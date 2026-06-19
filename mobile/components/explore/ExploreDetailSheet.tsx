@@ -27,6 +27,7 @@ type ExploreDetailModuleKey =
   | 'amenities'
   | 'fees'
   | 'alerts'
+  | 'calendar'
   | 'weather'
   | 'map'
   | 'story'
@@ -115,11 +116,13 @@ export function ExploreDetailSheet({
   const pack = place.source_pack;
   const sourceUrl = place.source_pack?.booking_url || place.source_pack?.official_url || place.summary.source_url;
   const [activeModule, setActiveModule] = useState<ExploreDetailModuleKey | null>(null);
+  const [selectedItem, setSelectedItem] = useState<ExploreSourcePackItem | null>(null);
   const [placeSearch, setPlaceSearch] = useState('');
   const searchNeedle = placeSearch.trim().toLowerCase();
 
   useEffect(() => {
     setPlaceSearch('');
+    setSelectedItem(null);
     if (tab === 'story') {
       setActiveModule('story');
     } else if (tab === 'nearby') {
@@ -234,6 +237,17 @@ export function ExploreDetailSheet({
       searchText: `${(pack?.alerts ?? []).map(alert => `${alert.title} ${alert.category}`).join(' ')}`,
     });
 
+    add((pack?.events?.length ?? 0) > 0 && {
+      key: 'calendar',
+      label: 'Calendar',
+      detail: `${pack?.events?.length ?? 0} events`,
+      icon: 'calendar-outline',
+      tone: '#22c55e',
+      count: pack?.events?.length,
+      imageUrl: firstItemImage(pack?.events) || heroOrPack,
+      searchText: `${searchTextForItems(pack?.events)} ranger program event calendar schedule`,
+    });
+
     add(hasCoords && {
       key: 'weather',
       label: 'Weather',
@@ -245,11 +259,11 @@ export function ExploreDetailSheet({
 
     add({
       key: 'map',
-      label: 'Map',
-      detail: 'Show area',
+      label: 'Map & Directions',
+      detail: 'Preview',
       icon: 'map-outline',
       tone: '#0f766e',
-      searchText: 'map route directions area navigation',
+      searchText: 'map route directions area navigation campgrounds visitor centers stops',
     });
 
     add(storySentences.length > 0 && {
@@ -311,7 +325,32 @@ export function ExploreDetailSheet({
     return list.filter(item => `${item.title ?? ''} ${item.description ?? ''} ${item.kind ?? ''} ${item.source_label ?? ''}`.toLowerCase().includes(searchNeedle));
   };
 
+  const itemHasCoords = (item?: ExploreSourcePackItem | null) => {
+    const lat = Number(item?.lat);
+    const lng = Number(item?.lng);
+    return Number.isFinite(lat) && Number.isFinite(lng);
+  };
+
+  const moduleItems = (key: ExploreDetailModuleKey): ExploreSourcePackItem[] => {
+    if (key === 'see') return filteredItems(pack?.things_to_see);
+    if (key === 'do') return filteredItems(pack?.things_to_do);
+    if (key === 'stay') return filteredItems(pack?.campgrounds);
+    if (key === 'visitor') return filteredItems(pack?.visitor_centers);
+    if (key === 'calendar') return filteredItems(pack?.events);
+    if (key === 'map') {
+      return [
+        ...(pack?.things_to_see ?? []),
+        ...(pack?.things_to_do ?? []),
+        ...(pack?.campgrounds ?? []),
+        ...(pack?.visitor_centers ?? []),
+        ...(pack?.parking_lots ?? []),
+      ].filter(item => itemHasCoords(item));
+    }
+    return [];
+  };
+
   function openModule(key: ExploreDetailModuleKey) {
+    setSelectedItem(null);
     setActiveModule(key);
     if (key === 'story') onTabChange('story');
     if (key === 'nearby') onTabChange('nearby');
@@ -324,11 +363,7 @@ export function ExploreDetailSheet({
   }
 
   function openSourceItem(item: ExploreSourcePackItem) {
-    if (item.lat != null && item.lng != null && onSourcePackItem) {
-      onSourcePackItem(item);
-      return;
-    }
-    if (item.url) Linking.openURL(item.url);
+    setSelectedItem(item);
   }
 
   function renderAction(label: string, icon: keyof typeof Ionicons.glyphMap, onPress: () => void, highlighted = false) {
@@ -358,7 +393,7 @@ export function ExploreDetailSheet({
       <View style={styles.itemList}>
         {items.map((item, idx) => {
           const itemImage = item.image_url ? mediaUrl(item.image_url) : imageUrl;
-          const canOpen = !!item.url || (item.lat != null && item.lng != null && !!onSourcePackItem);
+          const canOpen = !!item.title || !!item.url || itemHasCoords(item);
           return (
             <TouchableOpacity
               key={`${item.title}-${idx}`}
@@ -404,6 +439,316 @@ export function ExploreDetailSheet({
     );
   }
 
+  function pinStyleFor(lat: number, lng: number, bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number }) {
+    const latRange = Math.max(bounds.maxLat - bounds.minLat, 0.015);
+    const lngRange = Math.max(bounds.maxLng - bounds.minLng, 0.015);
+    const left = 10 + 80 * ((lng - bounds.minLng) / lngRange);
+    const top = 88 - 76 * ((lat - bounds.minLat) / latRange);
+    return {
+      left: `${Math.max(6, Math.min(90, left))}%` as any,
+      top: `${Math.max(10, Math.min(82, top))}%` as any,
+    };
+  }
+
+  function renderMapPreview({
+    items,
+    activeItem,
+    title,
+    subtitle,
+    onPress,
+    height = 260,
+  }: {
+    items: ExploreSourcePackItem[];
+    activeItem?: ExploreSourcePackItem | null;
+    title: string;
+    subtitle?: string;
+    onPress?: () => void;
+    height?: number;
+  }) {
+    const baseLat = Number(activeItem?.lat ?? place.summary.lat);
+    const baseLng = Number(activeItem?.lng ?? place.summary.lng);
+    const childPins = items
+      .filter(itemHasCoords)
+      .map((item, idx) => ({
+        id: String(item.source_id || item.title || idx),
+        title: item.title || 'Place',
+        lat: Number(item.lat),
+        lng: Number(item.lng),
+        kind: item.kind || 'place',
+        active: activeItem ? item === activeItem || item.source_id === activeItem.source_id : false,
+      }));
+    const pins = [
+      ...(Number.isFinite(Number(place.summary.lat)) && Number.isFinite(Number(place.summary.lng)) ? [{
+        id: 'parent',
+        title: getExploreDisplayTitle(place),
+        lat: Number(place.summary.lat),
+        lng: Number(place.summary.lng),
+        kind: 'park',
+        active: !activeItem,
+      }] : []),
+      ...childPins,
+      ...(activeItem && itemHasCoords(activeItem) && !childPins.some(pin => pin.id === String(activeItem.source_id || activeItem.title)) ? [{
+        id: 'active',
+        title: activeItem.title || 'Place',
+        lat: Number(activeItem.lat),
+        lng: Number(activeItem.lng),
+        kind: activeItem.kind || 'place',
+        active: true,
+      }] : []),
+    ].filter(pin => Number.isFinite(pin.lat) && Number.isFinite(pin.lng));
+    const fallbackLat = Number.isFinite(baseLat) ? baseLat : 0;
+    const fallbackLng = Number.isFinite(baseLng) ? baseLng : 0;
+    const coordPins = pins.length ? pins : [{ id: 'fallback', title, lat: fallbackLat, lng: fallbackLng, kind: 'place', active: true }];
+    const bounds = coordPins.reduce((acc, pin) => ({
+      minLat: Math.min(acc.minLat, pin.lat - 0.01),
+      maxLat: Math.max(acc.maxLat, pin.lat + 0.01),
+      minLng: Math.min(acc.minLng, pin.lng - 0.01),
+      maxLng: Math.max(acc.maxLng, pin.lng + 0.01),
+    }), { minLat: coordPins[0].lat, maxLat: coordPins[0].lat, minLng: coordPins[0].lng, maxLng: coordPins[0].lng });
+    const Wrapper: any = onPress ? TouchableOpacity : View;
+    return (
+      <Wrapper style={[styles.mapPreview, { height }]} activeOpacity={0.9} onPress={onPress as any}>
+        <View style={styles.mapPreviewBase}>
+          <View style={[styles.mapContour, styles.mapContourOne]} />
+          <View style={[styles.mapContour, styles.mapContourTwo]} />
+          <View style={[styles.mapContour, styles.mapContourThree]} />
+          <View style={[styles.mapRoad, styles.mapRoadOne]} />
+          <View style={[styles.mapRoad, styles.mapRoadTwo]} />
+          {coordPins.map(pin => {
+            const isCamp = /camp|stay/i.test(pin.kind);
+            const isVisitor = /visitor/i.test(pin.kind);
+            const icon = isCamp ? 'bed-outline' : isVisitor ? 'information-circle-outline' : 'location';
+            return (
+              <View key={pin.id} style={[styles.mapPinWrap, pinStyleFor(pin.lat, pin.lng, bounds)]}>
+                <View style={[styles.mapPin, pin.active && styles.mapPinActive, isCamp && styles.mapPinCamp]}>
+                  <Ionicons name={icon as any} size={pin.active ? 20 : 15} color="#fff" />
+                </View>
+                {pin.active && <Text style={styles.mapPinLabel} numberOfLines={1}>{pin.title}</Text>}
+              </View>
+            );
+          })}
+          <View style={styles.mapPreviewBadge}>
+            <Ionicons name="navigate-outline" size={15} color="#fff" />
+            <Text style={styles.mapPreviewBadgeText}>{coordPins.length} pins</Text>
+          </View>
+          <View style={styles.mapPreviewTitle}>
+            <Text style={styles.mapPreviewTitleText} numberOfLines={2}>{title}</Text>
+            {!!subtitle && <Text style={styles.mapPreviewSubtitle} numberOfLines={1}>{subtitle}</Text>}
+          </View>
+        </View>
+      </Wrapper>
+    );
+  }
+
+  function renderModuleHero(module: ExploreDetailModule) {
+    const items = moduleItems(module.key);
+    const mappedCount = items.filter(itemHasCoords).length;
+    return (
+      <View style={styles.moduleMapHero}>
+        {renderMapPreview({
+          items,
+          title: module.label,
+          subtitle: mappedCount ? `${mappedCount} mapped places` : getExploreDisplayTitle(place),
+          onPress: onShowArea,
+          height: 360,
+        })}
+        <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => { setActiveModule(null); onTabChange('summary'); }}>
+          <Ionicons name="arrow-back" size={25} color="#fff" />
+        </TouchableOpacity>
+        <View style={[styles.heroRight, { top: Math.max(topInset + 10, 22) }]}>
+          <TouchableOpacity style={styles.roundButton} onPress={onShowArea}>
+            <Ionicons name="map-outline" size={23} color="#fff" />
+          </TouchableOpacity>
+        </View>
+      </View>
+    );
+  }
+
+  function openItemDirections(item: ExploreSourcePackItem) {
+    const lat = Number(item.lat);
+    const lng = Number(item.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      if (item.url) Linking.openURL(item.url);
+      return;
+    }
+    Linking.openURL(`https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`);
+  }
+
+  function showItemOnMap(item: ExploreSourcePackItem) {
+    if (itemHasCoords(item) && onSourcePackItem) {
+      onSourcePackItem(item);
+      return;
+    }
+    if (item.url) Linking.openURL(item.url);
+  }
+
+  function formatEventDate(item: ExploreSourcePackItem) {
+    const raw = item.date_start || item.date_end || '';
+    if (!raw) return { month: 'DATE', day: '' };
+    const date = new Date(`${raw}T00:00:00`);
+    if (Number.isNaN(date.getTime())) return { month: raw.slice(0, 3).toUpperCase(), day: raw.slice(-2) };
+    return {
+      month: date.toLocaleString(undefined, { month: 'short' }).toUpperCase(),
+      day: String(date.getDate()).padStart(2, '0'),
+    };
+  }
+
+  function formatEventTime(item: ExploreSourcePackItem) {
+    if (item.time_start && item.time_end) return `${item.time_start} - ${item.time_end}`;
+    if (item.time_start) return item.time_start;
+    return item.location || item.category || 'Event';
+  }
+
+  function renderCalendarItems(items: ExploreSourcePackItem[]) {
+    if (!items.length) return renderItemList([], 'No events saved yet.');
+    return (
+      <View style={styles.calendarList}>
+        <View style={[styles.calendarPicker, { backgroundColor: C.s1, borderColor: C.border }]}>
+          <Ionicons name="chevron-back" size={20} color={C.text2} />
+          <Text style={[styles.calendarPickerText, { color: C.text }]}>{new Date().toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' })}</Text>
+          <Ionicons name="chevron-forward" size={20} color={C.text2} />
+        </View>
+        {items.map((item, idx) => {
+          const date = formatEventDate(item);
+          const chips = [item.category, ...(item.tags ?? [])].filter(Boolean).slice(0, 3);
+          return (
+            <TouchableOpacity
+              key={`${item.source_id || item.title}-${idx}`}
+              style={[styles.eventCard, { borderColor: C.border, backgroundColor: C.s1 }]}
+              activeOpacity={0.88}
+              onPress={() => openSourceItem(item)}
+            >
+              <View style={[styles.eventDateBlock, { backgroundColor: C.s2 }]}>
+                <Text style={[styles.eventMonth, { color: C.text2 }]}>{date.month}</Text>
+                <Text style={[styles.eventDay, { color: C.text }]}>{date.day}</Text>
+              </View>
+              <View style={styles.eventBody}>
+                <Text style={[styles.detailItemTitle, { color: C.text }]} numberOfLines={2}>{item.title || 'Event'}</Text>
+                <View style={styles.eventTimeRow}>
+                  <Ionicons name="time-outline" size={15} color={accent} />
+                  <Text style={[styles.detailItemCopy, { color: C.text2 }]} numberOfLines={1}>{formatEventTime(item)}</Text>
+                </View>
+                {!!chips.length && (
+                  <View style={styles.eventChips}>
+                    {chips.map(chip => (
+                      <View key={chip} style={[styles.eventChip, { backgroundColor: C.s2 }]}>
+                        <Text style={[styles.eventChipText, { color: C.text2 }]} numberOfLines={1}>{chip}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+              <Ionicons name="chevron-forward" size={22} color={C.text3} />
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+    );
+  }
+
+  function renderDetailFacts(item: ExploreSourcePackItem) {
+    const rows = [
+      item.address && { icon: 'location-outline' as const, label: 'Address', value: item.address },
+      item.operating_hours && { icon: 'time-outline' as const, label: 'Hours', value: item.operating_hours },
+      item.directions && { icon: 'navigate-outline' as const, label: 'Directions', value: item.directions },
+      item.location && { icon: 'pin-outline' as const, label: 'Location', value: item.location },
+      item.category && { icon: 'pricetag-outline' as const, label: 'Type', value: item.category },
+    ].filter(Boolean) as Array<{ icon: keyof typeof Ionicons.glyphMap; label: string; value: string }>;
+    if (!rows.length && !(item.amenities?.length)) return null;
+    return (
+      <View style={styles.childFactList}>
+        {rows.map(row => (
+          <View key={`${row.label}-${row.value}`} style={[styles.infoRowCard, { borderColor: C.border, backgroundColor: C.s1 }]}>
+            <Ionicons name={row.icon} size={21} color={accent} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={[styles.copyTitle, { color: C.text }]}>{row.label}</Text>
+              <Text style={[styles.copyBody, { color: C.text2 }]}>{row.value}</Text>
+            </View>
+          </View>
+        ))}
+        {!!item.amenities?.length && (
+          <View style={styles.activityGrid}>
+            {item.amenities.slice(0, 12).map(amenity => (
+              <View key={amenity} style={[styles.activityPill, { borderColor: C.border, backgroundColor: C.s1 }]}>
+                <Ionicons name="checkmark-circle-outline" size={16} color={accent} />
+                <Text style={[styles.activityText, { color: C.text }]} numberOfLines={2}>{amenity}</Text>
+              </View>
+            ))}
+          </View>
+        )}
+      </View>
+    );
+  }
+
+  function renderChildDetail(item: ExploreSourcePackItem) {
+    const itemImage = item.image_url ? mediaUrl(item.image_url) : imageUrl;
+    const siblingItems = activeModule ? moduleItems(activeModule) : moduleItems('map');
+    return (
+      <>
+        <View style={styles.childHero}>
+          {itemImage ? (
+            <Image source={{ uri: itemImage }} style={styles.heroImage} resizeMode="cover" />
+          ) : renderMapPreview({ items: siblingItems, activeItem: item, title: item.title || 'Place', height: 340 })}
+          {!!itemImage && <View style={styles.heroShade} />}
+          <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={() => setSelectedItem(null)}>
+            <Ionicons name="arrow-back" size={25} color="#fff" />
+          </TouchableOpacity>
+          <View style={[styles.heroRight, { top: Math.max(topInset + 10, 22) }]}>
+            <TouchableOpacity style={styles.roundButton} onPress={() => showItemOnMap(item)}>
+              <Ionicons name="map-outline" size={23} color="#fff" />
+            </TouchableOpacity>
+            {!!item.url && (
+              <TouchableOpacity style={styles.roundButton} onPress={() => Linking.openURL(item.url!)}>
+                <Ionicons name="open-outline" size={23} color="#fff" />
+              </TouchableOpacity>
+            )}
+          </View>
+          {!!itemImage && (
+            <View style={styles.heroText}>
+              <Text style={[styles.kicker, { color: '#bbf7d0' }]} numberOfLines={1}>{(item.kind || activeModuleDef?.label || 'Place').replace(/_/g, ' ').toUpperCase()}</Text>
+              <Text style={styles.title} numberOfLines={3}>{item.title || 'Place'}</Text>
+              {!!item.description && <Text style={styles.heroSummary} numberOfLines={3}>{item.description}</Text>}
+            </View>
+          )}
+        </View>
+        <ScrollView contentContainerStyle={styles.childContent} showsVerticalScrollIndicator={false}>
+          {!itemImage && (
+            <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
+              <Text style={[styles.copyTitle, { color: C.text }]}>{item.title || 'Place'}</Text>
+              {!!item.description && <Text style={[styles.copyBody, { color: C.text2 }]}>{item.description}</Text>}
+            </View>
+          )}
+          {!!item.description && itemImage && (
+            <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
+              <Text style={[styles.copyTitle, { color: C.text }]}>Details</Text>
+              <Text style={[styles.copyBody, { color: C.text2 }]}>{item.description}</Text>
+            </View>
+          )}
+          {renderDetailFacts(item)}
+          <View style={styles.childSection}>
+            <Text style={[styles.blockHeading, { color: C.text, marginHorizontal: 0 }]}>Map & Directions</Text>
+            {renderMapPreview({
+              items: siblingItems,
+              activeItem: item,
+              title: item.title || 'Map',
+              subtitle: itemHasCoords(item) ? 'Selected pin' : getExploreDisplayTitle(place),
+              onPress: () => showItemOnMap(item),
+              height: 230,
+            })}
+            <View style={styles.mapActions}>
+              {renderAction('Show on Map', 'map-outline', () => showItemOnMap(item), true)}
+              {renderAction('Directions', 'navigate-outline', () => openItemDirections(item))}
+              {!!item.reservation_url && renderAction('Reserve', 'calendar-outline', () => Linking.openURL(item.reservation_url!))}
+            </View>
+          </View>
+          {!!item.image_credit && (
+            <Text style={[styles.imageCredit, { color: C.text3 }]}>{item.image_credit}</Text>
+          )}
+        </ScrollView>
+      </>
+    );
+  }
+
   function renderModuleContent(key: ExploreDetailModuleKey) {
     if (key === 'see') {
       const seeItems = filteredItems(pack?.things_to_see);
@@ -437,7 +782,7 @@ export function ExploreDetailSheet({
       return (
         <>
           {stayItems.length > 0 ? renderItemList(stayItems, 'No saved stays yet.') : null}
-          {campgroundsSlot}
+          {stayItems.length === 0 ? campgroundsSlot : null}
           {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], 'No saved stays yet.') : null}
         </>
       );
@@ -507,6 +852,9 @@ export function ExploreDetailSheet({
         </View>
       );
     }
+    if (key === 'calendar') {
+      return renderCalendarItems(filteredItems(pack?.events));
+    }
     if (key === 'weather') {
       return weatherSlot ?? (
         <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
@@ -516,11 +864,21 @@ export function ExploreDetailSheet({
       );
     }
     if (key === 'map') {
+      const mapItems = moduleItems('map');
       return (
-        <View style={styles.mapActions}>
-          {renderAction('Show Area', 'map-outline', onShowArea, true)}
-          {renderAction('Route', 'navigate-outline', onRoute)}
-          {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}
+        <View style={styles.itemList}>
+          {renderMapPreview({
+            items: mapItems,
+            title: 'Map & Directions',
+            subtitle: `${mapItems.length} mapped places`,
+            onPress: onShowArea,
+            height: 240,
+          })}
+          <View style={styles.mapActions}>
+            {renderAction('Show Area', 'map-outline', onShowArea, true)}
+            {renderAction('Route', 'navigate-outline', onRoute)}
+            {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}
+          </View>
         </View>
       );
     }
@@ -602,9 +960,18 @@ export function ExploreDetailSheet({
     );
   }
 
+  if (selectedItem) {
+    return (
+      <View style={[styles.screen, { backgroundColor: C.bg }]}>
+        {renderChildDetail(selectedItem)}
+      </View>
+    );
+  }
+
   return (
     <View style={[styles.screen, { backgroundColor: C.bg }]}>
       <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
+        {activeModuleDef ? renderModuleHero(activeModuleDef) : (
         <View style={styles.hero}>
           {imageUrl ? (
             <Image source={{ uri: imageUrl }} style={styles.heroImage} resizeMode="cover" />
@@ -660,7 +1027,9 @@ export function ExploreDetailSheet({
             </View>
           </View>
         </View>
+        )}
 
+        {!activeModuleDef && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRail}>
           {renderAction('Map', 'map-outline', onShowArea, true)}
           {renderAction('Route', 'navigate-outline', onRoute)}
@@ -668,13 +1037,10 @@ export function ExploreDetailSheet({
           {renderAction(isPlaying ? 'Stop' : 'Audio', isPlaying ? 'stop' : 'play', onPlayAudio)}
           {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}
         </ScrollView>
+        )}
 
         {activeModuleDef ? (
           <View style={styles.moduleDetailScreen}>
-            <TouchableOpacity style={styles.moduleBack} onPress={() => { setActiveModule(null); onTabChange('summary'); }}>
-              <Ionicons name="chevron-back" size={18} color={C.text2} />
-              <Text style={[styles.moduleBackText, { color: C.text2 }]}>Explore this place</Text>
-            </TouchableOpacity>
             <View style={styles.moduleDetailHeader}>
               <View style={[styles.moduleDetailIcon, { backgroundColor: activeModuleDef.tone + '18' }]}>
                 <Ionicons name={activeModuleDef.icon} size={23} color={activeModuleDef.tone} />
@@ -918,6 +1284,76 @@ const styles = StyleSheet.create({
   copyBody: { fontSize: 13, lineHeight: 19, fontWeight: '700' },
   infoRowCard: { borderWidth: 1, borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
   mapActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  moduleMapHero: { height: 360, backgroundColor: '#101811' },
+  mapPreview: { width: '100%', borderRadius: 0, overflow: 'hidden', backgroundColor: '#182318' },
+  mapPreviewBase: { flex: 1, overflow: 'hidden', backgroundColor: '#1c2a1d' },
+  mapContour: { position: 'absolute', borderWidth: 1, borderColor: 'rgba(204,214,189,0.16)', borderRadius: 999 },
+  mapContourOne: { width: 320, height: 130, left: -40, top: 36, transform: [{ rotate: '-13deg' }] },
+  mapContourTwo: { width: 390, height: 180, right: -130, top: 92, transform: [{ rotate: '18deg' }] },
+  mapContourThree: { width: 260, height: 105, left: 70, bottom: 18, transform: [{ rotate: '8deg' }] },
+  mapRoad: { position: 'absolute', height: 3, borderRadius: 2, backgroundColor: 'rgba(232,226,204,0.22)' },
+  mapRoadOne: { width: '82%', left: '-8%', top: '58%', transform: [{ rotate: '-17deg' }] },
+  mapRoadTwo: { width: '74%', right: '-18%', top: '36%', transform: [{ rotate: '28deg' }] },
+  mapPinWrap: { position: 'absolute', alignItems: 'center', transform: [{ translateX: -20 }, { translateY: -20 }] },
+  mapPin: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#315f43',
+    borderWidth: 2,
+    borderColor: 'rgba(255,255,255,0.86)',
+  },
+  mapPinActive: { width: 44, height: 44, borderRadius: 22, backgroundColor: '#166534' },
+  mapPinCamp: { backgroundColor: '#7c4a2a' },
+  mapPinLabel: {
+    maxWidth: 150,
+    marginTop: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 999,
+    overflow: 'hidden',
+    color: '#fff',
+    fontSize: 10,
+    fontWeight: '900',
+    backgroundColor: 'rgba(3,7,18,0.72)',
+  },
+  mapPreviewBadge: {
+    position: 'absolute',
+    right: 14,
+    top: 14,
+    minHeight: 32,
+    borderRadius: 16,
+    paddingHorizontal: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    backgroundColor: 'rgba(3,7,18,0.54)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  mapPreviewBadgeText: { color: '#fff', fontSize: 11, fontWeight: '900' },
+  mapPreviewTitle: { position: 'absolute', left: 18, right: 92, bottom: 18 },
+  mapPreviewTitleText: { color: '#fff', fontSize: 31, lineHeight: 34, fontWeight: '900' },
+  mapPreviewSubtitle: { color: 'rgba(255,255,255,0.78)', fontSize: 13, lineHeight: 17, fontWeight: '800', marginTop: 5 },
+  calendarList: { gap: 12 },
+  calendarPicker: { minHeight: 52, borderWidth: 1, borderRadius: 18, paddingHorizontal: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  calendarPickerText: { fontSize: 17, lineHeight: 22, fontWeight: '900' },
+  eventCard: { minHeight: 116, borderWidth: 1, borderRadius: 16, overflow: 'hidden', flexDirection: 'row', alignItems: 'stretch' },
+  eventDateBlock: { width: 78, alignItems: 'center', justifyContent: 'center', gap: 3 },
+  eventMonth: { fontSize: 13, fontFamily: mono, fontWeight: '900' },
+  eventDay: { fontSize: 34, lineHeight: 37, fontWeight: '900' },
+  eventBody: { flex: 1, minWidth: 0, padding: 14, gap: 7, justifyContent: 'center' },
+  eventTimeRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  eventChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  eventChip: { borderRadius: 8, paddingHorizontal: 8, paddingVertical: 4 },
+  eventChipText: { fontSize: 10, lineHeight: 13, fontWeight: '800' },
+  childHero: { height: 390, backgroundColor: '#111827' },
+  childContent: { padding: 20, paddingBottom: 48, gap: 14 },
+  childFactList: { gap: 10 },
+  childSection: { gap: 10 },
+  imageCredit: { fontSize: 11, lineHeight: 15, fontWeight: '700', textAlign: 'center' },
   actions: { marginHorizontal: 20, marginTop: 10 },
   primaryAction: { flex: 1, minHeight: 56, borderRadius: 15 },
   tabs: { marginHorizontal: 20, marginTop: 14, borderWidth: 1, borderRadius: 14, flexDirection: 'row', overflow: 'hidden' },

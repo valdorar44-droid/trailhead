@@ -82,14 +82,14 @@ def merge_source_pack(primary: dict, secondary: dict) -> dict:
     if not isinstance(secondary, dict) or not secondary:
         return primary
     merged = {**secondary, **primary}
-    for key in ("sources", "photos", "things_to_do", "things_to_see", "visitor_centers", "campgrounds", "alerts"):
+    for key in ("sources", "photos", "things_to_do", "things_to_see", "visitor_centers", "campgrounds", "alerts", "events", "parking_lots"):
         values = []
         for item in [*(secondary.get(key) or []), *(primary.get(key) or [])]:
             if isinstance(item, dict) and item not in values:
                 values.append(item)
         if values:
             merged[key] = values
-    for key in ("activities", "topics", "fees"):
+    for key in ("activities", "topics", "fees", "passes"):
         merged[key] = sorted_unique([*(secondary.get(key) or []), *(primary.get(key) or [])])
     return merged
 

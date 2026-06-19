@@ -353,6 +353,7 @@ function sentenceDurationMs(sentence: string) {
 
 function mediaUrl(url?: string | null) {
   if (!url) return '';
+  if (url.startsWith('/common/uploads')) return `https://www.nps.gov${url}`;
   return url.startsWith('/') ? `${API_BASE}${url}` : url;
 }
 

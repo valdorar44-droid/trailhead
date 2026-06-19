@@ -246,7 +246,8 @@ export function getExploreCategoryColor(place: ExplorePlaceProfile) {
 export function getExploreSourceBadge(place: ExplorePlaceProfile) {
   const v3 = readV3(place);
   const sources = Array.isArray(v3.sources) ? v3.sources : [];
-  const quality = normalize(String(v3.quality || place.source_pack?.quality || place.facts.source_quality || ''));
+  const facts = place.facts ?? {};
+  const quality = normalize(String(v3.quality || place.source_pack?.quality || facts.source_quality || ''));
   const primary = String(place.source_pack?.primary || sources[0]?.publisher || sources[0]?.name || '').trim();
   if (quality.includes('official')) {
     if (!primary) return 'Official source';
@@ -254,7 +255,7 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
     return `${primary} official`;
   }
   if (sources.length > 1 || place.source_pack?.sources?.length) return 'Multiple sources';
-  if (quality.includes('wiki') || /wikipedia/i.test(place.facts.source_title || primary)) return 'Curated details';
+  if (quality.includes('wiki') || /wikipedia/i.test(facts.source_title || primary)) return 'Curated details';
   if (primary) return primary;
   return 'Map details';
 }
@@ -270,8 +271,9 @@ export function getExploreTrustBadge(place: ExplorePlaceProfile) {
 }
 
 export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
-  if (place.facts.last_updated && Number.isFinite(place.facts.last_updated)) {
-    return new Date(place.facts.last_updated * 1000).toLocaleDateString('en-US', {
+  const facts = place.facts ?? {};
+  if (facts.last_updated && Number.isFinite(facts.last_updated)) {
+    return new Date(facts.last_updated * 1000).toLocaleDateString('en-US', {
       month: 'long',
       day: 'numeric',
       year: 'numeric',
@@ -290,6 +292,7 @@ export function getExploreCardSourceLine(place: ExplorePlaceProfile) {
 
 export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceRow[] {
   const v3 = readV3(place);
+  const facts = place.facts ?? {};
   const sourceBadge = getExploreSourceBadge(place);
   const freshness = getExploreFreshnessLabel(place);
   const confidence = sourceConfidenceFromRecord(v3);
@@ -304,7 +307,7 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
     place.source_pack?.photos?.find(item => item.credit)?.credit,
   ])[0];
   const sourceNote = String(place.source_pack?.source_note || '').trim();
-  const officialUrl = place.source_pack?.official_url || place.facts.official_url || place.summary.source_url || place.facts.source_url;
+  const officialUrl = place.source_pack?.official_url || facts.official_url || place.summary.source_url || facts.source_url;
   const rows: ExploreSourceRow[] = [
     {
       label: 'Source',
@@ -316,7 +319,7 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
       label: 'Updated',
       value: freshness,
       icon: 'calendar-outline',
-      tone: place.facts.last_updated ? '#16a34a' : '#ca8a04',
+      tone: facts.last_updated ? '#16a34a' : '#ca8a04',
     },
     {
       label: 'Status',

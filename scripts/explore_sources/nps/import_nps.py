@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -15,6 +17,7 @@ from scripts.explore_sources.base.source_policy import assert_source_allowed
 
 NPS_LICENSE = "National Park Service public data"
 NPS_ATTRIBUTION = "National Park Service"
+NPS_CHILD_ITEM_LIMIT = 48
 
 
 def load_parks(path: str | Path) -> list[dict[str, Any]]:
@@ -173,7 +176,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
     photos = media_from_park(park, related=related)
     things_to_do = dedupe_items([
         source_pack_item(item, "thing_to_do", park_code=record.source_id)
-        for item in related.get("thingstodo", [])
+        for item in [*related.get("thingstodo", []), *related.get("tours", [])]
     ])
     things_to_see = dedupe_items([
         source_pack_item(item, "place", park_code=record.source_id)
@@ -186,6 +189,14 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
     campgrounds = dedupe_items([
         source_pack_item(item, "campground", park_code=record.source_id)
         for item in related.get("campgrounds", [])
+    ])
+    events = dedupe_items([
+        event_item(item, park_code=record.source_id)
+        for item in related.get("events", [])
+    ])
+    parking_lots = dedupe_items([
+        source_pack_item(item, "parking", park_code=record.source_id)
+        for item in related.get("parkinglots", [])
     ])
     source_ref = {
         "title": compact_text(park.get("fullName") or park.get("name") or record.name),
@@ -206,7 +217,10 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
         "things_to_see": things_to_see,
         "visitor_centers": visitor_centers,
         "campgrounds": campgrounds,
+        "events": events,
+        "parking_lots": parking_lots,
         "fees": fee_lines(park),
+        "passes": fee_pass_lines(related.get("feespasses", [])),
         "operating_hours": operating_hours(park),
         "alerts": alert_items(related.get("alerts", [])),
         "source_note": "Official National Park Service data",
@@ -246,7 +260,61 @@ def source_pack_item(item: dict[str, Any], kind: str, park_code: str) -> dict[st
         "image_caption": compact_text(image.get("caption") or image.get("title") or title),
         "image_credit": compact_text(image.get("credit") or NPS_ATTRIBUTION),
         "image_license": NPS_LICENSE,
+        "source_label": NPS_ATTRIBUTION,
+        **child_detail_fields(item),
     }
+
+
+def event_item(item: dict[str, Any], park_code: str) -> dict[str, Any]:
+    lat, lng = item_lat_lng(item)
+    image = first_image(item)
+    title = child_title(item)
+    times = item.get("times") if isinstance(item.get("times"), list) else []
+    first_time = times[0] if times and isinstance(times[0], dict) else {}
+    return {
+        "kind": "event",
+        "source": "nps",
+        "source_id": compact_text(item.get("id") or item.get("url") or slugify(title)),
+        "title": title,
+        "description": child_description(item),
+        "url": child_url(item, park_code),
+        "lat": lat,
+        "lng": lng,
+        "image_url": image.get("url") or "",
+        "image_caption": compact_text(image.get("caption") or image.get("title") or title),
+        "image_credit": compact_text(image.get("credit") or NPS_ATTRIBUTION),
+        "image_license": NPS_LICENSE,
+        "source_label": NPS_ATTRIBUTION,
+        "date_start": compact_text(item.get("datestart") or item.get("dateStart") or item.get("startDate")),
+        "date_end": compact_text(item.get("dateend") or item.get("dateEnd") or item.get("endDate")),
+        "time_start": compact_text(first_time.get("timestart") or first_time.get("timeStart") or item.get("timeStart")),
+        "time_end": compact_text(first_time.get("timeend") or first_time.get("timeEnd") or item.get("timeEnd")),
+        "location": compact_text(item.get("location") or item.get("locationName")),
+        "category": compact_text(item.get("category") or item.get("type")),
+        "tags": sorted_unique(event_type_names(item)),
+    }
+
+
+def child_detail_fields(item: dict[str, Any]) -> dict[str, Any]:
+    fields: dict[str, Any] = {}
+    directions = compact_text(item.get("directionsInfo") or item.get("directions") or item.get("directionsUrl"))
+    if directions:
+        fields["directions"] = directions
+    hours = operating_hours(item)
+    if hours:
+        fields["operating_hours"] = hours
+    amenities = item.get("amenities")
+    if isinstance(amenities, list):
+        values = sorted_unique([compact_text(value.get("name") if isinstance(value, dict) else value) for value in amenities])
+        if values:
+            fields["amenities"] = values
+    reservation_url = compact_text(item.get("reservationUrl") or item.get("reservationURL") or item.get("bookingUrl"))
+    if reservation_url:
+        fields["reservation_url"] = reservation_url
+    address = address_line(item)
+    if address:
+        fields["address"] = address
+    return fields
 
 
 def child_title(item: dict[str, Any]) -> str:
@@ -254,12 +322,50 @@ def child_title(item: dict[str, Any]) -> str:
 
 
 def child_description(item: dict[str, Any]) -> str:
-    return compact_text(
+    return plain_text(
         item.get("shortDescription")
         or item.get("listingDescription")
         or item.get("description")
         or item.get("abstract")
     )[:320]
+
+
+def plain_text(value: Any) -> str:
+    text = html.unescape(str(value or ""))
+    text = re.sub(r"<br\s*/?>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"</p\s*>", " ", text, flags=re.IGNORECASE)
+    text = re.sub(r"<[^>]+>", " ", text)
+    return compact_text(text)
+
+
+def event_type_names(item: dict[str, Any]) -> list[str]:
+    values = []
+    for key in ("types", "tags", "categories"):
+        raw = item.get(key)
+        if isinstance(raw, list):
+            values.extend(compact_text(value.get("name") if isinstance(value, dict) else value) for value in raw)
+        elif raw:
+            values.append(compact_text(raw))
+    return [value for value in sorted_unique(values) if value]
+
+
+def address_line(item: dict[str, Any]) -> str:
+    addresses = item.get("addresses")
+    if not isinstance(addresses, list):
+        return ""
+    for address in addresses:
+        if not isinstance(address, dict):
+            continue
+        parts = [
+            compact_text(address.get("line1")),
+            compact_text(address.get("line2")),
+            compact_text(address.get("city")),
+            compact_text(address.get("stateCode") or address.get("state")),
+        ]
+        line = ", ".join(part for part in parts if part)
+        if line:
+            return line
+    return ""
 
 
 def child_url(item: dict[str, Any], park_code: str) -> str:
@@ -313,7 +419,7 @@ def dedupe_items(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
             continue
         seen.add(key)
         out.append(item)
-    return out[:12]
+    return out[:NPS_CHILD_ITEM_LIMIT]
 
 
 def topic_names(park: dict[str, Any]) -> list[str]:
@@ -337,6 +443,19 @@ def fee_lines(park: dict[str, Any]) -> list[str]:
         if line not in out:
             out.append(line)
     return out[:6]
+
+
+def fee_pass_lines(items: list[dict[str, Any]]) -> list[str]:
+    out = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        title = compact_text(item.get("title") or item.get("name"))
+        cost = compact_text(item.get("cost") or item.get("price"))
+        line = f"{title}: {format_cost(cost)}" if title and cost else title
+        if line and line not in out:
+            out.append(line)
+    return out[:12]
 
 
 def format_cost(value: str) -> str:

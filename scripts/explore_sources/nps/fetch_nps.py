@@ -13,7 +13,18 @@ from typing import Any, Callable, Iterable
 
 NPS_API_BASE = "https://developer.nps.gov/api/v1"
 NPS_USER_AGENT = "Trailhead/1.0"
-NPS_RELATED_ENDPOINTS = ("places", "thingstodo", "campgrounds", "visitorcenters", "alerts", "articles")
+NPS_RELATED_ENDPOINTS = (
+    "places",
+    "thingstodo",
+    "campgrounds",
+    "visitorcenters",
+    "alerts",
+    "articles",
+    "events",
+    "tours",
+    "parkinglots",
+    "feespasses",
+)
 NPS_PER_PARK_ENDPOINTS: set[str] = set()
 NPS_RETRY_STATUS_CODES = {429, 500, 502, 503, 504}
 

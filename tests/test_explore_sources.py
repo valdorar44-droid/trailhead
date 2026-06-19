@@ -113,6 +113,17 @@ class FakeNpsSourcePackOpener:
                 "url": "https://www.nps.gov/thingstodo/mist-trail.htm",
                 "images": [{"url": "https://www.nps.gov/mist.jpg", "caption": "Mist Trail", "credit": "NPS"}],
             }],
+            "events": [{
+                "id": "campfire-program",
+                "title": "Campground Evening Program",
+                "shortDescription": "<p>A ranger program near the campground.</p>",
+                "datestart": "2026-06-19",
+                "dateend": "2026-06-19",
+                "times": [{"timestart": "8:00 PM", "timeend": "8:45 PM"}],
+                "category": "Campfire/Evening Program",
+                "location": "Upper Pines Amphitheater",
+                "url": "https://www.nps.gov/planyourvisit/event-details.htm?id=campfire-program",
+            }],
         }.get(endpoint, [])
         return FakeHttpResponse({"total": str(len(items)), "data": items})
 
@@ -174,6 +185,20 @@ def nps_rich_payload() -> dict:
                     "latitude": "37.739",
                     "longitude": "-119.565",
                     "url": "https://www.nps.gov/places/upper-pines-campground.htm",
+                    "directionsInfo": "Follow signs to Curry Village and Upper Pines.",
+                    "operatingHours": [{"name": "Upper Pines", "description": "Open year-round by reservation."}],
+                    "amenities": ["Restrooms", "Food Storage Lockers"],
+                }],
+                "events": [{
+                    "id": "campfire-program",
+                    "title": "Campground Evening Program",
+                    "shortDescription": "<p>A ranger program near the campground.</p>",
+                    "datestart": "2026-06-19",
+                    "dateend": "2026-06-19",
+                    "times": [{"timestart": "8:00 PM", "timeend": "8:45 PM"}],
+                    "category": "Campfire/Evening Program",
+                    "location": "Upper Pines Amphitheater",
+                    "url": "https://www.nps.gov/planyourvisit/event-details.htm?id=campfire-program",
                 }],
                 "alerts": [{
                     "id": "road-work",
@@ -363,6 +388,12 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertEqual(pack["things_to_see"][0]["title"], "Bridalveil Fall")
         self.assertEqual(pack["visitor_centers"][0]["title"], "Yosemite Valley Visitor Center")
         self.assertEqual(pack["campgrounds"][0]["title"], "Upper Pines Campground")
+        self.assertIn("Open year-round", pack["campgrounds"][0]["operating_hours"])
+        self.assertIn("Restrooms", pack["campgrounds"][0]["amenities"])
+        self.assertEqual(pack["events"][0]["title"], "Campground Evening Program")
+        self.assertEqual(pack["events"][0]["description"], "A ranger program near the campground.")
+        self.assertEqual(pack["events"][0]["date_start"], "2026-06-19")
+        self.assertEqual(pack["events"][0]["time_start"], "8:00 PM")
         self.assertTrue(any(item["url"] == "https://www.nps.gov/mist.jpg" for item in place.media))
 
     def test_usfs_importer_builds_trails_roads_and_recreation_places(self):
@@ -530,7 +561,7 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                 park_codes=["yose"],
                 limit=1,
                 max_records=1,
-                related_endpoints=["places", "thingstodo"],
+                related_endpoints=["places", "thingstodo", "events"],
                 related_max_records=1,
                 opener=opener,
             )
@@ -540,7 +571,8 @@ class ExploreSourcePipelineTests(unittest.TestCase):
             self.assertEqual(payload["count"], 1)
             self.assertEqual(payload["related"]["yose"]["places"][0]["title"], "Bridalveil Fall")
             self.assertEqual(payload["related"]["yose"]["thingstodo"][0]["title"], "Mist Trail")
-            self.assertEqual(endpoints, ["parks", "places", "thingstodo"])
+            self.assertEqual(payload["related"]["yose"]["events"][0]["title"], "Campground Evening Program")
+            self.assertEqual(endpoints, ["parks", "places", "thingstodo", "events"])
             records, places, _trails = import_nps_fixture(path, fetched_at=123)
             self.assertEqual(len(records), 1)
             self.assertEqual(places[0].source_pack["things_to_see"][0]["title"], "Bridalveil Fall")
@@ -550,12 +582,12 @@ class ExploreSourcePipelineTests(unittest.TestCase):
                 park_codes=["yose"],
                 limit=1,
                 max_records=1,
-                related_endpoints=["places", "thingstodo"],
+                related_endpoints=["places", "thingstodo", "events"],
                 related_max_records=1,
                 opener=opener,
             )
             self.assertEqual(cached_again, path)
-            self.assertEqual(len(opener.requests), 3)
+            self.assertEqual(len(opener.requests), 4)
 
     def test_nps_live_request_params(self):
         params = request_params(park_codes=["yose"], states=["CA", "UT"], query="waterfalls", limit=25, start=50)

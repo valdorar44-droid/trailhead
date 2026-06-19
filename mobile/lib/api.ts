@@ -2622,7 +2622,10 @@ export interface ExplorePlaceProfile {
     things_to_see?: ExploreSourcePackItem[];
     visitor_centers?: ExploreSourcePackItem[];
     campgrounds?: ExploreSourcePackItem[];
+    events?: ExploreSourcePackItem[];
+    parking_lots?: ExploreSourcePackItem[];
     fees?: string[];
+    passes?: string[];
     operating_hours?: string;
     alerts?: { title?: string; category?: string; url?: string }[];
     source_note?: string;
@@ -2685,6 +2688,18 @@ export interface ExploreSourcePackItem {
   image_credit?: string;
   image_license?: string;
   source_label?: string;
+  directions?: string;
+  operating_hours?: string;
+  amenities?: string[];
+  reservation_url?: string;
+  address?: string;
+  date_start?: string;
+  date_end?: string;
+  time_start?: string;
+  time_end?: string;
+  location?: string;
+  category?: string;
+  tags?: string[];
 }
 export interface ExploreCatalog {
   schema_version: number;

@@ -1,0 +1,222 @@
+name: Apply Explore Fast Load + OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Expo update channel to publish after patching"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - production
+          - preview
+          - both
+          - none
+      message:
+        description: "Commit and OTA message"
+        required: true
+        default: "Stage Explore catalog loading"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-explore-fast-load
+  cancel-in-progress: false
+
+jobs:
+  patch-and-ota:
+    name: Patch Explore load path and optionally publish OTA
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_PUBLIC_API_URL: https://api.gettrailhead.app
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply Explore fast-load source patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("mobile/app/(tabs)/guide.tsx")
+          text = path.read_text()
+
+          replacement = """  useEffect(() => {
+            let cancelled = false;
+            let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+
+            const mergeById = (base: ExplorePlaceProfile[], next: ExplorePlaceProfile[]) => {
+              const seen = new Set(base.map(place => place.id));
+              const merged = [...base];
+              for (const place of next) {
+                if (!place?.id || seen.has(place.id)) continue;
+                seen.add(place.id);
+                merged.push(place);
+              }
+              return merged;
+            };
+
+            const withExploreTimeout = <T,>(promise: Promise<T>, ms = 6500) => new Promise<T>((resolve, reject) => {
+              const timer = setTimeout(() => reject(new Error('Explore catalog timeout')), ms);
+              promise.then(
+                value => {
+                  clearTimeout(timer);
+                  resolve(value);
+                },
+                error => {
+                  clearTimeout(timer);
+                  reject(error);
+                },
+              );
+            });
+
+            const readCachedCatalog = async () => {
+              const raw = await storage.get(EXPLORE_CACHE_KEY).catch(() => '');
+              if (!raw) return [] as ExplorePlaceProfile[];
+              try {
+                const cached = JSON.parse(raw);
+                return Array.isArray(cached?.places) ? cached.places as ExplorePlaceProfile[] : [];
+              } catch {
+                return [] as ExplorePlaceProfile[];
+              }
+            };
+
+            const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
+              let nextCursor = cursor;
+              let allPlaces = seededPlaces;
+              for (let page = 0; nextCursor != null && page < 8; page += 1) {
+                const catalog = await api.getExploreCatalogIndex({ limit: 500, cursor: nextCursor });
+                const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+                allPlaces = mergeById(allPlaces, pagePlaces);
+                nextCursor = catalog.next_cursor;
+                if (cancelled) return;
+                setExplorePlaces(current => mergeById(current, pagePlaces));
+                if (page % 2 === 1) {
+                  storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
+                }
+                await new Promise(resolve => setTimeout(resolve, 40));
+              }
+              if (!cancelled) {
+                storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
+              }
+            };
+
+            setExploreLoading(true);
+            (async () => {
+              try {
+                const firstPage = await withExploreTimeout(api.getExploreCatalogIndex({ limit: 220, cursor: 0 }));
+                const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
+                if (cancelled) return;
+                setExplorePlaces(firstPlaces);
+                setExploreError('');
+                setExploreLoading(false);
+                backgroundTimer = setTimeout(() => {
+                  hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
+                }, 650);
+              } catch {
+                const cached = await readCachedCatalog();
+                if (cancelled) return;
+                if (cached.length) {
+                  setExplorePlaces(cached);
+                  setExploreError('');
+                } else {
+                  setExploreError('Explore catalog unavailable offline until it has been loaded once.');
+                }
+                setExploreLoading(false);
+              }
+            })();
+
+            return () => {
+              cancelled = true;
+              if (backgroundTimer) clearTimeout(backgroundTimer);
+            };
+          }, []);"""
+
+          if "hydrateRemainingCatalog" in text and "limit: 220" in text:
+            print("Explore fast-load patch is already applied.")
+          else:
+            pattern = re.compile(
+              r"  useEffect\(\(\) => \{\n"
+              r"    let cancelled = false;\n"
+              r"    setExploreLoading\(true\);\n"
+              r"    storage\.get\(EXPLORE_CACHE_KEY\)[\s\S]*?"
+              r"    return \(\) => \{ cancelled = true; \};\n"
+              r"  \}, \[\]\);"
+            )
+            text, count = pattern.subn(replacement, text, count=1)
+            if count != 1:
+              raise SystemExit("Could not find exactly one Explore catalog-loading block in guide.tsx")
+            path.write_text(text)
+            print("Explore fast-load patch applied.")
+
+      - name: Show source diff
+        run: git diff -- mobile/app/\(tabs\)/guide.tsx
+
+      - name: Commit source patch when changed
+        shell: bash
+        run: |
+          if git diff --quiet -- mobile/app/\(tabs\)/guide.tsx; then
+            echo "No Explore source changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mobile/app/\(tabs\)/guide.tsx
+          git commit -m "${{ github.event.inputs.message }}"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Stop before OTA when requested
+        if: ${{ github.event.inputs.channel == 'none' }}
+        run: echo "Patched source only; OTA publish skipped."
+
+      - name: Check EXPO_TOKEN for OTA
+        if: ${{ github.event.inputs.channel != 'none' }}
+        shell: bash
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "Missing EXPO_TOKEN. Add it in GitHub repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Setup Node
+        if: ${{ github.event.inputs.channel != 'none' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Expo and EAS
+        if: ${{ github.event.inputs.channel != 'none' }}
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install mobile dependencies
+        if: ${{ github.event.inputs.channel != 'none' }}
+        working-directory: mobile
+        run: npm ci
+
+      - name: Typecheck mobile app
+        if: ${{ github.event.inputs.channel != 'none' }}
+        working-directory: mobile
+        run: npx tsc --noEmit
+
+      - name: Publish production OTA
+        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
+        working-directory: mobile
+        run: eas update --channel production --message "${{ github.event.inputs.message }}" --non-interactive
+
+      - name: Publish preview OTA
+        if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
+        working-directory: mobile
+        run: eas update --channel preview --message "${{ github.event.inputs.message }}" --non-interactive

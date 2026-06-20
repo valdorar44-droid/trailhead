@@ -42,8 +42,8 @@ const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v1:';
 const EXPLORE_EXPERIENCES_CACHE_PREFIX = 'trailhead_explore_experiences_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
-const EXPLORE_INITIAL_VISIBLE = 80;
-const EXPLORE_VISIBLE_STEP = 80;
+const EXPLORE_INITIAL_VISIBLE = 48;
+const EXPLORE_VISIBLE_STEP = 48;
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const FEATURED_SECTION_ORDER: ExploreCategoryKey[] = [
   'camp',
@@ -707,95 +707,135 @@ export default function GuideScreen() {
   }, [requestedView]);
 
   useEffect(() => {
-  let cancelled = false;
-  let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+    let cancelled = false;
+    let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
 
-  const mergeById = (base: ExplorePlaceProfile[], next: ExplorePlaceProfile[]) => {
-    const seen = new Set(base.map(place => place.id));
-    const merged = [...base];
-    for (const place of next) {
-      if (!place?.id || seen.has(place.id)) continue;
-      seen.add(place.id);
-      merged.push(place);
-    }
-    return merged;
-  };
+    const mergeById = (base: ExplorePlaceProfile[], next: ExplorePlaceProfile[]) => {
+      const seen = new Set(base.map(place => place.id));
+      const merged = [...base];
+      for (const place of next) {
+        if (!place?.id || seen.has(place.id)) continue;
+        seen.add(place.id);
+        merged.push(place);
+      }
+      return merged;
+    };
 
-  const withExploreTimeout = <T,>(promise: Promise<T>, ms = 6500) => new Promise<T>((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('Explore catalog timeout')), ms);
-    promise.then(
-      value => {
-        clearTimeout(timer);
-        resolve(value);
-      },
-      error => {
-        clearTimeout(timer);
-        reject(error);
-      },
-    );
-  });
+    const withExploreTimeout = <T,>(promise: Promise<T>, ms = 5200) => new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Explore catalog timeout')), ms);
+      promise.then(
+        value => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        error => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
 
-  const readCachedCatalog = async () => {
-    const raw = await storage.get(EXPLORE_CACHE_KEY).catch(() => '');
-    if (!raw) return [] as ExplorePlaceProfile[];
-    try {
-      const cached = JSON.parse(raw);
-      return Array.isArray(cached?.places) ? cached.places as ExplorePlaceProfile[] : [];
-    } catch {
-      return [] as ExplorePlaceProfile[];
-    }
-  };
+    const readCachedCatalog = async () => {
+      const raw = await storage.get(EXPLORE_CACHE_KEY).catch(() => '');
+      if (!raw) return [] as ExplorePlaceProfile[];
+      try {
+        const cached = JSON.parse(raw);
+        return Array.isArray(cached?.places) ? cached.places as ExplorePlaceProfile[] : [];
+      } catch {
+        return [] as ExplorePlaceProfile[];
+      }
+    };
 
-  const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
-    let nextCursor = cursor;
-    let allPlaces = seededPlaces;
-    for (let page = 0; nextCursor != null && page < 8; page += 1) {
-      const catalog = await api.getExploreCatalogIndex({ limit: 500, cursor: nextCursor });
-      const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
-      allPlaces = mergeById(allPlaces, pagePlaces);
-      nextCursor = catalog.next_cursor;
-      if (cancelled) return;
-      setExplorePlaces(current => mergeById(current, pagePlaces));
-      if (page % 2 === 1) {
+    const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
+      let nextCursor = cursor;
+      let allPlaces = seededPlaces;
+      for (let page = 0; nextCursor != null && page < 8; page += 1) {
+        const catalog = await api.getExploreCatalogIndex({ limit: 500, cursor: nextCursor });
+        const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+        allPlaces = mergeById(allPlaces, pagePlaces);
+        nextCursor = catalog.next_cursor;
+        if (cancelled) return;
+        await new Promise(resolve => setTimeout(resolve, 120));
+      }
+      if (!cancelled && allPlaces.length > seededPlaces.length) {
         storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
       }
-      await new Promise(resolve => setTimeout(resolve, 40));
-    }
-    if (!cancelled) {
-      storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
-    }
-  };
+    };
 
-  setExploreLoading(true);
-  (async () => {
-    try {
-      const firstPage = await withExploreTimeout(api.getExploreCatalogIndex({ limit: 220, cursor: 0 }));
-      const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
-      if (cancelled) return;
-      setExplorePlaces(firstPlaces);
-      setExploreError('');
-      setExploreLoading(false);
-      backgroundTimer = setTimeout(() => {
-        hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
-      }, 650);
-    } catch {
-      const cached = await readCachedCatalog();
-      if (cancelled) return;
-      if (cached.length) {
-        setExplorePlaces(cached);
+    // Compact home load: show a curated first page, keep source-rich data findable through search/filter.
+    setExploreLoading(true);
+    (async () => {
+      try {
+        const firstPage = await withExploreTimeout(api.getExploreCatalogIndex({ limit: 120, cursor: 0 }));
+        const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
+        if (cancelled) return;
+        setExplorePlaces(firstPlaces);
         setExploreError('');
-      } else {
-        setExploreError('Explore catalog unavailable offline until it has been loaded once.');
+        setExploreLoading(false);
+        backgroundTimer = setTimeout(() => {
+          hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
+        }, 3200);
+      } catch {
+        const cached = await readCachedCatalog();
+        if (cancelled) return;
+        if (cached.length) {
+          setExplorePlaces(cached.slice(0, 160));
+          setExploreError('');
+        } else {
+          setExploreError('Explore catalog unavailable offline until it has been loaded once.');
+        }
+        setExploreLoading(false);
       }
-      setExploreLoading(false);
-    }
-  })();
+    })();
 
-  return () => {
-    cancelled = true;
-    if (backgroundTimer) clearTimeout(backgroundTimer);
-  };
-}, []);
+    return () => {
+      cancelled = true;
+      if (backgroundTimer) clearTimeout(backgroundTimer);
+    };
+  }, []);
+
+
+
+  useEffect(() => {
+    const query = exploreQuery.trim();
+    const category = exploreCategory !== 'all' ? exploreCategory : '';
+    const shouldFetch = tab === 'explore'
+      && exploreMode === 'featured'
+      && !exploreSavedOnly
+      && (query.length >= 2 || !!category);
+    if (!shouldFetch) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.getExploreCatalogIndex({
+        q: query.length >= 2 ? query : undefined,
+        category: category || undefined,
+        limit: 420,
+        cursor: 0,
+      })
+        .then(catalog => {
+          if (cancelled) return;
+          const remotePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+          if (!remotePlaces.length) return;
+          setExplorePlaces(current => {
+            const seen = new Set(current.map(place => place.id));
+            const merged = [...current];
+            for (const place of remotePlaces) {
+              if (!place?.id || seen.has(place.id)) continue;
+              seen.add(place.id);
+              merged.push(place);
+            }
+            return merged;
+          });
+        })
+        .catch(() => {});
+    }, 280);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [tab, exploreMode, exploreQuery, exploreCategory, exploreSavedOnly]);
 
   useEffect(() => {
     let cancelled = false;
@@ -1220,12 +1260,12 @@ export default function GuideScreen() {
     pick(text => /\b(ca|ut|az|wy|mt|co|wa|or|id|tn|nc|me|usa|united states|yosemite|zion|glacier|teton|moab)\b/.test(text));
     pick(text => /italy|italia|dolomite|dolomites|alps|switzerland|france|norway|iceland|slovenia|austria|scotland|spain|portugal/.test(text));
     for (const item of candidates) {
-      if (picks.length >= 8) break;
+      if (picks.length >= 4) break;
       if (used.has(item.place.id)) continue;
       used.add(item.place.id);
       picks.push(item);
     }
-    return picks.slice(0, 8);
+    return picks.slice(0, 4);
   }, [featuredLead?.place.id, rankedExplore, showExploreHome]);
   const featuredReservedExploreIds = useMemo(() => {
     const used = new Set<string>();
@@ -1272,7 +1312,7 @@ export default function GuideScreen() {
   const featuredSections = useMemo(() => {
     if (hasExploreQuery || exploreSavedOnly || exploreCategory !== 'all' || exploreMode !== 'featured') return [];
     const used = new Set(featuredReservedExploreIds);
-    return FEATURED_SECTION_ORDER
+    return FEATURED_SECTION_ORDER.slice(0, 6)
       .map(key => {
         const rows = rankedExplore
           .filter(({ place }) => {
@@ -1280,7 +1320,7 @@ export default function GuideScreen() {
             return exploreHomeShelfKey(place, exploreHubMeta.categoryKeysByHubId) === key;
           })
           .sort((a, b) => (a.place.summary.hero_rank ?? a.place.summary.rank) - (b.place.summary.hero_rank ?? b.place.summary.rank))
-          .slice(0, 5);
+          .slice(0, 3);
         rows.forEach(({ place }) => used.add(place.id));
         return {
           key,
@@ -1295,7 +1335,7 @@ export default function GuideScreen() {
     const count = (featuredLead ? 1 : 0)
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
-    return `${count.toLocaleString()} featured hubs`;
+    return `${count.toLocaleString()} featured picks`;
   }, [featuredLead, featuredSections, rankedExplore.length, showExploreHome, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];

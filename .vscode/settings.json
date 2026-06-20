@@ -1,0 +1,53 @@
+{
+  "files.exclude": {
+    "**/node_modules": true,
+    "**/.expo": true,
+    "**/.eas": true,
+    "**/.gradle": true,
+    "**/ios/build": true,
+    "**/android/build": true,
+    "**/data/explore/source_cache": true,
+    "**/data/explore/imports": true,
+    "**/dashboard/explore_catalog_v1.json": true,
+    "**/dashboard/explore_catalog_v3.json": true,
+    "**/dashboard/explore_source_records_sample.jsonl": true,
+    "**/dashboard/explore_trail_geometries_v1.json": true,
+    "**/output": true,
+    "**/.playwright-cli": true,
+    "**/.wrangler": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.expo": true,
+    "**/.eas": true,
+    "**/.gradle": true,
+    "**/ios/build": true,
+    "**/android/build": true,
+    "**/data/explore/source_cache": true,
+    "**/data/explore/imports": true,
+    "**/dashboard/explore_catalog_v1.json": true,
+    "**/dashboard/explore_catalog_v3.json": true,
+    "**/dashboard/explore_source_records_sample.jsonl": true,
+    "**/dashboard/explore_trail_geometries_v1.json": true,
+    "**/output": true,
+    "**/.playwright-cli": true,
+    "**/.wrangler": true
+  },
+  "files.watcherExclude": {
+    "**/node_modules/**": true,
+    "**/.expo/**": true,
+    "**/.eas/**": true,
+    "**/.gradle/**": true,
+    "**/ios/build/**": true,
+    "**/android/build/**": true,
+    "**/data/explore/source_cache/**": true,
+    "**/data/explore/imports/**": true,
+    "**/dashboard/explore_catalog_v1.json": true,
+    "**/dashboard/explore_catalog_v3.json": true,
+    "**/dashboard/explore_source_records_sample.jsonl": true,
+    "**/dashboard/explore_trail_geometries_v1.json": true,
+    "**/output/**": true,
+    "**/.playwright-cli/**": true,
+    "**/.wrangler/**": true
+  }
+}

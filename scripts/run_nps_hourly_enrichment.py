@@ -262,6 +262,7 @@ def rebuild_catalog(cache_dir: Path) -> None:
         "scripts/build_explore_catalog_v3.py",
         *BASE_CATALOG_ARGS,
         *nps_fixtures,
+        *wikidata_fixture_args(cache_dir),
         "--nps-rich",
         "--source-cache-dir",
         str(cache_dir),
@@ -295,6 +296,14 @@ def rich_fixture_sort_key(path: Path) -> tuple[int, str]:
     except ValueError:
         priority = len(PRIORITY_PARK_CODES)
     return priority, name
+
+
+def wikidata_fixture_args(cache_dir: Path) -> list[str]:
+    wikidata_dir = cache_dir / "wikidata"
+    args: list[str] = []
+    for path in sorted(wikidata_dir.glob("*.json")):
+        args.extend(["--wikidata-fixture", str(path)])
+    return args
 
 
 def run_audits() -> None:

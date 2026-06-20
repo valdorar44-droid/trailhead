@@ -15,6 +15,9 @@ WIKIDATA_SPARQL_ENDPOINT = "https://query.wikidata.org/sparql"
 WIKIDATA_USER_AGENT = "Trailhead/1.0 explore-wikidata-fetcher"
 
 DEFAULT_CLASS_QIDS = [
+    "Q46169",  # national park
+    "Q473972",  # protected area
+    "Q179049",  # nature reserve
     "Q35666",  # glacier
     "Q8502",  # mountain
     "Q133056",  # mountain pass
@@ -24,7 +27,7 @@ DEFAULT_CLASS_QIDS = [
     "Q4989906",  # monument
 ]
 
-UrlOpener = Callable[[urllib.request.Request, float], Any]
+UrlOpener = Callable[..., Any]
 
 
 def fetch_wikidata_places_to_cache(
@@ -83,7 +86,7 @@ def fetch_wikidata_bindings(
         },
     )
     try:
-        with opener(request, timeout) as response:
+        with opener(request, timeout=timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         raise RuntimeError(f"Wikidata SPARQL fetch failed: HTTP {exc.code}") from exc

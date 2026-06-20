@@ -654,6 +654,148 @@ def _v3_source_pack(place: dict) -> dict:
     return source_pack if isinstance(source_pack, dict) else {}
 
 
+def _v3_lat_lng(place: dict) -> tuple[float | None, float | None]:
+    try:
+        lat = float(place.get("lat")) if place.get("lat") is not None else None
+        lng = float(place.get("lng")) if place.get("lng") is not None else None
+    except Exception:
+        return None, None
+    if lat is None or lng is None or not math.isfinite(lat) or not math.isfinite(lng):
+        return None, None
+    return lat, lng
+
+
+def _v3_distance_miles(a: dict, b: dict) -> float | None:
+    lat1, lng1 = _v3_lat_lng(a)
+    lat2, lng2 = _v3_lat_lng(b)
+    if lat1 is None or lng1 is None or lat2 is None or lng2 is None:
+        return None
+    radius_mi = 3958.7613
+    phi1 = math.radians(lat1)
+    phi2 = math.radians(lat2)
+    d_phi = math.radians(lat2 - lat1)
+    d_lam = math.radians(lng2 - lng1)
+    h = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lam / 2) ** 2
+    return 2 * radius_mi * math.asin(min(1.0, math.sqrt(h)))
+
+
+def _v3_nearby_region_match(parent: dict, child: dict) -> bool:
+    parent_country = str(parent.get("country") or "").strip().lower()
+    child_country = str(child.get("country") or "").strip().lower()
+    if parent_country and child_country and parent_country != child_country:
+        return False
+    parent_region = str(parent.get("region") or parent.get("admin") or "").strip().lower()
+    child_region = str(child.get("region") or child.get("admin") or "").strip().lower()
+    if parent_region and child_region and parent_region == child_region:
+        return True
+    return bool(parent_country and child_country and parent_country == child_country)
+
+
+def _v3_source_pack_child_item(place: dict, *, kind: str, distance_mi: float) -> dict:
+    source_pack = _v3_source_pack(place)
+    primary_source = _v3_primary_source(place)
+    media = _v3_primary_media(place)
+    title = str(place.get("name") or "Place").strip()
+    source_title = (
+        source_pack.get("primary")
+        or primary_source.get("title")
+        or primary_source.get("publisher")
+        or primary_source.get("source")
+        or "Open source"
+    )
+    source_url = source_pack.get("official_url") or primary_source.get("url") or primary_source.get("source_url") or ""
+    description = str(place.get("description") or place.get("summary") or "").strip()
+    lat, lng = _v3_lat_lng(place)
+    return {
+        "kind": kind,
+        "source": primary_source.get("source") or place.get("quality") or "open_source",
+        "source_id": str(place.get("id") or title),
+        "title": title,
+        "description": description,
+        "url": source_url,
+        "lat": lat,
+        "lng": lng,
+        "image_url": media.get("url") or "",
+        "image_caption": media.get("caption") or title,
+        "image_credit": media.get("credit") or source_title,
+        "image_license": media.get("license") or source_pack.get("license") or "",
+        "source_label": primary_source.get("attribution") or source_title,
+        "category": str(place.get("category") or kind).replace("_", " "),
+        "tags": [str(tag) for tag in (place.get("tags") or []) if str(tag).strip()][:8],
+        "distance_mi": round(distance_mi, 1),
+    }
+
+
+def _v3_child_kind(category: str) -> str:
+    normalized = str(category or "").strip().lower()
+    if normalized in {"glacier", "waterfall", "lake", "peak", "trail", "park"}:
+        return normalized
+    if normalized == "historic_site":
+        return "historic_site"
+    if normalized == "public_land":
+        return "protected_area"
+    return "place"
+
+
+def _attach_v3_nearby_source_items(profiles: list[dict], raw_places: list[dict]) -> None:
+    by_id = {str(profile.get("id") or ""): profile for profile in profiles}
+    source_places = [place for place in raw_places if isinstance(place, dict)]
+    child_categories = {"glacier", "waterfall", "lake", "peak", "viewpoint", "historic_site", "trail", "park", "public_land"}
+    hub_categories = {"park", "public_land", "glacier"}
+    for parent in source_places:
+        parent_id = str(parent.get("id") or "")
+        profile = by_id.get(parent_id)
+        if not profile:
+            continue
+        parent_pack = profile.get("source_pack") if isinstance(profile.get("source_pack"), dict) else {}
+        if parent_pack.get("nps_park_code"):
+            continue
+        parent_category = str(parent.get("category") or "").strip().lower()
+        if parent_category not in hub_categories:
+            continue
+        existing_children = parent_pack.get("things_to_see") if isinstance(parent_pack.get("things_to_see"), list) else []
+        if len(existing_children) >= 8:
+            continue
+        nearby: list[tuple[float, dict]] = []
+        for child in source_places:
+            if child is parent:
+                continue
+            child_category = str(child.get("category") or "").strip().lower()
+            if child_category not in child_categories:
+                continue
+            if _explore_title_merge_key({"name": child.get("name")}) == _explore_title_merge_key({"name": parent.get("name")}):
+                continue
+            if not _v3_nearby_region_match(parent, child):
+                continue
+            distance = _v3_distance_miles(parent, child)
+            if distance is None or distance <= 0.05 or distance > 120:
+                continue
+            nearby.append((distance, child))
+        if not nearby:
+            continue
+        nearby.sort(key=lambda item: (
+            0 if _v3_primary_media(item[1]).get("url") else 1,
+            item[0],
+            str(item[1].get("name") or ""),
+        ))
+        additions = [
+            _v3_source_pack_child_item(child, kind=_v3_child_kind(str(child.get("category") or "")), distance_mi=distance)
+            for distance, child in nearby[: max(0, 16 - len(existing_children))]
+        ]
+        if not additions:
+            continue
+        merged_pack = dict(parent_pack)
+        merged_pack["things_to_see"] = _merge_unique_dicts(existing_children, additions, ("source_id", "title"))
+        topics = [*(merged_pack.get("topics") or []), "nearby landmarks", "map stops"]
+        for item in additions:
+            if item.get("category"):
+                topics.append(str(item.get("category")))
+        merged_pack["topics"] = sorted({str(topic).strip() for topic in topics if str(topic).strip()})
+        if not merged_pack.get("source_note"):
+            merged_pack["source_note"] = "Nearby source-linked places"
+        profile["source_pack"] = merged_pack
+
+
 def _v3_merge_source_pack(existing: dict, generated: dict) -> dict:
     if not existing:
         return generated
@@ -834,10 +976,12 @@ def _load_explore_catalog_v3_profiles() -> list[dict]:
         catalog = json.loads(EXPLORE_CATALOG_V3.read_text())
     except Exception:
         return []
+    raw_places = [place for place in catalog.get("places") or [] if isinstance(place, dict)]
     profiles = []
-    for idx, place in enumerate(catalog.get("places") or [], start=1):
+    for idx, place in enumerate(raw_places, start=1):
         if isinstance(place, dict):
             profiles.append(_explore_v3_place_to_profile(place, rank=900000 + idx))
+    _attach_v3_nearby_source_items(profiles, raw_places)
     return profiles
 
 

@@ -1,0 +1,76 @@
+name: Manual Mobile OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Expo update channel to publish"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - production
+          - preview
+          - both
+      message:
+        description: "OTA update message"
+        required: true
+        default: "Manual OTA from GitHub Actions"
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: manual-mobile-ota-${{ github.event.inputs.channel }}
+  cancel-in-progress: false
+
+jobs:
+  ota:
+    name: Publish Expo OTA
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_PUBLIC_API_URL: https://api.gettrailhead.app
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - name: Check EXPO_TOKEN
+        shell: bash
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "Missing EXPO_TOKEN. Add it in GitHub repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Expo and EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install mobile dependencies
+        run: npm ci
+
+      - name: Typecheck mobile app
+        run: npx tsc --noEmit
+
+      - name: Publish production OTA
+        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
+        run: eas update --channel production --message "${{ github.event.inputs.message }}" --non-interactive
+
+      - name: Publish preview OTA
+        if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
+        run: eas update --channel preview --message "${{ github.event.inputs.message }}" --non-interactive

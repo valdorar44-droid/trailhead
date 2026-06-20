@@ -1,0 +1,272 @@
+name: Apply Explore Hub Trim + OTA
+
+on:
+  workflow_dispatch:
+    inputs:
+      channel:
+        description: "Expo update channel to publish after patching"
+        required: true
+        default: "both"
+        type: choice
+        options:
+          - production
+          - preview
+          - both
+          - none
+      message:
+        description: "Commit and OTA message"
+        required: true
+        default: "Trim Explore home hub and defer full catalog"
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apply-explore-hub-trim
+  cancel-in-progress: false
+
+jobs:
+  patch-and-ota:
+    name: Patch Explore home hub and optionally publish OTA
+    runs-on: ubuntu-latest
+    env:
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+      EXPO_PUBLIC_API_URL: https://api.gettrailhead.app
+      EXPO_NO_TELEMETRY: "1"
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Apply Explore hub trim source patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import re
+
+          path = Path("mobile/app/(tabs)/guide.tsx")
+          text = path.read_text()
+
+          text = text.replace("const EXPLORE_INITIAL_VISIBLE = 80;", "const EXPLORE_INITIAL_VISIBLE = 48;")
+          text = text.replace("const EXPLORE_VISIBLE_STEP = 80;", "const EXPLORE_VISIBLE_STEP = 48;")
+
+          compact_block = """  useEffect(() => {
+            let cancelled = false;
+            let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+
+            const mergeById = (base: ExplorePlaceProfile[], next: ExplorePlaceProfile[]) => {
+              const seen = new Set(base.map(place => place.id));
+              const merged = [...base];
+              for (const place of next) {
+                if (!place?.id || seen.has(place.id)) continue;
+                seen.add(place.id);
+                merged.push(place);
+              }
+              return merged;
+            };
+
+            const withExploreTimeout = <T,>(promise: Promise<T>, ms = 5200) => new Promise<T>((resolve, reject) => {
+              const timer = setTimeout(() => reject(new Error('Explore catalog timeout')), ms);
+              promise.then(
+                value => {
+                  clearTimeout(timer);
+                  resolve(value);
+                },
+                error => {
+                  clearTimeout(timer);
+                  reject(error);
+                },
+              );
+            });
+
+            const readCachedCatalog = async () => {
+              const raw = await storage.get(EXPLORE_CACHE_KEY).catch(() => '');
+              if (!raw) return [] as ExplorePlaceProfile[];
+              try {
+                const cached = JSON.parse(raw);
+                return Array.isArray(cached?.places) ? cached.places as ExplorePlaceProfile[] : [];
+              } catch {
+                return [] as ExplorePlaceProfile[];
+              }
+            };
+
+            const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
+              let nextCursor = cursor;
+              let allPlaces = seededPlaces;
+              for (let page = 0; nextCursor != null && page < 8; page += 1) {
+                const catalog = await api.getExploreCatalogIndex({ limit: 500, cursor: nextCursor });
+                const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+                allPlaces = mergeById(allPlaces, pagePlaces);
+                nextCursor = catalog.next_cursor;
+                if (cancelled) return;
+                await new Promise(resolve => setTimeout(resolve, 120));
+              }
+              if (!cancelled && allPlaces.length > seededPlaces.length) {
+                storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
+              }
+            };
+
+            // Compact home load: show a curated first page, keep source-rich data findable through search/filter.
+            setExploreLoading(true);
+            (async () => {
+              try {
+                const firstPage = await withExploreTimeout(api.getExploreCatalogIndex({ limit: 120, cursor: 0 }));
+                const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
+                if (cancelled) return;
+                setExplorePlaces(firstPlaces);
+                setExploreError('');
+                setExploreLoading(false);
+                backgroundTimer = setTimeout(() => {
+                  hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
+                }, 3200);
+              } catch {
+                const cached = await readCachedCatalog();
+                if (cancelled) return;
+                if (cached.length) {
+                  setExplorePlaces(cached.slice(0, 160));
+                  setExploreError('');
+                } else {
+                  setExploreError('Explore catalog unavailable offline until it has been loaded once.');
+                }
+                setExploreLoading(false);
+              }
+            })();
+
+            return () => {
+              cancelled = true;
+              if (backgroundTimer) clearTimeout(backgroundTimer);
+            };
+          }, []);"""
+
+          if "Compact home load: show a curated first page" not in text:
+            pattern = re.compile(
+              r"  useEffect\(\(\) => \{\n"
+              r"\s*let cancelled = false;\n"
+              r"\s*let backgroundTimer:[\s\S]*?"
+              r"\n\s*\}, \[\]\);"
+            )
+            text, count = pattern.subn(compact_block, text, count=1)
+            if count != 1:
+              raise SystemExit("Could not find exactly one staged Explore catalog-loading effect in guide.tsx")
+
+          remote_search_effect = """\n\n  useEffect(() => {
+    const query = exploreQuery.trim();
+    const category = exploreCategory !== 'all' ? exploreCategory : '';
+    const shouldFetch = tab === 'explore'
+      && exploreMode === 'featured'
+      && !exploreSavedOnly
+      && (query.length >= 2 || !!category);
+    if (!shouldFetch) return;
+
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      api.getExploreCatalogIndex({
+        q: query.length >= 2 ? query : undefined,
+        category: category || undefined,
+        limit: 420,
+        cursor: 0,
+      })
+        .then(catalog => {
+          if (cancelled) return;
+          const remotePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+          if (!remotePlaces.length) return;
+          setExplorePlaces(current => {
+            const seen = new Set(current.map(place => place.id));
+            const merged = [...current];
+            for (const place of remotePlaces) {
+              if (!place?.id || seen.has(place.id)) continue;
+              seen.add(place.id);
+              merged.push(place);
+            }
+            return merged;
+          });
+        })
+        .catch(() => {});
+    }, 280);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [tab, exploreMode, exploreQuery, exploreCategory, exploreSavedOnly]);"""
+
+          if "limit: 420" not in text:
+            marker = "  useEffect(() => {\n    let cancelled = false;\n    storage.get(SAVED_EXPLORE_KEY)"
+            if marker not in text:
+              raise SystemExit("Could not find saved Explore useEffect insertion point")
+            text = text.replace(marker, remote_search_effect + "\n\n" + marker, 1)
+
+          text = text.replace("if (picks.length >= 8) break;", "if (picks.length >= 4) break;")
+          text = text.replace("return picks.slice(0, 8);", "return picks.slice(0, 4);")
+          text = text.replace("return FEATURED_SECTION_ORDER\n      .map(key => {", "return FEATURED_SECTION_ORDER.slice(0, 6)\n      .map(key => {")
+          text = text.replace("          .slice(0, 5);", "          .slice(0, 3);")
+          text = text.replace("featured hubs", "featured picks")
+
+          path.write_text(text)
+          print("Explore hub trim patch applied or already present.")
+
+      - name: Show source diff
+        run: git diff -- mobile/app/\(tabs\)/guide.tsx
+
+      - name: Commit source patch when changed
+        shell: bash
+        run: |
+          if git diff --quiet -- mobile/app/\(tabs\)/guide.tsx; then
+            echo "No Explore source changes to commit."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add mobile/app/\(tabs\)/guide.tsx
+          git commit -m "${{ github.event.inputs.message }}"
+          git push origin HEAD:${{ github.ref_name }}
+
+      - name: Stop before OTA when requested
+        if: ${{ github.event.inputs.channel == 'none' }}
+        run: echo "Patched source only; OTA publish skipped."
+
+      - name: Check EXPO_TOKEN for OTA
+        if: ${{ github.event.inputs.channel != 'none' }}
+        shell: bash
+        run: |
+          if [ -z "$EXPO_TOKEN" ]; then
+            echo "Missing EXPO_TOKEN. Add it in GitHub repo Settings -> Secrets and variables -> Actions."
+            exit 1
+          fi
+
+      - name: Setup Node
+        if: ${{ github.event.inputs.channel != 'none' }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Setup Expo and EAS
+        if: ${{ github.event.inputs.channel != 'none' }}
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Install mobile dependencies
+        if: ${{ github.event.inputs.channel != 'none' }}
+        working-directory: mobile
+        run: npm ci
+
+      - name: Typecheck mobile app
+        if: ${{ github.event.inputs.channel != 'none' }}
+        working-directory: mobile
+        run: npx tsc --noEmit
+
+      - name: Publish production OTA
+        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
+        working-directory: mobile
+        run: eas update --channel production --message "${{ github.event.inputs.message }}" --non-interactive
+
+      - name: Publish preview OTA
+        if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
+        working-directory: mobile
+        run: eas update --channel preview --message "${{ github.event.inputs.message }}" --non-interactive

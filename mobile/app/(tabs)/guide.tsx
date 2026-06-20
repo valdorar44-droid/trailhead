@@ -707,38 +707,95 @@ export default function GuideScreen() {
   }, [requestedView]);
 
   useEffect(() => {
-    let cancelled = false;
-    setExploreLoading(true);
-    storage.get(EXPLORE_CACHE_KEY).then(raw => {
-      if (cancelled || !raw) return;
-      try {
-        const cached = JSON.parse(raw);
-        if (Array.isArray(cached?.places)) setExplorePlaces(cached.places);
-      } catch {}
-    }).catch(() => {});
-    (async () => {
-      const places: ExplorePlaceProfile[] = [];
-      let cursor = 0;
-      for (let page = 0; page < 8; page += 1) {
-        const catalog = await api.getExploreCatalogIndex({ limit: 1000, cursor });
-        places.push(...(catalog.places ?? []).map(exploreIndexItemToProfile));
-        if (catalog.next_cursor == null) break;
-        cursor = catalog.next_cursor;
+  let cancelled = false;
+  let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+
+  const mergeById = (base: ExplorePlaceProfile[], next: ExplorePlaceProfile[]) => {
+    const seen = new Set(base.map(place => place.id));
+    const merged = [...base];
+    for (const place of next) {
+      if (!place?.id || seen.has(place.id)) continue;
+      seen.add(place.id);
+      merged.push(place);
+    }
+    return merged;
+  };
+
+  const withExploreTimeout = <T,>(promise: Promise<T>, ms = 6500) => new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Explore catalog timeout')), ms);
+    promise.then(
+      value => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      error => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+
+  const readCachedCatalog = async () => {
+    const raw = await storage.get(EXPLORE_CACHE_KEY).catch(() => '');
+    if (!raw) return [] as ExplorePlaceProfile[];
+    try {
+      const cached = JSON.parse(raw);
+      return Array.isArray(cached?.places) ? cached.places as ExplorePlaceProfile[] : [];
+    } catch {
+      return [] as ExplorePlaceProfile[];
+    }
+  };
+
+  const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
+    let nextCursor = cursor;
+    let allPlaces = seededPlaces;
+    for (let page = 0; nextCursor != null && page < 8; page += 1) {
+      const catalog = await api.getExploreCatalogIndex({ limit: 500, cursor: nextCursor });
+      const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+      allPlaces = mergeById(allPlaces, pagePlaces);
+      nextCursor = catalog.next_cursor;
+      if (cancelled) return;
+      setExplorePlaces(current => mergeById(current, pagePlaces));
+      if (page % 2 === 1) {
+        storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
       }
-      return places;
-    })()
-      .then(places => {
-        if (cancelled) return;
-        setExplorePlaces(places);
-        storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places, fetched_at: Date.now() })).catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 40));
+    }
+    if (!cancelled) {
+      storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
+    }
+  };
+
+  setExploreLoading(true);
+  (async () => {
+    try {
+      const firstPage = await withExploreTimeout(api.getExploreCatalogIndex({ limit: 220, cursor: 0 }));
+      const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
+      if (cancelled) return;
+      setExplorePlaces(firstPlaces);
+      setExploreError('');
+      setExploreLoading(false);
+      backgroundTimer = setTimeout(() => {
+        hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
+      }, 650);
+    } catch {
+      const cached = await readCachedCatalog();
+      if (cancelled) return;
+      if (cached.length) {
+        setExplorePlaces(cached);
         setExploreError('');
-      })
-      .catch(() => {
-        if (!cancelled) setExploreError('Explore catalog unavailable offline until it has been loaded once.');
-      })
-      .finally(() => !cancelled && setExploreLoading(false));
-    return () => { cancelled = true; };
-  }, []);
+      } else {
+        setExploreError('Explore catalog unavailable offline until it has been loaded once.');
+      }
+      setExploreLoading(false);
+    }
+  })();
+
+  return () => {
+    cancelled = true;
+    if (backgroundTimer) clearTimeout(backgroundTimer);
+  };
+}, []);
 
   useEffect(() => {
     let cancelled = false;

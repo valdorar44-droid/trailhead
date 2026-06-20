@@ -44,45 +44,12 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
+          import re
 
           path = Path("mobile/app/(tabs)/guide.tsx")
           text = path.read_text()
 
-          old = """  useEffect(() => {
-            let cancelled = false;
-            setExploreLoading(true);
-            storage.get(EXPLORE_CACHE_KEY).then(raw => {
-              if (cancelled || !raw) return;
-              try {
-                const cached = JSON.parse(raw);
-                if (Array.isArray(cached?.places)) setExplorePlaces(cached.places);
-              } catch {}
-            }).catch(() => {});
-            (async () => {
-              const places: ExplorePlaceProfile[] = [];
-              let cursor = 0;
-              for (let page = 0; page < 8; page += 1) {
-                const catalog = await api.getExploreCatalogIndex({ limit: 1000, cursor });
-                places.push(...(catalog.places ?? []).map(exploreIndexItemToProfile));
-                if (catalog.next_cursor == null) break;
-                cursor = catalog.next_cursor;
-              }
-              return places;
-            })()
-              .then(places => {
-                if (cancelled) return;
-                setExplorePlaces(places);
-                storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places, fetched_at: Date.now() })).catch(() => {});
-                setExploreError('');
-              })
-              .catch(() => {
-                if (!cancelled) setExploreError('Explore catalog unavailable offline until it has been loaded once.');
-              })
-              .finally(() => !cancelled && setExploreLoading(false));
-            return () => { cancelled = true; };
-          }, []);"""
-
-          new = """  useEffect(() => {
+          replacement = """  useEffect(() => {
             let cancelled = false;
             let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
 
@@ -173,14 +140,22 @@ jobs:
             };
           }, []);"""
 
-          if new in text:
+          if "hydrateRemainingCatalog" in text and "limit: 220" in text:
             print("Explore fast-load patch is already applied.")
-          elif old in text:
-            text = text.replace(old, new)
+          else:
+            pattern = re.compile(
+              r"  useEffect\(\(\) => \{\n"
+              r"    let cancelled = false;\n"
+              r"    setExploreLoading\(true\);\n"
+              r"    storage\.get\(EXPLORE_CACHE_KEY\)[\s\S]*?"
+              r"    return \(\) => \{ cancelled = true; \};\n"
+              r"  \}, \[\]\);"
+            )
+            text, count = pattern.subn(replacement, text, count=1)
+            if count != 1:
+              raise SystemExit("Could not find exactly one Explore catalog-loading block in guide.tsx")
             path.write_text(text)
             print("Explore fast-load patch applied.")
-          else:
-            raise SystemExit("Could not find the expected Explore catalog-loading block in guide.tsx")
 
       - name: Show source diff
         run: git diff -- mobile/app/\(tabs\)/guide.tsx

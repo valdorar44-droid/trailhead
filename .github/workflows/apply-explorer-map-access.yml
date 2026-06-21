@@ -1,5 +1,4 @@
-name: Apply Explorer Map Access + OTA
-
+name: Apply Explorer Map Accesss + OTA
 on:
   workflow_dispatch:
     inputs:
@@ -18,14 +17,11 @@ on:
         required: true
         default: "Open Explorer map styles and keep safety layers free"
         type: string
-
 permissions:
   contents: write
-
 concurrency:
   group: apply-explorer-map-access
   cancel-in-progress: false
-
 jobs:
   patch-and-ota:
     name: Patch Explorer map access and optionally publish OTA
@@ -39,44 +35,36 @@ jobs:
         uses: actions/checkout@v4
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Apply Explorer map access source patch
         shell: python
         run: |
           from pathlib import Path
           import re
-
           changed_files: set[str] = set()
           warnings: list[str] = []
-
           def read(path: str) -> str:
             p = Path(path)
             if not p.exists():
               raise SystemExit(f"Missing expected file: {path}")
             return p.read_text()
-
           def write(path: str, text: str, original: str) -> None:
             if text != original:
               Path(path).write_text(text)
               changed_files.add(path)
-
           def replace_required(text: str, old: str, new: str, path: str) -> str:
             if old not in text:
               raise SystemExit(f"Pattern not found in {path}: {old[:160]!r}")
             return text.replace(old, new)
-
           def replace_optional(text: str, old: str, new: str, path: str) -> str:
             if old in text:
               return text.replace(old, new)
             warnings.append(f"Optional pattern not found in {path}: {old[:120]!r}")
             return text
-
           def regex_required(text: str, pattern: str, replacement: str, path: str, count: int = 1) -> str:
             updated, n = re.subn(pattern, replacement, text, count=count, flags=re.S)
             if n == 0:
               raise SystemExit(f"Regex not found in {path}: {pattern[:180]!r}")
             return updated
-
           # Routing type and fallback order.
           path = "mobile/components/NativeMap/types.ts"
           text = original = read(path)
@@ -88,7 +76,6 @@ jobs:
               path,
             )
           write(path, text, original)
-
           path = "mobile/components/NativeMap/routing.ts"
           text = original = read(path)
           text = text.replace(
@@ -105,22 +92,24 @@ jobs:
           text = text.replace("EXTREME Mapbox", "Explorer Mapbox")
           text = text.replace("'EXTREME Mapbox Directions'", "'Explorer Mapbox Directions'")
           if "const wantsMapboxFirst" not in text:
-            new_block = """  // C. Online: Trailhead routes first. Mapbox stays as the first fallback,
-  // then OSRM. Traffic-first only runs when explicitly requested.
-  const wantsMapboxFirst = String(providerMode) === 'mapbox-traffic' || String(providerMode) === 'traffic';
-  const onlineEngines = wantsMapboxFirst
-    ? [
-        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
-        () => fetchValhalla(pairs, fromIdx, routeOpts),
-        () => fetchOSRM(pairs, fromIdx, routeOpts),
-      ]
-    : [
-        () => fetchValhalla(pairs, fromIdx, routeOpts),
-        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
-        () => fetchOSRM(pairs, fromIdx, routeOpts),
-      ];
-
-  console.log('[fetchRoute] online — trying live engines in priority order');"""
+            new_block = "\n".join([
+              "  // C. Online: Trailhead routes first. Mapbox stays as the first fallback,",
+              "  // then OSRM. Traffic-first only runs when explicitly requested.",
+              "  const wantsMapboxFirst = String(providerMode) === 'mapbox-traffic' || String(providerMode) === 'traffic';",
+              "  const onlineEngines = wantsMapboxFirst",
+              "    ? [",
+              "        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),",
+              "        () => fetchValhalla(pairs, fromIdx, routeOpts),",
+              "        () => fetchOSRM(pairs, fromIdx, routeOpts),",
+              "      ]",
+              "    : [",
+              "        () => fetchValhalla(pairs, fromIdx, routeOpts),",
+              "        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),",
+              "        () => fetchOSRM(pairs, fromIdx, routeOpts),",
+              "      ];",
+              "",
+              "  console.log('[fetchRoute] online — trying live engines in priority order');",
+            ])
             text = regex_required(
               text,
               r"  // C\. Online:[\s\S]*?  console\.log\('\[fetchRoute\] online — trying live engines in priority order'\);",
@@ -128,15 +117,14 @@ jobs:
               path,
             )
           write(path, text, original)
-
           # Backend plan names and offline download access.
           path = "db/store.py"
           text = original = read(path)
           if "EXPLORER_PLAN_TYPES" not in text:
-            text = replace_required(
+            text = regex_required(
               text,
-              "def _csv_set(value: str) -> set[str]:\n    return {item.strip().lower() for item in (value or '').split(',') if item.strip()}\n",
-              "def _csv_set(value: str) -> set[str]:\n    return {item.strip().lower() for item in (value or '').split(',') if item.strip()}\n\nEXPLORER_PLAN_TYPES = {\"explorer\", \"explorer_beta\", \"extreme\", \"extreme_beta\"}\n",
+              r"def _csv_set\(value: str\) -> set\[str\]:\n    return \{[^\n]*\}\n",
+              "\\g<0>\nEXPLORER_PLAN_TYPES = {\"explorer\", \"explorer_beta\", \"extreme\", \"extreme_beta\"}\n",
               path,
             )
           text = text.replace("if plan in {\"extreme\", \"extreme_beta\"}:", "if plan in EXPLORER_PLAN_TYPES:")
@@ -145,28 +133,30 @@ jobs:
             "Trailhead-owned offline packs are free for everyone. Plan users are free\n    for any remaining paid offline assets.",
           )
           if "trailhead_owned_free" not in text:
+            free_block = "\n".join([
+              "      trailhead_owned_free = (",
+              "          asset_type in {",
+              "              \"state_map\", \"state_route\", \"state_contours\", \"state_trails\",",
+              "              \"country_map\", \"country_route\", \"trip_corridor\",",
+              "              \"conus_map\", \"place_pack\", \"trail_pack\", \"topo_pack\",",
+              "          }",
+              "          or asset_type.startswith(\"trailhead_\")",
+              "      )",
+              "      if trailhead_owned_free:",
+              "          db.execute(",
+              "              \"INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)\",",
+              "              (user_id, asset_type, region_id, 0, 0, now),",
+              "          )",
+              "          db.commit()",
+              "          return {\"authorized\": True, \"charged\": 0, \"free_used\": False, \"credits\": user.get(\"credits\", 0)}",
+            ])
             text = regex_required(
               text,
               r"      free_allowed = asset_type == \"state_route\" and region_id != \"conus\"[\s\S]*?return \{\"authorized\": True, \"charged\": 0, \"free_used\": True, \"credits\": user\.get\(\"credits\", 0\)\}",
-              """      trailhead_owned_free = (
-              asset_type in {
-                  "state_map", "state_route", "state_contours", "state_trails",
-                  "country_map", "country_route", "trip_corridor",
-                  "conus_map", "place_pack", "trail_pack", "topo_pack",
-              }
-              or asset_type.startswith("trailhead_")
-          )
-          if trailhead_owned_free:
-              db.execute(
-                  "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
-                  (user_id, asset_type, region_id, 0, 0, now),
-              )
-              db.commit()
-              return {"authorized": True, "charged": 0, "free_used": False, "credits": user.get("credits", 0)}""",
+              free_block,
               path,
             )
           write(path, text, original)
-
           # Backend compatibility aliases and visible tier name.
           path = "dashboard/server.py"
           text = original = read(path)
@@ -184,7 +174,6 @@ jobs:
             patched.append(line)
           text = "\n".join(patched) + ("\n" if original.endswith("\n") else "")
           write(path, text, original)
-
           # Mobile API compatibility aliases and visible type name.
           path = "mobile/lib/api.ts"
           text = original = read(path)
@@ -204,7 +193,6 @@ jobs:
               path,
             )
           write(path, text, original)
-
           # Visible copy cleanup.
           for path in [
             "mobile/components/map/MapLayerSheetContent.tsx",
@@ -225,13 +213,11 @@ jobs:
             text = text.replace("Premium Map", "Map Styles")
             text = text.replace("premium map", "map styles")
             write(path, text, original)
-
           # Smoke should not become a visible broken safety layer from this patch.
           for path in ["mobile/components/map/MapLayerSheetContent.tsx", "mobile/components/NativeMap/index.tsx"]:
             p = Path(path)
             if p.exists() and ("Smoke" in p.read_text() or "showSmoke" in p.read_text()):
               warnings.append(f"Smoke references still need source verification in {path}")
-
           # Verification guardrails.
           failures: list[str] = []
           for path in ["mobile/components/map/MapLayerSheetContent.tsx", "mobile/components/map/MapStyleSheet.tsx", "mobile/app/extreme-explorer.tsx", "dashboard/admin.html"]:
@@ -271,11 +257,138 @@ jobs:
             print("Warnings:")
             for item in warnings:
               print(f"- {item}")
-
+      - name: Relocate Explorer map styles out of Extreme gate
+        shell: python
+        run: |
+          from pathlib import Path
+          def patch(path, old, new, required=True):
+              p = Path(path)
+              if not p.exists():
+                  if required:
+                      raise SystemExit(f"[style-relocation] missing file: {path}")
+                  return
+              text = p.read_text()
+              if new in text:
+                  return
+              if old not in text:
+                  if required:
+                      raise SystemExit(f"[style-relocation] anchor not found in {path}: {old[:90]!r}")
+                  return
+              p.write_text(text.replace(old, new, 1))
+          MAP = "mobile/app/(tabs)/map.tsx"
+          MLS = "mobile/components/map/MapLayerSheetContent.tsx"
+          MSS = "mobile/components/map/MapStyleSheet.tsx"
+          # 1. Anyone can enter premium map style mode (drop the entitlement paywall).
+          patch(MAP,
+              "\n".join([
+                  "  function selectExtremeMapLayer() {",
+                  "    if (!extremeMapLayerEntitled) {",
+                  "      setPaywallCode('extreme_hidden_beta');",
+                  "      setPaywallMessage('Explorer includes EXTREME terrain previews. Premium beta tools stay locked to Extreme accounts.');",
+                  "      setPaywallVisible(true);",
+                  "      return;",
+                  "    }",
+                  "    if (extremeMapboxPending) {",
+              ]),
+              "\n".join([
+                  "  function selectExtremeMapLayer() {",
+                  "    if (extremeMapboxPending) {",
+              ]))
+          # 2. Selecting a premium style activates premium rendering for everyone.
+          patch(MAP,
+              "\n".join([
+                  "    onPress: () => {",
+                  "      setPremiumMapStyle(option.id);",
+                  "      api.logExtremeLedger({",
+                  "        event_type: 'mapbox_style_selected',",
+              ]),
+              "\n".join([
+                  "    onPress: () => {",
+                  "      applyMapLayer('extreme');",
+                  "      setPremiumMapStyle(option.id);",
+                  "      api.logExtremeLedger({",
+                  "        event_type: 'mapbox_style_selected',",
+              ]))
+          # 3. Premium style section + Extreme card available to all (mapbox supported + token).
+          patch(MAP, "premiumMapVisible={extremeMapLayerActive}", "premiumMapVisible={extremeMapboxSupported && !!mapboxToken}")
+          patch(MAP, "extremeMapLayerSelectable={extremeMapLayerAvailable}", "extremeMapLayerSelectable={extremeMapboxSupported}")
+          patch(MAP, "extremeSelectable={extremeMapLayerAvailable}", "extremeSelectable={extremeMapboxSupported}")
+          # 4. Keep navigation provider Explorer-only (free style users still route via Trailhead).
+          patch(MAP,
+              "routeProviderMode={extremeMapLayerActive ? 'extreme-mapbox' : 'trailhead'}",
+              "routeProviderMode={extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation ? 'extreme-mapbox' : 'trailhead'}")
+          patch(MAP,
+              "route_provider: extremeMapLayerActive ? 'extreme-mapbox' : 'trailhead',",
+              "route_provider: extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation ? 'extreme-mapbox' : 'trailhead',")
+          # 5. Keep base POI + nearby place feeds for free style users (suppress only with Explorer search).
+          patch(MAP,
+              "\n".join([
+                  "  function fetchPois(center: { lat: number; lng: number }, radius = 28, categoriesOverride?: string) {",
+                  "    if (extremeMapLayerActive) {",
+              ]),
+              "\n".join([
+                  "  function fetchPois(center: { lat: number; lng: number }, radius = 28, categoriesOverride?: string) {",
+                  "    if (extremeMapLayerActive && !!extremeConfig?.feature_flags?.search) {",
+              ]))
+          patch(MAP,
+              "\n".join([
+                  "    if (!key || center?.lat == null || center?.lng == null || !isFinite(center.lat) || !isFinite(center.lng)) return;",
+                  "    if (extremeMapLayerActive) {",
+              ]),
+              "\n".join([
+                  "    if (!key || center?.lat == null || center?.lng == null || !isFinite(center.lat) || !isFinite(center.lng)) return;",
+                  "    if (extremeMapLayerActive && !!extremeConfig?.feature_flags?.search) {",
+              ]))
+          # 6. Drop the misleading lock icons now that the style cards are free.
+          patch(MLS, 'name="lock-closed" size={15} color="#ef4444" />}', 'name="ellipse-outline" size={15} color="#ef4444" />}', required=False)
+          patch(MSS, "name={extremeActive ? 'checkmark-circle' : 'lock-closed'}", "name={extremeActive ? 'checkmark-circle' : 'ellipse-outline'}", required=False)
+          # 7. Card subtitle should not claim "Not available yet" now that the styles are free.
+          patch(MAP,
+              "\n".join([
+                  "  const extremeMapLayerSub = !extremeMapLayerEntitled",
+                  "    ? 'Not available yet'",
+                  "    : extremeMapboxPending",
+                  "      ? 'Checking device'",
+                  "      : extremeMapboxSupported",
+                  "        ? (extremeConfig?.enabled ? 'Premium Mapbox mode' : 'Explorer 3D terrain')",
+                  "        : 'Android fallback';",
+              ]),
+              "\n".join([
+                  "  const extremeMapLayerSub = extremeMapboxPending",
+                  "    ? 'Checking device'",
+                  "    : !extremeMapboxSupported",
+                  "      ? 'Android fallback'",
+                  "      : (extremeConfig?.enabled ? 'Premium Mapbox mode' : 'Mapbox map styles');",
+              ]))
+          # Verification.
+          map_text = Path(MAP).read_text()
+          failures = []
+          if "setPaywallCode('extreme_hidden_beta')" in map_text:
+              failures.append("selectExtremeMapLayer paywall still present")
+          if "'Not available yet'" in map_text:
+              failures.append("Extreme card subtitle still says 'Not available yet'")
+          for needle in [
+              "applyMapLayer('extreme');\n      setPremiumMapStyle(option.id);",
+              "premiumMapVisible={extremeMapboxSupported && !!mapboxToken}",
+              "extremeMapLayerSelectable={extremeMapboxSupported}",
+              "routeProviderMode={extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation ? 'extreme-mapbox' : 'trailhead'}",
+              "route_provider: extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation ? 'extreme-mapbox' : 'trailhead',",
+              "if (extremeMapLayerActive && !!extremeConfig?.feature_flags?.search) {",
+              "const extremeMapLayerSub = extremeMapboxPending",
+          ]:
+              if needle not in map_text:
+                  failures.append(f"missing expected change: {needle[:70]!r}")
+          if failures:
+              print("Style relocation verification failed:")
+              for item in failures:
+                  print(f"- {item}")
+              raise SystemExit(1)
+          print("Explorer map styles relocated out of Extreme gate.")
       - name: Show source diff
         shell: bash
         run: |
           git diff -- \
+            'mobile/app/(tabs)/map.tsx' \
             mobile/components/NativeMap/types.ts \
             mobile/components/NativeMap/routing.ts \
             mobile/components/NativeMap/index.tsx \
@@ -287,11 +400,11 @@ jobs:
             dashboard/server.py \
             dashboard/admin.html \
             db/store.py
-
       - name: Commit source patch when changed
         shell: bash
         run: |
           if git diff --quiet -- \
+            'mobile/app/(tabs)/map.tsx' \
             mobile/components/NativeMap/types.ts \
             mobile/components/NativeMap/routing.ts \
             mobile/components/NativeMap/index.tsx \
@@ -309,6 +422,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
+            'mobile/app/(tabs)/map.tsx' \
             mobile/components/NativeMap/types.ts \
             mobile/components/NativeMap/routing.ts \
             mobile/components/NativeMap/index.tsx \
@@ -322,11 +436,9 @@ jobs:
             db/store.py
           git commit -m "${{ github.event.inputs.message }}"
           git push origin HEAD:${{ github.ref_name }}
-
       - name: Stop before OTA when requested
         if: ${{ github.event.inputs.channel == 'none' }}
         run: echo "Patched source only; OTA publish skipped."
-
       - name: Check EXPO_TOKEN for OTA
         if: ${{ github.event.inputs.channel != 'none' }}
         shell: bash
@@ -335,7 +447,6 @@ jobs:
             echo "Missing EXPO_TOKEN. Add it in GitHub repo Settings -> Secrets and variables -> Actions."
             exit 1
           fi
-
       - name: Setup Node
         if: ${{ github.event.inputs.channel != 'none' }}
         uses: actions/setup-node@v4
@@ -343,30 +454,26 @@ jobs:
           node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
-
       - name: Setup Expo and EAS
         if: ${{ github.event.inputs.channel != 'none' }}
         uses: expo/expo-github-action@v8
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
-
       - name: Install mobile dependencies
         if: ${{ github.event.inputs.channel != 'none' }}
         working-directory: mobile
         run: npm ci
-
       - name: Typecheck mobile app
         if: ${{ github.event.inputs.channel != 'none' }}
         working-directory: mobile
         run: npx tsc --noEmit
-
       - name: Publish production OTA
         if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
         working-directory: mobile
         run: eas update --channel production --message "${{ github.event.inputs.message }}" --non-interactive
-
       - name: Publish preview OTA
         if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
         working-directory: mobile
         run: eas update --channel preview --message "${{ github.event.inputs.message }}" --non-interactive
+      

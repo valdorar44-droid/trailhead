@@ -2566,7 +2566,7 @@ def _extreme_config_for_user(user: dict | None) -> dict:
     max_demo_session_seconds = _int_override(overrides, "max_demo_session_seconds", settings.extreme_max_demo_session_seconds, 60, 7200)
     max_navigation_session_seconds = _int_override(overrides, "max_navigation_session_seconds", settings.extreme_max_navigation_session_seconds, 300, 86400)
     return {
-        "tier_name": "Extreme Explorer",
+        "tier_name": "Explorer",
         "enabled": bool(beta_active and entitled),
         "entitled": bool(entitled),
         "enabled_visual": bool(beta_active and visual_entitled),
@@ -2654,9 +2654,9 @@ def _classify_extreme_command(command: str) -> tuple[str, str]:
 def _require_extreme_copilot(user: dict, voice: bool = False) -> dict:
     config = _extreme_config_for_user(user)
     if config["kill_switch"]:
-        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Explorer is temporarily unavailable."})
     if not config["enabled"] or not config["entitled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
     if "copilot" not in config["allowed_surfaces"] and "map_layers" not in config["allowed_surfaces"]:
         raise HTTPException(403, {"code": "extreme_copilot_unavailable", "message": "EXTREME Copilot is not available on this surface."})
     if not config["feature_flags"]["copilot"]:
@@ -6178,20 +6178,22 @@ def get_config():
         "apple_service_id": settings.apple_service_id,
     }
 
+@app.get("/api/explorer/config")
 @app.get("/api/extreme/config")
 def extreme_config(user: dict = Depends(_current_user)):
     return _extreme_config_for_user(user)
 
+@app.post("/api/explorer/session/authorize")
 @app.post("/api/extreme/session/authorize")
 def extreme_authorize_session(body: ExtremeSessionAuthorizeRequest, user: dict = Depends(_current_user)):
     config = _extreme_config_for_user(user)
     surface = _clean_extreme_surface(body.surface)
     if config["kill_switch"]:
-        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Explorer is temporarily unavailable."})
     if not config["beta_active"] or surface not in config["allowed_surfaces"]:
-        raise HTTPException(403, {"code": "extreme_unavailable", "message": "Extreme Explorer is not available here yet."})
+        raise HTTPException(403, {"code": "extreme_unavailable", "message": "Explorer is not available here yet."})
     if not config["entitled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
 
     trip_id = (body.trip_id or "").strip()[:120] or None
     checkpoints = [cp.dict() for cp in body.checkpoints[:80]]
@@ -6221,6 +6223,7 @@ def extreme_authorize_session(body: ExtremeSessionAuthorizeRequest, user: dict =
         "navigation_session_authorized": False,
     }
 
+@app.post("/api/explorer/session/end")
 @app.post("/api/extreme/session/end")
 def extreme_end_session(body: ExtremeSessionEndRequest, user: dict = Depends(_current_user)):
     clean_session = _clean_extreme_session_id(body.session_id)
@@ -6239,15 +6242,16 @@ def extreme_end_session(body: ExtremeSessionEndRequest, user: dict = Depends(_cu
     )
     return {"ok": True, "session_id": clean_session, "status": ended.get("status"), "ended_at": ended.get("ended_at")}
 
+@app.post("/api/explorer/navigation/authorize")
 @app.post("/api/extreme/navigation/authorize")
 def extreme_authorize_navigation(body: ExtremeNavigationAuthorizeRequest, user: dict = Depends(_current_user)):
     config = _extreme_config_for_user(user)
     surface = _clean_extreme_surface(body.surface or "navigation")
     nav_mode = _clean_extreme_event_type(body.navigation_mode or "route_guidance")
     if config["kill_switch"]:
-        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Explorer is temporarily unavailable."})
     if not config["enabled"] or not config["entitled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
     if not config["feature_flags"]["navigation"] or surface not in config["allowed_surfaces"]:
         raise HTTPException(403, {"code": "extreme_navigation_disabled", "message": "Guided navigation is not enabled for this beta."})
     if nav_mode in {"free_drive", "free-drive"}:
@@ -6292,13 +6296,14 @@ def extreme_authorize_navigation(body: ExtremeNavigationAuthorizeRequest, user: 
         "route_id": route_id,
     }
 
+@app.post("/api/explorer/ledger")
 @app.post("/api/extreme/ledger")
 def extreme_ledger(body: ExtremeLedgerRequest, user: dict = Depends(_current_user)):
     config = _extreme_config_for_user(user)
     if not config["beta_active"]:
-        raise HTTPException(403, {"code": "extreme_unavailable", "message": "Extreme Explorer is not available."})
+        raise HTTPException(403, {"code": "extreme_unavailable", "message": "Explorer is not available."})
     if not config["entitled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
     surface = _clean_extreme_surface(body.surface)
     event_type = _clean_extreme_event_type(body.event_type)
     clean_session = _clean_extreme_session_id(body.session_id)
@@ -6309,9 +6314,9 @@ def extreme_ledger(body: ExtremeLedgerRequest, user: dict = Depends(_current_use
 def _require_extreme_map_layers(user: dict) -> dict:
     config = _extreme_config_for_user(user)
     if config["kill_switch"]:
-        raise HTTPException(403, {"code": "extreme_disabled", "message": "Extreme Explorer is temporarily unavailable."})
+        raise HTTPException(403, {"code": "extreme_disabled", "message": "Explorer is temporarily unavailable."})
     if not config["enabled"] or not config["entitled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
     if "map_layers" not in config["allowed_surfaces"]:
         raise HTTPException(403, {"code": "extreme_unavailable", "message": "Extreme map layers are not available here yet."})
     if not settings.mapbox_token:
@@ -6370,6 +6375,7 @@ def _mapbox_feature_coordinate_summary(items: object, limit: int = 8) -> list[di
         })
     return summary
 
+@app.post("/api/explorer/search/session")
 @app.post("/api/extreme/search/session")
 def extreme_search_session(body: ExtremeSearchSessionRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_map_layers(user)
@@ -6390,6 +6396,7 @@ def extreme_search_session(body: ExtremeSearchSessionRequest, user: dict = Depen
         "expires_in_seconds": 180,
     }
 
+@app.post("/api/explorer/search/suggest")
 @app.post("/api/extreme/search/suggest")
 async def extreme_search_suggest(body: ExtremeSearchSuggestRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_map_layers(user)
@@ -6431,6 +6438,7 @@ async def extreme_search_suggest(body: ExtremeSearchSuggestRequest, user: dict =
     data["_trailhead"] = {"temporary_use_only": True}
     return data
 
+@app.post("/api/explorer/search/retrieve")
 @app.post("/api/extreme/search/retrieve")
 async def extreme_search_retrieve(body: ExtremeSearchRetrieveRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_map_layers(user)
@@ -6464,6 +6472,7 @@ async def extreme_search_retrieve(body: ExtremeSearchRetrieveRequest, user: dict
     data["_trailhead"] = {"temporary_use_only": True}
     return data
 
+@app.post("/api/explorer/search/category")
 @app.post("/api/extreme/search/category")
 async def extreme_search_category(body: ExtremeSearchCategoryRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_map_layers(user)
@@ -6497,6 +6506,7 @@ async def extreme_search_category(body: ExtremeSearchCategoryRequest, user: dict
     data["_trailhead"] = {"temporary_use_only": True}
     return data
 
+@app.post("/api/explorer/search/reverse")
 @app.post("/api/extreme/search/reverse")
 async def extreme_search_reverse(body: ExtremeSearchReverseRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_map_layers(user)
@@ -6532,6 +6542,7 @@ async def extreme_search_reverse(body: ExtremeSearchReverseRequest, user: dict =
     data["_trailhead"] = {"temporary_use_only": True}
     return data
 
+@app.post("/api/explorer/directions")
 @app.post("/api/extreme/directions")
 async def extreme_directions(body: ExtremeDirectionsRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_map_layers(user)
@@ -6578,18 +6589,20 @@ async def extreme_directions(body: ExtremeDirectionsRequest, user: dict = Depend
     data["_trailhead"] = {"engine": "mapbox-directions", "temporary_use_only": True}
     return data
 
+@app.get("/api/explorer/weather/layers")
 @app.get("/api/extreme/weather/layers")
 def extreme_weather_layers(user: dict = Depends(_current_user)):
     config = _extreme_config_for_user(user)
     if not config["enabled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
     return config["weather"]
 
+@app.post("/api/explorer/weather/route-risk")
 @app.post("/api/extreme/weather/route-risk")
 def extreme_weather_route_risk(body: ExtremeRouteRiskRequest, user: dict = Depends(_current_user)):
     config = _extreme_config_for_user(user)
     if not config["enabled"]:
-        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Extreme Explorer is in hidden beta for selected accounts."})
+        raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
     if not config["feature_flags"]["weather"]:
         raise HTTPException(403, {"code": "extreme_weather_disabled", "message": "Weather Watch is not enabled for this beta."})
     trip_id = (body.trip_id or "").strip()[:120] or None
@@ -6609,6 +6622,7 @@ def extreme_weather_route_risk(body: ExtremeRouteRiskRequest, user: dict = Depen
         "summary": "Weather checks are staged along the route for review.",
     }
 
+@app.post("/api/explorer/copilot/command")
 @app.post("/api/extreme/copilot/command")
 def extreme_copilot_command(body: ExtremeCopilotCommandRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_copilot(user, voice=str(body.mode or "").lower() == "voice")
@@ -6660,6 +6674,7 @@ def extreme_copilot_command(body: ExtremeCopilotCommandRequest, user: dict = Dep
         "message": map_action["message"] or response,
     }
 
+@app.post("/api/explorer/copilot/session")
 @app.post("/api/extreme/copilot/session")
 def extreme_copilot_session(body: ExtremeCopilotSessionRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_copilot(user)
@@ -6697,6 +6712,7 @@ def extreme_copilot_session(body: ExtremeCopilotSessionRequest, user: dict = Dep
         "ledger_id": event_id,
     }
 
+@app.post("/api/explorer/copilot/message")
 @app.post("/api/extreme/copilot/message")
 def extreme_copilot_message(body: ExtremeCopilotMessageRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_copilot(user, voice=str(body.mode or "").lower() == "voice")
@@ -6858,6 +6874,7 @@ async def _mission_provider_places_for_route(config: dict, route: object, metada
     })
     return places[:40], debug
 
+@app.post("/api/explorer/copilot/mission-control")
 @app.post("/api/extreme/copilot/mission-control")
 async def extreme_copilot_mission_control(body: MissionControlRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_copilot(user)
@@ -6899,6 +6916,7 @@ async def extreme_copilot_mission_control(body: MissionControlRequest, user: dic
     brief["ledger_id"] = ledger_id
     return brief
 
+@app.post("/api/explorer/route-scout/windows")
 @app.post("/api/extreme/route-scout/windows")
 def extreme_route_scout_windows(body: RouteScoutWindowPlanRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_copilot(user)
@@ -6940,6 +6958,7 @@ def extreme_route_scout_windows(body: RouteScoutWindowPlanRequest, user: dict = 
         "ledger_id": ledger_id,
     }
 
+@app.post("/api/explorer/copilot/action/confirm")
 @app.post("/api/extreme/copilot/action/confirm")
 def extreme_copilot_action_confirm(body: ExtremeCopilotConfirmRequest, user: dict = Depends(_current_user)):
     _require_extreme_copilot(user)
@@ -6970,6 +6989,7 @@ def extreme_copilot_action_confirm(body: ExtremeCopilotConfirmRequest, user: dic
         "ledger_id": ledger_id,
     }
 
+@app.post("/api/explorer/copilot/realtime-session")
 @app.post("/api/extreme/copilot/realtime-session")
 def extreme_copilot_realtime_session(body: RealtimeCopilotSessionRequest, user: dict = Depends(_current_user)):
     config = _require_extreme_copilot(user, voice=True)

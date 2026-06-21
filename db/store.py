@@ -3045,6 +3045,8 @@ def has_active_plan(user: dict) -> bool:
 def _csv_set(value: str) -> set[str]:
     return {item.strip().lower() for item in (value or "").split(",") if item.strip()}
 
+EXPLORER_PLAN_TYPES = {"explorer", "explorer_beta", "extreme", "extreme_beta"}
+
 def get_extreme_admin_config() -> dict:
     db = _conn()
     rows = db.execute("SELECT config_key, value_json, updated_by, updated_at FROM extreme_admin_config").fetchall()
@@ -3088,7 +3090,7 @@ def has_extreme_plan(user: dict | None) -> bool:
     if user.get("is_admin"):
         return True
     plan = str(user.get("plan_type") or "free").strip().lower()
-    if plan in {"extreme", "extreme_beta"}:
+    if plan in EXPLORER_PLAN_TYPES:
         expires = user.get("plan_expires_at")
         return expires is None or int(time.time()) < int(expires)
     beta_ids = _csv_set(settings.extreme_beta_user_ids)
@@ -3309,8 +3311,8 @@ def get_extreme_ledger_summary(since: int | None = None) -> dict:
 def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost: int, reason: str) -> dict:
     """Authorize one offline map/routing asset.
 
-    State map downloads are free for everyone. Plan users are free for all
-    offline assets. Free users get one state routing pack, then pay credits.
+    Trailhead-owned offline packs are free for everyone. Plan users are free
+    for any remaining paid offline assets.
     Re-downloading an already-authorized asset is free.
     """
     user_id = user["id"]
@@ -3342,19 +3344,21 @@ def authorize_offline_download(user: dict, asset_type: str, region_id: str, cost
           db.commit()
           return {"authorized": True, "charged": 0, "free_used": False, "plan": True, "credits": user.get("credits", 0)}
 
-      free_allowed = asset_type == "state_route" and region_id != "conus"
-      if free_allowed:
-          free_count = db.execute(
-              "SELECT COUNT(*) AS c FROM offline_downloads WHERE user_id=? AND asset_type=? AND free_used=1",
-              (user_id, asset_type),
-          ).fetchone()["c"]
-          if free_count == 0:
-              db.execute(
-                  "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
-                  (user_id, asset_type, region_id, 0, 1, now),
-              )
-              db.commit()
-              return {"authorized": True, "charged": 0, "free_used": True, "credits": user.get("credits", 0)}
+      trailhead_owned_free = (
+          asset_type in {
+              "state_map", "state_route", "state_contours", "state_trails",
+              "country_map", "country_route", "trip_corridor",
+              "conus_map", "place_pack", "trail_pack", "topo_pack",
+          }
+          or asset_type.startswith("trailhead_")
+      )
+      if trailhead_owned_free:
+          db.execute(
+              "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
+              (user_id, asset_type, region_id, 0, 0, now),
+          )
+          db.commit()
+          return {"authorized": True, "charged": 0, "free_used": False, "credits": user.get("credits", 0)}
     finally:
       db.close()
 

@@ -17,9 +17,9 @@ import { MissionControlPanel } from '@/components/copilot/MissionControlPanel';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import {
   api,
-  ExtremeCheckpoint,
-  ExtremeConfig,
-  ExtremeSurface,
+  ExplorerCheckpoint,
+  ExplorerConfig,
+  ExplorerSurface,
   ExplorePlaceProfile,
   MissionControlBrief,
   MissionControlRecommendation,
@@ -51,22 +51,22 @@ type DemoPlace = {
 
 type DemoPayload = {
   token: string;
-  styles: ExtremeConfig['style_uris'];
-  activeStyle: keyof ExtremeConfig['style_uris'];
+  styles: ExplorerConfig['style_uris'];
+  activeStyle: keyof ExplorerConfig['style_uris'];
   route: [number, number][];
-  checkpoints: ExtremeCheckpoint[];
+  checkpoints: ExplorerCheckpoint[];
   places: DemoPlace[];
   summary: string;
   tripName: string;
-  features: ExtremeConfig['feature_flags'];
-  weatherLayers: NonNullable<ExtremeConfig['weather']>['layers'];
+  features: ExplorerConfig['feature_flags'];
+  weatherLayers: NonNullable<ExplorerConfig['weather']>['layers'];
   copilotVoice: boolean;
   navigationEnabled: boolean;
   safeTop: number;
   safeBottom: number;
 };
 
-type ExtremePlaceCard = {
+type ExplorerPlaceCard = {
   id?: string;
   name: string;
   lat: number;
@@ -87,7 +87,7 @@ type ExtremePlaceCard = {
   confidence?: string;
 };
 
-const STYLE_ORDER: Array<keyof ExtremeConfig['style_uris']> = [
+const STYLE_ORDER: Array<keyof ExplorerConfig['style_uris']> = [
   'standard',
   'live_road',
   'satellite_trail',
@@ -97,7 +97,7 @@ const STYLE_ORDER: Array<keyof ExtremeConfig['style_uris']> = [
   'outdoors',
 ];
 
-const STYLE_TITLES: Record<keyof ExtremeConfig['style_uris'], string> = {
+const STYLE_TITLES: Record<keyof ExplorerConfig['style_uris'], string> = {
   standard: 'Standard',
   live_road: 'Live Road',
   satellite_trail: 'Satellite Trail',
@@ -141,7 +141,7 @@ function checkpointType(type: string) {
   return 'checkpoint';
 }
 
-function checkpointsFromTrip(trip: ReturnType<typeof useStore.getState>['activeTrip']): ExtremeCheckpoint[] {
+function checkpointsFromTrip(trip: ReturnType<typeof useStore.getState>['activeTrip']): ExplorerCheckpoint[] {
   return (trip?.plan.waypoints ?? [])
     .filter(wp => finiteCoord(wp.lat, wp.lng))
     .map((wp, index) => ({
@@ -274,14 +274,14 @@ function placesFromTrip(trip: ReturnType<typeof useStore.getState>['activeTrip']
   return places.slice(0, 48);
 }
 
-function routeAnchor(route: [number, number][], checkpoints: ExtremeCheckpoint[]) {
+function routeAnchor(route: [number, number][], checkpoints: ExplorerCheckpoint[]) {
   const source = route.length ? route : checkpoints.map(cp => [cp.lng, cp.lat] as [number, number]);
   if (!source.length) return { lat: 38.5733, lng: -109.5498 };
   const mid = source[Math.floor(source.length / 2)];
   return { lat: Number(mid[1]), lng: Number(mid[0]) };
 }
 
-function fallbackPlaces(route: [number, number][], checkpoints: ExtremeCheckpoint[]): DemoPlace[] {
+function fallbackPlaces(route: [number, number][], checkpoints: ExplorerCheckpoint[]): DemoPlace[] {
   const source = route.length > 1 ? route : checkpoints.map(cp => [cp.lng, cp.lat] as [number, number]);
   if (!source.length) return [];
   const pick = (ratio: number) => source[Math.max(0, Math.min(source.length - 1, Math.floor((source.length - 1) * ratio)))];
@@ -322,7 +322,7 @@ function mergePlaces(places: DemoPlace[]) {
   return out.slice(0, 64);
 }
 
-function placeCardFromDemo(place: DemoPlace): ExtremePlaceCard {
+function placeCardFromDemo(place: DemoPlace): ExplorerPlaceCard {
   return {
     id: place.id,
     name: place.title || 'Place',
@@ -433,7 +433,7 @@ function makeHtml(payload: DemoPayload) {
 </head>
 <body>
   <div id="map"></div>
-  <div id="loading" class="loading"><div class="load-card"><div class="pulse"></div><div class="load-title">EXTREME EXPLORER</div><div class="load-sub">Loading premium route preview</div></div></div>
+  <div id="loading" class="loading"><div class="load-card"><div class="pulse"></div><div class="load-title">EXPLORER EXPLORER</div><div class="load-sub">Loading premium route preview</div></div></div>
   <div class="stylebar" id="stylebar"></div>
   <script>
     const demo = ${data};
@@ -572,7 +572,7 @@ function makeHtml(payload: DemoPayload) {
 </html>`;
 }
 
-export default function ExtremeExplorerScreen() {
+export default function ExplorerExplorerScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ surface?: string }>();
   const C = useTheme();
@@ -581,17 +581,17 @@ export default function ExtremeExplorerScreen() {
   const rigProfile = useStore(st => st.rigProfile);
   const sessionIdRef = useRef<string | null>(null);
   const navigationSessionIdRef = useRef<string | null>(null);
-  const [config, setConfig] = useState<ExtremeConfig | null>(null);
+  const [config, setConfig] = useState<ExplorerConfig | null>(null);
   const [status, setStatus] = useState<'loading' | 'ready' | 'blocked' | 'error'>('loading');
-  const [message, setMessage] = useState('Loading Extreme Explorer');
+  const [message, setMessage] = useState('Loading Explorer');
   const [discoveredPlaces, setDiscoveredPlaces] = useState<DemoPlace[]>([]);
   const [routeExplorePlaces, setRouteExplorePlaces] = useState<DemoPlace[]>([]);
-  const [selectedPlace, setSelectedPlace] = useState<ExtremePlaceCard | null>(null);
-  const [relatedPlaces, setRelatedPlaces] = useState<ExtremePlaceCard[]>([]);
+  const [selectedPlace, setSelectedPlace] = useState<ExplorerPlaceCard | null>(null);
+  const [relatedPlaces, setRelatedPlaces] = useState<ExplorerPlaceCard[]>([]);
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [missionBrief, setMissionBrief] = useState<MissionControlBrief | null>(null);
   const [missionLoading, setMissionLoading] = useState(false);
-  const surface: ExtremeSurface = params.surface === 'route_builder' ? 'route_builder' : 'map';
+  const surface: ExplorerSurface = params.surface === 'route_builder' ? 'route_builder' : 'map';
 
   const route = useMemo(() => routeFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.route_geometry?.ts]);
   const checkpoints = useMemo(() => checkpointsFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
@@ -608,18 +608,18 @@ export default function ExtremeExplorerScreen() {
     let cancelled = false;
     async function boot() {
       try {
-        const cfg = await api.getExtremeConfig();
+        const cfg = await api.getExplorerConfig();
         if (cancelled) return;
         setConfig(cfg);
         const surfaceAllowed = cfg.allowed_surfaces.includes(surface);
         if (!cfg.beta_active || cfg.kill_switch || !surfaceAllowed) {
           setStatus('blocked');
-          setMessage('Extreme Explorer is not available here yet.');
+          setMessage('Explorer is not available here yet.');
           return;
         }
         if (!cfg.enabled || !cfg.entitled) {
           setStatus('blocked');
-          setMessage('Extreme Explorer is in hidden beta for selected accounts.');
+          setMessage('Explorer is in hidden beta for selected accounts.');
           return;
         }
         if (!cfg.mapbox_public_token) {
@@ -627,7 +627,7 @@ export default function ExtremeExplorerScreen() {
           setMessage('Premium map preview is not configured.');
           return;
         }
-        const auth = await api.authorizeExtremeSession({
+        const auth = await api.authorizeExplorerSession({
           surface,
           trip_id: activeTrip?.trip_id ?? null,
           checkpoints,
@@ -641,7 +641,7 @@ export default function ExtremeExplorerScreen() {
         if (cancelled) return;
         sessionIdRef.current = auth.session_id;
         setStatus('ready');
-        api.logExtremeLedger({
+        api.logExplorerLedger({
           session_id: auth.session_id,
           event_type: 'demo_opened',
           surface,
@@ -652,7 +652,7 @@ export default function ExtremeExplorerScreen() {
         if (cancelled) return;
         setStatus(error?.status === 403 ? 'blocked' : 'error');
         const detail = error?.detail;
-        setMessage(typeof detail?.message === 'string' ? detail.message : error?.message ?? 'Extreme Explorer could not open.');
+        setMessage(typeof detail?.message === 'string' ? detail.message : error?.message ?? 'Explorer could not open.');
       }
     }
     boot();
@@ -660,12 +660,12 @@ export default function ExtremeExplorerScreen() {
       cancelled = true;
       const sid = sessionIdRef.current;
       if (sid) {
-        api.endExtremeSession(sid, 'closed').catch(() => {});
+        api.endExplorerSession(sid, 'closed').catch(() => {});
         sessionIdRef.current = null;
       }
       const navSid = navigationSessionIdRef.current;
       if (navSid) {
-        api.endExtremeSession(navSid, 'closed').catch(() => {});
+        api.endExplorerSession(navSid, 'closed').catch(() => {});
         navigationSessionIdRef.current = null;
       }
     };
@@ -733,7 +733,7 @@ export default function ExtremeExplorerScreen() {
       checkpoints,
       places,
       summary,
-      tripName: activeTrip?.plan.trip_name ?? 'Extreme Explorer',
+      tripName: activeTrip?.plan.trip_name ?? 'Explorer',
       features: config.feature_flags,
       weatherLayers: config.weather?.enabled ? (config.weather.layers ?? []) : [],
       copilotVoice: false,
@@ -829,7 +829,7 @@ export default function ExtremeExplorerScreen() {
   async function runMissionRecommendation(action: MissionControlRecommendation) {
     if (action.action_type === 'applyMissionFilter') {
       Alert.alert('Mission Control', action.reason || 'Map focus is ready for route review.');
-      api.logExtremeLedger({
+      api.logExplorerLedger({
         session_id: sessionIdRef.current,
         event_type: 'mission_filter_selected',
         surface,
@@ -885,7 +885,7 @@ export default function ExtremeExplorerScreen() {
     return risk.summary;
   }
 
-  function showPlaceCard(place: ExtremePlaceCard) {
+  function showPlaceCard(place: ExplorerPlaceCard) {
     setSelectedPlace(place);
     setRelatedLoading(true);
     setRelatedPlaces([]);
@@ -975,7 +975,7 @@ export default function ExtremeExplorerScreen() {
           onPress: async () => {
             try {
               await stageCopilotCommand('start_guidance');
-              const nav = await api.authorizeExtremeNavigation({
+              const nav = await api.authorizeExplorerNavigation({
                 surface: 'navigation',
                 trip_id: activeTrip?.trip_id ?? null,
                 route_id: activeTrip?.trip_id ?? null,
@@ -1009,7 +1009,7 @@ export default function ExtremeExplorerScreen() {
         confirmGuidance();
         return;
       }
-      api.logExtremeLedger({
+      api.logExplorerLedger({
         session_id: sessionIdRef.current,
         event_type: `chip_${data.action}`,
         surface,
@@ -1021,11 +1021,11 @@ export default function ExtremeExplorerScreen() {
         data.action === 'show_weather' ? previewWeather().catch((error: any) => error?.message ?? '') : Promise.resolve(''),
       ]).then(([message, weather]) => {
         const text = weather || message || 'Action staged for review.';
-        Alert.alert('Premium Map', text);
+        Alert.alert('Map Styles', text);
       });
     }
     if (data.type === 'style') {
-      api.logExtremeLedger({
+      api.logExplorerLedger({
         session_id: sessionIdRef.current,
         event_type: 'style_changed',
         surface,
@@ -1036,7 +1036,7 @@ export default function ExtremeExplorerScreen() {
     if (data.type === 'place' && data.place) {
       const place = placeCardFromDemo(data.place);
       showPlaceCard(place);
-      api.logExtremeLedger({
+      api.logExplorerLedger({
         session_id: sessionIdRef.current,
         event_type: `map_${data.source || 'place'}_selected`,
         surface,
@@ -1046,7 +1046,7 @@ export default function ExtremeExplorerScreen() {
     }
     if (data.type === 'map_tap' && finiteCoord(data.lat, data.lng)) {
       showMapTap(Number(data.lat), Number(data.lng));
-      api.logExtremeLedger({
+      api.logExplorerLedger({
         session_id: sessionIdRef.current,
         event_type: 'map_tapped',
         surface,
@@ -1064,7 +1064,7 @@ export default function ExtremeExplorerScreen() {
         </TouchableOpacity>
         <View style={styles.blockedInner}>
           {status === 'loading' ? <ActivityIndicator color={C.orange} /> : <Ionicons name="sparkles-outline" size={30} color={C.orange} />}
-          <Text style={[styles.blockedTitle, { color: C.text }]}>Extreme Explorer</Text>
+          <Text style={[styles.blockedTitle, { color: C.text }]}>Explorer</Text>
           <Text style={[styles.blockedText, { color: C.text3 }]}>{message}</Text>
         </View>
       </SafeAreaView>
@@ -1087,7 +1087,7 @@ export default function ExtremeExplorerScreen() {
           <Ionicons name="chevron-back" size={20} color="#f8fafc" />
         </TouchableOpacity>
         <View style={styles.titlePill}>
-          <Text style={styles.titleKicker}>EXTREME EXPLORER</Text>
+          <Text style={styles.titleKicker}>EXPLORER EXPLORER</Text>
           <Text style={styles.titleText} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Premium map preview'}</Text>
         </View>
       </View>
@@ -1106,7 +1106,7 @@ export default function ExtremeExplorerScreen() {
         visible={!!selectedPlace}
         initialStage="half"
         related={{ loading: relatedLoading, places: relatedPlaces, camps: [], trails: [] }}
-        routeContextLabel="Extreme Explorer"
+        routeContextLabel="Explorer"
         addToRouteLabel="Stage checkpoint"
         promoteToRouteLabel="Route through"
         onClose={() => setSelectedPlace(null)}
@@ -1114,13 +1114,13 @@ export default function ExtremeExplorerScreen() {
           showPlaceCard({ ...place, type: 'poi', source: 'trailhead', source_label: 'Map selection' });
         }}
         onSave={place => {
-          Alert.alert('Premium Map', `${place.name} staged for review.`);
+          Alert.alert('Map Styles', `${place.name} staged for review.`);
         }}
         onAddToRoute={place => {
-          Alert.alert('Premium Map', `${place.name} staged as a checkpoint.`);
+          Alert.alert('Map Styles', `${place.name} staged as a checkpoint.`);
         }}
         onPromoteToRoute={place => {
-          Alert.alert('Premium Map', `${place.name} staged for route review.`);
+          Alert.alert('Map Styles', `${place.name} staged for route review.`);
         }}
         onReport={() => Alert.alert('Report', 'Field reports stay in Trailhead mode for this beta slice.')}
         onNearbyCamps={place => {

@@ -31,7 +31,7 @@ export type PremiumMapItem = {
   onPress: () => void;
 };
 
-export type ExtremeFeatureItem = {
+export type ExplorerFeatureItem = {
   key: string;
   label: string;
   sub: string;
@@ -54,11 +54,11 @@ type Props = {
   extremeMapLayerActive: boolean;
   extremeMapLayerSelectable: boolean;
   extremeMapLayerSub: string;
-  onSelectExtremeMapLayer: () => void;
+  onSelectExplorerMapLayer: () => void;
   layerItems: readonly LayerToggleItem[];
   premiumMapVisible: boolean;
   premiumMapItems: readonly PremiumMapItem[];
-  extremeFeatureItems: readonly ExtremeFeatureItem[];
+  extremeFeatureItems: readonly ExplorerFeatureItem[];
   safeWaterLegendVisible: boolean;
   safeWaterLegendItems: readonly LegendItem[];
   safeWaterSummary: string;
@@ -79,7 +79,7 @@ export default function MapLayerSheetContent({
   extremeMapLayerActive,
   extremeMapLayerSelectable,
   extremeMapLayerSub,
-  onSelectExtremeMapLayer,
+  onSelectExplorerMapLayer,
   layerItems,
   premiumMapVisible,
   premiumMapItems,
@@ -257,20 +257,20 @@ export default function MapLayerSheetContent({
             !extremeMapLayerSelectable && s.extremeStyleCardLocked,
           ]}
           activeOpacity={0.86}
-          onPress={onSelectExtremeMapLayer}
+          onPress={onSelectExplorerMapLayer}
         >
           <View style={s.extremeStylePreview}>
-            <Text style={s.extremeStyleWord}>EXTREME</Text>
+            <Text style={s.extremeStyleWord}>EXPLORER</Text>
             <View style={s.extremeStyleSlash} />
             <View style={[s.extremeStyleSlash, s.extremeStyleSlashAlt]} />
           </View>
           <View style={s.styleCardText}>
-            <Text style={s.extremeStyleTitle} numberOfLines={1}>EXTREME</Text>
+            <Text style={s.extremeStyleTitle} numberOfLines={1}>EXPLORER</Text>
             <Text style={s.styleSub} numberOfLines={1}>{extremeMapLayerSub}</Text>
           </View>
           {extremeMapLayerActive
             ? <Ionicons name="checkmark-circle" size={17} color="#ef4444" />
-            : <Ionicons name="lock-closed" size={15} color="#ef4444" />}
+            : <Ionicons name="ellipse-outline" size={15} color="#ef4444" />}
         </TouchableOpacity>
       </ScrollView>
 
@@ -292,7 +292,7 @@ export default function MapLayerSheetContent({
 
       {premiumMapVisible ? (
         <>
-          <Text style={s.sectionHead}>PREMIUM MAP</Text>
+          <Text style={s.sectionHead}>MAP STYLES</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
             {premiumMapItems.map(option => (
               <TouchableOpacity
@@ -325,7 +325,7 @@ export default function MapLayerSheetContent({
                   {layer.val ? <View style={[s.layerToggleOnDot, { backgroundColor: layer.color }]} /> : null}
                 </View>
                 <Text style={s.styleTitle} numberOfLines={1}>{layer.label}</Text>
-                <Text style={s.styleSub} numberOfLines={1}>{layer.enabled ? layer.sub : 'Beta locked'}</Text>
+                <Text style={s.styleSub} numberOfLines={1}>{layer.enabled ? layer.sub : 'Explorer'}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>

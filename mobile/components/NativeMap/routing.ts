@@ -1,7 +1,7 @@
 /**
  * Routing — three live engines + offline route cache.
  *
- * Online priority:  Trailhead Valhalla for backroads → Mapbox → OSRM fallback
+ * Online priority:  Trailhead Valhalla → Mapbox → OSRM fallback
  * Offline fallback: cached route from last successful calculation for same waypoints
  * Last resort:      straight-line (isProper: false — UI shows warning)
  *
@@ -287,28 +287,29 @@ export async function fetchRoute(
     return buildNoRoute(pairs, `${nativeDebug}${debug}`);
   }
 
-  if (providerMode === 'extreme-mapbox') {
+  if (providerMode === 'explorer-mapbox' || providerMode === 'extreme-mapbox') {
     try {
       const route = await fetchExtremeMapbox(pairs, fromIdx, routeOpts);
-      console.log('[fetchRoute] EXTREME Mapbox route — saving to cache');
+      console.log('[fetchRoute] Explorer Mapbox route — saving to cache');
       await saveRoute(pairs, route);
       return route;
     } catch (e) {
-      console.warn('[fetchRoute] EXTREME Mapbox route failed', e);
+      console.warn('[fetchRoute] Explorer Mapbox route failed', e);
     }
   }
 
-  // C. Online: for overland-style routes, prefer our Valhalla service. Racing
-  // Mapbox here lets paved/highway routes win before Valhalla can return.
-  const onlineEngines = routeOpts.backRoads || routeOpts.avoidHighways
+  // C. Online: Trailhead routes first. Mapbox stays as the first fallback,
+  // then OSRM. Traffic-first only runs when explicitly requested.
+  const wantsMapboxFirst = String(providerMode) === 'mapbox-traffic' || String(providerMode) === 'traffic';
+  const onlineEngines = wantsMapboxFirst
     ? [
-        () => fetchValhalla(pairs, fromIdx, routeOpts),
         () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
+        () => fetchValhalla(pairs, fromIdx, routeOpts),
         () => fetchOSRM(pairs, fromIdx, routeOpts),
       ]
     : [
-        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
         () => fetchValhalla(pairs, fromIdx, routeOpts),
+        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
         () => fetchOSRM(pairs, fromIdx, routeOpts),
       ];
 
@@ -437,7 +438,7 @@ async function fetchExtremeMapbox(
       exclude: exclude.join(','),
     },
   });
-  return parseMapboxDirectionsRoute(data, 'extreme-mapbox-directions', 'EXTREME Mapbox Directions');
+  return parseMapboxDirectionsRoute(data, 'extreme-mapbox-directions', 'Explorer Mapbox Directions');
 }
 
 // ── Engine 1: Mapbox Directions ───────────────────────────────────────────────

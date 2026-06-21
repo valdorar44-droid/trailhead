@@ -195,7 +195,13 @@ export const api = {
   adminRemovePhoto:  (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/remove-photo`, { method: 'POST' }),
   adminExpireReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/expire`, { method: 'POST' }),
   getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
+  getExplorerConfig: () => req<ExtremeConfig>('/api/explorer/config'),
   getExtremeConfig: () => req<ExtremeConfig>('/api/extreme/config'),
+  authorizeExplorerSession: (data: ExtremeSessionAuthorizeRequest) =>
+    req<ExtremeSessionAuthorizeResponse>('/api/explorer/session/authorize', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   authorizeExtremeSession: (data: ExtremeSessionAuthorizeRequest) =>
     req<ExtremeSessionAuthorizeResponse>('/api/extreme/session/authorize', {
       method: 'POST',
@@ -801,7 +807,7 @@ export interface TripMemory {
   recent_user_edits?: Record<string, unknown>[];
 }
 export interface ExtremeConfig {
-  tier_name: 'Extreme Explorer' | string;
+  tier_name: 'Explorer' | string;
   enabled: boolean;
   entitled: boolean;
   enabled_visual?: boolean;

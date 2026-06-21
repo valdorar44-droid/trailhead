@@ -237,7 +237,7 @@ td.name{color:var(--text);font-weight:600;}
         <span class="nav-icon">MSG</span><span class="nav-label">Messages</span>
       </div>
       <div class="nav-item" onclick="showPage('extreme',this)">
-        <span class="nav-icon">EX</span><span class="nav-label">Extreme</span>
+        <span class="nav-icon">EX</span><span class="nav-label">Explorer</span>
       </div>
       <div class="nav-item" onclick="showPage('bugs',this)">
         <span class="nav-icon">BG</span><span class="nav-label">Bug Reports</span>
@@ -284,9 +284,9 @@ td.name{color:var(--text);font-weight:600;}
         </div>
       </div>
 
-      <!-- Extreme Explorer -->
+      <!-- Explorer -->
       <div class="page" id="page-extreme">
-        <div class="page-title">Extreme Explorer</div>
+        <div class="page-title">Explorer</div>
         <div class="page-sub">Hidden-beta mode controls, sessions, and recent premium events.</div>
         <div class="stats-grid" id="extreme-stats"></div>
         <div style="display:grid;grid-template-columns:minmax(280px,.8fr) 1.2fr;gap:16px;align-items:start;">
@@ -300,19 +300,19 @@ td.name{color:var(--text);font-weight:600;}
               <input id="extreme-voice" class="login-input" placeholder="Voice key">
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
-              <button class="btn btn-primary btn-sm" onclick="saveExtremeConfig()">Save controls</button>
-              <button class="btn btn-danger btn-sm" onclick="quickExtremeKill()">Kill switch</button>
+              <button class="btn btn-primary btn-sm" onclick="saveExplorerConfig()">Save controls</button>
+              <button class="btn btn-danger btn-sm" onclick="quickExplorerKill()">Kill switch</button>
             </div>
             <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;">
               <input id="extreme-grant-email" class="login-input" style="flex:1;min-width:180px;" placeholder="beta user email">
-              <button class="btn btn-ghost btn-sm" onclick="grantExtremeBeta()">Grant beta</button>
+              <button class="btn btn-ghost btn-sm" onclick="grantExplorerBeta()">Grant beta</button>
             </div>
             <div id="extreme-config" style="display:flex;flex-direction:column;gap:10px;color:var(--text2);font-size:12px;line-height:1.5;"></div>
           </div>
           <div class="card table-wrap">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
               <div class="section-label" style="margin:0;">RECENT SESSIONS</div>
-              <button class="btn btn-ghost btn-sm" onclick="loadExtreme()">Refresh</button>
+              <button class="btn btn-ghost btn-sm" onclick="loadExplorer()">Refresh</button>
             </div>
             <table>
               <thead><tr><th>Session</th><th>User</th><th>Surface</th><th>Status</th><th>Started</th></tr></thead>
@@ -333,7 +333,7 @@ td.name{color:var(--text);font-weight:600;}
               <div class="section-label" style="margin-bottom:4px;">COPILOT MAP DEBUG</div>
               <div style="color:var(--text3);font-size:12px;">Admin-only selection/context mismatch snapshots and copyable transcripts.</div>
             </div>
-            <button class="btn btn-ghost btn-sm" onclick="loadExtreme()">Refresh</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadExplorer()">Refresh</button>
           </div>
           <div id="extreme-debug-events" class="debug-grid"></div>
         </div>
@@ -808,7 +808,7 @@ function showPage(name, el) {
   if (name === 'contest') loadContest();
   if (name === 'push-campaigns') loadPushCampaigns();
   if (name === 'messages') loadSupportThreads();
-  if (name === 'extreme') loadExtreme();
+  if (name === 'extreme') loadExplorer();
   if (name === 'bugs')     loadBugs();
 }
 
@@ -931,8 +931,8 @@ function renderUsers(users, append) {
           <option value="" selected>Set plan</option>
           <option value="free">Free</option>
           <option value="explorer">Explorer</option>
-          <option value="extreme_beta">Extreme Beta</option>
-          <option value="extreme">Extreme</option>
+          <option value="extreme_beta">Explorer Beta</option>
+          <option value="extreme">Explorer</option>
         </select>
         <button class="btn btn-ghost btn-sm" onclick="openCreditModal(${u.id})">Credits</button>
         <button class="btn btn-ghost btn-sm" onclick="toggleAdmin(${u.id}, ${u.is_admin})">${u.is_admin?'Remove Admin':'Make Admin'}</button>
@@ -1012,15 +1012,15 @@ async function banUser(userId, username) {
   } catch(e) { toast('Error: ' + e.message, 'err'); }
 }
 
-// ── Extreme Explorer ─────────────────────────────────────────────────────────
+// ── Explorer ─────────────────────────────────────────────────────────
 
-async function loadExtreme() {
+async function loadExplorer() {
   try {
     const data = await api('/api/admin/extreme');
     const cfg = data.config || {};
     const flags = cfg.feature_flags || {};
     const summary = data.summary_24h || {};
-    renderExtremeControls(cfg);
+    renderExplorerControls(cfg);
     document.getElementById('extreme-stats').innerHTML = [
       { label:'BETA ACTIVE', val: cfg.beta_active ? 'ON' : 'OFF', sub: cfg.kill_switch ? 'kill switch active' : cfg.master_enabled ? 'server flag armed' : 'Railway flag off' },
       { label:'ADMIN ENABLED', val: cfg.enabled ? 'YES' : 'NO', sub: cfg.entitled ? 'entitled account' : 'not entitled' },
@@ -1055,7 +1055,7 @@ async function loadExtreme() {
         <td><span class="badge ${s.status === 'active' ? 'badge-green' : 'badge-gray'}">${esc(s.status || '')}</span></td>
         <td class="mono">${s.started_at ? new Date(s.started_at * 1000).toLocaleString() : ''}</td>
       </tr>
-    `).join('') || '<tr><td colspan="5" style="color:var(--text3);text-align:center;padding:24px;">No Extreme sessions yet</td></tr>';
+    `).join('') || '<tr><td colspan="5" style="color:var(--text3);text-align:center;padding:24px;">No Explorer sessions yet</td></tr>';
 
     document.getElementById('extreme-events').innerHTML = (data.recent_events || []).map(e => `
       <tr>
@@ -1065,10 +1065,10 @@ async function loadExtreme() {
         <td class="mono" style="font-size:10px;">${esc(e.trip_id || '')}</td>
         <td class="mono">${e.created_at ? new Date(e.created_at * 1000).toLocaleString() : ''}</td>
       </tr>
-    `).join('') || '<tr><td colspan="5" style="color:var(--text3);text-align:center;padding:24px;">No Extreme events yet</td></tr>';
+    `).join('') || '<tr><td colspan="5" style="color:var(--text3);text-align:center;padding:24px;">No Explorer events yet</td></tr>';
     extremeDebugEvents = data.debug_events || [];
-    renderExtremeDebugEvents(extremeDebugEvents);
-  } catch(e) { toast('Error loading Extreme: ' + e.message, 'err'); }
+    renderExplorerDebugEvents(extremeDebugEvents);
+  } catch(e) { toast('Error loading Explorer: ' + e.message, 'err'); }
 }
 
 function debugEventTitle(event) {
@@ -1084,7 +1084,7 @@ function debugEventTranscript(event) {
   return JSON.stringify(data, null, 2);
 }
 
-function renderExtremeDebugEvents(events) {
+function renderExplorerDebugEvents(events) {
   const el = document.getElementById('extreme-debug-events');
   if (!el) return;
   el.innerHTML = (events || []).map((event, idx) => {
@@ -1115,8 +1115,8 @@ function renderExtremeDebugEvents(events) {
         </div>
         <pre class="debug-pre">${esc(transcript)}</pre>
         <div class="debug-actions">
-          <button class="btn btn-ghost btn-sm" onclick="copyExtremeDebugTranscript(${idx})">Copy transcript</button>
-          <button class="btn btn-ghost btn-sm" onclick="copyExtremeDebugJson(${idx})">Copy JSON</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyExplorerDebugTranscript(${idx})">Copy transcript</button>
+          <button class="btn btn-ghost btn-sm" onclick="copyExplorerDebugJson(${idx})">Copy JSON</button>
         </div>
       </div>
     `;
@@ -1143,19 +1143,19 @@ async function copyText(text, label = 'Copied') {
   }
 }
 
-function copyExtremeDebugTranscript(idx) {
+function copyExplorerDebugTranscript(idx) {
   const event = extremeDebugEvents[idx];
   if (!event) return;
   copyText(debugEventTranscript(event), 'Debug transcript copied');
 }
 
-function copyExtremeDebugJson(idx) {
+function copyExplorerDebugJson(idx) {
   const event = extremeDebugEvents[idx];
   if (!event) return;
   copyText(JSON.stringify(event, null, 2), 'Debug JSON copied');
 }
 
-function renderExtremeControls(cfg) {
+function renderExplorerControls(cfg) {
   const flags = cfg.feature_flags || {};
   const controls = [
     ['enabled', 'Beta enabled', !!cfg.beta_active && !cfg.kill_switch],
@@ -1185,7 +1185,7 @@ function extremeChecked(key) {
   return !!document.getElementById(`extreme-${key}`)?.checked;
 }
 
-async function saveExtremeConfig() {
+async function saveExplorerConfig() {
   const surfaces = document.getElementById('extreme-surfaces').value.split(',').map(s => s.trim()).filter(Boolean);
   const body = {
     enabled: extremeChecked('enabled'),
@@ -1205,32 +1205,32 @@ async function saveExtremeConfig() {
   };
   try {
     await api('/api/admin/extreme/config', { method:'POST', body: JSON.stringify(body) });
-    toast('Extreme controls saved', 'ok');
-    loadExtreme();
-  } catch(e) { toast('Extreme save failed: ' + e.message, 'err'); }
+    toast('Explorer controls saved', 'ok');
+    loadExplorer();
+  } catch(e) { toast('Explorer save failed: ' + e.message, 'err'); }
 }
 
-async function quickExtremeKill() {
-  if (!confirm('Turn on the Extreme kill switch? This blocks beta access immediately.')) return;
+async function quickExplorerKill() {
+  if (!confirm('Turn on the Explorer kill switch? This blocks beta access immediately.')) return;
   try {
     await api('/api/admin/extreme/config', { method:'POST', body: JSON.stringify({ kill_switch: true }) });
-    toast('Extreme kill switch enabled', 'ok');
-    loadExtreme();
+    toast('Explorer kill switch enabled', 'ok');
+    loadExplorer();
   } catch(e) { toast('Kill switch failed: ' + e.message, 'err'); }
 }
 
-async function grantExtremeBeta() {
+async function grantExplorerBeta() {
   const email = document.getElementById('extreme-grant-email').value.trim();
   if (!email) { toast('Enter a user email', 'err'); return; }
-  if (!confirm(`Grant Extreme beta to ${email}?`)) return;
+  if (!confirm(`Grant Explorer beta to ${email}?`)) return;
   try {
     await api('/api/admin/extreme/grant', {
       method:'POST',
       body: JSON.stringify({ email, plan_type: 'extreme_beta', duration_days: 366 })
     });
-    toast('Extreme beta granted', 'ok');
+    toast('Explorer beta granted', 'ok');
     document.getElementById('extreme-grant-email').value = '';
-    loadExtreme();
+    loadExplorer();
     usersOffset = 0;
     loadUsers();
   } catch(e) { toast('Grant failed: ' + e.message, 'err'); }

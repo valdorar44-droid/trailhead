@@ -5036,13 +5036,11 @@ function MapScreen() {
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
   const extremeMapLayerAvailable = extremeMapLayerEntitled && extremeMapboxSupported;
   const extremeMapLayerActive = mapLayer === 'extreme';
-  const extremeMapLayerSub = !extremeMapLayerEntitled
-    ? 'Not available yet'
-    : extremeMapboxPending
-      ? 'Checking device'
-      : extremeMapboxSupported
-        ? (extremeConfig?.enabled ? 'Premium Mapbox mode' : 'Explorer 3D terrain')
-        : 'Android fallback';
+  const extremeMapLayerSub = extremeMapboxPending
+    ? 'Checking device'
+    : !extremeMapboxSupported
+      ? 'Android fallback'
+      : (extremeConfig?.enabled ? 'Premium Mapbox mode' : 'Mapbox map styles');
   const extremeCopilotAvailable = !!extremeConfig?.enabled && !!extremeConfig?.feature_flags?.copilot;
   const [showExtremeCopilot, setShowExtremeCopilot] = useState(false);
   const [extremeCopilotInput, setExtremeCopilotInput] = useState('');
@@ -5276,12 +5274,6 @@ function MapScreen() {
   const [paywallMessage, setPaywallMessage] = useState('');
 
   function selectExtremeMapLayer() {
-    if (!extremeMapLayerEntitled) {
-      setPaywallCode('extreme_hidden_beta');
-      setPaywallMessage('Explorer includes EXTREME terrain previews. Premium beta tools stay locked to Extreme accounts.');
-      setPaywallVisible(true);
-      return;
-    }
     if (extremeMapboxPending) {
       setQuickToast('Checking Android EXTREME renderer support...');
       setTimeout(() => setQuickToast(''), 2200);
@@ -7040,7 +7032,7 @@ function MapScreen() {
   }
 
   function fetchPois(center: { lat: number; lng: number }, radius = 28, categoriesOverride?: string) {
-    if (extremeMapLayerActive) {
+    if (extremeMapLayerActive && !!extremeConfig?.feature_flags?.search) {
       setPlacesLoading(false);
       setPois([]);
       webRef.current?.postMessage(JSON.stringify({ type: 'clear_pois' }));
@@ -9298,7 +9290,7 @@ function MapScreen() {
         destination: (searchRouteCard ?? navDestRef.current ?? null) as Record<string, unknown> | null,
         distance: routeProgress?.routeDistanceM ?? null,
         upcoming_turns: routeSteps.slice(0, 5).map(step => ({ instruction: displayStepLabel(step), distance: step.distance })),
-        route_provider: extremeMapLayerActive ? 'extreme-mapbox' : 'trailhead',
+        route_provider: extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation ? 'extreme-mapbox' : 'trailhead',
         route_id: activeTrip?.trip_id ?? null,
         route_ready: lastRouteCoords.length >= 2 || !!searchRouteCard,
         route_scout: routeScout
@@ -15288,7 +15280,7 @@ function MapScreen() {
     routeOverride?: [number, number][],
   ) {
     if (!key || center?.lat == null || center?.lng == null || !isFinite(center.lat) || !isFinite(center.lng)) return;
-    if (extremeMapLayerActive) {
+    if (extremeMapLayerActive && !!extremeConfig?.feature_flags?.search) {
       setNearbyPlaceFeeds(prev => ({
         ...prev,
         [key]: { loading: false, places: [], error: undefined, loadedAt: Date.now() },
@@ -16760,6 +16752,7 @@ function MapScreen() {
     ...option,
     active: option.id === premiumMapStyle,
     onPress: () => {
+      applyMapLayer('extreme');
       setPremiumMapStyle(option.id);
       api.logExtremeLedger({
         event_type: 'mapbox_style_selected',
@@ -17323,7 +17316,7 @@ function MapScreen() {
           navSpeed={userSpeed}
           mapLayer={mapLayer}
           premiumMapStyle={premiumMapStyle}
-          routeProviderMode={extremeMapLayerActive ? 'extreme-mapbox' : 'trailhead'}
+          routeProviderMode={extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation ? 'extreme-mapbox' : 'trailhead'}
           routeOpts={routeOpts}
           traceMode={trailTraceMode}
           traceDraftCoords={trailTraceMode ? trailTraceDraft : []}
@@ -21090,7 +21083,7 @@ function MapScreen() {
         activeMapLayer={mapLayer}
         options={mapStyleOptions}
         extremeActive={extremeMapLayerActive}
-        extremeSelectable={extremeMapLayerAvailable}
+        extremeSelectable={extremeMapboxSupported}
         extremeSub={extremeMapLayerSub}
         onClose={() => setShowMapStyleSheet(false)}
         onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
@@ -21316,11 +21309,11 @@ function MapScreen() {
             activeMapLayer={mapLayer}
             onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
             extremeMapLayerActive={extremeMapLayerActive}
-            extremeMapLayerSelectable={extremeMapLayerAvailable}
+            extremeMapLayerSelectable={extremeMapboxSupported}
             extremeMapLayerSub={extremeMapLayerSub}
             onSelectExtremeMapLayer={selectExtremeMapLayer}
             layerItems={layerSheetItems}
-            premiumMapVisible={extremeMapLayerActive}
+            premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
             premiumMapItems={premiumMapItems}
             extremeFeatureItems={extremeFeatureItems}
             safeWaterLegendVisible={layerNautical}

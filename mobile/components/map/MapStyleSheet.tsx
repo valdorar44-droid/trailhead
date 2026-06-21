@@ -21,7 +21,7 @@ type Props = {
   extremeSub: string;
   onClose: () => void;
   onSelectMapLayer: (id: string) => void;
-  onSelectExtreme: () => void;
+  onSelectExplorer: () => void;
 };
 
 export default function MapStyleSheet({
@@ -34,7 +34,7 @@ export default function MapStyleSheet({
   extremeSub,
   onClose,
   onSelectMapLayer,
-  onSelectExtreme,
+  onSelectExplorer,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -90,19 +90,19 @@ export default function MapStyleSheet({
               ]}
               activeOpacity={0.86}
               onPress={() => {
-                onSelectExtreme();
+                onSelectExplorer();
                 if (extremeSelectable) onClose();
               }}
             >
               <View style={s.extremePreview}>
-                <Text style={s.extremeWord}>EXTREME</Text>
+                <Text style={s.extremeWord}>EXPLORER</Text>
               </View>
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.extremeTitle} numberOfLines={1}>EXTREME</Text>
+                <Text style={s.extremeTitle} numberOfLines={1}>EXPLORER</Text>
                 <Text style={s.cardSub} numberOfLines={1}>{extremeSub}</Text>
               </View>
               <Ionicons
-                name={extremeActive ? 'checkmark-circle' : 'lock-closed'}
+                name={extremeActive ? 'checkmark-circle' : 'ellipse-outline'}
                 size={18}
                 color="#ef4444"
               />

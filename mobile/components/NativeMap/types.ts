@@ -26,7 +26,7 @@ export interface RouteOpts {
   backRoads: boolean;  noFerries: boolean;
 }
 
-export type RouteProviderMode = 'trailhead' | 'extreme-mapbox';
+export type RouteProviderMode = 'trailhead' | 'explorer-mapbox' | 'extreme-mapbox' | 'mapbox-traffic' | 'traffic';
 
 export interface MapBounds {
   n: number; s: number; e: number; w: number; zoom: number;

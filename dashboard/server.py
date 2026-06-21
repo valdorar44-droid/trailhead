@@ -2536,7 +2536,9 @@ def _extreme_config_for_user(user: dict | None) -> dict:
     master_enabled = bool(settings.extreme_enabled)
     db_enabled = _bool_override(overrides, "enabled", True)
     beta_active = bool(((master_enabled and db_enabled) or is_admin) and not kill_switch)
-    entitled = has_extreme_plan(user)
+    # EXTREME map/explorer is now part of the free signed-in experience.
+    # Keep anonymous users blocked and preserve the kill switch/admin rollout controls.
+    entitled = bool(user) or has_extreme_plan(user)
     visual_entitled = bool(entitled or has_active_plan(user or {}))
     if beta_active and is_admin:
         allowed_surfaces = list(dict.fromkeys([*_extreme_allowed_surfaces_from_overrides(overrides), *EXTREME_ADMIN_SURFACES]))

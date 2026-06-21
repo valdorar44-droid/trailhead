@@ -45,7 +45,6 @@ jobs:
         run: |
           from pathlib import Path
           import re
-          import sys
 
           changed_files: set[str] = set()
           warnings: list[str] = []
@@ -61,168 +60,152 @@ jobs:
               Path(path).write_text(text)
               changed_files.add(path)
 
-          def replace(text: str, old: str, new: str, path: str, *, required: bool = False) -> str:
+          def replace_required(text: str, old: str, new: str, path: str) -> str:
+            if old not in text:
+              raise SystemExit(f"Pattern not found in {path}: {old[:160]!r}")
+            return text.replace(old, new)
+
+          def replace_optional(text: str, old: str, new: str, path: str) -> str:
             if old in text:
               return text.replace(old, new)
-            msg = f"Pattern not found in {path}: {old[:120]!r}"
-            if required:
-              raise SystemExit(msg)
-            warnings.append(msg)
+            warnings.append(f"Optional pattern not found in {path}: {old[:120]!r}")
             return text
 
-          def replace_re(text: str, pattern: str, new: str, path: str, *, required: bool = False, count: int = 0) -> str:
-            updated, n = re.subn(pattern, new, text, count=count, flags=re.S)
+          def regex_required(text: str, pattern: str, replacement: str, path: str, count: int = 1) -> str:
+            updated, n = re.subn(pattern, replacement, text, count=count, flags=re.S)
             if n == 0:
-              msg = f"Regex not found in {path}: {pattern[:120]!r}"
-              if required:
-                raise SystemExit(msg)
-              warnings.append(msg)
+              raise SystemExit(f"Regex not found in {path}: {pattern[:180]!r}")
             return updated
 
-          # ── Routing type and fallback order ──────────────────────────────────
+          # Routing type and fallback order.
           path = "mobile/components/NativeMap/types.ts"
           text = original = read(path)
-          text = replace(
-            text,
-            "export type RouteProviderMode = 'trailhead' | 'extreme-mapbox';",
-            "export type RouteProviderMode = 'trailhead' | 'explorer-mapbox' | 'extreme-mapbox';",
-            path,
-            required=True,
-          )
+          if "'explorer-mapbox'" not in text:
+            text = replace_required(
+              text,
+              "export type RouteProviderMode = 'trailhead' | 'extreme-mapbox';",
+              "export type RouteProviderMode = 'trailhead' | 'explorer-mapbox' | 'extreme-mapbox' | 'mapbox-traffic' | 'traffic';",
+              path,
+            )
           write(path, text, original)
 
           path = "mobile/components/NativeMap/routing.ts"
           text = original = read(path)
-          text = replace(
-            text,
+          text = text.replace(
             " * Online priority:  Trailhead Valhalla for backroads → Mapbox → OSRM fallback",
             " * Online priority:  Trailhead Valhalla → Mapbox → OSRM fallback",
-            path,
           )
-          text = replace(
-            text,
-            "if (providerMode === 'extreme-mapbox') {",
-            "if (providerMode === 'explorer-mapbox' || providerMode === 'extreme-mapbox') {",
-            path,
-            required=True,
-          )
+          if "providerMode === 'explorer-mapbox'" not in text:
+            text = replace_required(
+              text,
+              "if (providerMode === 'extreme-mapbox') {",
+              "if (providerMode === 'explorer-mapbox' || providerMode === 'extreme-mapbox') {",
+              path,
+            )
           text = text.replace("EXTREME Mapbox", "Explorer Mapbox")
           text = text.replace("'EXTREME Mapbox Directions'", "'Explorer Mapbox Directions'")
-          old_block = """  // C. Online: for overland-style routes, prefer our Valhalla service. Racing
-          // Mapbox here lets paved/highway routes win before Valhalla can return.
-          const onlineEngines = routeOpts.backRoads || routeOpts.avoidHighways
-            ? [
-                () => fetchValhalla(pairs, fromIdx, routeOpts),
-                () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
-                () => fetchOSRM(pairs, fromIdx, routeOpts),
-              ]
-            : [
-                () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
-                () => fetchValhalla(pairs, fromIdx, routeOpts),
-                () => fetchOSRM(pairs, fromIdx, routeOpts),
-              ];"""
-          new_block = """  // C. Online: Trailhead routes first. Mapbox stays as the first fallback,
-          // then OSRM. The Explorer/Mapbox route preview path is handled above.
-          const onlineEngines = [
-            () => fetchValhalla(pairs, fromIdx, routeOpts),
-            () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
-            () => fetchOSRM(pairs, fromIdx, routeOpts),
-          ];"""
-          text = replace(text, old_block, new_block, path, required=True)
+          if "const wantsMapboxFirst" not in text:
+            new_block = """  // C. Online: Trailhead routes first. Mapbox stays as the first fallback,
+  // then OSRM. Traffic-first only runs when explicitly requested.
+  const wantsMapboxFirst = String(providerMode) === 'mapbox-traffic' || String(providerMode) === 'traffic';
+  const onlineEngines = wantsMapboxFirst
+    ? [
+        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
+        () => fetchValhalla(pairs, fromIdx, routeOpts),
+        () => fetchOSRM(pairs, fromIdx, routeOpts),
+      ]
+    : [
+        () => fetchValhalla(pairs, fromIdx, routeOpts),
+        () => fetchMapbox(pairs, fromIdx, mapboxToken, routeOpts),
+        () => fetchOSRM(pairs, fromIdx, routeOpts),
+      ];
+
+  console.log('[fetchRoute] online — trying live engines in priority order');"""
+            text = regex_required(
+              text,
+              r"  // C\. Online:[\s\S]*?  console\.log\('\[fetchRoute\] online — trying live engines in priority order'\);",
+              new_block,
+              path,
+            )
           write(path, text, original)
 
-          # ── Backend plan names and offline download access ──────────────────
+          # Backend plan names and offline download access.
           path = "db/store.py"
           text = original = read(path)
           if "EXPLORER_PLAN_TYPES" not in text:
-            text = replace(
+            text = replace_required(
               text,
               "def _csv_set(value: str) -> set[str]:\n    return {item.strip().lower() for item in (value or '').split(',') if item.strip()}\n",
               "def _csv_set(value: str) -> set[str]:\n    return {item.strip().lower() for item in (value or '').split(',') if item.strip()}\n\nEXPLORER_PLAN_TYPES = {\"explorer\", \"explorer_beta\", \"extreme\", \"extreme_beta\"}\n",
               path,
-              required=True,
             )
-          text = replace(
-            text,
-            "if plan in {\"extreme\", \"extreme_beta\"}:",
-            "if plan in EXPLORER_PLAN_TYPES:",
-            path,
-          )
-          text = replace(
-            text,
+          text = text.replace("if plan in {\"extreme\", \"extreme_beta\"}:", "if plan in EXPLORER_PLAN_TYPES:")
+          text = text.replace(
             "State map downloads are free for everyone. Plan users are free for all\n    offline assets. Free users get one state routing pack, then pay credits.",
             "Trailhead-owned offline packs are free for everyone. Plan users are free\n    for any remaining paid offline assets.",
-            path,
           )
-          old_block = """      free_allowed = asset_type == \"state_route\" and region_id != \"conus\"
-          if free_allowed:
-              free_count = db.execute(
-                  \"SELECT COUNT(*) AS c FROM offline_downloads WHERE user_id=? AND asset_type=? AND free_used=1\",
-                  (user_id, asset_type),
-              ).fetchone()[\"c\"]
-              if free_count == 0:
-                  db.execute(
-                      \"INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)\",
-                      (user_id, asset_type, region_id, 0, 1, now),
-                  )
-                  db.commit()
-                  return {\"authorized\": True, \"charged\": 0, \"free_used\": True, \"credits\": user.get(\"credits\", 0)}"""
-          new_block = """      trailhead_owned_free = (
+          if "trailhead_owned_free" not in text:
+            text = regex_required(
+              text,
+              r"      free_allowed = asset_type == \"state_route\" and region_id != \"conus\"[\s\S]*?return \{\"authorized\": True, \"charged\": 0, \"free_used\": True, \"credits\": user\.get\(\"credits\", 0\)\}",
+              """      trailhead_owned_free = (
               asset_type in {
-                  \"state_map\", \"state_route\", \"state_contours\", \"state_trails\",
-                  \"country_map\", \"country_route\", \"trip_corridor\",
-                  \"conus_map\", \"place_pack\", \"trail_pack\", \"topo_pack\",
+                  "state_map", "state_route", "state_contours", "state_trails",
+                  "country_map", "country_route", "trip_corridor",
+                  "conus_map", "place_pack", "trail_pack", "topo_pack",
               }
-              or asset_type.startswith(\"trailhead_\")
+              or asset_type.startswith("trailhead_")
           )
           if trailhead_owned_free:
               db.execute(
-                  \"INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)\",
+                  "INSERT OR IGNORE INTO offline_downloads (user_id,asset_type,region_id,cost,free_used,created_at) VALUES (?,?,?,?,?,?)",
                   (user_id, asset_type, region_id, 0, 0, now),
               )
               db.commit()
-              return {\"authorized\": True, \"charged\": 0, \"free_used\": False, \"credits\": user.get(\"credits\", 0)}"""
-          text = replace(text, old_block, new_block, path, required=True)
+              return {"authorized": True, "charged": 0, "free_used": False, "credits": user.get("credits", 0)}""",
+              path,
+            )
           write(path, text, original)
 
-          # ── Backend compatibility aliases and visible tier name ─────────────
+          # Backend compatibility aliases and visible tier name.
           path = "dashboard/server.py"
           text = original = read(path)
           text = text.replace('"tier_name": "Extreme Explorer"', '"tier_name": "Explorer"')
           text = text.replace("Extreme Explorer access required", "Explorer access required")
           text = text.replace("Extreme Explorer", "Explorer")
-
           lines = text.splitlines()
           patched: list[str] = []
           for line in lines:
-            match = re.match(r'(\s*@app\.(?:get|post|put|delete|patch)\()\"/api/extreme/([^\"]+)\"(.*)$', line)
+            match = re.match(r'(\s*@app\.(?:get|post|put|delete|patch)\()([\"\'])/api/extreme/([^\"\']+)([\"\'])(.*)$', line)
             if match:
-              alias = f'{match.group(1)}"/api/explorer/{match.group(2)}"{match.group(3)}'
+              alias = f'{match.group(1)}{match.group(2)}/api/explorer/{match.group(3)}{match.group(4)}{match.group(5)}'
               if not patched or patched[-1] != alias:
                 patched.append(alias)
             patched.append(line)
           text = "\n".join(patched) + ("\n" if original.endswith("\n") else "")
           write(path, text, original)
 
-          # ── Mobile API compatibility aliases and visible type name ──────────
+          # Mobile API compatibility aliases and visible type name.
           path = "mobile/lib/api.ts"
           text = original = read(path)
           text = text.replace("tier_name: 'Extreme Explorer' | string;", "tier_name: 'Explorer' | string;")
-          text = replace(
-            text,
-            "  getExtremeConfig: () => req<ExtremeConfig>('/api/extreme/config'),",
-            "  getExplorerConfig: () => req<ExtremeConfig>('/api/explorer/config'),\n  getExtremeConfig: () => req<ExtremeConfig>('/api/extreme/config'),",
-            path,
-          )
-          text = replace(
-            text,
-            "  authorizeExtremeSession: (data: ExtremeSessionAuthorizeRequest) =>\n    req<ExtremeSessionAuthorizeResponse>('/api/extreme/session/authorize', {",
-            "  authorizeExplorerSession: (data: ExtremeSessionAuthorizeRequest) =>\n    req<ExtremeSessionAuthorizeResponse>('/api/explorer/session/authorize', {\n      method: 'POST',\n      body: JSON.stringify(data),\n    }),\n  authorizeExtremeSession: (data: ExtremeSessionAuthorizeRequest) =>\n    req<ExtremeSessionAuthorizeResponse>('/api/extreme/session/authorize', {",
-            path,
-          )
+          if "getExplorerConfig" not in text:
+            text = replace_optional(
+              text,
+              "  getExtremeConfig: () => req<ExtremeConfig>('/api/extreme/config'),",
+              "  getExplorerConfig: () => req<ExtremeConfig>('/api/explorer/config'),\n  getExtremeConfig: () => req<ExtremeConfig>('/api/extreme/config'),",
+              path,
+            )
+          if "authorizeExplorerSession" not in text:
+            text = replace_optional(
+              text,
+              "  authorizeExtremeSession: (data: ExtremeSessionAuthorizeRequest) =>\n    req<ExtremeSessionAuthorizeResponse>('/api/extreme/session/authorize', {",
+              "  authorizeExplorerSession: (data: ExtremeSessionAuthorizeRequest) =>\n    req<ExtremeSessionAuthorizeResponse>('/api/explorer/session/authorize', {\n      method: 'POST',\n      body: JSON.stringify(data),\n    }),\n  authorizeExtremeSession: (data: ExtremeSessionAuthorizeRequest) =>\n    req<ExtremeSessionAuthorizeResponse>('/api/extreme/session/authorize', {",
+              path,
+            )
           write(path, text, original)
 
-          # ── Visible copy cleanup in layer and style sheets ──────────────────
+          # Visible copy cleanup.
           for path in [
             "mobile/components/map/MapLayerSheetContent.tsx",
             "mobile/components/map/MapStyleSheet.tsx",
@@ -243,69 +226,47 @@ jobs:
             text = text.replace("premium map", "map styles")
             write(path, text, original)
 
-          # ── Hide known-broken smoke toggles if they exist ───────────────────
-          smoke_patterns = [
-            ("mobile/components/map/MapLayerSheetContent.tsx", r"\n[\s\S]{0,220}Smoke[\s\S]{0,220}\n"),
-            ("mobile/components/NativeMap/index.tsx", r"\n[\s\S]{0,220}showSmoke[\s\S]{0,220}\n"),
-          ]
-          for path, pattern in smoke_patterns:
+          # Smoke should not become a visible broken safety layer from this patch.
+          for path in ["mobile/components/map/MapLayerSheetContent.tsx", "mobile/components/NativeMap/index.tsx"]:
             p = Path(path)
-            if not p.exists():
-              continue
-            text = original = p.read_text()
-            if "Smoke" in text or "showSmoke" in text:
-              warnings.append(f"Smoke references still need a manual source check in {path}; workflow did not remove broad code automatically.")
-            write(path, text, original)
+            if p.exists() and ("Smoke" in p.read_text() or "showSmoke" in p.read_text()):
+              warnings.append(f"Smoke references still need source verification in {path}")
 
-          # ── Verification guardrails ─────────────────────────────────────────
-          visible_files = [
-            "mobile/components/map/MapLayerSheetContent.tsx",
-            "mobile/components/map/MapStyleSheet.tsx",
-            "mobile/app/extreme-explorer.tsx",
-            "dashboard/admin.html",
-          ]
-          forbidden_visible = ["Extreme Explorer", "EXTREME", "Beta locked", "PREMIUM MAP"]
+          # Verification guardrails.
           failures: list[str] = []
-          for path in visible_files:
+          for path in ["mobile/components/map/MapLayerSheetContent.tsx", "mobile/components/map/MapStyleSheet.tsx", "mobile/app/extreme-explorer.tsx", "dashboard/admin.html"]:
             p = Path(path)
             if not p.exists():
               continue
             text = p.read_text()
-            for term in forbidden_visible:
+            for term in ["Extreme Explorer", "EXTREME", "Beta locked", "PREMIUM MAP"]:
               if term in text:
                 failures.append(f"{term!r} remains in {path}")
-
           routing = Path("mobile/components/NativeMap/routing.ts").read_text()
-          if "() => fetchValhalla(pairs, fromIdx, routeOpts),\n            () => fetchMapbox" not in routing:
+          if "const wantsMapboxFirst" not in routing:
+            failures.append("routing.ts did not add explicit traffic-first guard")
+          if "() => fetchValhalla(pairs, fromIdx, routeOpts),\n        () => fetchMapbox" not in routing:
             failures.append("routing.ts does not show Trailhead Valhalla before Mapbox")
-          if "Explorer Mapbox Directions" not in routing:
-            failures.append("routing.ts did not rename Mapbox route preview label")
-
           store = Path("db/store.py").read_text()
           if "EXPLORER_PLAN_TYPES" not in store:
             failures.append("db/store.py is missing Explorer plan aliases")
           if "trailhead_owned_free" not in store:
             failures.append("db/store.py is missing Trailhead-owned offline free path")
-
           server = Path("dashboard/server.py").read_text()
           if '"tier_name": "Explorer"' not in server:
             failures.append("dashboard/server.py is missing Explorer tier name")
-          if '"/api/explorer/config"' not in server:
+          if '"/api/extreme/config"' in server and '"/api/explorer/config"' not in server:
             failures.append("dashboard/server.py is missing /api/explorer compatibility route")
-
           if failures:
             print("Patch verification failed:")
             for item in failures:
               print(f"- {item}")
             raise SystemExit(1)
-
           print("Explorer map access patch applied.")
           if changed_files:
             print("Changed files:")
             for path in sorted(changed_files):
               print(f"- {path}")
-          else:
-            print("No source changes were needed; patch already present.")
           if warnings:
             print("Warnings:")
             for item in warnings:

@@ -14591,7 +14591,7 @@ function MapScreen() {
     setPanelCollapsed(!expanded);
     Haptics.selectionAsync().catch(() => {});
   }, [activeTrip?.trip_id, navMode]);
-  const canOpenMapDrawer = !navMode && !waterFollowActive && !showSearch;
+  const canOpenMapDrawer = !navMode && !waterFollowActive && !showSearch && !inlineSearchOpen && !mapSearchSession;
   const openMapDrawer = useCallback(() => {
     if (!canOpenMapDrawer) return;
     setShowMapDrawer(true);
@@ -16920,10 +16920,15 @@ function MapScreen() {
   };
   const scopedMapSearchActive = Boolean(mapSearchSession && !navMode && !waterFollowActive && !safeWaterPlanningActive);
   const androidInlineSearchKeyboardActive = Platform.OS === 'android' && inlineSearchOpen && keyboardVisible;
+  const mapSearchChromeActive = Boolean(showSearch || inlineSearchOpen || scopedMapSearchActive || androidInlineSearchKeyboardActive);
+  const topChromeLeft = canOpenMapDrawer ? 72 : 16;
+  const topChromeLaneStyle = topChromeLeft > 16 ? { left: topChromeLeft } : null;
   const scopedMapSearchPois = scopedMapSearchActive ? (mapSearchSession?.places ?? []) : routePois;
   const showMapStatusBar = Boolean(
     !navMode &&
     !waterFollowActive &&
+    !showSearch &&
+    !inlineSearchOpen &&
     !androidInlineSearchKeyboardActive &&
     !scopedMapSearchActive &&
     (
@@ -16977,10 +16982,17 @@ function MapScreen() {
   );
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
   const inlineSearchTop = inlineSearchSideBySide ? compassTop : compassTop + 52;
-  const inlineSearchLeft = userHeading !== null && inlineSearchSideBySide ? 176 : 68;
+  const inlineSearchLeft = inlineSearchOpen ? 16 : userHeading !== null && inlineSearchSideBySide ? 176 : 68;
   const inlineSearchResultsMaxHeight = androidInlineSearchKeyboardActive
     ? Math.max(128, windowHeight - keyboardHeight - inlineSearchTop - 28)
     : undefined;
+  const mapControlsBlocked = Boolean(
+    navMode ||
+    mapSearchChromeActive ||
+    safeWaterSheetOwnsPage ||
+    mapSheetOpen ||
+    (!!selectedTrail && !trailCardCollapsed)
+  );
   const trailToolPanelActive = trailPinCaptureMode || trailTraceMode || trailRouteBuilderOpen;
   const showQuickMapMessage = Boolean(
     (!!quickToast || quickReport) &&
@@ -17451,7 +17463,7 @@ function MapScreen() {
 
       {/* Offline map load error banner */}
       {mapLoadFailed && (
-        <View style={s.mapLoadFailBanner}>
+        <View style={[s.mapLoadFailBanner, topChromeLaneStyle]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#fbbf24" />
           <Text style={s.mapLoadFailText}>MAP FAILED TO LOAD — OFFLINE MAPS NOT DOWNLOADED FOR THIS AREA</Text>
         </View>
@@ -17459,10 +17471,7 @@ function MapScreen() {
 
       {/* Select-on-map mode banner */}
       {selectOnMapMode && (
-        <View style={{ position: 'absolute', top: 60, left: 16, right: 16, zIndex: 100,
-          backgroundColor: '#3b82f6', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10,
-          flexDirection: 'row', alignItems: 'center', gap: 10,
-          shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 }}>
+        <View style={[s.selectOnMapBanner, topChromeLaneStyle]}>
           <Ionicons name="locate" size={18} color="#fff" />
           <Text style={{ color: '#fff', fontSize: 14, fontWeight: '600', flex: 1 }}>Tap the map to set destination</Text>
           <TouchableOpacity onPress={() => setSelectOnMapMode(false)}>
@@ -17516,7 +17525,7 @@ function MapScreen() {
         const aqi = mapWeather?.air_quality?.current?.us_aqi;
         return (
           <MapWeatherPeek
-            visible={mapWeatherEnabled && !navMode && !safeWaterPlanningActive && !waterFollowActive && !scopedMapSearchActive}
+            visible={mapWeatherEnabled && !navMode && !safeWaterPlanningActive && !waterFollowActive && !mapSearchChromeActive}
             bottomInset={bottomInset}
             loading={mapWeatherLoading}
             icon={weatherIonIcon(code)}
@@ -17604,7 +17613,7 @@ function MapScreen() {
       )}
 
       {/* Route/status bar */}
-      {showMapStatusBar && <View style={s.topBar}>
+      {showMapStatusBar && <View style={[s.topBar, topChromeLaneStyle]}>
         <TouchableOpacity
           style={s.topBarMain}
           activeOpacity={activeTrip && !navMode ? 0.78 : 1}
@@ -17657,26 +17666,26 @@ function MapScreen() {
       </View>}
 
       {/* Offline mode banners */}
-      {activeTripFromCache && isActuallyOffline && (
-        <View style={s.offlineCacheBanner}>
+      {!mapSearchChromeActive && activeTripFromCache && isActuallyOffline && (
+        <View style={[s.offlineCacheBanner, topChromeLaneStyle]}>
           <Ionicons name="cloud-offline-outline" size={12} color="#a3e635" />
           <Text style={s.offlineCacheBannerText}>Using cached trip data — offline mode</Text>
         </View>
       )}
-      {routeFromCache && navMode && isActuallyOffline && (
-        <View style={[s.offlineCacheBanner, { backgroundColor: 'rgba(234,179,8,0.15)' }]}>
+      {!mapSearchChromeActive && routeFromCache && navMode && isActuallyOffline && (
+        <View style={[s.offlineCacheBanner, topChromeLaneStyle, { backgroundColor: 'rgba(234,179,8,0.15)' }]}>
           <Ionicons name="navigate-outline" size={12} color="#eab308" />
           <Text style={[s.offlineCacheBannerText, { color: '#eab308' }]}>Offline — using cached route · re-routing disabled</Text>
         </View>
       )}
-      {routeFromCache && navMode && !isActuallyOffline && (
-        <View style={[s.offlineCacheBanner, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
+      {!mapSearchChromeActive && routeFromCache && navMode && !isActuallyOffline && (
+        <View style={[s.offlineCacheBanner, topChromeLaneStyle, { backgroundColor: 'rgba(59,130,246,0.12)' }]}>
           <Ionicons name="checkmark-circle-outline" size={12} color="#60a5fa" />
           <Text style={[s.offlineCacheBannerText, { color: '#60a5fa' }]}>Using cached route</Text>
         </View>
       )}
-      {!!routeDebug && !isRouted && (
-        <View style={s.noRouteCard}>
+      {!mapSearchChromeActive && !!routeDebug && !isRouted && (
+        <View style={[s.noRouteCard, topChromeLaneStyle]}>
           <View style={s.noRouteTop}>
             <Ionicons name="alert-circle-outline" size={14} color={C.red} />
             <Text style={s.noRouteTitle}>NO DRAWABLE ROUTE</Text>
@@ -17760,7 +17769,7 @@ function MapScreen() {
         </View>
       )}
 
-      {!trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && (
+      {!trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && !inlineSearchOpen && (
         <View style={[s.compassPill, mapChrome.toast, { top: compassTop, left: 68 }]}>
           <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
           <View>
@@ -17928,7 +17937,7 @@ function MapScreen() {
       )}
 
       {/* Sync toast — flashes briefly when signal restores and weather is refreshed */}
-      {!!syncToast && !scopedMapSearchActive && (
+      {!!syncToast && !mapSearchChromeActive && (
         <View style={s.syncToast}>
           <Ionicons name="wifi" size={11} color={C.orange} />
           <Text style={s.syncToastText}>{syncToast}</Text>
@@ -18054,10 +18063,10 @@ function MapScreen() {
       )}
 
       {/* Land check card — appears on long-press, auto-dismisses after 8s */}
-      {!scopedMapSearchActive && !safeWaterPlanningActive && !waterFollowActive && (landCheckLoading || landCheck) && (
+      {!mapSearchChromeActive && !safeWaterPlanningActive && !waterFollowActive && (landCheckLoading || landCheck) && (
         <TouchableOpacity
           activeOpacity={0.92}
-          style={s.landCheckCard}
+          style={[s.landCheckCard, topChromeLaneStyle]}
           onPress={() => { setLandCheck(null); setLandCheckLoading(false); if (landCheckDismissTimer.current) clearTimeout(landCheckDismissTimer.current); }}
         >
           {landCheckLoading ? (
@@ -18109,10 +18118,10 @@ function MapScreen() {
 
       {/* Controls — hidden during nav (panel covers them and they serve no purpose while driving) */}
       <ScrollView
-        pointerEvents={navMode || androidInlineSearchKeyboardActive || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed) ? 'none' : 'auto'}
+        pointerEvents={mapControlsBlocked ? 'none' : 'auto'}
         style={[
           s.controls,
-          (navMode || androidInlineSearchKeyboardActive || scopedMapSearchActive || safeWaterSheetOwnsPage || mapSheetOpen || (!!selectedTrail && !trailCardCollapsed)) && { opacity: 0 },
+          mapControlsBlocked && { opacity: 0 },
         ]}
         contentContainerStyle={s.controlsInner}
         showsVerticalScrollIndicator={false}
@@ -19154,7 +19163,7 @@ function MapScreen() {
       {/* ── Search overlay ── */}
       {/* ── Route Search Modal (OsmAnd-style) ──────────────────────────── */}
       {showSearch && !navMode && (
-        <View style={{ position: 'absolute', bottom: Platform.OS === 'android' ? Math.max(bottomInset - 8, 16) : 0, left: 0, right: 0 }}>
+        <View style={[s.routeSearchModalLayer, { bottom: Platform.OS === 'android' ? Math.max(bottomInset - 8, 16) : 0 }]}>
           <RouteSearchModal
             visible={showSearch}
             mode={searchMode}
@@ -22701,6 +22710,8 @@ const makeStyles = (C: ColorPalette) => {
     paddingVertical: 8, paddingHorizontal: 14,
     borderWidth: 1, borderColor: OVR.border,
     flexDirection: 'row', alignItems: 'center', gap: 8,
+    zIndex: 120,
+    elevation: 36,
   },
   topBarMain: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 8 },
   topBarDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange },
@@ -22831,7 +22842,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   pinCaptureActionText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
 
-  controls: { position: 'absolute', top: 106, right: 16, bottom: 100, maxHeight: '80%' as any },
+  controls: { position: 'absolute', top: 106, right: 16, bottom: 100, maxHeight: '80%' as any, zIndex: 90, elevation: 42 },
   mapTourTarget: {
     position: 'absolute',
     left: 16,
@@ -22870,8 +22881,8 @@ const makeStyles = (C: ColorPalette) => {
     left: 16,
     width: 44,
     height: 44,
-    zIndex: 20,
-    elevation: 20,
+    zIndex: 180,
+    elevation: 80,
   },
   mapDrawerToggle: {
     width: 44,
@@ -22886,7 +22897,8 @@ const makeStyles = (C: ColorPalette) => {
     shadowOpacity: 0.24,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 14,
+    zIndex: 180,
+    elevation: 80,
   },
   mapDrawerEdgePull: {
     position: 'absolute',
@@ -23431,14 +23443,15 @@ const makeStyles = (C: ColorPalette) => {
     borderWidth: 1, borderColor: OVR.border,
     paddingHorizontal: 9, paddingVertical: 7,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.22, shadowRadius: 8,
-    elevation: 7,
+    zIndex: 110,
+    elevation: 32,
   },
   compassDir: { color: OVR.text, fontSize: 12, fontFamily: mono, fontWeight: '900', lineHeight: 14 },
   compassDeg: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '700', marginTop: 1 },
   inlineMapSearchWrap: {
     position: 'absolute',
-    zIndex: 45,
-    elevation: 45,
+    zIndex: 220,
+    elevation: 90,
   },
   inlineMapSearchBar: {
     minHeight: 44,
@@ -23486,7 +23499,8 @@ const makeStyles = (C: ColorPalette) => {
     shadowOpacity: 0.24,
     shadowRadius: 12,
     shadowOffset: { width: 0, height: 3 },
-    elevation: 8,
+    zIndex: 221,
+    elevation: 92,
   },
   inlineMapSearchStateRow: {
     minHeight: 42,
@@ -23887,6 +23901,8 @@ const makeStyles = (C: ColorPalette) => {
   dlBar: {
     position: 'absolute', top: 92, left: 16, right: 16,
     height: 3, borderRadius: 1.5, backgroundColor: C.border, overflow: 'hidden',
+    zIndex: 115,
+    elevation: 30,
   },
   dlFill: { height: 3, backgroundColor: C.orange, borderRadius: 1.5 },
 
@@ -23897,7 +23913,8 @@ const makeStyles = (C: ColorPalette) => {
     borderWidth: 1, borderColor: OVR.border,
     paddingHorizontal: 14, paddingVertical: 10,
     shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
-    elevation: 6,
+    zIndex: 118,
+    elevation: 34,
   },
   landCheckBadge: {
     borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
@@ -23913,6 +23930,8 @@ const makeStyles = (C: ColorPalette) => {
   searchAreaWrap: {
     position: 'absolute', bottom: 102, left: 0, right: 0,
     alignItems: 'center', pointerEvents: 'box-none',
+    zIndex: 95,
+    elevation: 46,
   },
   searchAreaBtn: {
     flexDirection: 'row', alignItems: 'center',
@@ -23987,13 +24006,21 @@ const makeStyles = (C: ColorPalette) => {
   stepDist: { color: C.text3, fontSize: 10, fontFamily: mono },
 
   // ── Search overlay
+  routeSearchModalLayer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    zIndex: 260,
+    elevation: 110,
+  },
   searchSheet: {
     backgroundColor: OVR.bg2,
     borderTopLeftRadius: 20, borderTopRightRadius: 20,
     borderTopWidth: 1, borderColor: OVR.border,
     paddingBottom: 28,
     shadowColor: '#000', shadowOffset: { width: 0, height: -4 },
-    shadowOpacity: 0.35, shadowRadius: 12, elevation: 12,
+    shadowOpacity: 0.35, shadowRadius: 12, elevation: 110,
+    zIndex: 260,
   },
   searchHandle: {
     width: 36, height: 4, borderRadius: 2,
@@ -25756,7 +25783,8 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: 'rgba(20,30,20,0.92)', borderRadius: 8,
     paddingHorizontal: 10, paddingVertical: 6,
     borderWidth: 1, borderColor: 'rgba(163,230,53,0.3)',
-    zIndex: 30,
+    zIndex: 125,
+    elevation: 38,
   },
   offlineCacheBannerText: { color: '#a3e635', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3, flex: 1 },
   noRouteCard: {
@@ -25765,10 +25793,10 @@ const makeStyles = (C: ColorPalette) => {
     borderRadius: 14,
     borderWidth: 1, borderColor: C.red + '77',
     padding: 12,
-    zIndex: 35,
+    zIndex: 126,
     gap: 8,
     shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 14, shadowOffset: { width: 0, height: 6 },
-    elevation: 12,
+    elevation: 40,
   },
   noRouteTop: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   noRouteTitle: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, flex: 1 },
@@ -25782,6 +25810,8 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: OVR.bg2, borderRadius: 16,
     paddingHorizontal: 14, paddingVertical: 8,
     borderWidth: 1, borderColor: OVR.border,
+    zIndex: 135,
+    elevation: 44,
   },
   syncToastText: { color: OVR.text2, fontSize: 11, fontFamily: mono, fontWeight: '700', letterSpacing: 0.2 },
 
@@ -26187,9 +26217,29 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: 'rgba(69,26,3,0.95)', borderRadius: 10,
     paddingHorizontal: 12, paddingVertical: 9,
     borderWidth: 1, borderColor: '#92400e',
+    zIndex: 130,
+    elevation: 42,
   },
   mapLoadFailText: {
     flex: 1, color: '#fbbf24', fontSize: 10, fontFamily: mono, fontWeight: '700', letterSpacing: 0.3,
+  },
+  selectOnMapBanner: {
+    position: 'absolute',
+    top: 60,
+    left: 16,
+    right: 16,
+    zIndex: 132,
+    elevation: 44,
+    backgroundColor: '#3b82f6',
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    shadowColor: '#000',
+    shadowOpacity: 0.3,
+    shadowRadius: 8,
   },
   });
 };

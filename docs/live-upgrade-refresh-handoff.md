@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 14 implemented locally; release decision
+**Status at save time:** Checkpoint 15 implemented locally; release decision
 pending.
 
 This note is the restart point for the next Codex session after refreshing MCP
@@ -10,7 +10,7 @@ tools. It captures what is already complete and what should happen next.
 
 ## Current State
 
-- Checkpoints 1-14 are complete through the Route Builder workspace extraction
+- Checkpoints 1-15 are complete through the Route Search Layering
   slice in `docs/live-upgrade-execution-checkpoints.md`.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
@@ -25,11 +25,12 @@ tools. It captures what is already complete and what should happen next.
   `7379c0a5-fcdf-48a3-ba5a-5744815b8a86`.
 - Latest route-builder preview OTA:
   `1b7b6b96-367d-4916-b30e-6bfbdf0797bc`.
-- Latest local route-builder workspace checkpoint:
-  Checkpoint 14 extracted `RouteBuilderWorkspaceSummary` and
-  `RouteBuilderReadinessCard`; production and preview OTA are recorded.
-- Current repo check before this handoff: Checkpoint 14 validation, push, and
-  OTA release passed.
+- Latest local route/search checkpoint:
+  Checkpoint 15 extracted `RouteBuilderTimelineActions` and
+  `RouteBuilderInsertNotice`, added map search layer policy, and added
+  `RouteSearchModal` fallback lookup coverage.
+- Current repo check before this handoff: Checkpoint 15 validation passed
+  locally; release records are pending until commit, push, and OTA complete.
 
 ## MCP / Research State
 
@@ -65,6 +66,7 @@ fresh shipped-app references.
 12. Map Navigation Stability + Mapbox Native QA.
 13. Route Builder Deeper Redesign first slice.
 14. Route Builder Workspace Extraction.
+15. Route Search Layering.
 
 ## Remaining Work Queue
 
@@ -85,10 +87,11 @@ Verify:
 
 Checkpoint 13 extracted the hub and cleaned first Route Builder copy hits.
 Checkpoint 14 extracted the active workspace summary and trip-readiness card.
+Checkpoint 15 extracted timeline actions and insert guidance, and fixed the
+map search/tool/banner layer policy.
 Still
 needed:
 
-- Timeline actions and insert notice.
 - Stop rows and leg action rows.
 - Footer dock.
 - Route timeline.
@@ -209,9 +212,9 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 15 - Route Builder Timeline Actions**
+**Checkpoint 16 - Route Builder Stop Rows**
 
-Extract timeline actions and the insert guidance card from
-`mobile/app/(tabs)/route-builder.tsx`, then continue to stop-row/leg-action
-extraction only after the smaller surface passes TypeScript, copy, route, Figma,
-and Playwright checks.
+Extract stop rows and leg action rows from
+`mobile/app/(tabs)/route-builder.tsx`, then continue to the footer dock and
+route timeline only after the smaller surface passes TypeScript, copy, route,
+Figma, and Playwright checks.

@@ -111,6 +111,17 @@ checkpoint must leave an audit note before the next checkpoint starts.
       API payloads, and offline readiness calculations unchanged.
     - Save design decision, audit checkpoint, and Figma checkpoint frame.
 
+15. **Route Search Layering**
+    - Status: complete for Route Builder actions/search-layering slice.
+    - Extract Route Builder timeline actions and insert guidance.
+    - Keep route computation, saved geometry, camp scoring, and route readiness
+      calculations unchanged.
+    - Reserve the map top lane for search, move/hide transient banners and tool
+      controls while search owns that lane, and pair Android `zIndex` with
+      `elevation`.
+    - Add shared place-lookup fallback coverage to `RouteSearchModal`.
+    - Save design decision, audit checkpoint, and Figma checkpoint frame.
+
 ## Refresh Handoff
 
 - Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.
@@ -124,6 +135,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-13-route-builder-audit.md`.
 - Checkpoint 14 workspace extraction context is saved in
   `docs/live-upgrade-checkpoint-14-route-builder-workspace-audit.md`.
+- Checkpoint 15 route/search layering context is saved in
+  `docs/live-upgrade-checkpoint-15-route-search-layering-audit.md`.
 
 ## Validation Gate
 

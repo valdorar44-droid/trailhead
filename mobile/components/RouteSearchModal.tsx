@@ -520,6 +520,30 @@ export default function RouteSearchModal({
       .filter(hasUsableCoordinate) as SearchPlace[];
   }, [userLoc]);
 
+  const searchFallbackPlaces = useCallback(async (text: string) => {
+    const places = await api.geocodePlaces(text.trim(), 8).catch(() => []);
+    return places
+      .map(place => {
+        const sourceLabel = place.source_label && !/mapbox/i.test(place.source_label)
+          ? place.source_label
+          : 'Map result';
+        return {
+          name: place.name,
+          lat: place.lat,
+          lng: place.lng,
+          dist: userLoc ? haversineKm(userLoc, place) : null,
+          source: place.source,
+          source_label: sourceLabel,
+          place_id: place.place_id,
+          provider_place_id: place.provider_place_id,
+          type: place.feature_type || place.category || 'poi',
+          address: [place.region, place.country].filter(Boolean).join(', ') || undefined,
+        };
+      })
+      .filter(hasUsableCoordinate)
+      .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999));
+  }, [userLoc]);
+
   const searchExtremeCategory = useCallback(async (catId: string) => {
     if (!extremeSearchEnabled || !userLoc) return [] as SearchPlace[];
     const categoryMap: Record<string, string> = {
@@ -564,18 +588,18 @@ export default function RouteSearchModal({
     }
     setSearching(true);
     try {
-      const explorePlaces = await searchExplorePlaces(query.trim());
+      const cleanQuery = query.trim();
+      const explorePlaces = await searchExplorePlaces(cleanQuery);
       let providerPlaces: SearchPlace[] = [];
       if (extremeSearchEnabled) {
-        providerPlaces = await searchExtremePlaces(query.trim());
+        providerPlaces = await searchExtremePlaces(cleanQuery).catch(() => []);
       } else {
-        const places = await api.geocodePlaces(query.trim(), 8);
-        providerPlaces = places
-          .map(place => ({ name: place.name, lat: place.lat, lng: place.lng, dist: userLoc ? haversineKm(userLoc, place) : null, source: place.source, place_id: place.place_id }))
-          .filter(hasUsableCoordinate)
-          .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999));
+        providerPlaces = await searchFallbackPlaces(cleanQuery);
       }
-      setResults(dedupeSearchResults([...explorePlaces, ...providerPlaces])
+      const fallbackPlaces = extremeSearchEnabled && providerPlaces.length < 4
+        ? await searchFallbackPlaces(cleanQuery)
+        : [];
+      setResults(dedupeSearchResults([...explorePlaces, ...providerPlaces, ...fallbackPlaces])
         .sort((a, b) => {
           const scoreDelta = exploreSearchScore(b, query) - exploreSearchScore(a, query);
           if (Math.abs(scoreDelta) > 0.01) return scoreDelta;
@@ -584,7 +608,7 @@ export default function RouteSearchModal({
         .slice(0, 18));
     } catch { setResults([]); }
     setSearching(false);
-  }, [query, userLoc, extremeSearchEnabled, searchExtremePlaces, searchExplorePlaces]);
+  }, [query, userLoc, extremeSearchEnabled, searchExtremePlaces, searchExplorePlaces, searchFallbackPlaces]);
 
   const pickCategory = useCallback(async (catId: string) => {
     setActiveCat(catId);
@@ -818,7 +842,11 @@ export default function RouteSearchModal({
     return (
       <Modal visible animationType="slide" transparent={false} statusBarTranslucent onShow={focusSearchInput}>
         <SafeAreaView style={{ flex: 1, backgroundColor: C.bg, paddingTop: searchModalTopPad }}>
-        <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={{ flex: 1 }}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'android' ? searchModalTopPad : 0}
+          style={{ flex: 1 }}
+        >
         <View style={s.searchingSheet}>
           {/* Search input row */}
           <View style={s.searchInputRow}>
@@ -852,8 +880,13 @@ export default function RouteSearchModal({
             </View>
           )}
 
-          <ScrollView keyboardShouldPersistTaps="handled" keyboardDismissMode="on-drag" style={{ flex: 1 }}>
-            {/* Geocoding results */}
+          <ScrollView
+            keyboardShouldPersistTaps="handled"
+            keyboardDismissMode="on-drag"
+            style={{ flex: 1 }}
+            contentContainerStyle={[s.searchScrollContent, { paddingBottom: bottomPad + (Platform.OS === 'android' ? 96 : 24) }]}
+          >
+            {/* Search results */}
             {results.length > 0 && results.map((r, i) => (
               <TouchableOpacity key={i} style={s.resultRow} onPress={() => selectPlace(r)}>
                 <View style={s.resultIcon}><Ionicons name="location" size={14} color={C.orange} /></View>
@@ -1384,6 +1417,7 @@ const styles = (C: ReturnType<typeof useTheme>) => StyleSheet.create({
   searchingSheet: { backgroundColor: C.bg, flex: 1 },
   searchInputRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderColor: C.border },
   searchInput: { flex: 1, color: C.text, fontSize: 15, fontFamily: mono },
+  searchScrollContent: { paddingBottom: 24 },
   hideBtn: { color: C.text2, fontSize: 14 },
   tabRow: { flexDirection: 'row', paddingHorizontal: 16, paddingVertical: 6, gap: 4, borderBottomWidth: 1, borderColor: C.border },
   tab: { paddingHorizontal: 16, paddingVertical: 7, borderRadius: 20, backgroundColor: C.s2 },

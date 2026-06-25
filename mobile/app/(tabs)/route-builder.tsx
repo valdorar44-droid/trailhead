@@ -17,7 +17,9 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
+import RouteBuilderInsertNotice from '@/components/routeBuilder/RouteBuilderInsertNotice';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
+import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
@@ -4815,19 +4817,12 @@ export default function RouteBuilderScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        <View style={s.timelineSheetActions}>
-          <TouchableOpacity style={s.routeTimelineAddDay} onPress={addDay}>
-            <Ionicons name="add" size={13} color={C.orange} />
-            <Text style={s.routeTimelineAddText}>DAY</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.routeTimelineLoop}
-            onPress={() => applyTripShapeMode(tripShapeMode === 'one_way' ? 'loop' : tripShapeMode === 'loop' ? 'there_and_back' : 'one_way')}
-          >
-            <Ionicons name={tripShapeMode === 'loop' ? 'sync-outline' : tripShapeMode === 'there_and_back' ? 'repeat-outline' : 'arrow-forward-outline'} size={13} color={tripLoop ? C.green : C.text3} />
-            <Text style={[s.routeTimelineLoopText, tripLoop && { color: C.green }]}>{tripShapeMode === 'loop' ? 'LOOP' : tripShapeMode === 'there_and_back' ? 'RETURN' : 'ONE WAY'}</Text>
-          </TouchableOpacity>
-        </View>
+        <RouteBuilderTimelineActions
+          tripShapeMode={tripShapeMode}
+          tripLoop={tripLoop}
+          onAddDay={addDay}
+          onToggleTripShape={() => applyTripShapeMode(tripShapeMode === 'one_way' ? 'loop' : tripShapeMode === 'loop' ? 'there_and_back' : 'one_way')}
+        />
 
         {renderRouteTimeline()}
 
@@ -4840,22 +4835,12 @@ export default function RouteBuilderScreen() {
           ))}
         </View>
 
-        <View style={[s.insertCard, selectedInsertStop && { borderColor: C.orange + '66', backgroundColor: C.orange + '10' }]}>
-          <Ionicons name={selectedInsertStop ? 'git-commit-outline' : 'add-circle-outline'} size={15} color={selectedInsertStop ? C.orange : C.text3} />
-          <View style={{ flex: 1 }}>
-            <Text style={s.insertTitle}>{selectedInsertStop ? 'Insert after stop' : 'Add to active day'}</Text>
-            <Text style={s.insertText} numberOfLines={3}>
-              {selectedInsertStop
-                ? `New stops will land after ${selectedInsertStop.name.split(',')[0]} on Day ${insertTargetDay ?? selectedInsertStop.day}.`
-                : 'Use a day action below to place fuel, camps, or POIs in the right leg.'}
-            </Text>
-          </View>
-          {selectedInsertStop ? (
-            <TouchableOpacity style={s.insertClear} onPress={() => { setInsertAfterId(null); setInsertTargetDay(null); }}>
-              <Text style={s.insertClearText}>END</Text>
-            </TouchableOpacity>
-          ) : null}
-        </View>
+        <RouteBuilderInsertNotice
+          selectedStopName={selectedInsertStop?.name}
+          targetDay={insertTargetDay}
+          fallbackDay={selectedInsertStop?.day}
+          onClearInsert={() => { setInsertAfterId(null); setInsertTargetDay(null); }}
+        />
 
         <TourTarget id="routeBuilder.search">
           <View style={s.searchBox}>
@@ -6116,11 +6101,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
   typeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 9, paddingHorizontal: 9, paddingVertical: 7, backgroundColor: C.s2 },
   typeChipText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800' },
-  insertCard: { flexDirection: 'row', alignItems: 'flex-start', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, paddingHorizontal: 11, paddingVertical: 10, backgroundColor: C.s2 },
-  insertTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
-  insertText: { color: C.text3, fontSize: 10, lineHeight: 15, marginTop: 1 },
-  insertClear: { borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6, backgroundColor: C.s1 },
-  insertClearText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   searchBox: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s2, paddingLeft: 12 },
   searchInput: { flex: 1, color: C.text, fontSize: 13, paddingVertical: 11 },
   searchBtn: { alignSelf: 'stretch', minWidth: 56, backgroundColor: C.orange, borderTopRightRadius: 11, borderBottomRightRadius: 11, alignItems: 'center', justifyContent: 'center' },
@@ -6144,14 +6124,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routeDayMeta: { color: C.text3, fontSize: 13, fontFamily: mono, marginTop: 4, lineHeight: 18 },
   routeTimelineCard: { borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2, padding: 10, gap: 9 },
   routeTimelineList: { gap: 18 },
-  timelineSheetActions: { flexDirection: 'row', justifyContent: 'flex-end', gap: 10, paddingHorizontal: 2, paddingBottom: 2 },
   routeTimelineTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 2 },
   routeTimelineTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
   routeTimelineSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
-  routeTimelineAddDay: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 10, paddingHorizontal: 9, backgroundColor: C.orange + '10' },
-  routeTimelineAddText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
-  routeTimelineLoop: { minHeight: 32, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 9, backgroundColor: C.s1 },
-  routeTimelineLoopText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   routeDayWrap: { gap: 10 },
   routeDaySection: {
     minHeight: 520, flexDirection: 'row', gap: 12,

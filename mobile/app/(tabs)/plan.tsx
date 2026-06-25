@@ -1174,7 +1174,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 94,
-    zIndex: 40,
+    zIndex: 120,
+    elevation: 64,
     backgroundColor: 'transparent',
     paddingHorizontal: 12,
   },
@@ -1230,6 +1231,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 6,
+    zIndex: 90,
+    elevation: 44,
   },
   weatherToastText: { color: C.text, fontSize: 12, fontFamily: mono, letterSpacing: 0.3 },
 });

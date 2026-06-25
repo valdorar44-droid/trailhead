@@ -16726,9 +16726,9 @@ function MapScreen() {
   ];
   const premiumMapOptions: Array<{ id: PremiumMapStyle; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = [
     { id: 'standard', label: 'Standard', sub: 'Dynamic day base', icon: 'map-outline', color: '#38bdf8' },
+    { id: 'outdoors', label: 'Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
     { id: 'standard_satellite', label: 'Standard Sat', sub: 'Satellite + Standard', icon: 'earth-outline', color: '#22c55e' },
     { id: 'streets', label: 'Streets', sub: 'Rendered road view', icon: 'navigate-outline', color: '#60a5fa' },
-    { id: 'outdoors', label: 'Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
     { id: 'navigation_day', label: 'Nav Day', sub: 'Traffic guidance', icon: 'git-merge-outline', color: '#f97316' },
     { id: 'navigation_night', label: 'Nav Night', sub: 'Night guidance', icon: 'moon-outline', color: '#ef4444' },
     { id: 'dawn', label: 'Dawn', sub: 'Low sun lighting', icon: 'partly-sunny-outline', color: '#f59e0b' },
@@ -21082,12 +21082,14 @@ function MapScreen() {
         bottomInset={bottomInset}
         activeMapLayer={mapLayer}
         options={mapStyleOptions}
+        premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
+        premiumMapItems={premiumMapItems}
         extremeActive={extremeMapLayerActive}
         extremeSelectable={extremeMapboxSupported}
         extremeSub={extremeMapLayerSub}
         onClose={() => setShowMapStyleSheet(false)}
         onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
-        onSelectExtreme={selectExtremeMapLayer}
+        onSelectExplorer={selectExtremeMapLayer}
       />
 
       {/* ── Route Brief Modal ── */}
@@ -21311,7 +21313,7 @@ function MapScreen() {
             extremeMapLayerActive={extremeMapLayerActive}
             extremeMapLayerSelectable={extremeMapboxSupported}
             extremeMapLayerSub={extremeMapLayerSub}
-            onSelectExtremeMapLayer={selectExtremeMapLayer}
+            onSelectExplorerMapLayer={selectExtremeMapLayer}
             layerItems={layerSheetItems}
             premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
             premiumMapItems={premiumMapItems}

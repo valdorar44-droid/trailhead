@@ -272,6 +272,28 @@ export default function MapLayerSheetContent({
             ? <Ionicons name="checkmark-circle" size={17} color="#ef4444" />
             : <Ionicons name="ellipse-outline" size={15} color="#ef4444" />}
         </TouchableOpacity>
+        {premiumMapVisible ? premiumMapItems.map(option => (
+          <TouchableOpacity
+            key={`mapbox-${option.id}`}
+            style={[
+              s.styleCard,
+              s.mapboxStyleCard,
+              extremeMapLayerActive && option.active && { borderColor: option.color + '88', backgroundColor: option.color + '16' },
+            ]}
+            activeOpacity={0.86}
+            onPress={option.onPress}
+          >
+            <View style={[s.mapboxStylePreview, { borderColor: option.color + '55', backgroundColor: option.color + '14' }]}>
+              <Ionicons name={option.icon} size={24} color={option.color} />
+              {extremeMapLayerActive && option.active ? <View style={[s.layerToggleOnDot, { backgroundColor: option.color }]} /> : null}
+            </View>
+            <View style={s.styleCardText}>
+              <Text style={s.styleTitle} numberOfLines={1}>{option.label}</Text>
+              <Text style={s.styleSub} numberOfLines={1}>{option.sub}</Text>
+            </View>
+            {extremeMapLayerActive && option.active ? <Ionicons name="checkmark-circle" size={17} color={option.color} /> : null}
+          </TouchableOpacity>
+        )) : null}
       </ScrollView>
 
       <Text style={s.sectionHead}>LAYERS</Text>
@@ -292,23 +314,8 @@ export default function MapLayerSheetContent({
 
       {premiumMapVisible ? (
         <>
-          <Text style={s.sectionHead}>MAP STYLES</Text>
+          <Text style={s.sectionHead}>EXPLORER TOOLS</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
-            {premiumMapItems.map(option => (
-              <TouchableOpacity
-                key={option.id}
-                style={[s.toggleCard, option.active && { borderColor: option.color + '88', backgroundColor: option.color + '16' }]}
-                activeOpacity={0.86}
-                onPress={option.onPress}
-              >
-                <View style={[s.layerTogglePreview, { borderColor: option.color + '55', backgroundColor: option.color + '14' }]}>
-                  <Ionicons name={option.icon} size={22} color={option.color} />
-                  {option.active ? <View style={[s.layerToggleOnDot, { backgroundColor: option.color }]} /> : null}
-                </View>
-                <Text style={s.styleTitle} numberOfLines={1}>{option.label}</Text>
-                <Text style={s.styleSub} numberOfLines={1}>{option.sub}</Text>
-              </TouchableOpacity>
-            ))}
             {extremeFeatureItems.map(layer => (
               <TouchableOpacity
                 key={layer.key}
@@ -435,6 +442,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderColor: '#4b5563',
     backgroundColor: '#171717',
   },
+  mapboxStyleCard: {
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.055)',
+  },
   stylePreview: {
     height: 64,
     borderRadius: 11,
@@ -478,6 +489,14 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontSize: 12,
     fontFamily: mono,
     fontWeight: '900',
+  },
+  mapboxStylePreview: {
+    height: 64,
+    borderRadius: 11,
+    overflow: 'hidden',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   extremeStyleSlash: {
     position: 'absolute',

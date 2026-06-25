@@ -11,11 +11,23 @@ export type MapStyleOption = {
   colors: [string, string, string];
 };
 
+export type PremiumMapStyleOption = {
+  id: string;
+  label: string;
+  sub: string;
+  icon: keyof typeof Ionicons.glyphMap;
+  color: string;
+  active: boolean;
+  onPress: () => void;
+};
+
 type Props = {
   visible: boolean;
   bottomInset: number;
   activeMapLayer: string;
   options: readonly MapStyleOption[];
+  premiumMapVisible: boolean;
+  premiumMapItems: readonly PremiumMapStyleOption[];
   extremeActive: boolean;
   extremeSelectable: boolean;
   extremeSub: string;
@@ -29,6 +41,8 @@ export default function MapStyleSheet({
   bottomInset,
   activeMapLayer,
   options,
+  premiumMapVisible,
+  premiumMapItems,
   extremeActive,
   extremeSelectable,
   extremeSub,
@@ -107,6 +121,27 @@ export default function MapStyleSheet({
                 color="#ef4444"
               />
             </TouchableOpacity>
+
+            {premiumMapVisible ? premiumMapItems.map(option => (
+              <TouchableOpacity
+                key={`mapbox-${option.id}`}
+                style={[s.card, s.premiumCard, extremeActive && option.active && { borderColor: option.color + '88', backgroundColor: option.color + '16' }]}
+                activeOpacity={0.86}
+                onPress={() => {
+                  option.onPress();
+                  onClose();
+                }}
+              >
+                <View style={[s.premiumPreview, { borderColor: option.color + '55', backgroundColor: option.color + '14' }]}>
+                  <Ionicons name={option.icon} size={22} color={option.color} />
+                </View>
+                <View style={{ flex: 1, minWidth: 0 }}>
+                  <Text style={s.cardTitle} numberOfLines={1}>{option.label}</Text>
+                  <Text style={s.cardSub} numberOfLines={1}>{option.sub}</Text>
+                </View>
+                {extremeActive && option.active ? <Ionicons name="checkmark-circle" size={18} color={option.color} /> : null}
+              </TouchableOpacity>
+            )) : null}
           </ScrollView>
         </TouchableOpacity>
       </TouchableOpacity>
@@ -188,6 +223,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderColor: '#4b5563',
     backgroundColor: '#18181b',
   },
+  premiumCard: {
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.055)',
+  },
   preview: {
     width: 58,
     height: 44,
@@ -260,5 +299,13 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     color: '#ef4444',
     fontSize: 12.5,
     fontWeight: '900',
+  },
+  premiumPreview: {
+    width: 58,
+    height: 44,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -207,13 +207,28 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  endExplorerSession: (session_id: string, reason = 'ended') =>
+    req<{ ok: boolean; session_id: string; status: string; ended_at?: number }>('/api/explorer/session/end', {
+      method: 'POST',
+      body: JSON.stringify({ session_id, reason }),
+    }),
   endExtremeSession: (session_id: string, reason = 'ended') =>
     req<{ ok: boolean; session_id: string; status: string; ended_at?: number }>('/api/extreme/session/end', {
       method: 'POST',
       body: JSON.stringify({ session_id, reason }),
     }),
+  logExplorerLedger: (data: ExtremeLedgerRequest) =>
+    req<{ ok: boolean; event_id: number }>('/api/explorer/ledger', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   logExtremeLedger: (data: ExtremeLedgerRequest) =>
     req<{ ok: boolean; event_id: number }>('/api/extreme/ledger', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  authorizeExplorerNavigation: (data: ExtremeNavigationAuthorizeRequest) =>
+    req<ExtremeNavigationAuthorizeResponse>('/api/explorer/navigation/authorize', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -777,6 +792,7 @@ export interface SupportThread {
   messages?: SupportMessage[];
 }
 export type ExtremeSurface = 'map_layers' | 'map' | 'route_builder' | 'navigation' | 'copilot' | 'weather';
+export type ExplorerSurface = ExtremeSurface;
 export type ExtremeCheckpointType = 'start' | 'fuel' | 'stay' | 'camp' | 'food' | 'repair' | 'viewpoint' | 'weather' | 'finish' | string;
 export interface ExtremeCheckpoint {
   id: string;
@@ -793,6 +809,7 @@ export interface ExtremeCheckpoint {
   confidence?: 'high' | 'medium' | 'low' | 'estimated' | string;
   expires_at?: number | null;
 }
+export type ExplorerCheckpoint = ExtremeCheckpoint;
 export interface TripMemory {
   vehicle?: Record<string, unknown>;
   range?: Record<string, unknown>;
@@ -866,6 +883,7 @@ export interface ExtremeConfig {
     permanent_copilot_mutations?: boolean;
   };
 }
+export type ExplorerConfig = ExtremeConfig;
 export interface ExtremeSessionAuthorizeRequest {
   surface: ExtremeSurface;
   trip_id?: string | null;

@@ -217,36 +217,35 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 25 - Route Builder Stop Preview Cards:
+Checkpoint 26 - Route Builder Discovery Candidate Cleanup:
 
-- Code commit: `0b6f1a8` (`Extract route builder stop preview cards`), pushed
+- Code commit: `485482d` (`Clean route builder discovery candidate styles`), pushed
   to `master`.
 - Production OTA update group:
-  `c73e1a00-56f1-42c1-8dde-dae19dab79a9`
+  `1d16b311-7f19-4095-81e9-5ff1f628e462`
 - Preview OTA update group:
-  `53125ce1-8b85-46c5-b5c8-b5edd306881f`
+  `8c5687a2-3b95-41ef-95fe-ec277fb24791`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-25-route-builder-stop-preview-cards-audit.md`.
+  `docs/live-upgrade-checkpoint-26-route-builder-discovery-candidate-cleanup-audit.md`.
 
 ## Current Checkpoint Record
 
-Checkpoint 26 - Route Builder Discovery Candidate Cleanup:
+Checkpoint 27 - Route Builder Discovery State Boundary:
 
 - Code commit: pending.
 - Production OTA update group: pending.
 - Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
-- Audit doc:
-  `docs/live-upgrade-checkpoint-26-route-builder-discovery-candidate-cleanup-audit.md`.
-- Playwright evidence:
-  `http://127.0.0.1:8100/route-builder` reload with no current console errors.
-- Validation:
-  - `cd mobile && npx tsc --noEmit`
-  - `cd mobile && npm run audit:copy`
-  - `cd mobile && npm run audit:routes`
-  - `rg "candidateRow|candidateIcon|campCandidate|candidateName|candidateMeta" "mobile/app/(tabs)/route-builder.tsx"`
-  - `git diff --check`
+- Audit doc: pending.
+- Design decision: pending.
+- Scope:
+  - Audit route discovery state and scan helpers for the next extraction
+    boundary.
+  - Keep provider calls, offline fallback, camp replacement, add-place
+    behavior, selected camp sheets, and route calculations unchanged.
+  - Continue Mobbin/Figma research against route discovery sheets and search
+    result workflows before code.
 
 ## Repo Note
 

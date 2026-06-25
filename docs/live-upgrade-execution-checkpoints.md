@@ -247,13 +247,16 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `53125ce1-8b85-46c5-b5c8-b5edd306881f`.
 
 26. **Route Builder Discovery Candidate Cleanup**
-    - Status: complete, pending release.
+    - Status: complete and released.
     - Removed stale candidate-row and camp-candidate styles now that live inline
       discovery results render through `RouteBuilderInlineResults`.
     - Keep discovery filtering, camp replacement, add-place behavior, selected
       camp sheets, and route calculations unchanged.
     - Audited dead references before code and saved design decision, audit
       checkpoint, Playwright smoke, and validation evidence.
+    - Release: production OTA
+      `1d16b311-7f19-4095-81e9-5ff1f628e462`; preview OTA
+      `8c5687a2-3b95-41ef-95fe-ec277fb24791`.
 
 27. **Route Builder Discovery State Boundary**
     - Status: queued.

@@ -65,4 +65,10 @@
 
 ## Release
 
-- Pending commit, push, and OTA.
+- Code commit: `485482d` (`Clean route builder discovery candidate styles`),
+  pushed to `master`.
+- Production OTA update group:
+  `1d16b311-7f19-4095-81e9-5ff1f628e462`
+- Preview OTA update group:
+  `8c5687a2-3b95-41ef-95fe-ec277fb24791`
+- Runtime: `native-20260614-sdk54-1`.

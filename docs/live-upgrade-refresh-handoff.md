@@ -206,17 +206,17 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 16 - Route Builder Stop Rows:
+Checkpoint 17 - Route Builder Footer Dock:
 
-- Code commit: `f32db0f` (`Extract route builder stop rows`), pushed to
+- Code commit: `bc83331` (`Extract route builder footer dock`), pushed to
   `master`.
 - Production OTA update group:
-  `5a097e8e-2c23-406b-883d-ba86896bf0d8`
+  `e707456e-fd48-4fef-9875-f4ede9cde94d`
 - Preview OTA update group:
-  `ded0f229-27f9-4ddb-877a-410a8fe7b2d0`
+  `cd4e38e3-b02c-453b-84d5-6087c8f9bdff`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-16-route-builder-stop-rows-audit.md`.
+  `docs/live-upgrade-checkpoint-17-route-builder-footer-dock-audit.md`.
 
 ## Repo Note
 

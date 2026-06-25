@@ -75,9 +75,24 @@
 
 ## Release
 
-- GitHub commit: pending.
-- Production OTA: pending.
-- Preview OTA: pending.
+- GitHub commit: `bc83331` (`Extract route builder footer dock`), pushed to
+  `master`.
+- Production OTA:
+  - Channel: `production`
+  - Runtime: `native-20260614-sdk54-1`
+  - Update group ID: `e707456e-fd48-4fef-9875-f4ede9cde94d`
+  - Android update ID: `019eff99-9226-77ff-8a80-77a2edff9c52`
+  - iOS update ID: `019eff99-9226-747a-8113-cec3f7334ad4`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/e707456e-fd48-4fef-9875-f4ede9cde94d`
+- Preview OTA:
+  - Channel: `preview`
+  - Runtime: `native-20260614-sdk54-1`
+  - Update group ID: `cd4e38e3-b02c-453b-84d5-6087c8f9bdff`
+  - Android update ID: `019eff9a-405c-7f28-ba99-d34de40b8f21`
+  - iOS update ID: `019eff9a-405c-78ba-8e0f-eb268d0e3b77`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/cd4e38e3-b02c-453b-84d5-6087c8f9bdff`
 
 ## Remaining Risks
 

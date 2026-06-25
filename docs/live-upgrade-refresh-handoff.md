@@ -2,15 +2,16 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 19 implemented, pushed, and OTA released.
+**Status at save time:** Checkpoint 21 implemented and validated; release
+pending in the current turn.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
 
 ## Current State
 
-- Checkpoints 1-19 are complete through the Route Builder Inline Discovery
-  Results slice in `docs/live-upgrade-execution-checkpoints.md`.
+- Checkpoints 1-21 are complete through the Route Builder Search Flow
+  Extraction slice in `docs/live-upgrade-execution-checkpoints.md`.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
   `8ff520a Polish planner composer checkpoint`.
@@ -30,13 +31,14 @@ tools. It captures what is already complete and what should happen next.
   `121ff29d-88da-4d4f-98e0-04f633a729fb`.
 - Latest route/search preview OTA:
   `f579cc32-ab38-4a82-b1ae-63ed7baac40c`.
+- Latest shipped route-builder checkpoint:
+  Checkpoint 20 extracted route-fit card assembly into
+  `mobile/lib/routeBuilder/routeFit.ts` and shipped production/preview OTA.
 - Latest local route-builder checkpoint:
-  Checkpoint 19 extracted `RouteBuilderInlineResults`,
-  `RouteBuilderInlineCampCard`, and `RouteBuilderInlineResultRow`, removed
-  stale inline-result styles, and added footer scroll clearance for phone
-  viewports.
-- Current repo check before this handoff: Checkpoint 19 validation, push, and
-  OTA release passed.
+  Checkpoint 21 extracted search scoring, result dedupe, lookup orchestration,
+  and selected-place stop mapping into `mobile/lib/routeBuilder/searchFlow.ts`.
+- Current repo check before this handoff: Checkpoint 21 validation passed;
+  commit, push, and OTA release are pending in the current turn.
 
 ## MCP / Research State
 
@@ -77,6 +79,8 @@ fresh shipped-app references.
 17. Route Builder Footer Dock.
 18. Route Builder Timeline Day Rows.
 19. Route Builder Inline Discovery Results.
+20. Route Builder Route Fit Cards.
+21. Route Builder Search Flow Extraction.
 
 ## Remaining Work Queue
 
@@ -104,12 +108,14 @@ Checkpoint 17 extracted the fixed footer dock.
 Checkpoint 18 extracted route timeline day cards.
 Checkpoint 19 extracted inline discovery result rows and added footer scroll
 clearance.
+Checkpoint 20 extracted route-fit card assembly.
+Checkpoint 21 extracted route-builder search flow helpers.
 Still
 needed:
 
+- Search surface component extraction.
 - Recent/saved strip.
 - Smart suggestions drawer.
-- Route-fit cards.
 - More extraction from `mobile/app/(tabs)/route-builder.tsx`.
 
 Keep route computation and Mapbox bridge logic outside the screen.
@@ -225,6 +231,18 @@ Checkpoint 20 - Route Builder Route Fit Cards:
 - Audit doc:
   `docs/live-upgrade-checkpoint-20-route-builder-route-fit-cards-audit.md`.
 
+## Current Checkpoint Record
+
+Checkpoint 21 - Route Builder Search Flow Extraction:
+
+- Code commit: pending.
+- Production OTA update group: pending.
+- Preview OTA update group: pending.
+- Audit doc:
+  `docs/live-upgrade-checkpoint-21-route-builder-search-flow-audit.md`.
+- Playwright evidence:
+  `/tmp/trailhead-route-builder-checkpoint-21-search-results-web.png`
+
 ## Repo Note
 
 Two filenames from the earlier instruction were not present at the exact paths
@@ -238,11 +256,11 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 21 - Route Builder Search Flow Extraction**
+**Checkpoint 22 - Route Builder Search Surface Component**
 
-Extract route-builder search/result state and place-add mapping from
-`mobile/app/(tabs)/route-builder.tsx` where it can be shared with map search and
-Planner/Copilot route handoff flows. Keep provider calls, Android lookup
-fallback, saved geometry, route-fit cards, and existing search result behavior
-unchanged; audit against Mobbin travel search, route-stop, and saved-place
-patterns plus the existing Figma checkpoint board before code.
+Extract the Route Builder search type chips, insert notice placement, search
+box, and result rows into a presentational component. Keep the Checkpoint 21
+helper, provider calls, Android lookup fallback, saved geometry, route
+computation, and existing result behavior unchanged; audit against Mobbin travel
+destination pickers, itinerary add-place flows, and compact route-stop search
+surfaces plus the existing Figma checkpoint board before code.

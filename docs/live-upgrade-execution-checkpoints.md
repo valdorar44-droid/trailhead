@@ -177,13 +177,25 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `5a4df7c2-16e2-4f71-824b-1a401fad02d8`.
 
 21. **Route Builder Search Flow Extraction**
-    - Status: queued.
-    - Extract route-builder search/result state and place-add mapping where it
+    - Status: complete for helper extraction; release pending.
+    - Extracted route-builder search/result state and place-add mapping where it
       can be shared with map search and Planner/Copilot route handoff flows.
-    - Keep provider calls, Android lookup fallback, saved geometry, and
+    - Kept provider calls, Android lookup fallback, saved geometry, and
       existing search result behavior unchanged.
-    - Continue Mobbin/Figma research against travel search and route-stop
-      patterns before code.
+    - Reviewed Mobbin/Figma travel search and route-stop patterns before code.
+    - Saved design decision, audit checkpoint, and Playwright smoke
+      screenshots.
+
+22. **Route Builder Search Surface Component**
+    - Status: queued.
+    - Extract the Route Builder search type chips, insert notice placement,
+      search box, and result rows into a presentational component.
+    - Keep the Checkpoint 21 helper, provider calls, Android lookup fallback,
+      saved geometry, route computation, and existing result behavior
+      unchanged.
+    - Continue Mobbin/Figma research against travel destination pickers,
+      itinerary add-place flows, and compact route-stop search surfaces before
+      code.
 
 ## Refresh Handoff
 
@@ -208,6 +220,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-18-route-builder-timeline-day-rows-audit.md`.
 - Checkpoint 19 inline discovery-result extraction context is saved in
   `docs/live-upgrade-checkpoint-19-route-builder-inline-discovery-results-audit.md`.
+- Checkpoint 21 search-flow extraction context is saved in
+  `docs/live-upgrade-checkpoint-21-route-builder-search-flow-audit.md`.
 
 ## Validation Gate
 

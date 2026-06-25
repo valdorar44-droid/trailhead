@@ -3,5 +3,6 @@ export * from './geometry';
 export * from './model';
 export * from './readiness';
 export * from './routeFit';
+export * from './searchFlow';
 export * from './session';
 export * from './units';

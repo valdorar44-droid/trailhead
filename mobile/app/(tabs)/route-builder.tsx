@@ -49,6 +49,7 @@ import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
+  buildRouteBuilderSearchStop,
   buildRouteFitCards,
   buildRouteBuilderSession,
   buildRouteLocationsForShape,
@@ -60,6 +61,10 @@ import {
   rebalanceAfterCampSelection,
   routeUnitsParam,
   savedGeometryFromCoords,
+  resolveRouteBuilderSearchResults,
+  searchOfflineRouteBuilderPlaces,
+  type RouteBuilderSearchPlace,
+  type RouteBuilderStopType,
   type RouteFitCard,
   type ProviderRouteGeometry,
   type RouteBuilderIntent,
@@ -122,7 +127,7 @@ function campPhotoItems(camp?: Partial<CampsitePin> | null, detail?: Partial<Cam
   return items;
 }
 
-type BuilderStopType = 'start' | 'fuel' | 'waypoint' | 'camp' | 'motel';
+type BuilderStopType = RouteBuilderStopType;
 type BuilderStop = {
   id: string;
   day: number;
@@ -142,7 +147,7 @@ type BuilderStop = {
   campWindowLabel?: string;
   routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
 };
-type SearchPlace = { name: string; lat: number; lng: number };
+type SearchPlace = RouteBuilderSearchPlace;
 type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
 type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'private' | 'any';
 type CampCadenceMode = 'nightly' | 'alternate' | 'manual';
@@ -907,52 +912,6 @@ function areaScopedOfflinePlaces(points: OsmPoi[], center: { lat: number; lng: n
     .filter(point => (point.route_distance_mi ?? 999) <= radiusMi)
     .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999))
   );
-}
-
-function offlinePlaceSearchText(place: OsmPoi) {
-  return [
-    place.name,
-    place.type,
-    place.subtype,
-    place.source_label,
-    place.address,
-    place.trek_name,
-    place.stage_name,
-    ...(Array.isArray((place as any).aliases) ? (place as any).aliases : []),
-    ...(Array.isArray((place as any).search_terms) ? (place as any).search_terms : []),
-    ...(Array.isArray((place as any).local_terms) ? (place as any).local_terms : []),
-    ...(Array.isArray((place as any).tags) ? (place as any).tags : []),
-    ...(Array.isArray((place as any).site_types) ? (place as any).site_types : []),
-  ].filter(Boolean).join(' ').toLowerCase();
-}
-
-function searchOfflinePlaces(points: OsmPoi[], query: string, limit = 10): SearchPlace[] {
-  const q = query.trim().toLowerCase();
-  if (q.length < 2) return [];
-  const tokens = q.split(/\s+/).filter(Boolean);
-  return points
-    .map(place => {
-      const name = place.name.toLowerCase();
-      const text = offlinePlaceSearchText(place);
-      let score = 0;
-      if (name === q) score += 120;
-      if (name.includes(q)) score += 70;
-      if (text.includes(q)) score += 45;
-      for (const token of tokens) {
-        if (name.includes(token)) score += 16;
-        else if (text.includes(token)) score += 8;
-      }
-      if (place.source?.includes('pakistan') || text.includes('pakistan') || text.includes('karakoram')) score += 4;
-      return { place, score };
-    })
-    .filter(row => row.score > 0)
-    .sort((a, b) => b.score - a.score || a.place.name.localeCompare(b.place.name))
-    .slice(0, limit)
-    .map(({ place }) => ({
-      name: `${place.name}${place.subtype ? ` · ${String(place.subtype).replace(/_/g, ' ')}` : ''}`,
-      lat: place.lat,
-      lng: place.lng,
-    }));
 }
 
 function stopTypeFromWaypoint(type?: string): BuilderStopType {
@@ -2075,15 +2034,7 @@ export default function RouteBuilderScreen() {
   }
 
   function addPlace(place: SearchPlace, type = pendingType) {
-    addStop({
-      name: place.name,
-      lat: place.lat,
-      lng: place.lng,
-      type,
-      description: type === 'start' ? 'Manual route start.' : 'Manual route stop.',
-      land_type: type === 'fuel' || type === 'motel' ? 'town' : 'route',
-      source: 'search',
-    });
+    addStop(buildRouteBuilderSearchStop(place, type));
     setSearchResults([]);
     setQuery('');
   }
@@ -2158,17 +2109,13 @@ export default function RouteBuilderScreen() {
     if (!query.trim()) return;
     setSearching(true);
     try {
-      const offlineMatches = searchOfflinePlaces(offlinePlaces, query.trim());
-      const onlineMatches = await geocodePlaces(query.trim()).catch(() => [] as SearchPlace[]);
-      const seen = new Set<string>();
-      setSearchResults([...offlineMatches, ...onlineMatches].filter(place => {
-        const key = `${place.name.toLowerCase()}:${place.lat.toFixed(4)}:${place.lng.toFixed(4)}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      }).slice(0, 12));
+      setSearchResults(await resolveRouteBuilderSearchResults({
+        query,
+        offlinePlaces,
+        searchOnline: geocodePlaces,
+      }));
     } catch {
-      setSearchResults(searchOfflinePlaces(offlinePlaces, query.trim()));
+      setSearchResults(searchOfflineRouteBuilderPlaces(offlinePlaces, query.trim()));
     } finally {
       setSearching(false);
     }

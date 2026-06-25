@@ -2,8 +2,7 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 19 implemented and validated; push/OTA
-release pending.
+**Status at save time:** Checkpoint 19 implemented, pushed, and OTA released.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
@@ -36,8 +35,8 @@ tools. It captures what is already complete and what should happen next.
   `RouteBuilderInlineCampCard`, and `RouteBuilderInlineResultRow`, removed
   stale inline-result styles, and added footer scroll clearance for phone
   viewports.
-- Current repo check before this handoff: Checkpoint 19 validation passed;
-  release record pending push/OTA.
+- Current repo check before this handoff: Checkpoint 19 validation, push, and
+  OTA release passed.
 
 ## MCP / Research State
 
@@ -214,17 +213,17 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 18 - Route Builder Timeline Day Rows:
+Checkpoint 19 - Route Builder Inline Discovery Results:
 
-- Code commit: `3938aff` (`Extract route builder timeline day rows`), pushed to
-  `master`.
+- Code commit: `f7f4615` (`Extract route builder inline discovery results`),
+  pushed to `master`.
 - Production OTA update group:
-  `21ff72c3-a030-4e74-ac95-346cbfb09322`
+  `633e6107-d6b3-4805-ac77-beaae2cc5c92`
 - Preview OTA update group:
-  `7099756b-4036-4f3b-8561-c2b67f235263`
+  `7c051970-48ee-403c-a514-88fb3b498e99`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-18-route-builder-timeline-day-rows-audit.md`.
+  `docs/live-upgrade-checkpoint-19-route-builder-inline-discovery-results-audit.md`.
 
 ## Repo Note
 

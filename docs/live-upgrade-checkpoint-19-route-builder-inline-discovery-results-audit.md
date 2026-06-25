@@ -84,9 +84,13 @@ content clearance.
 
 ## Release
 
-- GitHub commit: pending.
-- Production OTA: pending.
-- Preview OTA: pending.
+- GitHub commit: `f7f4615` (`Extract route builder inline discovery results`),
+  pushed to `master`.
+- Production OTA update group:
+  `633e6107-d6b3-4805-ac77-beaae2cc5c92`
+- Preview OTA update group:
+  `7c051970-48ee-403c-a514-88fb3b498e99`
+- Runtime: `native-20260614-sdk54-1`.
 
 ## Remaining Risks
 

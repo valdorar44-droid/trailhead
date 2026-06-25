@@ -99,9 +99,24 @@
 
 ## Release
 
-- GitHub commit: pending.
-- Production OTA: pending.
-- Preview OTA: pending.
+- GitHub commit: `f32db0f` (`Extract route builder stop rows`), pushed to
+  `master`.
+- Production OTA:
+  - Channel: `production`
+  - Runtime: `native-20260614-sdk54-1`
+  - Update group ID: `5a097e8e-2c23-406b-883d-ba86896bf0d8`
+  - Android update ID: `019eff8f-4ecd-71aa-833a-1f3fd5ca905e`
+  - iOS update ID: `019eff8f-4ecd-79ba-bb7f-46197ddb7482`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/5a097e8e-2c23-406b-883d-ba86896bf0d8`
+- Preview OTA:
+  - Channel: `preview`
+  - Runtime: `native-20260614-sdk54-1`
+  - Update group ID: `ded0f229-27f9-4ddb-877a-410a8fe7b2d0`
+  - Android update ID: `019eff8f-fa9b-70f5-9f10-27e74afd765a`
+  - iOS update ID: `019eff8f-fa9b-7b8b-81ac-a7efe1d9a2dc`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/ded0f229-27f9-4ddb-877a-410a8fe7b2d0`
 
 ## Remaining Risks
 

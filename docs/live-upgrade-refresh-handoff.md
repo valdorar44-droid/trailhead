@@ -204,6 +204,20 @@ Native smoke tests still needed:
 - Explore horizontal controls.
 - Offline/download flows.
 
+## Latest Release Record
+
+Checkpoint 16 - Route Builder Stop Rows:
+
+- Code commit: `f32db0f` (`Extract route builder stop rows`), pushed to
+  `master`.
+- Production OTA update group:
+  `5a097e8e-2c23-406b-883d-ba86896bf0d8`
+- Preview OTA update group:
+  `ded0f229-27f9-4ddb-877a-410a8fe7b2d0`
+- Runtime: `native-20260614-sdk54-1`.
+- Audit doc:
+  `docs/live-upgrade-checkpoint-16-route-builder-stop-rows-audit.md`.
+
 ## Repo Note
 
 Two filenames from the earlier instruction were not present at the exact paths

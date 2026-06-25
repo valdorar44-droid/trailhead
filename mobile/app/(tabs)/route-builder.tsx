@@ -1325,6 +1325,21 @@ async function geocodePlaces(query: string): Promise<SearchPlace[]> {
   if (coord && coord.length >= 2 && Math.abs(coord[0]) <= 90 && Math.abs(coord[1]) <= 180) {
     return [{ name: `${coord[0].toFixed(5)}, ${coord[1].toFixed(5)}`, lat: coord[0], lng: coord[1] }];
   }
+  const mapContextPlaces = await api.mapContextResolve({
+    q: query,
+    limit: 8,
+    types: 'poi,place,address',
+    language: 'en',
+    metadata: { surface: 'route_builder', source: 'route_builder_geocode' },
+  }).then(res => res.places ?? []).catch(() => []);
+  if (mapContextPlaces.length) {
+    return mapContextPlaces.map(place => ({
+      name: place.name,
+      lat: place.lat,
+      lng: place.lng,
+      source: 'search',
+    }));
+  }
   const serverPlaces = await api.geocodePlaces(query, 8).catch(() => [] as GeocodePlace[]);
   if (serverPlaces.length) return serverPlaces;
   const res = await fetch(
@@ -1337,6 +1352,61 @@ async function geocodePlaces(query: string): Promise<SearchPlace[]> {
     lat: Number(p.lat),
     lng: Number(p.lon),
   })).filter((p: SearchPlace) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+}
+
+async function searchMapContextNearby(query: string, center: { lat: number; lng: number }, radiusMi = 25, type: OsmPoi['type'] = 'poi', limit = 8): Promise<OsmPoi[]> {
+  const latDelta = radiusMi / 69;
+  const lngDelta = radiusMi / Math.max(8, 69 * Math.cos(center.lat * Math.PI / 180));
+  const bbox = `${(center.lng - lngDelta).toFixed(6)},${(center.lat - latDelta).toFixed(6)},${(center.lng + lngDelta).toFixed(6)},${(center.lat + latDelta).toFixed(6)}`;
+  const category = type === 'fuel'
+    ? 'fuel'
+    : type === 'lodging'
+      ? 'lodging'
+      : type === 'viewpoint'
+        ? 'viewpoint'
+        : type === 'trailhead' || type === 'trail'
+          ? 'trailhead'
+          : type === 'grocery'
+            ? 'grocery'
+            : type === 'water'
+              ? 'water'
+              : 'attraction';
+  const data = await api.mapContextSearch({
+    q: query,
+    category,
+    center,
+    proximity: `${center.lng},${center.lat}`,
+    bbox,
+    limit,
+    language: 'en',
+    metadata: { surface: 'route_builder', source: 'route_builder_nearby', type },
+  }).catch(() => ({ places: [] }));
+  return (data.places ?? []).map((place: any) => ({
+    id: String(place.id || place.mapbox_id || `mapbox_${place.lat}_${place.lng}`),
+    name: String(place.name || query),
+    lat: Number(place.lat),
+    lng: Number(place.lng),
+    type,
+    subtype: String(place.subtype || place.feature_type || category),
+    source: 'mapbox_search',
+    source_label: 'Mapbox Search',
+    provider_place_id: place.provider_place_id || place.mapbox_id,
+    place_id: place.place_id || place.mapbox_id,
+    address: place.address,
+    phone: place.phone,
+    website: place.website,
+    rating: place.rating,
+    rating_count: place.rating_count,
+    average_rating: place.average_rating,
+    review_count: place.review_count,
+    attribution: 'Mapbox',
+    mapbox_id: place.mapbox_id,
+    mapbox_categories: place.mapbox_categories || place.categories,
+    distance_mi: place.distance_mi,
+    distance_meters: place.distance_meters,
+    enrichment_source: 'mapbox_searchbox_rest',
+    enrichment_status: 'enriched',
+  })).filter((p: OsmPoi) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
 }
 
 async function searchNominatimNearby(query: string, center: { lat: number; lng: number }, radiusMi = 25, type: OsmPoi['type'] = 'poi', limit = 8): Promise<OsmPoi[]> {
@@ -2202,7 +2272,7 @@ export default function RouteBuilderScreen() {
       };
     }
     try {
-      const routed = await api.buildRoute([
+      const routed = await buildBridgeRoute([
         { lat: leg.from.lat, lng: leg.from.lng, type: 'break' },
         { lat: leg.to.lat, lng: leg.to.lng, type: 'break' },
       ], {
@@ -2284,14 +2354,15 @@ export default function RouteBuilderScreen() {
       } else if (tab === 'gas') {
         if (useLeg) {
           const radius = Math.max(32, Math.min(64, searchLeg!.miles / 4 + 14));
-          const nrelStations = uniqueByGeo((await Promise.all(
-            legSamplePoints(searchLeg!).map(point => api.getGas(point.lat, point.lng, radius).catch(() => []))
-          )).flat());
-          const osmFuel = uniqueByGeo((await Promise.all(
-            legSamplePoints(searchLeg!).map(point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES).catch(() => []))
-          )).flat());
+          const samplePoints = legSamplePoints(searchLeg!);
+          const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
+            Promise.all(samplePoints.map(point => api.getGas(point.lat, point.lng, radius).catch(() => []))).then(items => uniqueByGeo(items.flat())),
+            Promise.all(samplePoints.map(point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES).catch(() => []))).then(items => uniqueByGeo(items.flat())),
+            Promise.all(samplePoints.map(point => searchMapContextNearby('gas station', point, radius, 'fuel', 5).catch(() => []))).then(items => uniqueByGeo(items.flat())),
+          ]);
           const offlineFuel = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['fuel', 'propane']);
           const stations = uniqueByGeo([
+            ...mapboxFuel.map(poiToGasStation),
             ...nrelStations,
             ...osmFuel.map(poiToGasStation),
             ...offlineFuel.map(poiToGasStation),
@@ -2308,12 +2379,14 @@ export default function RouteBuilderScreen() {
           );
           storeDiscoveryResults(key, { gas: scoped, summary: `${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg` });
         } else {
-          const [nrelStations, osmFuel] = await Promise.all([
+          const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
             api.getGas(target.lat, target.lng, 35).catch(() => []),
             api.getOsmPois(target.lat, target.lng, 35, FUEL_POI_TYPES).catch(() => []),
+            searchMapContextNearby('gas station', target, 35, 'fuel', 8).catch(() => []),
           ]);
           const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], 45);
           const stations = uniqueByGeo([
+            ...mapboxFuel.map(poiToGasStation),
             ...nrelStations,
             ...osmFuel.map(poiToGasStation),
             ...offlineFuel.map(poiToGasStation),
@@ -2376,6 +2449,20 @@ export default function RouteBuilderScreen() {
               ['water', 'water'],
               ['grocery', 'grocery'],
             ];
+            const mapboxPlaces = uniqueByGeo((await Promise.all(
+              legSamplePoints(searchLeg!).flatMap(point =>
+                fallbackQueries.map(([query, type]) => searchMapContextNearby(query, point, radius, type, 3).catch(() => []))
+              )
+            )).flat());
+            routePlaces.push(...mapboxPlaces);
+          }
+          if (routePlaces.length === 0) {
+            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
+              ['trailhead', 'trailhead'],
+              ['viewpoint', 'viewpoint'],
+              ['water', 'water'],
+              ['grocery', 'grocery'],
+            ];
             const nominatimPlaces = uniqueByGeo((await Promise.all(
               legSamplePoints(searchLeg!).flatMap(point =>
                 fallbackQueries.map(([query, type]) => searchNominatimNearby(query, point, radius, type, 3).catch(() => []))
@@ -2399,6 +2486,18 @@ export default function RouteBuilderScreen() {
             45
           );
           const routePlaces = uniqueByGeo([...found, ...offlineRoutePlaces]);
+          if (routePlaces.length === 0) {
+            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
+              ['trailhead', 'trailhead'],
+              ['viewpoint', 'viewpoint'],
+              ['water', 'water'],
+              ['grocery', 'grocery'],
+            ];
+            const mapboxPlaces = uniqueByGeo((await Promise.all(
+              fallbackQueries.map(([query, type]) => searchMapContextNearby(query, target, 40, type, 5).catch(() => []))
+            )).flat());
+            routePlaces.push(...mapboxPlaces);
+          }
           if (routePlaces.length === 0) {
             const fallbackQueries: Array<[string, OsmPoi['type']]> = [
               ['trailhead', 'trailhead'],
@@ -3156,6 +3255,19 @@ export default function RouteBuilderScreen() {
     return points;
   }
 
+  async function buildBridgeRoute(
+    locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>,
+    opts: { backRoads: boolean; avoidHighways: boolean; avoidTolls: boolean; noFerries: boolean },
+    units: 'miles' | 'kilometers',
+  ) {
+    try {
+      return await api.mapContextRouteBuild(locations, opts, units);
+    } catch (err) {
+      console.warn('Route Builder Mapbox bridge route failed; falling back to Trailhead route', err instanceof Error ? err.message : err);
+      return api.buildRoute(locations, opts, units);
+    }
+  }
+
   async function buildRouteSpine(first: BuilderStop, last: BuilderStop): Promise<RouteSpineBuild | null> {
     if (closeEnough(first, last)) {
       setRouteGeometry(null);
@@ -3184,7 +3296,7 @@ export default function RouteBuilderScreen() {
         routeStyle,
       });
       const units = routeUnitsParam(weatherUnitMode);
-      const routed = await api.buildRoute(locations.map(loc => ({ lat: loc.lat, lng: loc.lng, type: loc.type })), opts, units);
+      const routed = await buildBridgeRoute(locations.map(loc => ({ lat: loc.lat, lng: loc.lng, type: loc.type })), opts, units);
       const geometry = providerGeometryFromRoute(routed, units);
       if (geometry.coords.length >= 2) {
         setRouteGeometry(geometry);
@@ -3210,7 +3322,7 @@ export default function RouteBuilderScreen() {
     if (navStops.length < 2) return null;
     try {
       const units = routeUnitsParam(weatherUnitMode);
-      const routed = await api.buildRoute(
+      const routed = await buildBridgeRoute(
         navStops.map(st => ({
           lat: st.lat,
           lng: st.lng,

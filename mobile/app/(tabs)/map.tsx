@@ -8031,26 +8031,23 @@ function MapScreen() {
   }
 
   async function openExtremeReversePlace(lat: number, lng: number) {
-    if (!extremeMapLayerActive || !extremeConfig?.feature_flags?.search || mapZoom < 13) return false;
+    if (!extremeConfig?.enabled || mapZoom < 13) return false;
     try {
-      const data = await api.extremeSearchReverse({
+      const data = await api.mapContextReverse({
         lat,
         lng,
         limit: 1,
         types: 'poi,address,place',
+        metadata: { surface: 'map', source: 'map_tap_reverse' },
       });
-      const feature = data.features?.[0];
-      const props = feature?.properties ?? {};
-      const coords = feature?.geometry?.type === 'Point' && Array.isArray(feature.geometry.coordinates)
-        ? feature.geometry.coordinates
-        : [lng, lat];
-      const name = String(props.name || props.full_address || props.place_formatted || props.address || '').trim();
-      const nextLng = Number(coords[0]);
-      const nextLat = Number(coords[1]);
+      const place = data.selected ?? data.places?.[0];
+      const name = String(place?.name || place?.address || '').trim();
+      const nextLng = Number(place?.lng ?? lng);
+      const nextLat = Number(place?.lat ?? lat);
       if (!name || !Number.isFinite(nextLat) || !Number.isFinite(nextLng)) return false;
       const tapDistanceM = haversineKm(lat, lng, nextLat, nextLng) * 1000;
       if (!Number.isFinite(tapDistanceM) || tapDistanceM > 70) return false;
-      const type = String(props.poi_category?.[0] || props.feature_type || props.category || 'poi').toLowerCase().replace(/[^a-z0-9_]+/g, '_') || 'poi';
+      const type = String(place?.type || place?.feature_type || place?.mapbox_categories?.[0] || 'poi').toLowerCase().replace(/[^a-z0-9_]+/g, '_') || 'poi';
       setSearchRouteCard(null);
       setShowSearch(false);
       setShowDiscoveryPanel(false);
@@ -8062,15 +8059,15 @@ function MapScreen() {
         lat: nextLat,
         lng: nextLng,
         type,
-        subtype: String(props.poi_category?.[0] || props.feature_type || props.category || '').replace(/[_-]+/g, ' '),
+        subtype: String(place?.subtype || place?.mapbox_categories?.[0] || place?.feature_type || '').replace(/[_-]+/g, ' '),
         source: 'mapbox_search',
         source_label: 'Mapbox Search',
-        provider_place_id: props.mapbox_id,
-        place_id: props.mapbox_id,
-        address: props.full_address || props.place_formatted || props.address,
+        provider_place_id: (place?.provider_place_id || place?.mapbox_id) ?? undefined,
+        place_id: (place?.place_id || place?.mapbox_id) ?? undefined,
+        address: place?.address,
         attribution: 'Mapbox',
         enrichment_source: 'mapbox_searchbox_rest',
-        enrichment_status: 'unavailable',
+        enrichment_status: place ? 'enriched' : 'unavailable',
       });
       setSelectedCamp(null);
       setTappedTrail(null);
@@ -8079,7 +8076,7 @@ function MapScreen() {
       setTappedPoi(null);
       setSelectedCommunityPin(null);
       setSelectedTrail(null);
-      focusPlaceCamera({ name, lat: nextLat, lng: nextLng, type, subtype: String(props.poi_category?.[0] || props.feature_type || props.category || '') }, 15, type);
+      focusPlaceCamera({ name, lat: nextLat, lng: nextLng, type, subtype: String(place?.subtype || place?.mapbox_categories?.[0] || place?.feature_type || '') }, 15, type);
       return true;
     } catch {
       return false;
@@ -10430,6 +10427,11 @@ function MapScreen() {
     };
   }
 
+  function mapContextPlaceToCopilotPlace(raw: Record<string, unknown> | null | undefined, center: { lat: number; lng: number }, category: string): SearchPlace | null {
+    if (!raw) return null;
+    return mapboxNativeResultToPlace(raw, center, category) || osmPoiToCopilotPlace(raw as unknown as OsmPoi, center, category);
+  }
+
   function mergeRenderedMapboxDetails(base: SearchPlace, enriched: SearchPlace, feature: MapSelectableFeature): SearchPlace {
     return {
       ...base,
@@ -10472,35 +10474,21 @@ function MapScreen() {
 
   async function runMapboxSuggestPlaceSearch(q: string, center: { lat: number; lng: number }, category: string, limit: number, bbox: string): Promise<SearchPlace[]> {
     const clean = q.trim();
-    if (!clean || !extremeConfig?.feature_flags?.search) return [];
+    if (!clean || !extremeConfig?.enabled) return [];
     try {
-      const session = await api.extremeSearchSession({ source: 'copilot_text_place_search', q: clean.slice(0, 80) });
-      const suggestions = await api.extremeSearchSuggest({
+      const data = await api.mapContextSearch({
         q: clean,
-        session_token: session.session_token,
+        category,
+        center,
         proximity: `${center.lng},${center.lat}`,
         origin: `${center.lng},${center.lat}`,
         bbox,
-        types: 'poi,place,address',
         language: 'en',
         limit: Math.min(limit, 10),
+        metadata: { surface: 'map_copilot', source: 'copilot_text_place_search' },
       });
-      const candidates = (suggestions.suggestions ?? [])
-        .map((item: any) => item?.mapbox_id || item?.id)
-        .filter(Boolean)
-        .slice(0, Math.min(limit, 8));
-      const retrieved = await Promise.all(candidates.map((mapboxId: string) =>
-        api.extremeSearchRetrieve({
-          mapbox_id: mapboxId,
-          session_token: session.session_token,
-          language: 'en',
-          proximity: `${center.lng},${center.lat}`,
-          origin: `${center.lng},${center.lat}`,
-        }).catch(() => null),
-      ));
-      return retrieved
-        .flatMap(data => data?.features ?? [])
-        .map(feature => mapboxFeatureToCopilotPlace(feature, center, category))
+      return (data.places ?? [])
+        .map(place => mapContextPlaceToCopilotPlace(place as any, center, category))
         .filter(Boolean) as SearchPlace[];
     } catch {
       return [];
@@ -10509,40 +10497,29 @@ function MapScreen() {
 
   async function resolveMapboxSearchAnchor(q: string): Promise<{ lat: number; lng: number; name?: string } | null> {
     const clean = q.trim();
-    if (!clean || !extremeMapLayerActive || !extremeConfig?.feature_flags?.search) return null;
+    if (!clean || !extremeConfig?.enabled) return null;
     const vp = viewportRef.current;
     const center = vp
       ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
       : userLoc;
     try {
-      const session = await api.extremeSearchSession({ source: 'copilot_anchor_search', q: clean.slice(0, 80) });
-      const suggestions = await api.extremeSearchSuggest({
+      const data = await api.mapContextResolve({
         q: clean,
-        session_token: session.session_token,
         proximity: center ? `${center.lng},${center.lat}` : '',
-        origin: center ? `${center.lng},${center.lat}` : '',
         bbox: vp ? `${vp.w},${vp.s},${vp.e},${vp.n}` : '',
         types: 'poi,place,address',
         language: 'en,fr',
         limit: 4,
+        snapshot: vp ? {
+          center: center ?? undefined,
+          bounds: vp,
+          zoom: vp.zoom,
+          style: mapLayer,
+        } : undefined,
+        metadata: { surface: 'map_copilot', source: 'copilot_anchor_search' },
       });
-      const candidates = (suggestions.suggestions ?? [])
-        .map((item: any) => item?.mapbox_id || item?.id)
-        .filter(Boolean)
-        .slice(0, 4);
-      if (!candidates.length) return null;
-      const retrieved = await Promise.all(candidates.map((mapboxId: string) =>
-        api.extremeSearchRetrieve({
-          mapbox_id: mapboxId,
-          session_token: session.session_token,
-          language: 'en,fr',
-          proximity: center ? `${center.lng},${center.lat}` : '',
-          origin: center ? `${center.lng},${center.lat}` : '',
-        }).catch(() => null),
-      ));
-      const places = retrieved
-        .flatMap(data => data?.features ?? [])
-        .map(feature => mapboxFeatureToCopilotPlace(feature, center ?? userLoc ?? { lat: 0, lng: 0 }, 'anchor'))
+      const places = (data.places ?? [])
+        .map(place => mapContextPlaceToCopilotPlace(place as any, center ?? userLoc ?? { lat: 0, lng: 0 }, 'anchor'))
         .filter(Boolean) as SearchPlace[];
       if (!places.length) return null;
       const rankCenter = center ?? { lat: places[0].lat, lng: places[0].lng };
@@ -10555,7 +10532,7 @@ function MapScreen() {
   }
 
   async function getMapboxViewportCandidates(limit = 24): Promise<MapSelectableFeature[]> {
-    if (!extremeMapLayerActive || !extremeConfig?.feature_flags?.search) return [];
+    if (!extremeConfig?.enabled) return [];
     const vp = viewportRef.current;
     const center = vp
       ? { lat: (vp.n + vp.s) / 2, lng: (vp.e + vp.w) / 2 }
@@ -10566,15 +10543,23 @@ function MapScreen() {
       : copilotSearchBbox(center, 18);
     const categories = ['restaurant', 'cafe', 'hotel', 'attraction', 'museum'];
     const places = (await Promise.all(categories.map(category =>
-      api.extremeSearchCategory({
+      api.mapContextSearch({
         category,
+        center,
         proximity: `${center.lng},${center.lat}`,
         bbox,
         limit: Math.max(3, Math.min(6, Math.ceil(limit / categories.length))),
         language: 'en',
+        snapshot: {
+          center,
+          bounds: vp ?? undefined,
+          zoom: vp?.zoom,
+          style: mapLayer,
+        },
+        metadata: { surface: 'map_copilot', source: 'mapbox_viewport_candidates' },
       })
-        .then(data => (data.features ?? [])
-          .map(feature => mapboxFeatureToCopilotPlace(feature, center, category === 'hotel' ? 'lodging' : category))
+        .then(data => (data.places ?? [])
+          .map(place => mapContextPlaceToCopilotPlace(place as any, center, category === 'hotel' ? 'lodging' : category))
           .filter(Boolean) as SearchPlace[])
         .catch(() => []),
     ))).flat();
@@ -11441,16 +11426,24 @@ function MapScreen() {
     focusPlaceCamera({ lat: center.lat, lng: center.lng, name: searchedNear, type: category.id, subtype: category.label }, query ? 13 : 12, `${category.id} ${query}`);
 
     const searches: Promise<SearchPlace[]>[] = [];
-    if (extremeConfig?.feature_flags?.search) {
+    if (extremeConfig?.enabled) {
       searches.push(
-        api.extremeSearchCategory({
+        api.mapContextSearch({
           category: keyword || category.provider,
+          center,
           proximity: `${center.lng},${center.lat}`,
           bbox,
           limit,
           language: 'en',
+          snapshot: {
+            center,
+            bounds: boundsFromBboxString(bbox, query ? 13 : 12),
+            zoom: query ? 13 : 12,
+            style: mapLayer,
+          },
+          metadata: { surface: 'map_copilot', source: 'copilot_place_search', category: category.id },
         })
-          .then(data => (data.features ?? []).map(feature => mapboxFeatureToCopilotPlace(feature, center, category.id)).filter(Boolean) as SearchPlace[])
+          .then(data => (data.places ?? []).map(place => mapContextPlaceToCopilotPlace(place as any, center, category.id)).filter(Boolean) as SearchPlace[])
           .catch(() => []),
       );
       const textQueries = Array.from(new Set([
@@ -11464,7 +11457,7 @@ function MapScreen() {
         searches.push(runMapboxSuggestPlaceSearch(textQuery, center, category.id, limit, bbox));
       }
     }
-    if (!extremeMapLayerActive || !extremeConfig?.feature_flags?.search) {
+    if (!extremeConfig?.enabled) {
       searches.push(
         api.getNearbyPlaces(center.lat, center.lng, radius, category.nearby, 'auto')
           .then(places => places.map(place => osmPoiToCopilotPlace(place, center, category.id)).filter(Boolean) as SearchPlace[])
@@ -16723,7 +16716,7 @@ function MapScreen() {
   }));
   const extremeFeatureItems = [
     { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain camera', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
-    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.feature_flags?.search, onPress: () => { if (extremeConfig?.feature_flags?.search) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('Search is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.enabled, onPress: () => { if (extremeConfig?.enabled) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('Search is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('Directions are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('Traffic is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('Weather layers are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
@@ -19292,7 +19285,7 @@ function MapScreen() {
             routeOpts={routeOpts}
             routeCoords={lastRouteCoords.length > 0 ? lastRouteCoords : undefined}
             routeCard={searchRouteCard}
-            extremeSearchEnabled={extremeMapLayerActive && !!extremeConfig?.feature_flags?.search}
+            extremeSearchEnabled={!!extremeConfig?.enabled}
             onLoadSavedTrip={async (tripId) => {
               const trip = await loadOfflineTrip(tripId).catch(() => null)
                 ?? await api.getTrip(tripId).catch(() => null);

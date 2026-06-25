@@ -97,7 +97,6 @@ export default function PlanScreen() {
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const tripHistory      = useStore(st => st.tripHistory);
   const userLoc          = useStore(st => st.userLoc);
-  const mapboxToken      = useStore(st => st.mapboxToken);
   const activeTrip       = useStore(st => st.activeTrip);
   const sessionId        = useStore(st => st.sessionId);
   const user             = useStore(st => st.user);
@@ -186,15 +185,19 @@ export default function PlanScreen() {
   // ── Resolve location reference in text ──────────────────────────────────────
   async function resolveLocation(text: string): Promise<string> {
     if (!/\b(my location|from here|current location|where i am|starting from here|starting here)\b/i.test(text)) return text;
-    if (!userLoc || !mapboxToken) return text;
+    if (!userLoc) return text;
     try {
-      const r = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${userLoc.lng},${userLoc.lat}.json?access_token=${mapboxToken}&types=place,region&limit=1`
-      );
-      const geo = await r.json();
-      const place = geo.features?.[0]?.text ?? `${userLoc.lat.toFixed(3)},${userLoc.lng.toFixed(3)}`;
-      const region = geo.features?.[0]?.context?.find((c: any) => c.id?.startsWith('region'))?.short_code?.replace('US-', '') ?? '';
-      const placeName = region ? `${place}, ${region}` : place;
+      const reverse = await api.mapContextReverse({
+        lat: userLoc.lat,
+        lng: userLoc.lng,
+        types: 'place,region',
+        limit: 1,
+        metadata: { surface: 'planner', source: 'planner_current_location' },
+      });
+      const place = reverse.selected ?? reverse.places?.[0];
+      const baseName = place?.name || `${userLoc.lat.toFixed(3)},${userLoc.lng.toFixed(3)}`;
+      const region = typeof place?.region === 'string' && place.region ? place.region : '';
+      const placeName = region && !baseName.includes(region) ? `${baseName}, ${region}` : baseName;
       return text.replace(/\b(my location|from here|current location|where i am|starting from here|starting here)\b/gi, placeName);
     } catch { return text; }
   }

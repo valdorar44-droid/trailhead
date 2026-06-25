@@ -302,6 +302,79 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  mapContextResolve: (data: MapContextResolveRequest) => {
+    const normalized = normalizeRequestText(data.q || '');
+    if (normalized.length < 2) return Promise.resolve({ ok: true, provider: 'mapbox', temporary_use_only: true, places: [], selected: null } as MapContextResolveResponse);
+    const center = data.snapshot?.center;
+    return guardedRequest(
+      `mapctx-resolve:${normalized}:${data.limit ?? 8}:${data.country ?? ''}:${data.types ?? ''}:${data.proximity ?? ''}:${data.bbox ?? ''}:${center ? `${stableNumber(center.lat)}:${stableNumber(center.lng)}` : ''}`,
+      3 * 60_000,
+      () => req<MapContextResolveResponse>('/api/map-context/resolve', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    );
+  },
+  mapContextSearch: (data: MapContextSearchRequest) => {
+    const q = normalizeRequestText(data.q || data.keyword || '');
+    const category = normalizeRequestText(data.category || '');
+    const center = data.center ?? data.snapshot?.center;
+    const bbox = data.bbox || (data.snapshot?.bounds
+      ? `${stableNumber(data.snapshot.bounds.w)}:${stableNumber(data.snapshot.bounds.s)}:${stableNumber(data.snapshot.bounds.e)}:${stableNumber(data.snapshot.bounds.n)}`
+      : '');
+    return guardedRequest(
+      `mapctx-search:${q}:${category}:${data.limit ?? 8}:${data.proximity ?? ''}:${bbox}:${center ? `${stableNumber(center.lat)}:${stableNumber(center.lng)}` : ''}:${stableRouteKey(data.route)}`,
+      2 * 60_000,
+      () => req<MapContextSearchResponse>('/api/map-context/search', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    );
+  },
+  mapContextReverse: (data: MapContextReverseRequest) =>
+    guardedRequest(
+      `mapctx-reverse:${stableNumber(data.lat, 4)}:${stableNumber(data.lng, 4)}:${data.limit ?? 5}:${data.types ?? ''}`,
+      3 * 60_000,
+      () => req<MapContextResolveResponse>('/api/map-context/reverse', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    ),
+  mapContextRoute: (data: MapContextRouteRequest) =>
+    guardedRequest(
+      `mapctx-route:${stableRouteKey(data.coordinates)}:${data.profile ?? 'mapbox/driving-traffic'}:${data.exclude ?? ''}:${data.units ?? 'miles'}:${data.annotations ?? ''}`,
+      2 * 60_000,
+      () => req<MapContextRouteResponse>('/api/map-context/route', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    ),
+  mapContextRouteBuild: (locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>, options: RouteBuildOptions = {}, units: 'miles' | 'kilometers' = 'miles') =>
+    guardedRequest(
+      `mapctx-route-build:${locations.map(loc => `${stableNumber(loc.lat, 4)},${stableNumber(loc.lng, 4)},${loc.type ?? 'break'}`).join('|')}:${options.backRoads ? 'wild' : 'traffic'}:${options.avoidHighways ? 'nohw' : ''}:${options.avoidTolls ? 'notoll' : ''}:${options.noFerries ? 'noferry' : ''}:${units}`,
+      2 * 60_000,
+      () => req<MapContextRouteResponse>('/api/map-context/route', {
+        method: 'POST',
+        body: JSON.stringify({
+          coordinates: locations.map(loc => [loc.lng, loc.lat]),
+          profile: options.backRoads ? 'mapbox/driving' : 'mapbox/driving-traffic',
+          steps: true,
+          alternatives: false,
+          overview: 'full',
+          annotations: 'congestion,duration,distance',
+          exclude: [
+            options.avoidTolls ? 'toll' : '',
+            options.avoidHighways ? 'motorway' : '',
+            options.noFerries ? 'ferry' : '',
+          ].filter(Boolean).join(','),
+          units,
+          metadata: { source: 'mobile_route_builder' },
+        } satisfies MapContextRouteRequest),
+      }).then(res => {
+        if (!res.route_build) throw new Error('Mapbox route build unavailable');
+        return res.route_build;
+      }),
+    ),
   geocodePlaces: (query: string, limit = 8, options: GeocodeRequestOptions = {}) => {
     const normalized = normalizeRequestText(query);
     if (normalized.length < 2) return Promise.resolve([]);
@@ -1368,6 +1441,113 @@ export interface GeocodePlace {
   bbox?: number[] | null;
   confidence?: string;
   score?: number;
+}
+export interface MapContextPoint {
+  lat: number;
+  lng: number;
+}
+export interface MapContextBounds {
+  n: number;
+  s: number;
+  e: number;
+  w: number;
+}
+export interface MapContextSnapshot {
+  center?: MapContextPoint | null;
+  bounds?: MapContextBounds | null;
+  zoom?: number | null;
+  style?: string;
+  selected_place?: Record<string, unknown> | null;
+  visible_features?: Array<Record<string, unknown>>;
+  current_results?: Array<Record<string, unknown>>;
+  route?: [number, number][];
+  metadata?: Record<string, unknown>;
+}
+export interface MapContextPlace extends GeocodePlace {
+  id?: string;
+  type?: string;
+  subtype?: string;
+  address?: string;
+  phone?: string;
+  website?: string;
+  attribution?: string;
+  mapbox_id?: string | null;
+  mapbox_categories?: string[];
+  categories?: string[];
+  rating?: number;
+  rating_count?: number;
+  average_rating?: number;
+  review_count?: number;
+  distance_mi?: number;
+  distance_meters?: number;
+  temporary_use_only?: boolean;
+  source?: string;
+  source_label?: string;
+  provider?: string;
+  raw_feature?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+export interface MapContextResolveRequest {
+  q: string;
+  limit?: number;
+  country?: string;
+  proximity?: string;
+  bbox?: string;
+  types?: string;
+  language?: string;
+  snapshot?: MapContextSnapshot;
+  metadata?: Record<string, unknown>;
+}
+export interface MapContextSearchRequest {
+  q?: string;
+  category?: string;
+  keyword?: string;
+  limit?: number;
+  proximity?: string;
+  origin?: string;
+  bbox?: string;
+  country?: string;
+  language?: string;
+  center?: MapContextPoint | null;
+  route?: [number, number][];
+  snapshot?: MapContextSnapshot;
+  metadata?: Record<string, unknown>;
+}
+export interface MapContextReverseRequest {
+  lat: number;
+  lng: number;
+  limit?: number;
+  country?: string;
+  types?: string;
+  language?: string;
+  snapshot?: MapContextSnapshot;
+  metadata?: Record<string, unknown>;
+}
+export interface MapContextRouteRequest extends ExtremeDirectionsRequest {
+  units?: 'miles' | 'kilometers' | string;
+  snapshot?: MapContextSnapshot;
+}
+export interface MapContextResolveResponse {
+  ok?: boolean;
+  provider?: string;
+  temporary_use_only?: boolean;
+  query?: string;
+  selected?: MapContextPlace | null;
+  places: MapContextPlace[];
+  features?: any[];
+  query_context?: Record<string, unknown>;
+  _trailhead?: { engine?: string; temporary_use_only?: boolean; [key: string]: unknown };
+}
+export interface MapContextSearchResponse extends MapContextResolveResponse {
+  query_context?: Record<string, unknown>;
+}
+export interface MapContextRouteResponse {
+  ok?: boolean;
+  provider?: string;
+  temporary_use_only?: boolean;
+  directions?: ExtremeDirectionsResponse;
+  route_build?: RouteBuildResult;
+  _trailhead?: { engine?: string; temporary_use_only?: boolean; [key: string]: unknown };
 }
 export interface GeocodeRejectedPlace {
   name?: string;

@@ -2274,6 +2274,85 @@ class ExtremeDirectionsRequest(BaseModel):
     overview: str = "full"
     metadata: dict = Field(default_factory=dict)
 
+class MapContextPoint(BaseModel):
+    lat: float
+    lng: float
+
+class MapContextBounds(BaseModel):
+    n: float
+    s: float
+    e: float
+    w: float
+
+class MapContextSnapshot(BaseModel):
+    center: Optional[MapContextPoint] = None
+    bounds: Optional[MapContextBounds] = None
+    zoom: Optional[float] = None
+    style: str = ""
+    selected_place: Optional[dict] = None
+    visible_features: list[dict] = Field(default_factory=list)
+    current_results: list[dict] = Field(default_factory=list)
+    route: list[list[float]] = Field(default_factory=list)
+    metadata: dict = Field(default_factory=dict)
+
+class MapContextResolveRequest(BaseModel):
+    q: str
+    limit: int = 8
+    country: str = ""
+    proximity: str = ""
+    bbox: str = ""
+    types: str = ""
+    language: str = "en"
+    snapshot: Optional[MapContextSnapshot] = None
+    metadata: dict = Field(default_factory=dict)
+
+class MapContextSearchRequest(BaseModel):
+    q: str = ""
+    category: str = ""
+    keyword: str = ""
+    limit: int = 8
+    proximity: str = ""
+    origin: str = ""
+    bbox: str = ""
+    country: str = ""
+    language: str = "en"
+    center: Optional[MapContextPoint] = None
+    route: list[list[float]] = Field(default_factory=list)
+    snapshot: Optional[MapContextSnapshot] = None
+    metadata: dict = Field(default_factory=dict)
+
+class MapContextReverseRequest(BaseModel):
+    lat: float
+    lng: float
+    limit: int = 5
+    country: str = ""
+    types: str = ""
+    language: str = "en"
+    snapshot: Optional[MapContextSnapshot] = None
+    metadata: dict = Field(default_factory=dict)
+
+class MapContextRouteRequest(BaseModel):
+    coordinates: list[list[float]] = Field(default_factory=list)
+    profile: str = "mapbox/driving-traffic"
+    steps: bool = True
+    alternatives: bool = False
+    annotations: str = "congestion,duration,distance"
+    exclude: str = ""
+    language: str = "en"
+    voice_units: str = "imperial"
+    overview: str = "full"
+    units: str = "miles"
+    snapshot: Optional[MapContextSnapshot] = None
+    metadata: dict = Field(default_factory=dict)
+
+class MapContextMatrixRequest(BaseModel):
+    coordinates: list[list[float]] = Field(default_factory=list)
+    profile: str = "mapbox/driving"
+    sources: str = "0"
+    destinations: str = "all"
+    annotations: str = "duration,distance"
+    metadata: dict = Field(default_factory=dict)
+
 class AdminExtremeConfigBody(BaseModel):
     enabled: Optional[bool] = None
     kill_switch: Optional[bool] = None
@@ -6351,6 +6430,461 @@ async def _mapbox_get(url: str, params: dict) -> dict:
 def _mapbox_directions_url(profile: str, coords: list[str]) -> str:
     return f"https://api.mapbox.com/directions/v5/{profile}/{';'.join(coords)}"
 
+MAP_CONTEXT_CATEGORY_ALIASES = {
+    "camp": "campground",
+    "camps": "campground",
+    "camping": "campground",
+    "campground": "campground",
+    "campsite": "campground",
+    "rv": "campground",
+    "rv_park": "campground",
+    "food": "restaurant",
+    "restaurant": "restaurant",
+    "restaurants": "restaurant",
+    "coffee": "cafe",
+    "cafe": "cafe",
+    "fuel": "gas station",
+    "gas": "gas station",
+    "gas_station": "gas station",
+    "propane": "propane",
+    "lodging": "hotel",
+    "hotel": "hotel",
+    "motel": "hotel",
+    "stay": "hotel",
+    "viewpoint": "scenic viewpoint",
+    "view": "scenic viewpoint",
+    "attraction": "attraction",
+    "landmark": "attraction",
+    "trail": "trailhead",
+    "trails": "trailhead",
+    "trailhead": "trailhead",
+    "grocery": "grocery",
+    "mechanic": "mechanic",
+    "parking": "parking",
+    "water": "water",
+}
+
+def _map_context_category_provider(category: str = "") -> str:
+    clean = re.sub(r"[^a-z0-9_ -]+", "", str(category or "").lower()).strip()
+    return MAP_CONTEXT_CATEGORY_ALIASES.get(clean.replace(" ", "_"), clean)
+
+def _map_context_limit(limit: int, default: int = 8, max_value: int = 12) -> int:
+    try:
+        parsed = int(limit or default)
+    except (TypeError, ValueError):
+        parsed = default
+    return max(1, min(parsed, max_value))
+
+def _map_context_center(snapshot: MapContextSnapshot | None, explicit: MapContextPoint | None = None) -> MapContextPoint | None:
+    if explicit:
+        return explicit
+    if snapshot and snapshot.center:
+        return snapshot.center
+    if snapshot and snapshot.bounds:
+        return MapContextPoint(
+            lat=(snapshot.bounds.n + snapshot.bounds.s) / 2,
+            lng=(snapshot.bounds.e + snapshot.bounds.w) / 2,
+        )
+    return None
+
+def _map_context_proximity(snapshot: MapContextSnapshot | None, explicit: str = "", center: MapContextPoint | None = None) -> str:
+    cleaned = _clean_mapbox_param(explicit, r"[^0-9,.\-]+", 80)
+    if cleaned:
+        return cleaned
+    point = center or _map_context_center(snapshot)
+    return f"{point.lng:.6f},{point.lat:.6f}" if point else ""
+
+def _map_context_bbox(snapshot: MapContextSnapshot | None, explicit: str = "") -> str:
+    cleaned = _clean_mapbox_param(explicit, r"[^0-9,.\-]+", 120)
+    if cleaned:
+        return cleaned
+    bounds = snapshot.bounds if snapshot else None
+    return f"{bounds.w:.6f},{bounds.s:.6f},{bounds.e:.6f},{bounds.n:.6f}" if bounds else ""
+
+def _first_text(*values: object) -> str:
+    for value in values:
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if value is not None and not isinstance(value, (dict, list, tuple)):
+            text = str(value).strip()
+            if text:
+                return text
+    return ""
+
+def _first_number(*values: object) -> float | None:
+    for value in values:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(parsed):
+            return parsed
+    return None
+
+def _map_context_string_list(*values: object) -> list[str]:
+    out: list[str] = []
+    for value in values:
+        if isinstance(value, str):
+            parts = [part.strip() for part in re.split(r"[,;/|]", value) if part.strip()]
+            out.extend(parts)
+        elif isinstance(value, list):
+            out.extend(str(item).strip() for item in value if str(item or "").strip())
+    return list(dict.fromkeys(out))
+
+def _map_context_feature_coords(feature: dict) -> tuple[float | None, float | None]:
+    geometry = feature.get("geometry") if isinstance(feature.get("geometry"), dict) else {}
+    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else feature
+    coords = geometry.get("coordinates") if isinstance(geometry, dict) else None
+    if isinstance(coords, list) and len(coords) >= 2:
+        lng = _first_number(coords[0])
+        lat = _first_number(coords[1])
+        if lat is not None and lng is not None:
+            return lat, lng
+    coord_obj = props.get("coordinates") if isinstance(props.get("coordinates"), dict) else {}
+    lat = _first_number(props.get("lat"), props.get("latitude"), coord_obj.get("latitude"), coord_obj.get("lat"))
+    lng = _first_number(props.get("lng"), props.get("lon"), props.get("longitude"), coord_obj.get("longitude"), coord_obj.get("lng"), coord_obj.get("lon"))
+    return lat, lng
+
+def _map_context_normalize_mapbox_feature(feature: dict, *, category: str = "", center: MapContextPoint | None = None, source: str = "mapbox_search") -> dict | None:
+    if not isinstance(feature, dict):
+        return None
+    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else feature
+    metadata = props.get("metadata") if isinstance(props.get("metadata"), dict) else {}
+    metadata_data = metadata.get("data") if isinstance(metadata.get("data"), dict) else {}
+    lat, lng = _map_context_feature_coords(feature)
+    if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    categories = _map_context_string_list(
+        props.get("poi_category"),
+        props.get("poi_category_ids"),
+        props.get("category"),
+        props.get("categories"),
+        metadata.get("poi_category"),
+        metadata.get("category"),
+        metadata.get("categories"),
+        metadata_data.get("category"),
+        metadata_data.get("categories"),
+    )
+    mapbox_id = _first_text(props.get("mapbox_id"), props.get("id"), feature.get("mapbox_id"), feature.get("id"))
+    feature_type = _first_text(props.get("feature_type"), props.get("type"), feature.get("place_type"))
+    name = _first_text(
+        props.get("name"),
+        props.get("full_address"),
+        props.get("place_formatted"),
+        props.get("text"),
+        feature.get("text"),
+        feature.get("place_name"),
+        "Mapbox place",
+    )
+    address = _first_text(
+        props.get("full_address"),
+        props.get("place_formatted"),
+        props.get("address"),
+        props.get("address_line1"),
+        feature.get("place_name"),
+        metadata.get("full_address"),
+        metadata.get("place_formatted"),
+        metadata.get("address"),
+    )
+    phone = _first_text(props.get("phone"), props.get("tel"), props.get("telephone"), metadata.get("phone"), metadata_data.get("phone"))
+    website = _first_text(props.get("website"), props.get("url"), metadata.get("website"), metadata.get("url"), metadata_data.get("website"))
+    rating = _first_number(props.get("rating"), props.get("average_rating"), metadata.get("rating"), metadata_data.get("rating"))
+    rating_count = _first_number(props.get("rating_count"), props.get("review_count"), metadata.get("rating_count"), metadata_data.get("review_count"))
+    coordinates = props.get("coordinates") if isinstance(props.get("coordinates"), dict) else {}
+    routable_points = []
+    for point in coordinates.get("routable_points") or []:
+        point_coords = point.get("coordinates") if isinstance(point, dict) else point
+        if isinstance(point_coords, list) and len(point_coords) >= 2:
+            rp_lng = _first_number(point_coords[0])
+            rp_lat = _first_number(point_coords[1])
+            if rp_lat is not None and rp_lng is not None:
+                routable_points.append({"name": point.get("name") if isinstance(point, dict) else None, "lat": rp_lat, "lng": rp_lng})
+    country_code = country_name = region_name = None
+    try:
+        country_code, country_name, region_name = _country_code_from_mapbox_context(feature)
+    except Exception:
+        pass
+    place_type = category or (categories[0] if categories else feature_type) or "poi"
+    distance_mi = None
+    if center:
+        distance_mi = _haversine_m(float(center.lat), float(center.lng), lat, lng) / 1609.344
+    stable_id = mapbox_id or hashlib.sha1(f"{name}:{lat:.6f}:{lng:.6f}".encode()).hexdigest()[:16]
+    normalized = {
+        "id": f"mapbox:{stable_id}",
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "type": place_type,
+        "subtype": ", ".join(categories) or feature_type or place_type,
+        "source": source,
+        "source_label": "Mapbox Search",
+        "provider": "mapbox",
+        "provider_place_id": mapbox_id or stable_id,
+        "place_id": mapbox_id or stable_id,
+        "mapbox_id": mapbox_id or None,
+        "mapbox_categories": categories,
+        "categories": categories,
+        "feature_type": feature_type,
+        "address": address or None,
+        "phone": phone or None,
+        "website": website or None,
+        "rating": rating,
+        "rating_count": rating_count,
+        "average_rating": rating,
+        "review_count": rating_count,
+        "country_code": country_code,
+        "country": country_name,
+        "region": region_name,
+        "bbox": feature.get("bbox") if isinstance(feature.get("bbox"), list) else None,
+        "distance_mi": distance_mi,
+        "distance_meters": _first_number(props.get("distance"), metadata.get("distance")),
+        "routable_points": routable_points,
+        "attribution": "Mapbox",
+        "temporary_use_only": True,
+        "enrichment_source": "mapbox_searchbox_rest",
+        "raw_feature": {"id": mapbox_id or stable_id, "source": source, "properties": props},
+    }
+    return {k: v for k, v in normalized.items() if v not in (None, "", [])}
+
+async def _mapbox_forward_geocode_features(
+    client: httpx.AsyncClient,
+    query: str,
+    *,
+    limit: int = 8,
+    country: str = "",
+    proximity: str = "",
+    bbox: str = "",
+    types: str = "",
+    language: str = "en",
+) -> list[dict]:
+    token = settings.mapbox_token
+    clean_query = " ".join(str(query or "").split())[:256]
+    if not token or len(clean_query) < 2:
+        return []
+    safe_limit = _map_context_limit(limit, 8, 10)
+    country_filter = _clean_countrycodes(country)
+    cache_key = "mapctx:geocode:" + hashlib.sha1(
+        f"{clean_query.lower()}:{safe_limit}:{country_filter}:{proximity}:{bbox}:{types}:{language}".encode()
+    ).hexdigest()[:24]
+
+    async def fetch_geocode() -> list[dict]:
+        common_params = {
+            "access_token": token,
+            "limit": str(safe_limit),
+            "language": _clean_mapbox_param(language, r"[^a-zA-Z,\-]+", 40) or "en",
+        }
+        if country_filter:
+            common_params["country"] = country_filter
+        cleaned_proximity = _clean_mapbox_param(proximity, r"[^0-9,.\-]+", 80)
+        cleaned_bbox = _clean_mapbox_param(bbox, r"[^0-9,.\-]+", 120)
+        cleaned_types = _clean_mapbox_param(types, r"[^a-zA-Z0-9_,]+", 120)
+        if cleaned_proximity:
+            common_params["proximity"] = cleaned_proximity
+        if cleaned_bbox:
+            common_params["bbox"] = cleaned_bbox
+        if cleaned_types:
+            common_params["types"] = cleaned_types
+        try:
+            res = await client.get(
+                "https://api.mapbox.com/search/geocode/v6/forward",
+                params={**common_params, "q": clean_query, "permanent": "false"},
+            )
+            if res.status_code < 400:
+                features = res.json().get("features", [])
+                if isinstance(features, list) and features:
+                    return features
+        except Exception:
+            pass
+        try:
+            res = await client.get(
+                f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(clean_query, safe='')}.json",
+                params=common_params,
+            )
+            if res.status_code < 400:
+                features = res.json().get("features", [])
+                if isinstance(features, list):
+                    return features
+        except Exception:
+            return []
+        return []
+
+    return await runtime_cached_call(
+        cache_key,
+        180,
+        fetch_geocode,
+        provider="mapbox",
+        endpoint="geocode",
+        source_action="map_context",
+        source_tier="temporary",
+        cache_empty=False,
+    )
+
+async def _map_context_searchbox_features(body: MapContextSearchRequest | MapContextResolveRequest) -> tuple[list[dict], dict]:
+    center = _map_context_center(getattr(body, "snapshot", None), getattr(body, "center", None))
+    proximity = _map_context_proximity(getattr(body, "snapshot", None), getattr(body, "proximity", ""), center)
+    origin = _map_context_proximity(getattr(body, "snapshot", None), getattr(body, "origin", ""), center)
+    bbox = _map_context_bbox(getattr(body, "snapshot", None), getattr(body, "bbox", ""))
+    country = _clean_countrycodes(getattr(body, "country", ""))
+    language = _clean_mapbox_param(getattr(body, "language", "en"), r"[^a-zA-Z,\-]+", 40) or "en"
+    limit = _map_context_limit(getattr(body, "limit", 8), 8, 10)
+    raw_category = getattr(body, "category", "") or ""
+    keyword = getattr(body, "keyword", "") or ""
+    provider_category = _map_context_category_provider(raw_category)
+    q = " ".join(str(getattr(body, "q", "") or "").split())[:256]
+    if keyword and not q:
+        q = str(keyword).strip()[:120]
+    if q and provider_category and provider_category.lower() not in q.lower() and raw_category not in {"", "place", "anchor", "poi"}:
+        q = f"{q} {provider_category}".strip()
+    token = str(uuid.uuid4())
+    features: list[dict] = []
+    debug = {
+        "provider": "mapbox",
+        "temporary_use_only": True,
+        "session_token_hash": _mapbox_session_hash(token),
+        "category": raw_category,
+        "provider_category": provider_category,
+        "q": q,
+        "bbox": bbox,
+        "proximity": proximity,
+    }
+
+    if q:
+        suggest_params = _searchbox_params({
+            "q": q,
+            "session_token": token,
+            "proximity": proximity,
+            "origin": origin,
+            "bbox": bbox,
+            "country": country,
+            "types": _clean_mapbox_param(getattr(body, "types", "poi,place,address"), r"[^a-zA-Z0-9_,]+", 120) or "poi,place,address",
+            "language": language,
+            "limit": str(limit),
+        })
+        suggestions = await _mapbox_get("https://api.mapbox.com/search/searchbox/v1/suggest", suggest_params)
+        ids = [
+            str(item.get("mapbox_id") or item.get("id") or "").strip()
+            for item in suggestions.get("suggestions", [])
+            if isinstance(item, dict)
+        ]
+        ids = [item for item in ids if item][:limit]
+        retrieve_params = _searchbox_params({"session_token": token, "language": language, "proximity": proximity, "origin": origin})
+        async def retrieve(mapbox_id: str) -> list[dict]:
+            data = await _mapbox_get(f"https://api.mapbox.com/search/searchbox/v1/retrieve/{quote(mapbox_id, safe='')}", retrieve_params)
+            return [feat for feat in data.get("features", []) if isinstance(feat, dict)]
+        retrieved = await asyncio.gather(*(retrieve(item) for item in ids), return_exceptions=True)
+        for item in retrieved:
+            if isinstance(item, list):
+                features.extend(item)
+        debug["suggestion_count"] = len(ids)
+    elif provider_category:
+        category_params = _searchbox_params({
+            "proximity": proximity,
+            "bbox": bbox,
+            "country": country,
+            "language": language,
+            "limit": str(limit),
+        })
+        data = await _mapbox_get(f"https://api.mapbox.com/search/searchbox/v1/category/{quote(provider_category, safe='')}", category_params)
+        features = [feat for feat in data.get("features", []) if isinstance(feat, dict)]
+    return features[:limit], debug
+
+def _encode_polyline6(coords: list[list[float]]) -> str:
+    def encode_value(value: int) -> str:
+        value = ~(value << 1) if value < 0 else (value << 1)
+        chunks = []
+        while value >= 0x20:
+            chunks.append(chr((0x20 | (value & 0x1f)) + 63))
+            value >>= 5
+        chunks.append(chr(value + 63))
+        return "".join(chunks)
+
+    last_lat = 0
+    last_lng = 0
+    out = []
+    for coord in coords:
+        if not isinstance(coord, list) or len(coord) < 2:
+            continue
+        lng = _first_number(coord[0])
+        lat = _first_number(coord[1])
+        if lat is None or lng is None:
+            continue
+        lat_i = int(round(lat * 1_000_000))
+        lng_i = int(round(lng * 1_000_000))
+        out.append(encode_value(lat_i - last_lat))
+        out.append(encode_value(lng_i - last_lng))
+        last_lat = lat_i
+        last_lng = lng_i
+    return "".join(out)
+
+def _map_context_route_build_from_directions(data: dict, units: str = "miles") -> dict:
+    route = (data.get("routes") or [{}])[0] if isinstance(data.get("routes"), list) else {}
+    geometry = route.get("geometry") if isinstance(route.get("geometry"), dict) else {}
+    coords = geometry.get("coordinates") if isinstance(geometry.get("coordinates"), list) else []
+    distance_m = _first_number(route.get("distance")) or 0.0
+    duration_s = _first_number(route.get("duration")) or 0.0
+    use_metric = str(units or "").lower().startswith("k")
+    length = distance_m / 1000 if use_metric else distance_m / 1609.344
+    return {
+        "trip": {
+            "status": 0 if coords else 1,
+            "summary": {"length": length, "time": duration_s},
+            "legs": [{"shape": _encode_polyline6(coords), "summary": {"length": length, "time": duration_s}}],
+        },
+        "_trailhead": {"engine": "mapbox-directions", "cache": "temporary", "temporary_use_only": True},
+    }
+
+async def _map_context_directions(body: MapContextRouteRequest | ExtremeDirectionsRequest) -> dict:
+    profile = body.profile if body.profile in {"mapbox/driving-traffic", "mapbox/driving", "mapbox/walking", "mapbox/cycling"} else "mapbox/driving-traffic"
+    coords: list[str] = []
+    for point in body.coordinates[:25]:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+        lng = _first_number(point[0])
+        lat = _first_number(point[1])
+        if lng is not None and lat is not None and -180 <= lng <= 180 and -90 <= lat <= 90:
+            coords.append(f"{lng:.6f},{lat:.6f}")
+    if len(coords) < 2:
+        raise HTTPException(400, "At least two valid [lng,lat] coordinates are required")
+    params = {
+        "access_token": settings.mapbox_token,
+        "geometries": "geojson",
+        "overview": body.overview if body.overview in {"full", "simplified", "false"} else "full",
+        "steps": "true" if body.steps else "false",
+        "alternatives": "true" if body.alternatives else "false",
+        "language": _clean_mapbox_param(body.language, r"[^a-zA-Z,\-]+", 40) or "en",
+        "voice_units": "metric" if body.voice_units == "metric" else "imperial",
+    }
+    annotations = _clean_mapbox_param(body.annotations, r"[^a-zA-Z_,]+", 80)
+    if annotations:
+        params["annotations"] = annotations
+    exclude = _clean_mapbox_param(body.exclude, r"[^a-zA-Z_,]+", 80)
+    if exclude:
+        params["exclude"] = exclude
+    data = await _mapbox_get(_mapbox_directions_url(profile, coords), params)
+    data["_trailhead"] = {"engine": "mapbox-directions", "temporary_use_only": True, "profile": profile}
+    return data
+
+async def _map_context_matrix(body: MapContextMatrixRequest) -> dict:
+    profile = body.profile if body.profile in {"mapbox/driving", "mapbox/walking", "mapbox/cycling"} else "mapbox/driving"
+    coords: list[str] = []
+    for point in body.coordinates[:25]:
+        if not isinstance(point, list) or len(point) < 2:
+            continue
+        lng = _first_number(point[0])
+        lat = _first_number(point[1])
+        if lng is not None and lat is not None and -180 <= lng <= 180 and -90 <= lat <= 90:
+            coords.append(f"{lng:.6f},{lat:.6f}")
+    if len(coords) < 2:
+        raise HTTPException(400, "At least two valid [lng,lat] coordinates are required")
+    params = _searchbox_params({
+        "sources": _clean_mapbox_param(body.sources, r"[^0-9;all]+", 80) or "0",
+        "destinations": _clean_mapbox_param(body.destinations, r"[^0-9;all]+", 80) or "all",
+        "annotations": _clean_mapbox_param(body.annotations, r"[^a-zA-Z_,]+", 80) or "duration,distance",
+    })
+    data = await _mapbox_get(f"https://api.mapbox.com/directions-matrix/v1/{profile}/{';'.join(coords)}", params)
+    data["_trailhead"] = {"engine": "mapbox-matrix", "temporary_use_only": True, "profile": profile}
+    return data
+
 def _mapbox_feature_coordinate_summary(items: object, limit: int = 8) -> list[dict]:
     if not isinstance(items, list):
         return []
@@ -6590,6 +7124,213 @@ async def extreme_directions(body: ExtremeDirectionsRequest, user: dict = Depend
     )
     data["_trailhead"] = {"engine": "mapbox-directions", "temporary_use_only": True}
     return data
+
+@app.post("/api/map-context/context")
+async def map_context_snapshot(body: MapContextSnapshot, user: dict = Depends(_current_user)):
+    _require_extreme_map_layers(user)
+    center = _map_context_center(body)
+    visible = [
+        place for place in (
+            _map_context_normalize_mapbox_feature(item, center=center, source="mapbox_visible_feature")
+            for item in (body.visible_features or [])[:40]
+        )
+        if place
+    ]
+    return {
+        "ok": True,
+        "provider": "mapbox",
+        "temporary_use_only": True,
+        "snapshot": body.dict(),
+        "visible_places": visible,
+        "current_results": body.current_results[:40],
+        "_trailhead": {"engine": "map-context", "temporary_use_only": True},
+    }
+
+@app.post("/api/map-context/resolve")
+async def map_context_resolve(body: MapContextResolveRequest, user: dict = Depends(_current_user)):
+    _require_extreme_map_layers(user)
+    center = _map_context_center(body.snapshot)
+    proximity = _map_context_proximity(body.snapshot, body.proximity, center)
+    bbox = _map_context_bbox(body.snapshot, body.bbox)
+    features: list[dict] = []
+    async with httpx.AsyncClient(timeout=8) as client:
+        features = await _mapbox_forward_geocode_features(
+            client,
+            body.q,
+            limit=body.limit,
+            country=body.country,
+            proximity=proximity,
+            bbox=bbox,
+            types=body.types or "place,address,poi",
+            language=body.language,
+        )
+    if not features:
+        search_body = MapContextSearchRequest(
+            q=body.q,
+            limit=body.limit,
+            proximity=proximity,
+            bbox=bbox,
+            country=body.country,
+            language=body.language,
+            snapshot=body.snapshot,
+            metadata=body.metadata,
+        )
+        features, _debug = await _map_context_searchbox_features(search_body)
+    places = [
+        place for place in (
+            _map_context_normalize_mapbox_feature(feature, category="place", center=center, source="mapbox_geocode")
+            for feature in features[:_map_context_limit(body.limit, 8, 10)]
+        )
+        if place
+    ]
+    log_extreme_ledger_event(
+        user["id"],
+        "map_context_resolve",
+        None,
+        "map_layers",
+        None,
+        {"q_len": len(body.q or ""), "count": len(places), "bbox": bbox, "proximity": proximity, **(body.metadata or {})},
+    )
+    return {
+        "ok": True,
+        "provider": "mapbox",
+        "temporary_use_only": True,
+        "query": body.q,
+        "selected": places[0] if places else None,
+        "places": places,
+        "features": features[:_map_context_limit(body.limit, 8, 10)],
+        "_trailhead": {"engine": "map-context-resolve", "temporary_use_only": True},
+    }
+
+@app.post("/api/map-context/search")
+async def map_context_search(body: MapContextSearchRequest, user: dict = Depends(_current_user)):
+    _require_extreme_map_layers(user)
+    center = _map_context_center(body.snapshot, body.center)
+    features, debug = await _map_context_searchbox_features(body)
+    category = body.category or body.keyword or "poi"
+    places = [
+        place for place in (
+            _map_context_normalize_mapbox_feature(feature, category=category, center=center, source="mapbox_search")
+            for feature in features[:_map_context_limit(body.limit, 8, 10)]
+        )
+        if place
+    ]
+    log_extreme_ledger_event(
+        user["id"],
+        "map_context_search",
+        None,
+        "map_layers",
+        None,
+        {"category": category, "q_len": len(body.q or body.keyword or ""), "count": len(places), **debug, **(body.metadata or {})},
+    )
+    return {
+        "ok": True,
+        "provider": "mapbox",
+        "temporary_use_only": True,
+        "places": places,
+        "features": features[:_map_context_limit(body.limit, 8, 10)],
+        "query_context": {
+            "source": "map_context",
+            "provider": "mapbox",
+            "category": body.category,
+            "keyword": body.keyword,
+            "q": body.q,
+            "bbox": debug.get("bbox", ""),
+            "proximity": debug.get("proximity", ""),
+            "temporary_use_only": True,
+        },
+        "_trailhead": {"engine": "map-context-search", "temporary_use_only": True},
+    }
+
+@app.post("/api/map-context/reverse")
+async def map_context_reverse(body: MapContextReverseRequest, user: dict = Depends(_current_user)):
+    _require_extreme_map_layers(user)
+    lat = float(body.lat)
+    lng = float(body.lng)
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        raise HTTPException(400, "lat/lng out of range")
+    params = _searchbox_params({
+        "latitude": f"{lat:.7f}",
+        "longitude": f"{lng:.7f}",
+        "language": _clean_mapbox_param(body.language, r"[^a-zA-Z,\-]+", 40) or "en",
+        "limit": str(_map_context_limit(body.limit, 5, 10)),
+        "country": _clean_countrycodes(body.country),
+        "types": _clean_mapbox_param(body.types, r"[^a-zA-Z0-9_,]+", 120),
+    })
+    data = await _mapbox_get("https://api.mapbox.com/search/searchbox/v1/reverse", params)
+    center = MapContextPoint(lat=lat, lng=lng)
+    features = [feature for feature in data.get("features", []) if isinstance(feature, dict)]
+    places = [
+        place for place in (
+            _map_context_normalize_mapbox_feature(feature, category="place", center=center, source="mapbox_reverse_geocode")
+            for feature in features
+        )
+        if place
+    ]
+    log_extreme_ledger_event(
+        user["id"],
+        "map_context_reverse",
+        None,
+        "map_layers",
+        None,
+        {"lat": round(lat, 7), "lng": round(lng, 7), "count": len(places), **(body.metadata or {})},
+    )
+    return {
+        "ok": True,
+        "provider": "mapbox",
+        "temporary_use_only": True,
+        "selected": places[0] if places else None,
+        "places": places,
+        "features": features,
+        "_trailhead": {"engine": "map-context-reverse", "temporary_use_only": True},
+    }
+
+@app.post("/api/map-context/route")
+async def map_context_route(body: MapContextRouteRequest, user: dict = Depends(_current_user)):
+    _require_extreme_map_layers(user)
+    data = await _map_context_directions(body)
+    route_build = _map_context_route_build_from_directions(data, body.units)
+    log_extreme_ledger_event(
+        user["id"],
+        "map_context_route",
+        None,
+        "map_layers",
+        None,
+        {
+            "profile": data.get("_trailhead", {}).get("profile") or body.profile,
+            "coordinate_count": len(body.coordinates or []),
+            "route_count": len(data.get("routes", [])),
+            **(body.metadata or {}),
+        },
+    )
+    return {
+        "ok": True,
+        "provider": "mapbox",
+        "temporary_use_only": True,
+        "directions": data,
+        "route_build": route_build,
+        "_trailhead": {"engine": "map-context-route", "temporary_use_only": True},
+    }
+
+@app.post("/api/map-context/matrix")
+async def map_context_matrix(body: MapContextMatrixRequest, user: dict = Depends(_current_user)):
+    _require_extreme_map_layers(user)
+    data = await _map_context_matrix(body)
+    log_extreme_ledger_event(
+        user["id"],
+        "map_context_matrix",
+        None,
+        "map_layers",
+        None,
+        {"profile": body.profile, "coordinate_count": len(body.coordinates or []), **(body.metadata or {})},
+    )
+    return {
+        "ok": True,
+        "provider": "mapbox",
+        "temporary_use_only": True,
+        "matrix": data,
+        "_trailhead": {"engine": "map-context-matrix", "temporary_use_only": True},
+    }
 
 @app.get("/api/explorer/weather/layers")
 @app.get("/api/extreme/weather/layers")
@@ -16557,17 +17298,18 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
     async def _try(query: str):
         if token:
             try:
-                params = {"access_token": token, "limit": 1}
-                if country_filter:
-                    params["country"] = country_filter
-                resp = await client.get(
-                    f"https://api.mapbox.com/geocoding/v5/mapbox.places/{quote(query, safe='')}.json",
-                    params=params,
+                feats = await _mapbox_forward_geocode_features(
+                    client,
+                    query,
+                    limit=1,
+                    country=country_filter,
+                    types="place,address,poi",
+                    language="en",
                 )
-                resp.raise_for_status()
-                feats = resp.json().get("features", [])
                 if feats:
-                    return feats[0]["geometry"]["coordinates"], feats[0].get("place_name", query)
+                    place = _map_context_normalize_mapbox_feature(feats[0], category="place", source="mapbox_geocode")
+                    if place:
+                        return [place["lng"], place["lat"]], place.get("name") or feats[0].get("place_name", query)
             except Exception:
                 pass
         try:

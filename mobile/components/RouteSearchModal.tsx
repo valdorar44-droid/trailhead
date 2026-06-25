@@ -38,6 +38,8 @@ export interface SearchPlace {
   photo_url?: string | null;
   google_maps_uri?: string;
   attribution?: string;
+  mapbox_id?: string | null;
+  mapbox_categories?: string[];
   icon?: string;
   summary?: string;
   _camp?: CampsitePin;
@@ -413,7 +415,6 @@ export default function RouteSearchModal({
   const [newGroupIcon, setNewGroupIcon] = useState(GROUP_ICONS[0]);
   const [offlineTrips, setOfflineTrips] = useState<Array<{ trip_id: string; plan: { trip_name: string; states?: string[]; duration_days?: number } }>>([]);
   const inputRef = useRef<TextInput>(null);
-  const extremeSearchSessionRef = useRef<{ token: string; expiresAt: number } | null>(null);
   const currentLocationPlace = userLoc ? {
     name: 'My Location',
     lat: userLoc.lat,
@@ -467,74 +468,47 @@ export default function RouteSearchModal({
     return () => interaction.cancel();
   }, [focusSearchInput, visible, view]);
 
-  const getExtremeSearchSession = useCallback(async () => {
-    const now = Date.now();
-    if (extremeSearchSessionRef.current && extremeSearchSessionRef.current.expiresAt > now + 15_000) {
-      return extremeSearchSessionRef.current.token;
-    }
-    const session = await api.extremeSearchSession({ surface: 'route_search_modal' });
-    const token = session.session_token;
-    extremeSearchSessionRef.current = {
-      token,
-      expiresAt: now + Math.max(30, session.expires_in_seconds || 180) * 1000,
-    };
-    return token;
-  }, []);
-
-  const mapboxFeatureToPlace = useCallback((feature: any): SearchPlace | null => {
-    const coords = feature?.geometry?.coordinates;
-    const lng = Number(coords?.[0]);
-    const lat = Number(coords?.[1]);
+  const mapContextPlaceToPlace = useCallback((place: any): SearchPlace | null => {
+    const lat = Number(place?.lat);
+    const lng = Number(place?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
-    const props = feature?.properties ?? {};
-    const name = String(props.name || props.full_address || props.place_formatted || feature?.text || 'Mapbox place');
     return {
-      name,
+      name: String(place.name || 'Mapbox place'),
       lat,
       lng,
       dist: userLoc ? haversineKm(userLoc, { lat, lng }) : null,
       source: 'mapbox_search',
       source_label: 'Mapbox Search',
-      place_id: props.mapbox_id || feature?.id,
-      provider_place_id: props.mapbox_id || feature?.id,
-      type: props.feature_type || props.poi_category?.[0] || 'poi',
-      address: props.full_address || props.place_formatted,
+      place_id: place.place_id || place.mapbox_id || place.id,
+      provider_place_id: place.provider_place_id || place.mapbox_id || place.id,
+      type: place.type || place.feature_type || place.mapbox_categories?.[0] || 'poi',
+      address: place.address,
       attribution: 'Mapbox',
+      mapbox_id: place.mapbox_id,
+      mapbox_categories: place.mapbox_categories || place.categories,
+      rating: place.rating,
+      rating_count: place.rating_count,
+      phone: place.phone,
+      website: place.website,
     };
   }, [userLoc]);
 
   const searchExtremePlaces = useCallback(async (text: string) => {
-    const token = await getExtremeSearchSession();
     const proximity = userLoc ? `${userLoc.lng},${userLoc.lat}` : '';
-    const suggested = await api.extremeSearchSuggest({
+    const data = await api.mapContextSearch({
       q: text,
-      session_token: token,
+      category: 'poi',
+      center: userLoc || undefined,
       proximity,
       origin: proximity,
       limit: 6,
       language: 'en',
+      metadata: { surface: 'route_search_modal', source: 'route_search_text' },
     });
-    const suggestions = (suggested.suggestions ?? []).slice(0, 6);
-    const retrieved = await Promise.all(suggestions.map(async (suggestion: any) => {
-      const mapboxId = suggestion.mapbox_id || suggestion.mapbox_id_value || suggestion.id;
-      if (!mapboxId) return null;
-      try {
-        const data = await api.extremeSearchRetrieve({
-          mapbox_id: String(mapboxId),
-          session_token: token,
-          proximity,
-          origin: proximity,
-          language: 'en',
-        });
-        return (data.features ?? []).map(mapboxFeatureToPlace).filter(Boolean) as SearchPlace[];
-      } catch {
-        return null;
-      }
-    }));
-    return dedupePlaces(retrieved.flat().filter(Boolean) as SearchPlace[])
+    return dedupePlaces((data.places ?? []).map(mapContextPlaceToPlace).filter(Boolean) as SearchPlace[])
       .filter(hasUsableCoordinate)
       .sort((a, b) => (a.dist ?? 9999) - (b.dist ?? 9999));
-  }, [getExtremeSearchSession, mapboxFeatureToPlace, userLoc]);
+  }, [mapContextPlaceToPlace, userLoc]);
 
   const searchExplorePlaces = useCallback(async (text: string) => {
     const clean = text.trim();
@@ -565,17 +539,19 @@ export default function RouteSearchModal({
       water: 'drinking water',
       wifi: 'library',
     };
-    const data = await api.extremeSearchCategory({
+    const data = await api.mapContextSearch({
       category: categoryMap[catId] ?? catId,
+      center: userLoc,
       proximity: `${userLoc.lng},${userLoc.lat}`,
       limit: 10,
       language: 'en',
+      metadata: { surface: 'route_search_modal', source: 'route_search_category', category: catId },
     });
-    return (data.features ?? [])
-      .map(mapboxFeatureToPlace)
+    return (data.places ?? [])
+      .map(mapContextPlaceToPlace)
       .filter(Boolean)
       .filter(hasUsableCoordinate) as SearchPlace[];
-  }, [extremeSearchEnabled, mapboxFeatureToPlace, userLoc]);
+  }, [extremeSearchEnabled, mapContextPlaceToPlace, userLoc]);
 
   const doSearch = useCallback(async () => {
     if (!query.trim()) return;

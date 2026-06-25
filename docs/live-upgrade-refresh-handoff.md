@@ -217,25 +217,28 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 24 - Route Builder Active Day Stop List:
+Checkpoint 25 - Route Builder Stop Preview Cards:
 
-- Code commit: `cf31f80` (`Extract route builder active day stop list`), pushed
+- Code commit: `0b6f1a8` (`Extract route builder stop preview cards`), pushed
   to `master`.
 - Production OTA update group:
-  `9f937769-fe5a-4642-9df9-19aedea9f2ca`
+  `c73e1a00-56f1-42c1-8dde-dae19dab79a9`
 - Preview OTA update group:
-  `55a49eea-e55e-4578-a7d3-975278c6bfbe`
+  `53125ce1-8b85-46c5-b5c8-b5edd306881f`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-24-route-builder-active-day-stop-list-audit.md`.
+  `docs/live-upgrade-checkpoint-25-route-builder-stop-preview-cards-audit.md`.
 
 ## Current Checkpoint Record
 
 Checkpoint 25 - Route Builder Stop Preview Cards:
 
-- Code commit: pending.
-- Production OTA update group: pending.
-- Preview OTA update group: pending.
+- Code commit: `0b6f1a8` (`Extract route builder stop preview cards`), pushed
+  to `master`.
+- Production OTA update group:
+  `c73e1a00-56f1-42c1-8dde-dae19dab79a9`
+- Preview OTA update group:
+  `53125ce1-8b85-46c5-b5c8-b5edd306881f`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
   `docs/live-upgrade-checkpoint-25-route-builder-stop-preview-cards-audit.md`.

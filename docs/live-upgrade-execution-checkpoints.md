@@ -233,7 +233,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `55a49eea-e55e-4578-a7d3-975278c6bfbe`.
 
 25. **Route Builder Stop Preview Cards**
-    - Status: complete, pending release.
+    - Status: complete and released.
     - Extracted stop preview rendering for start, route stop, fuel, places, and
       camp cards into reusable route-builder preview components.
     - Keep camp detail loading, selected camp sheets, replacement flow, stop
@@ -242,6 +242,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
       route stop media layouts before code.
     - Saved design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
+    - Release: production OTA
+      `c73e1a00-56f1-42c1-8dde-dae19dab79a9`; preview OTA
+      `53125ce1-8b85-46c5-b5c8-b5edd306881f`.
 
 26. **Route Builder Discovery Candidate Cards**
     - Status: queued.

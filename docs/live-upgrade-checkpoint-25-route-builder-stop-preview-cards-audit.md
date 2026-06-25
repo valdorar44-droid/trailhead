@@ -91,4 +91,10 @@
 
 ## Release
 
-- Pending commit, push, and OTA.
+- Code commit: `0b6f1a8` (`Extract route builder stop preview cards`),
+  pushed to `master`.
+- Production OTA update group:
+  `c73e1a00-56f1-42c1-8dde-dae19dab79a9`
+- Preview OTA update group:
+  `53125ce1-8b85-46c5-b5c8-b5edd306881f`
+- Runtime: `native-20260614-sdk54-1`.

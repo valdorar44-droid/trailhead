@@ -290,13 +290,26 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `01480fc3-971c-417f-9a36-d0d576cc84a1`.
 
 29. **Route Builder Discovery Gas Provider Boundary**
+    - Status: complete, pending release.
+    - Extracted point fan-out and provider empty-fallback handling into
+      `searchRouteBuilderProviderAtPoints`.
+    - Updated gas leg and area searches to use the helper for NREL, OSM fuel,
+      Mapbox fuel, and Nominatim fuel fallback.
+    - Kept provider merge order, offline fuel/propane, dedupe, route
+      projection, result sorting, selected place sheets, add-place behavior,
+      and route calculations unchanged.
+    - Reviewed Mobbin fuel/search references and Figma design-system search
+      before code; saved design decision, audit checkpoint, Figma checkpoint
+      frame, and Playwright smoke screenshot.
+
+30. **Route Builder Discovery Camp Provider Boundary**
     - Status: queued.
-    - Audit gas-provider fan-out in `runDiscovery` for leg and area searches.
-    - Extract only provider orchestration if NREL, OSM fuel, Mapbox fuel,
-      offline fuel/propane, Nominatim fallback, dedupe, route projection, and
-      selected place sheets stay unchanged.
-    - Continue Mobbin/Figma research against route fuel-stop and travel-day
-      add-place workflows before code.
+    - Audit camp-provider fan-out in `runDiscovery` for leg and area searches.
+    - Extract only provider orchestration if camp filters, photo-only fallback,
+      endpoint fallback, camp ranking, route projection, replacement behavior,
+      and selected camp sheets stay unchanged.
+    - Continue Mobbin/Figma research against campground search, overnight
+      selection, and itinerary add-place workflows before code.
 
 ## Refresh Handoff
 
@@ -337,6 +350,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-27-route-builder-discovery-state-boundary-audit.md`.
 - Checkpoint 28 discovery-provider-boundary context is saved in
   `docs/live-upgrade-checkpoint-28-route-builder-discovery-provider-boundary-audit.md`.
+- Checkpoint 29 discovery-gas-provider-boundary context is saved in
+  `docs/live-upgrade-checkpoint-29-route-builder-discovery-gas-provider-boundary-audit.md`.
 
 ## Validation Gate
 

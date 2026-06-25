@@ -71,6 +71,7 @@ import {
   savedGeometryFromCoords,
   resolveRouteBuilderSearchResults,
   searchRouteBuilderFallbackPois,
+  searchRouteBuilderProviderAtPoints,
   searchOfflineRouteBuilderPlaces,
   type RouteBuilderSearchPlace,
   type RouteBuilderStopType,
@@ -2214,9 +2215,21 @@ export default function RouteBuilderScreen() {
           const radius = Math.max(32, Math.min(64, searchLeg!.miles / 4 + 14));
           const samplePoints = legSamplePoints(searchLeg!);
           const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
-            Promise.all(samplePoints.map(point => api.getGas(point.lat, point.lng, radius).catch(() => []))).then(items => uniqueByGeo(items.flat())),
-            Promise.all(samplePoints.map(point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES).catch(() => []))).then(items => uniqueByGeo(items.flat())),
-            Promise.all(samplePoints.map(point => searchMapContextNearby('gas station', point, radius, 'fuel', 5).catch(() => []))).then(items => uniqueByGeo(items.flat())),
+            searchRouteBuilderProviderAtPoints({
+              points: samplePoints,
+              provider: point => api.getGas(point.lat, point.lng, radius),
+              dedupe: uniqueByGeo,
+            }),
+            searchRouteBuilderProviderAtPoints({
+              points: samplePoints,
+              provider: point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES),
+              dedupe: uniqueByGeo,
+            }),
+            searchRouteBuilderProviderAtPoints({
+              points: samplePoints,
+              provider: point => searchMapContextNearby('gas station', point, radius, 'fuel', 5),
+              dedupe: uniqueByGeo,
+            }),
           ]);
           const offlineFuel = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['fuel', 'propane']);
           const stations = uniqueByGeo([
@@ -2226,9 +2239,11 @@ export default function RouteBuilderScreen() {
             ...offlineFuel.map(poiToGasStation),
           ]);
           if (stations.length === 0) {
-            const nominatimFuel = uniqueByGeo((await Promise.all(
-              legSamplePoints(searchLeg!).map(point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6).catch(() => []))
-            )).flat());
+            const nominatimFuel = await searchRouteBuilderProviderAtPoints({
+              points: legSamplePoints(searchLeg!),
+              provider: point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6),
+              dedupe: uniqueByGeo,
+            });
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           const scoped = spreadAlongLeg(stations
@@ -2238,9 +2253,18 @@ export default function RouteBuilderScreen() {
           storeDiscoveryResults(key, { gas: scoped, summary: `${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg` });
         } else {
           const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
-            api.getGas(target.lat, target.lng, 35).catch(() => []),
-            api.getOsmPois(target.lat, target.lng, 35, FUEL_POI_TYPES).catch(() => []),
-            searchMapContextNearby('gas station', target, 35, 'fuel', 8).catch(() => []),
+            searchRouteBuilderProviderAtPoints({
+              points: [target],
+              provider: point => api.getGas(point.lat, point.lng, 35),
+            }),
+            searchRouteBuilderProviderAtPoints({
+              points: [target],
+              provider: point => api.getOsmPois(point.lat, point.lng, 35, FUEL_POI_TYPES),
+            }),
+            searchRouteBuilderProviderAtPoints({
+              points: [target],
+              provider: point => searchMapContextNearby('gas station', point, 35, 'fuel', 8),
+            }),
           ]);
           const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], 45);
           const stations = uniqueByGeo([
@@ -2250,7 +2274,10 @@ export default function RouteBuilderScreen() {
             ...offlineFuel.map(poiToGasStation),
           ]);
           if (stations.length === 0) {
-            const nominatimFuel = await searchNominatimNearby('gas station', target, 35, 'fuel', 8).catch(() => []);
+            const nominatimFuel = await searchRouteBuilderProviderAtPoints({
+              points: [target],
+              provider: point => searchNominatimNearby('gas station', point, 35, 'fuel', 8),
+            });
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           stations.sort((a, b) => (a.route_distance_mi ?? haversineMi(a, target)) - (b.route_distance_mi ?? haversineMi(b, target)));

@@ -1,6 +1,9 @@
 import type { OsmPoi } from '@/lib/api';
 
 export type RouteBuilderDiscoveryPoint = { lat: number; lng: number };
+export type RouteBuilderPointProvider<T extends RouteBuilderDiscoveryPoint> = (
+  point: RouteBuilderDiscoveryPoint,
+) => Promise<T[]>;
 export type RouteBuilderPoiFallbackQuery = readonly [query: string, type: OsmPoi['type']];
 export type RouteBuilderPoiFallbackProvider = (
   query: string,
@@ -36,4 +39,20 @@ export async function searchRouteBuilderFallbackPois({
     queries.map(([query, type]) => provider(query, point, radiusMi, type, limitPerQuery).catch(() => [] as OsmPoi[]))
   ));
   return batches.flat();
+}
+
+export type SearchRouteBuilderProviderAtPointsInput<T extends RouteBuilderDiscoveryPoint> = {
+  points: RouteBuilderDiscoveryPoint[];
+  provider: RouteBuilderPointProvider<T>;
+  dedupe?: (items: T[]) => T[];
+};
+
+export async function searchRouteBuilderProviderAtPoints<T extends RouteBuilderDiscoveryPoint>({
+  points,
+  provider,
+  dedupe,
+}: SearchRouteBuilderProviderAtPointsInput<T>): Promise<T[]> {
+  const batches = await Promise.all(points.map(point => provider(point).catch(() => [] as T[])));
+  const items = batches.flat();
+  return dedupe ? dedupe(items) : items;
 }

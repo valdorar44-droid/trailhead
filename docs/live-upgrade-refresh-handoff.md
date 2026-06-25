@@ -237,15 +237,23 @@ Checkpoint 29 - Route Builder Discovery Gas Provider Boundary:
 - Production OTA update group: pending.
 - Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
-- Audit doc: pending.
-- Design decision: pending.
-- Scope:
-  - Audit gas-provider fan-out in `runDiscovery` for leg and area searches.
-  - Extract only provider orchestration if NREL, OSM fuel, Mapbox fuel,
-    offline fuel/propane, Nominatim fallback, dedupe, route projection, and
-    selected place sheets stay unchanged.
-  - Continue Mobbin/Figma research against route fuel-stop and travel-day
-    add-place workflows before code.
+- Audit doc:
+  `docs/live-upgrade-checkpoint-29-route-builder-discovery-gas-provider-boundary-audit.md`.
+- Design decision:
+  `docs/design-decisions/route-builder-discovery-gas-provider-boundary.md`.
+- Figma evidence:
+  - File `yP342OKFtUQ1J0RCwnzH6s`
+  - Frame `39:2`
+  - Screenshot
+    `/tmp/trailhead-checkpoint-29-route-builder-discovery-gas-provider-boundary-figma.png`
+- Playwright evidence:
+  `/tmp/trailhead-route-builder-checkpoint-29-discovery-gas-provider-boundary-web.png`
+- Validation:
+  - `npx tsc --noEmit`
+  - `npm run audit:copy`
+  - `npm run audit:routes`
+  - `node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" lib/routeBuilder/discoveryProviders.ts`
+  - `git diff --check`
 
 ## Repo Note
 
@@ -260,9 +268,9 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 29 - Route Builder Discovery Gas Provider Boundary**
+**Checkpoint 30 - Route Builder Discovery Camp Provider Boundary**
 
-Audit gas-provider fan-out in `runDiscovery` for leg and area searches. Extract
-only provider orchestration if NREL, OSM fuel, Mapbox fuel, offline
-fuel/propane, Nominatim fallback, dedupe, route projection, and selected place
-sheets stay unchanged.
+Audit camp-provider fan-out in `runDiscovery` for leg and area searches. Extract
+only provider orchestration if camp filters, photo-only fallback, endpoint
+fallback, camp ranking, route projection, replacement behavior, and selected
+camp sheets stay unchanged.

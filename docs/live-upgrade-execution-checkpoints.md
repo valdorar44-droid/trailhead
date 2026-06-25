@@ -246,14 +246,23 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `c73e1a00-56f1-42c1-8dde-dae19dab79a9`; preview OTA
       `53125ce1-8b85-46c5-b5c8-b5edd306881f`.
 
-26. **Route Builder Discovery Candidate Cards**
-    - Status: queued.
-    - Extract candidate rows, camp candidate cards, and replacement/discovery
-      result card composition into reusable route-builder components.
+26. **Route Builder Discovery Candidate Cleanup**
+    - Status: complete, pending release.
+    - Removed stale candidate-row and camp-candidate styles now that live inline
+      discovery results render through `RouteBuilderInlineResults`.
     - Keep discovery filtering, camp replacement, add-place behavior, selected
       camp sheets, and route calculations unchanged.
-    - Continue Mobbin/Figma research against search result cards, saved-place
-      cards, and route discovery sheets before code.
+    - Audited dead references before code and saved design decision, audit
+      checkpoint, Playwright smoke, and validation evidence.
+
+27. **Route Builder Discovery State Boundary**
+    - Status: queued.
+    - Audit route discovery state and scan helpers for the next extraction
+      boundary.
+    - Keep provider calls, offline fallback, camp replacement, add-place
+      behavior, selected camp sheets, and route calculations unchanged.
+    - Continue Mobbin/Figma research against route discovery sheets and search
+      result workflows before code.
 
 ## Refresh Handoff
 
@@ -288,6 +297,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-24-route-builder-active-day-stop-list-audit.md`.
 - Checkpoint 25 stop-preview-card extraction context is saved in
   `docs/live-upgrade-checkpoint-25-route-builder-stop-preview-cards-audit.md`.
+- Checkpoint 26 discovery-candidate cleanup context is saved in
+  `docs/live-upgrade-checkpoint-26-route-builder-discovery-candidate-cleanup-audit.md`.
 
 ## Validation Gate
 

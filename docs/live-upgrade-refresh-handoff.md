@@ -231,26 +231,21 @@ Checkpoint 25 - Route Builder Stop Preview Cards:
 
 ## Current Checkpoint Record
 
-Checkpoint 25 - Route Builder Stop Preview Cards:
+Checkpoint 26 - Route Builder Discovery Candidate Cleanup:
 
-- Code commit: `0b6f1a8` (`Extract route builder stop preview cards`), pushed
-  to `master`.
-- Production OTA update group:
-  `c73e1a00-56f1-42c1-8dde-dae19dab79a9`
-- Preview OTA update group:
-  `53125ce1-8b85-46c5-b5c8-b5edd306881f`
+- Code commit: pending.
+- Production OTA update group: pending.
+- Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-25-route-builder-stop-preview-cards-audit.md`.
-- Figma evidence:
-  `/tmp/trailhead-checkpoint-25-route-builder-stop-preview-cards-figma.png`
+  `docs/live-upgrade-checkpoint-26-route-builder-discovery-candidate-cleanup-audit.md`.
 - Playwright evidence:
-  `/tmp/trailhead-route-builder-checkpoint-25-stop-preview-card-web.png`
+  `http://127.0.0.1:8100/route-builder` reload with no current console errors.
 - Validation:
   - `cd mobile && npx tsc --noEmit`
   - `cd mobile && npm run audit:copy`
   - `cd mobile && npm run audit:routes`
-  - `cd mobile && node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" components/routeBuilder/RouteBuilderStopPreviewCards.tsx`
+  - `rg "candidateRow|candidateIcon|campCandidate|candidateName|candidateMeta" "mobile/app/(tabs)/route-builder.tsx"`
   - `git diff --check`
 
 ## Repo Note
@@ -266,10 +261,9 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 26 - Route Builder Discovery Candidate Cards**
+**Checkpoint 27 - Route Builder Discovery State Boundary**
 
-Extract candidate rows, camp candidate cards, and replacement/discovery result
-card composition into reusable route-builder components. Keep discovery
-filtering, camp replacement, add-place behavior, selected camp sheets, and route
-calculations unchanged; audit against Mobbin search result cards, saved-place
-cards, discovery sheets, and the existing Figma checkpoint board before code.
+Audit route discovery state and scan helpers for the next extraction boundary.
+Keep provider calls, offline fallback, camp replacement, add-place behavior,
+selected camp sheets, and route calculations unchanged; continue Mobbin/Figma
+research against route discovery sheets and search result workflows before code.

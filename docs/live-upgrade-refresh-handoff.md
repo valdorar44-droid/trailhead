@@ -14,12 +14,12 @@ tools. It captures what is already complete and what should happen next.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
   `8ff520a Polish planner composer checkpoint`.
-- Production OTA recorded in the prior session:
-  `28d8b279-cc12-435f-b098-1042e0bb92b7`.
-- Preview OTA recorded in the prior session:
-  `dacf0049-c1b5-4763-ae0f-7cb3ce93da2d`.
-- Current repo check before this handoff: Checkpoint 12 has local uncommitted
-  changes in map navigation code and checkpoint documentation.
+- Latest shipped implementation batch: Map Navigation Stability.
+- Latest implementation commit: `d2d5739 Stabilize map navigation pan handling`.
+- Latest production OTA: `8d04336f-dc1a-4c6c-b429-c3d64a998339`.
+- Latest preview OTA: `bde39339-21c9-47be-b277-845ebf8fe2eb`.
+- Current repo check before this handoff: clean and synced with origin after
+  release record push.
 
 ## MCP / Research State
 

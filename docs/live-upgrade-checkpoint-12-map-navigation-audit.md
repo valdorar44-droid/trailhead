@@ -82,6 +82,22 @@ recent map viewport cache, and map-layer QA documentation.
 - Figma checkpoint screenshot reviewed at
   `/tmp/trailhead-checkpoint-12-figma-fixed.png`.
 
+## Release
+
+- GitHub commit: `d2d5739` (`Stabilize map navigation pan handling`)
+- Production OTA:
+  - Update group: `8d04336f-dc1a-4c6c-b429-c3d64a998339`
+  - Android update: `019efde7-8304-77dc-9ab1-8dd3b8d045c4`
+  - iOS update: `019efde7-8304-777c-8a8b-20baf878578f`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/8d04336f-dc1a-4c6c-b429-c3d64a998339`
+- Preview OTA:
+  - Update group: `bde39339-21c9-47be-b277-845ebf8fe2eb`
+  - Android update: `019efde8-2c5f-718a-bd86-a10a54a82a35`
+  - iOS update: `019efde8-2c5f-7320-ab88-de4f99bcf0e1`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/bde39339-21c9-47be-b277-845ebf8fe2eb`
+
 ## Remaining Risks
 
 - The reported iOS crash requires native-device smoke testing after OTA because

@@ -86,6 +86,25 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Validate the authenticated Planner welcome, composer typing, and report
       sheet through Figma and Playwright.
 
+12. **Map Navigation Stability + Mapbox Native QA**
+    - Status: complete for first iOS navigation pan-stability slice.
+    - Debounce native map gesture/follow breakaway events.
+    - Keep navigation running while the user pans into free-camera mode.
+    - Keep locate/follow as the explicit return-to-follow action.
+    - Add a short recent-viewport cache for quick map returns.
+    - Reconfirm Trailhead Topo / Mapbox Outdoors layer ordering and free Mapbox
+      style access.
+
+## Refresh Handoff
+
+- Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.
+- Mobbin MCP OAuth login succeeded, but the active Codex session did not expose
+  Mobbin tools after login. Refresh Codex, then verify Mobbin tool discovery.
+- Mobbin tools were visible after refresh and were used for Checkpoint 12
+  research.
+- Checkpoint 12 implementation context is saved in
+  `docs/live-upgrade-checkpoint-12-map-navigation-audit.md`.
+
 ## Validation Gate
 
 Run the relevant subset before each checkpoint closes:

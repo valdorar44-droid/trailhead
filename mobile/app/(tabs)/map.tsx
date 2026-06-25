@@ -1746,7 +1746,8 @@ function conditionSourceLabel(r: Report): string {
   if (provider === 'airnow') return 'AIR QUALITY · AIRNOW';
   if (provider === 'wfigs') return 'WILDFIRE · WFIGS';
   if (provider === 'firms') return 'FIRE DETECTION · NASA FIRMS';
-  return `LIVE CONDITION · ${(r.provider ?? 'provider').toUpperCase()}`;
+  const source = String(r.provider ?? '').trim().toUpperCase();
+  return source ? `LIVE CONDITION · ${source}` : 'LIVE CONDITION';
 }
 
 function conditionCanSpeak(r: Report): boolean {
@@ -4263,7 +4264,8 @@ const buildMapHtml = (
       el.textContent=REP_ICONS[r.type]||'!';
       el.title=(r.source==='provider'?'LIVE CONDITION · ':'')+(r.subtype||r.type)+(r.confirmations?' ✓'+r.confirmations:'');
       var age=repTimeAgo(r.created_at);
-      var providerLabel=r.provider==='nws'?'WEATHER ALERT · NWS':r.provider==='airnow'?'AIR QUALITY · AIRNOW':r.provider==='wfigs'?'WILDFIRE · WFIGS':r.provider==='firms'?'FIRE DETECTION · NASA FIRMS':r.provider==='tomtom'?'LIVE TRAFFIC · TOMTOM':'LIVE CONDITION · '+String(r.provider||'provider').toUpperCase();
+      var unknownProvider=String(r.provider||'').trim().toUpperCase();
+      var providerLabel=r.provider==='nws'?'WEATHER ALERT · NWS':r.provider==='airnow'?'AIR QUALITY · AIRNOW':r.provider==='wfigs'?'WILDFIRE · WFIGS':r.provider==='firms'?'FIRE DETECTION · NASA FIRMS':r.provider==='tomtom'?'LIVE TRAFFIC · TOMTOM':(unknownProvider?'LIVE CONDITION · '+unknownProvider:'LIVE CONDITION');
       var confLine=r.source==='provider'?'<div class="pm" style="color:#6DA8FF;margin-top:2px">'+escHTML(providerLabel)+'</div>':(r.confirmations?'<div class="pm" style="color:#22c55e;margin-top:2px">✓ '+r.confirmations+' confirmed</div>':'');
       var ageLine=age?'<div class="pm" style="opacity:0.5;margin-top:2px">'+escHTML(age)+'</div>':'';
       var popup=new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||(r.source==='provider'?'Live condition alert':'Community report'))+'</div>'+confLine+ageLine);
@@ -5529,6 +5531,7 @@ function MapScreen() {
   const lastAndroidHeadingRef = useRef<{ at: number; raw: number; smooth: number } | null>(null);
   const navModeStateRef  = useRef(navMode);
   const navCameraFollowStateRef = useRef(navCameraFollow);
+  const lastNavMapGestureRef = useRef(0);
   const lastAndroidLocationDebugRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
 
@@ -7995,7 +7998,7 @@ function MapScreen() {
       setSearchResults(sorted.map(place => ({
         ...place,
         source: place.source || 'search',
-        source_label: place.source_label || (place.source === 'mapbox' ? 'Mapbox geocode' : place.source === 'trailhead_landmark' ? 'Trailhead landmark' : 'Map search'),
+        source_label: place.source_label || (place.source === 'mapbox' ? 'Mapbox Search' : place.source === 'trailhead_landmark' ? 'Trailhead landmark' : 'Map search'),
         type: place.feature_type || place.category || 'poi',
         geocode_status: resolved?.status,
         geocode_reason: resolved?.reason,
@@ -8418,8 +8421,8 @@ function MapScreen() {
         return {
           ...place,
           type: place.type || 'poi',
-          source: place.source || 'geocode',
-          source_label: 'Geocode',
+          source: place.source || 'map_search',
+          source_label: 'Map Search',
         } as SearchPlace;
       }
       return null;
@@ -8775,7 +8778,7 @@ function MapScreen() {
       allowAmbiguous: true,
     });
     return place && Number.isFinite(place.lat) && Number.isFinite(place.lng)
-      ? { ...place, name: place.name || query, type: 'poi', source: place.source || 'geocode', source_label: 'Geocode' } as SearchPlace
+      ? { ...place, name: place.name || query, type: 'poi', source: place.source || 'map_search', source_label: 'Map Search' } as SearchPlace
       : null;
   }
 
@@ -11185,8 +11188,8 @@ function MapScreen() {
       ...place,
       name: place.name || query,
       type: place.feature_type || place.category || 'poi',
-      source: place.source || 'geocode',
-      source_label: place.source_label || (place.source === 'trailhead_landmark' ? 'Trailhead landmark' : place.source === 'mapbox' ? 'Mapbox geocode' : 'Geocode'),
+      source: place.source || 'map_search',
+      source_label: place.source_label || (place.source === 'trailhead_landmark' ? 'Trailhead landmark' : place.source === 'mapbox' ? 'Mapbox Search' : 'Map Search'),
       provider_place_id: place.provider_place_id || place.place_id,
       selection_source: place.source === 'mapbox' ? 'mapbox_search' : 'map_point',
       selection_confidence: place.confidence || (status === 'resolved' ? 'high' : 'medium'),
@@ -12075,7 +12078,7 @@ function MapScreen() {
             flown_to: place.name || query,
             lat: place.lat,
             lng: place.lng,
-            source: place.source || 'geocode',
+            source: place.source || 'map_search',
             geocode_status: place.geocode_status || null,
             geocode_reason: place.geocode_reason || null,
             country_code: place.country_code || null,
@@ -12492,7 +12495,7 @@ function MapScreen() {
     if (!user?.is_admin) return;
     recordAndroidMapDebugEvent({
       at: Date.now(),
-      kind: 'debug:manual-share',
+      kind: 'support:manual-share',
       details: {
         viewport: currentCopilotBounds(),
         userLoc,
@@ -12502,7 +12505,7 @@ function MapScreen() {
       },
     });
     const payload = await recordAdminCopilotDebugSnapshot(
-      'manual_admin_debug_share',
+      'manual_admin_support_share',
       {
         pending_action: copilotDebugActionPayload(pendingCopilotAction),
         current_input: extremeCopilotInput.trim() || null,
@@ -17239,7 +17242,15 @@ function MapScreen() {
             }
           }}
           onMapGesture={() => {
-            if (navMode) setNavCameraFollow(false);
+            const now = Date.now();
+            if (navModeStateRef.current) {
+              const recentlyHandled = now - lastNavMapGestureRef.current < 1200;
+              if (navCameraFollowStateRef.current && !recentlyHandled) {
+                lastNavMapGestureRef.current = now;
+                navCameraFollowStateRef.current = false;
+                setNavCameraFollow(false);
+              }
+            }
             if (searchRouteCard) setSearchRouteCard(null);
           }}
           onDebugEvent={recordAndroidMapDebugEvent}

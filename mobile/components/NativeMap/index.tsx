@@ -89,9 +89,54 @@ const MAPBOX_LIGHT_PRESETS: Partial<Record<PremiumMapStyle, 'dawn' | 'day' | 'du
   night: 'night',
 };
 
+const RECENT_MAP_VIEWPORT_KEY = 'trailhead_map_recent_viewport_v1';
+const RECENT_MAP_VIEWPORT_TTL_MS = 5 * 60 * 1000;
+const RECENT_MAP_VIEWPORT_WRITE_MS = 2500;
+const NAV_GESTURE_HOLD_MS = Platform.OS === 'ios' ? 2600 : 1800;
+const NAV_GESTURE_NOTIFY_COOLDOWN_MS = Platform.OS === 'ios' ? 1400 : 900;
+
+type CachedMapViewport = {
+  at: number;
+  centerCoordinate: [number, number];
+  zoomLevel: number;
+  pitch: number;
+  mapLayer?: string;
+  premiumMapStyle?: string | null;
+};
+
 function isUserCameraEvent(feature: any) {
   const props = feature?.properties ?? feature?.nativeEvent?.payload?.properties ?? feature?.nativeEvent?.payload ?? {};
   return !!(props.isUserInteraction || props.isAnimatingFromUserInteraction);
+}
+
+function parseCachedMapViewport(raw: string | null | undefined): CachedMapViewport | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    const center = Array.isArray(parsed?.centerCoordinate) ? parsed.centerCoordinate.map(Number) : null;
+    const at = Number(parsed?.at);
+    const zoomLevel = Number(parsed?.zoomLevel);
+    const pitch = Number(parsed?.pitch);
+    if (
+      !center ||
+      center.length !== 2 ||
+      !center.every(Number.isFinite) ||
+      !Number.isFinite(at) ||
+      !Number.isFinite(zoomLevel)
+    ) {
+      return null;
+    }
+    return {
+      at,
+      centerCoordinate: [center[0], center[1]],
+      zoomLevel,
+      pitch: Number.isFinite(pitch) ? pitch : 0,
+      mapLayer: typeof parsed?.mapLayer === 'string' ? parsed.mapLayer : undefined,
+      premiumMapStyle: typeof parsed?.premiumMapStyle === 'string' ? parsed.premiumMapStyle : null,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -832,6 +877,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const pendingFreeCameraRef = useRef<null | (() => void)>(null);
   const programmaticCameraUntilRef = useRef(0);
   const userCameraGestureUntilRef = useRef(0);
+  const navGestureBreakawayRef = useRef(false);
+  const lastGestureNotifyRef = useRef(0);
+  const recentViewportRestoredRef = useRef(false);
+  const lastViewportCacheWriteRef = useRef(0);
   const locateSettleTimersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const deferredSourceRefreshRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const routeRequestRef = useRef(0);                   // cancels stale async route results
@@ -848,17 +897,76 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     };
   }, []);
 
-  const markUserCameraGesture = useCallback((source: string, details: Record<string, unknown> = {}) => {
+  useEffect(() => {
+    if (!navMode || navCameraFollow) navGestureBreakawayRef.current = false;
+  }, [navCameraFollow, navMode]);
+
+  const persistRecentViewport = useCallback((lat: number, lng: number, zoomLevel: number, pitch: number) => {
+    if (navMode || !Number.isFinite(lat) || !Number.isFinite(lng) || !Number.isFinite(zoomLevel)) return;
     const now = Date.now();
-    userCameraGestureUntilRef.current = now + 2200;
+    if (now - lastViewportCacheWriteRef.current < RECENT_MAP_VIEWPORT_WRITE_MS) return;
+    lastViewportCacheWriteRef.current = now;
+    const payload: CachedMapViewport = {
+      at: now,
+      centerCoordinate: [lng, lat],
+      zoomLevel,
+      pitch: Number.isFinite(pitch) ? pitch : 0,
+      mapLayer,
+      premiumMapStyle: props.premiumMapStyle ?? null,
+    };
+    storage.set(RECENT_MAP_VIEWPORT_KEY, JSON.stringify(payload)).catch(() => {});
+  }, [mapLayer, navMode, props.premiumMapStyle]);
+
+  const restoreRecentViewportIfNeeded = useCallback(async () => {
+    if (recentViewportRestoredRef.current || navMode || waypoints.length > 0 || searchMarker) return;
+    recentViewportRestoredRef.current = true;
+    const cached = parseCachedMapViewport(await storage.get(RECENT_MAP_VIEWPORT_KEY).catch(() => null));
+    if (!cached || Date.now() - cached.at > RECENT_MAP_VIEWPORT_TTL_MS) return;
+    freeCameraDefaultRef.current = {
+      centerCoordinate: cached.centerCoordinate,
+      zoomLevel: cached.zoomLevel,
+      pitch: cached.pitch,
+      animationDuration: 0,
+    };
+    emitDebugEvent('camera:restore-recent-viewport', {
+      age_ms: Date.now() - cached.at,
+      center: cached.centerCoordinate,
+      zoom: cached.zoomLevel,
+      cachedMapLayer: cached.mapLayer ?? null,
+      cachedPremiumMapStyle: cached.premiumMapStyle ?? null,
+    });
+    setFreeCameraRevision(value => value + 1);
+    camRef.current?.setCamera({
+      centerCoordinate: cached.centerCoordinate,
+      zoomLevel: cached.zoomLevel,
+      pitch: cached.pitch,
+      animationDuration: 0,
+      animationMode: 'none',
+    } as any);
+  }, [emitDebugEvent, navMode, searchMarker, waypoints.length]);
+
+  const markUserCameraGesture = useCallback((source: string, details: Record<string, unknown> = {}, notifyParent = true) => {
+    const now = Date.now();
+    userCameraGestureUntilRef.current = now + NAV_GESTURE_HOLD_MS;
     // A real touch should win over any in-flight locate/flyTo animation.
     programmaticCameraUntilRef.current = 0;
     pendingFreeCameraRef.current = null;
     locateSettleTimersRef.current.forEach(timer => clearTimeout(timer));
     locateSettleTimersRef.current = [];
+    const alreadyBreakingAway = navMode && navGestureBreakawayRef.current;
+    if (navMode) navGestureBreakawayRef.current = true;
     if (navMode && !navCameraFollow) setFreeCameraRevision(value => value + 1);
-    emitDebugEvent('camera:user-gesture', { source, ...details });
-    onMapGesture?.();
+    const shouldNotifyParent = notifyParent && (!alreadyBreakingAway || now - lastGestureNotifyRef.current > NAV_GESTURE_NOTIFY_COOLDOWN_MS);
+    emitDebugEvent('camera:user-gesture', {
+      source,
+      notifyParent: shouldNotifyParent,
+      holdMs: NAV_GESTURE_HOLD_MS,
+      ...details,
+    });
+    if (shouldNotifyParent) {
+      lastGestureNotifyRef.current = now;
+      onMapGesture?.();
+    }
   }, [emitDebugEvent, navCameraFollow, navMode, onMapGesture]);
 
   const clearLocateSettleTimers = useCallback(() => {
@@ -1946,7 +2054,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const handleMapReady = useCallback(() => {
     emitDebugEvent('map:ready');
     onMapReady();
-  }, [emitDebugEvent, onMapReady]);
+    restoreRecentViewportIfNeeded().catch(() => {});
+  }, [emitDebugEvent, onMapReady, restoreRecentViewportIfNeeded]);
 
   const handleRegionIsChanging = useCallback((feat: any) => {
     if (!isUserCameraEvent(feat)) return;
@@ -2174,6 +2283,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         animationDuration: 0,
       };
     }
+    if (!navMode) {
+      persistRecentViewport(
+        (n + s) / 2,
+        (e + w) / 2,
+        Number.isFinite(Number(zoomLevel)) ? Number(zoomLevel) : freeCameraDefaultRef.current.zoomLevel,
+        showTerrain ? 68 : 0,
+      );
+    }
     boundsRef.current = { n, s, e, w };
     onBoundsChange({ n, s, e, w, zoom: zoomLevel || 10 });
     if (showMvum) fetchMvum({ n, s, e, w });
@@ -2194,7 +2311,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } else {
       refreshMapSourcesForBounds(n, s, e, w);
     }
-  }, [emitDebugEvent, onBoundsChange, showMvum, fetchMvum, navMode, showTerrain, refreshMapSourcesForBounds]);
+  }, [emitDebugEvent, onBoundsChange, showMvum, fetchMvum, navMode, persistRecentViewport, showTerrain, refreshMapSourcesForBounds]);
 
   const handleCampPress = useCallback((e: any) => {
     const feat = e.features?.[0];
@@ -2231,7 +2348,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         projection={isExtremeMapbox ? 'globe' : undefined}
         onPress={handlePress}
         onLongPress={handleLongPress}
-        onTouchStart={() => markUserCameraGesture('touch-start')}
+        onTouchStart={() => markUserCameraGesture('touch-start', {}, false)}
         onRegionWillChange={(feature: any) => {
           if (isUserCameraEvent(feature)) {
             const props = feature?.properties ?? {};
@@ -2290,7 +2407,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
         followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
         onUserTrackingModeChange={(event: any) => {
-          if (event?.nativeEvent?.payload?.followUserLocation === false) onMapGesture?.();
+          const payload = event?.nativeEvent?.payload ?? {};
+          if (payload?.followUserLocation === false) {
+            markUserCameraGesture('tracking-mode-change', {
+              followUserLocation: false,
+              reason: payload?.reason ?? null,
+            });
+          }
         }}
       />
 

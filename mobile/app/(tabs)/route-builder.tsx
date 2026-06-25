@@ -33,6 +33,7 @@ import {
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderTimelineDayCard from '@/components/routeBuilder/RouteBuilderTimelineDayCard';
 import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
+import RentalSuggestionModule from '@/components/trip/RentalSuggestionModule';
 import useRouteBuilderDiscoveryState, {
   type DiscoveryTab,
   type LegSearchContext,
@@ -40,12 +41,14 @@ import useRouteBuilderDiscoveryState, {
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore, type TripHistoryItem } from '@/lib/store';
+import { storage } from '@/lib/storage';
 import { trackPhase0Once } from '@/lib/telemetry';
+import { buildRentalSuggestionFit } from '@/lib/outdoorRentals';
 import {
   clearTrailheadRouteBuilderDraft,
   loadTrailheadRouteBuilderDraft,
@@ -84,6 +87,7 @@ const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhea
 const ROUTE_BUILDER_LOAD_VIDEO = require('../../assets/route-builder-load.mp4');
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 const ROUTE_HERO_PHOTO = 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg';
+const ROUTE_BUILDER_RENTAL_DISMISSED_KEY = 'trailhead_route_builder_rental_dismissed_at';
 
 const ROUTE_COVER_FALLBACKS = [
   { match: /utah|moab|arches|canyonlands|red rock|\but\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg' },
@@ -1344,6 +1348,7 @@ export default function RouteBuilderScreen() {
   const setStoreUserLoc = useStore(st => st.setUserLoc);
   const rigProfile = useStore(st => st.rigProfile);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
+  const sessionId = useStore(st => st.sessionId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const {
     getState: getOfflineMapState,
@@ -1380,6 +1385,10 @@ export default function RouteBuilderScreen() {
   const [copilotAutoBuildRunId, setCopilotAutoBuildRunId] = useState(0);
   const [restDays, setRestDays] = useState<number[]>([]);
   const [dayDriveTargets, setDayDriveTargets] = useState<Record<number, string>>({});
+  const [rentalOffers, setRentalOffers] = useState<OutdoorOffer[]>([]);
+  const [rentalOffersLoading, setRentalOffersLoading] = useState(false);
+  const [rentalDismissedAt, setRentalDismissedAt] = useState(0);
+  const [rentalIdeaSaved, setRentalIdeaSaved] = useState(false);
   const gasPrice = '3.65';
 
   useEffect(() => {
@@ -1552,6 +1561,16 @@ export default function RouteBuilderScreen() {
       clearTrailheadRouteBuilderDraft().catch(() => {});
     }).catch(() => {});
     return () => { cancelled = true; };
+  }, []);
+
+  useEffect(() => {
+    let mounted = true;
+    storage.get(ROUTE_BUILDER_RENTAL_DISMISSED_KEY).then(raw => {
+      if (!mounted) return;
+      const ts = Number(raw || 0);
+      if (Number.isFinite(ts) && ts > 0) setRentalDismissedAt(ts);
+    }).catch(() => {});
+    return () => { mounted = false; };
   }, []);
 
   useEffect(() => {
@@ -2001,6 +2020,50 @@ export default function RouteBuilderScreen() {
     offlineReady: routeOfflineReadiness.ready,
     offlineMessage: routeOfflineReadiness.message,
   }), [days, orderedStops, totals.miles, planningStats.driveLimit, planningStats.fuelCost, planningStats.mpg, planningStats.range, weatherUnitMode, fuelEstimate, rigProfile?.fuel_mpg, dayDriveTargets, restDays, tripReadiness.tasks, routeOfflineReadiness.ready, routeOfflineReadiness.message]);
+  const rentalCampNights = routeDayPlans.filter(plan => plan.needsOvernight).length;
+  const rentalSuggestion = useMemo(() => buildRentalSuggestionFit({
+    start: orderedStops[0],
+    days: days.length,
+    campNights: rentalCampNights,
+    routeStyle,
+    campPreference: campPreferenceMode,
+    tripShape: tripShapeMode,
+    rigProfile,
+    dismissedAt: rentalDismissedAt,
+  }), [orderedStops, days.length, rentalCampNights, routeStyle, campPreferenceMode, tripShapeMode, rigProfile, rentalDismissedAt]);
+  useEffect(() => {
+    if (!rentalSuggestion.shouldSearch || !rentalSuggestion.query) {
+      setRentalOffers([]);
+      setRentalOffersLoading(false);
+      return;
+    }
+    let cancelled = false;
+    setRentalOffersLoading(true);
+    setRentalIdeaSaved(false);
+    api.getRentalOffers(rentalSuggestion.query)
+      .then(res => {
+        if (cancelled) return;
+        const offers = res.status === 'ok' ? res.offers : [];
+        setRentalOffers(offers);
+        if (offers.length) {
+          api.trackOutdoorOfferEvent('impression', {
+            offer_id: offers[0].id,
+            provider: offers[0].provider || 'outdoorsy',
+            placement: 'route_builder',
+            route_type: rentalSuggestion.context.route_type,
+            session_id: sessionId,
+            context: rentalSuggestion.context,
+          }).catch(() => {});
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setRentalOffers([]);
+      })
+      .finally(() => {
+        if (!cancelled) setRentalOffersLoading(false);
+      });
+    return () => { cancelled = true; };
+  }, [rentalSuggestion.cacheKey, sessionId]);
   const discoverEmptyText = discoverTab === 'camps'
     ? 'Tap scan to find legal camps near the selected leg or route point.'
     : discoverTab === 'gas'
@@ -4216,6 +4279,48 @@ export default function RouteBuilderScreen() {
     );
   }
 
+  function rentalEventPayload(offer: OutdoorOffer) {
+    return {
+      offer_id: offer.id,
+      provider: offer.provider || 'outdoorsy',
+      placement: 'route_builder',
+      route_type: rentalSuggestion.context.route_type,
+      session_id: sessionId,
+      context: rentalSuggestion.context,
+    };
+  }
+
+  function viewRentalOffers(offer?: OutdoorOffer) {
+    const selected = offer ?? rentalOffers[0];
+    if (!selected) return;
+    const url = selected.affiliate_url || selected.booking_url || '';
+    api.trackOutdoorOfferEvent('click', rentalEventPayload(selected)).catch(() => {});
+    if (!url) {
+      Alert.alert('No rental options here yet.', 'Try nearby camps, routes, and official places.');
+      return;
+    }
+    api.trackOutdoorOfferEvent('redirect', rentalEventPayload(selected)).catch(() => {});
+    Linking.openURL(url).catch(() => {
+      Alert.alert('Unable to open rentals', 'Try again in a moment.');
+    });
+  }
+
+  function saveRentalIdea() {
+    const selected = rentalOffers[0];
+    if (!selected) return;
+    setRentalIdeaSaved(true);
+    api.trackOutdoorOfferEvent('save', rentalEventPayload(selected)).catch(() => {});
+  }
+
+  function dismissRentalSuggestion() {
+    const ts = Date.now();
+    const selected = rentalOffers[0];
+    setRentalDismissedAt(ts);
+    setRentalOffers([]);
+    storage.set(ROUTE_BUILDER_RENTAL_DISMISSED_KEY, String(ts)).catch(() => {});
+    if (selected) api.trackOutdoorOfferEvent('dismiss', rentalEventPayload(selected)).catch(() => {});
+  }
+
   function renderRouteHub() {
     const savedRoutes = tripHistory.slice(0, 10);
     return (
@@ -4654,6 +4759,16 @@ export default function RouteBuilderScreen() {
         />
 
         {renderRouteTimeline()}
+
+        <RentalSuggestionModule
+          fit={rentalSuggestion}
+          offers={rentalOffers}
+          loading={rentalOffersLoading}
+          saved={rentalIdeaSaved}
+          onViewRentals={viewRentalOffers}
+          onSaveIdea={saveRentalIdea}
+          onDismiss={dismissRentalSuggestion}
+        />
 
         <RouteBuilderSearchSurface
           pendingType={pendingType}

@@ -63,6 +63,12 @@ checkpoint must leave an audit note before the next checkpoint starts.
    - Fixture/sandbox/external checkout only.
    - No in-app booking.
 
+9. **Reports + Mission Control Signal Polish**
+   - Status: complete for first shared field-report composer slice.
+   - Extract map field-report form UI out of `map.tsx`.
+   - Show report trust/freshness as a compact Mission Control signal.
+   - Keep backend payloads, credits, TTL, and submit behavior unchanged.
+
 ## Validation Gate
 
 Run the relevant subset before each checkpoint closes:

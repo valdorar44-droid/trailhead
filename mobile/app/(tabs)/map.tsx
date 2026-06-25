@@ -8,6 +8,7 @@ import OfflineModal, { type OfflineAreaSelection } from '@/components/NativeMap/
 import CampCommentsSection from '@/components/map/CampCommentsSection';
 import CampCoordinatesSection from '@/components/map/CampCoordinatesSection';
 import CampFieldReportsSection from '@/components/map/CampFieldReportsSection';
+import FieldReportComposer from '@/components/reports/FieldReportComposer';
 import CampInsightSection from '@/components/map/CampInsightSection';
 import CampNearbyPlacesSection from '@/components/map/CampNearbyPlacesSection';
 import CampReviewsSection from '@/components/map/CampReviewsSection';
@@ -13891,93 +13892,6 @@ function MapScreen() {
     }
   }
 
-  function renderCampFieldReportForm() {
-    return (
-      <View style={s.frForm}>
-        <Text style={s.frFormLabel}>How was it?</Text>
-        <View style={s.frPillRow}>
-          {([['loved_it','Loved it','#22c55e','heart'],['its_ok','It\'s OK','#f59e0b','thumbs-up'],['would_skip','Would skip','#ef4444','thumbs-down']] as const).map(([val, label, color, icon]) => (
-            <TouchableOpacity key={val} style={[s.frSentimentBtn, frSentiment === val && { borderColor: color, backgroundColor: color + '22' }]}
-              onPress={() => setFrSentiment(val)}>
-              <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={12} color={frSentiment === val ? color : C.text2} />
-              <Text style={[s.frSentimentBtnText, frSentiment === val && { color }]}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={s.frFormLabel}>Access road</Text>
-        <View style={s.frPillRow}>
-          {([['easy','Easy'],['rough','Rough'],['four_wd_required','4WD Only']] as const).map(([val, label]) => (
-            <TouchableOpacity key={val} style={[s.frPill, frAccess === val && s.frPillActive]}
-              onPress={() => setFrAccess(val)}>
-              <Text style={[s.frPillText, frAccess === val && s.frPillTextActive]}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={s.frFormLabel}>Crowd level</Text>
-        <View style={s.frPillRow}>
-          {([['empty','Empty'],['few_rigs','A few rigs'],['packed','Packed']] as const).map(([val, label]) => (
-            <TouchableOpacity key={val} style={[s.frPill, frCrowd === val && s.frPillActive]}
-              onPress={() => setFrCrowd(val)}>
-              <Text style={[s.frPillText, frCrowd === val && s.frPillTextActive]}>{label}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <Text style={s.frFormLabel}>Tags (pick any)</Text>
-        <View style={s.frTagPicker}>
-          {['Great Views','Dog Friendly','Water Nearby','No Cell Signal','Fire Ring',
-            'Very Quiet','High Clearance','Good Shade','Exposed/Windy','Creek Nearby',
-            'Stargazing','Kids Friendly','Dusty Road','Fishing Nearby','Horse Friendly'].map(tag => {
-            const on = frTags.includes(tag);
-            return (
-              <TouchableOpacity key={tag}
-                style={[s.frTagPill, on && s.frTagPillOn]}
-                onPress={() => setFrTags(p => on ? p.filter(t => t !== tag) : [...p, tag])}>
-                <Text style={[s.frTagPillText, on && s.frTagPillTextOn]}>{tag}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-
-        <Text style={s.frFormLabel}>Notes <Text style={s.frOptional}>(optional)</Text></Text>
-        <TextInput
-          style={s.frNoteInput}
-          value={frNote}
-          onChangeText={v => setFrNote(v.slice(0, 280))}
-          placeholder="Road conditions, water source, anything useful..."
-          placeholderTextColor={C.text3}
-          multiline
-          numberOfLines={3}
-        />
-        <Text style={s.frCharCount}>{frNote.length}/280</Text>
-
-        <TouchableOpacity style={s.frPhotoBtn} onPress={pickFieldReportPhoto}>
-          <Ionicons name={frPhoto ? 'checkmark-circle' : 'camera-outline'} size={16} color={frPhoto ? '#22c55e' : C.text3} />
-          <Text style={[s.frPhotoBtnText, frPhoto && { color: '#22c55e' }]}>
-            {frPhoto ? `Photo added (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)` : `Add photo (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)`}
-          </Text>
-        </TouchableOpacity>
-
-        <View style={s.frFormActions}>
-          <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}>
-            <Text style={s.frCancelText}>Cancel</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={[s.frSubmitBtn, (!frSentiment || !frAccess || !frCrowd || frSubmitting) && { opacity: 0.5 }]}
-            onPress={submitFieldReport}
-            disabled={!frSentiment || !frAccess || !frCrowd || frSubmitting}
-          >
-            {frSubmitting
-              ? <ActivityIndicator size="small" color="#fff" />
-              : <Text style={s.frSubmitText}>SUBMIT +{frPhoto ? 10 : 5} CREDITS</Text>}
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
   async function submitCampComment() {
     const detail = campDetail ?? selectedCamp;
     const text = campCommentText.trim();
@@ -18857,72 +18771,32 @@ function MapScreen() {
               <Text style={s.frEmpty}>No trail reports yet. Be the first to add photos or conditions.</Text>
             )}
             {showTrailFieldReportForm ? (
-              <View style={s.frForm}>
-                <Text style={s.frFormLabel}>How was it?</Text>
-                <View style={s.frPillRow}>
-                  {([['loved_it','Loved it','#22c55e','heart'],['its_ok','It\'s OK','#f59e0b','thumbs-up'],['would_skip','Would skip','#ef4444','thumbs-down']] as const).map(([val, label, color, icon]) => (
-                    <TouchableOpacity key={val} style={[s.frSentimentBtn, frSentiment === val && { borderColor: color, backgroundColor: color + '22' }]}
-                      onPress={() => setFrSentiment(val)}>
-                      <Ionicons name={icon as keyof typeof Ionicons.glyphMap} size={12} color={frSentiment === val ? color : C.text2} />
-                      <Text style={[s.frSentimentBtnText, frSentiment === val && { color }]}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={s.frFormLabel}>Trail access</Text>
-                <View style={s.frPillRow}>
-                  {([['easy','Easy'],['rough','Rough'],['four_wd_required','4WD Only']] as const).map(([val, label]) => (
-                    <TouchableOpacity key={val} style={[s.frPill, frAccess === val && s.frPillActive]} onPress={() => setFrAccess(val)}>
-                      <Text style={[s.frPillText, frAccess === val && s.frPillTextActive]}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={s.frFormLabel}>Traffic</Text>
-                <View style={s.frPillRow}>
-                  {([['empty','Empty'],['few_rigs','A few rigs'],['packed','Packed']] as const).map(([val, label]) => (
-                    <TouchableOpacity key={val} style={[s.frPill, frCrowd === val && s.frPillActive]} onPress={() => setFrCrowd(val)}>
-                      <Text style={[s.frPillText, frCrowd === val && s.frPillTextActive]}>{label}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </View>
-                <Text style={s.frFormLabel}>Tags</Text>
-                <View style={s.frTagPicker}>
-                  {['Scenic','Technical','Muddy','Rocky','Washouts','Snow/Ice','Downed Trees','Gate Closed','Water Crossing','Pinstripes','Shelf Road','Beginner Friendly'].map(tag => {
-                    const on = frTags.includes(tag);
-                    return (
-                      <TouchableOpacity key={tag} style={[s.frTagPill, on && s.frTagPillOn]} onPress={() => setFrTags(p => on ? p.filter(t => t !== tag) : [...p, tag])}>
-                        <Text style={[s.frTagPillText, on && s.frTagPillTextOn]}>{tag}</Text>
-                      </TouchableOpacity>
-                    );
-                  })}
-                </View>
-                <TextInput
-                  style={s.frNoteInput}
-                  value={frNote}
-                  onChangeText={v => setFrNote(v.slice(0, 280))}
-                  placeholder="Current conditions, obstacles, best direction, closures..."
-                  placeholderTextColor={C.text3}
-                  multiline
-                  numberOfLines={3}
-                />
-                <TouchableOpacity style={s.frPhotoBtn} onPress={pickFieldReportPhoto}>
-                  <Ionicons name={frPhoto ? 'checkmark-circle' : 'camera-outline'} size={16} color={frPhoto ? '#22c55e' : C.text3} />
-                  <Text style={[s.frPhotoBtnText, frPhoto && { color: '#22c55e' }]}>
-                    {frPhoto ? `Photo added (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)` : `Add photo (+${CREDIT_REWARDS.fieldReportPhotoBonus} credits)`}
-                  </Text>
-                </TouchableOpacity>
-                <View style={s.frFormActions}>
-                  <TouchableOpacity style={s.frCancelBtn} onPress={() => { setShowTrailFieldReportForm(false); resetFieldReportForm(); }}>
-                    <Text style={s.frCancelText}>Cancel</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={[s.frSubmitBtn, (!frSentiment || !frAccess || !frCrowd || frSubmitting) && { opacity: 0.5 }]}
-                    onPress={submitTrailFieldReport}
-                    disabled={!frSentiment || !frAccess || !frCrowd || frSubmitting}
-                  >
-                    {frSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.frSubmitText}>SUBMIT +{frPhoto ? 10 : 5}</Text>}
-                  </TouchableOpacity>
-                </View>
-              </View>
+              <FieldReportComposer
+                accessLabel="Trail access"
+                crowdLabel="Traffic"
+                notePlaceholder="Current conditions, obstacles, best direction, closures..."
+                tagOptions={[
+                  'Scenic', 'Technical', 'Muddy', 'Rocky', 'Washouts', 'Snow/Ice',
+                  'Downed Trees', 'Gate Closed', 'Water Crossing', 'Pinstripes',
+                  'Shelf Road', 'Beginner Friendly',
+                ]}
+                sentiment={frSentiment}
+                access={frAccess}
+                crowd={frCrowd}
+                tags={frTags}
+                note={frNote}
+                hasPhoto={Boolean(frPhoto)}
+                submitting={frSubmitting}
+                submitLabel={`SUBMIT +${frPhoto ? 10 : 5}`}
+                onSentimentChange={setFrSentiment}
+                onAccessChange={setFrAccess}
+                onCrowdChange={setFrCrowd}
+                onTagsChange={setFrTags}
+                onNoteChange={setFrNote}
+                onPickPhoto={pickFieldReportPhoto}
+                onCancel={() => { setShowTrailFieldReportForm(false); resetFieldReportForm(); }}
+                onSubmit={submitTrailFieldReport}
+              />
             ) : (
               user && (
                 <TouchableOpacity style={s.frAddBtn} onPress={() => { resetFieldReportForm(); setShowTrailFieldReportForm(true); }}>
@@ -20851,7 +20725,32 @@ function MapScreen() {
               colors={C}
             />
             <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
-              {renderCampFieldReportForm()}
+              <FieldReportComposer
+                accessLabel="Access road"
+                crowdLabel="Crowd level"
+                notePlaceholder="Road conditions, water source, anything useful..."
+                tagOptions={[
+                  'Great Views', 'Dog Friendly', 'Water Nearby', 'No Cell Signal', 'Fire Ring',
+                  'Very Quiet', 'High Clearance', 'Good Shade', 'Exposed/Windy', 'Creek Nearby',
+                  'Stargazing', 'Kids Friendly', 'Dusty Road', 'Fishing Nearby', 'Horse Friendly',
+                ]}
+                sentiment={frSentiment}
+                access={frAccess}
+                crowd={frCrowd}
+                tags={frTags}
+                note={frNote}
+                hasPhoto={Boolean(frPhoto)}
+                submitting={frSubmitting}
+                submitLabel={`SUBMIT +${frPhoto ? 10 : 5} CREDITS`}
+                onSentimentChange={setFrSentiment}
+                onAccessChange={setFrAccess}
+                onCrowdChange={setFrCrowd}
+                onTagsChange={setFrTags}
+                onNoteChange={setFrNote}
+                onPickPhoto={pickFieldReportPhoto}
+                onCancel={() => { setShowFieldReportForm(false); resetFieldReportForm(); }}
+                onSubmit={submitFieldReport}
+              />
             </ScrollView>
           </TrailheadSheet>
         </KeyboardAvoidingView>
@@ -24634,30 +24533,6 @@ const makeStyles = (C: ColorPalette) => {
   frEmpty: { color: C.text3, fontSize: 12, fontStyle: 'italic', marginBottom: 10 },
   frAddBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10 },
   frAddBtnText: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '700' },
-  frForm: { backgroundColor: C.s2, borderRadius: 12, padding: 14, gap: 4 },
-  frFormLabel: { color: C.text, fontSize: 12, fontWeight: '700', fontFamily: mono, marginTop: 8, marginBottom: 4 },
-  frOptional: { color: C.text3, fontWeight: '400' },
-  frPillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 4 },
-  frSentimentBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, borderRadius: 20, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
-  frSentimentBtnText: { color: C.text2, fontSize: 12, fontWeight: '600' },
-  frPill: { borderRadius: 16, paddingHorizontal: 10, paddingVertical: 6, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
-  frPillActive: { borderColor: C.orange, backgroundColor: C.orange + '22' },
-  frPillText: { color: C.text2, fontSize: 11 },
-  frPillTextActive: { color: C.orange, fontWeight: '600' },
-  frTagPicker: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginBottom: 4 },
-  frTagPill: { borderRadius: 14, paddingHorizontal: 9, paddingVertical: 5, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
-  frTagPillOn: { borderColor: C.green, backgroundColor: C.green + '22' },
-  frTagPillText: { color: C.text2, fontSize: 11 },
-  frTagPillTextOn: { color: C.green, fontWeight: '600' },
-  frNoteInput: { backgroundColor: C.s1, borderRadius: 8, padding: 10, color: C.text, fontSize: 13, minHeight: 72, textAlignVertical: 'top', borderWidth: 1, borderColor: C.border, marginBottom: 2 },
-  frCharCount: { color: C.text3, fontSize: 10, textAlign: 'right', marginBottom: 4 },
-  frPhotoBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 8 },
-  frPhotoBtnText: { color: C.text3, fontSize: 12 },
-  frFormActions: { flexDirection: 'row', gap: 10, marginTop: 8 },
-  frCancelBtn: { flex: 1, paddingVertical: 11, borderRadius: 10, borderWidth: 1, borderColor: C.border, alignItems: 'center' },
-  frCancelText: { color: C.text3, fontSize: 12 },
-  frSubmitBtn: { flex: 2, paddingVertical: 11, borderRadius: 10, backgroundColor: C.orange, alignItems: 'center' },
-  frSubmitText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '800' },
   frSheetOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.42)' },
   frSheet: { maxHeight: '82%', borderTopLeftRadius: 20, borderTopRightRadius: 20 },
   frSheetContent: { paddingHorizontal: 14, paddingTop: 10, gap: 10 },

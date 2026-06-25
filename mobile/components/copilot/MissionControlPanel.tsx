@@ -24,7 +24,9 @@ export function MissionControlPanel({ brief, loading, onRefresh, onRecommendatio
   const risks = brief?.risks?.slice(0, expanded ? 5 : 2) ?? [];
   const scores = brief?.scores?.slice(0, expanded ? 8 : 4) ?? [];
   const actions = (brief?.next_actions?.length ? brief.next_actions : brief?.recommendations)?.slice(0, 4) ?? [];
-  const statusRows = missionStatusRows(brief?.status_summary, expanded);
+  const reportSignal = missionReportSignal(brief);
+  const statusRows = missionStatusRows(brief?.status_summary, expanded)
+    .filter(row => row.key !== 'reports' || !reportSignal);
   const evidenceRows = missionEvidenceRows(brief, expanded);
   return (
     <View style={[styles.panel, { borderColor: C.border, backgroundColor: C.s1 }]}>
@@ -46,6 +48,30 @@ export function MissionControlPanel({ brief, loading, onRefresh, onRecommendatio
       <Text style={[styles.summary, { color: C.text2 }]} numberOfLines={expanded ? 4 : 2}>
         {brief?.summary || 'Route readiness will appear after the trip context loads.'}
       </Text>
+
+      {reportSignal && (
+        <View style={[styles.reportSignal, { borderColor: C.border, backgroundColor: C.s2 }]}>
+          <View style={styles.reportSignalTop}>
+            <View style={[styles.reportSignalIcon, { backgroundColor: reportSignal.color + '22' }]}>
+              <Ionicons name="radio-outline" size={15} color={reportSignal.color} />
+            </View>
+            <Text style={[styles.reportSignalTitle, { color: C.text }]} numberOfLines={1}>Reports</Text>
+            <Text style={[styles.reportSignalValue, { color: reportSignal.color }]} numberOfLines={1}>
+              {reportSignal.value}
+            </Text>
+          </View>
+          {reportSignal.summary ? (
+            <Text style={[styles.reportSignalSummary, { color: C.text2 }]} numberOfLines={expanded ? 3 : 2}>
+              {reportSignal.summary}
+            </Text>
+          ) : null}
+          {reportSignal.freshness ? (
+            <Text style={[styles.reportSignalFreshness, { color: C.text3 }]} numberOfLines={1}>
+              {reportSignal.freshness}
+            </Text>
+          ) : null}
+        </View>
+      )}
 
       {statusRows.length > 0 && (
         <View style={styles.statusList}>
@@ -146,6 +172,34 @@ function missionEvidenceRows(brief: MissionControlBrief | null, expanded: boolea
   }));
 }
 
+function missionReportSignal(brief: MissionControlBrief | null): { value: string; summary: string; freshness: string; color: string } | null {
+  const reports = brief?.status_summary?.reports;
+  if (!reports) return null;
+  const source = (brief?.source_summary || []).find(item => {
+    const label = `${item.source} ${(item.provider_ids || []).join(' ')}`.toLowerCase();
+    return label.includes('report') || label.includes('community');
+  });
+  const freshness = String(source?.freshness_label || '').trim();
+  return {
+    value: formatStatusValue(reports.value),
+    summary: reports.summary || readinessSummaryForReports(reports.readiness),
+    freshness: reportFreshnessLabel(freshness),
+    color: colorForStatus(reports),
+  };
+}
+
+function reportFreshnessLabel(value: string): string {
+  if (!value) return '';
+  if (value === 'current') return 'Source updated recently';
+  return `Source updated ${value}`;
+}
+
+function readinessSummaryForReports(readiness: MissionStatusItem['readiness']): string {
+  if (readiness === 'ready') return 'Recent field reports do not block this route.';
+  if (readiness === 'blocked') return 'A report needs review before this route is ready.';
+  return 'Review the latest route reports before departure.';
+}
+
 function formatStatusValue(value: string | undefined): string {
   return String(value || 'unknown').replace(/_/g, ' ');
 }
@@ -188,6 +242,13 @@ const styles = StyleSheet.create({
   title: { fontSize: 15, lineHeight: 19, fontWeight: '900', letterSpacing: 0 },
   iconBtn: { width: 34, height: 34, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   summary: { fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  reportSignal: { borderRadius: 14, borderWidth: 1, padding: 10, gap: 6 },
+  reportSignalTop: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  reportSignalIcon: { width: 28, height: 28, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  reportSignalTitle: { flex: 1, minWidth: 0, fontSize: 12, fontWeight: '900' },
+  reportSignalValue: { maxWidth: 118, fontFamily: mono, fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  reportSignalSummary: { fontSize: 11, lineHeight: 15, fontWeight: '700' },
+  reportSignalFreshness: { fontFamily: mono, fontSize: 9, fontWeight: '800', textTransform: 'uppercase' },
   statusList: { gap: 5 },
   statusRow: { minHeight: 24, borderTopWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 5 },
   statusDot: { width: 7, height: 7, borderRadius: 999 },

@@ -87,6 +87,22 @@
   - No browser console errors were present after the workspace reload; warnings
     were non-blocking Expo/web warnings.
 
+## Release
+
+- GitHub commit: `7b35225` (`Extract route builder workspace checkpoint`)
+- Production OTA:
+  - Update group: `7379c0a5-fcdf-48a3-ba5a-5744815b8a86`
+  - Android update: `019efe09-b9f8-777c-86b5-11574dc2f669`
+  - iOS update: `019efe09-b9f8-724c-a9d8-649295944e5f`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/7379c0a5-fcdf-48a3-ba5a-5744815b8a86`
+- Preview OTA:
+  - Update group: `1b7b6b96-367d-4916-b30e-6bfbdf0797bc`
+  - Android update: `019efe0a-6bce-79d1-9e4a-18f0f6574129`
+  - iOS update: `019efe0a-6bce-7e0f-8df2-ac1310c6fb5e`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/1b7b6b96-367d-4916-b30e-6bfbdf0797bc`
+
 ## Remaining Risks
 
 - Needs native visual smoke for the active Route Builder workspace after

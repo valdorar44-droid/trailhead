@@ -20,16 +20,16 @@ tools. It captures what is already complete and what should happen next.
 - Latest production OTA: `8d04336f-dc1a-4c6c-b429-c3d64a998339`.
 - Latest preview OTA: `bde39339-21c9-47be-b277-845ebf8fe2eb`.
 - Latest route-builder implementation commit:
-  `1e6fad9 Extract route builder hub checkpoint`.
+  `7b35225 Extract route builder workspace checkpoint`.
 - Latest route-builder production OTA:
-  `06a76ac2-b091-4f43-9983-53c9d56c07e5`.
+  `7379c0a5-fcdf-48a3-ba5a-5744815b8a86`.
 - Latest route-builder preview OTA:
-  `db8a0eab-05ec-4618-870b-2b532f8c8a54`.
+  `1b7b6b96-367d-4916-b30e-6bfbdf0797bc`.
 - Latest local route-builder workspace checkpoint:
   Checkpoint 14 extracted `RouteBuilderWorkspaceSummary` and
-  `RouteBuilderReadinessCard`; release decision is pending.
-- Current repo check before this handoff: Checkpoint 14 validation passed; see
-  git status for final commit state.
+  `RouteBuilderReadinessCard`; production and preview OTA are recorded.
+- Current repo check before this handoff: Checkpoint 14 validation, push, and
+  OTA release passed.
 
 ## MCP / Research State
 

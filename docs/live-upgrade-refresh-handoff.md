@@ -2,8 +2,7 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 21 implemented and validated; release
-pending in the current turn.
+**Status at save time:** Checkpoint 21 implemented, pushed, and OTA released.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
@@ -32,13 +31,10 @@ tools. It captures what is already complete and what should happen next.
 - Latest route/search preview OTA:
   `f579cc32-ab38-4a82-b1ae-63ed7baac40c`.
 - Latest shipped route-builder checkpoint:
-  Checkpoint 20 extracted route-fit card assembly into
-  `mobile/lib/routeBuilder/routeFit.ts` and shipped production/preview OTA.
-- Latest local route-builder checkpoint:
   Checkpoint 21 extracted search scoring, result dedupe, lookup orchestration,
   and selected-place stop mapping into `mobile/lib/routeBuilder/searchFlow.ts`.
-- Current repo check before this handoff: Checkpoint 21 validation passed;
-  commit, push, and OTA release are pending in the current turn.
+- Current repo check before this handoff: Checkpoint 21 validation, push, and
+  OTA release passed.
 
 ## MCP / Research State
 
@@ -235,9 +231,13 @@ Checkpoint 20 - Route Builder Route Fit Cards:
 
 Checkpoint 21 - Route Builder Search Flow Extraction:
 
-- Code commit: pending.
-- Production OTA update group: pending.
-- Preview OTA update group: pending.
+- Code commit: `3bf477c` (`Extract route builder search flow helper`), pushed
+  to `master`.
+- Production OTA update group:
+  `846b67d8-64af-40b3-9bf6-a2b0ef3587fe`
+- Preview OTA update group:
+  `bb64e724-0998-424c-b81e-4388fa793f28`
+- Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
   `docs/live-upgrade-checkpoint-21-route-builder-search-flow-audit.md`.
 - Playwright evidence:

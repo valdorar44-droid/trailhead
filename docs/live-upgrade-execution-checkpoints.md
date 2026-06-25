@@ -177,7 +177,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `5a4df7c2-16e2-4f71-824b-1a401fad02d8`.
 
 21. **Route Builder Search Flow Extraction**
-    - Status: complete for helper extraction; release pending.
+    - Status: complete for helper extraction.
     - Extracted route-builder search/result state and place-add mapping where it
       can be shared with map search and Planner/Copilot route handoff flows.
     - Kept provider calls, Android lookup fallback, saved geometry, and
@@ -185,6 +185,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Reviewed Mobbin/Figma travel search and route-stop patterns before code.
     - Saved design decision, audit checkpoint, and Playwright smoke
       screenshots.
+    - Release: production OTA
+      `846b67d8-64af-40b3-9bf6-a2b0ef3587fe`; preview OTA
+      `bb64e724-0998-424c-b81e-4388fa793f28`.
 
 22. **Route Builder Search Surface Component**
     - Status: queued.

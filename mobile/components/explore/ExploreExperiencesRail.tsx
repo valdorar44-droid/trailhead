@@ -21,9 +21,9 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.top}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.label, { color: C.orange }]}>TOURS & EXPERIENCES</Text>
+          <Text style={[styles.label, { color: C.orange }]}>PARTNER EXPERIENCES</Text>
           <Text style={[styles.sub, { color: C.text3 }]}>
-            {experiences.length ? `${experiences.length} bookable options nearby` : 'Bookable activities near this area'}
+            {experiences.length ? `${experiences.length} external checkout option${experiences.length === 1 ? '' : 's'} nearby` : 'External checkout options near this area'}
           </Text>
         </View>
         {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="ticket-outline" size={23} color={C.orange} />}
@@ -64,14 +64,23 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
                       style={[styles.bookButton, { backgroundColor: C.orange, opacity: url ? 1 : 0.55 }]}
                       disabled={!url}
                       onPress={() => url && Linking.openURL(url)}
+                      accessibilityLabel={`Checkout with partner for ${experience.title}`}
                     >
                       <Ionicons name="open-outline" size={15} color="#fff" />
-                      <Text style={styles.bookText}>Book on Viator</Text>
+                      <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Checkout with Partner</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.iconButton, { borderColor: C.border }]} onPress={() => onSave?.(experience)}>
+                    <TouchableOpacity
+                      style={[styles.iconButton, { borderColor: C.border }]}
+                      onPress={() => onSave?.(experience)}
+                      accessibilityLabel={`Save ${experience.title} to trip`}
+                    >
                       <Ionicons name="add-circle-outline" size={17} color={C.text2} />
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.iconButton, { borderColor: C.border }]} onPress={() => onShowArea?.(experience)}>
+                    <TouchableOpacity
+                      style={[styles.iconButton, { borderColor: C.border }]}
+                      onPress={() => onShowArea?.(experience)}
+                      accessibilityLabel={`Show ${experience.title} area on map`}
+                    >
                       <Ionicons name="map-outline" size={17} color={C.text2} />
                     </TouchableOpacity>
                   </View>
@@ -83,7 +92,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
       ) : loading ? (
         <TrailheadRailSkeleton count={3} cardWidth={224} />
       ) : null}
-      <Text style={[styles.attribution, { color: C.text3 }]}>Tours and checkout are provided by Viator.</Text>
+      <Text style={[styles.attribution, { color: C.text3 }]}>Trailhead may earn when you checkout with a partner. Availability and payment happen on partner sites.</Text>
     </View>
   );
 }
@@ -96,7 +105,7 @@ function experienceMeta(experience: BookableExperience) {
     bits.push(`${experience.rating.toFixed(1)}${experience.review_count ? ` (${experience.review_count})` : ''}`);
   }
   if (typeof experience.distance_mi === 'number') bits.push(`${experience.distance_mi.toFixed(experience.distance_mi >= 10 ? 0 : 1)} mi`);
-  return bits.join(' · ') || experience.region || 'Viator experience';
+  return bits.join(' · ') || experience.region || 'Partner experience';
 }
 
 function money(value: string, currency?: string) {

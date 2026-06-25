@@ -59,7 +59,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
    - Use cards and staged actions instead of raw chat-only output.
 
 8. **Viator/Partner Readiness**
-   - Status: next.
+   - Status: complete for first external-checkout copy/readiness slice.
    - Fixture/sandbox/external checkout only.
    - No in-app booking.
 

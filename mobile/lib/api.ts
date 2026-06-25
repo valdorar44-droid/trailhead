@@ -616,11 +616,7 @@ export const api = {
     if (params.vehicle_type) qs.set('vehicle_type', params.vehicle_type);
     if (params.pet_friendly != null) qs.set('pet_friendly', String(params.pet_friendly));
     if (params.delivery != null) qs.set('delivery', String(params.delivery));
-    return guardedRequest(
-      `rental-offers:${params.provider || 'outdoorsy'}:${stableNumber(typeof params.lat === 'number' ? params.lat : NaN, 3)}:${stableNumber(typeof params.lng === 'number' ? params.lng : NaN, 3)}:${params.start_date || ''}:${params.end_date || ''}:${params.sleeps ?? ''}:${params.vehicle_type || ''}:${params.pet_friendly ?? ''}:${params.delivery ?? ''}:${params.limit ?? 12}`,
-      3 * 60_000,
-      () => req<OutdoorOffersResponse>(`/api/offers/rentals?${qs.toString()}`),
-    );
+    return req<OutdoorOffersResponse>(`/api/offers/rentals?${qs.toString()}`);
   },
   getOutdoorOffer: (offerId: string, provider = 'outdoorsy') =>
     req<OutdoorOfferDetailResponse>(`/api/offers/${encodeURIComponent(offerId)}?provider=${encodeURIComponent(provider)}`),

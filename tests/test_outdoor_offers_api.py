@@ -33,6 +33,27 @@ class OutdoorOffersApiTests(unittest.TestCase):
         })
         self.assertEqual(context, {"camp_nights": 4, "route_type": "camping"})
 
+    def test_rental_cache_key_uses_coarse_public_search_fields(self):
+        query = server.OfferSearchQuery(
+            lat=39.739245,
+            lng=-104.990318,
+            start_date="2026-07-01",
+            end_date="2026-07-05",
+            sleeps=2,
+            vehicle_type="campervan_rental",
+            provider="outdoorsy",
+        )
+        key = server._offer_query_cache_key(query)
+        self.assertIn("39.739", key)
+        self.assertIn("-104.990", key)
+        self.assertNotIn("39.739245", key)
+        self.assertNotIn("api", key.lower())
+        self.assertNotIn("token", key.lower())
+
+    def test_empty_rental_cache_ttl_is_short(self):
+        result = server.OfferSearchResult("outdoorsy", "empty", offers=[])
+        self.assertEqual(server._offer_cache_ttl_seconds(result, now=100), 30)
+
     def test_record_offer_event_logs_only_safe_payload(self):
         body = server.OfferEventRequest(
             offer_id="outdoorsy:denver-campervan-1",

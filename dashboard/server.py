@@ -3818,6 +3818,7 @@ SAFE_OFFER_CONTEXT_KEYS = {
     "trip_type",
     "vehicle_type",
 }
+OFFER_RENTAL_CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
 
 
 def _clean_offer_slug(value: object, max_len: int = 120) -> str:
@@ -3850,6 +3851,22 @@ def _rental_offer_search(query: OfferSearchQuery) -> OfferSearchResult:
     return OfferSearchResult("outdoorsy", "empty", offers=[], reason="provider_unavailable")
 
 
+def _offer_query_cache_key(query: OfferSearchQuery) -> str:
+    parts = [
+        _offer_provider_id(query.provider or "outdoorsy"),
+        f"{float(query.lat):.3f}" if query.lat is not None else "",
+        f"{float(query.lng):.3f}" if query.lng is not None else "",
+        query.start_date or "",
+        query.end_date or "",
+        str(query.sleeps or ""),
+        _clean_offer_slug(query.vehicle_type, 48),
+        "" if query.pet_friendly is None else str(bool(query.pet_friendly)).lower(),
+        "" if query.delivery is None else str(bool(query.delivery)).lower(),
+        str(query.safe_limit()),
+    ]
+    return "|".join(parts)
+
+
 def _public_offer_search_response(result: OfferSearchResult) -> dict[str, Any]:
     offers = [offer.to_public_dict() for offer in result.offers] if result.status == "ok" else []
     status = "ok" if result.status == "ok" else "empty"
@@ -3863,6 +3880,14 @@ def _public_offer_search_response(result: OfferSearchResult) -> dict[str, Any]:
         "expires_at": result.expires_at if status == "ok" else 0,
         "disclosure": _outdoor_offer_disclosure(),
     }
+
+
+def _offer_cache_ttl_seconds(result: OfferSearchResult, now: int) -> int:
+    if result.status != "ok" or not result.offers:
+        return 30
+    if result.expires_at and result.expires_at > now:
+        return max(30, min(result.expires_at - now, 300))
+    return 60
 
 
 def _offer_event_context(context: object) -> dict[str, object]:
@@ -3936,7 +3961,19 @@ async def rental_offers(
     )
     if query.validation_error():
         raise HTTPException(400, "Invalid rental search")
-    return _public_offer_search_response(_rental_offer_search(query))
+    cache_key = _offer_query_cache_key(query)
+    now = int(time.time())
+    cached = OFFER_RENTAL_CACHE.get(cache_key)
+    if cached and cached[0] > now:
+        return cached[1]
+    result = _rental_offer_search(query)
+    response = _public_offer_search_response(result)
+    OFFER_RENTAL_CACHE[cache_key] = (now + _offer_cache_ttl_seconds(result, now), response)
+    if len(OFFER_RENTAL_CACHE) > 128:
+        expired = [key for key, (expires_at, _) in OFFER_RENTAL_CACHE.items() if expires_at <= now]
+        for key in expired[:32]:
+            OFFER_RENTAL_CACHE.pop(key, None)
+    return response
 
 
 @app.get("/api/offers/{offer_id}")

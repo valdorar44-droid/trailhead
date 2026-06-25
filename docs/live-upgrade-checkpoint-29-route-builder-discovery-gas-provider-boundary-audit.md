@@ -90,4 +90,10 @@
 
 ## Release
 
-- Pending commit, push, and OTA.
+- Code commit: `23b8404` (`Extract route discovery gas providers`), pushed
+  to `master`.
+- Production OTA update group:
+  `ddb09fbc-ef3b-44b7-a05a-92784a3808ff`
+- Preview OTA update group:
+  `5d2bffc5-4ff5-4ec4-83d8-fdb164c20950`
+- Runtime: `native-20260614-sdk54-1`.

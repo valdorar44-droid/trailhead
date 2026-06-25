@@ -217,43 +217,35 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 28 - Route Builder Discovery Provider Boundary:
+Checkpoint 29 - Route Builder Discovery Gas Provider Boundary:
 
-- Code commit: `606e365` (`Extract route discovery fallback providers`), pushed
+- Code commit: `23b8404` (`Extract route discovery gas providers`), pushed
   to `master`.
 - Production OTA update group:
-  `5c12de42-30db-4f0e-a228-61f53eaa5b1b`
+  `ddb09fbc-ef3b-44b7-a05a-92784a3808ff`
 - Preview OTA update group:
-  `01480fc3-971c-417f-9a36-d0d576cc84a1`
+  `5d2bffc5-4ff5-4ec4-83d8-fdb164c20950`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-28-route-builder-discovery-provider-boundary-audit.md`.
+  `docs/live-upgrade-checkpoint-29-route-builder-discovery-gas-provider-boundary-audit.md`.
 
 ## Current Checkpoint Record
 
-Checkpoint 29 - Route Builder Discovery Gas Provider Boundary:
+Checkpoint 30 - Route Builder Discovery Camp Provider Boundary:
 
 - Code commit: pending.
 - Production OTA update group: pending.
 - Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
-- Audit doc:
-  `docs/live-upgrade-checkpoint-29-route-builder-discovery-gas-provider-boundary-audit.md`.
-- Design decision:
-  `docs/design-decisions/route-builder-discovery-gas-provider-boundary.md`.
-- Figma evidence:
-  - File `yP342OKFtUQ1J0RCwnzH6s`
-  - Frame `39:2`
-  - Screenshot
-    `/tmp/trailhead-checkpoint-29-route-builder-discovery-gas-provider-boundary-figma.png`
-- Playwright evidence:
-  `/tmp/trailhead-route-builder-checkpoint-29-discovery-gas-provider-boundary-web.png`
-- Validation:
-  - `npx tsc --noEmit`
-  - `npm run audit:copy`
-  - `npm run audit:routes`
-  - `node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" lib/routeBuilder/discoveryProviders.ts`
-  - `git diff --check`
+- Audit doc: pending.
+- Design decision: pending.
+- Scope:
+  - Audit camp-provider fan-out in `runDiscovery` for leg and area searches.
+  - Extract only provider orchestration if camp filters, photo-only fallback,
+    endpoint fallback, camp ranking, route projection, replacement behavior,
+    and selected camp sheets stay unchanged.
+  - Continue Mobbin/Figma research against campground search, overnight
+    selection, and itinerary add-place workflows before code.
 
 ## Repo Note
 

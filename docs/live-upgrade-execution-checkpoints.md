@@ -290,7 +290,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `01480fc3-971c-417f-9a36-d0d576cc84a1`.
 
 29. **Route Builder Discovery Gas Provider Boundary**
-    - Status: complete, pending release.
+    - Status: complete and released.
     - Extracted point fan-out and provider empty-fallback handling into
       `searchRouteBuilderProviderAtPoints`.
     - Updated gas leg and area searches to use the helper for NREL, OSM fuel,
@@ -301,6 +301,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Reviewed Mobbin fuel/search references and Figma design-system search
       before code; saved design decision, audit checkpoint, Figma checkpoint
       frame, and Playwright smoke screenshot.
+    - Release: production OTA
+      `ddb09fbc-ef3b-44b7-a05a-92784a3808ff`; preview OTA
+      `5d2bffc5-4ff5-4ec4-83d8-fdb164c20950`.
 
 30. **Route Builder Discovery Camp Provider Boundary**
     - Status: queued.

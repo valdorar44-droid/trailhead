@@ -217,25 +217,28 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 23 - Route Builder Active Day Controls:
+Checkpoint 24 - Route Builder Active Day Stop List:
 
-- Code commit: `5c47877` (`Extract route builder active day controls`), pushed
+- Code commit: `cf31f80` (`Extract route builder active day stop list`), pushed
   to `master`.
 - Production OTA update group:
-  `89e55cb4-85b3-4f3e-9b8f-fac6ab7f1501`
+  `9f937769-fe5a-4642-9df9-19aedea9f2ca`
 - Preview OTA update group:
-  `01dd49e1-2fb6-42d2-8c86-ba6b125f0d7c`
+  `55a49eea-e55e-4578-a7d3-975278c6bfbe`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-23-route-builder-active-day-controls-audit.md`.
+  `docs/live-upgrade-checkpoint-24-route-builder-active-day-stop-list-audit.md`.
 
 ## Current Checkpoint Record
 
 Checkpoint 24 - Route Builder Active Day Stop List:
 
-- Code commit: pending.
-- Production OTA update group: pending.
-- Preview OTA update group: pending.
+- Code commit: `cf31f80` (`Extract route builder active day stop list`), pushed
+  to `master`.
+- Production OTA update group:
+  `9f937769-fe5a-4642-9df9-19aedea9f2ca`
+- Preview OTA update group:
+  `55a49eea-e55e-4578-a7d3-975278c6bfbe`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
   `docs/live-upgrade-checkpoint-24-route-builder-active-day-stop-list-audit.md`.

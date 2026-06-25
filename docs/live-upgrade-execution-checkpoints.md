@@ -218,7 +218,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `01dd49e1-2fb6-42d2-8c86-ba6b125f0d7c`.
 
 24. **Route Builder Active Day Stop List**
-    - Status: complete, pending release.
+    - Status: complete and released.
     - Extracted active-day stop-list rendering and leg-action wiring into a
       reusable component.
     - Keep stop ordering, insert-after selection, camp detail/swap callbacks,
@@ -228,6 +228,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
       travel day editing controls before code.
     - Saved design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
+    - Release: production OTA
+      `9f937769-fe5a-4642-9df9-19aedea9f2ca`; preview OTA
+      `55a49eea-e55e-4578-a7d3-975278c6bfbe`.
 
 25. **Route Builder Stop Preview Cards**
     - Status: queued.

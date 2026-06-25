@@ -95,4 +95,10 @@
 
 ## Release
 
-- Pending commit, push, and OTA.
+- Code commit: `cf31f80` (`Extract route builder active day stop list`),
+  pushed to `master`.
+- Production OTA update group:
+  `9f937769-fe5a-4642-9df9-19aedea9f2ca`
+- Preview OTA update group:
+  `55a49eea-e55e-4578-a7d3-975278c6bfbe`
+- Runtime: `native-20260614-sdk54-1`.

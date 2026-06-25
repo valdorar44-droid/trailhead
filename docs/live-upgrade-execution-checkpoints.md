@@ -172,7 +172,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
       and Mapbox handoff behavior unchanged.
     - Save design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
-    - Release: pending commit/OTA record.
+    - Release: production OTA
+      `f2bbe3b9-2dd4-42d0-9d0b-eca5a01161c5`; preview OTA
+      `5a4df7c2-16e2-4f71-824b-1a401fad02d8`.
 
 21. **Route Builder Search Flow Extraction**
     - Status: queued.

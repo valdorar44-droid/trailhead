@@ -215,9 +215,12 @@ Native smoke tests still needed:
 
 Checkpoint 20 - Route Builder Route Fit Cards:
 
-- Code commit: pending.
-- Production OTA update group: pending.
-- Preview OTA update group: pending.
+- Code commit: `a755f5f` (`Extract route builder route fit cards`), pushed
+  to `master`.
+- Production OTA update group:
+  `f2bbe3b9-2dd4-42d0-9d0b-eca5a01161c5`
+- Preview OTA update group:
+  `5a4df7c2-16e2-4f71-824b-1a401fad02d8`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
   `docs/live-upgrade-checkpoint-20-route-builder-route-fit-cards-audit.md`.

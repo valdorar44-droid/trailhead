@@ -16,6 +16,7 @@ import { api, ApiError, ContestStatus, ContributorProfile, SupportThread, TripRe
 import { useStore, RigProfile, SavedPlace, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
+import ProfileLibraryOverview from '@/components/profile/ProfileLibraryOverview';
 import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
 import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -117,6 +118,7 @@ const DEFAULT_RIG: RigProfile = {
 
 const PROFILE_SECTIONS = [
   { id: 'account', label: 'Account', icon: 'person-circle-outline' },
+  { id: 'library', label: 'Library', icon: 'albums-outline' },
   { id: 'rig', label: 'Rig', icon: 'car-sport-outline' },
   { id: 'trips', label: 'Trips', icon: 'map-outline' },
   { id: 'saved', label: 'Saved', icon: 'bookmark-outline' },
@@ -341,6 +343,8 @@ export default function ProfileScreen() {
     () => offlineTripSummaries.filter(summary => !tripHistory.some(trip => trip.trip_id === summary.trip_id)),
     [offlineTripSummaries, tripHistory],
   );
+  const latestSavedNearbyName = favoriteCamps[0]?.name ?? savedPlaces[0]?.name ?? '';
+  const latestOfflineTripName = offlineTripSummaries[0]?.plan.trip_name || offlineTripSummaries[0]?.trip_id || '';
 
   function openOfflineMapsManager() {
     setPendingOpenOfflineModal(true);
@@ -1198,6 +1202,13 @@ export default function ProfileScreen() {
                 { icon: 'time-outline', label: 'HISTORY', color: C.silverBright, onPress: loadHistory },
                 { icon: 'trail-sign-outline', label: 'APP TOUR', color: '#d4af37', onPress: startWelcomePrompt },
               ]
+            : profileSection === 'library'
+              ? [
+                  { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
+                  { icon: 'cloud-download-outline', label: 'DOWNLOADS', color: C.green, onPress: openOfflineMapsManager },
+                  { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
+                  { icon: 'bookmark-outline', label: 'SAVED', color: C.silverBright, onPress: () => setProfileSection('saved') },
+                ]
             : profileSection === 'rig'
               ? [
                   {
@@ -1258,6 +1269,25 @@ export default function ProfileScreen() {
             </ScrollView>
           );
         })()}
+
+        {profileSection === 'library' && (
+          <ProfileLibraryOverview
+            savedTripCount={tripHistory.length}
+            offlineTripCount={offlineTripCount}
+            offlineOnlyCount={offlineOnlyTrips.length}
+            savedCampCount={favoriteCamps.length}
+            savedPlaceCount={savedPlaces.length}
+            importedRouteCount={importedRouteCount}
+            importedPinCount={importedPinCount}
+            recentTripName={tripHistory[0]?.trip_name}
+            offlineTripName={latestOfflineTripName}
+            savedNearbyName={latestSavedNearbyName}
+            onOpenTrips={() => setProfileSection('trips')}
+            onOpenDownloads={openOfflineMapsManager}
+            onOpenSaved={() => setProfileSection('saved')}
+            onPlanTrip={() => { setActiveTrip(null); router.push('/(tabs)/plan' as any); }}
+          />
+        )}
 
         {/* My Trips — with offline cache badges */}
         {profileSection === 'trips' && tripHistory.length > 0 && (

@@ -45,10 +45,11 @@ checkpoint must leave an audit note before the next checkpoint starts.
    - Extract Route Builder shell components without changing route logic.
 
 5. **Library + Offline Readiness**
-   - Status: next.
+   - Status: complete for first consolidated Library pass.
    - Start Profile Saved/Downloads path toward a mobile Library model.
 
 6. **Map Sheets + Mapbox Layer Polish**
+   - Status: next.
    - Keep Mapbox Outdoors near Trailhead Topo.
    - Remove duplicate Explorer entry points if layer workflow replaces them.
    - Keep Mapbox layer access free where product direction requires it.

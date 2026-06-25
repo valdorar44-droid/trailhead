@@ -16,8 +16,10 @@ import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
+import RouteBuilderActiveDayStop from '@/components/routeBuilder/RouteBuilderActiveDayStop';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteBuilderInsertNotice from '@/components/routeBuilder/RouteBuilderInsertNotice';
+import RouteBuilderLegActions from '@/components/routeBuilder/RouteBuilderLegActions';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
@@ -1015,7 +1017,7 @@ function filterCampsByPhotoMode<T extends CampsitePin>(camps: T[], photoOnly: bo
 function sourceLabel(source?: BuilderStop['source']) {
   if (source === 'camp') return 'verified camp';
   if (source === 'gas') return 'fuel search';
-  if (source === 'poi') return 'poi search';
+  if (source === 'poi') return 'places search';
   if (source === 'search') return 'search';
   if (source === 'map') return 'map tap';
   return 'manual';
@@ -1107,7 +1109,7 @@ function tripCardData(route: TripHistoryItem, trip?: TripResult | null, catalogP
     camps ? `${camps} camp${camps === 1 ? '' : 's'}` : '',
     trails ? `${trails} trail${trails === 1 ? '' : 's'}` : '',
     gas ? `${gas} gas` : '',
-    poi ? `${poi} POI` : '',
+    poi ? `${poi} place${poi === 1 ? '' : 's'}` : '',
     stateCount ? `${stateCount} state${stateCount === 1 ? '' : 's'}` : '',
   ].filter(Boolean);
   return { coverUrl, stats: parts.join('  •  ') };
@@ -2469,7 +2471,7 @@ export default function RouteBuilderScreen() {
   async function discover() {
     const target = legContext ? legContext.center : anchor;
     if (!target) {
-      Alert.alert('Add a stop first', 'Start with a city, address, or map point, then discover camps, fuel, and POIs nearby.');
+      Alert.alert('Add a stop first', 'Start with a city, address, or map point, then discover camps, fuel, and places nearby.');
       return;
     }
     setInlineSearch(null);
@@ -3800,14 +3802,14 @@ export default function RouteBuilderScreen() {
         day,
         title: rest ? `Day ${day}: Rest / local exploring` : needsWindowCamp ? `${window.label} Camp: ${first} to ${last}` : `${window.label}: Travel window`,
         description: rest
-          ? 'Rest day. Keep the camp, add local POIs, or set a shorter drive max.'
+          ? 'Rest day. Keep the camp, add local places, or set a shorter drive max.'
           : campCadenceMode === 'alternate' && !needsWindowCamp
           ? `${window.label} shares an overnight camp on Day ${window.end}.`
           : wps.length
           ? `Manual route day with ${wps.length} planned stop${wps.length === 1 ? '' : 's'}.`
           : hasPlanningTarget
           ? 'Planning day. Pick an overnight camp before using GPS navigation.'
-          : 'Open day. Add a destination, fuel, POIs, and camp.',
+          : 'Open day. Add a destination, fuel, places, and camp.',
         est_miles: Math.round(miles),
         road_type: rest ? 'none' : routeStyle === 'wild' ? 'backroads' : routeStyle === 'direct' ? 'direct' : 'mixed',
         highlights: wps.filter(st => st.type === 'waypoint' || st.type === 'camp').slice(0, 3).map(st => st.name),
@@ -3822,8 +3824,8 @@ export default function RouteBuilderScreen() {
       plan: {
         trip_name: nameOverride ?? resolvedRouteName(),
         overview: importedTripId
-          ? 'A Trailhead route edited in Route Builder with user-selected stops, fuel, POIs, and camps.'
-          : 'A manually built Trailhead route with user-selected stops, fuel, POIs, and camps.',
+          ? 'A Trailhead route edited in Route Builder with user-selected stops, fuel, places, and camps.'
+          : 'A manually built Trailhead route with user-selected stops, fuel, places, and camps.',
         duration_days: inputDays.length,
         states: importedTripId ? activeTrip?.plan.states ?? [] : [],
         total_est_miles: Math.round(inputMiles),
@@ -3841,7 +3843,7 @@ export default function RouteBuilderScreen() {
         logistics: {
           vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against the saved rig profile before departure.`,
           fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(inputMiles, planningStats.mpg, weatherUnitMode)} / $${Math.round(tripFuelCost)}. Fuel stops are manually selected.`,
-          water_strategy: 'Carry water for each day and add water POIs where needed.',
+          water_strategy: 'Carry water for each day and add water stops where needed.',
           permits_needed: `${tripShapeMode === 'loop' ? 'Loop route. ' : tripShapeMode === 'there_and_back' ? 'There-and-back route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
           best_season: `Verify seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
         },
@@ -4156,7 +4158,7 @@ export default function RouteBuilderScreen() {
     if (stop.type === 'motel') return 'LODGING';
     if (stop.poi?.type === 'trailhead') return 'TRAILHEAD';
     if (stop.poi?.type === 'viewpoint') return 'VIEWPOINT';
-    if (stop.poi?.type === 'attraction') return 'POINT OF INTEREST';
+    if (stop.poi?.type === 'attraction') return 'PLACE';
     return stop.type === 'waypoint' ? 'ROUTE STOP' : stopLabel(stop.type).toUpperCase();
   }
 
@@ -4249,7 +4251,7 @@ export default function RouteBuilderScreen() {
                       <Text style={s.routeDayTravelText}>{plan.campWindowLabel} shares the next camp window.</Text>
                     </View>
                   )}
-                  <Text style={s.routeDayGroupLabel}>Day {plan.day} Points of Interest</Text>
+                  <Text style={s.routeDayGroupLabel}>Day {plan.day} Places</Text>
                   <View style={s.routeDayActionRail}>
                     <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'camps')}>
                       <Ionicons name="bonfire-outline" size={13} color={C.orange} />
@@ -4911,67 +4913,38 @@ export default function RouteBuilderScreen() {
         {dayStops.length === 0 ? (
           <View style={s.emptyState}>
             <Text style={s.emptyTitle}>Build the day in order</Text>
-            <Text style={s.emptyText}>Start with a destination, then add fuel, POIs, and a camp. Tap a stop later to insert new places after it.</Text>
+            <Text style={s.emptyText}>Start with a destination, then add fuel, places, and a camp. Tap a stop later to insert new places after it.</Text>
           </View>
         ) : dayStops.map((st, idx) => {
           const next = dayStops[idx + 1] ?? null;
           const legMiles = next ? haversineMi(st, next) : 0;
           return (
-            <View key={st.id} style={s.timelineItem}>
-              <View style={[s.routeTimelineStop, insertAfterId === st.id && s.routeTimelineStopSelected]}>
-                <TouchableOpacity style={s.routeTimelineStopTop} onPress={() => selectInsertStop(st)} activeOpacity={0.86}>
-                  <View style={[s.stopNum, { backgroundColor: stopColor(st.type) }]}>
-                    <Text style={s.stopNumText}>{idx + 1}</Text>
-                  </View>
-                  <View style={{ flex: 1, minWidth: 0 }}>
-                    <Text style={s.stopName} numberOfLines={1}>{st.name}</Text>
-                    <Text style={s.stopMeta}>{stopCardLabel(st)} · {sourceLabel(st.source)}{insertAfterId === st.id ? ' · INSERT AFTER' : ''}</Text>
-                  </View>
-                  {st.camp ? (
-                    <TouchableOpacity style={s.iconBtn} onPress={() => openCampDetail(st.camp!)}>
-                      <Ionicons name="image-outline" size={15} color={C.orange} />
-                    </TouchableOpacity>
-                  ) : null}
-                  {st.type === 'camp' ? (
-                    <TouchableOpacity style={s.iconBtn} onPress={() => replaceCampStop(st)}>
-                      <Ionicons name="swap-horizontal-outline" size={15} color={C.orange} />
-                    </TouchableOpacity>
-                  ) : null}
-                  <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, -1)}>
-                    <Ionicons name="chevron-up" size={15} color={C.text3} />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.iconBtn} onPress={() => moveStop(st.id, 1)}>
-                    <Ionicons name="chevron-down" size={15} color={C.text3} />
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.iconBtn} onPress={() => removeStop(st.id)}>
-                    <Ionicons name="trash-outline" size={15} color={C.red} />
-                  </TouchableOpacity>
-                </TouchableOpacity>
-                {renderStopPreview(st)}
-              </View>
-              {next ? (
-                <View style={s.legCard}>
-                  <View style={s.legLine} />
-                  <View style={{ flex: 1 }}>
-                    <Text style={s.legMeta}>{fmtRouteDistance(legMiles)} · {fmtHours(estimateMovingHours(legMiles))}</Text>
-                    <Text style={s.legFuel}>{legFuelLabel(legMiles)}</Text>
-                    <Text style={s.legText} numberOfLines={1}>to {next.name}</Text>
-                  </View>
-                  <TouchableOpacity style={s.legAction} onPress={() => scanBetweenStops(st, next, 'gas')}>
-                    <Ionicons name="flash-outline" size={14} color={C.orange} />
-                    <Text style={s.legActionText}>FUEL</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.legAction} onPress={() => scanBetweenStops(st, next, 'camps', next.day ?? st.day, 'overnight')}>
-                    <Ionicons name="bonfire-outline" size={14} color={C.orange} />
-                    <Text style={s.legActionText}>CAMP</Text>
-                  </TouchableOpacity>
-                  <TouchableOpacity style={s.legAction} onPress={() => scanBetweenStops(st, next, 'poi')}>
-                    <Ionicons name="trail-sign-outline" size={14} color={C.orange} />
-                    <Text style={s.legActionText}>POI</Text>
-                  </TouchableOpacity>
-                </View>
-              ) : null}
-            </View>
+            <RouteBuilderActiveDayStop
+              key={st.id}
+              index={idx}
+              name={st.name}
+              meta={`${stopCardLabel(st)} · ${sourceLabel(st.source)}${insertAfterId === st.id ? ' · INSERT AFTER' : ''}`}
+              color={stopColor(st.type)}
+              selected={insertAfterId === st.id}
+              preview={renderStopPreview(st)}
+              onSelect={() => selectInsertStop(st)}
+              onOpenCampDetail={st.camp ? () => openCampDetail(st.camp!) : undefined}
+              onReplaceCamp={st.type === 'camp' ? () => replaceCampStop(st) : undefined}
+              onMoveUp={() => moveStop(st.id, -1)}
+              onMoveDown={() => moveStop(st.id, 1)}
+              onRemove={() => removeStop(st.id)}
+              leg={next ? (
+                <RouteBuilderLegActions
+                  distanceLabel={fmtRouteDistance(legMiles)}
+                  durationLabel={fmtHours(estimateMovingHours(legMiles))}
+                  fuelLabel={legFuelLabel(legMiles)}
+                  nextStopName={next.name}
+                  onFindFuel={() => scanBetweenStops(st, next, 'gas')}
+                  onFindCamp={() => scanBetweenStops(st, next, 'camps', next.day ?? st.day, 'overnight')}
+                  onFindPlaces={() => scanBetweenStops(st, next, 'poi')}
+                />
+              ) : undefined}
+            />
           );
         })}
       </ScrollView>
@@ -6178,9 +6151,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campPreviewActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
   campPreviewBtn: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s1, paddingHorizontal: 12 },
   campPreviewBtnText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  routeTimelineStop: { borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.s1, padding: 9, gap: 9 },
-  routeTimelineStopSelected: { borderColor: C.orange + '77', backgroundColor: C.orange + '10' },
-  routeTimelineStopTop: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   routeFuelCard: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#eab30855', borderRadius: 14, backgroundColor: '#eab30810', padding: 11 },
   routeFuelIcon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#eab30866', backgroundColor: '#eab30818' },
   routePlaceCard: { flexDirection: 'row', alignItems: 'stretch', gap: 10, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2, padding: 10 },
@@ -6242,21 +6212,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   emptyState: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 14, backgroundColor: C.s2 },
   emptyTitle: { color: C.text, fontSize: 14, fontWeight: '800', marginBottom: 4 },
   emptyText: { color: C.text3, fontSize: 12, lineHeight: 18 },
-  stopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 10, backgroundColor: C.s1 },
-  stopRowSelected: { borderColor: C.orange, backgroundColor: C.orange + '10' },
-  stopNum: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
-  stopNumText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900' },
-  stopName: { color: C.text, fontSize: 13, fontWeight: '800' },
-  stopMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
-  iconBtn: { width: 28, height: 28, borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2 },
-  timelineItem: { gap: 8 },
-  legCard: { marginLeft: 14, flexDirection: 'row', alignItems: 'center', gap: 9, borderLeftWidth: 2, borderLeftColor: C.orange + '55', paddingLeft: 14, paddingVertical: 6 },
-  legLine: { width: 7, height: 7, borderRadius: 4, backgroundColor: C.orange },
-  legMeta: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
-  legFuel: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '900', marginTop: 2 },
-  legText: { color: C.text3, fontSize: 10, marginTop: 1 },
-  legAction: { minWidth: 48, minHeight: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '12', borderWidth: 1, borderColor: C.orange + '35', paddingHorizontal: 7 },
-  legActionText: { color: C.orange, fontSize: 7, fontFamily: mono, fontWeight: '900', marginTop: 1 },
   dayControlRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 9, backgroundColor: C.s2 },
   restToggle: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 10, backgroundColor: C.s1 },
   restToggleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },

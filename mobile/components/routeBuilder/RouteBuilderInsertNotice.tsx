@@ -29,7 +29,7 @@ export default function RouteBuilderInsertNotice({
         <Text style={s.text} numberOfLines={3}>
           {active
             ? `New stops will land after ${stopShortName || 'this stop'}${dayLabel ? ` on Day ${dayLabel}` : ''}.`
-            : 'Use a day action below to place fuel, camps, or POIs in the right leg.'}
+            : 'Use a day action below to place fuel, camps, or places in the right leg.'}
         </Text>
       </View>
       {active ? (

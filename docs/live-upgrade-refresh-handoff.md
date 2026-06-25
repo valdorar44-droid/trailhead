@@ -217,9 +217,10 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 16 - Route Builder Stop Rows**
+**Checkpoint 17 - Route Builder Footer Dock**
 
-Extract stop rows and leg action rows from
-`mobile/app/(tabs)/route-builder.tsx`, then continue to the footer dock and
-route timeline only after the smaller surface passes TypeScript, copy, route,
-Figma, and Playwright checks.
+Extract the fixed bottom route summary/open-on-map dock from
+`mobile/app/(tabs)/route-builder.tsx` into a typed reusable component. Keep
+save/open-on-map behavior, route readiness, and trip geometry unchanged; audit
+against the Checkpoint 16 stop-row screenshot so the footer does not obscure
+active itinerary controls on web or native.

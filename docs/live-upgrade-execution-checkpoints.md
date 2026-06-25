@@ -122,6 +122,17 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Add shared place-lookup fallback coverage to `RouteSearchModal`.
     - Save design decision, audit checkpoint, and Figma checkpoint frame.
 
+16. **Route Builder Stop Rows**
+    - Status: complete for active-day stop-row and leg-action extraction.
+    - Extract active-day stop row rendering into a reusable component.
+    - Extract between-stop distance/fuel/action rendering into a reusable
+      component.
+    - Keep route computation, discovery scans, camp scoring, saved geometry, and
+      offline readiness calculations unchanged.
+    - Clean visible Route Builder stop/search copy from "POIs" to "places."
+    - Save design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshot.
+
 ## Refresh Handoff
 
 - Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.
@@ -137,6 +148,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-14-route-builder-workspace-audit.md`.
 - Checkpoint 15 route/search layering context is saved in
   `docs/live-upgrade-checkpoint-15-route-search-layering-audit.md`.
+- Checkpoint 16 stop-row extraction context is saved in
+  `docs/live-upgrade-checkpoint-16-route-builder-stop-rows-audit.md`.
 
 ## Validation Gate
 

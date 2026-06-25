@@ -231,26 +231,23 @@ Checkpoint 24 - Route Builder Active Day Stop List:
 
 ## Current Checkpoint Record
 
-Checkpoint 24 - Route Builder Active Day Stop List:
+Checkpoint 25 - Route Builder Stop Preview Cards:
 
-- Code commit: `cf31f80` (`Extract route builder active day stop list`), pushed
-  to `master`.
-- Production OTA update group:
-  `9f937769-fe5a-4642-9df9-19aedea9f2ca`
-- Preview OTA update group:
-  `55a49eea-e55e-4578-a7d3-975278c6bfbe`
+- Code commit: pending.
+- Production OTA update group: pending.
+- Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-24-route-builder-active-day-stop-list-audit.md`.
+  `docs/live-upgrade-checkpoint-25-route-builder-stop-preview-cards-audit.md`.
 - Figma evidence:
-  `/tmp/trailhead-checkpoint-24-route-builder-active-day-stop-list-figma.png`
+  `/tmp/trailhead-checkpoint-25-route-builder-stop-preview-cards-figma.png`
 - Playwright evidence:
-  `/tmp/trailhead-route-builder-checkpoint-24-active-day-stop-list-web.png`
+  `/tmp/trailhead-route-builder-checkpoint-25-stop-preview-card-web.png`
 - Validation:
   - `cd mobile && npx tsc --noEmit`
   - `cd mobile && npm run audit:copy`
   - `cd mobile && npm run audit:routes`
-  - `cd mobile && node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" components/routeBuilder/RouteBuilderActiveDayStopList.tsx`
+  - `cd mobile && node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" components/routeBuilder/RouteBuilderStopPreviewCards.tsx`
   - `git diff --check`
 
 ## Repo Note
@@ -266,10 +263,10 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 25 - Route Builder Stop Preview Cards**
+**Checkpoint 26 - Route Builder Discovery Candidate Cards**
 
-Extract stop preview rendering for start, route stop, fuel, places, and camp
-cards into reusable route-builder preview components. Keep camp detail loading,
-selected camp sheets, replacement flow, stop labels, source badges, and route
-calculations unchanged; audit against Mobbin itinerary place cards, saved-place
-previews, and the existing Figma checkpoint board before code.
+Extract candidate rows, camp candidate cards, and replacement/discovery result
+card composition into reusable route-builder components. Keep discovery
+filtering, camp replacement, add-place behavior, selected camp sheets, and route
+calculations unchanged; audit against Mobbin search result cards, saved-place
+cards, discovery sheets, and the existing Figma checkpoint board before code.

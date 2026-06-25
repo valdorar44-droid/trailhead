@@ -233,13 +233,24 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `55a49eea-e55e-4578-a7d3-975278c6bfbe`.
 
 25. **Route Builder Stop Preview Cards**
-    - Status: queued.
-    - Extract stop preview rendering for start, route stop, fuel, places, and
+    - Status: complete, pending release.
+    - Extracted stop preview rendering for start, route stop, fuel, places, and
       camp cards into reusable route-builder preview components.
     - Keep camp detail loading, selected camp sheets, replacement flow, stop
       labels, source badges, and route calculations unchanged.
-    - Continue Mobbin/Figma research against itinerary place cards, saved-place
-      previews, and route stop media layouts before code.
+    - Reviewed Mobbin/Figma itinerary place cards, saved-place previews, and
+      route stop media layouts before code.
+    - Saved design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshot.
+
+26. **Route Builder Discovery Candidate Cards**
+    - Status: queued.
+    - Extract candidate rows, camp candidate cards, and replacement/discovery
+      result card composition into reusable route-builder components.
+    - Keep discovery filtering, camp replacement, add-place behavior, selected
+      camp sheets, and route calculations unchanged.
+    - Continue Mobbin/Figma research against search result cards, saved-place
+      cards, and route discovery sheets before code.
 
 ## Refresh Handoff
 
@@ -272,6 +283,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-23-route-builder-active-day-controls-audit.md`.
 - Checkpoint 24 active-day-stop-list extraction context is saved in
   `docs/live-upgrade-checkpoint-24-route-builder-active-day-stop-list-audit.md`.
+- Checkpoint 25 stop-preview-card extraction context is saved in
+  `docs/live-upgrade-checkpoint-25-route-builder-stop-preview-cards-audit.md`.
 
 ## Validation Gate
 

@@ -25,6 +25,11 @@ import RouteBuilderInlineResults, {
 } from '@/components/routeBuilder/RouteBuilderInlineResults';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
 import RouteBuilderSearchSurface from '@/components/routeBuilder/RouteBuilderSearchSurface';
+import {
+  RouteBuilderCampPreviewCard,
+  RouteBuilderFuelPreviewCard,
+  RouteBuilderPlacePreviewCard,
+} from '@/components/routeBuilder/RouteBuilderStopPreviewCards';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderTimelineDayCard from '@/components/routeBuilder/RouteBuilderTimelineDayCard';
 import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
@@ -4041,51 +4046,27 @@ export default function RouteBuilderScreen() {
 
   function renderCampPreview(stop: BuilderStop, label: string, compact = false) {
     const camp = stop.camp;
+    const land = landColor(stop.land_type);
     const campFeatures = [
       ...(camp?.site_types ?? []),
       ...(camp?.amenities ?? []),
       ...(camp?.tags ?? []).map(tag => tag.replace(/_/g, ' ')),
     ].filter(Boolean).slice(0, compact ? 3 : 5).join(' · ');
     return (
-      <View style={[s.selectedCampCard, compact && s.selectedCampCardCompact]}>
-        <View style={[s.selectedCampPhotoWrap, compact && s.selectedCampPhotoWrapCompact]}>
-          {camp?.photo_url ? (
-            <Image source={{ uri: camp.photo_url }} style={[s.selectedCampPhoto, compact && s.selectedCampPhotoCompact]} resizeMode="cover" />
-          ) : (
-            <View style={[s.selectedCampPlaceholder, compact && s.selectedCampPhotoCompact, { backgroundColor: landColor(stop.land_type).bg }]}>
-              <Ionicons name={stop.type === 'motel' ? 'bed-outline' : 'bonfire-outline'} size={compact ? 18 : 24} color={landColor(stop.land_type).text} />
-            </View>
-          )}
-        </View>
-        <View style={[s.selectedCampBody, compact && s.selectedCampBodyCompact]}>
-          <Text style={s.selectedCampLabel}>{label}</Text>
-          <Text style={s.selectedCampName} numberOfLines={2}>{stop.name}</Text>
-          <Text style={s.selectedCampMeta} numberOfLines={2}>
-            {campFeatures || stop.land_type || stopLabel(stop.type)}{camp?.cost ? ` · ${camp.cost}` : ''}{restDays.includes(stop.day) ? ' · rest day' : ''}
-          </Text>
-          {!compact ? (
-            <View style={s.campPreviewActions}>
-              <TouchableOpacity style={s.campPreviewBtn} onPress={() => replaceCampStop(stop)}>
-                <Ionicons name="swap-horizontal-outline" size={12} color={C.orange} />
-                <Text style={s.campPreviewBtnText}>SWAP</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.campPreviewBtn} onPress={() => stayAtCampNextDay(stop)}>
-                <Ionicons name="bed-outline" size={12} color={C.green} />
-                <Text style={[s.campPreviewBtnText, { color: C.green }]}>STAY NEXT DAY</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.campPreviewBtn} onPress={() => stayAtCampTwoNights(stop)}>
-                <Ionicons name="calendar-outline" size={12} color={C.green} />
-                <Text style={[s.campPreviewBtnText, { color: C.green }]}>BASECAMP +2</Text>
-              </TouchableOpacity>
-            </View>
-          ) : null}
-        </View>
-        {camp ? (
-          <TouchableOpacity style={s.selectedCampSwap} onPress={() => openCampDetail(camp)}>
-            <Ionicons name="image-outline" size={14} color={C.orange} />
-          </TouchableOpacity>
-        ) : null}
-      </View>
+      <RouteBuilderCampPreviewCard
+        label={label}
+        name={stop.name}
+        meta={`${campFeatures || stop.land_type || stopLabel(stop.type)}${camp?.cost ? ` · ${camp.cost}` : ''}${restDays.includes(stop.day) ? ' · rest day' : ''}`}
+        compact={compact}
+        photoUrl={camp?.photo_url}
+        placeholderIcon={stop.type === 'motel' ? 'bed-outline' : 'bonfire-outline'}
+        placeholderBackground={land.bg}
+        placeholderColor={land.text}
+        onReplace={() => replaceCampStop(stop)}
+        onStayNextDay={() => stayAtCampNextDay(stop)}
+        onStayTwoNights={() => stayAtCampTwoNights(stop)}
+        onOpenDetail={camp ? () => openCampDetail(camp) : undefined}
+      />
     );
   }
 
@@ -4113,16 +4094,10 @@ export default function RouteBuilderScreen() {
     if (stop.type === 'fuel') {
       const station = stop.gas;
       return (
-        <View style={s.routeFuelCard}>
-          <View style={s.routeFuelIcon}>
-            <Ionicons name="flash-outline" size={18} color="#eab308" />
-          </View>
-          <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={s.routeStopLabel}>FUEL STOP</Text>
-            <Text style={s.routeStopTitle} numberOfLines={2}>{stop.name}</Text>
-            <Text style={s.routeStopMeta} numberOfLines={2}>{station?.address || station?.fuel_types || stop.description || 'Fuel stop selected in Route Builder.'}</Text>
-          </View>
-        </View>
+        <RouteBuilderFuelPreviewCard
+          name={stop.name}
+          meta={station?.address || station?.fuel_types || stop.description || 'Fuel stop selected in Route Builder.'}
+        />
       );
     }
     const color = placeColor(stop.poi?.type ?? stop.type);
@@ -4131,20 +4106,15 @@ export default function RouteBuilderScreen() {
       ? `${stop.poi.type.replace(/_/g, ' ')} stop selected for this day.`
       : stop.description;
     return (
-      <View style={s.routePlaceCard}>
-        <View style={[s.routePlacePhoto, { backgroundColor: color + '18', borderColor: color + '55' }]}>
-          <Ionicons name={icon} size={24} color={color} />
-        </View>
-        <View style={s.routePlaceBody}>
-          <Text style={[s.routeStopLabel, { color }]}>{stopCardLabel(stop)}</Text>
-          <Text style={s.routeStopTitle} numberOfLines={2}>{stop.name}</Text>
-          <Text style={s.routeStopMeta} numberOfLines={3}>{description}</Text>
-          <View style={s.routePlaceTags}>
-            <View style={s.miniTag}><Text style={s.miniTagText}>{sourceLabel(stop.source).toUpperCase()}</Text></View>
-            {stop.poi?.type ? <View style={s.miniTag}><Text style={s.miniTagText}>{stop.poi.type.replace(/_/g, ' ').toUpperCase()}</Text></View> : null}
-          </View>
-        </View>
-      </View>
+      <RouteBuilderPlacePreviewCard
+        label={stopCardLabel(stop)}
+        name={stop.name}
+        description={description}
+        color={color}
+        icon={icon}
+        sourceLabel={sourceLabel(stop.source).toUpperCase()}
+        typeLabel={stop.poi?.type ? stop.poi.type.replace(/_/g, ' ').toUpperCase() : undefined}
+      />
     );
   }
 
@@ -5904,31 +5874,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routeTimelineTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
   routeTimelineSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
   routeDayWrap: { gap: 10 },
-  selectedCampCard: { gap: 12, borderWidth: 1, borderColor: C.green + '55', borderRadius: 18, backgroundColor: C.green + '0f', padding: 12 },
-  selectedCampCardCompact: { padding: 8, gap: 10, borderRadius: 14 },
-  selectedCampPhotoWrap: { width: '100%', borderRadius: 16, overflow: 'hidden', backgroundColor: C.s2 },
-  selectedCampPhotoWrapCompact: { width: 108, borderRadius: 12 },
-  selectedCampPhoto: { width: '100%', height: 168 },
-  selectedCampPhotoCompact: { height: 96 },
-  selectedCampPlaceholder: { width: '100%', height: 168, alignItems: 'center', justifyContent: 'center' },
-  selectedCampBody: { minHeight: 118, justifyContent: 'center' },
-  selectedCampBodyCompact: { minHeight: 96 },
-  selectedCampLabel: { color: C.green, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  selectedCampName: { color: C.text, fontSize: 24, fontWeight: '900', lineHeight: 29, marginTop: 5 },
-  selectedCampMeta: { color: C.text3, fontSize: 14, marginTop: 7, lineHeight: 20 },
-  selectedCampSwap: { position: 'absolute', right: 14, top: 190, width: 42, height: 42, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.s1, alignItems: 'center', justifyContent: 'center' },
-  campPreviewActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 8 },
-  campPreviewBtn: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s1, paddingHorizontal: 12 },
-  campPreviewBtnText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  routeFuelCard: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: '#eab30855', borderRadius: 14, backgroundColor: '#eab30810', padding: 11 },
-  routeFuelIcon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#eab30866', backgroundColor: '#eab30818' },
-  routePlaceCard: { flexDirection: 'row', alignItems: 'stretch', gap: 10, borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2, padding: 10 },
-  routePlacePhoto: { width: 78, minHeight: 92, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  routePlaceBody: { flex: 1, minHeight: 92, justifyContent: 'center' },
-  routeStopLabel: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
-  routeStopTitle: { color: C.text, fontSize: 17, fontWeight: '900', lineHeight: 21, marginTop: 4 },
-  routeStopMeta: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 5 },
-  routePlaceTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 },
   inlineEmptyCard: { gap: 8, paddingVertical: 4 },
   inlineEmpty: { color: C.text3, fontSize: 11, lineHeight: 16, paddingVertical: 8 },
   inlineEmptyHint: { color: C.text3, fontSize: 10, lineHeight: 15 },
@@ -5956,8 +5901,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campCandidatePlaceholder: { width: '100%', height: 86, alignItems: 'center', justifyContent: 'center' },
   campCandidateBody: { flex: 1, minHeight: 86, justifyContent: 'center' },
   campCandidateTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
-  miniTag: { borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingHorizontal: 6, paddingVertical: 3, backgroundColor: C.s2 },
-  miniTagText: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900' },
   candidateName: { color: C.text, fontSize: 13, fontWeight: '800' },
   candidateMeta: { color: C.text3, fontSize: 10, marginTop: 2 },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },

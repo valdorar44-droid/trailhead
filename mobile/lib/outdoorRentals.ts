@@ -81,11 +81,11 @@ export function buildRentalSuggestionFit(input: RentalSuggestionInput): RentalSu
   const routeType = routeTypeFor({ ...input, days, campNights });
   const vehicleType = vehicleTypeFor(input.campPreference, input.routeStyle);
   const title = 'Need a vehicle for this trip?';
-  const subtitle = `Campervans and RVs near ${startLabel(input.start)}`;
+  const subtitle = `Search campervans and RVs from ${startLabel(input.start)}`;
   const reason = campNights > 1
-    ? `Fits your ${campNights}-night camping route.`
+    ? `Useful for a ${campNights}-night camping route.`
     : days > 1
-      ? `Fits your ${days}-day route.`
+      ? `Useful for a ${days}-day route.`
       : 'Best for trips that start away from your own vehicle.';
   const context = {
     camp_nights: campNights,

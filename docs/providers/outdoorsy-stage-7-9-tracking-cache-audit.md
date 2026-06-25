@@ -44,7 +44,7 @@ Not tracked:
 
 ## Checkout
 
-No backend URL construction was added in this checkpoint because Outdoorsy rental deep-link, affiliate, campaign, and sub-ID rules remain unconfirmed.
+No backend URL construction was added in this checkpoint because Outdoorsy rental deep-link, affiliate, campaign, and sub-ID rules were unconfirmed at the time. Stage 10 adds only the later-confirmed generic Outdoorsy RV Search affiliate link behavior; individual rental deep links remain unconfirmed.
 
 Route Builder opens only normalized `affiliate_url` or `booking_url` values that the backend has already returned on an `OutdoorOffer`. If no URL is available, it shows a neutral unavailable message.
 

@@ -2,10 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError, URLError
+from urllib.parse import urlencode, urlparse
+from urllib.request import Request, urlopen
 
 from scripts.explore_sources.offers.disclosure import (
     PARTNER_BOOKING_DISCLOSURE_KIND,
@@ -26,6 +30,7 @@ ALLOWED_PROVIDER_STATES = {
 }
 
 ERROR_STATUSES = {"auth_error", "rate_limited", "transient_error", "malformed_response"}
+TRACKING_TOKEN_RE = re.compile(r"[^A-Za-z0-9_.-]+")
 
 
 def _bool_env(value: object) -> bool:
@@ -67,6 +72,11 @@ class OutdoorsyConfig:
     tune_network_id: str = ""
     tune_api_key: str = ""
     tune_api_base_url: str = ""
+    tune_tracking_base_url: str = ""
+    tune_affiliate_id: str = ""
+    tune_offer_id: str = ""
+    tune_rv_search_url_id: str = ""
+    tune_source: str = "trailhead"
     enable_live: bool = False
     provider_state: str = "disabled"
     request_timeout_seconds: int = 12
@@ -81,6 +91,12 @@ class OutdoorsyConfig:
     def has_affiliate_credentials(self) -> bool:
         return bool(self.tune_network_id and self.tune_api_key)
 
+    def has_offer_id(self) -> bool:
+        return bool(_tracking_token(self.tune_offer_id))
+
+    def has_direct_tracking_config(self) -> bool:
+        return bool(self.has_offer_id() and _tracking_token(self.tune_affiliate_id) and _tracking_base_url(self))
+
     def live_inventory_allowed(self) -> bool:
         return False
 
@@ -91,12 +107,138 @@ def config_from_env(env: dict[str, str] | None = None) -> OutdoorsyConfig:
         tune_network_id=str(values.get("OUTDOORSY_TUNE_NETWORK_ID", "")).strip(),
         tune_api_key=str(values.get("OUTDOORSY_TUNE_API_KEY", "")).strip(),
         tune_api_base_url=str(values.get("OUTDOORSY_TUNE_API_BASE_URL", "")).strip().rstrip("/"),
+        tune_tracking_base_url=str(values.get("OUTDOORSY_TUNE_TRACKING_BASE_URL", "")).strip().rstrip("/"),
+        tune_affiliate_id=str(values.get("OUTDOORSY_TUNE_AFFILIATE_ID", "")).strip(),
+        tune_offer_id=str(values.get("OUTDOORSY_TUNE_OFFER_ID", "")).strip(),
+        tune_rv_search_url_id=str(values.get("OUTDOORSY_TUNE_RV_SEARCH_URL_ID", "")).strip(),
+        tune_source=str(values.get("OUTDOORSY_TUNE_SOURCE", "trailhead")).strip() or "trailhead",
         enable_live=_bool_env(values.get("OUTDOORSY_ENABLE_LIVE", "false")),
         provider_state=str(values.get("OUTDOORSY_PROVIDER_STATE", "disabled")).strip().lower(),
         request_timeout_seconds=_safe_int(values.get("OUTDOORSY_REQUEST_TIMEOUT_SECONDS", "12"), 12, 1, 30),
         cache_ttl_seconds=_safe_int(values.get("OUTDOORSY_CACHE_TTL_SECONDS", "900"), 900, 60, 3600),
         fixture_mode=_bool_env(values.get("OUTDOORSY_FIXTURE_MODE", "false")),
         fixture_path=str(values.get("OUTDOORSY_FIXTURE_PATH", "")).strip(),
+    )
+
+
+def _tracking_token(value: object, max_len: int = 120) -> str:
+    text = str(value or "").strip()
+    text = TRACKING_TOKEN_RE.sub("", text)
+    return text[:max_len]
+
+
+def _tracking_base_url(config: OutdoorsyConfig) -> str:
+    explicit = str(config.tune_tracking_base_url or "").strip().rstrip("/")
+    if explicit:
+        parsed = urlparse(explicit)
+        if parsed.scheme == "https" and parsed.netloc:
+            return explicit
+        return ""
+    network_id = _tracking_token(config.tune_network_id, 80).lower()
+    if not network_id:
+        return ""
+    return f"https://{network_id}.go2cloud.org/aff_c"
+
+
+def _tune_api_base_url(config: OutdoorsyConfig) -> str:
+    explicit = str(config.tune_api_base_url or "").strip().rstrip("/")
+    if explicit:
+        parsed = urlparse(explicit)
+        if parsed.scheme == "https" and parsed.netloc:
+            return explicit
+        return ""
+    network_id = _tracking_token(config.tune_network_id, 80).lower()
+    if not network_id:
+        return ""
+    return f"https://{network_id}.api.hasoffers.com/Apiv3/json"
+
+
+def _tracking_params(config: OutdoorsyConfig) -> dict[str, str]:
+    params = {
+        "offer_id": _tracking_token(config.tune_offer_id, 40),
+        "source": _tracking_token(config.tune_source, 120),
+    }
+    url_id = _tracking_token(config.tune_rv_search_url_id, 40)
+    if url_id:
+        params["url_id"] = url_id
+    return {key: value for key, value in params.items() if value}
+
+
+def _build_direct_tracking_url(config: OutdoorsyConfig) -> str:
+    base_url = _tracking_base_url(config)
+    offer_id = _tracking_token(config.tune_offer_id, 40)
+    affiliate_id = _tracking_token(config.tune_affiliate_id, 40)
+    if not base_url or not offer_id or not affiliate_id:
+        return ""
+    params = {"offer_id": offer_id, "aff_id": affiliate_id}
+    for key, value in _tracking_params(config).items():
+        if key != "offer_id":
+            params[key] = value
+    return f"{base_url}?{urlencode(params)}"
+
+
+def _extract_tracking_url(payload: object) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    response = payload.get("response") if isinstance(payload.get("response"), dict) else {}
+    data = response.get("data") if isinstance(response.get("data"), dict) else {}
+    for key in ("universal_tracking_link", "click_url"):
+        value = str(data.get(key) or "").strip()
+        parsed = urlparse(value)
+        hostname = str(parsed.hostname or "").lower()
+        if parsed.scheme == "https" and (hostname == "go2cloud.org" or hostname.endswith(".go2cloud.org")):
+            return value[:2000]
+    return ""
+
+
+def _generate_tune_tracking_url(config: OutdoorsyConfig) -> str:
+    if not config.enable_live or not config.has_affiliate_credentials() or not config.has_offer_id():
+        return ""
+    endpoint = _tune_api_base_url(config)
+    if not endpoint:
+        return ""
+    form: dict[str, str] = {
+        "NetworkId": _tracking_token(config.tune_network_id, 80),
+        "api_key": config.tune_api_key,
+        "Target": "Affiliate_Offer",
+        "Method": "generateTrackingLink",
+        "offer_id": _tracking_token(config.tune_offer_id, 40),
+    }
+    for key, value in _tracking_params(config).items():
+        if key != "offer_id":
+            form[f"params[{key}]"] = value
+    body = urlencode(form).encode("utf-8")
+    request = Request(endpoint, data=body, method="POST")
+    request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urlopen(request, timeout=config.request_timeout_seconds) as response:
+            return _extract_tracking_url(json.loads(response.read().decode("utf-8")))
+    except (HTTPError, URLError, TimeoutError, ValueError, json.JSONDecodeError, OSError):
+        return ""
+
+
+def _generic_search_offer(config: OutdoorsyConfig, query: OfferSearchQuery, *, fetched_at: int) -> OutdoorOffer | None:
+    affiliate_url = _generate_tune_tracking_url(config) or _build_direct_tracking_url(config)
+    if not affiliate_url:
+        return None
+    ttl_seconds = config.cache_ttl_seconds
+    pickup_area = "Starting area" if query.lat is not None and query.lng is not None else "Trip start"
+    return OutdoorOffer(
+        id="outdoorsy:rv-search",
+        provider="outdoorsy",
+        provider_offer_id="rv-search",
+        type="vehicle_rental",
+        title="Search campervans and RVs",
+        summary="Rental options open with Outdoorsy.",
+        pickup_area=pickup_area,
+        booking_url=affiliate_url,
+        affiliate_url=affiliate_url,
+        source_freshness="Outdoorsy search link",
+        fetched_at=fetched_at,
+        expires_at=fetched_at + ttl_seconds,
+        disclosure_kind=PARTNER_BOOKING_DISCLOSURE_KIND,
+        disclosure_label=PARTNER_BOOKING_DISCLOSURE_LABEL,
+        external_checkout_status="unconfirmed",
     )
 
 
@@ -273,9 +415,39 @@ class OutdoorsyProvider(OfferProvider):
             return normalize_outdoorsy_payload(payload, query=query, fetched_at=now, ttl_seconds=self.config.cache_ttl_seconds)
 
         if state == "configured_affiliate_link":
+            offer = _generic_search_offer(self.config, query, fetched_at=now)
+            if offer:
+                return OfferSearchResult(
+                    self.provider_id,
+                    "ok",
+                    offers=[offer],
+                    fetched_at=now,
+                    expires_at=offer.expires_at,
+                    reason="affiliate_search_link",
+                )
             return OfferSearchResult(self.provider_id, "affiliate_only", fetched_at=now, expires_at=now, reason="inventory_unconfirmed")
 
         if not self.config.enable_live or not self.config.has_affiliate_credentials():
+            offer = _generic_search_offer(self.config, query, fetched_at=now)
+            if offer:
+                return OfferSearchResult(
+                    self.provider_id,
+                    "ok",
+                    offers=[offer],
+                    fetched_at=now,
+                    expires_at=offer.expires_at,
+                    reason="affiliate_search_link",
+                )
             return OfferSearchResult(self.provider_id, "disabled", fetched_at=now, expires_at=now, reason="missing_backend_credentials")
 
+        offer = _generic_search_offer(self.config, query, fetched_at=now)
+        if offer:
+            return OfferSearchResult(
+                self.provider_id,
+                "ok",
+                offers=[offer],
+                fetched_at=now,
+                expires_at=offer.expires_at,
+                reason="affiliate_search_link",
+            )
         return OfferSearchResult(self.provider_id, "unconfirmed_contract", fetched_at=now, expires_at=now, reason="rental_inventory_contract_unconfirmed")

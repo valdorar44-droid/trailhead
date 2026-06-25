@@ -79,7 +79,7 @@ Outdoorsy should support:
 - `live_external_checkout`
 - `future_booking`
 
-Initial intended production state remains `live_external_checkout` only if the rental inventory contract confirms live inventory and external checkout rules. With only TUNE confirmed, the safe state is `configured_affiliate_link` or `disabled`, depending on whether approved offer IDs and tracking parameters are present.
+Initial intended production state remains `live_external_checkout` only if the rental inventory contract confirms live inventory and external checkout rules. With only TUNE confirmed, the safe state is `configured_affiliate_link` or `disabled`, depending on whether approved offer IDs and tracking parameters are present. After the authenticated portal audit, `configured_affiliate_link` may produce one generic Outdoorsy RV Search link, not individual rental inventory.
 
 ## Design References To Preserve
 
@@ -101,7 +101,7 @@ Patterns extracted during planning:
 
 ## Risks
 
-- The currently confirmed documentation is affiliate tracking, not rental inventory. Building inventory from this alone would require guessing endpoint paths, response fields, pricing, availability, cache rights, and location privacy.
+- The currently confirmed documentation is affiliate tracking, not rental inventory. Building inventory from this alone would require guessing endpoint paths, response fields, pricing, availability, cache rights, and location privacy. Generic RV Search linking is confirmed through the portal; listing-level inventory remains blocked.
 - The user pasted an API key in chat. The key must be rotated before production use.
 - `BookableExperience` is Viator/tours-shaped; reusing it directly for rentals would leak tour assumptions into rental flows.
 - Mobile must not call TUNE or Outdoorsy directly.
@@ -125,4 +125,4 @@ Patterns extracted during planning:
 
 Stage 0 is successful because the contract boundary is documented and the implementation is prevented from guessing live rental inventory behavior.
 
-Known limitation: implementation beyond affiliate tracking remains blocked until separate Outdoorsy rental inventory documentation, approved partner portal details, or a confirmed feed contract is supplied.
+Known limitation: implementation beyond the generic affiliate RV Search link remains blocked until separate Outdoorsy rental inventory documentation, approved partner portal details, or a confirmed feed contract is supplied.

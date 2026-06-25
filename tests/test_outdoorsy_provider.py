@@ -4,6 +4,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from urllib.parse import parse_qs
+from unittest.mock import patch
 
 from scripts.explore_sources.offers.disclosure import PARTNER_BOOKING_DISCLOSURE_LABEL
 from scripts.explore_sources.offers.providers.base import OfferSearchQuery
@@ -44,10 +46,15 @@ class OutdoorsyProviderTests(unittest.TestCase):
             "OUTDOORSY_REQUEST_TIMEOUT_SECONDS": "0",
             "OUTDOORSY_CACHE_TTL_SECONDS": "999999",
             "OUTDOORSY_PROVIDER_STATE": "live_external_checkout",
+            "OUTDOORSY_TUNE_OFFER_ID": "2",
+            "OUTDOORSY_TUNE_RV_SEARCH_URL_ID": "51",
+            "OUTDOORSY_TUNE_SOURCE": "trailhead",
         })
         self.assertEqual(config.request_timeout_seconds, 1)
         self.assertEqual(config.cache_ttl_seconds, 3600)
         self.assertEqual(config.normalized_state(), "live_external_checkout")
+        self.assertEqual(config.tune_offer_id, "2")
+        self.assertEqual(config.tune_rv_search_url_id, "51")
 
     def test_live_without_inventory_contract_returns_empty(self):
         provider = OutdoorsyProvider(OutdoorsyConfig(
@@ -64,6 +71,107 @@ class OutdoorsyProviderTests(unittest.TestCase):
         provider = OutdoorsyProvider(OutdoorsyConfig(provider_state="configured_affiliate_link"))
         result = provider.search_rentals(OfferSearchQuery(lat=39.7, lng=-105.0))
         self.assertEqual(result.status, "affiliate_only")
+        self.assertEqual(result.offers, [])
+
+    def test_configured_affiliate_link_returns_generic_search_offer_only(self):
+        provider = OutdoorsyProvider(OutdoorsyConfig(
+            tune_network_id="outdoorsyinc",
+            tune_affiliate_id="1234",
+            tune_offer_id="2",
+            tune_rv_search_url_id="51",
+            tune_source="trailhead_route_builder",
+            provider_state="configured_affiliate_link",
+        ))
+        result = provider.search_rentals(OfferSearchQuery(lat=39.7, lng=-105.0))
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(len(result.offers), 1)
+        offer = result.offers[0]
+        self.assertEqual(offer.id, "outdoorsy:rv-search")
+        self.assertEqual(offer.type, "vehicle_rental")
+        self.assertEqual(offer.price_from, None)
+        self.assertEqual(offer.images, [])
+        self.assertEqual(offer.availability_summary, "")
+        self.assertIn("offer_id=2", offer.affiliate_url)
+        self.assertIn("url_id=51", offer.affiliate_url)
+        self.assertIn("source=trailhead_route_builder", offer.affiliate_url)
+        self.assertNotIn("api_key", offer.to_public_dict()["affiliate_url"])
+        self.assertNotIn("token", json.dumps(offer.to_public_dict()).lower())
+
+    def test_tune_generated_link_uses_confirmed_response_fields(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "response": {
+                        "status": 1,
+                        "data": {
+                            "click_url": "https://outdoorsyinc.go2cloud.org/aff_c?offer_id=2&aff_id=1234&url_id=51",
+                            "universal_tracking_link": "https://outdoorsyinc.go2cloud.org/aff_c?offer_id=2&aff_id=1234&url_id=51&source=trailhead",
+                        },
+                    },
+                }).encode("utf-8")
+
+        requests = []
+
+        def fake_urlopen(request, timeout):
+            requests.append((request, timeout))
+            return FakeResponse()
+
+        provider = OutdoorsyProvider(OutdoorsyConfig(
+            tune_network_id="outdoorsyinc",
+            tune_api_key="test-token",
+            tune_offer_id="2",
+            tune_rv_search_url_id="51",
+            tune_source="trailhead",
+            enable_live=True,
+            provider_state="live_external_checkout",
+        ))
+        with patch("scripts.explore_sources.offers.providers.outdoorsy.urlopen", fake_urlopen):
+            result = provider.search_rentals(OfferSearchQuery(lat=39.7, lng=-105.0))
+
+        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.offers[0].affiliate_url, "https://outdoorsyinc.go2cloud.org/aff_c?offer_id=2&aff_id=1234&url_id=51&source=trailhead")
+        self.assertEqual(requests[0][1], 12)
+        body = requests[0][0].data.decode("utf-8")
+        self.assertIn("Target=Affiliate_Offer", body)
+        self.assertIn("Method=generateTrackingLink", body)
+        self.assertIn("params%5Burl_id%5D=51", body)
+        self.assertIn("params%5Bsource%5D=trailhead", body)
+        self.assertEqual(parse_qs(body)["api_key"], ["test-token"])
+        self.assertNotIn("api_key", json.dumps(result.offers[0].to_public_dict()).lower())
+
+    def test_tune_generated_link_rejects_unexpected_host(self):
+        class FakeResponse:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc, tb):
+                return False
+
+            def read(self):
+                return json.dumps({
+                    "response": {
+                        "status": 1,
+                        "data": {"universal_tracking_link": "https://example.invalid/aff_c?offer_id=2"},
+                    },
+                }).encode("utf-8")
+
+        provider = OutdoorsyProvider(OutdoorsyConfig(
+            tune_network_id="outdoorsyinc",
+            tune_api_key="test-token",
+            tune_offer_id="2",
+            enable_live=True,
+            provider_state="live_external_checkout",
+        ))
+        with patch("scripts.explore_sources.offers.providers.outdoorsy.urlopen", lambda request, timeout: FakeResponse()):
+            result = provider.search_rentals(OfferSearchQuery(lat=39.7, lng=-105.0))
+
+        self.assertEqual(result.status, "unconfirmed_contract")
         self.assertEqual(result.offers, [])
 
     def test_valid_fixture_normalization_and_dedupe(self):

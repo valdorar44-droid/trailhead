@@ -61,7 +61,7 @@ interface Message {
   outline?: string;   // "route ready" card
 }
 
-function userFacingAiText(text?: string) {
+function userFacingPlannerText(text?: string) {
   const clean = (text ?? '').trim();
   if (!clean) return 'I updated the trip. Review the map pins and daily route before you head out.';
   if (/(lat\/lng|latitude|longitude|coordinates|geocod|added .*coord|debug|internal)/i.test(clean)) {
@@ -71,7 +71,7 @@ function userFacingAiText(text?: string) {
 }
 
 function appendAiMessage(messages: Message[], text?: string): Message[] {
-  const clean = userFacingAiText(text);
+  const clean = userFacingPlannerText(text);
   const last = messages[messages.length - 1];
   if (last?.role === 'ai' && !last.trip && !last.outline && last.text === clean) return messages;
   return [...messages, { role: 'ai', text: clean }];
@@ -287,7 +287,7 @@ export default function PlanScreen() {
     } catch (e: any) {
       if (isOutOfCredits(e)) { handleOutOfCredits(); setPlanPhase('idle'); }
       else {
-        // Don't show raw AI responses or JSON in the chat — clean user-facing message
+        // Keep raw responses and JSON out of the visible chat.
         const raw = e?.message ?? '';
         const isTimeout = raw.includes('taking longer') || raw.includes('timeout');
         const isNetwork = raw.includes('Network') || raw.includes('fetch');
@@ -337,7 +337,7 @@ export default function PlanScreen() {
     setMessages(m => m.filter(msg => !msg.outline));
     setPlanPhase('planning');
     setLoading(true);
-    // Prevent screen sleep during long AI planning (can take 2-3 min)
+    // Prevent screen sleep during long planner runs (can take 2-3 min)
     await activateKeepAwakeAsync('trip-build');
     // Use the longer stage list so "this can take a minute" shows up for long trips
     startStages(PLAN_STAGES_LONG);

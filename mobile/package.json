@@ -10,6 +10,7 @@
     "build:android": "eas build --platform android --profile preview",
     "build:all": "eas build --platform all",
     "audit:routes": "node scripts/route-builder-audit.mjs",
+    "audit:copy": "node scripts/user-facing-copy-audit.mjs",
     "ota": "eas update --channel production --auto && eas update --channel preview --auto",
     "postinstall": "node scripts/patch-expo-modules.js && patch-package"
   },

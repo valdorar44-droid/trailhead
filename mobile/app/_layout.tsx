@@ -9,12 +9,20 @@ import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
 import { useStore } from '@/lib/store';
 import { api } from '@/lib/api';
-import { useTheme, mono } from '@/lib/design';
+import { mono } from '@/lib/design';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import TrailheadLaunchLoader from '@/components/TrailheadLaunchLoader';
 import WelcomeOnboardingModal from '@/components/WelcomeOnboardingModal';
+import WelcomeGate from '@/components/WelcomeGate';
+import {
+  markWelcomeGateSeen,
+  shouldShowWelcomeGate,
+  WELCOME_PENDING_ATTR_KEY,
+  WELCOME_WALKTHROUGH_SEEN_KEY,
+  type WelcomeGateChoice,
+} from '@/lib/welcomeGate';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -31,22 +39,21 @@ export default function RootLayout() {
   const sessionId    = useStore(s => s.sessionId);
   const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
   const router       = useRouter();
-  const C            = useTheme();
   const insets       = useSafeAreaInsets();
   const [updateBanner, setUpdateBanner] = useState(false);
   const [welcomeVisible, setWelcomeVisible] = useState(false);
+  const [welcomeGateVisible, setWelcomeGateVisible] = useState(false);
   const [startupReady, setStartupReady] = useState(false);
   const [launchLoaderVisible, setLaunchLoaderVisible] = useState(true);
   const updateReady  = useRef(false);
   const checking     = useRef(false);
   const pushRegistered = useRef(false);
+  const welcomeGateChecked = useRef(false);
 
   // We auto-apply OTA updates that arrive within ~10s of launch (so users get
   // the latest code on every cold start with one short reload). After that
   // window we fall back to a banner so we don't interrupt active use.
   const launchAtRef = useRef(Date.now());
-  const WELCOME_SEEN_KEY = 'trailhead_first_run_onboarding_seen_v3';
-  const WELCOME_PENDING_ATTR_KEY = 'trailhead_welcome_contest_clicked_pending_v1';
 
   function verificationTokenFromUrl(url: string | null | undefined) {
     if (!url || !url.includes('verify-email')) return '';
@@ -117,27 +124,52 @@ export default function RootLayout() {
     Updates.reloadAsync().catch(() => {});
   }
 
-  function logWelcomeEvent(eventType: 'welcome_contest_seen' | 'welcome_contest_cta' | 'welcome_contest_cta_attributed', data: Record<string, unknown> = {}) {
+  function logWelcomeEvent(eventType: 'welcome_gate_seen' | 'welcome_gate_cta' | 'welcome_gate_cta_attributed' | 'welcome_walkthrough_seen' | 'welcome_walkthrough_cta', data: Record<string, unknown> = {}) {
     api.logAnalyticsEvent(eventType, sessionId, data).catch(() => {});
   }
 
-  function closeWelcomeContest() {
+  function closeWelcomeWalkthrough() {
     setWelcomeVisible(false);
-    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
+    storage.set(WELCOME_WALKTHROUGH_SEEN_KEY, '1').catch(() => {});
   }
 
-  function openWelcomeContest() {
+  function openWelcomeWalkthrough() {
     setWelcomeVisible(true);
-    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
-    logWelcomeEvent('welcome_contest_seen', { source: 'profile_reopen' });
+    storage.set(WELCOME_WALKTHROUGH_SEEN_KEY, '1').catch(() => {});
+    logWelcomeEvent('welcome_walkthrough_seen', { source: 'profile' });
   }
 
-  function goToProfileFromWelcome() {
+  function goToProfileFromWalkthrough() {
     setWelcomeVisible(false);
-    storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
+    storage.set(WELCOME_WALKTHROUGH_SEEN_KEY, '1').catch(() => {});
     storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
-    logWelcomeEvent('welcome_contest_cta', { source: 'first_open_modal', signed_in: !!user });
+    logWelcomeEvent('welcome_walkthrough_cta', { source: 'profile', signed_in: !!user });
     router.push('/(tabs)/profile');
+  }
+
+  function dismissWelcomeGate(choice: WelcomeGateChoice) {
+    setWelcomeGateVisible(false);
+    markWelcomeGateSeen(choice).catch(() => {});
+  }
+
+  function createAccountFromWelcomeGate() {
+    dismissWelcomeGate('create_account');
+    storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
+    logWelcomeEvent('welcome_gate_cta', { action: 'create_account', signed_in: !!user });
+    router.push({ pathname: '/(tabs)/profile', params: { auth: 'register' } } as any);
+  }
+
+  function signInFromWelcomeGate() {
+    dismissWelcomeGate('sign_in');
+    storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
+    logWelcomeEvent('welcome_gate_cta', { action: 'sign_in', signed_in: !!user });
+    router.push({ pathname: '/(tabs)/profile', params: { auth: 'login' } } as any);
+  }
+
+  function continueFromWelcomeGate() {
+    dismissWelcomeGate('continue');
+    logWelcomeEvent('welcome_gate_cta', { action: 'continue', signed_in: !!user });
+    router.push('/(tabs)/guide' as any);
   }
 
   useEffect(() => {
@@ -253,16 +285,6 @@ export default function RootLayout() {
       handleVerificationUrl(event.url);
     });
 
-    storage.get(WELCOME_SEEN_KEY).then(seen => {
-      if (!seen) {
-        setTimeout(() => {
-          setWelcomeVisible(true);
-          storage.set(WELCOME_SEEN_KEY, '1').catch(() => {});
-          logWelcomeEvent('welcome_contest_seen', { source: 'first_open_modal' });
-        }, 900);
-      }
-    }).catch(() => {});
-
     return () => {
       launchCancelled = true;
       notifSub.remove();
@@ -284,15 +306,25 @@ export default function RootLayout() {
     if (!user) return;
     storage.get(WELCOME_PENDING_ATTR_KEY).then(value => {
       if (value !== '1') return;
-      api.logAnalyticsEvent('welcome_contest_cta_attributed', sessionId, { source: 'post_sign_in', user_id: user.id }).catch(() => {});
+      api.logAnalyticsEvent('welcome_gate_cta_attributed', sessionId, { source: 'post_sign_in', user_id: user.id }).catch(() => {});
       storage.del(WELCOME_PENDING_ATTR_KEY).catch(() => {});
     }).catch(() => {});
   }, [sessionId, user]);
 
   useEffect(() => {
     if (welcomePromptRunId <= 0) return;
-    openWelcomeContest();
+    openWelcomeWalkthrough();
   }, [welcomePromptRunId]);
+
+  useEffect(() => {
+    if (!startupReady || launchLoaderVisible || welcomeGateChecked.current) return;
+    welcomeGateChecked.current = true;
+    shouldShowWelcomeGate(!!user).then(show => {
+      if (!show) return;
+      setWelcomeGateVisible(true);
+      logWelcomeEvent('welcome_gate_seen', { source: 'first_open' });
+    }).catch(() => {});
+  }, [launchLoaderVisible, startupReady, user]);
 
   useEffect(() => {
     if (launchLoaderVisible) return;
@@ -323,10 +355,16 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
+      <WelcomeGate
+        visible={welcomeGateVisible}
+        onCreateAccount={createAccountFromWelcomeGate}
+        onSignIn={signInFromWelcomeGate}
+        onContinue={continueFromWelcomeGate}
+      />
       <WelcomeOnboardingModal
         visible={welcomeVisible}
-        onClose={closeWelcomeContest}
-        onSetupRig={goToProfileFromWelcome}
+        onClose={closeWelcomeWalkthrough}
+        onSetupRig={goToProfileFromWalkthrough}
       />
       {updateBanner && (
         <View style={{

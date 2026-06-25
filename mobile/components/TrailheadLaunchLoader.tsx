@@ -111,7 +111,7 @@ export default function TrailheadLaunchLoader() {
             <Image source={TRAILHEAD_LOGO} style={styles.logo} resizeMode="cover" />
           </View>
           <Text style={styles.brand}>TRAILHEAD</Text>
-          <Text style={styles.sub}>Loading maps and places</Text>
+          <Text style={styles.sub}>Preparing your trip space</Text>
         </View>
         <View style={styles.progressTrack}>
           <Animated.View style={[styles.progressFill, routeMotion]} />

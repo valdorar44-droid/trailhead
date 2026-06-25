@@ -130,7 +130,7 @@ export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
-  const params = useLocalSearchParams<{ support?: string; support_thread_id?: string }>();
+  const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; auth?: string }>();
   const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
   const tripHistory    = useStore(st => st.tripHistory);
   const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
@@ -266,6 +266,13 @@ export default function ProfileScreen() {
   useEffect(() => {
     if (user && view !== 'main') setView('main');
   }, [user]);
+
+  useEffect(() => {
+    const authTarget = Array.isArray(params.auth) ? params.auth[0] : params.auth;
+    if (authTarget !== 'register' && authTarget !== 'login') return;
+    setProfileSection('account');
+    setView(user ? 'main' : authTarget);
+  }, [params.auth, user?.id]);
 
   useEffect(() => {
     if (!user) return;
@@ -1189,6 +1196,7 @@ export default function ProfileScreen() {
                 { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
                 { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
                 { icon: 'time-outline', label: 'HISTORY', color: C.silverBright, onPress: loadHistory },
+                { icon: 'trail-sign-outline', label: 'APP TOUR', color: '#d4af37', onPress: startWelcomePrompt },
               ]
             : profileSection === 'rig'
               ? [
@@ -1226,7 +1234,7 @@ export default function ProfileScreen() {
                         { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
                       ]
                     : [
-                        { icon: 'sparkles-outline', label: 'WELCOME', color: '#d4af37', onPress: startWelcomePrompt },
+                        { icon: 'trail-sign-outline', label: 'APP TOUR', color: '#d4af37', onPress: startWelcomePrompt },
                         { icon: 'mic-outline', label: 'TRIP AUDIO', color: '#3b82f6', onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
                         { icon: 'partly-sunny-outline', label: 'WEATHER', color: '#0ea5e9', onPress: () => router.push('/(tabs)/guide?view=weather' as any) },
                         { icon: 'bug-outline', label: 'BUG', color: C.red, onPress: () => setShowBugModal(true) },

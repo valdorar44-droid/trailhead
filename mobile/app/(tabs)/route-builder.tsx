@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
-  ActivityIndicator, Animated, Easing, Keyboard, Modal, Alert, Image, Platform,
+  ActivityIndicator, Animated, Keyboard, Modal, Alert, Image, Platform,
   useWindowDimensions, KeyboardAvoidingView, Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -15,6 +15,8 @@ import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
+import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
+import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
@@ -266,76 +268,6 @@ function placeMatchesFilters(place: OsmPoi, filters: string[]) {
   const subtype = normalizedWaterSubtype(place);
   return filters.includes(subtype) || (subtype === 'water' && filters.includes('water'));
 }
-
-function RouteBuildStatus({ message }: { C: ColorPalette; message: string }) {
-  const pulse = useRef(new Animated.Value(0)).current;
-  const sweep = useRef(new Animated.Value(0)).current;
-  const [lineIdx, setLineIdx] = useState(0);
-
-  useEffect(() => {
-    const pulseLoop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 780, easing: Easing.out(Easing.quad), useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 780, easing: Easing.in(Easing.quad), useNativeDriver: true }),
-      ])
-    );
-    const sweepLoop = Animated.loop(
-      Animated.timing(sweep, { toValue: 1, duration: 1500, easing: Easing.inOut(Easing.quad), useNativeDriver: true })
-    );
-    pulseLoop.start();
-    sweepLoop.start();
-    const timer = setInterval(() => setLineIdx(idx => (idx + 1) % BUILD_STATUS_LINES.length), 1700);
-    return () => {
-      pulseLoop.stop();
-      sweepLoop.stop();
-      clearInterval(timer);
-    };
-  }, [pulse, sweep]);
-
-  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.55] });
-  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.55, 0] });
-  const sweepX = sweep.interpolate({ inputRange: [0, 1], outputRange: [-90, 220] });
-
-  return (
-    <View style={statusS.card}>
-      <View style={statusS.top}>
-        <View style={statusS.orbit}>
-          <Animated.View style={[statusS.pulse, { transform: [{ scale: pulseScale }], opacity: pulseOpacity }]} />
-          <View style={statusS.dot} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <Text style={statusS.kicker}>CURRENT STEP</Text>
-          <Text style={statusS.title}>{message || BUILD_STATUS_LINES[lineIdx]}</Text>
-          <Text style={statusS.sub}>Keeping the builder awake until it finishes.</Text>
-        </View>
-      </View>
-      <View style={statusS.track}>
-        <Animated.View style={[statusS.sweep, { transform: [{ translateX: sweepX }] }]} />
-      </View>
-    </View>
-  );
-}
-
-const statusS = StyleSheet.create({
-  card: {
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 18,
-    backgroundColor: 'rgba(5,5,5,0.72)',
-    padding: 13,
-    overflow: 'hidden',
-    gap: 12,
-  },
-  top: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  orbit: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
-  pulse: { position: 'absolute', width: 30, height: 30, borderRadius: 15, borderWidth: 1, borderColor: '#f97316' },
-  dot: { width: 10, height: 10, borderRadius: 5, backgroundColor: '#f97316' },
-  kicker: { color: '#fb923c', fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  title: { color: '#fff', fontSize: 13, fontWeight: '900' },
-  sub: { color: 'rgba(255,255,255,0.64)', fontSize: 10, fontFamily: mono, marginTop: 3 },
-  track: { height: 4, borderRadius: 2, overflow: 'hidden', backgroundColor: 'rgba(255,255,255,0.16)' },
-  sweep: { width: 90, height: 4, borderRadius: 2, backgroundColor: '#f97316' },
-});
 
 const STATE_INFO: Record<string, { name: string; minLat: number; maxLat: number; minLng: number; maxLng: number }> = {
   AL: { name: 'Alabama', minLat: 30.1, maxLat: 35.1, minLng: -88.6, maxLng: -84.9 },
@@ -4602,25 +4534,13 @@ export default function RouteBuilderScreen() {
         style={[s.wizardCard, fullScreen && s.wizardCardFull]}
         contentStyle={[s.routeSheetContent, fullScreen && s.routeSheetFullContent]}
       >
-        <View style={s.wizardHeader}>
-          <View>
-            <Text style={s.wizardEyebrow}>ROUTE BUILDER</Text>
-            <Text style={s.wizardHeaderTitle}>{stepMeta}</Text>
-          </View>
-          <TouchableOpacity style={s.wizardHeaderClose} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to recent adventures" activeOpacity={0.82}>
-            <Ionicons name="close" size={18} color={C.orange} />
-          </TouchableOpacity>
-        </View>
-        <View style={s.wizardTrack}>
-          {steps.map((label, idx) => (
-            <TouchableOpacity key={label} style={s.wizardTrackItem} onPress={() => setWizardStep(idx)}>
-              <View style={[s.wizardTrackDot, idx <= wizardStep && s.wizardTrackDotActive]}>
-                <Text style={[s.wizardTrackNum, idx <= wizardStep && s.wizardTrackNumActive]}>{idx + 1}</Text>
-              </View>
-              <View style={[s.wizardTrackLine, idx < wizardStep && s.wizardTrackLineActive]} />
-            </TouchableOpacity>
-          ))}
-        </View>
+        <RouteWizardProgressHeader
+          steps={steps}
+          currentStep={wizardStep}
+          title={stepMeta}
+          onStepPress={setWizardStep}
+          onClose={() => setRouteTabMode('hub')}
+        />
 
         <ScrollView
           style={s.wizardStepScroll}
@@ -4872,7 +4792,14 @@ export default function RouteBuilderScreen() {
             </View>
           )}
 
-          {buildingFramework && <RouteBuildStatus C={C} message={frameworkStatus} />}
+          {buildingFramework && (
+            <ActivityStatusCard
+              title={frameworkStatus}
+              fallbackLines={BUILD_STATUS_LINES}
+              helper="Keeping the builder awake until it finishes."
+              tone={C.orange}
+            />
+          )}
         </ScrollView>
 
         <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, wizardStep === 0 && s.wizardNavStepOne, { marginBottom: dockMarginBottom }]]}>
@@ -4948,7 +4875,12 @@ export default function RouteBuilderScreen() {
           </View>
 
           <View style={s.buildingBottomPanel}>
-            <RouteBuildStatus C={C} message={frameworkStatus} />
+            <ActivityStatusCard
+              title={frameworkStatus}
+              fallbackLines={BUILD_STATUS_LINES}
+              helper="Keeping the builder awake until it finishes."
+              tone={C.orange}
+            />
           </View>
         </View>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
@@ -6177,61 +6109,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'flex-start',
     marginTop: 8,
   },
-  wizardHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  wizardEyebrow: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1.1 },
-  wizardHeaderTitle: { color: C.text, fontSize: 18, fontWeight: '900', marginTop: 3 },
-  wizardHeaderMeta: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7, marginTop: 2 },
-  wizardSignal: {
-    minHeight: 30,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 999,
-    backgroundColor: C.s2,
-    paddingHorizontal: 10,
-  },
-  wizardSignalDot: { width: 6, height: 6, borderRadius: 3 },
-  wizardSignalText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  wizardHeaderClose: {
-    width: 42,
-    height: 42,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 21,
-    backgroundColor: C.s2,
-  },
-  wizardTrack: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 0,
-    borderWidth: 1,
-    borderColor: C.border,
-    borderRadius: 999,
-    backgroundColor: C.s2,
-    paddingHorizontal: 8,
-    paddingVertical: 8,
-  },
-  wizardTrackItem: { flex: 1, flexDirection: 'row', alignItems: 'center' },
-  wizardTrackDot: {
-    width: 26, height: 26, borderRadius: 13,
-    borderWidth: 1, borderColor: C.border, backgroundColor: C.s2,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  wizardTrackDotActive: {
-    borderColor: C.orange,
-    backgroundColor: C.orange,
-    shadowColor: C.orange,
-    shadowOpacity: 0.28,
-    shadowRadius: 12,
-  },
-  wizardTrackNum: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  wizardTrackNumActive: { color: '#fff' },
-  wizardTrackLine: { flex: 1, height: 2, backgroundColor: C.border, marginHorizontal: 5, borderRadius: 1 },
-  wizardTrackLineActive: { backgroundColor: C.orange },
   wizardStepScroll: { flex: 1, minHeight: 0 },
   wizardStepScrollContent: { flexGrow: 1 },
   wizardAnimatedPane: { minHeight: 0 },

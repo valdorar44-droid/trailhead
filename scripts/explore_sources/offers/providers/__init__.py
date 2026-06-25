@@ -1,0 +1,1 @@
+"""Outdoor offer provider adapters."""

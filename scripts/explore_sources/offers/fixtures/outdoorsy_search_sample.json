@@ -1,0 +1,87 @@
+{
+  "status": "ok",
+  "rentals": [
+    {
+      "id": "denver-campervan-1",
+      "type": "campervan_rental",
+      "title": "Denver campervan",
+      "summary": "Compact campervan near the trip start.",
+      "images": [
+        {
+          "url": "https://example.invalid/outdoorsy/denver-campervan.jpg",
+          "caption": "Campervan exterior"
+        }
+      ],
+      "pickup": {
+        "city": "Denver",
+        "region": "CO",
+        "lat": 39.7392,
+        "lng": -104.9903,
+        "precision": "approximate",
+        "address": "private address ignored"
+      },
+      "vehicle_class": "Campervan",
+      "sleeps": 2,
+      "seats": 4,
+      "pet_friendly": true,
+      "delivery_available": false,
+      "amenities": ["Kitchenette", "Heater"],
+      "pricing": {
+        "from": 129,
+        "currency": "USD",
+        "freshness": "Fixture only"
+      },
+      "availability": {
+        "summary": "Shown by partner"
+      },
+      "rating": 4.9,
+      "review_count": 32,
+      "cancellation_summary": "Shown by partner",
+      "insurance_summary": "Shown by partner",
+      "booking_url": "https://www.outdoorsy.com/rv-rental/example-denver-campervan",
+      "affiliate_url": "https://example.invalid/outdoorsy/affiliate/denver-campervan"
+    },
+    {
+      "id": "denver-rv-4",
+      "type": "rv_rental",
+      "title": "Family RV near Denver",
+      "summary": "Room for a family camping route.",
+      "images": [],
+      "pickup": {
+        "city": "Aurora",
+        "region": "CO",
+        "lat": 39.7294,
+        "lng": -104.8319,
+        "precision": "approximate"
+      },
+      "vehicle_class": "Class C RV",
+      "sleeps": 5,
+      "seats": 6,
+      "pet_friendly": false,
+      "delivery_available": true,
+      "amenities": ["Kitchen", "Shower"],
+      "pricing": {
+        "from": 219,
+        "currency": "USD",
+        "freshness": "Fixture only"
+      },
+      "availability": {
+        "summary": "Shown by partner"
+      },
+      "rating": 4.7,
+      "review_count": 18,
+      "booking_url": "https://www.outdoorsy.com/rv-rental/example-denver-rv",
+      "affiliate_url": "https://example.invalid/outdoorsy/affiliate/denver-rv"
+    },
+    {
+      "id": "denver-campervan-1",
+      "type": "campervan_rental",
+      "title": "Duplicate campervan",
+      "pickup": {
+        "city": "Denver",
+        "region": "CO",
+        "precision": "approximate"
+      }
+    }
+  ]
+}

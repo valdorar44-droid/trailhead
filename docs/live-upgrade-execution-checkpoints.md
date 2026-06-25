@@ -190,15 +190,25 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `bb64e724-0998-424c-b81e-4388fa793f28`.
 
 22. **Route Builder Search Surface Component**
-    - Status: queued.
-    - Extract the Route Builder search type chips, insert notice placement,
+    - Status: complete for search-surface component extraction; release
+      pending.
+    - Extracted the Route Builder search type chips, insert notice placement,
       search box, and result rows into a presentational component.
-    - Keep the Checkpoint 21 helper, provider calls, Android lookup fallback,
+    - Kept the Checkpoint 21 helper, provider calls, Android lookup fallback,
       saved geometry, route computation, and existing result behavior
       unchanged.
-    - Continue Mobbin/Figma research against travel destination pickers,
-      itinerary add-place flows, and compact route-stop search surfaces before
-      code.
+    - Kept result rows directly attached to the search field before readiness.
+    - Saved design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshots.
+
+23. **Route Builder Active Day Controls**
+    - Status: queued.
+    - Extract active-day itinerary header, rest-day toggle, day-hour input, and
+      empty-day guidance into reusable components.
+    - Keep day mileage, rest-day state, drive-hour targets, stop ordering,
+      route computation, and footer dock behavior unchanged.
+    - Continue Mobbin/Figma research against itinerary day editors, route-day
+      controls, and compact schedule panels before code.
 
 ## Refresh Handoff
 
@@ -225,6 +235,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-19-route-builder-inline-discovery-results-audit.md`.
 - Checkpoint 21 search-flow extraction context is saved in
   `docs/live-upgrade-checkpoint-21-route-builder-search-flow-audit.md`.
+- Checkpoint 22 search-surface extraction context is saved in
+  `docs/live-upgrade-checkpoint-22-route-builder-search-surface-audit.md`.
 
 ## Validation Gate
 

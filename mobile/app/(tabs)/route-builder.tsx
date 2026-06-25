@@ -13,19 +13,18 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
-import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderActiveDayStop from '@/components/routeBuilder/RouteBuilderActiveDayStop';
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
-import RouteBuilderInsertNotice from '@/components/routeBuilder/RouteBuilderInsertNotice';
 import RouteBuilderInlineResults, {
   RouteBuilderInlineCampCard,
   RouteBuilderInlineResultRow,
 } from '@/components/routeBuilder/RouteBuilderInlineResults';
 import RouteBuilderLegActions from '@/components/routeBuilder/RouteBuilderLegActions';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
+import RouteBuilderSearchSurface from '@/components/routeBuilder/RouteBuilderSearchSurface';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderTimelineDayCard from '@/components/routeBuilder/RouteBuilderTimelineDayCard';
 import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
@@ -4712,59 +4711,28 @@ export default function RouteBuilderScreen() {
 
         {renderRouteTimeline()}
 
-        <View style={s.typeRow}>
-          {(['start', 'fuel', 'waypoint', 'camp', 'motel'] as BuilderStopType[]).map(type => (
-            <TouchableOpacity key={type} style={[s.typeChip, pendingType === type && { borderColor: stopColor(type), backgroundColor: stopColor(type) + '18' }]} onPress={() => setPendingType(type)}>
-              <Ionicons name={stopIcon(type)} size={13} color={pendingType === type ? stopColor(type) : C.text3} />
-              <Text style={[s.typeChipText, pendingType === type && { color: stopColor(type) }]}>{type.toUpperCase()}</Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-
-        <RouteBuilderInsertNotice
+        <RouteBuilderSearchSurface
+          pendingType={pendingType}
+          query={query}
+          searching={searching}
+          results={searchResults}
           selectedStopName={selectedInsertStop?.name}
           targetDay={insertTargetDay}
           fallbackDay={selectedInsertStop?.day}
+          stopIcon={stopIcon}
+          stopColor={stopColor}
+          onSelectType={setPendingType}
+          onChangeQuery={setQuery}
+          onSubmitSearch={runSearch}
+          onSelectResult={addPlace}
           onClearInsert={() => { setInsertAfterId(null); setInsertTargetDay(null); }}
         />
-
-        <TourTarget id="routeBuilder.search">
-          <View style={s.searchBox}>
-            <Ionicons name="search" size={17} color={C.text3} />
-            <TextInput
-              value={query}
-              onChangeText={setQuery}
-              onSubmitEditing={runSearch}
-              placeholder="Search city, address, trailhead, or map point"
-              placeholderTextColor={C.text3}
-              style={s.searchInput}
-              returnKeyType="search"
-            />
-            <TouchableOpacity style={s.searchBtn} onPress={runSearch} disabled={searching}>
-              {searching ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.searchBtnText}>ADD</Text>}
-            </TouchableOpacity>
-          </View>
-        </TourTarget>
 
         <RouteBuilderReadinessCard
           checks={routeFitCards}
           offlineRows={routeOfflineReadiness.rows}
           showOfflineRows={routeOfflineReadiness.regionNames.length > 0}
         />
-
-        {searchResults.length > 0 && (
-          <View style={s.resultsBox}>
-            {searchResults.map(place => (
-              <TouchableOpacity key={`${place.name}_${place.lat}`} style={s.resultRow} onPress={() => addPlace(place)}>
-                <Ionicons name={stopIcon(pendingType)} size={15} color={stopColor(pendingType)} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.resultName} numberOfLines={1}>{place.name}</Text>
-                  <Text style={s.resultMeta}>Map result</Text>
-                </View>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
 
         <View style={s.sectionHeader}>
           <Text style={s.sectionTitle}>DAY {activeDay} ITINERARY</Text>
@@ -5953,17 +5921,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   flowText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 1 },
   gasSourceStrip: { flexDirection: 'row', alignItems: 'center', gap: 7, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s2, paddingHorizontal: 10, paddingVertical: 8 },
   gasSourceText: { flex: 1, color: C.text3, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '700' },
-  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  typeChip: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 9, paddingHorizontal: 9, paddingVertical: 7, backgroundColor: C.s2 },
-  typeChipText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800' },
-  searchBox: { flexDirection: 'row', alignItems: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s2, paddingLeft: 12 },
-  searchInput: { flex: 1, color: C.text, fontSize: 13, paddingVertical: 11 },
-  searchBtn: { alignSelf: 'stretch', minWidth: 56, backgroundColor: C.orange, borderTopRightRadius: 11, borderBottomRightRadius: 11, alignItems: 'center', justifyContent: 'center' },
-  searchBtnText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  resultsBox: { borderWidth: 1, borderColor: C.border, borderRadius: 12, overflow: 'hidden' },
-  resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
-  resultName: { color: C.text, fontSize: 13, fontWeight: '700' },
-  resultMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   routePlanCard: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 10, backgroundColor: C.s1, gap: 9 },
   routePlanTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   routePlanMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },

@@ -27,14 +27,14 @@ const FEATURES: Feature[] = [
   },
   {
     icon: 'cloud-download-outline',
-    title: 'Keep trips ready offline',
-    body: 'Save routes, places, and map details so the plan stays close when service drops.',
+    title: 'Save what matters',
+    body: 'Keep routes, places, and map details with the trip for quick return.',
     tone: '#22c55e',
   },
   {
     icon: 'bookmark-outline',
     title: 'Pick up where you left off',
-    body: 'Create a free account to sync saved places, downloads, and trip history.',
+    body: 'Create a free account to sync saved places and trip history.',
     tone: '#38bdf8',
   },
 ];
@@ -65,14 +65,14 @@ export default function WelcomeGate({ visible, onCreateAccount, onSignIn, onCont
               </View>
               <View style={s.brandCopy}>
                 <Text style={s.brand}>TRAILHEAD</Text>
-                <Text style={s.kicker}>OVERLAND PLANNER</Text>
+                <Text style={s.kicker}>TRIP PLANNER</Text>
               </View>
             </View>
 
             <View style={s.heroCopy}>
-              <Text style={s.title}>Plan the route. Keep the drive ready.</Text>
+              <Text style={s.title}>Plan the trip. Keep the details close.</Text>
               <Text style={s.body}>
-                Start free, save what matters, and bring your trip details with you from scouting to departure.
+                Start free, save places, and bring trip notes from scouting to departure.
               </Text>
             </View>
 

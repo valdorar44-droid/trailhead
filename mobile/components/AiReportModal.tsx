@@ -96,8 +96,8 @@ export default function AiReportModal({
         }))
         .filter(msg => msg.text);
       const title = kind === 'offensive'
-        ? `${surfaceLabel} offensive output`
-        : `${surfaceLabel} bug report`;
+        ? `${surfaceLabel} safety concern`
+        : `${surfaceLabel} issue report`;
       await api.submitBugReport({
         title,
         description: details.trim(),
@@ -135,7 +135,7 @@ export default function AiReportModal({
           <View style={s.header}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={s.title}>Report {surfaceLabel}</Text>
-              <Text style={s.sub}>Send the last exchange to admin with your notes.</Text>
+              <Text style={s.sub}>Send recent trip notes with your feedback.</Text>
             </View>
             <TouchableOpacity style={s.closeBtn} onPress={onClose}>
               <Ionicons name="close" size={17} color={C.text2} />
@@ -144,12 +144,12 @@ export default function AiReportModal({
 
           <View style={s.kindRow}>
             <TouchableOpacity style={[s.kindBtn, kind === 'bug' && s.kindBtnActive]} onPress={() => setKind('bug')}>
-              <Ionicons name="bug-outline" size={14} color={kind === 'bug' ? '#050505' : C.orange} />
-              <Text style={[s.kindText, kind === 'bug' && s.kindTextActive]}>REPORT BUG</Text>
+              <Ionicons name="flag-outline" size={14} color={kind === 'bug' ? '#050505' : C.orange} />
+              <Text style={[s.kindText, kind === 'bug' && s.kindTextActive]}>ISSUE</Text>
             </TouchableOpacity>
             <TouchableOpacity style={[s.kindBtn, kind === 'offensive' && s.kindBtnActive]} onPress={() => setKind('offensive')}>
               <Ionicons name="warning-outline" size={14} color={kind === 'offensive' ? '#050505' : C.orange} />
-              <Text style={[s.kindText, kind === 'offensive' && s.kindTextActive]}>REPORT OFFENSIVE</Text>
+              <Text style={[s.kindText, kind === 'offensive' && s.kindTextActive]}>SAFETY CONCERN</Text>
             </TouchableOpacity>
           </View>
 
@@ -157,7 +157,7 @@ export default function AiReportModal({
             style={s.details}
             value={details}
             onChangeText={setDetails}
-            placeholder={kind === 'offensive' ? 'Say what crossed the line or what the model said.' : 'Say what went wrong, what you expected, and what it actually did.'}
+            placeholder={kind === 'offensive' ? 'Say what felt unsafe, harmful, or wrong.' : 'Say what went wrong and what you expected.'}
             placeholderTextColor={C.text3}
             multiline
             textAlignVertical="top"
@@ -181,7 +181,7 @@ export default function AiReportModal({
           ) : null}
 
           <View style={s.contextCard}>
-            <Text style={s.contextTitle}>RECENT CONTEXT</Text>
+            <Text style={s.contextTitle}>RECENT NOTES</Text>
             <ScrollView style={s.contextScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
               {messages.slice(-4).map((msg, idx) => (
                 <Text key={`${msg.role}-${idx}`} style={s.contextLine}>

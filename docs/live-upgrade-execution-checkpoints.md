@@ -76,6 +76,16 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Extract control markup out of `guide.tsx` without changing catalog,
       map, route, saved, cache, or detail behavior.
 
+11. **Planner Composer + Copy Cleanup**
+    - Status: complete for first input/composer slice.
+    - Replace the Planner preset-card wall with compact starter prompts.
+    - Remove the visible Planner context-chip strip.
+    - Move Planner reporting behind a compact composer icon.
+    - Clean support/report and first-run Planner copy from implementation-style
+      wording.
+    - Validate the authenticated Planner welcome, composer typing, and report
+      sheet through Figma and Playwright.
+
 ## Validation Gate
 
 Run the relevant subset before each checkpoint closes:

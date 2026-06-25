@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, ScrollView,
-  StyleSheet, KeyboardAvoidingView, Platform, ActivityIndicator,
+  StyleSheet, KeyboardAvoidingView, Platform,
   Share, Animated, Alert, Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,13 +11,13 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { api, ApiError, PaywallError, TripResult, TrailDNA } from '@/lib/api';
+import { api, ApiError, PaywallError, TripResult } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
 import CopilotBriefCard from '@/components/copilot/CopilotBriefCard';
-import CopilotRecommendationCard from '@/components/copilot/CopilotRecommendationCard';
+import PlannerStarterRow from '@/components/planning/PlannerStarterRow';
 import AiReportModal from '@/components/AiReportModal';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
@@ -28,51 +28,33 @@ import { CREDIT_REWARDS } from '@/lib/credits';
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
 
-const EXAMPLES = [
+const STARTER_PROMPTS = [
   {
-    label: 'Wild Trip',
+    title: 'Plan 3 days from Moab to Telluride',
     icon: 'trail-sign-outline',
-    tags: ['BACKROADS', 'CAMPS'],
-    reason: 'Best when you want a route spine, realistic camp nights, fuel checks, and room for dirt-road decisions.',
-    sourceLabel: 'Planner setup',
-    text: 'Create a wild trip from my start to my destination using scenic backroads, wild roads, dispersed camps, fuel checks, and realistic first-day pacing.',
+    body: 'Scenic roads, camp options, fuel checks.',
+    text: 'Plan a 3-day trip from Moab to Telluride with scenic roads, camp options, fuel checks, and realistic first-day pacing.',
   },
   {
-    label: 'Rig Check',
-    icon: 'car-sport-outline',
-    tags: ['CLEARANCE', 'RANGE'],
-    reason: 'Use this before committing to rough forest roads, remote camps, or long gaps between services.',
-    sourceLabel: 'Rig profile',
-    text: 'Check whether my rig setup is ready for rough forest roads and remote camps.',
-  },
-  {
-    label: 'Field Brief',
-    icon: 'radio-outline',
-    tags: ['WEATHER', 'SIGNAL'],
-    reason: 'Good for tonight decisions: weather, signal, water, and safer camp strategy before you roll in.',
-    sourceLabel: 'Route ready',
-    text: 'Give me a quick field brief for tonight: weather, signal, water, and safe camp strategy.',
+    title: 'Find a quiet weekend near Asheville',
+    icon: 'moon-outline',
+    body: 'Short drives, legal camps, easy morning exit.',
+    text: 'Find a quiet weekend trip near Asheville with short drives, legal camps, and an easy morning exit.',
   },
 ];
 
 const CHAT_STAGES  = [
-  'Reading what kind of trip you want...',
-  'Checking your rig, pace, and camp style...',
-  'Looking for the best next move...',
-];
-const PLAN_STAGES  = [
-  'Sketching the route spine...',
-  'Balancing drive days with camp nights...',
-  'Checking fuel gaps and bailout towns...',
-  'Adding the places worth stopping for...',
+  'Reading your trip notes...',
+  'Checking the route shape...',
+  'Preparing the next step...',
 ];
 // Long trips (7+ days) can take 1-2 minutes — we surface an extra stage at ~20s
 const PLAN_STAGES_LONG = [
-  'Sketching the route spine...',
-  'Longer routes take a minute. I’m keeping the days realistic.',
-  'Balancing drive time, fuel range, and camp nights...',
-  'Checking useful towns, trailheads, and bailout options...',
-  'Polishing the route so it feels drivable...',
+  'Drafting the route...',
+  'Longer trips can take a minute. Keeping the days realistic.',
+  'Balancing drive time, fuel, and camp nights...',
+  'Checking towns, trailheads, and backup options...',
+  'Polishing the trip plan...',
 ];
 
 type PlanPhase = 'idle' | 'chatting' | 'ready' | 'planning' | 'active' | 'editing';
@@ -111,14 +93,12 @@ export default function PlanScreen() {
   const [input,     setInput]     = useState('');
   const [loading,   setLoading]   = useState(false);
   const [planPhase, setPlanPhase] = useState<PlanPhase>('idle');
-  const [trailDna,  setTrailDna]  = useState<TrailDNA>({});
   const [stageIdx,  setStageIdx]  = useState(0);
   const stageTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const scrollRef        = useRef<ScrollView>(null);
   const setActiveTrip    = useStore(st => st.setActiveTrip);
   const addTripToHistory = useStore(st => st.addTripToHistory);
-  const tripHistory      = useStore(st => st.tripHistory);
   const userLoc          = useStore(st => st.userLoc);
   const activeTrip       = useStore(st => st.activeTrip);
   const sessionId        = useStore(st => st.sessionId);
@@ -129,7 +109,6 @@ export default function PlanScreen() {
   useEffect(() => {
     setMessages([]);
     setInput('');
-    setTrailDna({});
     setLoading(false);
     setPlanPhase('idle');
     stopStages();
@@ -166,7 +145,7 @@ export default function PlanScreen() {
       saveOfflineTrip(trip).catch(() => {});
     } catch (e: any) {
       if (e instanceof ApiError && (e.status === 401 || e.status === 403)) {
-        Alert.alert('Trip unavailable', 'This trip is not available for the current signed-in account. Sign in again or open an offline-saved copy.');
+        Alert.alert('Trip unavailable', 'This trip is not available for the current signed-in account. Sign in again or open a saved copy.');
         return;
       }
       Alert.alert('Trip unavailable', e?.message ?? 'Could not open this trip.');
@@ -258,7 +237,6 @@ export default function PlanScreen() {
       startStages(CHAT_STAGES);
       try {
         const data = await api.chat(finalText, sessionId, activeTrip, rigProfile as any);
-        if (data.trail_dna) setTrailDna(data.trail_dna);
 
         if (data.type === 'trip_update' && data.trip) {
           setActiveTrip(data.trip);
@@ -294,13 +272,12 @@ export default function PlanScreen() {
     startStages(CHAT_STAGES);
     try {
       const data = await api.chat(finalText, sessionId, null, rigProfile as any);
-      if (data.trail_dna) setTrailDna(data.trail_dna);
 
       if (data.type === 'ready') {
         setMessages(m => [
           ...m,
           { role: 'ai', text: data.content },
-          { role: 'ai', outline: data.outline ?? 'Route ready. Build it to see waypoints, camps, and fuel stops.' },
+          { role: 'ai', outline: data.outline ?? 'Route outline is ready. Build the trip to review days, camps, and fuel.' },
         ]);
         setPlanPhase('ready');
       } else {
@@ -315,10 +292,10 @@ export default function PlanScreen() {
         const isTimeout = raw.includes('taking longer') || raw.includes('timeout');
         const isNetwork = raw.includes('Network') || raw.includes('fetch');
         const friendly = isTimeout
-              ? 'This route is taking longer than usual. Give it one more try and I’ll keep the plan tighter.'
+              ? 'This route is taking longer than usual. Give it one more try and Trailhead will keep the plan tighter.'
           : isNetwork
           ? 'I lost the signal for a second. Check your connection and send it again.'
-          : 'I lost the thread on that one. Try one cleaner sentence, or say “build it” again and I’ll take another pass.';
+          : 'That route note did not land clearly. Try one shorter sentence, or say “build it” again.';
         setMessages(m => [...m, { role: 'ai', text: friendly }]);
         setPlanPhase('ready'); // stay in ready so they can retry
       }
@@ -389,7 +366,7 @@ export default function PlanScreen() {
       api.getRouteWeather(result.trip_id, result.plan.waypoints, weatherUnitMode).then(async weather => {
         const path = `${FileSystem.documentDirectory}weather_${result.trip_id}.json`;
         await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), { encoding: FileSystem.EncodingType.UTF8 });
-        setWeatherToast('Weather downloaded for offline use');
+        setWeatherToast('Weather saved for this trip');
         setTimeout(() => setWeatherToast(''), 3000);
       }).catch(() => {});
     } catch (e: any) {
@@ -409,12 +386,12 @@ export default function PlanScreen() {
               : isRouteValidation
               ? e.message
               : e.message?.includes('taking longer')
-              ? 'This trip is taking longer than usual to plan. Tap Retry and I’ll keep the route tighter.'
+              ? 'This trip is taking longer than usual to plan. Tap Retry to keep the route tighter.'
               : e.message?.includes('non-JSON') || e.message?.includes('```')
-              ? 'I had the route idea, but the format came back messy. Tap Retry and I’ll rebuild it cleanly.'
+              ? 'The route outline needs a cleaner rebuild. Tap Retry to try again.'
               : e.message?.includes('Network') || e.message?.includes('fetch')
               ? 'Signal dropped while planning. Check your connection and tap Retry.'
-              : 'I hit a rough patch building that route. Tap Retry and I’ll take another pass.',
+              : 'Trailhead could not finish that route. Tap Retry to try again.',
             outline: '__retry__',
           },
         ]);
@@ -428,19 +405,19 @@ export default function PlanScreen() {
   function keepRefining() {
     setMessages(m => [
       ...m.filter(msg => !msg.outline),
-      { role: 'ai', text: "No problem — what would you like to adjust? I can tweak the route, change the camping style, add or remove days, or swap out any area." },
+      { role: 'ai', text: 'What would you like to change? Trailhead can adjust the route, camp style, days, or area.' },
     ]);
     setPlanPhase('chatting');
   }
 
   // ── Input hint text ──────────────────────────────────────────────────────
   const inputPlaceholder = planPhase === 'active' || planPhase === 'editing'
-    ? 'Change anything — "skip Day 3", "add a shower stop"...'
+    ? 'Change the trip...'
     : planPhase === 'ready'
-      ? 'Refine the plan, or say "build it"...'
+      ? 'Refine it, or say "build it"...'
       : planPhase === 'planning'
-        ? 'Building your route...'
-        : 'Tell me about your adventure...';
+        ? 'Building the route...'
+        : 'Ask for a route, camp, or change...';
 
   const currentStages = planPhase === 'planning' ? PLAN_STAGES_LONG : CHAT_STAGES;
 
@@ -453,14 +430,14 @@ export default function PlanScreen() {
         </View>
         <Text style={s.loginGateTitle}>Trip Planning</Text>
         <Text style={s.loginGateSub}>
-          Build multi-day overland routes with fuel, legal camp options, weather, land context, offline downloads, and road-condition reports matched to your rig.
+          Build multi-day routes with fuel, camp options, weather, land context, saved trips, and road-condition reports.
         </Text>
         <View style={s.loginGatePerks}>
           {[
-            ['flash',          `${CREDIT_REWARDS.signup} signup credits, then earn more by contributing`],
-            ['map-outline',    'Route days, fuel, camps, POIs, and weather'],
-            ['download-outline', 'Offline maps, route packs, and trip corridors'],
-            ['shield-checkmark-outline', 'Private trips with community reports when needed'],
+            ['flash',          `${CREDIT_REWARDS.signup} trip credits to start`],
+            ['map-outline',    'Route days, fuel, camps, and weather'],
+            ['download-outline', 'Saved trips and maps for later'],
+            ['shield-checkmark-outline', 'Private trips with community reports when useful'],
           ].map(([icon, text]) => (
             <View key={text} style={s.loginGatePerk}>
               <Ionicons name={icon as any} size={16} color={C.orange} />
@@ -471,7 +448,7 @@ export default function PlanScreen() {
         <TouchableOpacity style={s.loginGateBtn} onPress={() => router.push('/(tabs)/profile')}>
           <Text style={s.loginGateBtnText}>SIGN IN OR CREATE ACCOUNT</Text>
         </TouchableOpacity>
-        <Text style={s.loginGateNote}>Browse camps, report conditions, and navigate — always free.</Text>
+        <Text style={s.loginGateNote}>Browse camps, report conditions, and navigate for free.</Text>
       </View>
     </SafeAreaView>
   );
@@ -506,7 +483,7 @@ export default function PlanScreen() {
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={s.logoName}>Trailhead</Text>
-          <Text style={s.logoTag}>OVERLAND PLANNER</Text>
+          <Text style={s.logoTag}>PLANNER</Text>
         </View>
         {user && (
           <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
@@ -526,35 +503,15 @@ export default function PlanScreen() {
       {offlineToast && (
         <View style={s.offlineToast}>
           <Ionicons name="download-outline" size={13} color="#fff" />
-          <Text style={s.offlineToastText}>Route + weather saved offline</Text>
+          <Text style={s.offlineToastText}>Trip saved for later</Text>
         </View>
-      )}
-
-      {/* ── Trail DNA strip ── */}
-      {(Object.keys(trailDna).some(k => trailDna[k as keyof TrailDNA]) || (rigProfile?.make && rigProfile?.model)) && (
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={s.dnaRow}
-          contentContainerStyle={s.dnaRowContent}
-        >
-          <Text style={s.dnaLabel}>TRAIL DNA</Text>
-          {rigProfile?.make && rigProfile?.model && !trailDna.vehicle && (
-            <DnaChip C={C} icon="car-outline" label={`${rigProfile.year ? rigProfile.year + ' ' : ''}${rigProfile.make} ${rigProfile.model}`} />
-          )}
-          {trailDna.vehicle    && <DnaChip C={C} icon="car-outline"       label={trailDna.vehicle} />}
-          {trailDna.terrain    && <DnaChip C={C} icon="triangle-outline"  label={trailDna.terrain} />}
-          {trailDna.camp_style && <DnaChip C={C} icon="moon-outline"      label={trailDna.camp_style} />}
-          {trailDna.duration   && <DnaChip C={C} icon="time-outline"      label={trailDna.duration} />}
-          {(trailDna.regions ?? []).map(r => <DnaChip key={r} C={C} icon="location-outline" label={r} />)}
-        </ScrollView>
       )}
 
       {/* ── Messages ── */}
       <ScrollView
         ref={scrollRef}
         style={s.messages}
-        contentContainerStyle={[s.messagesContent, { paddingBottom: 226 + bottomInset }]}
+        contentContainerStyle={[s.messagesContent, { paddingBottom: 148 + bottomInset }]}
         keyboardShouldPersistTaps="handled"
       >
         {/* Welcome screen */}
@@ -566,7 +523,7 @@ export default function PlanScreen() {
               <TrailheadCard style={s.resumeCard}>
                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                   <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange }} />
-                  <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 }}>SAVED ROUTE</Text>
+                  <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 }}>SAVED TRIP</Text>
                 </View>
                 <Text style={{ color: C.text, fontSize: 15, fontFamily: mono, fontWeight: '900', marginBottom: 4 }} numberOfLines={2}>
                   {activeTrip.plan.trip_name}
@@ -577,7 +534,7 @@ export default function PlanScreen() {
                 </Text>
                 <TrailheadButtonDock>
                   <TrailheadButton
-                    label="Resume Route"
+                    label="Resume Trip"
                     variant="primary"
                     onPress={() => {
                       setMessages([{ role: 'ai', trip: activeTrip }]);
@@ -596,45 +553,29 @@ export default function PlanScreen() {
             )}
 
             <Text style={s.welcomeHeading}>
-              {'ASK\nTRAILHEAD\n'}
-              <Text style={{ color: C.orange }}>TO PLAN IT.</Text>
+              {'Where are you\nheaded?'}
             </Text>
             <Text style={s.welcomeSub}>
-              Plan routes with camp context, trail scouting, rig readiness, weather strategy, and trip adjustments. Build and reopen full routes from the Route tab.
+              Tell Trailhead the start, timing, and travel style. It will turn that into a route outline you can review before building.
             </Text>
-            <View style={s.welcomeChips}>
-              {['TRAIL INTEL', 'CAMP RULES', 'RIG ADVICE'].map(label => (
-                <View key={label} style={s.welcomeChip}>
-                  <Text style={s.welcomeChipText}>{label}</Text>
-                </View>
+            <View style={s.starterList}>
+              {STARTER_PROMPTS.map(prompt => (
+                <PlannerStarterRow
+                  key={prompt.title}
+                  title={prompt.title}
+                  body={prompt.body}
+                  icon={prompt.icon as keyof typeof Ionicons.glyphMap}
+                  onPress={() => setInput(prompt.text)}
+                />
               ))}
             </View>
-
-            {EXAMPLES.map(ex => (
-              <CopilotRecommendationCard
-                key={ex.label}
-                title={ex.label}
-                summary={ex.text}
-                reason={ex.reason}
-                icon={ex.icon as any}
-                tags={ex.tags}
-                sourceLabel={ex.sourceLabel}
-                onPress={() => setInput(ex.text)}
-                action={{
-                  label: 'USE THIS',
-                  icon: 'arrow-forward',
-                  variant: 'secondary',
-                  onPress: () => setInput(ex.text),
-                }}
-              />
-            ))}
           </View>
         )}
 
         {/* Message list */}
         {messages.map((msg, i) => (
           <View key={i} style={[s.msg, msg.role === 'user' ? s.msgUser : s.msgAi]}>
-            {msg.role === 'ai'   && <Text style={s.msgLabel}>TRAILHEAD PLANNER</Text>}
+            {msg.role === 'ai'   && <Text style={s.msgLabel}>TRAILHEAD</Text>}
             {msg.role === 'user' && <Text style={[s.msgLabel, { textAlign: 'right' }]}>YOU</Text>}
 
             {msg.trip ? (
@@ -663,13 +604,13 @@ export default function PlanScreen() {
         {/* Thinking indicator */}
         {loading && (
           <View style={s.msgAi}>
-            <Text style={s.msgLabel}>TRAILHEAD PLANNER</Text>
+            <Text style={s.msgLabel}>TRAILHEAD</Text>
             <View style={s.thinkingBubble}>
               <View style={s.thinkingOrb}>
                 <ThinkingDots C={C} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.thinkingKicker}>PLANNING PASS</Text>
+                <Text style={s.thinkingKicker}>WORKING ON IT</Text>
                 <Text style={[s.bubbleText, s.thinkingText]}>{currentStages[stageIdx]}</Text>
               </View>
             </View>
@@ -679,30 +620,19 @@ export default function PlanScreen() {
 
       {/* ── Input ── */}
       <KeyboardAvoidingView style={[s.inputDock, { bottom: 94 + bottomInset }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <View style={s.aiReportRow}>
-          <TouchableOpacity
-            style={s.aiReportBtn}
-            onPress={() => {
-              setAiReportKind('bug');
-              setAiReportVisible(true);
-            }}
-          >
-            <Ionicons name="bug-outline" size={14} color={C.orange} />
-            <Text style={s.aiReportBtnText}>REPORT BUG</Text>
-          </TouchableOpacity>
-          <TouchableOpacity
-            style={s.aiReportBtn}
-            onPress={() => {
-              setAiReportKind('offensive');
-              setAiReportVisible(true);
-            }}
-          >
-            <Ionicons name="warning-outline" size={14} color={C.orange} />
-            <Text style={s.aiReportBtnText}>REPORT OFFENSIVE</Text>
-          </TouchableOpacity>
-        </View>
         <TourTarget id="plan.input">
           <View style={s.inputWrap}>
+            <TouchableOpacity
+              style={s.reportIconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Report planner response"
+              onPress={() => {
+                setAiReportKind('bug');
+                setAiReportVisible(true);
+              }}
+            >
+              <Ionicons name="flag-outline" size={17} color={C.text2} />
+            </TouchableOpacity>
             <TextInput
               style={[s.input, (planPhase === 'active' || planPhase === 'editing') && s.inputEdit]}
               value={input}
@@ -710,6 +640,9 @@ export default function PlanScreen() {
               placeholder={inputPlaceholder}
               placeholderTextColor={C.text3}
               multiline
+              textAlignVertical="top"
+              onFocus={scrollToEnd}
+              onContentSizeChange={scrollToEnd}
               maxLength={500}
               editable={!loading || planPhase === 'active'}
             />
@@ -722,15 +655,9 @@ export default function PlanScreen() {
             </TouchableOpacity>
           </View>
         </TourTarget>
-        {(planPhase === 'active' || planPhase === 'editing') && (
-          <View style={s.editHint}>
-            <Ionicons name="pencil-outline" size={10} color={C.orange} />
-            <Text style={[s.editHintText, { color: C.orange }]}>Edit mode — describe any change to your route</Text>
-          </View>
-        )}
       </KeyboardAvoidingView>
       {!!weatherToast && (
-        <View style={[s.weatherToast, { bottom: 116 + bottomInset }]}>
+        <View style={[s.weatherToast, { bottom: 176 + bottomInset }]}>
           <Ionicons name="cloud-download-outline" size={14} color={C.text} />
           <Text style={s.weatherToastText}>{weatherToast}</Text>
         </View>
@@ -827,15 +754,6 @@ function RichText({ text, baseColor }: { text: string; baseColor: string }) {
   }
   if (last < text.length) parts.push(<Text key={key++}>{text.slice(last)}</Text>);
   return <>{parts}</>;
-}
-
-function DnaChip({ C, label, icon }: { C: ColorPalette; label: string; icon?: string }) {
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: 'rgba(122,170,124,0.1)', borderWidth: 1, borderColor: 'rgba(122,170,124,0.2)', borderRadius: 5, paddingHorizontal: 9, paddingVertical: 3, marginRight: 6 }}>
-      {icon && <Ionicons name={icon as any} size={9} color={C.sage} />}
-      <Text style={{ color: C.sage, fontSize: 9, fontFamily: mono, letterSpacing: 0.6 }}>{label.toUpperCase()}</Text>
-    </View>
-  );
 }
 
 function PlannerAmbientBackground({ C }: { C: ColorPalette }) {
@@ -970,13 +888,13 @@ function OutlineCard({ outline, onBuild, onRefine, loading }: {
   if (isRetry) {
     return (
       <CopilotBriefCard
-        kicker="ROUTE NEEDS REVIEW"
-        title="Retry route build"
-        summary="The route idea is still here. Retry will rebuild from the same conversation, which usually clears up long or complicated trips."
+        kicker="ROUTE REVIEW"
+        title="Retry the route"
+        summary="The trip notes are still here. Retry will rebuild from the same conversation."
         tone="review"
         icon="alert-circle-outline"
-        sourceLabel="Same conversation"
-        reason="A tighter rebuild can keep the stops and daily pacing cleaner."
+        sourceLabel="Trip notes"
+        reason="A cleaner pass can keep stops and daily pacing easier to review."
         actions={[{
           label: 'RETRY',
           icon: 'refresh',
@@ -990,23 +908,23 @@ function OutlineCard({ outline, onBuild, onRefine, loading }: {
 
   return (
     <CopilotBriefCard
-      kicker="ROUTE READY"
+      kicker="ROUTE OUTLINE"
       title="Build this trip"
       summary={outline}
       tone="ready"
       icon="map-outline"
-      sourceLabel="Planner draft"
-      reason="Build turns the draft into route days, camps, fuel checks, and map pins."
+      sourceLabel="Review first"
+      reason="Build turns the outline into route days, camps, fuel stops, and map pins."
       actions={[
         {
-          label: 'BUILD ROUTE',
+          label: 'BUILD TRIP',
           icon: 'navigate',
           variant: 'primary',
           onPress: onBuild,
           loading,
         },
         {
-          label: 'KEEP REFINING',
+          label: 'REFINE',
           icon: 'create-outline',
           variant: 'secondary',
           onPress: onRefine,
@@ -1203,14 +1121,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   editBadgeText: { color: C.gold, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.8 },
 
-  // Trail DNA strip
-  dnaRow: { borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.glass, maxHeight: 36 },
-  dnaRowContent: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 14, paddingVertical: 8, gap: 6 },
-  dnaLabel: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 1, marginRight: 4 },
-
   // Messages
   messages: { flex: 1 },
-  messagesContent: { padding: 16, paddingBottom: 226, gap: 14, flexGrow: 1 },
+  messagesContent: { padding: 16, paddingBottom: 148, gap: 14, flexGrow: 1 },
 
   // Welcome
   welcome: { gap: 10 },
@@ -1221,33 +1134,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
   },
   welcomeHeading: {
-    color: C.text, fontSize: 36, fontWeight: '800',
-    letterSpacing: 0, lineHeight: 40, marginBottom: 8,
+    color: C.text, fontSize: 34, fontWeight: '800',
+    letterSpacing: 0, lineHeight: 38, marginBottom: 8,
   },
-  welcomeSub: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 2 },
-  welcomeChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginBottom: 6 },
-  welcomeChip: {
-    borderWidth: 1, borderColor: C.border,
-    borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5,
-    backgroundColor: 'rgba(255,255,255,0.045)',
-  },
-  welcomeChipText: {
-    color: C.text3, fontSize: 8.5, fontFamily: mono,
-    fontWeight: '900', letterSpacing: 0.7,
-  },
-
-  sectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 8, textTransform: 'uppercase' },
-  historySection: { marginBottom: 4 },
-  historyScroll: { gap: 8, paddingRight: 4 },
-  historyCard: {
-    backgroundColor: 'rgba(255,255,255,0.055)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 18, padding: 12, width: 148, gap: 4,
-  },
-  historyCardName:   { color: C.text, fontSize: 12, fontWeight: '700', lineHeight: 16 },
-  historyCardStates: { color: C.orange, fontSize: 9, fontFamily: mono, letterSpacing: 0.5 },
-  historyCardFooter: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
-  historyCardStat:   { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700' },
-  historyCardDot:    { color: C.border, fontSize: 9 },
+  welcomeSub: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 6 },
+  starterList: { gap: 10, marginTop: 2 },
 
   // Messages
   msg:     { gap: 4 },
@@ -1284,57 +1175,45 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     right: 0,
     bottom: 94,
     zIndex: 40,
-    backgroundColor: C.bg,
-  },
-  aiReportRow: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingTop: 8,
-    paddingBottom: 4,
-    backgroundColor: C.bg,
-  },
-  aiReportBtn: {
-    flex: 1,
-    minHeight: 36,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s2,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  aiReportBtnText: {
-    color: C.orange,
-    fontSize: 10,
-    fontFamily: mono,
-    fontWeight: '900',
+    backgroundColor: 'transparent',
+    paddingHorizontal: 12,
   },
   inputWrap: {
-    flexDirection: 'row', gap: 10, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 12,
-    borderTopWidth: 1, borderColor: C.border,
-    alignItems: 'flex-end', backgroundColor: C.glassStrong,
+    flexDirection: 'row',
+    gap: 9,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 22,
+    alignItems: 'flex-end',
+    backgroundColor: C.glassStrong,
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  reportIconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   input: {
     flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 18, padding: 12, color: C.text, fontSize: 14, maxHeight: 120,
+    borderRadius: 16, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10, color: C.text, fontSize: 14, minHeight: 42, maxHeight: 108,
   },
   inputEdit: { borderColor: `rgba(184,92,56,0.4)` },
   sendBtn: {
-    width: 46, height: 46, borderRadius: 12, backgroundColor: C.orange,
+    width: 42, height: 42, borderRadius: 13, backgroundColor: C.orange,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: C.orange, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 6,
   },
   sendBtnDisabled: { backgroundColor: C.s3, shadowOpacity: 0 },
-
-  editHint: {
-    flexDirection: 'row', alignItems: 'center', gap: 5,
-    paddingHorizontal: 14, paddingBottom: 8,
-    backgroundColor: C.s1,
-  },
-  editHintText: { fontSize: 9, fontFamily: mono, letterSpacing: 0.4 },
 
   // Offline toast
   offlineToast: {

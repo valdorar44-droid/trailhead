@@ -16,14 +16,13 @@ import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderActiveDayControls, { RouteBuilderEmptyDayGuidance } from '@/components/routeBuilder/RouteBuilderActiveDayControls';
-import RouteBuilderActiveDayStop from '@/components/routeBuilder/RouteBuilderActiveDayStop';
+import RouteBuilderActiveDayStopList from '@/components/routeBuilder/RouteBuilderActiveDayStopList';
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteBuilderInlineResults, {
   RouteBuilderInlineCampCard,
   RouteBuilderInlineResultRow,
 } from '@/components/routeBuilder/RouteBuilderInlineResults';
-import RouteBuilderLegActions from '@/components/routeBuilder/RouteBuilderLegActions';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
 import RouteBuilderSearchSurface from '@/components/routeBuilder/RouteBuilderSearchSurface';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
@@ -4746,38 +4745,30 @@ export default function RouteBuilderScreen() {
           onChangeMaxHours={v => setDayDriveTargets(prev => ({ ...prev, [activeDay]: v }))}
         />
         {!hasBaseRoute ? renderInlineResultsForDay(activeDay) : null}
-        {dayStops.length === 0 ? <RouteBuilderEmptyDayGuidance /> : dayStops.map((st, idx) => {
-          const next = dayStops[idx + 1] ?? null;
-          const legMiles = next ? haversineMi(st, next) : 0;
-          return (
-            <RouteBuilderActiveDayStop
-              key={st.id}
-              index={idx}
-              name={st.name}
-              meta={`${stopCardLabel(st)} · ${sourceLabel(st.source)}${insertAfterId === st.id ? ' · INSERT AFTER' : ''}`}
-              color={stopColor(st.type)}
-              selected={insertAfterId === st.id}
-              preview={renderStopPreview(st)}
-              onSelect={() => selectInsertStop(st)}
-              onOpenCampDetail={st.camp ? () => openCampDetail(st.camp!) : undefined}
-              onReplaceCamp={st.type === 'camp' ? () => replaceCampStop(st) : undefined}
-              onMoveUp={() => moveStop(st.id, -1)}
-              onMoveDown={() => moveStop(st.id, 1)}
-              onRemove={() => removeStop(st.id)}
-              leg={next ? (
-                <RouteBuilderLegActions
-                  distanceLabel={fmtRouteDistance(legMiles)}
-                  durationLabel={fmtHours(estimateMovingHours(legMiles))}
-                  fuelLabel={legFuelLabel(legMiles)}
-                  nextStopName={next.name}
-                  onFindFuel={() => scanBetweenStops(st, next, 'gas')}
-                  onFindCamp={() => scanBetweenStops(st, next, 'camps', next.day ?? st.day, 'overnight')}
-                  onFindPlaces={() => scanBetweenStops(st, next, 'poi')}
-                />
-              ) : undefined}
-            />
-          );
-        })}
+        {dayStops.length === 0 ? (
+          <RouteBuilderEmptyDayGuidance />
+        ) : (
+          <RouteBuilderActiveDayStopList
+            stops={dayStops}
+            insertAfterId={insertAfterId}
+            stopColor={stopColor}
+            stopLabel={stopCardLabel}
+            sourceLabel={sourceLabel}
+            renderStopPreview={renderStopPreview}
+            measureLeg={haversineMi}
+            distanceLabel={fmtRouteDistance}
+            durationLabel={miles => fmtHours(estimateMovingHours(miles))}
+            fuelLabel={legFuelLabel}
+            onSelectStop={selectInsertStop}
+            onOpenCampDetail={stop => stop.camp && openCampDetail(stop.camp)}
+            onReplaceCamp={replaceCampStop}
+            onMoveStop={moveStop}
+            onRemoveStop={removeStop}
+            onFindFuel={(from, to) => scanBetweenStops(from, to, 'gas')}
+            onFindCamp={(from, to) => scanBetweenStops(from, to, 'camps', to.day ?? from.day, 'overnight')}
+            onFindPlaces={(from, to) => scanBetweenStops(from, to, 'poi')}
+          />
+        )}
       </ScrollView>
       </TrailheadSheet>
 

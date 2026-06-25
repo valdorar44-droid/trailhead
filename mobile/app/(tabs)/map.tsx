@@ -13025,7 +13025,7 @@ function MapScreen() {
     } catch (e: any) {
       if (e instanceof PaywallError) {
         setPaywallCode(e.code);
-        setPaywallMessage(e.message || 'Audio guides need credits or Explorer.');
+        setPaywallMessage(e.message || 'Audio guides need credits or a plan.');
         setPaywallVisible(true);
       } else {
         setQuickToast('Could not load narration');
@@ -16677,7 +16677,7 @@ function MapScreen() {
     { id: 'dark', title: 'Dark Road', sub: 'Low-glare roads', colors: ['#0b1020', '#334155', '#fbbf24'] },
     { id: 'red', title: 'Red / Night', sub: 'Night-friendly contrast', colors: ['#12090b', '#7f1d1d', '#ef4444'] },
   ];
-  const premiumMapOptions: Array<{ id: PremiumMapStyle; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = [
+  const mapboxStyleOptions: Array<{ id: PremiumMapStyle; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = [
     { id: 'outdoors', label: 'Mapbox Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
     { id: 'standard', label: 'Mapbox Standard', sub: 'Dynamic day base', icon: 'map-outline', color: '#38bdf8' },
     { id: 'standard_satellite', label: 'Mapbox Sat', sub: 'Satellite + Standard', icon: 'earth-outline', color: '#22c55e' },
@@ -16701,7 +16701,7 @@ function MapScreen() {
     { key: 'radar', label: 'Radar', sub: 'Rain radar', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', onPress: () => { const next = !layerRadar; setLayerRadar(next); toggleDataLayer('radar', next); } },
     { key: 'mvum', label: 'MVUM', sub: 'Legal access', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
   ] as const;
-  const premiumMapItems = premiumMapOptions.map(option => ({
+  const mapboxStyleItems = mapboxStyleOptions.map(option => ({
     ...option,
     active: option.id === premiumMapStyle,
     onPress: () => {
@@ -19706,7 +19706,7 @@ function MapScreen() {
         addToRouteLabel={selectedPlaceTripContext?.day ? `Add to Day ${selectedPlaceTripContext.day}` : activeTrip ? 'Add to Trip Day' : undefined}
         onRichDetailLocked={() => {
           setPaywallCode('category_unlock');
-          setPaywallMessage('Provider photo, contact details, and weekly hours load on demand for 5 credits or Explorer.');
+          setPaywallMessage('Photos, contact details, and weekly hours load on demand for 5 credits or a plan.');
           setPaywallVisible(true);
         }}
         onOpenRelatedPlace={place => {
@@ -19805,7 +19805,7 @@ function MapScreen() {
         addToRouteLabel={activeTrip && tappedPoi ? `Add to Day ${tripPlaceContextFor(tappedPoi)?.day ?? selectedDay ?? 1}` : undefined}
         onRichDetailLocked={() => {
           setPaywallCode('category_unlock');
-          setPaywallMessage('Provider photo, contact details, and weekly hours load on demand for 5 credits or Explorer.');
+          setPaywallMessage('Photos, contact details, and weekly hours load on demand for 5 credits or a plan.');
           setPaywallVisible(true);
         }}
       />
@@ -19987,10 +19987,10 @@ function MapScreen() {
 	                ) : null}
 	                {campDetail.provider_notices?.length ? (
 	                  <View style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>PROVIDER NOTICES</Text>
+	                    <Text style={s.detailSectionTitle}>SOURCE NOTICES</Text>
 	                    {campDetail.provider_notices.slice(0, 3).map((notice, idx) => (
 	                      <View key={`${notice.label || 'notice'}-${idx}`} style={s.campNoteCard}>
-	                        <Text style={s.campNoteTitle}>{notice.label || 'PROVIDER NOTICE'}</Text>
+	                        <Text style={s.campNoteTitle}>{notice.label || 'SOURCE NOTICE'}</Text>
 	                        <ExpandableDetailText text={notice.text} style={s.campNoteText} linkColor={C.orange} previewChars={420} previewLines={4} />
 	                      </View>
 	                    ))}
@@ -20255,7 +20255,7 @@ function MapScreen() {
                   showUpsell={!hasPlan && (campDetail.reviews ?? []).length > 1}
                   onPressUpsell={() => {
                     setPaywallCode('camp_detail');
-                    setPaywallMessage('Explorer unlocks deeper campground details, longer review previews, and richer camp planning context.');
+                    setPaywallMessage('Credits or a plan unlock deeper campground details, longer review previews, and richer camp planning context.');
                     setPaywallVisible(true);
                   }}
                 />
@@ -20315,7 +20315,7 @@ function MapScreen() {
                     </View>
 	                    <View style={s.lockedAiOverlay}>
 	                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
-	                      <Text style={s.lockedAiOverlayText}>Unlock full camp fit, hazards, best season, and nearby highlights with credits or Explorer.</Text>
+	                      <Text style={s.lockedAiOverlayText}>Unlock full camp fit, hazards, best season, and nearby highlights with credits or a plan.</Text>
                     </View>
                   </TouchableOpacity>
                 )}
@@ -20521,10 +20521,10 @@ function MapScreen() {
                 ) : null}
                 {campDetail.provider_notices?.length ? (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>Provider notices</Text>
+                    <Text style={s.detailSectionTitle}>Source notices</Text>
                     {campDetail.provider_notices.slice(0, 3).map((notice, idx) => (
                       <View key={`${notice.label || 'notice'}-${idx}`} style={s.campNoteCard}>
-                        <Text style={s.campNoteTitle}>{notice.label || 'PROVIDER NOTICE'}</Text>
+                        <Text style={s.campNoteTitle}>{notice.label || 'SOURCE NOTICE'}</Text>
                         <ExpandableDetailText text={notice.text} style={s.campNoteText} linkColor={C.orange} previewChars={420} previewLines={4} />
                       </View>
                     ))}
@@ -21036,7 +21036,7 @@ function MapScreen() {
         activeMapLayer={mapLayer}
         options={mapStyleOptions}
         premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
-        premiumMapItems={premiumMapItems}
+        premiumMapItems={mapboxStyleItems}
         extremeActive={extremeMapLayerActive}
         onClose={() => setShowMapStyleSheet(false)}
         onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
@@ -21262,9 +21262,9 @@ function MapScreen() {
             onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
             extremeMapLayerActive={extremeMapLayerActive}
             layerItems={layerSheetItems}
-            premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
-            premiumMapItems={premiumMapItems}
-            extremeFeatureItems={extremeFeatureItems}
+            mapboxStylesVisible={extremeMapboxSupported && !!mapboxToken}
+            mapboxStyleItems={mapboxStyleItems}
+            mapToolItems={extremeFeatureItems}
             safeWaterLegendVisible={layerNautical}
             safeWaterLegendItems={safeWaterLegendItems}
             safeWaterSummary={hydroAvailable

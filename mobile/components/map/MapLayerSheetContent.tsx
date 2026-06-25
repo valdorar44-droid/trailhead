@@ -21,7 +21,7 @@ export type LayerToggleItem = {
   onPress: () => void;
 };
 
-export type PremiumMapItem = {
+export type MapboxStyleItem = {
   id: string;
   label: string;
   sub: string;
@@ -31,7 +31,7 @@ export type PremiumMapItem = {
   onPress: () => void;
 };
 
-export type ExplorerFeatureItem = {
+export type MapToolItem = {
   key: string;
   label: string;
   sub: string;
@@ -53,9 +53,9 @@ type Props = {
   onSelectMapLayer: (id: string) => void;
   extremeMapLayerActive: boolean;
   layerItems: readonly LayerToggleItem[];
-  premiumMapVisible: boolean;
-  premiumMapItems: readonly PremiumMapItem[];
-  extremeFeatureItems: readonly ExplorerFeatureItem[];
+  mapboxStylesVisible: boolean;
+  mapboxStyleItems: readonly MapboxStyleItem[];
+  mapToolItems: readonly MapToolItem[];
   safeWaterLegendVisible: boolean;
   safeWaterLegendItems: readonly LegendItem[];
   safeWaterSummary: string;
@@ -75,9 +75,9 @@ export default function MapLayerSheetContent({
   onSelectMapLayer,
   extremeMapLayerActive,
   layerItems,
-  premiumMapVisible,
-  premiumMapItems,
-  extremeFeatureItems,
+  mapboxStylesVisible,
+  mapboxStyleItems,
+  mapToolItems,
   safeWaterLegendVisible,
   safeWaterLegendItems,
   safeWaterSummary,
@@ -92,6 +92,9 @@ export default function MapLayerSheetContent({
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
+  const primaryMapStyleOptions = mapStyleOptions.slice(0, 1);
+  const secondaryMapStyleOptions = mapStyleOptions.slice(1);
+  const mapToolsVisible = mapboxStylesVisible && mapToolItems.length > 0;
 
   const renderLayerMiniPreview = (layer: { key: string; color: string; icon: keyof typeof Ionicons.glyphMap; val: boolean }) => {
     const activeDot = layer.val ? <View style={[s.layerToggleOnDot, { backgroundColor: layer.color }]} /> : null;
@@ -220,7 +223,7 @@ export default function MapLayerSheetContent({
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.sheetContent}>
       <Text style={s.sectionHead}>MAP STYLE</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
-        {mapStyleOptions.slice(0, 1).map(option => {
+        {primaryMapStyleOptions.map(option => {
           const active = option.id === activeMapLayer;
           return (
             <TouchableOpacity
@@ -243,7 +246,7 @@ export default function MapLayerSheetContent({
             </TouchableOpacity>
           );
         })}
-        {premiumMapVisible ? premiumMapItems.map(option => (
+        {mapboxStylesVisible ? mapboxStyleItems.map(option => (
           <TouchableOpacity
             key={`mapbox-${option.id}`}
             style={[
@@ -265,7 +268,7 @@ export default function MapLayerSheetContent({
             {extremeMapLayerActive && option.active ? <Ionicons name="checkmark-circle" size={17} color={option.color} /> : null}
           </TouchableOpacity>
         )) : null}
-        {mapStyleOptions.slice(1).map(option => {
+        {secondaryMapStyleOptions.map(option => {
           const active = option.id === activeMapLayer;
           return (
             <TouchableOpacity
@@ -306,11 +309,11 @@ export default function MapLayerSheetContent({
         ))}
       </ScrollView>
 
-      {premiumMapVisible ? (
+      {mapToolsVisible ? (
         <>
-          <Text style={s.sectionHead}>EXPLORER TOOLS</Text>
+          <Text style={s.sectionHead}>MAP TOOLS</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
-            {extremeFeatureItems.map(layer => (
+            {mapToolItems.map(layer => (
               <TouchableOpacity
                 key={layer.key}
                 style={[
@@ -326,7 +329,7 @@ export default function MapLayerSheetContent({
                   {layer.val ? <View style={[s.layerToggleOnDot, { backgroundColor: layer.color }]} /> : null}
                 </View>
                 <Text style={s.styleTitle} numberOfLines={1}>{layer.label}</Text>
-                <Text style={s.styleSub} numberOfLines={1}>{layer.enabled ? layer.sub : 'Explorer'}</Text>
+                <Text style={s.styleSub} numberOfLines={1}>{layer.enabled ? layer.sub : 'Not available yet'}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>

@@ -159,10 +159,10 @@ export default function MapFilterSheet({
               if (locked) {
                 Alert.alert(
                   'Open services for today',
-                  'Town services use live search. Open this group with credits, or search in Explorer.',
+                  'Town services use live search. Open this group with credits, or use map search.',
                   [
                     { text: 'Cancel', style: 'cancel' },
-                    { text: 'Open', onPress: onUnlockExplore },
+                    { text: 'Open Search', onPress: onUnlockExplore },
                   ],
                 );
                 return;

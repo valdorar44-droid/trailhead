@@ -49,12 +49,13 @@ checkpoint must leave an audit note before the next checkpoint starts.
    - Start Profile Saved/Downloads path toward a mobile Library model.
 
 6. **Map Sheets + Mapbox Layer Polish**
-   - Status: next.
+   - Status: complete for layer-sheet ordering and Explorer copy cleanup.
    - Keep Mapbox Outdoors near Trailhead Topo.
    - Remove duplicate Explorer entry points if layer workflow replaces them.
    - Keep Mapbox layer access free where product direction requires it.
 
 7. **Planner/Copilot Structured Cards**
+   - Status: next.
    - Use cards and staged actions instead of raw chat-only output.
 
 8. **Viator/Partner Readiness**

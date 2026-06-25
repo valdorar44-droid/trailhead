@@ -17,7 +17,7 @@ export default function CampReviewsSection({
   reviews,
   limit,
   showUpsell = false,
-  upsellText = 'More review detail is included with Explorer.',
+  upsellText = 'More review detail is included with credits or a plan.',
   onPressUpsell,
 }: Props) {
   const C = useTheme();
@@ -32,7 +32,7 @@ export default function CampReviewsSection({
         <View key={`${review.authorName || 'review'}-${idx}`} style={s.reviewCard}>
           <View style={s.reviewTop}>
             <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || 'Review'}</Text>
-            <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Provider'}</Text>
+            <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Source'}</Text>
           </View>
           {!!review.relativeTime && <Text style={s.reviewMeta}>{review.relativeTime}</Text>}
           {!!review.text && <Text style={s.reviewText} numberOfLines={limit > 1 ? 4 : 2}>{review.text}</Text>}

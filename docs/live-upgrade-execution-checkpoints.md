@@ -204,7 +204,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `b36e8539-2ec6-4b14-b3e0-f30c394a404d`.
 
 23. **Route Builder Active Day Controls**
-    - Status: complete, pending release.
+    - Status: complete and released.
     - Extracted active-day itinerary header, rest-day toggle, day-hour input,
       and empty-day guidance into reusable components.
     - Keep day mileage, rest-day state, drive-hour targets, stop ordering,
@@ -213,6 +213,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
       compact schedule panels before code.
     - Saved design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
+    - Release: production OTA
+      `89e55cb4-85b3-4f3e-9b8f-fac6ab7f1501`; preview OTA
+      `01dd49e1-2fb6-42d2-8c86-ba6b125f0d7c`.
 
 24. **Route Builder Active Day Stop List**
     - Status: queued.

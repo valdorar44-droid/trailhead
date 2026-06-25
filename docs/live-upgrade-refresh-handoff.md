@@ -217,25 +217,28 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 22 - Route Builder Search Surface Component:
+Checkpoint 23 - Route Builder Active Day Controls:
 
-- Code commit: `67dfd1c` (`Extract route builder search surface`), pushed
+- Code commit: `5c47877` (`Extract route builder active day controls`), pushed
   to `master`.
 - Production OTA update group:
-  `88dcf02d-445c-489f-9080-5b91c39f168f`
+  `89e55cb4-85b3-4f3e-9b8f-fac6ab7f1501`
 - Preview OTA update group:
-  `b36e8539-2ec6-4b14-b3e0-f30c394a404d`
+  `01dd49e1-2fb6-42d2-8c86-ba6b125f0d7c`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-22-route-builder-search-surface-audit.md`.
+  `docs/live-upgrade-checkpoint-23-route-builder-active-day-controls-audit.md`.
 
 ## Current Checkpoint Record
 
 Checkpoint 23 - Route Builder Active Day Controls:
 
-- Code commit: pending.
-- Production OTA update group: pending.
-- Preview OTA update group: pending.
+- Code commit: `5c47877` (`Extract route builder active day controls`), pushed
+  to `master`.
+- Production OTA update group:
+  `89e55cb4-85b3-4f3e-9b8f-fac6ab7f1501`
+- Preview OTA update group:
+  `01dd49e1-2fb6-42d2-8c86-ba6b125f0d7c`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
   `docs/live-upgrade-checkpoint-23-route-builder-active-day-controls-audit.md`.

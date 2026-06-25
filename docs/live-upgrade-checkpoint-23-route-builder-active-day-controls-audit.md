@@ -88,4 +88,10 @@
 
 ## Release
 
-- Pending commit, push, and OTA.
+- Code commit: `5c47877` (`Extract route builder active day controls`),
+  pushed to `master`.
+- Production OTA update group:
+  `89e55cb4-85b3-4f3e-9b8f-fac6ab7f1501`
+- Preview OTA update group:
+  `01dd49e1-2fb6-42d2-8c86-ba6b125f0d7c`
+- Runtime: `native-20260614-sdk54-1`.

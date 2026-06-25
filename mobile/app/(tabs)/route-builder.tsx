@@ -15,6 +15,7 @@ import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
+import RouteBuilderActiveDayControls, { RouteBuilderEmptyDayGuidance } from '@/components/routeBuilder/RouteBuilderActiveDayControls';
 import RouteBuilderActiveDayStop from '@/components/routeBuilder/RouteBuilderActiveDayStop';
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
@@ -4734,40 +4735,18 @@ export default function RouteBuilderScreen() {
           showOfflineRows={routeOfflineReadiness.regionNames.length > 0}
         />
 
-        <View style={s.sectionHeader}>
-          <Text style={s.sectionTitle}>DAY {activeDay} ITINERARY</Text>
-          <Text style={s.sectionMeta}>
-            {restDays.includes(activeDay) ? 'rest day' : `${fmtRouteDistance(dayMileage[activeDay] ?? 0)} · ${fmtHours(routeDayPlans.find(plan => plan.day === activeDay)?.hours ?? estimateMovingHours(dayMileage[activeDay] ?? 0))}`}
-          </Text>
-        </View>
-        <View style={s.dayControlRow}>
-          <TouchableOpacity
-            style={[s.restToggle, restDays.includes(activeDay) && { borderColor: C.green + '77', backgroundColor: C.green + '14' }]}
-            onPress={() => toggleRestDay(activeDay)}
-          >
-            <Ionicons name="bed-outline" size={13} color={restDays.includes(activeDay) ? C.green : C.text3} />
-            <Text style={[s.restToggleText, restDays.includes(activeDay) && { color: C.green }]}>REST DAY</Text>
-          </TouchableOpacity>
-          <View style={s.dayHoursBox}>
-            <Text style={s.setupLabel}>MAX HOURS</Text>
-            <TextInput
-              value={dayDriveTargets[activeDay] ?? driveHoursPerDay}
-              onChangeText={v => setDayDriveTargets(prev => ({ ...prev, [activeDay]: v }))}
-              keyboardType="decimal-pad"
-              style={s.setupInput}
-              placeholder={driveHoursPerDay}
-              placeholderTextColor={C.text3}
-            />
-          </View>
-          <Text style={s.dayControlMeta}>{fmtHours(activeDayDriveLimit)} max</Text>
-        </View>
+        <RouteBuilderActiveDayControls
+          activeDay={activeDay}
+          meta={restDays.includes(activeDay) ? 'rest day' : `${fmtRouteDistance(dayMileage[activeDay] ?? 0)} · ${fmtHours(routeDayPlans.find(plan => plan.day === activeDay)?.hours ?? estimateMovingHours(dayMileage[activeDay] ?? 0))}`}
+          restDay={restDays.includes(activeDay)}
+          maxHoursValue={dayDriveTargets[activeDay] ?? driveHoursPerDay}
+          maxHoursPlaceholder={driveHoursPerDay}
+          maxHoursSummary={`${fmtHours(activeDayDriveLimit)} max`}
+          onToggleRestDay={() => toggleRestDay(activeDay)}
+          onChangeMaxHours={v => setDayDriveTargets(prev => ({ ...prev, [activeDay]: v }))}
+        />
         {!hasBaseRoute ? renderInlineResultsForDay(activeDay) : null}
-        {dayStops.length === 0 ? (
-          <View style={s.emptyState}>
-            <Text style={s.emptyTitle}>Build the day in order</Text>
-            <Text style={s.emptyText}>Start with a destination, then add fuel, places, and a camp. Tap a stop later to insert new places after it.</Text>
-          </View>
-        ) : dayStops.map((st, idx) => {
+        {dayStops.length === 0 ? <RouteBuilderEmptyDayGuidance /> : dayStops.map((st, idx) => {
           const next = dayStops[idx + 1] ?? null;
           const legMiles = next ? haversineMi(st, next) : 0;
           return (
@@ -5963,9 +5942,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   inlineEmpty: { color: C.text3, fontSize: 11, lineHeight: 16, paddingVertical: 8 },
   inlineEmptyHint: { color: C.text3, fontSize: 10, lineHeight: 15 },
   inlineEmptyActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginTop: 4 },
-  sectionTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
-  sectionMeta: { color: C.text3, fontSize: 10, fontFamily: mono, maxWidth: 190 },
   sectionAction: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: C.orange + '10' },
   sectionActionText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   discoverTabs: { flexDirection: 'row', gap: 8, alignItems: 'stretch' },
@@ -5993,14 +5969,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   miniTagText: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900' },
   candidateName: { color: C.text, fontSize: 13, fontWeight: '800' },
   candidateMeta: { color: C.text3, fontSize: 10, marginTop: 2 },
-  emptyState: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 14, backgroundColor: C.s2 },
-  emptyTitle: { color: C.text, fontSize: 14, fontWeight: '800', marginBottom: 4 },
-  emptyText: { color: C.text3, fontSize: 12, lineHeight: 18 },
-  dayControlRow: { flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 9, backgroundColor: C.s2 },
-  restToggle: { minHeight: 36, flexDirection: 'row', alignItems: 'center', gap: 6, borderWidth: 1, borderColor: C.border, borderRadius: 10, paddingHorizontal: 10, backgroundColor: C.s1 },
-  restToggleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  dayHoursBox: { width: 82, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 8, paddingVertical: 4 },
-  dayControlMeta: { flex: 1, color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'right' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
   filterSheet: {
     maxHeight: '78%',

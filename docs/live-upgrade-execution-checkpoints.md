@@ -204,13 +204,25 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `b36e8539-2ec6-4b14-b3e0-f30c394a404d`.
 
 23. **Route Builder Active Day Controls**
-    - Status: queued.
-    - Extract active-day itinerary header, rest-day toggle, day-hour input, and
-      empty-day guidance into reusable components.
+    - Status: complete, pending release.
+    - Extracted active-day itinerary header, rest-day toggle, day-hour input,
+      and empty-day guidance into reusable components.
     - Keep day mileage, rest-day state, drive-hour targets, stop ordering,
       route computation, and footer dock behavior unchanged.
-    - Continue Mobbin/Figma research against itinerary day editors, route-day
-      controls, and compact schedule panels before code.
+    - Reviewed Mobbin/Figma itinerary day editors, route-day controls, and
+      compact schedule panels before code.
+    - Saved design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshot.
+
+24. **Route Builder Active Day Stop List**
+    - Status: queued.
+    - Extract active-day stop-list rendering and leg-action wiring into a
+      reusable component.
+    - Keep stop ordering, insert-after selection, camp detail/swap callbacks,
+      move/remove actions, leg fuel/camp/place scans, route computation, and
+      footer dock behavior unchanged.
+    - Continue Mobbin/Figma research against itinerary stop lists, compact
+      route legs, and travel day editing controls before code.
 
 ## Refresh Handoff
 
@@ -239,6 +251,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-21-route-builder-search-flow-audit.md`.
 - Checkpoint 22 search-surface extraction context is saved in
   `docs/live-upgrade-checkpoint-22-route-builder-search-surface-audit.md`.
+- Checkpoint 23 active-day-controls extraction context is saved in
+  `docs/live-upgrade-checkpoint-23-route-builder-active-day-controls-audit.md`.
 
 ## Validation Gate
 

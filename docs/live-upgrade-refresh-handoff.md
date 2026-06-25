@@ -231,22 +231,24 @@ Checkpoint 22 - Route Builder Search Surface Component:
 
 ## Current Checkpoint Record
 
-Checkpoint 22 - Route Builder Search Surface Component:
+Checkpoint 23 - Route Builder Active Day Controls:
 
-- Code commit: `67dfd1c` (`Extract route builder search surface`), pushed
-  to `master`.
-- Production OTA update group:
-  `88dcf02d-445c-489f-9080-5b91c39f168f`
-- Preview OTA update group:
-  `b36e8539-2ec6-4b14-b3e0-f30c394a404d`
+- Code commit: pending.
+- Production OTA update group: pending.
+- Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-22-route-builder-search-surface-audit.md`.
+  `docs/live-upgrade-checkpoint-23-route-builder-active-day-controls-audit.md`.
 - Figma evidence:
-  `/tmp/trailhead-checkpoint-22-route-builder-search-surface-figma.png`
+  `/tmp/trailhead-checkpoint-23-route-builder-active-day-controls-figma.png`
 - Playwright evidence:
-  `/tmp/trailhead-route-builder-checkpoint-22-search-box-web.png`
-  `/tmp/trailhead-route-builder-checkpoint-22-search-result-row-web.png`
+  `/tmp/trailhead-route-builder-checkpoint-23-active-day-controls-web.png`
+- Validation:
+  - `cd mobile && npx tsc --noEmit`
+  - `cd mobile && npm run audit:copy`
+  - `cd mobile && npm run audit:routes`
+  - `cd mobile && node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" components/routeBuilder/RouteBuilderActiveDayControls.tsx`
+  - `git diff --check`
 
 ## Repo Note
 
@@ -261,10 +263,10 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 23 - Route Builder Active Day Controls**
+**Checkpoint 24 - Route Builder Active Day Stop List**
 
-Extract active-day itinerary header, rest-day toggle, day-hour input, and
-empty-day guidance into reusable components. Keep day mileage, rest-day state,
-drive-hour targets, stop ordering, route computation, and footer dock behavior
-unchanged; audit against Mobbin travel day editors, route-day controls, and
-compact schedule panels plus the existing Figma checkpoint board before code.
+Extract active-day stop-list rendering and leg-action wiring into a reusable
+component. Keep stop ordering, insert-after selection, camp detail/swap
+callbacks, move/remove actions, leg fuel/camp/place scans, route computation,
+and footer dock behavior unchanged; audit against Mobbin itinerary stop lists,
+compact route legs, and the existing Figma checkpoint board before code.

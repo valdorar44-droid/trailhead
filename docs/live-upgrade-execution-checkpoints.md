@@ -69,6 +69,13 @@ checkpoint must leave an audit note before the next checkpoint starts.
    - Show report trust/freshness as a compact Mission Control signal.
    - Keep backend payloads, credits, TTL, and submit behavior unchanged.
 
+10. **Explore Control Surface**
+    - Status: complete for first production control-surface slice.
+    - Wire the full Explore category chips into the home feed.
+    - Add compact count/source/sort status controls.
+    - Extract control markup out of `guide.tsx` without changing catalog,
+      map, route, saved, cache, or detail behavior.
+
 ## Validation Gate
 
 Run the relevant subset before each checkpoint closes:

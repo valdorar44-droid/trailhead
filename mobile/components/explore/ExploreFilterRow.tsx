@@ -5,6 +5,7 @@ import { useTheme } from '@/lib/design';
 
 type Props = {
   shownCount: number;
+  countLabel?: string;
   sourceLabel?: string;
   sortLabel?: string;
   onCountPress?: () => void;
@@ -14,6 +15,7 @@ type Props = {
 
 export function ExploreFilterRow({
   shownCount,
+  countLabel,
   sourceLabel = 'Sources',
   sortLabel = 'Best match',
   onCountPress,
@@ -21,19 +23,19 @@ export function ExploreFilterRow({
   onSortPress,
 }: Props) {
   const C = useTheme();
-  const compactCount = formatShownCount(shownCount);
+  const compactCount = countLabel ?? formatShownCount(shownCount);
   const compactSort = sortLabel === 'Best match' ? 'Best' : sortLabel;
   const items = [
-    { icon: 'list-outline', label: compactCount, accessibilityLabel: `${shownCount} places shown`, onPress: onCountPress },
-    { icon: 'shield-checkmark-outline', label: sourceLabel, accessibilityLabel: 'Sources', onPress: onSourcePress },
-    { icon: 'filter-outline', label: compactSort, accessibilityLabel: `Sort: ${sortLabel}`, onPress: onSortPress },
+    { icon: 'list-outline', label: compactCount, accessibilityLabel: `${shownCount} places shown`, onPress: onCountPress, flex: 0.95 },
+    { icon: 'shield-checkmark-outline', label: sourceLabel, accessibilityLabel: 'Sources', onPress: onSourcePress, flex: 1.3 },
+    { icon: 'filter-outline', label: compactSort, accessibilityLabel: `Sort: ${sortLabel}`, onPress: onSortPress, flex: 0.95 },
   ];
   return (
     <View style={styles.row}>
       {items.map(item => (
         <TouchableOpacity
           key={item.label}
-          style={[styles.pill, { borderColor: C.border, backgroundColor: C.s1 }]}
+          style={[styles.pill, { flex: item.flex, borderColor: C.border, backgroundColor: C.s1 }]}
           activeOpacity={0.78}
           onPress={item.onPress}
           disabled={!item.onPress}

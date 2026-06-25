@@ -3,6 +3,7 @@ export { ExploreDetailSheet, type ExploreDetailTab, type ExploreDetailWeather } 
 export { ExploreExperiencesRail } from './ExploreExperiencesRail';
 export { ExploreFilterRow } from './ExploreFilterRow';
 export { ExploreHero } from './ExploreHero';
+export { ExploreHomeControls, type ExploreSortMode } from './ExploreHomeControls';
 export { ExploreModeTabs } from './ExploreModeTabs';
 export { ExplorePlaceCard } from './ExplorePlaceCard';
 export { ExploreTrailArea } from './ExploreTrailArea';

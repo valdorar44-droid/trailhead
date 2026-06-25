@@ -16,7 +16,7 @@ import {
   ExploreDetailSheet,
   ExploreExperiencesRail,
   ExploreHero,
-  ExploreModeTabs,
+  ExploreHomeControls,
   ExplorePlaceCard,
   exploreCategoryFromQuery,
   exploreCategoryMatches,
@@ -28,6 +28,7 @@ import {
   type ExploreDetailTab,
   type ExploreDetailWeather,
   type ExploreNearbyModule,
+  type ExploreSortMode,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
@@ -80,8 +81,6 @@ const HOME_SHELF_ASSIGNMENT_ORDER: ExploreCategoryKey[] = [
   'water',
   'scenic',
 ];
-
-type ExploreSortMode = 'best' | 'nearest' | 'source';
 
 const WMO_ICON: Record<number, keyof typeof Ionicons.glyphMap> = {
   0: 'sunny-outline', 1: 'partly-sunny-outline', 2: 'partly-sunny-outline', 3: 'cloud-outline',
@@ -2002,6 +2001,11 @@ export default function GuideScreen() {
 
   function selectExploreHomeCategory(key: ExploreCategoryKey) {
     setExploreSavedOnly(false);
+    if (key === 'nearby') {
+      setExploreCategory('all');
+      setExploreMode('nearby');
+      return;
+    }
     if (key === 'all') {
       setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
       setExploreCategory('all');
@@ -2009,6 +2013,14 @@ export default function GuideScreen() {
     }
     setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
     setExploreCategory(exploreCategory === key ? 'all' : key);
+  }
+
+  function cycleExploreSortMode() {
+    setExploreSortMode(current => {
+      if (current === 'best') return 'nearest';
+      if (current === 'nearest') return 'source';
+      return 'best';
+    });
   }
 
   function renderLandingHeader() {
@@ -2096,23 +2108,21 @@ export default function GuideScreen() {
 
         {tab === 'explore' && (
           <View style={s.exploreFeedSheet}>
-            <ExploreModeTabs value={exploreMode} onChange={mode => {
-              setExploreSavedOnly(false);
-              setExploreMode(mode);
-            }} />
-
-            {exploreCategory !== 'all' && (
-              <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreCategory('all')}>
-                <Ionicons name="close" size={14} color={C.orange} />
-                <Text style={s.clearCategoryText}>Show all Explore places</Text>
-              </TouchableOpacity>
-            )}
-            {exploreSavedOnly && (
-              <TouchableOpacity style={s.clearCategoryBtn} onPress={() => setExploreSavedOnly(false)}>
-                <Ionicons name="close" size={14} color={C.orange} />
-                <Text style={s.clearCategoryText}>Show all Explore places</Text>
-              </TouchableOpacity>
-            )}
+            <ExploreHomeControls
+              mode={exploreMode}
+              category={exploreCategory}
+              savedOnly={exploreSavedOnly}
+              shownCount={rankedExplore.length}
+              sortMode={exploreSortMode}
+              onModeChange={mode => {
+                setExploreSavedOnly(false);
+                setExploreMode(mode);
+              }}
+              onCategorySelect={selectExploreHomeCategory}
+              onClearCategory={() => setExploreCategory('all')}
+              onClearSaved={() => setExploreSavedOnly(false)}
+              onSortCycle={cycleExploreSortMode}
+            />
 
             {showExperienceSearch && (
               <ExploreExperiencesRail
@@ -2175,15 +2185,6 @@ export default function GuideScreen() {
                 </Text>
                 <Text style={s.exploreHomeCount}>{exploreHomeCountLabel}</Text>
               </View>
-              <TouchableOpacity
-                style={s.exploreFilterGlyph}
-                activeOpacity={0.72}
-                onPress={() => setExploreSortMode(current => current === 'nearest' ? 'best' : 'nearest')}
-                accessibilityRole="button"
-                accessibilityLabel="Toggle nearest ranking"
-              >
-                <Ionicons name="options-outline" size={24} color={exploreSortMode === 'nearest' ? C.orange : C.text3} />
-              </TouchableOpacity>
             </View>
 
             {exploreLoading && (
@@ -2656,12 +2657,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
   },
   categoryTileText: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '900', marginTop: 10 },
-  clearCategoryBtn: {
-    alignSelf: 'flex-start', minHeight: 34, flexDirection: 'row', alignItems: 'center', gap: 6,
-    borderRadius: 8, borderWidth: 1, borderColor: C.orange + '44',
-    backgroundColor: C.orangeGlow, paddingHorizontal: 10, marginHorizontal: 20,
-  },
-  clearCategoryText: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   exploreFeedSheet: {
     marginHorizontal: -14,
     marginTop: 0,
@@ -2683,12 +2678,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   exploreHomeTitle: { color: C.text, fontSize: 23, lineHeight: 28, fontWeight: '900', letterSpacing: 0 },
   exploreHomeCount: { color: C.text3, fontSize: 12, lineHeight: 16, fontWeight: '800', marginTop: 3 },
-  exploreFilterGlyph: {
-    width: 46,
-    height: 46,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   exploreSectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',

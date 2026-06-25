@@ -20,6 +20,10 @@ import RouteBuilderActiveDayStop from '@/components/routeBuilder/RouteBuilderAct
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteBuilderInsertNotice from '@/components/routeBuilder/RouteBuilderInsertNotice';
+import RouteBuilderInlineResults, {
+  RouteBuilderInlineCampCard,
+  RouteBuilderInlineResultRow,
+} from '@/components/routeBuilder/RouteBuilderInlineResults';
 import RouteBuilderLegActions from '@/components/routeBuilder/RouteBuilderLegActions';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
@@ -4255,108 +4259,78 @@ export default function RouteBuilderScreen() {
     if (!inlineSearch || inlineSearch.day !== day) return null;
     const inlineTab = inlineSearch.tab;
     return (
-      <View style={s.inlineResults}>
-        <View style={s.inlineResultsTop}>
-          <View style={{ flex: 1 }}>
-            <Text style={s.inlineResultsTitle}>{inlineSearch.label}</Text>
-            <Text style={s.inlineResultsSub}>{discoverySummary || 'Searching along this day segment'}</Text>
-          </View>
-          <TouchableOpacity style={s.inlineClose} onPress={() => setInlineSearch(null)}>
-            <Ionicons name="close" size={13} color={C.text3} />
-          </TouchableOpacity>
-        </View>
-        {discoverLoading ? (
-          <View style={s.inlineLoading}>
-            <TrailheadCardSkeleton media lines={3} style={s.inlineLoadingCard} />
-            <TrailheadCardSkeleton lines={2} style={s.inlineLoadingCard} />
-          </View>
-        ) : inlineTab === 'camps' ? (
+      <RouteBuilderInlineResults
+        title={inlineSearch.label}
+        subtitle={discoverySummary || 'Searching along this day segment'}
+        loading={discoverLoading}
+        onClose={() => setInlineSearch(null)}
+      >
+        {inlineTab === 'camps' ? (
           camps.length ? camps.slice(0, 6).map(camp => (
-            <TouchableOpacity key={camp.id} style={s.inlineCampCard} onPress={() => openCampDetail(camp)}>
-              <View style={s.inlineCampPhotoWrap}>
-                {camp.photo_url ? (
-                  <Image source={{ uri: camp.photo_url }} style={s.inlineCampPhoto} resizeMode="cover" />
-                ) : (
-                  <View style={[s.inlineCampPlaceholder, { backgroundColor: landColor(camp.land_type).bg }]}>
-                    <Ionicons name="bonfire-outline" size={19} color={landColor(camp.land_type).text} />
-                  </View>
-                )}
-              </View>
-              <View style={s.inlineCampBody}>
-                <Text style={s.candidateName} numberOfLines={2}>{camp.name}</Text>
-                <Text style={s.candidateMeta} numberOfLines={2}>
-                  Day {day} · {camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}
-                  {routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}
-                  {(camp as any).photo_status === 'missing' ? 'No photo fallback · ' : ''}
-                  {[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · {camp.cost || 'See site'}
-                </Text>
-              </View>
-              <TouchableOpacity style={s.useBtn} onPress={() => addCamp(camp)}>
-                <Text style={s.useBtnText}>{replaceStopId ? 'SWAP' : 'USE'}</Text>
-              </TouchableOpacity>
-            </TouchableOpacity>
+            <RouteBuilderInlineCampCard
+              key={camp.id}
+              title={camp.name}
+              meta={`Day ${day} · ${camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}${routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}${(camp as any).photo_status === 'missing' ? 'No photo fallback · ' : ''}${[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · ${camp.cost || 'See site'}`}
+              photoUrl={camp.photo_url}
+              fallbackColor={landColor(camp.land_type).text}
+              fallbackBackgroundColor={landColor(camp.land_type).bg}
+              actionLabel={replaceStopId ? 'SWAP' : 'USE'}
+              onPress={() => openCampDetail(camp)}
+              onPressAction={() => addCamp(camp)}
+            />
           )) : (
             renderInlineEmptyState(day, 'camps')
           )
         ) : inlineTab === 'gas' ? (
           gas.length ? gas.slice(0, 6).map(station => (
-            <TouchableOpacity key={String(station.id)} style={s.inlineStopRow} onPress={() => openRoutePlace({ kind: 'gas', day, data: station, place: routeSheetPlaceFromGas(station) })}>
-              <View style={[s.candidateIcon, { borderColor: '#eab30866', backgroundColor: '#eab30818' }]}>
-                <Ionicons name="flash-outline" size={16} color="#eab308" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.candidateName} numberOfLines={1}>{station.name}</Text>
-                <Text style={s.candidateMeta} numberOfLines={1}>
-                  Day {day} · {station.route_distance_mi != null ? `${fmtRouteDistance(station.route_distance_mi)} off route · ` : ''}
-                  {routeProgressLabel((station as any).route_progress) ? `${routeProgressLabel((station as any).route_progress)} · ` : ''}
-                  {station.address || station.fuel_types || 'Fuel stop'}
-                </Text>
-              </View>
-            </TouchableOpacity>
+            <RouteBuilderInlineResultRow
+              key={String(station.id)}
+              icon="flash-outline"
+              iconColor="#eab308"
+              iconBackgroundColor="#eab30818"
+              iconBorderColor="#eab30866"
+              title={station.name}
+              meta={`Day ${day} · ${station.route_distance_mi != null ? `${fmtRouteDistance(station.route_distance_mi)} off route · ` : ''}${routeProgressLabel((station as any).route_progress) ? `${routeProgressLabel((station as any).route_progress)} · ` : ''}${station.address || station.fuel_types || 'Fuel stop'}`}
+              onPress={() => openRoutePlace({ kind: 'gas', day, data: station, place: routeSheetPlaceFromGas(station) })}
+            />
           )) : (
             renderInlineEmptyState(day, 'gas')
           )
         ) : inlineTab === 'excursions' ? (
           excursions.length ? excursions.slice(0, 8).map(item => (
-            <TouchableOpacity key={item.id} style={s.inlineStopRow} onPress={() => openRoutePlace({ kind: 'excursion', day, data: item, place: routeSheetPlaceFromExcursion(item) })}>
-              <View style={[s.candidateIcon, { borderColor: placeColor(item.type) + '66', backgroundColor: placeColor(item.type) + '18' }]}>
-                <Ionicons name={item.type === 'climbing' ? 'trending-up-outline' : item.type === 'historic' ? 'business-outline' : item.type === 'park' ? 'map-outline' : 'compass-outline'} size={16} color={placeColor(item.type)} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.candidateName} numberOfLines={1}>{item.name}</Text>
-                <Text style={s.candidateMeta} numberOfLines={2}>
-                  Day {day} · {item.distance_from_route_mi != null ? `${fmtRouteDistance(item.distance_from_route_mi)} off route · ` : ''}
-                  {routeProgressLabel((item as any).route_progress) ? `${routeProgressLabel((item as any).route_progress)} · ` : ''}
-                  {item.day_fit || item.type} · {item.source_label}
-                </Text>
-              </View>
-              <View style={[s.miniTag, item.offline_ready && { borderColor: C.green + '66' }]}>
-                <Text style={s.miniTagText}>{item.offline_ready ? 'OFFLINE' : item.source_confidence?.toUpperCase() || 'SOURCE'}</Text>
-              </View>
-            </TouchableOpacity>
+            <RouteBuilderInlineResultRow
+              key={item.id}
+              icon={item.type === 'climbing' ? 'trending-up-outline' : item.type === 'historic' ? 'business-outline' : item.type === 'park' ? 'map-outline' : 'compass-outline'}
+              iconColor={placeColor(item.type)}
+              iconBackgroundColor={placeColor(item.type) + '18'}
+              iconBorderColor={placeColor(item.type) + '66'}
+              title={item.name}
+              meta={`Day ${day} · ${item.distance_from_route_mi != null ? `${fmtRouteDistance(item.distance_from_route_mi)} off route · ` : ''}${routeProgressLabel((item as any).route_progress) ? `${routeProgressLabel((item as any).route_progress)} · ` : ''}${item.day_fit || item.type} · ${item.source_label}`}
+              metaLines={2}
+              trailingLabel={item.offline_ready ? 'OFFLINE' : item.source_confidence?.toUpperCase() || 'SOURCE'}
+              trailingColor={item.offline_ready ? C.green : undefined}
+              onPress={() => openRoutePlace({ kind: 'excursion', day, data: item, place: routeSheetPlaceFromExcursion(item) })}
+            />
           )) : (
             renderInlineEmptyState(day, 'excursions')
           )
         ) : (
           discoveryPois.length ? discoveryPois.slice(0, 6).map(poi => (
-            <TouchableOpacity key={poi.id} style={s.inlineStopRow} onPress={() => openRoutePlace({ kind: 'poi', day, data: poi, place: routeSheetPlaceFromPoi(poi) })}>
-              <View style={[s.candidateIcon, { borderColor: placeColor(poi.type) + '66', backgroundColor: placeColor(poi.type) + '18' }]}>
-                <Ionicons name={placeIcon(poi.type)} size={16} color={placeColor(poi.type)} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.candidateName} numberOfLines={1}>{poi.name || poi.type}</Text>
-                <Text style={s.candidateMeta} numberOfLines={1}>
-                  Day {day} · {(poi as any).route_distance_mi != null ? `${fmtRouteDistance((poi as any).route_distance_mi)} off route · ` : ''}
-                  {routeProgressLabel((poi as any).route_progress) ? `${routeProgressLabel((poi as any).route_progress)} · ` : ''}
-                  {poi.type.replace(/_/g, ' ')}
-                </Text>
-              </View>
-            </TouchableOpacity>
+            <RouteBuilderInlineResultRow
+              key={poi.id}
+              icon={placeIcon(poi.type)}
+              iconColor={placeColor(poi.type)}
+              iconBackgroundColor={placeColor(poi.type) + '18'}
+              iconBorderColor={placeColor(poi.type) + '66'}
+              title={poi.name || poi.type}
+              meta={`Day ${day} · ${(poi as any).route_distance_mi != null ? `${fmtRouteDistance((poi as any).route_distance_mi)} off route · ` : ''}${routeProgressLabel((poi as any).route_progress) ? `${routeProgressLabel((poi as any).route_progress)} · ` : ''}${poi.type.replace(/_/g, ' ')}`}
+              onPress={() => openRoutePlace({ kind: 'poi', day, data: poi, place: routeSheetPlaceFromPoi(poi) })}
+            />
           )) : (
             renderInlineEmptyState(day, 'poi')
           )
         )}
-      </View>
+      </RouteBuilderInlineResults>
     );
   }
 
@@ -4785,7 +4759,7 @@ export default function RouteBuilderScreen() {
 
       <ScrollView
         style={s.body}
-        contentContainerStyle={[s.bodyContent, { paddingBottom: (keyboardVisible ? 260 : 150) + bottomInset }]}
+        contentContainerStyle={[s.bodyContent, { paddingBottom: (keyboardVisible ? 260 : 240) + bottomInset }]}
         showsVerticalScrollIndicator={false}
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
@@ -6089,19 +6063,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routeStopTitle: { color: C.text, fontSize: 17, fontWeight: '900', lineHeight: 21, marginTop: 4 },
   routeStopMeta: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 5 },
   routePlaceTags: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 8 },
-  inlineResults: { borderWidth: 1, borderColor: C.orange + '44', borderRadius: 12, backgroundColor: C.bg, padding: 9, gap: 8 },
-  inlineResultsTop: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  inlineResultsTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
-  inlineResultsSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
-  inlineClose: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
-  inlineLoading: { gap: 8, paddingVertical: 4 },
-  inlineLoadingCard: { borderRadius: 11, padding: 9, backgroundColor: C.s1 },
-  inlineCampCard: { flexDirection: 'row', alignItems: 'stretch', gap: 8, padding: 8, borderRadius: 11, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
-  inlineCampPhotoWrap: { width: 64, borderRadius: 9, overflow: 'hidden', backgroundColor: C.s2 },
-  inlineCampPhoto: { width: '100%', height: 74 },
-  inlineCampPlaceholder: { width: '100%', height: 74, alignItems: 'center', justifyContent: 'center' },
-  inlineCampBody: { flex: 1, minHeight: 74, justifyContent: 'center' },
-  inlineStopRow: { flexDirection: 'row', alignItems: 'center', gap: 9, padding: 9, borderWidth: 1, borderColor: C.border, borderRadius: 11, backgroundColor: C.s1 },
   inlineEmptyCard: { gap: 8, paddingVertical: 4 },
   inlineEmpty: { color: C.text3, fontSize: 11, lineHeight: 16, paddingVertical: 8 },
   inlineEmptyHint: { color: C.text3, fontSize: 10, lineHeight: 15 },
@@ -6136,8 +6097,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   miniTagText: { color: C.text3, fontSize: 7, fontFamily: mono, fontWeight: '900' },
   candidateName: { color: C.text, fontSize: 13, fontWeight: '800' },
   candidateMeta: { color: C.text3, fontSize: 10, marginTop: 2 },
-  useBtn: { borderWidth: 1, borderColor: C.green + '66', backgroundColor: C.green + '14', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 6 },
-  useBtnText: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   emptyState: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 14, backgroundColor: C.s2 },
   emptyTitle: { color: C.text, fontSize: 14, fontWeight: '800', marginBottom: 4 },
   emptyText: { color: C.text3, fontSize: 12, lineHeight: 18 },

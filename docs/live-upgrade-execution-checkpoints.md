@@ -151,6 +151,19 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Save design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
 
+19. **Route Builder Inline Discovery Results**
+    - Status: complete for inline discovery-result extraction and footer
+      clearance.
+    - Extract inline route discovery result shell, camp cards, and compact
+      result rows into reusable components.
+    - Keep discovery state, filtering, empty states, add/swap callbacks, route
+      place open callbacks, saved geometry, and readiness calculations
+      unchanged.
+    - Add phone-viewport content clearance so the fixed footer dock does not
+      cover active route content.
+    - Save design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshot.
+
 ## Refresh Handoff
 
 - Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.
@@ -172,6 +185,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-17-route-builder-footer-dock-audit.md`.
 - Checkpoint 18 timeline day-row extraction context is saved in
   `docs/live-upgrade-checkpoint-18-route-builder-timeline-day-rows-audit.md`.
+- Checkpoint 19 inline discovery-result extraction context is saved in
+  `docs/live-upgrade-checkpoint-19-route-builder-inline-discovery-results-audit.md`.
 
 ## Validation Gate
 

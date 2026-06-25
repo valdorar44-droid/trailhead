@@ -2,15 +2,16 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 18 implemented, pushed, and OTA released.
+**Status at save time:** Checkpoint 19 implemented and validated; push/OTA
+release pending.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
 
 ## Current State
 
-- Checkpoints 1-18 are complete through the Route Builder Timeline Day Rows
-  slice in `docs/live-upgrade-execution-checkpoints.md`.
+- Checkpoints 1-19 are complete through the Route Builder Inline Discovery
+  Results slice in `docs/live-upgrade-execution-checkpoints.md`.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
   `8ff520a Polish planner composer checkpoint`.
@@ -31,11 +32,12 @@ tools. It captures what is already complete and what should happen next.
 - Latest route/search preview OTA:
   `f579cc32-ab38-4a82-b1ae-63ed7baac40c`.
 - Latest local route-builder checkpoint:
-  Checkpoint 18 extracted `RouteBuilderTimelineDayCard`, removed stale inline
-  route-day styles, and kept route planning/discovery/readiness behavior
-  unchanged.
-- Current repo check before this handoff: Checkpoint 18 validation, push, and
-  OTA release passed.
+  Checkpoint 19 extracted `RouteBuilderInlineResults`,
+  `RouteBuilderInlineCampCard`, and `RouteBuilderInlineResultRow`, removed
+  stale inline-result styles, and added footer scroll clearance for phone
+  viewports.
+- Current repo check before this handoff: Checkpoint 19 validation passed;
+  release record pending push/OTA.
 
 ## MCP / Research State
 
@@ -75,6 +77,7 @@ fresh shipped-app references.
 16. Route Builder Stop Rows.
 17. Route Builder Footer Dock.
 18. Route Builder Timeline Day Rows.
+19. Route Builder Inline Discovery Results.
 
 ## Remaining Work Queue
 
@@ -100,14 +103,14 @@ map search/tool/banner layer policy.
 Checkpoint 16 extracted active-day stop rows and leg actions.
 Checkpoint 17 extracted the fixed footer dock.
 Checkpoint 18 extracted route timeline day cards.
+Checkpoint 19 extracted inline discovery result rows and added footer scroll
+clearance.
 Still
 needed:
 
 - Recent/saved strip.
 - Smart suggestions drawer.
 - Route-fit cards.
-- Inline discovery result extraction.
-- Footer/content clearance polish for small phone viewports.
 - More extraction from `mobile/app/(tabs)/route-builder.tsx`.
 
 Keep route computation and Mapbox bridge logic outside the screen.
@@ -236,10 +239,10 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 19 - Route Builder Inline Discovery Results**
+**Checkpoint 20 - Route Builder Route Fit Cards**
 
-Extract inline day discovery results and small-phone footer/content clearance
-from `mobile/app/(tabs)/route-builder.tsx` into reusable components. Keep
-search/scout result state, camp/fuel/place scan callbacks, route readiness, and
-saved geometry unchanged; audit against Mobbin route timeline/search result
-examples and the existing Figma checkpoint board before code.
+Extract the route-fit/readiness detail cards that explain schedule, camps, fuel,
+downloads, and route lock status from `mobile/app/(tabs)/route-builder.tsx`
+into reusable components. Keep route checks, offline readiness, saved geometry,
+and map handoff behavior unchanged; audit against Mobbin route planning and trip
+readiness patterns plus the existing Figma checkpoint board before code.

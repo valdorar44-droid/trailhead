@@ -259,7 +259,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `8c5687a2-3b95-41ef-95fe-ec277fb24791`.
 
 27. **Route Builder Discovery State Boundary**
-    - Status: complete, pending release.
+    - Status: complete and released.
     - Extracted active discovery tab, loading state, keyed result cache,
       inline search state, result merge, and clear/reset helpers into
       `useRouteBuilderDiscoveryState`.
@@ -269,6 +269,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Reviewed Mobbin route/search flows and Figma design-system search before
       code; saved design decision, audit checkpoint, Figma checkpoint frame,
       and Playwright smoke screenshot.
+    - Release: production OTA
+      `6acde002-4dd1-41ea-9245-10e6c67d7b85`; preview OTA
+      `c673e5b1-5ffb-4758-aa66-24e7f961c834`.
 
 28. **Route Builder Discovery Provider Boundary**
     - Status: queued.

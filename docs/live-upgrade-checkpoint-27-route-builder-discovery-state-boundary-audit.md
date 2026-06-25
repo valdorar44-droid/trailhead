@@ -95,4 +95,10 @@
 
 ## Release
 
-- Pending commit, push, and OTA.
+- Code commit: `345412c` (`Extract route builder discovery state`), pushed
+  to `master`.
+- Production OTA update group:
+  `6acde002-4dd1-41ea-9245-10e6c67d7b85`
+- Preview OTA update group:
+  `c673e5b1-5ffb-4758-aa66-24e7f961c834`
+- Runtime: `native-20260614-sdk54-1`.

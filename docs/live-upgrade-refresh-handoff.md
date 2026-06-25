@@ -217,43 +217,36 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 26 - Route Builder Discovery Candidate Cleanup:
+Checkpoint 27 - Route Builder Discovery State Boundary:
 
-- Code commit: `485482d` (`Clean route builder discovery candidate styles`), pushed
+- Code commit: `345412c` (`Extract route builder discovery state`), pushed
   to `master`.
 - Production OTA update group:
-  `1d16b311-7f19-4095-81e9-5ff1f628e462`
+  `6acde002-4dd1-41ea-9245-10e6c67d7b85`
 - Preview OTA update group:
-  `8c5687a2-3b95-41ef-95fe-ec277fb24791`
+  `c673e5b1-5ffb-4758-aa66-24e7f961c834`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-26-route-builder-discovery-candidate-cleanup-audit.md`.
+  `docs/live-upgrade-checkpoint-27-route-builder-discovery-state-boundary-audit.md`.
 
 ## Current Checkpoint Record
 
-Checkpoint 27 - Route Builder Discovery State Boundary:
+Checkpoint 28 - Route Builder Discovery Provider Boundary:
 
 - Code commit: pending.
 - Production OTA update group: pending.
 - Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
-- Audit doc:
-  `docs/live-upgrade-checkpoint-27-route-builder-discovery-state-boundary-audit.md`.
-- Design decision:
-  `docs/design-decisions/route-builder-discovery-state-boundary.md`.
-- Figma evidence:
-  - File `yP342OKFtUQ1J0RCwnzH6s`
-  - Frame `37:2`
-  - Screenshot
-    `/tmp/trailhead-checkpoint-27-route-builder-discovery-state-boundary-figma.png`
-- Playwright evidence:
-  `/tmp/trailhead-route-builder-checkpoint-27-discovery-state-boundary-web.png`
-- Validation:
-  - `npx tsc --noEmit`
-  - `npm run audit:copy`
-  - `npm run audit:routes`
-  - `node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" components/routeBuilder/useRouteBuilderDiscoveryState.ts`
-  - `git diff --check`
+- Audit doc: pending.
+- Design decision: pending.
+- Scope:
+  - Audit `runDiscovery`, `resolveLegSearchContext`, and provider fallback
+    branches now that discovery state is isolated.
+  - Extract the next provider-orchestration boundary only if Mapbox, offline,
+    Nominatim, camp ranking, route projection, and sheet behavior stay
+    unchanged.
+  - Continue Mobbin/Figma research against route search, itinerary add-place,
+    and map-bottom-sheet workflows before code.
 
 ## Repo Note
 

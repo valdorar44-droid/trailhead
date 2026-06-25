@@ -1,4 +1,5 @@
 export * from './audit';
+export * from './discoveryProviders';
 export * from './geometry';
 export * from './model';
 export * from './readiness';

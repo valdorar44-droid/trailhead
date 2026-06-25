@@ -70,6 +70,7 @@ import {
   routeUnitsParam,
   savedGeometryFromCoords,
   resolveRouteBuilderSearchResults,
+  searchRouteBuilderFallbackPois,
   searchOfflineRouteBuilderPlaces,
   type RouteBuilderSearchPlace,
   type RouteBuilderStopType,
@@ -2300,31 +2301,21 @@ export default function RouteBuilderScreen() {
           );
           const routePlaces = uniqueByGeo([...found, ...offlineRoutePlaces]);
           if (routePlaces.length === 0) {
-            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
-              ['trailhead', 'trailhead'],
-              ['viewpoint', 'viewpoint'],
-              ['water', 'water'],
-              ['grocery', 'grocery'],
-            ];
-            const mapboxPlaces = uniqueByGeo((await Promise.all(
-              legSamplePoints(searchLeg!).flatMap(point =>
-                fallbackQueries.map(([query, type]) => searchMapContextNearby(query, point, radius, type, 3).catch(() => []))
-              )
-            )).flat());
+            const mapboxPlaces = uniqueByGeo(await searchRouteBuilderFallbackPois({
+              points: legSamplePoints(searchLeg!),
+              radiusMi: radius,
+              limitPerQuery: 3,
+              provider: searchMapContextNearby,
+            }));
             routePlaces.push(...mapboxPlaces);
           }
           if (routePlaces.length === 0) {
-            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
-              ['trailhead', 'trailhead'],
-              ['viewpoint', 'viewpoint'],
-              ['water', 'water'],
-              ['grocery', 'grocery'],
-            ];
-            const nominatimPlaces = uniqueByGeo((await Promise.all(
-              legSamplePoints(searchLeg!).flatMap(point =>
-                fallbackQueries.map(([query, type]) => searchNominatimNearby(query, point, radius, type, 3).catch(() => []))
-              )
-            )).flat());
+            const nominatimPlaces = uniqueByGeo(await searchRouteBuilderFallbackPois({
+              points: legSamplePoints(searchLeg!),
+              radiusMi: radius,
+              limitPerQuery: 3,
+              provider: searchNominatimNearby,
+            }));
             routePlaces.push(...nominatimPlaces);
           }
           const scoped = spreadAlongLeg(routePlaces
@@ -2344,27 +2335,21 @@ export default function RouteBuilderScreen() {
           );
           const routePlaces = uniqueByGeo([...found, ...offlineRoutePlaces]);
           if (routePlaces.length === 0) {
-            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
-              ['trailhead', 'trailhead'],
-              ['viewpoint', 'viewpoint'],
-              ['water', 'water'],
-              ['grocery', 'grocery'],
-            ];
-            const mapboxPlaces = uniqueByGeo((await Promise.all(
-              fallbackQueries.map(([query, type]) => searchMapContextNearby(query, target, 40, type, 5).catch(() => []))
-            )).flat());
+            const mapboxPlaces = uniqueByGeo(await searchRouteBuilderFallbackPois({
+              points: [target],
+              radiusMi: 40,
+              limitPerQuery: 5,
+              provider: searchMapContextNearby,
+            }));
             routePlaces.push(...mapboxPlaces);
           }
           if (routePlaces.length === 0) {
-            const fallbackQueries: Array<[string, OsmPoi['type']]> = [
-              ['trailhead', 'trailhead'],
-              ['viewpoint', 'viewpoint'],
-              ['water', 'water'],
-              ['grocery', 'grocery'],
-            ];
-            const nominatimPlaces = uniqueByGeo((await Promise.all(
-              fallbackQueries.map(([query, type]) => searchNominatimNearby(query, target, 40, type, 5).catch(() => []))
-            )).flat());
+            const nominatimPlaces = uniqueByGeo(await searchRouteBuilderFallbackPois({
+              points: [target],
+              radiusMi: 40,
+              limitPerQuery: 5,
+              provider: searchNominatimNearby,
+            }));
             routePlaces.push(...nominatimPlaces);
           }
           const scoped = routePlaces

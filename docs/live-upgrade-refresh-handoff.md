@@ -237,16 +237,23 @@ Checkpoint 28 - Route Builder Discovery Provider Boundary:
 - Production OTA update group: pending.
 - Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
-- Audit doc: pending.
-- Design decision: pending.
-- Scope:
-  - Audit `runDiscovery`, `resolveLegSearchContext`, and provider fallback
-    branches now that discovery state is isolated.
-  - Extract the next provider-orchestration boundary only if Mapbox, offline,
-    Nominatim, camp ranking, route projection, and sheet behavior stay
-    unchanged.
-  - Continue Mobbin/Figma research against route search, itinerary add-place,
-    and map-bottom-sheet workflows before code.
+- Audit doc:
+  `docs/live-upgrade-checkpoint-28-route-builder-discovery-provider-boundary-audit.md`.
+- Design decision:
+  `docs/design-decisions/route-builder-discovery-provider-boundary.md`.
+- Figma evidence:
+  - File `yP342OKFtUQ1J0RCwnzH6s`
+  - Frame `38:2`
+  - Screenshot
+    `/tmp/trailhead-checkpoint-28-route-builder-discovery-provider-boundary-figma.png`
+- Playwright evidence:
+  `/tmp/trailhead-route-builder-checkpoint-28-discovery-provider-boundary-web.png`
+- Validation:
+  - `npx tsc --noEmit`
+  - `npm run audit:copy`
+  - `npm run audit:routes`
+  - `node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" lib/routeBuilder/discoveryProviders.ts`
+  - `git diff --check`
 
 ## Repo Note
 
@@ -261,9 +268,9 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 28 - Route Builder Discovery Provider Boundary**
+**Checkpoint 29 - Route Builder Discovery Gas Provider Boundary**
 
-Audit `runDiscovery`, `resolveLegSearchContext`, and provider fallback branches
-now that discovery state is isolated. Extract the next provider-orchestration
-boundary only if Mapbox, offline, Nominatim, camp ranking, route projection, and
-sheet behavior stay unchanged.
+Audit gas-provider fan-out in `runDiscovery` for leg and area searches. Extract
+only provider orchestration if NREL, OSM fuel, Mapbox fuel, offline
+fuel/propane, Nominatim fallback, dedupe, route projection, and selected place
+sheets stay unchanged.

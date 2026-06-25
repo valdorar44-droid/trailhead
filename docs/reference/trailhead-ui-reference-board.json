@@ -1,0 +1,447 @@
+{
+  "version": 1,
+  "generated_for": "Trailhead Outdoor Trip OS live-app refresh",
+  "rules": [
+    "Use references as pattern inputs, not visual overhauls.",
+    "Do not commit paid template files, premium screenshots, font files, or licensed assets unless the license explicitly permits repository redistribution.",
+    "Translate every pattern into Trailhead components using mobile/lib/design.ts tokens.",
+    "User-facing copy must avoid AI/model/provider/sandbox/debug/internal/dev wording.",
+    "Every commercial recommendation must show a visible disclosure.",
+    "No reference may override official safety, offline, source/freshness, or route-readiness requirements."
+  ],
+  "references": [
+    {
+      "id": "untitled-ui-design-system-backbone",
+      "source_url": "https://www.untitledui.com/",
+      "source_type": "paid_figma_design_system",
+      "target_surfaces": ["route_builder", "recent_saved_library", "profile", "auth", "copilot_cards", "mission_control", "web_admin"],
+      "extract_patterns": [
+        "card hierarchy",
+        "chip/button states",
+        "form fields and validation",
+        "modal and sheet spacing",
+        "empty-state composition",
+        "settings/account layouts",
+        "dark-mode variable discipline"
+      ],
+      "do_not_copy": [
+        "light SaaS visual identity",
+        "generic desktop-first layouts",
+        "raw component names as user copy",
+        "premium Figma components into repo"
+      ],
+      "codex_component_targets": [
+        "mobile/components/trip/TripCommandHeader.tsx",
+        "mobile/components/trip/RouteDayCard.tsx",
+        "mobile/components/trip/RecentPlaceCard.tsx",
+        "mobile/components/copilot/CopilotBriefCard.tsx",
+        "mobile/components/mission/MissionStatusTile.tsx"
+      ],
+      "figma_notes": "Use as component-discipline backbone. Recreate with Trailhead dark tokens, not Untitled's default brand styling.",
+      "asset_policy": "Reference only unless licensed components are manually translated into original Trailhead code. Do not commit kit files."
+    },
+    {
+      "id": "setproduct-nocra-ai-product-system",
+      "source_url": "https://www.setproduct.com/",
+      "source_type": "paid_figma_ai_ui_kit",
+      "target_surfaces": ["copilot", "ai_planner", "mission_control", "recommendation_cards"],
+      "extract_patterns": [
+        "structured assistant output cards",
+        "chat plus action-card layout",
+        "AI product dashboards translated to Planner/Copilot copy",
+        "reasoning/status panels",
+        "compact action docks"
+      ],
+      "do_not_copy": [
+        "user-facing AI/model language",
+        "generic AI SaaS gradients",
+        "large dashboard density on phone",
+        "kit assets into repo"
+      ],
+      "codex_component_targets": [
+        "mobile/components/copilot/CopilotContextStrip.tsx",
+        "mobile/components/copilot/CopilotRecommendationCard.tsx",
+        "mobile/components/copilot/CopilotActionCard.tsx",
+        "mobile/components/copilot/CopilotActionDock.tsx"
+      ],
+      "figma_notes": "Rename AI sections to Planner/Copilot/Trip ideas in user-facing UI. Keep structured cards, chips, and source rows.",
+      "asset_policy": "Reference/design only; implement original components."
+    },
+    {
+      "id": "setproduct-orion-status-dashboard",
+      "source_url": "https://www.setproduct.com/",
+      "source_type": "paid_figma_dashboard_kit",
+      "target_surfaces": ["mission_control", "route_day_status", "offline_readiness", "admin_dashboard"],
+      "extract_patterns": [
+        "status tiles",
+        "compact metric groups",
+        "readiness grid",
+        "chart/card spacing",
+        "light/dark dashboard parity"
+      ],
+      "do_not_copy": [
+        "desktop dashboard bulk",
+        "analytics jargon",
+        "chart-heavy mobile screens"
+      ],
+      "codex_component_targets": [
+        "mobile/components/mission/MissionControlCompact.tsx",
+        "mobile/components/mission/MissionStatusTile.tsx",
+        "mobile/components/offline/OfflineReadinessStrip.tsx"
+      ],
+      "figma_notes": "Translate to compact mobile tiles: Route, Offline, Weather, Camps, Services, Reports, Next action.",
+      "asset_policy": "Reference only."
+    },
+    {
+      "id": "setproduct-mobile-x-nucleus-mobile-patterns",
+      "source_url": "https://www.setproduct.com/",
+      "source_type": "paid_mobile_figma_pattern_library",
+      "target_surfaces": ["route_builder", "library", "profile", "welcome_gate", "planner"],
+      "extract_patterns": [
+        "mobile card stacks",
+        "one-handed action placement",
+        "wizard/stepper layouts",
+        "saved/recent item lists",
+        "bottom sheet and tab rhythm"
+      ],
+      "do_not_copy": [
+        "Material/iOS default look without Trailhead styling",
+        "forced onboarding carousels",
+        "unadapted app templates"
+      ],
+      "codex_component_targets": [
+        "mobile/components/trip/RouteTimeline.tsx",
+        "mobile/components/trip/SmartSuggestionDrawer.tsx",
+        "mobile/components/library/LibraryItemCard.tsx",
+        "mobile/components/welcome/WelcomeGate.tsx"
+      ],
+      "figma_notes": "Use for screen composition. Route Builder remains custom because it has route/offline/source logic.",
+      "asset_policy": "Reference only."
+    },
+    {
+      "id": "mobbin-real-world-flow-library",
+      "source_url": "https://mobbin.com/",
+      "source_type": "subscription_reference_library",
+      "target_surfaces": ["welcome_gate", "auth", "route_builder", "search", "saved_library", "copilot", "paywall", "profile"],
+      "extract_patterns": [
+        "real login/register/skip flows",
+        "search and recent-place flows",
+        "bottom sheets and action docks",
+        "saved/list/library behaviors",
+        "chat and recommendation flows",
+        "subscription/paywall behavior"
+      ],
+      "do_not_copy": [
+        "screens from competitor apps verbatim",
+        "brand-specific visual identity",
+        "paid screenshots into repo"
+      ],
+      "codex_component_targets": [
+        "mobile/components/welcome/WelcomeGate.tsx",
+        "mobile/components/trip/RecentPlacesRail.tsx",
+        "mobile/components/library/LibraryScreen.tsx",
+        "mobile/components/copilot/CopilotActionDock.tsx"
+      ],
+      "figma_notes": "Use Mobbin as flow proof. Capture pattern notes in this JSON; only store screenshots if license permits.",
+      "asset_policy": "Do not commit Mobbin screenshots unless license/workflow allows. Prefer notes + Figma frame references."
+    },
+    {
+      "id": "envato-ai-startup-dashboard",
+      "source_url": "https://elements.envato.com/ai-startup-dashboard-SW78S3D",
+      "source_type": "paid_envato_figma_dashboard_template",
+      "target_surfaces": ["mission_control", "copilot_structured_cards", "admin_dashboard"],
+      "extract_patterns": [
+        "modular dashboard composition",
+        "status/analytics cards",
+        "AI-tool presentation cards translated to Copilot cards",
+        "clean dark/light dashboard grouping"
+      ],
+      "do_not_copy": [
+        "AI startup brand style",
+        "analytics/monitoring wording",
+        "dashboard density on mobile",
+        "template screenshots/assets into public repo"
+      ],
+      "codex_component_targets": [
+        "mobile/components/mission/MissionControlCompact.tsx",
+        "mobile/components/copilot/CopilotBriefCard.tsx",
+        "dashboard/site/src/components/WebPlanner.tsx"
+      ],
+      "figma_notes": "Use for Mission Control composition only. Mobile needs simplified tiles and action chips.",
+      "asset_policy": "Reference only unless licensed assets are manually exported for internal design use and not committed."
+    },
+    {
+      "id": "creative-market-trip-planner-mobile-kit",
+      "source_url": "https://creativemarket.com/betush/7242770-Trip-Planner-Mobile-App-UI-Kit",
+      "source_type": "paid_travel_planner_mobile_ui_kit",
+      "target_surfaces": ["route_builder", "route_timeline", "recent_saved_library", "trip_detail"],
+      "extract_patterns": [
+        "itinerary card hierarchy",
+        "trip day list",
+        "destination card layout",
+        "calendar/trip overview feel",
+        "saved trip grouping"
+      ],
+      "do_not_copy": [
+        "pastel/generic travel style",
+        "hotel/vacation-only framing",
+        "template files into repo",
+        "route/offline logic shortcuts"
+      ],
+      "codex_component_targets": [
+        "mobile/components/trip/RouteDayCard.tsx",
+        "mobile/components/trip/RouteTimeline.tsx",
+        "mobile/components/trip/TripCommandHeader.tsx"
+      ],
+      "figma_notes": "Use for route/day card proportions and itinerary rhythm. Trailhead day cards must include camps, services, offline, and source/readiness states.",
+      "asset_policy": "Reference only; do not commit template exports."
+    },
+    {
+      "id": "behance-exploretrip-onboarding-login",
+      "source_url": "https://www.behance.net/gallery/145638697/ExploreTrip-App-UI",
+      "source_type": "public_visual_reference",
+      "target_surfaces": ["welcome_gate", "auth"],
+      "extract_patterns": [
+        "brand splash to sign-in/register hierarchy",
+        "clear primary/secondary actions",
+        "short headline with simple value prop"
+      ],
+      "do_not_copy": [
+        "bright blue travel identity",
+        "exact layout/illustrations",
+        "forced onboarding sequence"
+      ],
+      "codex_component_targets": [
+        "mobile/components/welcome/WelcomeGate.tsx"
+      ],
+      "figma_notes": "Create a dark Trailhead welcome gate: Create account, Log in, Continue for now, Profile walkthrough hint.",
+      "asset_policy": "Reference only; do not commit screenshot unless using an allowed internal design board."
+    },
+    {
+      "id": "dribbble-wanderly-splash-auth",
+      "source_url": "https://dribbble.com/shots/25186658-Wanderly-Travel-App-Splash-Screen",
+      "source_type": "public_visual_reference",
+      "target_surfaces": ["welcome_gate", "auth"],
+      "extract_patterns": [
+        "bold brand lockup",
+        "one headline plus two account actions",
+        "simple welcome composition"
+      ],
+      "do_not_copy": [
+        "Wanderly branding",
+        "exact background/photo",
+        "travel-only tone"
+      ],
+      "codex_component_targets": [
+        "mobile/components/welcome/WelcomeGate.tsx",
+        "mobile/components/TrailheadLaunchLoader.tsx"
+      ],
+      "figma_notes": "Trailhead version should use topo/route background and copy: Plan routes. Find places. Stay ready offline.",
+      "asset_policy": "Reference only."
+    },
+    {
+      "id": "dribbble-trip-planner-app-ui-showcase",
+      "source_url": "https://dribbble.com/shots/18547336-Trip-Planner-App-UI-Showcase",
+      "source_type": "public_visual_reference",
+      "target_surfaces": ["auth", "route_builder", "trip_cards"],
+      "extract_patterns": [
+        "travel image + login/action composition",
+        "trip planning card rhythm",
+        "social auth/action grouping"
+      ],
+      "do_not_copy": [
+        "image-led vacation-only style",
+        "social login buttons unless already supported",
+        "visual assets"
+      ],
+      "codex_component_targets": [
+        "mobile/components/welcome/WelcomeGate.tsx",
+        "mobile/components/trip/RouteDayCard.tsx"
+      ],
+      "figma_notes": "Use for spacing inspiration; keep Trailhead dark mission-control look.",
+      "asset_policy": "Reference only."
+    },
+    {
+      "id": "behance-travel-onboarding-illustrated",
+      "source_url": "https://www.behance.net/gallery/153560301/Travel-App-Onboarding-Screen-Design",
+      "source_type": "public_visual_reference",
+      "target_surfaces": ["profile_walkthrough", "optional_onboarding"],
+      "extract_patterns": [
+        "skip affordance",
+        "short feature pages",
+        "progress/dot indicator"
+      ],
+      "do_not_copy": [
+        "auto-forced carousel",
+        "illustrations",
+        "generic travel copy"
+      ],
+      "codex_component_targets": [
+        "mobile/components/WelcomeOnboardingModal.tsx"
+      ],
+      "figma_notes": "WelcomeOnboardingModal should become Profile -> App walkthrough only.",
+      "asset_policy": "Reference only."
+    },
+    {
+      "id": "expo-splashscreen-guidance",
+      "source_url": "https://docs.expo.dev/versions/latest/sdk/splash-screen/",
+      "source_type": "official_technical_docs",
+      "target_surfaces": ["native_splash", "launch_loader"],
+      "extract_patterns": [
+        "native splash should be short",
+        "use config plugin for native splash properties",
+        "hide splash after app readiness",
+        "test release builds"
+      ],
+      "do_not_copy": [
+        "long native splash delays",
+        "network work inside native splash",
+        "complex onboarding as native splash"
+      ],
+      "codex_component_targets": [
+        "mobile/app.config.js",
+        "mobile/app/_layout.tsx",
+        "mobile/components/TrailheadLaunchLoader.tsx"
+      ],
+      "figma_notes": "Design native splash as simple icon/background; branded animated loader is React Native after app mount.",
+      "asset_policy": "Official docs; no asset reuse issue."
+    },
+    {
+      "id": "android-12-splashscreen-guidance",
+      "source_url": "https://developer.android.com/develop/ui/views/launch/splash-screen",
+      "source_type": "official_technical_docs",
+      "target_surfaces": ["native_splash_android", "launch_loader"],
+      "extract_patterns": [
+        "icon/background native splash",
+        "short animation duration",
+        "avoid jarring transition",
+        "launch screen should not be full onboarding"
+      ],
+      "do_not_copy": [
+        "long startup animations",
+        "interactive decisions in native splash"
+      ],
+      "codex_component_targets": [
+        "mobile/app.config.js",
+        "mobile/components/TrailheadLaunchLoader.tsx"
+      ],
+      "figma_notes": "Welcome Gate appears after app ready, not as native splash.",
+      "asset_policy": "Official docs."
+    },
+    {
+      "id": "current-trailhead-launch-loader",
+      "source_url": "repo:mobile/components/TrailheadLaunchLoader.tsx",
+      "source_type": "current_repo_surface",
+      "target_surfaces": ["launch_loader"],
+      "extract_patterns": [
+        "dark gradient",
+        "contour line motion",
+        "route line and pins",
+        "brand lockup",
+        "loading state"
+      ],
+      "do_not_copy": [
+        "loading copy that sounds narrow or technical",
+        "long blocking loader"
+      ],
+      "codex_component_targets": [
+        "mobile/components/TrailheadLaunchLoader.tsx"
+      ],
+      "figma_notes": "Keep and refine. Copy options: Loading your trip space / Preparing maps and places / Checking saved trips.",
+      "asset_policy": "Existing repo component."
+    },
+    {
+      "id": "current-trailhead-welcome-modal",
+      "source_url": "repo:mobile/components/WelcomeOnboardingModal.tsx",
+      "source_type": "current_repo_surface",
+      "target_surfaces": ["profile_walkthrough", "optional_help"],
+      "extract_patterns": [
+        "feature pages",
+        "Explore Route Map Ready grouping",
+        "cards with icon/tone/body",
+        "profile/rig setup CTA"
+      ],
+      "do_not_copy": [
+        "first-run auto-popup",
+        "forced onboarding before app use"
+      ],
+      "codex_component_targets": [
+        "mobile/components/WelcomeOnboardingModal.tsx",
+        "mobile/app/_layout.tsx",
+        "mobile/app/(tabs)/profile.tsx"
+      ],
+      "figma_notes": "Move to Profile -> App walkthrough. Welcome Gate only hints where to find it.",
+      "asset_policy": "Existing repo component."
+    },
+    {
+      "id": "google-maps-offline-area-pattern",
+      "source_url": "https://support.google.com/maps/answer/6291838",
+      "source_type": "official_product_help_reference",
+      "target_surfaces": ["library", "offline_downloads", "route_builder"],
+      "extract_patterns": [
+        "downloaded areas mental model",
+        "offline search/place info/driving directions",
+        "manage/update/delete offline areas",
+        "clear limitations"
+      ],
+      "do_not_copy": [
+        "Google UI styling",
+        "map data terms",
+        "drive-only assumptions"
+      ],
+      "codex_component_targets": [
+        "mobile/components/library/OfflineAreaCard.tsx",
+        "mobile/components/offline/OfflineReadinessStrip.tsx"
+      ],
+      "figma_notes": "Trailhead Library should show map areas + trip packs + meeting-point packs, not a desktop filesystem.",
+      "asset_policy": "Reference only."
+    },
+    {
+      "id": "osmand-offline-map-file-pattern",
+      "source_url": "https://osmand.net/docs/user/personal/maps-resources/",
+      "source_type": "product_docs_reference",
+      "target_surfaces": ["library", "downloads", "imports"],
+      "extract_patterns": [
+        "offline maps by region/file",
+        "favorites/POIs/routes resources",
+        "offline customization",
+        "downloaded resource management"
+      ],
+      "do_not_copy": [
+        "power-user file-manager complexity",
+        "OsmAnd visual style",
+        "technical map-file copy"
+      ],
+      "codex_component_targets": [
+        "mobile/components/library/LibraryScreen.tsx",
+        "mobile/components/library/LibraryItemCard.tsx"
+      ],
+      "figma_notes": "Use filesystem logic underneath; present as mobile Library: Trips, Places, Downloads, Imports, Activity Packs.",
+      "asset_policy": "Reference only."
+    },
+    {
+      "id": "figma-dev-mode-mcp-handoff",
+      "source_url": "https://www.figma.com/blog/",
+      "source_type": "official_tooling_reference",
+      "target_surfaces": ["figma_handoff", "codex_workflow"],
+      "extract_patterns": [
+        "Dev Mode design context to coding agents",
+        "named frames/components",
+        "design specs and variables",
+        "use official/secure MCP paths when available"
+      ],
+      "do_not_copy": [
+        "untrusted MCP packages with shell execution",
+        "one-off generated UI that ignores repo components",
+        "design values hardcoded outside tokens"
+      ],
+      "codex_component_targets": [
+        "docs/reference/trailhead-ui-reference-board.json",
+        "mobile/lib/design.ts",
+        "mobile/lib/activityTheme.ts"
+      ],
+      "figma_notes": "Figma is source of visual spec; this JSON is source of implementation intent. Codex must map frames to Trailhead components.",
+      "asset_policy": "Tooling reference; no asset reuse."
+    }
+  ]
+}

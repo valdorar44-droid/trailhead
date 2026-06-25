@@ -104,9 +104,19 @@
 
 ## Release
 
-- GitHub commit: pending.
-- Production OTA: pending.
-- Preview OTA: pending.
+- GitHub commit: `b3699c7` (`Extract route search layering checkpoint`)
+- Production OTA:
+  - Update group: `121ff29d-88da-4d4f-98e0-04f633a729fb`
+  - Android update: `019efe5e-73bd-7e10-9c9e-8177a72cb1e5`
+  - iOS update: `019efe5e-73bd-73fd-abfc-32021226b3a5`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/121ff29d-88da-4d4f-98e0-04f633a729fb`
+- Preview OTA:
+  - Update group: `f579cc32-ab38-4a82-b1ae-63ed7baac40c`
+  - Android update: `019efe5f-26ef-759d-9c08-233f07d24519`
+  - iOS update: `019efe5f-26ef-71d9-9849-8d3d4208f04e`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/f579cc32-ab38-4a82-b1ae-63ed7baac40c`
 
 ## Remaining Risks
 

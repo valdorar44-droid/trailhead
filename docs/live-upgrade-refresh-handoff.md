@@ -2,8 +2,7 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 15 implemented locally; release decision
-pending.
+**Status at save time:** Checkpoint 15 implemented, pushed, and OTA released.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
@@ -25,12 +24,18 @@ tools. It captures what is already complete and what should happen next.
   `7379c0a5-fcdf-48a3-ba5a-5744815b8a86`.
 - Latest route-builder preview OTA:
   `1b7b6b96-367d-4916-b30e-6bfbdf0797bc`.
+- Latest route/search implementation commit:
+  `b3699c7 Extract route search layering checkpoint`.
+- Latest route/search production OTA:
+  `121ff29d-88da-4d4f-98e0-04f633a729fb`.
+- Latest route/search preview OTA:
+  `f579cc32-ab38-4a82-b1ae-63ed7baac40c`.
 - Latest local route/search checkpoint:
   Checkpoint 15 extracted `RouteBuilderTimelineActions` and
   `RouteBuilderInsertNotice`, added map search layer policy, and added
   `RouteSearchModal` fallback lookup coverage.
-- Current repo check before this handoff: Checkpoint 15 validation passed
-  locally; release records are pending until commit, push, and OTA complete.
+- Current repo check before this handoff: Checkpoint 15 validation, push, and
+  OTA release passed.
 
 ## MCP / Research State
 

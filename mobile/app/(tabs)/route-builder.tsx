@@ -17,6 +17,7 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderActiveDayStop from '@/components/routeBuilder/RouteBuilderActiveDayStop';
+import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteBuilderInsertNotice from '@/components/routeBuilder/RouteBuilderInsertNotice';
 import RouteBuilderLegActions from '@/components/routeBuilder/RouteBuilderLegActions';
@@ -4950,18 +4951,16 @@ export default function RouteBuilderScreen() {
       </ScrollView>
       </TrailheadSheet>
 
-      {!keyboardVisible && <View style={[s.footer, { bottom: 18 + bottomInset }]} pointerEvents="box-none">
-        <View>
-          <Text style={s.footerMiles}>{fmtRouteDistance(totals.miles)}</Text>
-          <Text style={s.footerSub}>
-            {totals.stops} stops · {totals.camps} camps · {fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / ${totals.miles > 0 ? Math.max(1, Math.round(planningStats.fuelCost)) : 0} · {fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg))}
-          </Text>
-        </View>
-        <TouchableOpacity style={[s.previewBtn, routeSaving && { opacity: 0.65 }]} onPress={() => saveRoute(true)} disabled={routeSaving}>
-          <Ionicons name="map-outline" size={16} color="#fff" />
-          <Text style={s.previewText}>OPEN ON MAP</Text>
-        </TouchableOpacity>
-      </View>}
+      {!keyboardVisible ? (
+        <RouteBuilderFooterDock
+          bottom={18 + bottomInset}
+          distanceLabel={fmtRouteDistance(totals.miles)}
+          summaryLabel={`${totals.stops} stops · ${totals.camps} camps · ${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / $${totals.miles > 0 ? Math.max(1, Math.round(planningStats.fuelCost)) : 0} · ${fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg))}`}
+          actionLabel="OPEN ON MAP"
+          saving={routeSaving}
+          onPressAction={() => saveRoute(true)}
+        />
+      ) : null}
 
       <Modal visible={!!selectedCamp} transparent animationType="slide" onRequestClose={() => setSelectedCamp(null)}>
         <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setSelectedCamp(null)}>
@@ -6217,17 +6216,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   restToggleText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   dayHoursBox: { width: 82, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 8, paddingVertical: 4 },
   dayControlMeta: { flex: 1, color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'right' },
-  footer: {
-    position: 'absolute', left: 14, right: 14, bottom: 96,
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    padding: 14, borderRadius: 20,
-    backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border,
-    shadowColor: '#000', shadowOpacity: 0.36, shadowRadius: 22, shadowOffset: { width: 0, height: 12 },
-  },
-  footerMiles: { color: C.text, fontSize: 18, fontFamily: mono, fontWeight: '900' },
-  footerSub: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
-  previewBtn: { flexDirection: 'row', alignItems: 'center', gap: 7, backgroundColor: C.green, borderRadius: 12, paddingHorizontal: 18, paddingVertical: 12 },
-  previewText: { color: '#fff', fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
   filterSheet: {
     maxHeight: '78%',

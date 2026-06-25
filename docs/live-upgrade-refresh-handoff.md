@@ -231,10 +231,10 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 17 - Route Builder Footer Dock**
+**Checkpoint 18 - Route Builder Timeline Day Rows**
 
-Extract the fixed bottom route summary/open-on-map dock from
-`mobile/app/(tabs)/route-builder.tsx` into a typed reusable component. Keep
-save/open-on-map behavior, route readiness, and trip geometry unchanged; audit
-against the Checkpoint 16 stop-row screenshot so the footer does not obscure
-active itinerary controls on web or native.
+Extract the route day cards and their action rail from
+`mobile/app/(tabs)/route-builder.tsx` into typed reusable components. Keep day
+planning, camp selection, discovery scans, route readiness, and saved geometry
+unchanged; audit against Mobbin route timeline examples and the existing Figma
+checkpoint board before code.

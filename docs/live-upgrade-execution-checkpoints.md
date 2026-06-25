@@ -133,6 +133,14 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Save design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
 
+17. **Route Builder Footer Dock**
+    - Status: complete for fixed route summary/open-on-map dock extraction.
+    - Extract footer summary and primary map action into a reusable component.
+    - Keep route totals, fuel estimates, saved geometry, route saving,
+      keyboard visibility, and safe-area positioning unchanged.
+    - Save design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshot.
+
 ## Refresh Handoff
 
 - Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.
@@ -150,6 +158,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-15-route-search-layering-audit.md`.
 - Checkpoint 16 stop-row extraction context is saved in
   `docs/live-upgrade-checkpoint-16-route-builder-stop-rows-audit.md`.
+- Checkpoint 17 footer-dock extraction context is saved in
+  `docs/live-upgrade-checkpoint-17-route-builder-footer-dock-audit.md`.
 
 ## Validation Gate
 

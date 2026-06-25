@@ -33,6 +33,10 @@ import {
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderTimelineDayCard from '@/components/routeBuilder/RouteBuilderTimelineDayCard';
 import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
+import useRouteBuilderDiscoveryState, {
+  type DiscoveryTab,
+  type LegSearchContext,
+} from '@/components/routeBuilder/useRouteBuilderDiscoveryState';
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -152,30 +156,12 @@ type BuilderStop = {
   routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
 };
 type SearchPlace = RouteBuilderSearchPlace;
-type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
 type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'private' | 'any';
 type CampCadenceMode = 'nightly' | 'alternate' | 'manual';
 type RoutePlaceSelection =
   | { kind: 'gas'; day: number; place: any; data: GasStation }
   | { kind: 'poi'; day: number; place: any; data: OsmPoi }
   | { kind: 'excursion'; day: number; place: any; data: ExcursionCandidate };
-type LegSearchContext = {
-  from: { lat: number; lng: number; name: string };
-  to: { lat: number; lng: number; name: string };
-  miles: number;
-  center: { lat: number; lng: number };
-  targetDay?: number;
-  purpose?: 'leg' | 'overnight';
-  routeCoords?: [number, number][];
-  routeSource?: 'saved' | 'live' | 'straight';
-};
-type DiscoveryResults = {
-  camps: CampsitePin[];
-  gas: GasStation[];
-  pois: OsmPoi[];
-  excursions: ExcursionCandidate[];
-  summary: string;
-};
 type RouteDayPlan = {
   day: number;
   campWindowLabel: string;
@@ -194,11 +180,6 @@ type RouteDayPlan = {
   rest: boolean;
   complete: boolean;
 };
-type InlineSearchState = {
-  day: number;
-  tab: DiscoveryTab;
-  label: string;
-} | null;
 type TripBuildMode = 'recommended' | 'blank';
 type DistanceMode = 'hours' | 'miles';
 type RouteTabMode = 'hub' | 'wizard';
@@ -270,7 +251,6 @@ const BUILD_STATUS_LINES = [
   'Adding fuel and useful stops',
   'Saving the route preview',
 ];
-const EMPTY_DISCOVERY_RESULTS: DiscoveryResults = { camps: [], gas: [], pois: [], excursions: [], summary: '' };
 
 function normalizedWaterSubtype(place: Pick<OsmPoi, 'type' | 'subtype'> & Record<string, any>) {
   if (String(place.type || '') !== 'water') return '';
@@ -1437,11 +1417,21 @@ export default function RouteBuilderScreen() {
   const [insertAfterId, setInsertAfterId] = useState<string | null>(null);
   const [insertTargetDay, setInsertTargetDay] = useState<number | null>(null);
   const [replaceStopId, setReplaceStopId] = useState<string | null>(null);
-  const [discoverTab, setDiscoverTab] = useState<DiscoveryTab>('camps');
-  const [discoverLoading, setDiscoverLoading] = useState(false);
-  const [activeDiscoveryKey, setActiveDiscoveryKey] = useState<string | null>(null);
-  const [discoveryByKey, setDiscoveryByKey] = useState<Record<string, DiscoveryResults>>({});
-  const [inlineSearch, setInlineSearch] = useState<InlineSearchState>(null);
+  const {
+    discoverTab,
+    setDiscoverTab,
+    discoverLoading,
+    setDiscoverLoading,
+    activeDiscoveryKey,
+    setActiveDiscoveryKey,
+    activeDiscovery,
+    inlineSearch,
+    setInlineSearch,
+    discoveryKeyFor,
+    storeDiscoveryResults,
+    clearDiscoveryResults,
+    resetDiscoveryResults,
+  } = useRouteBuilderDiscoveryState({ activeDay, insertTargetDay });
   const [offlinePlaces, setOfflinePlaces] = useState<OsmPoi[]>([]);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
@@ -1753,7 +1743,6 @@ export default function RouteBuilderScreen() {
   const discoverContextLabel = legContext
     ? `${legContext.from.name.split(',')[0]} to ${legContext.to.name.split(',')[0]} · ${fmtRouteDistance(legContext.miles)}`
     : anchor ? anchor.name.split(',')[0] : 'add a stop first';
-  const activeDiscovery = activeDiscoveryKey ? discoveryByKey[activeDiscoveryKey] ?? EMPTY_DISCOVERY_RESULTS : EMPTY_DISCOVERY_RESULTS;
   const camps = activeDiscovery.camps;
   const gas = activeDiscovery.gas;
   const pois = activeDiscovery.pois;
@@ -2125,26 +2114,6 @@ export default function RouteBuilderScreen() {
     }
   }
 
-  function discoveryKeyFor(tab: DiscoveryTab, target: { lat: number; lng: number }, leg: LegSearchContext | null) {
-    if (leg) {
-      return [
-        `day:${leg.targetDay ?? activeDay}`,
-        `tab:${tab}`,
-        `from:${leg.from.lat.toFixed(4)},${leg.from.lng.toFixed(4)}`,
-        `to:${leg.to.lat.toFixed(4)},${leg.to.lng.toFixed(4)}`,
-        `purpose:${leg.purpose ?? 'leg'}`,
-      ].join('|');
-    }
-    return [`day:${insertTargetDay ?? activeDay}`, `tab:${tab}`, `area:${target.lat.toFixed(4)},${target.lng.toFixed(4)}`].join('|');
-  }
-
-  function storeDiscoveryResults(key: string, patch: Partial<DiscoveryResults>) {
-    setDiscoveryByKey(prev => ({
-      ...prev,
-      [key]: { ...(prev[key] ?? EMPTY_DISCOVERY_RESULTS), ...patch },
-    }));
-  }
-
   async function resolveLegSearchContext(leg: LegSearchContext): Promise<LegSearchContext> {
     if (leg.routeCoords && leg.routeCoords.length >= 2) return leg;
     const savedCoords = activeTrip?.route_geometry?.coords;
@@ -2410,11 +2379,6 @@ export default function RouteBuilderScreen() {
     } finally {
       setDiscoverLoading(false);
     }
-  }
-
-  function clearDiscoveryResults() {
-    setActiveDiscoveryKey(null);
-    setInlineSearch(null);
   }
 
   async function discover() {
@@ -3938,9 +3902,7 @@ export default function RouteBuilderScreen() {
     setDayDriveTargets({});
     setImportedTripId(null);
     setSearchResults([]);
-    setInlineSearch(null);
-    setActiveDiscoveryKey(null);
-    setDiscoveryByKey({});
+    resetDiscoveryResults();
     setSelectedRoutePlace(null);
   }
 

@@ -237,15 +237,23 @@ Checkpoint 27 - Route Builder Discovery State Boundary:
 - Production OTA update group: pending.
 - Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
-- Audit doc: pending.
-- Design decision: pending.
-- Scope:
-  - Audit route discovery state and scan helpers for the next extraction
-    boundary.
-  - Keep provider calls, offline fallback, camp replacement, add-place
-    behavior, selected camp sheets, and route calculations unchanged.
-  - Continue Mobbin/Figma research against route discovery sheets and search
-    result workflows before code.
+- Audit doc:
+  `docs/live-upgrade-checkpoint-27-route-builder-discovery-state-boundary-audit.md`.
+- Design decision:
+  `docs/design-decisions/route-builder-discovery-state-boundary.md`.
+- Figma evidence:
+  - File `yP342OKFtUQ1J0RCwnzH6s`
+  - Frame `37:2`
+  - Screenshot
+    `/tmp/trailhead-checkpoint-27-route-builder-discovery-state-boundary-figma.png`
+- Playwright evidence:
+  `/tmp/trailhead-route-builder-checkpoint-27-discovery-state-boundary-web.png`
+- Validation:
+  - `npx tsc --noEmit`
+  - `npm run audit:copy`
+  - `npm run audit:routes`
+  - `node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" components/routeBuilder/useRouteBuilderDiscoveryState.ts`
+  - `git diff --check`
 
 ## Repo Note
 
@@ -260,9 +268,9 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 27 - Route Builder Discovery State Boundary**
+**Checkpoint 28 - Route Builder Discovery Provider Boundary**
 
-Audit route discovery state and scan helpers for the next extraction boundary.
-Keep provider calls, offline fallback, camp replacement, add-place behavior,
-selected camp sheets, and route calculations unchanged; continue Mobbin/Figma
-research against route discovery sheets and search result workflows before code.
+Audit `runDiscovery`, `resolveLegSearchContext`, and provider fallback branches
+now that discovery state is isolated. Extract the next provider-orchestration
+boundary only if Mapbox, offline, Nominatim, camp ranking, route projection, and
+sheet behavior stay unchanged.

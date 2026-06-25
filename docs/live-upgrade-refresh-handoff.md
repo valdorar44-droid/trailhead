@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 12 implemented locally; release decision
+**Status at save time:** Checkpoint 14 implemented locally; release decision
 pending.
 
 This note is the restart point for the next Codex session after refreshing MCP
@@ -10,7 +10,7 @@ tools. It captures what is already complete and what should happen next.
 
 ## Current State
 
-- Checkpoints 1-13 are complete through the first Route Builder extraction
+- Checkpoints 1-14 are complete through the Route Builder workspace extraction
   slice in `docs/live-upgrade-execution-checkpoints.md`.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
@@ -25,8 +25,11 @@ tools. It captures what is already complete and what should happen next.
   `06a76ac2-b091-4f43-9983-53c9d56c07e5`.
 - Latest route-builder preview OTA:
   `db8a0eab-05ec-4618-870b-2b532f8c8a54`.
-- Current repo check before this handoff: clean and synced with origin after
-  release record push.
+- Latest local route-builder workspace checkpoint:
+  Checkpoint 14 extracted `RouteBuilderWorkspaceSummary` and
+  `RouteBuilderReadinessCard`; release decision is pending.
+- Current repo check before this handoff: Checkpoint 14 validation passed; see
+  git status for final commit state.
 
 ## MCP / Research State
 
@@ -61,6 +64,7 @@ fresh shipped-app references.
 11. Planner Composer + Copy Cleanup.
 12. Map Navigation Stability + Mapbox Native QA.
 13. Route Builder Deeper Redesign first slice.
+14. Route Builder Workspace Extraction.
 
 ## Remaining Work Queue
 
@@ -79,9 +83,14 @@ Verify:
 
 ### 2. Route Builder Deeper Redesign
 
-Checkpoint 13 extracted the hub and cleaned first Route Builder copy hits. Still
+Checkpoint 13 extracted the hub and cleaned first Route Builder copy hits.
+Checkpoint 14 extracted the active workspace summary and trip-readiness card.
+Still
 needed:
 
+- Timeline actions and insert notice.
+- Stop rows and leg action rows.
+- Footer dock.
 - Route timeline.
 - Recent/saved strip.
 - Smart suggestions drawer.
@@ -200,7 +209,9 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 13 - Route Builder Deeper Redesign**
+**Checkpoint 15 - Route Builder Timeline Actions**
 
-Proceed only after Checkpoint 12 has been smoke-tested on iOS or the remaining
-native crash evidence has been captured.
+Extract timeline actions and the insert guidance card from
+`mobile/app/(tabs)/route-builder.tsx`, then continue to stop-row/leg-action
+extraction only after the smaller surface passes TypeScript, copy, route, Figma,
+and Playwright checks.

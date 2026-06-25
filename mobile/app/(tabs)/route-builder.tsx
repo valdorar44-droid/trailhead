@@ -17,6 +17,8 @@ import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
+import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
+import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -4801,16 +4803,10 @@ export default function RouteBuilderScreen() {
       </View>
 
       <TrailheadSheet handle={false} style={[s.routeEditorPanel, { marginBottom: keyboardVisible ? 12 : 18 + bottomInset }]} contentStyle={s.routeSheetContent}>
-        <View style={s.workspaceHandleArea}>
-          <View style={s.workspaceHandle} />
-          <View style={s.workspaceHandleSummary}>
-            <View>
-              <Text style={s.workspaceSheetTitle}>{resolvedRouteName()}</Text>
-              <Text style={s.workspaceSheetMeta}>{fmtRouteDistance(totals.miles)} · {fmtHours(planningStats.driveHours)} · {days.length} days · {totals.camps} camps</Text>
-            </View>
-            <Ionicons name="map-outline" size={18} color={C.text3} />
-          </View>
-        </View>
+        <RouteBuilderWorkspaceSummary
+          title={resolvedRouteName()}
+          meta={`${fmtRouteDistance(totals.miles)} · ${fmtHours(planningStats.driveHours)} · ${days.length} days · ${totals.camps} camps`}
+        />
 
       <ScrollView
         style={s.body}
@@ -4879,40 +4875,11 @@ export default function RouteBuilderScreen() {
           </View>
         </TourTarget>
 
-        <View style={s.readinessCard}>
-          <View style={s.readinessTop}>
-            <View>
-              <Text style={s.readinessTitle}>Trip readiness</Text>
-              <Text style={s.readinessSub}>Camps, fuel, route, and downloads to check before leaving signal.</Text>
-            </View>
-            <View style={[s.readinessBadge, routeChecks.some(c => c.level === 'warn') ? s.readinessBadgeWarn : s.readinessBadgeOk]}>
-              <Text style={[s.readinessBadgeText, routeChecks.some(c => c.level === 'warn') ? { color: C.yellow } : { color: C.green }]}>
-                {routeChecks.some(c => c.level === 'warn') ? 'CHECK' : 'READY'}
-              </Text>
-            </View>
-          </View>
-          <View style={s.checkGrid}>
-            {(routeChecks.length ? routeChecks : [{ level: 'warn' as const, label: 'Start', text: 'Add your first route stop.' }]).map(check => (
-              <View key={`${check.label}-${check.text}`} style={s.checkRow}>
-                <Ionicons name={check.level === 'ok' ? 'checkmark-circle-outline' : 'alert-circle-outline'} size={15} color={check.level === 'ok' ? C.green : C.yellow} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.checkLabel}>{check.label.toUpperCase()}</Text>
-                  <Text style={s.checkText}>{check.text}</Text>
-                </View>
-              </View>
-            ))}
-          </View>
-          {routeOfflineReadiness.regionNames.length ? (
-            <View style={s.offlineMiniGrid}>
-              {routeOfflineReadiness.rows.map(row => (
-                <View key={row.key} style={[s.offlineMiniPill, row.ready ? s.offlineMiniPillReady : row.needed ? s.offlineMiniPillWarn : null]}>
-                  <Ionicons name={row.ready ? 'checkmark-circle-outline' : row.needed ? 'cloud-download-outline' : 'remove-circle-outline'} size={12} color={row.ready ? C.green : row.needed ? C.yellow : C.text3} />
-                  <Text style={[s.offlineMiniText, row.ready ? { color: C.green } : row.needed ? { color: C.yellow } : null]}>{row.label}</Text>
-                </View>
-              ))}
-            </View>
-          ) : null}
-        </View>
+        <RouteBuilderReadinessCard
+          checks={routeChecks}
+          offlineRows={routeOfflineReadiness.rows}
+          showOfflineRows={routeOfflineReadiness.regionNames.length > 0}
+        />
 
         {searchResults.length > 0 && (
           <View style={s.resultsBox}>
@@ -5699,11 +5666,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   routeSheetContent: { padding: 14, gap: 13 },
   routeSheetFullContent: { flex: 1 },
-  workspaceHandleArea: { paddingTop: 8, paddingHorizontal: 18, paddingBottom: 6, gap: 6 },
-  workspaceHandle: { width: 58, height: 5, borderRadius: 3, backgroundColor: 'rgba(255,255,255,0.24)', alignSelf: 'center' },
-  workspaceHandleSummary: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
-  workspaceSheetTitle: { color: C.text, fontSize: 17, fontWeight: '900' },
-  workspaceSheetMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 1 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.glassStrong,
@@ -6163,23 +6125,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   searchInput: { flex: 1, color: C.text, fontSize: 13, paddingVertical: 11 },
   searchBtn: { alignSelf: 'stretch', minWidth: 56, backgroundColor: C.orange, borderTopRightRadius: 11, borderBottomRightRadius: 11, alignItems: 'center', justifyContent: 'center' },
   searchBtnText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  readinessCard: { borderWidth: 1, borderColor: C.border, borderRadius: 12, padding: 12, backgroundColor: C.s1, gap: 10 },
-  readinessTop: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 10 },
-  readinessTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
-  readinessSub: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 2, maxWidth: 235 },
-  readinessBadge: { borderRadius: 999, borderWidth: 1, paddingHorizontal: 9, paddingVertical: 5 },
-  readinessBadgeWarn: { borderColor: C.yellow + '66', backgroundColor: C.yellow + '14' },
-  readinessBadgeOk: { borderColor: C.green + '66', backgroundColor: C.green + '14' },
-  readinessBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7 },
-  checkGrid: { gap: 8 },
-  checkRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 7 },
-  checkLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
-  checkText: { color: C.text2, fontSize: 11, lineHeight: 16, marginTop: 1 },
-  offlineMiniGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, paddingTop: 2 },
-  offlineMiniPill: { minHeight: 26, flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 999, paddingHorizontal: 8, backgroundColor: C.s2 },
-  offlineMiniPillReady: { borderColor: C.green + '55', backgroundColor: C.green + '10' },
-  offlineMiniPillWarn: { borderColor: C.yellow + '55', backgroundColor: C.yellow + '10' },
-  offlineMiniText: { color: C.text3, fontSize: 8.5, fontFamily: mono, fontWeight: '900' },
   resultsBox: { borderWidth: 1, borderColor: C.border, borderRadius: 12, overflow: 'hidden' },
   resultRow: { flexDirection: 'row', alignItems: 'center', gap: 10, padding: 11, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1 },
   resultName: { color: C.text, fontSize: 13, fontWeight: '700' },

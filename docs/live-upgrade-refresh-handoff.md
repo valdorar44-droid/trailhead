@@ -2,8 +2,7 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 18 implemented and validated; push/OTA
-release pending.
+**Status at save time:** Checkpoint 18 implemented, pushed, and OTA released.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
@@ -35,8 +34,8 @@ tools. It captures what is already complete and what should happen next.
   Checkpoint 18 extracted `RouteBuilderTimelineDayCard`, removed stale inline
   route-day styles, and kept route planning/discovery/readiness behavior
   unchanged.
-- Current repo check before this handoff: Checkpoint 18 validation passed;
-  release record pending push/OTA.
+- Current repo check before this handoff: Checkpoint 18 validation, push, and
+  OTA release passed.
 
 ## MCP / Research State
 
@@ -212,17 +211,17 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 17 - Route Builder Footer Dock:
+Checkpoint 18 - Route Builder Timeline Day Rows:
 
-- Code commit: `bc83331` (`Extract route builder footer dock`), pushed to
+- Code commit: `3938aff` (`Extract route builder timeline day rows`), pushed to
   `master`.
 - Production OTA update group:
-  `e707456e-fd48-4fef-9875-f4ede9cde94d`
+  `21ff72c3-a030-4e74-ac95-346cbfb09322`
 - Preview OTA update group:
-  `cd4e38e3-b02c-453b-84d5-6087c8f9bdff`
+  `7099756b-4036-4f3b-8561-c2b67f235263`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-17-route-builder-footer-dock-audit.md`.
+  `docs/live-upgrade-checkpoint-18-route-builder-timeline-day-rows-audit.md`.
 
 ## Repo Note
 

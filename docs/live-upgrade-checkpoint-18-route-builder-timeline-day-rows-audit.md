@@ -78,9 +78,13 @@
 
 ## Release
 
-- GitHub commit: pending.
-- Production OTA: pending.
-- Preview OTA: pending.
+- GitHub commit: `3938aff` (`Extract route builder timeline day rows`), pushed
+  to `master`.
+- Production OTA update group:
+  `21ff72c3-a030-4e74-ac95-346cbfb09322`
+- Preview OTA update group:
+  `7099756b-4036-4f3b-8561-c2b67f235263`
+- Runtime: `native-20260614-sdk54-1`.
 
 ## Remaining Risks
 

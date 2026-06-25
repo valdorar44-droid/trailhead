@@ -29,11 +29,8 @@ type Props = {
   premiumMapVisible: boolean;
   premiumMapItems: readonly PremiumMapStyleOption[];
   extremeActive: boolean;
-  extremeSelectable: boolean;
-  extremeSub: string;
   onClose: () => void;
   onSelectMapLayer: (id: string) => void;
-  onSelectExplorer: () => void;
 };
 
 export default function MapStyleSheet({
@@ -44,11 +41,8 @@ export default function MapStyleSheet({
   premiumMapVisible,
   premiumMapItems,
   extremeActive,
-  extremeSelectable,
-  extremeSub,
   onClose,
   onSelectMapLayer,
-  onSelectExplorer,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -68,7 +62,7 @@ export default function MapStyleSheet({
           </View>
 
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.grid}>
-            {options.map(option => {
+            {options.slice(0, 1).map(option => {
               const active = option.id === activeMapLayer;
               return (
                 <TouchableOpacity
@@ -95,33 +89,6 @@ export default function MapStyleSheet({
               );
             })}
 
-            <TouchableOpacity
-              style={[
-                s.card,
-                s.extremeCard,
-                extremeActive && s.extremeCardActive,
-                !extremeSelectable && s.extremeCardLocked,
-              ]}
-              activeOpacity={0.86}
-              onPress={() => {
-                onSelectExplorer();
-                if (extremeSelectable) onClose();
-              }}
-            >
-              <View style={s.extremePreview}>
-                <Text style={s.extremeWord}>EXPLORER</Text>
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.extremeTitle} numberOfLines={1}>EXPLORER</Text>
-                <Text style={s.cardSub} numberOfLines={1}>{extremeSub}</Text>
-              </View>
-              <Ionicons
-                name={extremeActive ? 'checkmark-circle' : 'ellipse-outline'}
-                size={18}
-                color="#ef4444"
-              />
-            </TouchableOpacity>
-
             {premiumMapVisible ? premiumMapItems.map(option => (
               <TouchableOpacity
                 key={`mapbox-${option.id}`}
@@ -142,6 +109,33 @@ export default function MapStyleSheet({
                 {extremeActive && option.active ? <Ionicons name="checkmark-circle" size={18} color={option.color} /> : null}
               </TouchableOpacity>
             )) : null}
+
+            {options.slice(1).map(option => {
+              const active = option.id === activeMapLayer;
+              return (
+                <TouchableOpacity
+                  key={option.id}
+                  style={[s.card, active && s.cardActive]}
+                  activeOpacity={0.86}
+                  onPress={() => {
+                    onSelectMapLayer(option.id);
+                    onClose();
+                  }}
+                >
+                  <View style={[s.preview, { backgroundColor: option.colors[0] }]}>
+                    <View style={[s.previewWater, { backgroundColor: option.colors[2] }]} />
+                    <View style={[s.previewLand, { backgroundColor: option.colors[1] }]} />
+                    <View style={s.previewRoad} />
+                    <View style={[s.previewRoad, s.previewRoadAlt]} />
+                  </View>
+                  <View style={{ flex: 1, minWidth: 0 }}>
+                    <Text style={s.cardTitle} numberOfLines={1}>{option.title}</Text>
+                    <Text style={s.cardSub} numberOfLines={1}>{option.sub}</Text>
+                  </View>
+                  {active ? <Ionicons name="checkmark-circle" size={18} color={C.green} /> : null}
+                </TouchableOpacity>
+              );
+            })}
           </ScrollView>
         </TouchableOpacity>
       </TouchableOpacity>
@@ -211,18 +205,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderColor: C.green + '80',
     backgroundColor: C.green + '12',
   },
-  extremeCard: {
-    borderColor: '#7f1d1d88',
-    backgroundColor: 'rgba(20,20,22,0.92)',
-  },
-  extremeCardActive: {
-    borderColor: '#ef4444',
-    backgroundColor: '#7f1d1d22',
-  },
-  extremeCardLocked: {
-    borderColor: '#4b5563',
-    backgroundColor: '#18181b',
-  },
   premiumCard: {
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(255,255,255,0.055)',
@@ -278,27 +260,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     color: C.text3,
     fontSize: 10,
     marginTop: 2,
-  },
-  extremePreview: {
-    width: 58,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    borderColor: '#ef444488',
-    backgroundColor: '#111113',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  extremeWord: {
-    color: '#ef4444',
-    fontSize: 9,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  extremeTitle: {
-    color: '#ef4444',
-    fontSize: 12.5,
-    fontWeight: '900',
   },
   premiumPreview: {
     width: 58,

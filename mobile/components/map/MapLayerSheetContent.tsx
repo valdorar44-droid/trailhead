@@ -52,9 +52,6 @@ type Props = {
   activeMapLayer: string;
   onSelectMapLayer: (id: string) => void;
   extremeMapLayerActive: boolean;
-  extremeMapLayerSelectable: boolean;
-  extremeMapLayerSub: string;
-  onSelectExplorerMapLayer: () => void;
   layerItems: readonly LayerToggleItem[];
   premiumMapVisible: boolean;
   premiumMapItems: readonly PremiumMapItem[];
@@ -77,9 +74,6 @@ export default function MapLayerSheetContent({
   activeMapLayer,
   onSelectMapLayer,
   extremeMapLayerActive,
-  extremeMapLayerSelectable,
-  extremeMapLayerSub,
-  onSelectExplorerMapLayer,
   layerItems,
   premiumMapVisible,
   premiumMapItems,
@@ -226,7 +220,7 @@ export default function MapLayerSheetContent({
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.sheetContent}>
       <Text style={s.sectionHead}>MAP STYLE</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
-        {mapStyleOptions.map(option => {
+        {mapStyleOptions.slice(0, 1).map(option => {
           const active = option.id === activeMapLayer;
           return (
             <TouchableOpacity
@@ -249,29 +243,6 @@ export default function MapLayerSheetContent({
             </TouchableOpacity>
           );
         })}
-        <TouchableOpacity
-          style={[
-            s.styleCard,
-            s.extremeStyleCard,
-            extremeMapLayerActive && s.extremeStyleCardActive,
-            !extremeMapLayerSelectable && s.extremeStyleCardLocked,
-          ]}
-          activeOpacity={0.86}
-          onPress={onSelectExplorerMapLayer}
-        >
-          <View style={s.extremeStylePreview}>
-            <Text style={s.extremeStyleWord}>EXPLORER</Text>
-            <View style={s.extremeStyleSlash} />
-            <View style={[s.extremeStyleSlash, s.extremeStyleSlashAlt]} />
-          </View>
-          <View style={s.styleCardText}>
-            <Text style={s.extremeStyleTitle} numberOfLines={1}>EXPLORER</Text>
-            <Text style={s.styleSub} numberOfLines={1}>{extremeMapLayerSub}</Text>
-          </View>
-          {extremeMapLayerActive
-            ? <Ionicons name="checkmark-circle" size={17} color="#ef4444" />
-            : <Ionicons name="ellipse-outline" size={15} color="#ef4444" />}
-        </TouchableOpacity>
         {premiumMapVisible ? premiumMapItems.map(option => (
           <TouchableOpacity
             key={`mapbox-${option.id}`}
@@ -294,6 +265,29 @@ export default function MapLayerSheetContent({
             {extremeMapLayerActive && option.active ? <Ionicons name="checkmark-circle" size={17} color={option.color} /> : null}
           </TouchableOpacity>
         )) : null}
+        {mapStyleOptions.slice(1).map(option => {
+          const active = option.id === activeMapLayer;
+          return (
+            <TouchableOpacity
+              key={option.id}
+              style={[s.styleCard, active && s.styleCardActive]}
+              activeOpacity={0.86}
+              onPress={() => onSelectMapLayer(option.id)}
+            >
+              <View style={[s.stylePreview, { backgroundColor: option.colors[0] }]}>
+                <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
+                <View style={[s.mapStylePreviewLand, { backgroundColor: option.colors[1] }]} />
+                <View style={s.mapStylePreviewRoad} />
+                <View style={[s.mapStylePreviewRoad, s.mapStylePreviewRoadAlt]} />
+              </View>
+              <View style={s.styleCardText}>
+                <Text style={s.styleTitle} numberOfLines={1}>{option.title}</Text>
+                <Text style={s.styleSub} numberOfLines={1}>{option.sub}</Text>
+              </View>
+              {active ? <Ionicons name="checkmark-circle" size={17} color={C.green} /> : null}
+            </TouchableOpacity>
+          );
+        })}
       </ScrollView>
 
       <Text style={s.sectionHead}>LAYERS</Text>
@@ -430,18 +424,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderColor: C.green + '88',
     backgroundColor: C.green + '12',
   },
-  extremeStyleCard: {
-    borderColor: '#7f1d1d88',
-    backgroundColor: '#18181b',
-  },
-  extremeStyleCardActive: {
-    borderColor: '#ef4444',
-    backgroundColor: '#7f1d1d22',
-  },
-  extremeStyleCardLocked: {
-    borderColor: '#4b5563',
-    backgroundColor: '#171717',
-  },
   mapboxStyleCard: {
     borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: 'rgba(255,255,255,0.055)',
@@ -468,28 +450,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontFamily: mono,
     marginTop: 2,
   },
-  extremeStylePreview: {
-    height: 64,
-    borderRadius: 11,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: '#ef444488',
-    backgroundColor: '#111113',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  extremeStyleWord: {
-    color: '#ef4444',
-    fontSize: 17,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  extremeStyleTitle: {
-    color: '#ef4444',
-    fontSize: 12,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
   mapboxStylePreview: {
     height: 64,
     borderRadius: 11,
@@ -497,18 +457,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  extremeStyleSlash: {
-    position: 'absolute',
-    width: 112,
-    height: 2,
-    borderRadius: 2,
-    backgroundColor: '#ef444433',
-    transform: [{ rotate: '-18deg' }],
-  },
-  extremeStyleSlashAlt: {
-    transform: [{ rotate: '18deg' }],
-    backgroundColor: '#991b1b44',
   },
   toggleCard: {
     width: 142,

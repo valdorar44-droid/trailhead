@@ -5027,20 +5027,8 @@ function MapScreen() {
   const [mapLayer,    setMapLayerState] = useState<MapLayer>('light');
   const [premiumMapStyle, setPremiumMapStyle] = useState<PremiumMapStyle>('standard');
   const [extremeTrafficEnabled, setExtremeTrafficEnabled] = useState(false);
-  const extremeVisualSurfaces = (extremeConfig?.allowed_surfaces_visual ?? extremeConfig?.allowed_surfaces ?? []) as string[];
-  const extremeMapLayerEntitled = !!(extremeConfig?.enabled_visual ?? extremeConfig?.enabled)
-    && !!extremeConfig?.beta_active
-    && !extremeConfig?.kill_switch
-    && extremeVisualSurfaces.includes('map_layers');
-  const extremeMapboxPending = Platform.OS === 'android' && !extremeMapboxCapabilities;
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
-  const extremeMapLayerAvailable = extremeMapLayerEntitled && extremeMapboxSupported;
   const extremeMapLayerActive = mapLayer === 'extreme';
-  const extremeMapLayerSub = extremeMapboxPending
-    ? 'Checking device'
-    : !extremeMapboxSupported
-      ? 'Android fallback'
-      : (extremeConfig?.enabled ? 'Premium Mapbox mode' : 'Mapbox map styles');
   const extremeCopilotAvailable = !!extremeConfig?.enabled && !!extremeConfig?.feature_flags?.copilot;
   const [showExtremeCopilot, setShowExtremeCopilot] = useState(false);
   const [extremeCopilotInput, setExtremeCopilotInput] = useState('');
@@ -5272,34 +5260,6 @@ function MapScreen() {
   const [paywallCode, setPaywallCode] = useState('');
   const [reviewPromptVisible, setReviewPromptVisible] = useState(false);
   const [paywallMessage, setPaywallMessage] = useState('');
-
-  function selectExtremeMapLayer() {
-    if (extremeMapboxPending) {
-      setQuickToast('Checking Android EXTREME renderer support...');
-      setTimeout(() => setQuickToast(''), 2200);
-      return;
-    }
-    if (!extremeMapboxSupported) {
-      setQuickToast('EXTREME falls back to the normal map on this Android device.');
-      setTimeout(() => setQuickToast(''), 2800);
-      if (mapLayer === 'extreme') applyMapLayer('topo');
-      return;
-    }
-    if (!mapboxToken) {
-      setQuickToast('Loading Mapbox access. Try EXTREME again in a moment.');
-      setTimeout(() => setQuickToast(''), 2600);
-      return;
-    }
-    applyMapLayer('extreme');
-    setLayerTrails(true);
-    if (extremeConfig?.enabled) {
-      api.logExtremeLedger({
-        event_type: 'mapbox_mode_selected',
-        surface: 'map_layers',
-        event_data: { entry: 'layers_sheet', renderer: extremeMapboxCapabilities?.renderer ?? (Platform.OS === 'ios' ? 'metal' : 'unknown') },
-      }).catch(() => {});
-    }
-  }
 
   // POI layer
   const [showPois, setShowPois] = useState(false);
@@ -16725,16 +16685,16 @@ function MapScreen() {
     { id: 'red', title: 'Red / Night', sub: 'Night-friendly contrast', colors: ['#12090b', '#7f1d1d', '#ef4444'] },
   ];
   const premiumMapOptions: Array<{ id: PremiumMapStyle; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = [
-    { id: 'standard', label: 'Standard', sub: 'Dynamic day base', icon: 'map-outline', color: '#38bdf8' },
-    { id: 'outdoors', label: 'Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
-    { id: 'standard_satellite', label: 'Standard Sat', sub: 'Satellite + Standard', icon: 'earth-outline', color: '#22c55e' },
-    { id: 'streets', label: 'Streets', sub: 'Rendered road view', icon: 'navigate-outline', color: '#60a5fa' },
-    { id: 'navigation_day', label: 'Nav Day', sub: 'Traffic guidance', icon: 'git-merge-outline', color: '#f97316' },
-    { id: 'navigation_night', label: 'Nav Night', sub: 'Night guidance', icon: 'moon-outline', color: '#ef4444' },
-    { id: 'dawn', label: 'Dawn', sub: 'Low sun lighting', icon: 'partly-sunny-outline', color: '#f59e0b' },
-    { id: 'dusk', label: 'Dusk', sub: 'Evening lighting', icon: 'cloudy-night-outline', color: '#a855f7' },
-    { id: 'night', label: 'Night', sub: 'Standard night', icon: 'moon-outline', color: '#818cf8' },
-    { id: 'satellite_streets', label: 'Sat Streets', sub: 'Classic satellite', icon: 'image-outline', color: '#14b8a6' },
+    { id: 'outdoors', label: 'Mapbox Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
+    { id: 'standard', label: 'Mapbox Standard', sub: 'Dynamic day base', icon: 'map-outline', color: '#38bdf8' },
+    { id: 'standard_satellite', label: 'Mapbox Sat', sub: 'Satellite + Standard', icon: 'earth-outline', color: '#22c55e' },
+    { id: 'streets', label: 'Mapbox Streets', sub: 'Rendered road view', icon: 'navigate-outline', color: '#60a5fa' },
+    { id: 'navigation_day', label: 'Mapbox Nav Day', sub: 'Traffic guidance', icon: 'git-merge-outline', color: '#f97316' },
+    { id: 'navigation_night', label: 'Mapbox Nav Night', sub: 'Night guidance', icon: 'moon-outline', color: '#ef4444' },
+    { id: 'dawn', label: 'Mapbox Dawn', sub: 'Low sun lighting', icon: 'partly-sunny-outline', color: '#f59e0b' },
+    { id: 'dusk', label: 'Mapbox Dusk', sub: 'Evening lighting', icon: 'cloudy-night-outline', color: '#a855f7' },
+    { id: 'night', label: 'Mapbox Night', sub: 'Standard night', icon: 'moon-outline', color: '#818cf8' },
+    { id: 'satellite_streets', label: 'Mapbox Sat Streets', sub: 'Classic satellite', icon: 'image-outline', color: '#14b8a6' },
   ];
   const layerSheetItems = [
     { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat map' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
@@ -21085,11 +21045,8 @@ function MapScreen() {
         premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
         premiumMapItems={premiumMapItems}
         extremeActive={extremeMapLayerActive}
-        extremeSelectable={extremeMapboxSupported}
-        extremeSub={extremeMapLayerSub}
         onClose={() => setShowMapStyleSheet(false)}
         onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
-        onSelectExplorer={selectExtremeMapLayer}
       />
 
       {/* ── Route Brief Modal ── */}
@@ -21311,9 +21268,6 @@ function MapScreen() {
             activeMapLayer={mapLayer}
             onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
             extremeMapLayerActive={extremeMapLayerActive}
-            extremeMapLayerSelectable={extremeMapboxSupported}
-            extremeMapLayerSub={extremeMapLayerSub}
-            onSelectExplorerMapLayer={selectExtremeMapLayer}
             layerItems={layerSheetItems}
             premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
             premiumMapItems={premiumMapItems}

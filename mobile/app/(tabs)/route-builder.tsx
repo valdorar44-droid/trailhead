@@ -23,6 +23,7 @@ import RouteBuilderInsertNotice from '@/components/routeBuilder/RouteBuilderInse
 import RouteBuilderLegActions from '@/components/routeBuilder/RouteBuilderLegActions';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
+import RouteBuilderTimelineDayCard from '@/components/routeBuilder/RouteBuilderTimelineDayCard';
 import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
@@ -4224,55 +4225,24 @@ export default function RouteBuilderScreen() {
                 : 'travel day';
           return (
             <View key={plan.day} style={s.routeDayWrap}>
-              <TouchableOpacity activeOpacity={0.9} style={[s.routeDaySection, activeDay === plan.day && s.routeDaySectionActive]} onPress={() => setActiveDay(plan.day)}>
-                <View style={s.routeDayRail}>
-                  <View style={[s.routeDayDotLarge, { borderColor: statusColor }, plan.complete && !overDailyMax && { backgroundColor: C.green, borderColor: C.green }]} />
-                  <View style={s.routeDayStemLarge} />
-                </View>
-                <View style={s.routeDayContent}>
-                  <View style={s.routeDayHeader}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.routeDayTitle}>{plan.needsOvernight ? `${plan.campWindowLabel} Camp` : `${plan.campWindowLabel} Travel`}{plan.rest ? ' · Rest' : ''}</Text>
-                      <Text style={s.routeDayMeta}>{fmtRouteDistance(plan.miles)} · {fmtHours(plan.hours)}{plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}</Text>
-                    </View>
-                    <View style={[s.routeDayStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
-                      <Text style={[s.routeDayStatusText, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
-                    </View>
-                  </View>
-                  {camp ? (
-                    renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP')
-                  ) : plan.needsOvernight ? (
-                    <TouchableOpacity style={s.routeDayEmptyCamp} onPress={() => scanDayPlan(plan, 'camps')}>
-                      <Ionicons name="add-circle-outline" size={18} color={C.orange} />
-                      <Text style={s.routeDayEmptyCampText}>Choose overnight</Text>
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={s.routeDayTravelCard}>
-                      <Ionicons name="arrow-forward-circle-outline" size={18} color={C.text3} />
-                      <Text style={s.routeDayTravelText}>{plan.campWindowLabel} shares the next camp window.</Text>
-                    </View>
-                  )}
-                  <Text style={s.routeDayGroupLabel}>Day {plan.day} Places</Text>
-                  <View style={s.routeDayActionRail}>
-                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'camps')}>
-                      <Ionicons name="bonfire-outline" size={13} color={C.orange} />
-                      <Text style={s.routeDayActionText}>CAMP</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'gas')}>
-                      <Ionicons name="flash-outline" size={13} color={C.orange} />
-                      <Text style={s.routeDayActionText}>FUEL</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'poi')}>
-                      <Ionicons name="trail-sign-outline" size={13} color={C.orange} />
-                      <Text style={s.routeDayActionText}>PLACES</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.routeDayActionBtn} onPress={() => scanDayPlan(plan, 'excursions')}>
-                      <Ionicons name="compass-outline" size={13} color={C.orange} />
-                      <Text style={s.routeDayActionText}>SIDE TRIPS</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              </TouchableOpacity>
+              <RouteBuilderTimelineDayCard
+                active={activeDay === plan.day}
+                title={`${plan.needsOvernight ? `${plan.campWindowLabel} Camp` : `${plan.campWindowLabel} Travel`}${plan.rest ? ' · Rest' : ''}`}
+                meta={`${fmtRouteDistance(plan.miles)} · ${fmtHours(plan.hours)}${plan.previous ? ` · from ${plan.previous.name.split(',')[0]}` : ''}`}
+                statusText={statusText}
+                statusColor={statusColor}
+                complete={plan.complete && !overDailyMax}
+                placesLabel={`Day ${plan.day} Places`}
+                campPreview={camp ? renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP') : undefined}
+                needsOvernight={plan.needsOvernight}
+                travelText={`${plan.campWindowLabel} shares the next camp window.`}
+                onSelect={() => setActiveDay(plan.day)}
+                onChooseOvernight={() => scanDayPlan(plan, 'camps')}
+                onFindCamp={() => scanDayPlan(plan, 'camps')}
+                onFindFuel={() => scanDayPlan(plan, 'gas')}
+                onFindPlaces={() => scanDayPlan(plan, 'poi')}
+                onFindSideTrips={() => scanDayPlan(plan, 'excursions')}
+              />
               {renderInlineResultsForDay(plan.day)}
             </View>
           );
@@ -6088,52 +6058,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   routePlanBadgeWarn: { borderColor: C.yellow + '66', backgroundColor: C.yellow + '12' },
   routePlanBadgeOk: { borderColor: C.green + '66', backgroundColor: C.green + '12' },
   routePlanBadgeText: { fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
-  routeDayMain: { flexDirection: 'row', alignItems: 'center', gap: 9 },
-  routeDayNum: { width: 28, height: 28, borderRadius: 9, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s3 },
-  routeDayNumText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  routeDayTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
-  routeDayTitle: { flex: 1, color: C.text, fontSize: 24, fontWeight: '900' },
-  routeDayMeta: { color: C.text3, fontSize: 13, fontFamily: mono, marginTop: 4, lineHeight: 18 },
   routeTimelineCard: { borderWidth: 1, borderColor: C.border, borderRadius: 14, backgroundColor: C.s2, padding: 10, gap: 9 },
   routeTimelineList: { gap: 18 },
   routeTimelineTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 2 },
   routeTimelineTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
   routeTimelineSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
   routeDayWrap: { gap: 10 },
-  routeDaySection: {
-    minHeight: 520, flexDirection: 'row', gap: 12,
-    borderWidth: 1, borderColor: C.border, borderRadius: 18,
-    backgroundColor: C.s1, padding: 14,
-  },
-  routeDaySectionActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '08' },
-  routeDayRail: { width: 28, alignItems: 'center' },
-  routeDayDotLarge: { width: 18, height: 18, borderRadius: 9, borderWidth: 3, borderColor: C.orange, backgroundColor: C.s1, marginTop: 10 },
-  routeDayStemLarge: { flex: 1, width: 3, backgroundColor: C.border, marginTop: 8, borderRadius: 2 },
-  routeDayContent: { flex: 1, gap: 16 },
-  routeDayCard: { flexDirection: 'row', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 12, backgroundColor: C.s1, padding: 9 },
-  routeDayCardActive: { borderColor: C.orange + '66', backgroundColor: C.orange + '0f' },
-  routeDayDotCol: { width: 17, alignItems: 'center' },
-  routeDayDot: { width: 12, height: 12, borderRadius: 6, borderWidth: 2, borderColor: C.orange, backgroundColor: C.s1, marginTop: 4 },
-  routeDayStem: { flex: 1, width: 2, backgroundColor: C.border, marginTop: 4 },
-  routeDayHeader: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  routeDayMiniBtn: { width: 31, height: 31, borderRadius: 9, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.orange + '35', backgroundColor: C.orange + '10' },
-  routeDayStatusPill: { maxWidth: 118, minHeight: 28, borderWidth: 1, borderRadius: 999, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 8 },
-  routeDayStatusText: { fontSize: 8, fontFamily: mono, fontWeight: '900' },
-  routeDayEmptyCamp: { minHeight: 148, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 16, backgroundColor: C.orange + '0f', paddingHorizontal: 16 },
-  routeDayEmptyCampText: { color: C.orange, fontSize: 15, fontFamily: mono, fontWeight: '900', flexShrink: 1 },
-  routeDayTravelCard: { minHeight: 104, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 9, borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.s2, paddingHorizontal: 16 },
-  routeDayTravelText: { color: C.text3, fontSize: 13, fontFamily: mono, fontWeight: '800', flexShrink: 1, textAlign: 'center' },
-  routeDayGroupLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginTop: 2 },
-  routeDayActionRail: { flexDirection: 'row', gap: 9, marginTop: 'auto' },
-  routeDayActionBtn: { flex: 1, minHeight: 44, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 14, backgroundColor: C.orange + '10' },
-  routeDayActions: { flexDirection: 'row', gap: 7, paddingLeft: 37 },
-  routeDayAction: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.orange + '38', borderRadius: 9, backgroundColor: C.orange + '10' },
-  routeDayActionText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
-  routeDayVisual: { gap: 7, paddingLeft: 37 },
-  routeStopPill: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 9, paddingVertical: 7 },
-  routeStopPillIcon: { width: 28, height: 28, borderRadius: 9, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
-  routeStopPillTitle: { color: C.text, fontSize: 11, fontWeight: '800' },
-  routeStopPillMeta: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 1 },
   selectedCampCard: { gap: 12, borderWidth: 1, borderColor: C.green + '55', borderRadius: 18, backgroundColor: C.green + '0f', padding: 12 },
   selectedCampCardCompact: { padding: 8, gap: 10, borderRadius: 14 },
   selectedCampPhotoWrap: { width: '100%', borderRadius: 16, overflow: 'hidden', backgroundColor: C.s2 },

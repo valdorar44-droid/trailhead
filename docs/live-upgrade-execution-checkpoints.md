@@ -141,6 +141,16 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Save design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
 
+18. **Route Builder Timeline Day Rows**
+    - Status: complete for route timeline day-card extraction.
+    - Extract route day title/status/body/action rendering into a reusable
+      component.
+    - Keep route day planning, status calculation, discovery scans, camp preview
+      rendering, inline discovery results, saved geometry, and readiness
+      calculations unchanged.
+    - Save design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshot.
+
 ## Refresh Handoff
 
 - Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.
@@ -160,6 +170,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   `docs/live-upgrade-checkpoint-16-route-builder-stop-rows-audit.md`.
 - Checkpoint 17 footer-dock extraction context is saved in
   `docs/live-upgrade-checkpoint-17-route-builder-footer-dock-audit.md`.
+- Checkpoint 18 timeline day-row extraction context is saved in
+  `docs/live-upgrade-checkpoint-18-route-builder-timeline-day-rows-audit.md`.
 
 ## Validation Gate
 

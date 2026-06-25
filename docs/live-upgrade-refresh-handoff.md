@@ -2,14 +2,15 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 15 implemented, pushed, and OTA released.
+**Status at save time:** Checkpoint 18 implemented and validated; push/OTA
+release pending.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
 
 ## Current State
 
-- Checkpoints 1-15 are complete through the Route Search Layering
+- Checkpoints 1-18 are complete through the Route Builder Timeline Day Rows
   slice in `docs/live-upgrade-execution-checkpoints.md`.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
@@ -30,12 +31,12 @@ tools. It captures what is already complete and what should happen next.
   `121ff29d-88da-4d4f-98e0-04f633a729fb`.
 - Latest route/search preview OTA:
   `f579cc32-ab38-4a82-b1ae-63ed7baac40c`.
-- Latest local route/search checkpoint:
-  Checkpoint 15 extracted `RouteBuilderTimelineActions` and
-  `RouteBuilderInsertNotice`, added map search layer policy, and added
-  `RouteSearchModal` fallback lookup coverage.
-- Current repo check before this handoff: Checkpoint 15 validation, push, and
-  OTA release passed.
+- Latest local route-builder checkpoint:
+  Checkpoint 18 extracted `RouteBuilderTimelineDayCard`, removed stale inline
+  route-day styles, and kept route planning/discovery/readiness behavior
+  unchanged.
+- Current repo check before this handoff: Checkpoint 18 validation passed;
+  release record pending push/OTA.
 
 ## MCP / Research State
 
@@ -72,6 +73,9 @@ fresh shipped-app references.
 13. Route Builder Deeper Redesign first slice.
 14. Route Builder Workspace Extraction.
 15. Route Search Layering.
+16. Route Builder Stop Rows.
+17. Route Builder Footer Dock.
+18. Route Builder Timeline Day Rows.
 
 ## Remaining Work Queue
 
@@ -94,15 +98,17 @@ Checkpoint 13 extracted the hub and cleaned first Route Builder copy hits.
 Checkpoint 14 extracted the active workspace summary and trip-readiness card.
 Checkpoint 15 extracted timeline actions and insert guidance, and fixed the
 map search/tool/banner layer policy.
+Checkpoint 16 extracted active-day stop rows and leg actions.
+Checkpoint 17 extracted the fixed footer dock.
+Checkpoint 18 extracted route timeline day cards.
 Still
 needed:
 
-- Stop rows and leg action rows.
-- Footer dock.
-- Route timeline.
 - Recent/saved strip.
 - Smart suggestions drawer.
 - Route-fit cards.
+- Inline discovery result extraction.
+- Footer/content clearance polish for small phone viewports.
 - More extraction from `mobile/app/(tabs)/route-builder.tsx`.
 
 Keep route computation and Mapbox bridge logic outside the screen.
@@ -231,10 +237,10 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 18 - Route Builder Timeline Day Rows**
+**Checkpoint 19 - Route Builder Inline Discovery Results**
 
-Extract the route day cards and their action rail from
-`mobile/app/(tabs)/route-builder.tsx` into typed reusable components. Keep day
-planning, camp selection, discovery scans, route readiness, and saved geometry
-unchanged; audit against Mobbin route timeline examples and the existing Figma
-checkpoint board before code.
+Extract inline day discovery results and small-phone footer/content clearance
+from `mobile/app/(tabs)/route-builder.tsx` into reusable components. Keep
+search/scout result state, camp/fuel/place scan callbacks, route readiness, and
+saved geometry unchanged; audit against Mobbin route timeline/search result
+examples and the existing Figma checkpoint board before code.

@@ -16,6 +16,8 @@ import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
+import CopilotBriefCard from '@/components/copilot/CopilotBriefCard';
+import CopilotRecommendationCard from '@/components/copilot/CopilotRecommendationCard';
 import AiReportModal from '@/components/AiReportModal';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
@@ -27,9 +29,30 @@ const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.ap
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
 
 const EXAMPLES = [
-  { label: 'WILD TRIP', icon: 'trail-sign-outline', tags: ['BACKROADS', 'CAMPS'], text: 'Create a wild trip from my start to my destination using scenic backroads, wild roads, dispersed camps, fuel checks, and realistic first-day pacing.' },
-  { label: 'RIG',  icon: 'car-sport-outline', tags: ['CLEARANCE', 'RANGE'],      text: 'Check whether my rig setup is ready for rough forest roads and remote camps.' },
-  { label: 'FIELD',icon: 'radio-outline',     tags: ['WEATHER', 'SIGNAL'],       text: 'Give me a quick field brief for tonight: weather, signal, water, and safe camp strategy.' },
+  {
+    label: 'Wild Trip',
+    icon: 'trail-sign-outline',
+    tags: ['BACKROADS', 'CAMPS'],
+    reason: 'Best when you want a route spine, realistic camp nights, fuel checks, and room for dirt-road decisions.',
+    sourceLabel: 'Planner setup',
+    text: 'Create a wild trip from my start to my destination using scenic backroads, wild roads, dispersed camps, fuel checks, and realistic first-day pacing.',
+  },
+  {
+    label: 'Rig Check',
+    icon: 'car-sport-outline',
+    tags: ['CLEARANCE', 'RANGE'],
+    reason: 'Use this before committing to rough forest roads, remote camps, or long gaps between services.',
+    sourceLabel: 'Rig profile',
+    text: 'Check whether my rig setup is ready for rough forest roads and remote camps.',
+  },
+  {
+    label: 'Field Brief',
+    icon: 'radio-outline',
+    tags: ['WEATHER', 'SIGNAL'],
+    reason: 'Good for tonight decisions: weather, signal, water, and safer camp strategy before you roll in.',
+    sourceLabel: 'Route ready',
+    text: 'Give me a quick field brief for tonight: weather, signal, water, and safe camp strategy.',
+  },
 ];
 
 const CHAT_STAGES  = [
@@ -587,21 +610,23 @@ export default function PlanScreen() {
               ))}
             </View>
 
-            {EXAMPLES.map((ex, i) => (
-              <TrailheadCard key={i} style={s.example} onPress={() => setInput(ex.text)}>
-                <View style={s.exampleIconWrap}>
-                  <Ionicons name={ex.icon as any} size={18} color={C.orange} />
-                </View>
-                <View style={{ flex: 1, gap: 6 }}>
-                  <View style={s.exampleTagRow}>
-                    <View style={s.exampleBadge}><Text style={s.exampleBadgeText}>{ex.label}</Text></View>
-                    {ex.tags.map(t => (
-                      <View key={t} style={s.exampleTag}><Text style={s.exampleTagText}>{t}</Text></View>
-                    ))}
-                  </View>
-                  <Text style={s.exampleText}>{ex.text}</Text>
-                </View>
-              </TrailheadCard>
+            {EXAMPLES.map(ex => (
+              <CopilotRecommendationCard
+                key={ex.label}
+                title={ex.label}
+                summary={ex.text}
+                reason={ex.reason}
+                icon={ex.icon as any}
+                tags={ex.tags}
+                sourceLabel={ex.sourceLabel}
+                onPress={() => setInput(ex.text)}
+                action={{
+                  label: 'USE THIS',
+                  icon: 'arrow-forward',
+                  variant: 'secondary',
+                  onPress: () => setInput(ex.text),
+                }}
+              />
             ))}
           </View>
         )}
@@ -623,7 +648,6 @@ export default function PlanScreen() {
             ) : msg.outline ? (
               <OutlineCard
                 outline={msg.outline}
-                C={C}
                 onBuild={buildTrip}
                 onRefine={keepRefining}
                 loading={planPhase === 'planning'}
@@ -938,79 +962,57 @@ function ThinkingDots({ C }: { C: ColorPalette }) {
   );
 }
 
-function OutlineCard({ outline, C, onBuild, onRefine, loading }: {
-  outline: string; C: ColorPalette;
+function OutlineCard({ outline, onBuild, onRefine, loading }: {
+  outline: string;
   onBuild: () => void; onRefine: () => void; loading: boolean;
 }) {
-  const fadeAnim = useRef(new Animated.Value(0)).current;
-  const slideAnim = useRef(new Animated.Value(16)).current;
-  useEffect(() => {
-    Animated.parallel([
-      Animated.timing(fadeAnim,  { toValue: 1, duration: 350, useNativeDriver: true }),
-      Animated.spring(slideAnim, { toValue: 0, tension: 60, friction: 9, useNativeDriver: true }),
-    ]).start();
-  }, []);
-
   const isRetry = outline === '__retry__';
+  if (isRetry) {
+    return (
+      <CopilotBriefCard
+        kicker="ROUTE NEEDS REVIEW"
+        title="Retry route build"
+        summary="The route idea is still here. Retry will rebuild from the same conversation, which usually clears up long or complicated trips."
+        tone="review"
+        icon="alert-circle-outline"
+        sourceLabel="Same conversation"
+        reason="A tighter rebuild can keep the stops and daily pacing cleaner."
+        actions={[{
+          label: 'RETRY',
+          icon: 'refresh',
+          variant: 'primary',
+          onPress: onBuild,
+          loading,
+        }]}
+      />
+    );
+  }
 
   return (
-    <Animated.View style={[{
-      backgroundColor: isRetry ? C.orangeGlow : C.gold + '18',
-      borderWidth: 1,
-      borderColor: isRetry ? C.orange + '44' : C.gold + '44',
-      borderRadius: 14, overflow: 'hidden',
-      opacity: fadeAnim, transform: [{ translateY: slideAnim }],
-    }]}>
-      <View style={{ padding: 14 }}>
-        {isRetry ? (
-          <>
-            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 10 }}>ROUTE NEEDS ANOTHER PASS</Text>
-            <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, marginBottom: 14 }}>
-              The route idea is still here. Retry will rebuild from the same conversation, which usually clears up long or complicated trips.
-            </Text>
-            <TouchableOpacity
-              onPress={onBuild}
-              disabled={loading}
-              style={{
-                backgroundColor: C.orange, borderRadius: 8, paddingVertical: 12,
-                alignItems: 'center',
-                shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6,
-              }}
-            >
-              {loading
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={{ color: C.white, fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 }}>RETRY →</Text>
-              }
-            </TouchableOpacity>
-          </>
-        ) : (
-          <>
-            <Text style={{ color: C.gold, fontSize: 9, fontFamily: mono, letterSpacing: 1, marginBottom: 10 }}>✦ ROUTE READY TO BUILD</Text>
-            <Text style={{ color: C.text2, fontSize: 13, lineHeight: 20, fontStyle: 'italic', marginBottom: 14 }}>{outline}</Text>
-            <TouchableOpacity
-              onPress={onBuild}
-              disabled={loading}
-              style={{
-                backgroundColor: C.orange, borderRadius: 8, paddingVertical: 12,
-                alignItems: 'center', marginBottom: 8,
-                shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 6,
-              }}
-            >
-              {loading
-                ? <ActivityIndicator color="#fff" size="small" />
-                : <Text style={{ color: C.white, fontWeight: '700', fontSize: 13, fontFamily: mono, letterSpacing: 0.5 }}>BUILD ROUTE →</Text>
-              }
-            </TouchableOpacity>
-            <TouchableOpacity
-              onPress={onRefine}
-              style={{ backgroundColor: 'transparent', borderWidth: 1, borderColor: C.border, borderRadius: 8, paddingVertical: 11, alignItems: 'center' }}
-            >
-              <Text style={{ color: C.text2, fontSize: 12, fontFamily: mono, letterSpacing: 0.3 }}>KEEP REFINING</Text>
-            </TouchableOpacity>
-          </>
-        )}
-      </View>
-    </Animated.View>
+    <CopilotBriefCard
+      kicker="ROUTE READY"
+      title="Build this trip"
+      summary={outline}
+      tone="ready"
+      icon="map-outline"
+      sourceLabel="Planner draft"
+      reason="Build turns the draft into route days, camps, fuel checks, and map pins."
+      actions={[
+        {
+          label: 'BUILD ROUTE',
+          icon: 'navigate',
+          variant: 'primary',
+          onPress: onBuild,
+          loading,
+        },
+        {
+          label: 'KEEP REFINING',
+          icon: 'create-outline',
+          variant: 'secondary',
+          onPress: onRefine,
+        },
+      ]}
+    />
   );
 }
 
@@ -1246,30 +1248,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   historyCardFooter: { flexDirection: 'row', alignItems: 'center', gap: 4, marginTop: 2 },
   historyCardStat:   { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '700' },
   historyCardDot:    { color: C.border, fontSize: 9 },
-
-  example: {
-    backgroundColor: 'rgba(255,255,255,0.052)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.08)',
-    borderRadius: 18, padding: 12,
-    flexDirection: 'row', alignItems: 'flex-start', gap: 10,
-  },
-  exampleIconWrap: {
-    width: 36, height: 36, borderRadius: 14,
-    backgroundColor: 'rgba(229,231,235,0.08)', borderWidth: 1, borderColor: 'rgba(229,231,235,0.14)',
-    alignItems: 'center', justifyContent: 'center',
-  },
-  exampleTagRow: { flexDirection: 'row', alignItems: 'center', gap: 5, flexWrap: 'wrap' },
-  exampleBadge: {
-    height: 20, borderRadius: 5,
-    backgroundColor: 'rgba(229,231,235,0.16)', borderWidth: 1, borderColor: 'rgba(229,231,235,0.16)',
-    alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
-  },
-  exampleBadgeText: { color: C.silverBright, fontSize: 8.5, fontFamily: mono, fontWeight: '800' },
-  exampleTag: {
-    height: 20, borderRadius: 5, borderWidth: 1, borderColor: C.border,
-    backgroundColor: C.s3, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 6,
-  },
-  exampleTagText: { color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 0.3 },
-  exampleText: { color: C.text2, fontSize: 12.5, lineHeight: 18 },
 
   // Messages
   msg:     { gap: 4 },

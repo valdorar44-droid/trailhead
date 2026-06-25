@@ -55,10 +55,11 @@ checkpoint must leave an audit note before the next checkpoint starts.
    - Keep Mapbox layer access free where product direction requires it.
 
 7. **Planner/Copilot Structured Cards**
-   - Status: next.
+   - Status: complete for first production structured-card slice.
    - Use cards and staged actions instead of raw chat-only output.
 
 8. **Viator/Partner Readiness**
+   - Status: next.
    - Fixture/sandbox/external checkout only.
    - No in-app booking.
 

@@ -9501,7 +9501,7 @@ function MapScreen() {
     const map = payload.map ?? {};
     const result = payload.result_context ?? {};
     const details = payload.details ?? {};
-    lines.push('Trailhead Copilot map debug');
+    lines.push('Trailhead Copilot support log');
     lines.push(`time: ${payload.created_at_iso || new Date().toISOString()}`);
     lines.push(`reason: ${payload.reason || 'manual'}`);
     lines.push(`user: ${payload.user || 'admin'}`);
@@ -9662,7 +9662,7 @@ function MapScreen() {
       appendCopilotMessage({
         id: `copilot-debug-${Date.now()}`,
         role: 'assistant',
-        text: `Admin debug transcript recorded.\n\n${payload.transcript.slice(0, 3200)}`,
+        text: `Support log recorded.\n\n${payload.transcript.slice(0, 3200)}`,
       });
     }
     return payload;
@@ -12510,13 +12510,13 @@ function MapScreen() {
     );
     const transcript = payload?.transcript || copilotDebugTranscript;
     if (!transcript) {
-      setQuickToast('No debug transcript available.');
+      setQuickToast('No support log available.');
       setTimeout(() => setQuickToast(''), 2200);
       return;
     }
     try {
       await Share.share({
-        title: 'Trailhead Copilot map debug',
+        title: 'Trailhead Copilot support log',
         message: transcript,
       });
     } catch {}
@@ -19395,7 +19395,7 @@ function MapScreen() {
               {user?.is_admin && (
                 <TouchableOpacity style={[s.extremeCopilotChip, s.extremeCopilotDebugChip]} onPress={shareAdminCopilotDebugTranscript} disabled={extremeCopilotBusy}>
                   <Ionicons name="bug-outline" size={13} color={C.yellow} />
-                  <Text style={[s.extremeCopilotChipText, s.extremeCopilotDebugChipText]}>debug transcript</Text>
+                  <Text style={[s.extremeCopilotChipText, s.extremeCopilotDebugChipText]}>support log</Text>
                 </TouchableOpacity>
               )}
               {[

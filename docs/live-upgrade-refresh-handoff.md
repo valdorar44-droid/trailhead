@@ -19,6 +19,12 @@ tools. It captures what is already complete and what should happen next.
 - Latest implementation commit: `d2d5739 Stabilize map navigation pan handling`.
 - Latest production OTA: `8d04336f-dc1a-4c6c-b429-c3d64a998339`.
 - Latest preview OTA: `bde39339-21c9-47be-b277-845ebf8fe2eb`.
+- Latest route-builder implementation commit:
+  `1e6fad9 Extract route builder hub checkpoint`.
+- Latest route-builder production OTA:
+  `06a76ac2-b091-4f43-9983-53c9d56c07e5`.
+- Latest route-builder preview OTA:
+  `db8a0eab-05ec-4618-870b-2b532f8c8a54`.
 - Current repo check before this handoff: clean and synced with origin after
   release record push.
 

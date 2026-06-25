@@ -84,6 +84,22 @@ cleanup.
   - The welcome gate appeared over the route in the web session; the only
     console error seen was the existing analytics request returning `400`.
 
+## Release
+
+- GitHub commit: `1e6fad9` (`Extract route builder hub checkpoint`)
+- Production OTA:
+  - Update group: `06a76ac2-b091-4f43-9983-53c9d56c07e5`
+  - Android update: `019efdf6-1435-7369-be3f-1fc2efc17c2b`
+  - iOS update: `019efdf6-1435-7a1e-b7ed-9a7d7dcadf17`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/06a76ac2-b091-4f43-9983-53c9d56c07e5`
+- Preview OTA:
+  - Update group: `db8a0eab-05ec-4618-870b-2b532f8c8a54`
+  - Android update: `019efdf6-c203-745b-9dee-2eb895afb39b`
+  - iOS update: `019efdf6-c203-7611-bb27-c5fd801a1d7c`
+  - Dashboard:
+    `https://expo.dev/accounts/danub44/projects/trailhead/updates/db8a0eab-05ec-4618-870b-2b532f8c8a54`
+
 ## Remaining Risks
 
 - Needs native-device visual smoke testing for the Route Builder hub after the

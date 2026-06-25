@@ -2280,28 +2280,19 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         ) : null}
 
       {/* ── Camera ────────────────────────────────────────────────────── */}
-      {/* Initial placement is default-only. Navigation follow and explicit
-          locate actions are the only code paths that should recenter later. */}
-      {navMode && navCameraFollow ? (
-        <MapGL.Camera
-          key="nav-follow-camera"
-          ref={camRef}
-          defaultSettings={freeCameraDefaultRef.current}
-          followUserLocation
-          followUserMode={(navSpeed ?? 0) > 1.2 ? MapGL.UserTrackingMode.FollowWithCourse : MapGL.UserTrackingMode.FollowWithHeading}
-          followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
-          followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
-          onUserTrackingModeChange={(event: any) => {
-            if (event?.nativeEvent?.payload?.followUserLocation === false) onMapGesture?.();
-          }}
-        />
-      ) : (
-        <MapGL.Camera
-          key={`free-camera-${freeCameraRevision}`}
-          ref={camRef}
-          defaultSettings={freeCameraDefaultRef.current}
-        />
-      )}
+      {/* Keep one native Camera instance alive. Remounting Camera while an iOS
+          pan gesture disables nav follow can crash RNMapbox/MapLibre. */}
+      <MapGL.Camera
+        ref={camRef}
+        defaultSettings={freeCameraDefaultRef.current}
+        followUserLocation={!!(navMode && navCameraFollow)}
+        followUserMode={(navSpeed ?? 0) > 1.2 ? MapGL.UserTrackingMode.FollowWithCourse : MapGL.UserTrackingMode.FollowWithHeading}
+        followZoomLevel={(navSpeed ?? 0) > 20 ? 15.5 : (navSpeed ?? 0) > 9 ? 16.2 : 17}
+        followPitch={showTerrain ? 62 : (navSpeed ?? 0) > 2.2 ? 45 : 0}
+        onUserTrackingModeChange={(event: any) => {
+          if (event?.nativeEvent?.payload?.followUserLocation === false) onMapGesture?.();
+        }}
+      />
 
       {/* ── User location ─────────────────────────────────────────────── */}
       {navMode && navCameraFollow ? (

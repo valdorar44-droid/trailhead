@@ -91,4 +91,10 @@
 
 ## Release
 
-- Pending commit, push, and OTA.
+- Code commit: `606e365` (`Extract route discovery fallback providers`),
+  pushed to `master`.
+- Production OTA update group:
+  `5c12de42-30db-4f0e-a228-61f53eaa5b1b`
+- Preview OTA update group:
+  `01480fc3-971c-417f-9a36-d0d576cc84a1`
+- Runtime: `native-20260614-sdk54-1`.

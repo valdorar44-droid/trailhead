@@ -274,7 +274,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `c673e5b1-5ffb-4758-aa66-24e7f961c834`.
 
 28. **Route Builder Discovery Provider Boundary**
-    - Status: complete, pending release.
+    - Status: complete and released.
     - Extracted duplicated route POI fallback provider fan-out into
       `searchRouteBuilderFallbackPois`.
     - Centralized the stable fallback query set for trailheads, viewpoints,
@@ -285,6 +285,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Reviewed Mobbin add-place/map search flows and Figma design-system search
       before code; saved design decision, audit checkpoint, Figma checkpoint
       frame, and Playwright smoke screenshot.
+    - Release: production OTA
+      `5c12de42-30db-4f0e-a228-61f53eaa5b1b`; preview OTA
+      `01480fc3-971c-417f-9a36-d0d576cc84a1`.
 
 29. **Route Builder Discovery Gas Provider Boundary**
     - Status: queued.

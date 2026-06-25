@@ -217,43 +217,35 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 27 - Route Builder Discovery State Boundary:
+Checkpoint 28 - Route Builder Discovery Provider Boundary:
 
-- Code commit: `345412c` (`Extract route builder discovery state`), pushed
+- Code commit: `606e365` (`Extract route discovery fallback providers`), pushed
   to `master`.
 - Production OTA update group:
-  `6acde002-4dd1-41ea-9245-10e6c67d7b85`
+  `5c12de42-30db-4f0e-a228-61f53eaa5b1b`
 - Preview OTA update group:
-  `c673e5b1-5ffb-4758-aa66-24e7f961c834`
+  `01480fc3-971c-417f-9a36-d0d576cc84a1`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-27-route-builder-discovery-state-boundary-audit.md`.
+  `docs/live-upgrade-checkpoint-28-route-builder-discovery-provider-boundary-audit.md`.
 
 ## Current Checkpoint Record
 
-Checkpoint 28 - Route Builder Discovery Provider Boundary:
+Checkpoint 29 - Route Builder Discovery Gas Provider Boundary:
 
 - Code commit: pending.
 - Production OTA update group: pending.
 - Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
-- Audit doc:
-  `docs/live-upgrade-checkpoint-28-route-builder-discovery-provider-boundary-audit.md`.
-- Design decision:
-  `docs/design-decisions/route-builder-discovery-provider-boundary.md`.
-- Figma evidence:
-  - File `yP342OKFtUQ1J0RCwnzH6s`
-  - Frame `38:2`
-  - Screenshot
-    `/tmp/trailhead-checkpoint-28-route-builder-discovery-provider-boundary-figma.png`
-- Playwright evidence:
-  `/tmp/trailhead-route-builder-checkpoint-28-discovery-provider-boundary-web.png`
-- Validation:
-  - `npx tsc --noEmit`
-  - `npm run audit:copy`
-  - `npm run audit:routes`
-  - `node scripts/user-facing-copy-audit.mjs "app/(tabs)/route-builder.tsx" lib/routeBuilder/discoveryProviders.ts`
-  - `git diff --check`
+- Audit doc: pending.
+- Design decision: pending.
+- Scope:
+  - Audit gas-provider fan-out in `runDiscovery` for leg and area searches.
+  - Extract only provider orchestration if NREL, OSM fuel, Mapbox fuel,
+    offline fuel/propane, Nominatim fallback, dedupe, route projection, and
+    selected place sheets stay unchanged.
+  - Continue Mobbin/Figma research against route fuel-stop and travel-day
+    add-place workflows before code.
 
 ## Repo Note
 

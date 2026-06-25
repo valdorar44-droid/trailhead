@@ -49,6 +49,7 @@ import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
+  buildRouteFitCards,
   buildRouteBuilderSession,
   buildRouteLocationsForShape,
   computeDaySegmentsFromRouteGeometry,
@@ -59,6 +60,7 @@ import {
   rebalanceAfterCampSelection,
   routeUnitsParam,
   savedGeometryFromCoords,
+  type RouteFitCard,
   type ProviderRouteGeometry,
   type RouteBuilderIntent,
 } from '@/lib/routeBuilder';
@@ -2031,30 +2033,20 @@ export default function RouteBuilderScreen() {
     : 'Build a base route first';
   const activeDayDriveLimit = parsePositiveNumber(dayDriveTargets[activeDay]) ?? planningStats.driveLimit;
   const tripReadiness = routeBuildSession.readiness;
-  const routeChecks = useMemo(() => {
-    const checks: { level: 'ok' | 'warn'; label: string; text: string }[] = [...tripReadiness.tasks];
-    if (orderedStops.length < 2) {
-      checks.push({ level: 'warn', label: 'Need route', text: 'Add a start and at least one destination.' });
-    }
-    const fuelCount = orderedStops.filter(st => st.type === 'fuel').length;
-    if (!checks.some(check => check.label === 'Fuel') && fuelCount > 0) {
-      checks.push({ level: 'ok', label: 'Fuel', text: `${fuelCount} fuel stop${fuelCount === 1 ? '' : 's'} added.` });
-    } else if (!checks.some(check => check.label === 'Fuel') && totals.miles > 0) {
-      checks.push({
-        level: planningStats.range && totals.miles > planningStats.range * 0.7 ? 'warn' : 'ok',
-        label: 'Fuel',
-        text: `${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} · $${Math.round(planningStats.fuelCost)} ${fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg)).toLowerCase()}.`,
-      });
-    }
-    const driveCapacity = days
-      .filter(day => !restDays.includes(day))
-      .reduce((sum, day) => sum + ((parsePositiveNumber(dayDriveTargets[day]) ?? planningStats.driveLimit) * 42), 0);
-    if (totals.miles > driveCapacity && orderedStops.length > 1) {
-      checks.push({ level: 'warn', label: 'Schedule', text: `This route needs more than the selected ${days.length} day${days.length === 1 ? '' : 's'} at the current daily max.` });
-    }
-    checks.push({ level: routeOfflineReadiness.ready ? 'ok' : 'warn', label: 'Offline', text: routeOfflineReadiness.message });
-    return checks.slice(0, 5);
-  }, [days, orderedStops, totals.miles, planningStats.driveLimit, planningStats.fuelCost, planningStats.mpg, planningStats.range, weatherUnitMode, fuelEstimate, rigProfile?.fuel_mpg, dayDriveTargets, restDays, tripReadiness.tasks, routeOfflineReadiness.ready, routeOfflineReadiness.message]);
+  const routeFitCards = useMemo<RouteFitCard[]>(() => buildRouteFitCards({
+    readinessTasks: tripReadiness.tasks,
+    stopCount: orderedStops.length,
+    fuelStopCount: orderedStops.filter(st => st.type === 'fuel').length,
+    totalMiles: totals.miles,
+    days,
+    restDays,
+    maxDriveHoursByDay: Object.fromEntries(days.map(day => [day, parsePositiveNumber(dayDriveTargets[day]) ?? undefined])),
+    defaultDriveLimitHours: planningStats.driveLimit,
+    fuelRangeMi: planningStats.range,
+    fuelSummaryText: `${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} · $${Math.round(planningStats.fuelCost)} ${fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg)).toLowerCase()}.`,
+    offlineReady: routeOfflineReadiness.ready,
+    offlineMessage: routeOfflineReadiness.message,
+  }), [days, orderedStops, totals.miles, planningStats.driveLimit, planningStats.fuelCost, planningStats.mpg, planningStats.range, weatherUnitMode, fuelEstimate, rigProfile?.fuel_mpg, dayDriveTargets, restDays, tripReadiness.tasks, routeOfflineReadiness.ready, routeOfflineReadiness.message]);
   const discoverEmptyText = discoverTab === 'camps'
     ? 'Tap scan to find legal camps near the selected leg or route point.'
     : discoverTab === 'gas'
@@ -4808,7 +4800,7 @@ export default function RouteBuilderScreen() {
         </TourTarget>
 
         <RouteBuilderReadinessCard
-          checks={routeChecks}
+          checks={routeFitCards}
           offlineRows={routeOfflineReadiness.rows}
           showOfflineRows={routeOfflineReadiness.regionNames.length > 0}
         />

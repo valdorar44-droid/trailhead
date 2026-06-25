@@ -164,6 +164,25 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Save design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshot.
 
+20. **Route Builder Route Fit Cards**
+    - Status: complete for route-fit/readiness card assembly extraction.
+    - Extract route-fit card assembly from `route-builder.tsx` into a typed
+      route-builder helper.
+    - Keep route computation, saved geometry, offline readiness, fuel estimates,
+      and Mapbox handoff behavior unchanged.
+    - Save design decision, audit checkpoint, Figma checkpoint frame, and
+      Playwright smoke screenshot.
+    - Release: pending commit/OTA record.
+
+21. **Route Builder Search Flow Extraction**
+    - Status: queued.
+    - Extract route-builder search/result state and place-add mapping where it
+      can be shared with map search and Planner/Copilot route handoff flows.
+    - Keep provider calls, Android lookup fallback, saved geometry, and
+      existing search result behavior unchanged.
+    - Continue Mobbin/Figma research against travel search and route-stop
+      patterns before code.
+
 ## Refresh Handoff
 
 - Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.

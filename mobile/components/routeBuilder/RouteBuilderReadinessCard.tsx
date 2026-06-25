@@ -2,12 +2,9 @@ import { Ionicons } from '@expo/vector-icons';
 import { StyleSheet, Text, View } from 'react-native';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
 import type { OfflineReadinessRow } from '@/lib/offlineReadiness';
+import type { RouteFitCard } from '@/lib/routeBuilder';
 
-export type RouteReadinessCheck = {
-  level: 'ok' | 'warn';
-  label: string;
-  text: string;
-};
+export type RouteReadinessCheck = RouteFitCard;
 
 type RouteBuilderReadinessCardProps = {
   checks: RouteReadinessCheck[];
@@ -45,34 +42,54 @@ export default function RouteBuilderReadinessCard({
 
       <View style={s.checkGrid}>
         {visibleChecks.map(check => (
-          <View key={`${check.label}-${check.text}`} style={s.checkRow}>
-            <Ionicons
-              name={check.level === 'ok' ? 'checkmark-circle-outline' : 'alert-circle-outline'}
-              size={15}
-              color={check.level === 'ok' ? C.green : C.yellow}
-            />
-            <View style={s.checkCopy}>
-              <Text style={s.checkLabel}>{check.label.toUpperCase()}</Text>
-              <Text style={s.checkText}>{check.text}</Text>
-            </View>
-          </View>
+          <RouteBuilderRouteFitRow key={`${check.label}-${check.text}`} check={check} />
         ))}
       </View>
 
       {showOfflineRows ? (
         <View style={s.offlineGrid}>
           {offlineRows.map(row => (
-            <View key={row.key} style={[s.offlinePill, row.ready ? s.offlinePillReady : row.needed ? s.offlinePillWarn : null]}>
-              <Ionicons
-                name={row.ready ? 'checkmark-circle-outline' : row.needed ? 'cloud-download-outline' : 'remove-circle-outline'}
-                size={12}
-                color={row.ready ? C.green : row.needed ? C.yellow : C.text3}
-              />
-              <Text style={[s.offlineText, row.ready ? { color: C.green } : row.needed ? { color: C.yellow } : null]}>{row.label}</Text>
-            </View>
+            <OfflineReadinessPill key={row.key} row={row} />
           ))}
         </View>
       ) : null}
+    </View>
+  );
+}
+
+function RouteBuilderRouteFitRow({ check }: { check: RouteReadinessCheck }) {
+  const C = useTheme();
+  const s = styles(C);
+  const ready = check.level === 'ok';
+
+  return (
+    <View style={s.checkRow}>
+      <Ionicons
+        name={ready ? 'checkmark-circle-outline' : 'alert-circle-outline'}
+        size={15}
+        color={ready ? C.green : C.yellow}
+      />
+      <View style={s.checkCopy}>
+        <Text style={s.checkLabel}>{check.label.toUpperCase()}</Text>
+        <Text style={s.checkText}>{check.text}</Text>
+      </View>
+    </View>
+  );
+}
+
+function OfflineReadinessPill({ row }: { row: OfflineReadinessRow }) {
+  const C = useTheme();
+  const s = styles(C);
+  const color = row.ready ? C.green : row.needed ? C.yellow : C.text3;
+
+  return (
+    <View style={[s.offlinePill, row.ready ? s.offlinePillReady : row.needed ? s.offlinePillWarn : null]}>
+      <Ionicons
+        name={row.ready ? 'checkmark-circle-outline' : row.needed ? 'cloud-download-outline' : 'remove-circle-outline'}
+        size={12}
+        color={color}
+      />
+      <Text style={[s.offlineText, row.ready || row.needed ? { color } : null]}>{row.label}</Text>
     </View>
   );
 }
@@ -126,7 +143,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     fontSize: 9,
     fontFamily: mono,
     fontWeight: '900',
-    letterSpacing: 0.7,
+    letterSpacing: 0,
   },
   checkGrid: {
     gap: 8,
@@ -145,7 +162,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     fontSize: 8,
     fontFamily: mono,
     fontWeight: '900',
-    letterSpacing: 0.6,
+    letterSpacing: 0,
   },
   checkText: {
     color: C.text2,

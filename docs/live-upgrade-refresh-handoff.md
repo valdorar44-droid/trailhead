@@ -213,17 +213,14 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 19 - Route Builder Inline Discovery Results:
+Checkpoint 20 - Route Builder Route Fit Cards:
 
-- Code commit: `f7f4615` (`Extract route builder inline discovery results`),
-  pushed to `master`.
-- Production OTA update group:
-  `633e6107-d6b3-4805-ac77-beaae2cc5c92`
-- Preview OTA update group:
-  `7c051970-48ee-403c-a514-88fb3b498e99`
+- Code commit: pending.
+- Production OTA update group: pending.
+- Preview OTA update group: pending.
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-19-route-builder-inline-discovery-results-audit.md`.
+  `docs/live-upgrade-checkpoint-20-route-builder-route-fit-cards-audit.md`.
 
 ## Repo Note
 
@@ -238,10 +235,11 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 20 - Route Builder Route Fit Cards**
+**Checkpoint 21 - Route Builder Search Flow Extraction**
 
-Extract the route-fit/readiness detail cards that explain schedule, camps, fuel,
-downloads, and route lock status from `mobile/app/(tabs)/route-builder.tsx`
-into reusable components. Keep route checks, offline readiness, saved geometry,
-and map handoff behavior unchanged; audit against Mobbin route planning and trip
-readiness patterns plus the existing Figma checkpoint board before code.
+Extract route-builder search/result state and place-add mapping from
+`mobile/app/(tabs)/route-builder.tsx` where it can be shared with map search and
+Planner/Copilot route handoff flows. Keep provider calls, Android lookup
+fallback, saved geometry, route-fit cards, and existing search result behavior
+unchanged; audit against Mobbin travel search, route-stop, and saved-place
+patterns plus the existing Figma checkpoint board before code.

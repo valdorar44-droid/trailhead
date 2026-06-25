@@ -190,8 +190,7 @@ checkpoint must leave an audit note before the next checkpoint starts.
       `bb64e724-0998-424c-b81e-4388fa793f28`.
 
 22. **Route Builder Search Surface Component**
-    - Status: complete for search-surface component extraction; release
-      pending.
+    - Status: complete for search-surface component extraction.
     - Extracted the Route Builder search type chips, insert notice placement,
       search box, and result rows into a presentational component.
     - Kept the Checkpoint 21 helper, provider calls, Android lookup fallback,
@@ -200,6 +199,9 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Kept result rows directly attached to the search field before readiness.
     - Saved design decision, audit checkpoint, Figma checkpoint frame, and
       Playwright smoke screenshots.
+    - Release: production OTA
+      `88dcf02d-445c-489f-9080-5b91c39f168f`; preview OTA
+      `b36e8539-2ec6-4b14-b3e0-f30c394a404d`.
 
 23. **Route Builder Active Day Controls**
     - Status: queued.

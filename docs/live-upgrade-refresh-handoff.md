@@ -2,15 +2,15 @@
 
 **Date:** 2026-06-25
 **Branch:** `master`
-**Status at save time:** Checkpoint 21 implemented, pushed, and OTA released.
+**Status at save time:** Checkpoint 22 implemented, pushed, and OTA released.
 
 This note is the restart point for the next Codex session after refreshing MCP
 tools. It captures what is already complete and what should happen next.
 
 ## Current State
 
-- Checkpoints 1-21 are complete through the Route Builder Search Flow
-  Extraction slice in `docs/live-upgrade-execution-checkpoints.md`.
+- Checkpoints 1-22 are complete through the Route Builder Search Surface
+  Component slice in `docs/live-upgrade-execution-checkpoints.md`.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
   `8ff520a Polish planner composer checkpoint`.
@@ -31,9 +31,9 @@ tools. It captures what is already complete and what should happen next.
 - Latest route/search preview OTA:
   `f579cc32-ab38-4a82-b1ae-63ed7baac40c`.
 - Latest shipped route-builder checkpoint:
-  Checkpoint 21 extracted search scoring, result dedupe, lookup orchestration,
-  and selected-place stop mapping into `mobile/lib/routeBuilder/searchFlow.ts`.
-- Current repo check before this handoff: Checkpoint 21 validation, push, and
+  Checkpoint 22 extracted the Route Builder search surface into
+  `mobile/components/routeBuilder/RouteBuilderSearchSurface.tsx`.
+- Current repo check before this handoff: Checkpoint 22 validation, push, and
   OTA release passed.
 
 ## MCP / Research State
@@ -77,6 +77,7 @@ fresh shipped-app references.
 19. Route Builder Inline Discovery Results.
 20. Route Builder Route Fit Cards.
 21. Route Builder Search Flow Extraction.
+22. Route Builder Search Surface Component.
 
 ## Remaining Work Queue
 
@@ -106,10 +107,11 @@ Checkpoint 19 extracted inline discovery result rows and added footer scroll
 clearance.
 Checkpoint 20 extracted route-fit card assembly.
 Checkpoint 21 extracted route-builder search flow helpers.
+Checkpoint 22 extracted the search surface component.
 Still
 needed:
 
-- Search surface component extraction.
+- Active-day controls extraction.
 - Recent/saved strip.
 - Smart suggestions drawer.
 - More extraction from `mobile/app/(tabs)/route-builder.tsx`.
@@ -215,33 +217,36 @@ Native smoke tests still needed:
 
 ## Latest Release Record
 
-Checkpoint 20 - Route Builder Route Fit Cards:
+Checkpoint 22 - Route Builder Search Surface Component:
 
-- Code commit: `a755f5f` (`Extract route builder route fit cards`), pushed
+- Code commit: `67dfd1c` (`Extract route builder search surface`), pushed
   to `master`.
 - Production OTA update group:
-  `f2bbe3b9-2dd4-42d0-9d0b-eca5a01161c5`
+  `88dcf02d-445c-489f-9080-5b91c39f168f`
 - Preview OTA update group:
-  `5a4df7c2-16e2-4f71-824b-1a401fad02d8`
+  `b36e8539-2ec6-4b14-b3e0-f30c394a404d`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-20-route-builder-route-fit-cards-audit.md`.
+  `docs/live-upgrade-checkpoint-22-route-builder-search-surface-audit.md`.
 
 ## Current Checkpoint Record
 
-Checkpoint 21 - Route Builder Search Flow Extraction:
+Checkpoint 22 - Route Builder Search Surface Component:
 
-- Code commit: `3bf477c` (`Extract route builder search flow helper`), pushed
+- Code commit: `67dfd1c` (`Extract route builder search surface`), pushed
   to `master`.
 - Production OTA update group:
-  `846b67d8-64af-40b3-9bf6-a2b0ef3587fe`
+  `88dcf02d-445c-489f-9080-5b91c39f168f`
 - Preview OTA update group:
-  `bb64e724-0998-424c-b81e-4388fa793f28`
+  `b36e8539-2ec6-4b14-b3e0-f30c394a404d`
 - Runtime: `native-20260614-sdk54-1`.
 - Audit doc:
-  `docs/live-upgrade-checkpoint-21-route-builder-search-flow-audit.md`.
+  `docs/live-upgrade-checkpoint-22-route-builder-search-surface-audit.md`.
+- Figma evidence:
+  `/tmp/trailhead-checkpoint-22-route-builder-search-surface-figma.png`
 - Playwright evidence:
-  `/tmp/trailhead-route-builder-checkpoint-21-search-results-web.png`
+  `/tmp/trailhead-route-builder-checkpoint-22-search-box-web.png`
+  `/tmp/trailhead-route-builder-checkpoint-22-search-result-row-web.png`
 
 ## Repo Note
 
@@ -256,11 +261,10 @@ update the plan references so the repo audit trail is consistent.
 
 ## Recommended Next Checkpoint
 
-**Checkpoint 22 - Route Builder Search Surface Component**
+**Checkpoint 23 - Route Builder Active Day Controls**
 
-Extract the Route Builder search type chips, insert notice placement, search
-box, and result rows into a presentational component. Keep the Checkpoint 21
-helper, provider calls, Android lookup fallback, saved geometry, route
-computation, and existing result behavior unchanged; audit against Mobbin travel
-destination pickers, itinerary add-place flows, and compact route-stop search
-surfaces plus the existing Figma checkpoint board before code.
+Extract active-day itinerary header, rest-day toggle, day-hour input, and
+empty-day guidance into reusable components. Keep day mileage, rest-day state,
+drive-hour targets, stop ordering, route computation, and footer dock behavior
+unchanged; audit against Mobbin travel day editors, route-day controls, and
+compact schedule panels plus the existing Figma checkpoint board before code.

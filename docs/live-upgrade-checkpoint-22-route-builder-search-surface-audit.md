@@ -91,7 +91,13 @@
 
 ## Release
 
-- Pending OTA.
+- Code commit: `67dfd1c` (`Extract route builder search surface`), pushed to
+  `master`.
+- Production OTA update group:
+  `88dcf02d-445c-489f-9080-5b91c39f168f`
+- Preview OTA update group:
+  `b36e8539-2ec6-4b14-b3e0-f30c394a404d`
+- Runtime: `native-20260614-sdk54-1`.
 
 ## Remaining Risks
 

@@ -10,7 +10,8 @@ tools. It captures what is already complete and what should happen next.
 
 ## Current State
 
-- Checkpoints 1-12 are complete in `docs/live-upgrade-execution-checkpoints.md`.
+- Checkpoints 1-13 are complete through the first Route Builder extraction
+  slice in `docs/live-upgrade-execution-checkpoints.md`.
 - Last shipped implementation batch: Planner composer and copy cleanup.
 - Last implementation commit recorded in the prior session:
   `8ff520a Polish planner composer checkpoint`.
@@ -53,6 +54,7 @@ fresh shipped-app references.
 10. Explore Control Surface.
 11. Planner Composer + Copy Cleanup.
 12. Map Navigation Stability + Mapbox Native QA.
+13. Route Builder Deeper Redesign first slice.
 
 ## Remaining Work Queue
 
@@ -71,14 +73,13 @@ Verify:
 
 ### 2. Route Builder Deeper Redesign
 
-Checkpoint 4 only did shell extraction. Still needed:
+Checkpoint 13 extracted the hub and cleaned first Route Builder copy hits. Still
+needed:
 
-- Command header.
 - Route timeline.
 - Recent/saved strip.
 - Smart suggestions drawer.
 - Route-fit cards.
-- Visible copy cleanup.
 - More extraction from `mobile/app/(tabs)/route-builder.tsx`.
 
 Keep route computation and Mapbox bridge logic outside the screen.

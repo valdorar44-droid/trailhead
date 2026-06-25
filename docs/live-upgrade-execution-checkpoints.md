@@ -95,6 +95,14 @@ checkpoint must leave an audit note before the next checkpoint starts.
     - Reconfirm Trailhead Topo / Mapbox Outdoors layer ordering and free Mapbox
       style access.
 
+13. **Route Builder Deeper Redesign**
+    - Status: complete for first hub extraction and copy-cleanup slice.
+    - Extract Route Builder hub into a reusable component.
+    - Keep route computation, Mapbox bridge calls, saved geometry, camp scoring,
+      and API payloads unchanged.
+    - Clean visible Route Builder wording flagged by targeted copy audit.
+    - Save design decision, audit checkpoint, and Figma checkpoint frame.
+
 ## Refresh Handoff
 
 - Saved continuation context in `docs/live-upgrade-refresh-handoff.md`.
@@ -104,6 +112,8 @@ checkpoint must leave an audit note before the next checkpoint starts.
   research.
 - Checkpoint 12 implementation context is saved in
   `docs/live-upgrade-checkpoint-12-map-navigation-audit.md`.
+- Checkpoint 13 first-slice context is saved in
+  `docs/live-upgrade-checkpoint-13-route-builder-audit.md`.
 
 ## Validation Gate
 

@@ -16,6 +16,7 @@ import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
+import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -1481,7 +1482,7 @@ export default function RouteBuilderScreen() {
   const [showNewRouteConfirm, setShowNewRouteConfirm] = useState(false);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('camp_detail');
-  const [paywallMessage, setPaywallMessage] = useState('Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
+  const [paywallMessage, setPaywallMessage] = useState('Use credits to open full campsite profiles. You can still add this camp to your route from the free preview.');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
@@ -2266,14 +2267,14 @@ export default function RouteBuilderScreen() {
                   ...withLegProjection(camp, searchLeg!),
                   photo_status: 'missing',
                   route_fit: camp.route_fit || 'No photo fallback',
-                  photo_fallback_reason: 'Photos only found no photo-backed camp near this overnight endpoint.',
+                  photo_fallback_reason: 'Photos only found no photo-backed camp near this overnight stop.',
                 }))
                 .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to))
                 .slice(0, 3);
               fallbackText = ' using a no-photo fallback near the day-end area';
             }
           }
-          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} endpoint${fallbackText}` : 'spread along this leg'}` });
+          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} stop${fallbackText}` : 'spread along this leg'}` });
         } else {
           const offlineCamps = areaScopedOfflinePlaces(offlinePlaces, target, ['camp'], 50)
             .map(point => offlinePoiToCamp(point))
@@ -2974,7 +2975,7 @@ export default function RouteBuilderScreen() {
     } catch (e: any) {
       if (e instanceof PaywallError) {
         setPaywallCode(e.code || 'camp_detail');
-        setPaywallMessage(e.message || 'Use credits or Explorer to open full campsite profiles. You can still add this camp to your route from the free preview.');
+        setPaywallMessage(e.message || 'Use credits to open full campsite profiles. You can still add this camp to your route from the free preview.');
         setPaywallVisible(true);
       } else {
         const fallbackDetail = await enrichCampDetailWithGoogle({
@@ -3083,7 +3084,7 @@ export default function RouteBuilderScreen() {
       if (startQ) {
         const [startPlace] = await geocodePlaces(startQ);
         if (!startPlace) {
-          Alert.alert('Start not found', 'Try a city, address, trailhead, or coordinates for the route start.');
+          Alert.alert('Start not found', 'Try a city, address, trailhead, or map point for the route start.');
           return null;
         }
         start = {
@@ -3129,7 +3130,7 @@ export default function RouteBuilderScreen() {
       }
       const [place] = await geocodePlaces(q);
       if (!place) {
-        Alert.alert('Destination not found', 'Try a city, campground, park, trailhead, or coordinates.');
+        Alert.alert('Destination not found', 'Try a city, campground, park, trailhead, or map point.');
         return null;
       }
       if (!start) {
@@ -4385,136 +4386,28 @@ export default function RouteBuilderScreen() {
   function renderRouteHub() {
     const savedRoutes = tripHistory.slice(0, 10);
     return (
-      <SafeAreaView style={s.wizardScreen}>
-        <TrailheadTopBar
-          title="ROUTE BUILDER"
-          subtitle="Recent Adventures"
-          icon="trail-sign-outline"
-          style={s.wizardScreenTop}
-        />
-        <ScrollView
-          style={s.body}
-          contentContainerStyle={[s.routeHubContent, { paddingBottom: 120 + bottomInset }]}
-          showsVerticalScrollIndicator={false}
-          keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="on-drag"
-        >
-          <TrailheadCard style={s.routeHubHero}>
-            <Image source={{ uri: ROUTE_HERO_PHOTO }} style={s.routeHubHeroImage} resizeMode="cover" />
-            <LinearGradient colors={['rgba(3,7,18,0.04)', 'rgba(3,7,18,0.76)']} style={s.routeHubHeroShade} />
-            <View style={s.routeHubHeroContent}>
-              <Text style={s.routeHubTitle}>Plan a Route</Text>
-              <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={startNewRoute} disabled={routeSaving} />
-            </View>
-          </TrailheadCard>
-
-          <TrailheadCard style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
-            <View style={s.routeHubRigIcon}>
-              <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={17} color={rigRouteSummary.ready ? C.green : C.yellow} />
-            </View>
-            <View style={{ flex: 1 }}>
-              <Text style={s.routeHubRigTitle}>{rigRouteSummary.title}</Text>
-              <Text style={s.routeHubRigMeta}>{rigRouteSummary.meta}</Text>
-            </View>
-            <TouchableOpacity style={s.routeHubSmallBtn} onPress={() => router.push('/(tabs)/profile')}>
-              <Text style={s.routeHubSmallText}>{rigRouteSummary.ready ? 'EDIT' : 'ADD'}</Text>
-            </TouchableOpacity>
-          </TrailheadCard>
-
-          <View style={s.routeHubSectionHead}>
-            <Text style={s.routeHubSectionTitle}>Recent Adventures</Text>
-            {activeTrip ? (
-              <TouchableOpacity style={s.routeHubTinyAction} onPress={() => router.replace('/(tabs)/map')}>
-                <Ionicons name="map-outline" size={12} color={C.orange} />
-                <Text style={s.routeHubTinyText}>OPEN ACTIVE</Text>
-              </TouchableOpacity>
-            ) : null}
-          </View>
-
-          {savedRoutes.length ? (
-            savedRoutes.map(route => {
-              const card = routeTripCards[route.trip_id] || tripCardData(route, activeTrip?.trip_id === route.trip_id ? activeTrip : null, offlinePlaces);
-              return (
-                <TrailheadCard key={route.trip_id} style={s.savedRouteCard} onPress={() => openSavedRoute(route.trip_id)}>
-                  <Image source={{ uri: card.coverUrl }} style={s.savedRouteImage} resizeMode="cover" />
-                  <LinearGradient colors={['rgba(2,6,23,0.05)', 'rgba(2,6,23,0.78)']} style={s.savedRouteShade} />
-                  <View style={s.savedRouteOverlay}>
-                    <Text style={s.savedTripName} numberOfLines={2}>{route.trip_name}</Text>
-                    {card.stats ? <Text style={s.savedTripMeta} numberOfLines={2}>{card.stats}</Text> : null}
-                    <View style={s.savedRouteContinue}>
-                      <Text style={s.savedRouteOpenText}>Continue</Text>
-                      <Ionicons name="chevron-forward" size={13} color="#fff" />
-                    </View>
-                  </View>
-                </TrailheadCard>
-              );
-            })
-          ) : (
-            <TrailheadCard style={s.routeHubEmpty}>
-              <Ionicons name="map-outline" size={20} color={C.text3} />
-              <Text style={s.routeHubEmptyTitle}>No adventures yet</Text>
-            </TrailheadCard>
-          )}
-
-          <View style={s.routeHubSectionHead}>
-            <Text style={s.routeHubSectionTitle}>Trails</Text>
-            <Text style={s.routeHubSectionMeta}>{savedTrails.length ? `${savedTrails.length} saved` : 'Saved'}</Text>
-          </View>
-
-          {savedTrails.length ? (
-            savedTrails.map(item => (
-              <TrailheadCard key={item.id} style={s.savedTrailCard} onPress={() => openSavedTrailRoute(item)}>
-                <View style={s.savedTrailPreview}>
-                  <Ionicons name="git-branch-outline" size={19} color={C.green} />
-                </View>
-                <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.savedRouteName} numberOfLines={2}>{item.trail.name}</Text>
-                  <Text style={s.savedRouteMeta} numberOfLines={1}>{savedTrailDistance(item)}</Text>
-                  <View style={s.savedTrailPills}>
-                    <Text style={s.savedTrailPill}>TRAIL</Text>
-                    <Text style={s.savedTrailPill}>SAVED</Text>
-                  </View>
-                </View>
-                <View style={s.savedTrailActions}>
-                  <TouchableOpacity
-                    style={s.savedTrailDelete}
-                    onPress={(event: any) => {
-                      event.stopPropagation?.();
-                      deleteSavedTrailRoute(item);
-                    }}
-                    activeOpacity={0.82}
-                  >
-                    <Ionicons name="trash-outline" size={15} color={C.red} />
-                  </TouchableOpacity>
-                  <Ionicons name="chevron-forward" size={17} color={C.text3} />
-                </View>
-              </TrailheadCard>
-            ))
-          ) : (
-            <TrailheadCard style={s.routeHubEmptyCompact}>
-              <Ionicons name="git-branch-outline" size={18} color={C.text3} />
-              <Text style={s.routeHubEmptyText}>Saved pinned trail routes will appear here after you tap SAVE in the trail planner.</Text>
-            </TrailheadCard>
-          )}
-        </ScrollView>
-        <Modal visible={showNewRouteConfirm} transparent animationType="fade" onRequestClose={() => setShowNewRouteConfirm(false)}>
-          <View style={s.confirmOverlay}>
-            <TrailheadSheet handle={false} style={s.confirmCard} contentStyle={s.confirmCardContent}>
-              <View style={s.confirmIcon}>
-                <Ionicons name="trail-sign-outline" size={22} color={C.orange} />
-              </View>
-              <Text style={s.confirmTitle}>Start a new route?</Text>
-              <Text style={s.confirmText}>
-                You already have an active route open. Save and close it before starting fresh, or discard it and clear the workspace.
-              </Text>
-              <TrailheadButton label="Save & Close" icon="save-outline" variant="primary" onPress={saveCloseAndStartNewRoute} loading={routeSaving} disabled={routeSaving} style={{ alignSelf: 'stretch' }} />
-              <TrailheadButton label="Discard & Close" icon="trash-outline" variant="danger" onPress={discardCloseAndStartNewRoute} disabled={routeSaving} style={{ alignSelf: 'stretch' }} />
-              <TrailheadButton label="Cancel" variant="ghost" onPress={() => setShowNewRouteConfirm(false)} disabled={routeSaving} style={{ alignSelf: 'stretch' }} />
-            </TrailheadSheet>
-          </View>
-        </Modal>
-        <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
-      </SafeAreaView>
+      <RouteBuilderHub
+        bottomInset={bottomInset}
+        heroPhoto={ROUTE_HERO_PHOTO}
+        routeSaving={routeSaving}
+        rigRouteSummary={rigRouteSummary}
+        savedRoutes={savedRoutes}
+        savedTrails={savedTrails}
+        showOpenActive={!!activeTrip}
+        showNewRouteConfirm={showNewRouteConfirm}
+        routeTripCardData={route => routeTripCards[route.trip_id] || tripCardData(route, activeTrip?.trip_id === route.trip_id ? activeTrip : null, offlinePlaces)}
+        savedTrailDistance={savedTrailDistance}
+        onStartNewRoute={startNewRoute}
+        onOpenProfile={() => router.push('/(tabs)/profile')}
+        onOpenActiveMap={() => router.replace('/(tabs)/map')}
+        onOpenSavedRoute={openSavedRoute}
+        onOpenSavedTrailRoute={openSavedTrailRoute}
+        onDeleteSavedTrailRoute={deleteSavedTrailRoute}
+        onCloseNewRouteConfirm={() => setShowNewRouteConfirm(false)}
+        onSaveCloseAndStartNewRoute={saveCloseAndStartNewRoute}
+        onDiscardCloseAndStartNewRoute={discardCloseAndStartNewRoute}
+        paywallModal={<PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />}
+      />
     );
   }
 
@@ -4557,7 +4450,7 @@ export default function RouteBuilderScreen() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you starting?</Text>
-              <Text style={s.wizardHelp}>Use current location or search a known city, trailhead, address, campsite, or coordinates.</Text>
+              <Text style={s.wizardHelp}>Use current location or search a known city, trailhead, address, campsite, or map point.</Text>
             </View>
             <View style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
               <View style={s.routeHubRigIcon}>
@@ -4975,7 +4868,7 @@ export default function RouteBuilderScreen() {
               value={query}
               onChangeText={setQuery}
               onSubmitEditing={runSearch}
-              placeholder="Search city, address, trailhead, coordinates"
+              placeholder="Search city, address, trailhead, or map point"
               placeholderTextColor={C.text3}
               style={s.searchInput}
               returnKeyType="search"
@@ -5028,7 +4921,7 @@ export default function RouteBuilderScreen() {
                 <Ionicons name={stopIcon(pendingType)} size={15} color={stopColor(pendingType)} />
                 <View style={{ flex: 1 }}>
                   <Text style={s.resultName} numberOfLines={1}>{place.name}</Text>
-                  <Text style={s.resultMeta}>{place.lat.toFixed(4)}, {place.lng.toFixed(4)}</Text>
+                  <Text style={s.resultMeta}>Map result</Text>
                 </View>
               </TouchableOpacity>
             ))}
@@ -5210,7 +5103,7 @@ export default function RouteBuilderScreen() {
                 <Text style={s.quickCardCost}>{selectedCamp.reservable ? 'Reservable · ' : ''}{selectedCamp.cost}</Text>
               ) : null}
               <Text style={s.quickCardDesc} numberOfLines={3}>
-                {stripHtml(selectedCamp?.description) || 'Camp profile preview. Full profile shows access notes, amenities, coordinates, and Trailhead camp brief.'}
+                {stripHtml(selectedCamp?.description) || 'Camp profile preview. Full profile shows access notes, amenities, map details, and Trailhead camp brief.'}
               </Text>
             {campWeather?.daily?.time?.length ? (
               <View style={s.weatherStrip}>
@@ -5520,7 +5413,7 @@ export default function RouteBuilderScreen() {
                       <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
                         <View style={s.campReviewTop}>
                           <Text style={s.campReviewAuthor} numberOfLines={1}>{review.authorName || 'Review'}</Text>
-                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Provider'}</Text>
+                          <Text style={s.campReviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Source'}</Text>
                         </View>
                         {!!review.relativeTime && <Text style={s.campReviewMeta}>{review.relativeTime}</Text>}
                         {!!review.text && <Text style={s.campReviewText} numberOfLines={4}>{review.text}</Text>}
@@ -5616,7 +5509,7 @@ export default function RouteBuilderScreen() {
         promoteToRouteLabel="Route through"
         onRichDetailLocked={() => {
           setPaywallCode('category_unlock');
-          setPaywallMessage('Provider photo, contact details, and weekly hours load on demand for 5 credits or Explorer.');
+          setPaywallMessage('Photos, contact details, and weekly hours load on demand for 5 credits.');
           setPaywallVisible(true);
         }}
       />

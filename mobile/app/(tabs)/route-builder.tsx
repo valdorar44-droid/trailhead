@@ -32,7 +32,6 @@ import {
 } from '@/components/routeBuilder/RouteBuilderStopPreviewCards';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderTimelineDayCard from '@/components/routeBuilder/RouteBuilderTimelineDayCard';
-import RouteBuilderWorkspaceSummary from '@/components/routeBuilder/RouteBuilderWorkspaceSummary';
 import RentalSuggestionModule from '@/components/trip/RentalSuggestionModule';
 import useRouteBuilderDiscoveryState, {
   type DiscoveryTab,
@@ -4980,11 +4979,6 @@ export default function RouteBuilderScreen() {
       </View>
 
       <TrailheadSheet handle={false} style={[s.routeEditorPanel, { marginBottom: keyboardVisible ? 12 : 18 + bottomInset }]} contentStyle={s.routeSheetContent}>
-        <RouteBuilderWorkspaceSummary
-          title={resolvedRouteName()}
-          meta={`${fmtRouteDistance(totals.miles)} · ${fmtHours(planningStats.driveHours)} · ${days.length} days · ${totals.camps} camps`}
-        />
-
       <ScrollView
         style={s.body}
         contentContainerStyle={[s.bodyContent, { paddingBottom: (keyboardVisible ? 260 : 240) + bottomInset }]}

@@ -4289,6 +4289,26 @@ export default function RouteBuilderScreen() {
     discardCloseAndStartNewRoute();
   }
 
+  function discardAndExitRouteBuilder() {
+    resetRouteDraft();
+    setActiveTrip(null);
+    setRouteTabMode('hub');
+    router.replace('/(tabs)/map');
+  }
+
+  function exitRouteBuilder() {
+    if (routeSaving) return;
+    Alert.alert(
+      'Exit route builder?',
+      'Save this route before leaving, or discard the builder draft.',
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard & exit', style: 'destructive', onPress: discardAndExitRouteBuilder },
+        { text: 'Save & exit', onPress: () => { saveRoute(true).catch(() => {}); } },
+      ],
+    );
+  }
+
   function applyRouteRename() {
     const clean = routeNameDraft.trim();
     setRouteName(clean || resolvedRouteName());
@@ -4970,7 +4990,7 @@ export default function RouteBuilderScreen() {
   return (
     <SafeAreaView style={s.wizardScreen}>
       <View style={s.wizardCompactTop}>
-        <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to recent adventures" activeOpacity={0.82}>
+        <TouchableOpacity style={s.headerBtn} onPress={exitRouteBuilder} accessibilityLabel="Exit route builder" activeOpacity={0.82}>
           <Ionicons name="close" size={17} color={C.orange} />
         </TouchableOpacity>
         <TouchableOpacity style={s.headerBtn} onPress={() => setRouteActionSheet('actions')} accessibilityLabel="Route actions" activeOpacity={0.82}>
@@ -5594,6 +5614,13 @@ export default function RouteBuilderScreen() {
                   <View style={s.routeActionRowText}>
                     <Text style={s.routeActionTitle}>Save & close</Text>
                     <Text style={s.routeActionSub}>Save this route and start a new one</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.routeActionRow} onPress={() => { setRouteActionSheet(null); exitRouteBuilder(); }} disabled={routeSaving} activeOpacity={0.84}>
+                  <Ionicons name="exit-outline" size={18} color={C.orange} />
+                  <View style={s.routeActionRowText}>
+                    <Text style={s.routeActionTitle}>Exit route builder</Text>
+                    <Text style={s.routeActionSub}>Save or discard before returning to the map</Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.routeActionRow} onPress={openRouteRenameSheet} activeOpacity={0.84}>

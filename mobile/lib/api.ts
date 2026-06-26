@@ -674,8 +674,8 @@ export const api = {
     }),
 
   // Discovery
-  getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = []) =>
-    req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}`)
+  getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = [], opts: { limit?: number; mode?: 'full' | 'light'; stays?: boolean } = {}) =>
+    req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}&limit=${opts.limit ?? 220}&mode=${encodeURIComponent(opts.mode ?? 'full')}&stays=${opts.stays ? '1' : '0'}`)
       .then(canonicalizeCampsitePins),
   getRouteCampWindows: (data: RouteCampWindowsRequest) =>
     req<RouteCampWindowsResponse>('/api/route/camp-windows', {
@@ -687,8 +687,8 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  getCampsBbox: (n: number, s: number, e: number, w: number, types: string[] = []) =>
-    req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}`)
+  getCampsBbox: (n: number, s: number, e: number, w: number, types: string[] = [], opts: { limit?: number; mode?: 'full' | 'light'; stays?: boolean } = {}) =>
+    req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}&limit=${opts.limit ?? 360}&mode=${encodeURIComponent(opts.mode ?? 'light')}&stays=${opts.stays ? '1' : '0'}`)
       .then(canonicalizeCampsitePins),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
@@ -2080,7 +2080,7 @@ export interface Report {
   description: string; severity: string; upvotes: number; downvotes: number;
   confirmations: number; has_photo: number; cluster_count: number;
   username: string; created_at: number; expires_at: number; waypoint_day?: number;
-  source?: 'trailhead' | 'provider' | string; provider?: string | null; provider_id?: string;
+  source?: string; provider?: string | null; provider_id?: string;
   updated_at?: number; road_name?: string | null; confidence?: number; geometry?: unknown;
   route_distance_m?: number; distance_m?: number; reporter_trust?: string; source_confidence?: string;
 }

@@ -1891,6 +1891,11 @@ export default function RouteBuilderScreen() {
   const campTypeFilters = useMemo(() => (
     CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.filters ?? []
   ), [campPreferenceMode]);
+  const campDiscoveryRequestOptions = useMemo(() => ({
+    limit: 220,
+    mode: 'light' as const,
+    stays: campTypeFilters.length === 0 || campTypeFilters.some(type => ['private', 'private_stay', 'farm', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'].includes(type)),
+  }), [campTypeFilters]);
   const campPreferenceLabel = CAMP_PREFERENCE_OPTIONS.find(option => option.id === campPreferenceMode)?.label ?? 'Public';
   const campWindowFor = (day: number, sourceDays: number[] = days, cadence: CampCadenceMode = campCadenceMode) => {
     const lastDay = sourceDays[sourceDays.length - 1] ?? day;
@@ -2361,7 +2366,7 @@ export default function RouteBuilderScreen() {
           }).catch(() => null));
           if (found.length === 0) {
             found = uniqueByGeo((await Promise.all(
-              legSamplePoints(searchLeg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => []))
+              legSamplePoints(searchLeg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters, campDiscoveryRequestOptions).catch(() => []))
             )).flat());
           }
           const offlineCamps = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['camp'], 18)
@@ -2375,7 +2380,7 @@ export default function RouteBuilderScreen() {
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
           let fallbackText = '';
           if (searchLeg!.purpose === 'overnight' && scoped.length === 0) {
-            const endpointCamps = await api.getNearbyCamps(searchLeg!.to.lat, searchLeg!.to.lng, 55, campTypeFilters).catch(() => []);
+            const endpointCamps = await api.getNearbyCamps(searchLeg!.to.lat, searchLeg!.to.lng, 55, campTypeFilters, campDiscoveryRequestOptions).catch(() => []);
             scoped = filterCampsByPhotoMode(endpointCamps, campPhotoOnly)
               .map(camp => withLegProjection(camp, searchLeg!))
               .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to));
@@ -2411,7 +2416,7 @@ export default function RouteBuilderScreen() {
             limit: 120,
           }).catch(() => null));
           if (liveCamps.length === 0) {
-            liveCamps = await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters).catch(() => []);
+            liveCamps = await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters, campDiscoveryRequestOptions).catch(() => []);
           }
           const found = filterCampsByPhotoMode(uniqueByGeo([...liveCamps, ...offlineCamps]), campPhotoOnly)
             .filter(camp => campMatchesFilters(camp, campTypeFilters))
@@ -3505,7 +3510,7 @@ export default function RouteBuilderScreen() {
     }).catch(() => null)).filter(camp => campMatchesFilters(camp, campTypeFilters));
     if (found.length === 0) {
       found = uniqueByGeo((await Promise.all(
-        samples.map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => [] as CampsitePin[]))
+        samples.map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters, campDiscoveryRequestOptions).catch(() => [] as CampsitePin[]))
       )).flat());
     }
     const scored = found

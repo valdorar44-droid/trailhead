@@ -12512,6 +12512,8 @@ def _merge_camp_record(existing: dict, incoming: dict) -> dict:
 
 PRIVATE_STAY_PLACE_TYPES = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
 PRIVATE_STAY_FILTERS = {"private", "private_stay", "farm", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
+CAMP_DISCOVERY_DEFAULT_LIMIT = 220
+CAMP_DISCOVERY_MAX_LIMIT = 500
 
 def _private_stay_only_place_request(categories: set[str]) -> bool:
     normalized = {_normalize_place_category(c) for c in categories if str(c).strip()}
@@ -12542,6 +12544,12 @@ def _private_stay_categories_for_filters(type_filters: list[str] | None = None) 
         categories.add("winery")
     if "glamping" in filters or "private" in filters:
         categories.add("glamping")
+    return categories
+
+def _camp_private_stay_categories(type_filters: list[str] | None = None, include_private: bool = False) -> set[str]:
+    categories = _private_stay_categories_for_filters(type_filters)
+    if include_private and not categories:
+        return set(PRIVATE_STAY_PLACE_TYPES)
     return categories
 
 def _private_stay_label(place_type: str, text: str = "") -> str:
@@ -12659,12 +12667,82 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "site_types": [land_type] if is_private_stay else (["RV"] if "rv" in tags else ["Tent", "Campground"]),
     }
 
+def _camp_first_photo_url(camp: dict) -> str:
+    for key in ("photo_url", "hero_photo_url", "primary_image", "image_url"):
+        value = str(camp.get(key) or "").strip()
+        if value:
+            return value
+    photos = camp.get("photos") or camp.get("photo_candidates") or camp.get("images") or []
+    if isinstance(photos, list):
+        for photo in photos:
+            if isinstance(photo, dict):
+                value = str(photo.get("url") or photo.get("src") or "").strip()
+            else:
+                value = str(photo or "").strip()
+            if value:
+                return value
+    return ""
+
+def _camp_lightweight_record(camp: dict) -> dict:
+    photo_url = _camp_first_photo_url(camp)
+    photos = [photo_url] if photo_url else []
+    source = str(camp.get("source") or camp.get("verified_source") or "").strip()
+    freshness = camp.get("last_checked") or camp.get("updated_at") or camp.get("fetched_at")
+    return {
+        "id": camp.get("id") or _camp_merge_key(camp),
+        "name": camp.get("name") or "Camp stay",
+        "lat": camp.get("lat"),
+        "lng": camp.get("lng"),
+        "tags": camp.get("tags") or [],
+        "land_type": camp.get("land_type") or camp.get("type") or "Campground",
+        "summary": camp.get("summary") or _planner_clean_text(camp.get("description"), 220),
+        "description": _planner_clean_text(camp.get("description") or camp.get("summary"), 260),
+        "photo_url": photo_url,
+        "photos": photos,
+        "has_photo": bool(photo_url),
+        "reservable": bool(camp.get("reservable")),
+        "cost": camp.get("cost") or "",
+        "url": camp.get("url") or "",
+        "ada": bool(camp.get("ada")),
+        "source": camp.get("source") or "",
+        "verified_source": camp.get("verified_source") or "",
+        "source_badge": camp.get("source_badge") or camp.get("verified_source") or source,
+        "source_confidence": _camp_source_confidence(camp),
+        "last_checked": freshness,
+        "freshness_label": camp.get("freshness_label") or ("Source checked" if freshness else "Freshness unknown"),
+        "phone": camp.get("phone") or "",
+        "address": camp.get("address") or "",
+        "rating": camp.get("rating"),
+        "rating_count": camp.get("rating_count"),
+        "provider_place_id": camp.get("provider_place_id") or camp.get("place_id") or "",
+        "place_id": camp.get("place_id") or "",
+        "amenities": (camp.get("amenities") or [])[:8],
+        "site_types": (camp.get("site_types") or [])[:6],
+        "pin_payload": True,
+    }
+
+def _camp_discovery_response(camps: list[dict], mode: str = "full", limit: int = CAMP_DISCOVERY_DEFAULT_LIMIT) -> list[dict]:
+    safe_limit = max(1, min(int(limit or CAMP_DISCOVERY_DEFAULT_LIMIT), CAMP_DISCOVERY_MAX_LIMIT))
+    sliced = camps[:safe_limit]
+    if str(mode or "").lower() in {"light", "pin", "pins", "map"}:
+        return [_camp_lightweight_record(camp) for camp in sliced]
+    return sliced
+
 def _international_camp_tasks(lat: float, lng: float, radius: float, type_filters: list[str] | None) -> list:
     return international_camp_tasks(lat, lng, radius, type_filters)
 
-async def _aggregate_nearby_camps(lat: float, lng: float, radius: float = 50, types: str = "") -> list[dict]:
+async def _aggregate_nearby_camps(
+    lat: float,
+    lng: float,
+    radius: float = 50,
+    types: str = "",
+    *,
+    limit: int = CAMP_DISCOVERY_DEFAULT_LIMIT,
+    mode: str = "full",
+    include_private: bool = False,
+) -> list[dict]:
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    private_stay_categories = _private_stay_categories_for_filters(type_filters)
+    private_stay_categories = _camp_private_stay_categories(type_filters, include_private=include_private)
     active_filters = {
         "group_site": bool(type_filters and "group" in type_filters),
         "rv": bool(type_filters and "rv" in type_filters),
@@ -12683,13 +12761,13 @@ async def _aggregate_nearby_camps(lat: float, lng: float, radius: float = 50, ty
     merged = _merge_camp_sources(ridb, blm, osm, active, [c for c in hosted_camps if c], *international_sources, type_filters=type_filters)
     if len(merged) < 10:
         merged = _merge_camp_sources(merged, _explore_catalog_fallback_camps(lat, lng, max(radius, 75), limit=32), type_filters=type_filters)
-    return merged[:160]
+    return _camp_discovery_response(merged, mode=mode, limit=limit)
 
 
 @app.get("/api/nearby-camps")
-async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = ""):
+async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = "", limit: int = CAMP_DISCOVERY_DEFAULT_LIMIT, mode: str = "full", stays: bool = False):
     """Aggregate legal camp sources near a point, no trip required."""
-    return await _aggregate_nearby_camps(lat, lng, radius, types)
+    return await _aggregate_nearby_camps(lat, lng, radius, types, limit=limit, mode=mode, include_private=stays)
 
 
 def _route_points_from_body(route: list[dict]) -> list[dict]:
@@ -13211,26 +13289,38 @@ async def route_camp_windows(body: RouteCampWindowsRequest):
 
 
 @app.get("/api/camps/bbox")
-async def camps_bbox(n: float, s: float, e: float, w: float, types: str = ""):
+async def camps_bbox(n: float, s: float, e: float, w: float, types: str = "", limit: int = 360, mode: str = "light", stays: bool = False):
     """Viewport-based camp loading — returns all camps in a bounding box."""
     lat = (n + s) / 2
     lng = (e + w) / 2
     # Rough radius: half the larger of NS or EW span in miles
     lat_span_mi = abs(n - s) * 69.0
     lng_span_mi = abs(e - w) * 54.6  # ~54.6 mi per degree lng at 38° N
-    radius_miles = min(max(lat_span_mi, lng_span_mi) / 2 + 5, 120)
+    radius_miles = min(max(lat_span_mi, lng_span_mi) / 2 + 5, 180)
     radius_m = int(radius_miles * 1600)
     type_filters = [t.strip() for t in types.split(",") if t.strip()] if types else None
-    ridb, blm, osm = await asyncio.gather(
+    private_stay_categories = _camp_private_stay_categories(type_filters, include_private=stays)
+    active_filters = {
+        "group_site": bool(type_filters and "group" in type_filters),
+        "rv": bool(type_filters and "rv" in type_filters),
+        "tent": bool(type_filters and "tent" in type_filters),
+    }
+    international_tasks = _international_camp_tasks(lat, lng, radius_miles, type_filters)
+    ridb, blm, osm, active, hosted_private, *international_sources = await asyncio.gather(
         get_campsites_search(lat, lng, radius_miles=radius_miles, type_filters=type_filters),
         get_blm_campsites(lat, lng, radius_miles=radius_miles),
-        get_osm_campsites(lat, lng, radius_m=min(radius_m, 120000)),
+        get_osm_campsites(lat, lng, radius_m=min(radius_m, 180000)),
+        get_active_campgrounds(lat, lng, radius_miles=radius_miles, filters=active_filters),
+        get_geoapify_places(lat, lng, radius_m=int(min(radius_miles, 65) * 1609.344), categories=private_stay_categories, limit_per_category=18) if private_stay_categories else asyncio.sleep(0, result=[]),
+        *international_tasks,
     )
+    hosted_camps = [_camp_from_live_place(place) for place in hosted_private if isinstance(place, dict)]
     in_box = [
         [c for c in source if s <= c.get("lat", 999) <= n and w <= c.get("lng", 999) <= e]
-        for source in (ridb, blm, osm)
+        for source in (ridb, blm, osm, active, [c for c in hosted_camps if c], *international_sources)
     ]
-    return _merge_camp_sources(*in_box, type_filters=type_filters)[:200]
+    merged = _merge_camp_sources(*in_box, type_filters=type_filters)
+    return _camp_discovery_response(merged, mode=mode, limit=limit)
 
 
 def _planner_clean_text(value: object, max_chars: int = 700) -> str:

@@ -5567,6 +5567,7 @@ function MapScreen() {
   const lastNavMapGestureRef = useRef(0);
   const lastAndroidLocationDebugRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
+  const campAreaRequestRef = useRef(0);
 
   const webLoadedRef = useRef(false);
   const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
@@ -13384,12 +13385,21 @@ function MapScreen() {
     const latMi = ((bounds.n - bounds.s) / 2) * 69;
     const lngMi = ((bounds.e - bounds.w) / 2) * 69 * Math.cos(centerLat * Math.PI / 180);
     const radiusMi = Math.min(Math.ceil(Math.sqrt(latMi * latMi + lngMi * lngMi)), opts.radiusCapMi ?? MAX_FREECAM_CAMP_SEARCH_RADIUS_MI);
+    const requestId = campAreaRequestRef.current + 1;
+    campAreaRequestRef.current = requestId;
+    const includeStays = Boolean(opts.campOnly || lookupTypes.length === 0 || lookupTypes.some(type => ['private', 'private_stay', 'farm', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'].includes(type)));
+    const campLimit = opts.campOnly ? 420 : 300;
     setIsLoadingAreaCamps(true);
     setMapMoved(false);
     setSearchResult(null);
     try {
       const [campsResult, fullResult, smartPackResult] = await Promise.allSettled([
-        api.getNearbyCamps(centerLat, centerLng, radiusMi, lookupTypes),
+        api.getCampsBbox(bounds.n, bounds.s, bounds.e, bounds.w, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays })
+          .then(value => value.length > 0
+            ? value
+            : api.getNearbyCamps(centerLat, centerLng, radiusMi, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays })
+          )
+          .catch(() => api.getNearbyCamps(centerLat, centerLng, radiusMi, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays })),
         api.getNearbyFullness(centerLat, centerLng, radiusMi * 0.6),
         api.getNearbySmartPack(
           centerLat,
@@ -13405,9 +13415,10 @@ function MapScreen() {
         setPaywallCode(campsResult.reason.code);
         setPaywallMessage(campsResult.reason.message);
         setPaywallVisible(true);
-        setIsLoadingAreaCamps(false);
+        if (campAreaRequestRef.current === requestId) setIsLoadingAreaCamps(false);
         return null;
       }
+      if (campAreaRequestRef.current !== requestId) return null;
       const fullIds = new Set(
         fullResult.status === 'fulfilled' ? fullResult.value.map(f => f.camp_id) : []
       );
@@ -13438,7 +13449,7 @@ function MapScreen() {
         seenCampKeys.add(key);
         seenCampKeys.add(fuzzy);
         mergedCamps.push(camp);
-        if (mergedCamps.length >= 180) break;
+        if (mergedCamps.length >= campLimit) break;
       }
       const tagged = rankCopilotCampsForSearch(
         mergedCamps.map(c => ({ ...c, full: fullIds.has(c.id) ? 1 : 0 })),
@@ -13454,9 +13465,10 @@ function MapScreen() {
       if (opts.openSheet) setCampDiscoverySheetDismissed(false);
       setSearchResult({ count: tagged.length });
       setTimeout(() => setSearchResult(null), 3000);
-      setIsLoadingAreaCamps(false);
+      if (campAreaRequestRef.current === requestId) setIsLoadingAreaCamps(false);
       return tagged;
     } catch (e: any) {
+      if (campAreaRequestRef.current !== requestId) return null;
       if (e instanceof PaywallError) {
         setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
       } else {
@@ -13464,7 +13476,7 @@ function MapScreen() {
         setTimeout(() => setSearchResult(null), 3000);
       }
     }
-    setIsLoadingAreaCamps(false);
+    if (campAreaRequestRef.current === requestId) setIsLoadingAreaCamps(false);
     return null;
   }
 
@@ -17011,13 +17023,13 @@ function MapScreen() {
     (!showPlacePins || placeFilterChanged ? 1 : 0);
   const campFilterSummary = showCampPins
     ? activeFilters.length === 0
-      ? 'No camp types selected'
+      ? 'No camp types visible'
       : allCampFiltersSelected(activeFilters)
-        ? 'All camp types selected'
-        : `${activeFilters.length} selected`
+        ? 'All camp types visible'
+        : `${activeFilters.length} visible`
     : 'Hidden';
   const activeCampFilterLabel = activeFilters.length === 0
-    ? 'No camp types selected'
+    ? 'No camp types visible'
     : allCampFiltersSelected(activeFilters)
       ? 'Camps, RV parks, and stays nearby'
       : activeFilters.map(cleanDisplayLabel).slice(0, 3).join(' · ');
@@ -17303,17 +17315,9 @@ function MapScreen() {
       if (seen.has(key)) continue;
       seen.add(key);
       next.push(camp);
-      if (next.length >= 60) break;
+      if (next.length >= 300) break;
     }
-    return next.sort((a, b) => {
-      const aPhoto = campPhotoUrl(a.photo_url || a.photos?.[0]) ? 1 : 0;
-      const bPhoto = campPhotoUrl(b.photo_url || b.photos?.[0]) ? 1 : 0;
-      if (aPhoto !== bPhoto) return bPhoto - aPhoto;
-      const aRating = Number(a.rating ?? 0);
-      const bRating = Number(b.rating ?? 0);
-      if (aRating !== bRating) return bRating - aRating;
-      return Number(a.route_distance_mi ?? 999) - Number(b.route_distance_mi ?? 999);
-    });
+    return next;
   }, [areaCamps, activeTrip?.campsites, activeFilters, campDiscoveryWideActive]);
   const showCampDiscoverySheet = Boolean(
     showCampPins &&
@@ -18143,7 +18147,7 @@ function MapScreen() {
             </View>
           ) : (
           <View style={s.campDiscoveryCards}>
-            {discoveryCamps.slice(0, 30).map((camp, idx) => {
+            {discoveryCamps.slice(0, 50).map((camp) => {
                 const photo = campPhotoItems(camp)[0]?.url;
                 const distance = camp.route_distance_mi != null ? Number(camp.route_distance_mi) : null;
                 const meta = [
@@ -18154,7 +18158,7 @@ function MapScreen() {
                 const price = camp.cost || (camp.reservable ? 'Reservable' : '');
                 return (
                   <TouchableOpacity
-                    key={`${campKey(camp)}-${idx}`}
+                    key={campKey(camp)}
                     style={s.campDiscoveryCard}
                     onPress={() => openCampFromDiscovery(camp)}
                     activeOpacity={0.88}

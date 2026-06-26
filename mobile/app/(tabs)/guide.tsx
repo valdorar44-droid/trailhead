@@ -2645,9 +2645,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderColor: C.border,
   },
   categoryPillText: { color: C.text, fontSize: 12, fontWeight: '900' },
-  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
+  categoryGrid: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'space-between', rowGap: 10 },
   categoryTile: {
-    width: '48%', minHeight: 92, borderRadius: 8,
+    flexBasis: '48%', maxWidth: '48%', minHeight: 104, borderRadius: 8,
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
     padding: 12, justifyContent: 'space-between',
   },

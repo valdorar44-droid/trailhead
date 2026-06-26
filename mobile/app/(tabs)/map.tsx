@@ -3451,6 +3451,13 @@ function weatherTemp(value?: number | null, units?: WeatherForecast['trailhead_u
   return `${Math.round(Number(value))}${units?.temperature_label ?? '°'}`;
 }
 
+function campCostLine(camp: Partial<CampsitePin> | null | undefined) {
+  const raw = String(camp?.cost || '').trim();
+  if (!raw) return camp?.reservable ? 'Reservable' : '';
+  if (camp?.reservable && !/\breservable\b/i.test(raw)) return `Reservable · ${raw}`;
+  return raw.replace(/\bReservable\s*·\s*Reservable\b/gi, 'Reservable');
+}
+
 function firstNumber(values?: Array<number | null> | null) {
   const value = Array.isArray(values) ? values.find(v => Number.isFinite(Number(v))) : null;
   return Number.isFinite(Number(value)) ? Number(value) : null;
@@ -17326,6 +17333,7 @@ function MapScreen() {
     !offlineAreaPicker &&
     !trailRouteBuilderOpen
   );
+  const nativeMapCampPins = showCampPins ? discoveryCamps : [];
 
   const nativeNavigationPanel = navMode ? (
     <Animated.View
@@ -17483,10 +17491,7 @@ function MapScreen() {
         <NativeMap
           ref={nativeMapRef}
           waypoints={waypoints}
-          camps={scopedMapSearchActive || waterFollowActive || !showCampPins ? [] : [
-            ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
-            ...areaCamps.filter(c => c.lat != null && c.lng != null),
-          ] as any}
+          camps={scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
           gas={scopedMapSearchActive ? [] : routeSearchGas as any}
           pois={scopedMapSearchPois}
           waterNavLines={scopedMapSearchActive ? null : waterNavLines}
@@ -20165,38 +20170,13 @@ function MapScreen() {
       {selectedCamp && !navMode && !safeWaterPlanningActive && (
         <TrailheadSnapSheet
           initialStage="full"
-          maxFullRatio={0.98}
+          maxFullRatio={1}
           halfRatio={0.58}
+          fullScreen
           style={s.quickSnapCard}
           contentStyle={s.quickSnapShell}
           scrollContentStyle={s.quickSnapContent}
-          peekHeader={(
-            <View style={s.quickPeekHeader}>
-              <View style={s.quickPeekIcon}>
-                <Ionicons
-                  name={(selectedCamp.tags ?? []).includes('rv') ? 'car-outline' : (selectedCamp.tags ?? []).includes('dispersed') ? 'moon-outline' : 'bonfire-outline'}
-                  size={18}
-                  color={C.orange}
-                />
-              </View>
-              <View style={s.quickPeekCopy}>
-                <Text style={s.quickPeekTitle} numberOfLines={1}>{selectedCamp.name}</Text>
-                <Text style={s.quickPeekMeta} numberOfLines={1}>
-                  {[selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type || 'Camp', selectedCamp.address || selectedCamp.cost || ''].filter(Boolean).join(' · ')}
-                </Text>
-              </View>
-              <TouchableOpacity style={s.quickPeekButton} onPress={() => saveCampPlace(selectedCamp)}>
-                <Ionicons
-                  name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
-                  size={18}
-                  color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : C.text2}
-                />
-              </TouchableOpacity>
-              <TouchableOpacity style={s.quickPeekButton} onPress={closeSelectedCampProfile}>
-                <Ionicons name="close" size={18} color={C.text2} />
-              </TouchableOpacity>
-            </View>
-          )}
+          peekHeader={null}
         >
             {/* Photo / placeholder */}
             {(() => {
@@ -20225,8 +20205,8 @@ function MapScreen() {
                       </TouchableOpacity>
                     </View>
                   ) : null}
-                  {photos.length > 1 ? <Text style={s.quickPhotoCount}>{safeIndex + 1}/{photos.length}</Text> : null}
-                  <View style={s.quickCardHeroActions}>
+                  {photos.length > 1 ? <Text style={[s.quickPhotoCount, { top: Math.max(insets.top + 12, 12) }]}>{safeIndex + 1}/{photos.length} photos</Text> : null}
+                  <View style={[s.quickCardHeroActions, { top: Math.max(insets.top + 8, 12) }]}>
                     <TouchableOpacity
                       style={s.quickCardHeroIcon}
                       onPress={() => saveCampPlace(selectedCamp)}
@@ -20249,6 +20229,22 @@ function MapScreen() {
                       {(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type || 'Trailhead camp').toUpperCase()}
                     </Text>
                     <Text style={s.quickCardHeroTitle} numberOfLines={2}>{selectedCamp.name}</Text>
+                    {(() => {
+                      const weather = campWeather;
+                      if (!weather?.daily?.time?.length) return null;
+                      return (
+                        <View style={s.quickHeroWeatherRow}>
+                          {[0, 1, 2].filter(i => weather.daily.time[i]).map(i => (
+                            <View key={i} style={s.quickHeroWeatherPill}>
+                              <Ionicons name={weatherIonIcon(weather.daily.weathercode[i])} size={14} color="#fff" />
+                              <Text style={s.quickHeroWeatherText}>
+                                {Math.round(weather.daily.temperature_2m_max[i])}{weather.trailhead_units?.temperature_label ?? '°'}/{Math.round(weather.daily.temperature_2m_min[i])}{weather.trailhead_units?.temperature_label ?? '°'}
+                              </Text>
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    })()}
                   </View>
                 </TouchableOpacity>
               );
@@ -20262,13 +20258,17 @@ function MapScreen() {
                 </Text>
               </View>
             ) : null}
-            <Text style={s.quickCardSource} numberOfLines={1}>
-              {[
-                selectedCamp.verified_source || selectedCamp.source || 'Trailhead',
-                selectedCamp.rating ? `${Number(selectedCamp.rating).toFixed(1)} (${selectedCamp.rating_count || 0})` : '',
-                selectedCamp.address || '',
-              ].filter(Boolean).join(' · ')}
-            </Text>
+            {[
+              selectedCamp.rating ? `${Number(selectedCamp.rating).toFixed(1)} (${selectedCamp.rating_count || 0})` : '',
+              selectedCamp.address || '',
+            ].filter(Boolean).length ? (
+              <Text style={s.quickCardSource} numberOfLines={1}>
+                {[
+                  selectedCamp.rating ? `${Number(selectedCamp.rating).toFixed(1)} (${selectedCamp.rating_count || 0})` : '',
+                  selectedCamp.address || '',
+                ].filter(Boolean).join(' · ')}
+              </Text>
+            ) : null}
             {/* Amenity tags */}
             <View style={s.quickCardTags}>
               {(selectedCamp.tags ?? []).map(cleanDisplayLabel).filter(Boolean).slice(0, 5).map(t => (
@@ -20283,9 +20283,9 @@ function MapScreen() {
               )}
             </View>
             {/* Cost */}
-            {selectedCamp.cost ? (
+            {campCostLine(selectedCamp) ? (
               <Text style={s.quickCardCost}>
-                {selectedCamp.reservable ? 'Reservable · ' : ''}{selectedCamp.cost}
+                {campCostLine(selectedCamp)}
               </Text>
             ) : null}
             {/* Rig compatibility */}
@@ -20294,19 +20294,6 @@ function MapScreen() {
                 <Text style={[s.rigCompatText, { color: compat.ok ? C.green : C.yellow }]}>{compat.msg}</Text>
               </View>
             ) : null; })()}
-            {/* Weather 3-day strip */}
-            {campWeather && campWeather.daily.time.length >= 3 && (
-              <View style={s.weatherStrip}>
-	                {[0, 1, 2].map(i => (
-	                  <View key={i} style={s.weatherDay}>
-	                    <Ionicons name={weatherIonIcon(campWeather.daily.weathercode[i])} size={17} color={C.orange} />
-	                    <Text style={s.weatherHiLo}>
-	                      {Math.round(campWeather.daily.temperature_2m_max[i])}{campWeather.trailhead_units?.temperature_label ?? '°'}/{Math.round(campWeather.daily.temperature_2m_min[i])}{campWeather.trailhead_units?.temperature_label ?? '°'}
-	                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
             {/* Camp Fullness */}
             {campFullness && campFullness.status === 'full' ? (
               <View style={s.fullnessBanner}>
@@ -24954,9 +24941,22 @@ const makeStyles = (C: ColorPalette) => {
     width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.36)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
   },
-  quickCardHeroText: { position: 'absolute', left: 18, right: 138, bottom: 18 },
+  quickCardHeroText: { position: 'absolute', left: 18, right: 18, bottom: 18 },
   quickCardHeroKicker: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, opacity: 0.9 },
-  quickCardHeroTitle: { color: '#fff', fontSize: 30, lineHeight: 35, fontWeight: '900', marginTop: 4 },
+  quickCardHeroTitle: { color: '#fff', fontSize: 30, lineHeight: 35, fontWeight: '900', marginTop: 4, maxWidth: '82%' },
+  quickHeroWeatherRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7, marginTop: 12 },
+  quickHeroWeatherPill: {
+    minHeight: 30,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 9,
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.38)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+  },
+  quickHeroWeatherText: { color: '#fff', fontSize: 11, lineHeight: 14, fontFamily: mono, fontWeight: '900' },
   quickCardBody: { padding: 14, paddingBottom: 30, gap: 10 },
   quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   quickCardName: { color: C.text, fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },

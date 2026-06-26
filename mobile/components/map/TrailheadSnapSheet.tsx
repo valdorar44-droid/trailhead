@@ -22,13 +22,14 @@ type Props = {
   visible?: boolean;
   initialStage?: TrailheadSnapStage;
   children: ReactNode;
-  peekHeader: ReactNode;
+  peekHeader?: ReactNode;
   actionDock?: ReactNode;
   style?: StyleProp<ViewStyle>;
   contentStyle?: StyleProp<ViewStyle>;
   scrollContentStyle?: StyleProp<ViewStyle>;
   maxFullRatio?: number;
   halfRatio?: number;
+  fullScreen?: boolean;
 };
 
 export default function TrailheadSnapSheet({
@@ -42,6 +43,7 @@ export default function TrailheadSnapSheet({
   scrollContentStyle,
   maxFullRatio = 0.84,
   halfRatio = 0.42,
+  fullScreen = false,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -50,7 +52,7 @@ export default function TrailheadSnapSheet({
   const [stage, setStage] = useState<TrailheadSnapStage>(initialStage);
   const dragY = useRef(new Animated.Value(0)).current;
 
-  const maxFull = Math.min(height * maxFullRatio, height - Math.max(insets.top + 22, 54));
+  const maxFull = fullScreen ? height : Math.min(height * maxFullRatio, height - Math.max(insets.top + 22, 54));
   const stageHeight = stage === 'full'
     ? maxFull
     : stage === 'half'
@@ -95,17 +97,19 @@ export default function TrailheadSnapSheet({
         style,
       ]}
     >
-      <TrailheadSheet handle={false} style={[s.sheet, stage === 'peek' && s.sheetPeek]} contentStyle={[s.sheetContent, contentStyle]}>
-        <View style={s.grabberZone} {...pan.panHandlers}>
-          <TouchableOpacity
-            style={s.grabberTap}
-            activeOpacity={0.78}
-            onPress={() => setStage(current => current === 'full' ? 'half' : current === 'half' ? 'peek' : 'half')}
-          >
-            <View style={s.grabber} />
-          </TouchableOpacity>
-          {peekHeader}
-        </View>
+      <TrailheadSheet handle={false} style={[s.sheet, fullScreen && s.sheetFull, stage === 'peek' && s.sheetPeek]} contentStyle={[s.sheetContent, contentStyle]}>
+        {peekHeader != null ? (
+          <View style={s.grabberZone} {...pan.panHandlers}>
+            <TouchableOpacity
+              style={s.grabberTap}
+              activeOpacity={0.78}
+              onPress={() => setStage(current => current === 'full' ? 'half' : current === 'half' ? 'peek' : 'half')}
+            >
+              <View style={s.grabber} />
+            </TouchableOpacity>
+            {peekHeader}
+          </View>
+        ) : null}
         {stage !== 'peek' ? (
           <ScrollView
             showsVerticalScrollIndicator={false}
@@ -139,6 +143,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sheetPeek: {
     borderTopLeftRadius: 18,
     borderTopRightRadius: 18,
+  },
+  sheetFull: {
+    borderTopLeftRadius: 0,
+    borderTopRightRadius: 0,
   },
   sheetContent: {
     flex: 1,

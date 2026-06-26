@@ -2881,10 +2881,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             id="camp-cluster"
             filter={['has', 'point_count']}
             style={{
-              circleColor: ['step', ['get', 'point_count'], '#6b7280', 10, '#52525b', 50, '#3f3f46'],
-              circleRadius: ['step', ['get', 'point_count'], 18, 10, 25, 50, 32],
-              circleOpacity: 0.88,
-              circleStrokeWidth: 2,
+              circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'],
+              circleRadius: ['step', ['get', 'point_count'], 22, 10, 29, 50, 36],
+              circleOpacity: 0.94,
+              circleStrokeWidth: 3,
               circleStrokeColor: '#fff',
             }}
           />
@@ -2914,9 +2914,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                 'corps', '#0284c7',
                 'reservable', '#8b5cf6',
                 '#14b8a6'],
-              circleOpacity: 0.88,
-              circleStrokeWidth: ['case', ['==', ['get', 'full'], 1], 3, 2],
-              circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', 'rgba(255,255,255,0.9)'],
+              circleOpacity: 0.96,
+              circleStrokeWidth: ['case', ['==', ['get', 'full'], 1], 4, 3],
+              circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', '#fff'],
             }}
           />
           <MapGL.SymbolLayer

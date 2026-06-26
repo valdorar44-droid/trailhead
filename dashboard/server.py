@@ -98,6 +98,7 @@ from db.store import (
     add_place_edit_suggestion, get_place_edit_suggestions, update_place_edit_suggestion_status,
     list_place_comments, update_place_comment_status, list_place_photos, update_place_photo_status,
     save_place_reservation_alert, get_place_reservation_alerts,
+    upsert_route_intelligence_places, list_cached_places_near_samples,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
     upsert_trail_profile, get_trail_profile, list_trail_profiles_near,
     add_trail_edit_suggestion, get_trail_edit_suggestions,
@@ -4964,6 +4965,20 @@ class NearbySmartPackRequest(BaseModel):
     scope_id: str = ""
     recommended_day: Optional[int] = None
     route_scope: str = "area"
+
+class RouteIntelligenceRequest(BaseModel):
+    route: list[list[float]] = Field(default_factory=list)
+    center: Optional[PlannerPoint] = None
+    radius: float = 35
+    categories: list[str] = Field(default_factory=list)
+    scope_id: str = ""
+    route_scope: str = "route"
+    recommended_day: Optional[int] = None
+    max_samples: int = 6
+    force_refresh: bool = False
+    include_stale: bool = True
+    stale_after_hours: int = 168
+    limit: int = 120
 
 class RouteCampWindow(BaseModel):
     day: int
@@ -13326,6 +13341,22 @@ async def planner_context(body: PlannerContextRequest):
         return cleaned
 
     async def load_places() -> list[dict]:
+        try:
+            intelligence = await _build_route_intelligence(RouteIntelligenceRequest(
+                route=body.route,
+                center=PlannerPoint(lat=center_lat, lng=center_lng),
+                radius=sample_radius,
+                categories=filters,
+                scope_id="planner_context",
+                route_scope="route" if route_samples else "area",
+                max_samples=min(6, len(sample_points) or 1),
+                include_stale=True,
+                limit=140,
+            ))
+            if isinstance(intelligence, dict):
+                return _planner_dedupe(intelligence.get("places") or [], limit=120)
+        except Exception as exc:
+            errors["places_intelligence"] = str(exc)
         merged: list[dict] = []
         for point in sample_points:
             try:
@@ -16692,6 +16723,266 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
             "official_free_categories": sorted(official_requested),
         },
     }
+
+
+ROUTE_INTELLIGENCE_DEFAULT_CATEGORIES = {
+    "camp", "camping", "fuel", "propane", "water", "dump", "trailhead",
+    "viewpoint", "peak", "hot_spring", "mechanic", "parking", "grocery",
+    "park", "historic", "attraction", "visitor_center",
+}
+
+def _route_intelligence_samples(body: RouteIntelligenceRequest) -> list[dict]:
+    max_samples = max(1, min(int(body.max_samples or 6), 10))
+    route_samples = _planner_route_samples(body.route or [], max_samples=max_samples)
+    if route_samples:
+        return route_samples
+    if body.center:
+        return [{"lat": float(body.center.lat), "lng": float(body.center.lng)}]
+    return []
+
+def _route_intelligence_category_match(item: dict, requested: set[str]) -> bool:
+    if not requested:
+        return True
+    ptype = _smart_pack_type(item.get("type") or item.get("category"))
+    if ptype in requested:
+        return True
+    if ptype == "camp" and requested.intersection({"camp", "camps", "camping"}):
+        return True
+    if ptype == "attraction" and requested.intersection({"park", "historic", "climbing", "ohv", "attraction"}):
+        return True
+    return False
+
+def _route_intelligence_cacheable(item: dict, source_context: str) -> dict | None:
+    if not isinstance(item, dict):
+        return None
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    name = re.sub(r"\s+", " ", str(item.get("name") or "").strip())
+    if not name:
+        return None
+    source = str(item.get("source") or item.get("verified_source") or item.get("attribution") or "trailhead").lower()
+    ptype = _smart_pack_type(item.get("type") or item.get("category") or item.get("land_type") or "place")
+    now = int(time.time())
+    refresh_days = 14 if source in {"nps", "ridb", "recreation.gov", "blm", "usfs", "fs", "usda"} else 7
+    payload = {
+        **item,
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "type": ptype,
+        "category": ptype,
+        "source": source,
+        "source_context": source_context,
+        "last_refreshed_at": now,
+        "refresh_after": now + refresh_days * 86400,
+        "cache_status": "fresh",
+        "source_freshness": item.get("source_freshness") or f"Refreshed by Trailhead {datetime.fromtimestamp(now, tz=timezone.utc).date().isoformat()}.",
+    }
+    if item.get("website") and not payload.get("url"):
+        payload["url"] = item.get("website")
+    return payload
+
+def _route_intelligence_fuel_place(item: dict) -> dict | None:
+    ptype = _smart_pack_type(item.get("type") or item.get("category"))
+    if ptype not in {"fuel", "propane"}:
+        return None
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    return {
+        "id": item.get("id") or item.get("trailhead_place_id") or f"{ptype}:{lat:.5f}:{lng:.5f}",
+        "name": item.get("name") or ("Propane stop" if ptype == "propane" else "Fuel stop"),
+        "lat": lat,
+        "lng": lng,
+        "fuel_types": "Propane" if ptype == "propane" else "Fuel",
+        "address": item.get("address") or item.get("subtype") or ptype.replace("_", " "),
+        "route_distance_mi": item.get("route_distance_mi") or item.get("distance_mi"),
+        "route_fit": item.get("route_fit"),
+        "route_progress": item.get("route_progress"),
+        "route_progress_mi": item.get("route_progress_mi"),
+        "route_segment_index": item.get("route_segment_index"),
+    }
+
+def _route_intelligence_camp_place(item: dict) -> dict | None:
+    ptype = _smart_pack_type(item.get("type") or item.get("category"))
+    if ptype not in {"camp", "camping"}:
+        return None
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    photos = item.get("photos") if isinstance(item.get("photos"), list) else []
+    photo_url = item.get("photo_url") or item.get("hero_photo_url")
+    return {
+        "id": item.get("id") or item.get("trailhead_place_id") or f"camp:{lat:.5f}:{lng:.5f}",
+        "name": item.get("name") or "Camp",
+        "lat": lat,
+        "lng": lng,
+        "tags": item.get("tags") or item.get("activities") or [],
+        "land_type": item.get("land_type") or item.get("subtype") or "camp",
+        "description": item.get("description") or item.get("summary") or "Camp option near this route.",
+        "amenities": item.get("amenities") or [],
+        "site_types": item.get("site_types") or [],
+        "photos": photos,
+        "photo_url": photo_url,
+        "reservable": bool(item.get("reservable")),
+        "cost": item.get("cost"),
+        "url": item.get("url") or item.get("website") or item.get("official_url") or "",
+        "ada": bool(item.get("ada")),
+        "hero_photo_url": item.get("hero_photo_url") or photo_url,
+        "official_url": item.get("official_url") or item.get("website") or item.get("url"),
+        "booking_url": item.get("booking_url"),
+        "source_badge": item.get("source_badge") or item.get("source_label") or item.get("verified_source"),
+        "source_freshness": item.get("source_freshness"),
+        "route_distance_mi": item.get("route_distance_mi") or item.get("distance_mi"),
+        "route_fit": item.get("route_fit"),
+        "route_progress": item.get("route_progress"),
+        "route_progress_mi": item.get("route_progress_mi"),
+        "route_segment_index": item.get("route_segment_index"),
+        "source": item.get("source"),
+        "verified_source": item.get("verified_source") or item.get("source_label"),
+        "cache_status": item.get("cache_status"),
+        "rating": item.get("rating"),
+        "rating_count": item.get("rating_count"),
+        "phone": item.get("phone"),
+        "address": item.get("address"),
+        "provider_place_id": item.get("provider_place_id") or item.get("source_place_id"),
+        "place_id": item.get("place_id") or item.get("source_place_id"),
+    }
+
+async def _build_route_intelligence(body: RouteIntelligenceRequest, user: dict | None = None) -> dict:
+    """Corridor/area place cache with stale-while-refresh source fanout."""
+    started = time.time()
+    samples = _route_intelligence_samples(body)
+    if not samples:
+        raise HTTPException(400, "route or center is required")
+    radius = max(2.0, min(float(body.radius or 35), 85.0))
+    limit = max(20, min(int(body.limit or 120), 260))
+    requested = {_normalize_place_category(c) for c in body.categories if str(c).strip()}
+    requested = requested or set(ROUTE_INTELLIGENCE_DEFAULT_CATEGORIES)
+    stale_after_seconds = max(3600, min(int(body.stale_after_hours or 168) * 3600, 60 * 86400))
+    route = body.route or []
+    route_points = _route_points_from_lonlat(route)
+    route_scope = str(body.route_scope or "route").lower()
+    errors: dict[str, str] = {}
+
+    cached = list_cached_places_near_samples(
+        samples,
+        radius_mi=radius,
+        categories=sorted(requested),
+        stale_after_seconds=stale_after_seconds,
+        include_stale=bool(body.include_stale),
+        limit=limit * 2,
+    )
+    fresh_cached = [item for item in cached if not item.get("stale")]
+    stale_cached = [item for item in cached if item.get("stale")]
+    target_floor = min(18, max(6, limit // 5))
+    should_refresh = bool(body.force_refresh or len(fresh_cached) < target_floor or stale_cached)
+
+    fresh: list[dict] = []
+    saved = {"saved": 0, "skipped": 0}
+    refresh_status = "skipped"
+    if should_refresh:
+        refresh_status = "performed"
+        sem = asyncio.Semaphore(3)
+
+        async def fetch_sample(sample: dict) -> list[dict]:
+            async with sem:
+                try:
+                    pack = await asyncio.wait_for(
+                        nearby_smart_pack(NearbySmartPackRequest(
+                            center=PlannerPoint(lat=float(sample["lat"]), lng=float(sample["lng"])),
+                            radius=radius,
+                            categories=sorted(requested),
+                            route=route,
+                            scope_id=body.scope_id,
+                            recommended_day=body.recommended_day,
+                            route_scope=route_scope,
+                        ), user if isinstance(user, dict) else None),
+                        timeout=18.0,
+                    )
+                    if isinstance(pack, dict):
+                        for key, value in (pack.get("errors") or {}).items():
+                            errors[f"{key}:{round(float(sample['lat']), 3)}:{round(float(sample['lng']), 3)}"] = str(value)
+                        return [p for p in (pack.get("places") or []) if isinstance(p, dict)]
+                except Exception as exc:
+                    errors[f"sample:{round(float(sample.get('lat', 0)), 3)}:{round(float(sample.get('lng', 0)), 3)}"] = str(exc)
+            return []
+
+        sample_results = await asyncio.gather(*(fetch_sample(sample) for sample in samples))
+        fresh = [item for group in sample_results for item in group if _route_intelligence_category_match(item, requested)]
+        cacheable = [
+            payload for payload in (
+                _route_intelligence_cacheable(item, f"route_intelligence:{route_scope}") for item in fresh
+            )
+            if payload
+        ]
+        if cacheable:
+            saved = upsert_route_intelligence_places(cacheable, source_context=f"route_intelligence:{route_scope}")
+        elif errors:
+            refresh_status = "partial"
+
+    combined = [*fresh_cached, *fresh, *stale_cached]
+    combined = [item for item in combined if _route_intelligence_category_match(item, requested)]
+    if len(route_points) >= 2:
+        for item in combined:
+            _annotate_route_candidate(item, route_points, body.recommended_day)
+    combined = await _enrich_nearby_card_photos(combined, limit=min(limit, 40))
+    combined = _dedupe_nearby_places(combined)
+    combined = [item for item in combined if not _is_low_value_generic_blm_place(item, keep_services=True)]
+
+    def smart_dist(item: dict) -> float:
+        try:
+            value = item.get("route_distance_mi")
+            if value is None:
+                value = item.get("distance_mi")
+            return float(value if value is not None else 9999)
+        except Exception:
+            return 9999.0
+
+    if route_scope in {"leg", "route"} and len(route_points) >= 2:
+        places = sorted(
+            combined,
+            key=lambda p: (smart_dist(p), p.get("stale", False), _place_type_priority(p.get("type")), _place_source_priority(p), p.get("confidence") != "high", p.get("name", "")),
+        )[:limit]
+    else:
+        places = _balanced_nearby_places(combined, requested, smart_dist, limit=limit)
+
+    camps = [camp for camp in (_route_intelligence_camp_place(item) for item in places) if camp]
+    fuel = [station for station in (_route_intelligence_fuel_place(item) for item in places) if station]
+    return {
+        "samples": samples,
+        "radius": radius,
+        "categories": sorted(requested),
+        "scope_id": body.scope_id,
+        "recommended_day": body.recommended_day,
+        "route_scope": route_scope,
+        "places": places,
+        "camps": camps,
+        "fuel": fuel,
+        "errors": errors,
+        "cache": {
+            "cached_count": len(cached),
+            "fresh_cached_count": len(fresh_cached),
+            "stale_cached_count": len(stale_cached),
+            "fresh_count": len(fresh),
+            "saved": saved.get("saved", 0),
+            "skipped": saved.get("skipped", 0),
+            "refresh": refresh_status,
+            "stale_after_hours": int(stale_after_seconds / 3600),
+        },
+        "timings": {"total_ms": round((time.time() - started) * 1000, 1)},
+    }
+
+@app.post("/api/route/intelligence")
+async def route_intelligence(body: RouteIntelligenceRequest, user: dict | None = Depends(_optional_user)):
+    return await _build_route_intelligence(body, user if isinstance(user, dict) else None)
 
 
 @app.get("/api/places/{source}/{place_id}/detail")

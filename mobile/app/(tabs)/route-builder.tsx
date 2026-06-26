@@ -841,6 +841,68 @@ function offlinePoiToCamp(point: OsmPoi): CampsitePin {
   } as CampsitePin;
 }
 
+function smartPlaceToCamp(point: OsmPoi): CampsitePin {
+  const anyPoint = point as any;
+  const subtype = normalizeCampSubtype(point.subtype || anyPoint.land_type || '');
+  const photoUrl = anyPoint.photo_url || anyPoint.hero_photo_url || anyPoint.primary_image || anyPoint.image_url;
+  return {
+    id: point.id,
+    name: point.name || 'Camp',
+    lat: point.lat,
+    lng: point.lng,
+    tags: Array.isArray(anyPoint.tags) ? anyPoint.tags : ['route intelligence'],
+    land_type: anyPoint.source_badge || subtype || 'Camp',
+    description: point.description || point.summary || anyPoint.access_note || 'Camp option near this route.',
+    reservable: Boolean(anyPoint.reservable),
+    cost: anyPoint.cost,
+    url: anyPoint.booking_url || anyPoint.official_url || point.website || anyPoint.url || '',
+    photo_url: photoUrl,
+    photos: anyPoint.photos,
+    hero_photo_url: anyPoint.hero_photo_url || photoUrl,
+    ada: Boolean(anyPoint.ada),
+    route_distance_mi: point.route_distance_mi ?? anyPoint.distance_mi,
+    route_fit: point.route_fit,
+    route_progress: anyPoint.route_progress,
+    route_progress_mi: anyPoint.route_progress_mi,
+    recommended_day: anyPoint.recommended_day,
+    verified_source: point.source_label || point.source || anyPoint.verified_source || 'Trailhead cache',
+    source_badge: anyPoint.source_badge || point.source_label,
+    source_freshness: anyPoint.source_freshness,
+    amenities: Array.isArray(anyPoint.amenities) ? anyPoint.amenities : undefined,
+    site_types: Array.isArray(anyPoint.site_types) ? anyPoint.site_types : undefined,
+    cache_status: anyPoint.cache_status,
+    rating: anyPoint.rating,
+    rating_count: anyPoint.rating_count,
+    phone: anyPoint.phone,
+    address: anyPoint.address,
+    provider_place_id: anyPoint.provider_place_id,
+    place_id: anyPoint.place_id,
+  } as CampsitePin;
+}
+
+function routeIntelligenceCamps(pack: Awaited<ReturnType<typeof api.getRouteIntelligence>> | null | undefined) {
+  const explicit = Array.isArray(pack?.camps) ? pack!.camps! : [];
+  const fromPlaces = (pack?.places ?? [])
+    .filter(point => point.type === 'camp' || point.type === 'camping')
+    .map(point => smartPlaceToCamp(point as OsmPoi));
+  return uniqueByGeo([...explicit, ...fromPlaces]);
+}
+
+function routeIntelligenceFuel(pack: Awaited<ReturnType<typeof api.getRouteIntelligence>> | null | undefined) {
+  const explicit = Array.isArray(pack?.fuel) ? pack!.fuel! : [];
+  const fromPlaces = (pack?.places ?? [])
+    .filter(point => point.type === 'fuel' || point.type === 'propane')
+    .map(point => poiToGasStation(point as OsmPoi));
+  return uniqueByGeo([...explicit, ...fromPlaces]);
+}
+
+function routeIntelligencePois(pack: Awaited<ReturnType<typeof api.getRouteIntelligence>> | null | undefined, excludeTypes: string[] = []) {
+  const excluded = new Set(excludeTypes);
+  return uniqueByGeo((pack?.places ?? [])
+    .filter(point => !excluded.has(point.type))
+    .map(point => point as OsmPoi));
+}
+
 function normalizeCampSubtype(value: string) {
   const normalized = String(value || '').trim().toLowerCase().replace(/_/g, ' ');
   if (normalized === 'camp site') return 'Tent camp';
@@ -2286,9 +2348,23 @@ export default function RouteBuilderScreen() {
       if (tab === 'camps') {
         if (useLeg) {
           const radius = Math.max(34, Math.min(62, searchLeg!.miles / 3.5 + 14));
-          const found = uniqueByGeo((await Promise.all(
-            legSamplePoints(searchLeg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => []))
-          )).flat());
+          let found = routeIntelligenceCamps(await api.getRouteIntelligence({
+            route: legRouteCoords(searchLeg!),
+            center: searchLeg!.center,
+            radius,
+            categories: ['camp', 'camping'],
+            scope_id: key,
+            recommended_day: searchLeg!.targetDay ?? activeDay,
+            route_scope: 'leg',
+            max_samples: 6,
+            include_stale: true,
+            limit: 140,
+          }).catch(() => null));
+          if (found.length === 0) {
+            found = uniqueByGeo((await Promise.all(
+              legSamplePoints(searchLeg!).map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => []))
+            )).flat());
+          }
           const offlineCamps = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['camp'], 18)
             .map(point => offlinePoiToCamp(point))
             .filter(camp => campMatchesFilters(camp, campTypeFilters));
@@ -2324,7 +2400,21 @@ export default function RouteBuilderScreen() {
           const offlineCamps = areaScopedOfflinePlaces(offlinePlaces, target, ['camp'], 50)
             .map(point => offlinePoiToCamp(point))
             .filter(camp => campMatchesFilters(camp, campTypeFilters));
-          const found = filterCampsByPhotoMode(uniqueByGeo([...(await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters)), ...offlineCamps]), campPhotoOnly)
+          let liveCamps = routeIntelligenceCamps(await api.getRouteIntelligence({
+            center: target,
+            radius: 45,
+            categories: ['camp', 'camping'],
+            scope_id: key,
+            recommended_day: activeDay,
+            route_scope: 'area',
+            max_samples: 1,
+            include_stale: true,
+            limit: 120,
+          }).catch(() => null));
+          if (liveCamps.length === 0) {
+            liveCamps = await api.getNearbyCamps(target.lat, target.lng, 45, campTypeFilters).catch(() => []);
+          }
+          const found = filterCampsByPhotoMode(uniqueByGeo([...liveCamps, ...offlineCamps]), campPhotoOnly)
             .filter(camp => campMatchesFilters(camp, campTypeFilters))
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
           storeDiscoveryResults(key, { camps: found, summary: `${found.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area` });
@@ -2333,33 +2423,47 @@ export default function RouteBuilderScreen() {
         if (useLeg) {
           const radius = Math.max(32, Math.min(64, searchLeg!.miles / 4 + 14));
           const samplePoints = legSamplePoints(searchLeg!);
-          const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
-            searchRouteBuilderProviderAtPoints({
-              points: samplePoints,
-              provider: point => api.getGas(point.lat, point.lng, radius),
-              dedupe: uniqueByGeo,
-            }),
-            searchRouteBuilderProviderAtPoints({
-              points: samplePoints,
-              provider: point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES),
-              dedupe: uniqueByGeo,
-            }),
-            searchRouteBuilderProviderAtPoints({
-              points: samplePoints,
-              provider: point => searchMapContextNearby('gas station', point, radius, 'fuel', 5),
-              dedupe: uniqueByGeo,
-            }),
-          ]);
+          const intelFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
+            route: legRouteCoords(searchLeg!),
+            center: searchLeg!.center,
+            radius,
+            categories: ['fuel', 'propane'],
+            scope_id: key,
+            recommended_day: searchLeg!.targetDay ?? activeDay,
+            route_scope: 'leg',
+            max_samples: 6,
+            include_stale: true,
+            limit: 120,
+          }).catch(() => null));
           const offlineFuel = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['fuel', 'propane']);
-          const stations = uniqueByGeo([
-            ...mapboxFuel.map(poiToGasStation),
-            ...nrelStations,
-            ...osmFuel.map(poiToGasStation),
-            ...offlineFuel.map(poiToGasStation),
-          ]);
+          const stations = uniqueByGeo([...intelFuel, ...offlineFuel.map(poiToGasStation)]);
+          if (stations.length === 0) {
+            const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
+              searchRouteBuilderProviderAtPoints({
+                points: samplePoints,
+                provider: point => api.getGas(point.lat, point.lng, radius),
+                dedupe: uniqueByGeo,
+              }),
+              searchRouteBuilderProviderAtPoints({
+                points: samplePoints,
+                provider: point => api.getOsmPois(point.lat, point.lng, radius, FUEL_POI_TYPES),
+                dedupe: uniqueByGeo,
+              }),
+              searchRouteBuilderProviderAtPoints({
+                points: samplePoints,
+                provider: point => searchMapContextNearby('gas station', point, radius, 'fuel', 5),
+                dedupe: uniqueByGeo,
+              }),
+            ]);
+            stations.push(...uniqueByGeo([
+              ...mapboxFuel.map(poiToGasStation),
+              ...nrelStations,
+              ...osmFuel.map(poiToGasStation),
+            ]));
+          }
           if (stations.length === 0) {
             const nominatimFuel = await searchRouteBuilderProviderAtPoints({
-              points: legSamplePoints(searchLeg!),
+              points: samplePoints,
               provider: point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6),
               dedupe: uniqueByGeo,
             });
@@ -2371,27 +2475,40 @@ export default function RouteBuilderScreen() {
           );
           storeDiscoveryResults(key, { gas: scoped, summary: `${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg` });
         } else {
-          const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
-            searchRouteBuilderProviderAtPoints({
-              points: [target],
-              provider: point => api.getGas(point.lat, point.lng, 35),
-            }),
-            searchRouteBuilderProviderAtPoints({
-              points: [target],
-              provider: point => api.getOsmPois(point.lat, point.lng, 35, FUEL_POI_TYPES),
-            }),
-            searchRouteBuilderProviderAtPoints({
-              points: [target],
-              provider: point => searchMapContextNearby('gas station', point, 35, 'fuel', 8),
-            }),
-          ]);
+          const intelFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
+            center: target,
+            radius: 35,
+            categories: ['fuel', 'propane'],
+            scope_id: key,
+            recommended_day: activeDay,
+            route_scope: 'area',
+            max_samples: 1,
+            include_stale: true,
+            limit: 80,
+          }).catch(() => null));
           const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], 45);
-          const stations = uniqueByGeo([
-            ...mapboxFuel.map(poiToGasStation),
-            ...nrelStations,
-            ...osmFuel.map(poiToGasStation),
-            ...offlineFuel.map(poiToGasStation),
-          ]);
+          const stations = uniqueByGeo([...intelFuel, ...offlineFuel.map(poiToGasStation)]);
+          if (stations.length === 0) {
+            const [nrelStations, osmFuel, mapboxFuel] = await Promise.all([
+              searchRouteBuilderProviderAtPoints({
+                points: [target],
+                provider: point => api.getGas(point.lat, point.lng, 35),
+              }),
+              searchRouteBuilderProviderAtPoints({
+                points: [target],
+                provider: point => api.getOsmPois(point.lat, point.lng, 35, FUEL_POI_TYPES),
+              }),
+              searchRouteBuilderProviderAtPoints({
+                points: [target],
+                provider: point => searchMapContextNearby('gas station', point, 35, 'fuel', 8),
+              }),
+            ]);
+            stations.push(...uniqueByGeo([
+              ...mapboxFuel.map(poiToGasStation),
+              ...nrelStations,
+              ...osmFuel.map(poiToGasStation),
+            ]));
+          }
           if (stations.length === 0) {
             const nominatimFuel = await searchRouteBuilderProviderAtPoints({
               points: [target],
@@ -2405,14 +2522,18 @@ export default function RouteBuilderScreen() {
       } else if (tab === 'excursions') {
         const center = useLeg ? searchLeg!.center : target;
         const radius = useLeg ? Math.max(28, Math.min(60, searchLeg!.miles / 4 + 18)) : 45;
-        const smart = await api.getNearbySmartPack(
-          center.lat,
-          center.lng,
+        const smart = await api.getRouteIntelligence({
+          route: useLeg ? legRouteCoords(searchLeg!) : excursionRouteCoords(),
+          center,
           radius,
-          'trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,water',
-          useLeg ? legRouteCoords(searchLeg!) : excursionRouteCoords(),
-          { scope_id: key, recommended_day: searchLeg?.targetDay ?? activeDay, route_scope: useLeg ? 'leg' : 'area' },
-        ).catch(async () => {
+          categories: ['trailhead', 'viewpoint', 'peak', 'hot_spring', 'park', 'historic', 'climbing', 'ohv', 'attraction', 'water'],
+          scope_id: key,
+          recommended_day: searchLeg?.targetDay ?? activeDay,
+          route_scope: useLeg ? 'leg' : 'area',
+          max_samples: useLeg ? 6 : 1,
+          include_stale: true,
+          limit: 120,
+        }).catch(async () => {
           const found = await api.getExcursionsNearby({
             center,
             radius,
@@ -2437,9 +2558,23 @@ export default function RouteBuilderScreen() {
         if (useLeg) {
           const radius = Math.max(24, Math.min(42, searchLeg!.miles / 5 + 12));
           const legRoute = legRouteCoords(searchLeg!);
-          const found = uniqueByGeo((await Promise.all(
-            legSamplePoints(searchLeg!).map(point => api.getNearbySmartPack(point.lat, point.lng, radius, ROUTE_POI_TYPES, legRoute, { scope_id: key, recommended_day: searchLeg!.targetDay ?? activeDay, route_scope: 'leg' }).then(pack => pack.places as OsmPoi[]).catch(() => []))
-          )).flat());
+          let found = routeIntelligencePois(await api.getRouteIntelligence({
+            route: legRoute,
+            center: searchLeg!.center,
+            radius,
+            categories: ROUTE_POI_TYPES.split(',').filter(Boolean),
+            scope_id: key,
+            recommended_day: searchLeg!.targetDay ?? activeDay,
+            route_scope: 'leg',
+            max_samples: 6,
+            include_stale: true,
+            limit: 140,
+          }).catch(() => null), ['fuel', 'propane', 'camp', 'camping']);
+          if (found.length === 0) {
+            found = uniqueByGeo((await Promise.all(
+              legSamplePoints(searchLeg!).map(point => api.getNearbySmartPack(point.lat, point.lng, radius, ROUTE_POI_TYPES, legRoute, { scope_id: key, recommended_day: searchLeg!.targetDay ?? activeDay, route_scope: 'leg' }).then(pack => pack.places as OsmPoi[]).catch(() => []))
+            )).flat());
+          }
           const offlineRoutePlaces = routeScopedOfflinePlaces(
             filteredOfflinePlaces,
             searchLeg!,
@@ -2470,9 +2605,23 @@ export default function RouteBuilderScreen() {
           );
           storeDiscoveryResults(key, { pois: scoped, summary: `${scoped.length} place${scoped.length === 1 ? '' : 's'} along this leg` });
         } else {
-          const found = await api.getNearbySmartPack(target.lat, target.lng, 40, ROUTE_POI_TYPES, excursionRouteCoords())
-            .then(pack => pack.places as OsmPoi[])
-            .catch(() => api.getOsmPois(target.lat, target.lng, 40, ROUTE_POI_TYPES).catch(() => []));
+          let found = routeIntelligencePois(await api.getRouteIntelligence({
+            route: excursionRouteCoords(),
+            center: target,
+            radius: 40,
+            categories: ROUTE_POI_TYPES.split(',').filter(Boolean),
+            scope_id: key,
+            recommended_day: activeDay,
+            route_scope: 'area',
+            max_samples: 1,
+            include_stale: true,
+            limit: 100,
+          }).catch(() => null), ['fuel', 'propane', 'camp', 'camping']);
+          if (found.length === 0) {
+            found = await api.getNearbySmartPack(target.lat, target.lng, 40, ROUTE_POI_TYPES, excursionRouteCoords())
+              .then(pack => pack.places as OsmPoi[])
+              .catch(() => api.getOsmPois(target.lat, target.lng, 40, ROUTE_POI_TYPES).catch(() => []));
+          }
           const offlineRoutePlaces = areaScopedOfflinePlaces(
             filteredOfflinePlaces,
             target,
@@ -3343,9 +3492,23 @@ export default function RouteBuilderScreen() {
       .filter((point, idx, arr) => idx === 0 || idx === arr.length - 1 || idx % Math.max(1, Math.floor(arr.length / 4)) === 0)
       .slice(0, 6);
     const radius = Math.max(28, Math.min(58, searchWindowMi * 0.65));
-    const found = uniqueByGeo((await Promise.all(
-      samples.map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => [] as CampsitePin[]))
-    )).flat());
+    let found = routeIntelligenceCamps(await api.getRouteIntelligence({
+      route: samples.map(point => [point.lng, point.lat] as [number, number]),
+      center: target,
+      radius,
+      categories: ['camp', 'camping'],
+      scope_id: `camp-anchor-${day}-${Math.round(targetMi)}`,
+      recommended_day: day,
+      route_scope: 'leg',
+      max_samples: samples.length,
+      include_stale: true,
+      limit: 120,
+    }).catch(() => null)).filter(camp => campMatchesFilters(camp, campTypeFilters));
+    if (found.length === 0) {
+      found = uniqueByGeo((await Promise.all(
+        samples.map(point => api.getNearbyCamps(point.lat, point.lng, radius, campTypeFilters).catch(() => [] as CampsitePin[]))
+      )).flat());
+    }
     const scored = found
       .map(camp => {
         const routeDistance = Math.min(...samples.map(sample => haversineMi(camp, sample)));
@@ -3517,14 +3680,26 @@ export default function RouteBuilderScreen() {
       if (!target) continue;
       setFrameworkStatus(`Checking fuel around mile ${Math.round(targetMi)}...`);
       const radius = Math.max(28, Math.min(55, intervalMi * 0.22));
-      const [liveGas, osmFuel] = await Promise.all([
-        api.getGas(target.lat, target.lng, radius).catch(() => [] as GasStation[]),
-        api.getOsmPois(target.lat, target.lng, radius, FUEL_POI_TYPES).catch(() => [] as OsmPoi[]),
-      ]);
+      let liveFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
+        center: target,
+        radius,
+        categories: ['fuel', 'propane'],
+        scope_id: `fuel-anchor-${Math.round(targetMi)}`,
+        route_scope: 'area',
+        max_samples: 1,
+        include_stale: true,
+        limit: 60,
+      }).catch(() => null));
+      if (liveFuel.length === 0) {
+        const [liveGas, osmFuel] = await Promise.all([
+          api.getGas(target.lat, target.lng, radius).catch(() => [] as GasStation[]),
+          api.getOsmPois(target.lat, target.lng, radius, FUEL_POI_TYPES).catch(() => [] as OsmPoi[]),
+        ]);
+        liveFuel = uniqueByGeo([...liveGas, ...osmFuel.map(poiToGasStation)]);
+      }
       const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], radius + 12).map(poiToGasStation);
       const candidates = uniqueByGeo([
-        ...liveGas,
-        ...osmFuel.map(poiToGasStation),
+        ...liveFuel,
         ...offlineFuel,
       ])
         .filter(station => !placed.some(existing => haversineMi(existing, station) < 45))

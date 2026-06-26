@@ -758,6 +758,15 @@ export const api = {
         body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route, ...options }),
       }),
     ),
+  getRouteIntelligence: (data: RouteIntelligenceRequest) =>
+    guardedRequest(
+      `route-intel:${stableRouteKey(data.route)}:${data.center ? `${stableNumber(data.center.lat)}:${stableNumber(data.center.lng)}` : ''}:${Math.round(data.radius ?? 35)}:${(data.categories ?? []).map(c => c.trim()).filter(Boolean).sort().join(',')}:${data.scope_id ?? ''}:${data.recommended_day ?? ''}:${data.route_scope ?? ''}:${data.force_refresh ? 'force' : 'cache'}`,
+      5 * 60_000,
+      () => req<RouteIntelligenceResponse>('/api/route/intelligence', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    ),
   getPlaceDetail: (source: string, placeId: string, category = '') =>
     guardedRequest(
       `place-detail:${String(source || '').toLowerCase()}:${placeId}:${String(category || '').toLowerCase()}`,
@@ -2625,6 +2634,43 @@ export interface NearbySmartPackResponse {
     unlock_cost?: number;
     locked_categories?: string[];
   };
+}
+export interface RouteIntelligenceRequest {
+  route?: [number, number][];
+  center?: { lat: number; lng: number };
+  radius?: number;
+  categories?: string[];
+  scope_id?: string;
+  route_scope?: 'leg' | 'route' | 'area';
+  recommended_day?: number;
+  max_samples?: number;
+  force_refresh?: boolean;
+  include_stale?: boolean;
+  stale_after_hours?: number;
+  limit?: number;
+}
+export interface RouteIntelligenceResponse {
+  samples: Array<{ lat: number; lng: number }>;
+  radius: number;
+  categories: string[];
+  scope_id?: string;
+  recommended_day?: number;
+  route_scope?: 'leg' | 'route' | 'area' | string;
+  places: NearbySmartPlace[];
+  camps?: CampsitePin[];
+  fuel?: GasStation[];
+  errors?: Record<string, string>;
+  cache?: {
+    cached_count?: number;
+    fresh_cached_count?: number;
+    stale_cached_count?: number;
+    fresh_count?: number;
+    saved?: number;
+    skipped?: number;
+    refresh?: 'skipped' | 'performed' | 'partial' | string;
+    stale_after_hours?: number;
+  };
+  timings?: Record<string, number>;
 }
 export interface MapCardResolveRequest {
   kind?: 'search' | 'place' | 'poi' | 'camp' | 'trail' | string;

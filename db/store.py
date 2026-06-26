@@ -3899,6 +3899,9 @@ PLACE_METADATA_KEYS = {
     "amenities", "activities", "access_note", "access_notes", "reservation_notes",
     "booking_url", "reservable", "rating", "rating_count", "source_badge",
     "source_freshness", "verified_source", "land_type", "cost",
+    "confidence", "cache_status", "stale_reason", "source_updated_at",
+    "last_refreshed_at", "refresh_after", "refresh_priority",
+    "route_distance_mi", "route_progress", "route_progress_mi",
 }
 
 def _place_source_clean(value: object) -> str:
@@ -4159,6 +4162,116 @@ def get_place(trailhead_place_id: str) -> dict | None:
     place["comments"] = comments
     db.close()
     return place
+
+def _place_distance_mi(lat: float, lng: float, place: dict) -> float:
+    try:
+        plat = float(place.get("lat"))
+        plng = float(place.get("lng"))
+    except Exception:
+        return 999999.0
+    r = 3958.8
+    dlat = math.radians(plat - lat)
+    dlng = math.radians(plng - lng)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat)) * math.cos(math.radians(plat)) * math.sin(dlng / 2) ** 2
+    return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+def upsert_route_intelligence_places(items: list[dict], source_context: str = "route_intelligence") -> dict:
+    """Persist normalized provider/camp/place results into the canonical places table."""
+    saved = 0
+    skipped = 0
+    now = int(time.time())
+    for raw in items or []:
+        if not isinstance(raw, dict):
+            skipped += 1
+            continue
+        payload = dict(raw)
+        payload.setdefault("source_context", source_context)
+        payload.setdefault("last_refreshed_at", now)
+        payload.setdefault("refresh_after", now + 7 * 86400)
+        payload.setdefault("cache_status", "fresh")
+        try:
+            upsert_canonical_place(payload)
+            saved += 1
+        except Exception:
+            skipped += 1
+    return {"saved": saved, "skipped": skipped}
+
+def list_cached_places_near_samples(
+    samples: list[dict],
+    radius_mi: float = 35,
+    categories: list[str] | None = None,
+    stale_after_seconds: int = 7 * 86400,
+    include_stale: bool = True,
+    limit: int = 240,
+) -> list[dict]:
+    """Return canonical places near sampled points, annotated for stale-while-refresh use."""
+    clean_samples = []
+    for sample in samples or []:
+        try:
+            lat = float(sample.get("lat"))
+            lng = float(sample.get("lng"))
+        except Exception:
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            clean_samples.append({"lat": lat, "lng": lng})
+    if not clean_samples:
+        return []
+    normalized_categories = {re.sub(r"[^a-z0-9_]+", "", str(c or "").lower().replace(" ", "_")) for c in (categories or []) if str(c or "").strip()}
+    radius_mi = max(1.0, min(float(radius_mi or 35), 90.0))
+    now = int(time.time())
+    db = _conn()
+    seen: set[str] = set()
+    out: list[dict] = []
+    for sample in clean_samples:
+        lat = sample["lat"]
+        lng = sample["lng"]
+        lat_delta = radius_mi / 69.0
+        lng_delta = radius_mi / max(8.0, 69.0 * math.cos(math.radians(lat)))
+        rows = db.execute(
+            """SELECT * FROM places
+               WHERE lat BETWEEN ? AND ? AND lng BETWEEN ? AND ?
+               ORDER BY source_priority ASC, last_seen DESC
+               LIMIT ?""",
+            (lat - lat_delta, lat + lat_delta, lng - lng_delta, lng + lng_delta, max(limit * 2, 80)),
+        ).fetchall()
+        for row in rows:
+            place = _decode_place(row)
+            pid = str(place.get("trailhead_place_id") or "")
+            if not pid or pid in seen:
+                continue
+            distance = _place_distance_mi(lat, lng, place)
+            if distance > radius_mi:
+                continue
+            category = re.sub(r"[^a-z0-9_]+", "", str(place.get("category") or place.get("type") or "").lower().replace(" ", "_"))
+            if normalized_categories and category not in normalized_categories and not (
+                category in {"camp", "camping"} and normalized_categories.intersection({"camp", "camps", "camping"})
+            ):
+                continue
+            age_seconds = max(0, now - int(place.get("last_seen") or place.get("updated_at") or 0))
+            stale = age_seconds > stale_after_seconds
+            if stale and not include_stale:
+                continue
+            seen.add(pid)
+            place["id"] = pid
+            place["source_place_id"] = place.get("source_place_id") or (place.get("provider_ids") or {}).get(place.get("source"))
+            place["provider_place_id"] = place.get("source_place_id") or place.get("provider_place_id")
+            place["place_id"] = place.get("source_place_id") or place.get("place_id")
+            place["type"] = place.get("category") or place.get("type") or "place"
+            place["photo_url"] = place.get("hero_photo_url") or place.get("photo_url") or ""
+            place["distance_mi"] = round(distance, 2)
+            place["cache_status"] = "stale" if stale else "hit"
+            place["cached"] = True
+            place["last_seen_at"] = int(place.get("last_seen") or 0)
+            place["last_refreshed_at"] = place.get("last_refreshed_at") or int(place.get("updated_at") or 0)
+            place["stale"] = stale
+            if stale:
+                place.setdefault("stale_reason", f"Source data older than {max(1, stale_after_seconds // 86400)} days.")
+            out.append(place)
+            if len(out) >= limit:
+                db.close()
+                return sorted(out, key=lambda p: (p.get("stale", False), p.get("source_priority", 50), p.get("distance_mi", 9999), p.get("name", "")))
+    db.close()
+    return sorted(out, key=lambda p: (p.get("stale", False), p.get("source_priority", 50), p.get("distance_mi", 9999), p.get("name", "")))[:limit]
 
 def add_place_comment(trailhead_place_id: str, user_id: int, username: str, body: str) -> dict:
     now = int(time.time())

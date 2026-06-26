@@ -813,6 +813,7 @@ export const api = {
     if (params.s != null) qs.set('s', String(params.s));
     if (params.e != null) qs.set('e', String(params.e));
     if (params.w != null) qs.set('w', String(params.w));
+    if (params.refresh) qs.set('refresh', 'true');
     return req<TrailDiscoverResponse>(`/api/trails/discover?${qs.toString()}`);
   },
   discoverTrailArea: (params: TrailDiscoverParams) => {
@@ -2860,11 +2861,13 @@ export interface TrailDiscoverParams {
   w?: number;
   mode?: 'nearby' | 'view';
   limit?: number;
+  refresh?: boolean;
 }
 export interface TrailDiscoverResponse {
   mode: 'nearby' | 'view';
   source: string;
   offline: boolean;
+  refreshed?: boolean;
   trails: TrailProfile[];
 }
 export interface TrailEditSuggestionPayload {

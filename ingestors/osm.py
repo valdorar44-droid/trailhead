@@ -787,10 +787,10 @@ async def get_trailheads(lat: float, lng: float, radius_m: int = 30000) -> list[
     return results
 
 
-async def get_trails(lat: float, lng: float, radius_m: int = 30000) -> list[dict]:
-    key = f"osm_trail_routes_v4_geom_{lat:.2f}_{lng:.2f}_{radius_m}"
+async def get_trails(lat: float, lng: float, radius_m: int = 30000, refresh: bool = False) -> list[dict]:
+    key = f"osm_trail_routes_v5_merged_{lat:.2f}_{lng:.2f}_{radius_m}"
     cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24)
-    if cached is not None:
+    if cached is not None and not refresh:
         return cached
 
     elements = await _overpass(_TRAIL_ROUTE_QUERY.format(lat=lat, lng=lng, radius=radius_m))
@@ -805,8 +805,102 @@ async def get_trails(lat: float, lng: float, radius_m: int = 30000) -> list[dict
         route = _normalize_trail_route(el)
         if route:
             results.append(route)
+    results = _merge_route_fragments(results)
+    results.sort(key=_route_sort_key)
     set_cached("campsite_cache", key, results)
     return results
+
+
+def _generated_trail_name(name: str) -> bool:
+    clean = str(name or "").strip().lower()
+    return clean in {"mapped trail", "mapped trail route", "mapped rough track", "mapped backroad"} or clean.startswith("mapped ")
+
+
+def _route_group_key(route: dict) -> str:
+    name = str(route.get("name") or "").strip().lower()
+    if not name or _generated_trail_name(name):
+        return ""
+    subtype = str(route.get("subtype") or "").strip().lower()
+    return f"{name}:{subtype}"
+
+
+def _route_geometry_lines(route: dict) -> list[list[list[float]]]:
+    geometry = route.get("geometry") if isinstance(route, dict) else None
+    if not isinstance(geometry, dict):
+        return []
+    if geometry.get("type") == "LineString":
+        coords = geometry.get("coordinates") or []
+        return [coords] if len(coords) >= 2 else []
+    if geometry.get("type") == "MultiLineString":
+        return [line for line in (geometry.get("coordinates") or []) if isinstance(line, list) and len(line) >= 2]
+    return []
+
+
+def _geometry_from_lines(lines: list[list[list[float]]]) -> dict | None:
+    clean = [line for line in lines if len(line) >= 2]
+    if not clean:
+        return None
+    if len(clean) == 1:
+        return {"type": "LineString", "coordinates": clean[0]}
+    return {"type": "MultiLineString", "coordinates": clean}
+
+
+def _merge_route_group(routes: list[dict]) -> dict:
+    if len(routes) == 1:
+        return routes[0]
+    base = max(routes, key=lambda r: _geometry_length_m(r.get("geometry")))
+    lines: list[list[list[float]]] = []
+    for route in routes:
+        lines.extend(_route_geometry_lines(route))
+    stitched = _stitch_lines(lines, tolerance_m=45.0)
+    geometry = _geometry_from_lines(stitched)
+    length_m = _geometry_length_m(geometry)
+    coord = _geometry_representative_coord(geometry) or (base.get("lat"), base.get("lng"))
+    source_ids = [str(r.get("id") or "") for r in routes if r.get("id")]
+    merged = {
+        **base,
+        "id": base.get("id") or source_ids[0],
+        "lat": float(coord[0]),
+        "lng": float(coord[1]),
+        "geometry": geometry,
+        "length_mi": round(length_m / 1609.344, 2) if length_m > 0 else base.get("length_mi"),
+        "source_ids": source_ids,
+        "merged_segments": len(routes),
+    }
+    return merged
+
+
+def _merge_route_fragments(routes: list[dict]) -> list[dict]:
+    grouped: dict[str, list[dict]] = {}
+    passthrough: list[dict] = []
+    for route in routes:
+        key = _route_group_key(route)
+        if not key:
+            passthrough.append(route)
+            continue
+        grouped.setdefault(key, []).append(route)
+    merged = [_merge_route_group(group) for group in grouped.values()]
+    return passthrough + merged
+
+
+def _route_sort_key(route: dict) -> tuple:
+    name = str(route.get("name") or "")
+    generated = _generated_trail_name(name)
+    try:
+        length = float(route.get("length_mi") or 0)
+    except Exception:
+        length = 0.0
+    previewable = 1 if route.get("geometry") else 0
+    merged = int(route.get("merged_segments") or 1)
+    # Named and longer routes should beat tiny OSM way fragments in discovery.
+    score = 0.0
+    score += 120 if previewable else 0
+    score += 90 if not generated else -35
+    score += min(length * 18, 80)
+    score += min(max(merged - 1, 0) * 8, 32)
+    if generated and length < 0.15:
+        score -= 120
+    return (-score, generated, -length, str(route.get("name") or ""))
 
 
 def _normalize_trail_route(el: dict) -> dict | None:

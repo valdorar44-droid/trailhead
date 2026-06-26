@@ -5488,6 +5488,7 @@ function MapScreen() {
   const [selectedTrailProfile, setSelectedTrailProfile] = useState<TrailProfile | null>(null);
   const [trailPreviewOpen, setTrailPreviewOpen] = useState(false);
   const [trailPreviewLoading, setTrailPreviewLoading] = useState(false);
+  const [trailSourceRefreshing, setTrailSourceRefreshing] = useState(false);
   const [trailPreviewManifest, setTrailPreviewManifest] = useState<TrailPreviewManifest | null>(null);
   const [trailPreviewProgress, setTrailPreviewProgress] = useState(0);
   const [trailPreviewPauseSignal, setTrailPreviewPauseSignal] = useState(0);
@@ -15164,6 +15165,51 @@ function MapScreen() {
     }
   }
 
+  async function refreshSelectedTrailSource() {
+    if (!selectedTrail || trailSourceRefreshing) return;
+    setTrailSourceRefreshing(true);
+    setQuickToast('Refreshing trail source...');
+    try {
+      const discovered = await api.discoverTrails({
+        lat: selectedTrail.lat,
+        lng: selectedTrail.lng,
+        radius: 8,
+        limit: 24,
+        refresh: true,
+      });
+      const match = (discovered.trails ?? []).find(profile => (
+        profile.id === selectedTrail.profile_id ||
+        profile.name === selectedTrail.name ||
+        (selectedTrail.profile_id && profile.geometry_ref === selectedTrail.profile_id)
+      ));
+      if (match) {
+        setSelectedTrailProfile(match);
+        setSelectedTrail(current => current ? {
+          ...current,
+          profile_id: match.id || current.profile_id,
+          name: match.name || current.name,
+          subtitle: match.length_mi ? `${match.length_mi.toFixed(match.length_mi >= 10 ? 0 : 1)} mi trail` : current.subtitle,
+          summary: match.summary || current.summary,
+          photo_url: match.photos?.[0]?.url || current.photo_url,
+        } : current);
+        if (match.preview_available) {
+          setQuickToast('3D preview ready');
+        } else {
+          setQuickToast('Trail source refreshed');
+        }
+        setTimeout(() => setQuickToast(''), 2200);
+        return;
+      }
+      setQuickToast('Trail source refreshed');
+      setTimeout(() => setQuickToast(''), 2200);
+    } catch {
+      setQuickToast('Could not refresh trail source');
+      setTimeout(() => setQuickToast(''), 2400);
+    } finally {
+      setTrailSourceRefreshing(false);
+    }
+  }
+
   function openTrailFeature(feature: TrailFeature) {
     focusMapSelectionPoint({ lat: feature.lat, lng: feature.lng, name: feature.name }, 13, 'trail');
     setSelectedTrailProfile(null);
@@ -19309,6 +19355,17 @@ function MapScreen() {
                 </Text>
               </View>
               <Ionicons name="chevron-forward" size={17} color={OVR.text3} />
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.trailSourceRefreshAction}
+              activeOpacity={0.84}
+              disabled={trailSourceRefreshing}
+              onPress={refreshSelectedTrailSource}
+            >
+              <Ionicons name={trailSourceRefreshing ? 'sync' : 'cloud-download-outline'} size={15} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee'} />
+              <Text style={s.trailSourceRefreshText} numberOfLines={1}>
+                {trailSourceRefreshing ? 'Refreshing source...' : selectedTrailProfile?.preview_available ? 'Refresh source' : 'Refresh for 3D preview'}
+              </Text>
             </TouchableOpacity>
           </View>
           {trailFieldReports.some(fr => fr.has_photo) && (
@@ -25876,6 +25933,20 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailPreviewActionTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
   trailPreviewActionSub: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 3 },
+  trailSourceRefreshAction: {
+    minHeight: 36,
+    marginTop: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingHorizontal: 10,
+  },
+  trailSourceRefreshText: { color: C.text2, fontSize: 11, fontWeight: '900' },
   trailPhotoStripPanel: {
     backgroundColor: C.s2,
     borderWidth: 1,

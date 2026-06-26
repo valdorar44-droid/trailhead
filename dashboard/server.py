@@ -10424,7 +10424,59 @@ def _trail_profile_to_explore_card(profile: dict) -> dict:
         "photos": photos,
     }
 
+_GENERATED_TRAIL_NAMES = {"mapped trail", "mapped trail route", "mapped rough track", "mapped backroad"}
+
+def _generated_trail_profile_name(profile: dict) -> bool:
+    name = str((profile or {}).get("name") or "").strip().lower()
+    return name in _GENERATED_TRAIL_NAMES or name.startswith("mapped ")
+
+def _trail_profile_rank(profile: dict, center_lat: float | None = None, center_lng: float | None = None) -> float:
+    try:
+        length = float((profile or {}).get("length_mi") or 0)
+    except Exception:
+        length = 0.0
+    preview = len(_trail_profile_line_coords(profile or {})) >= 2
+    generated = _generated_trail_profile_name(profile or {})
+    rank = 0.0
+    rank += 120 if preview else 0
+    rank += 90 if not generated else -35
+    rank += min(length * 18, 80)
+    if str((profile or {}).get("id") or "").startswith("osm:osm_relation"):
+        rank += 35
+    provenance = (profile or {}).get("provenance") if isinstance((profile or {}).get("provenance"), dict) else {}
+    catalog = provenance.get("catalog") if isinstance(provenance.get("catalog"), dict) else {}
+    if catalog.get("route_type") in {"Loop", "Out and back", "Mapped route"}:
+        rank += 10
+    if generated and preview and length < 0.15:
+        rank -= 140
+    if center_lat is not None and center_lng is not None:
+        try:
+            dist = _haversine_m(float(center_lat), float(center_lng), float(profile.get("lat")), float(profile.get("lng"))) / 1609.344
+            rank -= min(dist, 25) * 1.2
+        except Exception:
+            pass
+    return rank
+
+def _rank_trail_profiles(profiles: list[dict], center_lat: float | None = None, center_lng: float | None = None, limit: int = 80) -> list[dict]:
+    ranked = sorted(profiles, key=lambda p: _trail_profile_rank(p, center_lat, center_lng), reverse=True)
+    strong: list[dict] = []
+    weak: list[dict] = []
+    for profile in ranked:
+        try:
+            length = float(profile.get("length_mi") or 0)
+        except Exception:
+            length = 0.0
+        is_weak_fragment = _generated_trail_profile_name(profile) and len(_trail_profile_line_coords(profile)) >= 2 and length < 0.15
+        if is_weak_fragment:
+            weak.append(profile)
+        else:
+            strong.append(profile)
+    if len(strong) >= max(8, min(limit, 20)):
+        return strong[:limit]
+    return (strong + weak)[:limit]
+
 def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: list[dict]) -> dict:
+    profiles = _rank_trail_profiles(profiles, lat, lng, limit=len(profiles) or 80)
     public_profiles = [_public_trail_profile(p) for p in profiles]
     is_pakistan = _point_in_pakistan(lat, lng)
     title = "Northern Pakistan Treks" if is_pakistan else "Nearby Trail Area"
@@ -10798,11 +10850,11 @@ async def _openverse_trail_photos(name: str, lat: float, lng: float) -> list[dic
             break
     return photos
 
-async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, limit: int = 80) -> list[dict]:
+async def _seed_open_trail_profiles(lat: float, lng: float, radius_mi: float, limit: int = 80, refresh: bool = False) -> list[dict]:
     radius_m = int(max(3, min(radius_mi, 80)) * 1609.344)
     pakistan_profiles = await _seed_pakistan_trek_profiles(lat, lng, radius_mi, limit=limit)
     batches = await asyncio.gather(
-        get_trails(lat, lng, radius_m=radius_m),
+        get_trails(lat, lng, radius_m=radius_m, refresh=refresh),
         get_trailheads(lat, lng, radius_m=radius_m),
         get_viewpoints(lat, lng, radius_m=radius_m),
         get_peaks(lat, lng, radius_m=radius_m),
@@ -10839,6 +10891,7 @@ async def trails_discover(
     w: float | None = None,
     mode: str = "nearby",
     limit: int = 60,
+    refresh: bool = False,
 ):
     mode = "view" if mode == "view" else "nearby"
     bbox = None
@@ -10849,12 +10902,15 @@ async def trails_discover(
         radius = max(3, min(80, max(abs(bbox["n"] - bbox["s"]) * 69, abs(bbox["e"] - bbox["w"]) * 69) / 2 + 3))
     if lat is None or lng is None:
         raise HTTPException(400, "lat/lng or n/s/e/w bounds are required")
-    await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80))
-    trails = [_public_trail_profile(p) for p in list_trail_profiles_near(float(lat), float(lng), radius, max(1, min(limit, 100)), bbox=bbox, mode=mode)]
+    await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80), refresh=bool(refresh))
+    raw_trails = list_trail_profiles_near(float(lat), float(lng), radius, max(1, min(max(limit, 40), 140)), bbox=bbox, mode=mode)
+    ranked_trails = _rank_trail_profiles(raw_trails, float(lat), float(lng), limit=max(1, min(limit, 100)))
+    trails = [_public_trail_profile(p) for p in ranked_trails]
     return {
         "mode": mode,
         "source": "online-open-official-first",
         "offline": False,
+        "refreshed": bool(refresh),
         "trails": trails,
     }
 
@@ -10879,7 +10935,7 @@ async def trail_area_discover(lat: float, lng: float, radius: float = 45, limit:
     radius = max(3.0, min(float(radius), 80.0))
     limit = max(1, min(int(limit), 60))
     await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80))
-    profiles = list_trail_profiles_near(float(lat), float(lng), radius, limit)
+    profiles = _rank_trail_profiles(list_trail_profiles_near(float(lat), float(lng), radius, max(limit, 80)), float(lat), float(lng), limit=limit)
     return {"area": _trail_area_from_profiles(float(lat), float(lng), radius, profiles)}
 
 class TrailEditSuggestionPayload(BaseModel):

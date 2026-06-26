@@ -296,6 +296,78 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertIsInstance(route["lat"], float)
         self.assertIsInstance(route["lng"], float)
 
+    def test_osm_same_name_fragments_merge_and_sort_before_tiny_unnamed(self):
+        named_a = osm._normalize_trail_route({
+            "type": "way",
+            "id": 100,
+            "tags": {"name": "Mill Creek Parkway", "highway": "path"},
+            "geometry": [
+                {"lat": 38.5700, "lon": -109.5480},
+                {"lat": 38.5710, "lon": -109.5490},
+            ],
+        })
+        named_b = osm._normalize_trail_route({
+            "type": "way",
+            "id": 101,
+            "tags": {"name": "Mill Creek Parkway", "highway": "path"},
+            "geometry": [
+                {"lat": 38.5710, "lon": -109.5490},
+                {"lat": 38.5720, "lon": -109.5500},
+            ],
+        })
+        tiny = osm._normalize_trail_route({
+            "type": "way",
+            "id": 102,
+            "tags": {"highway": "path"},
+            "geometry": [
+                {"lat": 38.5700, "lon": -109.5400},
+                {"lat": 38.5701, "lon": -109.5401},
+            ],
+        })
+
+        merged = osm._merge_route_fragments([tiny, named_a, named_b])
+        merged.sort(key=osm._route_sort_key)
+
+        self.assertEqual(merged[0]["name"], "Mill Creek Parkway")
+        self.assertEqual(merged[0]["merged_segments"], 2)
+        self.assertGreater(merged[0]["length_mi"], tiny["length_mi"])
+        self.assertEqual(merged[-1]["name"], "Mapped trail")
+
+    def test_trail_profile_ranking_suppresses_tiny_generated_fragments(self):
+        named = server._trail_profile_from_open_poi({
+            "id": "osm_way_100",
+            "name": "Moab Rim Trail",
+            "type": "trail",
+            "lat": 38.56,
+            "lng": -109.58,
+            "length_mi": 3.2,
+            "geometry": {"type": "LineString", "coordinates": [[-109.58, 38.56], [-109.59, 38.57], [-109.6, 38.58]]},
+            "url": "https://www.openstreetmap.org/way/100",
+        })
+        tiny = server._trail_profile_from_open_poi({
+            "id": "osm_way_101",
+            "name": "Mapped trail",
+            "type": "trail",
+            "lat": 38.5701,
+            "lng": -109.548,
+            "length_mi": 0.03,
+            "geometry": {"type": "LineString", "coordinates": [[-109.548, 38.5701], [-109.5481, 38.5702]]},
+            "url": "https://www.openstreetmap.org/way/101",
+        })
+        trailhead = server._trail_profile_from_open_poi({
+            "id": "osm_trail_1",
+            "name": "Moab Trailhead",
+            "type": "trailhead",
+            "lat": 38.57,
+            "lng": -109.55,
+        })
+
+        ranked = server._rank_trail_profiles([tiny, trailhead, named], 38.57, -109.55, limit=2)
+
+        self.assertEqual(ranked[0]["name"], "Moab Rim Trail")
+        self.assertEqual(len(ranked), 2)
+        self.assertNotIn("Mapped trail", [item["name"] for item in ranked])
+
     def test_trail_area_from_profiles_returns_explore_shape(self):
         area = server._trail_area_from_profiles(38.1, -109.5, 25, [{
             "id": "osm:node:1",

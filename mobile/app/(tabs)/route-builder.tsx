@@ -1218,11 +1218,31 @@ function amenityIcon(name: string): keyof typeof Ionicons.glyphMap {
   return 'checkmark-circle-outline';
 }
 
+function isRouteBuilderCategoryQuery(query: string) {
+  const q = query.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  if (!q) return false;
+  return /\b(camp|campground|campsite|rv|dispersed|fuel|gas|diesel|propane|trail|trailhead|hike|hiking|lodging|motel|hotel|water|dump|grocery|groceries|food|restaurant|mechanic|parking|viewpoint|attraction|overlook|arches|service|services)\b/.test(q);
+}
+
+function isRouteBuilderServiceQuery(query: string) {
+  const q = query.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return /\b(fuel|gas|diesel|propane|charging|lodging|motel|hotel|water|dump|grocery|groceries|food|restaurant|mechanic|parking|service|services)\b/.test(q);
+}
+
+function hasTrailheadCatalogResult(query: string, places: GeocodePlace[]) {
+  if (isRouteBuilderServiceQuery(query)) return false;
+  return places.some(place => String(place.source || '').startsWith('trailhead'));
+}
+
 async function geocodePlaces(query: string): Promise<SearchPlace[]> {
   const coord = query.match(/-?\d+(?:\.\d+)?/g)?.map(Number);
   if (coord && coord.length >= 2 && Math.abs(coord[0]) <= 90 && Math.abs(coord[1]) <= 180) {
     return [{ name: `${coord[0].toFixed(5)}, ${coord[1].toFixed(5)}`, lat: coord[0], lng: coord[1] }];
   }
+  const catalogFirst = isRouteBuilderCategoryQuery(query);
+  const serverPlaces = await api.geocodePlaces(query, 8, catalogFirst ? {} : { prefer: 'locality' }).catch(() => [] as GeocodePlace[]);
+  if (!catalogFirst && serverPlaces.length) return serverPlaces;
+  if (catalogFirst && hasTrailheadCatalogResult(query, serverPlaces)) return serverPlaces;
   const mapContextPlaces = await api.mapContextResolve({
     q: query,
     limit: 8,
@@ -1235,10 +1255,16 @@ async function geocodePlaces(query: string): Promise<SearchPlace[]> {
       name: place.name,
       lat: place.lat,
       lng: place.lng,
-      source: 'search',
+      source: place.source || 'search',
+      source_label: place.source_label,
+      feature_type: place.feature_type,
+      place_types: place.place_types,
+      category: place.category,
+      type: place.type,
+      subtype: place.subtype,
+      address: place.address,
     }));
   }
-  const serverPlaces = await api.geocodePlaces(query, 8).catch(() => [] as GeocodePlace[]);
   if (serverPlaces.length) return serverPlaces;
   const res = await fetch(
     `https://nominatim.openstreetmap.org/search?format=json&limit=8&q=${encodeURIComponent(query)}`,
@@ -1427,6 +1453,8 @@ export default function RouteBuilderScreen() {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [routeName, setRouteName] = useState('');
+  const [routeActionSheet, setRouteActionSheet] = useState<'actions' | 'rename' | null>(null);
+  const [routeNameDraft, setRouteNameDraft] = useState('');
   const [searchResults, setSearchResults] = useState<SearchPlace[]>([]);
   const [pendingType, setPendingType] = useState<BuilderStopType>('start');
   const [insertAfterId, setInsertAfterId] = useState<string | null>(null);
@@ -2198,6 +2226,7 @@ export default function RouteBuilderScreen() {
         query,
         offlinePlaces,
         searchOnline: geocodePlaces,
+        catalogFirst: isRouteBuilderCategoryQuery(query),
       }));
     } catch {
       setSearchResults(searchOfflineRouteBuilderPlaces(offlinePlaces, query.trim()));
@@ -4066,6 +4095,32 @@ export default function RouteBuilderScreen() {
     beginCleanNewRoute();
   }
 
+  function openRouteRenameSheet() {
+    setRouteNameDraft(resolvedRouteName());
+    setRouteActionSheet('rename');
+  }
+
+  async function saveRouteFromActions(openMap = false) {
+    setRouteActionSheet(null);
+    await saveRoute(openMap);
+  }
+
+  async function saveCloseRouteFromActions() {
+    setRouteActionSheet(null);
+    await saveCloseAndStartNewRoute();
+  }
+
+  function discardRouteFromActions() {
+    setRouteActionSheet(null);
+    discardCloseAndStartNewRoute();
+  }
+
+  function applyRouteRename() {
+    const clean = routeNameDraft.trim();
+    setRouteName(clean || resolvedRouteName());
+    setRouteActionSheet(null);
+  }
+
   async function openSavedRoute(tripId: string) {
     const trip = activeTrip?.trip_id === tripId ? activeTrip : await loadOfflineTrip(tripId);
     if (trip) {
@@ -4631,28 +4686,6 @@ export default function RouteBuilderScreen() {
           )}
           </Animated.View>
 
-          {(hasBaseRoute || wizardStep === 4) && (
-            <View style={s.routeNameOptions}>
-            <View style={s.routeNameField}>
-              <Text style={s.setupLabel}>ROUTE NAME</Text>
-              <TextInput
-                style={s.routeNameInput}
-                value={routeName}
-                onChangeText={setRouteName}
-                placeholder="Name this route"
-                placeholderTextColor={C.text3}
-                returnKeyType="done"
-              />
-            </View>
-            {hasBaseRoute ? (
-              <TouchableOpacity style={[s.routeNameSave, routeSaving && { opacity: 0.55 }]} onPress={() => saveRoute(false)} disabled={routeSaving}>
-                <Ionicons name="save-outline" size={15} color={C.orange} />
-                <Text style={s.routeNameSaveText}>SAVE</Text>
-              </TouchableOpacity>
-            ) : null}
-            </View>
-          )}
-
           {buildingFramework && (
             <ActivityStatusCard
               title={frameworkStatus}
@@ -4765,6 +4798,9 @@ export default function RouteBuilderScreen() {
       <View style={s.wizardCompactTop}>
         <TouchableOpacity style={s.headerBtn} onPress={() => setRouteTabMode('hub')} accessibilityLabel="Back to recent adventures" activeOpacity={0.82}>
           <Ionicons name="close" size={17} color={C.orange} />
+        </TouchableOpacity>
+        <TouchableOpacity style={s.headerBtn} onPress={() => setRouteActionSheet('actions')} accessibilityLabel="Route actions" activeOpacity={0.82}>
+          <Ionicons name="ellipsis-horizontal" size={17} color={C.orange} />
         </TouchableOpacity>
       </View>
 
@@ -5329,6 +5365,88 @@ export default function RouteBuilderScreen() {
         </TouchableOpacity>
       </Modal>
 
+      <Modal visible={routeActionSheet !== null} transparent animationType="slide" onRequestClose={() => setRouteActionSheet(null)}>
+        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setRouteActionSheet(null)}>
+          <TrailheadSheet handle={false} style={s.routeActionSheet} contentStyle={[s.routeActionSheetContent, { paddingBottom: bottomSheetPad }]}>
+            {routeActionSheet === 'rename' ? (
+              <>
+                <View style={s.filterSheetTop}>
+                  <View>
+                    <Text style={s.kicker}>ROUTE BUILDER</Text>
+                    <Text style={s.filterSheetTitle}>Rename route</Text>
+                  </View>
+                  <TouchableOpacity style={s.quickCardClose} onPress={() => setRouteActionSheet(null)}>
+                    <Ionicons name="close" size={17} color={C.text3} />
+                  </TouchableOpacity>
+                </View>
+                <View style={s.routeRenameField}>
+                  <Text style={s.setupLabel}>ROUTE NAME</Text>
+                  <TextInput
+                    style={s.routeNameInput}
+                    value={routeNameDraft}
+                    onChangeText={setRouteNameDraft}
+                    placeholder="Name this route"
+                    placeholderTextColor={C.text3}
+                    returnKeyType="done"
+                    onSubmitEditing={applyRouteRename}
+                    autoFocus
+                  />
+                </View>
+                <View style={s.routeActionFooter}>
+                  <TouchableOpacity style={s.routeActionSecondaryBtn} onPress={() => setRouteActionSheet('actions')} activeOpacity={0.84}>
+                    <Text style={s.routeActionSecondaryText}>CANCEL</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.routeActionPrimaryBtn} onPress={applyRouteRename} activeOpacity={0.84}>
+                    <Ionicons name="checkmark" size={15} color="#fff" />
+                    <Text style={s.routeActionPrimaryText}>DONE</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={s.filterSheetTop}>
+                  <View>
+                    <Text style={s.kicker}>ROUTE BUILDER</Text>
+                    <Text style={s.filterSheetTitle}>Route actions</Text>
+                  </View>
+                  <TouchableOpacity style={s.quickCardClose} onPress={() => setRouteActionSheet(null)}>
+                    <Ionicons name="close" size={17} color={C.text3} />
+                  </TouchableOpacity>
+                </View>
+                <TouchableOpacity style={s.routeActionRow} onPress={() => saveRouteFromActions(false)} disabled={routeSaving} activeOpacity={0.84}>
+                  <Ionicons name="save-outline" size={18} color={C.orange} />
+                  <View style={s.routeActionRowText}>
+                    <Text style={s.routeActionTitle}>Save</Text>
+                    <Text style={s.routeActionSub}>Keep editing this route</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.routeActionRow} onPress={saveCloseRouteFromActions} disabled={routeSaving} activeOpacity={0.84}>
+                  <Ionicons name="checkmark-done-outline" size={18} color={C.orange} />
+                  <View style={s.routeActionRowText}>
+                    <Text style={s.routeActionTitle}>Save & close</Text>
+                    <Text style={s.routeActionSub}>Save this route and start a new one</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.routeActionRow} onPress={openRouteRenameSheet} activeOpacity={0.84}>
+                  <Ionicons name="create-outline" size={18} color={C.orange} />
+                  <View style={s.routeActionRowText}>
+                    <Text style={s.routeActionTitle}>Rename route</Text>
+                    <Text style={s.routeActionSub}>{resolvedRouteName()}</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.routeActionRow, s.routeActionDangerRow]} onPress={discardRouteFromActions} activeOpacity={0.84}>
+                  <Ionicons name="trash-outline" size={18} color={C.red} />
+                  <View style={s.routeActionRowText}>
+                    <Text style={[s.routeActionTitle, { color: C.red }]}>Discard route</Text>
+                    <Text style={s.routeActionSub}>Close without saving changes</Text>
+                  </View>
+                </TouchableOpacity>
+              </>
+            )}
+          </TrailheadSheet>
+        </TouchableOpacity>
+      </Modal>
+
       <PremiumPlaceSheet
         place={selectedRoutePlace?.place ?? null}
         visible={!!selectedRoutePlace}
@@ -5365,6 +5483,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
+    gap: 8,
     paddingBottom: 8,
   },
   buildingScreen: {
@@ -5918,11 +6037,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campPhotoToggleActive: { borderColor: C.orange + '77', backgroundColor: C.orange + '12' },
   campPreferenceTitle: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   campPreferenceSub: { color: C.text3, fontSize: 9, marginTop: 2 },
-  routeNameOptions: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-  routeNameField: { flex: 1, borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: C.s2, paddingHorizontal: 12, paddingVertical: 8 },
+  routeRenameField: { borderWidth: 1, borderColor: C.border, borderRadius: RADIUS.md, backgroundColor: C.s2, paddingHorizontal: 12, paddingVertical: 8 },
   routeNameInput: { color: C.text, fontSize: 15, fontWeight: '800', paddingVertical: 4 },
-  routeNameSave: { minWidth: 74, borderWidth: 1, borderColor: C.orange + '55', borderRadius: RADIUS.md, backgroundColor: C.orange + '10', alignItems: 'center', justifyContent: 'center', gap: 4 },
-  routeNameSaveText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   setupGrid: { gap: 8 },
   setupGridPair: { flexDirection: 'row', gap: 8 },
   setupLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
@@ -6029,6 +6145,54 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   filterChip: { width: '48%', minHeight: 50, flexDirection: 'row', alignItems: 'center', gap: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 9 },
   filterChipText: { color: C.text2, fontSize: 11, fontFamily: mono, fontWeight: '900' },
   filterChipSub: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 },
+  routeActionSheet: {
+    maxHeight: '72%',
+    borderTopLeftRadius: 20,
+    borderTopRightRadius: 20,
+  },
+  routeActionSheetContent: { padding: 16, gap: 10 },
+  routeActionRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 14,
+    backgroundColor: C.s2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  routeActionDangerRow: {
+    borderColor: C.red + '44',
+    backgroundColor: C.red + '10',
+  },
+  routeActionRowText: { flex: 1, minWidth: 0 },
+  routeActionTitle: { color: C.text, fontSize: 14, fontWeight: '900' },
+  routeActionSub: { color: C.text3, fontSize: 11, lineHeight: 15, marginTop: 2 },
+  routeActionFooter: { flexDirection: 'row', gap: 9, alignItems: 'stretch' },
+  routeActionSecondaryBtn: {
+    flex: 1,
+    minHeight: 44,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 12,
+    backgroundColor: C.s2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  routeActionSecondaryText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  routeActionPrimaryBtn: {
+    flex: 1,
+    minHeight: 44,
+    borderRadius: 12,
+    backgroundColor: C.orange,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 6,
+  },
+  routeActionPrimaryText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
   buildSuccessOverlay: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.58)', padding: 24 },
   buildSuccessCard: { width: '100%', borderRadius: 18, backgroundColor: C.s1, borderWidth: 1, borderColor: C.border, padding: 18, alignItems: 'center', gap: 12 },
   successIconWrap: { width: 64, height: 64, borderRadius: 20, alignItems: 'center', justifyContent: 'center', backgroundColor: C.orange + '14', borderWidth: 1, borderColor: C.orange + '55' },

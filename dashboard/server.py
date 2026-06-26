@@ -8112,12 +8112,25 @@ GEOCODE_CENTER_ANCHOR_TYPES = {
     "landmark", "park", "national_park", "protected_area", "mountain", "peak", "volcano",
     "glacier", "natural", "tourism", "attraction", "historic", "monument",
 }
+GEOCODE_CATEGORY_QUERY_RE = re.compile(
+    r"\b(camp|campground|campsite|rv|dispersed|fuel|gas|diesel|propane|trail|trailhead|hike|hiking|lodging|motel|hotel|water|dump|grocery|groceries|food|restaurant|mechanic|parking|viewpoint|attraction|overlook|service|services)\b"
+)
+GEOCODE_SERVICE_QUERY_RE = re.compile(
+    r"\b(fuel|gas|diesel|propane|charging|lodging|motel|hotel|water|dump|grocery|groceries|food|restaurant|mechanic|parking|service|services)\b"
+)
 
 def _geocode_query_is_road(query: str) -> bool:
     return bool(GEOCODE_ROAD_WORD_RE.search(_normalize_geocode_text(query)))
 
 def _geocode_prefer_search_center(prefer: str) -> bool:
     return _normalize_geocode_text(prefer) in GEOCODE_SEARCH_CENTER_PREFERENCES
+
+def _geocode_query_prefers_locality(query: str) -> bool:
+    text = _normalize_geocode_text(query)
+    return bool(text and not _geocode_query_is_road(text) and not GEOCODE_CATEGORY_QUERY_RE.search(text))
+
+def _geocode_query_prefers_provider_poi(query: str) -> bool:
+    return bool(GEOCODE_SERVICE_QUERY_RE.search(_normalize_geocode_text(query)))
 
 def _geocode_candidate_type_tokens(place: dict) -> set[str]:
     raw_types = [
@@ -8214,7 +8227,7 @@ def _geocode_candidate_score(query: str, place: dict, country_filter: str = "", 
         score += 60
     if re.search(r"\b(address|street|postcode|neighborhood|locality)\b", types) and not query_is_road:
         score += 20
-    if re.search(r"\b(place|poi|landmark|tourism|attraction|historic|monument|museum|park|locality)\b", types):
+    if re.search(r"\b(place|poi|landmark|tourism|attraction|historic|monument|museum|park|locality|administrative|boundary|municipality|settlement|hamlet|village|city|town)\b", types):
         score -= 10
     relevance = place.get("relevance")
     try:
@@ -8363,6 +8376,18 @@ def _merge_geocode_candidates(groups: list[list[dict]], limit: int) -> list[dict
             if len(merged) >= limit:
                 return merged
     return merged[:limit]
+
+def _rank_geocode_candidates(query: str, places: list[dict], country_filter: str = "", prefer_search_center: bool = False, limit: int = 8) -> list[dict]:
+    ranked = sorted(
+        [place for place in places if isinstance(place, dict)],
+        key=lambda place: (
+            _geocode_candidate_score(query, place, country_filter, prefer_search_center),
+            str(place.get("name") or ""),
+            float(place.get("lat") or 0),
+            float(place.get("lng") or 0),
+        ),
+    )
+    return ranked[:max(1, min(int(limit or 8), 10))]
 
 def _explore_catalog_geocode_candidates(query: str, limit: int = 8, country_filter: str = "") -> list[dict]:
     if _geocode_query_is_road(query):
@@ -8516,7 +8541,8 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = "", prefer:
         return []
     limit = max(1, min(int(limit or 8), 10))
     country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
-    prefer_search_center = _geocode_prefer_search_center(prefer)
+    prefer_search_center = _geocode_prefer_search_center(prefer) or (not str(prefer or "").strip() and _geocode_query_prefers_locality(query))
+    prefer_provider_poi = _geocode_query_prefers_provider_poi(query)
     canonical_landmarks = _canonical_landmark_geocode(query)
     explore_candidates = _explore_catalog_geocode_candidates(query, limit, country_filter)
     if not prefer_search_center and _strong_explore_geocode_hit(explore_candidates):
@@ -8570,8 +8596,9 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = "", prefer:
                                 "provider_place_id": properties.get("mapbox_id") or feat.get("id"),
                             })
                     if places:
-                        groups = [canonical_landmarks, places, explore_candidates] if prefer_search_center else [explore_candidates, canonical_landmarks, places]
-                        return _merge_geocode_candidates(groups, limit)
+                        groups = [canonical_landmarks, places, explore_candidates] if (prefer_search_center or prefer_provider_poi) else [explore_candidates, canonical_landmarks, places]
+                        merged = _merge_geocode_candidates(groups, limit)
+                        return _rank_geocode_candidates(query, merged, country_filter, prefer_search_center, limit) if prefer_search_center else merged
                 except Exception:
                     pass
             try:
@@ -8614,12 +8641,14 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = "", prefer:
                         "bbox": [float(v) for v in p.get("boundingbox", [])] if isinstance(p.get("boundingbox"), list) and len(p.get("boundingbox")) == 4 else None,
                         "provider_place_id": p.get("osm_id"),
                     })
-                groups = [canonical_landmarks, places, explore_candidates] if prefer_search_center else [explore_candidates, canonical_landmarks, places]
-                return _merge_geocode_candidates(groups, limit)
+                groups = [canonical_landmarks, places, explore_candidates] if (prefer_search_center or prefer_provider_poi) else [explore_candidates, canonical_landmarks, places]
+                merged = _merge_geocode_candidates(groups, limit)
+                return _rank_geocode_candidates(query, merged, country_filter, prefer_search_center, limit) if prefer_search_center else merged
             except Exception as e:
                 if explore_candidates or canonical_landmarks:
                     groups = [canonical_landmarks, explore_candidates] if prefer_search_center else [explore_candidates, canonical_landmarks]
-                    return _merge_geocode_candidates(groups, limit)
+                    merged = _merge_geocode_candidates(groups, limit)
+                    return _rank_geocode_candidates(query, merged, country_filter, prefer_search_center, limit) if prefer_search_center else merged
                 raise HTTPException(502, f"Geocode failed: {e}")
 
     cache_key = f"geocode:{query.lower()}:{country_filter}:{limit}:{_normalize_geocode_text(prefer)}"

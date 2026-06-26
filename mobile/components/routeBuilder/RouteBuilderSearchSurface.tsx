@@ -26,6 +26,29 @@ type RouteBuilderSearchSurfaceProps = {
   onClearInsert: () => void;
 };
 
+function normalizeMetaToken(value?: string | null) {
+  return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
+}
+
+function searchResultLabel(place: RouteBuilderSearchPlace, fallback: string) {
+  const tokens = [
+    normalizeMetaToken(place.feature_type),
+    normalizeMetaToken(place.category),
+    normalizeMetaToken(place.type),
+    normalizeMetaToken(place.subtype),
+    ...(place.place_types ?? []).map(normalizeMetaToken),
+  ].filter(Boolean);
+  const source = normalizeMetaToken(place.source);
+  const hay = `${tokens.join(' ')} ${normalizeMetaToken(place.source_label)} ${normalizeMetaToken(place.address)}`;
+  if (/\b(fuel|gas|diesel|propane|charging_station)\b/.test(hay)) return 'Fuel';
+  if (/\b(camp|campground|campsite|rv_site|recreation_site)\b/.test(hay)) return 'Camp';
+  if (/\b(trail|trailhead|hiking)\b/.test(hay)) return 'Trailhead';
+  if (/\b(address|street|postcode|house|poi_address)\b/.test(hay)) return 'Address';
+  if (/\b(place|locality|city|town|village|hamlet|municipality|settlement|neighborhood|suburb)\b/.test(hay)) return 'Town';
+  if (source === 'trailhead_explore') return 'Explorer pick';
+  return fallback;
+}
+
 export default function RouteBuilderSearchSurface({
   pendingType,
   query,
@@ -104,7 +127,7 @@ export default function RouteBuilderSearchSurface({
               <Ionicons name={stopIcon(pendingType)} size={15} color={stopColor(pendingType)} />
               <View style={s.resultBody}>
                 <Text style={s.resultName} numberOfLines={1}>{place.name}</Text>
-                <Text style={s.resultMeta}>{resultMetaLabel}</Text>
+                <Text style={s.resultMeta}>{searchResultLabel(place, resultMetaLabel)}</Text>
               </View>
             </TouchableOpacity>
           ))}

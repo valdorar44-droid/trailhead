@@ -11,6 +11,9 @@ export type RouteBuilderSearchPlace = {
   lng: number;
   source?: string;
   source_label?: string;
+  feature_type?: string;
+  place_types?: string[];
+  category?: string;
   type?: string;
   subtype?: string;
   address?: string;
@@ -32,6 +35,7 @@ export type ResolveRouteBuilderSearchResultsInput = {
   searchOnline: (query: string) => Promise<RouteBuilderSearchPlace[]>;
   limit?: number;
   offlineLimit?: number;
+  catalogFirst?: boolean;
 };
 
 export async function resolveRouteBuilderSearchResults({
@@ -40,12 +44,13 @@ export async function resolveRouteBuilderSearchResults({
   searchOnline,
   limit = DEFAULT_ROUTE_BUILDER_SEARCH_LIMIT,
   offlineLimit = DEFAULT_OFFLINE_SEARCH_LIMIT,
+  catalogFirst = true,
 }: ResolveRouteBuilderSearchResultsInput): Promise<RouteBuilderSearchPlace[]> {
   const cleanQuery = query.trim();
   if (!cleanQuery) return [];
   const offlineMatches = searchOfflineRouteBuilderPlaces(offlinePlaces, cleanQuery, offlineLimit);
   const onlineMatches = await searchOnline(cleanQuery).catch(() => [] as RouteBuilderSearchPlace[]);
-  return dedupeRouteBuilderSearchPlaces([...offlineMatches, ...onlineMatches], limit);
+  return dedupeRouteBuilderSearchPlaces(catalogFirst ? [...offlineMatches, ...onlineMatches] : [...onlineMatches, ...offlineMatches], limit);
 }
 
 export function searchOfflineRouteBuilderPlaces(points: OsmPoi[], query: string, limit = DEFAULT_OFFLINE_SEARCH_LIMIT): RouteBuilderSearchPlace[] {

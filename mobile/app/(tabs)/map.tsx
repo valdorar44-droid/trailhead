@@ -5011,17 +5011,12 @@ function MapScreen() {
   const [extremeTrafficEnabled, setExtremeTrafficEnabled] = useState(false);
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
   const extremeMapLayerActive = mapLayer === 'extreme';
-  const mapboxRoutePreferred = Boolean(
+  const mapboxLayerRoutePreferred = Boolean(
     mapLayer === 'extreme' ||
     mapLayer === 'satellite' ||
     mapLayer === 'hybrid' ||
     extremeTrafficEnabled
   );
-  const activeRouteProviderMode = extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation
-    ? 'extreme-mapbox'
-    : mapboxRoutePreferred
-      ? 'traffic'
-      : 'trailhead';
   const extremeCopilotAvailable = !!extremeConfig?.enabled && !!extremeConfig?.feature_flags?.copilot;
   const [showExtremeCopilot, setShowExtremeCopilot] = useState(false);
   const [extremeCopilotInput, setExtremeCopilotInput] = useState('');
@@ -5140,6 +5135,12 @@ function MapScreen() {
   const offlineSaved = cachedRegions.length > 0;
   const [mapboxToken,   setMapboxToken]   = useState('');
   const [protomapsKey,  setProtomapsKey]  = useState('');
+  const mapboxRoutePreferred = Boolean(mapboxToken || mapboxLayerRoutePreferred);
+  const activeRouteProviderMode = extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation
+    ? 'extreme-mapbox'
+    : mapboxRoutePreferred
+      ? 'traffic'
+      : 'trailhead';
   const [showFilterSheet, setShowFilterSheet] = useState(false);
   const [mapControlsCollapsed, setMapControlsCollapsed] = useState(false);
   const [showMapLegendSheet, setShowMapLegendSheet] = useState(false);
@@ -13276,7 +13277,8 @@ function MapScreen() {
         ?? route.debug
         ?? ''
       ).toLowerCase();
-      return /(valhalla|osrm|fallback|offline|trailhead)/.test(source) && !source.includes('mapbox');
+      if (!source) return true;
+      return !source.includes('mapbox');
     };
     const serverRoute = activeTrip.route_geometry;
     if (serverRoute && Array.isArray(serverRoute.coords) && serverRoute.coords.length >= 2) {

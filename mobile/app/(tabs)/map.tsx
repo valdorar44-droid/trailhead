@@ -1059,6 +1059,28 @@ function campMatchesFilters(camp: Partial<CampsitePin> | OsmPoi, filters: string
   return filters.some(filter => tags.has(filter));
 }
 
+function cleanCampFilterSelection(filters: string[]) {
+  const allowed = new Set(CAMP_FILTER_IDS);
+  return Array.from(new Set(filters.filter(id => allowed.has(id))));
+}
+
+function allCampFiltersSelected(filters: string[]) {
+  const clean = cleanCampFilterSelection(filters);
+  return clean.length === CAMP_FILTER_IDS.length && CAMP_FILTER_IDS.every(id => clean.includes(id));
+}
+
+function campLookupFilters(filters: string[]): string[] | null {
+  const clean = cleanCampFilterSelection(filters);
+  if (clean.length === 0) return null;
+  return clean.length === CAMP_FILTER_IDS.length ? [] : clean;
+}
+
+function campMatchesSelectedFilters(camp: Partial<CampsitePin> | OsmPoi, filters: string[]) {
+  const lookupFilters = campLookupFilters(filters);
+  if (lookupFilters === null) return false;
+  return campMatchesFilters(camp, lookupFilters);
+}
+
 function trailGeometryCoords(fc?: GeoJSON.FeatureCollection | null): [number, number][] {
   const coords: [number, number][] = [];
   for (const feature of fc?.features ?? []) {
@@ -1674,6 +1696,7 @@ function routeScoutWindows(days: number, totalMiles: number): RouteCampWindowInp
 function routeScoutCampFilters(preference: string, style: string, currentFilters: string[]): string[] {
   const pref = String(preference || '').toLowerCase();
   const routeStyle = String(style || '').toLowerCase();
+  const visibleCampFilters = allCampFiltersSelected(currentFilters) ? [] : cleanCampFilterSelection(currentFilters);
   const filters = new Set<string>();
   if (pref === 'rv') {
     ['rv', 'reservable'].forEach(item => filters.add(item));
@@ -1682,7 +1705,7 @@ function routeScoutCampFilters(preference: string, style: string, currentFilters
   } else if (pref === 'developed') {
     ['tent', 'reservable', 'state', 'nps', 'usfs'].forEach(item => filters.add(item));
   } else if (pref === 'any') {
-    currentFilters
+    visibleCampFilters
       .filter(item => /^(blm|usfs|dispersed|free|tent|rv|reservable|state|nps|private_stay|farm|ranch|winery|glamping)$/i.test(String(item)))
       .forEach(item => filters.add(String(item).toLowerCase()));
   } else {
@@ -2563,6 +2586,7 @@ const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
   .filter(t => t.id !== 'gpx_import')
   .map(t => t.id);
 const MAP_FILTER_PREFS_KEY = 'trailhead_map_filter_preferences';
+const MAP_FILTER_PREFS_VERSION = 2;
 const EXPLORE_CATEGORY_UNLOCK_KEY = 'trailhead_explore_category_unlock_day';
 const MIN_CAMP_SEARCH_ZOOM = 10;
 const MIN_FILTERED_CAMP_SEARCH_ZOOM = 7;
@@ -2574,6 +2598,7 @@ const MAX_ALL_MAP_POIS = 1200;
 const MAX_VISIBLE_MAP_POIS = 450;
 const MAX_OFFLINE_POI_SCAN = 1800;
 const CAMP_FILTER_IDS = ['blm', 'usfs', 'nps', 'state', 'corps', 'dispersed', 'tent', 'rv', 'walk_in', 'free', 'ada', 'private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'];
+const DEFAULT_CAMP_FILTERS = [...CAMP_FILTER_IDS];
 const CAMP_FILTER_OPTIONS = [
   { id: 'blm', label: 'BLM', icon: 'earth-outline' as const },
   { id: 'usfs', label: 'National Forest', icon: 'leaf-outline' as const },
@@ -2920,6 +2945,7 @@ function mapWaterNavigationPlace(props: Record<string, any>, lat: number, lng: n
 }
 
 type MapFilterPreferences = {
+  version?: number;
   mapLayer?: MapLayer;
   mapModePreset?: MapModePresetId;
   activeFilters?: string[];
@@ -5166,7 +5192,7 @@ function MapScreen() {
   const [mapControlsCollapsed, setMapControlsCollapsed] = useState(false);
   const [showMapLegendSheet, setShowMapLegendSheet] = useState(false);
   const [activeMapModePreset, setActiveMapModePreset] = useState<MapModePresetId>('default');
-  const [activeFilters, setActiveFilters] = useState<string[]>([]);
+  const [activeFilters, setActiveFilters] = useState<string[]>(DEFAULT_CAMP_FILTERS);
   const [activePinFilters, setActivePinFilters] = useState<string[]>(DEFAULT_COMMUNITY_PIN_FILTERS);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showCampPins, setShowCampPins] = useState(true);
@@ -5787,6 +5813,11 @@ function MapScreen() {
           const savedLayer = validMapLayer(prefs.mapLayer);
           const savedMapModePreset = validMapModePreset(prefs.mapModePreset);
           const savedCampFilters = validIds(prefs.activeFilters, CAMP_FILTER_IDS);
+          const nextCampFilters = savedCampFilters && prefs.version === MAP_FILTER_PREFS_VERSION
+            ? savedCampFilters
+            : savedCampFilters
+              ? (savedCampFilters.length ? savedCampFilters : DEFAULT_CAMP_FILTERS)
+              : null;
           const savedPinFilters = validIds(prefs.activePinFilters, COMMUNITY_PIN_TYPES.map(t => t.id));
           const savedPlaceFilters = validIds(prefs.activePlaceFilters, ALL_PLACE_FILTER_IDS);
           const nextPlaceFilters = savedPlaceFilters && savedPlaceFilters.length === LEGACY_DEFAULT_PLACE_FILTERS.length && LEGACY_DEFAULT_PLACE_FILTERS.every(id => savedPlaceFilters.includes(id))
@@ -5794,7 +5825,7 @@ function MapScreen() {
             : savedPlaceFilters;
           if (savedLayer) setMapLayerState(savedLayer);
           if (savedMapModePreset) setActiveMapModePreset(savedMapModePreset);
-          if (savedCampFilters) setActiveFilters(savedCampFilters);
+          if (nextCampFilters) setActiveFilters(nextCampFilters);
           if (savedPinFilters) setActivePinFilters(savedPinFilters);
           if (nextPlaceFilters) setActivePlaceFilters(nextPlaceFilters);
           setShowCampPins(typeof prefs.showCampPins === 'boolean' ? prefs.showCampPins : true);
@@ -5824,6 +5855,7 @@ function MapScreen() {
   useEffect(() => {
     if (!filterPrefsLoadedRef.current) return;
     const prefs: MapFilterPreferences = {
+      version: MAP_FILTER_PREFS_VERSION,
       mapLayer,
       mapModePreset: activeMapModePreset,
       activeFilters,
@@ -7440,7 +7472,7 @@ function MapScreen() {
       api.getOsmPois(center.lat, center.lng, 25, 'fuel').then(value => ({ kind: 'pois' as const, value })),
       api.getOsmPois(center.lat, center.lng, 25, 'water').then(value => ({ kind: 'pois' as const, value })),
       api.getOsmPois(center.lat, center.lng, 25, 'trail,trailhead,viewpoint,peak,hot_spring').then(value => ({ kind: 'pois' as const, value })),
-      api.getNearbyCamps(center.lat, center.lng, 35, activeFilters).then(value => ({ kind: 'camps' as const, value })),
+      api.getNearbyCamps(center.lat, center.lng, 35, campLookupFilters(activeFilters) ?? ['__none__']).then(value => ({ kind: 'camps' as const, value })),
     ]);
     Promise.allSettled(contextJobs).then(results => {
       if (cancelled) return;
@@ -7788,7 +7820,7 @@ function MapScreen() {
     }));
     let cancelled = false;
     Promise.allSettled([
-      api.getNearbyCamps(pin.lat, pin.lng, 20, activeFilters),
+      api.getNearbyCamps(pin.lat, pin.lng, 20, campLookupFilters(activeFilters) ?? ['__none__']),
       api.getGas(pin.lat, pin.lng, 25),
       api.getOsmPois(pin.lat, pin.lng, 25, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring'),
       api.getNearbyAlerts(pin.lat, pin.lng, 0.15),
@@ -13304,7 +13336,7 @@ function MapScreen() {
     setMapLayerState('light');
     setPremiumMapStyle('standard');
     setMap3dEnabled(false);
-    setActiveFilters([]);
+    setActiveFilters(DEFAULT_CAMP_FILTERS);
     setActivePinFilters(DEFAULT_COMMUNITY_PIN_FILTERS);
     setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
     setShowCampPins(true);
@@ -13334,7 +13366,16 @@ function MapScreen() {
       setAreaCamps([]);
       return null;
     }
-    const hasActiveCampFilters = types.length > 0;
+    const lookupTypes = campLookupFilters(types);
+    if (lookupTypes === null) {
+      setAreaCamps([]);
+      webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: [] }));
+      if (opts.openSheet) setCampDiscoverySheetDismissed(false);
+      setSearchResult({ count: 0 });
+      setTimeout(() => setSearchResult(null), 3000);
+      return [];
+    }
+    const hasActiveCampFilters = lookupTypes.length > 0;
     const minCampSearchZoom = opts.minZoom ?? (hasActiveCampFilters ? MIN_FILTERED_CAMP_SEARCH_ZOOM : MIN_CAMP_SEARCH_ZOOM);
     if ((bounds.zoom ?? 0) < minCampSearchZoom) {
       setSearchResult({ count: -2 });
@@ -13353,7 +13394,7 @@ function MapScreen() {
     setSearchResult(null);
     try {
       const [campsResult, fullResult, smartPackResult] = await Promise.allSettled([
-        api.getNearbyCamps(centerLat, centerLng, radiusMi, types),
+        api.getNearbyCamps(centerLat, centerLng, radiusMi, lookupTypes),
         api.getNearbyFullness(centerLat, centerLng, radiusMi * 0.6),
         api.getNearbySmartPack(
           centerLat,
@@ -13382,7 +13423,7 @@ function MapScreen() {
         .filter((p): p is CampsitePin => !!p);
       const offlineCampPins = offlinePlacePois
         .filter(p => CAMP_PLACE_TYPES.has(String(p.type || '')))
-        .filter(p => campMatchesFilters(p, types))
+        .filter(p => campMatchesFilters(p, lookupTypes))
         .filter(p => p.lat >= bounds.s && p.lat <= bounds.n && p.lng >= bounds.w && p.lng <= bounds.e)
         .map(p => ({
           ...p,
@@ -13395,7 +13436,7 @@ function MapScreen() {
       const liveCampPins = (camps.length || offlineCampPins.length) ? [] : smartCampCandidates;
       const seenCampKeys = new Set<string>();
       const mergedCamps: CampsitePin[] = [];
-      for (const camp of [...camps, ...offlineCampPins, ...liveCampPins].filter(camp => campMatchesFilters(camp, types))) {
+      for (const camp of [...camps, ...offlineCampPins, ...liveCampPins].filter(camp => campMatchesFilters(camp, lookupTypes))) {
         const key = campKey(camp);
         const fuzzy = `${String(camp.name || '').toLowerCase().trim()}:${camp.lat.toFixed(4)}:${camp.lng.toFixed(4)}`;
         if (seenCampKeys.has(key) || seenCampKeys.has(fuzzy)) continue;
@@ -15563,7 +15604,7 @@ function MapScreen() {
         const [supportPoisResult, supportGasResult, supportCampsResult] = await Promise.allSettled([
           api.getOsmPois(center.lat, center.lng, supportRadiusMi, 'water,trailhead,viewpoint,peak,hot_spring'),
           api.getGas(center.lat, center.lng, supportRadiusMi),
-          api.getNearbyCamps(center.lat, center.lng, supportRadiusMi, activeFilters),
+          api.getNearbyCamps(center.lat, center.lng, supportRadiusMi, campLookupFilters(activeFilters) ?? ['__none__']),
         ]);
         const onlineSupportPois = supportPoisResult.status === 'fulfilled' ? supportPoisResult.value : [];
         const onlineFuelPois = supportGasResult.status === 'fulfilled'
@@ -16970,12 +17011,21 @@ function MapScreen() {
   const communityFilterChanged = activePinFilters.length !== DEFAULT_COMMUNITY_PIN_FILTERS.length ||
     DEFAULT_COMMUNITY_PIN_FILTERS.some(id => !activePinFilters.includes(id));
   const changedFilterGroupCount =
-    (!showCampPins || activeFilters.length > 0 ? 1 : 0) +
+    (!showCampPins || !allCampFiltersSelected(activeFilters) ? 1 : 0) +
     (!showCommunityPins || communityFilterChanged ? 1 : 0) +
     (!showPlacePins || placeFilterChanged ? 1 : 0);
   const campFilterSummary = showCampPins
-    ? activeFilters.length > 0 ? `${activeFilters.length} selected` : 'All camp types'
+    ? activeFilters.length === 0
+      ? 'No camp types selected'
+      : allCampFiltersSelected(activeFilters)
+        ? 'All camp types selected'
+        : `${activeFilters.length} selected`
     : 'Hidden';
+  const activeCampFilterLabel = activeFilters.length === 0
+    ? 'No camp types selected'
+    : allCampFiltersSelected(activeFilters)
+      ? 'Camps, RV parks, and stays nearby'
+      : activeFilters.map(cleanDisplayLabel).slice(0, 3).join(' · ');
   const placeFilterSummary = showPlacePins
     ? `${activePlaceFilters.length} selected`
     : 'Hidden';
@@ -17015,7 +17065,7 @@ function MapScreen() {
       camps = true,
       places = true,
       community = true,
-      campFilters = [],
+      campFilters = DEFAULT_CAMP_FILTERS,
       placeFilters = DEFAULT_PLACE_FILTERS,
       pinFilters = DEFAULT_COMMUNITY_PIN_FILTERS,
       sections = [],
@@ -17039,7 +17089,7 @@ function MapScreen() {
 
     if (preset === 'default') {
       commitPreset({
-        campFilters: [],
+        campFilters: DEFAULT_CAMP_FILTERS,
         placeFilters: DEFAULT_PLACE_FILTERS,
         pinFilters: DEFAULT_COMMUNITY_PIN_FILTERS,
         sections: ['camps', 'places'],
@@ -17048,7 +17098,7 @@ function MapScreen() {
     }
     if (preset === 'tonight') {
       commitPreset({
-        campFilters: [],
+        campFilters: DEFAULT_CAMP_FILTERS,
         placeFilters: unlockedPlaces(Array.from(new Set([
           ...DEFAULT_PLACE_FILTERS,
           'private_stay',
@@ -17083,7 +17133,7 @@ function MapScreen() {
     }
     if (preset === 'trailDay') {
       commitPreset({
-        campFilters: [],
+        campFilters: DEFAULT_CAMP_FILTERS,
         placeFilters: ['trailhead', 'viewpoint', 'peak', 'hot_spring', 'water', 'parking'],
         pinFilters: ['trailhead', 'trail_note', 'overlook', 'crossing', 'gate', 'trail_closure', 'water', 'parking', 'warning', 'wildlife'],
         sections: ['places', 'community', 'weather-layers'],
@@ -17101,7 +17151,7 @@ function MapScreen() {
     }
     if (preset === 'weatherRisk') {
       commitPreset({
-        campFilters: [],
+        campFilters: DEFAULT_CAMP_FILTERS,
         placeFilters: DEFAULT_PLACE_FILTERS,
         pinFilters: ['warning', 'road_report', 'checkpoint', 'gate', 'trail_closure', 'cell_signal', 'water'],
         sections: ['community', 'weather-layers'],
@@ -17245,7 +17295,8 @@ function MapScreen() {
   const discoveryCamps = useMemo(() => {
     const seen = new Set<string>();
     const next: CampsitePin[] = [];
-    const filters = campDiscoveryWideActive ? [] : activeFilters;
+    const filters = campDiscoveryWideActive ? [] : campLookupFilters(activeFilters);
+    if (filters === null) return next;
     const candidates = [
       ...areaCamps,
       ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null),
@@ -17546,7 +17597,7 @@ function MapScreen() {
             viewportRef.current = b;
             setMapZoom(b.zoom ?? 10);
             if ((b.zoom ?? 0) >= (campDiscoveryWideActive ? MIN_MANUAL_CAMP_SEARCH_ZOOM : 9)) setMapMoved(true);
-            if ((b.zoom ?? 0) < (activeFilters.length > 0 ? MIN_FILTERED_CAMP_SEARCH_ZOOM : 8)) setAreaCamps([]);
+            if ((b.zoom ?? 0) < (campLookupFilters(activeFilters)?.length ? MIN_FILTERED_CAMP_SEARCH_ZOOM : 8)) setAreaCamps([]);
             const lat = (b.n + b.s) / 2;
             const lng = (b.e + b.w) / 2;
             const radius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(b.n - b.s), Math.abs(b.e - b.w)) / 2 + 0.5));
@@ -18025,7 +18076,7 @@ function MapScreen() {
                 {`${discoveryCamps.length} Results`}
               </Text>
               <Text style={s.campDiscoverySub} numberOfLines={1}>
-                {campDiscoveryWideActive ? 'Camps, RV parks, and stays' : activeFilters.length > 0 ? activeFilters.map(cleanDisplayLabel).slice(0, 3).join(' · ') : 'Camps, RV parks, and stays nearby'}
+                {campDiscoveryWideActive ? 'Camps, RV parks, and stays' : activeCampFilterLabel}
               </Text>
             </View>
             {mapWeather?.current ? (
@@ -19875,7 +19926,7 @@ function MapScreen() {
           },
         ]}
         campFilterSummary={campFilterSummary}
-        activeCampFilterCount={activeFilters.length}
+        activeCampFilterCount={allCampFiltersSelected(activeFilters) ? 0 : 1}
         campOptions={CAMP_FILTER_OPTIONS}
         activeCampFilters={activeFilters}
         placeFilterSummary={placeFilterSummary}
@@ -19962,7 +20013,7 @@ function MapScreen() {
         onSelectPreset={applyMapFilterPreset}
         onOpenLegend={openMapFilterLegend}
         onToggleSection={toggleFilterSection}
-        onResetCamps={() => setActiveFilters([])}
+        onResetCamps={() => setActiveFilters(DEFAULT_CAMP_FILTERS)}
         onToggleCampFilter={id => toggleFilterId(setActiveFilters, id)}
         onResetPlacesDefault={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)}
         onToggleEssentialPlace={id => {

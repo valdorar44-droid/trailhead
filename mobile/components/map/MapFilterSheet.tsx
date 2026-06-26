@@ -303,7 +303,7 @@ export default function MapFilterSheet({
               })}
               {expandedSections.includes('camps') ? (
                 <>
-                  <Text style={styles.hintText}>No selection means all camp types. Turn Camps off above to hide them.</Text>
+                  <Text style={styles.hintText}>Select the camp types to show. Turn Camps off above to hide all camp pins.</Text>
                   {renderCheckRows(campOptions, activeCampFilters, onToggleCampFilter)}
                 </>
               ) : null}

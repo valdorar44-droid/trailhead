@@ -12,7 +12,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
-from typing import Optional
+from typing import Any, Optional
 import httpx
 import bcrypt as _bcrypt_lib
 from jose import jwt, JWTError
@@ -37,6 +37,15 @@ from dashboard.water_routing_provider import route_with_water_graph, water_graph
 from scripts.explore_sources.travel.ranking import rank_experiences
 from scripts.explore_sources.travel.viator.client import ViatorClient, config_from_env as viator_config_from_env
 from scripts.explore_sources.travel.viator.normalize_viator import normalize_viator_products
+from scripts.explore_sources.offers.disclosure import (
+    PARTNER_BOOKING_DISCLOSURE_KIND,
+    PARTNER_BOOKING_DISCLOSURE_LABEL,
+)
+from scripts.explore_sources.offers.providers.base import OfferSearchQuery, OfferSearchResult
+from scripts.explore_sources.offers.providers.outdoorsy import (
+    OutdoorsyProvider,
+    config_from_env as outdoorsy_config_from_env,
+)
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail, get_campsite_detail as get_ridb_campsite_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.nps import get_nps_places, nps_enabled
@@ -2066,6 +2075,16 @@ class AnalyticsEventRequest(BaseModel):
     session_id: str = ""
     event_data: dict = Field(default_factory=dict)
 
+
+class OfferEventRequest(BaseModel):
+    offer_id: str
+    provider: str = "outdoorsy"
+    placement: str = ""
+    route_type: str = ""
+    session_id: str = ""
+    context: dict = Field(default_factory=dict)
+
+
 class ExtremeCheckpoint(BaseModel):
     id: str
     type: str
@@ -3780,6 +3799,221 @@ async def provider_registry():
         "generated_at": int(time.time()),
         "providers": list_provider_metadata(),
     }
+
+
+OFFER_EVENT_TYPES = {
+    "commerce_offer_impression",
+    "commerce_offer_click",
+    "commerce_offer_save",
+    "commerce_offer_redirect",
+    "commerce_offer_dismiss",
+}
+SAFE_OFFER_CONTEXT_KEYS = {
+    "camp_nights",
+    "party_size",
+    "placement",
+    "query_kind",
+    "route_type",
+    "surface",
+    "trip_type",
+    "vehicle_type",
+}
+OFFER_RENTAL_CACHE: dict[str, tuple[int, dict[str, Any]]] = {}
+
+
+def _clean_offer_slug(value: object, max_len: int = 120) -> str:
+    return re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(value or "").strip())[:max_len].strip("._:-")
+
+
+def _clean_offer_label(value: object, max_len: int = 120) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip())[:max_len]
+
+
+def _offer_provider_id(provider: object = "outdoorsy") -> str:
+    provider_id = _clean_offer_slug(provider or "outdoorsy", 48).lower()
+    if provider_id in {"", "all"}:
+        return "outdoorsy"
+    if provider_id != "outdoorsy":
+        raise HTTPException(400, "Provider unavailable")
+    return provider_id
+
+
+def _outdoor_offer_disclosure() -> dict[str, str]:
+    return {
+        "kind": PARTNER_BOOKING_DISCLOSURE_KIND,
+        "label": PARTNER_BOOKING_DISCLOSURE_LABEL,
+    }
+
+
+def _rental_offer_search(query: OfferSearchQuery) -> OfferSearchResult:
+    if _offer_provider_id(query.provider or "outdoorsy") == "outdoorsy":
+        return OutdoorsyProvider(outdoorsy_config_from_env()).search_rentals(query)
+    return OfferSearchResult("outdoorsy", "empty", offers=[], reason="provider_unavailable")
+
+
+def _offer_query_cache_key(query: OfferSearchQuery) -> str:
+    parts = [
+        _offer_provider_id(query.provider or "outdoorsy"),
+        f"{float(query.lat):.3f}" if query.lat is not None else "",
+        f"{float(query.lng):.3f}" if query.lng is not None else "",
+        query.start_date or "",
+        query.end_date or "",
+        str(query.sleeps or ""),
+        _clean_offer_slug(query.vehicle_type, 48),
+        "" if query.pet_friendly is None else str(bool(query.pet_friendly)).lower(),
+        "" if query.delivery is None else str(bool(query.delivery)).lower(),
+        str(query.safe_limit()),
+    ]
+    return "|".join(parts)
+
+
+def _public_offer_search_response(result: OfferSearchResult) -> dict[str, Any]:
+    offers = [offer.to_public_dict() for offer in result.offers] if result.status == "ok" else []
+    status = "ok" if result.status == "ok" else "empty"
+    return {
+        "provider": result.provider,
+        "status": status,
+        "offers": offers,
+        "results": offers,
+        "count": len(offers),
+        "fetched_at": result.fetched_at,
+        "expires_at": result.expires_at if status == "ok" else 0,
+        "disclosure": _outdoor_offer_disclosure(),
+    }
+
+
+def _offer_cache_ttl_seconds(result: OfferSearchResult, now: int) -> int:
+    if result.status != "ok" or not result.offers:
+        return 30
+    if result.expires_at and result.expires_at > now:
+        return max(30, min(result.expires_at - now, 300))
+    return 60
+
+
+def _offer_event_context(context: object) -> dict[str, object]:
+    if not isinstance(context, dict):
+        return {}
+    clean: dict[str, object] = {}
+    for key in SAFE_OFFER_CONTEXT_KEYS:
+        if key not in context:
+            continue
+        value = context.get(key)
+        if isinstance(value, bool):
+            clean[key] = value
+        elif isinstance(value, int):
+            clean[key] = max(0, min(value, 90))
+        elif isinstance(value, float):
+            clean[key] = round(max(0.0, min(value, 90.0)), 1)
+        elif value is not None:
+            clean[key] = _clean_offer_label(value, 80)
+    return clean
+
+
+def _record_offer_event(event_type: str, body: OfferEventRequest, user: dict | None) -> dict[str, bool]:
+    if event_type not in OFFER_EVENT_TYPES:
+        raise HTTPException(400, "Unsupported offer event")
+    provider_id = _offer_provider_id(body.provider)
+    offer_id = _clean_offer_slug(body.offer_id, 160)
+    if not offer_id:
+        raise HTTPException(400, "Offer unavailable")
+    placement = _clean_offer_slug(body.placement, 80)
+    route_type = _clean_offer_label(body.route_type, 80)
+    session_id = _clean_offer_slug(body.session_id, 120) or None
+    event_data: dict[str, object] = {
+        "offer_id": offer_id,
+        "provider": provider_id,
+        "placement": placement,
+        "route_type": route_type,
+        "timestamp": int(time.time()),
+    }
+    context = _offer_event_context(body.context)
+    if context:
+        event_data["context"] = context
+    log_event(user["id"] if user else None, session_id, event_type, event_data)
+    return {"ok": True}
+
+
+@app.get("/api/offers/rentals")
+async def rental_offers(
+    lat: Optional[float] = None,
+    lng: Optional[float] = None,
+    start_date: str = "",
+    end_date: str = "",
+    sleeps: Optional[int] = None,
+    vehicle_type: str = "",
+    pet_friendly: Optional[bool] = None,
+    delivery: Optional[bool] = None,
+    limit: int = 12,
+    provider: str = "outdoorsy",
+):
+    provider_id = _offer_provider_id(provider)
+    query = OfferSearchQuery(
+        lat=lat,
+        lng=lng,
+        start_date=start_date,
+        end_date=end_date,
+        sleeps=sleeps,
+        vehicle_type=vehicle_type,
+        pet_friendly=pet_friendly,
+        delivery=delivery,
+        limit=limit,
+        provider=provider_id,
+    )
+    if query.validation_error():
+        raise HTTPException(400, "Invalid rental search")
+    cache_key = _offer_query_cache_key(query)
+    now = int(time.time())
+    cached = OFFER_RENTAL_CACHE.get(cache_key)
+    if cached and cached[0] > now:
+        return cached[1]
+    result = _rental_offer_search(query)
+    response = _public_offer_search_response(result)
+    OFFER_RENTAL_CACHE[cache_key] = (now + _offer_cache_ttl_seconds(result, now), response)
+    if len(OFFER_RENTAL_CACHE) > 128:
+        expired = [key for key, (expires_at, _) in OFFER_RENTAL_CACHE.items() if expires_at <= now]
+        for key in expired[:32]:
+            OFFER_RENTAL_CACHE.pop(key, None)
+    return response
+
+
+@app.get("/api/offers/{offer_id}")
+async def outdoor_offer_detail(offer_id: str, provider: str = "outdoorsy"):
+    provider_id = _offer_provider_id(provider or str(offer_id).split(":", 1)[0])
+    result = _rental_offer_search(OfferSearchQuery(limit=24, provider=provider_id))
+    for offer in result.offers:
+        if offer.id == offer_id or offer.provider_offer_id == offer_id:
+            return {
+                "status": "ok",
+                "provider": offer.provider,
+                "offer": offer.to_public_dict(),
+                "disclosure": _outdoor_offer_disclosure(),
+            }
+    raise HTTPException(404, "Offer not available")
+
+
+@app.post("/api/offers/impression")
+async def offer_impression(body: OfferEventRequest, user: dict | None = Depends(_optional_user)):
+    return _record_offer_event("commerce_offer_impression", body, user)
+
+
+@app.post("/api/offers/click")
+async def offer_click(body: OfferEventRequest, user: dict | None = Depends(_optional_user)):
+    return _record_offer_event("commerce_offer_click", body, user)
+
+
+@app.post("/api/offers/save")
+async def offer_save(body: OfferEventRequest, user: dict | None = Depends(_optional_user)):
+    return _record_offer_event("commerce_offer_save", body, user)
+
+
+@app.post("/api/offers/redirect")
+async def offer_redirect(body: OfferEventRequest, user: dict | None = Depends(_optional_user)):
+    return _record_offer_event("commerce_offer_redirect", body, user)
+
+
+@app.post("/api/offers/dismiss")
+async def offer_dismiss(body: OfferEventRequest, user: dict | None = Depends(_optional_user)):
+    return _record_offer_event("commerce_offer_dismiss", body, user)
 
 # ── Auth ──────────────────────────────────────────────────────────────────────
 

@@ -1,0 +1,33 @@
+{
+  "status": "ok",
+  "rentals": [
+    {
+      "id": "partial-trailer-1",
+      "type": "travel_trailer",
+      "title": "Trailer near the start",
+      "pickup": {
+        "city": "Boulder",
+        "region": "CO",
+        "lat": 40.015,
+        "lng": -105.2705,
+        "precision": "exact",
+        "address": "private address ignored"
+      },
+      "sleeps": 3,
+      "pet_friendly": true,
+      "pricing": {
+        "from": 89,
+        "currency": "USD",
+        "freshness": "Fixture only"
+      }
+    },
+    {
+      "id": "",
+      "title": "Missing id should be skipped"
+    },
+    {
+      "id": "missing-title",
+      "title": ""
+    }
+  ]
+}

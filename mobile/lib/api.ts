@@ -41,6 +41,99 @@ export type GeocodeRequestOptions = {
   prefer?: 'search_center' | 'center' | 'locality' | 'place' | string;
 };
 
+export type OutdoorOfferImage = {
+  url: string;
+  caption?: string;
+  credit?: string;
+  license?: string;
+};
+
+export type OutdoorOffer = {
+  id: string;
+  provider: string;
+  provider_offer_id: string;
+  type: string;
+  title: string;
+  summary?: string;
+  images?: OutdoorOfferImage[];
+  pickup_area?: string;
+  approximate_lat?: number | null;
+  approximate_lng?: number | null;
+  vehicle_class?: string;
+  sleeps?: number | null;
+  seats?: number | null;
+  pet_friendly?: boolean | null;
+  delivery_available?: boolean | null;
+  amenities?: string[];
+  price_from?: number | null;
+  currency?: string;
+  price_freshness?: string;
+  availability_summary?: string;
+  rating?: number | null;
+  review_count?: number | null;
+  cancellation_summary?: string;
+  insurance_summary?: string;
+  booking_url?: string;
+  affiliate_url?: string;
+  source_freshness?: string;
+  fetched_at?: number;
+  expires_at?: number;
+  disclosure_kind?: string;
+  disclosure_label?: string;
+  external_checkout_status?: string;
+};
+
+export type RentalOffersQuery = {
+  lat?: number;
+  lng?: number;
+  start_date?: string;
+  end_date?: string;
+  sleeps?: number;
+  vehicle_type?: string;
+  pet_friendly?: boolean;
+  delivery?: boolean;
+  limit?: number;
+  provider?: string;
+};
+
+export type OutdoorOffersResponse = {
+  provider: string;
+  status: 'ok' | 'empty';
+  offers: OutdoorOffer[];
+  results: OutdoorOffer[];
+  count: number;
+  fetched_at: number;
+  expires_at: number;
+  disclosure: { kind: string; label: string };
+};
+
+export type OutdoorOfferDetailResponse = {
+  status: 'ok';
+  provider: string;
+  offer: OutdoorOffer;
+  disclosure: { kind: string; label: string };
+};
+
+export type OfferEventName = 'impression' | 'click' | 'save' | 'redirect' | 'dismiss';
+
+export type OfferEventPayload = {
+  offer_id: string;
+  provider?: string;
+  placement?: string;
+  route_type?: string;
+  session_id?: string;
+  context?: {
+    camp_nights?: number;
+    party_size?: number;
+    placement?: string;
+    query_kind?: string;
+    route_type?: string;
+    surface?: string;
+    trip_type?: string;
+    vehicle_type?: string;
+  };
+};
+
 function geocodeOptionsQuery(options: GeocodeRequestOptions = {}) {
   const parts: string[] = [];
   const countrycodes = normalizeRequestText(options.countrycodes ?? '');
@@ -513,6 +606,22 @@ export const api = {
   },
   getExploreExperience: (experienceId: string) =>
     req<BookableExperience>(`/api/explore/experiences/${encodeURIComponent(experienceId)}`),
+  getRentalOffers: (params: RentalOffersQuery = {}) => {
+    const qs = new URLSearchParams({ provider: params.provider || 'outdoorsy', limit: String(params.limit ?? 12) });
+    if (params.lat != null) qs.set('lat', String(params.lat));
+    if (params.lng != null) qs.set('lng', String(params.lng));
+    if (params.start_date) qs.set('start_date', params.start_date);
+    if (params.end_date) qs.set('end_date', params.end_date);
+    if (params.sleeps != null) qs.set('sleeps', String(params.sleeps));
+    if (params.vehicle_type) qs.set('vehicle_type', params.vehicle_type);
+    if (params.pet_friendly != null) qs.set('pet_friendly', String(params.pet_friendly));
+    if (params.delivery != null) qs.set('delivery', String(params.delivery));
+    return req<OutdoorOffersResponse>(`/api/offers/rentals?${qs.toString()}`);
+  },
+  getOutdoorOffer: (offerId: string, provider = 'outdoorsy') =>
+    req<OutdoorOfferDetailResponse>(`/api/offers/${encodeURIComponent(offerId)}?provider=${encodeURIComponent(provider)}`),
+  trackOutdoorOfferEvent: (event: OfferEventName, data: OfferEventPayload) =>
+    req<{ ok: boolean }>(`/api/offers/${event}`, { method: 'POST', body: JSON.stringify(data) }),
   nearbyAudio: (lat: number, lng: number, location_name = '') =>
     req<{ narration: string }>('/api/audio/nearby', {
       method: 'POST', body: JSON.stringify({ lat, lng, location_name }),

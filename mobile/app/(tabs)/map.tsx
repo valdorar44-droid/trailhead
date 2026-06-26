@@ -18063,47 +18063,51 @@ function MapScreen() {
       />
 
       {showCampDiscoverySheet && (
-        <View
-          style={[s.campDiscoverySheet, { bottom: bottomInset + 60, maxHeight: Math.min(560, Math.max(360, windowHeight * 0.62)) }]}
-          pointerEvents="auto"
-        >
-          <View style={s.campDiscoveryHandle} />
-          <View style={s.campDiscoveryHeader}>
-            <View style={s.campDiscoveryTitleWrap}>
-              <Text style={s.campDiscoveryTitle}>
-                {`${discoveryCamps.length} Results`}
-              </Text>
-              <Text style={s.campDiscoverySub} numberOfLines={1}>
-                {campDiscoveryWideActive ? 'Camps, RV parks, and stays' : activeCampFilterLabel}
-              </Text>
-            </View>
-            {mapWeather?.current ? (
-              <View style={s.campDiscoveryWeather}>
-                <Ionicons name={weatherIonIcon(Number(mapWeather.current.weather_code ?? mapWeather.daily?.weathercode?.[0] ?? 3))} size={14} color="#0f766e" />
-                <Text style={s.campDiscoveryWeatherText}>{weatherTemp(mapWeather.current.temperature_2m, mapWeather.trailhead_units)}</Text>
+        <TrailheadSnapSheet
+          initialStage="peek"
+          maxFullRatio={0.82}
+          halfRatio={0.42}
+          style={[s.campDiscoverySnap, { bottom: bottomInset + 52 }]}
+          contentStyle={s.campDiscoverySnapContent}
+          scrollContentStyle={s.campDiscoveryScrollContent}
+          peekHeader={(
+            <View style={s.campDiscoveryHeader}>
+              <View style={s.campDiscoveryTitleWrap}>
+                <Text style={s.campDiscoveryTitle}>
+                  {isLoadingAreaCamps ? 'Searching camps' : `${discoveryCamps.length} Results`}
+                </Text>
+                <Text style={s.campDiscoverySub} numberOfLines={1}>
+                  {campDiscoveryWideActive ? 'Camps, RV parks, and stays' : activeCampFilterLabel}
+                </Text>
               </View>
-            ) : null}
-            <TouchableOpacity
-              style={s.campDiscoveryFilterBtn}
-              onPress={() => {
-                setCampDiscoveryWideActive(false);
-                setShowFilterSheet(true);
-              }}
-              activeOpacity={0.84}
-            >
-              <Ionicons name="options-outline" size={14} color={C.text} />
-              <Text style={s.campDiscoveryFilterText}>Filters</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={s.campDiscoveryClose}
-              onPress={() => setCampDiscoverySheetDismissed(true)}
-              activeOpacity={0.84}
-              accessibilityLabel="Close camp discovery results"
-            >
-              <Ionicons name="close" size={18} color="#101820" />
-            </TouchableOpacity>
-          </View>
-
+              {mapWeather?.current ? (
+                <View style={s.campDiscoveryWeather}>
+                  <Ionicons name={weatherIonIcon(Number(mapWeather.current.weather_code ?? mapWeather.daily?.weathercode?.[0] ?? 3))} size={14} color="#0f766e" />
+                  <Text style={s.campDiscoveryWeatherText}>{weatherTemp(mapWeather.current.temperature_2m, mapWeather.trailhead_units)}</Text>
+                </View>
+              ) : null}
+              <TouchableOpacity
+                style={s.campDiscoveryFilterBtn}
+                onPress={() => {
+                  setCampDiscoveryWideActive(false);
+                  setShowFilterSheet(true);
+                }}
+                activeOpacity={0.84}
+              >
+                <Ionicons name="options-outline" size={14} color={C.text} />
+                <Text style={s.campDiscoveryFilterText}>Filters</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={s.campDiscoveryClose}
+                onPress={() => setCampDiscoverySheetDismissed(true)}
+                activeOpacity={0.84}
+                accessibilityLabel="Close camp discovery results"
+              >
+                <Ionicons name="close" size={18} color="#101820" />
+              </TouchableOpacity>
+            </View>
+          )}
+        >
           {mapMoved && viewportRef.current ? (
             <TouchableOpacity
               style={s.campDiscoverySearchArea}
@@ -18121,20 +18125,24 @@ function MapScreen() {
             </TouchableOpacity>
           ) : null}
 
-          {isLoadingAreaCamps && discoveryCamps.length === 0 ? (
-            <View style={s.campDiscoveryState}>
-              <ActivityIndicator size="small" color="#0f766e" />
-              <Text style={s.campDiscoveryStateTitle}>Searching camps nearby</Text>
-              <Text style={s.campDiscoveryStateText}>Checking campgrounds, RV parks, public land, and local stay sources for this map area.</Text>
+          {isLoadingAreaCamps ? (
+            <View style={s.campDiscoverySkeletonList}>
+              {[0, 1, 2].map(idx => (
+                <View key={idx} style={s.campDiscoverySkeletonCard}>
+                  <TrailheadCardSkeleton media lines={3} style={s.campDiscoverySkeletonInner} />
+                </View>
+              ))}
             </View>
-          ) : !isLoadingAreaCamps && discoveryCamps.length === 0 ? (
+          ) : null}
+
+          {!isLoadingAreaCamps && discoveryCamps.length === 0 ? (
             <View style={s.campDiscoveryState}>
               <Ionicons name="map-outline" size={22} color="#0f766e" />
               <Text style={s.campDiscoveryStateTitle}>No camps loaded here yet</Text>
               <Text style={s.campDiscoveryStateText}>Move the map closer to Moab or widen the camp filters, then search this area again.</Text>
             </View>
           ) : (
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.campDiscoveryCards}>
+          <View style={s.campDiscoveryCards}>
             {discoveryCamps.slice(0, 30).map((camp, idx) => {
                 const photo = campPhotoItems(camp)[0]?.url;
                 const distance = camp.route_distance_mi != null ? Number(camp.route_distance_mi) : null;
@@ -18180,9 +18188,9 @@ function MapScreen() {
                   </TouchableOpacity>
                 );
               })}
-          </ScrollView>
+          </View>
           )}
-        </View>
+        </TrailheadSnapSheet>
       )}
 
       {copilotResults.length > 0 && !androidInlineSearchKeyboardActive && !scopedMapSearchActive && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
@@ -24593,31 +24601,18 @@ const makeStyles = (C: ColorPalette) => {
   filterChipLockedText: { color: C.text3 },
 
   // ── Camp discovery sheet
-  campDiscoverySheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+  campDiscoverySnap: {
     zIndex: 840,
     elevation: 32,
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    backgroundColor: '#fbfaf7',
-    borderTopWidth: 1,
-    borderColor: 'rgba(15,23,42,0.10)',
-    paddingTop: 8,
-    paddingBottom: 10,
-    shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: -8 },
   },
-  campDiscoveryHandle: {
-    alignSelf: 'center',
-    width: 42,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.18)',
-    marginBottom: 10,
+  campDiscoverySnapContent: {
+    backgroundColor: '#fbfaf7',
+  },
+  campDiscoveryScrollContent: {
+    paddingHorizontal: 0,
+    paddingTop: 10,
+    paddingBottom: 26,
+    gap: 12,
   },
   campDiscoveryHeader: {
     flexDirection: 'row',
@@ -24685,6 +24680,20 @@ const makeStyles = (C: ColorPalette) => {
   },
   campDiscoveryStateTitle: { color: '#101820', fontSize: 18, lineHeight: 23, fontWeight: '900', textAlign: 'center' },
   campDiscoveryStateText: { color: '#66706b', fontSize: 12, lineHeight: 17, textAlign: 'center', fontWeight: '700' },
+  campDiscoverySkeletonList: { paddingHorizontal: 18, gap: 14 },
+  campDiscoverySkeletonCard: {
+    minHeight: 258,
+    borderRadius: 8,
+    overflow: 'hidden',
+    backgroundColor: '#f4f1ea',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.06)',
+  },
+  campDiscoverySkeletonInner: {
+    minHeight: 258,
+    borderRadius: 8,
+    backgroundColor: 'transparent',
+  },
   campDiscoveryCards: { paddingHorizontal: 18, paddingBottom: 18, gap: 20 },
   campDiscoveryCard: {
     alignSelf: 'stretch',

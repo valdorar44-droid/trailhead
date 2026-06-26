@@ -2332,10 +2332,28 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       return;
     }
     const p = feat.properties;
+    if (p?.cluster || p?.point_count) {
+      const lng = Number(coords?.[0]);
+      const lat = Number(coords?.[1]);
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const nextZoom = Math.min(13, Math.max(9, Number(freeCameraDefaultRef.current.zoomLevel || 9) + 2.2));
+        programmaticCameraUntilRef.current = Date.now() + 900;
+        rememberFreeCamera(lat, lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
+        camRef.current?.setCamera({
+          centerCoordinate: [lng, lat],
+          zoomLevel: nextZoom,
+          pitch: navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0,
+          animationDuration: 420,
+          animationMode: 'flyTo',
+        } as any);
+      }
+      return;
+    }
     let raw: CampsitePin;
     try { raw = JSON.parse(p.raw || '{}'); } catch { raw = p as any; }
+    if (!raw || !Number.isFinite(Number(raw.lat)) || !Number.isFinite(Number(raw.lng))) return;
     onCampTap(raw);
-  }, [onCampTap, onMapTap, suppressFeatureTaps]);
+  }, [navMode, onCampTap, onMapTap, rememberFreeCamera, showTerrain, suppressFeatureTaps]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
   const userLocationShape = userLoc

@@ -10496,6 +10496,34 @@ def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: l
         "attribution": "Gilgit-Baltistan official context, OpenStreetMap contributors, RGI/GLIMS glacier reference, and credited media sources." if is_pakistan else "Open map data and credited media sources.",
     }
 
+def _open_poi_route_geometry(item: dict, trail_id: str, name: str) -> dict | None:
+    geometry = item.get("geometry")
+    if not isinstance(geometry, dict):
+        return None
+    gtype = geometry.get("type")
+    if gtype not in {"LineString", "MultiLineString"}:
+        return None
+    coords = geometry.get("coordinates")
+    if gtype == "LineString":
+        valid_count = sum(1 for pair in (coords or []) if _valid_trail_lnglat(pair))
+    else:
+        valid_count = sum(1 for line in (coords or []) for pair in (line or []) if _valid_trail_lnglat(pair))
+    if valid_count < 2:
+        return None
+    return {
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "id": trail_id,
+            "properties": {
+                "name": name[:180],
+                "source": "OpenStreetMap",
+                "source_id": str(item.get("id") or ""),
+            },
+            "geometry": geometry,
+        }],
+    }
+
 def _trail_profile_from_open_poi(item: dict) -> dict | None:
     lat, lng = item.get("lat"), item.get("lng")
     if not isinstance(lat, (int, float)) or not isinstance(lng, (int, float)):
@@ -10525,16 +10553,23 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
         parts = source_id.split("_")
         if len(parts) >= 3:
             official_url = f"https://www.openstreetmap.org/{parts[1]}/{parts[2]}"
+    geometry = _open_poi_route_geometry(item, trail_id, name) if kind == "trail" else None
+    length_mi = None
+    try:
+        if item.get("length_mi") is not None:
+            length_mi = round(float(item.get("length_mi")), 2)
+    except Exception:
+        length_mi = None
     provenance = {
         "name": {"source": "OpenStreetMap", "last_checked": now},
         "location": {"source": "OpenStreetMap", "last_checked": now},
         "summary": {"source": "Trailhead generated from open-source tags", "last_checked": now},
         "activities": {"source": "Trailhead inference", "last_checked": now},
         "catalog": {
-            "route_type": "Point or route",
+            "route_type": "Mapped route" if geometry else "Point or route",
             "geometry_ref": trail_id,
             "quality": "open",
-            "source_note": "Seeded from open map data; verify current trail status with the land manager.",
+            "source_note": "Seeded from open map data with route geometry where available; verify current trail status with the land manager.",
         },
     }
     return {
@@ -10544,11 +10579,11 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
         "description": f"{summary} Verify current access, difficulty, closures, and legality with the land manager before relying on this trail profile.",
         "lat": float(lat),
         "lng": float(lng),
-        "length_mi": None,
+        "length_mi": length_mi,
         "difficulty": "Scout first",
         "activities": ["Overlanding", "Hiking"] if kind in {"trail", "trailhead", "viewpoint", "peak"} else ["Overlanding"],
         "land_manager": "",
-        "geometry": None,
+        "geometry": geometry,
         "trailheads": [{"name": name, "lat": float(lat), "lng": float(lng), "source": "OpenStreetMap"}],
         "official_url": official_url,
         "photos": [],

@@ -5,6 +5,7 @@ from pathlib import Path
 
 import dashboard.server as server
 from db import store
+from ingestors import osm
 from ingestors.pakistan_curated import get_pakistan_curated_treks
 
 
@@ -244,6 +245,56 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertGreaterEqual(len(manifest["keyframes"]), 5)
         self.assertEqual(manifest["keyframes"][0]["progress"], 0.0)
         self.assertEqual(manifest["keyframes"][-1]["progress"], 1.0)
+
+    def test_osm_way_trail_route_carries_geometry_into_profile(self):
+        route = osm._normalize_trail_route({
+            "type": "way",
+            "id": 233584649,
+            "tags": {"name": "Moab Rim Trail", "highway": "path"},
+            "geometry": [
+                {"lat": 38.55891, "lon": -109.58444},
+                {"lat": 38.55980, "lon": -109.58560},
+                {"lat": 38.56055, "lon": -109.58700},
+            ],
+        })
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route["geometry"]["type"], "LineString")
+        self.assertEqual(route["geometry"]["coordinates"][0], [-109.58444, 38.55891])
+        self.assertGreater(route["length_mi"], 0)
+
+        profile = server._trail_profile_from_open_poi(route)
+        public = server._public_trail_profile(profile)
+        manifest = server._trail_preview_manifest(profile)
+
+        self.assertEqual(profile["geometry"]["features"][0]["geometry"]["type"], "LineString")
+        self.assertTrue(public["preview_available"])
+        self.assertEqual(manifest["status"], "available")
+        self.assertEqual(manifest["trail_name"], "Moab Rim Trail")
+
+    def test_osm_relation_trail_route_stitches_member_geometry(self):
+        route = osm._normalize_trail_route({
+            "type": "relation",
+            "id": 9001,
+            "tags": {"name": "Desert Loop", "route": "hiking"},
+            "members": [
+                {"type": "way", "ref": 1, "role": "", "geometry": [
+                    {"lat": 38.0, "lon": -109.0},
+                    {"lat": 38.001, "lon": -109.001},
+                ]},
+                {"type": "way", "ref": 2, "role": "", "geometry": [
+                    {"lat": 38.002, "lon": -109.002},
+                    {"lat": 38.001, "lon": -109.001},
+                ]},
+            ],
+        })
+
+        self.assertIsNotNone(route)
+        self.assertEqual(route["geometry"]["type"], "LineString")
+        self.assertEqual(route["geometry"]["coordinates"][0], [-109.0, 38.0])
+        self.assertEqual(route["geometry"]["coordinates"][-1], [-109.002, 38.002])
+        self.assertIsInstance(route["lat"], float)
+        self.assertIsInstance(route["lng"], float)
 
     def test_trail_area_from_profiles_returns_explore_shape(self):
         area = server._trail_area_from_profiles(38.1, -109.5, 25, [{

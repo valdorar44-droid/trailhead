@@ -206,7 +206,7 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
               </TouchableOpacity>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={styles.statValue}>{fmtDistance(distanceM)}</Text>
-                <Text style={styles.statLabel} numberOfLines={1}>animated route progress</Text>
+                <Text style={styles.statLabel} numberOfLines={1}>route progress</Text>
               </View>
               <TouchableOpacity
                 style={styles.restartBtn}

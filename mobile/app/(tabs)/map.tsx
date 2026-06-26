@@ -19287,7 +19287,7 @@ function MapScreen() {
             <View style={s.trailPreviewTop}>
               <Text style={s.trailReportTitle}>TRAIL PREVIEW</Text>
               <Text style={s.trailPreviewStatus}>
-                {selectedTrailProfile?.preview_available ? '3D READY' : selectedTrail.profile_id ? 'CHECKING' : 'GUIDE'}
+                {selectedTrailProfile?.preview_available ? '3D READY' : selectedTrail.profile_id ? 'GUIDE READY' : 'GUIDE'}
               </Text>
             </View>
             <TouchableOpacity
@@ -19304,7 +19304,7 @@ function MapScreen() {
                   {selectedTrailProfile?.preview_available
                     ? 'Animated route line with map camera and progress marker.'
                     : selectedTrail.profile_id
-                      ? 'Loads when this trail has ordered Trailhead route geometry.'
+                      ? 'Open the guide line now. 3D preview appears when route line detail is available.'
                       : 'Guide layer selected. Build or save an ordered route for 3D preview.'}
                 </Text>
               </View>

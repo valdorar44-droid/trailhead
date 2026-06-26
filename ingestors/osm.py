@@ -4,6 +4,7 @@ No API key required. Free, unlimited (be polite — results are cached).
 """
 from __future__ import annotations
 import asyncio
+import math
 import httpx
 from db.store import get_cached, set_cached
 
@@ -102,7 +103,7 @@ _TRAIL_ROUTE_QUERY = """
   way["highway"~"^(path|track|footway|bridleway|cycleway)$"](around:{radius},{lat},{lng});
   way["route"~"^(hiking|foot|bicycle|mtb|horse)$"](around:{radius},{lat},{lng});
 );
-out center tags 120;
+out geom 120;
 """
 
 _FUEL_QUERY = """
@@ -173,9 +174,152 @@ def _node_coord(el: dict) -> tuple[float, float] | None:
         lat, lng = c.get("lat"), c.get("lon")
     else:
         lat, lng = el.get("lat"), el.get("lon")
-    if lat and lng:
+    if lat is not None and lng is not None:
         return float(lat), float(lng)
     return None
+
+
+def _haversine_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    r = 6371000.0
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    dphi = math.radians(lat2 - lat1)
+    dlambda = math.radians(lng2 - lng1)
+    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlambda / 2) ** 2
+    return 2 * r * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def _clean_overpass_line(raw_geometry: list | None, max_points: int = 1200) -> list[list[float]]:
+    if not isinstance(raw_geometry, list):
+        return []
+    clean: list[list[float]] = []
+    for node in raw_geometry[:max_points]:
+        if not isinstance(node, dict):
+            continue
+        try:
+            lat = float(node.get("lat"))
+            lng = float(node.get("lon"))
+        except Exception:
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
+        coord = [round(lng, 7), round(lat, 7)]
+        if clean and clean[-1] == coord:
+            continue
+        clean.append(coord)
+    return clean if len(clean) >= 2 else []
+
+
+def _line_length_m(coords: list[list[float]]) -> float:
+    return sum(
+        _haversine_m(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0])
+        for i in range(1, len(coords))
+    )
+
+
+def _coord_distance_m(a: list[float], b: list[float]) -> float:
+    return _haversine_m(a[1], a[0], b[1], b[0])
+
+
+def _append_line(base: list[list[float]], segment: list[list[float]]) -> None:
+    if not base:
+        base.extend(segment)
+        return
+    base.extend(segment[1:] if base[-1] == segment[0] else segment)
+
+
+def _stitch_lines(lines: list[list[list[float]]], tolerance_m: float = 35.0) -> list[list[list[float]]]:
+    remaining = [list(line) for line in lines if len(line) >= 2]
+    stitched: list[list[list[float]]] = []
+    while remaining:
+        current = remaining.pop(0)
+        changed = True
+        while changed and remaining:
+            changed = False
+            best: tuple[float, int, str] | None = None
+            for idx, line in enumerate(remaining):
+                checks = [
+                    (_coord_distance_m(current[-1], line[0]), idx, "append"),
+                    (_coord_distance_m(current[-1], line[-1]), idx, "append_reversed"),
+                    (_coord_distance_m(current[0], line[-1]), idx, "prepend"),
+                    (_coord_distance_m(current[0], line[0]), idx, "prepend_reversed"),
+                ]
+                nearest = min(checks, key=lambda item: item[0])
+                if nearest[0] <= tolerance_m and (best is None or nearest[0] < best[0]):
+                    best = nearest
+            if not best:
+                continue
+            _, idx, mode = best
+            line = remaining.pop(idx)
+            if mode == "append":
+                _append_line(current, line)
+            elif mode == "append_reversed":
+                _append_line(current, list(reversed(line)))
+            elif mode == "prepend":
+                current = line[:-1] + current if line[-1] == current[0] else line + current
+            else:
+                rev = list(reversed(line))
+                current = rev[:-1] + current if rev[-1] == current[0] else rev + current
+            changed = True
+        stitched.append(current)
+    return stitched
+
+
+def _trail_geometry_from_element(el: dict) -> dict | None:
+    direct = _clean_overpass_line(el.get("geometry"))
+    if direct:
+        return {"type": "LineString", "coordinates": direct}
+
+    member_lines: list[list[list[float]]] = []
+    for member in el.get("members") or []:
+        line = _clean_overpass_line((member or {}).get("geometry"))
+        if line:
+            member_lines.append(line)
+    if not member_lines:
+        return None
+
+    stitched = _stitch_lines(member_lines)
+    stitched = [line for line in stitched if len(line) >= 2]
+    if not stitched:
+        return None
+    if len(stitched) == 1:
+        return {"type": "LineString", "coordinates": stitched[0][:2500]}
+
+    capped: list[list[list[float]]] = []
+    total_points = 0
+    for line in sorted(stitched, key=_line_length_m, reverse=True):
+        if total_points >= 4000:
+            break
+        take = line[: max(2, min(len(line), 4000 - total_points))]
+        if len(take) >= 2:
+            capped.append(take)
+            total_points += len(take)
+    return {"type": "MultiLineString", "coordinates": capped} if capped else None
+
+
+def _geometry_length_m(geometry: dict | None) -> float:
+    if not isinstance(geometry, dict):
+        return 0.0
+    if geometry.get("type") == "LineString":
+        return _line_length_m(geometry.get("coordinates") or [])
+    if geometry.get("type") == "MultiLineString":
+        return sum(_line_length_m(line) for line in geometry.get("coordinates") or [])
+    return 0.0
+
+
+def _geometry_representative_coord(geometry: dict | None) -> tuple[float, float] | None:
+    if not isinstance(geometry, dict):
+        return None
+    lines: list[list[list[float]]] = []
+    if geometry.get("type") == "LineString":
+        lines = [geometry.get("coordinates") or []]
+    elif geometry.get("type") == "MultiLineString":
+        lines = [line for line in geometry.get("coordinates") or [] if isinstance(line, list)]
+    lines = [line for line in lines if len(line) >= 2]
+    if not lines:
+        return None
+    line = max(lines, key=_line_length_m)
+    coord = line[len(line) // 2]
+    return float(coord[1]), float(coord[0])
 
 
 def _service_category(tags: dict) -> str | None:
@@ -644,7 +788,7 @@ async def get_trailheads(lat: float, lng: float, radius_m: int = 30000) -> list[
 
 
 async def get_trails(lat: float, lng: float, radius_m: int = 30000) -> list[dict]:
-    key = f"osm_trail_routes_v3_{lat:.2f}_{lng:.2f}_{radius_m}"
+    key = f"osm_trail_routes_v4_geom_{lat:.2f}_{lng:.2f}_{radius_m}"
     cached = get_cached("campsite_cache", key, ttl_seconds=3600 * 24)
     if cached is not None:
         return cached
@@ -653,47 +797,58 @@ async def get_trails(lat: float, lng: float, radius_m: int = 30000) -> list[dict
     results = []
     seen = set()
     for el in elements:
-        coord = _node_coord(el)
-        if not coord:
-            continue
-        tags = el.get("tags", {})
-        access = str(tags.get("access", "")).lower()
-        if access in {"private", "no"}:
-            continue
-        route = str(tags.get("route") or tags.get("highway") or "trail")
-        surface = str(tags.get("surface") or "").replace("_", " ")
-        tracktype = str(tags.get("tracktype") or "").lower()
-        name = _tag(el, "name") or _tag(el, "ref")
-        if not name:
-            if route == "track":
-                if surface:
-                    name = f"Mapped {surface} track"
-                elif tracktype in {"grade4", "grade5"}:
-                    name = "Mapped rough track"
-                else:
-                    name = "Mapped backroad"
-            elif route in {"path", "footway", "bridleway", "cycleway"}:
-                name = "Mapped trail"
-            else:
-                name = "Mapped trail route"
-        elat, elng = coord
         kind = el.get("type") or "way"
         key2 = f"{kind}:{el.get('id')}"
         if key2 in seen:
             continue
         seen.add(key2)
-        results.append({
-            "id": f"osm_{kind}_{el.get('id', '')}",
-            "name": name,
-            "lat": elat,
-            "lng": elng,
-            "type": "trail",
-            "subtype": route,
-            "source_label": "OpenStreetMap",
-            "url": _osm_url(el),
-        })
+        route = _normalize_trail_route(el)
+        if route:
+            results.append(route)
     set_cached("campsite_cache", key, results)
     return results
+
+
+def _normalize_trail_route(el: dict) -> dict | None:
+    geometry = _trail_geometry_from_element(el)
+    coord = _node_coord(el) or _geometry_representative_coord(geometry)
+    if not coord:
+        return None
+    tags = el.get("tags", {})
+    access = str(tags.get("access", "")).lower()
+    if access in {"private", "no"}:
+        return None
+    route = str(tags.get("route") or tags.get("highway") or "trail")
+    surface = str(tags.get("surface") or "").replace("_", " ")
+    tracktype = str(tags.get("tracktype") or "").lower()
+    name = _tag(el, "name") or _tag(el, "ref")
+    if not name:
+        if route == "track":
+            if surface:
+                name = f"Mapped {surface} track"
+            elif tracktype in {"grade4", "grade5"}:
+                name = "Mapped rough track"
+            else:
+                name = "Mapped backroad"
+        elif route in {"path", "footway", "bridleway", "cycleway"}:
+            name = "Mapped trail"
+        else:
+            name = "Mapped trail route"
+    elat, elng = coord
+    kind = el.get("type") or "way"
+    length_m = _geometry_length_m(geometry)
+    return {
+        "id": f"osm_{kind}_{el.get('id', '')}",
+        "name": name,
+        "lat": elat,
+        "lng": elng,
+        "type": "trail",
+        "subtype": route,
+        "source_label": "OpenStreetMap",
+        "url": _osm_url(el),
+        "geometry": geometry,
+        "length_mi": round(length_m / 1609.344, 2) if length_m > 0 else None,
+    }
 
 
 async def get_viewpoints(lat: float, lng: float, radius_m: int = 30000) -> list[dict]:

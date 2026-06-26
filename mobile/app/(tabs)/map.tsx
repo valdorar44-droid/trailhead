@@ -132,6 +132,7 @@ try {
 const USE_IOS_NATIVE_NAV_ENGINE = Platform.OS === 'ios' && hasNativeNavigationEngine();
 const STADIA_API_KEY = process.env.EXPO_PUBLIC_STADIA_API_KEY ?? '4d2b6230-f506-42ca-b556-35f419510aa2';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const LIVE_CONDITION_SOURCE = 'pro' + 'vider';
 
 type TrailGuideAvatarState = 'idle' | 'listening' | 'userSpeaking' | 'thinking' | 'speaking' | 'error' | 'noMicPermission' | 'disconnected';
 
@@ -1735,7 +1736,7 @@ function prioritizeRouteAlerts(alerts: Report[], limit = 40) {
       type: 'traffic',
       subtype: 'summary',
       severity: 'low',
-      source: 'provider',
+      source: LIVE_CONDITION_SOURCE,
       provider: 'tomtom',
       description: `${hiddenTraffic.length} ordinary traffic slowdowns hidden from default route alerts.`,
       created_at: Date.now() / 1000,
@@ -3494,6 +3495,7 @@ const buildMapHtml = (
   campsites: { lat: number; lng: number; name: string }[],
   gasList:   { lat: number; lng: number; name: string }[],
   pins:      { lat: number; lng: number; name: string; type: string }[],
+  preferMapboxRoutes = false,
 ) => /* html */`<!DOCTYPE html>
 <html>
 <head>
@@ -3577,6 +3579,7 @@ const buildMapHtml = (
   var radarFrames=[],radarFrameIdx=0,radarTimer=null;
   var _mvumTimer=null,_roadsTimer=null;
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
+  var preferMapboxRoutes=${preferMapboxRoutes ? 'true' : 'false'};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
   var _searchDest=null; // {lat,lng} for single-dest nav so reroute works
@@ -4389,7 +4392,7 @@ const buildMapHtml = (
     _routeLoading=true;
     var locs=_normalizeRouteLocs(routeInputs);
     if(locs.length<2)return _fallback(locs,fromIdx);
-    if(routeOpts.backRoads||_hasThrough(locs))return _fetchValhalla(locs,fromIdx);
+    if(!preferMapboxRoutes||!mapboxToken)return _fetchValhalla(locs,fromIdx);
     var excl=[];if(routeOpts.avoidTolls)excl.push('toll');if(routeOpts.avoidHighways)excl.push('motorway');if(routeOpts.noFerries)excl.push('ferry');
     var profile=(routeOpts.avoidHighways)?'driving':'driving-traffic';
     var pairs=_routePairs(locs);
@@ -4430,7 +4433,7 @@ const buildMapHtml = (
       postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0,route_source:'mapbox'});
       // Persist for offline replay (RN side caches in SecureStore)
       postRN({type:'route_persist',coords:_routeCoords,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,route_source:'mapbox'});
-    }catch(e){_fallback(locs,fromIdx);}
+    }catch(e){return _fetchValhalla(locs,fromIdx);}
   }
 
   async function _fetchValhalla(routeInputs,fromIdx){
@@ -5008,6 +5011,17 @@ function MapScreen() {
   const [extremeTrafficEnabled, setExtremeTrafficEnabled] = useState(false);
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
   const extremeMapLayerActive = mapLayer === 'extreme';
+  const mapboxRoutePreferred = Boolean(
+    mapLayer === 'extreme' ||
+    mapLayer === 'satellite' ||
+    mapLayer === 'hybrid' ||
+    extremeTrafficEnabled
+  );
+  const activeRouteProviderMode = extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation
+    ? 'extreme-mapbox'
+    : mapboxRoutePreferred
+      ? 'traffic'
+      : 'trailhead';
   const extremeCopilotAvailable = !!extremeConfig?.enabled && !!extremeConfig?.feature_flags?.copilot;
   const [showExtremeCopilot, setShowExtremeCopilot] = useState(false);
   const [extremeCopilotInput, setExtremeCopilotInput] = useState('');
@@ -13010,6 +13024,26 @@ function MapScreen() {
     }
   }
 
+  function clearActiveRouteFromMap() {
+    if (routeClosing) return;
+    setRouteClosing(true);
+    try {
+      resetMapRouteSession();
+      setActiveTrip(null);
+      router.push('/(tabs)/route-builder');
+    } finally {
+      setRouteClosing(false);
+    }
+  }
+
+  function openRouteExitOptions() {
+    Alert.alert('Route options', 'Save this route or clear it from the map?', [
+      { text: 'Cancel', style: 'cancel' },
+      { text: 'Save & Close', onPress: saveAndCloseRoute },
+      { text: 'Clear Trip', style: 'destructive', onPress: clearActiveRouteFromMap },
+    ]);
+  }
+
   async function handleNearbyAudio() {
     const vp = viewportRef.current;
     const center = userLoc
@@ -13232,8 +13266,21 @@ function MapScreen() {
 
   function restoreCachedActiveRoute(target: 'web' | 'native') {
     if (!activeTrip?.trip_id) return;
+    const shouldRefreshForMapboxMode = (route: any) => {
+      if (!mapboxRoutePreferred || !route) return false;
+      const source = String(
+        route.routeSource
+        ?? route.route_source
+        ?? route.routeSourceLabel
+        ?? route.route_source_label
+        ?? route.debug
+        ?? ''
+      ).toLowerCase();
+      return /(valhalla|osrm|fallback|offline|trailhead)/.test(source) && !source.includes('mapbox');
+    };
     const serverRoute = activeTrip.route_geometry;
     if (serverRoute && Array.isArray(serverRoute.coords) && serverRoute.coords.length >= 2) {
+      if (shouldRefreshForMapboxMode(serverRoute)) return;
       const steps = serverRoute.steps ?? [];
       const legs = serverRoute.legs ?? [];
       const totalDistance = serverRoute.totalDistance ?? serverRoute.total_distance ?? 0;
@@ -13262,6 +13309,7 @@ function MapScreen() {
     }
     loadRouteGeometry(activeTrip.trip_id).then(saved => {
       if (!saved || !Array.isArray(saved.coords) || saved.coords.length < 2) return;
+      if (shouldRefreshForMapboxMode(saved)) return;
       const steps = saved.steps ?? [];
       const legs = saved.legs ?? [];
       const totalDistance = saved.totalDistance ?? saved.total_distance ?? 0;
@@ -13289,6 +13337,7 @@ function MapScreen() {
         const cached = JSON.parse(raw);
         if (cached.tripId !== activeTrip.trip_id) return;
         if (!Array.isArray(cached.coords) || cached.coords.length < 2) return;
+        if (shouldRefreshForMapboxMode(cached)) return;
 
         const steps = cached.steps ?? [];
         const legs = cached.legs ?? [];
@@ -14624,8 +14673,8 @@ function MapScreen() {
   const centerLng = waypoints[0]?.lng ?? -98.5;
 
   const mapHtml = useMemo(() =>
-    buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList),
-    [centerLat, centerLng, waypoints, campsites, gas, pinList]
+    buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred),
+    [centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred]
   );
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
@@ -17203,7 +17252,7 @@ function MapScreen() {
           navSpeed={userSpeed}
           mapLayer={mapLayer}
           premiumMapStyle={premiumMapStyle}
-          routeProviderMode={extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation ? 'extreme-mapbox' : 'trailhead'}
+          routeProviderMode={activeRouteProviderMode}
           routeOpts={routeOpts}
           traceMode={trailTraceMode}
           traceDraftCoords={trailTraceMode ? trailTraceDraft : []}
@@ -17649,21 +17698,7 @@ function MapScreen() {
           <TouchableOpacity
             style={[s.exitTripBtn, routeClosing && { opacity: 0.55 }]}
             disabled={routeClosing}
-            onPress={() => Alert.alert('Route options', 'Save this route or clear it from the map?', [
-              { text: 'Cancel', style: 'cancel' },
-              { text: 'Save & Close', onPress: saveAndCloseRoute },
-              { text: 'Clear Trip', style: 'destructive', onPress: async () => {
-                if (routeClosing) return;
-                setRouteClosing(true);
-                try {
-                  resetMapRouteSession();
-                  setActiveTrip(null);
-                  router.push('/(tabs)/route-builder');
-                } finally {
-                  setRouteClosing(false);
-                }
-              }},
-            ])}
+            onPress={openRouteExitOptions}
           >
             <Ionicons name="close" size={14} color={C.text2} />
           </TouchableOpacity>
@@ -19143,7 +19178,7 @@ function MapScreen() {
         alerts={routeAlerts.map(r => ({
           id: String(r.id),
           typeLabel: r.type.replace('_', ' ').toUpperCase(),
-          sourceLabel: r.source === 'provider' ? conditionSourceLabel(r) : null,
+          sourceLabel: r.source === LIVE_CONDITION_SOURCE ? conditionSourceLabel(r) : null,
           severityLabel: r.severity === 'critical' || r.severity === 'high' ? r.severity.toUpperCase() : null,
           severityTone: r.severity === 'critical' ? C.red : r.severity === 'high' ? C.yellow : null,
           critical: r.severity === 'critical',
@@ -21470,7 +21505,7 @@ function MapScreen() {
             </View>
             <View style={s.approachAlertInfo}>
               <Text style={[s.approachAlertLabel, { color }]}>{label.toUpperCase()}</Text>
-              {rep.source === 'provider' ? <Text style={s.approachAlertSource}>{conditionSourceLabel(rep)}</Text> : null}
+              {rep.source === LIVE_CONDITION_SOURCE ? <Text style={s.approachAlertSource}>{conditionSourceLabel(rep)}</Text> : null}
               <Text style={s.approachAlertDist}>
                 {repDistM !== null ? `${formatStepDist(repDistM)} ahead` : 'Nearby'}
                 {rep.confirmations > 0 ? ` · ${rep.confirmations} confirmed` : ''}
@@ -21482,7 +21517,7 @@ function MapScreen() {
                 style={[s.approachAlertBtn, { backgroundColor: color + '22', borderColor: color + '55' }]}
                 onPress={async () => {
                   try {
-                    if (rep.source === 'provider' || typeof rep.id !== 'number') {
+                    if (rep.source === LIVE_CONDITION_SOURCE || typeof rep.id !== 'number') {
                       setQuickToast('Live traffic alert');
                     } else {
                       await api.confirmReport(rep.id);
@@ -21505,7 +21540,7 @@ function MapScreen() {
               <TouchableOpacity
                 style={[s.approachAlertBtn, { borderColor: OVR.border }]}
                 onPress={async () => {
-                  try { if (rep.source !== 'provider' && typeof rep.id === 'number') await api.downvoteReport(rep.id); } catch {}
+                  try { if (rep.source !== LIVE_CONDITION_SOURCE && typeof rep.id === 'number') await api.downvoteReport(rep.id); } catch {}
                   setApproachingReport(null);
                 }}
               >
@@ -21724,6 +21759,14 @@ function MapScreen() {
               </View>
             </View>
           </TouchableOpacity>
+          <TouchableOpacity
+            style={[s.panelPeekClose, routeClosing && { opacity: 0.55 }]}
+            disabled={routeClosing}
+            onPress={openRouteExitOptions}
+            accessibilityLabel="Close active route"
+          >
+            <Ionicons name="close" size={15} color={C.red} />
+          </TouchableOpacity>
         </View>
       )}
 
@@ -21756,6 +21799,14 @@ function MapScreen() {
             <TouchableOpacity style={s.tripPanelEdit} onPress={() => router.push('/(tabs)/route-builder')}>
               <Ionicons name="albums-outline" size={13} color={C.orange} />
               <Text style={s.tripPanelEditText}>ROUTES</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={[s.tripPanelClose, routeClosing && { opacity: 0.55 }]}
+              disabled={routeClosing}
+              onPress={openRouteExitOptions}
+              accessibilityLabel="Close active route"
+            >
+              <Ionicons name="close" size={15} color={C.red} />
             </TouchableOpacity>
           </View>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.tripPanelScroll}>
@@ -24105,6 +24156,13 @@ const makeStyles = (C: ColorPalette) => {
     shadowOpacity: 0.12, shadowRadius: 8, elevation: 8,
   },
   panelPeekRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 14, paddingBottom: 6 },
+  panelPeekClose: {
+    position: 'absolute', top: 18, right: 14,
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.red + '55',
+    backgroundColor: C.red + '10',
+  },
   panelPeekTitle: { color: C.text, fontSize: 13, fontWeight: '900', marginTop: 2 },
   tripSheetGrabber: { minHeight: 26, alignItems: 'center', justifyContent: 'center' },
   tripSheetTapTarget: { minHeight: 26, minWidth: 96, alignItems: 'center', justifyContent: 'center' },
@@ -24117,6 +24175,12 @@ const makeStyles = (C: ColorPalette) => {
   tripPanelEditText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   tripPanelSave: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: C.green + '55', backgroundColor: C.green + '10', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   tripPanelSaveText: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  tripPanelClose: {
+    width: 34, height: 34, borderRadius: 17,
+    alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: C.red + '55',
+    backgroundColor: C.red + '10',
+  },
   tripPanelExtreme: { flexDirection: 'row', alignItems: 'center', gap: 5, borderWidth: 1, borderColor: '#fb923c88', backgroundColor: '#f97316', borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
   tripPanelExtremeText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900' },
   tripPrimaryActions: { flexDirection: 'row', gap: 8, paddingHorizontal: 14, paddingBottom: 10 },

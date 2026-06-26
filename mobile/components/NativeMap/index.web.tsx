@@ -93,7 +93,7 @@ export interface NativeMapProps {
   onTrailTap:       (name: string, lat: number, lng: number) => void;
   onWaypointTap:    (idx: number, name: string) => void;
   onRouteReady:     (result: RouteResult & { fromIdx: number }) => void;
-  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null }) => void;
+  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null; routeSource?: string | null; routeSourceLabel?: string | null }) => void;
   onOffRoute?:      (lat: number, lng: number, distanceM: number) => void;
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;

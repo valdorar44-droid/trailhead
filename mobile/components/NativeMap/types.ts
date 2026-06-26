@@ -40,5 +40,7 @@ export interface RouteResult {
   totalDuration: number;
   isProper: boolean;
   fromCache?: boolean;
+  routeSource?: string;
+  routeSourceLabel?: string;
   debug?: string;
 }

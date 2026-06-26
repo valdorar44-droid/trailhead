@@ -13,6 +13,10 @@ export interface SavedRouteGeometry {
   totalDuration?: number;
   total_distance?: number;
   total_duration?: number;
+  routeSource?: string | null;
+  routeSourceLabel?: string | null;
+  route_source?: string | null;
+  route_source_label?: string | null;
   tripId: string | null;
   ts: number;
 }

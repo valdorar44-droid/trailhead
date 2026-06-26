@@ -246,7 +246,7 @@ export interface NativeMapProps {
   onTrailTap:       (name: string, lat: number, lng: number) => void;
   onWaypointTap:    (idx: number, name: string) => void;
   onRouteReady:     (result: RouteResult & { fromIdx: number }) => void;
-  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null }) => void;
+  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null; routeSource?: string | null; routeSourceLabel?: string | null }) => void;
   onOffRoute?:      (lat: number, lng: number, distanceM: number) => void;
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;
@@ -1869,11 +1869,15 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         coords: result.coords, steps: result.steps, legs: result.legs,
         totalDistance: result.totalDistance, totalDuration: result.totalDuration,
         tripId: activeTrip?.trip_id ?? null,
+        routeSource: (result as any).routeSource ?? null,
+        routeSourceLabel: (result as any).routeSourceLabel ?? null,
       });
       const routePayload = {
         coords: result.coords, steps: result.steps, legs: result.legs,
         totalDistance: result.totalDistance, totalDuration: result.totalDuration,
         tripId: activeTrip?.trip_id ?? null, ts: Date.now(),
+        routeSource: (result as any).routeSource ?? null,
+        routeSourceLabel: (result as any).routeSourceLabel ?? null,
       };
       storage.set('trailhead_active_route', JSON.stringify(routePayload)).catch(() => {});
       saveRouteGeometry(activeTrip?.trip_id, routePayload).catch(() => {});

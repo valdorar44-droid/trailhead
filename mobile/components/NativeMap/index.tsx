@@ -830,6 +830,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const C = useTheme();
   const isExtremeMapbox = mapLayer === 'extreme' && !!mapboxToken;
   const MapGL: any = isExtremeMapbox ? MapboxGL : MapLibreGL;
+  const routeArrowFont = isExtremeMapbox
+    ? ['DIN Pro Medium', 'Arial Unicode MS Regular']
+    : ['Noto Sans Medium'];
+  const routeTurnFont = isExtremeMapbox
+    ? ['DIN Pro Bold', 'Arial Unicode MS Regular']
+    : ['Noto Sans Bold'];
   const [localTiles,   setLocalTiles]   = useState(false);
   const [localContours, setLocalContours] = useState(false);
   const [localTrails, setLocalTrails] = useState(false);
@@ -2349,7 +2355,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
         {...(isExtremeMapbox ? { styleURL: mapboxStyleURL } : { mapStyle: mapStyleObj })}
-        projection={isExtremeMapbox ? 'globe' : undefined}
+        projection={isExtremeMapbox ? 'mercator' : undefined}
         onPress={handlePress}
         onLongPress={handleLongPress}
         onTouchStart={() => markUserCameraGesture('touch-start', {}, false)}
@@ -2566,15 +2572,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             style={{
               symbolPlacement: 'line',
               symbolSpacing: 70,
-              textField: '>',
+              textField: ['literal', '>'],
               textSize: ['interpolate', ['linear'], ['zoom'], 9, 14, 12, 17, 15, 21, 17, 25],
               textColor: '#111827',
               textHaloColor: 'rgba(255,255,255,0.82)',
               textHaloWidth: 1.2,
-              textFont: ['Noto Sans Medium'],
+              textFont: routeArrowFont,
               textIgnorePlacement: true,
               textAllowOverlap: true,
               textRotationAlignment: 'map',
+              textPitchAlignment: 'map',
               textKeepUpright: false,
               textLetterSpacing: 0,
             } as any}
@@ -2592,7 +2599,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textSize: ['interpolate', ['linear'], ['zoom'], 12, 28, 15, 36, 17, 44],
               textColor: 'rgba(2,6,23,0.42)',
               textTranslate: [0, 2],
-              textFont: ['Noto Sans Bold'],
+              textFont: routeTurnFont,
               textIgnorePlacement: true,
               textAllowOverlap: true,
             } as any}
@@ -2606,7 +2613,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textColor: '#f8c73d',
               textHaloColor: 'rgba(2,6,23,0.82)',
               textHaloWidth: 2.4,
-              textFont: ['Noto Sans Bold'],
+              textFont: routeTurnFont,
               textIgnorePlacement: true,
               textAllowOverlap: true,
             } as any}

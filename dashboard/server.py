@@ -4064,6 +4064,7 @@ class PlanRequest(BaseModel):
     region_hint: str = ""
     camp_reuse_policy: str = "different_each_night"
     max_daily_drive_hours: Optional[float] = None
+    trip_preferences: Optional[dict] = None
 
 class ChatRequest(BaseModel):
     message: str
@@ -4147,6 +4148,17 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
     # Seed trail_dna from rig profile when mobile provides it
     if body.rig_context:
         rig = body.rig_context
+        prefs = rig.get("trip_preferences") if isinstance(rig.get("trip_preferences"), dict) else None
+        if prefs:
+            if prefs.get("rental_interest") and not trail_dna.get("rental_interest"):
+                trail_dna["rental_interest"] = str(prefs.get("rental_interest"))
+            if prefs.get("camping_style") and not trail_dna.get("camping_style"):
+                trail_dna["camping_style"] = str(prefs.get("camping_style"))
+            if prefs.get("party") and not trail_dna.get("travel_party"):
+                trail_dna["travel_party"] = str(prefs.get("party"))
+            needs = prefs.get("needs")
+            if isinstance(needs, dict):
+                trail_dna["trip_needs"] = [k for k, v in needs.items() if v]
         if rig.get("vehicle_type") and not trail_dna.get("vehicle"):
             parts = [rig.get("vehicle_type", "")]
             if rig.get("make"):  parts.append(rig["make"])
@@ -4367,6 +4379,8 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             "camp_reuse_policy": (body.camp_reuse_policy or "different_each_night").strip().lower(),
             "region_hint": (body.region_hint or "").strip(),
             "max_daily_drive_hours": body.max_daily_drive_hours,
+            "trip_preferences": body.trip_preferences,
+            "rental_interest": (body.trip_preferences or {}).get("rental_interest") if isinstance(body.trip_preferences, dict) else None,
         }
 
         # Adjust credit charge to actual trip length
@@ -6238,7 +6252,17 @@ async def admin_place_photo_status(photo_id: int, body: dict, admin: dict = Depe
 @app.post("/api/analytics/event")
 async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depends(_optional_user)):
     event_type = re.sub(r"[^a-z0-9_.:-]+", "_", (body.event_type or "").strip().lower())[:80]
-    if event_type not in {"welcome_contest_seen", "welcome_contest_cta", "welcome_contest_cta_attributed"} and not event_type.startswith("phase0_"):
+    allowed_events = {
+        "welcome_contest_seen",
+        "welcome_contest_cta",
+        "welcome_contest_cta_attributed",
+        "welcome_gate_seen",
+        "welcome_gate_cta",
+        "welcome_gate_cta_attributed",
+        "welcome_walkthrough_seen",
+        "welcome_walkthrough_cta",
+    }
+    if event_type not in allowed_events and not event_type.startswith("phase0_"):
         raise HTTPException(400, "Unsupported analytics event")
     clean_session = re.sub(r"[^a-zA-Z0-9_.:-]+", "", (body.session_id or "").strip())[:120]
     log_event(user["id"] if user else None, clean_session or None, event_type, body.event_data or {})

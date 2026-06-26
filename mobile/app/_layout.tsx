@@ -18,10 +18,13 @@ import WelcomeOnboardingModal from '@/components/WelcomeOnboardingModal';
 import WelcomeGate from '@/components/WelcomeGate';
 import {
   markWelcomeGateSeen,
+  markWelcomeSetupSkipped,
+  saveWelcomeSetupPreferences,
   shouldShowWelcomeGate,
   WELCOME_PENDING_ATTR_KEY,
   WELCOME_WALKTHROUGH_SEEN_KEY,
   type WelcomeGateChoice,
+  type WelcomeSetupPreferences,
 } from '@/lib/welcomeGate';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
@@ -38,11 +41,14 @@ export default function RootLayout() {
   const user         = useStore(s => s.user);
   const sessionId    = useStore(s => s.sessionId);
   const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
+  const welcomeSetupRunId = useStore(s => s.welcomeSetupRunId);
   const router       = useRouter();
   const insets       = useSafeAreaInsets();
   const [updateBanner, setUpdateBanner] = useState(false);
   const [welcomeVisible, setWelcomeVisible] = useState(false);
   const [welcomeGateVisible, setWelcomeGateVisible] = useState(false);
+  const [welcomeGateMode, setWelcomeGateMode] = useState<'welcome' | 'setup'>('welcome');
+  const [welcomeGateSource, setWelcomeGateSource] = useState<'first_open' | 'profile'>('first_open');
   const [startupReady, setStartupReady] = useState(false);
   const [launchLoaderVisible, setLaunchLoaderVisible] = useState(true);
   const updateReady  = useRef(false);
@@ -149,6 +155,7 @@ export default function RootLayout() {
 
   function dismissWelcomeGate(choice: WelcomeGateChoice) {
     setWelcomeGateVisible(false);
+    setWelcomeGateMode('welcome');
     markWelcomeGateSeen(choice).catch(() => {});
   }
 
@@ -167,9 +174,45 @@ export default function RootLayout() {
   }
 
   function continueFromWelcomeGate() {
+    markWelcomeSetupSkipped().catch(() => {});
     dismissWelcomeGate('continue');
     logWelcomeEvent('welcome_gate_cta', { action: 'continue', signed_in: !!user });
     router.push('/(tabs)/guide' as any);
+  }
+
+  function completeWelcomeSetup(preferences: WelcomeSetupPreferences) {
+    saveWelcomeSetupPreferences(preferences).catch(() => {});
+    logWelcomeEvent('welcome_gate_cta', {
+      action: 'setup_complete',
+      source: welcomeGateSource,
+      signed_in: !!user,
+      rental_interest: preferences.vehicle,
+      camping: preferences.camping,
+      party: preferences.party,
+    });
+    if (welcomeGateSource === 'first_open') {
+      dismissWelcomeGate('continue');
+      router.push('/(tabs)/guide' as any);
+      return;
+    }
+    setWelcomeGateVisible(false);
+    setWelcomeGateMode('welcome');
+  }
+
+  function skipWelcomeSetup(preferences: Partial<WelcomeSetupPreferences>) {
+    markWelcomeSetupSkipped(preferences).catch(() => {});
+    logWelcomeEvent('welcome_gate_cta', {
+      action: 'setup_skip',
+      source: welcomeGateSource,
+      signed_in: !!user,
+    });
+    if (welcomeGateSource === 'first_open') {
+      dismissWelcomeGate('continue');
+      router.push('/(tabs)/guide' as any);
+      return;
+    }
+    setWelcomeGateVisible(false);
+    setWelcomeGateMode('welcome');
   }
 
   useEffect(() => {
@@ -317,10 +360,20 @@ export default function RootLayout() {
   }, [welcomePromptRunId]);
 
   useEffect(() => {
+    if (welcomeSetupRunId <= 0) return;
+    setWelcomeGateSource('profile');
+    setWelcomeGateMode('setup');
+    setWelcomeGateVisible(true);
+    logWelcomeEvent('welcome_gate_seen', { source: 'profile_setup' });
+  }, [welcomeSetupRunId]);
+
+  useEffect(() => {
     if (!startupReady || launchLoaderVisible || welcomeGateChecked.current) return;
     welcomeGateChecked.current = true;
     shouldShowWelcomeGate(!!user).then(show => {
       if (!show) return;
+      setWelcomeGateSource('first_open');
+      setWelcomeGateMode('welcome');
       setWelcomeGateVisible(true);
       logWelcomeEvent('welcome_gate_seen', { source: 'first_open' });
     }).catch(() => {});
@@ -357,9 +410,12 @@ export default function RootLayout() {
       <Stack screenOptions={{ headerShown: false }} />
       <WelcomeGate
         visible={welcomeGateVisible}
+        initialMode={welcomeGateMode}
         onCreateAccount={createAccountFromWelcomeGate}
         onSignIn={signInFromWelcomeGate}
         onContinue={continueFromWelcomeGate}
+        onSetupComplete={completeWelcomeSetup}
+        onSetupSkip={skipWelcomeSetup}
       />
       <WelcomeOnboardingModal
         visible={welcomeVisible}

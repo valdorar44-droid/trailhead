@@ -93,6 +93,8 @@ import { MAP_MODE_PRESETS, legendCategoryForPreset, mapModePresetTitle, type Map
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 import { playTrailheadCue, playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
+import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
+import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 import { startRealtimeCopilotSession } from '@/lib/realtimeCopilot';
 import {
   loadTrailheadRouteBuilderDraft,
@@ -4945,6 +4947,11 @@ function MapScreen() {
   const rigProfile = useStore(st => st.rigProfile);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const guidedTourActive = useStore(st => st.guidedTourActive);
+  const [welcomeSetupPreferences, setWelcomeSetupPreferences] = useState<WelcomeSetupPreferences | null>(null);
+  const tripPreferenceContext = useMemo(
+    () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
+    [welcomeSetupPreferences],
+  );
   const webRef       = useRef<any>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
   const navVoiceRef  = useRef<string | undefined>(undefined);
@@ -4975,6 +4982,14 @@ function MapScreen() {
     api.getExtremeConfig()
       .then(cfg => { if (mounted) setExtremeConfig(cfg); })
       .catch(() => { if (mounted) setExtremeConfig(null); });
+    return () => { mounted = false; };
+  }, [user?.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    loadWelcomeSetupPreferences()
+      .then(preferences => { if (mounted) setWelcomeSetupPreferences(preferences); })
+      .catch(() => { if (mounted) setWelcomeSetupPreferences(null); });
     return () => { mounted = false; };
   }, [user?.id]);
 
@@ -9212,6 +9227,7 @@ function MapScreen() {
         plan_tier: extremeConfig?.tier_name ?? 'Trailhead',
         admin: !!user?.is_admin,
         rig_profile: (rigProfile ?? null) as Record<string, unknown> | null,
+        trip_preferences: tripPreferenceContext,
       },
       map: {
         center,
@@ -9274,6 +9290,7 @@ function MapScreen() {
         active_trip: activeTrip?.trip_id ?? null,
         selected_day: selectedDay,
         current_screen: 'map',
+        route_builder_defaults: tripPreferenceContext?.route_builder ?? null,
         saved_stops: waypoints.slice(0, 30).map(wp => ({ lat: wp.lat, lng: wp.lng, name: wp.name, day: wp.day, type: wp.type })),
         offline_status: { saved_regions: cachedRegions.length, route_cached: routeFromCache },
       },

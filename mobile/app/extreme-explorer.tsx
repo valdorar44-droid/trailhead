@@ -28,6 +28,8 @@ import {
 } from '@/lib/api';
 import { useTheme, mono } from '@/lib/design';
 import { useStore } from '@/lib/store';
+import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
+import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 
 type DemoPlace = {
   id: string;
@@ -591,6 +593,7 @@ export default function ExplorerExplorerScreen() {
   const [relatedLoading, setRelatedLoading] = useState(false);
   const [missionBrief, setMissionBrief] = useState<MissionControlBrief | null>(null);
   const [missionLoading, setMissionLoading] = useState(false);
+  const [welcomeSetupPreferences, setWelcomeSetupPreferences] = useState<WelcomeSetupPreferences | null>(null);
   const surface: ExplorerSurface = params.surface === 'route_builder' ? 'route_builder' : 'map';
 
   const route = useMemo(() => routeFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.route_geometry?.ts]);
@@ -601,6 +604,10 @@ export default function ExplorerExplorerScreen() {
     return mergePlaces([...tripPlaces, ...routeExplorePlaces, ...discoveredPlaces, ...seed]);
   }, [checkpoints, discoveredPlaces, route, routeExplorePlaces, tripPlaces]);
   const tripMemory = useMemo(() => tripMemoryFromState(rigProfile), [rigProfile]);
+  const tripPreferenceContext = useMemo(
+    () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
+    [welcomeSetupPreferences],
+  );
   const summary = useMemo(() => missionBrief?.summary || coPilotSummary(places), [missionBrief?.summary, places]);
   const missionEnabled = config?.feature_flags?.mission_control !== false && config?.feature_flags?.adventure_scores !== false;
 
@@ -670,6 +677,14 @@ export default function ExplorerExplorerScreen() {
       }
     };
   }, [activeTrip?.trip_id, checkpoints, route.length, surface, tripMemory]);
+
+  useEffect(() => {
+    let mounted = true;
+    loadWelcomeSetupPreferences()
+      .then(preferences => { if (mounted) setWelcomeSetupPreferences(preferences); })
+      .catch(() => { if (mounted) setWelcomeSetupPreferences(null); });
+    return () => { mounted = false; };
+  }, []);
 
   useEffect(() => {
     if (status !== 'ready') return;
@@ -764,6 +779,7 @@ export default function ExplorerExplorerScreen() {
       command: commands[action] ?? action,
       mode: action === 'voice_command' ? 'voice' : 'text',
       context: {
+        user: { trip_preferences: tripPreferenceContext },
         route_points: route.length,
         places: places.length,
         checkpoints: checkpoints.length,
@@ -799,8 +815,9 @@ export default function ExplorerExplorerScreen() {
         trip_memory: tripMemory,
         context: {
           route: { active_route: route.length > 1, route_ready: route.length > 1 },
+          user: { trip_preferences: tripPreferenceContext },
           map: { current_screen: 'extreme_explorer' },
-          trip: { active_trip: activeTrip?.trip_id ?? null },
+          trip: { active_trip: activeTrip?.trip_id ?? null, route_builder_defaults: tripPreferenceContext?.route_builder ?? null },
         },
         metadata: { source: Platform.OS, days },
       });

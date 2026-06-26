@@ -1,14 +1,20 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Image, Platform, StyleSheet, Text, View } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TRAILHEAD_LOGO = require('../assets/icon.png');
+const LAUNCH_LINES = [
+  'Preparing your trip',
+  'Checking saved places',
+  'Getting maps ready',
+];
 
 export default function TrailheadLaunchLoader() {
   const insets = useSafeAreaInsets();
   const drift = useRef(new Animated.Value(0)).current;
   const pulse = useRef(new Animated.Value(0)).current;
+  const [lineIndex, setLineIndex] = useState(0);
   const useNativeDriver = Platform.OS !== 'web';
 
   useEffect(() => {
@@ -51,6 +57,13 @@ export default function TrailheadLaunchLoader() {
       pulseLoop.stop();
     };
   }, [drift, pulse, useNativeDriver]);
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setLineIndex(index => (index + 1) % LAUNCH_LINES.length);
+    }, 1400);
+    return () => clearInterval(timer);
+  }, []);
 
   const contourMotion = {
     transform: [
@@ -111,7 +124,7 @@ export default function TrailheadLaunchLoader() {
             <Image source={TRAILHEAD_LOGO} style={styles.logo} resizeMode="cover" />
           </View>
           <Text style={styles.brand}>TRAILHEAD</Text>
-          <Text style={styles.sub}>Preparing your trip space</Text>
+          <Text style={styles.sub}>{LAUNCH_LINES[lineIndex]}</Text>
         </View>
         <View style={styles.progressTrack}>
           <Animated.View style={[styles.progressFill, routeMotion]} />

@@ -211,6 +211,7 @@ export default function ProfileScreen() {
   const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const startWelcomePrompt = useStore(st => st.startWelcomePrompt);
+  const startWelcomeSetup = useStore(st => st.startWelcomeSetup);
   const [offlineTripSummaries, setOfflineTripSummaries] = useState<Array<TripResult & { cached_at: number }>>([]);
 
   function openSavedCampOnMap(camp: typeof favoriteCamps[number]) {
@@ -230,7 +231,7 @@ export default function ProfileScreen() {
 
   function clearCampCacheAdmin() {
     if (!user?.is_admin || adminClearingCampCache) return;
-    Alert.alert('Clear camp cache?', 'This clears cached camp search/detail data so popular areas reload fresh provider data.', [
+    Alert.alert('Clear camp cache?', 'This clears cached camp search/detail data so popular areas reload fresh source data.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clear',
@@ -1200,7 +1201,8 @@ export default function ProfileScreen() {
                 { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
                 { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
                 { icon: 'time-outline', label: 'HISTORY', color: C.silverBright, onPress: loadHistory },
-                { icon: 'trail-sign-outline', label: 'APP TOUR', color: '#d4af37', onPress: startWelcomePrompt },
+                { icon: 'options-outline', label: 'TRIP SETUP', color: '#14b8a6', onPress: startWelcomeSetup },
+                { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: '#d4af37', onPress: startWelcomePrompt },
               ]
             : profileSection === 'library'
               ? [
@@ -1245,7 +1247,8 @@ export default function ProfileScreen() {
                         { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
                       ]
                     : [
-                        { icon: 'trail-sign-outline', label: 'APP TOUR', color: '#d4af37', onPress: startWelcomePrompt },
+                        { icon: 'options-outline', label: 'TRIP SETUP', color: '#14b8a6', onPress: startWelcomeSetup },
+                        { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: '#d4af37', onPress: startWelcomePrompt },
                         { icon: 'mic-outline', label: 'TRIP AUDIO', color: '#3b82f6', onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
                         { icon: 'partly-sunny-outline', label: 'WEATHER', color: '#0ea5e9', onPress: () => router.push('/(tabs)/guide?view=weather' as any) },
                         { icon: 'bug-outline', label: 'BUG', color: C.red, onPress: () => setShowBugModal(true) },

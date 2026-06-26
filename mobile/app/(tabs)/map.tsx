@@ -16924,21 +16924,6 @@ function MapScreen() {
   const topChromeLeft = canOpenMapDrawer ? 72 : 16;
   const topChromeLaneStyle = topChromeLeft > 16 ? { left: topChromeLeft } : null;
   const scopedMapSearchPois = scopedMapSearchActive ? (mapSearchSession?.places ?? []) : routePois;
-  const showMapStatusBar = Boolean(
-    !navMode &&
-    !waterFollowActive &&
-    !showSearch &&
-    !showFullMapSearch &&
-    !inlineSearchOpen &&
-    !androidInlineSearchKeyboardActive &&
-    !scopedMapSearchActive &&
-    (
-      activeTrip ||
-      isDownloading ||
-      routeAlerts.length > 0 ||
-      (safeWaterPlanningActive && waterRouteReview)
-    )
-  );
   const mapSheetOpen = Boolean(
     mapWeatherEnabled ||
     showMapWeatherSheet ||
@@ -16983,6 +16968,22 @@ function MapScreen() {
     !showSearch &&
     !showFullMapSearch &&
     (!mapSheetOpen || inlineSearchOpen || scopedMapSearchActive)
+  );
+  const showMapStatusBar = Boolean(
+    !navMode &&
+    !waterFollowActive &&
+    !showSearch &&
+    !showFullMapSearch &&
+    !showInlineMapSearch &&
+    !inlineSearchOpen &&
+    !androidInlineSearchKeyboardActive &&
+    !scopedMapSearchActive &&
+    (
+      activeTrip ||
+      isDownloading ||
+      routeAlerts.length > 0 ||
+      (safeWaterPlanningActive && waterRouteReview)
+    )
   );
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
   const inlineSearchTop = inlineSearchSideBySide ? compassTop : compassTop + 52;

@@ -2556,7 +2556,10 @@ const MAP_FILTER_PREFS_KEY = 'trailhead_map_filter_preferences';
 const EXPLORE_CATEGORY_UNLOCK_KEY = 'trailhead_explore_category_unlock_day';
 const MIN_CAMP_SEARCH_ZOOM = 10;
 const MIN_FILTERED_CAMP_SEARCH_ZOOM = 7;
+const MIN_MANUAL_CAMP_SEARCH_ZOOM = 5.5;
 const MAX_FREECAM_CAMP_SEARCH_RADIUS_MI = 75;
+const MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI = 180;
+const CAMP_DISCOVERY_PLACE_CATEGORIES = 'camp,camping,private_stay,farm_stay,ranch,winery,glamping,private_camp,lodging';
 const MAX_ALL_MAP_POIS = 1200;
 const MAX_VISIBLE_MAP_POIS = 450;
 const MAX_OFFLINE_POI_SCAN = 1800;
@@ -5534,6 +5537,7 @@ function MapScreen() {
   const lastPinFetchRef = useRef<{ lat: number; lng: number; ts: number } | null>(null);
   const [isLoadingAreaCamps, setIsLoadingAreaCamps] = useState(false);
   const [areaCamps, setAreaCamps] = useState<CampsitePin[]>([]);
+  const [campDiscoveryWideActive, setCampDiscoveryWideActive] = useState(false);
   const [mapMoved, setMapMoved] = useState(false);
   const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
@@ -6537,12 +6541,14 @@ function MapScreen() {
   useEffect(() => {
     if (!showCampPins) {
       setAreaCamps([]);
+      setCampDiscoveryWideActive(false);
       return;
     }
+    if (campDiscoveryWideActive) return;
     if (!viewportRef.current) return;
     lastCampFetchRef.current = null;
     loadCampsInArea(viewportRef.current, activeFilters);
-  }, [activeFilters, showCampPins]);
+  }, [activeFilters, showCampPins, campDiscoveryWideActive]);
 
   // Auto-load camps when userLoc first becomes available + map is ready
   const autoLoadedRef = useRef(false);
@@ -7879,6 +7885,40 @@ function MapScreen() {
     setShowSearch(false);
     setSearchMode('browse');
     focusInlineMapSearch();
+  }
+
+  function searchCampDiscoveryArea() {
+    const base = viewportRef.current || (userLoc ? {
+      n: userLoc.lat + 2.0,
+      s: userLoc.lat - 2.0,
+      e: userLoc.lng + 2.0,
+      w: userLoc.lng - 2.0,
+      zoom: 7,
+    } : null);
+    if (!base) {
+      setQuickToast('Move the map to a camp area first');
+      setTimeout(() => setQuickToast(''), 2400);
+      return;
+    }
+    const center = mapCenterFromBounds(base);
+    setShowMapDrawer(false);
+    setInlineSearchOpen(false);
+    setShowSearch(false);
+    setShowCampPins(true);
+    setCampDiscoveryWideActive(true);
+    setQuickToast('Searching camps and stays');
+    setTimeout(() => setQuickToast(''), 2200);
+    if (center) queueMapWeatherFetch(center, true);
+    loadCampsInArea(
+      { ...base, zoom: Math.max(base.zoom ?? 0, MIN_MANUAL_CAMP_SEARCH_ZOOM) },
+      [],
+      {
+        force: true,
+        minZoom: MIN_MANUAL_CAMP_SEARCH_ZOOM,
+        radiusCapMi: MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI,
+        campOnly: true,
+      },
+    );
   }
 
   function openFullMapSearch() {
@@ -13196,13 +13236,17 @@ function MapScreen() {
     setTimeout(() => setQuickToast(''), 2200);
   }
 
-  async function loadCampsInArea(bounds: { n: number; s: number; e: number; w: number; zoom: number }, types: string[]): Promise<CampsitePin[] | null> {
-    if (!showCampPins) {
+  async function loadCampsInArea(
+    bounds: { n: number; s: number; e: number; w: number; zoom: number },
+    types: string[],
+    opts: { force?: boolean; radiusCapMi?: number; minZoom?: number; campOnly?: boolean } = {},
+  ): Promise<CampsitePin[] | null> {
+    if (!showCampPins && !opts.force) {
       setAreaCamps([]);
       return null;
     }
     const hasActiveCampFilters = types.length > 0;
-    const minCampSearchZoom = hasActiveCampFilters ? MIN_FILTERED_CAMP_SEARCH_ZOOM : MIN_CAMP_SEARCH_ZOOM;
+    const minCampSearchZoom = opts.minZoom ?? (hasActiveCampFilters ? MIN_FILTERED_CAMP_SEARCH_ZOOM : MIN_CAMP_SEARCH_ZOOM);
     if ((bounds.zoom ?? 0) < minCampSearchZoom) {
       setSearchResult({ count: -2 });
       setTimeout(() => setSearchResult(null), 3000);
@@ -13214,7 +13258,7 @@ function MapScreen() {
     // Half-diagonal of visible area in miles, capped so freecam searches can reach a wider route window.
     const latMi = ((bounds.n - bounds.s) / 2) * 69;
     const lngMi = ((bounds.e - bounds.w) / 2) * 69 * Math.cos(centerLat * Math.PI / 180);
-    const radiusMi = Math.min(Math.ceil(Math.sqrt(latMi * latMi + lngMi * lngMi)), MAX_FREECAM_CAMP_SEARCH_RADIUS_MI);
+    const radiusMi = Math.min(Math.ceil(Math.sqrt(latMi * latMi + lngMi * lngMi)), opts.radiusCapMi ?? MAX_FREECAM_CAMP_SEARCH_RADIUS_MI);
     setIsLoadingAreaCamps(true);
     setMapMoved(false);
     setSearchResult(null);
@@ -13222,7 +13266,12 @@ function MapScreen() {
       const [campsResult, fullResult, smartPackResult] = await Promise.allSettled([
         api.getNearbyCamps(centerLat, centerLng, radiusMi, types),
         api.getNearbyFullness(centerLat, centerLng, radiusMi * 0.6),
-        api.getNearbySmartPack(centerLat, centerLng, Math.min(Math.max(radiusMi, 12), 45), placeCategoryRequest()),
+        api.getNearbySmartPack(
+          centerLat,
+          centerLng,
+          opts.campOnly ? Math.min(Math.max(radiusMi, 35), 85) : Math.min(Math.max(radiusMi, 12), 45),
+          opts.campOnly ? CAMP_DISCOVERY_PLACE_CATEGORIES : placeCategoryRequest(),
+        ),
       ]);
       const camps = campsResult.status === 'fulfilled' ? campsResult.value : [];
       if (campsResult.status === 'rejected' && campsResult.reason instanceof PaywallError) {
@@ -13269,7 +13318,7 @@ function MapScreen() {
       const smartNonCampPois = smartPlaces
         .filter(p => String(p.type) !== 'camp')
         .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[];
-      if (smartNonCampPois.length > 0) mergePoiBatch(smartNonCampPois, { lat: centerLat, lng: centerLng });
+      if (!opts.campOnly && smartNonCampPois.length > 0) mergePoiBatch(smartNonCampPois, { lat: centerLat, lng: centerLng });
       // Feed results to WebView (legacy path) AND native map
       webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: tagged }));
       setAreaCamps(tagged);
@@ -17102,23 +17151,34 @@ function MapScreen() {
   const discoveryCamps = useMemo(() => {
     const seen = new Set<string>();
     const next: CampsitePin[] = [];
+    const filters = campDiscoveryWideActive ? [] : activeFilters;
     const candidates = [
       ...areaCamps,
       ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null),
     ] as CampsitePin[];
     for (const camp of candidates) {
       if (!camp || camp.lat == null || camp.lng == null || !isFinite(camp.lat) || !isFinite(camp.lng)) continue;
-      if (!campMatchesFilters(camp, activeFilters)) continue;
+      if (!campMatchesFilters(camp, filters)) continue;
       const key = campKey(camp);
       if (seen.has(key)) continue;
       seen.add(key);
       next.push(camp);
-      if (next.length >= 24) break;
+      if (next.length >= 60) break;
     }
-    return next;
-  }, [areaCamps, activeTrip?.campsites, activeFilters]);
+    return next.sort((a, b) => {
+      const aPhoto = campPhotoUrl(a.photo_url || a.photos?.[0]) ? 1 : 0;
+      const bPhoto = campPhotoUrl(b.photo_url || b.photos?.[0]) ? 1 : 0;
+      if (aPhoto !== bPhoto) return bPhoto - aPhoto;
+      const aRating = Number(a.rating ?? 0);
+      const bRating = Number(b.rating ?? 0);
+      if (aRating !== bRating) return bRating - aRating;
+      return Number(a.route_distance_mi ?? 999) - Number(b.route_distance_mi ?? 999);
+    });
+  }, [areaCamps, activeTrip?.campsites, activeFilters, campDiscoveryWideActive]);
   const showCampDiscoverySheet = Boolean(
     showCampPins &&
+    discoveryCamps.length > 0 &&
+    !isLoadingAreaCamps &&
     !navMode &&
     !safeWaterPlanningActive &&
     !waterFollowActive &&
@@ -17364,7 +17424,7 @@ function MapScreen() {
           onBoundsChange={b => {
             viewportRef.current = b;
             setMapZoom(b.zoom ?? 10);
-            if ((b.zoom ?? 0) >= 9) setMapMoved(true);
+            if ((b.zoom ?? 0) >= (campDiscoveryWideActive ? MIN_MANUAL_CAMP_SEARCH_ZOOM : 9)) setMapMoved(true);
             if ((b.zoom ?? 0) < (activeFilters.length > 0 ? MIN_FILTERED_CAMP_SEARCH_ZOOM : 8)) setAreaCamps([]);
             const lat = (b.n + b.s) / 2;
             const lng = (b.e + b.w) / 2;
@@ -17833,20 +17893,33 @@ function MapScreen() {
 
       {showCampDiscoverySheet && (
         <View
-          style={[s.campDiscoverySheet, { bottom: bottomInset + 72, maxHeight: Math.min(286, Math.max(212, windowHeight * 0.34)) }]}
+          style={[s.campDiscoverySheet, { bottom: bottomInset + 60, maxHeight: Math.min(560, Math.max(360, windowHeight * 0.62)) }]}
           pointerEvents="auto"
         >
           <View style={s.campDiscoveryHandle} />
           <View style={s.campDiscoveryHeader}>
             <View style={s.campDiscoveryTitleWrap}>
               <Text style={s.campDiscoveryTitle}>
-                {isLoadingAreaCamps ? 'Finding stays' : `${discoveryCamps.length || areaCamps.length} stays`}
+                {`${discoveryCamps.length} Results`}
               </Text>
               <Text style={s.campDiscoverySub} numberOfLines={1}>
-                {activeFilters.length > 0 ? activeFilters.map(cleanDisplayLabel).slice(0, 3).join(' · ') : 'Camps, RV parks, and stays nearby'}
+                {campDiscoveryWideActive ? 'Camps, RV parks, and stays' : activeFilters.length > 0 ? activeFilters.map(cleanDisplayLabel).slice(0, 3).join(' · ') : 'Camps, RV parks, and stays nearby'}
               </Text>
             </View>
-            <TouchableOpacity style={s.campDiscoveryFilterBtn} onPress={() => setShowFilterSheet(true)} activeOpacity={0.84}>
+            {mapWeather?.current ? (
+              <View style={s.campDiscoveryWeather}>
+                <Ionicons name={weatherIonIcon(Number(mapWeather.current.weather_code ?? mapWeather.daily?.weathercode?.[0] ?? 3))} size={14} color="#0f766e" />
+                <Text style={s.campDiscoveryWeatherText}>{weatherTemp(mapWeather.current.temperature_2m, mapWeather.trailhead_units)}</Text>
+              </View>
+            ) : null}
+            <TouchableOpacity
+              style={s.campDiscoveryFilterBtn}
+              onPress={() => {
+                setCampDiscoveryWideActive(false);
+                setShowFilterSheet(true);
+              }}
+              activeOpacity={0.84}
+            >
               <Ionicons name="options-outline" size={14} color={C.text} />
               <Text style={s.campDiscoveryFilterText}>Filters</Text>
             </TouchableOpacity>
@@ -17855,7 +17928,13 @@ function MapScreen() {
           {mapMoved && viewportRef.current ? (
             <TouchableOpacity
               style={s.campDiscoverySearchArea}
-              onPress={() => viewportRef.current && loadCampsInArea(viewportRef.current, activeFilters)}
+              onPress={() => viewportRef.current && loadCampsInArea(
+                viewportRef.current,
+                campDiscoveryWideActive ? [] : activeFilters,
+                campDiscoveryWideActive
+                  ? { force: true, minZoom: MIN_MANUAL_CAMP_SEARCH_ZOOM, radiusCapMi: MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI, campOnly: true }
+                  : {},
+              )}
               activeOpacity={0.86}
             >
               <Ionicons name="search-outline" size={14} color="#fff" />
@@ -17863,21 +17942,8 @@ function MapScreen() {
             </TouchableOpacity>
           ) : null}
 
-          {isLoadingAreaCamps ? (
-            <View style={s.campDiscoveryState}>
-              <ActivityIndicator size="small" color={C.orange} />
-              <Text style={s.campDiscoveryStateText}>Loading camp sources</Text>
-            </View>
-          ) : discoveryCamps.length === 0 ? (
-            <View style={s.campDiscoveryState}>
-              <Ionicons name="map-outline" size={18} color={C.text3} />
-              <Text style={s.campDiscoveryStateText}>
-                {searchResult?.count === -2 ? 'Zoom in or add a camp filter to load stays.' : 'Move the map or adjust filters to find stays.'}
-              </Text>
-            </View>
-          ) : (
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.campDiscoveryCards}>
-              {discoveryCamps.slice(0, 12).map((camp, idx) => {
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.campDiscoveryCards}>
+            {discoveryCamps.slice(0, 30).map((camp, idx) => {
                 const photo = campPhotoItems(camp)[0]?.url;
                 const distance = camp.route_distance_mi != null ? Number(camp.route_distance_mi) : null;
                 const meta = [
@@ -17897,11 +17963,22 @@ function MapScreen() {
                       <Image source={{ uri: photo }} style={s.campDiscoveryPhoto} resizeMode="cover" />
                     ) : (
                       <View style={[s.campDiscoveryPhotoPlaceholder, { backgroundColor: landColor(camp.land_type).bg }]}>
-                        <Ionicons name={(camp.tags ?? []).includes('rv') ? 'car-outline' : 'bonfire-outline'} size={24} color={landColor(camp.land_type).text} />
+                        <Ionicons name={(camp.tags ?? []).includes('rv') ? 'car-outline' : 'bonfire-outline'} size={34} color={landColor(camp.land_type).text} />
                       </View>
                     )}
+                    <TouchableOpacity
+                      style={s.campDiscoverySave}
+                      onPress={(event: any) => {
+                        event.stopPropagation?.();
+                        toggleFavorite(camp);
+                      }}
+                      activeOpacity={0.84}
+                    >
+                      <Ionicons name={favoriteCamps.some(f => f.id === camp.id) ? 'heart' : 'heart-outline'} size={21} color={favoriteCamps.some(f => f.id === camp.id) ? '#ef4444' : '#101820'} />
+                    </TouchableOpacity>
                     <View style={s.campDiscoveryCardBody}>
                       <Text style={s.campDiscoveryName} numberOfLines={2}>{camp.name || 'Camp stay'}</Text>
+                      {camp.address ? <Text style={s.campDiscoveryAddress} numberOfLines={1}>{camp.address}</Text> : null}
                       <Text style={s.campDiscoveryMeta} numberOfLines={1}>{meta}</Text>
                       <View style={s.campDiscoveryCardFoot}>
                         <Text style={s.campDiscoveryPrice} numberOfLines={1}>{price || 'Open details'}</Text>
@@ -17911,8 +17988,7 @@ function MapScreen() {
                   </TouchableOpacity>
                 );
               })}
-            </ScrollView>
-          )}
+          </ScrollView>
         </View>
       )}
 
@@ -18366,10 +18442,12 @@ function MapScreen() {
 
         {!mapControlsCollapsed && !waterFollowActive && <TourTarget id="map.search">
           <TouchableOpacity
-            style={[s.ctrlBtn, mapChrome.button, inlineSearchOpen && mapChrome.buttonActive]}
-            onPress={openInlineMapSearch}
+            style={[s.ctrlBtn, mapChrome.button, campDiscoveryWideActive && mapChrome.buttonActive]}
+            onPress={searchCampDiscoveryArea}
+            activeOpacity={0.84}
+            accessibilityLabel="Search camps and stays in this area"
           >
-            <Ionicons name="search" size={20} color={inlineSearchOpen ? mapChrome.activeText : mapChrome.text} />
+            <Ionicons name="bonfire-outline" size={20} color={campDiscoveryWideActive ? mapChrome.activeText : mapChrome.text} />
           </TouchableOpacity>
         </TourTarget>}
 
@@ -19945,7 +20023,9 @@ function MapScreen() {
       {/* ── Campsite quick card ── */}
       {selectedCamp && !navMode && !safeWaterPlanningActive && (
         <TrailheadSnapSheet
-          initialStage="half"
+          initialStage="full"
+          maxFullRatio={0.98}
+          halfRatio={0.58}
           style={s.quickSnapCard}
           contentStyle={s.quickSnapShell}
           scrollContentStyle={s.quickSnapContent}
@@ -24476,7 +24556,7 @@ const makeStyles = (C: ColorPalette) => {
     borderTopWidth: 1,
     borderColor: 'rgba(15,23,42,0.10)',
     paddingTop: 8,
-    paddingBottom: 14,
+    paddingBottom: 10,
     shadowColor: '#000',
     shadowOpacity: 0.16,
     shadowRadius: 18,
@@ -24493,13 +24573,25 @@ const makeStyles = (C: ColorPalette) => {
   campDiscoveryHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 8,
     paddingHorizontal: 18,
     paddingBottom: 10,
   },
   campDiscoveryTitleWrap: { flex: 1, minWidth: 0 },
-  campDiscoveryTitle: { color: '#101820', fontSize: 19, lineHeight: 23, fontWeight: '900', letterSpacing: 0 },
+  campDiscoveryTitle: { color: '#101820', fontSize: 24, lineHeight: 29, fontWeight: '900', letterSpacing: 0 },
   campDiscoverySub: { color: '#66706b', fontSize: 11, lineHeight: 15, marginTop: 2 },
+  campDiscoveryWeather: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 9,
+    borderRadius: 17,
+    backgroundColor: '#ecfdf5',
+    borderWidth: 1,
+    borderColor: 'rgba(15,118,110,0.18)',
+  },
+  campDiscoveryWeatherText: { color: '#0f766e', fontSize: 11, fontWeight: '900' },
   campDiscoveryFilterBtn: {
     minHeight: 34,
     flexDirection: 'row',
@@ -24532,23 +24624,36 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 28,
   },
   campDiscoveryStateText: { color: '#66706b', fontSize: 12, lineHeight: 17, textAlign: 'center', fontWeight: '700' },
-  campDiscoveryCards: { paddingHorizontal: 18, paddingBottom: 2, gap: 12 },
+  campDiscoveryCards: { paddingHorizontal: 18, paddingBottom: 18, gap: 20 },
   campDiscoveryCard: {
-    width: 176,
-    height: 178,
-    borderRadius: 18,
-    overflow: 'hidden',
-    backgroundColor: '#fff',
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.10)',
+    alignSelf: 'stretch',
+    minHeight: 298,
+    borderRadius: 8,
+    overflow: 'visible',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
-  campDiscoveryPhoto: { width: '100%', height: 92, backgroundColor: '#e4e0d7' },
-  campDiscoveryPhotoPlaceholder: { width: '100%', height: 92, alignItems: 'center', justifyContent: 'center' },
-  campDiscoveryCardBody: { flex: 1, paddingHorizontal: 10, paddingTop: 8, paddingBottom: 9, gap: 4 },
-  campDiscoveryName: { color: '#101820', fontSize: 13, lineHeight: 17, fontWeight: '900', letterSpacing: 0 },
-  campDiscoveryMeta: { color: '#66706b', fontSize: 9.5, lineHeight: 13 },
-  campDiscoveryCardFoot: { marginTop: 'auto', flexDirection: 'row', alignItems: 'center', gap: 4 },
-  campDiscoveryPrice: { flex: 1, color: '#0f766e', fontSize: 10, lineHeight: 13, fontWeight: '900' },
+  campDiscoveryPhoto: { width: '100%', height: 178, borderRadius: 8, backgroundColor: '#e4e0d7' },
+  campDiscoveryPhotoPlaceholder: { width: '100%', height: 178, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  campDiscoverySave: {
+    position: 'absolute',
+    right: 14,
+    top: 14,
+    width: 48,
+    height: 48,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.92)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(15,23,42,0.14)',
+  },
+  campDiscoveryCardBody: { paddingHorizontal: 0, paddingTop: 12, paddingBottom: 14, gap: 6 },
+  campDiscoveryName: { color: '#101820', fontSize: 24, lineHeight: 29, fontWeight: '900', letterSpacing: 0, paddingHorizontal: 0 },
+  campDiscoveryAddress: { color: '#3f4945', fontSize: 14, lineHeight: 18, paddingHorizontal: 0 },
+  campDiscoveryMeta: { color: '#66706b', fontSize: 13, lineHeight: 17, paddingHorizontal: 0 },
+  campDiscoveryCardFoot: { marginTop: 4, flexDirection: 'row', alignItems: 'center', gap: 4 },
+  campDiscoveryPrice: { flex: 1, color: '#101820', fontSize: 16, lineHeight: 20, fontWeight: '900' },
 
   // ── Campsite quick card
   quickSnapCard: { left: 10, right: 10, zIndex: 1000, elevation: 40 },
@@ -24579,10 +24684,10 @@ const makeStyles = (C: ColorPalette) => {
     backgroundColor: C.s2,
   },
   quickCardImg: {
-    height: 164,
-    marginHorizontal: 12,
-    marginTop: 12,
-    borderRadius: 22,
+    height: 248,
+    marginHorizontal: -14,
+    marginTop: -10,
+    borderRadius: 0,
     position: 'relative',
     overflow: 'hidden',
     backgroundColor: C.s2,
@@ -24632,9 +24737,9 @@ const makeStyles = (C: ColorPalette) => {
     width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center',
     backgroundColor: 'rgba(0,0,0,0.36)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)',
   },
-  quickCardHeroText: { position: 'absolute', left: 15, right: 76, bottom: 14 },
+  quickCardHeroText: { position: 'absolute', left: 18, right: 82, bottom: 18 },
   quickCardHeroKicker: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, opacity: 0.9 },
-  quickCardHeroTitle: { color: '#fff', fontSize: 22, lineHeight: 27, fontWeight: '900', marginTop: 4 },
+  quickCardHeroTitle: { color: '#fff', fontSize: 30, lineHeight: 35, fontWeight: '900', marginTop: 4 },
   quickCardBody: { padding: 14, paddingBottom: 30, gap: 10 },
   quickCardHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 6 },
   quickCardName: { color: C.text, fontSize: 15, fontWeight: '800', flex: 1, lineHeight: 20 },

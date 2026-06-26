@@ -20,6 +20,11 @@
 - Android internal preview build if iOS passes or if Android map/search regressions are suspected.
 - Use production API URL with no secret values in the mobile bundle.
 
+## Queued Builds
+
+- iOS preview build queued from this branch:
+  `https://expo.dev/accounts/danub44/projects/trailhead/builds/230469d9-a674-45fb-a068-16ae2c97a1be`
+
 ## Camp Pin Flow
 
 - Open Map.

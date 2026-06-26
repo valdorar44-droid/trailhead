@@ -18,6 +18,7 @@ import MapDrawerSheet from '@/components/map/MapDrawerSheet';
 import MapFilterSheet from '@/components/map/MapFilterSheet';
 import MapLegendSheet from '@/components/map/MapLegendSheet';
 import MapLayerSheetContent from '@/components/map/MapLayerSheetContent';
+import MapSearchSheet, { type MapSearchQuickAction } from '@/components/map/MapSearchSheet';
 import MapStyleSheet from '@/components/map/MapStyleSheet';
 import MapWeatherPeek from '@/components/map/MapWeatherPeek';
 import MapWeatherSheet from '@/components/map/MapWeatherSheet';
@@ -2640,6 +2641,13 @@ type ScopedSearchCategoryRule = {
 const SCOPED_SEARCH_SPLIT_RE = /\s+(near|nearby|around|by|close to|in|at)\s+/i;
 const SCOPED_SEARCH_CURRENT_LOCATION_RE = /^(me|my location|current location|here|near me)$/i;
 const SCOPED_SEARCH_PREFIX_RE = /^(gas stations?|gas|fuel|petrol|diesel|propane|restaurants?|food|coffee|groceries|grocery|campgrounds?|camps?|camping|rv parks?|lodging|hotels?|motels?|trailheads?|trails?|treks?|hikes?|views?|viewpoints?|waterfalls?|falls|glaciers?|parks?|attractions?|mechanics?|repair|parking|medical|pharmacy|wifi)\s+(.{2,})$/i;
+const FULL_MAP_SEARCH_QUICK_ACTIONS: MapSearchQuickAction[] = [
+  { label: 'Camps', query: 'camps near me', icon: 'bonfire-outline' },
+  { label: 'Fuel', query: 'fuel near me', icon: 'car-sport-outline' },
+  { label: 'Water', query: 'water near me', icon: 'water-outline' },
+  { label: 'Trails', query: 'trails near me', icon: 'trail-sign-outline' },
+  { label: 'Groceries', query: 'grocery near me', icon: 'cart-outline' },
+];
 
 const SCOPED_SEARCH_CATEGORY_RULES: ScopedSearchCategoryRule[] = [
   { label: 'Fuel', ids: ['fuel'], radiusMi: 18, pattern: /\b(gas stations?|gas\b|fuel|petrol|diesel|charging stations?|ev charging)\b/i },
@@ -4898,6 +4906,8 @@ function MapScreen() {
   const rigProfile = useStore(st => st.rigProfile);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const guidedTourActive = useStore(st => st.guidedTourActive);
+  const searchHistory = useStore(st => st.searchHistory);
+  const addSearchHistory = useStore(st => st.addSearchHistory);
   const [welcomeSetupPreferences, setWelcomeSetupPreferences] = useState<WelcomeSetupPreferences | null>(null);
   const tripPreferenceContext = useMemo(
     () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
@@ -5055,6 +5065,7 @@ function MapScreen() {
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
   const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const [showFullMapSearch, setShowFullMapSearch] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const inlineSearchInputRef = useRef<TextInput | null>(null);
@@ -7833,6 +7844,25 @@ function MapScreen() {
     focusInlineMapSearch();
   }
 
+  function openFullMapSearch() {
+    setShowMapDrawer(false);
+    setInlineSearchOpen(false);
+    setShowSearch(false);
+    setSearchMode('browse');
+    setShowFullMapSearch(true);
+  }
+
+  function closeFullMapSearch(clear = false) {
+    setShowFullMapSearch(false);
+    setIsSearching(false);
+    if (clear) {
+      setSearchQuery('');
+      setSearchResults([]);
+      setMapSearchSession(null);
+    }
+    Keyboard.dismiss();
+  }
+
   function closeInlineMapSearch(clear = true) {
     setInlineSearchOpen(false);
     setIsSearching(false);
@@ -7996,6 +8026,8 @@ function MapScreen() {
       summary: basePlace.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
       source_label: basePlace.source_label || 'Map search',
     });
+    addSearchHistory({ name: basePlace.name, lat: basePlace.lat, lng: basePlace.lng, searchedAt: Date.now() });
+    setShowFullMapSearch(false);
     closeInlineMapSearch();
     focusPlaceCamera(basePlace, 14, query);
   }
@@ -16888,7 +16920,7 @@ function MapScreen() {
   };
   const scopedMapSearchActive = Boolean(mapSearchSession && !navMode && !waterFollowActive && !safeWaterPlanningActive);
   const androidInlineSearchKeyboardActive = Platform.OS === 'android' && inlineSearchOpen && keyboardVisible;
-  const mapSearchChromeActive = Boolean(showSearch || inlineSearchOpen || scopedMapSearchActive || androidInlineSearchKeyboardActive);
+  const mapSearchChromeActive = Boolean(showSearch || showFullMapSearch || inlineSearchOpen || scopedMapSearchActive || androidInlineSearchKeyboardActive);
   const topChromeLeft = canOpenMapDrawer ? 72 : 16;
   const topChromeLaneStyle = topChromeLeft > 16 ? { left: topChromeLeft } : null;
   const scopedMapSearchPois = scopedMapSearchActive ? (mapSearchSession?.places ?? []) : routePois;
@@ -16896,6 +16928,7 @@ function MapScreen() {
     !navMode &&
     !waterFollowActive &&
     !showSearch &&
+    !showFullMapSearch &&
     !inlineSearchOpen &&
     !androidInlineSearchKeyboardActive &&
     !scopedMapSearchActive &&
@@ -16910,6 +16943,7 @@ function MapScreen() {
     mapWeatherEnabled ||
     showMapWeatherSheet ||
     showSearch ||
+    showFullMapSearch ||
     !!searchRouteCard ||
     showDiscoveryPanel ||
     !!routeScout ||
@@ -16938,7 +16972,8 @@ function MapScreen() {
     trailPinCaptureMode ||
     trailTraceMode ||
     trailRouteBuilderOpen ||
-    inlineSearchOpen
+    inlineSearchOpen ||
+    showFullMapSearch
   );
   const showInlineMapSearch = Boolean(
     !trailPinCaptureMode &&
@@ -16946,6 +16981,7 @@ function MapScreen() {
     !waterFollowActive &&
     !safeWaterPlanningActive &&
     !showSearch &&
+    !showFullMapSearch &&
     (!mapSheetOpen || inlineSearchOpen || scopedMapSearchActive)
   );
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
@@ -17467,7 +17503,7 @@ function MapScreen() {
         bottomInset={bottomInset}
         onClose={() => setShowMapDrawer(false)}
         items={[
-          { label: 'Search places', sub: 'Find and fly to a place', icon: 'search-outline', tone: '#60a5fa', onPress: openInlineMapSearch },
+          { label: 'Search places', sub: 'Find camps, trails, fuel, and stops', icon: 'search-outline', tone: '#60a5fa', onPress: openFullMapSearch },
           { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
           { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
           { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
@@ -19129,6 +19165,48 @@ function MapScreen() {
       />
 
       {/* ── Search overlay ── */}
+      {showFullMapSearch && !navMode && (
+        <MapSearchSheet
+          visible={showFullMapSearch}
+          query={searchQuery}
+          results={searchResults}
+          searching={isSearching}
+          hasLocation={!!userLoc}
+          recent={searchHistory}
+          quickActions={FULL_MAP_SEARCH_QUICK_ACTIONS}
+          onQueryChange={text => {
+            setSearchQuery(text);
+            if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
+            if (text.trim().length < 2) setSearchResults([]);
+          }}
+          onSubmit={queryOverride => {
+            if (queryOverride != null) setSearchQuery(queryOverride);
+            searchMap(queryOverride);
+          }}
+          onSelect={place => selectSearchResult(place as SearchPlace)}
+          onRoute={place => {
+            if (!userLoc) {
+              setQuickToast('Turn on location to preview a route.');
+              setTimeout(() => setQuickToast(''), 2400);
+              return;
+            }
+            addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
+            setShowFullMapSearch(false);
+            previewSearchRoute({ name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true }, place as SearchPlace);
+          }}
+          onQuickAction={action => {
+            setSearchQuery(action.query);
+            searchMap(action.query);
+          }}
+          onClose={() => closeFullMapSearch(false)}
+          onClear={() => {
+            setSearchQuery('');
+            setSearchResults([]);
+            setMapSearchSession(null);
+          }}
+        />
+      )}
+
       {/* ── Route Search Modal (OsmAnd-style) ──────────────────────────── */}
       {showSearch && !navMode && (
         <View style={[s.routeSearchModalLayer, { bottom: Platform.OS === 'android' ? Math.max(bottomInset - 8, 16) : 0 }]}>

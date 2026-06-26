@@ -21,7 +21,6 @@ type RigRouteSummary = {
 
 type RouteBuilderHubProps = {
   bottomInset: number;
-  heroPhoto: string;
   routeSaving: boolean;
   rigRouteSummary: RigRouteSummary;
   savedRoutes: TripHistoryItem[];
@@ -44,7 +43,6 @@ type RouteBuilderHubProps = {
 
 export default function RouteBuilderHub({
   bottomInset,
-  heroPhoto,
   routeSaving,
   rigRouteSummary,
   savedRoutes,
@@ -82,27 +80,70 @@ export default function RouteBuilderHub({
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
-        <TrailheadCard style={s.hero}>
-          <Image source={{ uri: heroPhoto }} style={s.heroImage} resizeMode="cover" />
-          <LinearGradient colors={['rgba(3,7,18,0.04)', 'rgba(3,7,18,0.76)']} style={s.fill} />
-          <View style={s.heroContent}>
-            <Text style={s.heroTitle}>Plan a Route</Text>
-            <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={onStartNewRoute} disabled={routeSaving} />
+        <TrailheadCard style={s.commandCard}>
+          <View style={s.commandHead}>
+            <View style={s.flex}>
+              <Text style={s.commandKicker}>ROUTE PLANNER</Text>
+              <Text style={s.commandTitle}>Build around camps, fuel, and trailheads.</Text>
+              <Text style={s.commandMeta}>Start from a town, saved trail, map pin, or your active route.</Text>
+            </View>
+            {showOpenActive ? (
+              <TouchableOpacity style={s.activeMapButton} onPress={onOpenActiveMap} activeOpacity={0.84}>
+                <Ionicons name="map-outline" size={18} color={C.orange} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+
+          <TouchableOpacity style={s.searchShortcut} onPress={onStartNewRoute} activeOpacity={0.86} disabled={routeSaving}>
+            <View style={s.searchIcon}>
+              <Ionicons name="search" size={15} color={C.green} />
+            </View>
+            <View style={s.flex}>
+              <Text style={s.searchTitle}>Search a start or destination</Text>
+              <Text style={s.searchMeta}>Towns, trailheads, camps, fuel</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color={C.text3} />
+          </TouchableOpacity>
+
+          <View style={s.routeSketch} pointerEvents="none">
+            <View style={[s.sketchRoad, s.sketchRoadA]} />
+            <View style={[s.sketchRoad, s.sketchRoadB]} />
+            <View style={[s.sketchRoad, s.sketchRoadC]} />
+            <View style={[s.sketchRoute, s.sketchRouteA]} />
+            <View style={[s.sketchRoute, s.sketchRouteB]} />
+            <View style={[s.sketchRoute, s.sketchRouteC]} />
+            <View style={[s.sketchPin, s.sketchStart]}>
+              <Ionicons name="radio-button-on" size={10} color={C.green} />
+            </View>
+            <View style={[s.sketchPin, s.sketchEnd]}>
+              <Ionicons name="location" size={12} color="#fff" />
+            </View>
+            <View style={[s.sketchPoi, s.sketchCamp]}>
+              <Ionicons name="bonfire-outline" size={12} color={C.green} />
+            </View>
+            <View style={[s.sketchPoi, s.sketchFuel]}>
+              <Ionicons name="flash-outline" size={12} color={C.yellow} />
+            </View>
+          </View>
+
+          <View style={s.commandActions}>
+            <TrailheadButton label="Build New Route" icon="add" variant="primary" onPress={onStartNewRoute} disabled={routeSaving} style={s.primaryAction} />
+            {showOpenActive ? (
+              <TrailheadButton label="Open Active" icon="navigate-outline" variant="secondary" onPress={onOpenActiveMap} disabled={routeSaving} style={s.secondaryAction} />
+            ) : null}
           </View>
         </TrailheadCard>
 
-        <TrailheadCard style={[s.rigCard, rigRouteSummary.ready && s.rigCardReady]}>
-          <View style={s.rigIcon}>
-            <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={17} color={rigRouteSummary.ready ? C.green : C.yellow} />
+        <TouchableOpacity style={[s.rigRow, rigRouteSummary.ready && s.rigRowReady]} onPress={onOpenProfile} activeOpacity={0.84}>
+          <View style={[s.rigIcon, rigRouteSummary.ready && s.rigIconReady]}>
+            <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={16} color={rigRouteSummary.ready ? C.green : C.yellow} />
           </View>
           <View style={s.flex}>
-            <Text style={s.rigTitle}>{rigRouteSummary.title}</Text>
-            <Text style={s.rigMeta}>{rigRouteSummary.meta}</Text>
+            <Text style={s.rigTitle} numberOfLines={1}>{rigRouteSummary.title}</Text>
+            <Text style={s.rigMeta} numberOfLines={1}>{rigRouteSummary.meta}</Text>
           </View>
-          <TouchableOpacity style={s.smallButton} onPress={onOpenProfile} activeOpacity={0.82}>
-            <Text style={s.smallButtonText}>{rigRouteSummary.ready ? 'EDIT' : 'ADD'}</Text>
-          </TouchableOpacity>
-        </TrailheadCard>
+          <Text style={s.rigAction}>{rigRouteSummary.ready ? 'EDIT' : 'ADD'}</Text>
+        </TouchableOpacity>
 
         <View style={s.sectionHead}>
           <Text style={s.sectionTitle}>Recent Adventures</Text>
@@ -215,38 +256,134 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   content: { paddingBottom: 120, gap: 14 },
   flex: { flex: 1 },
   fill: { ...StyleSheet.absoluteFillObject },
-  hero: {
-    minHeight: 220,
+  commandCard: {
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 26,
-    backgroundColor: C.glassStrong,
-    padding: 0,
+    borderRadius: 22,
+    backgroundColor: C.s1,
+    padding: 14,
+    gap: 12,
     shadowColor: '#000',
-    shadowOpacity: 0.34,
-    shadowRadius: 28,
-    shadowOffset: { width: 0, height: 14 },
+    shadowOpacity: 0.18,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
   },
-  heroImage: { ...StyleSheet.absoluteFillObject, width: '100%', height: '100%' },
-  heroContent: {
-    minHeight: 220,
-    justifyContent: 'flex-end',
-    padding: 18,
+  commandHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
     gap: 12,
   },
-  heroTitle: { color: '#fff', fontSize: 34, lineHeight: 38, fontWeight: '900' },
-  rigCard: {
+  commandKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
+  commandTitle: { color: C.text, fontSize: 25, lineHeight: 30, fontWeight: '900', marginTop: 5 },
+  commandMeta: { color: C.text3, fontSize: 12, lineHeight: 17, marginTop: 6 },
+  activeMapButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    backgroundColor: C.orange + '12',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchShortcut: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 18,
+    backgroundColor: C.s2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+  },
+  searchIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.green + '44',
+    backgroundColor: C.green + '10',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  searchTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
+  searchMeta: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 3 },
+  routeSketch: {
+    height: 122,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.green + '22',
+    backgroundColor: C.green + '0b',
+    overflow: 'hidden',
+  },
+  sketchRoad: {
+    position: 'absolute',
+    height: 8,
+    borderRadius: 999,
+    backgroundColor: C.s2,
+    opacity: 0.72,
+  },
+  sketchRoadA: { left: 18, top: 23, width: 104 },
+  sketchRoadB: { right: 28, top: 34, width: 132 },
+  sketchRoadC: { left: 86, bottom: 20, width: 172 },
+  sketchRoute: {
+    position: 'absolute',
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: C.green,
+    shadowColor: C.green,
+    shadowOpacity: 0.32,
+    shadowRadius: 8,
+  },
+  sketchRouteA: { left: 44, top: 77, width: 92, transform: [{ rotate: '-23deg' }] },
+  sketchRouteB: { left: 125, top: 58, width: 116, transform: [{ rotate: '15deg' }] },
+  sketchRouteC: { left: 229, top: 77, width: 80, transform: [{ rotate: '-25deg' }] },
+  sketchPin: {
+    position: 'absolute',
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: C.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sketchStart: { left: 36, top: 70, backgroundColor: C.s1 },
+  sketchEnd: { right: 36, top: 44, backgroundColor: C.orange },
+  sketchPoi: {
+    position: 'absolute',
+    width: 30,
+    height: 30,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sketchCamp: { left: 144, top: 18 },
+  sketchFuel: { right: 94, bottom: 18 },
+  commandActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  primaryAction: { flex: 1 },
+  secondaryAction: { flex: 1 },
+  rigRow: {
+    minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
     borderWidth: 1,
     borderColor: C.border,
     borderRadius: 18,
-    backgroundColor: C.s2,
-    padding: 11,
+    backgroundColor: C.s1,
+    padding: 10,
   },
-  rigCardReady: { borderColor: C.green + '44', backgroundColor: C.green + '10' },
+  rigRowReady: { borderColor: C.green + '36', backgroundColor: C.green + '0d' },
   rigIcon: {
     width: 34,
     height: 34,
@@ -257,19 +394,10 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  rigIconReady: { borderColor: C.green + '44', backgroundColor: C.green + '12' },
   rigTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
-  rigMeta: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 2 },
-  smallButton: {
-    minHeight: 32,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.orange + '55',
-    backgroundColor: C.orange + '10',
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-  },
-  smallButtonText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  rigMeta: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 2, fontFamily: mono },
+  rigAction: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900', paddingHorizontal: 6 },
   sectionHead: {
     flexDirection: 'row',
     alignItems: 'center',

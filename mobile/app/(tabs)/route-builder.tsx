@@ -4605,7 +4605,6 @@ export default function RouteBuilderScreen() {
     return (
       <RouteBuilderHub
         bottomInset={bottomInset}
-        heroPhoto={ROUTE_HERO_PHOTO}
         routeSaving={routeSaving}
         rigRouteSummary={rigRouteSummary}
         savedRoutes={savedRoutes}

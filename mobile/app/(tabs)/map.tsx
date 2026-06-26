@@ -1075,12 +1075,6 @@ function campLookupFilters(filters: string[]): string[] | null {
   return clean.length === CAMP_FILTER_IDS.length ? [] : clean;
 }
 
-function campMatchesSelectedFilters(camp: Partial<CampsitePin> | OsmPoi, filters: string[]) {
-  const lookupFilters = campLookupFilters(filters);
-  if (lookupFilters === null) return false;
-  return campMatchesFilters(camp, lookupFilters);
-}
-
 function trailGeometryCoords(fc?: GeoJSON.FeatureCollection | null): [number, number][] {
   const coords: [number, number][] = [];
   for (const feature of fc?.features ?? []) {
@@ -8026,12 +8020,13 @@ function MapScreen() {
     setShowSearch(false);
     setShowCampPins(true);
     setCampDiscoveryWideActive(true);
+    setCampDiscoverySheetDismissed(false);
     setQuickToast('Searching camps and stays');
     setTimeout(() => setQuickToast(''), 2200);
     if (center) queueMapWeatherFetch(center, true);
     loadCampsInArea(
       { ...base, zoom: Math.max(base.zoom ?? 0, MIN_MANUAL_CAMP_SEARCH_ZOOM) },
-      [],
+      activeFilters,
       {
         force: true,
         minZoom: MIN_MANUAL_CAMP_SEARCH_ZOOM,
@@ -17322,9 +17317,7 @@ function MapScreen() {
   }, [areaCamps, activeTrip?.campsites, activeFilters, campDiscoveryWideActive]);
   const showCampDiscoverySheet = Boolean(
     showCampPins &&
-    discoveryCamps.length > 0 &&
     !campDiscoverySheetDismissed &&
-    !isLoadingAreaCamps &&
     !navMode &&
     !safeWaterPlanningActive &&
     !waterFollowActive &&
@@ -17597,7 +17590,12 @@ function MapScreen() {
             viewportRef.current = b;
             setMapZoom(b.zoom ?? 10);
             if ((b.zoom ?? 0) >= (campDiscoveryWideActive ? MIN_MANUAL_CAMP_SEARCH_ZOOM : 9)) setMapMoved(true);
-            if ((b.zoom ?? 0) < (campLookupFilters(activeFilters)?.length ? MIN_FILTERED_CAMP_SEARCH_ZOOM : 8)) setAreaCamps([]);
+            const campClearZoom = campDiscoveryWideActive
+              ? MIN_MANUAL_CAMP_SEARCH_ZOOM
+              : campLookupFilters(activeFilters)?.length
+                ? MIN_FILTERED_CAMP_SEARCH_ZOOM
+                : MIN_CAMP_SEARCH_ZOOM;
+            if ((b.zoom ?? 0) < campClearZoom) setAreaCamps([]);
             const lat = (b.n + b.s) / 2;
             const lng = (b.e + b.w) / 2;
             const radius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(b.n - b.s), Math.abs(b.e - b.w)) / 2 + 0.5));
@@ -18111,7 +18109,7 @@ function MapScreen() {
               style={s.campDiscoverySearchArea}
               onPress={() => viewportRef.current && loadCampsInArea(
                 viewportRef.current,
-                campDiscoveryWideActive ? [] : activeFilters,
+                activeFilters,
                 campDiscoveryWideActive
                   ? { force: true, minZoom: MIN_MANUAL_CAMP_SEARCH_ZOOM, radiusCapMi: MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI, campOnly: true, openSheet: true }
                   : { openSheet: true },
@@ -18123,6 +18121,19 @@ function MapScreen() {
             </TouchableOpacity>
           ) : null}
 
+          {isLoadingAreaCamps && discoveryCamps.length === 0 ? (
+            <View style={s.campDiscoveryState}>
+              <ActivityIndicator size="small" color="#0f766e" />
+              <Text style={s.campDiscoveryStateTitle}>Searching camps nearby</Text>
+              <Text style={s.campDiscoveryStateText}>Checking campgrounds, RV parks, public land, and local stay sources for this map area.</Text>
+            </View>
+          ) : !isLoadingAreaCamps && discoveryCamps.length === 0 ? (
+            <View style={s.campDiscoveryState}>
+              <Ionicons name="map-outline" size={22} color="#0f766e" />
+              <Text style={s.campDiscoveryStateTitle}>No camps loaded here yet</Text>
+              <Text style={s.campDiscoveryStateText}>Move the map closer to Moab or widen the camp filters, then search this area again.</Text>
+            </View>
+          ) : (
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.campDiscoveryCards}>
             {discoveryCamps.slice(0, 30).map((camp, idx) => {
                 const photo = campPhotoItems(camp)[0]?.url;
@@ -18170,6 +18181,7 @@ function MapScreen() {
                 );
               })}
           </ScrollView>
+          )}
         </View>
       )}
 
@@ -24669,7 +24681,9 @@ const makeStyles = (C: ColorPalette) => {
     justifyContent: 'center',
     gap: 8,
     paddingHorizontal: 28,
+    paddingVertical: 26,
   },
+  campDiscoveryStateTitle: { color: '#101820', fontSize: 18, lineHeight: 23, fontWeight: '900', textAlign: 'center' },
   campDiscoveryStateText: { color: '#66706b', fontSize: 12, lineHeight: 17, textAlign: 'center', fontWeight: '700' },
   campDiscoveryCards: { paddingHorizontal: 18, paddingBottom: 18, gap: 20 },
   campDiscoveryCard: {

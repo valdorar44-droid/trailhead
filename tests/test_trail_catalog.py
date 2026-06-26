@@ -183,6 +183,67 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(card["area"], "Canyon Area")
         self.assertEqual(card["image_license"], "cc-by-nc")
         self.assertTrue(card["photos"][0]["commercial_restricted"])
+        self.assertTrue(public["preview_available"])
+        self.assertEqual(public["preview_status"], "available")
+
+    def test_trail_preview_manifest_requires_ordered_route_geometry(self):
+        unavailable = server._trail_preview_manifest({
+            "id": "osm:node:trailhead",
+            "name": "Trailhead Only",
+            "lat": 38.1,
+            "lng": -109.5,
+            "geometry": None,
+            "activities": ["hiking"],
+            "trailheads": [],
+            "photos": [],
+            "source": "osm",
+            "source_label": "OpenStreetMap",
+            "provenance": {},
+            "last_checked": 1,
+        })
+
+        self.assertEqual(unavailable["status"], "unavailable")
+        self.assertFalse(unavailable["preview_available"])
+        self.assertIn("ordered Trailhead route geometry", unavailable["warnings"][0])
+
+    def test_trail_preview_manifest_builds_keyframes_from_linestring(self):
+        profile = {
+            "id": "osm:way:preview",
+            "name": "Preview Loop",
+            "summary": "Open trail record.",
+            "lat": 38.1,
+            "lng": -109.5,
+            "length_mi": 4.2,
+            "difficulty": "Moderate",
+            "activities": ["hiking"],
+            "land_manager": "BLM",
+            "geometry": {
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {"type": "LineString", "coordinates": [[-109.5, 38.1], [-109.51, 38.11], [-109.52, 38.115]]},
+                    "properties": {},
+                }],
+            },
+            "trailheads": [],
+            "official_url": "",
+            "photos": [],
+            "source": "osm",
+            "source_label": "OpenStreetMap",
+            "provenance": {"catalog": {"geometry_ref": "osm:way:preview"}},
+            "last_checked": 1,
+        }
+
+        manifest = server._trail_preview_manifest(profile)
+
+        self.assertEqual(manifest["status"], "available")
+        self.assertTrue(manifest["preview_available"])
+        self.assertEqual(manifest["trail_id"], "osm:way:preview")
+        self.assertEqual(manifest["coordinates"][0], [-109.5, 38.1])
+        self.assertTrue(manifest["geometry_hash"].startswith("sha256:"))
+        self.assertGreaterEqual(len(manifest["keyframes"]), 5)
+        self.assertEqual(manifest["keyframes"][0]["progress"], 0.0)
+        self.assertEqual(manifest["keyframes"][-1]["progress"], 1.0)
 
     def test_trail_area_from_profiles_returns_explore_shape(self):
         area = server._trail_area_from_profiles(38.1, -109.5, 25, [{

@@ -10130,6 +10130,164 @@ def _trail_route_type(profile: dict) -> str:
         return "Out and back"
     return "Point or route"
 
+def _valid_trail_lnglat(pair) -> list[float] | None:
+    if not isinstance(pair, (list, tuple)) or len(pair) < 2:
+        return None
+    try:
+        lng = float(pair[0])
+        lat = float(pair[1])
+    except Exception:
+        return None
+    if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+        return None
+    return [round(lng, 7), round(lat, 7)]
+
+def _trail_profile_line_coords(profile: dict) -> list[list[float]]:
+    geometry = profile.get("geometry") if isinstance(profile, dict) else None
+    if not isinstance(geometry, dict):
+        return []
+    candidates: list[list[list[float]]] = []
+
+    def add_line(raw_coords) -> None:
+        if not isinstance(raw_coords, list):
+            return
+        clean: list[list[float]] = []
+        for pair in raw_coords:
+            coord = _valid_trail_lnglat(pair)
+            if not coord:
+                continue
+            if clean and clean[-1] == coord:
+                continue
+            clean.append(coord)
+        if len(clean) >= 2:
+            candidates.append(clean)
+
+    def add_geometry(g) -> None:
+        if not isinstance(g, dict):
+            return
+        gtype = g.get("type")
+        coords = g.get("coordinates")
+        if gtype == "LineString":
+            add_line(coords)
+        elif gtype == "MultiLineString" and isinstance(coords, list):
+            for line in coords:
+                add_line(line)
+
+    if geometry.get("type") == "FeatureCollection":
+        for feature in geometry.get("features") or []:
+            add_geometry((feature or {}).get("geometry"))
+    else:
+        add_geometry(geometry)
+
+    if not candidates:
+        return []
+
+    def line_length_m(coords: list[list[float]]) -> float:
+        return sum(_haversine_m(coords[i - 1][1], coords[i - 1][0], coords[i][1], coords[i][0]) for i in range(1, len(coords)))
+
+    return max(candidates, key=line_length_m)
+
+def _trail_cumulative_m(coords: list[list[float]]) -> list[float]:
+    cumulative = [0.0]
+    for idx in range(1, len(coords)):
+        cumulative.append(cumulative[-1] + _haversine_m(coords[idx - 1][1], coords[idx - 1][0], coords[idx][1], coords[idx][0]))
+    return cumulative
+
+def _trail_point_at_fraction(coords: list[list[float]], cumulative: list[float], progress: float) -> tuple[list[float], int]:
+    if not coords:
+        return [0.0, 0.0], 0
+    if len(coords) == 1 or not cumulative or cumulative[-1] <= 0:
+        return coords[0], 0
+    target = max(0.0, min(1.0, progress)) * cumulative[-1]
+    for idx in range(1, len(cumulative)):
+        if cumulative[idx] >= target:
+            prev = cumulative[idx - 1]
+            span = max(0.0001, cumulative[idx] - prev)
+            t = (target - prev) / span
+            a, b = coords[idx - 1], coords[idx]
+            return [round(a[0] + (b[0] - a[0]) * t, 7), round(a[1] + (b[1] - a[1]) * t, 7)], idx - 1
+    return coords[-1], max(0, len(coords) - 2)
+
+def _trail_bearing(a: list[float], b: list[float]) -> float:
+    lng1, lat1 = math.radians(a[0]), math.radians(a[1])
+    lng2, lat2 = math.radians(b[0]), math.radians(b[1])
+    d_lng = lng2 - lng1
+    y = math.sin(d_lng) * math.cos(lat2)
+    x = math.cos(lat1) * math.sin(lat2) - math.sin(lat1) * math.cos(lat2) * math.cos(d_lng)
+    return round((math.degrees(math.atan2(y, x)) + 360) % 360, 1)
+
+def _trail_preview_manifest(profile: dict) -> dict:
+    public = _public_trail_profile(profile)
+    coords = _trail_profile_line_coords(profile)
+    route_id = f"trail:{public.get('id') or _clean_trail_profile_id(public.get('name') or 'trail')}"
+    if len(coords) < 2:
+        return {
+            "version": 1,
+            "status": "unavailable",
+            "route_id": route_id,
+            "trail_id": public.get("id"),
+            "preview_available": False,
+            "warnings": ["Preview needs ordered Trailhead route geometry. MVUM/rendered map lines are guide layers until imported into the trail graph."],
+        }
+    cumulative = _trail_cumulative_m(coords)
+    total_m = cumulative[-1] if cumulative else 0.0
+    geometry_hash = "sha256:" + hashlib.sha256(json.dumps(coords, separators=(",", ":")).encode()).hexdigest()
+    center = coords[len(coords) // 2]
+    progress_points = [0.0, 0.18, 0.38, 0.62, 0.82, 1.0] if total_m > 4500 else [0.0, 0.25, 0.5, 0.75, 1.0]
+    keyframes = []
+    for progress in progress_points:
+        coord, idx = _trail_point_at_fraction(coords, cumulative, progress)
+        look_idx = min(len(coords) - 1, idx + max(1, len(coords) // 24))
+        look_at = coords[look_idx]
+        keyframes.append({
+            "progress": round(progress, 3),
+            "coordinate": coord,
+            "look_at": look_at,
+            "bearing": _trail_bearing(coord, look_at),
+            "pitch": 64 if progress not in (0.0, 1.0) else 56,
+            "zoom": 15.4 if total_m < 6000 else 14.8,
+            "duration_ms": 1050 if progress in (0.0, 1.0) else 1350,
+            "cumulative_distance_m": round(total_m * progress),
+            "cumulative_gain_m": None,
+            "elevation_m": None,
+        })
+    return {
+        "version": 1,
+        "status": "available",
+        "route_id": route_id,
+        "trail_id": public.get("id"),
+        "trail_name": public.get("name") or "Trail",
+        "geometry_hash": geometry_hash,
+        "generated_at": int(time.time()),
+        "preview_available": True,
+        "distance_m": round(total_m),
+        "coordinates": coords,
+        "intro": {
+            "center": center,
+            "zoom": 12.6 if total_m > 6000 else 13.2,
+            "pitch": 48,
+            "bearing": keyframes[0]["bearing"],
+            "duration_ms": 1200,
+        },
+        "keyframes": keyframes,
+        "outro": {
+            "center": center,
+            "zoom": 12.8 if total_m > 6000 else 13.4,
+            "pitch": 46,
+            "bearing": keyframes[-1]["bearing"],
+            "duration_ms": 1000,
+        },
+        "style": {
+            "preferred_map_style": "satellite_terrain",
+            "route_color": "#22d3ee",
+            "progress_color": "#f5c84b",
+        },
+        "warnings": [
+            "Preview uses Trailhead/open route geometry when available.",
+            "Offline preview falls back to local topo/terrain styling when satellite imagery is unavailable.",
+        ],
+    }
+
 def _trail_feature_label(feature_type: str) -> str:
     text = str(feature_type or "").replace("_", " ").strip().title()
     if text == "Trek":
@@ -10214,6 +10372,8 @@ def _public_trail_profile(profile: dict) -> dict:
     out["source_confidence"] = catalog.get("source_confidence") or ""
     out["route_target"] = catalog.get("route_target") or None
     out["source_pack"] = _trail_source_pack(out)
+    out["preview_available"] = len(_trail_profile_line_coords(out)) >= 2
+    out["preview_status"] = "available" if out["preview_available"] else "needs_route_geometry"
     return out
 
 def _trail_profile_to_explore_card(profile: dict) -> dict:
@@ -10671,6 +10831,13 @@ async def trail_profile(trail_id: str):
     profile = _public_trail_profile(profile)
     profile["field_report_summary"] = get_trail_field_report_summary(profile["id"])
     return profile
+
+@app.get("/api/trails/{trail_id}/preview")
+async def trail_preview(trail_id: str):
+    profile = get_trail_profile(_clean_trail_profile_id(trail_id))
+    if not profile:
+        raise HTTPException(404, "Trail profile not found")
+    return _trail_preview_manifest(profile)
 
 @app.get("/api/trail-areas/discover")
 async def trail_area_discover(lat: float, lng: float, radius: float = 45, limit: int = 24):

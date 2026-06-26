@@ -24,6 +24,7 @@ import MapWeatherPeek from '@/components/map/MapWeatherPeek';
 import MapWeatherSheet from '@/components/map/MapWeatherSheet';
 import RouteAlertsPanel from '@/components/map/RouteAlertsPanel';
 import RouteScoutPanel from '@/components/map/RouteScoutPanel';
+import TrailPreviewPlayer from '@/components/trails/TrailPreviewPlayer';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
@@ -47,7 +48,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutState } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutState, type TrailPreviewManifest } from '@/lib/api';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -5485,6 +5486,16 @@ function MapScreen() {
   const [tappedPoi,  setTappedPoi]  = useState<OsmPoi | null>(null);
   const [selectedTrail, setSelectedTrail] = useState<TrailFeature | null>(null);
   const [selectedTrailProfile, setSelectedTrailProfile] = useState<TrailProfile | null>(null);
+  const [trailPreviewOpen, setTrailPreviewOpen] = useState(false);
+  const [trailPreviewLoading, setTrailPreviewLoading] = useState(false);
+  const [trailPreviewManifest, setTrailPreviewManifest] = useState<TrailPreviewManifest | null>(null);
+  const [trailPreviewProgress, setTrailPreviewProgress] = useState(0);
+  const [trailPreviewPauseSignal, setTrailPreviewPauseSignal] = useState(0);
+  const trailPreviewTone = useMemo<'cyan' | 'gold'>(() => (
+    mapLayer === 'satellite' || mapLayer === 'hybrid' || String(premiumMapStyle).includes('satellite') || premiumMapStyle === 'navigation_day'
+      ? 'gold'
+      : 'cyan'
+  ), [mapLayer, premiumMapStyle]);
   const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
   const [showTrailList, setShowTrailList] = useState(false);
   const [trailRouteBuilderOpen, setTrailRouteBuilderOpen] = useState(false);
@@ -15105,9 +15116,58 @@ function MapScreen() {
     setShowSearch(true);
   }
 
+  function closeTrailPreview() {
+    setTrailPreviewOpen(false);
+    setTrailPreviewLoading(false);
+    setTrailPreviewManifest(null);
+    setTrailPreviewProgress(0);
+  }
+
+  async function openTrailPreview(trail: TrailFeature) {
+    setTrailPreviewProgress(0);
+    setTrailPreviewManifest(null);
+    setTrailPreviewOpen(true);
+    setTrailCardCollapsed(true);
+    setShowTrailList(false);
+    setTrailRouteBuilderOpen(false);
+    if (!trail.profile_id) {
+      setTrailPreviewManifest({
+        version: 1,
+        status: 'unavailable',
+        route_id: `guide:${trail.id}`,
+        trail_id: trail.id,
+        trail_name: trail.name,
+        preview_available: false,
+        warnings: ['This map line is a guide layer. Build or save an ordered Trailhead route before 3D preview is available.'],
+      });
+      return;
+    }
+    setTrailPreviewLoading(true);
+    try {
+      const manifest = await api.getTrailPreview(trail.profile_id);
+      setTrailPreviewManifest(manifest);
+      if (manifest.status === 'available' && manifest.coordinates?.length) {
+        setMap3dEnabled(true);
+      }
+    } catch {
+      setTrailPreviewManifest({
+        version: 1,
+        status: 'unavailable',
+        route_id: `trail:${trail.profile_id}`,
+        trail_id: trail.profile_id,
+        trail_name: trail.name,
+        preview_available: false,
+        warnings: ['Preview is unavailable right now. The trail can still be highlighted and used as a guide.'],
+      });
+    } finally {
+      setTrailPreviewLoading(false);
+    }
+  }
+
   function openTrailFeature(feature: TrailFeature) {
     focusMapSelectionPoint({ lat: feature.lat, lng: feature.lng, name: feature.name }, 13, 'trail');
     setSelectedTrailProfile(null);
+    closeTrailPreview();
     setTrailRouteBuilderOpen(false);
     setSavedTrailRouteOpenId(null);
     setTrailRoutePlans([]);
@@ -16086,6 +16146,7 @@ function MapScreen() {
       id: `trail:${trail.id}`,
       trail: { ...trail, support: { ...trail.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail downloaded for offline follow' : 'Download this region for full trail follow' } },
       geometry: packGeometry,
+      preview: trailPreviewManifest?.trail_id === trail.profile_id && trailPreviewManifest?.status === 'available' ? trailPreviewManifest : null,
       savedAt: Date.now(),
       source: coords.length >= 2 ? 'highlight' : 'manual',
     });
@@ -17558,6 +17619,9 @@ function MapScreen() {
           traceDraftCoords={trailTraceMode ? trailTraceDraft : []}
           traceRouteCoords={trailTraceRoute}
           tracePinCoords={trailPinCaptureMode ? trailCapturePins : []}
+          trailPreviewCoords={trailPreviewOpen && trailPreviewManifest?.status === 'available' ? trailPreviewManifest.coordinates ?? [] : []}
+          trailPreviewProgress={trailPreviewProgress}
+          trailPreviewTone={trailPreviewTone}
           suppressFeatureTaps={mapTapToolOwnsFeatureSelection}
           showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
@@ -17614,6 +17678,7 @@ function MapScreen() {
           }}
           onMapGesture={() => {
             const now = Date.now();
+            if (trailPreviewOpen) setTrailPreviewPauseSignal(v => v + 1);
             setCampDiscoveryHintArmed(true);
             if (navModeStateRef.current) {
               const recentlyHandled = now - lastNavMapGestureRef.current < 1200;
@@ -17738,6 +17803,7 @@ function MapScreen() {
             }
             if (mapTapToolOwnsFeatureSelection) return;
             setSearchRouteCard(null);
+            closeTrailPreview();
             setSelectedPlace({ id: `trail:${lat}:${lng}`, name: name || 'Trail', lat, lng, type: 'trail', source: 'map', source_label: 'Map trail', summary: 'Trail or track selected from the map.' });
             setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); setSelectedCommunityPin(null);
           }}
@@ -17814,6 +17880,17 @@ function MapScreen() {
           onError={() => setMapLoadFailed(true)}
         />
       )}
+      <TrailPreviewPlayer
+        visible={trailPreviewOpen}
+        trail={selectedTrail}
+        manifest={trailPreviewManifest}
+        loading={trailPreviewLoading}
+        mapRef={nativeMapRef}
+        tone={trailPreviewTone}
+        pauseSignal={trailPreviewPauseSignal}
+        onClose={closeTrailPreview}
+        onProgress={setTrailPreviewProgress}
+      />
       {nativeNavigationPanel}
       {nativeTurnListPanel}
       {navLocateButton}
@@ -19052,6 +19129,7 @@ function MapScreen() {
             style={s.trailMapCloseBtn}
             activeOpacity={0.82}
             onPress={() => {
+              closeTrailPreview();
               nativeMapRef.current?.clearTrailHighlight();
               clearTrailRoutePreview();
               setTrailCardCollapsed(false);
@@ -19078,7 +19156,7 @@ function MapScreen() {
             <TouchableOpacity style={s.discoveryPanelClose} onPress={() => setTrailCardCollapsed(true)}>
               <Ionicons name="chevron-down" size={15} color={OVR.text2} />
             </TouchableOpacity>
-            <TouchableOpacity style={s.discoveryPanelClose} onPress={() => { nativeMapRef.current?.clearTrailHighlight(); setTrailCardCollapsed(false); setSelectedTrail(null); setShowTrailFieldReportForm(false); resetFieldReportForm(); }}>
+            <TouchableOpacity style={s.discoveryPanelClose} onPress={() => { closeTrailPreview(); nativeMapRef.current?.clearTrailHighlight(); setTrailCardCollapsed(false); setSelectedTrail(null); setShowTrailFieldReportForm(false); resetFieldReportForm(); }}>
               <Ionicons name="close" size={15} color={OVR.text2} />
             </TouchableOpacity>
           </View>
@@ -19208,14 +19286,30 @@ function MapScreen() {
           <View style={s.trailPreviewPanel}>
             <View style={s.trailPreviewTop}>
               <Text style={s.trailReportTitle}>TRAIL PREVIEW</Text>
-              <Text style={s.trailPreviewStatus}>{trailDifficultyText(selectedTrail)}</Text>
-            </View>
-            <View style={s.trailPreviewEmpty}>
-              <Ionicons name="map-outline" size={17} color={OVR.text3} />
-              <Text style={s.trailPreviewEmptyText}>
-                Build trails with pins: set the start, add pins at bends and forks, preview the line, then save or follow.
+              <Text style={s.trailPreviewStatus}>
+                {selectedTrailProfile?.preview_available ? '3D READY' : selectedTrail.profile_id ? 'CHECKING' : 'GUIDE'}
               </Text>
             </View>
+            <TouchableOpacity
+              style={[s.trailPreviewAction, { borderColor: (trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee') + '66', backgroundColor: (trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee') + '16' }]}
+              activeOpacity={0.86}
+              onPress={() => openTrailPreview(selectedTrail)}
+            >
+              <View style={[s.trailPreviewPlayIcon, { backgroundColor: trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee' }]}>
+                <Ionicons name="play" size={16} color="#061018" />
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={s.trailPreviewActionTitle} numberOfLines={1}>Preview route</Text>
+                <Text style={s.trailPreviewActionSub} numberOfLines={2}>
+                  {selectedTrailProfile?.preview_available
+                    ? 'Animated route line with map camera and progress marker.'
+                    : selectedTrail.profile_id
+                      ? 'Loads when this trail has ordered Trailhead route geometry.'
+                      : 'Guide layer selected. Build or save an ordered route for 3D preview.'}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={17} color={OVR.text3} />
+            </TouchableOpacity>
           </View>
           {trailFieldReports.some(fr => fr.has_photo) && (
             <View style={s.trailPhotoStripPanel}>
@@ -25763,6 +25857,25 @@ const makeStyles = (C: ColorPalette) => {
     paddingVertical: 10,
   },
   trailPreviewEmptyText: { color: C.text3, fontSize: 10.5, lineHeight: 15, flex: 1 },
+  trailPreviewAction: {
+    minHeight: 78,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 11,
+  },
+  trailPreviewPlayIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  trailPreviewActionTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
+  trailPreviewActionSub: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 3 },
   trailPhotoStripPanel: {
     backgroundColor: C.s2,
     borderWidth: 1,

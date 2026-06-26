@@ -1,10 +1,12 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TrailFeature } from './trailEngine';
+import type { TrailPreviewManifest } from './api';
 
 export type OfflineTrail = {
   id: string;
   trail: TrailFeature;
   geometry: GeoJSON.FeatureCollection;
+  preview?: TrailPreviewManifest | null;
   savedAt: number;
   source: 'highlight' | 'graph_pack' | 'manual';
 };

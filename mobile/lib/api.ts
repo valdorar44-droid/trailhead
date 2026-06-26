@@ -824,6 +824,8 @@ export const api = {
   },
   getTrailProfile: (trailId: string) =>
     req<TrailProfile>(`/api/trails/${encodeURIComponent(trailId)}`),
+  getTrailPreview: (trailId: string) =>
+    req<TrailPreviewManifest>(`/api/trails/${encodeURIComponent(trailId)}/preview`),
   suggestTrailEdit: (trailId: string, data: TrailEditSuggestionPayload) =>
     req<{ id: number; status: string; credits_earned: number; new_balance: number }>(`/api/trails/${encodeURIComponent(trailId)}/suggest-edit`, {
       method: 'POST', body: JSON.stringify(data),
@@ -2748,6 +2750,53 @@ export interface TrailPhoto {
   source_url?: string;
   commercial_restricted?: boolean;
 }
+export interface TrailPreviewKeyframe {
+  progress: number;
+  coordinate: [number, number];
+  look_at?: [number, number];
+  bearing?: number;
+  pitch?: number;
+  zoom?: number;
+  duration_ms?: number;
+  cumulative_distance_m?: number;
+  cumulative_gain_m?: number | null;
+  elevation_m?: number | null;
+  waypoint_id?: string;
+  pause_ms?: number;
+}
+export interface TrailPreviewManifest {
+  version: number;
+  status: 'available' | 'unavailable';
+  route_id: string;
+  trail_id?: string;
+  trail_name?: string;
+  geometry_hash?: string;
+  generated_at?: number;
+  preview_available: boolean;
+  distance_m?: number;
+  coordinates?: [number, number][];
+  intro?: {
+    center: [number, number];
+    zoom?: number;
+    pitch?: number;
+    bearing?: number;
+    duration_ms?: number;
+  };
+  keyframes?: TrailPreviewKeyframe[];
+  outro?: {
+    center: [number, number];
+    zoom?: number;
+    pitch?: number;
+    bearing?: number;
+    duration_ms?: number;
+  };
+  style?: {
+    preferred_map_style?: string;
+    route_color?: string;
+    progress_color?: string;
+  };
+  warnings?: string[];
+}
 export interface TrailProfile {
   id: string;
   name: string;
@@ -2798,6 +2847,8 @@ export interface TrailProfile {
   distance_mi?: number;
   viewport_score?: number;
   field_report_summary?: FieldReportSummary;
+  preview_available?: boolean;
+  preview_status?: string;
 }
 export interface TrailDiscoverParams {
   lat?: number;

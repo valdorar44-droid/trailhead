@@ -216,6 +216,9 @@ export interface NativeMapProps {
   traceDraftCoords?: [number, number][];
   traceRouteCoords?: [number, number][];
   tracePinCoords?: [number, number][];
+  trailPreviewCoords?: [number, number][];
+  trailPreviewProgress?: number;
+  trailPreviewTone?: 'cyan' | 'gold';
   suppressFeatureTaps?: boolean;
 
   // Overlay visibility
@@ -375,6 +378,48 @@ function pointFC(features: GeoJSON.Feature[]) {
 }
 function emptyFC() {
   return { type: 'FeatureCollection' as const, features: [] as GeoJSON.Feature[] };
+}
+
+function trailLineDistanceM(a: [number, number], b: [number, number]) {
+  const radius = 6371000;
+  const dLat = (b[1] - a[1]) * Math.PI / 180;
+  const dLng = (b[0] - a[0]) * Math.PI / 180;
+  const lat1 = a[1] * Math.PI / 180;
+  const lat2 = b[1] * Math.PI / 180;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * radius * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function splitLineAtProgress(coords: [number, number][], progress: number) {
+  const clean = coords.filter(coord => Number.isFinite(coord[0]) && Number.isFinite(coord[1]));
+  if (clean.length < 2) return { completed: clean, remaining: clean, marker: clean[0] ?? null };
+  const segments: number[] = [];
+  let total = 0;
+  for (let idx = 1; idx < clean.length; idx += 1) {
+    const d = trailLineDistanceM(clean[idx - 1], clean[idx]);
+    segments.push(d);
+    total += d;
+  }
+  if (total <= 0) return { completed: [clean[0]], remaining: clean, marker: clean[0] };
+  const target = Math.max(0, Math.min(1, progress)) * total;
+  let walked = 0;
+  for (let idx = 1; idx < clean.length; idx += 1) {
+    const seg = segments[idx - 1];
+    if (walked + seg >= target) {
+      const t = seg <= 0 ? 0 : (target - walked) / seg;
+      const a = clean[idx - 1];
+      const b = clean[idx];
+      const marker: [number, number] = [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+      return {
+        completed: [...clean.slice(0, idx), marker],
+        remaining: [marker, ...clean.slice(idx)],
+        marker,
+      };
+    }
+    walked += seg;
+  }
+  return { completed: clean, remaining: [clean[clean.length - 1]], marker: clean[clean.length - 1] };
 }
 
 function maneuverArrowText(step: RouteStep): string | null {
@@ -723,6 +768,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeProviderMode = 'trailhead', routeOpts,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
+    trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
     suppressFeatureTaps = false,
     showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
@@ -2059,6 +2105,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       },
     }];
   })), [routeSteps]);
+  const trailPreviewVisual = useMemo(() => {
+    const split = splitLineAtProgress(trailPreviewCoords, trailPreviewProgress);
+    return {
+      ...split,
+      active: trailPreviewCoords.length >= 2,
+      accent: trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee',
+      remaining: split.remaining.length >= 2 ? split.remaining : [],
+      completed: split.completed.length >= 2 ? split.completed : [],
+    };
+  }, [trailPreviewCoords, trailPreviewProgress, trailPreviewTone]);
 
   // ── Map event handlers ───────────────────────────────────────────────────────
   const handleMapReady = useCallback(() => {
@@ -2509,6 +2565,100 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             } as any}
           />
         </MapGL.ShapeSource>
+      )}
+
+      {trailPreviewVisual.active && (
+        <>
+          {trailPreviewVisual.remaining.length > 1 && (
+            <MapGL.ShapeSource id="trail-preview-remaining" shape={lineFC(trailPreviewVisual.remaining)}>
+              <MapGL.LineLayer
+                id="trail-preview-remaining-line"
+                style={{
+                  lineColor: '#f8fafc',
+                  lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 3, 13, 5.2, 16, 7],
+                  lineOpacity: 0.52,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                } as any}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {trailPreviewVisual.completed.length > 1 && (
+            <MapGL.ShapeSource id="trail-preview-completed" shape={lineFC(trailPreviewVisual.completed)}>
+              <MapGL.LineLayer
+                id="trail-preview-completed-glow"
+                style={{
+                  lineColor: trailPreviewVisual.accent,
+                  lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 8, 13, 13, 16, 18],
+                  lineOpacity: 0.24,
+                  lineBlur: 4,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                } as any}
+              />
+              <MapGL.LineLayer
+                id="trail-preview-completed-line"
+                style={{
+                  lineColor: trailPreviewVisual.accent,
+                  lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 3.4, 13, 5.8, 16, 8],
+                  lineOpacity: 0.98,
+                  lineCap: 'round',
+                  lineJoin: 'round',
+                } as any}
+              />
+              <MapGL.SymbolLayer
+                id="trail-preview-arrows"
+                minZoomLevel={10}
+                style={{
+                  symbolPlacement: 'line',
+                  symbolSpacing: 82,
+                  textField: ['literal', '>'],
+                  textSize: ['interpolate', ['linear'], ['zoom'], 10, 13, 13, 17, 16, 23],
+                  textColor: '#061018',
+                  textHaloColor: trailPreviewVisual.accent,
+                  textHaloWidth: 1.4,
+                  textFont: routeArrowFont,
+                  textIgnorePlacement: true,
+                  textAllowOverlap: true,
+                  textRotationAlignment: 'map',
+                  textPitchAlignment: 'map',
+                  textKeepUpright: false,
+                  textLetterSpacing: 0,
+                } as any}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {trailPreviewVisual.marker && (
+            <MapGL.ShapeSource
+              id="trail-preview-marker"
+              shape={pointFC([{
+                type: 'Feature' as const,
+                geometry: { type: 'Point' as const, coordinates: trailPreviewVisual.marker },
+                properties: {},
+              }])}
+            >
+              <MapGL.CircleLayer
+                id="trail-preview-marker-halo"
+                style={{
+                  circleRadius: 15,
+                  circleColor: trailPreviewVisual.accent,
+                  circleOpacity: 0.22,
+                  circleStrokeWidth: 1,
+                  circleStrokeColor: trailPreviewVisual.accent,
+                }}
+              />
+              <MapGL.CircleLayer
+                id="trail-preview-marker-dot"
+                style={{
+                  circleRadius: 6,
+                  circleColor: trailPreviewVisual.accent,
+                  circleStrokeWidth: 2,
+                  circleStrokeColor: '#ffffff',
+                }}
+              />
+            </MapGL.ShapeSource>
+          )}
+        </>
       )}
 
       {traceDraftCoords.length > 1 && (

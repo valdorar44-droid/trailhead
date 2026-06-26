@@ -1,324 +1,580 @@
-import { Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useMemo, useState } from 'react';
+import {
+  ImageBackground,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TouchableOpacity,
+  View,
+} from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { mono, useTheme } from '@/lib/design';
 import type { ColorPalette } from '@/lib/design';
+import type {
+  WelcomeCampingStyle,
+  WelcomeSetupPreferences,
+  WelcomeTravelNeed,
+  WelcomeTravelParty,
+  WelcomeVehicleChoice,
+} from '@/lib/welcomeGate';
+
+const HERO_IMAGE = require('../assets/explore-hero-welcome-mountains.jpg');
+
+type WelcomeGateMode = 'welcome' | 'setup';
 
 type WelcomeGateProps = {
   visible: boolean;
+  initialMode?: WelcomeGateMode;
   onCreateAccount: () => void;
   onSignIn: () => void;
   onContinue: () => void;
+  onSetupComplete?: (preferences: WelcomeSetupPreferences) => void;
+  onSetupSkip?: (preferences: Partial<WelcomeSetupPreferences>) => void;
 };
 
 type Feature = {
   icon: keyof typeof Ionicons.glyphMap;
   title: string;
   body: string;
-  tone: string;
 };
+
+type SingleChoiceOption<T extends string> = {
+  id: T;
+  icon: keyof typeof Ionicons.glyphMap;
+  title: string;
+  body: string;
+};
+
+type NeedOption = SingleChoiceOption<WelcomeTravelNeed>;
 
 const FEATURES: Feature[] = [
   {
     icon: 'map-outline',
-    title: 'Plan around real stops',
-    body: 'Find trails, camps, fuel, weather, and places worth saving before you drive.',
-    tone: '#f97316',
+    title: 'Routes that match the trip',
+    body: 'Plan around camps, trails, fuel, weather, and the places you want close.',
   },
   {
-    icon: 'cloud-download-outline',
-    title: 'Save what matters',
-    body: 'Keep routes, places, and map details with the trip for quick return.',
-    tone: '#22c55e',
+    icon: 'car-sport-outline',
+    title: 'Your travel style comes first',
+    body: 'Bring your own vehicle, rent when it helps, or decide later.',
   },
   {
     icon: 'bookmark-outline',
-    title: 'Pick up where you left off',
-    body: 'Create a free account to sync saved places and trip history.',
-    tone: '#38bdf8',
+    title: 'Save the good finds',
+    body: 'Keep trips, stops, notes, and downloads together for the next drive.',
   },
 ];
 
-export default function WelcomeGate({ visible, onCreateAccount, onSignIn, onContinue }: WelcomeGateProps) {
+const VEHICLE_OPTIONS: Array<SingleChoiceOption<WelcomeVehicleChoice>> = [
+  {
+    id: 'own_vehicle',
+    icon: 'car-sport-outline',
+    title: 'My own vehicle',
+    body: 'Tune routes and stops around what you already drive.',
+  },
+  {
+    id: 'rent_sometimes',
+    icon: 'calendar-outline',
+    title: 'I rent sometimes',
+    body: 'Show rentals only when they fit the trip.',
+  },
+  {
+    id: 'need_rental',
+    icon: 'key-outline',
+    title: 'I need a rental',
+    body: 'Start with campervans, RVs, or adventure vehicles near the route.',
+  },
+  {
+    id: 'not_sure',
+    icon: 'compass-outline',
+    title: 'Not sure yet',
+    body: 'Keep planning flexible for now.',
+  },
+];
+
+const CAMPING_OPTIONS: Array<SingleChoiceOption<WelcomeCampingStyle>> = [
+  {
+    id: 'campgrounds',
+    icon: 'trail-sign-outline',
+    title: 'Campgrounds',
+    body: 'Established sites, facilities, and easy arrival.',
+  },
+  {
+    id: 'dispersed',
+    icon: 'bonfire-outline',
+    title: 'Dispersed sites',
+    body: 'Quiet public-land spots and fewer services.',
+  },
+  {
+    id: 'rv_parks',
+    icon: 'business-outline',
+    title: 'RV parks',
+    body: 'Hookups, services, and longer stays.',
+  },
+  {
+    id: 'mixed',
+    icon: 'layers-outline',
+    title: 'A mix',
+    body: 'Keep all stay types in the plan.',
+  },
+];
+
+const PARTY_OPTIONS: Array<SingleChoiceOption<WelcomeTravelParty>> = [
+  {
+    id: 'solo',
+    icon: 'person-outline',
+    title: 'Solo',
+    body: 'Fast planning with fewer constraints.',
+  },
+  {
+    id: 'two_people',
+    icon: 'people-outline',
+    title: 'Two people',
+    body: 'Balance drive time, stays, and shared stops.',
+  },
+  {
+    id: 'family',
+    icon: 'happy-outline',
+    title: 'Family',
+    body: 'Prioritize room, services, and easier arrivals.',
+  },
+  {
+    id: 'group',
+    icon: 'people-circle-outline',
+    title: 'Group',
+    body: 'Keep plans practical for multiple vehicles or friends.',
+  },
+];
+
+const NEED_OPTIONS: NeedOption[] = [
+  {
+    id: 'pets',
+    icon: 'paw-outline',
+    title: 'Pets',
+    body: 'Favor places and rentals that work for animal companions.',
+  },
+  {
+    id: 'kids',
+    icon: 'happy-outline',
+    title: 'Kids',
+    body: 'Lean toward easier stops and practical stays.',
+  },
+  {
+    id: 'towing',
+    icon: 'swap-horizontal-outline',
+    title: 'Towing',
+    body: 'Keep length and access in mind.',
+  },
+  {
+    id: 'downloads',
+    icon: 'cloud-download-outline',
+    title: 'Downloaded maps',
+    body: 'Remember to keep important areas on this phone.',
+  },
+];
+
+export default function WelcomeGate({
+  visible,
+  initialMode = 'welcome',
+  onCreateAccount,
+  onSignIn,
+  onContinue,
+  onSetupComplete,
+  onSetupSkip,
+}: WelcomeGateProps) {
   const C = useTheme();
   const s = styles(C);
   const insets = useSafeAreaInsets();
+  const [mode, setMode] = useState<WelcomeGateMode>(initialMode);
+  const [step, setStep] = useState(0);
+  const [vehicle, setVehicle] = useState<WelcomeVehicleChoice | null>(null);
+  const [camping, setCamping] = useState<WelcomeCampingStyle | null>(null);
+  const [party, setParty] = useState<WelcomeTravelParty | null>(null);
+  const [needs, setNeeds] = useState<WelcomeTravelNeed[]>([]);
+
+  useEffect(() => {
+    if (!visible) return;
+    setMode(initialMode);
+    setStep(0);
+    setVehicle(null);
+    setCamping(null);
+    setParty(null);
+    setNeeds([]);
+  }, [initialMode, visible]);
+
+  const selectedCount = [vehicle, camping, party].filter(Boolean).length + needs.length;
+  const setupTitle = useMemo(() => {
+    if (step === 0) return 'How are you traveling?';
+    if (step === 1) return 'Where do you like to stay?';
+    if (step === 2) return 'Who usually comes along?';
+    return 'What should Trailhead remember?';
+  }, [step]);
+  const setupBody = useMemo(() => {
+    if (step === 0) return 'This helps routes, rentals, and stops fit the way you actually travel.';
+    if (step === 1) return 'Choose the stay style you look for most often. You can change this later.';
+    if (step === 2) return 'Trailhead will keep trip timing and stop choices practical.';
+    return 'Pick any that matter. Leave this blank if you want to decide later.';
+  }, [step]);
+  const canAdvance = step === 0 ? !!vehicle : step === 1 ? !!camping : step === 2 ? !!party : true;
+
+  function preferences(): WelcomeSetupPreferences {
+    return {
+      vehicle,
+      camping,
+      party,
+      needs,
+    };
+  }
+
+  function toggleNeed(id: WelcomeTravelNeed) {
+    setNeeds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
+  }
+
+  function nextSetupStep() {
+    if (!canAdvance) return;
+    if (step < 3) {
+      setStep(current => current + 1);
+      return;
+    }
+    onSetupComplete?.(preferences());
+  }
+
+  function skipSetup() {
+    onSetupSkip?.(preferences());
+  }
+
+  function handleRequestClose() {
+    if (mode === 'setup') {
+      skipSetup();
+      return;
+    }
+    onContinue();
+  }
+
+  function renderOption<T extends string>(
+    option: SingleChoiceOption<T>,
+    selected: boolean,
+    onPress: () => void,
+  ) {
+    return (
+      <TouchableOpacity
+        key={option.id}
+        activeOpacity={0.84}
+        onPress={onPress}
+        style={[s.optionRow, selected && s.optionRowSelected]}
+      >
+        <View style={[s.optionIcon, selected && s.optionIconSelected]}>
+          <Ionicons name={option.icon} size={20} color={selected ? '#ffffff' : C.text2} />
+        </View>
+        <View style={s.optionCopy}>
+          <Text style={[s.optionTitle, selected && s.optionTitleSelected]}>{option.title}</Text>
+          <Text style={s.optionBody}>{option.body}</Text>
+        </View>
+        <Ionicons
+          name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+          size={22}
+          color={selected ? C.orange : C.text3}
+        />
+      </TouchableOpacity>
+    );
+  }
+
+  function renderSetupOptions() {
+    if (step === 0) {
+      return VEHICLE_OPTIONS.map(option => renderOption(option, vehicle === option.id, () => setVehicle(option.id)));
+    }
+    if (step === 1) {
+      return CAMPING_OPTIONS.map(option => renderOption(option, camping === option.id, () => setCamping(option.id)));
+    }
+    if (step === 2) {
+      return PARTY_OPTIONS.map(option => renderOption(option, party === option.id, () => setParty(option.id)));
+    }
+    return NEED_OPTIONS.map(option => renderOption(option, needs.includes(option.id), () => toggleNeed(option.id)));
+  }
 
   return (
-    <Modal visible={visible} animationType="fade" transparent onRequestClose={onContinue}>
-      <View style={s.overlay}>
-        <View style={s.mapBackdrop}>
-          <View style={[s.contour, s.contourOne]} />
-          <View style={[s.contour, s.contourTwo]} />
-          <View style={[s.contour, s.contourThree]} />
-          <View style={[s.routeLine, s.routeLineOne]} />
-          <View style={[s.routeLine, s.routeLineTwo]} />
-          <View style={[s.pin, s.pinStart]} />
-          <View style={[s.pin, s.pinEnd]} />
-        </View>
-
-        <View style={[s.sheet, { paddingBottom: Math.max(insets.bottom, 12) + 16 }]}>
-          <ScrollView contentContainerStyle={s.scroll} showsVerticalScrollIndicator={false}>
-            <View style={s.brandRow}>
-              <View style={s.brandMark}>
-                <Ionicons name="trail-sign-outline" size={22} color={C.orange} />
-              </View>
-              <View style={s.brandCopy}>
-                <Text style={s.brand}>TRAILHEAD</Text>
-                <Text style={s.kicker}>TRIP PLANNER</Text>
-              </View>
-            </View>
-
-            <View style={s.heroCopy}>
-              <Text style={s.title}>Plan the trip. Keep the details close.</Text>
-              <Text style={s.body}>
-                Start free, save places, and bring trip notes from scouting to departure.
-              </Text>
-            </View>
-
-            <View style={s.featureStack}>
-              {FEATURES.map(feature => (
-                <View key={feature.title} style={s.featureRow}>
-                  <View style={[s.featureIcon, { backgroundColor: feature.tone + '18', borderColor: feature.tone + '44' }]}>
-                    <Ionicons name={feature.icon} size={18} color={feature.tone} />
-                  </View>
-                  <View style={s.featureCopy}>
-                    <Text style={s.featureTitle}>{feature.title}</Text>
-                    <Text style={s.featureBody}>{feature.body}</Text>
+    <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={handleRequestClose}>
+      <View style={s.root}>
+        <ImageBackground source={HERO_IMAGE} resizeMode="cover" style={s.heroImage}>
+          <View style={s.imageShade} />
+          <View style={[s.safe, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 14) }]}>
+            {mode === 'welcome' ? (
+              <>
+                <View style={s.heroTop}>
+                  <View style={s.brandRow}>
+                    <View style={s.brandMark}>
+                      <Ionicons name="trail-sign-outline" size={22} color="#ffffff" />
+                    </View>
+                    <Text style={s.brand}>TRAILHEAD</Text>
                   </View>
                 </View>
-              ))}
-            </View>
-          </ScrollView>
 
-          <View style={s.actions}>
-            <TouchableOpacity style={s.primaryButton} onPress={onCreateAccount} activeOpacity={0.86}>
-              <Text style={s.primaryText}>CREATE FREE ACCOUNT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.secondaryButton} onPress={onSignIn} activeOpacity={0.84}>
-              <Text style={s.secondaryText}>SIGN IN</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={s.linkButton} onPress={onContinue} activeOpacity={0.72}>
-              <Text style={s.linkText}>Continue for now</Text>
-            </TouchableOpacity>
+                <View style={s.heroCopy}>
+                  <Text style={s.title}>Plan the drive. Find the places. Keep it together.</Text>
+                  <Text style={s.body}>
+                    Build trips around how you travel, then keep routes, stays, notes, and downloads close.
+                  </Text>
+                </View>
+
+                <View style={s.featureStack}>
+                  {FEATURES.map(feature => (
+                    <View key={feature.title} style={s.featureRow}>
+                      <View style={s.featureIcon}>
+                        <Ionicons name={feature.icon} size={17} color="#ffffff" />
+                      </View>
+                      <View style={s.featureCopy}>
+                        <Text style={s.featureTitle}>{feature.title}</Text>
+                        <Text style={s.featureBody}>{feature.body}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+
+                <View style={s.actionDock}>
+                  <TouchableOpacity style={s.primaryButton} onPress={() => setMode('setup')} activeOpacity={0.86}>
+                    <Text style={s.primaryText}>Set up Trailhead</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#ffffff" />
+                  </TouchableOpacity>
+                  <View style={s.accountRow}>
+                    <TouchableOpacity style={s.accountButton} onPress={onCreateAccount} activeOpacity={0.84}>
+                      <Ionicons name="person-add-outline" size={17} color="#ffffff" />
+                      <Text style={s.accountText}>Create account</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.accountButton} onPress={onSignIn} activeOpacity={0.84}>
+                      <Ionicons name="log-in-outline" size={17} color="#ffffff" />
+                      <Text style={s.accountText}>Log in</Text>
+                    </TouchableOpacity>
+                  </View>
+                  <TouchableOpacity style={s.linkButton} onPress={onContinue} activeOpacity={0.72}>
+                    <Text style={s.linkText}>Continue for now</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            ) : (
+              <>
+                <View style={s.setupHeader}>
+                  <TouchableOpacity
+                    style={s.iconButton}
+                    onPress={() => {
+                      if (step === 0 && initialMode === 'welcome') setMode('welcome');
+                      else if (step === 0) skipSetup();
+                      else setStep(current => current - 1);
+                    }}
+                    activeOpacity={0.76}
+                    accessibilityLabel="Back"
+                  >
+                    <Ionicons name="chevron-back" size={22} color="#ffffff" />
+                  </TouchableOpacity>
+                  <View style={s.progressDots}>
+                    {[0, 1, 2, 3].map(index => (
+                      <View key={index} style={[s.progressDot, index <= step && s.progressDotActive]} />
+                    ))}
+                  </View>
+                  <TouchableOpacity style={s.skipHeaderButton} onPress={skipSetup} activeOpacity={0.76}>
+                    <Text style={s.skipHeaderText}>Later</Text>
+                  </TouchableOpacity>
+                </View>
+
+                <View style={s.setupCopy}>
+                  <Text style={s.setupKicker}>Trip setup</Text>
+                  <Text style={s.setupTitle}>{setupTitle}</Text>
+                  <Text style={s.setupBody}>{setupBody}</Text>
+                </View>
+
+                <ScrollView
+                  style={s.optionScroll}
+                  contentContainerStyle={s.optionContent}
+                  showsVerticalScrollIndicator={false}
+                >
+                  {renderSetupOptions()}
+                </ScrollView>
+
+                <View style={s.setupDock}>
+                  <View style={s.selectionSummary}>
+                    <Ionicons name="checkmark-done-outline" size={16} color={selectedCount > 0 ? C.orange : 'rgba(255,255,255,0.5)'} />
+                    <Text style={s.selectionText}>
+                      {selectedCount > 0 ? `${selectedCount} preference${selectedCount === 1 ? '' : 's'} selected` : 'No preferences selected yet'}
+                    </Text>
+                  </View>
+                  <TouchableOpacity
+                    style={[s.primaryButton, !canAdvance && s.primaryButtonDisabled]}
+                    onPress={nextSetupStep}
+                    activeOpacity={canAdvance ? 0.86 : 1}
+                  >
+                    <Text style={s.primaryText}>{step === 3 ? 'Done' : 'Next'}</Text>
+                    <Ionicons name={step === 3 ? 'checkmark' : 'arrow-forward'} size={18} color="#ffffff" />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.linkButton} onPress={skipSetup} activeOpacity={0.72}>
+                    <Text style={s.linkText}>Skip for now</Text>
+                  </TouchableOpacity>
+                </View>
+              </>
+            )}
           </View>
-        </View>
+        </ImageBackground>
       </View>
     </Modal>
   );
 }
 
 const styles = (C: ColorPalette) => StyleSheet.create({
-  overlay: {
+  root: {
     flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(3,5,8,0.94)',
+    backgroundColor: '#050705',
   },
-  mapBackdrop: {
+  heroImage: {
+    flex: 1,
+    backgroundColor: '#050705',
+  },
+  imageShade: {
     ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
+    backgroundColor: 'rgba(3,5,4,0.38)',
   },
-  contour: {
-    position: 'absolute',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'transparent',
+  safe: {
+    flex: 1,
+    paddingHorizontal: 20,
   },
-  contourOne: {
-    width: 420,
-    height: 154,
-    left: -120,
-    top: 74,
-    borderRadius: 120,
-    transform: [{ rotate: '-14deg' }],
-  },
-  contourTwo: {
-    width: 520,
-    height: 202,
-    right: -180,
-    top: 190,
-    borderRadius: 145,
-    borderColor: 'rgba(20,184,166,0.13)',
-    transform: [{ rotate: '17deg' }],
-  },
-  contourThree: {
-    width: 580,
-    height: 210,
-    left: -190,
-    bottom: 168,
-    borderRadius: 150,
-    borderColor: 'rgba(249,115,22,0.14)',
-    transform: [{ rotate: '19deg' }],
-  },
-  routeLine: {
-    position: 'absolute',
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(249,115,22,0.84)',
-  },
-  routeLineOne: {
-    left: '18%',
-    top: '35%',
-    width: '30%',
-    transform: [{ rotate: '16deg' }],
-  },
-  routeLineTwo: {
-    left: '45%',
-    top: '32%',
-    width: '36%',
-    backgroundColor: 'rgba(20,184,166,0.78)',
-    transform: [{ rotate: '-18deg' }],
-  },
-  pin: {
-    position: 'absolute',
-    width: 16,
-    height: 16,
-    borderRadius: 8,
-    borderWidth: 3,
-    borderColor: '#f8fafc',
-    backgroundColor: C.orange,
-  },
-  pinStart: {
-    left: '17%',
-    top: '34%',
-  },
-  pinEnd: {
-    right: '19%',
-    top: '29%',
-    backgroundColor: '#14b8a6',
-  },
-  sheet: {
-    maxHeight: '86%',
-    margin: 12,
-    borderRadius: 28,
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.bg,
-  },
-  scroll: {
-    padding: 20,
-    gap: 18,
+  heroTop: {
+    minHeight: 74,
+    justifyContent: 'center',
   },
   brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
   },
   brandMark: {
-    width: 46,
-    height: 46,
-    borderRadius: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: C.orange + '44',
-    backgroundColor: C.orangeGlow,
-  },
-  brandCopy: {
-    flex: 1,
+    borderColor: 'rgba(255,255,255,0.34)',
+    backgroundColor: 'rgba(255,255,255,0.16)',
   },
   brand: {
-    color: C.text,
+    color: '#ffffff',
     fontFamily: mono,
     fontSize: 16,
     fontWeight: '900',
     letterSpacing: 0,
   },
-  kicker: {
-    marginTop: 2,
-    color: C.text3,
-    fontFamily: mono,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
   heroCopy: {
-    gap: 9,
+    flex: 1,
+    justifyContent: 'center',
+    gap: 14,
+    paddingBottom: 18,
   },
   title: {
-    color: C.text,
-    fontSize: 31,
-    lineHeight: 36,
+    color: '#ffffff',
+    fontSize: 42,
+    lineHeight: 47,
     fontWeight: '900',
     letterSpacing: 0,
+    maxWidth: 380,
+    textShadowColor: 'rgba(0,0,0,0.36)',
+    textShadowRadius: 14,
+    textShadowOffset: { width: 0, height: 2 },
   },
   body: {
-    color: C.text2,
-    fontSize: 15,
-    lineHeight: 22,
+    color: 'rgba(255,255,255,0.82)',
+    fontSize: 16,
+    lineHeight: 23,
     letterSpacing: 0,
+    maxWidth: 360,
   },
   featureStack: {
     gap: 10,
+    marginBottom: 14,
   },
   featureRow: {
-    minHeight: 78,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    padding: 12,
-    borderRadius: 18,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s2,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(0,0,0,0.34)',
   },
   featureIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 13,
-    borderWidth: 1,
+    width: 34,
+    height: 34,
+    borderRadius: 10,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.14)',
   },
   featureCopy: {
     flex: 1,
     gap: 3,
   },
   featureTitle: {
-    color: C.text,
-    fontSize: 14,
+    color: '#ffffff',
+    fontSize: 13.5,
     fontWeight: '800',
     letterSpacing: 0,
   },
   featureBody: {
-    color: C.text3,
-    fontSize: 12.5,
-    lineHeight: 18,
+    color: 'rgba(255,255,255,0.7)',
+    fontSize: 12,
+    lineHeight: 17,
     letterSpacing: 0,
   },
-  actions: {
-    paddingHorizontal: 20,
+  actionDock: {
     gap: 10,
+    paddingBottom: 4,
   },
   primaryButton: {
-    minHeight: 52,
+    minHeight: 54,
+    borderRadius: 14,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    gap: 8,
     backgroundColor: C.orange,
+    shadowColor: C.orange,
+    shadowOpacity: Platform.OS === 'ios' ? 0.28 : 0,
+    shadowRadius: 16,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  primaryButtonDisabled: {
+    opacity: 0.45,
   },
   primaryText: {
-    color: '#fff',
-    fontFamily: mono,
-    fontSize: 12,
+    color: '#ffffff',
+    fontSize: 14,
     fontWeight: '900',
     letterSpacing: 0,
   },
-  secondaryButton: {
+  accountRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  accountButton: {
     minHeight: 48,
+    flex: 1,
+    borderRadius: 14,
+    flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 16,
+    gap: 7,
     borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s2,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.34)',
   },
-  secondaryText: {
-    color: C.text,
-    fontFamily: mono,
-    fontSize: 12,
-    fontWeight: '900',
+  accountText: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
     letterSpacing: 0,
   },
   linkButton: {
@@ -327,8 +583,151 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'center',
   },
   linkText: {
-    color: C.text3,
+    color: 'rgba(255,255,255,0.76)',
     fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  setupHeader: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  iconButton: {
+    width: 42,
+    height: 42,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(0,0,0,0.28)',
+  },
+  skipHeaderButton: {
+    minWidth: 54,
+    minHeight: 38,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  skipHeaderText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  progressDots: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  progressDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.28)',
+  },
+  progressDotActive: {
+    width: 24,
+    backgroundColor: C.orange,
+  },
+  setupCopy: {
+    gap: 9,
+    paddingTop: 18,
+    paddingBottom: 18,
+  },
+  setupKicker: {
+    color: 'rgba(255,255,255,0.72)',
+    fontFamily: mono,
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  setupTitle: {
+    color: '#ffffff',
+    fontSize: 31,
+    lineHeight: 36,
+    fontWeight: '900',
+    letterSpacing: 0,
+    maxWidth: 360,
+  },
+  setupBody: {
+    color: 'rgba(255,255,255,0.74)',
+    fontSize: 15,
+    lineHeight: 22,
+    letterSpacing: 0,
+    maxWidth: 360,
+  },
+  optionScroll: {
+    flex: 1,
+  },
+  optionContent: {
+    gap: 10,
+    paddingBottom: 14,
+  },
+  optionRow: {
+    minHeight: 82,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(0,0,0,0.38)',
+  },
+  optionRowSelected: {
+    borderColor: C.orange,
+    backgroundColor: 'rgba(217,119,69,0.23)',
+  },
+  optionIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  optionIconSelected: {
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: C.orange,
+  },
+  optionCopy: {
+    flex: 1,
+    gap: 4,
+  },
+  optionTitle: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  optionTitleSelected: {
+    color: '#ffffff',
+  },
+  optionBody: {
+    color: 'rgba(255,255,255,0.66)',
+    fontSize: 12.5,
+    lineHeight: 18,
+    letterSpacing: 0,
+  },
+  setupDock: {
+    gap: 10,
+    paddingTop: 8,
+  },
+  selectionSummary: {
+    minHeight: 28,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  selectionText: {
+    color: 'rgba(255,255,255,0.62)',
+    fontSize: 12,
     fontWeight: '700',
     letterSpacing: 0,
   },

@@ -58,6 +58,8 @@ import {
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
+import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
+import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
   buildRouteBuilderSearchStop,
@@ -1375,6 +1377,8 @@ export default function RouteBuilderScreen() {
   const [campPhotoOnly, setCampPhotoOnly] = useState(false);
   const [campCadenceMode, setCampCadenceMode] = useState<CampCadenceMode>('nightly');
   const [campReusePolicy, setCampReusePolicy] = useState<CampReusePolicy>('different_each_night');
+  const [welcomeSetupPreferences, setWelcomeSetupPreferences] = useState<WelcomeSetupPreferences | null>(null);
+  const [welcomeDefaultsApplied, setWelcomeDefaultsApplied] = useState(false);
   const [wizardStep, setWizardStep] = useState(0);
   const [targetMiles, setTargetMiles] = useState('180');
   const [startQuery, setStartQuery] = useState('');
@@ -1464,6 +1468,10 @@ export default function RouteBuilderScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
+  const tripPreferenceContext = useMemo(
+    () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
+    [welcomeSetupPreferences],
+  );
   const fmtRouteDistance = (mi: number) => fmtUnitDistance(mi, weatherUnitMode);
   const builderIntentFor = (inputDays: number[] = days): RouteBuilderIntent => ({
     shape: tripShapeMode,
@@ -1480,6 +1488,25 @@ export default function RouteBuilderScreen() {
       setCampReusePolicy('same_camp_window');
     }
   }
+
+  useEffect(() => {
+    let mounted = true;
+    loadWelcomeSetupPreferences()
+      .then(preferences => { if (mounted) setWelcomeSetupPreferences(preferences); })
+      .catch(() => { if (mounted) setWelcomeSetupPreferences(null); });
+    return () => { mounted = false; };
+  }, [user?.id]);
+
+  useEffect(() => {
+    if (!tripPreferenceContext || welcomeDefaultsApplied || stops.length > 0 || importedTripId) return;
+    setRouteStyle(tripPreferenceContext.route_builder.route_style);
+    setCampPreferenceMode(tripPreferenceContext.route_builder.camp_preference);
+    setCampReusePolicy(tripPreferenceContext.route_builder.camp_reuse_policy);
+    if (tripPreferenceContext.route_builder.place_filters.length) {
+      setActivePlaceFilters(current => Array.from(new Set([...current, ...tripPreferenceContext.route_builder.place_filters])));
+    }
+    setWelcomeDefaultsApplied(true);
+  }, [importedTripId, stops.length, tripPreferenceContext, welcomeDefaultsApplied]);
 
   function applyCopilotDraft(draft: TrailheadRouteBuilderDraft) {
     const dayCount = draft.days ? Math.max(1, Math.min(30, Math.round(draft.days))) : days.length || 1;
@@ -3827,6 +3854,8 @@ export default function RouteBuilderScreen() {
           camp_reuse_policy: effectiveCampReusePolicy,
           region_hint: routeStates.join(','),
           max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay),
+          rental_interest: tripPreferenceContext?.rental_interest,
+          trip_preferences: tripPreferenceContext,
         },
         logistics: {
           vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against the saved rig profile before departure.`,
@@ -3899,6 +3928,7 @@ export default function RouteBuilderScreen() {
       campPhotoOnly,
       campCadenceMode,
       campReusePolicy,
+      tripPreferences: tripPreferenceContext,
     };
     try {
       setRouteName(tripToSave.plan.trip_name);

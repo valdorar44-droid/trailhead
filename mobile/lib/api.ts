@@ -134,6 +134,17 @@ export type OfferEventPayload = {
   };
 };
 
+export type TripPreferencesPayload = Record<string, unknown>;
+
+export type PlanRequestOptions = {
+  route_style?: RouteStyleMode | string;
+  camp_preference?: string;
+  region_hint?: string;
+  camp_reuse_policy?: CampReusePolicy | string;
+  max_daily_drive_hours?: number | null;
+  trip_preferences?: TripPreferencesPayload | null;
+};
+
 function geocodeOptionsQuery(options: GeocodeRequestOptions = {}) {
   const parts: string[] = [];
   const countrycodes = normalizeRequestText(options.countrycodes ?? '');
@@ -198,14 +209,14 @@ export const api = {
     }),
   me: () => req<User>('/api/auth/me'),
 
-  plan: (request: string, sessionId = '') =>
-    req<{ job_id: string; status: string }>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId }) }),
+  plan: (request: string, sessionId = '', options: PlanRequestOptions = {}) =>
+    req<{ job_id: string; status: string }>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId, ...options }) }),
 
   // Submit plan job and poll until done (max 6 min). Safe if app backgrounds —
   // server completes the job and sends a push notification as a fallback.
-  planFromSession: async (sessionId: string): Promise<TripResult> => {
+  planFromSession: async (sessionId: string, options: PlanRequestOptions = {}): Promise<TripResult> => {
     const { job_id } = await req<{ job_id: string; status: string }>(
-      '/api/plan', { method: 'POST', body: JSON.stringify({ request: '', session_id: sessionId }) }
+      '/api/plan', { method: 'POST', body: JSON.stringify({ request: '', session_id: sessionId, ...options }) }
     );
     for (let i = 0; i < 120; i++) {
       await new Promise(r => setTimeout(r, 3000));
@@ -1263,6 +1274,7 @@ export interface CopilotContext {
     plan_tier?: string;
     admin?: boolean;
     rig_profile?: Record<string, unknown> | null;
+    trip_preferences?: TripPreferencesPayload | null;
   };
   map?: {
     center?: { lat: number; lng: number } | null;
@@ -1298,6 +1310,7 @@ export interface CopilotContext {
     active_trip?: string | null;
     selected_day?: number | null;
     route_builder_draft?: Record<string, unknown> | null;
+    route_builder_defaults?: Record<string, unknown> | null;
     saved_stops?: Array<Record<string, unknown>>;
     offline_status?: Record<string, unknown>;
     current_screen?: string;
@@ -1717,6 +1730,8 @@ export interface TripPlan {
     camp_reuse_policy?: CampReusePolicy;
     region_hint?: string;
     max_daily_drive_hours?: number | null;
+    rental_interest?: string;
+    trip_preferences?: TripPreferencesPayload | null;
   };
   planner_warnings?: string[];
 }

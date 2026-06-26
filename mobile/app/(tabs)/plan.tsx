@@ -24,6 +24,8 @@ import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
 import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
 import { CREDIT_REWARDS } from '@/lib/credits';
+import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
+import { mergeTripPreferencesIntoRigContext, tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
@@ -105,6 +107,24 @@ export default function PlanScreen() {
   const user             = useStore(st => st.user);
   const rigProfile       = useStore(st => st.rigProfile);
   const weatherUnitMode  = useStore(st => st.weatherUnitMode);
+  const [welcomeSetupPreferences, setWelcomeSetupPreferences] = useState<WelcomeSetupPreferences | null>(null);
+
+  useEffect(() => {
+    let mounted = true;
+    loadWelcomeSetupPreferences()
+      .then(preferences => { if (mounted) setWelcomeSetupPreferences(preferences); })
+      .catch(() => { if (mounted) setWelcomeSetupPreferences(null); });
+    return () => { mounted = false; };
+  }, [user?.id]);
+
+  const tripPreferenceContext = useMemo(
+    () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
+    [welcomeSetupPreferences],
+  );
+  const planningContext = useMemo(
+    () => mergeTripPreferencesIntoRigContext(rigProfile as Record<string, unknown> | null, welcomeSetupPreferences),
+    [rigProfile, welcomeSetupPreferences],
+  );
 
   useEffect(() => {
     setMessages([]);
@@ -236,7 +256,7 @@ export default function PlanScreen() {
       setPlanPhase('editing');
       startStages(CHAT_STAGES);
       try {
-        const data = await api.chat(finalText, sessionId, activeTrip, rigProfile as any);
+        const data = await api.chat(finalText, sessionId, activeTrip, planningContext as any);
 
         if (data.type === 'trip_update' && data.trip) {
           setActiveTrip(data.trip);
@@ -271,7 +291,7 @@ export default function PlanScreen() {
     setPlanPhase('chatting');
     startStages(CHAT_STAGES);
     try {
-      const data = await api.chat(finalText, sessionId, null, rigProfile as any);
+      const data = await api.chat(finalText, sessionId, null, planningContext as any);
 
       if (data.type === 'ready') {
         setMessages(m => [
@@ -342,7 +362,12 @@ export default function PlanScreen() {
     // Use the longer stage list so "this can take a minute" shows up for long trips
     startStages(PLAN_STAGES_LONG);
     try {
-      const result = await api.planFromSession(sessionId);
+      const result = await api.planFromSession(sessionId, tripPreferenceContext ? {
+        route_style: tripPreferenceContext.route_builder.route_style,
+        camp_preference: tripPreferenceContext.route_builder.camp_preference,
+        camp_reuse_policy: tripPreferenceContext.route_builder.camp_reuse_policy,
+        trip_preferences: tripPreferenceContext,
+      } : {});
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setActiveTrip(result);
       setMessages(m => [...m, { role: 'ai', trip: result }]);

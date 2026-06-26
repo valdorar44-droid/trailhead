@@ -205,6 +205,7 @@ interface AppState {
   guidedTourRunId: number;
   guidedTourActive: boolean;
   welcomePromptRunId: number;
+  welcomeSetupRunId: number;
   tourTargets: Record<string, TourTargetRect>;
   setAuth: (token: string, user: User) => void;
   clearAuth: () => void;
@@ -246,6 +247,7 @@ interface AppState {
   startGuidedTour: () => void;
   setGuidedTourActive: (active: boolean) => void;
   startWelcomePrompt: () => void;
+  startWelcomeSetup: () => void;
   setTourTarget: (key: string, rect: Omit<TourTargetRect, 'updatedAt'> | null) => void;
   restoreActiveTrip: () => Promise<void>;
 }
@@ -283,6 +285,7 @@ export const useStore = create<AppState>((set) => ({
   guidedTourRunId: 0,
   guidedTourActive: false,
   welcomePromptRunId: 0,
+  welcomeSetupRunId: 0,
   tourTargets: {},
 
   setAuth: (token, user) => {
@@ -409,6 +412,7 @@ export const useStore = create<AppState>((set) => ({
   startGuidedTour: () => set(state => ({ guidedTourRunId: state.guidedTourRunId + 1, guidedTourActive: true })),
   setGuidedTourActive: (active) => set({ guidedTourActive: active }),
   startWelcomePrompt: () => set(state => ({ welcomePromptRunId: state.welcomePromptRunId + 1 })),
+  startWelcomeSetup: () => set(state => ({ welcomeSetupRunId: state.welcomeSetupRunId + 1 })),
   setTourTarget: (key, rect) => set((state) => {
     const next = { ...state.tourTargets };
     if (!rect) delete next[key];

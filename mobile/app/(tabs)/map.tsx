@@ -12,10 +12,13 @@ import FieldReportComposer from '@/components/reports/FieldReportComposer';
 import CampInsightSection from '@/components/map/CampInsightSection';
 import CampNearbyPlacesSection from '@/components/map/CampNearbyPlacesSection';
 import CampReviewsSection from '@/components/map/CampReviewsSection';
+import CampEditSheet, { type CampEditDraft } from '@/components/map/CampEditSheet';
+import TrailheadSnapSheet from '@/components/map/TrailheadSnapSheet';
 import MapDrawerSheet from '@/components/map/MapDrawerSheet';
 import MapFilterSheet from '@/components/map/MapFilterSheet';
 import MapLegendSheet from '@/components/map/MapLegendSheet';
 import MapLayerSheetContent from '@/components/map/MapLayerSheetContent';
+import MapSearchSheet, { type MapSearchQuickAction } from '@/components/map/MapSearchSheet';
 import MapStyleSheet from '@/components/map/MapStyleSheet';
 import MapWeatherPeek from '@/components/map/MapWeatherPeek';
 import MapWeatherSheet from '@/components/map/MapWeatherSheet';
@@ -93,6 +96,8 @@ import { MAP_MODE_PRESETS, legendCategoryForPreset, mapModePresetTitle, type Map
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 import { playTrailheadCue, playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
+import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
+import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 import { startRealtimeCopilotSession } from '@/lib/realtimeCopilot';
 import {
   loadTrailheadRouteBuilderDraft,
@@ -2636,6 +2641,13 @@ type ScopedSearchCategoryRule = {
 const SCOPED_SEARCH_SPLIT_RE = /\s+(near|nearby|around|by|close to|in|at)\s+/i;
 const SCOPED_SEARCH_CURRENT_LOCATION_RE = /^(me|my location|current location|here|near me)$/i;
 const SCOPED_SEARCH_PREFIX_RE = /^(gas stations?|gas|fuel|petrol|diesel|propane|restaurants?|food|coffee|groceries|grocery|campgrounds?|camps?|camping|rv parks?|lodging|hotels?|motels?|trailheads?|trails?|treks?|hikes?|views?|viewpoints?|waterfalls?|falls|glaciers?|parks?|attractions?|mechanics?|repair|parking|medical|pharmacy|wifi)\s+(.{2,})$/i;
+const FULL_MAP_SEARCH_QUICK_ACTIONS: MapSearchQuickAction[] = [
+  { label: 'Camps', query: 'camps near me', icon: 'bonfire-outline' },
+  { label: 'Fuel', query: 'fuel near me', icon: 'car-sport-outline' },
+  { label: 'Water', query: 'water near me', icon: 'water-outline' },
+  { label: 'Trails', query: 'trails near me', icon: 'trail-sign-outline' },
+  { label: 'Groceries', query: 'grocery near me', icon: 'cart-outline' },
+];
 
 const SCOPED_SEARCH_CATEGORY_RULES: ScopedSearchCategoryRule[] = [
   { label: 'Fuel', ids: ['fuel'], radiusMi: 18, pattern: /\b(gas stations?|gas\b|fuel|petrol|diesel|charging stations?|ev charging)\b/i },
@@ -3232,24 +3244,6 @@ function fieldCrowdLabel(crowd: FieldReportCrowd) {
   if (crowd === 'few_rigs') return { label: 'A few rigs', icon: 'car-outline' as const, color: '#f59e0b' };
   return { label: 'Packed', icon: 'car-sport-outline' as const, color: '#ef4444' };
 }
-
-type CampEditDraft = {
-  name: string;
-  description: string;
-  cost: string;
-  phone: string;
-  url: string;
-  accessNotes: string;
-  bailOutNotes: string;
-  stayLimit: string;
-  reservationNotes: string;
-  sourceConfidenceNotes: string;
-  maxRigLength: string;
-  siteTypes: string[];
-  amenities: string[];
-  activities: string[];
-  note: string;
-};
 
 const SITE_TYPE_OPTIONS = [
   { label: 'RV Sites', icon: 'car-outline' },
@@ -4816,39 +4810,6 @@ function TrailGuideAvatar({
   );
 }
 
-function CampEditOptionSection({
-  title, options, values, onToggle, styles, colors,
-}: {
-  title: string;
-  options: readonly { label: string; icon: keyof typeof Ionicons.glyphMap }[];
-  values: string[];
-  onToggle: (label: string) => void;
-  styles: any;
-  colors: ColorPalette;
-}) {
-  return (
-    <View style={styles.campEditSection}>
-      <Text style={styles.campEditSectionTitle}>{title}</Text>
-      <View style={styles.campEditOptionList}>
-        {options.map(opt => {
-          const active = values.some(v => v.toLowerCase() === opt.label.toLowerCase());
-          return (
-            <TouchableOpacity key={opt.label} style={[styles.campEditOption, active && styles.campEditOptionActive]} onPress={() => onToggle(opt.label)}>
-              <View style={[styles.campEditCheck, active && styles.campEditCheckActive]}>
-                {active && <Ionicons name="checkmark" size={16} color="#fff" />}
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.campEditOptionText}>{opt.label}</Text>
-              </View>
-              <Ionicons name={opt.icon} size={30} color={active ? colors.orange : colors.text2} />
-            </TouchableOpacity>
-          );
-        })}
-      </View>
-    </View>
-  );
-}
-
 function PremiumActionSheetHeader({
   title, subtitle, icon, iconColor, onClose, styles, colors,
 }: {
@@ -4945,6 +4906,13 @@ function MapScreen() {
   const rigProfile = useStore(st => st.rigProfile);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const guidedTourActive = useStore(st => st.guidedTourActive);
+  const searchHistory = useStore(st => st.searchHistory);
+  const addSearchHistory = useStore(st => st.addSearchHistory);
+  const [welcomeSetupPreferences, setWelcomeSetupPreferences] = useState<WelcomeSetupPreferences | null>(null);
+  const tripPreferenceContext = useMemo(
+    () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
+    [welcomeSetupPreferences],
+  );
   const webRef       = useRef<any>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
   const navVoiceRef  = useRef<string | undefined>(undefined);
@@ -4975,6 +4943,14 @@ function MapScreen() {
     api.getExtremeConfig()
       .then(cfg => { if (mounted) setExtremeConfig(cfg); })
       .catch(() => { if (mounted) setExtremeConfig(null); });
+    return () => { mounted = false; };
+  }, [user?.id]);
+
+  useEffect(() => {
+    let mounted = true;
+    loadWelcomeSetupPreferences()
+      .then(preferences => { if (mounted) setWelcomeSetupPreferences(preferences); })
+      .catch(() => { if (mounted) setWelcomeSetupPreferences(null); });
     return () => { mounted = false; };
   }, [user?.id]);
 
@@ -5089,6 +5065,7 @@ function MapScreen() {
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
   const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
+  const [showFullMapSearch, setShowFullMapSearch] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const inlineSearchInputRef = useRef<TextInput | null>(null);
@@ -7867,6 +7844,25 @@ function MapScreen() {
     focusInlineMapSearch();
   }
 
+  function openFullMapSearch() {
+    setShowMapDrawer(false);
+    setInlineSearchOpen(false);
+    setShowSearch(false);
+    setSearchMode('browse');
+    setShowFullMapSearch(true);
+  }
+
+  function closeFullMapSearch(clear = false) {
+    setShowFullMapSearch(false);
+    setIsSearching(false);
+    if (clear) {
+      setSearchQuery('');
+      setSearchResults([]);
+      setMapSearchSession(null);
+    }
+    Keyboard.dismiss();
+  }
+
   function closeInlineMapSearch(clear = true) {
     setInlineSearchOpen(false);
     setIsSearching(false);
@@ -8030,6 +8026,8 @@ function MapScreen() {
       summary: basePlace.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
       source_label: basePlace.source_label || 'Map search',
     });
+    addSearchHistory({ name: basePlace.name, lat: basePlace.lat, lng: basePlace.lng, searchedAt: Date.now() });
+    setShowFullMapSearch(false);
     closeInlineMapSearch();
     focusPlaceCamera(basePlace, 14, query);
   }
@@ -9212,6 +9210,7 @@ function MapScreen() {
         plan_tier: extremeConfig?.tier_name ?? 'Trailhead',
         admin: !!user?.is_admin,
         rig_profile: (rigProfile ?? null) as Record<string, unknown> | null,
+        trip_preferences: tripPreferenceContext,
       },
       map: {
         center,
@@ -9274,6 +9273,7 @@ function MapScreen() {
         active_trip: activeTrip?.trip_id ?? null,
         selected_day: selectedDay,
         current_screen: 'map',
+        route_builder_defaults: tripPreferenceContext?.route_builder ?? null,
         saved_stops: waypoints.slice(0, 30).map(wp => ({ lat: wp.lat, lng: wp.lng, name: wp.name, day: wp.day, type: wp.type })),
         offline_status: { saved_regions: cachedRegions.length, route_cached: routeFromCache },
       },
@@ -16920,7 +16920,7 @@ function MapScreen() {
   };
   const scopedMapSearchActive = Boolean(mapSearchSession && !navMode && !waterFollowActive && !safeWaterPlanningActive);
   const androidInlineSearchKeyboardActive = Platform.OS === 'android' && inlineSearchOpen && keyboardVisible;
-  const mapSearchChromeActive = Boolean(showSearch || inlineSearchOpen || scopedMapSearchActive || androidInlineSearchKeyboardActive);
+  const mapSearchChromeActive = Boolean(showSearch || showFullMapSearch || inlineSearchOpen || scopedMapSearchActive || androidInlineSearchKeyboardActive);
   const topChromeLeft = canOpenMapDrawer ? 72 : 16;
   const topChromeLaneStyle = topChromeLeft > 16 ? { left: topChromeLeft } : null;
   const scopedMapSearchPois = scopedMapSearchActive ? (mapSearchSession?.places ?? []) : routePois;
@@ -16928,6 +16928,7 @@ function MapScreen() {
     !navMode &&
     !waterFollowActive &&
     !showSearch &&
+    !showFullMapSearch &&
     !inlineSearchOpen &&
     !androidInlineSearchKeyboardActive &&
     !scopedMapSearchActive &&
@@ -16942,6 +16943,7 @@ function MapScreen() {
     mapWeatherEnabled ||
     showMapWeatherSheet ||
     showSearch ||
+    showFullMapSearch ||
     !!searchRouteCard ||
     showDiscoveryPanel ||
     !!routeScout ||
@@ -16970,7 +16972,8 @@ function MapScreen() {
     trailPinCaptureMode ||
     trailTraceMode ||
     trailRouteBuilderOpen ||
-    inlineSearchOpen
+    inlineSearchOpen ||
+    showFullMapSearch
   );
   const showInlineMapSearch = Boolean(
     !trailPinCaptureMode &&
@@ -16978,6 +16981,7 @@ function MapScreen() {
     !waterFollowActive &&
     !safeWaterPlanningActive &&
     !showSearch &&
+    !showFullMapSearch &&
     (!mapSheetOpen || inlineSearchOpen || scopedMapSearchActive)
   );
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
@@ -17499,7 +17503,7 @@ function MapScreen() {
         bottomInset={bottomInset}
         onClose={() => setShowMapDrawer(false)}
         items={[
-          { label: 'Search places', sub: 'Find and fly to a place', icon: 'search-outline', tone: '#60a5fa', onPress: openInlineMapSearch },
+          { label: 'Search places', sub: 'Find camps, trails, fuel, and stops', icon: 'search-outline', tone: '#60a5fa', onPress: openFullMapSearch },
           { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
           { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
           { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
@@ -19161,6 +19165,48 @@ function MapScreen() {
       />
 
       {/* ── Search overlay ── */}
+      {showFullMapSearch && !navMode && (
+        <MapSearchSheet
+          visible={showFullMapSearch}
+          query={searchQuery}
+          results={searchResults}
+          searching={isSearching}
+          hasLocation={!!userLoc}
+          recent={searchHistory}
+          quickActions={FULL_MAP_SEARCH_QUICK_ACTIONS}
+          onQueryChange={text => {
+            setSearchQuery(text);
+            if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
+            if (text.trim().length < 2) setSearchResults([]);
+          }}
+          onSubmit={queryOverride => {
+            if (queryOverride != null) setSearchQuery(queryOverride);
+            searchMap(queryOverride);
+          }}
+          onSelect={place => selectSearchResult(place as SearchPlace)}
+          onRoute={place => {
+            if (!userLoc) {
+              setQuickToast('Turn on location to preview a route.');
+              setTimeout(() => setQuickToast(''), 2400);
+              return;
+            }
+            addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
+            setShowFullMapSearch(false);
+            previewSearchRoute({ name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true }, place as SearchPlace);
+          }}
+          onQuickAction={action => {
+            setSearchQuery(action.query);
+            searchMap(action.query);
+          }}
+          onClose={() => closeFullMapSearch(false)}
+          onClear={() => {
+            setSearchQuery('');
+            setSearchResults([]);
+            setMapSearchSession(null);
+          }}
+        />
+      )}
+
       {/* ── Route Search Modal (OsmAnd-style) ──────────────────────────── */}
       {showSearch && !navMode && (
         <View style={[s.routeSearchModalLayer, { bottom: Platform.OS === 'android' ? Math.max(bottomInset - 8, 16) : 0 }]}>
@@ -19706,8 +19752,39 @@ function MapScreen() {
 
       {/* ── Campsite quick card ── */}
       {selectedCamp && !navMode && !safeWaterPlanningActive && (
-        <TrailheadSheet handle={false} style={s.quickCard} contentStyle={s.quickCardShell}>
-          <ScrollView showsVerticalScrollIndicator={false} bounces={false}>
+        <TrailheadSnapSheet
+          initialStage="half"
+          style={s.quickSnapCard}
+          contentStyle={s.quickSnapShell}
+          scrollContentStyle={s.quickSnapContent}
+          peekHeader={(
+            <View style={s.quickPeekHeader}>
+              <View style={s.quickPeekIcon}>
+                <Ionicons
+                  name={(selectedCamp.tags ?? []).includes('rv') ? 'car-outline' : (selectedCamp.tags ?? []).includes('dispersed') ? 'moon-outline' : 'bonfire-outline'}
+                  size={18}
+                  color={C.orange}
+                />
+              </View>
+              <View style={s.quickPeekCopy}>
+                <Text style={s.quickPeekTitle} numberOfLines={1}>{selectedCamp.name}</Text>
+                <Text style={s.quickPeekMeta} numberOfLines={1}>
+                  {[selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type || 'Camp', selectedCamp.address || selectedCamp.cost || ''].filter(Boolean).join(' · ')}
+                </Text>
+              </View>
+              <TouchableOpacity style={s.quickPeekButton} onPress={() => toggleFavorite(selectedCamp)}>
+                <Ionicons
+                  name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
+                  size={18}
+                  color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : C.text2}
+                />
+              </TouchableOpacity>
+              <TouchableOpacity style={s.quickPeekButton} onPress={() => { setSelectedCamp(null); setCampFullness(null); setCampWeather(null); }}>
+                <Ionicons name="close" size={18} color={C.text2} />
+              </TouchableOpacity>
+            </View>
+          )}
+        >
             {/* Photo / placeholder */}
             {(() => {
               const photos = campPhotoItems(selectedCamp, campDetail);
@@ -20279,6 +20356,10 @@ function MapScreen() {
                 <Ionicons name="warning-outline" size={12} color={C.text2} />
                 <Text style={s.quickCardSecondaryText}>REPORT</Text>
               </TouchableOpacity>
+              <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={openCampDetail}>
+                <Ionicons name="reader-outline" size={12} color={C.text2} />
+                <Text style={s.quickCardSecondaryText}>DETAILS</Text>
+              </TouchableOpacity>
               <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => openCampEdit('suggest')}>
                 <Ionicons name="create-outline" size={12} color={C.text2} />
                 <Text style={s.quickCardSecondaryText}>EDIT</Text>
@@ -20291,14 +20372,13 @@ function MapScreen() {
               )}
             </View>
             </View>
-          </ScrollView>
-        </TrailheadSheet>
+        </TrailheadSnapSheet>
       )}
 
       {/* ── Campsite full profile modal ── */}
-      <Modal visible={showCampDetail && !!user?.is_admin} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeCampDetail}>
+      <Modal visible={showCampDetail} animationType="slide" presentationStyle="pageSheet" onRequestClose={closeCampDetail}>
         <View style={s.detailModal}>
-          {campDetail && user?.is_admin && (
+          {campDetail && (
             <ScrollView showsVerticalScrollIndicator={false}>
               {/* Photos */}
               <View style={s.detailHero}>
@@ -20776,71 +20856,24 @@ function MapScreen() {
         </KeyboardAvoidingView>
       </Modal>
 
-      <Modal visible={showCampEdit} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowCampEdit(false)}>
-        <SafeAreaView style={s.campEditModal}>
-          <View style={s.campEditTop}>
-            <TouchableOpacity style={s.campEditIconBtn} onPress={() => setShowCampEdit(false)}>
-              <Ionicons name="chevron-back" size={24} color={C.text} />
-            </TouchableOpacity>
-            <Text style={s.campEditTopTitle}>{campEditMode === 'admin' ? 'Admin Edit' : 'Suggest Edit'}</Text>
-            <TouchableOpacity style={s.campEditIconBtn} onPress={() => setShowCampEdit(false)}>
-              <Ionicons name="close" size={24} color={C.text} />
-            </TouchableOpacity>
-          </View>
-          {campEditDraft && campDetail && (
-            <>
-              <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-              <ScrollView style={s.campEditScroll} contentContainerStyle={s.campEditContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
-                <Text style={s.campEditTitle}>{campEditMode === 'admin' ? `Edit ${campDetail.name}` : `Improve ${campDetail.name}`}</Text>
-                <Text style={s.campEditIntro}>
-                  {campEditMode === 'admin'
-                    ? 'Update the profile users see on Trailhead. Leave unknown fields as-is.'
-                    : "Send what you know. Admins review edits before changing the public camp profile."}
-                </Text>
-
-                <View style={s.campEditSection}>
-                  <Text style={s.campEditSectionTitle}>NAME & CONTACT</Text>
-                  <TextInput style={s.campEditInput} value={campEditDraft.name} onChangeText={name => setCampEditDraft(p => p ? { ...p, name } : p)} placeholder="Camp name" placeholderTextColor={C.text3} />
-                  <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.description} onChangeText={description => setCampEditDraft(p => p ? { ...p, description } : p)} placeholder="Description, access notes, restrictions, best sites..." placeholderTextColor={C.text3} multiline />
-                  <TextInput style={s.campEditInput} value={campEditDraft.url} onChangeText={url => setCampEditDraft(p => p ? { ...p, url } : p)} placeholder="Website or booking link" placeholderTextColor={C.text3} autoCapitalize="none" />
-                  <TextInput style={s.campEditInput} value={campEditDraft.phone} onChangeText={phone => setCampEditDraft(p => p ? { ...p, phone } : p)} placeholder="Phone" placeholderTextColor={C.text3} keyboardType="phone-pad" />
-                  <TextInput style={s.campEditInput} value={campEditDraft.cost} onChangeText={cost => setCampEditDraft(p => p ? { ...p, cost } : p)} placeholder="Price or fee notes" placeholderTextColor={C.text3} />
-                  <TextInput style={s.campEditInput} value={campEditDraft.stayLimit} onChangeText={stayLimit => setCampEditDraft(p => p ? { ...p, stayLimit } : p)} placeholder="Stay limit or season notes" placeholderTextColor={C.text3} />
-                  <TextInput style={s.campEditInput} value={campEditDraft.reservationNotes} onChangeText={reservationNotes => setCampEditDraft(p => p ? { ...p, reservationNotes } : p)} placeholder="Reservation, first-come, or permit notes" placeholderTextColor={C.text3} />
-                </View>
-
-                <CampEditOptionSection title="SITE TYPE & ACCOMMODATIONS" options={SITE_TYPE_OPTIONS} values={campEditDraft.siteTypes} onToggle={label => toggleDraftList('siteTypes', label)} styles={s} colors={C} />
-                <CampEditOptionSection title="ESSENTIALS" options={ESSENTIAL_AMENITY_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
-                <CampEditOptionSection title="FIRE, WATER & TABLES" options={FIRE_WATER_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
-                <CampEditOptionSection title="RV & TRAILER FEATURES" options={RV_FEATURE_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
-                <CampEditOptionSection title="CONNECTIVITY & SERVICES" options={SERVICES_OPTIONS} values={campEditDraft.amenities} onToggle={label => toggleDraftList('amenities', label)} styles={s} colors={C} />
-                <CampEditOptionSection title="NEARBY ACTIVITIES" options={ACTIVITY_OPTIONS} values={campEditDraft.activities} onToggle={label => toggleDraftList('activities', label)} styles={s} colors={C} />
-
-                <View style={s.campEditSection}>
-                  <Text style={s.campEditSectionTitle}>ACCESS & CONFIDENCE</Text>
-                  <TextInput style={s.campEditInput} value={campEditDraft.maxRigLength} onChangeText={maxRigLength => setCampEditDraft(p => p ? { ...p, maxRigLength } : p)} placeholder="Max rig/trailer length, if known" placeholderTextColor={C.text3} />
-                  <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.accessNotes} onChangeText={accessNotes => setCampEditDraft(p => p ? { ...p, accessNotes } : p)} placeholder="Road condition, clearance, trailer turns, seasonal gates..." placeholderTextColor={C.text3} multiline />
-                  <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.bailOutNotes} onChangeText={bailOutNotes => setCampEditDraft(p => p ? { ...p, bailOutNotes } : p)} placeholder="Bail-out notes: where to go if full, closed, muddy, or unsafe..." placeholderTextColor={C.text3} multiline />
-                  <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.sourceConfidenceNotes} onChangeText={sourceConfidenceNotes => setCampEditDraft(p => p ? { ...p, sourceConfidenceNotes } : p)} placeholder="How confident is this? Source, last visit, ranger note, sign, website..." placeholderTextColor={C.text3} multiline />
-                </View>
-
-                {campEditMode !== 'admin' && (
-                  <View style={s.campEditSection}>
-                    <Text style={s.campEditSectionTitle}>NOTE FOR ADMIN</Text>
-                    <TextInput style={[s.campEditInput, s.campEditTextArea]} value={campEditDraft.note} onChangeText={note => setCampEditDraft(p => p ? { ...p, note } : p)} placeholder="What changed, how do you know, or anything admins should verify..." placeholderTextColor={C.text3} multiline />
-                  </View>
-                )}
-              </ScrollView>
-              </KeyboardAvoidingView>
-              <View style={s.campEditFooter}>
-                <TouchableOpacity style={[s.campEditSave, campEditSaving && { opacity: 0.6 }]} onPress={submitCampEdit} disabled={campEditSaving}>
-                  {campEditSaving ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.campEditSaveText}>{campEditMode === 'admin' ? 'SAVE CHANGES' : 'SUBMIT EDIT'}</Text>}
-                </TouchableOpacity>
-              </View>
-            </>
-          )}
-        </SafeAreaView>
-      </Modal>
+      <CampEditSheet
+        visible={showCampEdit}
+        mode={campEditMode}
+        draft={campEditDraft}
+        campName={campDetail?.name || selectedCamp?.name}
+        saving={campEditSaving}
+        canAdmin={!!user?.is_admin}
+        siteTypeOptions={SITE_TYPE_OPTIONS}
+        essentialOptions={ESSENTIAL_AMENITY_OPTIONS}
+        fireWaterOptions={FIRE_WATER_OPTIONS}
+        rvOptions={RV_FEATURE_OPTIONS}
+        serviceOptions={SERVICES_OPTIONS}
+        activityOptions={ACTIVITY_OPTIONS}
+        onClose={() => setShowCampEdit(false)}
+        onChange={patch => setCampEditDraft(prev => prev ? { ...prev, ...patch } : prev)}
+        onToggleList={toggleDraftList}
+        onSubmit={submitCampEdit}
+      />
 
       {/* ── Route Options Sheet ── */}
       <Modal visible={showRouteOpts} animationType="slide" transparent onRequestClose={() => setShowRouteOpts(false)}>
@@ -24210,24 +24243,33 @@ const makeStyles = (C: ColorPalette) => {
   filterChipLockedText: { color: C.text3 },
 
   // ── Campsite quick card
-  quickCard: {
-    position: 'absolute', bottom: 0, left: 10, right: 10,
-    maxHeight: '84%',
-    overflow: 'hidden',
-    borderTopLeftRadius: 26,
-    borderTopRightRadius: 26,
-    borderBottomLeftRadius: 0,
-    borderBottomRightRadius: 0,
+  quickSnapCard: { left: 10, right: 10, zIndex: 1000, elevation: 40 },
+  quickSnapShell: { backgroundColor: C.s1 },
+  quickSnapContent: { paddingHorizontal: 0, paddingTop: 0, paddingBottom: 30, gap: 0 },
+  quickPeekHeader: { flexDirection: 'row', alignItems: 'center', gap: 10, minHeight: 48 },
+  quickPeekIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: C.orange + '55',
+    backgroundColor: C.orange + '12',
+  },
+  quickPeekCopy: { flex: 1, minWidth: 0 },
+  quickPeekTitle: { color: C.text, fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  quickPeekMeta: { color: C.text3, fontSize: 10, lineHeight: 14, fontFamily: mono, marginTop: 2 },
+  quickPeekButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: C.border,
-    backgroundColor: C.s1,
-    shadowColor: '#000',
-    shadowOpacity: 0.32,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: -8 },
-    elevation: 40, zIndex: 1000,
+    backgroundColor: C.s2,
   },
-  quickCardShell: { padding: 0 },
   quickCardImg: {
     height: 164,
     marginHorizontal: 12,
@@ -24590,48 +24632,6 @@ const makeStyles = (C: ColorPalette) => {
     shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 8,
   },
   detailDirText: { color: '#fff', fontSize: 14, fontFamily: mono, fontWeight: '800' },
-
-  campEditModal: { flex: 1, backgroundColor: C.bg },
-  campEditTop: {
-    height: 54, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    paddingHorizontal: 14, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.s1,
-  },
-  campEditTopTitle: { color: C.text, fontSize: 16, fontWeight: '800' },
-  campEditIconBtn: { width: 38, height: 38, borderRadius: 19, alignItems: 'center', justifyContent: 'center' },
-  campEditScroll: { flex: 1 },
-  campEditContent: { padding: 20, paddingBottom: 110 },
-  campEditTitle: { color: C.text, fontSize: 24, fontWeight: '900', lineHeight: 30, textAlign: 'center', marginTop: 8 },
-  campEditIntro: { color: C.text2, fontSize: 15, lineHeight: 23, textAlign: 'center', marginTop: 14, marginBottom: 26 },
-  campEditSection: { paddingTop: 20, marginTop: 10, borderTopWidth: 1, borderColor: C.border },
-  campEditSectionTitle: { color: C.text, fontSize: 15, fontWeight: '900', marginBottom: 14, letterSpacing: 0.2 },
-  campEditInput: {
-    borderWidth: 1.5, borderColor: C.border, backgroundColor: C.s1, borderRadius: 10,
-    color: C.text, fontSize: 15, paddingHorizontal: 14, paddingVertical: 12, marginBottom: 12,
-  },
-  campEditTextArea: { minHeight: 110, textAlignVertical: 'top', lineHeight: 21 },
-  campEditOptionList: { gap: 10 },
-  campEditOption: {
-    minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 14,
-    borderWidth: 1.5, borderColor: C.border, backgroundColor: C.s1,
-    borderRadius: 12, paddingHorizontal: 14, paddingVertical: 12,
-  },
-  campEditOptionActive: { borderColor: C.orange, backgroundColor: C.orange + '0f' },
-  campEditCheck: {
-    width: 28, height: 28, borderRadius: 6, borderWidth: 1.5,
-    borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: C.bg,
-  },
-  campEditCheckActive: { backgroundColor: C.orange, borderColor: C.orange },
-  campEditOptionText: { color: C.text, fontSize: 16, fontWeight: '700' },
-  campEditFooter: {
-    position: 'absolute', left: 0, right: 0, bottom: 0,
-    padding: 16, paddingBottom: 28, backgroundColor: C.bg,
-    borderTopWidth: 1, borderColor: C.border,
-  },
-  campEditSave: {
-    height: 52, borderRadius: 12, backgroundColor: C.green,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  campEditSaveText: { color: '#fff', fontSize: 13, fontFamily: mono, fontWeight: '900', letterSpacing: 0.5 },
 
   // ── Wikipedia
   wikiItem: { paddingVertical: 10, borderBottomWidth: 1, borderColor: C.border },

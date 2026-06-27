@@ -288,7 +288,13 @@ export function buildTrailDiscoveries(
       const feature = featureFromPoi(
         poi,
         support,
-        poi.source === 'offline' ? 'offline_places' : poi.source === 'trailhead' ? 'trailhead' : 'osm',
+        poi.source === 'offline'
+          ? 'offline_places'
+          : poi.source === 'trailhead'
+            ? 'trailhead'
+            : poi.source === 'map_tile'
+              ? 'map_tile'
+              : 'osm',
       );
       if (feature && origin && isValidPoint(origin)) feature.distanceMi = haversineMiles(origin, feature);
       return feature;

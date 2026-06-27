@@ -177,6 +177,7 @@ export interface NativeMapHandle {
   screenToCoordinate: (x: number, y: number) => Promise<[number, number] | null>;
   selectFeatureAtScreenPoint: (x: number, y: number) => Promise<MapSelectableFeature | null>;
   queryVisibleFeatures: () => Promise<MapSelectableFeature[]>;
+  queryVisibleTrailPois: () => Promise<OsmPoi[]>;
   getVisibleMapCandidates: () => Promise<MapSelectableFeature[]>;
   getVisibleCenter: () => Promise<[number, number] | null>;
   getVisibleBounds: () => Promise<MapBounds | null>;
@@ -1787,6 +1788,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           });
         }
         return enriched;
+      } catch {
+        return [];
+      }
+    },
+    async queryVisibleTrailPois() {
+      if (!mapRef.current) return [];
+      try {
+        const screen = Dimensions.get('window');
+        const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
+        const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+          renderedQueryViewportRect(screen),
+          undefined,
+          layerIds,
+        ).catch(() => null);
+        const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
+        return normalizeVisibleTrailPois(rectFeatures);
       } catch {
         return [];
       }
@@ -3592,6 +3609,64 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
       geometry: feature?.geometry,
     },
   } as OsmPoi;
+}
+
+function coordinateFromTrailGeometry(geometry: any): [number, number] | null {
+  if (!geometry) return null;
+  if (geometry.type === 'Point' && Array.isArray(geometry.coordinates)) {
+    const lng = Number(geometry.coordinates[0]);
+    const lat = Number(geometry.coordinates[1]);
+    return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+  }
+  const line = geometry.type === 'LineString'
+    ? geometry.coordinates
+    : geometry.type === 'MultiLineString'
+      ? (geometry.coordinates || []).sort((a: any[], b: any[]) => (b?.length ?? 0) - (a?.length ?? 0))[0]
+      : null;
+  if (!Array.isArray(line) || !line.length) return null;
+  const coord = line[Math.max(0, Math.min(line.length - 1, Math.floor(line.length / 2)))];
+  const lng = Number(coord?.[0]);
+  const lat = Number(coord?.[1]);
+  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+}
+
+function normalizeVisibleTrailPois(features: any[] | undefined): OsmPoi[] {
+  if (!Array.isArray(features) || !features.length) return [];
+  const seen = new Set<string>();
+  const out: OsmPoi[] = [];
+  for (const feature of features) {
+    const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
+    if (!/(trail|road-path|road-other|mvum)/.test(layerId)) continue;
+    const coord = coordinateFromTrailGeometry(feature?.geometry);
+    if (!coord) continue;
+    const [lng, lat] = coord;
+    const props = feature?.properties ?? {};
+    const cls = String(props.class || props.type || props.kind || props.surface || layerId || '').toLowerCase();
+    const name = String(
+      props.name
+      || props.ref
+      || props.route_name
+      || props.trail_name
+      || (layerId.includes('road') || cls.includes('track') ? 'Map road / track' : 'Visible trail')
+    ).trim();
+    const key = `${name.toLowerCase()}:${lat.toFixed(4)}:${lng.toFixed(4)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push({
+      id: `visible_trail:${String(feature?.id || props.id || key).slice(0, 150)}`,
+      name,
+      lat,
+      lng,
+      type: 'trail',
+      subtype: cls.replace(/[_-]+/g, ' ') || 'visible map trail',
+      source: 'map_tile',
+      source_label: layerId.includes('mvum') ? 'Motorized access map' : 'Visible map trail',
+      source_layer: layerId,
+      feature_id: props.id || feature?.id || null,
+    } as OsmPoi);
+    if (out.length >= 60) break;
+  }
+  return out;
 }
 
 function bestMapboxPoiFromFeatures(features: any[] | undefined, fallbackLat: number, fallbackLng: number): OsmPoi | null {

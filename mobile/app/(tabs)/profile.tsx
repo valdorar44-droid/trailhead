@@ -120,9 +120,6 @@ const PROFILE_SECTIONS = [
   { id: 'account', label: 'Account', icon: 'person-circle-outline' },
   { id: 'library', label: 'Library', icon: 'albums-outline' },
   { id: 'rig', label: 'Rig', icon: 'car-sport-outline' },
-  { id: 'trips', label: 'Trips', icon: 'map-outline' },
-  { id: 'saved', label: 'Saved', icon: 'bookmark-outline' },
-  { id: 'support', label: 'Support', icon: 'ribbon-outline' },
   { id: 'settings', label: 'Settings', icon: 'settings-outline' },
 ] as const;
 
@@ -344,7 +341,6 @@ export default function ProfileScreen() {
     () => offlineTripSummaries.filter(summary => !tripHistory.some(trip => trip.trip_id === summary.trip_id)),
     [offlineTripSummaries, tripHistory],
   );
-  const latestSavedNearbyName = favoriteCamps[0]?.name ?? savedPlaces[0]?.name ?? '';
 
   function openOfflineMapsManager() {
     setPendingOpenOfflineModal(true);
@@ -1170,16 +1166,15 @@ export default function ProfileScreen() {
           const actions = profileSection === 'account'
             ? [
                 { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
+                { icon: 'mail-outline', label: 'INBOX', color: '#3b82f6', onPress: () => openSupportInbox() },
+                { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
                 { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
-                { icon: 'time-outline', label: 'HISTORY', color: C.silverBright, onPress: loadHistory },
-                { icon: 'options-outline', label: 'TRIP SETUP', color: '#14b8a6', onPress: startWelcomeSetup },
-                { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: '#d4af37', onPress: startWelcomePrompt },
               ]
             : profileSection === 'library'
               ? [
                   { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
                   { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
-                  { icon: 'bookmark-outline', label: 'SAVED', color: C.silverBright, onPress: () => setProfileSection('saved') },
+                  { icon: 'cloud-download-outline', label: 'DOWNLOADS', color: C.green, onPress: openOfflineMapsManager },
                 ]
             : profileSection === 'rig'
               ? [
@@ -1198,24 +1193,7 @@ export default function ProfileScreen() {
                   },
                   { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green, onPress: () => setShowChecklist(true) },
                 ]
-              : profileSection === 'trips'
-                ? [
-                    { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
-                    { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
-                  ]
-                : profileSection === 'saved'
-                  ? [
-                      { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
-                      { icon: 'sparkles-outline', label: 'EXPLORE', color: '#d4af37', onPress: () => router.push('/(tabs)/guide') },
-                    ]
-                  : profileSection === 'support'
-                    ? [
-                        { icon: 'mail-outline', label: 'INBOX', color: '#3b82f6', onPress: () => openSupportInbox() },
-                        { icon: 'ribbon-outline', label: 'CONTRIB', color: '#14b8a6', onPress: openContributions },
-                        { icon: 'trophy-outline', label: 'CONTEST', color: '#d4af37', onPress: openContest },
-                        { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
-                      ]
-                    : [
+              : [
                         { icon: 'options-outline', label: 'TRIP SETUP', color: '#14b8a6', onPress: startWelcomeSetup },
                         { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: '#d4af37', onPress: startWelcomePrompt },
                         { icon: 'mic-outline', label: 'TRIP AUDIO', color: '#3b82f6', onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
@@ -1251,80 +1229,12 @@ export default function ProfileScreen() {
             savedPlaceCount={savedPlaces.length}
             importedRouteCount={importedRouteCount}
             importedPinCount={importedPinCount}
-            recentTripName={tripHistory[0]?.trip_name}
-            savedNearbyName={latestSavedNearbyName}
-            onOpenTrips={() => setProfileSection('trips')}
             onOpenDownloads={openOfflineMapsManager}
-            onOpenSaved={() => setProfileSection('saved')}
             onPlanTrip={() => { setActiveTrip(null); router.push('/(tabs)/plan' as any); }}
           />
         )}
 
-        {/* My Trips — with offline cache badges */}
-        {profileSection === 'trips' && tripHistory.length > 0 && (
-          <>
-            <TrailheadMetricRow
-              metrics={[
-                { label: 'Saved trips', value: String(tripHistory.length), icon: 'map-outline', tone: C.silverBright },
-                { label: 'GPX routes', value: String(importedRouteCount), icon: 'git-branch-outline', tone: C.orange },
-                { label: 'Imported pins', value: String(importedPinCount), icon: 'pin-outline', tone: '#38bdf8' },
-              ]}
-            />
-          <TrailheadCard style={s.tripsCard}>
-            <Text style={s.sectionLabel}>MY TRIPS</Text>
-            {tripHistory.map(t => {
-              const isCached = offlineCachedIds.has(t.trip_id);
-              return (
-                <View key={t.trip_id} style={s.tripRow}>
-                  <TouchableOpacity style={s.tripRowOpen} onPress={() => { openTripFromProfile(t); }}>
-                    <View style={{ flex: 1 }}>
-                      <Text style={s.tripRowName} numberOfLines={1}>{t.trip_name}</Text>
-                      <Text style={s.tripRowMeta}>{(t.states ?? []).join(' · ')}  ·  {t.duration_days}D  ·  {t.est_miles}MI</Text>
-                    </View>
-                    {isCached && (
-                      <View style={s.offlineBadge}>
-                        <Ionicons name="download-outline" size={10} color="#22c55e" />
-                        <Text style={s.offlineBadgeText}>OFFLINE</Text>
-                      </View>
-                    )}
-                    <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
-                  </TouchableOpacity>
-                  <TouchableOpacity
-                    style={s.tripDeleteBtn}
-                    onPress={() => confirmDeleteTrip(t)}
-                    accessibilityLabel={`Delete ${t.trip_name}`}
-                  >
-                    <Ionicons name="trash-outline" size={15} color={C.red} />
-                  </TouchableOpacity>
-                </View>
-              );
-            })}
-          </TrailheadCard>
-          </>
-        )}
-
-        {profileSection === 'trips' && tripHistory.length === 0 && (
-          <>
-            <TrailheadMetricRow
-              metrics={[
-                { label: 'Saved trips', value: '0', icon: 'map-outline', tone: C.silverBright },
-                { label: 'GPX routes', value: String(importedRouteCount), icon: 'git-branch-outline', tone: C.orange },
-                { label: 'Imported pins', value: String(importedPinCount), icon: 'pin-outline', tone: '#38bdf8' },
-              ]}
-            />
-            <TrailheadCard style={s.historyCard}>
-              <Text style={s.sectionLabel}>TRIPS & GPX</Text>
-              <Text style={s.emptySectionText}>Saved trips and GPX route imports will show up here after you build or import them.</Text>
-              {gpxBatches.length > 0 && (
-                <Text style={s.tripSummaryMeta}>
-                  {importedRouteCount} GPX route {importedRouteCount === 1 ? 'preview' : 'previews'} · {importedPinCount} imported {importedPinCount === 1 ? 'pin' : 'pins'}
-                </Text>
-              )}
-            </TrailheadCard>
-          </>
-        )}
-
-        {profileSection === 'support' && (
+        {profileSection === 'account' && (
         <TouchableOpacity style={s.supportCard} onPress={() => openSupportInbox()} activeOpacity={0.9}>
           <View style={s.supportCardTop}>
             <View style={s.supportCardIcon}>
@@ -1841,52 +1751,6 @@ export default function ProfileScreen() {
           </View>
         )}
 
-        {/* Saved Camps */}
-        {profileSection === 'saved' && favoriteCamps.length > 0 && (
-          <View style={s.historyCard}>
-            <View style={s.sectionLabelRow}>
-              <Ionicons name="heart" size={13} color="#ef4444" />
-              <Text style={s.sectionLabel}>SAVED CAMPS</Text>
-            </View>
-            {favoriteCamps.map(camp => (
-              <TouchableOpacity key={camp.id} style={[s.txRow, { alignItems: 'flex-start', paddingVertical: 8 }]} activeOpacity={0.86} onPress={() => openSavedCampOnMap(camp)}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.txReason, { fontWeight: '700', fontSize: 13 }]} numberOfLines={1}>{camp.name}</Text>
-                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: 'monospace', marginTop: 2 }}>
-                    {camp.land_type || 'Camp'}{camp.cost ? ` · ${camp.cost}` : ''}
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={(event: any) => { event.stopPropagation?.(); toggleFavorite(camp); }} style={{ padding: 4 }}>
-                  <Ionicons name="heart" size={16} color="#ef4444" />
-                </TouchableOpacity>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
-        {/* Saved Locations */}
-        {profileSection === 'saved' && savedPlaces.length > 0 && (
-          <View style={s.historyCard}>
-            <View style={s.sectionLabelRow}>
-              <Ionicons name="bookmark" size={13} color={C.orange} />
-              <Text style={s.sectionLabel}>SAVED LOCATIONS</Text>
-            </View>
-            {savedPlaces.map(place => (
-              <TouchableOpacity key={place.id} style={[s.txRow, { alignItems: 'flex-start', paddingVertical: 8 }]} activeOpacity={0.86} onPress={() => openSavedPlaceOnMap(place)}>
-                <View style={{ flex: 1 }}>
-                  <Text style={[s.txReason, { fontWeight: '700', fontSize: 13 }]} numberOfLines={1}>{place.name}</Text>
-                  <Text style={{ color: C.text3, fontSize: 10, fontFamily: 'monospace', marginTop: 2 }} numberOfLines={1}>
-                    {place.note || `${place.lat.toFixed(5)}, ${place.lng.toFixed(5)}`}
-                  </Text>
-                </View>
-                <TouchableOpacity onPress={(event: any) => { event.stopPropagation?.(); removeSavedPlace(place.id); }} style={{ padding: 4 }}>
-                  <Ionicons name="trash-outline" size={16} color={C.text3} />
-                </TouchableOpacity>
-              </TouchableOpacity>
-            ))}
-          </View>
-        )}
-
         {/* Theme toggle */}
         {profileSection === 'settings' && (
         <TouchableOpacity
@@ -1926,60 +1790,6 @@ export default function ProfileScreen() {
               );
             })}
           </View>
-        </View>
-        )}
-
-        {/* GPX Import */}
-        {profileSection === 'trips' && (
-        <View style={s.gpxCard}>
-          <View style={s.gpxHeader}>
-            <Ionicons name="map-outline" size={18} color={C.orange} />
-            <Text style={s.gpxTitle}>Import GPX</Text>
-          </View>
-          <Text style={s.gpxDesc}>
-            Import GPX tracks as saved route previews and GPX waypoints as map pins. Normal accounts can add 15 waypoint pins per import. Imported points stay untrusted until review, verification, or trusted contributor approval.
-          </Text>
-          {!!gpxResult && (
-            <Text style={[s.gpxResult, gpxResult.startsWith('Import failed') && { color: C.red }]}>
-              {gpxResult}
-            </Text>
-          )}
-          <TouchableOpacity style={[s.gpxBtn, gpxImporting && s.gpxBtnDisabled]}
-            onPress={importGpx} disabled={gpxImporting}>
-            <Ionicons name={gpxImporting ? 'hourglass-outline' : 'cloud-upload-outline'}
-              size={16} color="#fff" />
-            <Text style={s.gpxBtnText}>{gpxImporting ? 'IMPORTING...' : 'SELECT GPX FILE'}</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={s.contributorApplyBtn} onPress={() => setShowContributorApply(true)}>
-            <Ionicons name="shield-checkmark-outline" size={16} color={C.green} />
-            <Text style={s.contributorApplyText}>APPLY AS MAP CONTRIBUTOR</Text>
-          </TouchableOpacity>
-          {gpxBatches.length > 0 && (
-            <View style={s.gpxBatchList}>
-              <Text style={s.gpxBatchHeader}>RECENT GPX IMPORTS</Text>
-              {gpxBatches.slice(0, 5).map(batch => {
-                const hasRoute = !!(batch.routeTripId || batch.routeTripIds?.length);
-                return (
-                  <View key={batch.id} style={s.gpxBatchRow}>
-                    <TouchableOpacity style={s.gpxBatchMain} onPress={() => openGpxBatch(batch)} disabled={!hasRoute}>
-                      <View style={[s.gpxBatchIcon, { borderColor: hasRoute ? C.orange + '55' : C.border }]}>
-                        <Ionicons name={hasRoute ? 'map-outline' : 'location-outline'} size={15} color={hasRoute ? C.orange : C.text3} />
-                      </View>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={s.gpxBatchName} numberOfLines={1}>{batch.routeName || batch.fileName}</Text>
-                        <Text style={s.gpxBatchMeta} numberOfLines={1}>
-                          {batch.routeTripIds?.length || (batch.routeTripId ? 1 : 0)} routes · {batch.importedPins}/{batch.waypointCount} pins · {Math.round(batch.distanceMiles)} mi · review
-                        </Text>
-                      </View>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.gpxBatchDelete} onPress={() => confirmDeleteGpxBatch(batch)}>
-                      <Ionicons name="trash-outline" size={15} color={C.red} />
-                    </TouchableOpacity>
-                  </View>
-                );
-              })}
-            </View>
-          )}
         </View>
         )}
 
@@ -2401,7 +2211,7 @@ export default function ProfileScreen() {
         </Modal>
 
         {/* Contributions */}
-        {profileSection === 'support' && (
+        {profileSection === 'account' && (
         <TouchableOpacity style={s.contributionCard} onPress={openContributions} activeOpacity={0.9}>
           <View style={s.contributionGlow} />
           <View style={s.contestHeader}>
@@ -2432,7 +2242,7 @@ export default function ProfileScreen() {
         )}
 
         {/* Contest */}
-        {profileSection === 'support' && (
+        {profileSection === 'account' && (
         <TouchableOpacity style={s.contestCard} onPress={openContest} activeOpacity={0.9}>
           <View style={s.contestGlow} />
           <View style={s.contestHeader}>
@@ -2506,13 +2316,6 @@ export default function ProfileScreen() {
             </View>
           ))}
         </View>
-        )}
-
-        {profileSection === 'saved' && favoriteCamps.length === 0 && savedPlaces.length === 0 && (
-          <TrailheadCard style={s.historyCard}>
-            <Text style={s.sectionLabel}>SAVED PLACES</Text>
-            <Text style={s.emptySectionText}>Saved camps and bookmarked places will land here after you favorite them from the map or guide.</Text>
-          </TrailheadCard>
         )}
 
         {/* Delete account — required by App Store guideline 5.1.1(v) */}

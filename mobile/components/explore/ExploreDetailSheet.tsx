@@ -4,6 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile, ExploreSourcePackItem, ExploreTrailCard } from '@/lib/api';
 import { mono, useTheme } from '@/lib/design';
 import { ExploreTrailArea } from './ExploreTrailArea';
+import { StaticMapboxPreview, type StaticMapboxPin } from './StaticMapboxPreview';
 import {
   getExploreCategoryColor,
   getExploreCardSummary,
@@ -554,17 +555,6 @@ export function ExploreDetailSheet({
     );
   }
 
-  function pinStyleFor(lat: number, lng: number, bounds: { minLat: number; maxLat: number; minLng: number; maxLng: number }) {
-    const latRange = Math.max(bounds.maxLat - bounds.minLat, 0.015);
-    const lngRange = Math.max(bounds.maxLng - bounds.minLng, 0.015);
-    const left = 10 + 80 * ((lng - bounds.minLng) / lngRange);
-    const top = 88 - 76 * ((lat - bounds.minLat) / latRange);
-    return {
-      left: `${Math.max(6, Math.min(90, left))}%` as any,
-      top: `${Math.max(10, Math.min(82, top))}%` as any,
-    };
-  }
-
   function renderMapPreview({
     items,
     activeItem,
@@ -582,7 +572,7 @@ export function ExploreDetailSheet({
   }) {
     const baseLat = Number(activeItem?.lat ?? place.summary.lat);
     const baseLng = Number(activeItem?.lng ?? place.summary.lng);
-    const childPins = items
+    const childPins: StaticMapboxPin[] = items
       .filter(itemHasCoords)
       .map((item, idx) => ({
         id: String(item.source_id || item.title || idx),
@@ -592,7 +582,7 @@ export function ExploreDetailSheet({
         kind: item.kind || 'place',
         active: activeItem ? item === activeItem || item.source_id === activeItem.source_id : false,
       }));
-    const pins = [
+    const pins: StaticMapboxPin[] = [
       ...(Number.isFinite(Number(place.summary.lat)) && Number.isFinite(Number(place.summary.lng)) ? [{
         id: 'parent',
         title: getExploreDisplayTitle(place),
@@ -614,44 +604,14 @@ export function ExploreDetailSheet({
     const fallbackLat = Number.isFinite(baseLat) ? baseLat : 0;
     const fallbackLng = Number.isFinite(baseLng) ? baseLng : 0;
     const coordPins = pins.length ? pins : [{ id: 'fallback', title, lat: fallbackLat, lng: fallbackLng, kind: 'place', active: true }];
-    const bounds = coordPins.reduce((acc, pin) => ({
-      minLat: Math.min(acc.minLat, pin.lat - 0.01),
-      maxLat: Math.max(acc.maxLat, pin.lat + 0.01),
-      minLng: Math.min(acc.minLng, pin.lng - 0.01),
-      maxLng: Math.max(acc.maxLng, pin.lng + 0.01),
-    }), { minLat: coordPins[0].lat, maxLat: coordPins[0].lat, minLng: coordPins[0].lng, maxLng: coordPins[0].lng });
-    const Wrapper: any = onPress ? TouchableOpacity : View;
     return (
-      <Wrapper style={[styles.mapPreview, { height }]} activeOpacity={0.9} onPress={onPress as any}>
-        <View style={styles.mapPreviewBase}>
-          <View style={[styles.mapContour, styles.mapContourOne]} />
-          <View style={[styles.mapContour, styles.mapContourTwo]} />
-          <View style={[styles.mapContour, styles.mapContourThree]} />
-          <View style={[styles.mapRoad, styles.mapRoadOne]} />
-          <View style={[styles.mapRoad, styles.mapRoadTwo]} />
-          {coordPins.map(pin => {
-            const isCamp = /camp|stay/i.test(pin.kind);
-            const isVisitor = /visitor/i.test(pin.kind);
-            const icon = isCamp ? 'bed-outline' : isVisitor ? 'information-circle-outline' : 'location';
-            return (
-              <View key={pin.id} style={[styles.mapPinWrap, pinStyleFor(pin.lat, pin.lng, bounds)]}>
-                <View style={[styles.mapPin, pin.active && styles.mapPinActive, isCamp && styles.mapPinCamp]}>
-                  <Ionicons name={icon as any} size={pin.active ? 20 : 15} color="#fff" />
-                </View>
-                {pin.active && <Text style={styles.mapPinLabel} numberOfLines={1}>{pin.title}</Text>}
-              </View>
-            );
-          })}
-          <View style={styles.mapPreviewBadge}>
-            <Ionicons name="navigate-outline" size={15} color="#fff" />
-            <Text style={styles.mapPreviewBadgeText}>{coordPins.length} pins</Text>
-          </View>
-          <View style={styles.mapPreviewTitle}>
-            <Text style={styles.mapPreviewTitleText} numberOfLines={2}>{title}</Text>
-            {!!subtitle && <Text style={styles.mapPreviewSubtitle} numberOfLines={1}>{subtitle}</Text>}
-          </View>
-        </View>
-      </Wrapper>
+      <StaticMapboxPreview
+        pins={coordPins}
+        title={title}
+        subtitle={subtitle}
+        height={height}
+        onPress={onPress}
+      />
     );
   }
 

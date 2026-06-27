@@ -338,7 +338,7 @@ interface SearchPlace {
   selection_confidence?: string | null; raw_feature?: Record<string, unknown> | null;
   country_code?: string | null; country?: string | null; region?: string | null; bbox?: number[] | null;
   geocode_status?: string; geocode_reason?: string; geocode_query?: string;
-  type?: string; subtype?: string; address?: string; phone?: string; website?: string;
+  type?: string; subtype?: string; address?: string; phone?: string; website?: string; official_url?: string; booking_url?: string;
   open_now?: boolean | null; rating?: number; rating_count?: number; photo_url?: string | null;
   photos?: TrailheadGalleryPhoto[];
   hours?: string[]; open_hours?: string[] | string | Record<string, unknown> | null; hours_label?: string | null;
@@ -7722,6 +7722,57 @@ function MapScreen() {
       focusMapSelectionPoint({ lat: camp.lat, lng: camp.lng, name: camp.name }, 12, 'place');
       if (camp.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
       if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+      return;
+    }
+    if (pendingMapSelection.kind === 'explorePlace') {
+      const explore = pendingMapSelection.place;
+      const photos: TrailheadGalleryPhoto[] = (explore.photos ?? [])
+        .map((photo, idx) => ({
+          id: idx,
+          url: mediaUrl(photo.url),
+          caption: photo.caption,
+          credit: photo.credit,
+          source: photo.source || explore.sourceLabel || 'Trailhead Explore',
+        }))
+        .filter(photo => !!photo.url);
+      const photoUrl = mediaUrl(explore.imageUrl) || photos[0]?.url || null;
+      setSelectedCamp(null);
+      setCampDetail(null);
+      setCampInsight(null);
+      setWikiArticles([]);
+      setSelectedPlace({
+        id: `explore:${explore.id}`,
+        place_id: explore.id,
+        provider_place_id: explore.id,
+        name: explore.name,
+        lat: explore.lat,
+        lng: explore.lng,
+        type: 'place',
+        subtype: explore.category || 'Explore area',
+        source: 'trailhead_explore',
+        source_label: explore.sourceLabel || 'Trailhead Explore',
+        summary: explore.summary || explore.note || 'Explore area',
+        photo_url: photoUrl,
+        photos,
+        website: explore.officialUrl || explore.sourceUrl,
+        official_url: explore.officialUrl || explore.sourceUrl,
+        source_freshness: explore.freshnessLabel,
+        region: explore.region || null,
+      });
+      setSelectedPlaceContext({
+        loading: true,
+        places: [],
+        camps: [],
+        trails: [],
+        things_to_do: [],
+        things_to_see: [],
+        visitor_centers: [],
+        campgrounds_nearby: [],
+        trip_services: [],
+      });
+      focusMapSelectionPoint({ lat: explore.lat, lng: explore.lng, name: explore.name }, 10.5, 'place');
+      setQuickToast('Explore area opened on map');
+      setTimeout(() => setQuickToast(''), 2200);
       return;
     }
     const isTrailSelection = pendingMapSelection.kind === 'trail';

@@ -637,6 +637,8 @@ export default function GuideScreen() {
   const setUserLoc = useStore(st => st.setUserLoc);
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const setWeatherUnitMode = useStore(st => st.setWeatherUnitMode);
+  const mapboxToken = useStore(st => st.mapboxToken);
+  const setMapboxToken = useStore(st => st.setMapboxToken);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const [guide, setGuide] = useState<Record<string, string>>({});
@@ -692,6 +694,22 @@ export default function GuideScreen() {
   const storyScrollRef = useRef<ScrollView | null>(null);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
+
+  useEffect(() => {
+    if (mapboxToken) return;
+    let cancelled = false;
+    api.getConfig().then(cfg => {
+      const token = cfg.mapbox_token || '';
+      if (!token || cancelled) return;
+      setMapboxToken(token);
+      storage.set('trailhead_mapbox_token', token).catch(() => {});
+    }).catch(() => {
+      storage.get('trailhead_mapbox_token').then(token => {
+        if (!cancelled && token) setMapboxToken(token);
+      }).catch(() => {});
+    });
+    return () => { cancelled = true; };
+  }, [mapboxToken, setMapboxToken]);
 
   useEffect(() => {
     if (requestedView === 'narrations' || requestedView === 'trip-audio') {
@@ -1524,16 +1542,34 @@ export default function GuideScreen() {
   function showExploreOnMap(place: ExplorePlaceProfile) {
     const { lat, lng, title } = place.summary;
     if (lat == null || lng == null) return;
+    const photos = [
+      ...(place.summary.image_url ? [{ url: mediaUrl(place.summary.image_url), source: place.attribution || place.source_pack?.primary }] : []),
+      ...(place.summary.thumbnail_url ? [{ url: mediaUrl(place.summary.thumbnail_url), source: place.attribution || place.source_pack?.primary }] : []),
+      ...((place.source_pack?.photos ?? []).map(photo => ({
+        url: mediaUrl(photo.url),
+        credit: photo.credit,
+        caption: photo.caption,
+        source: place.source_pack?.primary || place.attribution,
+        license: photo.license,
+      }))),
+    ].filter(photo => !!photo.url);
     setPendingMapSelection({
-      kind: 'place',
+      kind: 'explorePlace',
       place: {
-        id: `explore-area:${place.id}`,
+        id: place.id,
         name: title,
         lat: Number(lat),
         lng: Number(lng),
-        icon: 'pin',
+        category: place.category || place.subcategories?.[0],
+        region: place.card?.region,
+        summary: place.profile.summary || place.profile.hook || place.summary.short_description || place.summary.hook,
         note: place.summary.short_description || place.summary.hook || 'Explore area',
-        createdAt: Date.now(),
+        imageUrl: mediaUrl(place.summary.image_url || place.summary.thumbnail_url),
+        photos,
+        sourceLabel: place.source_quality?.primary_name || place.source_pack?.primary || place.attribution || 'Trailhead Explore',
+        sourceUrl: place.summary.source_url || place.facts?.source_url,
+        officialUrl: place.source_pack?.official_url || place.facts?.official_url,
+        freshnessLabel: place.source_quality?.freshness_label || (place.facts?.last_updated ? `Updated ${new Date(Number(place.facts.last_updated) * 1000).toLocaleDateString()}` : ''),
       },
     });
     setSelectedExplore(null);
@@ -1716,7 +1752,14 @@ export default function GuideScreen() {
       const detail = await api.getExplorePlace(place.id);
       setExplorePlaces(prev => prev.map(item => item.id === detail.id ? detail : item));
       const hydrated = exploreTrailAreasById[detail.id] ?? detail;
-      setSelectedExplore(current => current?.id === place.id ? hydrated : current);
+      setSelectedExplore(current => {
+        if (current?.id !== place.id) return current;
+        if (exploreTrailAreasById[detail.id]) return exploreTrailAreasById[detail.id];
+        if (hasExploreTrailCards(current) && !hasExploreTrailCards(detail)) {
+          return mergeDynamicTrailArea(detail, current);
+        }
+        return hydrated;
+      });
       setProfileReadMode(initialTab);
       if (!exploreWeatherById[hydrated.id] && exploreWeatherLoadingId !== hydrated.id) {
         fetchExploreWeather(hydrated).catch(() => {});

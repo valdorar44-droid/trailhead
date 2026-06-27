@@ -1,11 +1,11 @@
-import React, { useMemo, useState } from 'react';
-import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile, ExploreTrailCard } from '@/lib/api';
 import { mono, useTheme } from '@/lib/design';
 import { getExploreDisplayTitle, getExploreTrailCards } from './exploreDisplay';
 
-type TrailFilter = 'all' | 'easy' | 'hard';
+type TrailFilter = 'all' | 'easy' | 'moderate' | 'hard';
 
 type Props = {
   place: ExplorePlaceProfile;
@@ -25,16 +25,28 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
   );
   const areaPhoto = useMemo(() => primaryAreaPhoto(place), [place]);
 
+  useEffect(() => {
+    if (selectedId && !trails.some(trail => trail.id === selectedId)) {
+      setSelectedId(null);
+    }
+  }, [selectedId, trails]);
+
+  useEffect(() => {
+    if (filter !== 'all' && trails.length > 0 && visibleTrails.length === 0) {
+      setFilter('all');
+    }
+  }, [filter, trails.length, visibleTrails.length]);
+
   if (!trails.length) return null;
 
   return (
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.intro}>
         <Text style={[styles.introTitle, { color: C.text }]}>
-          Explore trails in and around {getExploreDisplayTitle(place).replace(/\s+Trails$/i, '')}.
+          Trails near {getExploreDisplayTitle(place).replace(/\s+Trails$/i, '')}
         </Text>
         <Text style={[styles.introText, { color: C.text2 }]}>
-          Pick by distance, type, elevation, and time.
+          Pick a route, preview the basics, then open it on the map.
         </Text>
       </View>
 
@@ -61,7 +73,6 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
         {visibleTrails.map(trail => {
           const selected = selectedId === trail.id;
           const photo = primaryTrailPhoto(trail) || areaPhoto;
-          const sourceLabel = trail.source_label || trail.source_pack?.primary || trail.image_credit || '';
           const featureLabel = trail.feature_label || trail.feature_type?.replace(/_/g, ' ') || 'Trail';
           return (
             <View key={trail.id} style={[styles.trailWrap, { borderColor: selected ? C.orange + '66' : C.border, backgroundColor: C.s2 }]}>
@@ -88,67 +99,29 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                     </Text>
                   </View>
                   <Text style={[styles.trailMeta, { color: C.text2 }]} numberOfLines={1}>
-                    {formatMiles(trail.distance_mi)} · {trail.route_type}
+                    {[formatMiles(trail.distance_mi), formatGain(trail.elevation_gain_ft), trail.route_type].filter(Boolean).join(' · ')}
                   </Text>
                   {!!trail.area && <Text style={[styles.trailArea, { color: C.text3 }]} numberOfLines={1}>{trail.area}</Text>}
-                  {!!sourceLabel && <Text style={[styles.trailSource, { color: C.text3 }]} numberOfLines={1}>{sourceLabel}</Text>}
-                  {!!trail.tags?.length && (
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tagRail}>
-                      {trail.tags.slice(0, 3).map((tag: string) => (
-                        <View key={`${trail.id}-${tag}`} style={[styles.tag, { backgroundColor: C.s3 }]}>
-                          <Text style={[styles.tagText, { color: C.text3 }]}>{tag.toUpperCase()}</Text>
-                        </View>
-                      ))}
-                    </ScrollView>
-                  )}
                 </View>
               </TouchableOpacity>
               {selected && (
                 <View style={[styles.detail, { borderTopColor: C.border }]}>
                   <View style={styles.statGrid}>
                     <TrailStat label="DISTANCE" value={formatMiles(trail.distance_mi)} />
-                    <TrailStat label="TYPE" value={trail.route_type} />
-                    <TrailStat label="GAIN" value={trail.elevation_gain_ft ? `${trail.elevation_gain_ft} ft` : 'Check'} />
+                    <TrailStat label="GAIN" value={formatGain(trail.elevation_gain_ft) || 'Check'} />
                     <TrailStat label="TIME" value={trail.typical_time || 'Check'} />
                   </View>
-                  <Text style={[styles.description, { color: C.text2 }]}>{trail.description || trail.summary}</Text>
+                  <Text style={[styles.description, { color: C.text2 }]} numberOfLines={4}>{trail.description || trail.summary}</Text>
                   {!!photoCredit(trail) && (
                     <Text style={[styles.photoCredit, { color: C.text3 }]} numberOfLines={2}>
                       Photo: {photoCredit(trail)}
                     </Text>
                   )}
-                  <View style={styles.detailsTable}>
-                    {[
-                      ['Difficulty', trail.difficulty],
-                      ['Season', trail.season_window || trail.best_season],
-                      ['Altitude', trail.altitude_ft ? `${trail.altitude_ft.toLocaleString()} ft` : ''],
-                      ['Guide', trail.guide_required ? 'Verify locally' : ''],
-                      ['Permit', trail.permit_note],
-                      ['Map', trail.geometry_ref ? 'Trail line available' : 'Map point'],
-                      ['Dogs', trail.dogs],
-                      ['Bikes', trail.bikes],
-                    ].filter(([, value]) => !!value).map(([label, value]) => (
-                      <View key={label} style={[styles.detailRow, { borderTopColor: C.border }]}>
-                        <Text style={[styles.detailLabel, { color: C.text2 }]}>{label}</Text>
-                        <Text style={[styles.detailValue, { color: C.text }]} numberOfLines={2}>{value}</Text>
-                      </View>
-                    ))}
-                  </View>
-                  {!!trail.highlights?.length && (
-                    <View style={styles.highlights}>
-                      {trail.highlights.slice(0, 4).map((highlight: string) => (
-                        <View key={`${trail.id}-${highlight}`} style={styles.highlightItem}>
-                          <Ionicons name={highlightIcon(highlight) as any} size={22} color="#5f8f3f" />
-                          <Text style={[styles.highlightText, { color: C.text2 }]} numberOfLines={2}>{highlight}</Text>
-                        </View>
-                      ))}
-                    </View>
-                  )}
-                  {!!trail.trekking_only && (
+                  {!!(trail.permit_note || trail.trekking_only) && (
                     <View style={[styles.warningBox, { borderColor: C.orange + '55', backgroundColor: C.orange + '12' }]}>
                       <Ionicons name="warning-outline" size={17} color={C.orange} />
                       <Text style={[styles.warningText, { color: C.text2 }]}>
-                        Route goes to staging. Verify guide, permit, glacier, bridge, weather, and local safety.
+                        {trail.permit_note || 'Verify route, guide, weather, and local safety before heading out.'}
                       </Text>
                     </View>
                   )}
@@ -174,7 +147,8 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
 
 function nextTrailFilter(current: TrailFilter): TrailFilter {
   if (current === 'all') return 'easy';
-  if (current === 'easy') return 'hard';
+  if (current === 'easy') return 'moderate';
+  if (current === 'moderate') return 'hard';
   return 'all';
 }
 
@@ -192,6 +166,11 @@ function formatMiles(mi?: number | null) {
   const value = typeof mi === 'number' ? mi : NaN;
   if (!Number.isFinite(value) || value <= 0) return 'Check';
   return `${value.toFixed(value >= 10 ? 0 : 1)} mi`;
+}
+
+function formatGain(value?: number | null) {
+  if (!Number.isFinite(Number(value)) || Number(value) <= 0) return '';
+  return `${Math.round(Number(value)).toLocaleString()} ft`;
 }
 
 function primaryTrailPhoto(trail: ExploreTrailCard) {
@@ -232,17 +211,6 @@ function difficultyTextColor(value: string) {
   if (text.includes('hard')) return '#b91c1c';
   if (text.includes('moderate')) return '#c2410c';
   return '#4d7c0f';
-}
-
-function highlightIcon(value: string) {
-  const text = value.toLowerCase();
-  if (text.includes('water')) return 'water-outline';
-  if (text.includes('view') || text.includes('summit')) return 'image-outline';
-  if (text.includes('flower') || text.includes('forest') || text.includes('sequoia')) return 'leaf-outline';
-  if (text.includes('family') || text.includes('easy')) return 'people-outline';
-  if (text.includes('permit')) return 'ticket-outline';
-  if (text.includes('exposure') || text.includes('cliff')) return 'warning-outline';
-  return 'trail-sign-outline';
 }
 
 const styles = StyleSheet.create({

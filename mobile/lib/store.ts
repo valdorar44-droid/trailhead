@@ -56,6 +56,23 @@ export interface SavedPlace {
   createdAt: number;
 }
 
+export interface ExploreMapSelection {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  category?: string;
+  region?: string;
+  summary?: string;
+  note?: string;
+  imageUrl?: string;
+  photos?: { url?: string; credit?: string; caption?: string; source?: string; license?: string }[];
+  sourceLabel?: string;
+  sourceUrl?: string;
+  officialUrl?: string;
+  freshnessLabel?: string;
+}
+
 export interface WaterSpot {
   id: string;
   name: string;
@@ -196,6 +213,7 @@ interface AppState {
     | { kind: 'camp'; camp: CampsitePin }
     | { kind: 'place'; place: SavedPlace }
     | { kind: 'trail'; trail: SavedPlace }
+    | { kind: 'explorePlace'; place: ExploreMapSelection }
     | null;
   pendingStartCopilotVoice: boolean;
   pendingOpenOfflineModal: boolean;

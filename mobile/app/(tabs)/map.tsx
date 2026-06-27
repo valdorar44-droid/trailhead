@@ -13571,7 +13571,28 @@ function MapScreen() {
     setSearchResult(null);
     try {
       const [campsResult, fullResult, smartPackResult] = await Promise.allSettled([
-        api.getCampsBbox(bounds.n, bounds.s, bounds.e, bounds.w, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays })
+        api.getDiscoveryContext({
+          bounds: { n: bounds.n, s: bounds.s, e: bounds.e, w: bounds.w },
+          center: { lat: centerLat, lng: centerLng },
+          radius: radiusMi,
+          zoom: bounds.zoom,
+          categories: opts.campOnly
+            ? CAMP_DISCOVERY_PLACE_CATEGORIES.split(',').filter(Boolean)
+            : ['camp', 'camping'],
+          filters: lookupTypes,
+          surface: 'map_camp_discovery',
+          mode: 'light',
+          limit: campLimit,
+          include_stays: includeStays,
+          force_refresh: Boolean(opts.force),
+          stale_after_hours: opts.campOnly ? 6 : 12,
+        })
+          .then(value => {
+            const pins = value.camps?.length ? value.camps : value.pins ?? [];
+            return pins.length > 0
+              ? pins
+              : api.getCampsBbox(bounds.n, bounds.s, bounds.e, bounds.w, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays });
+          })
           .then(value => value.length > 0
             ? value
             : api.getNearbyCamps(centerLat, centerLng, radiusMi, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays })
@@ -18410,7 +18431,11 @@ function MapScreen() {
             <View style={s.campDiscoveryHeader}>
               <View style={s.campDiscoveryTitleWrap}>
                 <Text style={s.campDiscoveryTitle}>
-                  {campDiscoveryRefreshing ? 'Searching camps' : `${currentDiscoveryCamps.length} Camps`}
+                  {campDiscoveryRefreshing
+                    ? 'Searching camps'
+                    : currentDiscoveryCamps.length > 0
+                      ? `${currentDiscoveryCamps.length} Camps`
+                      : 'Camps nearby'}
                 </Text>
                 <Text style={s.campDiscoverySub} numberOfLines={1}>
                   {campDiscoveryWideActive ? 'Camps, RV parks, and stays' : activeCampFilterLabel}
@@ -19802,8 +19827,10 @@ function MapScreen() {
               <View style={s.campDiscoveryTitleWrap}>
                 <Text style={s.campDiscoveryTitle}>
                   {discoveryMode === 'trails'
-                    ? isSearchingTrails ? 'Searching trails' : `${trailDiscoveries.length} Trails`
-                    : `${currentDiscoveryCamps.length} Camps`}
+                    ? isSearchingTrails
+                      ? 'Searching trails'
+                      : trailDiscoveries.length > 0 ? `${trailDiscoveries.length} Trails` : 'Trails nearby'
+                    : currentDiscoveryCamps.length > 0 ? `${currentDiscoveryCamps.length} Camps` : 'Camps nearby'}
                 </Text>
                 <Text style={s.campDiscoverySub} numberOfLines={1}>
                   {discoveryMode === 'trails'

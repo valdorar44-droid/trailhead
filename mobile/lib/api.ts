@@ -5,6 +5,45 @@ import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } fr
 const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 
+export type DiscoveryContextRequest = {
+  bounds?: { n: number; s: number; e: number; w: number };
+  center?: { lat: number; lng: number };
+  radius?: number;
+  zoom?: number;
+  categories?: string[];
+  filters?: string[];
+  route?: [number, number][];
+  surface?: string;
+  mode?: 'full' | 'light';
+  limit?: number;
+  include_stays?: boolean;
+  force_refresh?: boolean;
+  stale_after_hours?: number;
+};
+
+export type DiscoveryContextResponse = {
+  context_id: string;
+  surface?: string;
+  center: { lat: number; lng: number };
+  bounds: { n: number; s: number; e: number; w: number };
+  radius: number;
+  zoom?: number;
+  categories: string[];
+  filters: string[];
+  pins: CampsitePin[];
+  camps: CampsitePin[];
+  places: OsmPoi[];
+  source_counts?: Record<string, number>;
+  errors?: Record<string, string>;
+  cache?: {
+    status?: 'hit' | 'miss' | 'refresh' | string;
+    key?: string;
+    refresh_after_hours?: number;
+    stale_supported?: boolean;
+  };
+  timings?: { total_ms?: number };
+};
+
 async function getToken(): Promise<string | null> {
   return storage.get('trailhead_token');
 }
@@ -695,6 +734,24 @@ export const api = {
   getCampsBbox: (n: number, s: number, e: number, w: number, types: string[] = [], opts: { limit?: number; mode?: 'full' | 'light'; stays?: boolean } = {}) =>
     req<CampsitePin[]>(`/api/camps/bbox?n=${n}&s=${s}&e=${e}&w=${w}&types=${types.join(',')}&limit=${opts.limit ?? 360}&mode=${encodeURIComponent(opts.mode ?? 'light')}&stays=${opts.stays ? '1' : '0'}`)
       .then(canonicalizeCampsitePins),
+  getDiscoveryContext: (data: DiscoveryContextRequest) =>
+    guardedRequest(
+      `discovery-context:${data.surface ?? 'map'}:${data.bounds ? `${stableNumber(data.bounds.n, 3)}:${stableNumber(data.bounds.s, 3)}:${stableNumber(data.bounds.e, 3)}:${stableNumber(data.bounds.w, 3)}` : ''}:${data.center ? `${stableNumber(data.center.lat, 3)}:${stableNumber(data.center.lng, 3)}` : ''}:${Math.round(data.radius ?? 35)}:${Math.round(data.zoom ?? 0)}:${(data.categories ?? []).map(c => c.trim()).filter(Boolean).sort().join(',')}:${(data.filters ?? []).map(c => c.trim()).filter(Boolean).sort().join(',')}:${data.include_stays ? 'stays' : 'camps'}:${data.force_refresh ? 'force' : 'cache'}`,
+      data.force_refresh ? 15_000 : 2 * 60_000,
+      () => req<DiscoveryContextResponse>('/api/discovery/context', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }).then(res => {
+        const camps = canonicalizeCampsitePins(res.camps ?? []);
+        const pins = canonicalizeCampsitePins((res.pins?.length ? res.pins : res.camps) ?? []);
+        return {
+          ...res,
+          camps,
+          pins,
+          places: res.places ?? [],
+        };
+      }),
+    ),
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
   getNearbyPlaces: (lat: number, lng: number, radius = 25, categories = 'fuel,water,trailhead,viewpoint', provider: 'auto' | 'geoapify' | 'google' | 'foursquare' | 'osm' | 'nps' | 'blm' | 'usfs' = 'auto') =>

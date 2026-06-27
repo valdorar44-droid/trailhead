@@ -4966,6 +4966,21 @@ class NearbySmartPackRequest(BaseModel):
     recommended_day: Optional[int] = None
     route_scope: str = "area"
 
+class DiscoveryContextRequest(BaseModel):
+    bounds: PlannerBounds | None = None
+    center: PlannerPoint | None = None
+    radius: float = 35
+    zoom: Optional[float] = None
+    categories: list[str] = Field(default_factory=list)
+    filters: list[str] = Field(default_factory=list)
+    route: list[list[float]] = Field(default_factory=list)
+    surface: str = "map"
+    mode: str = "light"
+    limit: int = 300
+    include_stays: bool = False
+    force_refresh: bool = False
+    stale_after_hours: int = 12
+
 class RouteIntelligenceRequest(BaseModel):
     route: list[list[float]] = Field(default_factory=list)
     center: Optional[PlannerPoint] = None
@@ -13040,6 +13055,228 @@ async def _aggregate_nearby_camps(
 async def nearby_camps(lat: float, lng: float, radius: float = 50, types: str = "", limit: int = CAMP_DISCOVERY_DEFAULT_LIMIT, mode: str = "full", stays: bool = False):
     """Aggregate legal camp sources near a point, no trip required."""
     return await _aggregate_nearby_camps(lat, lng, radius, types, limit=limit, mode=mode, include_private=stays)
+
+def _discovery_bounds_from_request(body: DiscoveryContextRequest) -> tuple[float, float, float, float, float, float, float]:
+    if body.bounds:
+        n = max(float(body.bounds.n), float(body.bounds.s))
+        s = min(float(body.bounds.n), float(body.bounds.s))
+        e = max(float(body.bounds.e), float(body.bounds.w))
+        w = min(float(body.bounds.e), float(body.bounds.w))
+        lat = (n + s) / 2
+        lng = (e + w) / 2
+        lat_span_mi = abs(n - s) * 69.0
+        lng_span_mi = abs(e - w) * 69.0 * max(0.25, math.cos(math.radians(lat)))
+        radius_mi = max(2.0, min(max(lat_span_mi, lng_span_mi) / 2 + 5, 180.0))
+        return n, s, e, w, lat, lng, radius_mi
+    if not body.center:
+        raise HTTPException(400, "bounds or center is required")
+    lat = float(body.center.lat)
+    lng = float(body.center.lng)
+    radius_mi = max(2.0, min(float(body.radius or 35), 180.0))
+    lat_delta = radius_mi / 69.0
+    lng_delta = radius_mi / (69.0 * max(0.25, math.cos(math.radians(lat))))
+    return lat + lat_delta, lat - lat_delta, lng + lng_delta, lng - lng_delta, lat, lng, radius_mi
+
+def _discovery_cache_key(
+    body: DiscoveryContextRequest,
+    bounds: tuple[float, float, float, float],
+    type_filters: list[str] | None,
+    requested_categories: set[str],
+) -> str:
+    n, s, e, w = bounds
+    zoom_bucket = int(round(float(body.zoom if body.zoom is not None else 0)))
+    snapped = [
+        round(round(value / 0.05) * 0.05, 2)
+        for value in (n, s, e, w)
+    ]
+    filter_key = ",".join(sorted(type_filters or [])) or "all"
+    category_key = ",".join(sorted(requested_categories)) or "camp"
+    mode = "light" if str(body.mode or "").lower() in {"light", "pin", "pins", "map"} else "full"
+    surface = re.sub(r"[^a-z0-9_-]+", "_", str(body.surface or "map").lower())[:40] or "map"
+    return (
+        f"discovery_context:v1:{surface}:z{zoom_bucket}:{mode}:"
+        f"{int(bool(body.include_stays))}:{max(1, min(int(body.limit or 300), CAMP_DISCOVERY_MAX_LIMIT))}:"
+        f"{filter_key}:{category_key}:{snapped[0]:.2f}:{snapped[1]:.2f}:{snapped[2]:.2f}:{snapped[3]:.2f}"
+    )
+
+def _place_in_bounds(item: dict, n: float, s: float, e: float, w: float) -> bool:
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return False
+    return s <= lat <= n and w <= lng <= e
+
+async def _load_camp_discovery_area(
+    *,
+    n: float,
+    s: float,
+    e: float,
+    w: float,
+    lat: float,
+    lng: float,
+    radius_miles: float,
+    type_filters: list[str] | None,
+    include_private: bool,
+    limit: int,
+    mode: str,
+) -> dict:
+    private_stay_categories = _camp_private_stay_categories(type_filters, include_private=include_private)
+    active_filters = {
+        "group_site": bool(type_filters and "group" in type_filters),
+        "rv": bool(type_filters and "rv" in type_filters),
+        "tent": bool(type_filters and "tent" in type_filters),
+    }
+    radius_m = int(min(radius_miles, 180.0) * 1609.344)
+    tasks: list[tuple[str, Any]] = [
+        ("ridb", get_campsites_search(lat, lng, radius_miles=radius_miles, type_filters=type_filters)),
+        ("blm", get_blm_campsites(lat, lng, radius_miles=radius_miles)),
+        ("osm", get_osm_campsites(lat, lng, radius_m=radius_m)),
+        ("active", get_active_campgrounds(lat, lng, radius_miles=radius_miles, filters=active_filters)),
+    ]
+    if private_stay_categories:
+        tasks.append((
+            "geoapify",
+            get_geoapify_places(
+                lat,
+                lng,
+                radius_m=int(min(radius_miles, 65) * 1609.344),
+                categories=private_stay_categories,
+                limit_per_category=18,
+            ),
+        ))
+    for idx, task in enumerate(_international_camp_tasks(lat, lng, radius_miles, type_filters)):
+        tasks.append((f"international_{idx + 1}", task))
+
+    results = await asyncio.gather(*(task for _, task in tasks), return_exceptions=True)
+    source_counts: dict[str, int] = {}
+    source_errors: dict[str, str] = {}
+    source_batches: list[list[dict]] = []
+    for (name, _), result in zip(tasks, results):
+        if isinstance(result, Exception):
+            source_counts[name] = 0
+            source_errors[name] = str(result)
+            continue
+        raw_batch = result if isinstance(result, list) else []
+        if name == "geoapify":
+            raw_batch = [_camp_from_live_place(place) for place in raw_batch if isinstance(place, dict)]
+            raw_batch = [camp for camp in raw_batch if camp]
+        in_box = [camp for camp in raw_batch if isinstance(camp, dict) and _place_in_bounds(camp, n, s, e, w)]
+        source_counts[name] = len(in_box)
+        source_batches.append(in_box)
+
+    merged = _merge_camp_sources(*source_batches, type_filters=type_filters)
+    pins = _camp_discovery_response(merged, mode=mode, limit=limit)
+    source_counts["merged"] = len(pins)
+    return {
+        "camps": pins,
+        "source_counts": source_counts,
+        "source_errors": source_errors,
+    }
+
+@app.post("/api/discovery/context")
+async def discovery_context(body: DiscoveryContextRequest, user: dict | None = Depends(_optional_user)):
+    """Shared app discovery bridge for map, Explorer, route planning, and Copilot."""
+    started = time.time()
+    n, s, e, w, lat, lng, radius_miles = _discovery_bounds_from_request(body)
+    requested_categories = {_normalize_place_category(c) for c in body.categories if str(c).strip()}
+    if not requested_categories:
+        requested_categories = {"camp", "camping"}
+    type_filters = [str(t).strip() for t in body.filters if str(t).strip()]
+    mode = "light" if str(body.mode or "").lower() in {"light", "pin", "pins", "map"} else "full"
+    limit = max(1, min(int(body.limit or 300), CAMP_DISCOVERY_MAX_LIMIT))
+    include_private = bool(
+        body.include_stays
+        or not type_filters
+        or _private_stay_requested(type_filters)
+        or bool(requested_categories.intersection(PRIVATE_STAY_PLACE_TYPES | {"private"}))
+    )
+    cache_key = _discovery_cache_key(body, (n, s, e, w), type_filters, requested_categories)
+    ttl_seconds = max(900, min(int(body.stale_after_hours or 12) * 3600, 7 * 86400))
+    if not body.force_refresh:
+        cached = get_cached("campsite_cache", cache_key, ttl_seconds=ttl_seconds)
+        if isinstance(cached, dict):
+            cached["cache"] = {
+                **(cached.get("cache") or {}),
+                "status": "hit",
+                "key": cache_key,
+                "refresh_after_hours": round(ttl_seconds / 3600, 1),
+            }
+            cached["timings"] = {"total_ms": round((time.time() - started) * 1000, 1)}
+            return cached
+
+    camp_like_categories = {"camp", "camps", "camping"} | PRIVATE_STAY_PLACE_TYPES | {"private"}
+    camp_requested = bool(requested_categories.intersection(camp_like_categories))
+    if camp_requested:
+        camp_like_categories = camp_like_categories | {"lodging", "stay"}
+    place_categories = sorted(c for c in requested_categories if c not in camp_like_categories)
+    camps: list[dict] = []
+    places: list[dict] = []
+    source_counts: dict[str, int] = {}
+    errors: dict[str, str] = {}
+
+    if camp_requested:
+        camp_result = await _load_camp_discovery_area(
+            n=n,
+            s=s,
+            e=e,
+            w=w,
+            lat=lat,
+            lng=lng,
+            radius_miles=radius_miles,
+            type_filters=type_filters or None,
+            include_private=include_private,
+            limit=limit,
+            mode=mode,
+        )
+        camps = camp_result.get("camps") or []
+        source_counts.update(camp_result.get("source_counts") or {})
+        errors.update(camp_result.get("source_errors") or {})
+
+    if place_categories:
+        try:
+            pack = await nearby_smart_pack(NearbySmartPackRequest(
+                center=PlannerPoint(lat=lat, lng=lng),
+                radius=min(radius_miles, 70.0),
+                categories=place_categories,
+                route=body.route,
+                scope_id=f"discovery:{str(body.surface or 'map')[:30]}",
+                route_scope="area",
+            ), user if isinstance(user, dict) else None)
+            if isinstance(pack, dict):
+                places = [
+                    item for item in (pack.get("places") or [])
+                    if isinstance(item, dict) and _place_in_bounds(item, n, s, e, w)
+                ][:limit]
+                for key, value in (pack.get("errors") or {}).items():
+                    errors[f"places:{key}"] = str(value)
+        except Exception as exc:
+            errors["places"] = str(exc)
+
+    response = {
+        "context_id": cache_key,
+        "surface": body.surface or "map",
+        "center": {"lat": lat, "lng": lng},
+        "bounds": {"n": n, "s": s, "e": e, "w": w},
+        "radius": radius_miles,
+        "zoom": body.zoom,
+        "categories": sorted(requested_categories),
+        "filters": type_filters,
+        "pins": camps,
+        "camps": camps,
+        "places": places,
+        "source_counts": source_counts,
+        "errors": errors,
+        "cache": {
+            "status": "miss" if not body.force_refresh else "refresh",
+            "key": cache_key,
+            "refresh_after_hours": round(ttl_seconds / 3600, 1),
+            "stale_supported": True,
+        },
+        "timings": {"total_ms": round((time.time() - started) * 1000, 1)},
+    }
+    set_cached("campsite_cache", cache_key, response)
+    return response
 
 
 def _route_points_from_body(route: list[dict]) -> list[dict]:

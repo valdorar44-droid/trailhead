@@ -19,14 +19,24 @@ _CAMP_QUERY = """
   node["tourism"="wilderness_hut"](around:{radius},{lat},{lng});
   node["tourism"="alpine_hut"](around:{radius},{lat},{lng});
   node["amenity"="camping"](around:{radius},{lat},{lng});
+  node["amenity"="shelter"](around:{radius},{lat},{lng});
   node["shelter_type"="basic_hut"](around:{radius},{lat},{lng});
+  node["shelter_type"="lean_to"](around:{radius},{lat},{lng});
+  node["shelter_type"="weather_shelter"](around:{radius},{lat},{lng});
+  node["shelter_type"="rock_shelter"](around:{radius},{lat},{lng});
+  node["backcountry"="yes"](around:{radius},{lat},{lng});
   way["tourism"="camp_site"](around:{radius},{lat},{lng});
   way["tourism"="caravan_site"](around:{radius},{lat},{lng});
   way["tourism"="camp_pitch"](around:{radius},{lat},{lng});
   way["tourism"="wilderness_hut"](around:{radius},{lat},{lng});
   way["tourism"="alpine_hut"](around:{radius},{lat},{lng});
   way["amenity"="camping"](around:{radius},{lat},{lng});
+  way["amenity"="shelter"](around:{radius},{lat},{lng});
   way["shelter_type"="basic_hut"](around:{radius},{lat},{lng});
+  way["shelter_type"="lean_to"](around:{radius},{lat},{lng});
+  way["shelter_type"="weather_shelter"](around:{radius},{lat},{lng});
+  way["shelter_type"="rock_shelter"](around:{radius},{lat},{lng});
+  way["backcountry"="yes"](around:{radius},{lat},{lng});
 );
 out center tags 60;
 """
@@ -451,7 +461,7 @@ def _osm_site_types(tags: dict) -> list[str]:
         site_types.append("Camp pitch")
     if tourism == "caravan_site":
         site_types.append("RV / caravan")
-    if tourism in {"wilderness_hut", "alpine_hut"} or tags.get("shelter_type") == "basic_hut":
+    if tourism in {"wilderness_hut", "alpine_hut"} or tags.get("shelter_type") in {"basic_hut", "lean_to", "weather_shelter", "rock_shelter"}:
         site_types.append("Backcountry shelter")
     if tags.get("tents") == "yes":
         site_types.append("Tent")
@@ -476,6 +486,14 @@ def _normalize_osm_camp(el: dict) -> dict | None:
     tents = _tag(el, "tents", "")
     caravans = _tag(el, "caravans", "")
     tourism = _tag(el, "tourism", "")
+    amenity = _tag(el, "amenity", "")
+    shelter_type = _tag(el, "shelter_type", "")
+    camp_tourism = {"camp_site", "caravan_site", "camp_pitch", "wilderness_hut", "alpine_hut"}
+    overnight_shelters = {"basic_hut", "lean_to", "weather_shelter", "rock_shelter"}
+    backcountry_yes = _tag(el, "backcountry", "") == "yes"
+    if tourism not in camp_tourism and amenity != "camping" and shelter_type not in overnight_shelters:
+        if not (backcountry_yes and (tents == "yes" or _tag(el, "camp_site", "") or _tag(el, "camping", ""))):
+            return None
     tags = []
     if tents in ("yes", "") and tourism not in {"caravan_site"}:
         tags.append("tent")
@@ -483,9 +501,14 @@ def _normalize_osm_camp(el: dict) -> dict | None:
         tags.append("rv")
     if tourism == "camp_pitch":
         tags.append("dispersed")
-    if tourism in {"wilderness_hut", "alpine_hut"} or _tag(el, "shelter_type") == "basic_hut":
+    if tourism in {"wilderness_hut", "alpine_hut"} or shelter_type in {"basic_hut", "lean_to", "weather_shelter", "rock_shelter"}:
         tags.append("walk_in")
-    if _tag(el, "backcountry", "") == "yes":
+    if backcountry_yes:
+        tags.append("dispersed")
+        tags.append("backcountry")
+    if _tag(el, "informal", "") == "yes":
+        tags.append("dispersed")
+    if _tag(el, "impromptu", "") == "yes":
         tags.append("dispersed")
     operator = _tag(el, "operator:type", "")
     if "national_park" in operator.lower() or "nps" in _tag(el, "operator", "").lower():

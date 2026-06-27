@@ -30,6 +30,9 @@ final class TileServer {
     private let lock = NSLock()   // guards reader swaps
 
     let port: UInt16 = 57832
+    private let vectorMaxZoom = 15
+    private let contourMaxZoom = 12
+    private let trailMaxZoom = 15
 
     // ── Start server (call once on app launch) ────────────────────────────────
     func start() throws {
@@ -150,6 +153,8 @@ final class TileServer {
         guard let z = Int(rng(2)), let x = Int(rng(3)), let y = Int(rng(4)) else {
             respond(fd: fd, status: 400, body: Data()); return
         }
+        let maxZoom = lane == "contours" ? contourMaxZoom : lane == "trails" ? trailMaxZoom : vectorMaxZoom
+        let coord = overzoom(z: z, x: x, y: y, maxZoom: maxZoom)
 
         // Snapshot readers under lock so a swap mid-request is safe
         lock.lock()
@@ -161,12 +166,12 @@ final class TileServer {
 
         let data: Data?
         if lane == "contours" {
-            data = (cr?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
+            data = (cr?.tile(z: coord.z, x: coord.x, y: coord.y)).flatMap { $0.isEmpty ? nil : $0 }
         } else if lane == "trails" {
-            data = (tr?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
+            data = (tr?.tile(z: coord.z, x: coord.x, y: coord.y)).flatMap { $0.isEmpty ? nil : $0 }
         } else {
-            data = (sr?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
-                ?? (br?.tile(z: z, x: x, y: y)).flatMap { $0.isEmpty ? nil : $0 }
+            data = (sr?.tile(z: coord.z, x: coord.x, y: coord.y)).flatMap { $0.isEmpty ? nil : $0 }
+                ?? (br?.tile(z: coord.z, x: coord.x, y: coord.y)).flatMap { $0.isEmpty ? nil : $0 }
         }
 
         if let data {
@@ -250,5 +255,11 @@ final class TileServer {
     private func sendString(_ fd: Int32, _ s: String) {
         guard let d = s.data(using: .utf8) else { return }
         d.withUnsafeBytes { _ = Darwin.send(fd, $0.baseAddress!, d.count, 0) }
+    }
+
+    private func overzoom(z: Int, x: Int, y: Int, maxZoom: Int) -> (z: Int, x: Int, y: Int) {
+        guard z > maxZoom else { return (z, x, y) }
+        let shift = min(z - maxZoom, 30)
+        return (maxZoom, x >> shift, y >> shift)
     }
 }

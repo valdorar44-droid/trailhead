@@ -5,7 +5,8 @@
  * Key principle: highways must be thick + bright at z3-z5 so users can
  * orient themselves when zoomed out to a 200-mile view. OSM achieves this
  * with thick red interstates; we use bright orange (#e89428) on a dark field.
- * City labels use Protomaps "rank" (NOT "population_rank") — lower rank = bigger city.
+ * City labels use the tile-provided min_zoom first. Older packs may only have
+ * rank/population_rank, so filters fall back gracefully instead of hiding towns.
  */
 
 export type MapMode = 'satellite' | 'topo' | 'hybrid' | 'light' | 'city' | 'contrast' | 'desert' | 'snow' | 'dark' | 'red' | 'extreme';
@@ -59,6 +60,28 @@ const MAP_STYLE_PALETTES: Record<Exclude<MapMode, 'satellite' | 'hybrid' | 'extr
   red: { land: '#12090b', earth: '#180d10', water: '#1e1b4b', park: '#251112', forest: '#211011', grass: '#2a1610', residential: '#201013', wetland: '#1f191f', minorRoad: '#fca5a5', majorRoad: '#ef4444', trunkRoad: '#f97316', casing: '#060202', halo: '#080303' },
 };
 const WETLAND_KINDS = ['wetland', 'marsh', 'swamp', 'bog', 'mud', 'saltmarsh', 'tidalflat', 'wetland_noveg'];
+const USEFUL_POI_LABEL_KINDS = [
+  'restaurant',
+  'cafe',
+  'fast_food',
+  'bar',
+  'pub',
+  'hotel',
+  'motel',
+  'museum',
+  'viewpoint',
+  'attraction',
+  'parking',
+  'fuel',
+  'supermarket',
+  'convenience',
+  'pharmacy',
+  'hospital',
+  'toilets',
+  'drinking_water',
+  'information',
+  'picnic_site',
+];
 export type ContourSourceMode = 'none' | 'online' | 'local';
 export type TrailSourceMode = 'none' | 'online' | 'local';
 
@@ -207,6 +230,13 @@ export function buildMapStyle(
   const fillOp = sat ? 0 : hyb ? 0.4 : 1;
   const roadOp = sat ? 0 : 1;
   const labelOp = sat ? 0 : 1;
+  const placeMinZoom = [
+    'case',
+    ['has', 'min_zoom'], ['to-number', ['get', 'min_zoom']],
+    ['has', 'rank'], ['to-number', ['get', 'rank']],
+    ['has', 'population_rank'], ['-', 16, ['min', ['to-number', ['get', 'population_rank']], 15]],
+    99,
+  ];
 
   const layers: object[] = [
     // Background must read as land, not water. Some vector tiles are sparse or
@@ -312,7 +342,7 @@ export function buildMapStyle(
           ],
           'text-size': ['interpolate', ['linear'], ['zoom'], 12, 9, 15, 11],
           'text-font': ['Noto Sans Medium'],
-          'text-repeat': 500,
+          'symbol-spacing': 500,
         },
         paint: {
           'text-color': hyb ? '#ffe7b8' : '#b39a68',
@@ -359,7 +389,7 @@ export function buildMapStyle(
           'text-field': ['get', 'name'],
           'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 16, 12],
           'text-font': ['Noto Sans Medium'],
-          'text-repeat': 380,
+          'symbol-spacing': 380,
         },
         paint: {
           'text-color': sat ? '#fde68a' : '#d69b3a',
@@ -473,7 +503,7 @@ export function buildMapStyle(
           'text-field': ['coalesce', ['get', 'depth_label'], ['concat', ['to-string', ['get', 'depth_ft']], "'"]],
           'text-size': 10,
           'text-font': ['Noto Sans Bold'],
-          'text-repeat': 340,
+          'symbol-spacing': 340,
           'text-rotation-alignment': 'map',
           'text-keep-upright': true,
         },
@@ -584,6 +614,20 @@ export function buildMapStyle(
       filter: ['==', ['get', 'kind'], 'trailhead'],
       paint: { 'circle-radius': 5, 'circle-color': '#22c55e', 'circle-stroke-width': 1.5, 'circle-stroke-color': '#fff', 'circle-opacity': labelOp } },
 
+    { id: 'building-footprint', type: 'fill', source: pmId, 'source-layer': 'buildings',
+      minzoom: 15,
+      paint: {
+        'fill-color': mapboxRasterBase ? '#f5f0e8' : '#3a4350',
+        'fill-opacity': sat ? 0.18 : hyb ? 0.16 : 0.28,
+      } },
+    { id: 'building-outline', type: 'line', source: pmId, 'source-layer': 'buildings',
+      minzoom: 16,
+      paint: {
+        'line-color': mapboxRasterBase ? 'rgba(255,255,255,0.58)' : '#596271',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 16, 0.25, 18, 0.65],
+        'line-opacity': sat ? 0.18 : hyb ? 0.22 : 0.38,
+      } },
+
     ...(showTerrain ? [
       { id: 'building-extrusion', type: 'fill-extrusion', source: pmId, 'source-layer': 'buildings',
         minzoom: 15,
@@ -634,7 +678,7 @@ export function buildMapStyle(
         'text-field': ['coalesce', ['get', 'shield_text'], ['get', 'ref'], ['get', 'network']],
         'text-size': ['interpolate', ['linear'], ['zoom'], 6, 9, 10, 11, 14, 12],
         'text-font': ['Noto Sans Bold'],
-        'text-repeat': 260,
+        'symbol-spacing': 260,
         'text-padding': 3,
         'text-rotation-alignment': 'map',
         'text-keep-upright': true,
@@ -657,7 +701,7 @@ export function buildMapStyle(
         'text-font': ['Noto Sans Medium'],
         'symbol-placement': 'line',
         'text-max-width': 12,
-        'text-repeat': 360,
+        'symbol-spacing': 360,
         'text-offset': [0, 0.78],
         'text-rotation-alignment': 'map',
         'text-keep-upright': true,
@@ -672,7 +716,7 @@ export function buildMapStyle(
         'text-font': ['Noto Sans Medium'],
         'symbol-placement': 'line',
         'text-max-width': 10,
-        'text-repeat': 320,
+        'symbol-spacing': 320,
         'text-offset': [0, 0.68],
         'text-rotation-alignment': 'map',
         'text-keep-upright': true,
@@ -687,7 +731,7 @@ export function buildMapStyle(
         'text-font': ['Noto Sans Medium'],
         'symbol-placement': 'line',
         'text-max-width': 10,
-        'text-repeat': 260,
+        'symbol-spacing': 260,
         'text-offset': [0, 0.62],
         'text-rotation-alignment': 'map',
         'text-keep-upright': true,
@@ -699,6 +743,27 @@ export function buildMapStyle(
       minzoom: 7,
       layout: { 'text-field': ['get', 'name'], 'text-size': 10, 'text-font': ['Noto Sans Italic'], 'text-max-width': 9 },
       paint: { 'text-color': '#5faa6a', 'text-halo-color': lwHalo, 'text-halo-width': 1.6, 'text-opacity': labelOp } },
+
+    { id: 'poi-label', type: 'symbol', source: pmId, 'source-layer': 'pois',
+      minzoom: 15,
+      filter: ['all',
+        ['has', 'name'],
+        ['in', ['coalesce', ['get', 'kind'], ''], ['literal', USEFUL_POI_LABEL_KINDS]],
+      ],
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 15, 10, 17, 11.5],
+        'text-font': ['Noto Sans Regular'],
+        'text-max-width': 8,
+        'text-offset': [0, 0.7],
+        'text-anchor': 'top',
+      },
+      paint: {
+        'text-color': sat ? '#fff7ed' : '#b8bfca',
+        'text-halo-color': lwHalo,
+        'text-halo-width': 1.7,
+        'text-opacity': labelOp,
+      } },
 
     // Country labels z2-z5
     { id: 'place-country', type: 'symbol', source: pmId, 'source-layer': 'places',
@@ -716,31 +781,49 @@ export function buildMapStyle(
         'text-font': ['Noto Sans Regular'], 'text-transform': 'uppercase', 'text-letter-spacing': 0.08 },
       paint: { 'text-color': '#4a5a70', 'text-halo-color': lwHalo, 'text-halo-width': 1.2, 'text-opacity': labelOp } },
 
-    // FIXED: Protomaps v4 uses 'rank' (1=most important) NOT 'population_rank'
-    // rank 1-4: major metros (Chicago, KC, Omaha…) from z3
+    // Major places use min_zoom from the current Trailhead tile packs. That
+    // keeps towns/cities visible even when the pack exposes population_rank
+    // instead of rank.
     { id: 'place-large', type: 'symbol', source: pmId, 'source-layer': 'places',
       minzoom: 3,
-      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['<=', ['coalesce', ['get', 'rank'], 99], 4]],
+      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['<=', placeMinZoom, 5]],
       layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 3, 11, 8, 18, 12, 22],
         'text-font': ['Noto Sans Medium'] },
       paint: { 'text-color': '#e6e9f1', 'text-halo-color': lwHalo, 'text-halo-width': 2.5, 'text-opacity': labelOp } },
 
-    // rank 5-7: cities (Topeka, Wichita, Lincoln…) from z5
     { id: 'place-medium', type: 'symbol', source: pmId, 'source-layer': 'places',
       minzoom: 5,
       filter: ['all', ['==', ['get', 'kind'], 'locality'],
-        ['>', ['coalesce', ['get', 'rank'], 99], 4],
-        ['<=', ['coalesce', ['get', 'rank'], 99], 7]],
+        ['>', placeMinZoom, 5],
+        ['<=', placeMinZoom, 8]],
       layout: { 'text-field': ['get', 'name'], 'text-size': ['interpolate', ['linear'], ['zoom'], 5, 10, 10, 15, 14, 18],
         'text-font': ['Noto Sans Medium'] },
       paint: { 'text-color': '#cdd2dd', 'text-halo-color': lwHalo, 'text-halo-width': 2, 'text-opacity': labelOp } },
 
-    // rank > 7: towns from z8
     { id: 'place-small', type: 'symbol', source: pmId, 'source-layer': 'places',
       minzoom: 8,
-      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['>', ['coalesce', ['get', 'rank'], 99], 7]],
+      filter: ['all', ['==', ['get', 'kind'], 'locality'], ['>', placeMinZoom, 8]],
       layout: { 'text-field': ['get', 'name'], 'text-size': 11, 'text-font': ['Noto Sans Regular'] },
       paint: { 'text-color': '#a3aab9', 'text-halo-color': lwHalo, 'text-halo-width': 1.8, 'text-opacity': labelOp } },
+
+    { id: 'place-neighborhood', type: 'symbol', source: pmId, 'source-layer': 'places',
+      minzoom: 13,
+      filter: ['all',
+        ['has', 'name'],
+        ['in', ['coalesce', ['get', 'kind'], ''], ['literal', ['neighbourhood', 'neighborhood', 'suburb', 'quarter']]],
+      ],
+      layout: {
+        'text-field': ['get', 'name'],
+        'text-size': ['interpolate', ['linear'], ['zoom'], 13, 10, 16, 12],
+        'text-font': ['Noto Sans Regular'],
+        'text-max-width': 8,
+      },
+      paint: {
+        'text-color': sat ? '#f8fafc' : '#8993a3',
+        'text-halo-color': lwHalo,
+        'text-halo-width': 1.6,
+        'text-opacity': labelOp,
+      } },
     );
   }
 

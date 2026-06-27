@@ -11,6 +11,9 @@ import java.util.concurrent.Executors
  */
 object TileServer {
     private const val PORT = 57832
+    private const val VECTOR_MAX_ZOOM = 15
+    private const val CONTOUR_MAX_ZOOM = 12
+    private const val TRAIL_MAX_ZOOM = 15
     @Volatile var running = false
         private set
     private var server: ServerSocket? = null
@@ -134,14 +137,20 @@ object TileServer {
                 val z = m.groupValues[2].toInt()
                 val x = m.groupValues[3].toInt()
                 val y = m.groupValues[4].toInt()
+                val maxZoom = when (lane) {
+                    "contours" -> CONTOUR_MAX_ZOOM
+                    "trails" -> TRAIL_MAX_ZOOM
+                    else -> VECTOR_MAX_ZOOM
+                }
+                val coord = overzoom(z, x, y, maxZoom)
                 val data = synchronized(readerLock) {
                     if (lane == "contours") {
-                        contourReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                        contourReader?.tile(coord.z, coord.x, coord.y)?.takeIf { it.isNotEmpty() }
                     } else if (lane == "trails") {
-                        trailReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                        trailReader?.tile(coord.z, coord.x, coord.y)?.takeIf { it.isNotEmpty() }
                     } else {
-                        stateReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
-                            ?: baseReader?.tile(z, x, y)?.takeIf { it.isNotEmpty() }
+                        stateReader?.tile(coord.z, coord.x, coord.y)?.takeIf { it.isNotEmpty() }
+                            ?: baseReader?.tile(coord.z, coord.x, coord.y)?.takeIf { it.isNotEmpty() }
                     }
                 }
                 if (data != null && data.isNotEmpty()) {
@@ -185,5 +194,13 @@ object TileServer {
             if (c != '\r'.code) sb.append(c.toChar())
         }
         return if (sb.isEmpty() && c < 0) null else sb.toString()
+    }
+
+    private data class TileCoord(val z: Int, val x: Int, val y: Int)
+
+    private fun overzoom(z: Int, x: Int, y: Int, maxZoom: Int): TileCoord {
+        if (z <= maxZoom) return TileCoord(z, x, y)
+        val shift = (z - maxZoom).coerceAtMost(30)
+        return TileCoord(maxZoom, x shr shift, y shr shift)
     }
 }

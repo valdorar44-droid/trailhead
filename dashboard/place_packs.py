@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import math
 import os
 import re
 import time
@@ -1108,6 +1109,9 @@ async def _build_pakistan_camp_pack() -> Path:
         "generated_at": int(time.time()),
         "source": "Trailhead curated + OpenStreetMap mixed outdoor stay data",
         "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "source_counts": _pack_source_counts(points),
+        "coverage_status": _pack_coverage_status(points, failed_cells, len(PAKISTAN_CAMP_ANCHORS)),
+        "total_cell_count": len(PAKISTAN_CAMP_ANCHORS),
         "failed_cells": failed_cells,
         "failed_cell_count": len(failed_cells),
         "points": points,
@@ -1187,6 +1191,9 @@ async def _build_pakistan_context_pack(pack_id: str) -> Path:
         "generated_at": int(time.time()),
         "source": "Trailhead curated + OpenStreetMap Karakoram context",
         "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "source_counts": _pack_source_counts(points),
+        "coverage_status": _pack_coverage_status(points, failed_cells, len(anchors)),
+        "total_cell_count": len(anchors),
         "failed_cells": failed_cells,
         "failed_cell_count": len(failed_cells),
         "points": points,
@@ -1297,6 +1304,9 @@ async def _build_pakistan_essentials_pack() -> Path:
         "generated_at": int(time.time()),
         "source": "Trailhead curated Karakoram essentials" + (" + OpenStreetMap live enrichment" if live_enrichment else ""),
         "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "source_counts": _pack_source_counts(points),
+        "coverage_status": _pack_coverage_status(points, failed_cells, len(anchors)),
+        "total_cell_count": len(anchors),
         "failed_cells": failed_cells,
         "failed_cell_count": len(failed_cells),
         "points": points,
@@ -1438,6 +1448,30 @@ def _normalize_pack_point(item: dict, category: str) -> dict | None:
     }
 
 
+def _pack_source_counts(points: list[dict]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for point in points:
+        source = str(point.get("source") or point.get("source_badge") or "unknown").strip().lower() or "unknown"
+        counts[source] = counts.get(source, 0) + 1
+    return dict(sorted(counts.items()))
+
+
+def _pack_coverage_status(points: list[dict], failed_cells: list[dict], total_cells: int = 0) -> str:
+    if not points:
+        return "empty"
+    if total_cells <= 0:
+        return "partial" if failed_cells else "ready"
+    return "partial" if len(failed_cells) > max(2, math.ceil(total_cells * 0.2)) else "ready"
+
+
+def _pack_source_label(pack_id: str) -> str:
+    if pack_id == "camps":
+        return "OpenStreetMap + official public campground sources"
+    if pack_id == "water":
+        return "OpenStreetMap + OpenSeaMap seamark tags + official public water access sources"
+    return "OpenStreetMap"
+
+
 def status() -> dict:
     out = {}
     for key, data in _status.items():
@@ -1562,8 +1596,11 @@ async def build_region_pack(region: str, pack_id: str = "essentials") -> Path | 
         "region_name": _region_name(region),
         "name": f"{_region_name(region)} {PACK_DEFINITIONS[pack_id]['name']}",
         "generated_at": int(time.time()),
-        "source": "OpenStreetMap" if pack_id != "water" else "OpenStreetMap + OpenSeaMap seamark tags + official public water access sources",
+        "source": _pack_source_label(pack_id),
         "categories": PACK_DEFINITIONS[pack_id]["categories"],
+        "source_counts": _pack_source_counts(points),
+        "coverage_status": _pack_coverage_status(points, failed_cells, len(cells)),
+        "total_cell_count": len(cells),
         "failed_cells": failed_cells,
         "failed_cell_count": len(failed_cells),
         "points": points,
@@ -1659,6 +1696,10 @@ async def update_manifest_on_r2() -> bool:
                 listed_keys.add(name)
                 point_count = 0
                 failed_cells: list[dict] = []
+                generated_at = 0
+                source_counts: dict[str, int] = {}
+                coverage_status = "unknown"
+                total_cell_count = 0
                 size = int(item.get("Size") or 0)
                 try:
                     obj = await asyncio.to_thread(r2.get_object, Bucket=settings.r2_bucket, Key=key)
@@ -1666,6 +1707,10 @@ async def update_manifest_on_r2() -> bool:
                     payload = json.loads(body.decode())
                     point_count = len(payload.get("points") or [])
                     failed_cells = payload.get("failed_cells") or []
+                    generated_at = int(payload.get("generated_at") or 0)
+                    source_counts = payload.get("source_counts") or _pack_source_counts(payload.get("points") or [])
+                    coverage_status = str(payload.get("coverage_status") or _pack_coverage_status(payload.get("points") or [], failed_cells, int(payload.get("total_cell_count") or 0)))
+                    total_cell_count = int(payload.get("total_cell_count") or 0)
                 except Exception:
                     pass
                 manifest["packs"][name] = {
@@ -1673,6 +1718,10 @@ async def update_manifest_on_r2() -> bool:
                     "pack_id": pack_id,
                     "size": size,
                     "point_count": point_count,
+                    "generated_at": generated_at,
+                    "source_counts": source_counts,
+                    "coverage_status": coverage_status,
+                    "total_cell_count": total_cell_count,
                     "failed_cell_count": len(failed_cells),
                     "failed_cells": failed_cells,
                     "url": f"/api/places/packs/{region}/{pack_id}",
@@ -1696,14 +1745,26 @@ async def update_manifest_on_r2() -> bool:
                 payload = json.loads(path.read_text())
                 point_count = len(payload.get("points") or [])
                 failed_cells = payload.get("failed_cells") or []
+                generated_at = int(payload.get("generated_at") or 0)
+                source_counts = payload.get("source_counts") or _pack_source_counts(payload.get("points") or [])
+                coverage_status = str(payload.get("coverage_status") or _pack_coverage_status(payload.get("points") or [], failed_cells, int(payload.get("total_cell_count") or 0)))
+                total_cell_count = int(payload.get("total_cell_count") or 0)
             except Exception:
                 point_count = 0
                 failed_cells = []
+                generated_at = 0
+                source_counts = {}
+                coverage_status = "unknown"
+                total_cell_count = 0
             manifest["packs"][name] = {
                 "region_id": region,
                 "pack_id": pack_id,
                 "size": path.stat().st_size,
                 "point_count": point_count,
+                "generated_at": generated_at,
+                "source_counts": source_counts,
+                "coverage_status": coverage_status,
+                "total_cell_count": total_cell_count,
                 "failed_cell_count": len(failed_cells),
                 "failed_cells": failed_cells,
                 "url": f"/api/places/packs/{region}/{pack_id}",

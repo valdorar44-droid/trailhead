@@ -9669,6 +9669,13 @@ class CampCacheClearPayload(BaseModel):
     lng: Optional[float] = None
     radius_mi: Optional[float] = None
 
+class DiscoveryCacheInvalidatePayload(BaseModel):
+    region: Optional[str] = None
+    include_route_windows: bool = True
+
+class DiscoveryCampPackRefreshPayload(BaseModel):
+    clear_context_cache: bool = True
+
 @app.post("/api/admin/campsites/{facility_id}")
 async def admin_update_camp_detail(facility_id: str, body: CampAdminUpdatePayload,
                                    user: dict = Depends(_current_user)):
@@ -9722,6 +9729,7 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
             "trail_photo_wiki_",
             "land_check:",
             "route_camp_window:",
+            "discovery_context:v1",
         ]
         gas_prefixes = [
             "nrel_",
@@ -9735,9 +9743,10 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
             db.commit()
         finally:
             db.close()
+        _discovery_pack_cache.clear()
     elif scope == "source":
         source = (body.source_prefix or "").strip().lower()
-        allowed = {"ridb", "osm", "blm", "usfs", "nps", "google", "geoapify", "foursquare", "map_card", "ai_insight", "route_weather", "wiki", "land_check", "route_camp_window"}
+        allowed = {"ridb", "osm", "blm", "usfs", "nps", "google", "geoapify", "foursquare", "map_card", "ai_insight", "route_weather", "wiki", "land_check", "route_camp_window", "discovery"}
         if source not in allowed:
             raise HTTPException(400, f"source_prefix must be one of {', '.join(sorted(allowed))}")
         prefixes = [source]
@@ -9753,6 +9762,9 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
             prefixes.extend(["usfs_recreation_"])
         if source == "osm":
             gas_prefixes.extend(["osm_fuel_", "osm_services_"])
+        if source == "discovery":
+            prefixes.extend(["discovery_context:v1", "route_camp_window:"])
+            _discovery_pack_cache.clear()
     elif scope == "camp_id":
         camp_id = (body.camp_id or "").strip()
         if not camp_id:
@@ -9810,6 +9822,44 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
     gas_deleted = clear_cached_rows("gas_cache", prefixes=gas_prefixes, keys=gas_keys) if gas_prefixes or gas_keys else 0
     log_event(admin["id"], None, "admin_clear_camp_cache", {"scope": scope, "prefixes": prefixes, "keys": keys, "gas_prefixes": gas_prefixes, "gas_keys": gas_keys, "deleted": deleted, "gas_deleted": gas_deleted, "brief_deleted": brief_deleted})
     return {"ok": True, "deleted": deleted, "gas_deleted": gas_deleted, "brief_deleted": brief_deleted, "scope": scope}
+
+@app.post("/api/admin/discovery/cache/invalidate")
+async def admin_invalidate_discovery_cache(body: DiscoveryCacheInvalidatePayload, admin: dict = Depends(_require_admin)):
+    prefixes = ["discovery_context:v1"]
+    if body.include_route_windows:
+        prefixes.append("route_camp_window:")
+    region = (body.region or "").strip().lower()
+    if region:
+        for key in list(_discovery_pack_cache.keys()):
+            if key.startswith(f"{region}:"):
+                _discovery_pack_cache.pop(key, None)
+    else:
+        _discovery_pack_cache.clear()
+    deleted = clear_cached_rows("campsite_cache", prefixes=prefixes)
+    log_event(admin["id"], None, "admin_discovery_cache_invalidate", {"region": region or None, "prefixes": prefixes, "deleted": deleted})
+    return {"ok": True, "deleted": deleted, "region": region or None}
+
+@app.post("/api/admin/discovery/camp-pack/{region}/refresh")
+async def admin_refresh_discovery_camp_pack(region: str, body: DiscoveryCampPackRefreshPayload | None = None, admin: dict = Depends(_require_admin)):
+    payload = body or DiscoveryCampPackRefreshPayload()
+    try:
+        region_id = _place_packs._region_id(region)
+    except Exception:
+        raise HTTPException(400, "Unknown region")
+    if _place_packs._running:
+        return {"ok": False, "status": "already_running", "region": region_id, "pack_id": "camps"}
+    _discovery_pack_cache.pop(f"{region_id}:camps", None)
+    deleted = clear_cached_rows("campsite_cache", prefixes=["discovery_context:v1", "route_camp_window:"]) if payload.clear_context_cache else 0
+    asyncio.create_task(_place_packs.build_and_upload(region_id, "camps"))
+    log_event(admin["id"], None, "admin_discovery_camp_pack_refresh", {"region": region_id, "deleted": deleted})
+    return {"ok": True, "status": "queued", "region": region_id, "pack_id": "camps", "deleted": deleted}
+
+@app.post("/api/admin/discovery/context/refresh")
+async def admin_refresh_discovery_context(body: DiscoveryContextRequest, admin: dict = Depends(_require_admin)):
+    body.force_refresh = True
+    response = await discovery_context(body, user=admin)
+    log_event(admin["id"], None, "admin_discovery_context_refresh", {"surface": body.surface, "categories": body.categories, "limit": body.limit})
+    return response
 
 @app.get("/api/admin/camp-edit-suggestions")
 async def admin_camp_edit_suggestions(status: Optional[str] = "pending",
@@ -13107,6 +13157,174 @@ def _place_in_bounds(item: dict, n: float, s: float, e: float, w: float) -> bool
         return False
     return s <= lat <= n and w <= lng <= e
 
+def _add_source_counts(target: dict[str, int], counts: dict | None) -> None:
+    for key, value in (counts or {}).items():
+        clean_key = str(key or "").strip()
+        if not clean_key:
+            continue
+        try:
+            count = int(value or 0)
+        except Exception:
+            count = 0
+        target[clean_key] = target.get(clean_key, 0) + count
+
+DISCOVERY_PACK_CACHE_TTL_SECONDS = 3600
+DISCOVERY_PACK_STALE_SECONDS = 14 * 86400
+_discovery_pack_cache: dict[str, tuple[float, dict | None]] = {}
+
+def _bbox_intersection_area(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> float:
+    aw, as_, ae, an = a
+    bw, bs, be, bn = b
+    width = max(0.0, min(ae, be) - max(aw, bw))
+    height = max(0.0, min(an, bn) - max(as_, bs))
+    return width * height
+
+def _discovery_regions_for_bounds(n: float, s: float, e: float, w: float, max_regions: int = 12) -> list[str]:
+    request_bbox = (w, s, e, n)
+    matches: list[tuple[float, str]] = []
+    for code, bbox in getattr(_place_packs, "ALL_REGION_BBOXES", {}).items():
+        area = _bbox_intersection_area(request_bbox, bbox)
+        if area > 0:
+            matches.append((area, str(code).lower()))
+    if not matches:
+        return []
+    matches.sort(key=lambda item: item[0], reverse=True)
+    return [region for _area, region in matches[:max_regions]]
+
+async def _load_discovery_place_pack(region: str, pack_id: str = "camps") -> dict | None:
+    key = f"{region.lower()}:{pack_id.lower()}"
+    now = time.time()
+    cached = _discovery_pack_cache.get(key)
+    if cached and cached[0] > now:
+        return cached[1]
+    pack = await _place_packs.fetch_remote_pack(region, pack_id)
+    _discovery_pack_cache[key] = (now + DISCOVERY_PACK_CACHE_TTL_SECONDS, pack if isinstance(pack, dict) else None)
+    return pack if isinstance(pack, dict) else None
+
+def _camp_from_pack_point(point: dict, region: str, generated_at: int = 0) -> dict | None:
+    try:
+        lat = float(point.get("lat"))
+        lng = float(point.get("lng"))
+    except Exception:
+        return None
+    name = re.sub(r"\s+", " ", str(point.get("name") or "")).strip() or "Camp stay"
+    source = str(point.get("source") or "place_pack").strip().lower()
+    source_badge = point.get("source_badge") or point.get("verified_source") or point.get("source_label") or source.title()
+    official_url = point.get("official_url") or point.get("url") or ""
+    booking_url = point.get("booking_url") or (official_url if "recreation.gov" in str(official_url).lower() else "")
+    tags = [str(tag).strip().lower() for tag in (point.get("tags") or []) if str(tag).strip()]
+    if "camp" not in tags:
+        tags.append("camp")
+    subtype = point.get("subtype") or point.get("land_type") or ("RV Park" if "rv" in tags else "Campground")
+    return {
+        "id": str(point.get("id") or f"pack:{region}:camp:{lat:.5f}:{lng:.5f}"),
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "tags": sorted(set(tags)),
+        "land_type": subtype,
+        "summary": point.get("summary") or point.get("description") or point.get("address") or "",
+        "description": point.get("description") or point.get("summary") or point.get("source_freshness") or "Camp or stay location from available public source data. Verify current access, fees, closures, and availability before relying on it.",
+        "photo_url": point.get("photo_url") or "",
+        "photos": [point.get("photo_url")] if point.get("photo_url") else [],
+        "reservable": bool(point.get("reservable")),
+        "cost": point.get("cost") or "",
+        "url": booking_url or official_url,
+        "official_url": official_url,
+        "booking_url": booking_url,
+        "ada": bool(point.get("ada")),
+        "source": source,
+        "verified_source": source_badge,
+        "source_badge": source_badge,
+        "source_freshness": point.get("source_freshness") or "Camp source data packaged by Trailhead; verify current access, fees, closures, and availability with the source.",
+        "source_confidence": point.get("source_confidence") or _camp_source_confidence({"source": source, "verified_source": source_badge}),
+        "last_checked": int(point.get("last_checked") or generated_at or time.time()),
+        "phone": point.get("phone") or "",
+        "address": point.get("address") or "",
+        "provider_place_id": point.get("provider_place_id") or point.get("place_id") or "",
+        "place_id": point.get("place_id") or "",
+        "amenities": point.get("amenities") if isinstance(point.get("amenities"), list) else [],
+        "site_types": point.get("site_types") if isinstance(point.get("site_types"), list) else [],
+        "feature_source": "place_pack",
+        "cache_status": "pack",
+        "pack_region": region,
+    }
+
+def _camp_pack_sufficient(pack_result: dict, radius_miles: float, limit: int) -> bool:
+    status = str((pack_result.get("pack") or {}).get("status") or "")
+    if status != "ready":
+        return False
+    count = len(pack_result.get("raw_camps") or [])
+    target = 4 if radius_miles <= 10 else 8 if radius_miles <= 35 else 12
+    return count >= min(max(1, limit), target)
+
+async def _load_camp_pack_area(
+    *,
+    n: float,
+    s: float,
+    e: float,
+    w: float,
+    radius_miles: float,
+    type_filters: list[str] | None,
+    limit: int,
+    mode: str,
+) -> dict:
+    regions = _discovery_regions_for_bounds(n, s, e, w)
+    if not regions:
+        return {
+            "raw_camps": [],
+            "camps": [],
+            "source_counts": {"pack": 0},
+            "pack": {"status": "missing", "regions": [], "missing_regions": [], "stale_regions": []},
+        }
+    raw: list[dict] = []
+    source_counts: dict[str, int] = {"pack_regions": len(regions)}
+    missing: list[str] = []
+    stale: list[str] = []
+    coverage: dict[str, str] = {}
+    generated_at_by_region: dict[str, int] = {}
+    now = int(time.time())
+
+    for region in regions:
+        pack = await _load_discovery_place_pack(region, "camps")
+        if not pack:
+            missing.append(region)
+            continue
+        generated_at = int(pack.get("generated_at") or 0)
+        generated_at_by_region[region] = generated_at
+        if not generated_at or now - generated_at > DISCOVERY_PACK_STALE_SECONDS:
+            stale.append(region)
+        coverage[region] = str(pack.get("coverage_status") or "unknown")
+        for source, count in (pack.get("source_counts") or {}).items():
+            key = f"pack:{source}"
+            source_counts[key] = source_counts.get(key, 0) + int(count or 0)
+        for point in pack.get("points") or []:
+            if str(point.get("type") or point.get("category") or "").lower() != "camp":
+                continue
+            if not _place_in_bounds(point, n, s, e, w):
+                continue
+            camp = _camp_from_pack_point(point, region, generated_at)
+            if camp:
+                raw.append(camp)
+
+    merged = _merge_camp_sources(raw, type_filters=type_filters)
+    source_counts["pack"] = len(merged)
+    status = "ready" if merged and not missing and not stale and all(v in {"ready", "unknown"} for v in coverage.values()) else "stale" if merged and stale else "thin" if merged else "missing"
+    return {
+        "raw_camps": merged,
+        "camps": _camp_discovery_response(merged, mode=mode, limit=limit),
+        "source_counts": source_counts,
+        "pack": {
+            "status": status,
+            "regions": regions,
+            "missing_regions": missing,
+            "stale_regions": stale,
+            "coverage_status": coverage,
+            "generated_at": generated_at_by_region,
+            "ttl_seconds": DISCOVERY_PACK_STALE_SECONDS,
+        },
+    }
+
 async def _load_camp_discovery_area(
     *,
     n: float,
@@ -13169,6 +13387,7 @@ async def _load_camp_discovery_area(
     pins = _camp_discovery_response(merged, mode=mode, limit=limit)
     source_counts["merged"] = len(pins)
     return {
+        "raw_camps": merged,
         "camps": pins,
         "source_counts": source_counts,
         "source_errors": source_errors,
@@ -13191,11 +13410,33 @@ async def discovery_context(body: DiscoveryContextRequest, user: dict | None = D
         or _private_stay_requested(type_filters)
         or bool(requested_categories.intersection(PRIVATE_STAY_PLACE_TYPES | {"private"}))
     )
+    camp_like_categories = {"camp", "camps", "camping"} | PRIVATE_STAY_PLACE_TYPES | {"private"}
+    camp_requested = bool(requested_categories.intersection(camp_like_categories))
+    if camp_requested:
+        camp_like_categories = camp_like_categories | {"lodging", "stay"}
+    place_categories = sorted(c for c in requested_categories if c not in camp_like_categories)
     cache_key = _discovery_cache_key(body, (n, s, e, w), type_filters, requested_categories)
     ttl_seconds = max(900, min(int(body.stale_after_hours or 12) * 3600, 7 * 86400))
-    if not body.force_refresh:
+    pack_result: dict = {}
+    pack_sufficient = False
+    if camp_requested and not body.force_refresh:
+        pack_result = await _load_camp_pack_area(
+            n=n,
+            s=s,
+            e=e,
+            w=w,
+            radius_miles=radius_miles,
+            type_filters=type_filters or None,
+            limit=limit,
+            mode=mode,
+        )
+        pack_sufficient = _camp_pack_sufficient(pack_result, radius_miles, limit)
+
+    if not body.force_refresh and not pack_sufficient:
         cached = get_cached("campsite_cache", cache_key, ttl_seconds=ttl_seconds)
         if isinstance(cached, dict):
+            if pack_result:
+                cached["pack"] = pack_result.get("pack") or cached.get("pack")
             cached["cache"] = {
                 **(cached.get("cache") or {}),
                 "status": "hit",
@@ -13205,33 +13446,40 @@ async def discovery_context(body: DiscoveryContextRequest, user: dict | None = D
             cached["timings"] = {"total_ms": round((time.time() - started) * 1000, 1)}
             return cached
 
-    camp_like_categories = {"camp", "camps", "camping"} | PRIVATE_STAY_PLACE_TYPES | {"private"}
-    camp_requested = bool(requested_categories.intersection(camp_like_categories))
-    if camp_requested:
-        camp_like_categories = camp_like_categories | {"lodging", "stay"}
-    place_categories = sorted(c for c in requested_categories if c not in camp_like_categories)
     camps: list[dict] = []
     places: list[dict] = []
     source_counts: dict[str, int] = {}
     errors: dict[str, str] = {}
 
     if camp_requested:
-        camp_result = await _load_camp_discovery_area(
-            n=n,
-            s=s,
-            e=e,
-            w=w,
-            lat=lat,
-            lng=lng,
-            radius_miles=radius_miles,
-            type_filters=type_filters or None,
-            include_private=include_private,
-            limit=limit,
-            mode=mode,
-        )
-        camps = camp_result.get("camps") or []
-        source_counts.update(camp_result.get("source_counts") or {})
-        errors.update(camp_result.get("source_errors") or {})
+        _add_source_counts(source_counts, pack_result.get("source_counts") if pack_result else {})
+        if pack_sufficient:
+            camps = pack_result.get("camps") or []
+        else:
+            camp_result = await _load_camp_discovery_area(
+                n=n,
+                s=s,
+                e=e,
+                w=w,
+                lat=lat,
+                lng=lng,
+                radius_miles=radius_miles,
+                type_filters=type_filters or None,
+                include_private=include_private,
+                limit=limit,
+                mode=mode,
+            )
+            live_counts = dict(camp_result.get("source_counts") or {})
+            live_counts.pop("merged", None)
+            _add_source_counts(source_counts, live_counts)
+            errors.update(camp_result.get("source_errors") or {})
+            merged_raw = _merge_camp_sources(
+                pack_result.get("raw_camps") or [],
+                camp_result.get("raw_camps") or [],
+                type_filters=type_filters or None,
+            )
+            camps = _camp_discovery_response(merged_raw, mode=mode, limit=limit)
+        source_counts["merged"] = len(camps)
 
     if place_categories:
         try:
@@ -13267,8 +13515,11 @@ async def discovery_context(body: DiscoveryContextRequest, user: dict | None = D
         "places": places,
         "source_counts": source_counts,
         "errors": errors,
+        "pack": (pack_result.get("pack") if isinstance(pack_result, dict) else None) or {
+            "status": "not_requested" if not camp_requested else "skipped" if body.force_refresh else "missing",
+        },
         "cache": {
-            "status": "miss" if not body.force_refresh else "refresh",
+            "status": "refresh" if body.force_refresh else "pack" if pack_sufficient else "miss",
             "key": cache_key,
             "refresh_after_hours": round(ttl_seconds / 3600, 1),
             "stale_supported": True,

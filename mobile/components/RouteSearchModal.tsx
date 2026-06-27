@@ -664,7 +664,13 @@ export default function RouteSearchModal({
         const localCamps = (camps ?? [])
           .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
           .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c }));
-        const liveCamps = await api.getNearbyCamps(userLoc.lat, userLoc.lng, radiusMi, []);
+        const liveCamps = await api.getDiscoveryCamps(userLoc.lat, userLoc.lng, radiusMi, [], {
+          limit: 140,
+          mode: 'light',
+          stays: true,
+          surface: 'route_search_modal',
+          stale_after_hours: 12,
+        });
         setCatResults(dedupePlaces([...extremeCategoryResults, ...localCamps, ...liveCamps
           .filter(c => c.lat && c.lng && distanceMi(userLoc, c) <= radiusMi)
           .map(c => ({ name: c.name || 'Camp', lat: c.lat, lng: c.lng, dist: haversineKm(userLoc, c), _camp: c }))] as any)
@@ -675,7 +681,13 @@ export default function RouteSearchModal({
         const localPlaces = pois
           .filter(p => types.includes(p.type || '') && distanceMi(userLoc, p) <= radiusMi)
           .map(p => ({ ...p, name: p.name || 'Private Stay', dist: haversineKm(userLoc, p) }));
-        const liveCamps = await api.getNearbyCamps(userLoc.lat, userLoc.lng, radiusMi, ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp']);
+        const liveCamps = await api.getDiscoveryCamps(userLoc.lat, userLoc.lng, radiusMi, ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'], {
+          limit: 140,
+          mode: 'light',
+          stays: true,
+          surface: 'route_search_modal_stays',
+          stale_after_hours: 12,
+        });
         const livePlaces = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radiusMi, types.join(','));
         setCatResults(dedupePlaces([
           ...extremeCategoryResults,

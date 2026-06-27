@@ -7583,7 +7583,13 @@ function MapScreen() {
       api.getOsmPois(center.lat, center.lng, 25, 'fuel').then(value => ({ kind: 'pois' as const, value })),
       api.getOsmPois(center.lat, center.lng, 25, 'water').then(value => ({ kind: 'pois' as const, value })),
       api.getOsmPois(center.lat, center.lng, 25, 'trail,trailhead,viewpoint,peak,hot_spring').then(value => ({ kind: 'pois' as const, value })),
-      api.getNearbyCamps(center.lat, center.lng, 35, campLookupFilters(activeFilters) ?? ['__none__']).then(value => ({ kind: 'camps' as const, value })),
+      api.getDiscoveryCamps(center.lat, center.lng, 35, campLookupFilters(activeFilters) ?? ['__none__'], {
+        limit: 100,
+        mode: 'light',
+        stays: true,
+        surface: 'map_route_context',
+        stale_after_hours: 12,
+      }).then(value => ({ kind: 'camps' as const, value })),
     ]);
     Promise.allSettled(contextJobs).then(results => {
       if (cancelled) return;
@@ -7982,7 +7988,13 @@ function MapScreen() {
     }));
     let cancelled = false;
     Promise.allSettled([
-      api.getNearbyCamps(pin.lat, pin.lng, 20, campLookupFilters(activeFilters) ?? ['__none__']),
+      api.getDiscoveryCamps(pin.lat, pin.lng, 20, campLookupFilters(activeFilters) ?? ['__none__'], {
+        limit: 80,
+        mode: 'light',
+        stays: true,
+        surface: 'map_community_context',
+        stale_after_hours: 12,
+      }),
       api.getGas(pin.lat, pin.lng, 25),
       api.getOsmPois(pin.lat, pin.lng, 25, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring'),
       api.getNearbyAlerts(pin.lat, pin.lng, 0.15),
@@ -13169,7 +13181,13 @@ function MapScreen() {
           return c.recommended_day === nextDay || endpointMi <= 35;
         }) as CampsitePin[];
       const batches = await Promise.allSettled([
-        api.getNearbyCamps(endpoint.lat!, endpoint.lng!, 35, []),
+        api.getDiscoveryCamps(endpoint.lat!, endpoint.lng!, 35, [], {
+          limit: 140,
+          mode: 'light',
+          stays: true,
+          surface: 'map_camp_picker',
+          stale_after_hours: 12,
+        }),
         api.searchCampsites(endpoint.lat!, endpoint.lng!, 40, []),
       ]);
       const seen = new Set<string>();
@@ -13595,9 +13613,25 @@ function MapScreen() {
           })
           .then(value => value.length > 0
             ? value
-            : api.getNearbyCamps(centerLat, centerLng, radiusMi, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays })
+            : api.getDiscoveryCamps(centerLat, centerLng, radiusMi, lookupTypes, {
+              limit: campLimit,
+              mode: 'light',
+              stays: includeStays,
+              surface: 'map_camp_discovery_fallback',
+              force_refresh: Boolean(opts.force),
+              zoom: bounds.zoom,
+              stale_after_hours: opts.campOnly ? 6 : 12,
+            })
           )
-          .catch(() => api.getNearbyCamps(centerLat, centerLng, radiusMi, lookupTypes, { limit: campLimit, mode: 'light', stays: includeStays })),
+          .catch(() => api.getDiscoveryCamps(centerLat, centerLng, radiusMi, lookupTypes, {
+            limit: campLimit,
+            mode: 'light',
+            stays: includeStays,
+            surface: 'map_camp_discovery_fallback',
+            force_refresh: Boolean(opts.force),
+            zoom: bounds.zoom,
+            stale_after_hours: opts.campOnly ? 6 : 12,
+          })),
         api.getNearbyFullness(centerLat, centerLng, radiusMi * 0.6),
         api.getNearbySmartPack(
           centerLat,
@@ -14003,7 +14037,13 @@ function MapScreen() {
         api.getCampFullness(minId).then(r => setCampFullness(r)).catch(() => {});
         api.getWeather(msg.lat, msg.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
         // Silently upgrade to full camp data if our backend has it
-        api.getNearbyCamps(msg.lat, msg.lng, 2).then(results => {
+        api.getDiscoveryCamps(msg.lat, msg.lng, 2, [], {
+          limit: 30,
+          mode: 'full',
+          stays: true,
+          surface: 'map_tile_camp_match',
+          stale_after_hours: 12,
+        }).then(results => {
           if (!results.length) return;
           const match = strictBackendCampMatch(minPin, results);
           if (!match) return;
@@ -15551,7 +15591,13 @@ function MapScreen() {
       if (selectedCampRef.current?.id === pin.id) setCampWeather(r);
     }).catch(() => {});
 
-    api.getNearbyCamps(lat, lng, 2).then(results => {
+    api.getDiscoveryCamps(lat, lng, 2, [], {
+      limit: 30,
+      mode: 'full',
+      stays: true,
+      surface: 'map_tile_camp_match',
+      stale_after_hours: 12,
+    }).then(results => {
       if (!results.length) return;
       const match = strictBackendCampMatch(pin, results);
       if (!match) return;

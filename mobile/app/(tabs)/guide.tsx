@@ -989,7 +989,13 @@ export default function GuideScreen() {
     setExploreCampLoadingId(placeId);
     const loadFallbackCamps = async () => {
       if (fallbackLat != null && fallbackLng != null) {
-        const fallback = await api.getNearbyCamps(fallbackLat, fallbackLng, fallbackRadius, []).catch(() => []);
+        const fallback = await api.getDiscoveryCamps(fallbackLat, fallbackLng, fallbackRadius, [], {
+          limit: 140,
+          mode: 'light',
+          stays: true,
+          surface: 'explore_camp_rail',
+          stale_after_hours: 12,
+        }).catch(() => []);
         if (cancelled) return true;
         if (fallback.length) {
           setExploreCampgroundsById(prev => ({ ...prev, [placeId]: fallback }));
@@ -1020,7 +1026,13 @@ export default function GuideScreen() {
         let merged = primary;
         let sourceMode: 'official' | 'fallback' = 'official';
         if (fallbackLat != null && fallbackLng != null && primary.length < 6) {
-          const fallback = await api.getNearbyCamps(fallbackLat, fallbackLng, fallbackRadius, []).catch(() => []);
+          const fallback = await api.getDiscoveryCamps(fallbackLat, fallbackLng, fallbackRadius, [], {
+            limit: 140,
+            mode: 'light',
+            stays: true,
+            surface: 'explore_camp_rail',
+            stale_after_hours: 12,
+          }).catch(() => []);
           if (cancelled) return;
           if (fallback.length) {
             merged = mergeCampPins(primary, fallback);

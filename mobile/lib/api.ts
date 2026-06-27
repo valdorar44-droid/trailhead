@@ -752,6 +752,35 @@ export const api = {
         };
       }),
     ),
+  getDiscoveryCamps: (
+    lat: number,
+    lng: number,
+    radius = 50,
+    types: string[] = [],
+    opts: { limit?: number; mode?: 'full' | 'light'; stays?: boolean; surface?: string; force_refresh?: boolean; zoom?: number; stale_after_hours?: number } = {},
+  ) => {
+    const filters = (types ?? []).map(t => String(t || '').trim()).filter(Boolean);
+    const includeStays = Boolean(opts.stays || filters.some(type => /^(private|private_stay|farm|farm_stay|ranch|winery|glamping|private_camp)$/i.test(type)));
+    const categories = includeStays
+      ? ['camp', 'camping', 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp']
+      : ['camp', 'camping'];
+    return api.getDiscoveryContext({
+      center: { lat, lng },
+      radius,
+      zoom: opts.zoom,
+      categories,
+      filters,
+      surface: opts.surface ?? 'camp_discovery',
+      mode: opts.mode ?? 'light',
+      limit: opts.limit ?? 220,
+      include_stays: includeStays,
+      force_refresh: opts.force_refresh,
+      stale_after_hours: opts.stale_after_hours ?? 12,
+    }).then(res => {
+      const pins = res.camps?.length ? res.camps : res.pins ?? [];
+      return pins.length ? pins : api.getNearbyCamps(lat, lng, radius, filters, { limit: opts.limit ?? 220, mode: opts.mode ?? 'light', stays: includeStays });
+    }).catch(() => api.getNearbyCamps(lat, lng, radius, filters, { limit: opts.limit ?? 220, mode: opts.mode ?? 'light', stays: includeStays }));
+  },
   getOsmPois: (lat: number, lng: number, radius = 30, types = 'water,trailhead,viewpoint') =>
     req<OsmPoi[]>(`/api/osm-pois?lat=${lat}&lng=${lng}&radius=${radius}&types=${types}`),
   getNearbyPlaces: (lat: number, lng: number, radius = 25, categories = 'fuel,water,trailhead,viewpoint', provider: 'auto' | 'geoapify' | 'google' | 'foursquare' | 'osm' | 'nps' | 'blm' | 'usfs' = 'auto') =>

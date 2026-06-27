@@ -13598,7 +13598,7 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 9,
+        "v": 10,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -13613,6 +13613,30 @@ async def _select_camp_for_window(
     if cached is not None:
         cached["cache_status"] = "hit"
         return cached
+
+    async def load_window_camps(sample: dict, radius: float, filters: list[str]) -> list[dict]:
+        try:
+            bridge = await discovery_context(
+                DiscoveryContextRequest(
+                    center=PlannerPoint(lat=float(sample["lat"]), lng=float(sample["lng"])),
+                    radius=radius,
+                    categories=["camp", "camping", "private_stay", "glamping"],
+                    filters=filters,
+                    surface="route_camp_window",
+                    mode="full",
+                    limit=220,
+                    include_stays=True,
+                    stale_after_hours=12,
+                ),
+                user=None,
+            )
+            camps = (bridge or {}).get("camps") or (bridge or {}).get("pins") or []
+            if camps:
+                return camps
+        except Exception:
+            pass
+        return await nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=220, mode="full", stays=True)
+
     try:
         by_key: dict[str, dict] = {}
         search_passes: list[dict] = []
@@ -13622,7 +13646,7 @@ async def _select_camp_for_window(
             pass_samples = [target] if pass_def.get("target_only") else samples
             async with sem:
                 results = await asyncio.gather(*[
-                    asyncio.wait_for(nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters)), timeout=8.0)
+                    asyncio.wait_for(load_window_camps(sample, radius, filters), timeout=10.0)
                     for sample in pass_samples
                 ], return_exceptions=True)
             found = _merge_camp_sources(*[r for r in results if isinstance(r, list)], type_filters=filters or None)
@@ -13918,16 +13942,53 @@ async def planner_context(body: PlannerContextRequest):
 
     async def load_camps() -> list[dict]:
         merged: list[dict] = []
-        for point in sample_points:
-            try:
-                ridb, blm, osm = await asyncio.gather(
-                    get_campsites_search(point["lat"], point["lng"], radius_miles=sample_radius, type_filters=None),
-                    get_blm_campsites(point["lat"], point["lng"], radius_miles=sample_radius),
-                    get_osm_campsites(point["lat"], point["lng"], radius_m=int(min(sample_radius, 60) * 1600)),
+        try:
+            if bbox and not route_samples:
+                bridge = await discovery_context(
+                    DiscoveryContextRequest(
+                        bounds=PlannerBounds(**bbox),
+                        center=PlannerPoint(lat=center_lat, lng=center_lng),
+                        radius=radius,
+                        categories=["camp", "camping", "private_stay", "glamping"],
+                        filters=[],
+                        surface="planner_context",
+                        mode="light",
+                        limit=180,
+                        include_stays=True,
+                        stale_after_hours=12,
+                    ),
+                    user=None,
                 )
-                merged.extend(_merge_camp_sources(ridb, blm, osm))
-            except Exception as exc:
-                errors["camps"] = str(exc)
+                merged.extend((bridge or {}).get("camps") or (bridge or {}).get("pins") or [])
+                if isinstance(bridge, dict) and bridge.get("errors"):
+                    errors.update({f"camps:{k}": str(v) for k, v in (bridge.get("errors") or {}).items()})
+            else:
+                for point in sample_points:
+                    bridge = await discovery_context(
+                        DiscoveryContextRequest(
+                            center=PlannerPoint(lat=point["lat"], lng=point["lng"]),
+                            radius=sample_radius,
+                            categories=["camp", "camping", "private_stay", "glamping"],
+                            filters=[],
+                            surface="planner_context",
+                            mode="light",
+                            limit=90,
+                            include_stays=True,
+                            stale_after_hours=12,
+                        ),
+                        user=None,
+                    )
+                    merged.extend((bridge or {}).get("camps") or (bridge or {}).get("pins") or [])
+                    if isinstance(bridge, dict) and bridge.get("errors"):
+                        errors.update({f"camps:{k}": str(v) for k, v in (bridge.get("errors") or {}).items()})
+        except Exception as exc:
+            errors["camps_bridge"] = str(exc)
+        if not merged:
+            for point in sample_points:
+                try:
+                    merged.extend(await nearby_camps(point["lat"], point["lng"], radius=sample_radius, types="", limit=90, mode="light", stays=True))
+                except Exception as exc:
+                    errors["camps"] = str(exc)
         if bbox:
             merged = [c for c in merged if bbox["s"] <= float(c.get("lat", 999)) <= bbox["n"] and bbox["w"] <= float(c.get("lng", 999)) <= bbox["e"]]
         cleaned = []
@@ -16251,7 +16312,26 @@ async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -
             detail = None
         if detail:
             return detail, detail
-    candidates = await nearby_camps(body.lat, body.lng, radius=12, types="")
+    try:
+        bridge = await discovery_context(
+            DiscoveryContextRequest(
+                center=PlannerPoint(lat=float(body.lat), lng=float(body.lng)),
+                radius=12,
+                categories=["camp", "camping", "private_stay", "glamping"],
+                filters=[],
+                surface="map_card_overnight",
+                mode="full",
+                limit=80,
+                include_stays=True,
+                stale_after_hours=12,
+            ),
+            user=None,
+        )
+        candidates = (bridge or {}).get("camps") or (bridge or {}).get("pins") or []
+    except Exception:
+        candidates = []
+    if not candidates:
+        candidates = await nearby_camps(body.lat, body.lng, radius=12, types="", limit=80, mode="full", stays=True)
     close = [
         camp for camp in candidates
         if isinstance(camp, dict)
@@ -16410,6 +16490,57 @@ def _context_status(related: dict, errors: dict | None = None) -> dict:
     }
 
 
+async def _discovery_context_smart_places(
+    lat: float,
+    lng: float,
+    radius: float,
+    categories: list[str],
+    route: list[list[float]] | None = None,
+    surface: str = "place_context",
+    user: dict | None = None,
+    limit: int = 120,
+) -> dict:
+    bridge = await discovery_context(
+        DiscoveryContextRequest(
+            center=PlannerPoint(lat=float(lat), lng=float(lng)),
+            radius=radius,
+            categories=categories,
+            filters=[],
+            route=route or [],
+            surface=surface,
+            mode="light",
+            limit=limit,
+            include_stays=True,
+            stale_after_hours=12,
+        ),
+        user=user if isinstance(user, dict) else None,
+    )
+    camps = [
+        place for place in (
+            _smart_place_from_camp(camp, float(lat), float(lng), route or [])
+            for camp in ((bridge or {}).get("camps") or (bridge or {}).get("pins") or [])
+            if isinstance(camp, dict)
+        )
+        if place
+    ]
+    places = [
+        item for item in ((bridge or {}).get("places") or [])
+        if isinstance(item, dict)
+    ]
+    if not camps and not places:
+        fallback = await nearby_smart_pack(NearbySmartPackRequest(
+            center=PlannerPoint(lat=float(lat), lng=float(lng)),
+            radius=radius,
+            categories=categories,
+            route=route or [],
+        ), user=user if isinstance(user, dict) else None)
+        places = [item for item in (fallback.get("places") or []) if isinstance(item, dict)] if isinstance(fallback, dict) else []
+        errors = (fallback.get("errors") or {}) if isinstance(fallback, dict) else {}
+    else:
+        errors = (bridge.get("errors") or {}) if isinstance(bridge, dict) else {}
+    return {"places": [*camps, *places], "errors": errors}
+
+
 async def _build_place_context(
     lat: float,
     lng: float,
@@ -16430,12 +16561,15 @@ async def _build_place_context(
     radius = _place_context_radius(card_type)
     nearby_task = guarded(
         "nearby",
-        nearby_smart_pack(NearbySmartPackRequest(
-            center=PlannerPoint(lat=float(lat), lng=float(lng)),
-            radius=radius,
+        _discovery_context_smart_places(
+            float(lat),
+            float(lng),
             categories=PLACE_CONTEXT_CATEGORIES,
             route=route or [],
-        ), user=user),
+            radius=radius,
+            surface="place_context",
+            user=user if isinstance(user, dict) else None,
+        ),
         {"places": []},
         timeout=16.0,
     )
@@ -16446,6 +16580,8 @@ async def _build_place_context(
         timeout=10.0,
     )
     related_pack, trail_pack = await asyncio.gather(nearby_task, trails_task)
+    if isinstance(related_pack, dict) and related_pack.get("errors"):
+        errors.update({f"nearby:{k}": str(v) for k, v in (related_pack.get("errors") or {}).items()})
     related = _related_rails_from_places((related_pack or {}).get("places") or [], (trail_pack or {}).get("trails", []), camp_detail)
     status = _context_status(related, errors)
     related["context_status"] = status
@@ -16593,12 +16729,15 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     context_radius = _place_context_radius(context_type)
     nearby_task = guarded(
         "nearby",
-        nearby_smart_pack(NearbySmartPackRequest(
-            center=PlannerPoint(lat=center_lat, lng=center_lng),
-            radius=context_radius,
+        _discovery_context_smart_places(
+            center_lat,
+            center_lng,
             categories=PLACE_CONTEXT_CATEGORIES,
             route=body.route or [],
-        ), user=user if isinstance(user, dict) else None),
+            radius=context_radius,
+            surface="map_card_context",
+            user=user if isinstance(user, dict) else None,
+        ),
         {"places": []},
     )
     trails_task = guarded(
@@ -16628,6 +16767,8 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     detail = None
     timings["nearby_ms"] = nearby_ms
     timings["trails_ms"] = trails_ms
+    if isinstance(related_pack, dict) and related_pack.get("errors"):
+        errors.update({f"nearby:{k}": str(v) for k, v in (related_pack.get("errors") or {}).items()})
 
     card = _map_card_merge(base, detail)
     if camp_card:
@@ -17240,7 +17381,33 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
     camp_requested = bool(display_requested.intersection({"camp", "camps", "camping"}))
     place_requested = sorted(c for c in display_requested if c not in {"camp", "camps", "camping"})
     place_categories = ",".join(place_requested)
-    camps_task = guarded("camps", lambda: nearby_camps(center_lat, center_lng, min(radius, 55), ""), []) if camp_requested else asyncio.sleep(0, result=[])
+
+    async def load_smart_pack_camps() -> list[dict]:
+        search_radius = min(radius, 55)
+        try:
+            bridge = await discovery_context(
+                DiscoveryContextRequest(
+                    center=PlannerPoint(lat=center_lat, lng=center_lng),
+                    radius=search_radius,
+                    categories=["camp", "camping", "private_stay", "glamping"],
+                    filters=[],
+                    route=route,
+                    surface="nearby_smart_pack",
+                    mode="light",
+                    limit=140,
+                    include_stays=True,
+                    stale_after_hours=12,
+                ),
+                user=user if isinstance(user, dict) else None,
+            )
+            camps = (bridge or {}).get("camps") or (bridge or {}).get("pins") or []
+            if camps:
+                return camps
+        except Exception:
+            pass
+        return await nearby_camps(center_lat, center_lng, search_radius, "", limit=140, mode="light", stays=True)
+
+    camps_task = guarded("camps", load_smart_pack_camps, []) if camp_requested else asyncio.sleep(0, result=[])
     places_task = guarded("places", lambda: nearby_places(center_lat, center_lng, min(radius, 45), place_categories, "auto", user if isinstance(user, dict) else None), [], timeout=14.0) if place_categories else asyncio.sleep(0, result=[])
     fuel_task = guarded("fuel", lambda: get_fuel_stations(center_lat, center_lng, radius_m=int(min(max(radius, 1), 25) * 1609.344)), [], timeout=8.0) if display_requested.intersection({"fuel", "propane"}) else asyncio.sleep(0, result=[])
     active_activity_task = guarded("active_activities", lambda: get_active_activities(center_lat, center_lng, radius_miles=min(radius, 45), limit=30), [], timeout=8.0) if display_requested.intersection({"event", "attraction", "park", "historic", "trailhead", "tour"}) else asyncio.sleep(0, result=[])

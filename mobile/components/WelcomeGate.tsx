@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { mono, useTheme } from '@/lib/design';
 import type { ColorPalette } from '@/lib/design';
@@ -267,7 +268,7 @@ export default function WelcomeGate({
         style={[s.optionRow, selected && s.optionRowSelected]}
       >
         <View style={[s.optionIcon, selected && s.optionIconSelected]}>
-          <Ionicons name={option.icon} size={20} color={selected ? '#ffffff' : C.text2} />
+          <Ionicons name={option.icon} size={20} color={selected ? '#ffffff' : 'rgba(255,255,255,0.9)'} />
         </View>
         <View style={s.optionCopy}>
           <Text style={[s.optionTitle, selected && s.optionTitleSelected]}>{option.title}</Text>
@@ -276,7 +277,7 @@ export default function WelcomeGate({
         <Ionicons
           name={selected ? 'checkmark-circle' : 'ellipse-outline'}
           size={22}
-          color={selected ? C.orange : C.text3}
+          color={selected ? C.orange : 'rgba(255,255,255,0.84)'}
         />
       </TouchableOpacity>
     );
@@ -299,7 +300,12 @@ export default function WelcomeGate({
     <Modal visible={visible} animationType="fade" presentationStyle="fullScreen" onRequestClose={handleRequestClose}>
       <View style={s.root}>
         <ImageBackground source={HERO_IMAGE} resizeMode="cover" style={s.heroImage}>
-          <View style={s.imageShade} />
+          <LinearGradient
+            pointerEvents="none"
+            colors={['rgba(3,5,4,0.58)', 'rgba(3,5,4,0.42)', 'rgba(3,5,4,0.72)']}
+            locations={[0, 0.42, 1]}
+            style={s.imageShade}
+          />
           <View style={[s.safe, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 14) }]}>
             {mode === 'welcome' ? (
               <>
@@ -431,7 +437,6 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   imageShade: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(3,5,4,0.38)',
   },
   safe: {
     flex: 1,
@@ -547,7 +552,10 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     shadowOffset: { width: 0, height: 8 },
   },
   primaryButtonDisabled: {
-    opacity: 0.45,
+    backgroundColor: 'rgba(217,119,69,0.44)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.18)',
+    shadowOpacity: 0,
   },
   primaryText: {
     color: '#ffffff',
@@ -611,10 +619,13 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'center',
   },
   skipHeaderText: {
-    color: 'rgba(255,255,255,0.8)',
+    color: 'rgba(255,255,255,0.94)',
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 0,
+    textShadowColor: 'rgba(0,0,0,0.42)',
+    textShadowRadius: 8,
+    textShadowOffset: { width: 0, height: 1 },
   },
   progressDots: {
     flexDirection: 'row',
@@ -637,12 +648,15 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     paddingBottom: 18,
   },
   setupKicker: {
-    color: 'rgba(255,255,255,0.72)',
+    color: 'rgba(255,255,255,0.86)',
     fontFamily: mono,
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0,
     textTransform: 'uppercase',
+    textShadowColor: 'rgba(0,0,0,0.46)',
+    textShadowRadius: 8,
+    textShadowOffset: { width: 0, height: 1 },
   },
   setupTitle: {
     color: '#ffffff',
@@ -651,13 +665,20 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0,
     maxWidth: 360,
+    textShadowColor: 'rgba(0,0,0,0.46)',
+    textShadowRadius: 14,
+    textShadowOffset: { width: 0, height: 2 },
   },
   setupBody: {
-    color: 'rgba(255,255,255,0.74)',
+    color: 'rgba(255,255,255,0.9)',
     fontSize: 15,
     lineHeight: 22,
+    fontWeight: '500',
     letterSpacing: 0,
     maxWidth: 360,
+    textShadowColor: 'rgba(0,0,0,0.42)',
+    textShadowRadius: 10,
+    textShadowOffset: { width: 0, height: 1 },
   },
   optionScroll: {
     flex: 1,
@@ -674,12 +695,12 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     padding: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(0,0,0,0.38)',
+    borderColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: 'rgba(0,0,0,0.56)',
   },
   optionRowSelected: {
-    borderColor: C.orange,
-    backgroundColor: 'rgba(217,119,69,0.23)',
+    borderColor: 'rgba(255,255,255,0.42)',
+    backgroundColor: 'rgba(217,119,69,0.38)',
   },
   optionIcon: {
     width: 40,
@@ -688,8 +709,8 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: 'rgba(255,255,255,0.12)',
   },
   optionIconSelected: {
     borderColor: 'rgba(255,255,255,0.22)',
@@ -701,17 +722,22 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   optionTitle: {
     color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
+    fontSize: 15.5,
+    lineHeight: 20,
+    fontWeight: '900',
     letterSpacing: 0,
+    textShadowColor: 'rgba(0,0,0,0.32)',
+    textShadowRadius: 6,
+    textShadowOffset: { width: 0, height: 1 },
   },
   optionTitleSelected: {
     color: '#ffffff',
   },
   optionBody: {
-    color: 'rgba(255,255,255,0.66)',
-    fontSize: 12.5,
-    lineHeight: 18,
+    color: 'rgba(255,255,255,0.84)',
+    fontSize: 13,
+    lineHeight: 19,
+    fontWeight: '500',
     letterSpacing: 0,
   },
   setupDock: {
@@ -726,9 +752,12 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     gap: 6,
   },
   selectionText: {
-    color: 'rgba(255,255,255,0.62)',
+    color: 'rgba(255,255,255,0.82)',
     fontSize: 12,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0,
+    textShadowColor: 'rgba(0,0,0,0.42)',
+    textShadowRadius: 8,
+    textShadowOffset: { width: 0, height: 1 },
   },
 });

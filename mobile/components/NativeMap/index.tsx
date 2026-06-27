@@ -2627,41 +2627,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapGL.ShapeSource>
       ) : null}
 
-      {trailHighlight.features.length > 0 && (
-        <MapGL.ShapeSource id="selected-trail-highlight" shape={trailHighlight}>
-          <MapGL.LineLayer
-            id="selected-trail-highlight-glow"
-            style={{
-              lineColor: '#f97316',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 7, 13, 12, 16, 17],
-              lineOpacity: 0.28,
-              lineCap: 'round',
-              lineJoin: 'round',
-            } as any}
-          />
-          <MapGL.LineLayer
-            id="selected-trail-highlight-line"
-            style={{
-              lineColor: '#ffb000',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 2.8, 13, 4.8, 16, 7],
-              lineOpacity: 0.96,
-              lineCap: 'round',
-              lineJoin: 'round',
-            } as any}
-          />
-          <MapGL.LineLayer
-            id="selected-trail-highlight-core"
-            style={{
-              lineColor: '#ffffff',
-              lineWidth: ['interpolate', ['linear'], ['zoom'], 9, 0.8, 13, 1.4, 16, 2],
-              lineOpacity: 0.72,
-              lineCap: 'round',
-              lineJoin: 'round',
-            } as any}
-          />
-        </MapGL.ShapeSource>
-      )}
-
       {trailPreviewVisual.active && (
         <>
           {trailPreviewVisual.remaining.length > 1 && (

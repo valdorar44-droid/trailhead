@@ -106,7 +106,7 @@ import {
 } from '@/lib/copilotCapabilities';
 import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
 
-const TRAIL_FALLBACK_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
+const TRAIL_FALLBACK_IMAGE = require('@/assets/trail-fallback-backpack-sign.jpg');
 
 type MapboxNativeEnrichmentModule = {
   enrichPlace?: (data: {
@@ -5587,11 +5587,7 @@ function MapScreen() {
   const [trailPreviewManifest, setTrailPreviewManifest] = useState<TrailPreviewManifest | null>(null);
   const [trailPreviewProgress, setTrailPreviewProgress] = useState(0);
   const [trailPreviewPauseSignal, setTrailPreviewPauseSignal] = useState(0);
-  const trailPreviewTone = useMemo<'cyan' | 'gold'>(() => (
-    mapLayer === 'satellite' || mapLayer === 'hybrid' || String(premiumMapStyle).includes('satellite') || premiumMapStyle === 'navigation_day'
-      ? 'gold'
-      : 'cyan'
-  ), [mapLayer, premiumMapStyle]);
+  const trailPreviewTone = useMemo<'cyan' | 'gold'>(() => 'cyan', []);
   useEffect(() => {
     const trail = selectedTrail;
     const seq = ++trailWeatherSeqRef.current;
@@ -11654,9 +11650,7 @@ function MapScreen() {
     kind: 'place' | 'trail' = 'place',
   ) {
     const camera = map3dFocusOptions(zoom, kind);
-    if (kind === 'trail') {
-      nativeMapRef.current?.highlightTrail(point.lat, point.lng, point.name);
-    } else if (map3dEnabled && !navMode && nativeMapRef.current?.flyToCamera) {
+    if (map3dEnabled && !navMode && nativeMapRef.current?.flyToCamera) {
       nativeMapRef.current.flyToCamera({
         lat: point.lat,
         lng: point.lng,
@@ -15254,6 +15248,12 @@ function MapScreen() {
     setTrailPreviewProgress(0);
   }
 
+  function clearTrailMapOverlays() {
+    closeTrailPreview();
+    nativeMapRef.current?.clearTrailHighlight();
+    clearTrailRoutePreview();
+  }
+
   async function openTrailPreview(trail: TrailFeature) {
     setTrailPreviewProgress(0);
     setTrailPreviewManifest(null);
@@ -15345,10 +15345,10 @@ function MapScreen() {
   }
 
   function openTrailFeature(feature: TrailFeature) {
+    clearTrailMapOverlays();
     focusMapSelectionPoint({ lat: feature.lat, lng: feature.lng, name: feature.name }, 13, 'trail');
     setSelectedTrailProfile(null);
     setTrailWeather(null);
-    closeTrailPreview();
     setTrailRouteBuilderOpen(false);
     setSavedTrailRouteOpenId(null);
     setTrailRoutePlans([]);
@@ -15887,6 +15887,7 @@ function MapScreen() {
   }
 
   function selectTrailFromDiscovery(trail: TrailFeature) {
+    clearTrailMapOverlays();
     setShowDiscoveryPanel(false);
     setShowTrailList(false);
     setShowLayerSheet(false);
@@ -16608,6 +16609,8 @@ function MapScreen() {
   }
 
   function clearTrailPinCapture() {
+    nativeMapRef.current?.clearTrailHighlight();
+    closeTrailPreview();
     setTrailPinCaptureMode(false);
     setTrailPinCaptureSeedName('');
     setTrailCapturePins([]);
@@ -16626,6 +16629,8 @@ function MapScreen() {
 
   function beginTrailPinCapture() {
     if (navMode) return;
+    nativeMapRef.current?.clearTrailHighlight();
+    closeTrailPreview();
     setSavedTrailRouteOpenId(null);
     setSelectedCamp(null);
     setSelectedCommunityPin(null);
@@ -16658,6 +16663,8 @@ function MapScreen() {
 
   async function seedTrailPinCaptureFromTrail(trail: TrailFeature, geometry?: GeoJSON.FeatureCollection | null) {
     if (navMode) return;
+    nativeMapRef.current?.clearTrailHighlight();
+    closeTrailPreview();
     const seedRaw: [number, number] = [trail.lng, trail.lat];
     let seedGeometry = geometry?.features?.length ? geometry : null;
     if (!seedGeometry) {
@@ -19333,9 +19340,7 @@ function MapScreen() {
             style={s.trailMapCloseBtn}
             activeOpacity={0.82}
             onPress={() => {
-              closeTrailPreview();
-              nativeMapRef.current?.clearTrailHighlight();
-              clearTrailRoutePreview();
+              clearTrailMapOverlays();
               setTrailCardCollapsed(false);
               setSelectedTrail(null);
             }}
@@ -19399,8 +19404,7 @@ function MapScreen() {
                     <TouchableOpacity
                       style={s.trailHeroCircleBtn}
                       onPress={() => {
-                        closeTrailPreview();
-                        nativeMapRef.current?.clearTrailHighlight();
+                        clearTrailMapOverlays();
                         setTrailCardCollapsed(false);
                         setSelectedTrail(null);
                         setShowTrailFieldReportForm(false);
@@ -19756,7 +19760,7 @@ function MapScreen() {
                     : 'Camps in this view'}
                 </Text>
               </View>
-              {mapWeather?.current ? (
+              {discoveryMode !== 'trails' && mapWeather?.current ? (
                 <View style={s.campDiscoveryWeather}>
                   <Ionicons name={weatherIonIcon(Number(mapWeather.current.weather_code ?? mapWeather.daily?.weathercode?.[0] ?? 3))} size={14} color="#0f766e" />
                   <Text style={s.campDiscoveryWeatherText}>{weatherTemp(mapWeather.current.temperature_2m, mapWeather.trailhead_units)}</Text>
@@ -19819,10 +19823,7 @@ function MapScreen() {
                         {trail.photo_url ? (
                           <Image source={{ uri: trail.photo_url }} style={s.campDiscoveryPhoto} resizeMode="cover" />
                         ) : (
-                          <View style={[s.campDiscoveryPhotoPlaceholder, s.trailDiscoveryPhotoPlaceholder]}>
-                            <Ionicons name={trailIcon(trail.type) as any} size={34} color={trailColor(trail.type)} />
-                            <Text style={s.trailDiscoveryPhotoText}>Map trail</Text>
-                          </View>
+                          <Image source={TRAIL_FALLBACK_IMAGE} style={s.campDiscoveryPhoto} resizeMode="cover" />
                         )}
                         <View style={s.campDiscoveryCardBody}>
                           <Text style={s.campDiscoveryName} numberOfLines={2}>{trail.name}</Text>

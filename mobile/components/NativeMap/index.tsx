@@ -470,6 +470,47 @@ function campFeat(c: CampsitePin): GeoJSON.Feature {
     properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', camp_kind: kind, camp_code: code, cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
 }
 
+function campPinKind(c: CampsitePin): string {
+  const raw = [
+    ...(Array.isArray(c.tags) ? c.tags : []),
+    ...(Array.isArray(c.site_types) ? c.site_types : []),
+    c.land_type,
+    (c as any).source_badge,
+    c.verified_source,
+    c.source,
+    c.cost,
+    c.description,
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (raw.includes('dispersed') || raw.includes('primitive') || raw.includes('boondock')) return 'dispersed';
+  if (raw.includes('blm') || raw.includes('bureau of land management')) return 'blm';
+  if (raw.includes('usfs') || raw.includes('national forest') || raw.includes('forest service')) return 'usfs';
+  if (raw.includes('nps') || raw.includes('national park')) return 'nps';
+  if (raw.includes('state park')) return 'state';
+  if (raw.includes('rv') || raw.includes('hookup') || raw.includes('caravan')) return 'rv';
+  if (raw.includes('tent')) return 'tent';
+  return c.reservable ? 'reservable' : 'camp';
+}
+
+function campPinColor(c: CampsitePin): string {
+  switch (campPinKind(c)) {
+    case 'dispersed': return '#8b5a2b';
+    case 'blm': return '#f97316';
+    case 'usfs': return '#22c55e';
+    case 'nps': return '#3b82f6';
+    case 'state': return '#8b5cf6';
+    case 'rv': return '#2563eb';
+    case 'reservable': return '#8b5cf6';
+    default: return '#14b8a6';
+  }
+}
+
+function campPinIcon(c: CampsitePin): keyof typeof Ionicons.glyphMap {
+  const kind = campPinKind(c);
+  if (kind === 'rv') return 'car-outline';
+  if (kind === 'dispersed') return 'moon-outline';
+  return 'bonfire-outline';
+}
+
 function coordDistanceM(a: [number, number], b: [number, number]): number {
   const lat = ((a[1] + b[1]) / 2) * Math.PI / 180;
   const dx = (b[0] - a[0]) * 111_320 * Math.cos(lat);
@@ -1797,13 +1838,40 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       try {
         const screen = Dimensions.get('window');
         const layerIds = ['trail-pack-line', 'road-path', 'road-other', 'mvum-trails-line', 'mvum-roads-line'];
+        const rendered: any[] = [];
         const rectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
           renderedQueryViewportRect(screen),
           undefined,
           layerIds,
         ).catch(() => null);
         const rectFeatures = Array.isArray(rectFound) ? rectFound : rectFound?.features;
-        return normalizeVisibleTrailPois(rectFeatures);
+        if (Array.isArray(rectFeatures)) rendered.push(...rectFeatures);
+
+        const allRectFound = await (mapRef.current as any).queryRenderedFeaturesInRect?.(
+          renderedQueryViewportRect(screen),
+          undefined,
+          undefined,
+        ).catch(() => null);
+        const allRectFeatures = Array.isArray(allRectFound) ? allRectFound : allRectFound?.features;
+        if (Array.isArray(allRectFeatures)) rendered.push(...allRectFeatures);
+
+        const width = Math.max(1, Number(screen.width) || 1);
+        const height = Math.max(1, Number(screen.height) || 1);
+        const samplePoints = [
+          [0.22, 0.24], [0.5, 0.24], [0.78, 0.24],
+          [0.22, 0.42], [0.5, 0.42], [0.78, 0.42],
+          [0.22, 0.6], [0.5, 0.6], [0.78, 0.6],
+        ];
+        for (const [xRatio, yRatio] of samplePoints) {
+          const found = await mapRef.current.queryRenderedFeaturesAtPoint(
+            [width * xRatio, height * yRatio],
+            undefined,
+            undefined,
+          ).catch(() => null);
+          const features = Array.isArray(found) ? found : found?.features;
+          if (Array.isArray(features)) rendered.push(...features);
+        }
+        return normalizeVisibleTrailPois(rendered);
       } catch {
         return [];
       }
@@ -3135,6 +3203,20 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapGL.ShapeSource>
       )}
 
+      {camps.filter(camp => Number.isFinite(camp.lat) && Number.isFinite(camp.lng)).slice(0, 160).map((camp, i) => (
+        <MapGL.MarkerView
+          key={`camp-marker-${camp.id || camp.name || 'camp'}-${camp.lat}-${camp.lng}-${i}`}
+          id={`camp-marker-${i}`}
+          coordinate={[camp.lng, camp.lat]}
+        >
+          <IconPin
+            color={campPinColor(camp)}
+            icon={campPinIcon(camp)}
+            onPress={() => suppressFeatureTaps ? onMapTap(camp.lat, camp.lng) : onCampTap?.(camp)}
+          />
+        </MapGL.MarkerView>
+      ))}
+
       {/* ── Gas stations ──────────────────────────────────────────────── */}
       {gas.length > 0 && (
         <MapGL.ShapeSource
@@ -3636,12 +3718,32 @@ function normalizeVisibleTrailPois(features: any[] | undefined): OsmPoi[] {
   const out: OsmPoi[] = [];
   for (const feature of features) {
     const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
-    if (!/(trail|road-path|road-other|mvum)/.test(layerId)) continue;
+    const props = feature?.properties ?? {};
+    const cls = String(props.class || props.type || props.kind || props.surface || props.structure || props.mode || layerId || '').toLowerCase();
+    const raw = [
+      layerId,
+      cls,
+      props.name,
+      props.name_en,
+      props.maki,
+      props.category,
+      props.poi_category,
+      props.feature_type,
+      props.route,
+      props.network,
+      props.sport,
+    ].filter(Boolean).join(' ').toLowerCase();
+    const geometryType = String(feature?.geometry?.type || '');
+    const lineLike = geometryType === 'LineString' || geometryType === 'MultiLineString';
+    const localTrailLayer = /(trail-pack-line|road-path|road-other|mvum)/.test(layerId);
+    const mapboxTrailLayer = /(trail|path|walking|cycling|piste|pedestrian|footway|track)/.test(raw);
+    const normalRoad = /(motorway|trunk|primary|secondary|tertiary|street|residential|service|road-label|road-number|ferry)/.test(raw)
+      && !/(trail|path|walking|cycling|piste|footway|track|hiking|bridleway)/.test(raw);
+    if (!lineLike && !localTrailLayer) continue;
+    if (!localTrailLayer && (!mapboxTrailLayer || normalRoad)) continue;
     const coord = coordinateFromTrailGeometry(feature?.geometry);
     if (!coord) continue;
     const [lng, lat] = coord;
-    const props = feature?.properties ?? {};
-    const cls = String(props.class || props.type || props.kind || props.surface || layerId || '').toLowerCase();
     const name = String(
       props.name
       || props.ref

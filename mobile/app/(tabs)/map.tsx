@@ -14331,7 +14331,7 @@ function MapScreen() {
     [visibleCommunityPins]
   );
   const routePois = useMemo(() => {
-    const trailPinsActive = showTrailList || showDiscoveryPanel || discoveryMode === 'trails';
+    const trailPinsActive = showTrailList || (showDiscoveryPanel && discoveryMode === 'trails');
     const seen = new Set<string>();
     const next: OsmPoi[] = [];
     const pushPoi = (p: OsmPoi | undefined | null) => {
@@ -15226,20 +15226,10 @@ function MapScreen() {
     setShowTrailFieldReportForm(false);
     resetFieldReportForm();
     setTrailCardCollapsed(false);
-    setSelectedTrail(null);
-    setSelectedPlace({
-      id: feature.profile_id || `trail:${feature.lat.toFixed(5)}:${feature.lng.toFixed(5)}`,
-      name: feature.name,
-      lat: feature.lat,
-      lng: feature.lng,
-      type: feature.type || 'trail',
-      subtype: feature.subtitle,
-      source: feature.profile_id ? 'trailhead' : 'map',
-      source_label: feature.profile_id ? 'Trailhead trail' : 'Map trail',
-      provider_place_id: feature.profile_id,
-      photo_url: feature.photo_url || null,
-      summary: feature.summary || 'Mapped trail route with nearby support context from Trailhead.',
-    });
+    setSelectedTrail(feature);
+    setSelectedPlace(null);
+    setSelectedPlaceContext(null);
+    setSelectedPlaceTripContext(null);
     setSelectedCamp(null);
     setTappedTrail(null);
     setTappedTileSpot(null);
@@ -15253,14 +15243,15 @@ function MapScreen() {
       api.getTrailProfile(feature.profile_id)
         .then(profile => {
           setSelectedTrailProfile(profile);
-          setSelectedPlace(current => current && current.id === feature.profile_id ? {
-            ...current,
-            name: profile.name || current.name,
-            summary: profile.summary || current.summary,
-            photo_url: profile.photos?.[0]?.url || current.photo_url,
-            photos: profile.photos?.map(photo => ({ ...photo, url: photo.url })),
-            source_label: profile.source_label || current.source_label,
-          } : current);
+          setSelectedTrail(current => {
+            if (!current || current.profile_id !== feature.profile_id) return current;
+            return {
+              ...current,
+              name: profile.name || current.name,
+              summary: profile.summary || current.summary,
+              photo_url: profile.photos?.[0]?.url || current.photo_url,
+            };
+          });
           if (profile.field_report_summary) setTrailFieldReportSummary(profile.field_report_summary);
         })
         .catch(() => {});
@@ -15404,6 +15395,22 @@ function MapScreen() {
 
   function openPoiFeature(poi: OsmPoi, day?: number | null) {
     if (mapTapToolOwnsFeatureSelection) return;
+    if (poi.type === 'trail' || poi.type === 'trailhead') {
+      const support = buildTrailSupport(
+        { lat: poi.lat, lng: poi.lng },
+        trailSupportCamps,
+        trailSupportFuel,
+        allMapPois,
+        mapReports,
+        offlineSaved,
+      );
+      const feature = featureFromPoi(poi, support, poi.type === 'trailhead' ? 'trailhead' : 'osm');
+      if (feature) {
+        setSelectedPlaceTripContext(null);
+        openTrailFeature(feature);
+        return;
+      }
+    }
     const place = poi as SearchPlace;
     const source = String(poi.source || '').toLowerCase();
     const renderedMapbox = isRenderedMapboxPlaceSource(source);
@@ -15650,19 +15657,6 @@ function MapScreen() {
     });
   }
 
-  function searchCampsNearTrail(trail: TrailFeature) {
-    const bounds = { n: trail.lat + 0.35, s: trail.lat - 0.35, e: trail.lng + 0.35, w: trail.lng - 0.35, zoom: 11 };
-    setQuickToast('Searching camps near trail');
-    setTimeout(() => setQuickToast(''), 2500);
-    setTimeout(() => {
-      viewportRef.current = bounds;
-      nativeMapRef.current?.flyTo(trail.lat, trail.lng, 11);
-      setShowDiscoveryPanel(false);
-      setShowLayerSheet(false);
-      setTimeout(() => loadCampsInArea(bounds, activeFilters), 120);
-    }, 220);
-  }
-
   async function runTrailDiscoverySearch(scope: TrailDiscoveryScope = 'view') {
     if (isSearchingTrails) return;
     setTrailDiscoveryScope(scope);
@@ -15714,19 +15708,14 @@ function MapScreen() {
           setQuickToast(scope === 'nearby' && userLoc ? 'Showing live map trail places' : 'Showing map-view trail places');
         }
         const supportRadiusMi = Math.min(75, Math.max(radiusMi, 30));
-        const [supportPoisResult, supportGasResult, supportCampsResult] = await Promise.allSettled([
+        const [supportPoisResult, supportGasResult] = await Promise.allSettled([
           api.getOsmPois(center.lat, center.lng, supportRadiusMi, 'water,trailhead,viewpoint,peak,hot_spring'),
           api.getGas(center.lat, center.lng, supportRadiusMi),
-          api.getNearbyCamps(center.lat, center.lng, supportRadiusMi, campLookupFilters(activeFilters) ?? ['__none__']),
         ]);
         const onlineSupportPois = supportPoisResult.status === 'fulfilled' ? supportPoisResult.value : [];
         const onlineFuelPois = supportGasResult.status === 'fulfilled'
           ? supportGasResult.value.map(gasStationToPoi).filter((poi): poi is OsmPoi => !!poi)
           : [];
-        if (supportCampsResult.status === 'fulfilled') {
-          setAreaCamps(supportCampsResult.value.slice(0, 180));
-          webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: supportCampsResult.value.slice(0, 180) }));
-        }
         const padLat = vp ? Math.max(0.02, Math.abs(vp.n - vp.s) * 0.12) : 0;
         const padLng = vp ? Math.max(0.02, Math.abs(vp.e - vp.w) * 0.12) : 0;
         const bounded = scope === 'view' && vp
@@ -17482,7 +17471,8 @@ function MapScreen() {
     !offlineAreaPicker &&
     !trailRouteBuilderOpen
   );
-  const nativeMapCampPins = showCampPins ? discoveryCamps : [];
+  const campDiscoveryActive = !campDiscoverySheetDismissed || campDiscoveryWideActive;
+  const nativeMapCampPins = (showCampPins || campDiscoveryActive) ? discoveryCamps : [];
 
   const nativeNavigationPanel = navMode ? (
     <Animated.View
@@ -17850,8 +17840,7 @@ function MapScreen() {
             if (mapTapToolOwnsFeatureSelection) return;
             setSearchRouteCard(null);
             closeTrailPreview();
-            setSelectedPlace({ id: `trail:${lat}:${lng}`, name: name || 'Trail', lat, lng, type: 'trail', source: 'map', source_label: 'Map trail', summary: 'Trail or track selected from the map.' });
-            setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); setSelectedCommunityPin(null);
+            openTrailFromPoint(name || 'Trail', lat, lng, 'path');
           }}
           onWaypointTap={(idx, name) => { setTappedWp({ idx, wp: waypoints[idx] }); }}
           onRouteReady={result => {
@@ -19476,17 +19465,6 @@ function MapScreen() {
               <Text style={s.wpSheetNavText}>BUILD ROUTE</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[s.wpSheetDayBtn, s.trailSheetAction, { borderColor: C.orange + '44' }]}
-              onPress={() => {
-                const trail = selectedTrail;
-                setSelectedTrail(null);
-                searchCampsNearTrail(trail);
-              }}
-            >
-              <Ionicons name="bonfire-outline" size={14} color={C.orange} />
-              <Text style={[s.wpSheetDayText, { color: C.orange }]}>CAMPS</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
               style={[s.wpSheetDayBtn, s.trailSheetAction, s.trailSheetMutedAction]}
               onPress={() => {
                 resetFieldReportForm();
@@ -19660,11 +19638,19 @@ function MapScreen() {
         <View style={s.discoveryPanel}>
           <View style={s.discoveryPanelHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.discoveryPanelTitle}>{trailDiscoveryScope === 'nearby' ? 'Nearby camps & trails' : 'In-view camps & trails'}</Text>
+              <Text style={s.discoveryPanelTitle}>
+                {discoveryMode === 'trails'
+                  ? (trailDiscoveryScope === 'nearby' ? 'Nearby trails' : 'Trails in this view')
+                  : (trailDiscoveryScope === 'nearby' ? 'Nearby camps' : 'Camps in this view')}
+              </Text>
               <Text style={s.discoveryPanelSub}>
-                {trailDiscoveries.length || areaCamps.length
-                  ? 'Current map results. Tap one to open details.'
-                  : 'No camps or trails found in this view. Pan, zoom in, or search nearby.'}
+                {discoveryMode === 'trails'
+                  ? (trailDiscoveries.length
+                    ? 'Current trail results. Tap one to open the trail preview.'
+                    : 'No trails found in this view. Pan, zoom in, or search nearby.')
+                  : (areaCamps.length
+                    ? 'Current camp results. Tap one to open details.'
+                    : 'No camps found in this view. Pan, zoom in, or search nearby.')}
               </Text>
             </View>
             <TouchableOpacity style={s.discoveryPanelClose} onPress={() => setShowDiscoveryPanel(false)}>
@@ -19672,25 +19658,34 @@ function MapScreen() {
             </TouchableOpacity>
           </View>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.discoveryCats}>
-            {[
-              { type: 'camp', label: 'CAMPS', count: areaCamps.length },
-              { type: 'trailhead', label: 'TRAILHEADS' },
-              { type: 'viewpoint', label: 'VIEWS' },
-              { type: 'peak', label: 'PEAKS' },
-              { type: 'hot_spring', label: 'HOT SPRINGS' },
-            ].map(({ type, label, count: fixedCount }) => {
+            {((discoveryMode === 'trails'
+              ? [
+                { type: 'trail', label: 'TRAILS' },
+                { type: 'trailhead', label: 'TRAILHEADS' },
+                { type: 'viewpoint', label: 'VIEWS' },
+                { type: 'peak', label: 'PEAKS' },
+                { type: 'hot_spring', label: 'HOT SPRINGS' },
+              ]
+              : [
+                { type: 'camp', label: 'CAMPS', count: areaCamps.length },
+              ]
+            ) as Array<{ type: string; label: string; count?: number }>).map(({ type, label, count: fixedCount }) => {
               const count = typeof fixedCount === 'number' ? fixedCount : trailDiscoveries.filter(t => t.type === type).length;
               return <Text key={type} style={s.discoveryCatPill}>{label} {count}</Text>;
             })}
           </ScrollView>
           <ScrollView showsVerticalScrollIndicator={false} style={s.discoveryCardList} contentContainerStyle={s.discoveryCardRail}>
-            {trailDiscoveries.length === 0 && areaCamps.length === 0 ? (
+            {(discoveryMode === 'trails' ? trailDiscoveries.length === 0 : areaCamps.length === 0) ? (
               <View style={s.discoveryEmpty}>
                 <Ionicons name="map-outline" size={20} color={C.text3} />
-                <Text style={s.discoveryEmptyText}>No camps or trails found in this view. Pan, move closer, or search a nearby area.</Text>
+                <Text style={s.discoveryEmptyText}>
+                  {discoveryMode === 'trails'
+                    ? 'No trails found in this view. Pan, move closer, or search a nearby area.'
+                    : 'No camps found in this view. Pan, move closer, or search a nearby area.'}
+                </Text>
               </View>
             ) : (<>
-              {areaCamps.slice(0, 14).map(camp => (
+              {discoveryMode === 'camps' && areaCamps.slice(0, 14).map(camp => (
                 <TouchableOpacity
                   key={`camp:${camp.id || `${camp.lat}:${camp.lng}`}`}
                   style={s.discoveryTrailCard}
@@ -19734,7 +19729,7 @@ function MapScreen() {
                   </View>
                 </TouchableOpacity>
               ))}
-              {trailDiscoveries.map(trail => (
+              {discoveryMode === 'trails' && trailDiscoveries.map(trail => (
               <TouchableOpacity key={trail.id} style={s.discoveryTrailCard} onPress={() => selectTrailFromDiscovery(trail)} activeOpacity={0.88}>
                 <View style={[s.discoveryTrailHero, { borderColor: trailColor(trail.type) + '55' }]}>
                   {trail.photo_url ? (

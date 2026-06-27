@@ -161,6 +161,7 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
 
   const available = manifest?.status === 'available' && frames.length >= 2;
   const distanceM = activeFrame?.cumulative_distance_m ?? (manifest?.distance_m ? Math.round(manifest.distance_m * progress) : undefined);
+  if (!loading && !available) return null;
 
   return (
     <View style={styles.wrap} pointerEvents="box-none">
@@ -169,11 +170,11 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
           <Ionicons name="close" size={18} color="#f8fafc" />
         </TouchableOpacity>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={styles.kicker}>TRAIL PREVIEW</Text>
+          <Text style={styles.kicker}>Preview</Text>
           <Text style={styles.title} numberOfLines={1}>{manifest?.trail_name || trail?.name || 'Trail'}</Text>
         </View>
         <View style={[styles.livePill, { borderColor: accent + '88', backgroundColor: accent + '1f' }]}>
-          <Text style={[styles.livePillText, { color: accent }]}>{available ? '3D' : 'GUIDE'}</Text>
+          <Text style={[styles.livePillText, { color: accent }]}>{available ? '3D' : 'Loading'}</Text>
         </View>
       </View>
 
@@ -221,17 +222,7 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
               </TouchableOpacity>
             </View>
           </>
-        ) : (
-          <View style={styles.unavailable}>
-            <Ionicons name="map-outline" size={19} color={accent} />
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.unavailableTitle}>Map highlight ready</Text>
-              <Text style={styles.unavailableText} numberOfLines={3}>
-                {(manifest?.warnings ?? [])[0] || 'Flyover starts when this trail has route geometry.'}
-              </Text>
-            </View>
-          </View>
-        )}
+        ) : null}
       </View>
     </View>
   );

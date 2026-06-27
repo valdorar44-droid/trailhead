@@ -73,8 +73,6 @@ import {
 import {
   normalizeTrailheadTrailProfile,
   trailFeatureSourceSummary,
-  trailProfileSourceRows,
-  trailProfileStatRows,
 } from '@/lib/trailProfileDisplay';
 import {
   addNavigationStateListener,
@@ -107,6 +105,8 @@ import {
   type TrailheadRouteBuilderDraft,
 } from '@/lib/copilotCapabilities';
 import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
+
+const TRAIL_FALLBACK_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
 
 type MapboxNativeEnrichmentModule = {
   enrichPlace?: (data: {
@@ -3539,6 +3539,40 @@ function weatherTemp(value?: number | null, units?: WeatherForecast['trailhead_u
   return `${Math.round(Number(value))}${units?.temperature_label ?? '°'}`;
 }
 
+function trailDistanceLabel(profile?: TrailProfile | null, trail?: TrailFeature | null) {
+  const distance = Number(profile?.length_mi ?? profile?.distance_mi ?? trail?.length_mi ?? trail?.distanceMi);
+  if (!Number.isFinite(distance) || distance <= 0) return '--';
+  return `${distance >= 10 ? Math.round(distance).toLocaleString() : distance.toFixed(1)} mi`;
+}
+
+function trailElevationDisplay(profile?: TrailProfile | null, trail?: TrailFeature | null) {
+  const gain = Number(profile?.elevation_gain_ft);
+  if (Number.isFinite(gain) && gain > 0) return { label: 'Elevation gain', value: `${Math.round(gain).toLocaleString()} ft` };
+  const altitude = Number(profile?.altitude_ft);
+  if (Number.isFinite(altitude) && altitude > 0) return { label: 'Elevation', value: `${Math.round(altitude).toLocaleString()} ft` };
+  const elevation = String(trail?.elevation || '').trim();
+  if (elevation) return { label: 'Elevation', value: elevation };
+  return { label: 'Elevation', value: '--' };
+}
+
+function trailRouteTypeLabel(profile?: TrailProfile | null, trail?: TrailFeature | null) {
+  const raw = String(profile?.route_type || '').toLowerCase().replace(/[-_]+/g, ' ');
+  if (/loop/.test(raw)) return 'Loop';
+  if (/out.*back|return/.test(raw)) return 'Out & back';
+  if (/point|through|one way/.test(raw)) return 'Point to point';
+  if (/network|system|area/.test(raw)) return 'Trail system';
+  return trail?.type === 'road' ? 'Route' : 'Trail';
+}
+
+function trailWeatherDisplay(weather?: WeatherForecast | null) {
+  const code = Number(weather?.current?.weather_code ?? weather?.daily?.weathercode?.[0] ?? 3);
+  return {
+    icon: weatherIonIcon(code),
+    temp: weatherTemp(weather?.current?.temperature_2m ?? weather?.daily?.temperature_2m_max?.[0], weather?.trailhead_units),
+    label: weather ? weatherSummaryLabel(code) : 'Weather',
+  };
+}
+
 function campCostLine(camp: Partial<CampsitePin> | null | undefined) {
   const raw = String(camp?.cost || '').trim();
   if (!raw) return camp?.reservable ? 'Reservable' : '';
@@ -5545,6 +5579,8 @@ function MapScreen() {
   const [tappedPoi,  setTappedPoi]  = useState<OsmPoi | null>(null);
   const [selectedTrail, setSelectedTrail] = useState<TrailFeature | null>(null);
   const [selectedTrailProfile, setSelectedTrailProfile] = useState<TrailProfile | null>(null);
+  const [trailWeather, setTrailWeather] = useState<WeatherForecast | null>(null);
+  const trailWeatherSeqRef = useRef(0);
   const [trailPreviewOpen, setTrailPreviewOpen] = useState(false);
   const [trailPreviewLoading, setTrailPreviewLoading] = useState(false);
   const [trailSourceRefreshing, setTrailSourceRefreshing] = useState(false);
@@ -5556,6 +5592,17 @@ function MapScreen() {
       ? 'gold'
       : 'cyan'
   ), [mapLayer, premiumMapStyle]);
+  useEffect(() => {
+    const trail = selectedTrail;
+    const seq = ++trailWeatherSeqRef.current;
+    setTrailWeather(null);
+    if (!trail || !Number.isFinite(trail.lat) || !Number.isFinite(trail.lng)) return;
+    api.getWeather(trail.lat, trail.lng, 3, weatherUnitMode)
+      .then(result => {
+        if (trailWeatherSeqRef.current === seq) setTrailWeather(result);
+      })
+      .catch(() => {});
+  }, [selectedTrail?.id, selectedTrail?.lat, selectedTrail?.lng, weatherUnitMode]);
   const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
   const [showTrailList, setShowTrailList] = useState(false);
   const [trailRouteBuilderOpen, setTrailRouteBuilderOpen] = useState(false);
@@ -15210,54 +15257,43 @@ function MapScreen() {
   async function openTrailPreview(trail: TrailFeature) {
     setTrailPreviewProgress(0);
     setTrailPreviewManifest(null);
-    setTrailPreviewOpen(true);
-    setTrailCardCollapsed(true);
-    setShowTrailList(false);
-    setTrailRouteBuilderOpen(false);
     const localProfile = selectedTrailProfile && (
       selectedTrailProfile.id === trail.profile_id ||
       selectedTrailProfile.id === trail.id ||
       selectedTrailProfile.name === trail.name
     ) ? selectedTrailProfile : null;
     const localManifest = buildLocalTrailPreviewManifest(trail, localProfile);
+    const openManifest = (manifest: TrailPreviewManifest) => {
+      setTrailPreviewManifest(manifest);
+      setTrailPreviewOpen(true);
+      setTrailCardCollapsed(true);
+      setShowTrailList(false);
+      setTrailRouteBuilderOpen(false);
+      setMap3dEnabled(true);
+    };
+    if (localManifest) {
+      openManifest(localManifest);
+      return;
+    }
     if (!trail.profile_id) {
-      if (localManifest) {
-        setTrailPreviewManifest(localManifest);
-        setMap3dEnabled(true);
-        return;
-      }
-      setTrailPreviewManifest({
-        version: 1,
-        status: 'unavailable',
-        route_id: `guide:${trail.id}`,
-        trail_id: trail.id,
-        trail_name: trail.name,
-        preview_available: false,
-        warnings: ['This visible trail can be highlighted on the map. Full flyover starts when route geometry is available.'],
-      });
+      setQuickToast('Preview is not available for this trail yet.');
+      setTimeout(() => setQuickToast(''), 2400);
       return;
     }
     setTrailPreviewLoading(true);
     try {
       const manifest = await api.getTrailPreview(trail.profile_id);
-      const nextManifest = manifest.status === 'available' && manifest.coordinates?.length
+      const nextManifest = manifest.status === 'available' && (manifest.coordinates?.length ?? 0) >= 2
         ? manifest
-        : localManifest ?? manifest;
-      setTrailPreviewManifest(nextManifest);
-      if (nextManifest.status === 'available' && nextManifest.coordinates?.length) {
-        setMap3dEnabled(true);
+        : null;
+      if (nextManifest) openManifest(nextManifest);
+      else {
+        setQuickToast('Preview is not available for this trail yet.');
+        setTimeout(() => setQuickToast(''), 2400);
       }
     } catch {
-      setTrailPreviewManifest(localManifest ?? {
-        version: 1,
-        status: 'unavailable',
-        route_id: `trail:${trail.profile_id}`,
-        trail_id: trail.profile_id,
-        trail_name: trail.name,
-        preview_available: false,
-        warnings: ['This trail can still be highlighted on the map. Flyover starts when route geometry is available.'],
-      });
-      if (localManifest) setMap3dEnabled(true);
+      setQuickToast('Preview is not available for this trail yet.');
+      setTimeout(() => setQuickToast(''), 2400);
     } finally {
       setTrailPreviewLoading(false);
     }
@@ -15311,6 +15347,7 @@ function MapScreen() {
   function openTrailFeature(feature: TrailFeature) {
     focusMapSelectionPoint({ lat: feature.lat, lng: feature.lng, name: feature.name }, 13, 'trail');
     setSelectedTrailProfile(null);
+    setTrailWeather(null);
     closeTrailPreview();
     setTrailRouteBuilderOpen(false);
     setSavedTrailRouteOpenId(null);
@@ -19308,276 +19345,246 @@ function MapScreen() {
         </View>
       )}
 
-      {selectedTrail && !navMode && !trailPinCaptureMode && !trailCardCollapsed && !trailRouteBuilderOpen && (
-        <View style={s.trailOverlayCard}>
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailOverlayContent}>
-          <View style={s.wpSheetHeader}>
-            <View style={[s.trailIconBadge, { backgroundColor: trailColor(selectedTrail.type) + '22', borderColor: trailColor(selectedTrail.type) + '66' }]}>
-              <Ionicons name={trailIcon(selectedTrail.type) as any} size={18} color={trailColor(selectedTrail.type)} />
-            </View>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.wpSheetName} numberOfLines={2}>{selectedTrail.name}</Text>
-              <Text style={s.wpSheetMeta}>{selectedTrail.subtitle}</Text>
-            </View>
-            <TouchableOpacity style={s.discoveryPanelClose} onPress={() => setTrailCardCollapsed(true)}>
-              <Ionicons name="chevron-down" size={15} color={OVR.text2} />
-            </TouchableOpacity>
-            <TouchableOpacity style={s.discoveryPanelClose} onPress={() => { closeTrailPreview(); nativeMapRef.current?.clearTrailHighlight(); setTrailCardCollapsed(false); setSelectedTrail(null); setShowTrailFieldReportForm(false); resetFieldReportForm(); }}>
-              <Ionicons name="close" size={15} color={OVR.text2} />
-            </TouchableOpacity>
-          </View>
-          <View style={s.trailHeroPanel}>
-            {selectedTrailProfile?.photos?.[0]?.url || selectedTrail.photo_url ? (
-              <>
-                <Image source={{ uri: selectedTrailProfile?.photos?.[0]?.url || selectedTrail.photo_url || '' }} style={s.trailHeroPhoto} resizeMode="cover" />
-                <View style={s.trailHeroCredit}>
-                  <Ionicons name="image-outline" size={12} color="#fff" />
-                  <Text style={s.trailHeroCreditText} numberOfLines={1}>
-                    {selectedTrailProfile?.photos?.[0]?.credit || selectedTrailProfile?.photos?.[0]?.source || 'Open photo source'}
-                  </Text>
+      {selectedTrail && !navMode && !trailPinCaptureMode && !trailCardCollapsed && !trailRouteBuilderOpen && (() => {
+        const model = normalizeTrailheadTrailProfile(selectedTrailProfile, selectedTrail);
+        const heroUri = selectedTrailProfile?.photos?.[0]?.url || selectedTrail.photo_url || '';
+        const photoCredit = selectedTrailProfile?.photos?.[0]?.credit || selectedTrailProfile?.photos?.[0]?.source || '';
+        const elevation = trailElevationDisplay(selectedTrailProfile, selectedTrail);
+        const weather = trailWeatherDisplay(trailWeather);
+        const difficulty = model.difficulty_label && model.difficulty_label !== 'Unrated'
+          ? model.difficulty_label
+          : trailDifficultyText(selectedTrail);
+        const summary = String(selectedTrailProfile?.summary || selectedTrailProfile?.description || selectedTrail.summary || '').trim();
+        const canPreviewTrail = Boolean(buildLocalTrailPreviewManifest(selectedTrail, selectedTrailProfile) || selectedTrailProfile?.preview_available);
+        const nearbyRows = [
+          selectedTrail.support.nearestCampDistanceMi != null
+            ? { icon: 'bonfire-outline', color: C.orange, text: `${selectedTrail.support.nearestCampName || 'Nearest camp'} · ${selectedTrail.support.nearestCampDistanceMi.toFixed(1)} mi` }
+            : null,
+          selectedTrail.support.nearestWaterDistanceMi != null
+            ? { icon: 'water-outline', color: '#38bdf8', text: `Water source · ${selectedTrail.support.nearestWaterDistanceMi.toFixed(1)} mi` }
+            : null,
+          selectedTrail.support.nearestFuelDistanceMi != null
+            ? { icon: 'flash-outline', color: '#eab308', text: `Fuel / service · ${selectedTrail.support.nearestFuelDistanceMi.toFixed(1)} mi` }
+            : null,
+        ].filter(Boolean) as Array<{ icon: keyof typeof Ionicons.glyphMap; color: string; text: string }>;
+        const reportPhotoRows = trailFieldReports.filter(fr => fr.has_photo);
+        return (
+          <View style={s.trailOverlayCard}>
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailOverlayContent}>
+              <View style={s.trailHeroPanel}>
+                <Image source={heroUri ? { uri: heroUri } : TRAIL_FALLBACK_IMAGE} style={s.trailHeroPhoto} resizeMode="cover" />
+                <View style={s.trailHeroShade} />
+                <View style={s.trailHeroTopBar}>
+                  <TouchableOpacity style={s.trailHeroCircleBtn} onPress={() => setTrailCardCollapsed(true)}>
+                    <Ionicons name="chevron-down" size={18} color="#fff" />
+                  </TouchableOpacity>
+                  <View style={s.trailHeroTopActions}>
+                    {canPreviewTrail && (
+                      <TouchableOpacity
+                        style={s.trailHeroCircleBtn}
+                        activeOpacity={0.86}
+                        disabled={trailPreviewLoading}
+                        onPress={() => openTrailPreview(selectedTrail)}
+                      >
+                        {trailPreviewLoading ? (
+                          <ActivityIndicator size="small" color="#fff" />
+                        ) : (
+                          <Ionicons name="play" size={16} color="#fff" />
+                        )}
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity style={s.trailHeroCircleBtn} activeOpacity={0.86} onPress={() => downloadSelectedTrail(selectedTrail)}>
+                      <Ionicons name={selectedTrail.support.offlineReady ? 'cloud-done-outline' : 'cloud-download-outline'} size={17} color="#fff" />
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={s.trailHeroCircleBtn}
+                      onPress={() => {
+                        closeTrailPreview();
+                        nativeMapRef.current?.clearTrailHighlight();
+                        setTrailCardCollapsed(false);
+                        setSelectedTrail(null);
+                        setShowTrailFieldReportForm(false);
+                        resetFieldReportForm();
+                      }}
+                    >
+                      <Ionicons name="close" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  </View>
                 </View>
-              </>
-            ) : (
-              <View style={s.trailHeroFallback}>
-                <View style={s.trailHeroGrid}>
-                  {Array.from({ length: 6 }).map((_, i) => <View key={`th-v-${i}`} style={[s.trailHeroVLine, { left: `${i * 20}%` }]} />)}
-                  {Array.from({ length: 5 }).map((_, i) => <View key={`th-h-${i}`} style={[s.trailHeroHLine, { top: `${i * 25}%` }]} />)}
+                <View style={s.trailHeroTitleBlock}>
+                  <Text style={s.trailHeroTitle} numberOfLines={3}>{selectedTrail.name}</Text>
+                  <View style={s.trailHeroMetaLine}>
+                    <Ionicons name="star" size={12} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#23d2c3'} />
+                    <Text style={s.trailHeroMetaText} numberOfLines={1}>
+                      {difficulty}{selectedTrail.subtitle ? ` · ${selectedTrail.subtitle}` : ''}
+                    </Text>
+                  </View>
                 </View>
-                <View style={s.trailHeroRouteLine} />
-                <Ionicons name="map-outline" size={20} color={OVR.text2} />
-                <Text style={s.trailHeroFallbackTitle}>No open photo confirmed</Text>
-                <Text style={s.trailHeroFallbackSub} numberOfLines={2}>Showing map-first trail context until an official or open photo source is matched.</Text>
+                {!!photoCredit && (
+                  <View style={s.trailHeroCredit}>
+                    <Ionicons name="image-outline" size={12} color="#fff" />
+                    <Text style={s.trailHeroCreditText} numberOfLines={1}>{photoCredit}</Text>
+                  </View>
+                )}
               </View>
-            )}
-          </View>
-          {(() => {
-            const model = normalizeTrailheadTrailProfile(selectedTrailProfile, selectedTrail);
-            const statRows = trailProfileStatRows(model);
-            return (
-              <>
-                <View style={s.trailProfileStatGrid}>
-                  {statRows.map(row => (
-                    <View key={`${row.label}-${row.value}`} style={s.trailProfileStatCard}>
-                      <Ionicons name={row.icon as any} size={14} color={row.tone} />
-                      <Text style={s.trailProfileStatLabel}>{row.label.toUpperCase()}</Text>
-                      <Text style={s.trailProfileStatValue} numberOfLines={1}>{row.value}</Text>
+
+              <View style={s.trailDetailBody}>
+                <View style={s.trailFactGrid}>
+                  <View style={s.trailFactItem}>
+                    <Text style={s.trailFactValue}>{trailDistanceLabel(selectedTrailProfile, selectedTrail)}</Text>
+                    <Text style={s.trailFactLabel}>Length</Text>
+                  </View>
+                  <View style={s.trailFactItem}>
+                    <Text style={s.trailFactValue}>{elevation.value}</Text>
+                    <Text style={s.trailFactLabel}>{elevation.label}</Text>
+                  </View>
+                  <View style={s.trailFactItem}>
+                    <Text style={s.trailFactValue}>{weather.temp}</Text>
+                    <View style={s.trailFactIconLabel}>
+                      <Ionicons name={weather.icon as any} size={11} color={C.text3} />
+                      <Text style={s.trailFactLabel}>{weather.label}</Text>
                     </View>
-                  ))}
+                  </View>
+                  <View style={s.trailFactItem}>
+                    <Text style={s.trailFactValue}>{trailRouteTypeLabel(selectedTrailProfile, selectedTrail)}</Text>
+                    <Text style={s.trailFactLabel}>Route type</Text>
+                  </View>
                 </View>
-                {model.difficulty_reason.length > 0 && (
-                  <View style={s.trailReasonPanel}>
-                    <Text style={s.trailReportTitle}>DIFFICULTY BASIS</Text>
-                    {model.difficulty_reason.slice(0, 3).map(reason => (
-                      <View key={reason} style={s.trailReasonRow}>
-                        <Ionicons name="checkmark-circle-outline" size={13} color={C.green} />
-                        <Text style={s.trailReasonText} numberOfLines={2}>{reason}</Text>
+
+                {!!summary && (
+                  <View style={s.trailCleanSection}>
+                    <Text style={s.trailCleanCopy}>{summary}</Text>
+                  </View>
+                )}
+
+                {nearbyRows.length > 0 && (
+                  <View style={s.trailCleanSection}>
+                    <Text style={s.trailCleanTitle}>Nearby</Text>
+                    {nearbyRows.map(row => (
+                      <View key={row.text} style={s.trailCleanRow}>
+                        <Ionicons name={row.icon as any} size={16} color={row.color} />
+                        <Text style={s.trailCleanRowText} numberOfLines={1}>{row.text}</Text>
                       </View>
                     ))}
                   </View>
                 )}
-                {model.recent_conditions.length > 0 && (
-                  <View style={s.trailConditionPills}>
-                    {model.recent_conditions.map(tag => (
-                      <Text key={tag} style={s.trailConditionPill}>{tag}</Text>
-                    ))}
+
+                {reportPhotoRows.length > 0 && (
+                  <View style={s.trailCleanSection}>
+                    <View style={s.trailCleanHeaderRow}>
+                      <Text style={s.trailCleanTitle}>Photos</Text>
+                      <Text style={s.trailCleanMeta}>{reportPhotoRows.length} from reports</Text>
+                    </View>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.trailPhotoStrip}>
+                      {reportPhotoRows.slice(0, 10).map(fr => (
+                        <Image key={fr.id} source={{ uri: trailReportPhotoUrl(selectedTrail, fr.id) }} style={s.trailReportPhoto} resizeMode="cover" />
+                      ))}
+                    </ScrollView>
                   </View>
                 )}
-              </>
-            );
-          })()}
-          {(selectedTrailProfile?.summary || selectedTrail.summary) && (
-            <View style={s.trailStoryPanel}>
-              <Text style={s.trailReportTitle}>TRAIL NOTES</Text>
-              <Text style={s.trailStoryText}>{selectedTrailProfile?.summary || selectedTrail.summary}</Text>
-            </View>
-          )}
-          <View style={s.trailIntelList}>
-            <View style={s.trailIntelRow}>
-              <Ionicons name="bonfire-outline" size={15} color={C.orange} />
-              <Text style={s.trailIntelText} numberOfLines={1}>
-                {selectedTrail.support.nearestCampDistanceMi != null
-                  ? `${selectedTrail.support.nearestCampName || 'Nearest camp'} · ${selectedTrail.support.nearestCampDistanceMi.toFixed(1)} mi`
-                  : 'No loaded camp pins within 12 mi'}
-              </Text>
-            </View>
-            <View style={s.trailIntelRow}>
-              <Ionicons name="water-outline" size={15} color="#38bdf8" />
-              <Text style={s.trailIntelText} numberOfLines={1}>
-                {selectedTrail.support.nearestWaterDistanceMi != null
-                  ? `Water source · ${selectedTrail.support.nearestWaterDistanceMi.toFixed(1)} mi`
-                  : 'No loaded water source within 8 mi'}
-              </Text>
-            </View>
-            <View style={s.trailIntelRow}>
-              <Ionicons name="flash-outline" size={15} color="#eab308" />
-              <Text style={s.trailIntelText} numberOfLines={1}>
-                {selectedTrail.support.nearestFuelDistanceMi != null
-                  ? `Fuel / service · ${selectedTrail.support.nearestFuelDistanceMi.toFixed(1)} mi`
-                  : 'No loaded fuel/service within 20 mi'}
-              </Text>
-            </View>
-          </View>
-          <View style={s.trailPreviewPanel}>
-            <View style={s.trailPreviewTop}>
-              <Text style={s.trailReportTitle}>TRAIL PREVIEW</Text>
-              <Text style={s.trailPreviewStatus}>MAP FLYOVER</Text>
-            </View>
-            <TouchableOpacity
-              style={[s.trailPreviewAction, { borderColor: (trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee') + '66', backgroundColor: (trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee') + '16' }]}
-              activeOpacity={0.86}
-              onPress={() => openTrailPreview(selectedTrail)}
-            >
-              <View style={[s.trailPreviewPlayIcon, { backgroundColor: trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee' }]}>
-                <Ionicons name="play" size={16} color="#061018" />
-              </View>
-              <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={s.trailPreviewActionTitle} numberOfLines={1}>Preview route</Text>
-                <Text style={s.trailPreviewActionSub} numberOfLines={2}>
-                  Highlight the line and fly over the trail when geometry is available.
-                </Text>
-              </View>
-              <Ionicons name="chevron-forward" size={17} color={OVR.text3} />
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={s.trailSourceRefreshAction}
-              activeOpacity={0.84}
-              disabled={trailSourceRefreshing}
-              onPress={refreshSelectedTrailSource}
-            >
-              <Ionicons name={trailSourceRefreshing ? 'sync' : 'cloud-download-outline'} size={15} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#22d3ee'} />
-              <Text style={s.trailSourceRefreshText} numberOfLines={1}>
-                {trailSourceRefreshing ? 'Refreshing trail...' : 'Refresh trail data'}
-              </Text>
-            </TouchableOpacity>
-          </View>
-          {trailFieldReports.some(fr => fr.has_photo) && (
-            <View style={s.trailPhotoStripPanel}>
-              <View style={s.trailReportHeader}>
-                <Text style={s.trailReportTitle}>PHOTOS</Text>
-                <Text style={s.trailReportSub}>{trailFieldReports.filter(fr => fr.has_photo).length} from reports</Text>
-              </View>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.trailPhotoStrip}>
-                {trailFieldReports.filter(fr => fr.has_photo).slice(0, 10).map(fr => (
-                  <Image key={fr.id} source={{ uri: trailReportPhotoUrl(selectedTrail, fr.id) }} style={s.trailReportPhoto} resizeMode="cover" />
-                ))}
-              </ScrollView>
-            </View>
-          )}
-          <View style={s.trailReportPanel}>
-            <View style={s.trailReportHeader}>
-              <View>
-                <Text style={s.trailReportTitle}>TRAIL REPORTS</Text>
-                <Text style={s.trailReportSub}>
-                  {trailFieldReportSummary?.count
-                    ? `${trailFieldReportSummary.count} reports${trailFieldReportSummary.last_visited ? ` · last ${trailFieldReportSummary.last_visited}` : ''}`
-                    : 'Photos, access, crowd, and conditions from drivers.'}
-                </Text>
-              </View>
-              <Ionicons name="images-outline" size={17} color={OVR.text3} />
-            </View>
-            {!!trailFieldReportSummary?.top_tags?.length && (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.trailReportTags}>
-                {trailFieldReportSummary.top_tags.slice(0, 8).map(t => (
-                  <Text key={t.tag} style={s.trailReportTag}>{t.tag} {t.count}</Text>
-                ))}
-              </ScrollView>
-            )}
-            {trailFieldReports.slice(0, 2).map(fr => {
-              const sentiment = fieldSentimentLabel(fr.sentiment);
-              const access = fieldAccessLabel(fr.access_condition);
-              const crowd = fieldCrowdLabel(fr.crowd_level);
-              return (
-                <View key={fr.id} style={s.trailReportCard}>
-                  <View style={s.trailReportCardTop}>
-                    <Text style={s.frCardUser}>{fr.username || 'Trailhead user'}</Text>
-                    <View style={s.frMiniBadge}>
-                      <Ionicons name={sentiment.icon} size={11} color={sentiment.color} />
-                      <Text style={s.frCardBadge}>{sentiment.label}</Text>
-                    </View>
-                    {fr.has_photo && <Ionicons name="camera" size={12} color={C.orange} />}
+
+                <View style={s.trailCleanSection}>
+                  <View style={s.trailCleanHeaderRow}>
+                    <Text style={s.trailCleanTitle}>Recent reports</Text>
+                    {!!trailFieldReportSummary?.count && (
+                      <Text style={s.trailCleanMeta}>
+                        {trailFieldReportSummary.count}{trailFieldReportSummary.last_visited ? ` · ${trailFieldReportSummary.last_visited}` : ''}
+                      </Text>
+                    )}
                   </View>
-                  <View style={s.frCardBadges}>
-                    <View style={s.frMiniBadge}>
-                      <Ionicons name={access.icon} size={10} color={access.color} />
-                      <Text style={s.frCardBadge}>{access.label}</Text>
-                    </View>
-                    <View style={s.frMiniBadge}>
-                      <Ionicons name={crowd.icon} size={11} color={crowd.color} />
-                      <Text style={s.frCardBadge}>{crowd.label}</Text>
-                    </View>
-                  </View>
-                  {fr.note ? <Text style={s.frCardNote} numberOfLines={2}>{fr.note}</Text> : null}
+                  {trailFieldReports.slice(0, 2).map(fr => {
+                    const sentiment = fieldSentimentLabel(fr.sentiment);
+                    const access = fieldAccessLabel(fr.access_condition);
+                    const crowd = fieldCrowdLabel(fr.crowd_level);
+                    return (
+                      <View key={fr.id} style={s.trailSimpleReportCard}>
+                        <View style={s.trailSimpleReportTop}>
+                          <Text style={s.frCardUser}>{fr.username || 'Trailhead user'}</Text>
+                          {fr.has_photo && <Ionicons name="camera" size={13} color={C.orange} />}
+                        </View>
+                        <Text style={s.trailSimpleReportMeta} numberOfLines={1}>
+                          {sentiment.label} · {access.label} · {crowd.label}
+                        </Text>
+                        {fr.note ? <Text style={s.frCardNote} numberOfLines={3}>{fr.note}</Text> : null}
+                      </View>
+                    );
+                  })}
+                  {trailFieldReports.length === 0 && !showTrailFieldReportForm && (
+                    <Text style={s.frEmpty}>No trail reports yet.</Text>
+                  )}
+                  {showTrailFieldReportForm ? (
+                    <FieldReportComposer
+                      accessLabel="Trail access"
+                      crowdLabel="Traffic"
+                      notePlaceholder="Current conditions, obstacles, best direction, closures..."
+                      tagOptions={[
+                        'Scenic', 'Technical', 'Muddy', 'Rocky', 'Washouts', 'Snow/Ice',
+                        'Downed Trees', 'Gate Closed', 'Water Crossing', 'Pinstripes',
+                        'Shelf Road', 'Beginner Friendly',
+                      ]}
+                      sentiment={frSentiment}
+                      access={frAccess}
+                      crowd={frCrowd}
+                      tags={frTags}
+                      note={frNote}
+                      hasPhoto={Boolean(frPhoto)}
+                      submitting={frSubmitting}
+                      submitLabel="Submit report"
+                      onSentimentChange={setFrSentiment}
+                      onAccessChange={setFrAccess}
+                      onCrowdChange={setFrCrowd}
+                      onTagsChange={setFrTags}
+                      onNoteChange={setFrNote}
+                      onPickPhoto={pickFieldReportPhoto}
+                      onCancel={() => { setShowTrailFieldReportForm(false); resetFieldReportForm(); }}
+                      onSubmit={submitTrailFieldReport}
+                    />
+                  ) : (
+                    user && (
+                      <TouchableOpacity style={s.trailTextAction} onPress={() => { resetFieldReportForm(); setShowTrailFieldReportForm(true); }}>
+                        <Ionicons name="add-circle-outline" size={16} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#23d2c3'} />
+                        <Text style={s.trailTextActionText}>Add report</Text>
+                      </TouchableOpacity>
+                    )
+                  )}
                 </View>
-              );
-            })}
-            {trailFieldReports.length === 0 && !showTrailFieldReportForm && (
-              <Text style={s.frEmpty}>No trail reports yet. Be the first to add photos or conditions.</Text>
-            )}
-            {showTrailFieldReportForm ? (
-              <FieldReportComposer
-                accessLabel="Trail access"
-                crowdLabel="Traffic"
-                notePlaceholder="Current conditions, obstacles, best direction, closures..."
-                tagOptions={[
-                  'Scenic', 'Technical', 'Muddy', 'Rocky', 'Washouts', 'Snow/Ice',
-                  'Downed Trees', 'Gate Closed', 'Water Crossing', 'Pinstripes',
-                  'Shelf Road', 'Beginner Friendly',
-                ]}
-                sentiment={frSentiment}
-                access={frAccess}
-                crowd={frCrowd}
-                tags={frTags}
-                note={frNote}
-                hasPhoto={Boolean(frPhoto)}
-                submitting={frSubmitting}
-                submitLabel={`SUBMIT +${frPhoto ? 10 : 5}`}
-                onSentimentChange={setFrSentiment}
-                onAccessChange={setFrAccess}
-                onCrowdChange={setFrCrowd}
-                onTagsChange={setFrTags}
-                onNoteChange={setFrNote}
-                onPickPhoto={pickFieldReportPhoto}
-                onCancel={() => { setShowTrailFieldReportForm(false); resetFieldReportForm(); }}
-                onSubmit={submitTrailFieldReport}
-              />
-            ) : (
-              user && (
-                <TouchableOpacity style={s.frAddBtn} onPress={() => { resetFieldReportForm(); setShowTrailFieldReportForm(true); }}>
-                  <Ionicons name="add-circle-outline" size={15} color={C.orange} />
-                  <Text style={s.frAddBtnText}>ADD TRAIL REPORT</Text>
+
+                <TouchableOpacity
+                  style={s.trailTextAction}
+                  activeOpacity={0.84}
+                  disabled={trailSourceRefreshing}
+                  onPress={refreshSelectedTrailSource}
+                >
+                  <Ionicons name={trailSourceRefreshing ? 'sync' : 'refresh-outline'} size={16} color={trailPreviewTone === 'gold' ? '#f5c84b' : '#23d2c3'} />
+                  <Text style={s.trailTextActionText}>
+                    {trailSourceRefreshing ? 'Refreshing details' : 'Refresh details'}
+                  </Text>
                 </TouchableOpacity>
-              )
-            )}
+
+                <View style={s.trailDetailActions}>
+                  <TouchableOpacity
+                    style={s.trailPrimaryAction}
+                    onPress={() => seedTrailPinCaptureFromTrail(selectedTrail)}
+                  >
+                    <Ionicons name="git-branch-outline" size={16} color="#061018" />
+                    <Text style={s.trailPrimaryActionText}>Build route</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity
+                    style={s.trailSecondaryAction}
+                    onPress={() => {
+                      resetFieldReportForm();
+                      setShowTrailFieldReportForm(true);
+                    }}
+                  >
+                    <Ionicons name="camera-outline" size={16} color={C.text2} />
+                    <Text style={s.trailSecondaryActionText}>Report</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </ScrollView>
           </View>
-          <View style={s.trailActionGrid}>
-            <TouchableOpacity
-              style={[s.wpSheetNavBtn, s.trailSheetAction]}
-              onPress={() => seedTrailPinCaptureFromTrail(selectedTrail)}
-            >
-              <Ionicons name="git-branch-outline" size={14} color="#fff" />
-              <Text style={s.wpSheetNavText}>BUILD ROUTE</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.wpSheetDayBtn, s.trailSheetAction, s.trailSheetMutedAction]}
-              onPress={() => {
-                resetFieldReportForm();
-                setShowTrailFieldReportForm(true);
-              }}
-            >
-              <Ionicons name="camera-outline" size={14} color={OVR.text2} />
-              <Text style={[s.wpSheetDayText, { color: OVR.text2 }]}>REPORT</Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[s.wpSheetDayBtn, s.trailSheetAction, s.trailSheetMutedAction]}
-              onPress={() => downloadSelectedTrail(selectedTrail)}
-            >
-              <Ionicons name={selectedTrail.support.offlineReady ? 'cloud-done-outline' : 'cloud-download-outline'} size={14} color={OVR.text2} />
-              <Text style={[s.wpSheetDayText, { color: OVR.text2 }]}>DOWNLOAD</Text>
-            </TouchableOpacity>
-          </View>
-          </ScrollView>
-        </View>
-      )}
+        );
+      })()}
 
       {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && (
         <View style={s.trailRouteBuilderWrap}>
@@ -23648,24 +23655,21 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailOverlayCard: {
     position: 'absolute',
-    left: 10,
-    right: 10,
+    left: 0,
+    right: 0,
     bottom: 0,
-    maxHeight: '84%' as any,
+    maxHeight: '88%' as any,
     backgroundColor: C.s1,
-    borderWidth: 1,
-    borderColor: C.border,
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
     borderBottomLeftRadius: 0,
     borderBottomRightRadius: 0,
-    padding: 12,
-    paddingTop: 14,
+    overflow: 'hidden',
     shadowColor: '#000',
-    shadowOpacity: 0.32,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: -8 },
-    elevation: 28,
+    shadowOpacity: 0.34,
+    shadowRadius: 30,
+    shadowOffset: { width: 0, height: -10 },
+    elevation: 32,
   },
   safeWaterPanel: {
     position: 'absolute',
@@ -23861,7 +23865,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   catchNotes: { minHeight: 76, paddingTop: 10, textAlignVertical: 'top' },
   catchSaveBtn: { minHeight: 42 },
-  trailOverlayContent: { paddingBottom: 12 },
+  trailOverlayContent: { paddingBottom: 18 },
   trailCollapsedWrap: {
     position: 'absolute',
     left: 14,
@@ -25880,30 +25884,82 @@ const makeStyles = (C: ColorPalette) => {
     marginBottom: 8,
   },
   trailHeroPanel: {
-    height: 142,
-    borderRadius: 14,
+    height: 268,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: C.border,
     backgroundColor: C.s2,
-    marginTop: 10,
-    marginBottom: 10,
   },
   trailHeroPhoto: { width: '100%', height: '100%' },
+  trailHeroShade: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.26)',
+  },
+  trailHeroTopBar: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+    right: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  trailHeroTopActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  trailHeroCircleBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(6,16,24,0.54)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+  },
+  trailHeroTitleBlock: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    bottom: 24,
+  },
+  trailHeroTitle: {
+    color: '#fff',
+    fontSize: 25,
+    lineHeight: 30,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textShadowColor: 'rgba(0,0,0,0.38)',
+    textShadowRadius: 12,
+    textShadowOffset: { width: 0, height: 2 },
+  },
+  trailHeroMetaLine: {
+    marginTop: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  trailHeroMetaText: {
+    flex: 1,
+    color: 'rgba(255,255,255,0.92)',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+  },
   trailHeroCredit: {
     position: 'absolute',
-    left: 10,
-    right: 10,
-    bottom: 9,
+    left: 18,
+    bottom: 104,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 9,
     paddingVertical: 6,
-    borderRadius: 8,
-    backgroundColor: 'rgba(0,0,0,0.48)',
+    borderRadius: 999,
+    backgroundColor: 'rgba(0,0,0,0.38)',
+    maxWidth: '78%' as any,
   },
-  trailHeroCreditText: { color: '#fff', fontSize: 9.5, fontFamily: mono, fontWeight: '800', flex: 1 },
+  trailHeroCreditText: { color: '#fff', fontSize: 10, fontWeight: '700', flex: 1 },
   trailHeroFallback: {
     flex: 1,
     alignItems: 'center',
@@ -25928,6 +25984,166 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailHeroFallbackTitle: { color: C.text, fontSize: 12, fontWeight: '900', marginTop: 8 },
   trailHeroFallbackSub: { color: C.text3, fontSize: 10.5, lineHeight: 15, textAlign: 'center', marginTop: 4 },
+  trailDetailBody: {
+    paddingHorizontal: 18,
+    paddingTop: 18,
+    paddingBottom: 6,
+    backgroundColor: C.s1,
+  },
+  trailFactGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: C.border,
+    paddingVertical: 12,
+    marginBottom: 16,
+  },
+  trailFactItem: {
+    width: '50%' as any,
+    minHeight: 56,
+    justifyContent: 'center',
+    paddingVertical: 7,
+  },
+  trailFactValue: {
+    color: C.text,
+    fontSize: 21,
+    lineHeight: 25,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  trailFactLabel: {
+    color: C.text3,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  trailFactIconLabel: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 2,
+  },
+  trailCleanSection: {
+    paddingBottom: 16,
+    marginBottom: 16,
+    borderBottomWidth: 1,
+    borderColor: C.border,
+  },
+  trailCleanHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 10,
+  },
+  trailCleanTitle: {
+    color: C.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  trailCleanMeta: {
+    color: C.text3,
+    fontSize: 11,
+    lineHeight: 15,
+    fontWeight: '700',
+  },
+  trailCleanCopy: {
+    color: C.text2,
+    fontSize: 14,
+    lineHeight: 21,
+  },
+  trailCleanRow: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 4,
+  },
+  trailCleanRowText: {
+    flex: 1,
+    color: C.text2,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '700',
+  },
+  trailSimpleReportCard: {
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderColor: C.border,
+  },
+  trailSimpleReportTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  trailSimpleReportMeta: {
+    color: C.text3,
+    fontSize: 11,
+    lineHeight: 15,
+    marginTop: 4,
+  },
+  trailTextAction: {
+    minHeight: 40,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: 999,
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 13,
+    marginBottom: 12,
+  },
+  trailTextActionText: {
+    color: C.text2,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '800',
+  },
+  trailDetailActions: {
+    flexDirection: 'row',
+    gap: 10,
+    paddingTop: 2,
+  },
+  trailPrimaryAction: {
+    flex: 1.35,
+    minHeight: 48,
+    borderRadius: 999,
+    backgroundColor: '#23d2c3',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  trailPrimaryActionText: {
+    color: '#061018',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '900',
+  },
+  trailSecondaryAction: {
+    flex: 0.9,
+    minHeight: 48,
+    borderRadius: 999,
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+  },
+  trailSecondaryActionText: {
+    color: C.text2,
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '900',
+  },
   trailMetric: {
     flex: 1,
     backgroundColor: C.s2,

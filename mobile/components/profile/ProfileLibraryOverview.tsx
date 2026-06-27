@@ -13,7 +13,6 @@ type LibraryOverviewProps = {
   importedRouteCount: number;
   importedPinCount: number;
   recentTripName?: string;
-  offlineTripName?: string;
   savedNearbyName?: string;
   onOpenTrips: () => void;
   onOpenDownloads: () => void;
@@ -41,7 +40,6 @@ export default function ProfileLibraryOverview({
   importedRouteCount,
   importedPinCount,
   recentTripName,
-  offlineTripName,
   savedNearbyName,
   onOpenTrips,
   onOpenDownloads,
@@ -66,16 +64,6 @@ export default function ProfileLibraryOverview({
       tone: C.silverBright,
       action: savedTripCount > 0 ? 'OPEN' : 'PLAN',
       onPress: savedTripCount > 0 ? onOpenTrips : onPlanTrip,
-    },
-    {
-      key: 'offline',
-      title: 'Map Packs',
-      meta: `${offlineTotal} downloaded`,
-      detail: offlineTripName ? `Latest: ${offlineTripName}` : 'Downloaded corridors, maps, and route files.',
-      icon: 'folder-open-outline',
-      tone: C.green,
-      action: 'OPEN',
-      onPress: onOpenDownloads,
     },
     {
       key: 'saved',
@@ -114,8 +102,8 @@ export default function ProfileLibraryOverview({
       <TrailheadMetricRow
         metrics={[
           { label: 'Trips', value: String(savedTripCount), icon: 'map-outline', tone: C.silverBright },
-          { label: 'Offline', value: String(offlineTotal), icon: 'download-outline', tone: C.green },
           { label: 'Saved', value: String(savedNearbyCount), icon: 'bookmark-outline', tone: C.orange },
+          { label: 'GPX', value: String(importedRouteCount + importedPinCount), icon: 'git-branch-outline', tone: '#38bdf8' },
         ]}
       />
 
@@ -126,12 +114,12 @@ export default function ProfileLibraryOverview({
           </View>
           <View style={s.summaryCopy}>
             <Text style={s.kicker}>LIBRARY</Text>
-            <Text style={s.summaryTitle}>Routes, downloads, camps, GPX files, and photos.</Text>
+            <Text style={s.summaryTitle}>Routes, camps, GPX files, and photos.</Text>
           </View>
         </View>
         <TouchableOpacity style={s.primaryAction} onPress={onOpenDownloads} activeOpacity={0.84}>
           <Ionicons name="cloud-download-outline" size={15} color="#fff" />
-          <Text style={s.primaryActionText}>OPEN DOWNLOADS</Text>
+          <Text style={s.primaryActionText}>{offlineTotal > 0 ? `OPEN DOWNLOADS (${offlineTotal})` : 'OPEN DOWNLOADS'}</Text>
         </TouchableOpacity>
       </TrailheadCard>
 

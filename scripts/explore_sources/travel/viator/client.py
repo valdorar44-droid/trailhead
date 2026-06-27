@@ -50,7 +50,7 @@ class ViatorClient:
         flags: list[str] | None = None,
         start_date: str = "",
         end_date: str = "",
-        sort: str = "REVIEW_AVG_RATING_D",
+        sort: str = "TRAVELER_RATING",
         order: str = "DESCENDING",
         count: int = 12,
         currency: str = "USD",
@@ -77,23 +77,130 @@ class ViatorClient:
         }
         return self._post_json("/products/search", payload, timeout=timeout)
 
+    def search_freetext(
+        self,
+        *,
+        search_term: str,
+        search_type: str = "PRODUCTS",
+        count: int = 12,
+        currency: str = "USD",
+        timeout: float = 20.0,
+    ) -> dict[str, Any]:
+        if not self.ready():
+            return {"products": [], "status": "disabled", "reason": "VIATOR_API_KEY missing or VIATOR_ENABLE_LIVE=false"}
+        term = search_term.strip()
+        if not term:
+            return {"products": [], "status": "empty", "reason": "search_term missing"}
+        payload = {
+            "searchTerm": term,
+            "currency": currency,
+            "searchTypes": [
+                {
+                    "searchType": search_type,
+                    "pagination": {"start": 1, "count": max(1, min(int(count), 50))},
+                }
+            ],
+        }
+        return self._post_json("/search/freetext", payload, timeout=timeout)
+
+    def get_destinations(self, *, timeout: float = 20.0) -> dict[str, Any]:
+        if not self.ready():
+            return {"destinations": [], "status": "disabled", "reason": "VIATOR_API_KEY missing or VIATOR_ENABLE_LIVE=false"}
+        return self._get_json("/destinations", timeout=timeout)
+
+    def _headers(self) -> dict[str, str]:
+        return {
+            "Accept-Language": "en-US",
+            "Content-Type": "application/json;version=2.0",
+            "Accept": "application/json;version=2.0",
+            "exp-api-key": self.config.api_key,
+            "User-Agent": "Trailhead/1.0 ViatorBasicAccess",
+        }
+
     def _post_json(self, path: str, payload: dict[str, Any], timeout: float = 20.0) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             f"{self.config.base_url}{path}",
             data=body,
             method="POST",
-            headers={
-                "Accept-Language": "en-US",
-                "Content-Type": "application/json",
-                "Accept": "application/json;version=2.0",
-                "exp-api-key": self.config.api_key,
-                "User-Agent": "Trailhead/1.0 ViatorBasicAccess",
-            },
+            headers=self._headers(),
         )
+        return self._open_json(request, path=path, timeout=timeout)
+
+    def _get_json(self, path: str, timeout: float = 20.0) -> dict[str, Any]:
+        request = urllib.request.Request(
+            f"{self.config.base_url}{path}",
+            method="GET",
+            headers=self._headers(),
+        )
+        return self._open_json(request, path=path, timeout=timeout)
+
+    def _open_json(self, request: urllib.request.Request, *, path: str, timeout: float = 20.0) -> dict[str, Any]:
         try:
             with self.opener(request, timeout=timeout) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except (urllib.error.URLError, urllib.error.HTTPError, TimeoutError, json.JSONDecodeError) as exc:
-            return {"products": [], "status": "error", "reason": str(exc), "fetched_at": int(time.time())}
+                parsed = json.loads(response.read().decode("utf-8"))
+                if isinstance(parsed, dict):
+                    parsed.setdefault("status", "ok")
+                    parsed.setdefault("fetched_at", int(time.time()))
+                    parsed.setdefault("endpoint", path)
+                    tracking_id = self._header_value(response.headers, "X-Unique-ID") or self._header_value(
+                        response.headers,
+                        "X-Request-ID",
+                    )
+                    if tracking_id:
+                        parsed.setdefault("tracking_id", tracking_id)
+                    return parsed
+                return {"status": "ok", "endpoint": path, "data": parsed, "fetched_at": int(time.time())}
+        except urllib.error.HTTPError as exc:
+            return self._http_error_payload(exc, path=path)
+        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
+            return {"products": [], "status": "error", "endpoint": path, "reason": str(exc), "fetched_at": int(time.time())}
 
+    def _http_error_payload(self, exc: urllib.error.HTTPError, *, path: str) -> dict[str, Any]:
+        body_text = ""
+        body_json: dict[str, Any] = {}
+        try:
+            body_text = exc.read().decode("utf-8")
+            parsed = json.loads(body_text) if body_text else {}
+            if isinstance(parsed, dict):
+                body_json = parsed
+        except Exception:
+            body_json = {}
+        tracking_id = (
+            body_json.get("trackingId")
+            or body_json.get("tracking_id")
+            or self._header_value(exc.headers, "X-Unique-ID")
+            or self._header_value(exc.headers, "X-Request-ID")
+        )
+        message = (
+            body_json.get("message")
+            or body_json.get("errorMessage")
+            or body_json.get("error")
+            or body_text[:240]
+            or str(exc)
+        )
+        code = body_json.get("code") or body_json.get("errorCode")
+        return {
+            "products": [],
+            "status": "error",
+            "endpoint": path,
+            "reason": message,
+            "http_status": exc.code,
+            "provider_code": code,
+            "provider_message": message,
+            "tracking_id": tracking_id,
+            "fetched_at": int(time.time()),
+        }
+
+    @staticmethod
+    def _header_value(headers: Any, name: str) -> str:
+        if not headers:
+            return ""
+        getter = getattr(headers, "get", None)
+        if callable(getter):
+            value = getter(name) or getter(name.lower()) or getter(name.upper())
+            return str(value or "")
+        try:
+            return str(headers[name] or "")
+        except Exception:
+            return ""

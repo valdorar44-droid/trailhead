@@ -345,39 +345,10 @@ export default function ProfileScreen() {
     [offlineTripSummaries, tripHistory],
   );
   const latestSavedNearbyName = favoriteCamps[0]?.name ?? savedPlaces[0]?.name ?? '';
-  const latestOfflineTripName = offlineTripSummaries[0]?.plan.trip_name || offlineTripSummaries[0]?.trip_id || '';
 
   function openOfflineMapsManager() {
     setPendingOpenOfflineModal(true);
     router.push('/(tabs)/map');
-  }
-
-  function openOfflineTripSummary(trip: TripResult & { cached_at: number }) {
-    setActiveTrip({ ...trip, updated_at: Date.now() }, true);
-    router.push('/(tabs)/map');
-  }
-
-  function formatCachedDate(timestamp?: number | null) {
-    if (!timestamp || !Number.isFinite(timestamp)) return 'Saved offline';
-    return `Saved ${new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  }
-
-  function confirmDeleteOfflineCopy(trip: TripResult & { cached_at: number }) {
-    Alert.alert(
-      'Remove offline copy?',
-      `${trip.plan.trip_name || trip.trip_id} will stay in Profile if it is also saved there, but the device cache will be removed.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Remove',
-          style: 'destructive',
-          onPress: async () => {
-            await deleteOfflineTrip(trip.trip_id);
-            refreshOfflineTrips();
-          },
-        },
-      ],
-    );
   }
 
   useFocusEffect(useCallback(() => {
@@ -1207,7 +1178,6 @@ export default function ProfileScreen() {
             : profileSection === 'library'
               ? [
                   { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
-                  { icon: 'cloud-download-outline', label: 'DOWNLOADS', color: C.green, onPress: openOfflineMapsManager },
                   { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
                   { icon: 'bookmark-outline', label: 'SAVED', color: C.silverBright, onPress: () => setProfileSection('saved') },
                 ]
@@ -1231,7 +1201,6 @@ export default function ProfileScreen() {
               : profileSection === 'trips'
                 ? [
                     { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
-                    { icon: 'cloud-download-outline', label: 'OFFLINE MAPS', color: C.green, onPress: openOfflineMapsManager },
                     { icon: 'cloud-upload-outline', label: 'IMPORT GPX', color: C.text3, onPress: importGpx },
                   ]
                 : profileSection === 'saved'
@@ -1283,7 +1252,6 @@ export default function ProfileScreen() {
             importedRouteCount={importedRouteCount}
             importedPinCount={importedPinCount}
             recentTripName={tripHistory[0]?.trip_name}
-            offlineTripName={latestOfflineTripName}
             savedNearbyName={latestSavedNearbyName}
             onOpenTrips={() => setProfileSection('trips')}
             onOpenDownloads={openOfflineMapsManager}
@@ -1298,61 +1266,10 @@ export default function ProfileScreen() {
             <TrailheadMetricRow
               metrics={[
                 { label: 'Saved trips', value: String(tripHistory.length), icon: 'map-outline', tone: C.silverBright },
-                { label: 'Offline', value: String(offlineTripCount), icon: 'download-outline', tone: C.green },
                 { label: 'GPX routes', value: String(importedRouteCount), icon: 'git-branch-outline', tone: C.orange },
+                { label: 'Imported pins', value: String(importedPinCount), icon: 'pin-outline', tone: '#38bdf8' },
               ]}
             />
-            <TrailheadCard style={s.tripSummaryCard}>
-              <Text style={s.sectionLabel}>DOWNLOADS</Text>
-              <Text style={s.emptySectionText}>
-                {offlineTripCount > 0
-                  ? `${offlineTripCount} trip ${offlineTripCount === 1 ? 'is' : 'are'} ready offline. ${Math.max(0, tripHistory.length - offlineTripCount)} still need a cached copy if you want them without service.`
-                  : 'No trip is cached offline yet. Open a saved trip and cache it before you head out of service.'}
-              </Text>
-              <TouchableOpacity style={s.tripSummaryAction} onPress={openOfflineMapsManager}>
-                <Ionicons name="cloud-download-outline" size={14} color={C.orange} />
-                <Text style={s.tripSummaryActionText}>OPEN DOWNLOADS</Text>
-              </TouchableOpacity>
-              {gpxBatches.length > 0 && (
-                <Text style={s.tripSummaryMeta}>
-                  {importedRouteCount} GPX route {importedRouteCount === 1 ? 'preview' : 'previews'} · {importedPinCount} imported {importedPinCount === 1 ? 'pin' : 'pins'}
-                </Text>
-              )}
-            </TrailheadCard>
-            {offlineTripSummaries.length > 0 && (
-              <TrailheadCard style={s.tripsCard}>
-                <Text style={s.sectionLabel}>DOWNLOADED TRIPS</Text>
-                {offlineTripSummaries.slice(0, 8).map(trip => (
-                  <View key={`offline-${trip.trip_id}`} style={s.tripRow}>
-                    <TouchableOpacity style={s.tripRowOpen} onPress={() => openOfflineTripSummary(trip)}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.tripRowName} numberOfLines={1}>{trip.plan.trip_name || trip.trip_id}</Text>
-                        <Text style={s.tripRowMeta}>
-                          {trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0}D · {Math.round(trip.plan.total_est_miles || 0)}MI · {formatCachedDate((trip as any).cached_at)}
-                        </Text>
-                      </View>
-                      <View style={s.offlineBadge}>
-                        <Ionicons name="cloud-done-outline" size={10} color="#22c55e" />
-                        <Text style={s.offlineBadgeText}>DOWNLOADED</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={s.tripDeleteBtn}
-                      onPress={() => confirmDeleteOfflineCopy(trip)}
-                      accessibilityLabel={`Remove offline copy for ${trip.plan.trip_name || trip.trip_id}`}
-                    >
-                      <Ionicons name="trash-outline" size={15} color={C.red} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-                {offlineOnlyTrips.length > 0 && (
-                  <Text style={s.tripSummaryMeta}>
-                    {offlineOnlyTrips.length} cached {offlineOnlyTrips.length === 1 ? 'trip is' : 'trips are'} not in the saved trip list anymore.
-                  </Text>
-                )}
-              </TrailheadCard>
-            )}
           <TrailheadCard style={s.tripsCard}>
             <Text style={s.sectionLabel}>MY TRIPS</Text>
             {tripHistory.map(t => {
@@ -1391,52 +1308,19 @@ export default function ProfileScreen() {
             <TrailheadMetricRow
               metrics={[
                 { label: 'Saved trips', value: '0', icon: 'map-outline', tone: C.silverBright },
-                { label: 'Offline', value: '0', icon: 'download-outline', tone: C.green },
                 { label: 'GPX routes', value: String(importedRouteCount), icon: 'git-branch-outline', tone: C.orange },
+                { label: 'Imported pins', value: String(importedPinCount), icon: 'pin-outline', tone: '#38bdf8' },
               ]}
             />
             <TrailheadCard style={s.historyCard}>
-              <Text style={s.sectionLabel}>TRIPS & DOWNLOADS</Text>
-              <Text style={s.emptySectionText}>Saved trips, offline copies, and GPX route imports will show up here after you build or import them.</Text>
-              <TouchableOpacity style={s.tripSummaryAction} onPress={openOfflineMapsManager}>
-                <Ionicons name="cloud-download-outline" size={14} color={C.orange} />
-                <Text style={s.tripSummaryActionText}>OPEN DOWNLOADS</Text>
-              </TouchableOpacity>
+              <Text style={s.sectionLabel}>TRIPS & GPX</Text>
+              <Text style={s.emptySectionText}>Saved trips and GPX route imports will show up here after you build or import them.</Text>
               {gpxBatches.length > 0 && (
                 <Text style={s.tripSummaryMeta}>
                   {importedRouteCount} GPX route {importedRouteCount === 1 ? 'preview' : 'previews'} · {importedPinCount} imported {importedPinCount === 1 ? 'pin' : 'pins'}
                 </Text>
               )}
             </TrailheadCard>
-            {offlineTripSummaries.length > 0 && (
-              <TrailheadCard style={s.tripsCard}>
-                <Text style={s.sectionLabel}>DOWNLOADED TRIPS</Text>
-                {offlineTripSummaries.slice(0, 8).map(trip => (
-                  <View key={`offline-empty-${trip.trip_id}`} style={s.tripRow}>
-                    <TouchableOpacity style={s.tripRowOpen} onPress={() => openOfflineTripSummary(trip)}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.tripRowName} numberOfLines={1}>{trip.plan.trip_name || trip.trip_id}</Text>
-                        <Text style={s.tripRowMeta}>
-                          {trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0}D · {Math.round(trip.plan.total_est_miles || 0)}MI · {formatCachedDate((trip as any).cached_at)}
-                        </Text>
-                      </View>
-                      <View style={s.offlineBadge}>
-                        <Ionicons name="cloud-done-outline" size={10} color="#22c55e" />
-                        <Text style={s.offlineBadgeText}>DOWNLOADED</Text>
-                      </View>
-                      <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      style={s.tripDeleteBtn}
-                      onPress={() => confirmDeleteOfflineCopy(trip)}
-                      accessibilityLabel={`Remove offline copy for ${trip.plan.trip_name || trip.trip_id}`}
-                    >
-                      <Ionicons name="trash-outline" size={15} color={C.red} />
-                    </TouchableOpacity>
-                  </View>
-                ))}
-              </TrailheadCard>
-            )}
           </>
         )}
 

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import json
 import asyncio
+import io
 import tempfile
 import unittest
+import urllib.error
 from pathlib import Path
 
 import dashboard.server as server
@@ -24,6 +26,40 @@ EMPTY = ROOT / "tests/fixtures/explore_sources/viator_empty_sample.json"
 class FailingOpener:
     def __call__(self, *_args, **_kwargs):
         raise TimeoutError("network down")
+
+
+class JsonResponse:
+    def __init__(self, payload: dict, headers: dict | None = None):
+        self.payload = payload
+        self.headers = headers or {}
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def read(self):
+        return json.dumps(self.payload).encode("utf-8")
+
+
+class CapturingOpener:
+    def __init__(self, payload: dict | None = None):
+        self.payload = payload or {"products": []}
+        self.requests = []
+        self.bodies = []
+
+    def __call__(self, request, *_args, **_kwargs):
+        self.requests.append(request)
+        if request.data:
+            self.bodies.append(json.loads(request.data.decode("utf-8")))
+        return JsonResponse(self.payload, headers={"X-Unique-ID": "trace-123"})
+
+
+class HttpErrorOpener:
+    def __call__(self, request, *_args, **_kwargs):
+        body = json.dumps({"code": "SERVER_ERROR", "message": "Viator failed", "trackingId": "track-500"}).encode("utf-8")
+        raise urllib.error.HTTPError(request.full_url, 500, "Internal Server Error", {}, io.BytesIO(body))
 
 
 class ViatorSourcePackTests(unittest.TestCase):
@@ -55,6 +91,31 @@ class ViatorSourcePackTests(unittest.TestCase):
         payload = client.search_products(destination_id="5265")
         self.assertEqual(payload["products"], [])
         self.assertEqual(payload["status"], "error")
+
+    def test_client_uses_viator_v2_headers_and_documented_sort(self):
+        opener = CapturingOpener()
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=opener)
+        payload = client.search_products(destination_id="5600", count=3)
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(payload["tracking_id"], "trace-123")
+        request = opener.requests[0]
+        headers = {key.lower(): value for key, value in request.header_items()}
+        self.assertEqual(headers["accept"], "application/json;version=2.0")
+        self.assertEqual(headers["content-type"], "application/json;version=2.0")
+        self.assertEqual(headers["accept-language"], "en-US")
+        self.assertEqual(headers["exp-api-key"], "test")
+        self.assertEqual(opener.bodies[0]["sorting"]["sort"], "TRAVELER_RATING")
+        self.assertEqual(opener.bodies[0]["pagination"]["count"], 3)
+
+    def test_client_preserves_viator_http_error_details(self):
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=HttpErrorOpener())
+        payload = client.search_products(destination_id="5600")
+        self.assertEqual(payload["products"], [])
+        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["http_status"], 500)
+        self.assertEqual(payload["provider_code"], "SERVER_ERROR")
+        self.assertEqual(payload["provider_message"], "Viator failed")
+        self.assertEqual(payload["tracking_id"], "track-500")
 
     def test_cache_expiry_decision(self):
         self.assertFalse(is_expired(200, now=100))

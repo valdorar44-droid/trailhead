@@ -17899,6 +17899,13 @@ class RouteTourRequest(BaseModel):
     source: str = "viator"
     q: str = ""
 
+VIATOR_DESTINATION_HINTS = [
+    {"id": "5600", "name": "Moab", "lat": 38.573315, "lng": -109.54984, "radius_mi": 95.0},
+    {"id": "5265", "name": "Yosemite National Park", "lat": 37.8499232, "lng": -119.5676663, "radius_mi": 95.0},
+    {"id": "4837", "name": "Denver", "lat": 39.737567, "lng": -104.9847179, "radius_mi": 85.0},
+    {"id": "785", "name": "Utah", "lat": 39.3209801, "lng": -111.0937311, "radius_mi": 190.0},
+]
+
 def _route_tour_points(body: RouteTourRequest) -> list[dict]:
     points: list[dict] = []
     for idx, anchor in enumerate(body.anchors[:24]):
@@ -17930,6 +17937,136 @@ def _route_tour_points(body: RouteTourRequest) -> list[dict]:
         seen.add(key)
         unique.append(point)
     return unique[:24]
+
+
+def _viator_provider_status(payload: dict | None) -> dict:
+    if not isinstance(payload, dict):
+        return {"status": "empty"}
+    return {
+        "status": payload.get("status", "unknown"),
+        "endpoint": payload.get("endpoint", ""),
+        "http_status": payload.get("http_status"),
+        "provider_code": payload.get("provider_code"),
+        "provider_message": payload.get("provider_message") or payload.get("reason"),
+        "tracking_id": payload.get("tracking_id"),
+        "fetched_at": payload.get("fetched_at"),
+    }
+
+
+def _viator_destination_for_point(point: dict, max_radius_mi: float = 95.0) -> dict | None:
+    name = str(point.get("name") or "").lower()
+    for destination in VIATOR_DESTINATION_HINTS:
+        if destination["name"].lower().split()[0] in name:
+            return destination
+    best: tuple[float, dict] | None = None
+    for destination in VIATOR_DESTINATION_HINTS:
+        distance = _haversine_m(
+            float(point.get("lat")),
+            float(point.get("lng")),
+            float(destination["lat"]),
+            float(destination["lng"]),
+        ) / 1609.344
+        radius = max(float(destination.get("radius_mi") or max_radius_mi), max_radius_mi)
+        if distance <= radius and (best is None or distance < best[0]):
+            best = (distance, destination)
+    return best[1] if best else None
+
+
+def _viator_products_payload(payload: dict) -> dict:
+    if not isinstance(payload, dict):
+        return {"products": []}
+    if isinstance(payload.get("products"), list):
+        return payload
+    products: list[dict] = []
+    for key in ("results", "items"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            products.extend([item for item in value if isinstance(item, dict)])
+    for search_type in payload.get("searchTypes") or []:
+        if not isinstance(search_type, dict):
+            continue
+        for key in ("products", "results", "items"):
+            value = search_type.get(key)
+            if isinstance(value, list):
+                products.extend([item for item in value if isinstance(item, dict)])
+    return {**payload, "products": products}
+
+
+def _normalize_live_viator_experiences(payload: dict, point: dict, destination: dict | None, ttl_hours: int) -> list[dict]:
+    normalized = []
+    for item in normalize_viator_products(_viator_products_payload(payload), ttl_hours=ttl_hours):
+        try:
+            experience = item.to_dict()
+        except AttributeError:
+            experience = dict(item)
+        if destination:
+            experience.setdefault("region", destination.get("name"))
+            if not experience.get("lat"):
+                experience["lat"] = destination.get("lat")
+            if not experience.get("lng"):
+                experience["lng"] = destination.get("lng")
+        if experience.get("lat") and experience.get("lng"):
+            try:
+                experience["distance_mi"] = round(
+                    _haversine_m(float(point["lat"]), float(point["lng"]), float(experience["lat"]), float(experience["lng"])) / 1609.344,
+                    1,
+                )
+            except Exception:
+                pass
+        experience["route_anchor"] = {
+            "name": point.get("name"),
+            "day": point.get("day"),
+            "leg_index": point.get("leg_index"),
+            "distance_mi": experience.get("distance_mi"),
+        }
+        normalized.append(experience)
+    return normalized
+
+
+def _live_viator_route_suggestions(
+    client: ViatorClient,
+    points: list[dict],
+    *,
+    limit: int,
+    q: str = "",
+) -> tuple[list[dict], list[dict]]:
+    config = client.config
+    statuses: list[dict] = []
+    ranked_by_key: dict[str, dict] = {}
+    searched_destinations: set[str] = set()
+    for point in points[:8]:
+        destination = _viator_destination_for_point(point)
+        if not destination:
+            continue
+        destination_id = str(destination["id"])
+        if destination_id in searched_destinations:
+            continue
+        searched_destinations.add(destination_id)
+        payload = client.search_products(destination_id=destination_id, count=max(3, min(int(limit or 8), 12)))
+        statuses.append({"destination_id": destination_id, "destination": destination.get("name"), **_viator_provider_status(payload)})
+        for item in _normalize_live_viator_experiences(payload, point, destination, config.cache_ttl_hours):
+            key = str(item.get("id") or item.get("source_id") or item.get("title"))
+            current = ranked_by_key.get(key)
+            if not current or float(item.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
+                ranked_by_key[key] = item
+        if len(ranked_by_key) >= limit or len(searched_destinations) >= 4:
+            break
+    if not ranked_by_key and q.strip():
+        payload = client.search_freetext(search_term=q.strip(), count=max(3, min(int(limit or 8), 12)))
+        statuses.append({"query": q.strip(), **_viator_provider_status(payload)})
+        anchor = points[0] if points else {"lat": 0, "lng": 0, "name": "Route"}
+        for item in _normalize_live_viator_experiences(payload, anchor, None, config.cache_ttl_hours):
+            key = str(item.get("id") or item.get("source_id") or item.get("title"))
+            ranked_by_key[key] = item
+    ranked = sorted(
+        ranked_by_key.values(),
+        key=lambda item: (
+            float(item.get("distance_mi") or 9999),
+            -float(item.get("rating") or 0),
+            str(item.get("title") or ""),
+        ),
+    )[:max(1, min(int(limit or 8), 24))]
+    return ranked, statuses
 
 @app.post("/api/tours/route")
 async def route_tour_suggestions(body: RouteTourRequest):
@@ -17965,10 +18102,24 @@ async def route_tour_suggestions(body: RouteTourRequest):
             str(item.get("title") or ""),
         ),
     )[:max(1, min(int(body.limit or 8), 24))]
+    provider_status: list[dict] = []
+    client = ViatorClient(viator_config_from_env())
+    if len(ranked) < max(1, min(int(body.limit or 8), 24)) and source in {"", "all", "viator"} and client.ready():
+        live_limit = max(1, min(int(body.limit or 8), 24)) - len(ranked)
+        live_ranked, provider_status = _live_viator_route_suggestions(client, points, limit=live_limit, q=body.q or "")
+        existing = {str(item.get("id") or item.get("source_id") or item.get("title")) for item in ranked}
+        for item in live_ranked:
+            key = str(item.get("id") or item.get("source_id") or item.get("title"))
+            if key not in existing:
+                ranked.append(item)
+                existing.add(key)
+            if len(ranked) >= max(1, min(int(body.limit or 8), 24)):
+                break
     return {
         **_experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty"),
         "route_anchor_count": len(points),
-        "live_enabled": ViatorClient(viator_config_from_env()).ready(),
+        "live_enabled": client.ready(),
+        "provider_status": provider_status,
     }
 
 
@@ -17989,13 +18140,40 @@ async def explore_experience_refresh(source: str = "viator", destination_id: str
     payload = client.search_products(destination_id=destination_id, count=limit)
     experiences = [item.to_dict() for item in normalize_viator_products(payload, ttl_hours=config.cache_ttl_hours)]
     return {
-        "ok": True,
+        "ok": payload.get("status") != "error",
         "source": "viator",
         "status": payload.get("status", "live"),
+        "provider_status": _viator_provider_status(payload),
         "results": experiences,
         "count": len(experiences),
         "message": "Live Viator refresh returned external-booking products. Persist via importer before serving broadly.",
     }
+
+
+@app.get("/api/admin/viator/diagnostics")
+async def viator_diagnostics(destination_id: str = "5600", q: str = "Moab", limit: int = 3):
+    config = viator_config_from_env()
+    client = ViatorClient(config)
+    diagnostics = {
+        "source": "viator",
+        "ready": client.ready(),
+        "live_enabled": bool(config.enable_live),
+        "has_key": bool(config.api_key),
+        "base_url": config.base_url,
+        "destination_id": destination_id,
+        "query": q,
+        "checks": [],
+    }
+    if not client.ready():
+        return diagnostics
+    destinations = client.get_destinations(timeout=12.0)
+    destination_count = len(destinations.get("destinations") or []) if isinstance(destinations.get("destinations"), list) else 0
+    diagnostics["checks"].append({"name": "destinations", "count": destination_count, **_viator_provider_status(destinations)})
+    products = client.search_products(destination_id=destination_id, count=max(1, min(int(limit or 3), 5)), timeout=12.0)
+    diagnostics["checks"].append({"name": "products_search", "count": len(_viator_products_payload(products).get("products") or []), **_viator_provider_status(products)})
+    freetext = client.search_freetext(search_term=q, count=max(1, min(int(limit or 3), 5)), timeout=12.0)
+    diagnostics["checks"].append({"name": "freetext", "count": len(_viator_products_payload(freetext).get("products") or []), **_viator_provider_status(freetext)})
+    return diagnostics
 
 
 @app.get("/api/explore/experiences/{experience_id}")

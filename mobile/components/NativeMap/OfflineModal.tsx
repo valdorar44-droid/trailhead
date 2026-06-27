@@ -8,7 +8,7 @@
  *   2. MLN PACK       — per-tile download via MapLibre offline manager.
  *      Best for regions / trip corridors (small enough to complete quickly).
  */
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert, Modal, View, Text, TouchableOpacity, ScrollView, TextInput,
   StyleSheet, Animated, Easing, Platform, useWindowDimensions,
@@ -36,6 +36,8 @@ import {
   type OfflinePlacePackSummary,
 } from '@/lib/offlinePlacePacks';
 import { TrailheadSheet } from '@/components/TrailheadUI';
+import { deleteOfflineTrip, getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
+import type { TripResult } from '@/lib/api';
 
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
@@ -276,14 +278,14 @@ function StateReadinessPanel({
             {statusParts.join(' · ')}
           </Text>
         </View>
-        {!navReady && available && (
+        {!ready && available && (
           <TouchableOpacity
             disabled={busy}
             onPress={onDownloadMissing}
             style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: busy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: busy ? C.border : C.orange + '55' }}
           >
             <Text style={{ color: busy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-              {busy ? 'BUSY' : 'DOWNLOAD'}
+              {busy ? 'BUSY' : 'SAVE'}
             </Text>
           </TouchableOpacity>
         )}
@@ -517,6 +519,7 @@ export default function OfflineModal({
 }: Props) {
   const user        = useStore(st => st.user);
   const mapboxToken = useStore(st => st.mapboxToken);
+  const setActiveTrip = useStore(st => st.setActiveTrip);
   const C           = useTheme();
   const s           = makeStyles(C);
   const insets      = useSafeAreaInsets();
@@ -543,11 +546,13 @@ export default function OfflineModal({
   const [packError,      setPackError]      = useState<string | null>(null);
   const [activePackName, setActivePackName] = useState<string | null>(null);
   const [packProgress,   setPackProgress]   = useState<PackProgress | null>(null);
-  const [activeTab,      setActiveTab]      = useState<'areas' | 'regions'>('areas');
+  const [activeTab,      setActiveTab]      = useState<'files' | 'areas' | 'regions'>('files');
+  const [downloadSearch, setDownloadSearch] = useState('');
   const [selectedState,  setSelectedState]  = useState('ks');
   const [selectedRegionGroup, setSelectedRegionGroup] = useState<RegionGroupKey>('central');
   const [authorizing,    setAuthorizing]    = useState<string | null>(null);
   const [placePacks,     setPlacePacks]     = useState<OfflinePlacePackSummary[]>([]);
+  const [offlineTrips,   setOfflineTrips]   = useState<Array<TripResult & { cached_at: number }>>([]);
   const [placeManifest,  setPlaceManifest]  = useState<PlacePackManifest | null>(null);
   const [placeBusy,      setPlaceBusy]      = useState(false);
   const [placeError,     setPlaceError]     = useState<string | null>(null);
@@ -570,6 +575,15 @@ export default function OfflineModal({
   useEffect(() => {
     if (visible) reloadPlacePacks();
   }, [visible, reloadPlacePacks]);
+
+  const reloadOfflineTrips = useCallback(async () => {
+    const trips = await getOfflineTripSummaries().catch(() => []);
+    setOfflineTrips(trips);
+  }, []);
+
+  useEffect(() => {
+    if (visible) reloadOfflineTrips();
+  }, [visible, reloadOfflineTrips]);
 
   useEffect(() => {
     if (!visible) return;
@@ -723,6 +737,40 @@ export default function OfflineModal({
     onOfflinePlacesChanged?.();
   }, [onOfflinePlacesChanged, reloadPlacePacks]);
 
+  const openOfflineTrip = useCallback(async (tripId: string) => {
+    const trip = await loadOfflineTrip(tripId);
+    if (!trip) {
+      Alert.alert('Route file unavailable', 'That downloaded route file is no longer on this device.');
+      await reloadOfflineTrips();
+      return;
+    }
+    setActiveTrip({ ...trip, updated_at: Date.now() }, true);
+    onClose();
+  }, [onClose, reloadOfflineTrips, setActiveTrip]);
+
+  const deleteOfflineTripCopy = useCallback((trip: TripResult & { cached_at: number }) => {
+    Alert.alert(
+      'Delete route file?',
+      `${trip.plan.trip_name || trip.trip_id} will be removed from offline downloads on this device.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            await deleteOfflineTrip(trip.trip_id);
+            await reloadOfflineTrips();
+          },
+        },
+      ],
+    );
+  }, [reloadOfflineTrips]);
+
+  const formatOfflineTripDate = useCallback((timestamp?: number | null) => {
+    if (!timestamp || !Number.isFinite(timestamp)) return 'Saved offline';
+    return `Saved ${new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
+  }, []);
+
   const currentPlacePack = placePacks.find(pack => tripId && pack.trip_id === tripId);
   const currentManifestPlacePacks = Object.entries(placeManifest?.packs ?? {})
     .filter(([, entry]) => entry.region_id === selectedState)
@@ -753,6 +801,212 @@ export default function OfflineModal({
     }
   }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks, selectedState, tripId]);
 
+  const downloadRegionBundle = useCallback(async (regionId: string) => {
+    if (authorizing) return;
+    const region = FILE_REGIONS[regionId as keyof typeof FILE_REGIONS];
+    if (!region) return;
+    const label = region.name;
+    setAuthorizing(`bundle:${regionId}`);
+    const scheduleFile = async (
+      assetType: OfflineAssetType,
+      assetLabel: string,
+      action: () => void | Promise<void>,
+    ) => {
+      await api.authorizeOfflineDownload(assetType, regionId, assetLabel);
+      void Promise.resolve(action()).catch((e: any) => {
+        Alert.alert('Download unavailable', e?.message ?? `Could not start ${assetLabel}.`);
+      });
+    };
+    try {
+      const mapState = getState(regionId);
+      const routingState = getRoutingState(regionId);
+      const trailState = getTrailState(regionId);
+      if (isFilePublished(regionId)) {
+        if (mapState.status === 'idle' || mapState.status === 'error') {
+          await scheduleFile('state_map', `${label} map`, () => startDownload(regionId));
+        } else if (mapState.status === 'paused') {
+          resumeDownload(regionId);
+        }
+      }
+      if (isRoutingPublished(regionId)) {
+        if (routingState.status === 'idle' || routingState.status === 'error') {
+          await scheduleFile('state_route', `${label} navigation`, () => startRoutingDownload(regionId));
+        } else if (routingState.status === 'paused') {
+          resumeRoutingDownload(regionId);
+        }
+      }
+      if (isTrailPublished(regionId)) {
+        if (trailState.status === 'idle' || trailState.status === 'error') {
+          await scheduleFile('state_trails', `${label} trails`, () => startTrailDownload(regionId));
+        } else if (trailState.status === 'paused') {
+          resumeTrailDownload(regionId);
+        }
+      }
+      const placeEntries = Object.values(placeManifest?.packs ?? {}).filter(entry => entry.region_id === regionId);
+      const missingPlaceEntries = placeEntries.filter(entry => (
+        !placePacks.some(pack => pack.region_id === regionId && pack.pack_id === `${regionId}-${entry.pack_id}`)
+      ));
+      if (missingPlaceEntries.length && !placeBusy) {
+        setPlaceBusy(true);
+        setPlaceError(null);
+        void (async () => {
+          try {
+            for (const entry of missingPlaceEntries) {
+              const pack = await api.getPlacePack(regionId, entry.pack_id);
+              await saveOfflinePlacePack(pack, []);
+            }
+            await reloadPlacePacks();
+            onOfflinePlacesChanged?.();
+          } catch (e: any) {
+            setPlaceError(e?.message ?? 'Could not download places for this region.');
+          } finally {
+            setPlaceBusy(false);
+          }
+        })();
+      }
+    } catch (e: any) {
+      if (e instanceof PaywallError) {
+        Alert.alert('Download unavailable', e.message);
+      } else {
+        Alert.alert('Download unavailable', e?.message ?? `Could not start downloads for ${label}.`);
+      }
+    } finally {
+      setAuthorizing(null);
+    }
+  }, [
+    authorizing,
+    getRoutingState,
+    getState,
+    getTrailState,
+    isFilePublished,
+    isRoutingPublished,
+    isTrailPublished,
+    onOfflinePlacesChanged,
+    placeBusy,
+    placeManifest,
+    placePacks,
+    reloadPlacePacks,
+    resumeDownload,
+    resumeRoutingDownload,
+    resumeTrailDownload,
+    startDownload,
+    startRoutingDownload,
+    startTrailDownload,
+  ]);
+
+  const explorerStats = useMemo(() => {
+    const regionIds = Object.keys(FILE_REGIONS).filter(id => id !== 'conus');
+    const savedMaps = regionIds.filter(id => getState(id).status === 'complete').length;
+    const savedRoutes = regionIds.filter(id => getRoutingState(id).status === 'complete').length;
+    const savedTrails = regionIds.filter(id => getTrailState(id).status === 'complete').length;
+    const placeCount = placePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
+    return {
+      regionIds,
+      savedMaps,
+      savedRoutes,
+      savedTrails,
+      placeCount,
+      corridorCount: savedAreas.length + mlnPacks.filter(pack => pack.complete).length + offlineTrips.length,
+    };
+  }, [getRoutingState, getState, getTrailState, mlnPacks, offlineTrips.length, placePacks, savedAreas.length]);
+
+  const explorerSearchResults = useMemo(() => {
+    const query = downloadSearch.trim().toLowerCase();
+    if (!query) return [];
+    const rows: Array<{
+      id: string;
+      title: string;
+      detail: string;
+      icon: keyof typeof Ionicons.glyphMap;
+      status?: string;
+      onPress: () => void;
+    }> = [];
+    rows.push(
+      { id: 'countries', title: 'Countries', detail: 'Browse states and country downloads', icon: 'folder-outline', onPress: () => setActiveTab('regions') },
+      { id: 'corridors', title: 'Corridors', detail: 'Saved route corridors and custom map boxes', icon: 'git-branch-outline', onPress: () => setActiveTab('areas') },
+      { id: 'places', title: 'Camps & Places', detail: `${explorerStats.placeCount} saved pins`, icon: 'location-outline', onPress: () => setActiveTab('regions') },
+      { id: 'trails', title: 'Trails', detail: `${explorerStats.savedTrails} regions saved`, icon: 'trail-sign-outline', onPress: () => setActiveTab('regions') },
+      { id: 'gpx', title: 'GPX Imports', detail: 'Imported route files', icon: 'document-attach-outline', onPress: () => setActiveTab('areas') },
+      { id: 'photos', title: 'Photos', detail: 'Saved trip and place photos', icon: 'images-outline', onPress: () => setActiveTab('areas') },
+    );
+    Object.entries(FILE_REGIONS).forEach(([id, region]) => {
+      if (id === 'conus') return;
+      rows.push({
+        id: `region:${id}`,
+        title: region.name,
+        detail: `${regionCodeFor(id)} · map, navigation, places, and trails`,
+        icon: id.length === 2 ? 'map-outline' : 'earth-outline',
+        status: getState(id).status === 'complete' && getRoutingState(id).status === 'complete' ? 'Saved' : 'Available',
+        onPress: () => {
+          selectRegion(id);
+          setActiveTab('regions');
+        },
+      });
+    });
+    savedAreas.forEach(area => rows.push({
+      id: `area:${area.id}`,
+      title: area.label,
+      detail: `${Math.round(area.areaSqMi).toLocaleString()} sq mi · custom area`,
+      icon: 'scan-outline',
+      status: 'Area',
+      onPress: () => {
+        onSelectArea?.(area);
+        setActiveTab('areas');
+      },
+    }));
+    offlineTrips.forEach(trip => rows.push({
+      id: `route:${trip.trip_id}`,
+      title: trip.plan.trip_name || trip.trip_id,
+      detail: `${trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0} days · ${Math.round(trip.plan.total_est_miles || 0)} mi · ${formatOfflineTripDate((trip as any).cached_at)}`,
+      icon: 'map-outline',
+      status: 'Route',
+      onPress: () => openOfflineTrip(trip.trip_id),
+    }));
+    placePacks.forEach(pack => rows.push({
+      id: `place:${pack.pack_id}`,
+      title: pack.name,
+      detail: `${pack.point_count} places · ${(pack.categories || []).slice(0, 3).join(', ') || 'offline pins'}`,
+      icon: 'location-outline',
+      status: 'Saved',
+      onPress: () => setActiveTab('regions'),
+    }));
+    return rows.filter(row => `${row.title} ${row.detail} ${row.status ?? ''}`.toLowerCase().includes(query)).slice(0, 30);
+  }, [
+    downloadSearch,
+    explorerStats.placeCount,
+    explorerStats.savedTrails,
+    getRoutingState,
+    getState,
+    onSelectArea,
+    offlineTrips,
+    openOfflineTrip,
+    placePacks,
+    savedAreas,
+    selectRegion,
+    formatOfflineTripDate,
+  ]);
+
+  const renderExplorerRow = (row: {
+    id: string;
+    title: string;
+    detail: string;
+    icon: keyof typeof Ionicons.glyphMap;
+    status?: string;
+    onPress?: () => void;
+  }) => (
+    <TouchableOpacity key={row.id} style={s.explorerRow} onPress={row.onPress} activeOpacity={row.onPress ? 0.82 : 1}>
+      <View style={s.explorerIcon}>
+        <Ionicons name={row.icon} size={18} color={C.orange} />
+      </View>
+      <View style={s.explorerText}>
+        <Text style={s.explorerTitle} numberOfLines={1}>{row.title}</Text>
+        <Text style={s.explorerDetail} numberOfLines={2}>{row.detail}</Text>
+      </View>
+      {row.status ? <Text style={s.explorerStatus} numberOfLines={1}>{row.status}</Text> : null}
+      {row.onPress ? <Ionicons name="chevron-forward" size={16} color={C.text3} /> : null}
+    </TouchableOpacity>
+  );
+
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={s.overlay}>
@@ -763,8 +1017,8 @@ export default function OfflineModal({
           <View style={s.header}>
             <View style={s.headerAccent} />
             <View style={{ flex: 1 }}>
-              <Text style={s.title}>OFFLINE DOWNLOADS</Text>
-              <Text style={s.subtitle}>Regional packs for no-signal travel</Text>
+              <Text style={s.title}>DOWNLOADS</Text>
+              <Text style={s.subtitle}>Offline maps, corridors, places, trails, files</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={18} color={C.text3} />
@@ -773,14 +1027,14 @@ export default function OfflineModal({
 
           {/* ── Tabs ─────────────────────────────────────────────────────── */}
           <View style={s.tabs}>
-            {(['areas', 'regions'] as const).map(tab => (
+            {(['files', 'areas', 'regions'] as const).map(tab => (
               <TouchableOpacity
                 key={tab}
                 style={[s.tab, activeTab === tab && s.tabActive]}
                 onPress={() => setActiveTab(tab)}
               >
                 <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
-                  {tab === 'areas' ? 'TRIP DOWNLOAD' : 'REGIONS'}
+                  {tab === 'files' ? 'FILES' : tab === 'areas' ? 'CORRIDORS' : 'COUNTRIES'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -805,6 +1059,129 @@ export default function OfflineModal({
                   {freeDiskBytes != null ? `After selected map: ~${fmtBytes(Math.max(0, freeDiskBytes - getTotalBytes(selectedState)))}` : 'Check pack size'}
                 </Text>
               </View>
+
+              {activeTab === 'files' && (
+                <>
+                  <View style={s.explorerSearch}>
+                    <Ionicons name="search-outline" size={16} color={C.text3} />
+                    <TextInput
+                      value={downloadSearch}
+                      onChangeText={setDownloadSearch}
+                      placeholder="Search offline downloads"
+                      placeholderTextColor={C.text3}
+                      style={s.explorerSearchInput}
+                      autoCapitalize="none"
+                      autoCorrect={false}
+                      returnKeyType="search"
+                    />
+                    {downloadSearch.trim() ? (
+                      <TouchableOpacity onPress={() => setDownloadSearch('')} style={s.explorerClear}>
+                        <Ionicons name="close" size={14} color={C.text3} />
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
+
+                  {downloadSearch.trim() ? (
+                    <>
+                      <Section label="SEARCH RESULTS" />
+                      {explorerSearchResults.length > 0 ? explorerSearchResults.map(renderExplorerRow) : (
+                        <View style={s.explorerEmpty}>
+                          <Ionicons name="file-tray-outline" size={22} color={C.text3} />
+                          <Text style={s.explorerEmptyText}>No offline downloads match that search.</Text>
+                        </View>
+                      )}
+                    </>
+                  ) : (
+                    <>
+                      <Section label="FOLDERS" />
+                      {renderExplorerRow({
+                        id: 'countries',
+                        title: 'Countries',
+                        detail: `${explorerStats.savedMaps} map packs · ${explorerStats.savedRoutes} navigation packs saved`,
+                        icon: 'folder-outline',
+                        status: 'Open',
+                        onPress: () => setActiveTab('regions'),
+                      })}
+                      {renderExplorerRow({
+                        id: 'corridors',
+                        title: 'Corridors',
+                        detail: `${explorerStats.corridorCount} saved route corridors and custom areas`,
+                        icon: 'git-branch-outline',
+                        status: 'Open',
+                        onPress: () => setActiveTab('areas'),
+                      })}
+                      {renderExplorerRow({
+                        id: 'favorites',
+                        title: 'Downloaded Favorites',
+                        detail: `${explorerStats.placeCount} saved camp and place pins from offline packs`,
+                        icon: 'star-outline',
+                        status: `${explorerStats.placeCount}`,
+                        onPress: () => setActiveTab('regions'),
+                      })}
+                      {renderExplorerRow({
+                        id: 'places',
+                        title: 'Camps & Places',
+                        detail: 'Campgrounds, water, fuel, trailheads, viewpoints, and service pins',
+                        icon: 'location-outline',
+                        status: `${placePacks.length} packs`,
+                        onPress: () => setActiveTab('regions'),
+                      })}
+                      {renderExplorerRow({
+                        id: 'trails',
+                        title: 'Trails',
+                        detail: 'Saved trail line packs and trail preview data by region',
+                        icon: 'trail-sign-outline',
+                        status: `${explorerStats.savedTrails} saved`,
+                        onPress: () => setActiveTab('regions'),
+                      })}
+                      {renderExplorerRow({
+                        id: 'gpx',
+                        title: 'GPX Imports',
+                        detail: 'Imported GPX routes and tracks are grouped here as offline files',
+                        icon: 'document-attach-outline',
+                        status: 'Files',
+                        onPress: () => setActiveTab('areas'),
+                      })}
+                      {renderExplorerRow({
+                        id: 'photos',
+                        title: 'Photos',
+                        detail: 'Saved trip, campground, and trail photos available on this device',
+                        icon: 'images-outline',
+                        status: 'Media',
+                        onPress: () => setActiveTab('areas'),
+                      })}
+
+                      <Section label="COUNTRIES" />
+                      {renderExplorerRow({
+                        id: 'country:us',
+                        title: 'United States',
+                        detail: 'State folders with map, navigation, places, trails, and topo packs',
+                        icon: 'map-outline',
+                        status: `${explorerStats.regionIds.filter(id => id.length === 2).length} states`,
+                        onPress: () => {
+                          setSelectedRegionGroup('west');
+                          setActiveTab('regions');
+                        },
+                      })}
+                      {(['canada', 'mexico', 'fi', 'pk'] as const).map(id => {
+                        const region = FILE_REGIONS[id];
+                        if (!region) return null;
+                        return renderExplorerRow({
+                          id: `country:${id}`,
+                          title: region.name,
+                          detail: `${regionCodeFor(id)} · country map and navigation packs`,
+                          icon: 'earth-outline',
+                          status: getState(id).status === 'complete' && getRoutingState(id).status === 'complete' ? 'Saved' : 'Available',
+                          onPress: () => {
+                            selectRegion(id);
+                            setActiveTab('regions');
+                          },
+                        });
+                      })}
+                    </>
+                  )}
+                </>
+              )}
 
               {/* ── Active MLN pack progress ────────────────────────────── */}
               {activePackName && (
@@ -948,6 +1325,29 @@ export default function OfflineModal({
                         PLAN A TRIP FIRST TO DOWNLOAD IT
                       </Text>
                     </View>
+                  )}
+
+                  {offlineTrips.length > 0 && (
+                    <>
+                      <Section label="ROUTE FILES" />
+                      {offlineTrips.map(trip => (
+                        <View key={`route-file-${trip.trip_id}`} style={s.savedAreaRow}>
+                          <TouchableOpacity style={s.savedAreaMain} onPress={() => openOfflineTrip(trip.trip_id)}>
+                            <Text style={s.savedAreaTitle} numberOfLines={1}>{trip.plan.trip_name || trip.trip_id}</Text>
+                            <Text style={s.savedAreaMeta} numberOfLines={1}>
+                              {trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0} days · {Math.round(trip.plan.total_est_miles || 0)} mi · {formatOfflineTripDate((trip as any).cached_at)}
+                            </Text>
+                          </TouchableOpacity>
+                          <StatusChip label="ROUTE" color={C.green} />
+                          <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => openOfflineTrip(trip.trip_id)}>
+                            <Ionicons name="open-outline" size={14} color={C.text2} />
+                          </TouchableOpacity>
+                          <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => deleteOfflineTripCopy(trip)}>
+                            <Ionicons name="trash-outline" size={14} color={C.red} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </>
                   )}
                   <Section label="CONTINENTAL US — MAP" />
                   <Text style={s.hint}>
@@ -1230,17 +1630,7 @@ export default function OfflineModal({
                           contourBusy={contourBusy}
                           trailBusy={trailBusy}
                           available={regionAvailable}
-                          onDownloadMissing={() => {
-                            const label = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS]?.name ?? selectedState.toUpperCase();
-                            if (mapState.status === 'idle' || mapState.status === 'error') {
-                              authorizeAndRun(`map:${selectedState}`, 'state_map', selectedState, `${label} map`, () => startDownload(selectedState));
-                            }
-                            if (routingState.status === 'idle' || routingState.status === 'error') {
-                              authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${label} navigation`, () => startRoutingDownload(selectedState));
-                            }
-                            if (mapState.status === 'paused') resumeDownload(selectedState);
-                            if (routingState.status === 'paused') resumeRoutingDownload(selectedState);
-                          }}
+                          onDownloadMissing={() => downloadRegionBundle(selectedState)}
                         />
                         {!regionAvailable ? (
                           <View style={{ backgroundColor: C.s1, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 14 }}>
@@ -1464,6 +1854,43 @@ function makeStyles(C: ColorPalette) {
     storageTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
     storageText: { color: C.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
     storageEstimate: { color: C.text3, fontSize: 9, fontFamily: mono, maxWidth: 126, textAlign: 'right', lineHeight: 13 },
+    explorerSearch: {
+      minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9,
+      borderRadius: 12, borderWidth: 1, borderColor: C.border,
+      backgroundColor: C.s1, paddingHorizontal: 12, marginTop: 2, marginBottom: 2,
+    },
+    explorerSearchInput: {
+      flex: 1, color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '700',
+      paddingVertical: Platform.OS === 'ios' ? 11 : 8,
+    },
+    explorerClear: {
+      width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
+    },
+    explorerRow: {
+      minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 11,
+      backgroundColor: C.s1, borderRadius: 13, borderWidth: 1, borderColor: C.border,
+      paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8,
+    },
+    explorerIcon: {
+      width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center',
+      backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '42',
+    },
+    explorerText: { flex: 1, minWidth: 0 },
+    explorerTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
+    explorerDetail: { color: C.text3, fontSize: 9.5, lineHeight: 13, marginTop: 3 },
+    explorerStatus: {
+      maxWidth: 84, color: C.text2, fontSize: 9, fontFamily: mono,
+      fontWeight: '900', textAlign: 'right',
+    },
+    explorerEmpty: {
+      alignItems: 'center', justifyContent: 'center', gap: 8,
+      backgroundColor: C.s1, borderRadius: 13, borderWidth: 1,
+      borderColor: C.border, borderStyle: 'dashed', padding: 18,
+    },
+    explorerEmptyText: {
+      color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center',
+    },
     customAreaCard: {
       backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '38',
       padding: 14, marginBottom: 10,

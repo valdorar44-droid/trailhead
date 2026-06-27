@@ -12823,7 +12823,7 @@ function MapScreen() {
   function openTrailDiscoveryFromDrawer() {
     setDiscoveryMode('trails');
     setShowMapDrawer(false);
-    runTrailDiscoverySearch('nearby');
+    runTrailDiscoverySearch('view');
   }
 
   async function openCampInsight(camp: CampsitePin, detail?: CampsiteDetail | null): Promise<boolean> {
@@ -17972,7 +17972,7 @@ function MapScreen() {
         onClose={() => setShowMapDrawer(false)}
         items={[
           { label: 'Search places', sub: 'Find camps, trails, fuel, and stops', icon: 'search-outline', tone: '#60a5fa', onPress: openFullMapSearch },
-          { label: 'Trails', sub: 'Nearby trail discovery', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
+          { label: 'Trails', sub: 'Trails in this view', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
           { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
           { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
           { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, onPress: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },

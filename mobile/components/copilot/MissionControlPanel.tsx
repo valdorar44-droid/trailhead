@@ -12,7 +12,7 @@ type Props = {
 };
 
 const READINESS: Record<MissionReadiness, { label: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = {
-  ready: { label: 'READY', icon: 'checkmark-circle', color: '#22c55e' },
+  ready: { label: 'DONE', icon: 'checkmark-circle', color: '#22c55e' },
   needs_review: { label: 'REVIEW', icon: 'alert-circle', color: '#f97316' },
   blocked: { label: 'BLOCKED', icon: 'close-circle', color: '#ef4444' },
 };

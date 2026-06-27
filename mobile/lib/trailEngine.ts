@@ -223,6 +223,8 @@ export function featureFromPoi(
     length_mi: poi.length_mi,
     activities: poi.activities,
     last_checked: poi.last_checked,
+    summary: poi.summary,
+    difficulty: poi.difficulty,
     confidence: source === 'trailhead' ? 'verified' : source === 'offline_places' ? 'map_derived' : 'map_derived',
     open_status: 'unknown',
     vehicle_fit: 'unknown',

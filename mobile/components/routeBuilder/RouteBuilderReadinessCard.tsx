@@ -35,7 +35,7 @@ export default function RouteBuilderReadinessCard({
         </View>
         <View style={[s.badge, needsCheck ? s.badgeWarn : s.badgeOk]}>
           <Text style={[s.badgeText, { color: needsCheck ? C.yellow : C.green }]}>
-            {needsCheck ? 'CHECK' : 'READY'}
+            {needsCheck ? 'CHECK' : 'DONE'}
           </Text>
         </View>
       </View>

@@ -225,9 +225,9 @@ export default function TrailPreviewPlayer({ visible, trail, manifest, loading, 
           <View style={styles.unavailable}>
             <Ionicons name="map-outline" size={19} color={accent} />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={styles.unavailableTitle}>Guide layer only</Text>
+              <Text style={styles.unavailableTitle}>Map highlight ready</Text>
               <Text style={styles.unavailableText} numberOfLines={3}>
-                {(manifest?.warnings ?? [])[0] || 'Preview needs ordered Trailhead route geometry before it can animate.'}
+                {(manifest?.warnings ?? [])[0] || 'Flyover starts when this trail has route geometry.'}
               </Text>
             </View>
           </View>

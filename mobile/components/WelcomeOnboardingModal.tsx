@@ -60,7 +60,7 @@ const PAGES: OnboardingPage[] = [
     ],
   },
   {
-    kicker: 'READY',
+    kicker: 'SAVED',
     title: 'Keep the trip organized before signal drops.',
     body: 'Saved places, trip history, offline maps, reports, and your profile stay together so the next drive is easier to prepare.',
     icon: 'shield-checkmark-outline',

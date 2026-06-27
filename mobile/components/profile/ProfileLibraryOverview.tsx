@@ -59,43 +59,53 @@ export default function ProfileLibraryOverview({
   const groups: LibraryGroup[] = [
     {
       key: 'recent',
-      title: 'Recent Trips',
+      title: 'Routes',
       meta: `${savedTripCount} saved`,
-      detail: recentTripName ? `Last opened: ${recentTripName}` : 'Build a route to start your trip library.',
+      detail: recentTripName ? `Latest: ${recentTripName}` : 'Saved routes appear here after planning.',
       icon: 'time-outline',
       tone: C.silverBright,
-      action: savedTripCount > 0 ? 'OPEN TRIPS' : 'PLAN TRIP',
+      action: savedTripCount > 0 ? 'OPEN' : 'PLAN',
       onPress: savedTripCount > 0 ? onOpenTrips : onPlanTrip,
     },
     {
       key: 'offline',
-      title: 'Offline Ready',
-      meta: `${offlineTotal} ready`,
-      detail: offlineTripName ? `Ready on this device: ${offlineTripName}` : 'Cache trips, maps, and route details before service drops.',
-      icon: 'cloud-done-outline',
+      title: 'Map Packs',
+      meta: `${offlineTotal} downloaded`,
+      detail: offlineTripName ? `Latest: ${offlineTripName}` : 'Downloaded corridors, maps, and route files.',
+      icon: 'folder-open-outline',
       tone: C.green,
-      action: 'OPEN DOWNLOADS',
+      action: 'OPEN',
       onPress: onOpenDownloads,
     },
     {
       key: 'saved',
-      title: 'Saved Nearby',
+      title: 'Camps & Places',
       meta: `${savedNearbyCount} saved`,
-      detail: savedNearbyName ? `Latest saved: ${savedNearbyName}` : 'Saved camps and places stay close for the next planning pass.',
+      detail: savedNearbyName ? `Latest: ${savedNearbyName}` : 'Saved camps, stays, trailheads, and places.',
       icon: 'bookmark-outline',
       tone: C.orange,
-      action: 'OPEN SAVED',
+      action: 'OPEN',
       onPress: onOpenSaved,
     },
     {
       key: 'imports',
-      title: 'Imports',
+      title: 'GPX Imports',
       meta: `${importedRouteCount + importedPinCount} items`,
       detail: importDetail,
       icon: 'git-branch-outline',
       tone: '#38bdf8',
-      action: 'OPEN TRIPS',
+      action: 'OPEN',
       onPress: onOpenTrips,
+    },
+    {
+      key: 'photos',
+      title: 'Photos',
+      meta: '0 local',
+      detail: 'Saved place and trip photos will collect here.',
+      icon: 'images-outline',
+      tone: '#a855f7',
+      action: 'OPEN',
+      onPress: onOpenSaved,
     },
   ];
 
@@ -116,12 +126,12 @@ export default function ProfileLibraryOverview({
           </View>
           <View style={s.summaryCopy}>
             <Text style={s.kicker}>LIBRARY</Text>
-            <Text style={s.summaryTitle}>Recent, saved, and offline-ready trips in one place.</Text>
+            <Text style={s.summaryTitle}>Routes, downloads, camps, GPX files, and photos.</Text>
           </View>
         </View>
         <TouchableOpacity style={s.primaryAction} onPress={onOpenDownloads} activeOpacity={0.84}>
           <Ionicons name="cloud-download-outline" size={15} color="#fff" />
-          <Text style={s.primaryActionText}>CHECK OFFLINE READINESS</Text>
+          <Text style={s.primaryActionText}>OPEN DOWNLOADS</Text>
         </TouchableOpacity>
       </TrailheadCard>
 

@@ -2477,11 +2477,21 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const lng = Number(coords?.[0]);
       const lat = Number(coords?.[1]);
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        const nearest = camps
+          .filter(camp => Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
+          .map(camp => ({
+            camp,
+            distance: haversineMiles(lat, lng, camp.lat, camp.lng),
+          }))
+          .filter(item => item.distance <= 35)
+          .sort((a, b) => a.distance - b.distance)[0]?.camp;
+        const targetLat = Number.isFinite(nearest?.lat) ? nearest!.lat : lat;
+        const targetLng = Number.isFinite(nearest?.lng) ? nearest!.lng : lng;
         const nextZoom = Math.min(13, Math.max(9, Number(freeCameraDefaultRef.current.zoomLevel || 9) + 2.2));
         programmaticCameraUntilRef.current = Date.now() + 900;
-        rememberFreeCamera(lat, lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
+        rememberFreeCamera(targetLat, targetLng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
         camRef.current?.setCamera({
-          centerCoordinate: [lng, lat],
+          centerCoordinate: [targetLng, targetLat],
           zoomLevel: nextZoom,
           pitch: navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0,
           animationDuration: 420,
@@ -2494,7 +2504,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     try { raw = JSON.parse(p.raw || '{}'); } catch { raw = p as any; }
     if (!raw || !Number.isFinite(Number(raw.lat)) || !Number.isFinite(Number(raw.lng))) return;
     onCampTap(raw);
-  }, [navMode, onCampTap, onMapTap, rememberFreeCamera, showTerrain, suppressFeatureTaps]);
+  }, [camps, navMode, onCampTap, onMapTap, rememberFreeCamera, showTerrain, suppressFeatureTaps]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
   const userLocationShape = userLoc

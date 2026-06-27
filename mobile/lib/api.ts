@@ -617,6 +617,11 @@ export const api = {
   },
   getExploreExperience: (experienceId: string) =>
     req<BookableExperience>(`/api/explore/experiences/${encodeURIComponent(experienceId)}`),
+  getRouteTours: (data: RouteTourSuggestionRequest) =>
+    req<ExploreExperiencesResponse>('/api/tours/route', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getRentalOffers: (params: RentalOffersQuery = {}) => {
     const qs = new URLSearchParams({ provider: params.provider || 'outdoorsy', limit: String(params.limit ?? 12) });
     if (params.lat != null) qs.set('lat', String(params.lat));
@@ -2218,6 +2223,8 @@ export interface OsmPoi {
   enrichment_source?: 'mapbox_standard' | 'mapbox_searchbox_rest' | 'mapbox_search_sdk' | 'none' | string;
   enrichment_status?: 'pending' | 'enriched' | 'unavailable' | 'failed' | string;
   length_mi?: number | null;
+  difficulty?: string;
+  raw?: unknown;
   rich_detail_available?: boolean;
   rich_detail_locked?: boolean;
   rich_detail_reason?: string;
@@ -3261,6 +3268,12 @@ export interface BookableExperience {
   primary_action?: string;
   secondary_actions?: string[];
   distance_mi?: number;
+  route_anchor?: {
+    name?: string;
+    day?: number | null;
+    leg_index?: number | null;
+    distance_mi?: number | null;
+  };
 }
 export interface ExploreExperiencesResponse {
   source: string;
@@ -3269,6 +3282,16 @@ export interface ExploreExperiencesResponse {
   count?: number;
   attribution?: string;
   cache_status?: string;
+  live_enabled?: boolean;
+  route_anchor_count?: number;
+}
+export interface RouteTourSuggestionRequest {
+  anchors: Array<{ lat: number; lng: number; name?: string; day?: number; leg_index?: number }>;
+  route?: [number, number][];
+  radius?: number;
+  limit?: number;
+  source?: string;
+  q?: string;
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;

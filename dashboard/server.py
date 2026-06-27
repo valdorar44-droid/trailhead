@@ -10902,7 +10902,21 @@ async def trails_discover(
         radius = max(3, min(80, max(abs(bbox["n"] - bbox["s"]) * 69, abs(bbox["e"] - bbox["w"]) * 69) / 2 + 3))
     if lat is None or lng is None:
         raise HTTPException(400, "lat/lng or n/s/e/w bounds are required")
-    await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80), refresh=bool(refresh))
+    if bbox:
+        sample_points = [
+            (float(lat), float(lng)),
+            ((bbox["n"] * 0.68) + (bbox["s"] * 0.32), (bbox["e"] * 0.68) + (bbox["w"] * 0.32)),
+            ((bbox["n"] * 0.68) + (bbox["s"] * 0.32), (bbox["e"] * 0.32) + (bbox["w"] * 0.68)),
+            ((bbox["n"] * 0.32) + (bbox["s"] * 0.68), (bbox["e"] * 0.68) + (bbox["w"] * 0.32)),
+            ((bbox["n"] * 0.32) + (bbox["s"] * 0.68), (bbox["e"] * 0.32) + (bbox["w"] * 0.68)),
+        ]
+        sample_radius = max(6.0, min(28.0, radius * 0.55))
+        await asyncio.gather(*[
+            _seed_open_trail_profiles(point_lat, point_lng, sample_radius, limit=max(24, min(limit, 60)), refresh=bool(refresh))
+            for point_lat, point_lng in sample_points
+        ], return_exceptions=True)
+    else:
+        await _seed_open_trail_profiles(float(lat), float(lng), radius, limit=max(limit, 80), refresh=bool(refresh))
     raw_trails = list_trail_profiles_near(float(lat), float(lng), radius, max(1, min(max(limit, 40), 140)), bbox=bbox, mode=mode)
     ranked_trails = _rank_trail_profiles(raw_trails, float(lat), float(lng), limit=max(1, min(limit, 100)))
     trails = [_public_trail_profile(p) for p in ranked_trails]
@@ -17869,6 +17883,93 @@ async def explore_experiences(lat: float | None = None, lng: float | None = None
     nearby = _experience_distance_filter(experiences, lat, lng, max(1.0, min(float(radius or 30), 100.0)))
     ranked = rank_experiences(nearby, lat=lat, lng=lng)[:max(1, min(int(limit or 20), 50))]
     return _experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty")
+
+class RouteTourAnchor(BaseModel):
+    lat: float
+    lng: float
+    name: Optional[str] = None
+    day: Optional[int] = None
+    leg_index: Optional[int] = None
+
+class RouteTourRequest(BaseModel):
+    anchors: list[RouteTourAnchor] = Field(default_factory=list)
+    route: list[list[float]] = Field(default_factory=list)
+    radius: float = 45
+    limit: int = 8
+    source: str = "viator"
+    q: str = ""
+
+def _route_tour_points(body: RouteTourRequest) -> list[dict]:
+    points: list[dict] = []
+    for idx, anchor in enumerate(body.anchors[:24]):
+        if -90 <= float(anchor.lat) <= 90 and -180 <= float(anchor.lng) <= 180:
+            points.append({
+                "lat": float(anchor.lat),
+                "lng": float(anchor.lng),
+                "name": anchor.name or f"Stop {idx + 1}",
+                "day": anchor.day,
+                "leg_index": anchor.leg_index,
+            })
+    route = body.route or []
+    if route:
+        sample_count = min(8, max(2, len(route)))
+        for sample_idx in range(sample_count):
+            raw_idx = round((len(route) - 1) * (sample_idx / max(1, sample_count - 1)))
+            coord = route[raw_idx]
+            if not isinstance(coord, list) or len(coord) < 2:
+                continue
+            lng, lat = float(coord[0]), float(coord[1])
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                points.append({"lat": lat, "lng": lng, "name": "Route", "leg_index": sample_idx})
+    seen: set[str] = set()
+    unique: list[dict] = []
+    for point in points:
+        key = f"{point['lat']:.2f}:{point['lng']:.2f}"
+        if key in seen:
+            continue
+        seen.add(key)
+        unique.append(point)
+    return unique[:24]
+
+@app.post("/api/tours/route")
+async def route_tour_suggestions(body: RouteTourRequest):
+    payload = _load_explore_experiences()
+    source = (body.source or "viator").lower()
+    experiences = [
+        item for item in payload.get("experiences") or []
+        if source in {"", "all"} or str(item.get("source") or "").lower() == source
+    ]
+    experiences = _filter_experiences_by_query(experiences, body.q or "")
+    points = _route_tour_points(body)
+    radius_mi = max(5.0, min(float(body.radius or 45), 120.0))
+    ranked_by_key: dict[str, dict] = {}
+    for point in points:
+        nearby = _experience_distance_filter(experiences, point["lat"], point["lng"], radius_mi)
+        for item in rank_experiences(nearby, lat=point["lat"], lng=point["lng"])[:20]:
+            key = str(item.get("id") or item.get("source_id") or item.get("title"))
+            current = ranked_by_key.get(key)
+            enriched = dict(item)
+            enriched["route_anchor"] = {
+                "name": point.get("name"),
+                "day": point.get("day"),
+                "leg_index": point.get("leg_index"),
+                "distance_mi": item.get("distance_mi"),
+            }
+            if not current or float(enriched.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
+                ranked_by_key[key] = enriched
+    ranked = sorted(
+        ranked_by_key.values(),
+        key=lambda item: (
+            float(item.get("distance_mi") or 9999),
+            -float(item.get("rating") or 0),
+            str(item.get("title") or ""),
+        ),
+    )[:max(1, min(int(body.limit or 8), 24))]
+    return {
+        **_experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty"),
+        "route_anchor_count": len(points),
+        "live_enabled": ViatorClient(viator_config_from_env()).ready(),
+    }
 
 
 @app.post("/api/explore/experiences/refresh")

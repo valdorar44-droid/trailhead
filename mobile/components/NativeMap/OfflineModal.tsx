@@ -336,7 +336,7 @@ function ConusCard({
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
             <Text style={{ color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' }}>{region.name}</Text>
-            {isComplete && <StatusChip label="OFFLINE READY" color={C.green} />}
+            {isComplete && <StatusChip label="DOWNLOADED" color={C.green} />}
             {isActive   && <StatusChip label="DOWNLOADING"   color={C.orange} />}
             {isPaused   && <StatusChip label="PAUSED"        color={C.orange} />}
             {isError    && <StatusChip label="ERROR"         color={C.red} />}
@@ -439,7 +439,7 @@ function ConusCard({
       {isComplete && (
         <View style={{ margin: 12, marginTop: 0, padding: 10, backgroundColor: C.green + '15', borderRadius: 6, borderWidth: 1, borderColor: C.green + '30' }}>
           <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>
-            {completeTitle ?? 'READY OFFLINE'}
+            {completeTitle ?? 'DOWNLOADED'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 }}>
             {completeText ?? 'Saved on this device for offline use.'}
@@ -471,7 +471,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
         {isCached ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons name="checkmark-circle" size={12} color={C.green} />
-            <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>READY</Text>
+            <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>SAVED</Text>
             <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={14} color={C.red} />
             </TouchableOpacity>
@@ -993,7 +993,7 @@ export default function OfflineModal({
                           )}
                         </View>
                         {cached
-                          ? <StatusChip label="READY OFFLINE" color={C.green} />
+                          ? <StatusChip label="DOWNLOADED" color={C.green} />
                           : <StatusChip label={busy ? 'BUSY' : 'DOWNLOAD'} color={busy ? C.text3 : C.orange} />
                         }
                       </TouchableOpacity>
@@ -1054,7 +1054,7 @@ export default function OfflineModal({
                   {/* Downloaded packs */}
                   {mlnPacks.length > 0 && (
                     <>
-                      <Section label="READY OFFLINE — TAP TO DELETE" />
+                      <Section label="DOWNLOADED PACKS — TAP TO DELETE" />
                       {mlnPacks.map(pack => (
                         <View key={pack.name} style={s.packRow}>
                           <Ionicons name="checkmark-circle" size={12} color={C.green} />
@@ -1258,8 +1258,8 @@ export default function OfflineModal({
                               </View>
                             </View>
                             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                              <StatusChip label={mapPublished ? 'MAP READY' : `MAP ${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
-                              <StatusChip label={routePublished ? 'NAV READY' : `NAV ${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
+                              <StatusChip label={mapPublished ? 'MAP AVAILABLE' : `MAP ${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
+                              <StatusChip label={routePublished ? 'NAV AVAILABLE' : `NAV ${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
                             </View>
                             {'storageNote' in mapRegion && (
                               <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 10 }}>

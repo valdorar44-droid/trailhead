@@ -1303,7 +1303,7 @@ export default function ProfileScreen() {
               ]}
             />
             <TrailheadCard style={s.tripSummaryCard}>
-              <Text style={s.sectionLabel}>DOWNLOAD STATUS</Text>
+              <Text style={s.sectionLabel}>DOWNLOADS</Text>
               <Text style={s.emptySectionText}>
                 {offlineTripCount > 0
                   ? `${offlineTripCount} trip ${offlineTripCount === 1 ? 'is' : 'are'} ready offline. ${Math.max(0, tripHistory.length - offlineTripCount)} still need a cached copy if you want them without service.`
@@ -1311,7 +1311,7 @@ export default function ProfileScreen() {
               </Text>
               <TouchableOpacity style={s.tripSummaryAction} onPress={openOfflineMapsManager}>
                 <Ionicons name="cloud-download-outline" size={14} color={C.orange} />
-                <Text style={s.tripSummaryActionText}>OPEN OFFLINE MAPS</Text>
+                <Text style={s.tripSummaryActionText}>OPEN DOWNLOADS</Text>
               </TouchableOpacity>
               {gpxBatches.length > 0 && (
                 <Text style={s.tripSummaryMeta}>
@@ -1321,7 +1321,7 @@ export default function ProfileScreen() {
             </TrailheadCard>
             {offlineTripSummaries.length > 0 && (
               <TrailheadCard style={s.tripsCard}>
-                <Text style={s.sectionLabel}>OFFLINE TRIPS</Text>
+                <Text style={s.sectionLabel}>DOWNLOADED TRIPS</Text>
                 {offlineTripSummaries.slice(0, 8).map(trip => (
                   <View key={`offline-${trip.trip_id}`} style={s.tripRow}>
                     <TouchableOpacity style={s.tripRowOpen} onPress={() => openOfflineTripSummary(trip)}>
@@ -1333,7 +1333,7 @@ export default function ProfileScreen() {
                       </View>
                       <View style={s.offlineBadge}>
                         <Ionicons name="cloud-done-outline" size={10} color="#22c55e" />
-                        <Text style={s.offlineBadgeText}>READY</Text>
+                        <Text style={s.offlineBadgeText}>DOWNLOADED</Text>
                       </View>
                       <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
                     </TouchableOpacity>
@@ -1400,7 +1400,7 @@ export default function ProfileScreen() {
               <Text style={s.emptySectionText}>Saved trips, offline copies, and GPX route imports will show up here after you build or import them.</Text>
               <TouchableOpacity style={s.tripSummaryAction} onPress={openOfflineMapsManager}>
                 <Ionicons name="cloud-download-outline" size={14} color={C.orange} />
-                <Text style={s.tripSummaryActionText}>OPEN OFFLINE MAPS</Text>
+                <Text style={s.tripSummaryActionText}>OPEN DOWNLOADS</Text>
               </TouchableOpacity>
               {gpxBatches.length > 0 && (
                 <Text style={s.tripSummaryMeta}>
@@ -1410,7 +1410,7 @@ export default function ProfileScreen() {
             </TrailheadCard>
             {offlineTripSummaries.length > 0 && (
               <TrailheadCard style={s.tripsCard}>
-                <Text style={s.sectionLabel}>OFFLINE TRIPS</Text>
+                <Text style={s.sectionLabel}>DOWNLOADED TRIPS</Text>
                 {offlineTripSummaries.slice(0, 8).map(trip => (
                   <View key={`offline-empty-${trip.trip_id}`} style={s.tripRow}>
                     <TouchableOpacity style={s.tripRowOpen} onPress={() => openOfflineTripSummary(trip)}>
@@ -1422,7 +1422,7 @@ export default function ProfileScreen() {
                       </View>
                       <View style={s.offlineBadge}>
                         <Ionicons name="cloud-done-outline" size={10} color="#22c55e" />
-                        <Text style={s.offlineBadgeText}>READY</Text>
+                        <Text style={s.offlineBadgeText}>DOWNLOADED</Text>
                       </View>
                       <Ionicons name="chevron-forward" size={14} color={C.text3} style={{ marginLeft: 4 }} />
                     </TouchableOpacity>
@@ -1850,7 +1850,7 @@ export default function ProfileScreen() {
                         <View style={[s.checklistFill, { width: `${(done / total) * 100}%` as any }]} />
                       </View>
                     )}
-                    {done === total && <Text style={{ color: C.green, fontSize: 12 }}>READY!</Text>}
+                    {done === total && <Text style={{ color: C.green, fontSize: 12 }}>Done</Text>}
                   </>
                 );
               })()}

@@ -7,10 +7,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
-import { Asset } from 'expo-asset';
-import { ResizeMode, Video } from 'expo-av';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -40,7 +37,7 @@ import useRouteBuilderDiscoveryState, {
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -85,7 +82,6 @@ import {
 } from '@/lib/routeBuilder';
 
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
-const ROUTE_BUILDER_LOAD_VIDEO = require('../../assets/route-builder-load.mp4');
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 const ROUTE_HERO_PHOTO = 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg';
 const ROUTE_BUILDER_RENTAL_DISMISSED_KEY = 'trailhead_route_builder_rental_dismissed_at';
@@ -1448,8 +1444,9 @@ export default function RouteBuilderScreen() {
 
   const [activeDay, setActiveDay] = useState(1);
   const [routeTabMode, setRouteTabMode] = useState<RouteTabMode>('hub');
-  const [buildingVideoReady, setBuildingVideoReady] = useState(false);
-  const [buildingVideoSource, setBuildingVideoSource] = useState<any>(ROUTE_BUILDER_LOAD_VIDEO);
+  const [routeTours, setRouteTours] = useState<BookableExperience[]>([]);
+  const [routeToursLoading, setRouteToursLoading] = useState(false);
+  const [routeToursLoadedFor, setRouteToursLoadedFor] = useState('');
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
   const [days, setDays] = useState([1]);
@@ -1484,27 +1481,11 @@ export default function RouteBuilderScreen() {
 
   useEffect(() => {
     if (!buildingFramework) {
-      setBuildingVideoReady(false);
       deactivateKeepAwake('route-builder-build').catch(() => {});
       return;
     }
-    let cancelled = false;
-    setBuildingVideoReady(false);
     activateKeepAwakeAsync('route-builder-build').catch(() => {});
-    const asset = Asset.fromModule(ROUTE_BUILDER_LOAD_VIDEO);
-    const immediateUri = asset.localUri || asset.uri;
-    setBuildingVideoSource(immediateUri ? { uri: immediateUri } : ROUTE_BUILDER_LOAD_VIDEO);
-    asset.downloadAsync()
-      .then(downloaded => {
-        if (cancelled) return;
-        const uri = downloaded.localUri || downloaded.uri || asset.localUri || asset.uri;
-        setBuildingVideoSource(uri ? { uri } : ROUTE_BUILDER_LOAD_VIDEO);
-      })
-      .catch(() => {
-        if (!cancelled) setBuildingVideoSource(ROUTE_BUILDER_LOAD_VIDEO);
-      });
     return () => {
-      cancelled = true;
       deactivateKeepAwake('route-builder-build').catch(() => {});
     };
   }, [buildingFramework]);
@@ -2210,6 +2191,76 @@ export default function RouteBuilderScreen() {
     setActiveDay(stop.day);
     if (stop.type === 'start') setPendingType('waypoint');
     fly(stop.lat, stop.lng, stop.type === 'camp' ? 12 : 11);
+  }
+
+  function routeTourKey(inputStops: BuilderStop[]) {
+    return inputStops
+      .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
+      .map(stop => `${stop.day}:${stop.lat.toFixed(2)}:${stop.lng.toFixed(2)}`)
+      .join('|');
+  }
+
+  async function loadRouteToursForStops(inputStops: BuilderStop[], geometry?: ProviderRouteGeometry | null) {
+    const anchors = inputStops
+      .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
+      .slice(0, 18)
+      .map((stop, idx) => ({ lat: stop.lat, lng: stop.lng, name: stop.name, day: stop.day, leg_index: idx }));
+    if (anchors.length === 0) return;
+    const key = routeTourKey(inputStops);
+    if (key && key === routeToursLoadedFor && routeTours.length > 0) return;
+    setRouteToursLoading(true);
+    setRouteToursLoadedFor(key);
+    try {
+      const response = await api.getRouteTours({
+        anchors,
+        route: geometry?.coords ?? routeGeometry?.coords ?? [],
+        radius: 55,
+        limit: 8,
+        source: 'viator',
+      });
+      setRouteTours(response.results ?? []);
+    } catch {
+      setRouteTours([]);
+    } finally {
+      setRouteToursLoading(false);
+    }
+  }
+
+  function addTourToRoute(tour: BookableExperience) {
+    const lat = Number(tour.lat);
+    const lng = Number(tour.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+      const url = tour.booking_url || tour.affiliate_url || tour.source_url;
+      if (url) Linking.openURL(url).catch(() => {});
+      return;
+    }
+    const day = Number(tour.route_anchor?.day) || activeDay;
+    const poi: OsmPoi = {
+      id: tour.id,
+      name: tour.title,
+      lat,
+      lng,
+      type: 'attraction',
+      source: tour.source || 'viator',
+      source_label: tour.source_badge || 'Tour',
+      photo_url: tour.hero_image_url || tour.images?.[0]?.url || null,
+      booking_url: tour.booking_url || tour.affiliate_url || tour.source_url,
+      summary: tour.summary,
+      rating: tour.rating ?? undefined,
+      review_count: tour.review_count ?? undefined,
+    };
+    addStop({
+      day,
+      name: tour.title,
+      lat,
+      lng,
+      type: 'waypoint',
+      description: [tour.duration_label, tour.summary].filter(Boolean).join(' · ') || 'Bookable tour near this route.',
+      land_type: 'experience',
+      source: 'poi',
+      poi,
+      routePointType: 'side_stop',
+    });
   }
 
   function addPlace(place: SearchPlace, type = pendingType) {
@@ -3822,6 +3873,8 @@ export default function RouteBuilderScreen() {
       setInsertAfterId(null);
       setInsertTargetDay(null);
       setRouteName(nextName);
+      setFrameworkStatus('Checking tours along your route...');
+      loadRouteToursForStops(framework, buildGeometry).catch(() => {});
       setFrameworkStatus('Route built. Preparing your trip overview...');
       await commitTrip(
         buildTrip(framework, nextDays, nextName, buildGeometry),
@@ -4920,49 +4973,25 @@ export default function RouteBuilderScreen() {
   }
 
   if (buildingFramework) {
+    const featuredTour = routeTours[0] ?? null;
     return (
       <SafeAreaView style={s.buildingVideoScreen}>
-        <LinearGradient
-          colors={['#06080b', '#10201d', '#2f2415']}
-          start={{ x: 0.1, y: 0 }}
-          end={{ x: 0.9, y: 1 }}
-          style={s.buildingVideoFallback}
-        >
-          <View style={[s.buildingTerrainBand, s.buildingTerrainBandOne]} />
-          <View style={[s.buildingTerrainBand, s.buildingTerrainBandTwo]} />
-          <View style={[s.buildingRouteLine, s.buildingRouteLineOne]} />
-          <View style={[s.buildingRouteLine, s.buildingRouteLineTwo]} />
-          <View style={[s.buildingRouteLine, s.buildingRouteLineThree]} />
-          <View style={[s.buildingRoutePoint, s.buildingRoutePointStart]} />
-          <View style={[s.buildingRoutePoint, s.buildingRoutePointCamp]} />
-          <View style={[s.buildingRoutePoint, s.buildingRoutePointEnd]} />
-        </LinearGradient>
-        <Video
-          source={buildingVideoSource}
-          style={[s.buildingVideo, !buildingVideoReady && { opacity: 0 }]}
-          resizeMode={ResizeMode.COVER}
-          shouldPlay
-          isLooping
-          isMuted
-          useNativeControls={false}
-          onLoad={() => setBuildingVideoReady(true)}
-          onReadyForDisplay={() => setBuildingVideoReady(true)}
-          onError={() => setBuildingVideoReady(false)}
-        />
-        <View style={s.buildingVideoShade} />
         <View style={[s.buildingVideoContent, { paddingTop: Math.max(insets.top, 12) + 18, paddingBottom: Math.max(insets.bottom, 18) + 22 }]}>
           <View style={s.buildingVideoTop}>
             <View style={s.buildingLivePill}>
-              <ActivityIndicator size="small" color="#fff" />
+              <ActivityIndicator size="small" color="#101820" />
               <Text style={s.buildingLiveText}>BUILDING ROUTE</Text>
             </View>
           </View>
 
           <View style={s.buildingHeroCopy}>
-            <Text style={s.buildingEyebrow}>TRAILHEAD ROUTE BUILDER</Text>
+            <View style={s.buildingLogoMark}>
+              <Ionicons name="trail-sign-outline" size={28} color="#101820" />
+            </View>
+            <Text style={s.buildingEyebrow}>Plan your adventure</Text>
             <Text style={s.buildingHeadline}>Building your route</Text>
             <Text style={s.buildingSubtitle}>
-              Checking camps, fuel, and daily drive windows.
+              Checking camps, fuel, daily drive windows, and route options.
             </Text>
           </View>
 
@@ -4970,9 +4999,28 @@ export default function RouteBuilderScreen() {
             <ActivityStatusCard
               title={frameworkStatus}
               fallbackLines={BUILD_STATUS_LINES}
-              helper="Keeping the builder awake until it finishes."
+              helper={routeToursLoading ? 'Looking for tours along this route.' : undefined}
               tone={C.orange}
             />
+            {featuredTour ? (
+              <TouchableOpacity style={s.routeTourCard} activeOpacity={0.88} onPress={() => addTourToRoute(featuredTour)}>
+                {featuredTour.hero_image_url || featuredTour.images?.[0]?.url ? (
+                  <Image source={{ uri: featuredTour.hero_image_url || featuredTour.images?.[0]?.url || '' }} style={s.routeTourImage} resizeMode="cover" />
+                ) : (
+                  <View style={s.routeTourPlaceholder}>
+                    <Ionicons name="ticket-outline" size={22} color="#0f766e" />
+                  </View>
+                )}
+                <View style={s.routeTourBody}>
+                  <Text style={s.routeTourKicker}>Tour near your route</Text>
+                  <Text style={s.routeTourTitle} numberOfLines={2}>{featuredTour.title}</Text>
+                  <Text style={s.routeTourMeta} numberOfLines={1}>
+                    {[featuredTour.route_anchor?.name, featuredTour.duration_label, featuredTour.price_from ? `from ${featuredTour.currency || 'USD'} ${featuredTour.price_from}` : ''].filter(Boolean).join(' · ')}
+                  </Text>
+                </View>
+                <Ionicons name="add-circle-outline" size={22} color="#0f766e" />
+              </TouchableOpacity>
+            ) : null}
           </View>
         </View>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
@@ -5694,7 +5742,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   buildingVideoScreen: {
     flex: 1,
-    backgroundColor: '#050505',
+    backgroundColor: '#fbfaf7',
     overflow: 'hidden',
   },
   buildingVideo: {
@@ -5783,7 +5831,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   buildingVideoContent: {
     flex: 1,
     paddingHorizontal: 18,
-    justifyContent: 'flex-end',
+    justifyContent: 'space-between',
     gap: 18,
   },
   buildingVideoTop: {
@@ -5795,28 +5843,60 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     gap: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
+    borderColor: 'rgba(15,23,42,0.12)',
     borderRadius: 999,
-    backgroundColor: 'rgba(5,5,5,0.46)',
+    backgroundColor: '#ffffff',
     paddingHorizontal: 12,
   },
-  buildingLiveText: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  buildingLiveText: { color: '#101820', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   buildingHeroCopy: {
     gap: 8,
     alignItems: 'center',
     paddingHorizontal: 10,
   },
-  buildingEyebrow: { color: '#f97316', fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 },
-  buildingHeadline: { color: '#fff', fontSize: 36, lineHeight: 40, fontWeight: '900', textAlign: 'center' },
-  buildingSubtitle: { color: 'rgba(255,255,255,0.82)', fontSize: 15, lineHeight: 21, maxWidth: 340, textAlign: 'center' },
+  buildingLogoMark: {
+    width: 74,
+    height: 74,
+    borderRadius: 24,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.10)',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  buildingEyebrow: { color: '#0f766e', fontSize: 12, fontWeight: '900', letterSpacing: 0 },
+  buildingHeadline: { color: '#101820', fontSize: 36, lineHeight: 40, fontWeight: '900', textAlign: 'center' },
+  buildingSubtitle: { color: '#66706b', fontSize: 15, lineHeight: 21, maxWidth: 340, textAlign: 'center' },
   buildingBottomPanel: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    borderRadius: 20,
-    backgroundColor: 'rgba(5,5,5,0.38)',
-    padding: 10,
+    borderColor: 'rgba(15,23,42,0.10)',
+    borderRadius: 18,
+    backgroundColor: '#ffffff',
+    padding: 12,
     alignSelf: 'stretch',
+    gap: 12,
   },
+  routeTourCard: {
+    minHeight: 104,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.10)',
+    backgroundColor: '#fbfaf7',
+    padding: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  routeTourImage: { width: 76, height: 76, borderRadius: 10, backgroundColor: '#e4e0d7' },
+  routeTourPlaceholder: { width: 76, height: 76, borderRadius: 10, backgroundColor: '#ecfdf5', alignItems: 'center', justifyContent: 'center' },
+  routeTourBody: { flex: 1, minWidth: 0 },
+  routeTourKicker: { color: '#0f766e', fontSize: 10, fontWeight: '900' },
+  routeTourTitle: { color: '#101820', fontSize: 15, lineHeight: 19, fontWeight: '900', marginTop: 3 },
+  routeTourMeta: { color: '#66706b', fontSize: 11, lineHeight: 15, marginTop: 5 },
   buildingChecklist: {
     borderWidth: 1,
     borderColor: C.orange + '36',

@@ -1022,7 +1022,7 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
       {/* Hero */}
       <View style={{ backgroundColor: C.s1, padding: 14, borderBottomWidth: 1, borderColor: C.border }}>
         <View style={{ marginBottom: 4 }}>
-          <Text style={{ color: C.orange, fontSize: 8.5, fontFamily: mono, letterSpacing: 1.2 }}>TRIP PLAN READY</Text>
+          <Text style={{ color: C.orange, fontSize: 8.5, fontFamily: mono, letterSpacing: 1.2 }}>TRIP PLAN BUILT</Text>
         </View>
         <View style={{ flexDirection: 'row', alignItems: 'flex-start' }}>
           <View style={{ flex: 1 }}>

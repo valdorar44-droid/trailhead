@@ -3283,6 +3283,8 @@ export interface ExploreExperiencesResponse {
   attribution?: string;
   cache_status?: string;
   live_enabled?: boolean;
+  live_status?: 'disabled' | 'processing' | 'cache_hit' | 'ok' | string;
+  live_message?: string;
   route_anchor_count?: number;
 }
 export interface RouteTourSuggestionRequest {

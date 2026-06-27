@@ -17905,6 +17905,10 @@ VIATOR_DESTINATION_HINTS = [
     {"id": "4837", "name": "Denver", "lat": 39.737567, "lng": -104.9847179, "radius_mi": 85.0},
     {"id": "785", "name": "Utah", "lat": 39.3209801, "lng": -111.0937311, "radius_mi": 190.0},
 ]
+VIATOR_LIVE_CACHE_MAX_AGE_SECONDS = 3600
+VIATOR_LIVE_ERROR_RETRY_SECONDS = 300
+_viator_route_live_cache: dict[str, dict] = {}
+_viator_route_live_jobs: dict[str, dict] = {}
 
 def _route_tour_points(body: RouteTourRequest) -> list[dict]:
     points: list[dict] = []
@@ -17971,6 +17975,77 @@ def _viator_destination_for_point(point: dict, max_radius_mi: float = 95.0) -> d
             best = (distance, destination)
     return best[1] if best else None
 
+def _viator_route_cache_key(points: list[dict], q: str = "") -> str:
+    destination_ids: list[str] = []
+    for point in points[:8]:
+        destination = _viator_destination_for_point(point)
+        if not destination:
+            continue
+        destination_id = str(destination.get("id") or "")
+        if destination_id and destination_id not in destination_ids:
+            destination_ids.append(destination_id)
+        if len(destination_ids) >= 4:
+            break
+    query = re.sub(r"\s+", " ", str(q or "").strip().lower())[:96]
+    return f"dest:{','.join(destination_ids) or 'none'}|q:{query}"
+
+def _fresh_viator_route_cache(cache_key: str) -> dict | None:
+    cached = _viator_route_live_cache.get(cache_key)
+    if not cached:
+        return None
+    if cached.get("status") != "ok":
+        return None
+    if int(cached.get("expires_at") or 0) <= int(time.time()):
+        return None
+    return cached
+
+def _queue_viator_route_refresh(cache_key: str, client: ViatorClient, points: list[dict], *, limit: int, q: str = "") -> bool:
+    now = int(time.time())
+    job = _viator_route_live_jobs.get(cache_key)
+    if job and job.get("status") in {"queued", "running"} and now - int(job.get("started_at") or now) < 90:
+        return False
+    stale_error = _viator_route_live_cache.get(cache_key)
+    if stale_error and stale_error.get("status") in {"error", "provider_error", "timeout"} and now - int(stale_error.get("fetched_at") or 0) < VIATOR_LIVE_ERROR_RETRY_SECONDS:
+        return False
+    _viator_route_live_jobs[cache_key] = {"status": "queued", "started_at": now}
+    asyncio.create_task(_refresh_viator_route_cache(cache_key, client.config, points, limit=limit, q=q))
+    return True
+
+async def _refresh_viator_route_cache(cache_key: str, config, points: list[dict], *, limit: int, q: str = "") -> None:
+    now = int(time.time())
+    _viator_route_live_jobs[cache_key] = {"status": "running", "started_at": now}
+    timeout = max(6.0, min(float(getattr(config, "request_timeout_seconds", 8.0)) * 4, 24.0))
+    try:
+        def run_live() -> tuple[list[dict], list[dict]]:
+            client = ViatorClient(config)
+            return _live_viator_route_suggestions(client, points, limit=limit, q=q)
+        results, statuses = await asyncio.wait_for(asyncio.to_thread(run_live), timeout=timeout)
+        fetched_at = int(time.time())
+        provider_error = any(
+            str(status.get("status") or "").lower() in {"error", "timeout"}
+            or int(status.get("http_status") or 0) >= 500
+            for status in statuses
+        )
+        cache_status = "provider_error" if provider_error else "ok"
+        _viator_route_live_cache[cache_key] = {
+            "status": cache_status,
+            "results": results,
+            "provider_status": statuses,
+            "fetched_at": fetched_at,
+            "expires_at": fetched_at + (VIATOR_LIVE_ERROR_RETRY_SECONDS if provider_error else VIATOR_LIVE_CACHE_MAX_AGE_SECONDS),
+        }
+        _viator_route_live_jobs[cache_key] = {"status": cache_status if provider_error else "done", "started_at": now, "completed_at": fetched_at, "count": len(results)}
+    except Exception as exc:
+        fetched_at = int(time.time())
+        _viator_route_live_cache[cache_key] = {
+            "status": "error",
+            "results": [],
+            "provider_status": [{"status": "error", "provider_message": f"{type(exc).__name__}: {str(exc)[:180]}"}],
+            "fetched_at": fetched_at,
+            "expires_at": fetched_at + VIATOR_LIVE_ERROR_RETRY_SECONDS,
+        }
+        _viator_route_live_jobs[cache_key] = {"status": "error", "started_at": now, "completed_at": fetched_at, "error": str(exc)[:240]}
+
 
 def _viator_products_payload(payload: dict) -> dict:
     if not isinstance(payload, dict):
@@ -18034,6 +18109,7 @@ def _live_viator_route_suggestions(
     statuses: list[dict] = []
     ranked_by_key: dict[str, dict] = {}
     searched_destinations: set[str] = set()
+    page_count = max(1, min(int(getattr(config, "page_size", 6) or 6), 12))
     for point in points[:8]:
         destination = _viator_destination_for_point(point)
         if not destination:
@@ -18042,7 +18118,7 @@ def _live_viator_route_suggestions(
         if destination_id in searched_destinations:
             continue
         searched_destinations.add(destination_id)
-        payload = client.search_products(destination_id=destination_id, count=max(3, min(int(limit or 8), 12)))
+        payload = client.search_products(destination_id=destination_id, count=max(1, min(int(limit or page_count), page_count)), start=1)
         statuses.append({"destination_id": destination_id, "destination": destination.get("name"), **_viator_provider_status(payload)})
         for item in _normalize_live_viator_experiences(payload, point, destination, config.cache_ttl_hours):
             key = str(item.get("id") or item.get("source_id") or item.get("title"))
@@ -18052,7 +18128,7 @@ def _live_viator_route_suggestions(
         if len(ranked_by_key) >= limit or len(searched_destinations) >= 4:
             break
     if not ranked_by_key and q.strip():
-        payload = client.search_freetext(search_term=q.strip(), count=max(3, min(int(limit or 8), 12)))
+        payload = client.search_freetext(search_term=q.strip(), count=max(1, min(int(limit or page_count), page_count)), start=1)
         statuses.append({"query": q.strip(), **_viator_provider_status(payload)})
         anchor = points[0] if points else {"lat": 0, "lng": 0, "name": "Route"}
         for item in _normalize_live_viator_experiences(payload, anchor, None, config.cache_ttl_hours):
@@ -18103,10 +18179,48 @@ async def route_tour_suggestions(body: RouteTourRequest):
         ),
     )[:max(1, min(int(body.limit or 8), 24))]
     provider_status: list[dict] = []
+    live_status = "disabled"
+    live_message = ""
     client = ViatorClient(viator_config_from_env())
     if len(ranked) < max(1, min(int(body.limit or 8), 24)) and source in {"", "all", "viator"} and client.ready():
         live_limit = max(1, min(int(body.limit or 8), 24)) - len(ranked)
-        live_ranked, provider_status = _live_viator_route_suggestions(client, points, limit=live_limit, q=body.q or "")
+        cache_key = _viator_route_cache_key(points, body.q or "")
+        cached_live = _fresh_viator_route_cache(cache_key)
+        live_ranked: list[dict] = []
+        if cached_live:
+            live_ranked = list(cached_live.get("results") or [])
+            provider_status = list(cached_live.get("provider_status") or [])
+            provider_status.insert(0, {
+                "status": "cache_hit",
+                "endpoint": "viator_route_live_cache",
+                "fetched_at": cached_live.get("fetched_at"),
+                "expires_at": cached_live.get("expires_at"),
+            })
+            live_status = "cache_hit"
+            live_message = "Live tour cache used."
+        else:
+            queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(int(body.limit or 8), 8)), q=body.q or "")
+            job = _viator_route_live_jobs.get(cache_key) or {}
+            recent_error = _viator_route_live_cache.get(cache_key)
+            if not queued and recent_error and recent_error.get("status") in {"error", "provider_error", "timeout"}:
+                provider_status = list(recent_error.get("provider_status") or [])
+                provider_status.insert(0, {
+                    "status": str(recent_error.get("status") or "provider_error"),
+                    "endpoint": "viator_background_refresh",
+                    "fetched_at": recent_error.get("fetched_at"),
+                    "expires_at": recent_error.get("expires_at"),
+                })
+                live_status = "provider_error"
+                live_message = "Tours are temporarily unavailable."
+            else:
+                provider_status = [{
+                    "status": "queued" if queued else str(job.get("status") or "processing"),
+                    "endpoint": "viator_background_refresh",
+                    "provider_message": "Viator refresh is running in the background.",
+                    "fetched_at": int(time.time()),
+                }]
+                live_status = "processing"
+                live_message = "Tours are refreshing in the background."
         existing = {str(item.get("id") or item.get("source_id") or item.get("title")) for item in ranked}
         for item in live_ranked:
             key = str(item.get("id") or item.get("source_id") or item.get("title"))
@@ -18119,6 +18233,8 @@ async def route_tour_suggestions(body: RouteTourRequest):
         **_experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty"),
         "route_anchor_count": len(points),
         "live_enabled": client.ready(),
+        "live_status": live_status,
+        "live_message": live_message,
         "provider_status": provider_status,
     }
 

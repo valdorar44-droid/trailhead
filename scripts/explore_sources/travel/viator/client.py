@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import gzip
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -19,7 +21,9 @@ class ViatorConfig:
     affiliate_id: str = ""
     base_url: str = DEFAULT_BASE_URL
     enable_live: bool = False
-    cache_ttl_hours: int = 24
+    cache_ttl_hours: int = 1
+    request_timeout_seconds: float = 8.0
+    page_size: int = 6
 
 
 def config_from_env(env: dict[str, str] | None = None) -> ViatorConfig:
@@ -30,7 +34,9 @@ def config_from_env(env: dict[str, str] | None = None) -> ViatorConfig:
         affiliate_id=values.get("VIATOR_AFFILIATE_ID", "").strip(),
         base_url=values.get("VIATOR_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
         enable_live=str(values.get("VIATOR_ENABLE_LIVE", "false")).lower() in {"1", "true", "yes", "on"},
-        cache_ttl_hours=int(values.get("VIATOR_CACHE_TTL_HOURS", "24") or 24),
+        cache_ttl_hours=max(1, min(int(values.get("VIATOR_CACHE_TTL_HOURS", "1") or 1), 1)),
+        request_timeout_seconds=max(2.0, min(float(values.get("VIATOR_TIMEOUT_SECONDS", "8") or 8), 20.0)),
+        page_size=max(1, min(int(values.get("VIATOR_PAGE_SIZE", "6") or 6), 12)),
     )
 
 
@@ -53,8 +59,9 @@ class ViatorClient:
         sort: str = "TRAVELER_RATING",
         order: str = "DESCENDING",
         count: int = 12,
+        start: int = 1,
         currency: str = "USD",
-        timeout: float = 20.0,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         if not self.ready():
             return {"products": [], "status": "disabled", "reason": "VIATOR_API_KEY missing or VIATOR_ENABLE_LIVE=false"}
@@ -72,10 +79,10 @@ class ViatorClient:
         payload = {
             "filtering": filtering,
             "sorting": {"sort": sort, "order": order},
-            "pagination": {"start": 1, "count": max(1, min(int(count), 50))},
+            "pagination": {"start": max(1, int(start or 1)), "count": max(1, min(int(count), 12))},
             "currency": currency,
         }
-        return self._post_json("/products/search", payload, timeout=timeout)
+        return self._post_json("/products/search", payload, timeout=timeout or self.config.request_timeout_seconds)
 
     def search_freetext(
         self,
@@ -83,8 +90,9 @@ class ViatorClient:
         search_term: str,
         search_type: str = "PRODUCTS",
         count: int = 12,
+        start: int = 1,
         currency: str = "USD",
-        timeout: float = 20.0,
+        timeout: float | None = None,
     ) -> dict[str, Any]:
         if not self.ready():
             return {"products": [], "status": "disabled", "reason": "VIATOR_API_KEY missing or VIATOR_ENABLE_LIVE=false"}
@@ -97,22 +105,23 @@ class ViatorClient:
             "searchTypes": [
                 {
                     "searchType": search_type,
-                    "pagination": {"start": 1, "count": max(1, min(int(count), 50))},
+                    "pagination": {"start": max(1, int(start or 1)), "count": max(1, min(int(count), 12))},
                 }
             ],
         }
-        return self._post_json("/search/freetext", payload, timeout=timeout)
+        return self._post_json("/search/freetext", payload, timeout=timeout or self.config.request_timeout_seconds)
 
-    def get_destinations(self, *, timeout: float = 20.0) -> dict[str, Any]:
+    def get_destinations(self, *, timeout: float | None = None) -> dict[str, Any]:
         if not self.ready():
             return {"destinations": [], "status": "disabled", "reason": "VIATOR_API_KEY missing or VIATOR_ENABLE_LIVE=false"}
-        return self._get_json("/destinations", timeout=timeout)
+        return self._get_json("/destinations", timeout=timeout or self.config.request_timeout_seconds)
 
     def _headers(self) -> dict[str, str]:
         return {
             "Accept-Language": "en-US",
             "Content-Type": "application/json;version=2.0",
             "Accept": "application/json;version=2.0",
+            "Accept-Encoding": "gzip",
             "exp-api-key": self.config.api_key,
             "User-Agent": "Trailhead/1.0 ViatorBasicAccess",
         }
@@ -138,7 +147,7 @@ class ViatorClient:
     def _open_json(self, request: urllib.request.Request, *, path: str, timeout: float = 20.0) -> dict[str, Any]:
         try:
             with self.opener(request, timeout=timeout) as response:
-                parsed = json.loads(response.read().decode("utf-8"))
+                parsed = self._decode_response_json(response)
                 if isinstance(parsed, dict):
                     parsed.setdefault("status", "ok")
                     parsed.setdefault("fetched_at", int(time.time()))
@@ -153,14 +162,31 @@ class ViatorClient:
                 return {"status": "ok", "endpoint": path, "data": parsed, "fetched_at": int(time.time())}
         except urllib.error.HTTPError as exc:
             return self._http_error_payload(exc, path=path)
-        except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-            return {"products": [], "status": "error", "endpoint": path, "reason": str(exc), "fetched_at": int(time.time())}
+        except (urllib.error.URLError, TimeoutError, socket.timeout, json.JSONDecodeError) as exc:
+            timed_out = isinstance(exc, (TimeoutError, socket.timeout)) or "timed out" in str(exc).lower()
+            return {
+                "products": [],
+                "status": "timeout" if timed_out else "error",
+                "endpoint": path,
+                "reason": str(exc),
+                "fetched_at": int(time.time()),
+            }
+
+    def _decode_response_json(self, response: Any) -> Any:
+        raw = response.read()
+        encoding = self._header_value(response.headers, "Content-Encoding").lower()
+        if "gzip" in encoding:
+            raw = gzip.decompress(raw)
+        return json.loads(raw.decode("utf-8"))
 
     def _http_error_payload(self, exc: urllib.error.HTTPError, *, path: str) -> dict[str, Any]:
         body_text = ""
         body_json: dict[str, Any] = {}
         try:
-            body_text = exc.read().decode("utf-8")
+            raw = exc.read()
+            if "gzip" in self._header_value(exc.headers, "Content-Encoding").lower():
+                raw = gzip.decompress(raw)
+            body_text = raw.decode("utf-8")
             parsed = json.loads(body_text) if body_text else {}
             if isinstance(parsed, dict):
                 body_json = parsed

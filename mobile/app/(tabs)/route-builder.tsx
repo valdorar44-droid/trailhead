@@ -1447,6 +1447,7 @@ export default function RouteBuilderScreen() {
   const [routeTours, setRouteTours] = useState<BookableExperience[]>([]);
   const [routeToursLoading, setRouteToursLoading] = useState(false);
   const [routeToursLoadedFor, setRouteToursLoadedFor] = useState('');
+  const [routeToursStatus, setRouteToursStatus] = useState('');
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
   const [days, setDays] = useState([1]);
@@ -2200,14 +2201,14 @@ export default function RouteBuilderScreen() {
       .join('|');
   }
 
-  async function loadRouteToursForStops(inputStops: BuilderStop[], geometry?: ProviderRouteGeometry | null) {
+  async function loadRouteToursForStops(inputStops: BuilderStop[], geometry?: ProviderRouteGeometry | null, retryingLive = false) {
     const anchors = inputStops
       .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
       .slice(0, 18)
       .map((stop, idx) => ({ lat: stop.lat, lng: stop.lng, name: stop.name, day: stop.day, leg_index: idx }));
     if (anchors.length === 0) return;
     const key = routeTourKey(inputStops);
-    if (key && key === routeToursLoadedFor && routeTours.length > 0) return;
+    if (!retryingLive && key && key === routeToursLoadedFor && routeTours.length > 0) return;
     setRouteToursLoading(true);
     setRouteToursLoadedFor(key);
     try {
@@ -2218,9 +2219,17 @@ export default function RouteBuilderScreen() {
         limit: 8,
         source: 'viator',
       });
-      setRouteTours(response.results ?? []);
+      const results = response.results ?? [];
+      setRouteTours(results);
+      setRouteToursStatus(response.live_message || '');
+      if (!retryingLive && results.length === 0 && response.live_status === 'processing') {
+        setTimeout(() => {
+          loadRouteToursForStops(inputStops, geometry, true).catch(() => {});
+        }, 6500);
+      }
     } catch {
       setRouteTours([]);
+      setRouteToursStatus('');
     } finally {
       setRouteToursLoading(false);
     }
@@ -4999,7 +5008,7 @@ export default function RouteBuilderScreen() {
             <ActivityStatusCard
               title={frameworkStatus}
               fallbackLines={BUILD_STATUS_LINES}
-              helper={routeToursLoading ? 'Looking for tours along this route.' : undefined}
+              helper={routeToursLoading ? 'Looking for tours along this route.' : routeToursStatus || undefined}
               tone={C.orange}
             />
             {featuredTour ? (

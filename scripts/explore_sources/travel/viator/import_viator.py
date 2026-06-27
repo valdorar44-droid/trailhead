@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 import time
 from pathlib import Path
@@ -40,6 +41,8 @@ def main() -> int:
     parser.add_argument("--destination-id", default="", help="Viator destination id for live Basic Access /products/search.")
     parser.add_argument("--tag", action="append", type=int, default=[], help="Viator tag id for live search. May be repeated.")
     parser.add_argument("--count", type=int, default=12)
+    parser.add_argument("--pages", type=int, default=0, help="Number of small product-search pages to fetch. Defaults to count/page-size.")
+    parser.add_argument("--page-size", type=int, default=6, help="Products per page. Capped by the Viator client.")
     parser.add_argument("--currency", default="USD")
     parser.add_argument("--out", default="dashboard/explore_bookable_experiences_v1.json")
     parser.add_argument("--viator-out", default="dashboard/explore_tours_viator_v1.json")
@@ -51,13 +54,22 @@ def main() -> int:
     for fixture in args.fixture:
         experiences.extend(import_viator_fixture(fixture, fetched_at=fetched_at, ttl_hours=config.cache_ttl_hours))
     if args.destination_id:
-        payload = ViatorClient(config).search_products(
-            destination_id=args.destination_id,
-            tags=args.tag,
-            count=args.count,
-            currency=args.currency,
-        )
-        experiences.extend(normalize_viator_products(payload, fetched_at=fetched_at, ttl_hours=config.cache_ttl_hours))
+        client = ViatorClient(config)
+        remaining = max(1, int(args.count or args.page_size))
+        page_size = max(1, min(int(args.page_size or config.page_size), config.page_size))
+        page_total = int(args.pages or math.ceil(remaining / page_size))
+        for page in range(max(1, min(page_total, 20))):
+            if remaining <= 0:
+                break
+            payload = client.search_products(
+                destination_id=args.destination_id,
+                tags=args.tag,
+                count=min(page_size, remaining),
+                start=(page * page_size) + 1,
+                currency=args.currency,
+            )
+            experiences.extend(normalize_viator_products(payload, fetched_at=fetched_at, ttl_hours=config.cache_ttl_hours))
+            remaining -= page_size
     seen = set()
     deduped = []
     for item in experiences:

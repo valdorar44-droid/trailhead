@@ -11906,6 +11906,75 @@ function MapScreen() {
     };
   }
 
+  function summarizeTrailheadToolResult(result: Record<string, any>): Record<string, unknown> {
+    const tool = String(result.tool || '').replace(/^trailhead\./, '').replace(/_/g, ' ');
+    const places = Array.isArray(result.places) ? result.places : [];
+    const camps = Array.isArray(result.camps) ? result.camps : [];
+    const visible = Array.isArray(result.visible_places) ? result.visible_places : [];
+    const routeSummary = result.route_build?.trip?.summary && typeof result.route_build.trip.summary === 'object'
+      ? result.route_build.trip.summary
+      : null;
+    if (camps.length) {
+      const names = camps.slice(0, 3).map((camp: any) => String(camp?.name || '')).filter(Boolean);
+      return {
+        applied: false,
+        status: 'data_ready',
+        tool: result.tool,
+        count: camps.length,
+        camps: camps.slice(0, 6),
+        spoken_summary: `I found ${camps.length} camps${names.length ? `: ${names.join(', ')}` : ''}.`,
+      };
+    }
+    if (places.length) {
+      const names = places.slice(0, 3).map((place: any) => String(place?.name || '')).filter(Boolean);
+      return {
+        applied: false,
+        status: 'data_ready',
+        tool: result.tool,
+        count: places.length,
+        results: places.slice(0, 6),
+        selected: places[0] ?? null,
+        spoken_summary: `I found ${places.length} ${tool || 'results'}${names.length ? `: ${names.join(', ')}` : ''}.`,
+      };
+    }
+    if (visible.length) {
+      return {
+        applied: false,
+        status: 'data_ready',
+        tool: result.tool,
+        count: visible.length,
+        results: visible.slice(0, 6),
+        spoken_summary: `I found ${visible.length} visible map places.`,
+      };
+    }
+    if (routeSummary) {
+      const length = Number(routeSummary.length || 0);
+      const minutes = Math.round(Number(routeSummary.time || 0) / 60);
+      return {
+        applied: false,
+        status: 'data_ready',
+        tool: result.tool,
+        route_summary: routeSummary,
+        spoken_summary: `The route preview is ${Number.isFinite(length) ? length.toFixed(1) : 'ready'} miles${Number.isFinite(minutes) && minutes > 0 ? `, about ${minutes} minutes` : ''}.`,
+      };
+    }
+    if (result.matrix) {
+      return {
+        applied: false,
+        status: 'data_ready',
+        tool: result.tool,
+        matrix_code: result.matrix.code,
+        spoken_summary: result.matrix.code === 'Ok' ? 'The route matrix is ready.' : 'The route matrix returned a result.',
+      };
+    }
+    return {
+      applied: false,
+      status: result.ok === false ? 'failed' : 'data_ready',
+      tool: result.tool,
+      spoken_summary: result.ok === false ? 'Trailhead could not fetch that data.' : 'Trailhead data is ready.',
+    };
+  }
+
   async function executeCopilotAction(action: MapActionRequest): Promise<Record<string, unknown>> {
     const type = action.action_type;
     const args = action.args || {};
@@ -11920,6 +11989,21 @@ function MapScreen() {
         reason: 'reserved_ui_zone',
         spoken_summary: 'That tap is on a Trailhead control, not the map. Tap the map surface or name the place instead.',
       };
+    }
+    if (type === 'trailheadTool') {
+      const tool = String(args.tool || '');
+      const toolArgs = args.args && typeof args.args === 'object' && !Array.isArray(args.args)
+        ? args.args as Record<string, unknown>
+        : {};
+      if (!tool) {
+        return { applied: false, status: 'failed', reason: 'missing_tool', spoken_summary: 'Trailhead tool name was missing.' };
+      }
+      const result = await api.executeCopilotTool<Record<string, unknown>>({
+        tool,
+        args: toolArgs,
+        metadata: { source: 'realtime_copilot' },
+      });
+      return summarizeTrailheadToolResult(result as Record<string, any>);
     }
     if (type === 'getMapContext' || type === 'explainVisibleArea' || type === 'getVisibleMapCandidates') {
       const visibleCandidates = await getVisibleCandidateSnapshot();

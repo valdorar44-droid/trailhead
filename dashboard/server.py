@@ -2823,34 +2823,57 @@ def _openai_realtime_voice(raw: str = "") -> str:
     return clean if clean in known else "marin"
 
 def _copilot_realtime_tools() -> list[dict]:
-    return [{
-        "type": "function",
-        "name": "map_action",
-        "description": "Stage a Trailhead map action. The mobile client executes this through the same MapActionRequest executor used by text Copilot.",
-        "parameters": {
-            "type": "object",
-            "additionalProperties": False,
-            "properties": {
-                "action_type": {
-                    "type": "string",
-                    "enum": [
-                        "getMapContext", "getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace",
-                        "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard",
-                        "routeToSelectedPlace", "flyToPlace", "zoomMap", "setMapZoom",
-                        "toggleLayer", "setMapStyle", "buildRoute", "startRouteScout", "saveScoutToRouteBuilder", "startNavigation", "modifyRoute", "dropPin",
-                        "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
-                        "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
-                        "openReports", "stageReport", "openOfflineDownloads", "openRigProfile",
-                        "showMissionControl", "explainVisibleArea", "askForConfirmation",
-                    ],
+    return [
+        {
+            "type": "function",
+            "name": "map_action",
+            "description": "Stage a Trailhead map or app UI action. Use this for visible map changes, selection, navigation confirmation, route scout, panels, saves, reports, downloads, or anything that changes app state.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "action_type": {
+                        "type": "string",
+                        "enum": [
+                            "getMapContext", "getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace",
+                            "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard",
+                            "routeToSelectedPlace", "flyToPlace", "zoomMap", "setMapZoom",
+                            "toggleLayer", "setMapStyle", "buildRoute", "startRouteScout", "saveScoutToRouteBuilder", "startNavigation", "modifyRoute", "dropPin",
+                            "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
+                            "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
+                            "openReports", "stageReport", "openOfflineDownloads", "openRigProfile",
+                            "showMissionControl", "explainVisibleArea", "askForConfirmation",
+                        ],
+                    },
+                    "args": {"type": "object"},
+                    "requires_confirmation": {"type": "boolean"},
+                    "label": {"type": "string"},
                 },
-                "args": {"type": "object"},
-                "requires_confirmation": {"type": "boolean"},
-                "label": {"type": "string"},
+                "required": ["action_type", "args", "requires_confirmation"],
             },
-            "required": ["action_type", "args", "requires_confirmation"],
         },
-    }]
+        {
+            "type": "function",
+            "name": "trailhead_tool",
+            "description": "Call Trailhead's read-only map/search/route/discovery bridge for current data. Use this for answering questions from backend data without changing the map UI. Use map_action instead when the user asked to move, select, open, save, navigate, download, or otherwise change app state.",
+            "parameters": {
+                "type": "object",
+                "additionalProperties": False,
+                "properties": {
+                    "tool": {
+                        "type": "string",
+                        "enum": sorted(TRAILHEAD_COPILOT_TOOL_NAMES),
+                    },
+                    "args": {
+                        "type": "object",
+                        "description": "Arguments for the selected Trailhead tool. Use current map center/bounds/snapshot when available.",
+                    },
+                    "label": {"type": "string"},
+                },
+                "required": ["tool", "args"],
+            },
+        },
+    ]
 
 def _copilot_realtime_turn_detection() -> dict:
     return {
@@ -2867,7 +2890,8 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
     base = (
         "You are Trailhead Copilot, a concise overland map voice assistant. "
         f"Trailhead capabilities: {capabilities} "
-        "Use map_action for map changes. Keep spoken confirmations short. "
+        "Use trailhead_tool for read-only searches, geocoding, route previews, route matrix checks, discovery context, and current map context when you need backend data before answering. "
+        "Use map_action for map changes, selections, panels, saves, reports, downloads, route scout, or navigation confirmation. Keep spoken confirmations short. "
         "For questions about what is visible, call map_action with explainVisibleArea and answer from the tool output. "
         "For readiness questions like \"is this trip ready\", \"what is risky ahead\", \"why is this blocked\", or \"mission control\", call showMissionControl; answer only from Mission Control output. "
         "For fly-to commands with a named place, call flyToPlace with args.target.name set to the place name. "

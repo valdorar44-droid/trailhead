@@ -11,6 +11,7 @@ from dashboard.server import (
     _classify_extreme_command,
     _clean_mapbox_param,
     _copilot_realtime_instructions,
+    _copilot_realtime_tools,
     _copilot_realtime_turn_detection,
     _extreme_config_for_user,
     _require_extreme_copilot,
@@ -645,9 +646,22 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertIn("filler", instructions)
         self.assertIn("silence", instructions)
         self.assertIn("do not answer", instructions)
+        self.assertIn("trailhead_tool", instructions)
+        self.assertIn("read-only", instructions)
         self.assertGreaterEqual(turn_detection["threshold"], 0.9)
         self.assertGreaterEqual(turn_detection["silence_duration_ms"], 1400)
         self.assertLessEqual(turn_detection["prefix_padding_ms"], 300)
+
+    def test_copilot_realtime_exposes_map_and_trailhead_tools(self):
+        tools = _copilot_realtime_tools()
+        names = {tool["name"] for tool in tools}
+        trailhead = next(tool for tool in tools if tool["name"] == "trailhead_tool")
+
+        self.assertIn("map_action", names)
+        self.assertIn("trailhead_tool", names)
+        self.assertIn("trailhead.search_places", trailhead["parameters"]["properties"]["tool"]["enum"])
+        self.assertIn("trailhead.discovery_context", trailhead["parameters"]["properties"]["tool"]["enum"])
+        self.assertEqual(trailhead["parameters"]["required"], ["tool", "args"])
 
     def test_copilot_confirmation_updates_staged_action(self):
         uid = store.create_user("confirm@example.com", "confirmuser", "hash", "confirm-code")

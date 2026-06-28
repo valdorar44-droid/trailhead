@@ -22,6 +22,8 @@ Create a Trailhead-owned tool contract that bridges Co-Pilot, the mobile app, an
 - Co-Pilot staged map actions now include `args.tool_bridge` and `map_updates.tool_bridge` metadata so existing `map_action` execution can be audited against the backend bridge.
 - Mobile `api.ts` now has typed helpers for listing/executing tools and a direct `mapContextMatrix(...)` helper.
 - Added `tools/trailhead-mcp`, a local stdio MCP adapter that proxies all tool calls through Trailhead instead of calling Mapbox directly.
+- Realtime Co-Pilot now exposes `trailhead_tool` alongside `map_action`. `trailhead_tool` is read-only and calls the same backend bridge; `map_action` remains the path for UI changes, selections, navigation, saves, reports, downloads, and confirmations.
+- Mobile realtime voice now parses `trailhead_tool`, executes it through `api.executeCopilotTool(...)`, and returns a compact voice-safe summary to the realtime model.
 
 ## Audit Notes
 
@@ -29,8 +31,12 @@ Create a Trailhead-owned tool contract that bridges Co-Pilot, the mobile app, an
 - Discovery remains centralized in `/api/discovery/context`; the MCP adapter does not call source providers directly.
 - The bridge uses current Explorer/Co-Pilot entitlement checks before listing or executing tools.
 - Tool execution adds bridge metadata to request metadata and ledger events without changing existing map-context response bodies.
-- Realtime Co-Pilot still exposes the existing `map_action` tool; this checkpoint adds bridge metadata rather than requiring a new mobile realtime function executor.
+- Realtime Co-Pilot exposes both `map_action` and direct read-only `trailhead_tool` execution.
 - Mapbox-backed Explorer map layers remain free for signed-in users. Co-Pilot and AI Planner are Explorer AI entitlements; non-Explorer AI Planner users still go through the paid credit path.
+- Final-polish research notes:
+  - Keep Search Box as the high-quality place/POI source for interactive and standalone location search.
+  - Keep Directions for route geometry/preview and Matrix for travel-time/distance comparisons; use each tool narrowly so the assistant does not infer routing facts from plain text.
+  - Keep MCP tools server-side and authenticated. Tool inputs are validated, outputs are sanitized for voice, and sensitive operations stay behind `map_action` confirmation.
 
 ## Validation
 
@@ -47,4 +53,6 @@ Create a Trailhead-owned tool contract that bridges Co-Pilot, the mobile app, an
 
 - Add a mobile/debug UI surface that can inspect available bridge tools and replay a staged Co-Pilot action through `/api/copilot/tools/execute`.
 - Add server-side contract snapshots if MCP consumers start depending on stable schema diffs.
-- Consider moving realtime Co-Pilot to a dedicated `trailhead_tool` function only after the mobile realtime executor can handle it directly.
+- Add structured MCP outputs (`structuredContent`/output schemas) once external MCP hosts need machine-readable results beyond JSON text blocks.
+- Add a visual "tools used" trace in the Co-Pilot sheet for transparent MapGPT-style answers.
+- Add eval scripts for common map-agent prompts: "what am I looking at", "coffee near here", "route there", "camp along this route", "is this drive reachable", and "open the second result".

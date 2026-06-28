@@ -40,12 +40,33 @@ type RealtimeToolCall = {
 function actionFromToolEvent(event: any): RealtimeToolCall | null {
   const item = event?.item || event?.output || event?.response?.output?.[0] || event;
   const name = item?.name || event?.name;
-  if (name !== 'map_action') return null;
   const args = parseArguments(item?.arguments ?? event?.arguments);
-  const actionType = String(args.action_type || '');
-  if (!actionType) return null;
   const callId = String(item?.call_id || event?.call_id || item?.id || event?.item_id || '');
   if (!callId) return null;
+  if (name === 'trailhead_tool') {
+    const tool = String(args.tool || '');
+    if (!tool) return null;
+    return {
+      callId,
+      action: {
+        action_id: `realtime_${callId}_${Date.now()}`,
+        action_type: 'trailheadTool',
+        args: {
+          tool,
+          args: parseArguments(args.args),
+        },
+        requires_confirmation: false,
+        cost_class: 'network',
+        surface: 'copilot',
+        provider: 'openai_realtime',
+        status: 'staged',
+        label: typeof args.label === 'string' ? args.label : tool.replace(/^trailhead\./, '').replace(/_/g, ' '),
+      },
+    };
+  }
+  if (name !== 'map_action') return null;
+  const actionType = String(args.action_type || '');
+  if (!actionType) return null;
   return {
     callId,
     action: {

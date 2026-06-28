@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator, Animated, Keyboard, Modal, Alert, Image, Platform,
@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useRouter } from 'expo-router';
+import { useFocusEffect, useRouter } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
@@ -1449,6 +1449,7 @@ export default function RouteBuilderScreen() {
   const [routeToursLoading, setRouteToursLoading] = useState(false);
   const [routeToursLoadedFor, setRouteToursLoadedFor] = useState('');
   const [routeToursStatus, setRouteToursStatus] = useState('');
+  const consumedRouteBuilderDraftRef = useRef('');
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
   const [days, setDays] = useState([1]);
@@ -1620,6 +1621,19 @@ export default function RouteBuilderScreen() {
     if (draft.autoBuild) setCopilotAutoBuildRunId(Date.now());
   }
 
+  const consumeCopilotRouteBuilderDraft = useCallback(() => {
+    let cancelled = false;
+    loadTrailheadRouteBuilderDraft().then(draft => {
+      if (cancelled || !draft) return;
+      const key = `${draft.id || 'draft'}:${draft.updatedAt || 0}`;
+      if (consumedRouteBuilderDraftRef.current === key) return;
+      consumedRouteBuilderDraftRef.current = key;
+      applyCopilotDraft(draft);
+      clearTrailheadRouteBuilderDraft().catch(() => {});
+    }).catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
     setQuickCampPhotoIndex(0);
@@ -1655,15 +1669,8 @@ export default function RouteBuilderScreen() {
     return () => setTabBarHidden(false);
   }, [keyboardVisible, routeTabMode, setTabBarHidden]);
 
-  useEffect(() => {
-    let cancelled = false;
-    loadTrailheadRouteBuilderDraft().then(draft => {
-      if (cancelled || !draft) return;
-      applyCopilotDraft(draft);
-      clearTrailheadRouteBuilderDraft().catch(() => {});
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
+  useEffect(consumeCopilotRouteBuilderDraft, [consumeCopilotRouteBuilderDraft]);
+  useFocusEffect(consumeCopilotRouteBuilderDraft);
 
   useEffect(() => {
     let mounted = true;

@@ -23,7 +23,7 @@ import MapStyleSheet from '@/components/map/MapStyleSheet';
 import MapWeatherPeek from '@/components/map/MapWeatherPeek';
 import MapWeatherSheet from '@/components/map/MapWeatherSheet';
 import RouteAlertsPanel from '@/components/map/RouteAlertsPanel';
-import RouteScoutPanel from '@/components/map/RouteScoutPanel';
+import RouteScoutPanel, { type RouteScoutDayActionItem, type RouteScoutDayActionKind, type RouteScoutDayActionState } from '@/components/map/RouteScoutPanel';
 import TrailPreviewPlayer from '@/components/trails/TrailPreviewPlayer';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -47,7 +47,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutState, type TrailPreviewManifest } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest } from '@/lib/api';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -5330,6 +5330,7 @@ function MapScreen() {
   const renderedMapboxEnrichmentSeqRef = useRef(0);
   const renderedMapboxEnrichmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [routeScout, setRouteScout] = useState<RouteScoutState | null>(null);
+  const [routeScoutDayAction, setRouteScoutDayAction] = useState<RouteScoutDayActionState | null>(null);
   const routeScoutOperationRef = useRef(0);
   const routeScoutTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const recentRouteScoutActionRef = useRef<{ at: number; action: 'start' | 'save' } | null>(null);
@@ -8855,6 +8856,7 @@ function MapScreen() {
     routeScoutOperationRef.current += 1;
     clearRouteScoutTimers();
     clearRouteScoutPreview();
+    setRouteScoutDayAction(null);
     setRouteScout(null);
   }
 
@@ -9189,6 +9191,276 @@ function MapScreen() {
       .trim() || text);
   }
 
+  function routeScoutPlanPoint(plan: RouteScoutDayPlan): { lat: number; lng: number; name?: string } | null {
+    const camp = plan.camp;
+    if (camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng)) {
+      return { lat: camp.lat, lng: camp.lng, name: plan.campName || camp.name };
+    }
+    const stop = (routeScout?.stops ?? routeScout?.previewStops ?? []).find(item => Number(item.day) === Number(plan.day) && Number.isFinite(item.lat) && Number.isFinite(item.lng));
+    if (stop) return { lat: stop.lat, lng: stop.lng, name: stop.name };
+    const focus = routeScout?.focusTarget;
+    if (focus && Number.isFinite(focus.lat) && Number.isFinite(focus.lng)) return { lat: focus.lat, lng: focus.lng, name: focus.name };
+    return userLoc ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' } : null;
+  }
+
+  function routeScoutLegContext(plan: RouteScoutDayPlan) {
+    const stops = (routeScout?.stops ?? routeScout?.previewStops ?? [])
+      .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
+      .sort((a, b) => Number(a.day) - Number(b.day));
+    const to = routeScoutPlanPoint(plan);
+    const from = [...stops].reverse().find(stop => Number(stop.day) < Number(plan.day)) ?? stops.find(stop => stop.type === 'start') ?? null;
+    const center = from && to
+      ? { lat: (from.lat + to.lat) / 2, lng: (from.lng + to.lng) / 2, name: `Day ${plan.day} leg` }
+      : to;
+    const miles = from && to ? haversineKm(from.lat, from.lng, to.lat, to.lng) * 0.621371 : 40;
+    return { from, to, center, miles };
+  }
+
+  function routeScoutCampPhoto(camp: CampsitePin): string | null {
+    const anyCamp = camp as CampsitePin & Record<string, any>;
+    const candidates = [
+      anyCamp.hero_photo_url,
+      camp.photo_url,
+      anyCamp.primary_image,
+      anyCamp.image_url,
+      Array.isArray(camp.photos) ? camp.photos[0] : null,
+      Array.isArray(anyCamp.images) ? anyCamp.images[0] : null,
+      Array.isArray(camp.photo_candidates) ? camp.photo_candidates[0] : null,
+    ];
+    for (const item of candidates) {
+      if (typeof item === 'string' && item.trim()) return mediaUrl(item.trim());
+      if (item && typeof item === 'object' && typeof item.url === 'string' && item.url.trim()) return mediaUrl(item.url.trim());
+    }
+    return null;
+  }
+
+  function routeScoutCampActionItem(camp: CampsitePin, idx: number): RouteScoutDayActionItem {
+    const dist = Number((camp as any).route_distance_mi);
+    const meta = [
+      camp.land_type || 'Camp',
+      Number.isFinite(dist) ? `${dist < 10 ? dist.toFixed(1) : Math.round(dist)} mi off route` : null,
+      camp.cost || null,
+      camp.reservable ? 'Reservable' : null,
+    ].filter(Boolean).join(' · ');
+    return {
+      id: `camp:${camp.id || camp.name}:${idx}`,
+      title: camp.name,
+      meta,
+      photoUrl: routeScoutCampPhoto(camp),
+      icon: 'bonfire-outline',
+      color: C.green,
+      lat: camp.lat,
+      lng: camp.lng,
+      payload: camp,
+    };
+  }
+
+  function routeScoutFuelActionItem(station: GasStation, idx: number): RouteScoutDayActionItem {
+    const dist = Number((station as any).route_distance_mi);
+    const meta = [
+      Number.isFinite(dist) ? `${dist < 10 ? dist.toFixed(1) : Math.round(dist)} mi off route` : null,
+      station.address || station.fuel_types || 'Fuel stop',
+      station.price ? `$${station.price}` : null,
+    ].filter(Boolean).join(' · ');
+    return {
+      id: `fuel:${station.id || station.name}:${idx}`,
+      title: station.name,
+      meta,
+      icon: 'flash-outline',
+      color: '#eab308',
+      lat: station.lat,
+      lng: station.lng,
+      payload: station,
+    };
+  }
+
+  function routeScoutPoiIcon(type?: string | null): keyof typeof Ionicons.glyphMap {
+    const clean = String(type || '').toLowerCase();
+    if (/trail|hike/.test(clean)) return 'trail-sign-outline';
+    if (/view|peak|pass/.test(clean)) return 'telescope-outline';
+    if (/water|hot_spring/.test(clean)) return 'water-outline';
+    if (/food|grocery/.test(clean)) return 'restaurant-outline';
+    if (/mechanic|parts|hardware/.test(clean)) return 'construct-outline';
+    if (/park|historic|attraction/.test(clean)) return 'compass-outline';
+    return 'location-outline';
+  }
+
+  function routeScoutPoiColor(type?: string | null) {
+    const clean = String(type || '').toLowerCase();
+    if (/trail|hike|park/.test(clean)) return '#22c55e';
+    if (/view|peak|pass/.test(clean)) return '#38bdf8';
+    if (/water|hot_spring/.test(clean)) return '#0ea5e9';
+    if (/food|grocery/.test(clean)) return '#f97316';
+    if (/mechanic|parts|hardware/.test(clean)) return '#a855f7';
+    if (/historic|attraction/.test(clean)) return '#eab308';
+    return C.orange;
+  }
+
+  function routeScoutPlaceActionItem(place: OsmPoi, idx: number): RouteScoutDayActionItem {
+    const dist = Number((place as any).route_distance_mi ?? (place.distance_meters != null ? place.distance_meters / 1609.344 : NaN));
+    const meta = [
+      Number.isFinite(dist) ? `${dist < 10 ? dist.toFixed(1) : Math.round(dist)} mi away` : null,
+      place.type ? place.type.replace(/_/g, ' ') : null,
+      place.summary || place.address || place.source_label || null,
+    ].filter(Boolean).join(' · ');
+    return {
+      id: `place:${place.id || place.name}:${idx}`,
+      title: place.name || place.type || 'Place',
+      meta,
+      photoUrl: place.photo_url || place.primary_image || null,
+      icon: routeScoutPoiIcon(place.type || 'poi'),
+      color: routeScoutPoiColor(place.type || 'poi'),
+      lat: place.lat,
+      lng: place.lng,
+      payload: place,
+    };
+  }
+
+  function routeScoutTourActionItem(tour: BookableExperience, idx: number): RouteScoutDayActionItem {
+    const meta = [
+      tour.route_anchor?.name || null,
+      tour.duration_label || null,
+      tour.price_from ? `from ${tour.currency || 'USD'} ${tour.price_from}` : null,
+      tour.rating ? `${tour.rating.toFixed(1)} rating` : null,
+    ].filter(Boolean).join(' · ');
+    return {
+      id: `tour:${tour.id}:${idx}`,
+      title: tour.title,
+      meta: meta || tour.summary || 'Bookable experience',
+      photoUrl: tour.hero_image_url || tour.images?.[0]?.url || null,
+      icon: 'ticket-outline',
+      color: '#0f766e',
+      lat: tour.lat ?? null,
+      lng: tour.lng ?? null,
+      url: tour.booking_url || tour.affiliate_url || tour.source_url || null,
+      payload: tour,
+    };
+  }
+
+  async function handleRouteScoutDayAction(plan: RouteScoutDayPlan, kind: RouteScoutDayActionKind) {
+    const context = routeScoutLegContext(plan);
+    const center = context.center ?? context.to;
+    if (!routeScout || !center) {
+      setQuickToast('This day needs a route point first.');
+      setTimeout(() => setQuickToast(''), 2200);
+      return;
+    }
+    const actionTitle = kind === 'camp'
+      ? `Day ${plan.day} camp options`
+      : kind === 'fuel'
+        ? `Day ${plan.day} fuel stops`
+        : kind === 'places'
+          ? `Day ${plan.day} places`
+          : `Day ${plan.day} tours`;
+    const legLabel = [context.from?.name, context.to?.name].filter(Boolean).map(name => routeScoutShortPlace(name)).join(' to ');
+    setRouteScoutDayAction({
+      day: plan.day,
+      kind,
+      loading: true,
+      title: actionTitle,
+      subtitle: legLabel || 'Searching near this route leg',
+      items: [],
+    });
+    try {
+      let items: RouteScoutDayActionItem[] = [];
+      if (kind === 'camp') {
+        const filters = campLookupFilters(activeFilters) ?? DEFAULT_CAMP_FILTERS;
+        const camps = await api.getDiscoveryCamps(center.lat, center.lng, Math.max(35, Math.min(65, context.miles / 3 + 25)), filters, {
+          surface: 'copilot_route_builder_day',
+          stale_after_hours: 6,
+          limit: 12,
+        }).catch(() => []);
+        items = camps.slice(0, 8).map(routeScoutCampActionItem);
+      } else if (kind === 'fuel') {
+        const stations = await api.getGas(center.lat, center.lng, Math.max(28, Math.min(60, context.miles / 3 + 20))).catch(() => [] as GasStation[]);
+        items = stations.slice(0, 8).map(routeScoutFuelActionItem);
+      } else if (kind === 'places') {
+        const pack = await api.getNearbySmartPack(
+          center.lat,
+          center.lng,
+          Math.max(30, Math.min(55, context.miles / 4 + 22)),
+          'trailhead,viewpoint,peak,hot_spring,park,historic,climbing,ohv,attraction,water,grocery,mechanic,parking',
+          routeScout.routeCoords ?? [],
+          { scope_id: `copilot-route-day-${plan.day}`, recommended_day: plan.day, route_scope: 'leg' },
+        ).catch(() => ({ places: [] as OsmPoi[] }));
+        items = ((pack.places ?? []) as OsmPoi[]).slice(0, 8).map(routeScoutPlaceActionItem);
+      } else {
+        const anchors: Array<{ lat: number; lng: number; name?: string; day: number; leg_index: number }> = [];
+        if (context.from && Number.isFinite(context.from.lat) && Number.isFinite(context.from.lng)) {
+          anchors.push({ lat: context.from.lat, lng: context.from.lng, name: context.from.name, day: Math.max(1, plan.day - 1), leg_index: Math.max(0, plan.day - 1) });
+        }
+        if (context.to && Number.isFinite(context.to.lat) && Number.isFinite(context.to.lng)) {
+          anchors.push({ lat: context.to.lat, lng: context.to.lng, name: context.to.name, day: plan.day, leg_index: plan.day });
+        } else {
+          anchors.push({ lat: center.lat, lng: center.lng, name: center.name, day: plan.day, leg_index: plan.day });
+        }
+        const response = await api.getRouteTours({
+          anchors,
+          route: routeScout.routeCoords ?? [],
+          radius: 55,
+          limit: 8,
+          source: 'viator',
+        }).catch(() => ({ results: [] as BookableExperience[], live_message: '' }));
+        items = (response.results ?? []).slice(0, 8).map(routeScoutTourActionItem);
+      }
+      setRouteScoutDayAction({
+        day: plan.day,
+        kind,
+        loading: false,
+        title: actionTitle,
+        subtitle: items.length ? `${items.length} option${items.length === 1 ? '' : 's'} found${legLabel ? ` · ${legLabel}` : ''}` : legLabel || null,
+        message: kind === 'tours' ? 'No bookable tours found near this day yet.' : 'No options found near this day yet.',
+        items,
+      });
+    } catch {
+      setRouteScoutDayAction({
+        day: plan.day,
+        kind,
+        loading: false,
+        title: actionTitle,
+        subtitle: legLabel || null,
+        message: 'Search failed. Try again in a moment.',
+        items: [],
+      });
+    }
+  }
+
+  function handleRouteScoutDayActionItemPress(item: RouteScoutDayActionItem) {
+    const payload = item.payload as Record<string, any> | null | undefined;
+    if (payload && typeof payload === 'object' && ('land_type' in payload || 'reservable' in payload) && Number.isFinite(Number(payload.lat)) && Number.isFinite(Number(payload.lng))) {
+      openCopilotCampCard(payload as CampsitePin);
+      return;
+    }
+    if (item.url) {
+      Linking.openURL(item.url).catch(() => {
+        setQuickToast('Could not open that booking link.');
+        setTimeout(() => setQuickToast(''), 2200);
+      });
+      return;
+    }
+    const lat = Number(item.lat);
+    const lng = Number(item.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      const source = typeof payload?.source === 'string' ? payload.source : item.id.split(':')[0] || 'copilot_route_builder';
+      const type = typeof payload?.type === 'string'
+        ? payload.type
+        : item.id.startsWith('fuel:') ? 'fuel' : 'poi';
+      openCopilotPlaceCard({
+        id: item.id,
+        name: item.title,
+        lat,
+        lng,
+        type,
+        subtype: type,
+        source,
+        source_label: typeof payload?.source_label === 'string' ? payload.source_label : 'Route option',
+        address: typeof payload?.address === 'string' ? payload.address : undefined,
+        summary: item.meta || undefined,
+        photo_url: item.photoUrl || undefined,
+      } as SearchPlace, type === 'fuel' ? 13 : 12);
+    }
+  }
+
   function buildRouteScoutSummary(args: {
     startName: string;
     destinationName: string;
@@ -9289,6 +9561,7 @@ function MapScreen() {
     routeScoutOperationRef.current = operationId;
     clearRouteScoutTimers();
     clearRouteScoutPreview();
+    setRouteScoutDayAction(null);
     const scoutArgs = routeScoutArgsFromAction(args);
     if (!scoutArgs.destinationRaw) {
       const next: RouteScoutState = {
@@ -18887,6 +19160,7 @@ function MapScreen() {
       <RouteScoutPanel
         visible={!!routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch}
         routeScout={routeScout}
+        dayActionState={routeScoutDayAction}
         onClose={closeRouteScout}
         onRescout={() => {
           if (!routeScout?.draftArgs) return;
@@ -18902,6 +19176,8 @@ function MapScreen() {
           provider: 'trailhead_client',
         }, true)}
         onStopPress={stop => nativeMapRef.current?.flyTo(stop.lat, stop.lng, stop.type === 'camp' ? 11 : 9, stop.name)}
+        onDayAction={handleRouteScoutDayAction}
+        onDayActionItemPress={handleRouteScoutDayActionItemPress}
       />
 
       {showCampDiscoverySheet && (

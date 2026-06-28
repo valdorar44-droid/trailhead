@@ -6,13 +6,41 @@ import { TrailheadSkeletonLine } from '@/components/TrailheadUI';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
 import type { RouteScoutDayPlan, RouteScoutState, RouteScoutStop } from '@/lib/api';
 
+export type RouteScoutDayActionKind = 'camp' | 'fuel' | 'places' | 'tours';
+
+export type RouteScoutDayActionItem = {
+  id: string;
+  title: string;
+  meta?: string | null;
+  photoUrl?: string | null;
+  icon?: keyof typeof Ionicons.glyphMap;
+  color?: string;
+  lat?: number | null;
+  lng?: number | null;
+  url?: string | null;
+  payload?: unknown;
+};
+
+export type RouteScoutDayActionState = {
+  day: number;
+  kind: RouteScoutDayActionKind;
+  loading: boolean;
+  title: string;
+  subtitle?: string | null;
+  message?: string | null;
+  items: RouteScoutDayActionItem[];
+};
+
 type Props = {
   visible: boolean;
   routeScout: RouteScoutState | null;
+  dayActionState?: RouteScoutDayActionState | null;
   onClose: () => void;
   onRescout: () => void;
   onOpenBuilder: () => void;
   onStopPress: (stop: RouteScoutStop) => void;
+  onDayAction: (plan: RouteScoutDayPlan, kind: RouteScoutDayActionKind) => void;
+  onDayActionItemPress: (item: RouteScoutDayActionItem) => void;
 };
 
 type Tier = 'peek' | 'half' | 'full';
@@ -124,6 +152,13 @@ function campPhotoUri(plan: RouteScoutDayPlan) {
   return null;
 }
 
+function actionCopy(kind: RouteScoutDayActionKind) {
+  if (kind === 'camp') return { icon: 'bonfire-outline' as const, label: 'Camp' };
+  if (kind === 'fuel') return { icon: 'flash-outline' as const, label: 'Fuel' };
+  if (kind === 'places') return { icon: 'trail-sign-outline' as const, label: 'Places' };
+  return { icon: 'ticket-outline' as const, label: 'Tours' };
+}
+
 function reviewNotes(plan: RouteScoutDayPlan) {
   const campStatus = String(plan.campStatus || plan.status || '').toLowerCase();
   if (campStatus === 'locked' || campStatus === 'finish') return [];
@@ -165,10 +200,13 @@ function stopFromDayPlan(plan: RouteScoutDayPlan): RouteScoutStop | null {
 export default function RouteScoutPanel({
   visible,
   routeScout,
+  dayActionState,
   onClose,
   onRescout,
   onOpenBuilder,
   onStopPress,
+  onDayAction,
+  onDayActionItemPress,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -221,6 +259,7 @@ export default function RouteScoutPanel({
     const startName = shortPlaceName(plan.startName, true) || 'Start';
     const endName = shortPlaceName(plan.endName || plan.campName || plan.title, true) || 'Finish';
     const campStatus = String(plan.campStatus || plan.status || '').toLowerCase();
+    const dayAction = dayActionState?.day === plan.day ? dayActionState : null;
     return (
       <TouchableOpacity
         key={`route-scout-day-${plan.day}`}
@@ -261,7 +300,7 @@ export default function RouteScoutPanel({
                 <Image source={{ uri: photoUri }} style={s.campPhoto} resizeMode="cover" />
               ) : (
                 <View style={[s.campFallback, { borderColor: tone + '55', backgroundColor: tone + '12' }]}>
-                  <Ionicons name={campStatus === 'loading' ? 'time-outline' : 'bonfire-outline'} size={20} color={tone} />
+                  <Ionicons name={campStatus === 'loading' ? 'time-outline' : 'bonfire-outline'} size={26} color={tone} />
                 </View>
               )}
               <View style={s.campCopy}>
@@ -293,6 +332,61 @@ export default function RouteScoutPanel({
                 {notes.map((note, idx) => (
                   <Text key={`${plan.day}-note-${idx}`} style={s.note} numberOfLines={2}>{note}</Text>
                 ))}
+              </View>
+            ) : null}
+
+            <View style={s.dayActionRail}>
+              {(['camp', 'fuel', 'places', 'tours'] as const).map(kind => {
+                const copy = actionCopy(kind);
+                const active = dayAction?.kind === kind;
+                return (
+                  <TouchableOpacity
+                    key={`day-${plan.day}-${kind}`}
+                    style={[s.dayActionButton, active && s.dayActionButtonActive]}
+                    onPress={() => onDayAction(plan, kind)}
+                    activeOpacity={0.84}
+                  >
+                    <Ionicons name={copy.icon} size={13} color={active ? C.orange : C.text2} />
+                    <Text style={[s.dayActionText, active && s.dayActionTextActive]}>{copy.label}</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+
+            {dayAction ? (
+              <View style={s.inlineResults}>
+                <View style={s.inlineHead}>
+                  <Text style={s.inlineTitle}>{dayAction.title}</Text>
+                  {dayAction.loading ? <Text style={s.inlineLoading}>Searching</Text> : null}
+                </View>
+                {dayAction.subtitle ? <Text style={s.inlineSubtitle} numberOfLines={2}>{dayAction.subtitle}</Text> : null}
+                {dayAction.loading ? (
+                  <View style={s.inlineSkeletons}>
+                    <TrailheadSkeletonLine width="96%" height={54} style={s.inlineSkeleton} />
+                    <TrailheadSkeletonLine width="88%" height={54} style={s.inlineSkeleton} />
+                  </View>
+                ) : dayAction.items.length ? (
+                  <View style={s.inlineList}>
+                    {dayAction.items.slice(0, 4).map(item => (
+                      <TouchableOpacity key={item.id} style={s.inlineItem} onPress={() => onDayActionItemPress(item)} activeOpacity={0.84}>
+                        {item.photoUrl ? (
+                          <Image source={{ uri: item.photoUrl }} style={s.inlinePhoto} resizeMode="cover" />
+                        ) : (
+                          <View style={[s.inlineIcon, { borderColor: (item.color || C.orange) + '55', backgroundColor: (item.color || C.orange) + '12' }]}>
+                            <Ionicons name={item.icon || 'location-outline'} size={16} color={item.color || C.orange} />
+                          </View>
+                        )}
+                        <View style={s.flex}>
+                          <Text style={s.inlineItemTitle} numberOfLines={1}>{item.title}</Text>
+                          <Text style={s.inlineItemMeta} numberOfLines={2}>{item.meta || 'Tap to inspect'}</Text>
+                        </View>
+                        <Ionicons name={item.url ? 'open-outline' : 'chevron-forward'} size={14} color={C.text3} />
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                ) : (
+                  <Text style={s.inlineEmpty}>{dayAction.message || 'No options found near this leg yet.'}</Text>
+                )}
               </View>
             ) : null}
           </View>
@@ -365,7 +459,7 @@ export default function RouteScoutPanel({
         </TouchableOpacity>
         <TouchableOpacity style={[s.action, s.actionPrimary]} onPress={onOpenBuilder}>
           <Ionicons name="create-outline" size={13} color={primaryActionTextColor} />
-          <Text style={[s.actionText, s.actionPrimaryText]}>Edit route</Text>
+          <Text style={[s.actionText, s.actionPrimaryText]}>Full editor</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -607,20 +701,17 @@ const makeStyles = (C: ColorPalette) => {
       marginTop: 10,
     },
     campBlock: {
-      flexDirection: 'row',
-      alignItems: 'stretch',
       gap: 9,
-      minHeight: 76,
     },
     campPhoto: {
-      width: 76,
-      height: 76,
+      width: '100%',
+      height: 158,
       borderRadius: 8,
       backgroundColor: softBg,
     },
     campFallback: {
-      width: 54,
-      minHeight: 64,
+      width: '100%',
+      height: 132,
       borderRadius: 8,
       borderWidth: 1,
       alignItems: 'center',
@@ -629,7 +720,6 @@ const makeStyles = (C: ColorPalette) => {
     campCopy: {
       flex: 1,
       minWidth: 0,
-      justifyContent: 'center',
     },
     campLabel: {
       color: C.text3,
@@ -683,6 +773,115 @@ const makeStyles = (C: ColorPalette) => {
       color: C.text2,
       fontSize: 11,
       lineHeight: 15,
+    },
+    dayActionRail: {
+      flexDirection: 'row',
+      gap: 7,
+    },
+    dayActionButton: {
+      flex: 1,
+      minHeight: 40,
+      borderWidth: 1,
+      borderColor: C.border2,
+      borderRadius: 8,
+      backgroundColor: light ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.04)',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 2,
+    },
+    dayActionButtonActive: {
+      borderColor: C.orange + '77',
+      backgroundColor: C.orange + '12',
+    },
+    dayActionText: {
+      color: C.text2,
+      fontSize: 8,
+      fontFamily: mono,
+      fontWeight: '900',
+    },
+    dayActionTextActive: {
+      color: C.orange,
+    },
+    inlineResults: {
+      gap: 8,
+      borderWidth: 1,
+      borderColor: C.border2,
+      borderRadius: 8,
+      padding: 9,
+      backgroundColor: light ? 'rgba(255,255,255,0.64)' : 'rgba(255,255,255,0.045)',
+    },
+    inlineHead: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'space-between',
+      gap: 8,
+    },
+    inlineTitle: {
+      flex: 1,
+      color: C.text,
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    inlineLoading: {
+      color: C.orange,
+      fontSize: 9,
+      fontFamily: mono,
+      fontWeight: '900',
+    },
+    inlineSubtitle: {
+      color: C.text3,
+      fontSize: 10,
+      lineHeight: 14,
+    },
+    inlineSkeletons: {
+      gap: 8,
+    },
+    inlineSkeleton: {
+      borderRadius: 8,
+    },
+    inlineList: {
+      gap: 7,
+    },
+    inlineItem: {
+      minHeight: 58,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      borderWidth: 1,
+      borderColor: C.border2,
+      borderRadius: 8,
+      padding: 7,
+      backgroundColor: softBg,
+    },
+    inlinePhoto: {
+      width: 44,
+      height: 44,
+      borderRadius: 8,
+      backgroundColor: softBg,
+    },
+    inlineIcon: {
+      width: 44,
+      height: 44,
+      borderRadius: 8,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    inlineItemTitle: {
+      color: C.text,
+      fontSize: 11,
+      fontWeight: '900',
+    },
+    inlineItemMeta: {
+      color: C.text3,
+      fontSize: 9,
+      lineHeight: 13,
+      marginTop: 2,
+    },
+    inlineEmpty: {
+      color: C.text3,
+      fontSize: 10,
+      lineHeight: 14,
     },
     emptyLoading: {
       gap: 10,

@@ -90,7 +90,7 @@ class ViatorSourcePackTests(unittest.TestCase):
         client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=FailingOpener())
         payload = client.search_products(destination_id="5265")
         self.assertEqual(payload["products"], [])
-        self.assertEqual(payload["status"], "error")
+        self.assertEqual(payload["status"], "timeout")
 
     def test_client_uses_viator_v2_headers_and_documented_sort(self):
         opener = CapturingOpener()

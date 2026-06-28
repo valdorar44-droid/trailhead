@@ -145,6 +145,14 @@ const FALLBACK_COPY: Record<string, string> = {
   land: 'Public land or managed area. Verify land rules, camping limits, access, and current restrictions.',
 };
 
+const WEAK_COPY_PATTERNS = [
+  /\bmay refer to\b/i,
+  /\b(disambiguation|wikimedia|wikidata)\b/i,
+  /\b(undefined|null|nan)\b/i,
+  /^\s*(lake|mountain|waterfall|glacier|island|hill|volcano|national park|former national park|marine reserve|animal sanctuary|locality|river|peak)\s+(in|on|near|of)\s+[^.]{1,90}\.?\s*$/i,
+  /^\s*(mountain|waterfall|glacier|lake|peak|park|trail|campground|historic site|protected area|places?|things to do)\s*\.?\s*$/i,
+];
+
 function readV3(place: ExplorePlaceProfile): Record<string, any> {
   return place as unknown as Record<string, any>;
 }
@@ -657,6 +665,9 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     .replace(/\bAI\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (isWeakExploreCopy(text, place)) {
+    return FALLBACK_COPY[key] || `${title} has map details and current access checks.`;
+  }
   if (/Use .+ as the overnight search area|gives camp search a real center|Start camp planning around .+ then narrow it with live results/i.test(text)) {
     return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
   }
@@ -684,6 +695,15 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
   }
   return text;
+}
+
+function isWeakExploreCopy(text: string, place: ExplorePlaceProfile) {
+  const clean = normalizeExploreCopyBlock(text);
+  if (!clean || clean.length < 42) return true;
+  if (WEAK_COPY_PATTERNS.some(pattern => pattern.test(clean))) return true;
+  const title = normalizeExploreCopyBlock(getExploreDisplayTitle(place));
+  if (title && clean.toLowerCase() === title.toLowerCase()) return true;
+  return false;
 }
 
 function shortSeasonLabel(value: string) {

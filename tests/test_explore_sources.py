@@ -176,6 +176,12 @@ def nps_rich_payload() -> dict:
                     "url": "https://www.nps.gov/places/bridalveil-fall.htm",
                     "images": [{"url": "https://www.nps.gov/bride.jpg", "caption": "Bridalveil Fall", "credit": "NPS"}],
                 }],
+                "articles": [{
+                    "id": "science-database",
+                    "title": "Updated Species Database Will Help Boost Amphibian Conservation Across the National Park Service",
+                    "abstract": "A national research article, not a mapped visitor stop.",
+                    "url": "https://www.nps.gov/articles/species-database.htm",
+                }],
                 "visitorcenters": [{
                     "id": "yosemite-valley-visitor-center",
                     "title": "Yosemite Valley Visitor Center",
@@ -392,6 +398,8 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertEqual(pack["things_to_do"][0]["title"], "Mist Trail")
         self.assertAlmostEqual(pack["things_to_do"][0]["lat"], 37.7325)
         self.assertEqual(pack["things_to_see"][0]["title"], "Bridalveil Fall")
+        self.assertFalse(any("/articles/" in item.get("url", "") for item in pack["things_to_see"]))
+        self.assertNotIn("Updated Species Database", " ".join(item["title"] for item in pack["things_to_see"]))
         self.assertEqual(pack["visitor_centers"][0]["title"], "Yosemite Valley Visitor Center")
         self.assertEqual(pack["campgrounds"][0]["title"], "Upper Pines Campground")
         self.assertIn("Open year-round", pack["campgrounds"][0]["operating_hours"])

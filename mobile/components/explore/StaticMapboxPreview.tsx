@@ -29,9 +29,7 @@ export function StaticMapboxPreview({ pins, title, subtitle, height = 260, onPre
   const token = useStore(st => st.mapboxToken);
   const [failedUrl, setFailedUrl] = useState('');
   const cleanPins = useMemo(
-    () => pins
-      .filter(pin => Number.isFinite(pin.lat) && Number.isFinite(pin.lng))
-      .slice(0, 16),
+    () => dedupePreviewPins(pins).slice(0, 16),
     [pins],
   );
   const url = useMemo(
@@ -65,6 +63,25 @@ export function StaticMapboxPreview({ pins, title, subtitle, height = 260, onPre
       </View>
     </Wrapper>
   );
+}
+
+function dedupePreviewPins(pins: StaticMapboxPin[]) {
+  const out: StaticMapboxPin[] = [];
+  const seen = new Map<string, number>();
+  for (const pin of pins) {
+    if (!Number.isFinite(pin.lat) || !Number.isFinite(pin.lng)) continue;
+    const key = `${pin.lat.toFixed(4)},${pin.lng.toFixed(4)}:${String(pin.kind || '').toLowerCase()}`;
+    const existingIndex = seen.get(key);
+    if (existingIndex == null) {
+      seen.set(key, out.length);
+      out.push(pin);
+      continue;
+    }
+    if (pin.active && !out[existingIndex].active) {
+      out[existingIndex] = pin;
+    }
+  }
+  return out.sort((a, b) => Number(Boolean(b.active)) - Number(Boolean(a.active)));
 }
 
 function buildStaticMapboxUrl(pins: StaticMapboxPin[], token: string, height: number) {

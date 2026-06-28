@@ -180,7 +180,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
     ])
     things_to_see = dedupe_items([
         source_pack_item(item, "place", park_code=record.source_id)
-        for item in [*related.get("places", []), *related.get("articles", [])]
+        for item in related.get("places", [])
     ])
     visitor_centers = dedupe_items([
         source_pack_item(item, "visitor_center", park_code=record.source_id)

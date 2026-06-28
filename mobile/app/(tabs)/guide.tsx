@@ -579,7 +579,23 @@ function campMetaLine(camp: CampsitePin) {
   ].filter(Boolean).join(' · ');
 }
 
+function sourcePackItemLooksLikeArticle(item?: ExploreSourcePackItem | null) {
+  const source = String(item?.source || item?.source_label || '').toLowerCase();
+  const kind = String(item?.kind || item?.category || '').toLowerCase();
+  const url = String(item?.url || '').toLowerCase();
+  const title = String(item?.title || '').toLowerCase();
+  if (/(^|\/)(articles|news|stories)\//.test(url)) return true;
+  if (/\b(article|news|story|research|publication|collection)\b/.test(kind)) return true;
+  if (/nps|national park service/.test(source)) {
+    return /\b(species database|species spotlight|nifty finds|humanities research|photograph collection|bioaccumulation|cracking the code|research methods|holding the line|conservation across the national park service)\b/.test(title);
+  }
+  return false;
+}
+
 function sourcePackItemToRelatedPoi(item: ExploreSourcePackItem, fallbackType: OsmPoi['type'] = 'poi'): OsmPoi | null {
+  if (sourcePackItemLooksLikeArticle(item)) return null;
+  const title = String(item.title || '').replace(/\s+/g, ' ').trim();
+  if (!title || /^(places?|things to do|details?|overview)$/i.test(title)) return null;
   const lat = Number(item.lat);
   const lng = Number(item.lng);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
@@ -592,8 +608,8 @@ function sourcePackItemToRelatedPoi(item: ExploreSourcePackItem, fallbackType: O
         ? 'poi'
         : fallbackType;
   return {
-    id: String(item.source_id || item.url || item.title || `${lat.toFixed(5)},${lng.toFixed(5)}`),
-    name: item.title || item.source_label || 'Explore stop',
+    id: String(item.source_id || item.url || title || `${lat.toFixed(5)},${lng.toFixed(5)}`),
+    name: title,
     lat,
     lng,
     type,

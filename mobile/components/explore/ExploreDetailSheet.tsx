@@ -130,6 +130,25 @@ function sizedNpsMediaUrl(url?: string | null, width = 900) {
   return `${clean}${clean.includes('?') ? '&' : '?'}width=${width}&quality=85&mode=crop`;
 }
 
+function sourcePackItemLooksLikeArticle(item?: ExploreSourcePackItem | null) {
+  const source = String(item?.source || item?.source_label || '').toLowerCase();
+  const kind = String(item?.kind || item?.category || '').toLowerCase();
+  const url = String(item?.url || '').toLowerCase();
+  const title = String(item?.title || '').toLowerCase();
+  if (/(^|\/)(articles|news|stories)\//.test(url)) return true;
+  if (/\b(article|news|story|research|publication|collection)\b/.test(kind)) return true;
+  if (/nps|national park service/.test(source)) {
+    return /\b(species database|species spotlight|nifty finds|humanities research|photograph collection|bioaccumulation|cracking the code|research methods|holding the line|conservation across the national park service)\b/.test(title);
+  }
+  return false;
+}
+
+function sourcePackItemCanShow(item?: ExploreSourcePackItem | null) {
+  const title = normalizeExploreCopyBlock(item?.title);
+  if (!title || /^(places?|things to do|details?|overview)$/i.test(title)) return false;
+  return !sourcePackItemLooksLikeArticle(item);
+}
+
 function ExpandableText({
   value,
   textStyle,
@@ -180,6 +199,14 @@ export function ExploreDetailSheet({
   const [selectedItem, setSelectedItem] = useState<ExploreSourcePackItem | null>(null);
   const [placeSearch, setPlaceSearch] = useState('');
   const searchNeedle = placeSearch.trim().toLowerCase();
+  const sourcePackLists = useMemo(() => ({
+    thingsToDo: (pack?.things_to_do ?? []).filter(sourcePackItemCanShow),
+    thingsToSee: (pack?.things_to_see ?? []).filter(sourcePackItemCanShow),
+    visitorCenters: (pack?.visitor_centers ?? []).filter(sourcePackItemCanShow),
+    campgrounds: (pack?.campgrounds ?? []).filter(sourcePackItemCanShow),
+    events: (pack?.events ?? []).filter(sourcePackItemCanShow),
+    parkingLots: (pack?.parking_lots ?? []).filter(sourcePackItemCanShow),
+  }), [pack]);
 
   useEffect(() => {
     setPlaceSearch('');
@@ -233,59 +260,59 @@ export function ExploreDetailSheet({
     };
     const activityCount = (pack?.activities?.length ?? 0) + (place.amenities?.length ?? 0);
     const hasCoords = place.summary.lat != null && place.summary.lng != null;
-    const seeImages = tileImages(pack?.things_to_see);
-    const doImages = tileImages(pack?.things_to_do);
-    const stayImages = tileImages(pack?.campgrounds);
-    const visitorImages = tileImages(pack?.visitor_centers);
+    const seeImages = tileImages(sourcePackLists.thingsToSee);
+    const doImages = tileImages(sourcePackLists.thingsToDo);
+    const stayImages = tileImages(sourcePackLists.campgrounds);
+    const visitorImages = tileImages(sourcePackLists.visitorCenters);
     const trailImages = tileImages([], (place.trails ?? []).map(trail => trail.image_url));
-    const eventImages = tileImages(pack?.events);
+    const eventImages = tileImages(sourcePackLists.events);
 
     add({
       key: 'see',
       label: 'What to See',
-      detail: count(pack?.things_to_see) ? `${count(pack?.things_to_see)} places` : 'Highlights',
+      detail: count(sourcePackLists.thingsToSee) ? `${count(sourcePackLists.thingsToSee)} places` : 'Highlights',
       icon: 'camera-outline',
       tone: '#0f766e',
-      count: count(pack?.things_to_see) || undefined,
+      count: count(sourcePackLists.thingsToSee) || undefined,
       imageUrl: seeImages.imageUrl,
       imageCandidates: seeImages.imageCandidates,
-      searchText: `${searchTextForItems(pack?.things_to_see)} ${place.profile?.why_it_matters ?? ''} ${place.wiki_extract ?? ''}`,
+      searchText: `${searchTextForItems(sourcePackLists.thingsToSee)} ${place.profile?.why_it_matters ?? ''} ${place.wiki_extract ?? ''}`,
     });
 
-    add(Boolean(count(pack?.things_to_do) || activityCount > 0 || experiencesSlot) && {
+    add(Boolean(count(sourcePackLists.thingsToDo) || activityCount > 0 || experiencesSlot) && {
       key: 'do',
       label: 'Things to Do',
-      detail: count(pack?.things_to_do) ? `${count(pack?.things_to_do)} options` : 'Activities',
+      detail: count(sourcePackLists.thingsToDo) ? `${count(sourcePackLists.thingsToDo)} options` : 'Activities',
       icon: 'walk-outline',
       tone: '#f97316',
-      count: count(pack?.things_to_do) || activityCount || undefined,
+      count: count(sourcePackLists.thingsToDo) || activityCount || undefined,
       imageUrl: doImages.imageUrl,
       imageCandidates: doImages.imageCandidates,
-      searchText: `${searchTextForItems(pack?.things_to_do)} ${(pack?.activities ?? []).join(' ')} ${(place.amenities ?? []).join(' ')}`,
+      searchText: `${searchTextForItems(sourcePackLists.thingsToDo)} ${(pack?.activities ?? []).join(' ')} ${(place.amenities ?? []).join(' ')}`,
     });
 
-    add(Boolean(count(pack?.campgrounds) || campgroundsSlot) && {
+    add(Boolean(count(sourcePackLists.campgrounds) || campgroundsSlot) && {
       key: 'stay',
       label: 'Where to Stay',
-      detail: count(pack?.campgrounds) ? `${count(pack?.campgrounds)} stays` : 'Camp nearby',
+      detail: count(sourcePackLists.campgrounds) ? `${count(sourcePackLists.campgrounds)} stays` : 'Camp nearby',
       icon: 'bonfire-outline',
       tone: '#16a34a',
-      count: count(pack?.campgrounds) || undefined,
+      count: count(sourcePackLists.campgrounds) || undefined,
       imageUrl: stayImages.imageUrl,
       imageCandidates: stayImages.imageCandidates,
-      searchText: `${searchTextForItems(pack?.campgrounds)} camp campground lodge cabin rv overnight`,
+      searchText: `${searchTextForItems(sourcePackLists.campgrounds)} camp campground lodge cabin rv overnight`,
     });
 
-    add(Boolean(count(pack?.visitor_centers) || pack?.nps_park_code) && {
+    add(Boolean(count(sourcePackLists.visitorCenters) || pack?.nps_park_code) && {
       key: 'visitor',
       label: 'Visitor Centers',
-      detail: count(pack?.visitor_centers) ? `${count(pack?.visitor_centers)} centers` : 'Park info',
+      detail: count(sourcePackLists.visitorCenters) ? `${count(sourcePackLists.visitorCenters)} centers` : 'Park info',
       icon: 'information-circle-outline',
       tone: '#2563eb',
-      count: count(pack?.visitor_centers) || undefined,
+      count: count(sourcePackLists.visitorCenters) || undefined,
       imageUrl: visitorImages.imageUrl,
       imageCandidates: visitorImages.imageCandidates,
-      searchText: `${searchTextForItems(pack?.visitor_centers)} visitor center ranger station park info`,
+      searchText: `${searchTextForItems(sourcePackLists.visitorCenters)} visitor center ranger station park info`,
     });
 
     add(((place.trails?.length ?? 0) > 0 || (place.linked_trail_ids?.length ?? 0) > 0 || /trail|trek|peak|waterfall|glacier/i.test(`${place.category ?? ''} ${(place.subcategories ?? []).join(' ')}`)) && {
@@ -330,16 +357,16 @@ export function ExploreDetailSheet({
       searchText: `${(pack?.alerts ?? []).map(alert => `${alert.title} ${alert.category}`).join(' ')}`,
     });
 
-    add((pack?.events?.length ?? 0) > 0 && {
+    add(sourcePackLists.events.length > 0 && {
       key: 'calendar',
       label: 'Calendar',
-      detail: `${pack?.events?.length ?? 0} events`,
+      detail: `${sourcePackLists.events.length} events`,
       icon: 'calendar-outline',
       tone: '#22c55e',
-      count: pack?.events?.length,
+      count: sourcePackLists.events.length,
       imageUrl: eventImages.imageUrl,
       imageCandidates: eventImages.imageCandidates,
-      searchText: `${searchTextForItems(pack?.events)} ranger program event calendar schedule`,
+      searchText: `${searchTextForItems(sourcePackLists.events)} ranger program event calendar schedule`,
     });
 
     add(hasCoords && {
@@ -398,6 +425,7 @@ export function ExploreDetailSheet({
     place.trails,
     place.wiki_extract,
     relatedSlot,
+    sourcePackLists,
     storySentences,
     weather?.detail,
     weather?.icon,
@@ -415,7 +443,7 @@ export function ExploreDetailSheet({
   const placeHeroCandidates = mediaCandidates(imageUrl, (pack?.photos ?? []).map(photo => photo.url), place.summary.image_url, place.summary.thumbnail_url);
 
   const filteredItems = (items?: ExploreSourcePackItem[]) => {
-    const list = items ?? [];
+    const list = (items ?? []).filter(sourcePackItemCanShow);
     if (!searchNeedle) return list;
     return list.filter(item => `${item.title ?? ''} ${item.description ?? ''} ${item.kind ?? ''} ${item.source_label ?? ''}`.toLowerCase().includes(searchNeedle));
   };
@@ -446,18 +474,18 @@ export function ExploreDetailSheet({
   };
 
   const moduleItems = (key: ExploreDetailModuleKey): ExploreSourcePackItem[] => {
-    if (key === 'see') return filteredItems(pack?.things_to_see);
-    if (key === 'do') return filteredItems(pack?.things_to_do);
-    if (key === 'stay') return filteredItems(pack?.campgrounds);
-    if (key === 'visitor') return filteredItems(pack?.visitor_centers);
-    if (key === 'calendar') return filteredItems(pack?.events);
+    if (key === 'see') return filteredItems(sourcePackLists.thingsToSee);
+    if (key === 'do') return filteredItems(sourcePackLists.thingsToDo);
+    if (key === 'stay') return filteredItems(sourcePackLists.campgrounds);
+    if (key === 'visitor') return filteredItems(sourcePackLists.visitorCenters);
+    if (key === 'calendar') return filteredItems(sourcePackLists.events);
     if (key === 'map') {
       return [
-        ...(pack?.things_to_see ?? []),
-        ...(pack?.things_to_do ?? []),
-        ...(pack?.campgrounds ?? []),
-        ...(pack?.visitor_centers ?? []),
-        ...(pack?.parking_lots ?? []),
+        ...sourcePackLists.thingsToSee,
+        ...sourcePackLists.thingsToDo,
+        ...sourcePackLists.campgrounds,
+        ...sourcePackLists.visitorCenters,
+        ...sourcePackLists.parkingLots,
       ].filter(item => itemCanRenderOnMap(item));
     }
     return [];
@@ -1215,7 +1243,9 @@ function SourcePack({
           ))}
         </View>
       )}
-      {rows.map(([label, items]) => Array.isArray(items) && items.length ? (
+      {rows.map(([label, rawItems]) => {
+        const items = Array.isArray(rawItems) ? rawItems.filter(sourcePackItemCanShow) : [];
+        return items.length ? (
         <View key={label}>
           <Text style={[styles.packLabel, { color: C.text3 }]}>{label.toUpperCase()}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.miniRail}>
@@ -1245,7 +1275,8 @@ function SourcePack({
             })}
           </ScrollView>
         </View>
-      ) : null)}
+        ) : null;
+      })}
     </View>
   );
 }

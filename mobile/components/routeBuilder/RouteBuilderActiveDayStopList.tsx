@@ -32,6 +32,7 @@ type RouteBuilderActiveDayStopListProps<TStop extends RouteBuilderActiveDayListS
   onFindFuel: (from: TStop, to: TStop) => void;
   onFindCamp: (from: TStop, to: TStop) => void;
   onFindPlaces: (from: TStop, to: TStop) => void;
+  onFindTours: (from: TStop, to: TStop) => void;
 };
 
 export default function RouteBuilderActiveDayStopList<TStop extends RouteBuilderActiveDayListStop>({
@@ -53,6 +54,7 @@ export default function RouteBuilderActiveDayStopList<TStop extends RouteBuilder
   onFindFuel,
   onFindCamp,
   onFindPlaces,
+  onFindTours,
 }: RouteBuilderActiveDayStopListProps<TStop>) {
   return (
     <>
@@ -83,6 +85,7 @@ export default function RouteBuilderActiveDayStopList<TStop extends RouteBuilder
                 onFindFuel={() => onFindFuel(stop, next)}
                 onFindCamp={() => onFindCamp(stop, next)}
                 onFindPlaces={() => onFindPlaces(stop, next)}
+                onFindTours={() => onFindTours(stop, next)}
               />
             ) : undefined}
           />

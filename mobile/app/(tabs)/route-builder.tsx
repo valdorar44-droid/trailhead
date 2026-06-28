@@ -1877,6 +1877,7 @@ export default function RouteBuilderScreen() {
   const gas = activeDiscovery.gas;
   const pois = activeDiscovery.pois;
   const excursions = activeDiscovery.excursions;
+  const tours = activeDiscovery.tours;
   const discoverySummary = activeDiscovery.summary;
   const filteredOfflinePlaces = useMemo(() => (
     offlinePlaces.filter(place => placeMatchesFilters(place, activePlaceFilters))
@@ -1958,10 +1959,14 @@ export default function RouteBuilderScreen() {
       trackPhase0Once(`phase0:route-builder-empty:excursions:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
       return;
     }
+    if (inlineSearch.tab === 'tours' && tours.length === 0) {
+      trackPhase0Once(`phase0:route-builder-empty:tours:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
+      return;
+    }
     if (inlineSearch.tab === 'poi' && discoveryPois.length === 0) {
       trackPhase0Once(`phase0:route-builder-empty:poi:${activeDiscoveryKey || 'none'}:${inlineSearch.day}`, 'phase0_empty_state_seen', payload);
     }
-  }, [activeDiscoveryKey, camps.length, discoverLoading, discoveryPois.length, excursions.length, gas.length, inlineSearch]);
+  }, [activeDiscoveryKey, camps.length, discoverLoading, discoveryPois.length, excursions.length, gas.length, inlineSearch, tours.length]);
   const routeStateMiles = useMemo(() => sampleRouteStates(orderedStops, tripLoop), [orderedStops, tripLoop]);
   const routeStates = useMemo(() => Object.keys(routeStateMiles).sort((a, b) => routeStateMiles[b] - routeStateMiles[a]), [routeStateMiles]);
   const routeDaySegments = useMemo(() => {
@@ -2197,7 +2202,9 @@ export default function RouteBuilderScreen() {
       ? 'Tap scan to find fuel between the selected stops.'
       : discoverTab === 'excursions'
         ? 'Tap scan to find side trips, parks, trails, viewpoints, climbing, and historic stops from real map sources.'
-        : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
+        : discoverTab === 'tours'
+          ? 'Tap scan to find bookable tours near this leg.'
+          : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
 
   function fly(_lat: number, _lng: number, _zoom = 11) {}
 
@@ -2242,6 +2249,7 @@ export default function RouteBuilderScreen() {
         radius: 55,
         limit: 8,
         source: 'viator',
+        q: [routeName, inputStops[0]?.name, inputStops[inputStops.length - 1]?.name].filter(Boolean).join(' '),
       });
       const results = response.results ?? [];
       setRouteTours(results);
@@ -2424,7 +2432,7 @@ export default function RouteBuilderScreen() {
     return { ...leg, routeCoords: legRouteCoords(leg), routeSource: 'straight' };
   }
 
-  async function runDiscovery(tab: DiscoveryTab, target: { lat: number; lng: number }, leg: LegSearchContext | null, opts: { focusMap?: boolean } = {}) {
+  async function runDiscovery(tab: DiscoveryTab, target: { lat: number; lng: number }, leg: LegSearchContext | null, opts: { focusMap?: boolean; retryingLive?: boolean } = {}) {
     const key = discoveryKeyFor(tab, target, leg);
     setActiveDiscoveryKey(key);
     const useLeg = !!leg;
@@ -2618,6 +2626,41 @@ export default function RouteBuilderScreen() {
           }
           stations.sort((a, b) => (a.route_distance_mi ?? haversineMi(a, target)) - (b.route_distance_mi ?? haversineMi(b, target)));
           storeDiscoveryResults(key, { gas: stations, summary: `${stations.length} fuel stop${stations.length === 1 ? '' : 's'} near this area` });
+        }
+      } else if (tab === 'tours') {
+        const routeCoords = useLeg ? legRouteCoords(searchLeg!) : excursionRouteCoords();
+        const anchors = useLeg
+          ? [
+              { lat: searchLeg!.from.lat, lng: searchLeg!.from.lng, name: searchLeg!.from.name, day: searchLeg!.targetDay ?? activeDay, leg_index: 0 },
+              { lat: searchLeg!.to.lat, lng: searchLeg!.to.lng, name: searchLeg!.to.name, day: searchLeg!.targetDay ?? activeDay, leg_index: 1 },
+            ]
+          : [{ lat: target.lat, lng: target.lng, name: anchor?.name || `Day ${activeDay}`, day: activeDay, leg_index: 0 }];
+        const q = [
+          routeName,
+          useLeg ? searchLeg!.from.name : null,
+          useLeg ? searchLeg!.to.name : null,
+          orderedStops[0]?.name,
+          orderedStops[orderedStops.length - 1]?.name,
+        ].filter(Boolean).join(' ');
+        const response = await api.getRouteTours({
+          anchors,
+          route: routeCoords,
+          radius: useLeg ? 70 : 55,
+          limit: 8,
+          source: 'viator',
+          q,
+        }).catch(() => ({ results: [] as BookableExperience[], live_status: '', live_message: '' }));
+        const found = response.results ?? [];
+        storeDiscoveryResults(key, {
+          tours: found,
+          summary: found.length
+            ? `${found.length} tour${found.length === 1 ? '' : 's'} near this ${useLeg ? 'leg' : 'area'}`
+            : response.live_message || 'No bookable tours found near this segment yet.',
+        });
+        if (!found.length && response.live_status === 'processing' && !opts.retryingLive) {
+          setTimeout(() => {
+            runDiscovery(tab, target, leg, { focusMap: false, retryingLive: true }).catch(() => {});
+          }, 7000);
         }
       } else if (tab === 'excursions') {
         const center = useLeg ? searchLeg!.center : target;
@@ -3044,7 +3087,7 @@ export default function RouteBuilderScreen() {
       tab,
       label: tab === 'camps'
         ? `Choose an overnight near Day ${targetDay} endpoint`
-        : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} between ${from.name.split(',')[0]} and ${to.name.split(',')[0]}`,
+        : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : tab === 'tours' ? 'tours' : 'places'} between ${from.name.split(',')[0]} and ${to.name.split(',')[0]}`,
     } : null);
     runDiscovery(tab, leg.center, leg, { focusMap: false });
   }
@@ -3103,7 +3146,7 @@ export default function RouteBuilderScreen() {
       setInlineSearch({
         day: plan.day,
         tab,
-        label: tab === 'camps' ? `Choose a camp near Day ${plan.day}` : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} near Day ${plan.day}`,
+        label: tab === 'camps' ? `Choose a camp near Day ${plan.day}` : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : tab === 'tours' ? 'tours' : 'places'} near Day ${plan.day}`,
       });
       runDiscovery(tab, { lat: to.lat, lng: to.lng }, null, { focusMap: false });
       return;
@@ -3117,7 +3160,7 @@ export default function RouteBuilderScreen() {
         tab,
         label: tab === 'camps'
           ? `Choose a camp near Day ${plan.day}`
-          : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} near Day ${plan.day}`,
+          : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : tab === 'tours' ? 'tours' : 'places'} near Day ${plan.day}`,
       });
       runDiscovery(tab, { lat: fallbackTarget.lat, lng: fallbackTarget.lng }, null, { focusMap: false });
       return;
@@ -3140,7 +3183,7 @@ export default function RouteBuilderScreen() {
       tab,
       label: tab === 'camps'
         ? `Choose a camp near Day ${day}`
-        : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : 'places'} near Day ${day}`,
+        : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : tab === 'tours' ? 'tours' : 'places'} near Day ${day}`,
     });
     runDiscovery(tab, { lat: fallbackTarget.lat, lng: fallbackTarget.lng }, null, { focusMap: false });
   }
@@ -3152,7 +3195,9 @@ export default function RouteBuilderScreen() {
         ? 'No fuel stops landed on this day segment.'
         : tab === 'excursions'
           ? 'No side trips landed on this day segment.'
-          : 'No place cards landed on this day segment.';
+          : tab === 'tours'
+            ? 'No tours landed on this day segment.'
+            : 'No place cards landed on this day segment.';
     const hint = tab === 'camps'
       ? campPhotoOnly
         ? 'Photo-only is still on. Open the search to no-photo camp backups or rerun the segment scan.'
@@ -3161,7 +3206,9 @@ export default function RouteBuilderScreen() {
         ? 'Rerun the segment scan. Fuel often appears once the route day or nearby town is tightened up.'
         : tab === 'excursions'
           ? 'Rerun the segment scan or use the map after you lock in the day route.'
-          : 'Rerun the segment scan or use the map to search a wider area around this day.';
+          : tab === 'tours'
+            ? discoverySummary || 'Tour availability can take a moment to refresh. Try again after the route is tightened up.'
+            : 'Rerun the segment scan or use the map to search a wider area around this day.';
     return (
       <View style={s.inlineEmptyCard}>
         <Text style={s.inlineEmpty}>{title}</Text>
@@ -4578,6 +4625,7 @@ export default function RouteBuilderScreen() {
                 onFindFuel={() => scanDayPlan(plan, 'gas')}
                 onFindPlaces={() => scanDayPlan(plan, 'poi')}
                 onFindSideTrips={() => scanDayPlan(plan, 'excursions')}
+                onFindTours={() => scanDayPlan(plan, 'tours')}
               />
               {renderInlineResultsForDay(plan.day)}
             </View>
@@ -4627,6 +4675,30 @@ export default function RouteBuilderScreen() {
             />
           )) : (
             renderInlineEmptyState(day, 'gas')
+          )
+        ) : inlineTab === 'tours' ? (
+          tours.length ? tours.slice(0, 6).map(tour => (
+            <RouteBuilderInlineResultRow
+              key={tour.id}
+              icon="ticket-outline"
+              iconColor="#0f766e"
+              iconBackgroundColor="#0f766e18"
+              iconBorderColor="#0f766e66"
+              photoUrl={tour.hero_image_url || tour.images?.[0]?.url || null}
+              title={tour.title}
+              meta={`Day ${day} · ${[
+                tour.route_anchor?.name,
+                tour.duration_label,
+                tour.price_from ? `from ${tour.currency || 'USD'} ${tour.price_from}` : null,
+                tour.rating ? `${tour.rating.toFixed(1)} rating` : null,
+              ].filter(Boolean).join(' · ') || tour.summary || 'Bookable tour near this route'}`}
+              metaLines={2}
+              trailingLabel={tour.booking_url || tour.affiliate_url || tour.source_url ? 'OPEN' : 'ADD'}
+              trailingColor="#0f766e"
+              onPress={() => addTourToRoute(tour)}
+            />
+          )) : (
+            renderInlineEmptyState(day, 'tours')
           )
         ) : inlineTab === 'excursions' ? (
           excursions.length ? excursions.slice(0, 8).map(item => (
@@ -5220,6 +5292,7 @@ export default function RouteBuilderScreen() {
             onFindFuel={(from, to) => scanBetweenStops(from, to, 'gas')}
             onFindCamp={(from, to) => scanBetweenStops(from, to, 'camps', to.day ?? from.day, 'overnight')}
             onFindPlaces={(from, to) => scanBetweenStops(from, to, 'poi')}
+            onFindTours={(from, to) => scanBetweenStops(from, to, 'tours')}
           />
         )}
       </ScrollView>

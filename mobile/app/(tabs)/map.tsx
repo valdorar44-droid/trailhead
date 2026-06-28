@@ -9337,7 +9337,7 @@ function MapScreen() {
     };
   }
 
-  async function handleRouteScoutDayAction(plan: RouteScoutDayPlan, kind: RouteScoutDayActionKind) {
+  async function handleRouteScoutDayAction(plan: RouteScoutDayPlan, kind: RouteScoutDayActionKind, retryingLive = false) {
     const context = routeScoutLegContext(plan);
     const center = context.center ?? context.to;
     if (!routeScout || !center) {
@@ -9400,8 +9400,43 @@ function MapScreen() {
           radius: 55,
           limit: 8,
           source: 'viator',
-        }).catch(() => ({ results: [] as BookableExperience[], live_message: '' }));
+          q: [
+            context.from?.name,
+            context.to?.name,
+            routeScout.startName,
+            routeScout.destinationName,
+          ].filter(Boolean).join(' '),
+        }).catch(() => ({ results: [] as BookableExperience[], live_message: '', live_status: '' }));
         items = (response.results ?? []).slice(0, 8).map(routeScoutTourActionItem);
+        if (!items.length && response.live_status === 'processing') {
+          setRouteScoutDayAction({
+            day: plan.day,
+            kind,
+            loading: !retryingLive,
+            title: actionTitle,
+            subtitle: legLabel || 'Checking tour availability',
+            message: retryingLive ? 'Tours are still refreshing. Tap Tours again in a moment.' : (response.live_message || 'Tours are refreshing. Checking again.'),
+            items: [],
+          });
+          if (!retryingLive) {
+            setTimeout(() => {
+              handleRouteScoutDayAction(plan, kind, true).catch(() => {});
+            }, 7000);
+          }
+          return;
+        }
+        if (!items.length && response.live_message) {
+          setRouteScoutDayAction({
+            day: plan.day,
+            kind,
+            loading: false,
+            title: actionTitle,
+            subtitle: legLabel || null,
+            message: response.live_message,
+            items: [],
+          });
+          return;
+        }
       }
       setRouteScoutDayAction({
         day: plan.day,

@@ -1,7 +1,7 @@
 import { useCallback, useMemo, useState } from 'react';
-import type { CampsitePin, ExcursionCandidate, GasStation, OsmPoi } from '@/lib/api';
+import type { BookableExperience, CampsitePin, ExcursionCandidate, GasStation, OsmPoi } from '@/lib/api';
 
-export type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions';
+export type DiscoveryTab = 'camps' | 'gas' | 'poi' | 'excursions' | 'tours';
 
 export type LegSearchContext = {
   from: { lat: number; lng: number; name: string };
@@ -19,6 +19,7 @@ export type DiscoveryResults = {
   gas: GasStation[];
   pois: OsmPoi[];
   excursions: ExcursionCandidate[];
+  tours: BookableExperience[];
   summary: string;
 };
 
@@ -33,6 +34,7 @@ export const EMPTY_ROUTE_BUILDER_DISCOVERY_RESULTS: DiscoveryResults = {
   gas: [],
   pois: [],
   excursions: [],
+  tours: [],
   summary: '',
 };
 

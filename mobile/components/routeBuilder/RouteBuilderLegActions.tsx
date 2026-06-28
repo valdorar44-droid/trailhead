@@ -10,6 +10,7 @@ type RouteBuilderLegActionsProps = {
   onFindFuel: () => void;
   onFindCamp: () => void;
   onFindPlaces: () => void;
+  onFindTours: () => void;
 };
 
 export default function RouteBuilderLegActions({
@@ -20,6 +21,7 @@ export default function RouteBuilderLegActions({
   onFindFuel,
   onFindCamp,
   onFindPlaces,
+  onFindTours,
 }: RouteBuilderLegActionsProps) {
   const C = useTheme();
   const s = styles(C);
@@ -35,6 +37,7 @@ export default function RouteBuilderLegActions({
       <LegButton icon="flash-outline" label="FUEL" onPress={onFindFuel} />
       <LegButton icon="bonfire-outline" label="CAMP" onPress={onFindCamp} />
       <LegButton icon="trail-sign-outline" label="PLACE" onPress={onFindPlaces} />
+      <LegButton icon="ticket-outline" label="TOUR" onPress={onFindTours} />
     </View>
   );
 }
@@ -99,7 +102,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     marginTop: 1,
   },
   action: {
-    minWidth: 48,
+    minWidth: 42,
     minHeight: 34,
     borderRadius: 17,
     alignItems: 'center',
@@ -107,7 +110,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.orange + '12',
     borderWidth: 1,
     borderColor: C.orange + '35',
-    paddingHorizontal: 7,
+    paddingHorizontal: 6,
   },
   actionText: {
     color: C.orange,

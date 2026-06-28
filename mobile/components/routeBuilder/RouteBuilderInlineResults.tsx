@@ -30,6 +30,7 @@ type RouteBuilderInlineResultRowProps = {
   iconBorderColor: string;
   title: string;
   meta: string;
+  photoUrl?: string | null;
   metaLines?: number;
   trailingLabel?: string;
   trailingColor?: string;
@@ -111,6 +112,7 @@ export function RouteBuilderInlineResultRow({
   iconBorderColor,
   title,
   meta,
+  photoUrl,
   metaLines = 1,
   trailingLabel,
   trailingColor,
@@ -122,9 +124,13 @@ export function RouteBuilderInlineResultRow({
 
   return (
     <TouchableOpacity style={s.row} onPress={onPress} activeOpacity={0.86}>
-      <View style={[s.icon, { borderColor: iconBorderColor, backgroundColor: iconBackgroundColor }]}>
-        <Ionicons name={icon} size={16} color={iconColor} />
-      </View>
+      {photoUrl ? (
+        <Image source={{ uri: photoUrl }} style={s.rowPhoto} resizeMode="cover" />
+      ) : (
+        <View style={[s.icon, { borderColor: iconBorderColor, backgroundColor: iconBackgroundColor }]}>
+          <Ionicons name={icon} size={16} color={iconColor} />
+        </View>
+      )}
       <View style={s.rowBody}>
         <Text style={s.name} numberOfLines={1}>{title}</Text>
         <Text style={s.meta} numberOfLines={metaLines}>{meta}</Text>
@@ -235,6 +241,12 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  rowPhoto: {
+    width: 42,
+    height: 42,
+    borderRadius: 10,
+    backgroundColor: C.s2,
   },
   rowBody: {
     flex: 1,

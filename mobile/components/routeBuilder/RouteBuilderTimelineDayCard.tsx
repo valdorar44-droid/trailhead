@@ -20,6 +20,7 @@ type RouteBuilderTimelineDayCardProps = {
   onFindFuel: () => void;
   onFindPlaces: () => void;
   onFindSideTrips: () => void;
+  onFindTours: () => void;
 };
 
 export default function RouteBuilderTimelineDayCard({
@@ -39,6 +40,7 @@ export default function RouteBuilderTimelineDayCard({
   onFindFuel,
   onFindPlaces,
   onFindSideTrips,
+  onFindTours,
 }: RouteBuilderTimelineDayCardProps) {
   const C = useTheme();
   const s = styles(C);
@@ -84,6 +86,7 @@ export default function RouteBuilderTimelineDayCard({
           <DayAction icon="flash-outline" label="FUEL" onPress={onFindFuel} />
           <DayAction icon="trail-sign-outline" label="PLACES" onPress={onFindPlaces} />
           <DayAction icon="compass-outline" label="SIDE TRIPS" onPress={onFindSideTrips} />
+          <DayAction icon="ticket-outline" label="TOURS" onPress={onFindTours} />
         </View>
       </View>
     </TouchableOpacity>
@@ -234,11 +237,13 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   actionRail: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 9,
     marginTop: 'auto',
   },
   actionButton: {
-    flex: 1,
+    flexGrow: 1,
+    flexBasis: '30%',
     minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',

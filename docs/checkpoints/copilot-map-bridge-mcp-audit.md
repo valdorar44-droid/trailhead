@@ -37,6 +37,11 @@ Create a Trailhead-owned tool contract that bridges Co-Pilot, the mobile app, an
 - Added focused unit tests in `tests/test_copilot_tool_bridge.py`.
 - MCP adapter has a standalone `npm --prefix tools/trailhead-mcp run check` syntax check.
 - Broader validation target: `tests.test_copilot_tool_bridge`, `tests.test_extreme_explorer`, `tests.test_discovery_pack_bridge`, mobile TypeScript, and mobile API copy audit.
+- Production deployment `4c47628f-6bed-40ae-b305-1ee07afc2da7` passed bridge smoke tests on 2026-06-28:
+  - `/api/copilot/tools` returned contract `trailhead-copilot-tools-v1` with 7 tools.
+  - Direct production execution passed for all 7 bridge tools.
+  - Local MCP adapter was exercised through the MCP SDK stdio client and passed list/call tests for all 7 tools.
+  - Live provider paths returned expected compact results: Mapbox search/geocode/reverse/route/matrix and pack-backed discovery context.
 
 ## Next Checkpoint
 

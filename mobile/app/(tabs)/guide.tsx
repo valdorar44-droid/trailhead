@@ -1154,9 +1154,9 @@ export default function GuideScreen() {
         setWeatherLoading(false);
       });
     }
-  }, [activeTrip?.trip_id, weatherUnitMode]);
+  }, [activeTrip?.trip_id, activeTrip?.updated_at, weatherUnitMode]);
 
-  const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id]);
+  const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id, activeTrip?.updated_at]);
   const displayName = useMemo(() => (user?.username || 'Explorer').trim().split(/\s+/)[0] || 'Explorer', [user?.username]);
   const enrichedExplorePlaces = useMemo(() => (
     mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
@@ -1165,7 +1165,9 @@ export default function GuideScreen() {
   const heroHeight = Math.max(480, Math.min(560, Math.round(windowHeight * 0.58)));
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
+  const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
   const rankedExplore = useMemo(() => {
+    if (exploreMode === 'trip' && waypoints.length === 0) return [];
     const places = enrichedExplorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
         ? { lat: Number(place.summary.lat), lng: Number(place.summary.lng) }
@@ -1566,7 +1568,11 @@ export default function GuideScreen() {
 
   function showExploreOnMap(place: ExplorePlaceProfile) {
     const { lat, lng, title } = place.summary;
-    if (lat == null || lng == null) return;
+    if (lat == null || lng == null) {
+      const url = place.source_pack?.official_url || place.summary.source_url || place.facts?.source_url;
+      if (url) Linking.openURL(url).catch(() => {});
+      return;
+    }
     const photos = [
       ...(place.summary.image_url ? [{ url: mediaUrl(place.summary.image_url), source: place.attribution || place.source_pack?.primary }] : []),
       ...(place.summary.thumbnail_url ? [{ url: mediaUrl(place.summary.thumbnail_url), source: place.attribution || place.source_pack?.primary }] : []),
@@ -1632,7 +1638,10 @@ export default function GuideScreen() {
 
   function routeExplore(place: ExplorePlaceProfile) {
     const { lat, lng, title } = place.summary;
-    if (lat == null || lng == null) return;
+    if (lat == null || lng == null) {
+      showExploreOnMap(place);
+      return;
+    }
     setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: title });
     setSelectedExplore(null);
     router.push('/(tabs)/map');
@@ -1661,7 +1670,10 @@ export default function GuideScreen() {
   function showExploreTrailOnMap(place: ExplorePlaceProfile, trail: ExploreTrailCard) {
     const lat = trail.lat ?? place.summary.lat;
     const lng = trail.lng ?? place.summary.lng;
-    if (lat == null || lng == null) return;
+    if (lat == null || lng == null) {
+      if (trail.source_url) Linking.openURL(trail.source_url).catch(() => {});
+      return;
+    }
     const distance = Number.isFinite(trail.distance_mi) && trail.distance_mi > 0
       ? `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi`
       : 'Check distance';
@@ -1688,7 +1700,10 @@ export default function GuideScreen() {
     const target = trail.trekking_only && trail.route_target ? trail.route_target : null;
     const lat = target?.lat ?? trail.lat ?? place.summary.lat;
     const lng = target?.lng ?? trail.lng ?? place.summary.lng;
-    if (lat == null || lng == null) return;
+    if (lat == null || lng == null) {
+      if (trail.source_url) Linking.openURL(trail.source_url).catch(() => {});
+      return;
+    }
     setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: target?.name || trail.title });
     setSelectedExplore(null);
     router.push('/(tabs)/map');
@@ -2328,11 +2343,15 @@ export default function GuideScreen() {
               </>
             ) : !exploreLoading && rankedExplore.length === 0 && (!showExperienceSearch || (!exploreSearchExperienceLoading && exploreSearchExperiences.length === 0)) ? (
               <View style={s.emptyState}>
-                <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : 'search-outline'} size={44} color={C.text3} />
-                <Text style={s.emptyTitle}>{exploreSavedOnly ? 'No saved places yet' : 'No exact match'}</Text>
+                <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : exploreTripNeedsRoute ? 'map-outline' : 'search-outline'} size={44} color={C.text3} />
+                <Text style={s.emptyTitle}>
+                  {exploreSavedOnly ? 'No saved places yet' : exploreTripNeedsRoute ? 'No active trip' : 'No exact match'}
+                </Text>
                 <Text style={s.emptySub}>
                   {exploreSavedOnly
                     ? 'Save Explore cards to build a short list for your route.'
+                    : exploreTripNeedsRoute
+                      ? 'Open or build a route to rank Explore places around your trip stops.'
                     : 'Try camp, trail, viewpoint, waterfall, hut, fuel, tour, or hot spring.'}
                 </Text>
               </View>

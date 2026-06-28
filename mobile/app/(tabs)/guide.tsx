@@ -1096,19 +1096,32 @@ export default function GuideScreen() {
       return;
     }
     let cancelled = false;
-    setExploreSearchExperienceLoading(true);
-    setExploreSearchExperienceError('');
-    api.getExploreExperiences(userLoc?.lat, userLoc?.lng, userLoc ? 45 : 100, 'viator', 16, exploreQuery)
-      .then(res => {
-        if (!cancelled) setExploreSearchExperiences(res.results ?? []);
-      })
-      .catch(() => {
-        if (!cancelled) setExploreSearchExperienceError('Tours unavailable right now.');
-      })
-      .finally(() => {
-        if (!cancelled) setExploreSearchExperienceLoading(false);
-      });
-    return () => { cancelled = true; };
+    let retryTimer: ReturnType<typeof setTimeout> | null = null;
+    const loadTours = (retryingLive = false) => {
+      setExploreSearchExperienceLoading(true);
+      if (!retryingLive) setExploreSearchExperienceError('');
+      api.getExploreExperiences(userLoc?.lat, userLoc?.lng, userLoc ? 45 : 100, 'viator', 16, exploreQuery)
+        .then(res => {
+          if (cancelled) return;
+          const results = res.results ?? [];
+          setExploreSearchExperiences(results);
+          setExploreSearchExperienceError(results.length ? '' : res.live_message || '');
+          if (!retryingLive && results.length === 0 && res.live_status === 'processing') {
+            retryTimer = setTimeout(() => loadTours(true), 7000);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) setExploreSearchExperienceError('Tours unavailable right now.');
+        })
+        .finally(() => {
+          if (!cancelled) setExploreSearchExperienceLoading(false);
+        });
+    };
+    loadTours();
+    return () => {
+      cancelled = true;
+      if (retryTimer) clearTimeout(retryTimer);
+    };
   }, [tab, exploreCategory, exploreQuery, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
@@ -1682,7 +1695,11 @@ export default function GuideScreen() {
   }
 
   function showExperienceOnMap(experience: BookableExperience) {
-    if (experience.lat == null || experience.lng == null) return;
+    if (experience.lat == null || experience.lng == null) {
+      const url = experience.booking_url || experience.affiliate_url || experience.source_url;
+      if (url) Linking.openURL(url).catch(() => {});
+      return;
+    }
     setPendingMapSelection({
       kind: 'place',
       place: {
@@ -1701,7 +1718,12 @@ export default function GuideScreen() {
 
   function saveExperienceToPlanner(experience: BookableExperience) {
     if (!activeTrip) {
-      showExperienceOnMap(experience);
+      const url = experience.booking_url || experience.affiliate_url || experience.source_url;
+      if (url) {
+        Linking.openURL(url).catch(() => showExperienceOnMap(experience));
+      } else {
+        showExperienceOnMap(experience);
+      }
       return;
     }
     const waypoint = {
@@ -1784,12 +1806,10 @@ export default function GuideScreen() {
 
   function handleExploreNearbyAction(place: ExplorePlaceProfile, module: ExploreNearbyModule) {
     if (module.action === 'weather') {
-      setProfileReadMode('summary');
       fetchExploreWeather(place);
       return;
     }
     if (module.action === 'trails') {
-      setProfileReadMode('summary');
       if (!hasExploreTrailCards(place)) hydrateExploreTrailArea(place, true).catch(() => {});
       return;
     }
@@ -2176,6 +2196,8 @@ export default function GuideScreen() {
               onCategorySelect={selectExploreHomeCategory}
               onClearCategory={() => setExploreCategory('all')}
               onClearSaved={() => setExploreSavedOnly(false)}
+              onShowMore={visibleRankedExplore.length < rankedExplore.length ? () => setExploreVisibleLimit(limit => limit + EXPLORE_VISIBLE_STEP) : undefined}
+              onSourcePress={() => setExploreSortMode(current => current === 'source' ? 'best' : 'source')}
               onSortCycle={cycleExploreSortMode}
             />
 

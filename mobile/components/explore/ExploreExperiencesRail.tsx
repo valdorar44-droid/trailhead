@@ -21,9 +21,9 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.top}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.label, { color: C.orange }]}>PARTNER EXPERIENCES</Text>
+          <Text style={[styles.label, { color: C.orange }]}>TOURS & ACTIVITIES</Text>
           <Text style={[styles.sub, { color: C.text3 }]}>
-            {experiences.length ? `${experiences.length} external checkout option${experiences.length === 1 ? '' : 's'} nearby` : 'External checkout options near this area'}
+            {experiences.length ? `${experiences.length} bookable option${experiences.length === 1 ? '' : 's'} nearby` : 'Bookable options near this area'}
           </Text>
         </View>
         {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="ticket-outline" size={23} color={C.orange} />}
@@ -39,6 +39,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
           {experiences.slice(0, 12).map(experience => {
             const url = experience.booking_url || experience.affiliate_url || experience.source_url || '';
             const image = experience.hero_image_url || experience.images?.find(item => !!item.url)?.url || '';
+            const hasCoords = Number.isFinite(Number(experience.lat)) && Number.isFinite(Number(experience.lng));
             return (
               <View key={experience.id} style={[styles.card, { borderColor: C.border, backgroundColor: C.s2 }]}>
                 <View style={styles.imageWrap}>
@@ -64,10 +65,10 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
                       style={[styles.bookButton, { backgroundColor: C.orange, opacity: url ? 1 : 0.55 }]}
                       disabled={!url}
                       onPress={() => url && Linking.openURL(url)}
-                      accessibilityLabel={`Checkout with partner for ${experience.title}`}
+                      accessibilityLabel={`Open booking for ${experience.title}`}
                     >
                       <Ionicons name="open-outline" size={15} color="#fff" />
-                      <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Checkout with Partner</Text>
+                      <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Open Booking</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.iconButton, { borderColor: C.border }]}
@@ -77,11 +78,12 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
                       <Ionicons name="add-circle-outline" size={17} color={C.text2} />
                     </TouchableOpacity>
                     <TouchableOpacity
-                      style={[styles.iconButton, { borderColor: C.border }]}
+                      style={[styles.iconButton, { borderColor: C.border, opacity: hasCoords ? 1 : 0.45 }]}
+                      disabled={!hasCoords}
                       onPress={() => onShowArea?.(experience)}
-                      accessibilityLabel={`Show ${experience.title} area on map`}
+                      accessibilityLabel={hasCoords ? `Show ${experience.title} area on map` : `Map unavailable for ${experience.title}`}
                     >
-                      <Ionicons name="map-outline" size={17} color={C.text2} />
+                      <Ionicons name="map-outline" size={17} color={hasCoords ? C.text2 : C.text3} />
                     </TouchableOpacity>
                   </View>
                 </View>
@@ -92,7 +94,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
       ) : loading ? (
         <TrailheadRailSkeleton count={3} cardWidth={224} />
       ) : null}
-      <Text style={[styles.attribution, { color: C.text3 }]}>Trailhead may earn when you checkout with a partner. Availability and payment happen on partner sites.</Text>
+      <Text style={[styles.attribution, { color: C.text3 }]}>Trailhead may earn from booking links. Availability and payment happen on the booking site.</Text>
     </View>
   );
 }

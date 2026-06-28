@@ -19,6 +19,8 @@ type Props = {
   onCategorySelect: (key: ExploreCategoryKey) => void;
   onClearCategory: () => void;
   onClearSaved: () => void;
+  onShowMore?: () => void;
+  onSourcePress?: () => void;
   onSortCycle: () => void;
 };
 
@@ -32,6 +34,8 @@ export function ExploreHomeControls({
   onCategorySelect,
   onClearCategory,
   onClearSaved,
+  onShowMore,
+  onSourcePress,
   onSortCycle,
 }: Props) {
   const C = useTheme();
@@ -46,6 +50,8 @@ export function ExploreHomeControls({
         countLabel={countLabel}
         sourceLabel="Official + community"
         sortLabel={sortLabel}
+        onCountPress={onShowMore}
+        onSourcePress={onSourcePress}
         onSortPress={onSortCycle}
       />
       {category !== 'all' ? (

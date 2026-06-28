@@ -18949,8 +18949,8 @@ def _filter_experiences_by_query(experiences: list[dict], q: str = "") -> list[d
     return [item for item in experiences if all(term in _experience_query_text(item) for term in query_terms)]
 
 
-def _experience_response(source: str, results: list[dict], place_id: str = "", cache_status: str = "fresh") -> dict:
-    return {
+def _experience_response(source: str, results: list[dict], place_id: str = "", cache_status: str = "fresh", **extra) -> dict:
+    payload = {
         "source": source or "viator",
         "place_id": place_id,
         "results": results,
@@ -18958,6 +18958,8 @@ def _experience_response(source: str, results: list[dict], place_id: str = "", c
         "attribution": "Tours and experiences sourced from Viator.",
         "cache_status": cache_status,
     }
+    payload.update(extra)
+    return payload
 
 
 @app.get("/api/explore/places/{place_id}/experiences")
@@ -18982,14 +18984,37 @@ async def explore_place_experiences(place_id: str, source: str = "viator", limit
 @app.get("/api/explore/experiences")
 async def explore_experiences(lat: float | None = None, lng: float | None = None, radius: float = 30, source: str = "viator", limit: int = 20, q: str = ""):
     payload = _load_explore_experiences()
+    result_limit = max(1, min(int(limit or 20), 50))
     experiences = [
         item for item in payload.get("experiences") or []
         if source in {"", "all"} or str(item.get("source") or "").lower() == source.lower()
     ]
     experiences = _filter_experiences_by_query(experiences, q)
     nearby = _experience_distance_filter(experiences, lat, lng, max(1.0, min(float(radius or 30), 100.0)))
-    ranked = rank_experiences(nearby, lat=lat, lng=lng)[:max(1, min(int(limit or 20), 50))]
-    return _experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty")
+    ranked = rank_experiences(nearby, lat=lat, lng=lng)[:result_limit]
+    points: list[dict] = []
+    if lat is not None and lng is not None:
+        try:
+            points.append({"lat": float(lat), "lng": float(lng), "name": q.strip() or "Explore search", "leg_index": 0})
+        except Exception:
+            points = []
+    live_ranked, live_meta = _viator_live_results_for_points(points, source, q, result_limit, existing_count=len(ranked))
+    if live_ranked:
+        existing = {str(item.get("id") or item.get("source_id") or item.get("title")) for item in ranked}
+        for item in live_ranked:
+            key = str(item.get("id") or item.get("source_id") or item.get("title"))
+            if key in existing:
+                continue
+            ranked.append(item)
+            existing.add(key)
+            if len(ranked) >= result_limit:
+                break
+    return _experience_response(
+        source,
+        ranked,
+        cache_status="fresh" if payload.get("generated_at") else "empty",
+        **live_meta,
+    )
 
 class RouteTourAnchor(BaseModel):
     lat: float
@@ -19250,6 +19275,79 @@ def _live_viator_route_suggestions(
         ),
     )[:max(1, min(int(limit or 8), 24))]
     return ranked, statuses
+
+
+def _viator_live_results_for_points(points: list[dict], source: str, q: str, limit: int, *, existing_count: int = 0) -> tuple[list[dict], dict]:
+    client = ViatorClient(viator_config_from_env())
+    source_key = str(source or "viator").lower()
+    meta = {
+        "live_enabled": client.ready(),
+        "live_status": "disabled",
+        "live_message": "",
+        "provider_status": [],
+    }
+    if source_key not in {"", "all", "viator"}:
+        return [], meta
+    max_results = max(1, min(int(limit or 8), 24))
+    if existing_count >= max_results:
+        meta["live_status"] = "not_needed"
+        return [], meta
+    if not client.ready():
+        return [], meta
+    if not points and not str(q or "").strip():
+        meta["live_status"] = "idle"
+        return [], meta
+
+    live_limit = max(1, max_results - existing_count)
+    cache_key = _viator_route_cache_key(points, q or "")
+    cached_live = _fresh_viator_route_cache(cache_key)
+    if cached_live:
+        meta.update({
+            "live_status": "cache_hit",
+            "live_message": "Live tours updated.",
+            "provider_status": [
+                {
+                    "status": "cache_hit",
+                    "endpoint": "viator_route_live_cache",
+                    "fetched_at": cached_live.get("fetched_at"),
+                    "expires_at": cached_live.get("expires_at"),
+                },
+                *(cached_live.get("provider_status") or []),
+            ],
+        })
+        return list(cached_live.get("results") or [])[:live_limit], meta
+
+    queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(max_results, 8)), q=q or "")
+    job = _viator_route_live_jobs.get(cache_key) or {}
+    recent_error = _viator_route_live_cache.get(cache_key)
+    if not queued and recent_error and recent_error.get("status") in {"error", "provider_error", "timeout"}:
+        meta.update({
+            "live_status": "provider_error",
+            "live_message": "Tours are temporarily unavailable.",
+            "provider_status": [
+                {
+                    "status": str(recent_error.get("status") or "provider_error"),
+                    "endpoint": "viator_background_refresh",
+                    "fetched_at": recent_error.get("fetched_at"),
+                    "expires_at": recent_error.get("expires_at"),
+                },
+                *(recent_error.get("provider_status") or []),
+            ],
+        })
+        return [], meta
+
+    meta.update({
+        "live_status": "processing",
+        "live_message": "Tours are refreshing. Checking again.",
+        "provider_status": [{
+            "status": "queued" if queued else str(job.get("status") or "processing"),
+            "endpoint": "viator_background_refresh",
+            "provider_message": "Viator refresh is running in the background.",
+            "fetched_at": int(time.time()),
+        }],
+    })
+    return [], meta
+
 
 @app.post("/api/tours/route")
 async def route_tour_suggestions(body: RouteTourRequest):

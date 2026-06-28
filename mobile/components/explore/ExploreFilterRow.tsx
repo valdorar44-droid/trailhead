@@ -32,20 +32,34 @@ export function ExploreFilterRow({
   ];
   return (
     <View style={styles.row}>
-      {items.map(item => (
-        <TouchableOpacity
-          key={item.label}
-          style={[styles.pill, { flex: item.flex, borderColor: C.border, backgroundColor: C.s1 }]}
-          activeOpacity={0.78}
-          onPress={item.onPress}
-          disabled={!item.onPress}
-          accessibilityLabel={item.accessibilityLabel}
-          accessibilityRole={item.onPress ? 'button' : undefined}
-        >
-          <Ionicons name={item.icon as any} size={16} color={C.text3} />
-          <Text style={[styles.label, { color: C.text3 }]} numberOfLines={1}>{item.label}</Text>
-        </TouchableOpacity>
-      ))}
+      {items.map(item => {
+        const content = (
+          <>
+            <Ionicons name={item.icon as any} size={16} color={C.text3} />
+            <Text style={[styles.label, { color: C.text3 }]} numberOfLines={1}>{item.label}</Text>
+          </>
+        );
+        const style = [styles.pill, { flex: item.flex, borderColor: C.border, backgroundColor: C.s1 }];
+        if (!item.onPress) {
+          return (
+            <View key={item.label} style={style} accessibilityLabel={item.accessibilityLabel}>
+              {content}
+            </View>
+          );
+        }
+        return (
+          <TouchableOpacity
+            key={item.label}
+            style={style}
+            activeOpacity={0.78}
+            onPress={item.onPress}
+            accessibilityLabel={item.accessibilityLabel}
+            accessibilityRole="button"
+          >
+            {content}
+          </TouchableOpacity>
+        );
+      })}
     </View>
   );
 }

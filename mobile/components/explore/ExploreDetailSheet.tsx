@@ -446,6 +446,25 @@ export function ExploreDetailSheet({
     return Number.isFinite(lat) && Number.isFinite(lng);
   };
 
+  const mapRadiusMi = exploreMapRadiusMi(place);
+  const parentLat = Number(place.summary.lat);
+  const parentLng = Number(place.summary.lng);
+  const hasParentCoords = Number.isFinite(parentLat) && Number.isFinite(parentLng);
+  const itemDistanceFromParent = (item?: ExploreSourcePackItem | null) => {
+    if (!itemHasCoords(item) || !hasParentCoords) return null;
+    return haversineMiles(parentLat, parentLng, Number(item?.lat), Number(item?.lng));
+  };
+  const itemCanRenderOnMap = (item?: ExploreSourcePackItem | null, active = false) => {
+    if (!itemHasCoords(item)) return false;
+    if (active) return true;
+    if (item?.map_hidden) return false;
+    const explicitDistance = Number(item?.distance_mi);
+    if (Number.isFinite(explicitDistance) && explicitDistance > mapRadiusMi) return false;
+    const measuredDistance = itemDistanceFromParent(item);
+    if (measuredDistance != null && measuredDistance > mapRadiusMi) return false;
+    return true;
+  };
+
   const moduleItems = (key: ExploreDetailModuleKey): ExploreSourcePackItem[] => {
     if (key === 'see') return filteredItems(pack?.things_to_see);
     if (key === 'do') return filteredItems(pack?.things_to_do);
@@ -459,7 +478,7 @@ export function ExploreDetailSheet({
         ...(pack?.campgrounds ?? []),
         ...(pack?.visitor_centers ?? []),
         ...(pack?.parking_lots ?? []),
-      ].filter(item => itemHasCoords(item));
+      ].filter(item => itemCanRenderOnMap(item));
     }
     return [];
   };
@@ -570,10 +589,8 @@ export function ExploreDetailSheet({
     onPress?: () => void;
     height?: number;
   }) {
-    const baseLat = Number(activeItem?.lat ?? place.summary.lat);
-    const baseLng = Number(activeItem?.lng ?? place.summary.lng);
     const childPins: StaticMapboxPin[] = items
-      .filter(itemHasCoords)
+      .filter(item => itemCanRenderOnMap(item))
       .map((item, idx) => ({
         id: String(item.source_id || item.title || idx),
         title: item.title || 'Place',
@@ -592,7 +609,7 @@ export function ExploreDetailSheet({
         active: !activeItem,
       }] : []),
       ...childPins,
-      ...(activeItem && itemHasCoords(activeItem) && !childPins.some(pin => pin.id === String(activeItem.source_id || activeItem.title)) ? [{
+      ...(activeItem && itemCanRenderOnMap(activeItem, true) && !childPins.some(pin => pin.id === String(activeItem.source_id || activeItem.title)) ? [{
         id: 'active',
         title: activeItem.title || 'Place',
         lat: Number(activeItem.lat),
@@ -601,12 +618,9 @@ export function ExploreDetailSheet({
         active: true,
       }] : []),
     ].filter(pin => Number.isFinite(pin.lat) && Number.isFinite(pin.lng));
-    const fallbackLat = Number.isFinite(baseLat) ? baseLat : 0;
-    const fallbackLng = Number.isFinite(baseLng) ? baseLng : 0;
-    const coordPins = pins.length ? pins : [{ id: 'fallback', title, lat: fallbackLat, lng: fallbackLng, kind: 'place', active: true }];
     return (
       <StaticMapboxPreview
-        pins={coordPins}
+        pins={pins}
         title={title}
         subtitle={subtitle}
         height={height}
@@ -617,7 +631,7 @@ export function ExploreDetailSheet({
 
   function renderModuleHero(module: ExploreDetailModule) {
     const items = moduleItems(module.key);
-    const mappedCount = items.filter(itemHasCoords).length;
+    const mappedCount = items.filter(item => itemCanRenderOnMap(item)).length;
     return (
       <View style={styles.moduleMapHero}>
         {renderMapPreview({
@@ -1269,6 +1283,23 @@ function sourceBodyForPlace(place: ExplorePlaceProfile) {
 function sourcePublisherLabel(primary: string) {
   if (/wiki/i.test(primary)) return 'CURATED';
   return primary.toUpperCase();
+}
+
+function exploreMapRadiusMi(place: ExplorePlaceProfile) {
+  const hay = `${place.category ?? ''} ${place.summary.category ?? ''} ${place.summary.explore_group ?? ''}`.toLowerCase();
+  if (/park|public|land|forest|wilderness|glacier/.test(hay)) return 90;
+  if (/camp|trail|water|lake|view|overlook|fall|peak|climb/.test(hay)) return 45;
+  return 60;
+}
+
+function haversineMiles(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const radiusMi = 3958.7613;
+  const toRad = (value: number) => value * Math.PI / 180;
+  const dLat = toRad(lat2 - lat1);
+  const dLng = toRad(lng2 - lng1);
+  const a = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * radiusMi * Math.asin(Math.min(1, Math.sqrt(a)));
 }
 
 const styles = StyleSheet.create({

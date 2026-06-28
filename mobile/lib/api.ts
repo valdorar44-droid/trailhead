@@ -3314,6 +3314,9 @@ export interface ExploreSourcePackItem {
   location?: string;
   category?: string;
   tags?: string[];
+  distance_mi?: number;
+  map_hidden?: boolean;
+  map_hidden_reason?: string;
 }
 export interface ExploreCatalog {
   schema_version: number;

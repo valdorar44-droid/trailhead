@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from .normalize import compact_text
+from .content_quality import clean_description
 from .schema import ExplorePlaceV3
 
 
@@ -58,7 +58,14 @@ def source_badge(place: ExplorePlaceV3) -> str:
 
 def build_card(place: ExplorePlaceV3) -> ExplorePlaceV3:
     fallback = CATEGORY_FALLBACKS.get(place.category, "Mapped outdoor place; verify access, current conditions, and local rules before relying on it.")
-    summary = compact_text(place.summary or place.description or fallback)
+    region = place.region or place.admin or place.country or "the area"
+    summary = clean_description(
+        place.summary or place.description or fallback,
+        title=place.name or "Explore stop",
+        category=place.category,
+        group="",
+        region=region,
+    )
     facts = []
     if place.category:
         facts.append(place.category.replace("_", " ").title())
@@ -82,7 +89,13 @@ def build_card(place: ExplorePlaceV3) -> ExplorePlaceV3:
     if not place.summary:
         place.summary = summary
     if not place.description:
-        place.description = fallback
+        place.description = clean_description(
+            fallback,
+            title=place.name or "Explore stop",
+            category=place.category,
+            group="",
+            region=region,
+        )
     return place
 
 

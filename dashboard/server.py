@@ -37,6 +37,8 @@ from dashboard.water_routing_provider import route_with_water_graph, water_graph
 from scripts.explore_sources.travel.ranking import rank_experiences
 from scripts.explore_sources.travel.viator.client import ViatorClient, config_from_env as viator_config_from_env
 from scripts.explore_sources.travel.viator.normalize_viator import normalize_viator_products
+from scripts.explore_sources.base.content_quality import clean_description as clean_explore_description
+from scripts.explore_sources.base.content_quality import sanitize_place_profile
 from scripts.explore_sources.offers.disclosure import (
     PARTNER_BOOKING_DISCLOSURE_KIND,
     PARTNER_BOOKING_DISCLOSURE_LABEL,
@@ -714,7 +716,13 @@ def _v3_source_pack_child_item(place: dict, *, kind: str, distance_mi: float) ->
         or "Open source"
     )
     source_url = source_pack.get("official_url") or primary_source.get("url") or primary_source.get("source_url") or ""
-    description = str(place.get("description") or place.get("summary") or "").strip()
+    description = clean_explore_description(
+        place.get("description") or place.get("summary") or "",
+        title=title,
+        category=place.get("category") or kind,
+        group=kind,
+        region=place.get("region") or place.get("admin") or place.get("country") or "the area",
+    )
     lat, lng = _v3_lat_lng(place)
     return {
         "kind": kind,
@@ -834,8 +842,20 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
     category = str(place.get("category") or "explore").strip()
     category_title = _title_case_category(category)
     region = str(place.get("region") or place.get("admin") or place.get("country") or "").strip()
-    summary_text = str(place.get("summary") or place.get("description") or "").strip()
-    description = str(place.get("description") or summary_text or f"{title} is mapped from open source data.").strip()
+    summary_text = clean_explore_description(
+        place.get("summary") or place.get("description") or "",
+        title=title,
+        category=category,
+        group=_v3_explore_group(category),
+        region=region,
+    )
+    description = clean_explore_description(
+        place.get("description") or summary_text or f"{title} is mapped from open source data.",
+        title=title,
+        category=category,
+        group=_v3_explore_group(category),
+        region=region,
+    )
     tags = [str(tag) for tag in (place.get("tags") or []) if str(tag).strip()]
     card = place.get("card") if isinstance(place.get("card"), dict) else {}
     primary_source = _v3_primary_source(place)
@@ -862,7 +882,13 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         lat_value = None
         lng_value = None
     hook = str(card.get("headline") or title).strip()
-    card_summary = str(card.get("summary") or summary_text or description).strip()
+    card_summary = clean_explore_description(
+        card.get("summary") or summary_text or description,
+        title=title,
+        category=category,
+        group=_v3_explore_group(category),
+        region=region,
+    )
     quick_facts = [str(item) for item in (card.get("quick_facts") or []) if str(item).strip()]
     source_pack_sources = []
     for source in place.get("sources") or []:
@@ -904,7 +930,7 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         "booking_url": (place.get("reservations") or {}).get("url") if isinstance(place.get("reservations"), dict) else "",
         "license": primary_source.get("license") or existing_source_pack.get("license") or "",
     }
-    return {
+    profile = {
         "id": place_id,
         "category": category,
         "subcategories": place.get("subcategories") or [],
@@ -977,6 +1003,7 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         },
         "attribution": primary_source.get("attribution") or source_title,
     }
+    return sanitize_place_profile(profile)
 
 
 def _load_explore_catalog_v3_profiles() -> list[dict]:
@@ -1066,6 +1093,14 @@ def _merge_explore_sidecar_enrichment(base: dict, sidecar: dict) -> dict:
     return enriched
 
 
+def _sanitize_explore_catalog(catalog: dict) -> dict:
+    places = []
+    for place in catalog.get("places") or []:
+        if isinstance(place, dict):
+            places.append(sanitize_place_profile(place))
+    return {**catalog, "places": places, "count": len(places)}
+
+
 def _load_explore_catalog() -> dict:
     if EXPLORE_CATALOG.exists():
         try:
@@ -1102,10 +1137,10 @@ def _load_explore_catalog() -> dict:
                 "count": len(places),
                 "places": places,
             }
-            return _apply_explore_story_overrides(merged)
+            return _sanitize_explore_catalog(_apply_explore_story_overrides(merged))
         except Exception:
             pass
-    return _apply_explore_story_overrides({
+    return _sanitize_explore_catalog(_apply_explore_story_overrides({
         "schema_version": 1,
         "catalog_id": "explore-us-top-v1",
         "name": "Trailhead Featured Explore",
@@ -1113,7 +1148,7 @@ def _load_explore_catalog() -> dict:
         "source": "Fallback catalog",
         "future_pack_compatible": True,
         "places": [],
-    })
+    }))
 
 def _apply_explore_story_overrides(catalog: dict) -> dict:
     overrides = get_explore_story_overrides()

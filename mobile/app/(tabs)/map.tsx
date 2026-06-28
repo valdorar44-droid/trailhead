@@ -12912,6 +12912,18 @@ function MapScreen() {
     await startCopilotVoice('push_to_talk');
   }
 
+  function handleTrailGuideDockPress() {
+    openTrailGuideSheet();
+  }
+
+  function handleTrailGuideDockLongPress() {
+    if (extremeConfig?.copilot?.voice_enabled && !extremeCopilotVoiceBusy) {
+      toggleCopilotVoice();
+      return;
+    }
+    openTrailGuideSheet();
+  }
+
   function openTrailGuideSheet() {
     setShowExtremeCopilot(true);
     if (extremeCopilotMessages.length === 0) {
@@ -22275,17 +22287,10 @@ function MapScreen() {
             style={s.extremeCopilotFab}
             activeOpacity={0.88}
             delayLongPress={320}
-            onLongPress={openTrailGuideSheet}
-            onPress={() => {
-              if (extremeConfig?.copilot?.voice_enabled) {
-                toggleCopilotVoice();
-              } else {
-                openTrailGuideSheet();
-              }
-            }}
-            disabled={extremeCopilotVoiceBusy}
-            accessibilityLabel={extremeCopilotVoiceActive ? 'Stop Co-Pilot microphone' : 'Start Co-Pilot microphone'}
-            accessibilityHint="Long press to open text Copilot."
+            onLongPress={handleTrailGuideDockLongPress}
+            onPress={handleTrailGuideDockPress}
+            accessibilityLabel="Open Co-Pilot"
+            accessibilityHint={extremeConfig?.copilot?.voice_enabled ? 'Long press to start or stop Co-Pilot voice.' : 'Opens text Co-Pilot.'}
           >
             <TrailGuideAvatar state={trailGuideAvatarState} colors={C} label={trailGuideDockLabel} />
           </TouchableOpacity>

@@ -646,22 +646,21 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertIn("filler", instructions)
         self.assertIn("silence", instructions)
         self.assertIn("do not answer", instructions)
-        self.assertIn("trailhead_tool", instructions)
-        self.assertIn("read-only", instructions)
+        self.assertIn("map_action", instructions)
+        self.assertIn("campground searches", instructions)
         self.assertGreaterEqual(turn_detection["threshold"], 0.9)
         self.assertGreaterEqual(turn_detection["silence_duration_ms"], 1400)
         self.assertLessEqual(turn_detection["prefix_padding_ms"], 300)
 
-    def test_copilot_realtime_exposes_map_and_trailhead_tools(self):
+    def test_copilot_realtime_exposes_only_map_action_for_voice(self):
         tools = _copilot_realtime_tools()
         names = {tool["name"] for tool in tools}
-        trailhead = next(tool for tool in tools if tool["name"] == "trailhead_tool")
+        map_action = next(tool for tool in tools if tool["name"] == "map_action")
 
-        self.assertIn("map_action", names)
-        self.assertIn("trailhead_tool", names)
-        self.assertIn("trailhead.search_places", trailhead["parameters"]["properties"]["tool"]["enum"])
-        self.assertIn("trailhead.discovery_context", trailhead["parameters"]["properties"]["tool"]["enum"])
-        self.assertEqual(trailhead["parameters"]["required"], ["tool", "args"])
+        self.assertEqual(names, {"map_action"})
+        self.assertIn("searchPlaces", map_action["parameters"]["properties"]["action_type"]["enum"])
+        self.assertIn("flyToPlace", map_action["parameters"]["properties"]["action_type"]["enum"])
+        self.assertEqual(map_action["parameters"]["required"], ["action_type", "args", "requires_confirmation"])
 
     def test_copilot_confirmation_updates_staged_action(self):
         uid = store.create_user("confirm@example.com", "confirmuser", "hash", "confirm-code")

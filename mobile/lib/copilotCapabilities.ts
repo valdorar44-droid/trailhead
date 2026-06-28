@@ -37,6 +37,19 @@ export type TrailheadRouteBuilderDraftStop = {
   source?: string;
 };
 
+export type TrailheadRouteScoutDraftDayPlan = {
+  day: number;
+  title?: string;
+  status?: string;
+  driveSummary?: string;
+  startName?: string;
+  endName?: string;
+  campName?: string | null;
+  campStatus?: string;
+  campMeta?: string | null;
+  reviewNotes?: string[];
+};
+
 export type TrailheadRouteScoutDraftSummary = {
   status?: string;
   message?: string;
@@ -46,6 +59,7 @@ export type TrailheadRouteScoutDraftSummary = {
   missingDays?: number[];
   lockedStopCount?: number;
   stopCount?: number;
+  dayPlans?: TrailheadRouteScoutDraftDayPlan[];
   generatedAt?: number;
 };
 
@@ -138,6 +152,7 @@ function normalizeRouteStyle(value: unknown): RouteStyleMode | undefined {
 function normalizeCampPreference(value: unknown): CopilotCampPreference | undefined {
   const clean = String(value || '').trim().toLowerCase();
   if (clean === 'private' || clean === 'rv' || clean === 'developed' || clean === 'any') return clean;
+  if (clean === 'established' || clean === 'campground' || clean === 'campgrounds' || clean === 'official') return 'developed';
   if (clean === 'public' || clean === 'primitive' || clean === 'dispersed' || clean === 'blm' || clean === 'usfs' || clean === 'federal') return 'public';
   return undefined;
 }
@@ -153,6 +168,32 @@ function cleanScoutSummary(value: unknown): TrailheadRouteScoutDraftSummary | un
   const cleanDays = (days: unknown) => Array.isArray(days)
     ? days.map(Number).filter(Number.isFinite).map(day => Math.max(1, Math.min(30, Math.round(day)))).slice(0, 30)
     : undefined;
+  const cleanDayPlans: TrailheadRouteScoutDraftDayPlan[] | undefined = Array.isArray(input.dayPlans)
+    ? input.dayPlans
+        .reduce<TrailheadRouteScoutDraftDayPlan[]>((items, item) => {
+          if (!item || typeof item !== 'object') return items;
+          const plan = item as Record<string, unknown>;
+          const day = Number(plan.day);
+          if (!Number.isFinite(day)) return items;
+          const notes = Array.isArray(plan.reviewNotes)
+            ? plan.reviewNotes.map(note => String(note || '').trim()).filter(Boolean).slice(0, 4)
+            : undefined;
+          items.push({
+            day: Math.max(1, Math.min(30, Math.round(day))),
+            title: typeof plan.title === 'string' ? plan.title.slice(0, 80) : undefined,
+            status: typeof plan.status === 'string' ? plan.status.slice(0, 40) : undefined,
+            driveSummary: typeof plan.driveSummary === 'string' ? plan.driveSummary.slice(0, 80) : undefined,
+            startName: typeof plan.startName === 'string' ? plan.startName.slice(0, 120) : undefined,
+            endName: typeof plan.endName === 'string' ? plan.endName.slice(0, 120) : undefined,
+            campName: typeof plan.campName === 'string' ? plan.campName.slice(0, 160) : null,
+            campStatus: typeof plan.campStatus === 'string' ? plan.campStatus.slice(0, 40) : undefined,
+            campMeta: typeof plan.campMeta === 'string' ? plan.campMeta.slice(0, 180) : null,
+            reviewNotes: notes,
+          });
+          return items;
+        }, [])
+        .slice(0, 30)
+    : undefined;
   return {
     status: typeof input.status === 'string' ? input.status.slice(0, 40) : undefined,
     message: typeof input.message === 'string' ? input.message.slice(0, 700) : undefined,
@@ -162,6 +203,7 @@ function cleanScoutSummary(value: unknown): TrailheadRouteScoutDraftSummary | un
     missingDays: cleanDays(input.missingDays),
     lockedStopCount: Number.isFinite(lockedStopCount) ? Math.max(0, Math.round(lockedStopCount)) : undefined,
     stopCount: Number.isFinite(stopCount) ? Math.max(0, Math.round(stopCount)) : undefined,
+    dayPlans: cleanDayPlans,
     generatedAt: Number.isFinite(generatedAt) ? generatedAt : undefined,
   };
 }

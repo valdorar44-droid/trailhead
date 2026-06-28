@@ -8297,7 +8297,18 @@ def extreme_route_scout_windows(body: RouteScoutWindowPlanRequest, user: dict = 
     if total_miles <= 0:
         raise HTTPException(400, "Route distance is required for Route Scout windows")
     safe_days = max(2, min(30, int(round(float(body.days or 2)))))
-    windows = _route_scout_window_plan(safe_days, total_miles)
+    destination = str((body.metadata or {}).get("destination") or "").strip()
+    include_destination_camp = bool(
+        (body.metadata or {}).get("include_destination_camp") is True
+        or (body.metadata or {}).get("destination_camp") is True
+        or destination
+    )
+    windows = _route_scout_window_plan(
+        safe_days,
+        total_miles,
+        include_destination_camp=include_destination_camp,
+        destination=destination,
+    )
     clean_session = _clean_extreme_session_id(body.session_id)
     trip_id = (body.trip_id or "").strip()[:120] or None
     ledger_id = log_extreme_ledger_event(
@@ -8312,6 +8323,7 @@ def extreme_route_scout_windows(body: RouteScoutWindowPlanRequest, user: dict = 
             "days": safe_days,
             "window_count": len(windows),
             "route_style": str(body.route_style or "balanced")[:40],
+            "include_destination_camp": include_destination_camp,
         },
     )
     return {
@@ -8321,7 +8333,7 @@ def extreme_route_scout_windows(body: RouteScoutWindowPlanRequest, user: dict = 
         "days": safe_days,
         "drive_hours": body.drive_hours,
         "route_style": str(body.route_style or "balanced")[:40],
-        "policy": "route_scout_windows_v1",
+        "policy": "route_scout_windows_v2",
         "windows": windows,
         "ledger_id": ledger_id,
     }
@@ -13914,7 +13926,14 @@ def _route_points_from_any(route: object, limit: int = 400) -> list[dict]:
             points.append(point)
     return points
 
-def _route_scout_window_plan(days: int, total_miles: float) -> list[dict]:
+def _route_scout_destination_window_label(day: int, destination: str = "") -> str:
+    clean_destination = re.sub(r"\s+", " ", str(destination or "")).strip()
+    if clean_destination:
+        return f"Day {day} {clean_destination} camp"
+    return f"Day {day} destination camp"
+
+
+def _route_scout_window_plan(days: int, total_miles: float, include_destination_camp: bool = False, destination: str = "") -> list[dict]:
     safe_days = max(2, min(30, int(round(float(days or 2)))))
     total = max(0.1, float(total_miles or 0))
     overnight_count = max(1, safe_days - 1)
@@ -13931,6 +13950,17 @@ def _route_scout_window_plan(days: int, total_miles: float) -> list[dict]:
             "label": f"Day {day} overnight",
             "target_mi": round(target, 2),
             "search_window_mi": round(search_window, 2),
+        })
+    if include_destination_camp and not any(int(window.get("day") or 0) == safe_days for window in windows):
+        search_window = max(18.0, min(55.0, day_span * 0.45))
+        windows.append({
+            "day": safe_days,
+            "start": round(max(0.0, total - search_window), 2),
+            "end": round(total, 2),
+            "label": _route_scout_destination_window_label(safe_days, destination),
+            "target_mi": round(total, 2),
+            "search_window_mi": round(search_window, 2),
+            "window_kind": "destination_camp",
         })
     return windows
 
@@ -13997,7 +14027,13 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
     style_raw = str(route_style or "balanced").lower()
     style = "wild" if style_raw in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else style_raw
     preference_raw = str(camp_preference or "public").lower()
-    preference = "public" if preference_raw in {"primitive", "dispersed", "blm", "usfs", "federal", "boondock", "boondocking"} else preference_raw
+    preference = (
+        "public"
+        if preference_raw in {"primitive", "dispersed", "blm", "usfs", "federal", "boondock", "boondocking"}
+        else "developed"
+        if preference_raw in {"established", "campground", "campgrounds", "official"}
+        else preference_raw
+    )
     limited_public = _public_camp_supply_limited(region_hint)
     public = any(term in combined for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free"))
     official_developed = any(term in combined for term in ("ridb", "recreation.gov", "nps", "state park", "county park", "municipal"))
@@ -14014,10 +14050,10 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
         score += -4 if any(term in combined for term in ("farm", "ranch", "winery", "vineyard", "glamping")) else 0
         score += 6 if public else 0
     elif preference == "developed":
-        score += -10 if official_developed else 0
-        score += -4 if public else 0
-        score += -4 if private_stay and limited_public else 0
-        score += 2 if rv_private else 0
+        score += -14 if official_developed else 4
+        score += -6 if public else 0
+        score += 10 if private_stay and not limited_public else 0
+        score += 8 if rv_private and not official_developed else 0
     elif preference == "any":
         score += -5 if public or official_developed else 0
         score += 3 if rv_private and not limited_public else 0
@@ -14218,7 +14254,7 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 11,
+        "v": 12,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -14421,7 +14457,13 @@ async def route_camp_windows(body: RouteCampWindowsRequest):
     route_style_raw = (body.route_style or "balanced").lower()
     route_style = "wild" if route_style_raw in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else route_style_raw
     camp_preference_raw = (body.camp_preference or "public").lower()
-    camp_preference = "public" if camp_preference_raw in {"primitive", "dispersed", "blm", "usfs", "federal", "boondock", "boondocking"} else camp_preference_raw
+    camp_preference = (
+        "public"
+        if camp_preference_raw in {"primitive", "dispersed", "blm", "usfs", "federal", "boondock", "boondocking"}
+        else "developed"
+        if camp_preference_raw in {"established", "campground", "campgrounds", "official"}
+        else camp_preference_raw
+    )
     results = await asyncio.gather(*[
         _select_camp_for_window(
             window,

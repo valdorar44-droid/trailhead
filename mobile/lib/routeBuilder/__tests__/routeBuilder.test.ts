@@ -184,6 +184,10 @@ const normalizedDraft = normalizeTrailheadRouteBuilderDraft({
     totalMiles: 951.4,
     reviewDays: [2],
     lockedStopCount: 2,
+    dayPlans: [
+      { day: 1, title: 'Day 1 overnight', status: 'locked', campName: 'Castle Rock Campground', campStatus: 'locked', campMeta: 'BLM campground' },
+      { day: 5, title: 'Day 5 Big Sur camp', status: 'review', campName: 'Big Sur review area', campStatus: 'review', reviewNotes: ['Verify final camp near Big Sur.'] },
+    ],
   },
 });
 assertRouteBuilderContract(normalizedDraft.routeStyle === 'wild', 'copilot draft maps wild_but_safe route style');
@@ -193,6 +197,14 @@ assertRouteBuilderContract(normalizedDraft.riskTolerance === 'wild_but_safe', 'c
 assertRouteBuilderContract((normalizedDraft.poiPreferences || []).join('|') === 'park|monument|trailhead', 'copilot draft filters poi preferences');
 assertRouteBuilderContract(normalizedDraft.handoff === 'scout_review', 'copilot draft keeps scout handoff');
 assertRouteBuilderContract(normalizedDraft.scoutSummary?.totalMiles === 951, 'copilot draft keeps rounded scout miles');
+assertRouteBuilderContract(normalizedDraft.scoutSummary?.dayPlans?.length === 2, 'copilot draft keeps scout day plans');
+
+const establishedDraft = normalizeTrailheadRouteBuilderDraft({
+  start: 'Moab',
+  destination: 'Big Sur',
+  campPreference: 'established',
+});
+assertRouteBuilderContract(establishedDraft.campPreference === 'developed', 'copilot draft maps established camp preference to developed');
 
 export const routeBuilderContractCases = {
   oneWay,

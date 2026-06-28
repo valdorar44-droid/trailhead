@@ -133,6 +133,15 @@ class PlannerTimelineTests(unittest.TestCase):
             _camp_pref_score(rv_park, route_style="wild", camp_preference="public", region_hint="UT"),
         )
 
+    def test_established_camp_scoring_prefers_official_developed_before_rv(self):
+        official = {"name": "Afton Canyon Campground", "land_type": "BLM Campground", "source": "Recreation.gov", "tags": ["reservable"]}
+        rv_park = {"name": "Private RV Resort", "land_type": "private", "source": "commercial", "tags": ["rv park", "hookup"]}
+
+        self.assertLess(
+            _camp_pref_score(official, route_style="balanced", camp_preference="established", region_hint="CA"),
+            _camp_pref_score(rv_park, route_style="balanced", camp_preference="established", region_hint="CA"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

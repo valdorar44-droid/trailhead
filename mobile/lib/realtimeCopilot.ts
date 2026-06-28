@@ -129,7 +129,49 @@ function compactToolOutputSummary(output: Record<string, unknown> | void): strin
   return 'The map action was applied.';
 }
 
+function compactRouteScoutSummary(output: Record<string, unknown> | void): string {
+  const scout = output?.route_scout;
+  if (!scout || typeof scout !== 'object') return '';
+  const data = scout as Record<string, any>;
+  const days = Number(data.days);
+  const destination = typeof data.destinationName === 'string' ? data.destinationName.trim() : '';
+  const plans = Array.isArray(data.dayPlans) ? data.dayPlans : [];
+  const locked = plans.filter((plan: any) => String(plan?.campStatus || plan?.status || '').toLowerCase() === 'locked').length;
+  const review = plans.filter((plan: any) => ['review', 'missing'].includes(String(plan?.campStatus || plan?.status || '').toLowerCase())).length;
+  const head = Number.isFinite(days) && destination
+    ? `Route scout ready: ${days} days to ${destination}.`
+    : destination
+      ? `Route scout ready for ${destination}.`
+      : 'Route scout ready.';
+  const details = locked || review
+    ? ` ${locked} camp${locked === 1 ? '' : 's'} locked${review ? `, ${review} day${review === 1 ? '' : 's'} need review` : ''}.`
+    : ' Review the day plan before navigation.';
+  return `${head}${details}`;
+}
+
+function shouldIgnoreAssistantTranscript(text: string): boolean {
+  const clean = text.trim().replace(/\s+/g, ' ');
+  if (!clean) return true;
+  const lower = clean.toLowerCase().replace(/[.!,\s]+$/g, '');
+  if (lower.length <= 2) return true;
+  return [
+    'okay',
+    'ok',
+    'alright',
+    'sure',
+    'got it',
+    'one moment',
+    'let me check',
+    'checking',
+    'yes',
+  ].includes(lower);
+}
+
 function toolResponseInstructions(output: Record<string, unknown> | void): string {
+  const routeScoutSummary = compactRouteScoutSummary(output);
+  if (routeScoutSummary) {
+    return `The Trailhead route scout has already updated the app. Say exactly this and then stop: "${routeScoutSummary}" Do not repeat the full route summary. Do not call another tool unless the user asks a new follow-up.`;
+  }
   const summary = typeof output?.spoken_summary === 'string' ? output.spoken_summary.trim() : '';
   if (summary) {
     return `The Trailhead map action has already been applied. Give a brief spoken confirmation based only on this result: "${summary}". Do not read coordinates, ids, or raw debug fields aloud unless the user explicitly asks. Do not call another tool unless the user asks a new follow-up.`;
@@ -194,7 +236,7 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       const userText = userTranscriptFromEvent(event);
       if (userText) options.onUserTranscript?.(userText);
       const text = transcriptFromEvent(event);
-      if (text) options.onMessage?.(text);
+      if (text && !shouldIgnoreAssistantTranscript(text)) options.onMessage?.(text);
       if (isCompletedToolCallEvent(event)) {
         const toolCall = actionFromToolEvent(event);
         if (!toolCall || handledToolCalls.has(toolCall.callId)) return;

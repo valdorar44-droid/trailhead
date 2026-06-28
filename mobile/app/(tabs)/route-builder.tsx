@@ -2120,6 +2120,10 @@ export default function RouteBuilderScreen() {
     ].filter(Boolean);
     return parts.join(' · ');
   }, [copilotScoutSummary]);
+  const copilotScoutDays = useMemo(
+    () => (copilotScoutSummary?.dayPlans ?? []).slice(0, 6),
+    [copilotScoutSummary],
+  );
   const activeDayDriveLimit = parsePositiveNumber(dayDriveTargets[activeDay]) ?? planningStats.driveLimit;
   const tripReadiness = routeBuildSession.readiness;
   const routeFitCards = useMemo<RouteFitCard[]>(() => buildRouteFitCards({
@@ -5114,6 +5118,23 @@ export default function RouteBuilderScreen() {
             {!!copilotScoutSummary.message && (
               <Text style={s.copilotScoutMessage} numberOfLines={3}>{copilotScoutSummary.message}</Text>
             )}
+            {copilotScoutDays.length > 0 ? (
+              <View style={s.copilotScoutDays}>
+                {copilotScoutDays.map(plan => {
+                  const cleanStatus = String(plan.campStatus || plan.status || '').toLowerCase();
+                  const tone = cleanStatus === 'locked' ? C.green : cleanStatus === 'review' ? C.yellow : C.orange;
+                  return (
+                    <View key={`copilot-scout-day-${plan.day}`} style={s.copilotScoutDay}>
+                      <View style={[s.copilotScoutDayDot, { backgroundColor: tone }]} />
+                      <View style={s.flex}>
+                        <Text style={s.copilotScoutDayTitle} numberOfLines={1}>Day {plan.day} · {String(plan.campStatus || plan.status || 'review').replace(/_/g, ' ')}</Text>
+                        <Text style={s.copilotScoutDayMeta} numberOfLines={1}>{plan.campName || plan.title || 'Route window'}</Text>
+                      </View>
+                    </View>
+                  );
+                })}
+              </View>
+            ) : null}
           </View>
         ) : null}
 
@@ -6038,6 +6059,26 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   copilotScoutTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
   copilotScoutMeta: { color: C.orange, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '900', marginTop: 2 },
   copilotScoutMessage: { color: C.text2, fontSize: 12, lineHeight: 17 },
+  copilotScoutDays: { gap: 7 },
+  copilotScoutDay: {
+    minHeight: 38,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    backgroundColor: C.s1,
+    paddingHorizontal: 9,
+    paddingVertical: 7,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  copilotScoutDayDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  copilotScoutDayTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  copilotScoutDayMeta: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 1 },
   copilotScoutDismiss: {
     width: 28,
     height: 28,

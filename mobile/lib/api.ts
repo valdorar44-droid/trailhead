@@ -1484,6 +1484,22 @@ export interface RouteScoutStop {
   overnight_style?: 'dispersed' | 'developed' | 'rv' | 'private' | 'unknown' | string | null;
   fit_notes?: string[];
 }
+export interface RouteScoutDayPlan {
+  day: number;
+  title?: string;
+  status?: 'loading' | 'locked' | 'review' | 'missing' | 'finish' | string;
+  driveSummary?: string;
+  startName?: string;
+  endName?: string;
+  campName?: string | null;
+  campStatus?: 'locked' | 'review' | 'missing' | string;
+  campMeta?: string | null;
+  camp?: CampsitePin | null;
+  fuelStops?: RouteScoutStop[];
+  poiStops?: RouteScoutStop[];
+  reviewNotes?: string[];
+  spokenUpdate?: string;
+}
 export interface RouteScoutState {
   status: 'idle' | 'scouting' | 'needs_input' | 'ready' | 'review' | 'failed' | string;
   message: string;
@@ -1505,7 +1521,9 @@ export interface RouteScoutState {
   totalDurationHours?: number;
   routeCoords?: [number, number][];
   stops?: RouteScoutStop[];
+  plannedWindows?: RouteCampWindowInput[];
   windows?: RouteCampWindowResult[];
+  dayPlans?: RouteScoutDayPlan[];
   missingDays?: number[];
   draftArgs?: Record<string, unknown>;
   spoken_summary?: string;

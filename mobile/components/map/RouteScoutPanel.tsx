@@ -1,10 +1,10 @@
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { TrailheadSkeletonLine } from '@/components/TrailheadUI';
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
-import type { RouteScoutState, RouteScoutStop } from '@/lib/api';
+import type { RouteScoutDayPlan, RouteScoutState, RouteScoutStop } from '@/lib/api';
 
 type Props = {
   visible: boolean;
@@ -14,6 +14,75 @@ type Props = {
   onOpenBuilder: () => void;
   onStopPress: (stop: RouteScoutStop) => void;
 };
+
+type Tier = 'peek' | 'half' | 'full';
+
+const tierOrder: Tier[] = ['peek', 'half', 'full'];
+
+function nextTier(tier: Tier): Tier {
+  const idx = tierOrder.indexOf(tier);
+  return tierOrder[(idx + 1) % tierOrder.length] ?? 'half';
+}
+
+function fallbackDayPlans(routeScout: RouteScoutState): RouteScoutDayPlan[] {
+  const stops = routeScout.stops ?? routeScout.previewStops ?? [];
+  const days = Math.max(1, Math.round(Number(routeScout.days) || Math.max(1, ...stops.map(stop => Number(stop.day) || 1))));
+  return Array.from({ length: days }, (_, idx) => {
+    const day = idx + 1;
+    const stop = stops.find(item => Number(item.day) === day && item.type !== 'start') ?? null;
+    const isReview = stop?.type === 'review';
+    const isCamp = stop?.type === 'camp';
+    return {
+      day,
+      title: stop?.label || `Day ${day}`,
+      status: routeScout.status === 'scouting' && !stop ? 'loading' : isCamp ? 'locked' : isReview ? 'review' : day === days ? 'finish' : 'missing',
+      driveSummary: routeScout.totalMiles ? `~${Math.round(routeScout.totalMiles / Math.max(1, days))} mi target` : 'Route window',
+      startName: day === 1 ? routeScout.startName || 'Start' : `Day ${day - 1}`,
+      endName: day === days ? routeScout.destinationName || stop?.name || 'Finish' : stop?.name || `Day ${day}`,
+      campName: stop?.name ?? (routeScout.status === 'scouting' ? 'Checking camps' : null),
+      campStatus: isCamp ? 'locked' : isReview ? 'review' : routeScout.status === 'scouting' ? 'loading' : 'missing',
+      campMeta: stop?.description || stop?.reason || null,
+      camp: stop?.camp ?? null,
+      fuelStops: [],
+      poiStops: [],
+      reviewNotes: stop?.reason ? [stop.reason] : [],
+    };
+  });
+}
+
+function planTone(C: ColorPalette, status?: string | null) {
+  const clean = String(status || '').toLowerCase();
+  if (clean === 'locked' || clean === 'ready' || clean === 'finish') return C.green;
+  if (clean === 'loading' || clean === 'scouting') return C.orange;
+  if (clean === 'review') return C.yellow;
+  return C.red;
+}
+
+function planIcon(status?: string | null) {
+  const clean = String(status || '').toLowerCase();
+  if (clean === 'locked' || clean === 'ready') return 'checkmark-circle-outline' as const;
+  if (clean === 'finish') return 'flag-outline' as const;
+  if (clean === 'loading' || clean === 'scouting') return 'scan-outline' as const;
+  if (clean === 'review') return 'help-circle-outline' as const;
+  return 'alert-circle-outline' as const;
+}
+
+function stopFromDayPlan(plan: RouteScoutDayPlan): RouteScoutStop | null {
+  const camp = plan.camp;
+  if (camp?.lat && camp?.lng && plan.campName) {
+    return {
+      day: plan.day,
+      name: plan.campName,
+      lat: camp.lat,
+      lng: camp.lng,
+      type: plan.campStatus === 'locked' ? 'camp' : 'review',
+      label: plan.title,
+      description: plan.campMeta || undefined,
+      camp,
+    };
+  }
+  return null;
+}
 
 export default function RouteScoutPanel({
   visible,
@@ -25,87 +94,148 @@ export default function RouteScoutPanel({
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
-  const primaryActionTextColor = C.bg === '#F7F8F6' ? '#101820' : '#fff';
+  const [tier, setTier] = useState<Tier>('half');
 
   if (!visible || !routeScout || routeScout.status === 'idle') return null;
 
-  const statusIcon = routeScout.status === 'scouting'
-    ? 'scan-outline'
-    : routeScout.status === 'failed'
-      ? 'alert-circle-outline'
-      : 'map-outline';
-  const statusColor = routeScout.status === 'failed' ? C.red : C.orange;
+  const plans = routeScout.dayPlans?.length ? routeScout.dayPlans : fallbackDayPlans(routeScout);
+  const lockedCount = plans.filter(plan => String(plan.campStatus || plan.status).toLowerCase() === 'locked').length;
+  const reviewCount = plans.filter(plan => ['review', 'missing'].includes(String(plan.campStatus || plan.status).toLowerCase())).length;
+  const statusColor = routeScout.status === 'failed' ? C.red : routeScout.status === 'review' ? C.yellow : C.orange;
   const progressWidth = `${Math.max(6, Math.min(100, routeScout.progressPct ?? 8))}%` as const;
-  const stops = (routeScout.stops ?? routeScout.previewStops ?? []).slice(0, 10);
   const subtitle = [routeScout.startName, routeScout.destinationName].filter(Boolean).join(' -> ') || routeScout.message;
+  const visiblePlans = tier === 'half' ? plans.slice(0, 4) : plans;
+  const primaryActionTextColor = C.bg === '#F7F8F6' ? '#101820' : '#fff';
+
+  const renderDay = (plan: RouteScoutDayPlan) => {
+    const tone = planTone(C, plan.campStatus || plan.status);
+    const loading = String(plan.status || '').toLowerCase() === 'loading' || String(plan.campStatus || '').toLowerCase() === 'loading';
+    const stop = stopFromDayPlan(plan);
+    const fuelCount = plan.fuelStops?.length ?? 0;
+    const poiCount = plan.poiStops?.length ?? 0;
+    return (
+      <TouchableOpacity
+        key={`route-scout-day-${plan.day}`}
+        style={s.dayRow}
+        activeOpacity={stop ? 0.84 : 1}
+        onPress={() => { if (stop) onStopPress(stop); }}
+      >
+        <View style={s.rail}>
+          <View style={[s.dot, { borderColor: tone }, (plan.campStatus === 'locked' || plan.status === 'finish') && { backgroundColor: tone }]} />
+          <View style={s.stem} />
+        </View>
+        <View style={s.dayBody}>
+          <View style={s.dayHead}>
+            <View style={s.flex}>
+              <Text style={s.dayTitle}>Day {plan.day}</Text>
+              <Text style={s.dayMeta} numberOfLines={1}>{plan.driveSummary || plan.title || 'Route window'}</Text>
+            </View>
+            <View style={[s.statusPill, { borderColor: tone + '66', backgroundColor: tone + '12' }]}>
+              <Ionicons name={planIcon(plan.campStatus || plan.status)} size={12} color={tone} />
+              <Text style={[s.statusText, { color: tone }]} numberOfLines={1}>
+                {String(plan.campStatus || plan.status || 'review').replace(/_/g, ' ')}
+              </Text>
+            </View>
+          </View>
+
+          <Text style={s.routeLine} numberOfLines={2}>{plan.startName || 'Start'} to {plan.endName || plan.campName || plan.title || 'route window'}</Text>
+
+          {loading ? (
+            <View style={s.loadingBlock}>
+              <TrailheadSkeletonLine width="94%" height={12} style={s.skeletonLine} />
+              <TrailheadSkeletonLine width="72%" height={12} style={s.skeletonLine} />
+            </View>
+          ) : null}
+
+          <View style={s.stopRows}>
+            <View style={s.stopRow}>
+              <View style={[s.stopIcon, { borderColor: C.green + '55', backgroundColor: C.green + '14' }]}>
+                <Ionicons name="bonfire-outline" size={13} color={C.green} />
+              </View>
+              <View style={s.flex}>
+                <Text style={s.stopName} numberOfLines={1}>{plan.campName || 'Choose overnight'}</Text>
+                <Text style={s.stopMeta} numberOfLines={2}>{plan.campMeta || 'Verify access, rules, and fit before navigation'}</Text>
+              </View>
+            </View>
+
+            <View style={s.slotGrid}>
+              <View style={s.slot}>
+                <Ionicons name="flash-outline" size={12} color={fuelCount ? C.yellow : C.text3} />
+                <Text style={s.slotText} numberOfLines={1}>{fuelCount ? `${fuelCount} fuel` : 'Fuel slot'}</Text>
+              </View>
+              <View style={s.slot}>
+                <Ionicons name="trail-sign-outline" size={12} color={poiCount ? '#38bdf8' : C.text3} />
+                <Text style={s.slotText} numberOfLines={1}>{poiCount ? `${poiCount} places` : 'POI slot'}</Text>
+              </View>
+            </View>
+
+            {tier === 'full' && (plan.reviewNotes ?? []).length > 0 ? (
+              <View style={s.notes}>
+                {(plan.reviewNotes ?? []).slice(0, 3).map((note, idx) => (
+                  <Text key={`${plan.day}-note-${idx}`} style={s.note} numberOfLines={2}>{note}</Text>
+                ))}
+              </View>
+            ) : null}
+          </View>
+        </View>
+      </TouchableOpacity>
+    );
+  };
 
   return (
-    <View style={s.panel} pointerEvents="auto">
+    <View style={[s.panel, tier === 'peek' ? s.peekPanel : tier === 'full' ? s.fullPanel : s.halfPanel]} pointerEvents="auto">
+      <TouchableOpacity style={s.handleArea} onPress={() => setTier(nextTier(tier))} activeOpacity={0.82}>
+        <View style={s.handle} />
+      </TouchableOpacity>
+
       <View style={s.top}>
         <View style={s.titleWrap}>
-          <Ionicons name={statusIcon} size={14} color={statusColor} />
-          <View style={{ flex: 1, minWidth: 0 }}>
+          <View style={[s.titleIcon, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
+            <Ionicons name={routeScout.status === 'failed' ? 'alert-circle-outline' : 'scan-outline'} size={15} color={statusColor} />
+          </View>
+          <View style={s.flex}>
             <Text style={s.title}>ROUTE SCOUT</Text>
             <Text style={s.sub} numberOfLines={1}>{subtitle}</Text>
           </View>
         </View>
-        <TouchableOpacity onPress={onClose} hitSlop={10}>
-          <Ionicons name="close" size={15} color={C.text3} />
-        </TouchableOpacity>
+        <View style={s.topActions}>
+          <TouchableOpacity style={s.iconBtn} onPress={() => setTier(tier === 'full' ? 'half' : 'full')} accessibilityLabel="Expand route scout">
+            <Ionicons name={tier === 'full' ? 'chevron-down-outline' : 'chevron-up-outline'} size={15} color={C.text2} />
+          </TouchableOpacity>
+          <TouchableOpacity style={s.iconBtn} onPress={onClose} accessibilityLabel="Close route scout">
+            <Ionicons name="close" size={15} color={C.text3} />
+          </TouchableOpacity>
+        </View>
       </View>
 
-      {routeScout.status === 'scouting' ? (
-        <View style={s.progressWrap}>
-          <View style={s.progressTrack}>
-            <View style={[s.progressFill, { width: progressWidth }]} />
-          </View>
-          <Text style={s.phaseText} numberOfLines={1}>{routeScout.phaseLabel || routeScout.message}</Text>
+      <View style={s.progressWrap}>
+        <View style={s.progressTrack}>
+          <View style={[s.progressFill, { width: progressWidth, backgroundColor: statusColor }]} />
         </View>
-      ) : null}
-
-      <Text style={s.message} numberOfLines={routeScout.status === 'scouting' ? 2 : 6}>
-        {routeScout.message}
-      </Text>
-
-      <View style={s.stats}>
-        <Text style={s.stat}>{routeScout.days ? `${routeScout.days} days` : 'Days TBD'}</Text>
-        <Text style={s.stat}>{routeScout.driveHours ? `${routeScout.driveHours}h/day` : 'Drive time TBD'}</Text>
-        <Text style={s.stat}>{routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : 'Routing'}</Text>
+        <View style={s.statRow}>
+          <Text style={s.stat}>{routeScout.days ? `${routeScout.days} days` : 'Days TBD'}</Text>
+          <Text style={s.stat}>{routeScout.driveHours ? `${routeScout.driveHours}h max` : 'Drive TBD'}</Text>
+          <Text style={s.stat}>{routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : 'Routing'}</Text>
+          <Text style={s.stat}>{lockedCount} locked</Text>
+          {reviewCount ? <Text style={[s.stat, s.reviewStat]}>{reviewCount} review</Text> : null}
+        </View>
       </View>
 
-      {stops.length > 0 ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.stops}>
-          {stops.map((stop, idx) => {
-            const tone = stop.type === 'review' ? C.red : stop.type === 'camp' ? '#22c55e' : C.orange;
-            return (
-              <TouchableOpacity
-                key={`${stop.type}-${stop.day}-${stop.lat}-${stop.lng}-${idx}`}
-                style={[s.stop, stop.type === 'review' && s.stopReview]}
-                onPress={() => onStopPress(stop)}
-              >
-                <Ionicons
-                  name={stop.type === 'camp'
-                    ? 'bonfire-outline'
-                    : stop.type === 'destination'
-                      ? 'flag-outline'
-                      : stop.type === 'review'
-                        ? 'help-circle-outline'
-                        : 'radio-button-on-outline'}
-                  size={13}
-                  color={tone}
-                />
-                <Text style={s.stopName} numberOfLines={1}>{stop.name}</Text>
-                <Text style={s.stopMeta} numberOfLines={1}>{stop.label || (stop.day ? `Day ${stop.day}` : 'Start')}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      ) : routeScout.status === 'scouting' ? (
-        <View style={s.scoutSkeleton}>
-          <TrailheadSkeletonLine width={118} height={54} style={s.scoutSkeletonCard} />
-          <TrailheadSkeletonLine width={118} height={54} style={s.scoutSkeletonCard} />
-          <TrailheadSkeletonLine width={118} height={54} style={s.scoutSkeletonCard} />
-        </View>
+      {tier !== 'peek' ? (
+        <>
+          <Text style={s.message} numberOfLines={tier === 'full' ? 5 : 2}>
+            {routeScout.phaseLabel || routeScout.message}
+          </Text>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.timeline}>
+            {visiblePlans.map(renderDay)}
+            {routeScout.status === 'scouting' && visiblePlans.length === 0 ? (
+              <View style={s.emptyLoading}>
+                <TrailheadSkeletonLine width="92%" height={58} style={s.skeletonCard} />
+                <TrailheadSkeletonLine width="86%" height={58} style={s.skeletonCard} />
+              </View>
+            ) : null}
+          </ScrollView>
+        </>
       ) : null}
 
       <View style={s.actions}>
@@ -124,170 +254,331 @@ export default function RouteScoutPanel({
 
 const makeStyles = (C: ColorPalette) => {
   const light = C.bg === '#F7F8F6';
-  const panelBg = light ? 'rgba(255,255,255,0.96)' : 'rgba(5, 9, 12, 0.92)';
+  const panelBg = light ? 'rgba(255,255,255,0.97)' : 'rgba(7, 11, 14, 0.94)';
   const softBg = light ? 'rgba(15,23,42,0.045)' : 'rgba(255,255,255,0.055)';
   const progressTrackBg = light ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.08)';
   const primaryText = light ? '#101820' : '#fff';
   return StyleSheet.create({
-  panel: {
-    position: 'absolute',
-    left: 12,
-    right: 12,
-    bottom: 118,
-    backgroundColor: panelBg,
-    borderWidth: 1,
-    borderColor: C.orange + '66',
-    borderRadius: 14,
-    padding: 11,
-    zIndex: 9050,
-    elevation: 95,
-    shadowColor: '#000',
-    shadowOpacity: light ? 0.16 : 0.3,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 9 },
-  },
-  top: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 10,
-  },
-  titleWrap: {
-    flex: 1,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
-  },
-  title: {
-    color: C.orange,
-    fontSize: 10,
-    fontFamily: mono,
-    fontWeight: '900',
-    letterSpacing: 0.7,
-  },
-  sub: {
-    color: C.text3,
-    fontSize: 10,
-    fontFamily: mono,
-    marginTop: 2,
-  },
-  progressWrap: {
-    marginTop: 9,
-    gap: 6,
-  },
-  progressTrack: {
-    height: 4,
-    borderRadius: 999,
-    overflow: 'hidden',
-    backgroundColor: progressTrackBg,
-    borderWidth: 1,
-    borderColor: C.border2,
-  },
-  progressFill: {
-    height: '100%',
-    borderRadius: 999,
-    backgroundColor: C.orange,
-  },
-  phaseText: {
-    color: C.orange,
-    fontSize: 10,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  message: {
-    color: C.text2,
-    fontSize: 12,
-    lineHeight: 17,
-    marginTop: 8,
-  },
-  stats: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 7,
-    marginTop: 9,
-  },
-  stat: {
-    color: C.text2,
-    fontSize: 9,
-    fontFamily: mono,
-    fontWeight: '800',
-    borderWidth: 1,
-    borderColor: C.border2,
-    backgroundColor: softBg,
-    borderRadius: 999,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    overflow: 'hidden',
-  },
-  stops: {
-    gap: 8,
-    paddingTop: 10,
-    paddingRight: 4,
-  },
-  scoutSkeleton: {
-    flexDirection: 'row',
-    gap: 8,
-    paddingTop: 10,
-    overflow: 'hidden',
-  },
-  scoutSkeletonCard: {
-    borderRadius: 10,
-  },
-  stop: {
-    width: 146,
-    minHeight: 62,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.border2,
-    backgroundColor: softBg,
-    padding: 8,
-    justifyContent: 'center',
-  },
-  stopReview: {
-    borderColor: C.red + '66',
-    backgroundColor: C.red + '12',
-  },
-  stopName: {
-    color: C.text,
-    fontSize: 11,
-    fontWeight: '900',
-    marginTop: 5,
-  },
-  stopMeta: {
-    color: C.text3,
-    fontSize: 9,
-    fontFamily: mono,
-    marginTop: 2,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 10,
-  },
-  action: {
-    minHeight: 34,
-    paddingHorizontal: 11,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: C.border2,
-    backgroundColor: softBg,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
-  actionPrimary: {
-    backgroundColor: C.orange,
-    borderColor: C.orange,
-  },
-  actionText: {
-    color: C.text2,
-    fontSize: 10,
-    fontFamily: mono,
-    fontWeight: '900',
-  },
-  actionPrimaryText: {
-    color: primaryText,
-  },
+    panel: {
+      position: 'absolute',
+      left: 10,
+      right: 10,
+      bottom: 104,
+      backgroundColor: panelBg,
+      borderWidth: 1,
+      borderColor: light ? 'rgba(15,23,42,0.12)' : 'rgba(255,255,255,0.14)',
+      borderRadius: 18,
+      paddingHorizontal: 12,
+      paddingTop: 6,
+      paddingBottom: 12,
+      zIndex: 9050,
+      elevation: 95,
+      shadowColor: '#000',
+      shadowOpacity: light ? 0.17 : 0.32,
+      shadowRadius: 18,
+      shadowOffset: { width: 0, height: 9 },
+    },
+    peekPanel: {
+      maxHeight: 176,
+    },
+    halfPanel: {
+      maxHeight: 430,
+    },
+    fullPanel: {
+      top: 94,
+    },
+    handleArea: {
+      alignItems: 'center',
+      paddingVertical: 5,
+    },
+    handle: {
+      width: 42,
+      height: 4,
+      borderRadius: 999,
+      backgroundColor: light ? 'rgba(15,23,42,0.18)' : 'rgba(255,255,255,0.22)',
+    },
+    top: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      justifyContent: 'space-between',
+      gap: 10,
+    },
+    titleWrap: {
+      flex: 1,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 9,
+      minWidth: 0,
+    },
+    titleIcon: {
+      width: 32,
+      height: 32,
+      borderRadius: 16,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    title: {
+      color: C.orange,
+      fontSize: 10,
+      fontFamily: mono,
+      fontWeight: '900',
+      letterSpacing: 0,
+    },
+    sub: {
+      color: C.text3,
+      fontSize: 10,
+      fontFamily: mono,
+      marginTop: 2,
+    },
+    topActions: {
+      flexDirection: 'row',
+      gap: 6,
+    },
+    iconBtn: {
+      width: 31,
+      height: 31,
+      borderRadius: 16,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: C.border2,
+      backgroundColor: softBg,
+    },
+    progressWrap: {
+      marginTop: 10,
+      gap: 7,
+    },
+    progressTrack: {
+      height: 5,
+      borderRadius: 999,
+      overflow: 'hidden',
+      backgroundColor: progressTrackBg,
+      borderWidth: 1,
+      borderColor: C.border2,
+    },
+    progressFill: {
+      height: '100%',
+      borderRadius: 999,
+    },
+    statRow: {
+      flexDirection: 'row',
+      flexWrap: 'wrap',
+      gap: 6,
+    },
+    stat: {
+      color: C.text2,
+      fontSize: 9,
+      fontFamily: mono,
+      fontWeight: '800',
+      borderWidth: 1,
+      borderColor: C.border2,
+      backgroundColor: softBg,
+      borderRadius: 999,
+      paddingHorizontal: 8,
+      paddingVertical: 4,
+      overflow: 'hidden',
+    },
+    reviewStat: {
+      color: C.yellow,
+      borderColor: C.yellow + '55',
+      backgroundColor: C.yellow + '10',
+    },
+    message: {
+      color: C.text2,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 10,
+      fontWeight: '700',
+    },
+    timeline: {
+      paddingTop: 12,
+      paddingBottom: 4,
+      gap: 12,
+    },
+    dayRow: {
+      flexDirection: 'row',
+      gap: 10,
+      paddingBottom: 2,
+    },
+    rail: {
+      width: 18,
+      alignItems: 'center',
+      paddingTop: 3,
+    },
+    dot: {
+      width: 14,
+      height: 14,
+      borderRadius: 7,
+      borderWidth: 2,
+      backgroundColor: panelBg,
+    },
+    stem: {
+      flex: 1,
+      minHeight: 72,
+      width: 2,
+      marginTop: 4,
+      backgroundColor: light ? 'rgba(15,23,42,0.1)' : 'rgba(255,255,255,0.12)',
+      borderRadius: 999,
+    },
+    dayBody: {
+      flex: 1,
+      minWidth: 0,
+      borderWidth: 1,
+      borderColor: C.border2,
+      borderRadius: 8,
+      padding: 10,
+      backgroundColor: softBg,
+    },
+    dayHead: {
+      flexDirection: 'row',
+      alignItems: 'flex-start',
+      gap: 8,
+    },
+    dayTitle: {
+      color: C.text,
+      fontSize: 14,
+      fontWeight: '900',
+    },
+    dayMeta: {
+      color: C.text3,
+      fontSize: 10,
+      fontFamily: mono,
+      marginTop: 2,
+    },
+    statusPill: {
+      maxWidth: 110,
+      borderWidth: 1,
+      borderRadius: 999,
+      paddingHorizontal: 7,
+      paddingVertical: 4,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 4,
+    },
+    statusText: {
+      fontSize: 9,
+      fontFamily: mono,
+      fontWeight: '900',
+      textTransform: 'uppercase',
+    },
+    routeLine: {
+      color: C.text2,
+      fontSize: 12,
+      lineHeight: 17,
+      marginTop: 7,
+      fontWeight: '800',
+    },
+    loadingBlock: {
+      gap: 7,
+      marginTop: 9,
+    },
+    skeletonLine: {
+      borderRadius: 8,
+    },
+    stopRows: {
+      gap: 9,
+      marginTop: 10,
+    },
+    stopRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    stopIcon: {
+      width: 28,
+      height: 28,
+      borderRadius: 8,
+      borderWidth: 1,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    stopName: {
+      color: C.text,
+      fontSize: 12,
+      fontWeight: '900',
+    },
+    stopMeta: {
+      color: C.text3,
+      fontSize: 10,
+      lineHeight: 14,
+      marginTop: 1,
+    },
+    slotGrid: {
+      flexDirection: 'row',
+      gap: 8,
+    },
+    slot: {
+      flex: 1,
+      minHeight: 30,
+      borderWidth: 1,
+      borderColor: C.border2,
+      borderRadius: 8,
+      backgroundColor: light ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.04)',
+      paddingHorizontal: 8,
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 6,
+    },
+    slotText: {
+      flex: 1,
+      minWidth: 0,
+      color: C.text3,
+      fontSize: 10,
+      fontFamily: mono,
+      fontWeight: '800',
+    },
+    notes: {
+      gap: 5,
+      borderTopWidth: 1,
+      borderTopColor: C.border2,
+      paddingTop: 8,
+    },
+    note: {
+      color: C.text2,
+      fontSize: 11,
+      lineHeight: 15,
+    },
+    emptyLoading: {
+      gap: 10,
+    },
+    skeletonCard: {
+      borderRadius: 8,
+    },
+    actions: {
+      flexDirection: 'row',
+      gap: 8,
+      marginTop: 10,
+    },
+    action: {
+      minHeight: 34,
+      paddingHorizontal: 11,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderColor: C.border2,
+      backgroundColor: softBg,
+      flexDirection: 'row',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 6,
+    },
+    actionPrimary: {
+      flex: 1,
+      backgroundColor: C.orange,
+      borderColor: C.orange,
+    },
+    actionText: {
+      color: C.text2,
+      fontSize: 10,
+      fontFamily: mono,
+      fontWeight: '900',
+    },
+    actionPrimaryText: {
+      color: primaryText,
+    },
+    flex: {
+      flex: 1,
+      minWidth: 0,
+    },
   });
 };

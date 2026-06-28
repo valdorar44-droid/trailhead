@@ -43,6 +43,15 @@ class ExploreRouteRankTests(unittest.TestCase):
         self.assertGreater(windows[0]["target_mi"], 0)
         self.assertLessEqual(windows[-1]["end"], 500)
 
+    def test_route_scout_window_plan_can_include_destination_camp(self):
+        windows = _route_scout_window_plan(days=5, total_miles=951, include_destination_camp=True, destination="Big Sur")
+
+        self.assertEqual(len(windows), 5)
+        self.assertEqual(windows[-1]["day"], 5)
+        self.assertEqual(windows[-1]["window_kind"], "destination_camp")
+        self.assertIn("Big Sur", windows[-1]["label"])
+        self.assertEqual(windows[-1]["target_mi"], 951)
+
     def test_ranks_near_route_places_before_farther_catalog_items(self):
         route = _route_points_from_any([[-109.55, 38.57], [-109.40, 38.70]])
         ranked = _rank_explore_places_for_route(

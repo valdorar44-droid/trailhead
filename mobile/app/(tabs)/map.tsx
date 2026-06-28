@@ -1728,11 +1728,11 @@ function routePointAtDistance(coords: [number, number][], cumulative: number[], 
   return last ? { lat: last[1], lng: last[0] } : null;
 }
 
-function routeScoutWindows(days: number, totalMiles: number): RouteCampWindowInput[] {
+function routeScoutWindows(days: number, totalMiles: number, destinationName?: string): RouteCampWindowInput[] {
   const safeDays = Math.max(2, Math.min(30, Math.round(days || 2)));
   const overnightCount = Math.max(1, safeDays - 1);
   const daySpan = totalMiles / safeDays;
-  return Array.from({ length: overnightCount }, (_, idx) => {
+  const windows = Array.from({ length: overnightCount }, (_, idx) => {
     const day = idx + 1;
     const target = daySpan * day;
     const searchWindow = Math.max(28, Math.min(85, daySpan * 0.72));
@@ -1745,6 +1745,19 @@ function routeScoutWindows(days: number, totalMiles: number): RouteCampWindowInp
       search_window_mi: searchWindow,
     };
   });
+  const cleanDestination = String(destinationName || '').trim();
+  if (cleanDestination && !windows.some(win => win.day === safeDays)) {
+    const searchWindow = Math.max(18, Math.min(55, daySpan * 0.45));
+    windows.push({
+      day: safeDays,
+      start: Math.max(0, totalMiles - searchWindow),
+      end: totalMiles,
+      label: `Day ${safeDays} ${cleanDestination} camp`,
+      target_mi: totalMiles,
+      search_window_mi: searchWindow,
+    });
+  }
+  return windows;
 }
 
 function routeScoutCampFilters(preference: string, style: string, currentFilters: string[]): string[] {
@@ -1756,7 +1769,7 @@ function routeScoutCampFilters(preference: string, style: string, currentFilters
     ['rv', 'reservable'].forEach(item => filters.add(item));
   } else if (pref === 'private') {
     ['private_stay', 'farm', 'ranch', 'winery', 'glamping'].forEach(item => filters.add(item));
-  } else if (pref === 'developed') {
+  } else if (pref === 'developed' || pref === 'established') {
     ['tent', 'reservable', 'state', 'nps', 'usfs'].forEach(item => filters.add(item));
   } else if (pref === 'any') {
     visibleCampFilters
@@ -9051,8 +9064,119 @@ function MapScreen() {
     const name = locked
       ? String(win.display_name || win.selected?.name || win.camp?.name || label).trim()
       : routeScoutReviewLabel(win);
-    const head = locked ? `${label} locked ${name}.` : `${label} marked ${name}.`;
+    const head = locked ? `Found ${name} for ${label}.` : `${label} needs review at ${name}.`;
     return `${head} ${completed} of ${total} overnight windows checked.`;
+  }
+
+  function routeScoutDayPlans(args: {
+    days: number;
+    startName?: string | null;
+    destinationName?: string | null;
+    totalMiles?: number | null;
+    plannedWindows?: RouteCampWindowInput[];
+    windows?: RouteCampWindowResult[];
+  }): NonNullable<RouteScoutState['dayPlans']> {
+    const safeDays = Math.max(1, Math.min(30, Math.round(Number(args.days) || 1)));
+    const plannedByDay = new Map<number, RouteCampWindowInput>();
+    const resultByDay = new Map<number, RouteCampWindowResult>();
+    (args.plannedWindows ?? []).forEach(win => {
+      if (Number.isFinite(Number(win.day))) plannedByDay.set(Math.round(Number(win.day)), win);
+    });
+    (args.windows ?? []).forEach(win => {
+      if (Number.isFinite(Number(win.day))) resultByDay.set(Math.round(Number(win.day)), win);
+    });
+    let previousName = String(args.startName || 'Start');
+    let previousTargetMi = 0;
+    return Array.from({ length: safeDays }, (_, idx) => {
+      const day = idx + 1;
+      const planned = plannedByDay.get(day);
+      const result = resultByDay.get(day);
+      const isFinalDay = day === safeDays;
+      const targetMi = Number(result?.target_mi ?? planned?.target_mi ?? ((Number(args.totalMiles) || 0) / safeDays) * day);
+      const legMi = Math.max(0, Math.round(targetMi - previousTargetMi));
+      const driveSummary = legMi > 0 ? `~${legMi} mi drive target` : isFinalDay ? 'Destination area' : 'Route window';
+      previousTargetMi = Math.max(previousTargetMi, targetMi || previousTargetMi);
+
+      if (result) {
+        const locked = routeScoutWindowIsLocked(result);
+        const camp = locked ? (result.selected ?? result.camp ?? result.candidates?.[0] ?? null) : null;
+        const campName = locked
+          ? String(result.display_name || camp?.name || `Day ${day} camp`).trim()
+          : routeScoutReviewLabel(result);
+        const notes = [
+          routeScoutReasonText(result, locked),
+          ...(result.fit_notes ?? []),
+        ]
+          .map(note => String(note || '').trim())
+          .filter(Boolean)
+          .filter((note, noteIdx, all) => all.indexOf(note) === noteIdx)
+          .slice(0, 4);
+        const routeDistance = Number((camp as any)?.route_distance_mi);
+        const campMeta = camp
+          ? [
+              camp.land_type || result.overnight_style || 'Camp',
+              Number.isFinite(routeDistance) ? `${routeDistance.toFixed(routeDistance < 10 ? 1 : 0)} mi off route` : '',
+              camp.cost || '',
+              camp.source || '',
+            ].filter(Boolean).join(' · ')
+          : result.overnight_style && result.overnight_style !== 'unknown'
+            ? `${result.overnight_style.replace(/_/g, ' ')} · review needed`
+            : 'Review needed';
+        const plan = {
+          day,
+          title: result.label || planned?.label || `Day ${day}`,
+          status: locked ? 'locked' : result.candidates?.length ? 'review' : 'missing',
+          driveSummary,
+          startName: previousName,
+          endName: isFinalDay ? String(args.destinationName || campName || 'Finish') : campName,
+          campName,
+          campStatus: locked ? 'locked' : result.candidates?.length ? 'review' : 'missing',
+          campMeta,
+          camp,
+          fuelStops: [],
+          poiStops: [],
+          reviewNotes: notes,
+          spokenUpdate: locked ? `Found ${campName} for day ${day}.` : `Day ${day} needs overnight review.`,
+        };
+        previousName = campName;
+        return plan;
+      }
+
+      if (planned) {
+        const title = planned.label || `Day ${day}`;
+        return {
+          day,
+          title,
+          status: 'loading',
+          driveSummary,
+          startName: previousName,
+          endName: isFinalDay ? String(args.destinationName || 'Finish') : title,
+          campName: 'Checking camps',
+          campStatus: 'loading',
+          campMeta: 'Camp, fuel, and POI slots are loading',
+          fuelStops: [],
+          poiStops: [],
+          reviewNotes: ['Searching legal overnight options near this route window.'],
+          spokenUpdate: `Checking day ${day}.`,
+        };
+      }
+
+      return {
+        day,
+        title: isFinalDay ? 'Finish' : `Day ${day}`,
+        status: isFinalDay ? 'finish' : 'review',
+        driveSummary,
+        startName: previousName,
+        endName: isFinalDay ? String(args.destinationName || 'Finish') : `Day ${day} route segment`,
+        campName: isFinalDay ? String(args.destinationName || 'Finish') : null,
+        campStatus: isFinalDay ? 'locked' : 'missing',
+        campMeta: isFinalDay ? 'Destination' : 'No overnight window planned',
+        fuelStops: [],
+        poiStops: [],
+        reviewNotes: isFinalDay ? [] : ['No overnight window is planned for this day yet.'],
+        spokenUpdate: isFinalDay ? 'Destination day ready.' : `Day ${day} needs review.`,
+      };
+    });
   }
 
   function buildRouteScoutSummary(args: {
@@ -9123,6 +9247,8 @@ function MapScreen() {
         : 'balanced';
     const campPreference = /^(primitive|dispersed|boondock|boondocking|blm|usfs|federal)$/.test(campPreferenceRaw)
       ? 'public'
+      : /^(established|developed|campgrounds?|official)$/.test(campPreferenceRaw)
+        ? 'developed'
       : /^(private|rv|developed|any|public)$/.test(campPreferenceRaw)
         ? campPreferenceRaw
         : 'public';
@@ -9334,9 +9460,9 @@ function MapScreen() {
       days: scoutArgs.days,
       drive_hours: scoutArgs.driveHours,
       route_style: scoutArgs.routeStyle,
-      metadata: { source: 'mobile_route_scout', destination: destination.name },
+      metadata: { source: 'mobile_route_scout', destination: destination.name, include_destination_camp: true },
     }).catch(() => null);
-    const windows = backendWindowPlan?.windows?.length ? backendWindowPlan.windows : routeScoutWindows(scoutArgs.days, totalMiles);
+    const windows = backendWindowPlan?.windows?.length ? backendWindowPlan.windows : routeScoutWindows(scoutArgs.days, totalMiles, destination.name);
     const previewTargets = routeScoutTargetPoints(coords, cumulative, windows);
     scheduleRouteSketch(operationId, coords, [
       { name: start.name, lat: start.lat, lng: start.lng, role: 'start' },
@@ -9361,7 +9487,7 @@ function MapScreen() {
       totalDurationHours: totalDuration ? totalDuration / 3600 : undefined,
       routeCoords: coords,
       previewStops: previewTargets.map((target, idx) => ({
-        day: idx + 1,
+        day: windows[idx]?.day ?? idx + 1,
         name: target.name,
         lat: target.lat,
         lng: target.lng,
@@ -9369,7 +9495,16 @@ function MapScreen() {
         label: target.name,
         source: 'route_scout_preview',
       })),
-      draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, campPhotoOnly: scoutArgs.campPhotoOnly },
+      plannedWindows: windows,
+      dayPlans: routeScoutDayPlans({
+        days: scoutArgs.days,
+        startName: start.name,
+        destinationName: destination.name,
+        totalMiles,
+        plannedWindows: windows,
+        windows: [],
+      }),
+      draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, driveHours: scoutArgs.driveHours, routeStyle: scoutArgs.routeStyle, campPreference: scoutArgs.campPreference, campPhotoOnly: scoutArgs.campPhotoOnly },
     }));
     scheduleRouteScoutPhase(operationId, 2200, 'camps', 'Searching real camp options near those windows...', 68);
     scheduleRouteScoutPhase(
@@ -9425,6 +9560,14 @@ function MapScreen() {
             ...prev,
             windows: partialWindows,
             previewStops,
+            dayPlans: routeScoutDayPlans({
+              days: scoutArgs.days,
+              startName: start.name,
+              destinationName: destination.name,
+              totalMiles,
+              plannedWindows: windows,
+              windows: partialWindows,
+            }),
             missingDays: partialWindows.filter(win => !routeScoutWindowIsLocked(win)).map(win => win.day),
           };
         });
@@ -9503,7 +9646,16 @@ function MapScreen() {
       totalDurationHours: totalDuration ? totalDuration / 3600 : undefined,
       routeCoords: coords,
       stops,
+      plannedWindows: windows,
       windows: scoutWindows,
+      dayPlans: routeScoutDayPlans({
+        days: scoutArgs.days,
+        startName: start.name,
+        destinationName: destination.name,
+        totalMiles,
+        plannedWindows: windows,
+        windows: scoutWindows,
+      }),
       missingDays,
       draftArgs: { ...scoutArgs.merged, start: start.name, destination: destination.name, days: scoutArgs.days, driveHours: scoutArgs.driveHours, routeStyle: scoutArgs.routeStyle, campPreference: scoutArgs.campPreference, campPhotoOnly: scoutArgs.campPhotoOnly },
       spoken_summary: !missingDays.length && !scoutArgs.driveHours ? `${nextMessage} Tell me the daily drive limit if you want me to tighten the overnight windows.` : nextMessage,
@@ -9653,6 +9805,14 @@ function MapScreen() {
               campPreference: routeScout.campPreference,
               totalMiles: routeScout.totalMiles,
               missingDays: routeScout.missingDays,
+              dayPlans: routeScout.dayPlans?.slice(0, 10).map(day => ({
+                day: day.day,
+                status: day.status,
+                campName: day.campName,
+                campStatus: day.campStatus,
+                driveSummary: day.driveSummary,
+                reviewNotes: day.reviewNotes?.slice(0, 3),
+              })),
               draftArgs: routeScout.draftArgs,
             }
           : null,
@@ -12721,6 +12881,7 @@ function MapScreen() {
           missingDays: routeScout.missingDays,
           lockedStopCount: routeScout.windows?.filter(routeScoutWindowIsLocked).length ?? scoutStops.filter(stop => stop.type === 'camp').length,
           stopCount: scoutStops.length,
+          dayPlans: routeScout.dayPlans,
           generatedAt: Date.now(),
         },
         stops: scoutStops
@@ -12976,10 +13137,19 @@ function MapScreen() {
   }
 
   async function handleRealtimeCopilotAction(action: MapActionRequest): Promise<Record<string, unknown>> {
+    const stagedText = action.requires_confirmation
+      ? 'Confirm this voice action before I apply it.'
+      : action.action_type === 'startRouteScout'
+        ? 'Starting route scout.'
+        : action.action_type === 'saveScoutToRouteBuilder'
+          ? 'Saving scout to Route Builder.'
+          : action.action_type === 'searchPlaces'
+            ? 'Searching places.'
+            : 'Applying voice action.';
     appendCopilotMessage({
       id: `copilot-voice-action-${Date.now()}`,
       role: 'assistant',
-      text: action.requires_confirmation ? 'Confirm this voice action before I apply it.' : 'Voice action staged.',
+      text: stagedText,
       action,
     });
     if (action.requires_confirmation) {

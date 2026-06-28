@@ -11662,6 +11662,34 @@ function MapScreen() {
     return penalty;
   }
 
+  function trailheadToolPoint(value: unknown): { lat: number; lng: number; name?: string } | null {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+    const record = value as Record<string, unknown>;
+    const lat = Number(record.lat);
+    const lng = Number(record.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    return { lat, lng, name: typeof record.name === 'string' ? record.name : undefined };
+  }
+
+  function campQueryFromTrailheadTool(tool: string, args: Record<string, unknown>) {
+    const normalizedTool = tool.replace(/^trailhead\./, '');
+    if (normalizedTool !== 'search_places' && normalizedTool !== 'resolve_place') return '';
+    const raw = String(args.q || args.query || args.text || '').trim();
+    const category = String(args.category || args.type || args.types || '').trim();
+    const hay = `${raw} ${category}`.toLowerCase();
+    if (!/\b(camps?|campgrounds?|campsites?|camping|rv\s+parks?|boondock|dispersed)\b/.test(hay)) return '';
+    const nearMatch = raw.match(/\b(?:near|around|by|outside|outside of|in)\s+(.+)$/i);
+    const source = nearMatch?.[1] || raw;
+    const cleaned = source
+      .replace(/\b(find|show|search|look for|get|open|best|top|nearby)\b/gi, ' ')
+      .replace(/\b(camps?|campgrounds?|campsites?|rv\s+parks?|boondocking|boondock|dispersed|near|around|by|outside|of|in)\b/gi, ' ')
+      .replace(/[?.!,]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!cleaned || /^(me|here|current view|current area)$/i.test(cleaned)) return '';
+    return cleaned;
+  }
+
   function rankCopilotCampsForSearch(camps: CampsitePin[], center: { lat: number; lng: number }) {
     return [...camps].sort((a, b) => {
       const distanceA = campSearchDistanceMi(a, center);
@@ -11670,8 +11698,8 @@ function MapScreen() {
       const ratingB = Number.isFinite(Number(b.rating)) ? Number(b.rating) : 0;
       const fullA = (a as any).full ? 40 : 0;
       const fullB = (b as any).full ? 40 : 0;
-      const scoreA = fullA + copilotCampQualityPenalty(a) + Math.min(distanceA, 75) * 0.08 - ratingA * 0.7;
-      const scoreB = fullB + copilotCampQualityPenalty(b) + Math.min(distanceB, 75) * 0.08 - ratingB * 0.7;
+      const scoreA = fullA + copilotCampQualityPenalty(a) + Math.min(distanceA, 75) * 0.85 - ratingA * 0.7;
+      const scoreB = fullB + copilotCampQualityPenalty(b) + Math.min(distanceB, 75) * 0.85 - ratingB * 0.7;
       return scoreA - scoreB
         || distanceA - distanceB
         || ratingB - ratingA
@@ -11696,8 +11724,8 @@ function MapScreen() {
     if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
     if (camp?.lat && camp?.lng) {
       api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
-      nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12, camp.name);
-      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, zoom: 12, name: camp.name }));
+      nativeMapRef.current?.flyTo(camp.lat, camp.lng, 11, camp.name);
+      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, zoom: 11, name: camp.name }));
     }
   }
 
@@ -12034,12 +12062,33 @@ function MapScreen() {
       if (!tool) {
         return { applied: false, status: 'failed', reason: 'missing_tool', spoken_summary: 'Trailhead tool name was missing.' };
       }
+      const redirectedCampQuery = campQueryFromTrailheadTool(tool, toolArgs);
+      if (redirectedCampQuery || /\b(camps?|campgrounds?|campsites?|camping)\b/i.test(String(toolArgs.category || toolArgs.type || toolArgs.types || ''))) {
+        const snapshot = toolArgs.snapshot && typeof toolArgs.snapshot === 'object' && !Array.isArray(toolArgs.snapshot)
+          ? toolArgs.snapshot as Record<string, unknown>
+          : {};
+        const near = trailheadToolPoint(toolArgs.near)
+          || trailheadToolPoint(toolArgs.center)
+          || trailheadToolPoint(snapshot.center);
+        return executeCopilotAction({
+          ...action,
+          action_type: 'searchPlaces',
+          args: {
+            category: 'camp',
+            query: redirectedCampQuery,
+            near: near ?? undefined,
+            open_card: true,
+            redirected_from_tool: tool,
+          },
+          label: 'Camp search',
+        });
+      }
       const result = await api.executeCopilotTool<Record<string, unknown>>({
         tool,
         args: toolArgs,
         metadata: { source: 'realtime_copilot' },
       });
-      return summarizeTrailheadToolResult(result as Record<string, any>);
+      return summarizeTrailheadToolResult({ ...(result as Record<string, any>), tool, tool_args: toolArgs });
     }
     if (type === 'getMapContext' || type === 'explainVisibleArea' || type === 'getVisibleMapCandidates') {
       const visibleCandidates = await getVisibleCandidateSnapshot();
@@ -13844,7 +13893,10 @@ function MapScreen() {
         if (seenCampKeys.has(key) || seenCampKeys.has(fuzzy)) continue;
         seenCampKeys.add(key);
         seenCampKeys.add(fuzzy);
-        mergedCamps.push(camp);
+        mergedCamps.push({
+          ...camp,
+          route_distance_mi: campSearchDistanceMi(camp, { lat: centerLat, lng: centerLng }),
+        });
         if (mergedCamps.length >= campLimit) break;
       }
       const tagged = rankCopilotCampsForSearch(

@@ -2855,7 +2855,7 @@ def _copilot_realtime_tools() -> list[dict]:
         {
             "type": "function",
             "name": "trailhead_tool",
-            "description": "Call Trailhead's read-only map/search/route/discovery bridge for current data. Use this for answering questions from backend data without changing the map UI. Use map_action instead when the user asked to move, select, open, save, navigate, download, or otherwise change app state.",
+            "description": "Call Trailhead's read-only map/search/route/discovery bridge for current data. Use this for answering questions from backend data without changing the map UI. For campground searches near a named place, use only trailhead.resolve_place for coordinates, then call map_action searchPlaces; do not use trailhead.search_places or summarize the resolver as the final answer. Use map_action when the user asked to move, select, open, save, navigate, download, or otherwise change app state.",
             "parameters": {
                 "type": "object",
                 "additionalProperties": False,
@@ -2898,8 +2898,9 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "For famous landmarks or named attractions such as Eiffel Tower, Golden Gate Bridge, Grand Canyon, Arches, museums, monuments, or parks, use flyToPlace with only the landmark name unless the user gives a specific city/region; do not choose similarly named roads or addresses. "
         "For zoom in/out commands, call zoomMap with args.direction=\"in\" or \"out\" and answer from the returned visible_map_features; for zooming to a visible icon, include the visible candidate feature_id, result_index, type, or screen_position. "
         "For broad discovery requests like \"find places\" or \"where should I stop\", ask the user to choose camps, lodging, food, fuel, attractions, or trails before searching. Do not default to camps. "
-        "For campground searches near a named place, resolve the named place first with trailhead_tool when coordinates are not already known, then call map_action searchPlaces with args.category=\"camp\", args.query set to the place name, and args.near set to the resolved lat/lng/name when available. "
-        "Treat map_action searchPlaces as authoritative for opening camp cards; do not report no camps from a read-only place/geocode lookup alone. Set args.open_card=true when the user asks for one campground or the best/top option. "
+        "For campground searches near a named place, use trailhead_tool only as trailhead.resolve_place for coordinates when needed; do not use trailhead.search_places for campground searches. "
+        "After resolving, immediately call map_action searchPlaces with args.category=\"camp\", args.query set to the place name, and args.near set to the resolved lat/lng/name when available. "
+        "Do not speak or summarize the read-only resolver step. Treat map_action searchPlaces as authoritative for camp counts, pins, and opening camp cards; never report no camps from a read-only place/geocode lookup alone. Set args.open_card=true when the user asks for one campground or the best/top option. "
         "For restaurants, food, scenic viewpoints, landmarks, or attractions near a named place, call searchPlaces with args.category set to "
         "\"food\", \"viewpoint\", or \"attraction\" and args.query set to the named place; set args.open_card=true only when the user asks to open the best/top/first option. "
         "For cuisine or drink followups such as pizza, tacos, burgers, coffee, BBQ, sushi, Italian, breweries, beer, or pubs, call searchPlaces with args.category=\"food\" and args.keyword set to the cuisine/drink; do not geocode the cuisine/drink as a destination. "

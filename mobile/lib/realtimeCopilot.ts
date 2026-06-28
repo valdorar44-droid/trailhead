@@ -9,6 +9,7 @@ type StartRealtimeCopilotOptions = {
   tokenResponse: RealtimeCopilotSessionResponse;
   onStatus?: (status: string) => void;
   onMessage?: (message: string) => void;
+  onUserTranscript?: (message: string) => void;
   onToolCall?: (action: MapActionRequest) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
 };
 
@@ -142,10 +143,16 @@ function transcriptFromEvent(event: any): string {
   const type = String(event?.type || '');
   if (type.startsWith('conversation.item.input_audio_transcription') || type.startsWith('input_audio_buffer.')) return '';
   if (type === 'response.audio_transcript.done' && typeof event?.transcript === 'string') return event.transcript;
+  if (type === 'response.output_audio_transcript.done' && typeof event?.transcript === 'string') return event.transcript;
   if (type === 'response.output_text.done' && typeof event?.text === 'string') return event.text;
   if (type === 'response.done' && typeof event?.response?.output_text === 'string') return event.response.output_text;
   if (!type && typeof event?.response?.output_text === 'string') return event.response.output_text;
   return '';
+}
+
+function userTranscriptFromEvent(event: any): string {
+  if (event?.type !== 'conversation.item.input_audio_transcription.completed') return '';
+  return typeof event?.transcript === 'string' ? event.transcript : '';
 }
 
 export async function startRealtimeCopilotSession(options: StartRealtimeCopilotOptions): Promise<RealtimeCopilotHandle> {
@@ -184,6 +191,8 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   dc.onmessage = async (message: { data: string }) => {
     try {
       const event = JSON.parse(message.data);
+      const userText = userTranscriptFromEvent(event);
+      if (userText) options.onUserTranscript?.(userText);
       const text = transcriptFromEvent(event);
       if (text) options.onMessage?.(text);
       if (isCompletedToolCallEvent(event)) {

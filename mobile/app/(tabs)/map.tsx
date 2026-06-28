@@ -5166,6 +5166,7 @@ function MapScreen() {
   const [extremeCopilotVoiceStatus, setExtremeCopilotVoiceStatus] = useState('');
   const [extremeCopilotVoiceMode, setExtremeCopilotVoiceMode] = useState<'push_to_talk' | 'wake_phrase' | null>(null);
   const realtimeCopilotRef = useRef<{ stop: () => void } | null>(null);
+  const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
     available: extremeCopilotAvailable,
     voiceEnabled: !!extremeConfig?.copilot?.voice_enabled,
@@ -9781,6 +9782,11 @@ function MapScreen() {
     const record = item ?? {};
     const lat = Number(record.lat);
     const lng = Number(record.lng);
+    const distanceMi = Number.isFinite(Number(record.distance_mi))
+      ? Number(record.distance_mi)
+      : Number.isFinite(Number(record.route_distance_mi))
+        ? Number(record.route_distance_mi)
+        : null;
     return {
       result_set_id: record.result_set_id || null,
       result_id: record.result_id || record.feature_id || record.id || null,
@@ -9792,7 +9798,7 @@ function MapScreen() {
       lat: Number.isFinite(lat) ? lat : null,
       lng: Number.isFinite(lng) ? lng : null,
       screen_position: record.screen_position || null,
-      distance_mi: Number.isFinite(Number(record.distance_mi)) ? Number(record.distance_mi) : null,
+      distance_mi: distanceMi,
     };
   }
 
@@ -9893,7 +9899,13 @@ function MapScreen() {
     lines.push('Messages:');
     (payload.messages ?? []).forEach((msg: any) => {
       lines.push(`- ${msg.role}: ${String(msg.text || '').replace(/\s+/g, ' ').slice(0, 500)}`);
-      if (msg.action_type) lines.push(`  action: ${msg.action_type} id=${msg.action_id || ''}`);
+      const action = msg.action ?? null;
+      const actionType = action?.action_type ?? msg.action_type;
+      const actionId = action?.action_id ?? msg.action_id;
+      if (actionType) {
+        const argsText = action?.args ? ` args=${copilotDebugJson(action.args, 900).replace(/\s+/g, ' ')}` : '';
+        lines.push(`  action: ${actionType} id=${actionId || ''}${argsText}`);
+      }
     });
     lines.push('');
     lines.push('Requested action / guard:');
@@ -9951,6 +9963,7 @@ function MapScreen() {
         text: msg.text,
         action_type: msg.action?.action_type ?? null,
         action_id: msg.action?.action_id ?? null,
+        action: copilotDebugActionPayload(msg.action),
       })),
       action: copilotDebugActionPayload(pendingCopilotAction),
       details,
@@ -10039,7 +10052,7 @@ function MapScreen() {
       appendCopilotMessage({
         id: `copilot-debug-${Date.now()}`,
         role: 'assistant',
-        text: `Support log recorded.\n\n${payload.transcript.slice(0, 3200)}`,
+        text: 'Support log recorded.',
       });
     }
     return payload;
@@ -12999,6 +13012,14 @@ function MapScreen() {
         onMessage: text => {
           if (!text.trim()) return;
           appendCopilotMessage({ id: `copilot-voice-${Date.now()}`, role: 'assistant', text: text.trim() });
+        },
+        onUserTranscript: text => {
+          const clean = text.trim();
+          if (!clean) return;
+          const last = lastRealtimeUserTranscriptRef.current;
+          if (last?.text === clean && Date.now() - last.at < 4000) return;
+          lastRealtimeUserTranscriptRef.current = { text: clean, at: Date.now() };
+          appendCopilotMessage({ id: `copilot-voice-user-${Date.now()}`, role: 'user', text: clean });
         },
         onToolCall: action => handleRealtimeCopilotAction(action),
       });

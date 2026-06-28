@@ -1,0 +1,20 @@
+{
+  "name": "@trailhead/local-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Local MCP adapter for Trailhead Co-Pilot map and discovery bridge tools.",
+  "bin": {
+    "trailhead-mcp": "src/server.js"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "check": "node --check src/server.js"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0"
+  }
+}

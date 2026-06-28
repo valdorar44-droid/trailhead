@@ -415,6 +415,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  getCopilotTools: () => req<TrailheadToolListResponse>('/api/copilot/tools'),
+  executeCopilotTool: <T = Record<string, unknown>>(data: TrailheadToolExecuteRequest) =>
+    req<TrailheadToolExecuteResponse<T>>('/api/copilot/tools/execute', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   extremeSearchSession: (metadata: Record<string, unknown> = {}) =>
     req<ExtremeSearchSessionResponse>('/api/extreme/search/session', {
       method: 'POST',
@@ -488,6 +494,15 @@ export const api = {
       `mapctx-route:${stableRouteKey(data.coordinates)}:${data.profile ?? 'mapbox/driving-traffic'}:${data.exclude ?? ''}:${data.units ?? 'miles'}:${data.annotations ?? ''}`,
       2 * 60_000,
       () => req<MapContextRouteResponse>('/api/map-context/route', {
+        method: 'POST',
+        body: JSON.stringify(data),
+      }),
+    ),
+  mapContextMatrix: (data: MapContextMatrixRequest) =>
+    guardedRequest(
+      `mapctx-matrix:${stableRouteKey(data.coordinates)}:${data.profile ?? 'mapbox/driving'}:${data.sources ?? '0'}:${data.destinations ?? 'all'}:${data.annotations ?? 'duration,distance'}`,
+      2 * 60_000,
+      () => req<MapContextMatrixResponse>('/api/map-context/matrix', {
         method: 'POST',
         body: JSON.stringify(data),
       }),
@@ -1123,6 +1138,10 @@ export interface ExtremeConfig {
   tier_name: 'Explorer' | string;
   enabled: boolean;
   entitled: boolean;
+  mapbox_entitled?: boolean;
+  explorer_entitled?: boolean;
+  ai_entitled?: boolean;
+  enabled_ai?: boolean;
   enabled_visual?: boolean;
   entitled_visual?: boolean;
   kill_switch: boolean;
@@ -1564,6 +1583,47 @@ export interface ExtremeCopilotConfirmResponse {
   confirmed: boolean;
   ledger_id?: number;
 }
+export type TrailheadToolName =
+  | 'trailhead.visible_map_context'
+  | 'trailhead.search_places'
+  | 'trailhead.resolve_place'
+  | 'trailhead.reverse_geocode'
+  | 'trailhead.route_preview'
+  | 'trailhead.route_matrix'
+  | 'trailhead.discovery_context';
+export interface TrailheadToolSpec {
+  name: TrailheadToolName | string;
+  description: string;
+  input_schema: Record<string, unknown>;
+  temporary_use_only?: boolean;
+  contract?: string;
+}
+export interface TrailheadToolListResponse {
+  ok: boolean;
+  version: string;
+  tools: TrailheadToolSpec[];
+}
+export type TrailheadToolArgs =
+  | Partial<MapContextSnapshot>
+  | MapContextSearchRequest
+  | MapContextResolveRequest
+  | MapContextReverseRequest
+  | MapContextRouteRequest
+  | MapContextMatrixRequest
+  | DiscoveryContextRequest
+  | Record<string, unknown>;
+export interface TrailheadToolExecuteRequest {
+  tool: TrailheadToolName | string;
+  args?: TrailheadToolArgs;
+  metadata?: Record<string, unknown>;
+}
+export interface TrailheadToolExecuteResponse<T = Record<string, unknown>> extends Record<string, unknown> {
+  ok: boolean;
+  tool: TrailheadToolName | string;
+  tool_contract: string;
+  result?: T;
+  _trailhead?: { tool?: string; tool_contract?: string; engine?: string; temporary_use_only?: boolean; [key: string]: unknown };
+}
 export interface RealtimeCopilotSessionRequest {
   session_id?: string | null;
   voice?: string;
@@ -1752,6 +1812,14 @@ export interface MapContextRouteRequest extends ExtremeDirectionsRequest {
   units?: 'miles' | 'kilometers' | string;
   snapshot?: MapContextSnapshot;
 }
+export interface MapContextMatrixRequest {
+  coordinates: Array<[number, number]>;
+  profile?: 'mapbox/driving' | 'mapbox/walking' | 'mapbox/cycling' | string;
+  sources?: string;
+  destinations?: string;
+  annotations?: string;
+  metadata?: Record<string, unknown>;
+}
 export interface MapContextResolveResponse {
   ok?: boolean;
   provider?: string;
@@ -1772,6 +1840,13 @@ export interface MapContextRouteResponse {
   temporary_use_only?: boolean;
   directions?: ExtremeDirectionsResponse;
   route_build?: RouteBuildResult;
+  _trailhead?: { engine?: string; temporary_use_only?: boolean; [key: string]: unknown };
+}
+export interface MapContextMatrixResponse {
+  ok?: boolean;
+  provider?: string;
+  temporary_use_only?: boolean;
+  matrix?: Record<string, unknown>;
   _trailhead?: { engine?: string; temporary_use_only?: boolean; [key: string]: unknown };
 }
 export interface GeocodeRejectedPlace {

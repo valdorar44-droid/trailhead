@@ -13,6 +13,7 @@ from dashboard.server import (
     _copilot_realtime_instructions,
     _copilot_realtime_turn_detection,
     _extreme_config_for_user,
+    _require_extreme_copilot,
     _mapbox_directions_url,
     _mapbox_session_hash,
     _canonical_landmark_geocode,
@@ -74,17 +75,23 @@ class ExtremeExplorerTests(unittest.TestCase):
         for key, value in self.orig.items():
             setattr(settings, key, value)
 
-    def test_extreme_config_blocks_normal_user_and_allows_admin(self):
+    def test_extreme_config_gives_free_mapbox_but_ai_requires_explorer(self):
         normal = {"id": 11, "email": "free@example.com", "is_admin": 0, "plan_type": "free"}
         admin = {"id": 12, "email": "admin@example.com", "is_admin": 1, "plan_type": "free"}
 
         normal_cfg = _extreme_config_for_user(normal)
         admin_cfg = _extreme_config_for_user(admin)
 
-        self.assertFalse(normal_cfg["enabled"])
-        self.assertFalse(normal_cfg["entitled"])
+        self.assertTrue(normal_cfg["enabled"])
+        self.assertTrue(normal_cfg["entitled"])
+        self.assertTrue(normal_cfg["mapbox_entitled"])
+        self.assertFalse(normal_cfg["explorer_entitled"])
+        self.assertTrue(normal_cfg["feature_flags"]["search"])
+        self.assertFalse(normal_cfg["feature_flags"]["copilot"])
+        self.assertFalse(normal_cfg["copilot"]["enabled"])
         self.assertTrue(admin_cfg["enabled"])
         self.assertTrue(admin_cfg["entitled"])
+        self.assertTrue(admin_cfg["explorer_entitled"])
         self.assertTrue(admin_cfg["guardrails"]["navigation_sessions"])
         self.assertTrue(admin_cfg["feature_flags"]["search"])
         self.assertTrue(admin_cfg["feature_flags"]["copilot"])
@@ -93,6 +100,26 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertIn("navigation", admin_cfg["allowed_surfaces"])
         self.assertIn("route_builder", admin_cfg["allowed_surfaces"])
         self.assertIn("outdoors", admin_cfg["style_uris"])
+
+    def test_copilot_requires_explorer_even_when_mapbox_is_free(self):
+        settings.extreme_copilot_enabled = True
+        settings.extreme_voice_enabled = True
+        settings.extreme_allowed_surfaces = "map_layers,copilot"
+        normal = {"id": 11, "email": "free@example.com", "is_admin": 0, "plan_type": "free"}
+        explorer = {"id": 13, "email": "explorer@example.com", "is_admin": 0, "plan_type": "explorer", "plan_expires_at": None}
+
+        normal_cfg = _extreme_config_for_user(normal)
+        explorer_cfg = _extreme_config_for_user(explorer)
+
+        self.assertTrue(normal_cfg["enabled"])
+        self.assertFalse(normal_cfg["explorer_entitled"])
+        self.assertFalse(normal_cfg["feature_flags"]["copilot"])
+        with self.assertRaises(HTTPException) as err:
+            _require_extreme_copilot(normal)
+        self.assertEqual(err.exception.detail["code"], "explorer_required")
+        self.assertTrue(explorer_cfg["explorer_entitled"])
+        self.assertTrue(explorer_cfg["feature_flags"]["copilot"])
+        self.assertTrue(_require_extreme_copilot(explorer)["copilot"]["enabled"])
 
     def test_admin_gets_extreme_access_when_public_beta_disabled(self):
         settings.extreme_enabled = False

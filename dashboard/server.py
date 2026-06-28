@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 from typing import Any, Optional
 import httpx
 import bcrypt as _bcrypt_lib
@@ -2373,6 +2373,11 @@ class MapContextMatrixRequest(BaseModel):
     annotations: str = "duration,distance"
     metadata: dict = Field(default_factory=dict)
 
+class TrailheadToolExecuteRequest(BaseModel):
+    tool: str
+    args: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+
 class AdminExtremeConfigBody(BaseModel):
     enabled: Optional[bool] = None
     kill_switch: Optional[bool] = None
@@ -2554,6 +2559,15 @@ def _copilot_capability_summary() -> str:
         lines.append(f"{domain}: {data.get('summary', '')} Tools: {commands}.")
     return " ".join(lines)
 EXTREME_ADMIN_SURFACES = ["map_layers", "map", "route_builder", "navigation", "weather", "copilot"]
+EXTREME_AI_FEATURE_FLAGS = {
+    "voice",
+    "copilot",
+    "mission_control",
+    "adventure_scores",
+    "mission_provider_evidence",
+    "mapgpt_pilot",
+    "atlas_pilot",
+}
 
 def _extreme_allowed_surfaces() -> list[str]:
     allowed = []
@@ -2635,10 +2649,12 @@ def _extreme_config_for_user(user: dict | None) -> dict:
     master_enabled = bool(settings.extreme_enabled)
     db_enabled = _bool_override(overrides, "enabled", True)
     beta_active = bool(((master_enabled and db_enabled) or is_admin) and not kill_switch)
-    # EXTREME map/explorer is now part of the free signed-in experience.
-    # Keep anonymous users blocked and preserve the kill switch/admin rollout controls.
-    entitled = bool(user) or has_extreme_plan(user)
-    visual_entitled = bool(entitled or has_active_plan(user or {}))
+    # Mapbox-backed Explorer map layers are free for signed-in users for now.
+    # AI surfaces remain Explorer entitlements.
+    mapbox_entitled = bool(user)
+    explorer_entitled = bool(has_extreme_plan(user))
+    entitled = bool(mapbox_entitled or explorer_entitled)
+    visual_entitled = bool(mapbox_entitled or explorer_entitled or has_active_plan(user or {}))
     if beta_active and is_admin:
         allowed_surfaces = list(dict.fromkeys([*_extreme_allowed_surfaces_from_overrides(overrides), *EXTREME_ADMIN_SURFACES]))
     else:
@@ -2650,6 +2666,9 @@ def _extreme_config_for_user(user: dict | None) -> dict:
         "trail_overlays",
     ])) if beta_active and visual_entitled else []
     feature_flags = _extreme_feature_flags(beta_active, overrides)
+    if not explorer_entitled:
+        for key in EXTREME_AI_FEATURE_FLAGS:
+            feature_flags[key] = False
     if beta_active and is_admin:
         feature_flags.update({
             "native_mode": True,
@@ -2670,6 +2689,10 @@ def _extreme_config_for_user(user: dict | None) -> dict:
         "tier_name": "Explorer",
         "enabled": bool(beta_active and entitled),
         "entitled": bool(entitled),
+        "mapbox_entitled": bool(mapbox_entitled),
+        "explorer_entitled": bool(explorer_entitled),
+        "ai_entitled": bool(explorer_entitled),
+        "enabled_ai": bool(beta_active and explorer_entitled),
         "enabled_visual": bool(beta_active and visual_entitled),
         "entitled_visual": bool(visual_entitled),
         "kill_switch": kill_switch,
@@ -2758,6 +2781,8 @@ def _require_extreme_copilot(user: dict, voice: bool = False) -> dict:
         raise HTTPException(403, {"code": "extreme_disabled", "message": "Explorer is temporarily unavailable."})
     if not config["enabled"] or not config["entitled"]:
         raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
+    if not config.get("explorer_entitled"):
+        raise HTTPException(403, {"code": "explorer_required", "message": "Co-Pilot is included with Explorer."})
     if "copilot" not in config["allowed_surfaces"] and "map_layers" not in config["allowed_surfaces"]:
         raise HTTPException(403, {"code": "extreme_copilot_unavailable", "message": "EXTREME Copilot is not available on this surface."})
     if not config["feature_flags"]["copilot"]:
@@ -3515,6 +3540,10 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
 
     if action_type in EXTREME_COPILOT_CONFIRM_ACTIONS:
         requires_confirmation = True
+    tool_bridge = _trailhead_tool_bridge_for_map_action(action_type, args)
+    if tool_bridge:
+        args = {**args, "tool_bridge": tool_bridge}
+        map_updates = {**map_updates, "tool_bridge": tool_bridge}
     return {
         "action_id": f"copilot_{uuid.uuid4().hex[:12]}",
         "action_type": action_type,
@@ -4714,7 +4743,7 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
     day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
 
     if user:
-        if has_active_plan(user):
+        if has_extreme_plan(user):
             from db.store import get_plan_action_count_today, log_ai_usage
             if get_plan_action_count_today(user["id"], "trip_plan") >= PLAN_DAILY_TRIPS:
                 raise HTTPException(429, "Daily trip planning limit reached. Resets at midnight UTC.")
@@ -7173,6 +7202,292 @@ async def _map_context_matrix(body: MapContextMatrixRequest) -> dict:
     data["_trailhead"] = {"engine": "mapbox-matrix", "temporary_use_only": True, "profile": profile}
     return data
 
+TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION = "trailhead-copilot-tools-v1"
+TRAILHEAD_COPILOT_TOOL_NAMES = {
+    "trailhead.visible_map_context",
+    "trailhead.search_places",
+    "trailhead.resolve_place",
+    "trailhead.reverse_geocode",
+    "trailhead.route_preview",
+    "trailhead.route_matrix",
+    "trailhead.discovery_context",
+}
+TRAILHEAD_COPILOT_TOOL_ALIASES = {
+    "visible_map_context": "trailhead.visible_map_context",
+    "map_context": "trailhead.visible_map_context",
+    "search_places": "trailhead.search_places",
+    "place_search": "trailhead.search_places",
+    "resolve_place": "trailhead.resolve_place",
+    "geocode": "trailhead.resolve_place",
+    "reverse_geocode": "trailhead.reverse_geocode",
+    "route_preview": "trailhead.route_preview",
+    "directions": "trailhead.route_preview",
+    "route_matrix": "trailhead.route_matrix",
+    "matrix": "trailhead.route_matrix",
+    "discovery_context": "trailhead.discovery_context",
+    "discover": "trailhead.discovery_context",
+}
+
+TRAILHEAD_COPILOT_TOOL_SCHEMAS = {
+    "trailhead.visible_map_context": {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "snapshot": {"type": "object", "description": "Optional MapContextSnapshot wrapper."},
+            "center": {"type": "object", "properties": {"lat": {"type": "number"}, "lng": {"type": "number"}}},
+            "bounds": {"type": "object", "properties": {"n": {"type": "number"}, "s": {"type": "number"}, "e": {"type": "number"}, "w": {"type": "number"}}},
+            "zoom": {"type": "number"},
+            "selected_place": {"type": "object"},
+            "visible_features": {"type": "array", "items": {"type": "object"}},
+            "current_results": {"type": "array", "items": {"type": "object"}},
+            "route": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+        },
+    },
+    "trailhead.search_places": {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "q": {"type": "string"},
+            "query": {"type": "string", "description": "Alias for q."},
+            "category": {"type": "string", "description": "camp, lodging, food, fuel, viewpoint, attraction, poi."},
+            "keyword": {"type": "string"},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+            "center": {"type": "object", "properties": {"lat": {"type": "number"}, "lng": {"type": "number"}}},
+            "snapshot": {"type": "object"},
+            "bbox": {"type": "string", "description": "west,south,east,north"},
+            "proximity": {"type": "string", "description": "lng,lat"},
+        },
+    },
+    "trailhead.resolve_place": {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "q": {"type": "string"},
+            "query": {"type": "string", "description": "Alias for q."},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+            "country": {"type": "string"},
+            "types": {"type": "string"},
+            "snapshot": {"type": "object"},
+        },
+    },
+    "trailhead.reverse_geocode": {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "lat": {"type": "number"},
+            "lng": {"type": "number"},
+            "point": {"type": "object", "properties": {"lat": {"type": "number"}, "lng": {"type": "number"}}},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 10},
+            "country": {"type": "string"},
+            "types": {"type": "string"},
+        },
+    },
+    "trailhead.route_preview": {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "coordinates": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "Route points as [lng,lat]."},
+            "locations": {"type": "array", "items": {"type": "object"}, "description": "Optional points as {lat,lng}; converted to coordinates."},
+            "profile": {"type": "string", "enum": ["mapbox/driving-traffic", "mapbox/driving", "mapbox/walking", "mapbox/cycling"]},
+            "exclude": {"type": "string"},
+            "units": {"type": "string", "enum": ["miles", "kilometers"]},
+        },
+    },
+    "trailhead.route_matrix": {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "coordinates": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}, "description": "Matrix points as [lng,lat]."},
+            "locations": {"type": "array", "items": {"type": "object"}, "description": "Optional points as {lat,lng}; converted to coordinates."},
+            "profile": {"type": "string", "enum": ["mapbox/driving", "mapbox/walking", "mapbox/cycling"]},
+            "sources": {"type": "string"},
+            "destinations": {"type": "string"},
+            "annotations": {"type": "string"},
+        },
+    },
+    "trailhead.discovery_context": {
+        "type": "object",
+        "additionalProperties": True,
+        "properties": {
+            "bounds": {"type": "object", "properties": {"n": {"type": "number"}, "s": {"type": "number"}, "e": {"type": "number"}, "w": {"type": "number"}}},
+            "center": {"type": "object", "properties": {"lat": {"type": "number"}, "lng": {"type": "number"}}},
+            "snapshot": {"type": "object", "description": "Optional source for bounds, center, zoom, and route."},
+            "radius": {"type": "number"},
+            "zoom": {"type": "number"},
+            "categories": {"type": "array", "items": {"type": "string"}},
+            "filters": {"type": "array", "items": {"type": "string"}},
+            "route": {"type": "array", "items": {"type": "array", "items": {"type": "number"}}},
+            "surface": {"type": "string"},
+            "mode": {"type": "string", "enum": ["light", "full"]},
+            "limit": {"type": "integer"},
+            "include_stays": {"type": "boolean"},
+            "force_refresh": {"type": "boolean"},
+        },
+    },
+}
+
+TRAILHEAD_COPILOT_TOOL_DESCRIPTIONS = {
+    "trailhead.visible_map_context": "Normalize the current visible Trailhead map snapshot, including visible features, selected place, current results, and route context.",
+    "trailhead.search_places": "Search Mapbox-backed places through Trailhead's temporary-use map bridge.",
+    "trailhead.resolve_place": "Resolve a named place, address, landmark, or POI through Trailhead's Mapbox-backed geocode bridge.",
+    "trailhead.reverse_geocode": "Resolve a lat/lng point to nearby place candidates through Trailhead's Mapbox-backed reverse geocode bridge.",
+    "trailhead.route_preview": "Build a temporary Mapbox-backed route preview and Trailhead route-build shape from [lng,lat] coordinates.",
+    "trailhead.route_matrix": "Build a temporary Mapbox-backed travel-time/distance matrix for route planning decisions.",
+    "trailhead.discovery_context": "Read Trailhead's discovery bridge for camps, private stays, places, and pack-backed map context.",
+}
+
+def _trailhead_tool_alias(tool: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_.-]+", "", str(tool or "").strip())
+    clean = clean.replace("-", "_")
+    if clean in TRAILHEAD_COPILOT_TOOL_NAMES:
+        return clean
+    if clean in TRAILHEAD_COPILOT_TOOL_ALIASES:
+        return TRAILHEAD_COPILOT_TOOL_ALIASES[clean]
+    prefixed = f"trailhead.{clean}" if clean and not clean.startswith("trailhead.") else clean
+    if prefixed in TRAILHEAD_COPILOT_TOOL_NAMES:
+        return prefixed
+    raise HTTPException(400, {"code": "unknown_trailhead_tool", "message": f"Unknown Trailhead tool: {tool}", "allowed_tools": sorted(TRAILHEAD_COPILOT_TOOL_NAMES)})
+
+def _trailhead_tool_specs() -> list[dict]:
+    return [
+        {
+            "name": name,
+            "description": TRAILHEAD_COPILOT_TOOL_DESCRIPTIONS[name],
+            "input_schema": TRAILHEAD_COPILOT_TOOL_SCHEMAS[name],
+            "temporary_use_only": name in {
+                "trailhead.search_places",
+                "trailhead.resolve_place",
+                "trailhead.reverse_geocode",
+                "trailhead.route_preview",
+                "trailhead.route_matrix",
+            },
+            "contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION,
+        }
+        for name in sorted(TRAILHEAD_COPILOT_TOOL_NAMES)
+    ]
+
+def _trailhead_tool_model(model: type[BaseModel], args: dict, tool: str) -> BaseModel:
+    try:
+        return model(**args)
+    except ValidationError as exc:
+        raise HTTPException(400, {"code": "invalid_trailhead_tool_args", "tool": tool, "errors": exc.errors()})
+
+def _trailhead_tool_args(args: object, tool: str) -> dict:
+    if not isinstance(args, dict):
+        raise HTTPException(400, {"code": "invalid_trailhead_tool_args", "tool": tool, "message": "args must be an object"})
+    clean = dict(args)
+    clean.setdefault("metadata", {})
+    if isinstance(clean.get("metadata"), dict):
+        clean["metadata"] = {**clean["metadata"], "tool": tool, "tool_contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION}
+    return clean
+
+def _trailhead_tool_coord(value: object) -> list[float] | None:
+    lat = lng = None
+    if isinstance(value, dict):
+        lat = _first_number(value.get("lat") if "lat" in value else value.get("latitude"))
+        lng = _first_number(value.get("lng") if "lng" in value else value.get("lon") if "lon" in value else value.get("longitude"))
+    elif isinstance(value, (list, tuple)) and len(value) >= 2:
+        lng = _first_number(value[0])
+        lat = _first_number(value[1])
+    if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return [float(lng), float(lat)]
+
+def _trailhead_route_args(args: dict) -> dict:
+    clean = dict(args)
+    if not clean.get("coordinates") and isinstance(clean.get("locations"), list):
+        clean["coordinates"] = [coord for coord in (_trailhead_tool_coord(item) for item in clean["locations"]) if coord]
+    return clean
+
+def _trailhead_reverse_args(args: dict) -> dict:
+    clean = dict(args)
+    if ("lat" not in clean or "lng" not in clean) and isinstance(clean.get("point"), dict):
+        point = clean["point"]
+        if "lat" in point:
+            clean["lat"] = point.get("lat")
+        if "lng" in point:
+            clean["lng"] = point.get("lng")
+    return clean
+
+def _trailhead_discovery_args(args: dict) -> dict:
+    clean = dict(args)
+    snapshot = clean.get("snapshot")
+    if isinstance(snapshot, dict):
+        clean.setdefault("center", snapshot.get("center"))
+        clean.setdefault("bounds", snapshot.get("bounds"))
+        clean.setdefault("zoom", snapshot.get("zoom"))
+        clean.setdefault("route", snapshot.get("route") or [])
+    clean.pop("snapshot", None)
+    return clean
+
+def _trailhead_wrap_tool_result(tool: str, result: object) -> dict:
+    if isinstance(result, dict):
+        wrapped = dict(result)
+    else:
+        wrapped = {"result": result}
+    trailhead_meta = wrapped.get("_trailhead") if isinstance(wrapped.get("_trailhead"), dict) else {}
+    wrapped["ok"] = bool(wrapped.get("ok", True))
+    wrapped["tool"] = tool
+    wrapped["tool_contract"] = TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION
+    wrapped["_trailhead"] = {
+        **trailhead_meta,
+        "tool": tool,
+        "tool_contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION,
+    }
+    return wrapped
+
+async def _execute_trailhead_tool(tool: str, args: object, user: dict) -> dict:
+    normalized = _trailhead_tool_alias(tool)
+    clean = _trailhead_tool_args(args, normalized)
+    if normalized in {"trailhead.search_places", "trailhead.resolve_place"} and "q" not in clean and clean.get("query"):
+        clean["q"] = clean.get("query")
+    if normalized == "trailhead.visible_map_context":
+        snapshot_args = clean.get("snapshot") if isinstance(clean.get("snapshot"), dict) else clean
+        result = await map_context_snapshot(_trailhead_tool_model(MapContextSnapshot, snapshot_args, normalized), user=user)
+    elif normalized == "trailhead.search_places":
+        result = await map_context_search(_trailhead_tool_model(MapContextSearchRequest, clean, normalized), user=user)
+    elif normalized == "trailhead.resolve_place":
+        result = await map_context_resolve(_trailhead_tool_model(MapContextResolveRequest, clean, normalized), user=user)
+    elif normalized == "trailhead.reverse_geocode":
+        result = await map_context_reverse(_trailhead_tool_model(MapContextReverseRequest, _trailhead_reverse_args(clean), normalized), user=user)
+    elif normalized == "trailhead.route_preview":
+        result = await map_context_route(_trailhead_tool_model(MapContextRouteRequest, _trailhead_route_args(clean), normalized), user=user)
+    elif normalized == "trailhead.route_matrix":
+        result = await map_context_matrix(_trailhead_tool_model(MapContextMatrixRequest, _trailhead_route_args(clean), normalized), user=user)
+    elif normalized == "trailhead.discovery_context":
+        result = await discovery_context(_trailhead_tool_model(DiscoveryContextRequest, _trailhead_discovery_args(clean), normalized), user=user)
+    else:
+        raise HTTPException(400, {"code": "unknown_trailhead_tool", "tool": normalized})
+    try:
+        log_extreme_ledger_event(
+            user["id"],
+            "copilot_tool_execute",
+            None,
+            "copilot",
+            None,
+            {
+                "tool": normalized,
+                "contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION,
+                "result_ok": bool(result.get("ok", True)) if isinstance(result, dict) else True,
+            },
+        )
+    except Exception:
+        pass
+    return _trailhead_wrap_tool_result(normalized, result)
+
+def _trailhead_tool_bridge_for_map_action(action_type: str, args: dict) -> dict | None:
+    if action_type in {"getMapContext", "getVisibleMapCandidates", "explainVisibleArea"}:
+        return {"tool": "trailhead.visible_map_context", "contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION}
+    if action_type == "searchPlaces":
+        category = str((args or {}).get("category") or "").lower()
+        tool = "trailhead.discovery_context" if category in {"camp", "camps", "camping", "private", "lodging", "stay"} else "trailhead.search_places"
+        return {"tool": tool, "contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION}
+    if action_type in {"buildRoute", "routeToSelectedPlace", "modifyRoute"}:
+        return {"tool": "trailhead.route_preview", "contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION}
+    if action_type in {"flyToPlace", "searchAndSelectPlace"}:
+        return {"tool": "trailhead.resolve_place", "contract": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION}
+    return None
+
 def _mapbox_feature_coordinate_summary(items: object, limit: int = 8) -> list[dict]:
     if not isinstance(items, list):
         return []
@@ -7619,6 +7934,26 @@ async def map_context_matrix(body: MapContextMatrixRequest, user: dict = Depends
         "matrix": data,
         "_trailhead": {"engine": "map-context-matrix", "temporary_use_only": True},
     }
+
+@app.get("/api/copilot/tools")
+@app.get("/api/extreme/copilot/tools")
+def copilot_tools(user: dict = Depends(_current_user)):
+    _require_extreme_copilot(user)
+    return {
+        "ok": True,
+        "version": TRAILHEAD_COPILOT_TOOL_CONTRACT_VERSION,
+        "tools": _trailhead_tool_specs(),
+    }
+
+@app.post("/api/copilot/tools/execute")
+@app.post("/api/extreme/copilot/tools/execute")
+async def copilot_tool_execute(body: TrailheadToolExecuteRequest, user: dict = Depends(_current_user)):
+    _require_extreme_copilot(user)
+    args = dict(body.args or {})
+    if isinstance(body.metadata, dict) and body.metadata:
+        metadata = args.get("metadata") if isinstance(args.get("metadata"), dict) else {}
+        args["metadata"] = {**metadata, **body.metadata}
+    return await _execute_trailhead_tool(body.tool, args, user)
 
 @app.get("/api/explorer/weather/layers")
 @app.get("/api/extreme/weather/layers")

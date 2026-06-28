@@ -11628,15 +11628,51 @@ function MapScreen() {
     ].join('|');
   }
 
+  function campSearchDistanceMi(camp: CampsitePin, center: { lat: number; lng: number }) {
+    return Number.isFinite(Number(camp.route_distance_mi))
+      ? Number(camp.route_distance_mi)
+      : haversineKm(center.lat, center.lng, camp.lat, camp.lng) * 0.621371;
+  }
+
+  function campNameHasStaySignal(name: string) {
+    return /\b(camp|campground|campsite|rv|cabin|cabins|resort|ranch|farm|winery|glamping|koa)\b/i.test(name);
+  }
+
+  function campNameLooksAddressLike(name: string) {
+    return /^\d+\s+/.test(name) || (
+      /\b(street|st\.?|road|rd\.?|avenue|ave\.?|drive|dr\.?|lane|ln\.?|highway|hwy\.?|boulevard|blvd\.?|way|center|centre)\b/i.test(name)
+      && !campNameHasStaySignal(name)
+    );
+  }
+
+  function copilotCampQualityPenalty(camp: CampsitePin) {
+    const name = String(camp.name || '').trim();
+    const source = String(camp.verified_source || camp.source_badge || camp.source || '').toLowerCase();
+    const land = String(camp.land_type || '').toLowerCase();
+    let penalty = 0;
+    if (!name || /^(camp|campground|tent camp|rv park)$/i.test(name)) penalty += 10;
+    if (campNameLooksAddressLike(name)) penalty += 28;
+    if (campNameHasStaySignal(name)) penalty -= 8;
+    else if (/\bcamp|campground|campsite|rv\b/i.test(land)) penalty += 2;
+    if (/recreation\.gov|ridb|nps|national park|usfs|forest service|state park|blm|geoapify|official/i.test(source)) penalty -= 3;
+    if (/openstreetmap|osm/i.test(source) && !campNameHasStaySignal(name)) penalty += 5;
+    if (camp.reservable) penalty -= 3;
+    const rating = Number(camp.rating);
+    if (Number.isFinite(rating) && rating > 0) penalty -= Math.min(4, rating * 0.6);
+    return penalty;
+  }
+
   function rankCopilotCampsForSearch(camps: CampsitePin[], center: { lat: number; lng: number }) {
     return [...camps].sort((a, b) => {
-      const distanceA = Number.isFinite(Number(a.route_distance_mi)) ? Number(a.route_distance_mi) : haversineKm(center.lat, center.lng, a.lat, a.lng) * 0.621371;
-      const distanceB = Number.isFinite(Number(b.route_distance_mi)) ? Number(b.route_distance_mi) : haversineKm(center.lat, center.lng, b.lat, b.lng) * 0.621371;
+      const distanceA = campSearchDistanceMi(a, center);
+      const distanceB = campSearchDistanceMi(b, center);
       const ratingA = Number.isFinite(Number(a.rating)) ? Number(a.rating) : 0;
       const ratingB = Number.isFinite(Number(b.rating)) ? Number(b.rating) : 0;
       const fullA = (a as any).full ? 40 : 0;
       const fullB = (b as any).full ? 40 : 0;
-      return fullA - fullB
+      const scoreA = fullA + copilotCampQualityPenalty(a) + Math.min(distanceA, 75) * 0.08 - ratingA * 0.7;
+      const scoreB = fullB + copilotCampQualityPenalty(b) + Math.min(distanceB, 75) * 0.08 - ratingB * 0.7;
+      return scoreA - scoreB
         || distanceA - distanceB
         || ratingB - ratingA
         || String(a.name || '').localeCompare(String(b.name || ''))
@@ -12194,17 +12230,46 @@ function MapScreen() {
         viewportRef.current = bounds;
         nativeMapRef.current?.flyTo(center.lat, center.lng, 11, searchedNear);
         webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: 11, name: searchedNear }));
-        const camps = await loadCampsInArea(bounds, activeFilters) ?? [];
+        const copilotCampFilters = campLookupFilters(activeFilters) === null ? DEFAULT_CAMP_FILTERS : activeFilters;
+        const copilotCampLoadOpts = {
+          force: true,
+          campOnly: true,
+          radiusCapMi: query ? 85 : MAX_FREECAM_CAMP_SEARCH_RADIUS_MI,
+          minZoom: MIN_CAMP_SEARCH_ZOOM,
+        };
+        let campSearchBounds = bounds;
+        let campSearchSource = 'copilot_camp_search';
+        let camps = await loadCampsInArea(bounds, copilotCampFilters, copilotCampLoadOpts) ?? [];
+        const narrowFilters = campLookupFilters(copilotCampFilters);
+        if (query && camps.length === 0 && Array.isArray(narrowFilters) && narrowFilters.length > 0) {
+          const broadCamps = await loadCampsInArea(bounds, DEFAULT_CAMP_FILTERS, copilotCampLoadOpts) ?? [];
+          if (broadCamps.length > 0) {
+            camps = broadCamps;
+            campSearchSource = 'copilot_camp_search_broad_retry';
+          }
+        }
+        if (query && camps.length === 0) {
+          const wideBounds = copilotBoundsAround(center, 10, 0.9);
+          const wideCamps = await loadCampsInArea(wideBounds, DEFAULT_CAMP_FILTERS, copilotCampLoadOpts) ?? [];
+          if (wideCamps.length > 0) {
+            camps = wideCamps;
+            campSearchBounds = wideBounds;
+            campSearchSource = 'copilot_camp_search_wide_retry';
+            viewportRef.current = wideBounds;
+            nativeMapRef.current?.flyTo(center.lat, center.lng, 10, searchedNear);
+            webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: 10, name: searchedNear }));
+          }
+        }
         const { resultSetId, queryContext } = storeCopilotCampResults(camps, 'camp', {
           queryContext: {
-            source: 'copilot_camp_search',
+            source: campSearchSource,
             query: query || null,
             category: 'camp',
             center,
-            bounds,
-            bbox: bboxStringFromBounds(bounds),
-            zoom: bounds.zoom,
-            radius_mi: query ? 32 : 24,
+            bounds: campSearchBounds,
+            bbox: bboxStringFromBounds(campSearchBounds),
+            zoom: campSearchBounds.zoom,
+            radius_mi: campSearchSource === 'copilot_camp_search_wide_retry' ? 65 : query ? 32 : 24,
           },
         });
         const shouldOpenCard = camps.length > 0 && (args.open_card === true || !!query);

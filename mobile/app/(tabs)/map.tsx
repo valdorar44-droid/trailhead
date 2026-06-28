@@ -9094,7 +9094,7 @@ function MapScreen() {
       const isFinalDay = day === safeDays;
       const targetMi = Number(result?.target_mi ?? planned?.target_mi ?? ((Number(args.totalMiles) || 0) / safeDays) * day);
       const legMi = Math.max(0, Math.round(targetMi - previousTargetMi));
-      const driveSummary = legMi > 0 ? `~${legMi} mi drive target` : isFinalDay ? 'Destination area' : 'Route window';
+      const driveSummary = legMi > 0 ? `~${legMi} mi` : isFinalDay ? 'Finish area' : 'Route leg';
       previousTargetMi = Math.max(previousTargetMi, targetMi || previousTargetMi);
 
       if (result) {
@@ -9153,10 +9153,10 @@ function MapScreen() {
           endName: isFinalDay ? String(args.destinationName || 'Finish') : title,
           campName: 'Checking camps',
           campStatus: 'loading',
-          campMeta: 'Camp, fuel, and POI slots are loading',
+          campMeta: 'Finding overnight options',
           fuelStops: [],
           poiStops: [],
-          reviewNotes: ['Searching legal overnight options near this route window.'],
+          reviewNotes: ['Searching legal overnight options near this part of the route.'],
           spokenUpdate: `Checking day ${day}.`,
         };
       }
@@ -9170,13 +9170,23 @@ function MapScreen() {
         endName: isFinalDay ? String(args.destinationName || 'Finish') : `Day ${day} route segment`,
         campName: isFinalDay ? String(args.destinationName || 'Finish') : null,
         campStatus: isFinalDay ? 'locked' : 'missing',
-        campMeta: isFinalDay ? 'Destination' : 'No overnight window planned',
+        campMeta: isFinalDay ? 'Finish area' : 'Choose an overnight',
         fuelStops: [],
         poiStops: [],
-        reviewNotes: isFinalDay ? [] : ['No overnight window is planned for this day yet.'],
+        reviewNotes: isFinalDay ? [] : ['Choose an overnight stop before starting.'],
         spokenUpdate: isFinalDay ? 'Destination day ready.' : `Day ${day} needs review.`,
       };
     });
+  }
+
+  function routeScoutShortPlace(value?: string | null) {
+    const text = String(value || '').trim();
+    if (!text) return '';
+    return (text
+      .replace(/\s*,\s*United States(?: of America)?$/i, '')
+      .replace(/\s*,\s*USA$/i, '')
+      .split(',')[0]
+      .trim() || text);
   }
 
   function buildRouteScoutSummary(args: {
@@ -9194,36 +9204,17 @@ function MapScreen() {
     const lockedWindows = windows.filter(routeScoutWindowIsLocked);
     const reviewWindows = windows.filter(win => !routeScoutWindowIsLocked(win));
     const miles = Math.round(args.totalMiles || 0);
-    const driveWindow = args.driveHours ? ` with about ${args.driveHours} hours of driving per day` : '';
-    const stayText = lockedWindows.length
-      ? `Locked overnights: ${lockedWindows.slice(0, 3).map(win => `${win.label || `Day ${win.day}`} at ${String(win.display_name || win.selected?.name || win.camp?.name || '').trim()}`).join('; ')}${lockedWindows.length > 3 ? `; plus ${lockedWindows.length - 3} more` : ''}.`
-      : reviewWindows.length
-        ? `I marked ${reviewWindows.length} overnight review area${reviewWindows.length === 1 ? '' : 's'} before you lock camps.`
-        : 'I did not lock overnight stays yet.';
-    const styleText = args.routeStyle === 'wild'
-      ? 'I biased the scout toward rougher but still sane backroads and public-land style overnights.'
-      : args.routeStyle === 'direct'
-        ? 'I kept the drive direct and stayed tight to the corridor for overnights.'
-        : 'I balanced drive time, scenic value, and workable overnight windows.';
-    const dayBriefs = windows
-      .slice(0, 3)
-      .map(win => {
-        const locked = routeScoutWindowIsLocked(win);
-        const targetName = locked
-          ? String(win.display_name || win.selected?.name || win.camp?.name || `Day ${win.day}`).trim()
-          : routeScoutReviewLabel(win);
-        const target = locked ? targetName : `review ${targetName}`;
-        const fitNote = Array.isArray(win.fit_notes) && win.fit_notes.length ? ` ${win.fit_notes.slice(0, 2).join(', ')}.` : '';
-        const reason = routeScoutReasonText(win, locked);
-        const note = reason ? ` ${reason.slice(0, 88)}` : fitNote || ' Review access, services, and alternates before you commit.';
-        return `Day ${win.day}: ${target}.${note}${fitNote && !note.includes(fitNote.trim()) ? fitNote : ''}`;
-      });
-    const dayText = dayBriefs.length ? ` ${dayBriefs.join(' ')}` : '';
     const reviewDays = reviewWindows.map(win => win.day);
     const reviewText = reviewDays.length
-      ? ` Review day${reviewDays.length === 1 ? '' : 's'} ${reviewDays.join(', ')} before starting navigation.`
+      ? ` Review day${reviewDays.length === 1 ? '' : 's'} ${reviewDays.join(', ')} before starting.`
       : '';
-    return `Route summary: ${args.startName} to ${args.destinationName}, about ${miles} miles over ${args.days} days${driveWindow}. ${styleText} ${stayText}${dayText}${reviewText}`;
+    const driveWindow = args.driveHours ? ` · ${args.driveHours}h/day` : '';
+    const campText = lockedWindows.length
+      ? `${lockedWindows.length} overnight ${lockedWindows.length === 1 ? 'stop' : 'stops'} set.`
+      : reviewWindows.length
+        ? `${reviewWindows.length} overnight ${reviewWindows.length === 1 ? 'stop needs' : 'stops need'} review.`
+        : 'Overnight stops still need review.';
+    return `${routeScoutShortPlace(args.startName)} to ${routeScoutShortPlace(args.destinationName)} · ${args.days} days · ${miles} mi${driveWindow}. ${campText}${reviewText}`;
   }
 
   function routeScoutArgsFromAction(args: Record<string, unknown> = {}) {
@@ -9529,7 +9520,7 @@ function MapScreen() {
     const windowDefaultPoint = { lat: start.lat, lng: start.lng };
     const queue = windows.slice();
     let completedWindowCount = 0;
-    const workerCount = Math.min(3, Math.max(1, Math.ceil(windows.length / 2)));
+    const workerCount = Math.min(4, Math.max(1, windows.length));
     const runCampWindowWorker = async () => {
       while (queue.length && routeScoutOperationRef.current === operationId) {
         const nextWindow = queue.shift();
@@ -13090,6 +13081,23 @@ function MapScreen() {
   async function runCopilotAction(action: MapActionRequest, confirmed: boolean): Promise<Record<string, unknown>> {
     let clientResult: Record<string, unknown> = { confirmed };
     const actionResultText = (result: Record<string, unknown>) => {
+      if (action.action_type === 'startRouteScout' && result.route_scout && typeof result.route_scout === 'object') {
+        const scout = result.route_scout as RouteScoutState;
+        const preview = result.route_preview && typeof result.route_preview === 'object' ? result.route_preview as Record<string, unknown> : {};
+        const days = Number(scout.days || preview.days);
+        const miles = Number(scout.totalMiles || preview.total_miles);
+        const plans = Array.isArray(scout.dayPlans) ? scout.dayPlans : [];
+        const locked = plans.filter(plan => String(plan?.campStatus || plan?.status || '').toLowerCase() === 'locked').length;
+        const review = plans.filter(plan => ['review', 'missing'].includes(String(plan?.campStatus || plan?.status || '').toLowerCase())).length;
+        const routeName = `${routeScoutShortPlace(scout.startName) || 'Start'} to ${routeScoutShortPlace(scout.destinationName) || 'finish'}`;
+        const details = [
+          Number.isFinite(days) && days > 0 ? `${Math.round(days)} days` : null,
+          Number.isFinite(miles) && miles > 0 ? `${Math.round(miles)} mi` : null,
+          locked ? `${locked} camps set` : null,
+          review ? `${review} to review` : null,
+        ].filter(Boolean).join(' · ');
+        return details ? `Route ready: ${routeName} · ${details}.` : `Route ready: ${routeName}.`;
+      }
       const spoken = typeof result.spoken_summary === 'string' ? result.spoken_summary.trim() : '';
       if (spoken) return spoken;
       const message = typeof result.message === 'string' ? result.message.trim() : '';

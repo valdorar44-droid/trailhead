@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 import { TrailheadSkeletonLine } from '@/components/TrailheadUI';
@@ -36,7 +36,7 @@ function fallbackDayPlans(routeScout: RouteScoutState): RouteScoutDayPlan[] {
       day,
       title: stop?.label || `Day ${day}`,
       status: routeScout.status === 'scouting' && !stop ? 'loading' : isCamp ? 'locked' : isReview ? 'review' : day === days ? 'finish' : 'missing',
-      driveSummary: routeScout.totalMiles ? `~${Math.round(routeScout.totalMiles / Math.max(1, days))} mi target` : 'Route window',
+      driveSummary: routeScout.totalMiles ? `~${Math.round(routeScout.totalMiles / Math.max(1, days))} mi` : 'Route window',
       startName: day === 1 ? routeScout.startName || 'Start' : `Day ${day - 1}`,
       endName: day === days ? routeScout.destinationName || stop?.name || 'Finish' : stop?.name || `Day ${day}`,
       campName: stop?.name ?? (routeScout.status === 'scouting' ? 'Checking camps' : null),
@@ -56,6 +56,84 @@ function planTone(C: ColorPalette, status?: string | null) {
   if (clean === 'loading' || clean === 'scouting') return C.orange;
   if (clean === 'review') return C.yellow;
   return C.red;
+}
+
+function shortPlaceName(value?: string | null, headline = false) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  const withoutCountry = text
+    .replace(/\s*,\s*United States(?: of America)?$/i, '')
+    .replace(/\s*,\s*USA$/i, '');
+  const parts = withoutCountry.split(',').map(part => part.trim()).filter(Boolean);
+  if (!parts.length) return withoutCountry || text;
+  return headline ? parts[0] : parts.slice(0, 2).join(', ');
+}
+
+function cleanDriveSummary(value?: string | null) {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text
+    .replace(/\s*drive target\b/i, '')
+    .replace(/\s*target\b/i, '')
+    .replace(/^Destination area$/i, 'Finish area')
+    .replace(/^Route window$/i, 'Route leg');
+}
+
+function dayStatusLabel(status?: string | null) {
+  const clean = String(status || '').toLowerCase();
+  if (clean === 'locked' || clean === 'ready' || clean === 'finish') return 'overnight set';
+  if (clean === 'loading' || clean === 'scouting') return 'finding camp';
+  if (clean === 'review') return 'review camp';
+  return 'needs camp';
+}
+
+function campMetaText(plan: RouteScoutDayPlan) {
+  const raw = String(plan.campMeta || '').trim();
+  const campStatus = String(plan.campStatus || plan.status || '').toLowerCase();
+  const sourcePattern = /^(ridb|osm|openstreetmap|geoapify|geoapify places|map data|recreation\.gov|route_scout_preview)$/i;
+  const parts = raw
+    .split(/\s*·\s*/)
+    .map(part => part.trim())
+    .filter(Boolean)
+    .filter(part => !sourcePattern.test(part))
+    .filter(part => !/slots? (are )?loading/i.test(part))
+    .filter(part => !/^camp$/i.test(part))
+    .slice(0, 3);
+  if (parts.length) return parts.join(' · ');
+  if (campStatus === 'loading' || String(plan.status || '').toLowerCase() === 'loading') return 'Finding overnight options';
+  if (campStatus === 'review' || campStatus === 'missing') return 'Choose an overnight before starting';
+  return 'Verify access, rules, and fit before you go';
+}
+
+function campPhotoUri(plan: RouteScoutDayPlan) {
+  const camp = plan.camp as (NonNullable<RouteScoutDayPlan['camp']> & Record<string, any>) | null | undefined;
+  if (!camp) return null;
+  const candidates = [
+    camp.hero_photo_url,
+    camp.photo_url,
+    camp.primary_image,
+    camp.image_url,
+    Array.isArray(camp.images) ? camp.images[0] : null,
+    Array.isArray(camp.photos) ? camp.photos[0] : null,
+    Array.isArray(camp.photo_candidates) ? camp.photo_candidates[0] : null,
+  ];
+  for (const item of candidates) {
+    if (typeof item === 'string' && /^https?:\/\//i.test(item)) return item;
+    if (item && typeof item === 'object' && typeof item.url === 'string' && /^https?:\/\//i.test(item.url)) return item.url;
+  }
+  return null;
+}
+
+function reviewNotes(plan: RouteScoutDayPlan) {
+  const campStatus = String(plan.campStatus || plan.status || '').toLowerCase();
+  if (campStatus === 'locked' || campStatus === 'finish') return [];
+  return (plan.reviewNotes ?? [])
+    .map(note => String(note || '').trim())
+    .filter(Boolean)
+    .filter(note => !/^locked\b/i.test(note))
+    .filter(note => !/route_scout|ridb|geoapify|openstreetmap|\bOSM\b/i.test(note))
+    .filter(note => !/slots? (are )?loading/i.test(note))
+    .slice(0, 2);
 }
 
 function planIcon(status?: string | null) {
@@ -96,16 +174,38 @@ export default function RouteScoutPanel({
   const s = useMemo(() => makeStyles(C), [C]);
   const [tier, setTier] = useState<Tier>('half');
 
+  useEffect(() => {
+    if (!routeScout || routeScout.status === 'idle') return;
+    const status = String(routeScout.status || '').toLowerCase();
+    setTier(status === 'scouting' || status === 'needs_input' ? 'half' : 'full');
+  }, [routeScout?.operationId, routeScout?.status]);
+
   if (!visible || !routeScout || routeScout.status === 'idle') return null;
 
   const plans = routeScout.dayPlans?.length ? routeScout.dayPlans : fallbackDayPlans(routeScout);
   const lockedCount = plans.filter(plan => String(plan.campStatus || plan.status).toLowerCase() === 'locked').length;
   const reviewCount = plans.filter(plan => ['review', 'missing'].includes(String(plan.campStatus || plan.status).toLowerCase())).length;
-  const statusColor = routeScout.status === 'failed' ? C.red : routeScout.status === 'review' ? C.yellow : C.orange;
+  const statusColor = routeScout.status === 'failed' ? C.red : routeScout.status === 'review' ? C.yellow : routeScout.status === 'scouting' ? C.orange : C.green;
   const progressWidth = `${Math.max(6, Math.min(100, routeScout.progressPct ?? 8))}%` as const;
-  const subtitle = [routeScout.startName, routeScout.destinationName].filter(Boolean).join(' -> ') || routeScout.message;
+  const tripTitle = routeScout.startName || routeScout.destinationName
+    ? `${shortPlaceName(routeScout.startName, true) || 'Start'} to ${shortPlaceName(routeScout.destinationName, true) || 'Finish'}`
+    : 'Trip overview';
+  const statText = [
+    routeScout.days ? `${routeScout.days} days` : null,
+    routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : null,
+    lockedCount ? `${lockedCount} camps` : null,
+    reviewCount ? `${reviewCount} to review` : null,
+  ].filter(Boolean).join(' · ');
+  const overviewText = routeScout.status === 'failed'
+    ? routeScout.message
+    : routeScout.status === 'scouting'
+      ? routeScout.phaseLabel || 'Finding overnight stops'
+      : reviewCount
+        ? `${lockedCount} overnight ${lockedCount === 1 ? 'stop' : 'stops'} set. Review ${reviewCount} before starting.`
+        : `${lockedCount || plans.length} overnight ${lockedCount === 1 ? 'stop' : 'stops'} set for the route.`;
   const visiblePlans = tier === 'half' ? plans.slice(0, 4) : plans;
   const primaryActionTextColor = C.bg === '#F7F8F6' ? '#101820' : '#fff';
+  const headerIcon = routeScout.status === 'failed' ? 'alert-circle-outline' : routeScout.status === 'scouting' ? 'time-outline' : 'map-outline';
 
   const renderDay = (plan: RouteScoutDayPlan) => {
     const tone = planTone(C, plan.campStatus || plan.status);
@@ -113,6 +213,14 @@ export default function RouteScoutPanel({
     const stop = stopFromDayPlan(plan);
     const fuelCount = plan.fuelStops?.length ?? 0;
     const poiCount = plan.poiStops?.length ?? 0;
+    const photoUri = campPhotoUri(plan);
+    const notes = reviewNotes(plan);
+    const cleanDrive = cleanDriveSummary(plan.driveSummary);
+    const statusLabel = dayStatusLabel(plan.campStatus || plan.status);
+    const metaParts = [cleanDrive, statusLabel].filter(Boolean).join(' · ');
+    const startName = shortPlaceName(plan.startName, true) || 'Start';
+    const endName = shortPlaceName(plan.endName || plan.campName || plan.title, true) || 'Finish';
+    const campStatus = String(plan.campStatus || plan.status || '').toLowerCase();
     return (
       <TouchableOpacity
         key={`route-scout-day-${plan.day}`}
@@ -128,17 +236,17 @@ export default function RouteScoutPanel({
           <View style={s.dayHead}>
             <View style={s.flex}>
               <Text style={s.dayTitle}>Day {plan.day}</Text>
-              <Text style={s.dayMeta} numberOfLines={1}>{plan.driveSummary || plan.title || 'Route window'}</Text>
+              <Text style={s.dayMeta} numberOfLines={1}>{metaParts || plan.title || 'Route leg'}</Text>
             </View>
             <View style={[s.statusPill, { borderColor: tone + '66', backgroundColor: tone + '12' }]}>
               <Ionicons name={planIcon(plan.campStatus || plan.status)} size={12} color={tone} />
               <Text style={[s.statusText, { color: tone }]} numberOfLines={1}>
-                {String(plan.campStatus || plan.status || 'review').replace(/_/g, ' ')}
+                {statusLabel}
               </Text>
             </View>
           </View>
 
-          <Text style={s.routeLine} numberOfLines={2}>{plan.startName || 'Start'} to {plan.endName || plan.campName || plan.title || 'route window'}</Text>
+          <Text style={s.routeLine} numberOfLines={2}>{startName} to {endName}</Text>
 
           {loading ? (
             <View style={s.loadingBlock}>
@@ -148,30 +256,41 @@ export default function RouteScoutPanel({
           ) : null}
 
           <View style={s.stopRows}>
-            <View style={s.stopRow}>
-              <View style={[s.stopIcon, { borderColor: C.green + '55', backgroundColor: C.green + '14' }]}>
-                <Ionicons name="bonfire-outline" size={13} color={C.green} />
-              </View>
-              <View style={s.flex}>
-                <Text style={s.stopName} numberOfLines={1}>{plan.campName || 'Choose overnight'}</Text>
-                <Text style={s.stopMeta} numberOfLines={2}>{plan.campMeta || 'Verify access, rules, and fit before navigation'}</Text>
-              </View>
-            </View>
-
-            <View style={s.slotGrid}>
-              <View style={s.slot}>
-                <Ionicons name="flash-outline" size={12} color={fuelCount ? C.yellow : C.text3} />
-                <Text style={s.slotText} numberOfLines={1}>{fuelCount ? `${fuelCount} fuel` : 'Fuel slot'}</Text>
-              </View>
-              <View style={s.slot}>
-                <Ionicons name="trail-sign-outline" size={12} color={poiCount ? '#38bdf8' : C.text3} />
-                <Text style={s.slotText} numberOfLines={1}>{poiCount ? `${poiCount} places` : 'POI slot'}</Text>
+            <View style={s.campBlock}>
+              {photoUri ? (
+                <Image source={{ uri: photoUri }} style={s.campPhoto} resizeMode="cover" />
+              ) : (
+                <View style={[s.campFallback, { borderColor: tone + '55', backgroundColor: tone + '12' }]}>
+                  <Ionicons name={campStatus === 'loading' ? 'time-outline' : 'bonfire-outline'} size={20} color={tone} />
+                </View>
+              )}
+              <View style={s.campCopy}>
+                <Text style={s.campLabel}>{campStatus === 'review' || campStatus === 'missing' ? 'CAMP TO REVIEW' : 'OVERNIGHT CAMP'}</Text>
+                <Text style={s.stopName} numberOfLines={2}>{loading ? 'Finding overnight' : plan.campName || 'Choose overnight'}</Text>
+                <Text style={s.stopMeta} numberOfLines={2}>{campMetaText(plan)}</Text>
               </View>
             </View>
 
-            {tier === 'full' && (plan.reviewNotes ?? []).length > 0 ? (
+            {fuelCount || poiCount ? (
+              <View style={s.slotGrid}>
+                {fuelCount ? (
+                  <View style={s.slot}>
+                    <Ionicons name="flash-outline" size={12} color={C.yellow} />
+                    <Text style={s.slotText} numberOfLines={1}>{fuelCount} fuel</Text>
+                  </View>
+                ) : null}
+                {poiCount ? (
+                  <View style={s.slot}>
+                    <Ionicons name="trail-sign-outline" size={12} color="#38bdf8" />
+                    <Text style={s.slotText} numberOfLines={1}>{poiCount} places</Text>
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
+
+            {tier === 'full' && notes.length > 0 ? (
               <View style={s.notes}>
-                {(plan.reviewNotes ?? []).slice(0, 3).map((note, idx) => (
+                {notes.map((note, idx) => (
                   <Text key={`${plan.day}-note-${idx}`} style={s.note} numberOfLines={2}>{note}</Text>
                 ))}
               </View>
@@ -191,18 +310,19 @@ export default function RouteScoutPanel({
       <View style={s.top}>
         <View style={s.titleWrap}>
           <View style={[s.titleIcon, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
-            <Ionicons name={routeScout.status === 'failed' ? 'alert-circle-outline' : 'scan-outline'} size={15} color={statusColor} />
+            <Ionicons name={headerIcon} size={15} color={statusColor} />
           </View>
           <View style={s.flex}>
-            <Text style={s.title}>ROUTE SCOUT</Text>
-            <Text style={s.sub} numberOfLines={1}>{subtitle}</Text>
+            <Text style={s.title}>TRIP OVERVIEW</Text>
+            <Text style={s.headline} numberOfLines={1}>{tripTitle}</Text>
+            <Text style={s.sub} numberOfLines={1}>{statText || shortPlaceName(routeScout.message)}</Text>
           </View>
         </View>
         <View style={s.topActions}>
-          <TouchableOpacity style={s.iconBtn} onPress={() => setTier(tier === 'full' ? 'half' : 'full')} accessibilityLabel="Expand route scout">
+          <TouchableOpacity style={s.iconBtn} onPress={() => setTier(tier === 'full' ? 'half' : 'full')} accessibilityLabel="Expand trip overview">
             <Ionicons name={tier === 'full' ? 'chevron-down-outline' : 'chevron-up-outline'} size={15} color={C.text2} />
           </TouchableOpacity>
-          <TouchableOpacity style={s.iconBtn} onPress={onClose} accessibilityLabel="Close route scout">
+          <TouchableOpacity style={s.iconBtn} onPress={onClose} accessibilityLabel="Close trip overview">
             <Ionicons name="close" size={15} color={C.text3} />
           </TouchableOpacity>
         </View>
@@ -214,9 +334,9 @@ export default function RouteScoutPanel({
         </View>
         <View style={s.statRow}>
           <Text style={s.stat}>{routeScout.days ? `${routeScout.days} days` : 'Days TBD'}</Text>
-          <Text style={s.stat}>{routeScout.driveHours ? `${routeScout.driveHours}h max` : 'Drive TBD'}</Text>
+          <Text style={s.stat}>{routeScout.driveHours ? `${routeScout.driveHours}h/day` : 'Drive TBD'}</Text>
           <Text style={s.stat}>{routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : 'Routing'}</Text>
-          <Text style={s.stat}>{lockedCount} locked</Text>
+          <Text style={s.stat}>{lockedCount} set</Text>
           {reviewCount ? <Text style={[s.stat, s.reviewStat]}>{reviewCount} review</Text> : null}
         </View>
       </View>
@@ -224,7 +344,7 @@ export default function RouteScoutPanel({
       {tier !== 'peek' ? (
         <>
           <Text style={s.message} numberOfLines={tier === 'full' ? 5 : 2}>
-            {routeScout.phaseLabel || routeScout.message}
+            {overviewText}
           </Text>
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.timeline}>
             {visiblePlans.map(renderDay)}
@@ -241,11 +361,11 @@ export default function RouteScoutPanel({
       <View style={s.actions}>
         <TouchableOpacity style={s.action} onPress={onRescout}>
           <Ionicons name="refresh-outline" size={13} color={C.text2} />
-          <Text style={s.actionText}>Rescout</Text>
+          <Text style={s.actionText}>Refresh</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.action, s.actionPrimary]} onPress={onOpenBuilder}>
-          <Ionicons name="git-branch-outline" size={13} color={primaryActionTextColor} />
-          <Text style={[s.actionText, s.actionPrimaryText]}>Builder</Text>
+          <Ionicons name="create-outline" size={13} color={primaryActionTextColor} />
+          <Text style={[s.actionText, s.actionPrimaryText]}>Edit route</Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -324,6 +444,12 @@ const makeStyles = (C: ColorPalette) => {
       fontFamily: mono,
       fontWeight: '900',
       letterSpacing: 0,
+    },
+    headline: {
+      color: C.text,
+      fontSize: 17,
+      fontWeight: '900',
+      marginTop: 1,
     },
     sub: {
       color: C.text3,
@@ -480,18 +606,37 @@ const makeStyles = (C: ColorPalette) => {
       gap: 9,
       marginTop: 10,
     },
-    stopRow: {
+    campBlock: {
       flexDirection: 'row',
-      alignItems: 'center',
-      gap: 8,
+      alignItems: 'stretch',
+      gap: 9,
+      minHeight: 76,
     },
-    stopIcon: {
-      width: 28,
-      height: 28,
+    campPhoto: {
+      width: 76,
+      height: 76,
+      borderRadius: 8,
+      backgroundColor: softBg,
+    },
+    campFallback: {
+      width: 54,
+      minHeight: 64,
       borderRadius: 8,
       borderWidth: 1,
       alignItems: 'center',
       justifyContent: 'center',
+    },
+    campCopy: {
+      flex: 1,
+      minWidth: 0,
+      justifyContent: 'center',
+    },
+    campLabel: {
+      color: C.text3,
+      fontSize: 9,
+      fontFamily: mono,
+      fontWeight: '900',
+      marginBottom: 3,
     },
     stopName: {
       color: C.text,

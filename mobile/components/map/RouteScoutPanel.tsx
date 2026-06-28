@@ -25,6 +25,7 @@ export default function RouteScoutPanel({
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
+  const primaryActionTextColor = C.bg === '#F7F8F6' ? '#101820' : '#fff';
 
   if (!visible || !routeScout || routeScout.status === 'idle') return null;
 
@@ -113,7 +114,7 @@ export default function RouteScoutPanel({
           <Text style={s.actionText}>Rescout</Text>
         </TouchableOpacity>
         <TouchableOpacity style={[s.action, s.actionPrimary]} onPress={onOpenBuilder}>
-          <Ionicons name="git-branch-outline" size={13} color="#fff" />
+          <Ionicons name="git-branch-outline" size={13} color={primaryActionTextColor} />
           <Text style={[s.actionText, s.actionPrimaryText]}>Builder</Text>
         </TouchableOpacity>
       </View>
@@ -121,13 +122,19 @@ export default function RouteScoutPanel({
   );
 }
 
-const makeStyles = (C: ColorPalette) => StyleSheet.create({
+const makeStyles = (C: ColorPalette) => {
+  const light = C.bg === '#F7F8F6';
+  const panelBg = light ? 'rgba(255,255,255,0.96)' : 'rgba(5, 9, 12, 0.92)';
+  const softBg = light ? 'rgba(15,23,42,0.045)' : 'rgba(255,255,255,0.055)';
+  const progressTrackBg = light ? 'rgba(15,23,42,0.08)' : 'rgba(255,255,255,0.08)';
+  const primaryText = light ? '#101820' : '#fff';
+  return StyleSheet.create({
   panel: {
     position: 'absolute',
     left: 12,
     right: 12,
     bottom: 118,
-    backgroundColor: 'rgba(5, 9, 12, 0.92)',
+    backgroundColor: panelBg,
     borderWidth: 1,
     borderColor: C.orange + '66',
     borderRadius: 14,
@@ -135,7 +142,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     zIndex: 9050,
     elevation: 95,
     shadowColor: '#000',
-    shadowOpacity: 0.3,
+    shadowOpacity: light ? 0.16 : 0.3,
     shadowRadius: 18,
     shadowOffset: { width: 0, height: 9 },
   },
@@ -172,7 +179,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     height: 4,
     borderRadius: 999,
     overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: progressTrackBg,
     borderWidth: 1,
     borderColor: C.border2,
   },
@@ -206,7 +213,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontWeight: '800',
     borderWidth: 1,
     borderColor: C.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
+    backgroundColor: softBg,
     borderRadius: 999,
     paddingHorizontal: 8,
     paddingVertical: 4,
@@ -232,7 +239,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: C.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
+    backgroundColor: softBg,
     padding: 8,
     justifyContent: 'center',
   },
@@ -263,7 +270,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: C.border2,
-    backgroundColor: 'rgba(255,255,255,0.055)',
+    backgroundColor: softBg,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -280,6 +287,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontWeight: '900',
   },
   actionPrimaryText: {
-    color: '#fff',
+    color: primaryText,
   },
-});
+  });
+};

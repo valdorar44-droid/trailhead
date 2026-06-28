@@ -37,10 +37,23 @@ export type TrailheadRouteBuilderDraftStop = {
   source?: string;
 };
 
+export type TrailheadRouteScoutDraftSummary = {
+  status?: string;
+  message?: string;
+  totalMiles?: number;
+  totalDurationHours?: number;
+  reviewDays?: number[];
+  missingDays?: number[];
+  lockedStopCount?: number;
+  stopCount?: number;
+  generatedAt?: number;
+};
+
 export type TrailheadRouteBuilderDraft = {
   id?: string;
   source?: 'copilot' | 'manual' | string;
   updatedAt?: number;
+  routeName?: string;
   start?: string;
   destination?: string;
   stops?: Array<string | TrailheadRouteBuilderDraftStop>;
@@ -61,6 +74,8 @@ export type TrailheadRouteBuilderDraft = {
   roadPreference?: CopilotRoadPreference | string;
   riskTolerance?: CopilotRiskTolerance | string;
   originalCommand?: string;
+  handoff?: 'scout_review' | 'builder_setup' | string;
+  scoutSummary?: TrailheadRouteScoutDraftSummary;
 };
 
 export const TRAILHEAD_COPILOT_CAPABILITY_SUMMARY = [
@@ -113,6 +128,44 @@ function normalizeRiskTolerance(value: unknown): CopilotRiskTolerance | undefine
   return undefined;
 }
 
+function normalizeRouteStyle(value: unknown): RouteStyleMode | undefined {
+  const clean = String(value || '').trim().toLowerCase();
+  if (clean === 'direct' || clean === 'balanced' || clean === 'wild') return clean;
+  if (clean === 'wild_but_safe' || clean === 'adventure' || clean === 'adventurous' || clean === 'rough' || clean === 'backroads') return 'wild';
+  return undefined;
+}
+
+function normalizeCampPreference(value: unknown): CopilotCampPreference | undefined {
+  const clean = String(value || '').trim().toLowerCase();
+  if (clean === 'private' || clean === 'rv' || clean === 'developed' || clean === 'any') return clean;
+  if (clean === 'public' || clean === 'primitive' || clean === 'dispersed' || clean === 'blm' || clean === 'usfs' || clean === 'federal') return 'public';
+  return undefined;
+}
+
+function cleanScoutSummary(value: unknown): TrailheadRouteScoutDraftSummary | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const input = value as Record<string, unknown>;
+  const totalMiles = Number(input.totalMiles);
+  const totalDurationHours = Number(input.totalDurationHours);
+  const lockedStopCount = Number(input.lockedStopCount);
+  const stopCount = Number(input.stopCount);
+  const generatedAt = Number(input.generatedAt);
+  const cleanDays = (days: unknown) => Array.isArray(days)
+    ? days.map(Number).filter(Number.isFinite).map(day => Math.max(1, Math.min(30, Math.round(day)))).slice(0, 30)
+    : undefined;
+  return {
+    status: typeof input.status === 'string' ? input.status.slice(0, 40) : undefined,
+    message: typeof input.message === 'string' ? input.message.slice(0, 700) : undefined,
+    totalMiles: Number.isFinite(totalMiles) ? Math.max(0, Math.round(totalMiles)) : undefined,
+    totalDurationHours: Number.isFinite(totalDurationHours) ? Math.max(0, Math.round(totalDurationHours * 10) / 10) : undefined,
+    reviewDays: cleanDays(input.reviewDays),
+    missingDays: cleanDays(input.missingDays),
+    lockedStopCount: Number.isFinite(lockedStopCount) ? Math.max(0, Math.round(lockedStopCount)) : undefined,
+    stopCount: Number.isFinite(stopCount) ? Math.max(0, Math.round(stopCount)) : undefined,
+    generatedAt: Number.isFinite(generatedAt) ? generatedAt : undefined,
+  };
+}
+
 function normalizePoiPreference(value: unknown): CopilotPoiPreference | null {
   const clean = String(value || '').trim().toLowerCase();
   if (
@@ -143,10 +196,8 @@ export function normalizeTrailheadRouteBuilderDraft(value: unknown): TrailheadRo
   const driveHours = Number(input.driveHours);
   const targetMiles = Number(input.targetMiles);
   const tripShape = input.tripShape === 'loop' || input.tripShape === 'there_and_back' ? input.tripShape : input.tripShape === 'one_way' ? 'one_way' : undefined;
-  const routeStyle = input.routeStyle === 'direct' || input.routeStyle === 'wild' ? input.routeStyle : input.routeStyle === 'balanced' ? 'balanced' : undefined;
-  const campPreference = input.campPreference === 'private' || input.campPreference === 'rv' || input.campPreference === 'developed' || input.campPreference === 'any'
-    ? input.campPreference
-    : input.campPreference === 'public' ? 'public' : undefined;
+  const routeStyle = normalizeRouteStyle(input.routeStyle);
+  const campPreference = normalizeCampPreference(input.campPreference);
   const campReuse = input.campReuse === 'same_camp_window' || input.campReuse === 'manual' ? input.campReuse : input.campReuse === 'different_each_night' ? 'different_each_night' : undefined;
   const poiPreferences = Array.isArray(input.poiPreferences)
     ? input.poiPreferences.map(normalizePoiPreference).filter((item): item is CopilotPoiPreference => !!item).slice(0, 12)
@@ -155,6 +206,7 @@ export function normalizeTrailheadRouteBuilderDraft(value: unknown): TrailheadRo
     id: typeof input.id === 'string' ? input.id : `copilot-draft-${Date.now()}`,
     source: typeof input.source === 'string' ? input.source : 'copilot',
     updatedAt: Number.isFinite(Number(input.updatedAt)) ? Number(input.updatedAt) : Date.now(),
+    routeName: typeof input.routeName === 'string' ? input.routeName.trim().slice(0, 140) : undefined,
     start: typeof input.start === 'string' ? input.start.trim().slice(0, 120) : undefined,
     destination: typeof input.destination === 'string' ? input.destination.trim().slice(0, 120) : undefined,
     stops: Array.isArray(input.stops) ? input.stops.map(cleanDraftStop).filter((stop): stop is string | TrailheadRouteBuilderDraftStop => !!stop).slice(0, 24) : undefined,
@@ -175,6 +227,8 @@ export function normalizeTrailheadRouteBuilderDraft(value: unknown): TrailheadRo
     roadPreference: normalizeRoadPreference(input.roadPreference),
     riskTolerance: normalizeRiskTolerance(input.riskTolerance),
     originalCommand: typeof input.originalCommand === 'string' ? input.originalCommand.slice(0, 500) : undefined,
+    handoff: typeof input.handoff === 'string' ? input.handoff.slice(0, 60) : undefined,
+    scoutSummary: cleanScoutSummary(input.scoutSummary),
   };
 }
 

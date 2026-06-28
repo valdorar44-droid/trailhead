@@ -13994,14 +13994,18 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
         " ".join(camp.get("amenities") or []),
         " ".join(camp.get("site_types") or []),
     ]).lower()
-    style = "wild" if str(route_style).lower() in {"wild", "adventure"} else str(route_style or "balanced").lower()
-    preference = str(camp_preference or "public").lower()
+    style_raw = str(route_style or "balanced").lower()
+    style = "wild" if style_raw in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else style_raw
+    preference_raw = str(camp_preference or "public").lower()
+    preference = "public" if preference_raw in {"primitive", "dispersed", "blm", "usfs", "federal", "boondock", "boondocking"} else preference_raw
     limited_public = _public_camp_supply_limited(region_hint)
     public = any(term in combined for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free"))
     official_developed = any(term in combined for term in ("ridb", "recreation.gov", "nps", "state park", "county park", "municipal"))
     rv_private = any(term in combined for term in ("rv park", "rv resort", "koa", "hookup", "electric", "private campground"))
     private_stay = any(term in combined for term in ("private_stay", "private stay", "farm stay", "ranch stay", "winery stay", "vineyard", "glamping", "private camp"))
     score = 0.0
+    if _camp_requires_review(camp):
+        score += 90
     if preference == "rv":
         score += -12 if rv_private else 5
         score += -4 if camp.get("reservable") else 0
@@ -14048,6 +14052,32 @@ def _camp_text(camp: dict) -> str:
         " ".join(camp.get("site_types") or []),
         camp.get("description"),
     ]).lower()
+
+def _camp_requires_review(camp: dict | None) -> bool:
+    if not isinstance(camp, dict) or not camp:
+        return True
+    name = re.sub(r"\s+", " ", str(camp.get("name") or "")).strip().lower()
+    text = _camp_text(camp)
+    if not name:
+        return True
+    review_name = re.search(
+        r"\b("
+        r"office|headquarters|visitor\s+cent(?:er|re)|information\s+cent(?:er|re)|"
+        r"ranger\s+(?:station|district|office)|field\s+office|permit\s+office|"
+        r"administrative|day\s+use|picnic\s+area|parking|trailhead"
+        r")\b",
+        name,
+    )
+    if not review_name:
+        return False
+    overnight_signal = re.search(
+        r"\b("
+        r"campground|campsite|camp\s*site|camping|tent\s+camp|rv\s+(?:park|campground|resort)|"
+        r"dispersed|primitive|boondock|shelter|hut|bothy|lodge|glamping"
+        r")\b",
+        text,
+    )
+    return not bool(overnight_signal)
 
 def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
     if not type_filters:
@@ -14118,11 +14148,13 @@ def _camp_name_needs_review(name: str | None) -> bool:
     clean = re.sub(r"\s+", " ", str(name or "")).strip().lower()
     if not clean:
         return True
-    return clean in {"camp", "campground", "campsite", "site", "rv park", "park", "overnight option"}
+    if clean in {"camp", "campground", "campsite", "site", "rv park", "park", "overnight option"}:
+        return True
+    return bool(re.search(r"\b(office|headquarters|visitor\s+cent(?:er|re)|ranger\s+(?:station|district|office)|field\s+office|permit\s+office|day\s+use|picnic\s+area|parking|trailhead)\b", clean))
 
 def _camp_display_name(camp: dict | None, label: str) -> str:
     name = re.sub(r"\s+", " ", str((camp or {}).get("name") or "")).strip()
-    if _camp_name_needs_review(name):
+    if _camp_requires_review(camp) or _camp_name_needs_review(name):
         style = _camp_overnight_style(camp)
         if style == "dispersed":
             return f"{label} dispersed review area"
@@ -14186,7 +14218,7 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 10,
+        "v": 11,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -14288,13 +14320,16 @@ async def _select_camp_for_window(
         preferred_best = bool(best and (best.get("preference_match") or not type_filters))
         display_name = _camp_display_name(best, label)
         display_name_needs_review = _camp_name_needs_review(display_name) or display_name.lower().endswith("review area")
+        best_requires_review = _camp_requires_review(best)
         strong = bool(
             best
             and best_route_distance <= 28
             and best_endpoint_distance <= 55
             and (preferred_best or str(camp_preference or "").lower() == "any")
             and not display_name_needs_review
+            and not best_requires_review
         )
+        selected_best = best if strong else None
         confidence = "strong" if strong else "review" if best else "missing"
         coverage_status = "ready" if strong else "review" if best else "sparse"
         overnight_style = _camp_overnight_style(best)
@@ -14322,8 +14357,8 @@ async def _select_camp_for_window(
             "label": label,
             "target_mi": window.target_mi,
             "search_window_mi": window.search_window_mi,
-            "camp": best,
-            "selected": best,
+            "camp": selected_best,
+            "selected": selected_best,
             "candidates": candidates,
             "fallback": None if best else {"lat": target["lat"], "lng": target["lng"], "name": f"{label} review area", "description": "Review this day. Choose an overnight stop before navigation."},
             "strong": strong,
@@ -14332,7 +14367,7 @@ async def _select_camp_for_window(
             "reason": reason,
             "reason_short": reason_short,
             "display_name": display_name,
-            "overnight_kind": "camp" if best else "review",
+            "overnight_kind": "camp" if selected_best else "review",
             "overnight_style": overnight_style if best else "unknown",
             "fallback_label": f"{label} review area",
             "fit_notes": fit_notes,
@@ -14383,7 +14418,10 @@ async def route_camp_windows(body: RouteCampWindowsRequest):
     total_mi = _route_distance_mi(points)
     sem = asyncio.Semaphore(3)
     type_filters = [str(t).strip() for t in body.camp_filters if str(t).strip()]
-    route_style = "wild" if (body.route_style or "").lower() in {"wild", "adventure"} else (body.route_style or "balanced").lower()
+    route_style_raw = (body.route_style or "balanced").lower()
+    route_style = "wild" if route_style_raw in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else route_style_raw
+    camp_preference_raw = (body.camp_preference or "public").lower()
+    camp_preference = "public" if camp_preference_raw in {"primitive", "dispersed", "blm", "usfs", "federal", "boondock", "boondocking"} else camp_preference_raw
     results = await asyncio.gather(*[
         _select_camp_for_window(
             window,
@@ -14393,7 +14431,7 @@ async def route_camp_windows(body: RouteCampWindowsRequest):
             total_mi,
             sem,
             route_style=route_style,
-            camp_preference=body.camp_preference,
+            camp_preference=camp_preference,
             require_photos=body.require_photos,
             region_hint=body.region_hint,
         )

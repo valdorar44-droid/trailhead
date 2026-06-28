@@ -8939,6 +8939,7 @@ function MapScreen() {
     const clean = String(name || '').trim().replace(/\s+/g, ' ').toLowerCase();
     if (!clean) return true;
     if (['camp', 'campground', 'campsite', 'site', 'rv park', 'park', 'overnight option'].includes(clean)) return true;
+    if (/\b(office|headquarters|visitor\s+cent(?:er|re)|ranger\s+(?:station|district|office)|field\s+office|permit\s+office|administrative|day\s+use|picnic\s+area|parking|trailhead)\b/.test(clean)) return true;
     return /review area$/.test(clean) || /^day \d+ (?:dispersed |rv |private stay )?review area$/.test(clean);
   }
 
@@ -9016,9 +9017,9 @@ function MapScreen() {
     cumulative: number[],
     defaultPoint: { lat: number; lng: number },
   ): NonNullable<RouteScoutState['stops']>[number] {
-    const camp = win.selected ?? win.camp ?? win.candidates?.[0] ?? null;
-    const point = routeScoutFallbackPoint(win, coords, cumulative, defaultPoint);
     const locked = routeScoutWindowIsLocked(win);
+    const camp = locked ? (win.selected ?? win.camp ?? win.candidates?.[0] ?? null) : null;
+    const point = routeScoutFallbackPoint(win, coords, cumulative, defaultPoint);
     return {
       day: win.day,
       name: locked
@@ -9113,18 +9114,30 @@ function MapScreen() {
     const days = Math.max(2, Math.min(30, Math.round(Number(merged.days ?? merged.duration_days ?? merged.day_count ?? routeScout?.days ?? 3) || 3)));
     const driveHoursValue = Number(merged.driveHours ?? merged.drive_hours ?? merged.max_daily_drive_hours ?? routeScout?.driveHours);
     const driveHours = Number.isFinite(driveHoursValue) && driveHoursValue > 0 ? Math.max(1, Math.min(14, driveHoursValue)) : null;
-    const routeStyle = String(merged.routeStyle ?? merged.route_style ?? routeScout?.routeStyle ?? 'balanced').toLowerCase();
-    const campPreference = String(merged.campPreference ?? merged.camp_preference ?? routeScout?.campPreference ?? 'public').toLowerCase();
+    const routeStyleRaw = String(merged.routeStyle ?? merged.route_style ?? routeScout?.routeStyle ?? 'balanced').toLowerCase();
+    const campPreferenceRaw = String(merged.campPreference ?? merged.camp_preference ?? routeScout?.campPreference ?? 'public').toLowerCase();
+    const routeStyle = /^(wild|adventure|adventurous|wild_but_safe|backroads|rough)$/.test(routeStyleRaw)
+      ? 'wild'
+      : routeStyleRaw === 'direct'
+        ? 'direct'
+        : 'balanced';
+    const campPreference = /^(primitive|dispersed|boondock|boondocking|blm|usfs|federal)$/.test(campPreferenceRaw)
+      ? 'public'
+      : /^(private|rv|developed|any|public)$/.test(campPreferenceRaw)
+        ? campPreferenceRaw
+        : 'public';
     const campPhotoOnly = merged.campPhotoOnly === true || merged.requirePhotos === true || merged.require_photos === true || merged.photosOnly === true;
+    const riskTolerance = String(merged.riskTolerance ?? merged.risk_tolerance ?? '').toLowerCase() || (routeStyleRaw === 'wild_but_safe' ? 'wild_but_safe' : undefined);
     return {
-      merged,
+      merged: { ...merged, routeStyle, campPreference, riskTolerance },
       startRaw,
       destinationRaw,
       days,
       driveHours,
-      routeStyle: routeStyle === 'wild' || routeStyle === 'direct' ? routeStyle : 'balanced',
+      routeStyle,
       campPreference,
       campPhotoOnly,
+      riskTolerance,
       poiPreferences: Array.isArray(merged.poiPreferences) ? merged.poiPreferences : Array.isArray(merged.poi_preferences) ? merged.poi_preferences : [],
       clarify: clarifyArg,
     };
@@ -9426,6 +9439,7 @@ function MapScreen() {
       .map(win => progressiveWindows.get(win.day) ?? routeScoutFallbackWindow(win, coords, cumulative, windowDefaultPoint))
       .sort((a, b) => a.day - b.day);
     const selectedCamps = scoutWindows
+      .filter(routeScoutWindowIsLocked)
       .map(win => win.selected ?? win.camp ?? win.candidates?.[0] ?? null)
       .filter((camp): camp is CampsitePin => !!camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng));
     if (selectedCamps.length) {
@@ -9447,7 +9461,7 @@ function MapScreen() {
       ...scoutWindows.map(win => routeScoutStopFromWindow(win, coords, cumulative, windowDefaultPoint)),
       { day: scoutArgs.days, name: destination.name, lat: destination.lat, lng: destination.lng, type: 'destination', label: 'Finish', routePointType: 'break' as const, routeShapeRole: 'destination' as const, source: 'copilot' },
     ];
-    const missingDays = scoutWindows.filter(win => !(win.selected ?? win.camp ?? win.candidates?.[0])).map(win => win.day);
+    const missingDays = scoutWindows.filter(win => !(win.selected ?? win.camp)).map(win => win.day);
     const reviewDays = scoutWindows.filter(win => !routeScoutWindowIsLocked(win)).map(win => win.day);
     const lockedCount = scoutWindows.filter(routeScoutWindowIsLocked).length;
     const nextStatus = reviewDays.length ? 'review' : scoutArgs.driveHours ? 'ready' : 'needs_input';
@@ -12688,6 +12702,8 @@ function MapScreen() {
       const draft = await writeRouteBuilderDraft({
         ...routeScout.draftArgs,
         source: 'copilot_route_scout',
+        handoff: 'scout_review',
+        routeName: [routeScout.startName, routeScout.destinationName].filter(Boolean).join(' to '),
         autoBuild: false,
         start: routeScout.startName || routeScout.draftArgs.start,
         destination: routeScout.destinationName || routeScout.draftArgs.destination,
@@ -12696,6 +12712,17 @@ function MapScreen() {
         routeStyle: routeScout.routeStyle,
         campPreference: routeScout.campPreference,
         campPhotoOnly: routeScout.draftArgs?.campPhotoOnly === true || routeScout.draftArgs?.require_photos === true,
+        scoutSummary: {
+          status: routeScout.status,
+          message: routeScout.message,
+          totalMiles: routeScout.totalMiles,
+          totalDurationHours: routeScout.totalDurationHours,
+          reviewDays: routeScout.windows?.filter(win => !routeScoutWindowIsLocked(win)).map(win => win.day) ?? routeScout.missingDays,
+          missingDays: routeScout.missingDays,
+          lockedStopCount: routeScout.windows?.filter(routeScoutWindowIsLocked).length ?? scoutStops.filter(stop => stop.type === 'camp').length,
+          stopCount: scoutStops.length,
+          generatedAt: Date.now(),
+        },
         stops: scoutStops
           .map(stop => ({
             day: stop.day,

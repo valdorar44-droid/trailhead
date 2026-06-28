@@ -49,6 +49,7 @@ import {
   clearTrailheadRouteBuilderDraft,
   loadTrailheadRouteBuilderDraft,
   type TrailheadRouteBuilderDraft,
+  type TrailheadRouteScoutDraftSummary,
   type TrailheadRouteBuilderDraftStop,
 } from '@/lib/copilotCapabilities';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
@@ -1496,6 +1497,7 @@ export default function RouteBuilderScreen() {
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [routeName, setRouteName] = useState('');
+  const [copilotScoutSummary, setCopilotScoutSummary] = useState<TrailheadRouteScoutDraftSummary | null>(null);
   const [routeActionSheet, setRouteActionSheet] = useState<'actions' | 'rename' | null>(null);
   const [routeNameDraft, setRouteNameDraft] = useState('');
   const [searchResults, setSearchResults] = useState<SearchPlace[]>([]);
@@ -1585,6 +1587,8 @@ export default function RouteBuilderScreen() {
       setPlannedDays(String(dayCount));
       setDays(Array.from({ length: dayCount }, (_, idx) => idx + 1));
     }
+    setCopilotScoutSummary(draft.scoutSummary ?? null);
+    if (draft.routeName) setRouteName(draft.routeName);
     if (draft.start) setStartQuery(draft.start);
     if (draft.destination) setEndQuery(draft.destination);
     if (draft.tripShape) applyTripShapeMode(draft.tripShape);
@@ -1612,7 +1616,7 @@ export default function RouteBuilderScreen() {
     }
     setTripBuildMode('recommended');
     setRouteTabMode('wizard');
-    setWizardStep(draft.start && draft.destination ? 3 : draft.destination ? 1 : 0);
+    setWizardStep(draft.handoff === 'scout_review' && draftStops.length >= 2 ? 4 : draft.start && draft.destination ? 3 : draft.destination ? 1 : 0);
     if (draft.autoBuild) setCopilotAutoBuildRunId(Date.now());
   }
 
@@ -2107,6 +2111,15 @@ export default function RouteBuilderScreen() {
   const baseRouteSummary = hasBaseRoute
     ? `${orderedStops[0].name.split(',')[0]} to ${orderedStops[orderedStops.length - 1].name.split(',')[0]}`
     : 'Build a base route first';
+  const copilotScoutMeta = useMemo(() => {
+    if (!copilotScoutSummary) return '';
+    const parts = [
+      Number.isFinite(Number(copilotScoutSummary.totalMiles)) ? `${Math.round(Number(copilotScoutSummary.totalMiles)).toLocaleString()} mi` : '',
+      Number.isFinite(Number(copilotScoutSummary.lockedStopCount)) ? `${Math.round(Number(copilotScoutSummary.lockedStopCount))} locked` : '',
+      copilotScoutSummary.reviewDays?.length ? `review day${copilotScoutSummary.reviewDays.length === 1 ? '' : 's'} ${copilotScoutSummary.reviewDays.join(', ')}` : '',
+    ].filter(Boolean);
+    return parts.join(' · ');
+  }, [copilotScoutSummary]);
   const activeDayDriveLimit = parsePositiveNumber(dayDriveTargets[activeDay]) ?? planningStats.driveLimit;
   const tripReadiness = routeBuildSession.readiness;
   const routeFitCards = useMemo<RouteFitCard[]>(() => buildRouteFitCards({
@@ -4288,6 +4301,7 @@ export default function RouteBuilderScreen() {
     setStartQuery('');
     setEndQuery('');
     setRouteName('');
+    setCopilotScoutSummary(null);
     setFrameworkStatus('');
     setRestDays([]);
     setDayDriveTargets({});
@@ -5083,6 +5097,26 @@ export default function RouteBuilderScreen() {
         keyboardShouldPersistTaps="handled"
         keyboardDismissMode="on-drag"
       >
+        {copilotScoutSummary ? (
+          <View style={s.copilotScoutBanner}>
+            <View style={s.copilotScoutTop}>
+              <View style={s.copilotScoutIcon}>
+                <Ionicons name="scan-outline" size={16} color={C.orange} />
+              </View>
+              <View style={s.flex}>
+                <Text style={s.copilotScoutTitle}>Co-Pilot scout loaded</Text>
+                {!!copilotScoutMeta && <Text style={s.copilotScoutMeta} numberOfLines={1}>{copilotScoutMeta}</Text>}
+              </View>
+              <TouchableOpacity style={s.copilotScoutDismiss} onPress={() => setCopilotScoutSummary(null)} accessibilityLabel="Dismiss Co-Pilot scout summary">
+                <Ionicons name="close" size={14} color={C.text3} />
+              </TouchableOpacity>
+            </View>
+            {!!copilotScoutSummary.message && (
+              <Text style={s.copilotScoutMessage} numberOfLines={3}>{copilotScoutSummary.message}</Text>
+            )}
+          </View>
+        ) : null}
+
         <RouteBuilderTimelineActions
           tripShapeMode={tripShapeMode}
           tripLoop={tripLoop}
@@ -5965,6 +5999,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   title: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: 0 },
   headerBtn: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 19, backgroundColor: C.glassStrong },
   headerBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  flex: { flex: 1, minWidth: 0 },
   nameBar: {
     flexDirection: 'row', alignItems: 'center', gap: 9,
     paddingHorizontal: 16, paddingVertical: 10,
@@ -5977,6 +6012,42 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   body: { flex: 1 },
   bodyContent: { padding: 12, paddingTop: 0, paddingBottom: 150, gap: 14 },
+  copilotScoutBanner: {
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    borderRadius: 16,
+    backgroundColor: C.orange + '10',
+    padding: 12,
+    gap: 9,
+  },
+  copilotScoutTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  copilotScoutIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    backgroundColor: C.orange + '12',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  copilotScoutTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
+  copilotScoutMeta: { color: C.orange, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '900', marginTop: 2 },
+  copilotScoutMessage: { color: C.text2, fontSize: 12, lineHeight: 17 },
+  copilotScoutDismiss: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   routeHubContent: { paddingBottom: 120, gap: 14 },
   routeHubHero: {
     minHeight: 220,

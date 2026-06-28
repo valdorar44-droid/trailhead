@@ -173,15 +173,26 @@ const normalizedDraft = normalizeTrailheadRouteBuilderDraft({
   start: 'Moab',
   destination: 'Big Sur',
   days: 5,
-  routeStyle: 'wild',
-  campPreference: 'public',
+  routeStyle: 'wild_but_safe',
+  campPreference: 'primitive',
   roadPreference: 'high_clearance',
   riskTolerance: 'wild_but_safe',
   poiPreferences: ['park', 'monument', 'trailhead', 'invalid'],
+  handoff: 'scout_review',
+  scoutSummary: {
+    message: 'Route scout ready for review.',
+    totalMiles: 951.4,
+    reviewDays: [2],
+    lockedStopCount: 2,
+  },
 });
+assertRouteBuilderContract(normalizedDraft.routeStyle === 'wild', 'copilot draft maps wild_but_safe route style');
+assertRouteBuilderContract(normalizedDraft.campPreference === 'public', 'copilot draft maps primitive to public camp preference');
 assertRouteBuilderContract(normalizedDraft.roadPreference === 'high_clearance', 'copilot draft keeps road preference');
 assertRouteBuilderContract(normalizedDraft.riskTolerance === 'wild_but_safe', 'copilot draft keeps risk tolerance');
 assertRouteBuilderContract((normalizedDraft.poiPreferences || []).join('|') === 'park|monument|trailhead', 'copilot draft filters poi preferences');
+assertRouteBuilderContract(normalizedDraft.handoff === 'scout_review', 'copilot draft keeps scout handoff');
+assertRouteBuilderContract(normalizedDraft.scoutSummary?.totalMiles === 951, 'copilot draft keeps rounded scout miles');
 
 export const routeBuilderContractCases = {
   oneWay,

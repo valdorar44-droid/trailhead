@@ -1,7 +1,7 @@
 import unittest
 
 from ai.planner import _normalize_plan
-from dashboard.server import _build_trip_timeline, _camp_pref_score
+from dashboard.server import _build_trip_timeline, _camp_pref_score, _camp_requires_review
 
 
 def _base_plan(duration=3):
@@ -116,10 +116,17 @@ class PlannerTimelineTests(unittest.TestCase):
     def test_wild_camp_scoring_prefers_public_unless_region_supply_is_limited(self):
         blm_camp = {"name": "BLM Dispersed Area", "land_type": "BLM", "source": "blm", "tags": ["primitive"]}
         rv_park = {"name": "Private RV Park", "land_type": "private", "source": "commercial", "tags": ["rv park", "hookup"]}
+        admin_office = {"name": "Spring Mountains National Recreation Area Office", "land_type": "Federal office", "source": "Recreation.gov"}
 
+        self.assertTrue(_camp_requires_review(admin_office))
+        self.assertFalse(_camp_requires_review(blm_camp))
         self.assertLess(
             _camp_pref_score(blm_camp, route_style="wild", camp_preference="public", region_hint="UT"),
             _camp_pref_score(rv_park, route_style="wild", camp_preference="public", region_hint="UT"),
+        )
+        self.assertLess(
+            _camp_pref_score(blm_camp, route_style="wild", camp_preference="primitive", region_hint="NV"),
+            _camp_pref_score(admin_office, route_style="wild_but_safe", camp_preference="primitive", region_hint="NV"),
         )
         self.assertLess(
             _camp_pref_score(rv_park, route_style="wild", camp_preference="public", region_hint="VT"),

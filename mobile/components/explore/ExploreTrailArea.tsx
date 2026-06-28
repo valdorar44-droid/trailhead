@@ -111,7 +111,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                     <TrailStat label="GAIN" value={formatGain(trail.elevation_gain_ft) || 'Check'} />
                     <TrailStat label="TIME" value={trail.typical_time || 'Check'} />
                   </View>
-                  <Text style={[styles.description, { color: C.text2 }]} numberOfLines={4}>{trail.description || trail.summary}</Text>
+                  <Text style={[styles.description, { color: C.text2 }]}>{trail.description || trail.summary}</Text>
                   {!!photoCredit(trail) && (
                     <Text style={[styles.photoCredit, { color: C.text3 }]} numberOfLines={2}>
                       Photo: {photoCredit(trail)}

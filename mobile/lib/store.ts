@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
-import { User, TripResult, Report, CampsitePin } from './api';
+import { User, TripResult, Report, CampsitePin, OsmPoi } from './api';
 
 // File-based trip storage — no 2KB SecureStore limit
 const TRIP_FILE = () => `${FileSystem.documentDirectory}active_trip.json`;
@@ -71,6 +71,14 @@ export interface ExploreMapSelection {
   sourceUrl?: string;
   officialUrl?: string;
   freshnessLabel?: string;
+  relatedContext?: {
+    places?: OsmPoi[];
+    things_to_do?: OsmPoi[];
+    things_to_see?: OsmPoi[];
+    visitor_centers?: OsmPoi[];
+    campgrounds_nearby?: CampsitePin[];
+    trip_services?: OsmPoi[];
+  };
 }
 
 export interface WaterSpot {

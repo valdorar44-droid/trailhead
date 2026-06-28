@@ -5373,7 +5373,7 @@ export default function RouteBuilderScreen() {
               {selectedCamp?.cost ? (
                 <Text style={s.quickCardCost}>{selectedCamp.reservable ? 'Reservable · ' : ''}{selectedCamp.cost}</Text>
               ) : null}
-              <Text style={s.quickCardDesc} numberOfLines={3}>
+              <Text style={s.quickCardDesc}>
                 {stripHtml(selectedCamp?.description) || 'Camp profile preview. Full profile shows access notes, amenities, map details, and Trailhead camp brief.'}
               </Text>
             {campWeather?.daily?.time?.length ? (

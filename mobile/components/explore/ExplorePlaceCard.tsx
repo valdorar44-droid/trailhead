@@ -12,7 +12,7 @@ import {
   getExploreDisplayTitle,
   getExploreIcon,
   getExploreQuickFacts,
-  sentenceAwarePreviewText,
+  normalizeExploreCopyBlock,
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
@@ -50,7 +50,7 @@ export function ExplorePlaceCard({
   const facts = getExploreQuickFacts(place, context).slice(0, 2);
   const title = getExploreDisplayTitle(place);
   const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
-  const summary = sentenceAwarePreviewText(getExploreCardSummary(place), lead ? 220 : 160);
+  const summary = normalizeExploreCopyBlock(getExploreCardSummary(place));
   if (compact) {
     return (
       <TouchableOpacity

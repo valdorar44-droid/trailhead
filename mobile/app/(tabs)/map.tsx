@@ -6307,34 +6307,36 @@ function MapScreen() {
     if (!locGranted) return;
     let sub: Location.LocationSubscription | null = null;
     let headingSub: Location.LocationSubscription | null = null;
-    Location.watchHeadingAsync(h => {
-      const raw = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
-      if (raw == null || raw < 0 || !Number.isFinite(raw)) return;
-      const normalizedRaw = ((raw % 360) + 360) % 360;
-      const speedMs = userSpeedRef.current ?? 0;
-      if (Platform.OS === 'android') {
-        const now = Date.now();
-        const last = lastAndroidHeadingRef.current;
-        const headingAccuracy = Number((h as any).accuracy ?? (h as any).headingAccuracy ?? NaN);
-        const unreliable = Number.isFinite(headingAccuracy) && headingAccuracy > 45;
-        const rawJump = last ? angleDeltaDeg(last.raw, normalizedRaw) : 0;
-        const smoothJump = last ? angleDeltaDeg(last.smooth, normalizedRaw) : 0;
-        const dt = last ? now - last.at : Infinity;
-        if (unreliable && speedMs < 1.2 && last) return;
-        if (speedMs < 0.8 && last && dt < 1200 && rawJump > 70 && smoothJump > 70) return;
-        if (speedMs < 1.2 && last && dt < 700 && rawJump > 95) return;
-      }
-      const alpha = Platform.OS === 'android'
-        ? speedMs > 2.5 ? 0.24 : 0.16
-        : 0.32;
-      const smooth = smoothAngle(compassHdgRef.current, normalizedRaw, alpha);
-      compassHdgRef.current = smooth;
-      if (Platform.OS === 'android') lastAndroidHeadingRef.current = { at: Date.now(), raw: normalizedRaw, smooth };
-      setUserHeading(smooth);
-      if ((userSpeedRef.current ?? 0) < 1.2) {
-        smoothedHdgRef.current = smooth;
-      }
-    }).then(s => { headingSub = s; }).catch(() => {});
+    if (Platform.OS !== 'web') {
+      Location.watchHeadingAsync(h => {
+        const raw = h.trueHeading != null && h.trueHeading >= 0 ? h.trueHeading : h.magHeading;
+        if (raw == null || raw < 0 || !Number.isFinite(raw)) return;
+        const normalizedRaw = ((raw % 360) + 360) % 360;
+        const speedMs = userSpeedRef.current ?? 0;
+        if (Platform.OS === 'android') {
+          const now = Date.now();
+          const last = lastAndroidHeadingRef.current;
+          const headingAccuracy = Number((h as any).accuracy ?? (h as any).headingAccuracy ?? NaN);
+          const unreliable = Number.isFinite(headingAccuracy) && headingAccuracy > 45;
+          const rawJump = last ? angleDeltaDeg(last.raw, normalizedRaw) : 0;
+          const smoothJump = last ? angleDeltaDeg(last.smooth, normalizedRaw) : 0;
+          const dt = last ? now - last.at : Infinity;
+          if (unreliable && speedMs < 1.2 && last) return;
+          if (speedMs < 0.8 && last && dt < 1200 && rawJump > 70 && smoothJump > 70) return;
+          if (speedMs < 1.2 && last && dt < 700 && rawJump > 95) return;
+        }
+        const alpha = Platform.OS === 'android'
+          ? speedMs > 2.5 ? 0.24 : 0.16
+          : 0.32;
+        const smooth = smoothAngle(compassHdgRef.current, normalizedRaw, alpha);
+        compassHdgRef.current = smooth;
+        if (Platform.OS === 'android') lastAndroidHeadingRef.current = { at: Date.now(), raw: normalizedRaw, smooth };
+        setUserHeading(smooth);
+        if ((userSpeedRef.current ?? 0) < 1.2) {
+          smoothedHdgRef.current = smooth;
+        }
+      }).then(s => { headingSub = s; }).catch(() => {});
+    }
     Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
       loc => {
@@ -6600,7 +6602,10 @@ function MapScreen() {
           }
         }
     ).then(s => { sub = s; }).catch(() => {});
-    return () => { sub?.remove(); headingSub?.remove(); };
+    return () => {
+      try { sub?.remove(); } catch {}
+      try { headingSub?.remove(); } catch {}
+    };
   }, [locGranted]);
 
   // ── Trip data ───────────────────────────────────────────────────────────────
@@ -6827,17 +6832,33 @@ function MapScreen() {
         .map(p => smartPlaceToCampPin(p as OsmPoi))
         .filter((p): p is CampsitePin => !!p);
       const trails = resolved.related?.trails ?? [];
-      setSelectedPlaceContext({
-        loading: false,
-        places: smartPlaces.filter(p => p.name && p.name.trim()) as OsmPoi[],
-        camps: smartCamps,
-        trails,
-        things_to_do: smartPlaces.filter(p => p.name && p.name.trim()) as OsmPoi[],
-        things_to_see: smartSights.filter(p => p.name && p.name.trim()) as OsmPoi[],
-        visitor_centers: smartVisitorCenters.filter(p => p.name && p.name.trim()) as OsmPoi[],
-        campgrounds_nearby: smartCamps,
-        trip_services: smartServices.filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[],
-        error: !smartPlaces.length && !smartSights.length && !smartVisitorCenters.length && !smartCamps.length && !trails.length && !smartServices.length ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
+      setSelectedPlaceContext(prev => {
+        const resolvedPlaces = smartPlaces.filter(p => p.name && p.name.trim()) as OsmPoi[];
+        const resolvedSights = smartSights.filter(p => p.name && p.name.trim()) as OsmPoi[];
+        const resolvedVisitors = smartVisitorCenters.filter(p => p.name && p.name.trim()) as OsmPoi[];
+        const resolvedServices = smartServices.filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[];
+        const resolvedHasContext = resolvedPlaces.length || resolvedSights.length || resolvedVisitors.length || smartCamps.length || trails.length || resolvedServices.length;
+        const previousHasContext = selectedPlaceIsExplore && prev && (
+          prev.places.length || prev.camps.length || prev.trails.length ||
+          (prev.things_to_do?.length ?? 0) || (prev.things_to_see?.length ?? 0) ||
+          (prev.visitor_centers?.length ?? 0) || (prev.campgrounds_nearby?.length ?? 0) ||
+          (prev.trip_services?.length ?? 0)
+        );
+        if (!resolvedHasContext && previousHasContext) {
+          return { ...prev, loading: false, error: undefined };
+        }
+        return {
+          loading: false,
+          places: resolvedPlaces,
+          camps: smartCamps,
+          trails,
+          things_to_do: resolvedPlaces,
+          things_to_see: resolvedSights,
+          visitor_centers: resolvedVisitors,
+          campgrounds_nearby: smartCamps,
+          trip_services: resolvedServices,
+          error: !resolvedHasContext ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
+        };
       });
     };
     const cached = mapCardResolveCacheRef.current.get(resolveKey);
@@ -7780,16 +7801,18 @@ function MapScreen() {
         source_freshness: explore.freshnessLabel,
         region: explore.region || null,
       });
+      const related = explore.relatedContext;
+      const relatedCamps = related?.campgrounds_nearby ?? [];
       setSelectedPlaceContext({
-        loading: true,
-        places: [],
-        camps: [],
+        loading: !related,
+        places: related?.places ?? [],
+        camps: relatedCamps,
         trails: [],
-        things_to_do: [],
-        things_to_see: [],
-        visitor_centers: [],
-        campgrounds_nearby: [],
-        trip_services: [],
+        things_to_do: related?.things_to_do ?? related?.places ?? [],
+        things_to_see: related?.things_to_see ?? [],
+        visitor_centers: related?.visitor_centers ?? [],
+        campgrounds_nearby: relatedCamps,
+        trip_services: related?.trip_services ?? [],
       });
       focusMapSelectionPoint({ lat: explore.lat, lng: explore.lng, name: explore.name }, 10.5, 'place');
       setQuickToast('Explore area opened on map');

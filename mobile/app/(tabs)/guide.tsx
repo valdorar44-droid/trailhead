@@ -579,6 +579,57 @@ function campMetaLine(camp: CampsitePin) {
   ].filter(Boolean).join(' · ');
 }
 
+function sourcePackItemToRelatedPoi(item: ExploreSourcePackItem, fallbackType: OsmPoi['type'] = 'poi'): OsmPoi | null {
+  const lat = Number(item.lat);
+  const lng = Number(item.lng);
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  const kind = String(item.kind || '').toLowerCase();
+  const type: OsmPoi['type'] = /trail/.test(kind)
+    ? 'trail'
+    : /view|overlook|vista/.test(kind)
+      ? 'viewpoint'
+      : /visitor|center|centre/.test(kind)
+        ? 'poi'
+        : fallbackType;
+  return {
+    id: String(item.source_id || item.url || item.title || `${lat.toFixed(5)},${lng.toFixed(5)}`),
+    name: item.title || item.source_label || 'Explore stop',
+    lat,
+    lng,
+    type,
+    subtype: item.kind || item.source_label,
+    display_type: item.kind || item.source_label,
+    source: item.source,
+    source_label: item.source_label || item.source,
+    website: item.url,
+    official_url: item.url,
+    summary: item.description,
+    description: item.description,
+    photo_url: item.image_url ? mediaUrl(item.image_url) : null,
+  };
+}
+
+function exploreMapRelatedContext(place: ExplorePlaceProfile, campgrounds: CampsitePin[] = []) {
+  const pack = place.source_pack ?? {};
+  const thingsToDo = (pack.things_to_do ?? [])
+    .map(item => sourcePackItemToRelatedPoi(item, 'poi'))
+    .filter((item): item is OsmPoi => !!item);
+  const thingsToSee = (pack.things_to_see ?? [])
+    .map(item => sourcePackItemToRelatedPoi(item, 'viewpoint'))
+    .filter((item): item is OsmPoi => !!item);
+  const visitorCenters = (pack.visitor_centers ?? [])
+    .map(item => sourcePackItemToRelatedPoi(item, 'poi'))
+    .filter((item): item is OsmPoi => !!item);
+  return {
+    places: [...thingsToDo, ...thingsToSee, ...visitorCenters].slice(0, 18),
+    things_to_do: thingsToDo.slice(0, 12),
+    things_to_see: thingsToSee.slice(0, 12),
+    visitor_centers: visitorCenters.slice(0, 8),
+    campgrounds_nearby: campgrounds.slice(0, 12),
+    trip_services: [],
+  };
+}
+
 function mergeCampPins(primary: CampsitePin[], fallback: CampsitePin[]) {
   const seen = new Set<string>();
   const merged: CampsitePin[] = [];
@@ -1097,15 +1148,24 @@ export default function GuideScreen() {
     }
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const loadTours = (retryingLive = false) => {
+    const loadTours = async (retryingLive = false) => {
       setExploreSearchExperienceLoading(true);
       if (!retryingLive) setExploreSearchExperienceError('');
-      api.getExploreExperiences(userLoc?.lat, userLoc?.lng, userLoc ? 45 : 100, 'viator', 16, exploreQuery)
+      const placeQuery = placeQueryFromExploreQuery(exploreQuery);
+      let center = userLoc ? { ...userLoc, name: 'this area' } : null;
+      if (placeQuery.length >= 2) {
+        const [resolved] = await api.geocodePlaces(placeQuery, 1, { prefer: 'search_center' }).catch(() => []);
+        if (cancelled) return;
+        if (resolved?.lat != null && resolved?.lng != null) {
+          center = { lat: Number(resolved.lat), lng: Number(resolved.lng), name: resolved.name || placeQuery };
+        }
+      }
+      api.getExploreExperiences(center?.lat, center?.lng, center ? 60 : 100, 'viator', 16, exploreQuery)
         .then(res => {
           if (cancelled) return;
           const results = res.results ?? [];
           setExploreSearchExperiences(results);
-          setExploreSearchExperienceError(results.length ? '' : res.live_message || '');
+          setExploreSearchExperienceError(results.length ? '' : res.live_message || `No bookable tours found near ${center?.name || 'this area'} yet.`);
           if (!retryingLive && results.length === 0 && res.live_status === 'processing') {
             retryTimer = setTimeout(() => loadTours(true), 7000);
           }
@@ -1601,6 +1661,7 @@ export default function GuideScreen() {
         sourceUrl: place.summary.source_url || place.facts?.source_url,
         officialUrl: place.source_pack?.official_url || place.facts?.official_url,
         freshnessLabel: place.source_quality?.freshness_label || (place.facts?.last_updated ? `Updated ${new Date(Number(place.facts.last_updated) * 1000).toLocaleDateString()}` : ''),
+        relatedContext: exploreMapRelatedContext(place, exploreCampgroundsById[place.id] ?? []),
       },
     });
     setSelectedExplore(null);

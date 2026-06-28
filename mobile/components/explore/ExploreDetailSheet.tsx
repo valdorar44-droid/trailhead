@@ -15,9 +15,6 @@ import {
   getExploreSourceRows,
   getExploreTrustBadge,
   normalizeExploreCopyBlock,
-  sentenceAwarePreview,
-  sentenceAwarePreviewText,
-  withPreviewEllipsis,
   type ExploreNearbyModule,
   type ExploreDisplayContext,
 } from './exploreDisplay';
@@ -136,31 +133,14 @@ function sizedNpsMediaUrl(url?: string | null, width = 900) {
 function ExpandableText({
   value,
   textStyle,
-  previewChars = 300,
 }: {
   value?: string | null;
   textStyle: StyleProp<TextStyle>;
   previewChars?: number;
 }) {
-  const C = useTheme();
-  const [expanded, setExpanded] = useState(false);
   const clean = normalizeExploreCopyBlock(value);
-  const preview = sentenceAwarePreview(clean, previewChars);
-  const canExpand = preview.expandable;
   if (!clean) return null;
-  return (
-    <Text style={textStyle}>
-      {expanded || !canExpand ? clean : withPreviewEllipsis(preview.text)}
-      {canExpand ? (
-        <>
-          {expanded ? ' ' : ' '}
-          <Text style={[styles.expandLink, { color: C.orange }]} onPress={() => setExpanded(current => !current)}>
-            {expanded ? 'Show less' : 'See more'}
-          </Text>
-        </>
-      ) : null}
-    </Text>
-  );
+  return <Text style={textStyle}>{clean}</Text>;
 }
 
 export function ExploreDetailSheet({
@@ -541,7 +521,7 @@ export function ExploreDetailSheet({
               <View style={styles.detailItemBody}>
                 <Text style={[styles.detailItemTitle, { color: C.text }]} numberOfLines={2}>{item.title || 'Place'}</Text>
                 {!!item.description && (
-                  <Text style={[styles.detailItemCopy, { color: C.text2 }]}>{sentenceAwarePreviewText(item.description, 230)}</Text>
+                  <Text style={[styles.detailItemCopy, { color: C.text2 }]}>{normalizeExploreCopyBlock(item.description)}</Text>
                 )}
                 <View style={styles.detailItemMeta}>
                   {!!item.source_label && <Text style={[styles.detailItemMetaText, { color: C.text3 }]} numberOfLines={1}>{item.source_label}</Text>}
@@ -796,7 +776,6 @@ export function ExploreDetailSheet({
             <View style={styles.heroText}>
               <Text style={[styles.kicker, { color: '#bbf7d0' }]} numberOfLines={1}>{(item.kind || activeModuleDef?.label || 'Place').replace(/_/g, ' ').toUpperCase()}</Text>
               <Text style={styles.title} numberOfLines={3}>{item.title || 'Place'}</Text>
-              {!!item.description && <Text style={styles.heroSummary}>{sentenceAwarePreviewText(item.description, 190)}</Text>}
             </View>
           )}
         </View>
@@ -1103,7 +1082,6 @@ export function ExploreDetailSheet({
               {getExploreDisplayCategory(place).toUpperCase()} · {place.summary.state || getExploreDisplayRegion(place)}
             </Text>
             <Text style={styles.title} numberOfLines={3}>{getExploreDisplayTitle(place)}</Text>
-            <Text style={styles.heroSummary}>{sentenceAwarePreviewText(getExploreCardSummary(place), 180)}</Text>
             <View style={styles.heroMetaRow}>
               <View style={styles.heroTrust}>
                 <Ionicons name="star" size={16} color="#facc15" />
@@ -1260,7 +1238,7 @@ function SourcePack({
                   {!!item.image_url && <ResilientImage uris={[sizedNpsMediaUrl(mediaUrl(item.image_url)), mediaUrl(item.image_url)]} style={styles.miniImage} />}
                   <View style={styles.miniBody}>
                     <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
-                    {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]}>{sentenceAwarePreviewText(item.description, 135)}</Text>}
+                    {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]}>{normalizeExploreCopyBlock(item.description)}</Text>}
                   </View>
                 </TouchableOpacity>
               );

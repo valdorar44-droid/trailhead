@@ -58,7 +58,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
                   <Text style={[styles.title, { color: C.text }]} numberOfLines={2}>{experience.title}</Text>
                   <Text style={[styles.meta, { color: C.text3 }]} numberOfLines={1}>{experienceMeta(experience)}</Text>
                   {!!experience.summary && (
-                    <Text style={[styles.summary, { color: C.text2 }]} numberOfLines={3}>{experience.summary}</Text>
+                    <Text style={[styles.summary, { color: C.text2 }]}>{experience.summary}</Text>
                   )}
                   <View style={styles.actions}>
                     <TouchableOpacity

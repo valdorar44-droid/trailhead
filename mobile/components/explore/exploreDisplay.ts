@@ -171,6 +171,12 @@ function isOpenKnowledgePublisher(value?: string | null) {
   return /\b(wikidata|wikipedia|wikimedia|commons)\b/i.test(String(value || ''));
 }
 
+function cleanSourcePublisherLabel(value?: string | null) {
+  const clean = String(value || '').trim();
+  if (!clean) return '';
+  return clean.replace(/\b(blm|nps|usfs|usgs|nws)\b/gi, match => match.toUpperCase());
+}
+
 export function normalizeExploreCopyBlock(value?: string | null) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -339,7 +345,7 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
   const sources = Array.isArray(v3.sources) ? v3.sources : [];
   const facts = place.facts ?? {};
   const quality = normalize(String(v3.quality || place.source_pack?.quality || facts.source_quality || ''));
-  const primary = String(place.source_pack?.primary || sources[0]?.publisher || sources[0]?.name || '').trim();
+  const primary = cleanSourcePublisherLabel(place.source_pack?.primary || sources[0]?.publisher || sources[0]?.name);
   if (isOpenKnowledgePublisher(primary)) return 'Multiple sources';
   if (quality.includes('official')) {
     if (!primary) return 'Official source';

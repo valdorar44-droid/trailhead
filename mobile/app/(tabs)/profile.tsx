@@ -175,6 +175,7 @@ export default function ProfileScreen() {
   const [resendingVerify, setResendingVerify] = useState(false);
   const [resetSent, setResetSent] = useState(false);
   const [creditHistory, setCreditHistory] = useState<any[]>([]);
+  const [creditHistoryLoaded, setCreditHistoryLoaded] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showPaywall, setShowPaywall] = useState(false);
   const hasPlan     = useStore(st => st.hasPlan);
@@ -300,6 +301,21 @@ export default function ProfileScreen() {
     if (!user) return;
     loadSupportInbox(false).catch(() => {});
   }, [user?.id]);
+
+  useEffect(() => {
+    let alive = true;
+    if (!user) {
+      setPlan(false, null);
+      return () => { alive = false; };
+    }
+    api.subscriptionStatus()
+      .then(sub => {
+        if (!alive) return;
+        setPlan(Boolean(sub.is_active), sub.is_active ? sub.plan_expires_at ?? null : null);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [setPlan, user?.id]);
 
   useEffect(() => {
     if (!user || params.support !== '1') return;
@@ -622,10 +638,11 @@ export default function ProfileScreen() {
   }
 
   async function loadHistory() {
-    if (creditHistory.length > 0) { setShowHistory(p => !p); return; }
+    if (creditHistoryLoaded) { setShowHistory(p => !p); return; }
     try {
       const res = await api.getCredits();
-      setCreditHistory(res.history);
+      setCreditHistory(Array.isArray(res.history) ? res.history : []);
+      setCreditHistoryLoaded(true);
       setShowHistory(true);
     } catch (e: any) {
       if (e instanceof ApiError && e.status === 401) {
@@ -1765,17 +1782,24 @@ export default function ProfileScreen() {
           onClose={() => setShowPaywall(false)}
         />
 
-        {profileSection === 'account' && showHistory && creditHistory.length > 0 && (
+        {profileSection === 'account' && showHistory && creditHistoryLoaded && (
           <View style={s.historyCard}>
             <Text style={s.sectionLabel}>RECENT ACTIVITY</Text>
-            {creditHistory.map(tx => (
-              <View key={tx.id} style={s.txRow}>
-                <Text style={s.txReason} numberOfLines={1}>{tx.reason}</Text>
-                <Text style={[s.txAmount, tx.amount > 0 ? s.txPos : s.txNeg]}>
-                  {tx.amount > 0 ? '+' : ''}{tx.amount}
-                </Text>
+            {creditHistory.length > 0 ? (
+              creditHistory.map(tx => (
+                <View key={tx.id} style={s.txRow}>
+                  <Text style={s.txReason} numberOfLines={1}>{tx.reason}</Text>
+                  <Text style={[s.txAmount, tx.amount > 0 ? s.txPos : s.txNeg]}>
+                    {tx.amount > 0 ? '+' : ''}{tx.amount}
+                  </Text>
+                </View>
+              ))
+            ) : (
+              <View style={s.emptyMiniCard}>
+                <Text style={s.emptyMiniTitle}>No credit activity yet</Text>
+                <Text style={s.emptyMiniSub}>Reports, confirmations, and referrals will show here.</Text>
               </View>
-            ))}
+            )}
           </View>
         )}
 
@@ -1958,7 +1982,7 @@ export default function ProfileScreen() {
             <Ionicons name="bug-outline" size={20} color={C.red} />
             <View style={{ flex: 1 }}>
               <Text style={s.bugCardTitle}>Found a bug?</Text>
-              <Text style={s.bugCardSub}>Report it and earn credits if it's legit</Text>
+              <Text style={s.bugCardSub}>Send details so support can review it.</Text>
             </View>
           </View>
           <Ionicons name="chevron-forward" size={16} color={C.text3} />
@@ -1987,7 +2011,7 @@ export default function ProfileScreen() {
                 <>
                   <TrailheadCard style={s.bugCreditBanner}>
                     <Ionicons name="flash" size={14} color={C.orange} />
-                    <Text style={s.bugCreditText}>Verified bugs earn generous credits. You must be logged in to receive them.</Text>
+                    <Text style={s.bugCreditText}>Verified reports may earn credits. You must be logged in to receive them.</Text>
                   </TrailheadCard>
                   <Text style={s.bugFieldLabel}>WHAT WENT WRONG</Text>
                   <TextInput
@@ -2820,6 +2844,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   sectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1, marginBottom: 10 },
   sectionLabelRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginBottom: 10 },
+  emptyMiniCard: {
+    borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s3, padding: 12, gap: 4,
+  },
+  emptyMiniTitle: { color: C.text, fontSize: 13, fontWeight: '700' },
+  emptyMiniSub: { color: C.text3, fontSize: 12, lineHeight: 17 },
   txRow: {
     flexDirection: 'row', justifyContent: 'space-between',
     paddingVertical: 7, borderBottomWidth: 1, borderColor: C.border,

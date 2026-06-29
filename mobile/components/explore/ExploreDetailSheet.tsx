@@ -235,7 +235,12 @@ function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
     .replace(/\bmap context\b/gi, 'area detail')
     .replace(/\bAI\b/g, '')
     .trim();
-  if (/\bis a managed outdoor area near\b/i.test(clean) || /\bCheck official access, fees, closures, permits, weather\b/i.test(clean)) {
+  if (
+    /\bis a managed outdoor area near\b/i.test(clean)
+    || /\bCheck official access, fees, closures, permits, weather\b/i.test(clean)
+    || /\bUse it to stage trail time, nearby stays, weather, and map context\b/i.test(clean)
+    || /\bsource-backed Explore destination\b/i.test(clean)
+  ) {
     return replacementForGenericSourcePackCopy(title, item);
   }
   if (!clean || clean.length < 24) return '';
@@ -1093,7 +1098,7 @@ export function ExploreDetailSheet({
       return (
         <View style={[styles.panel, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <ScrollView ref={storyScrollRef} style={styles.storyBox} nestedScrollEnabled showsVerticalScrollIndicator>
-            {(storySentences.length ? storySentences : ['No story yet.']).map((sentence, idx) => (
+            {(storySentences.length ? storySentences : ['Story unavailable.']).map((sentence, idx) => (
               <Text
                 key={`${idx}-${sentence.slice(0, 24)}`}
                 style={[

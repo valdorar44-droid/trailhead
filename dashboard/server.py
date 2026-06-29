@@ -1508,6 +1508,87 @@ def _explore_is_destination_hub(place: dict) -> bool:
     return False
 
 
+EXPLORE_THIN_OPEN_REFERENCE_PATTERNS = (
+    re.compile(r"\bUse it to stage trail time, nearby stays, weather, and map context\b", re.I),
+    re.compile(r"\bUse this card for map context, nearby stops, weather, and access checks\b", re.I),
+    re.compile(r"\badds a real named destination to Explore\b", re.I),
+    re.compile(r"\bOpen global Explore\b", re.I),
+    re.compile(r"\bFallback global Explore\b", re.I),
+    re.compile(r"\bsource-backed Explore destination\b", re.I),
+    re.compile(r"\broute planning can connect map, weather, nearby stops\b", re.I),
+    re.compile(r"\bOpen nearby camps, services, weather, and trails before\b", re.I),
+)
+
+
+def _explore_open_reference_text(place: dict) -> str:
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    profile = place.get("profile") if isinstance(place.get("profile"), dict) else {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    sources = []
+    for source_list in (place.get("sources"), source_pack.get("sources")):
+        if isinstance(source_list, list):
+            sources.extend(source for source in source_list if isinstance(source, dict))
+    values = [
+        place.get("attribution"),
+        place.get("quality"),
+        place.get("source_quality"),
+        source_pack.get("quality"),
+        source_pack.get("primary"),
+        source_pack.get("source_note"),
+        summary.get("source_title"),
+        summary.get("hook"),
+        summary.get("short_description"),
+        profile.get("summary"),
+        profile.get("why_it_matters"),
+        profile.get("nearby_context"),
+    ]
+    for source in sources:
+        values.extend([source.get("publisher"), source.get("name"), source.get("title"), source.get("kind")])
+    return " ".join(str(value or "") for value in values).lower()
+
+
+def _explore_has_rich_content(place: dict) -> bool:
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    if summary.get("image_url") or summary.get("thumbnail_url") or place.get("media"):
+        return True
+    for key in ("things_to_do", "things_to_see", "campgrounds", "visitor_centers", "photos"):
+        if isinstance(source_pack.get(key), list) and source_pack.get(key):
+            return True
+    return bool(place.get("trails"))
+
+
+def _explore_thin_open_reference(place: dict) -> bool:
+    text = _explore_open_reference_text(place)
+    if any(pattern.search(text) for pattern in EXPLORE_THIN_OPEN_REFERENCE_PATTERNS):
+        return True
+    if not re.search(r"\b(wikidata|wikipedia|wikimedia|commons)\b", text):
+        return False
+    if _explore_has_rich_content(place):
+        return False
+    return bool(re.search(r"\b(managed outdoor area near|check official access, fees, closures, permits, weather)\b", text))
+
+
+def _explore_content_quality_score(place: dict) -> float:
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    profile = place.get("profile") if isinstance(place.get("profile"), dict) else {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    score = 0.0
+    if summary.get("image_url") or summary.get("thumbnail_url") or place.get("media"):
+        score += 18.0
+    if profile.get("story") or profile.get("summary"):
+        score += 8.0
+    for key, weight in (("things_to_do", 3.0), ("things_to_see", 3.0), ("campgrounds", 2.0), ("visitor_centers", 2.0)):
+        values = source_pack.get(key)
+        if isinstance(values, list):
+            score += min(12.0, len(values) * weight)
+    if place.get("trails"):
+        score += 12.0
+    if _explore_thin_open_reference(place):
+        score -= 45.0
+    return score
+
+
 def _explore_query_sort_key(place: dict, query_terms: list[str]) -> tuple[float, float]:
     summary = place.get("summary") or {}
     rank = float(summary.get("hero_rank") or summary.get("rank") or 999999)
@@ -1534,6 +1615,7 @@ def _explore_query_sort_key(place: dict, query_terms: list[str]) -> tuple[float,
         score -= 15.0
     if child_title and not is_hub:
         score += 15.0
+    score -= max(-45.0, min(28.0, _explore_content_quality_score(place)))
     return (score, rank)
 
 def _explore_place_matches_categories(place_type: str, requested: set[str] | None) -> bool:

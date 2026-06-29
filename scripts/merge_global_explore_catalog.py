@@ -121,7 +121,7 @@ def build_place(entry: dict, wiki: dict, rank: int) -> dict | None:
     region = str(entry.get("state") or entry.get("region") or "").strip() or "Global"
     extract = wiki.get("extract") or ""
     default_hook = str(entry.get("hook") or f"{title} is a source-backed Explore destination in {region}.")
-    default_summary = str(entry.get("short_description") or "Use this card for map context, nearby stops, weather, and access checks before committing time to the detour.")
+    default_summary = str(entry.get("short_description") or "Use this card to compare nearby stops, weather, access, and current conditions.")
     hook = sentence(extract, default_hook)
     short = compact_summary(extract, default_summary)
     img, credit = image_from_summary(wiki)
@@ -159,11 +159,11 @@ def build_place(entry: dict, wiki: dict, rank: int) -> dict | None:
             "hook": default_hook if len(hook) > 190 else hook,
             "summary": short,
             "story": f"{title}. {short} Use current local sources for closures, permits, safety, and seasonal access before planning around it.",
-            "why_it_matters": f"{title} adds a real named destination to Explore so route planning can connect map, weather, nearby stops, and access checks.",
+            "why_it_matters": f"{title} adds a named destination with map, weather, nearby stop, and access context.",
             "what_to_know": "This is an open-source planning lead. Verify current access, fees, permits, closures, local rules, and conditions before relying on it.",
             "best_time_to_stop": "Check local season, daylight, weather, and access before setting dates.",
             "access_notes": "Use the linked source and local official sources for current access.",
-            "nearby_context": "Open nearby camps, services, weather, and trails before committing it to a route.",
+            "nearby_context": "Compare nearby camps, services, weather, and trails before you go.",
         },
         "audio_script": "",
         "wiki_extract": extract,
@@ -184,7 +184,7 @@ def build_place(entry: dict, wiki: dict, rank: int) -> dict | None:
                 "license": entry.get("image_license") or "Wikimedia Commons",
             }] if img else []),
             "topics": tags,
-            "source_note": entry.get("source_note") or "Open global Explore source pack. Verify current access locally.",
+            "source_note": entry.get("source_note") or "Open-reference destination data. Verify current access locally.",
             "extract": extract,
         },
         "facts": {

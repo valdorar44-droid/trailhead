@@ -141,9 +141,23 @@ const FALLBACK_COPY: Record<string, string> = {
   tours: 'Bookable guided trips, tickets, local tours, and activities from external providers.',
   water: 'Water access or feature. Verify safety, access, seasonal conditions, and local rules.',
   scenic: 'Scenic stop for photos, short walks, and nearby exploration.',
-  parks: 'Outdoor destination. Check official access, fees, closures, and local rules before committing dates.',
+  parks: 'Outdoor destination. Check official access, fees, closures, and local rules before setting dates.',
   land: 'Public land or managed area. Verify land rules, camping limits, access, and current restrictions.',
 };
+
+const THIN_OPEN_REFERENCE_PATTERNS = [
+  /\bUse it to stage trail time, nearby stays, weather, and map context\b/i,
+  /\bUse this card for map context, nearby stops, weather, and access checks\b/i,
+  /\badds a real named destination to Explore\b/i,
+  /\bOpen global Explore\b/i,
+  /\bFallback global Explore\b/i,
+  /\bsource-backed Explore destination\b/i,
+  /\broute planning can connect map, weather, nearby stops\b/i,
+  /\bOpen nearby camps, services, weather, and trails before\b/i,
+  /\bsafer overnight or weather-reset lead\b/i,
+  /\bday anchor for nearby camps\b/i,
+  /\bdrive-by pin\b/i,
+];
 
 const WEAK_COPY_PATTERNS = [
   /\bmay refer to\b/i,
@@ -151,6 +165,7 @@ const WEAK_COPY_PATTERNS = [
   /\b(undefined|null|nan)\b/i,
   /\bis a managed outdoor area near\b/i,
   /\bCheck official access, fees, closures, permits, weather\b/i,
+  ...THIN_OPEN_REFERENCE_PATTERNS,
   /^\s*(lake|mountain|waterfall|glacier|island|hill|volcano|national park|former national park|marine reserve|animal sanctuary|locality|river|peak)\s+(in|on|near|of)\s+[^.]{1,90}\.?\s*$/i,
   /^\s*(mountain|waterfall|glacier|lake|peak|park|trail|campground|historic site|protected area|places?|things to do)\s*\.?\s*$/i,
 ];
@@ -346,13 +361,13 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
   const facts = place.facts ?? {};
   const quality = normalize(String(v3.quality || place.source_pack?.quality || facts.source_quality || ''));
   const primary = cleanSourcePublisherLabel(place.source_pack?.primary || sources[0]?.publisher || sources[0]?.name);
-  if (isOpenKnowledgePublisher(primary)) return 'Multiple sources';
+  if (isOpenKnowledgePublisher(primary)) return 'Open references';
   if (quality.includes('official')) {
     if (!primary) return 'Official source';
     if (/official/i.test(primary)) return primary;
     return `${primary} official`;
   }
-  if (quality.includes('wiki') || /wikipedia/i.test(facts.source_title || primary)) return 'Curated details';
+  if (quality.includes('wiki') || /wikipedia|wikidata|wikimedia/i.test(facts.source_title || primary)) return 'Open references';
   if (primary) return primary;
   if (sources.length > 1 || place.source_pack?.sources?.length) return 'Multiple sources';
   return 'Map details';
@@ -364,7 +379,7 @@ export function getExploreTrustBadge(place: ExplorePlaceProfile) {
   if (confidence.score >= 65) return 'Good confidence';
   const badge = getExploreSourceBadge(place);
   if (/official/i.test(badge)) return 'Verified details';
-  if (/community|curated|multiple/i.test(badge)) return 'Curated details';
+  if (/community|curated|multiple|open references/i.test(badge)) return 'Curated details';
   return 'Check access';
 }
 
@@ -377,7 +392,9 @@ export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
       year: 'numeric',
     });
   }
-  if (/official/i.test(getExploreSourceBadge(place))) return 'Official details';
+  const badge = getExploreSourceBadge(place);
+  if (/official/i.test(badge)) return 'Official details';
+  if (/open references/i.test(badge)) return 'Verify locally';
   return 'Check current status';
 }
 
@@ -530,6 +547,10 @@ export function getExploreQuickFacts(place: ExplorePlaceProfile, context: Explor
     facts.push({ label: 'Verify hours', icon: 'car-outline', tone: '#ea580c' });
   } else if (key === 'resupply') {
     facts.push({ label: 'Verify supply', icon: 'basket-outline', tone: '#7c3aed' });
+  } else if (key === 'trails' || key === 'trailheads' || key === 'climb') {
+    facts.push({ label: 'Trail access', icon: 'walk-outline', tone: '#f97316' });
+  } else if (key === 'peaks') {
+    facts.push({ label: 'Mountain', icon: 'triangle-outline', tone: '#2563eb' });
   } else {
     facts.push({ label: 'Area', icon: 'navigate-outline', tone: '#2563eb' });
   }
@@ -670,6 +691,70 @@ export function exploreTrustScore(place: ExplorePlaceProfile) {
   return score;
 }
 
+export function isExploreThinOpenReference(place: ExplorePlaceProfile) {
+  const v3 = readV3(place);
+  const sourcePack = place.source_pack ?? {};
+  const sourceText = compact([
+    place.attribution,
+    place.quality,
+    v3.source_quality,
+    v3.source_confidence,
+    sourcePack.quality,
+    sourcePack.primary,
+    sourcePack.source_note,
+    place.summary.source_title,
+    ...(Array.isArray(place.sources) ? place.sources.flatMap((source: any) => [
+      source?.publisher,
+      source?.name,
+      source?.title,
+      source?.kind,
+    ]) : []),
+    ...(Array.isArray(sourcePack.sources) ? sourcePack.sources.flatMap((source: any) => [
+      source?.publisher,
+      source?.name,
+      source?.title,
+      source?.kind,
+    ]) : []),
+  ]).join(' ');
+  const copyText = compact([
+    v3.card?.summary,
+    v3.card?.headline,
+    place.summary.hook,
+    place.summary.short_description,
+    place.profile.summary,
+    place.profile.why_it_matters,
+    place.profile.nearby_context,
+    sourcePack.source_note,
+  ]).join(' ');
+  const openKnowledge = isOpenKnowledgePublisher(sourceText);
+  if (THIN_OPEN_REFERENCE_PATTERNS.some(pattern => pattern.test(copyText))) return true;
+  if (!openKnowledge) return false;
+  const hasRicherMedia = Boolean(place.summary.image_url || place.summary.thumbnail_url || (Array.isArray(v3.media) && v3.media.length));
+  const hasNestedDetails = Boolean(
+    (Array.isArray(v3.trails) && v3.trails.length)
+    || (Array.isArray(sourcePack.things_to_do) && sourcePack.things_to_do.length)
+    || (Array.isArray(sourcePack.things_to_see) && sourcePack.things_to_see.length)
+    || (Array.isArray(sourcePack.campgrounds) && sourcePack.campgrounds.length)
+  );
+  return !hasRicherMedia && !hasNestedDetails && isWeakExploreCopy(copyText, place);
+}
+
+export function exploreContentQualityScore(place: ExplorePlaceProfile) {
+  const v3 = readV3(place);
+  const sourcePack = place.source_pack ?? {};
+  let score = 0;
+  if (place.summary.image_url || place.summary.thumbnail_url || (Array.isArray(v3.media) && v3.media.length)) score += 24;
+  if (v3.card?.summary || v3.card?.headline || v3.card?.highlight) score += 18;
+  if (place.profile.summary && !isWeakExploreCopy(place.profile.summary, place)) score += 14;
+  if (place.profile.story && !isWeakExploreCopy(place.profile.story, place)) score += 10;
+  if (Array.isArray(v3.trails) && v3.trails.length) score += Math.min(20, v3.trails.length * 4);
+  if (Array.isArray(sourcePack.things_to_do) && sourcePack.things_to_do.length) score += Math.min(16, sourcePack.things_to_do.length * 3);
+  if (Array.isArray(sourcePack.things_to_see) && sourcePack.things_to_see.length) score += Math.min(16, sourcePack.things_to_see.length * 3);
+  if (Array.isArray(sourcePack.campgrounds) && sourcePack.campgrounds.length) score += Math.min(12, sourcePack.campgrounds.length * 3);
+  if (isExploreThinOpenReference(place)) score -= 70;
+  return score;
+}
+
 function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   const key = getExploreCategoryKey(place);
   const title = getExploreDisplayTitle(place);
@@ -681,6 +766,26 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     .replace(/\bAI\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (/Use it to stage trail time, nearby stays, weather, and map context|Use this card for map context, nearby stops, weather, and access checks/i.test(text)) {
+    if (key === 'peaks') return `${title} is a mountain target. Check route, weather, access, and current conditions before you go.`;
+    if (key === 'trails' || key === 'trailheads' || key === 'climb') return `${title} is a trail target. Check route, access, weather, permits, and current conditions before you go.`;
+    return `${title} has area details to compare with weather, access, nearby stops, and current conditions.`;
+  }
+  if (/safer overnight or weather-reset lead|Verify reservations, seasonal access, food, hut rules, and route approach/i.test(text)) {
+    return `${title} is a hut or shelter option. Check reservations, seasonal access, route approach, and current conditions.`;
+  }
+  if (/day anchor for nearby camps, trailheads, access notes, and weather/i.test(text)) {
+    return `${title} has nearby camps, trails, access notes, and weather to check before setting dates.`;
+  }
+  if (/Use it for photos, route timing, nearby trail context, and weather checks/i.test(text)) {
+    return `${title} is a scenic stop. Check access, seasonal conditions, and local rules before you go.`;
+  }
+  if (/drive-by pin|Plan time to stop, walk, and read the place/i.test(text)) {
+    return `${title} is a history or landmark stop. Check hours, tickets, access, and local rules.`;
+  }
+  if (/Use it to start a camp search near a real destination/i.test(text)) {
+    return `${title} is an overnight-area lead. Check legal camping, fees, closures, road access, and booking rules.`;
+  }
   if (isWeakExploreCopy(text, place)) {
     return FALLBACK_COPY[key] || `${title} has map details and current access checks.`;
   }

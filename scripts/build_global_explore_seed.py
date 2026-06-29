@@ -29,7 +29,7 @@ QUERY_GROUPS = [
         "classes": ["Q2143825", "Q1286517", "Q22698", "Q8502"],
         "tags": ["trails", "trekking", "route"],
         "hook": "{title} is a route-worthy trail or trek anchor in {region}.",
-        "summary": "Use it to stage trail time, nearby stays, weather, and map context. Verify route, access, permits, and current conditions before committing.",
+        "summary": "Trail or trek target for comparing access, weather, nearby stays, and current route conditions.",
     },
     {
         "key": "parks",
@@ -38,7 +38,7 @@ QUERY_GROUPS = [
         "classes": ["Q46169", "Q179049", "Q473972", "Q9259"],
         "tags": ["parks", "protected area", "outdoors"],
         "hook": "{title} is a protected-land destination worth shaping a route around.",
-        "summary": "Use it as a day anchor for nearby camps, trailheads, access notes, and weather. Check the official land manager before relying on dates or roads.",
+        "summary": "Protected-land destination with nearby camps, trailheads, access notes, and weather to verify before setting dates.",
     },
     {
         "key": "water_scenic",
@@ -47,7 +47,7 @@ QUERY_GROUPS = [
         "classes": ["Q34038", "Q35666", "Q23397", "Q45776", "Q40080", "Q23442", "Q47521"],
         "tags": ["water", "waterfalls", "glaciers", "coast", "views"],
         "hook": "{title} gives Explore a scenic water, ice, or coast anchor in {region}.",
-        "summary": "Use it for photos, route timing, nearby trail context, and weather checks. Confirm seasonal access, flow, surf, ice, or road status locally.",
+        "summary": "Scenic water, ice, or coast stop with nearby trail context and seasonal access to verify locally.",
     },
     {
         "key": "monuments",
@@ -56,7 +56,7 @@ QUERY_GROUPS = [
         "classes": ["Q9259", "Q4989906", "Q839954", "Q570116"],
         "tags": ["monuments", "history", "heritage", "landmarks"],
         "hook": "{title} gives the route a specific history or landmark stop in {region}.",
-        "summary": "Plan time to stop, walk, and read the place instead of treating it like a drive-by pin. Confirm hours, tickets, access, and local rules.",
+        "summary": "History or landmark stop. Confirm hours, tickets, access, and local rules before you go.",
     },
     {
         "key": "huts_lodging",
@@ -65,7 +65,7 @@ QUERY_GROUPS = [
         "classes": ["Q182676", "Q2710737", "Q11900058"],
         "tags": ["huts", "lodging", "shelter", "trekking"],
         "hook": "{title} can be a roofed mountain or backcountry planning anchor in {region}.",
-        "summary": "Use it as a safer overnight or weather-reset lead. Verify reservations, seasonal access, food, hut rules, and route approach before depending on it.",
+        "summary": "Hut or roofed mountain stay. Verify reservations, seasonal access, food, hut rules, and route approach.",
     },
     {
         "key": "camping",
@@ -74,7 +74,7 @@ QUERY_GROUPS = [
         "classes": ["Q832778", "Q1058914"],
         "tags": ["camping", "campgrounds", "overnight"],
         "hook": "{title} is a named overnight-area lead in {region}.",
-        "summary": "Use it to start a camp search near a real destination. Verify legal camping, fees, closures, road access, and booking rules with the local source.",
+        "summary": "Named overnight-area lead. Verify legal camping, fees, closures, road access, and booking rules with the local source.",
     },
 ]
 
@@ -226,7 +226,7 @@ def fetch_group(client: httpx.Client, group: dict) -> list[dict]:
             "lng": lng,
             "source_url": source_url(item_url, ""),
             "source_publisher": "Wikidata, Wikipedia, and Wikimedia Commons",
-            "source_note": "Open global Explore seed from Wikidata/Wikipedia. Verify current access, closures, permits, and local rules before relying on it.",
+            "source_note": "Open-reference destination data from Wikidata, Wikipedia, and Wikimedia Commons. Verify current access, closures, permits, and local rules before you go.",
             "license": "Wikidata CC0; Wikipedia/Commons content requires attribution where used",
             "wikidata_qid": qid,
             **({"image_url": image_url, "image_credit": "Wikimedia Commons"} if image_url else {}),
@@ -312,7 +312,7 @@ def fallback_seed() -> dict:
                 "state": "Global",
                 "source_url": f"https://en.wikipedia.org/wiki/{quote((title[0] if isinstance(title, tuple) else title).replace(' ', '_'))}",
                 "source_publisher": "Wikipedia",
-                "source_note": "Fallback global Explore seed. Verify current access with the local official source.",
+                "source_note": "Open-reference destination data. Verify current access with the local official source.",
                 "tags": group["tags"],
                 "hook": group["hook"].format(title=title[0] if isinstance(title, tuple) else title, region="Global"),
                 "short_description": group["summary"],

@@ -20,10 +20,12 @@ import {
   ExplorePlaceCard,
   exploreCategoryFromQuery,
   exploreCategoryMatches,
+  exploreContentQualityScore,
   exploreQueryScore as scoreExploreQuery,
   exploreTrustScore as scoreExploreTrust,
   getExploreCategoryKey,
   getExploreTrailCards,
+  isExploreThinOpenReference,
   mergeCuratedExplorePlaces,
   type ExploreCategoryKey,
   type ExploreDetailTab,
@@ -717,6 +719,7 @@ function explorePlacePrimaryCategoryMatchesBrowseIntent(place: ExplorePlaceProfi
 function explorePlaceActiveSearchCanSatisfyIdentity(place: ExplorePlaceProfile, query: string) {
   if (!explorePlaceMatchedActiveSearch(place, query)) return false;
   if (isDestinationExploreHub(place) || isLegacyExploreAreaWrapper(place)) return false;
+  if (isExploreThinOpenReference(place)) return false;
   if (!explorePlacePrimaryCategoryMatchesBrowseIntent(place, query)) return false;
   const rank = Number((place as any).matched_explore_rank);
   return Number.isFinite(rank) && rank < 16;
@@ -1951,6 +1954,7 @@ function GuideScreenContent() {
         ...item,
         queryScore: queryScoreForPlace(item.place) + destinationHubBoost,
         trustScore: scoreExploreTrust(item.place),
+        contentScore: exploreContentQualityScore(item.place),
         categoryAffinity: exploreCategoryAffinity(item.place, exploreCategory, exploreHubMeta.categoryKeysByHubId),
       };
     });
@@ -1972,6 +1976,7 @@ function GuideScreenContent() {
         if (categoryDiff !== 0) return categoryDiff;
       }
       if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
+      if (query && b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
       if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
       const categoryDiff = sortByCategoryAffinity(a, b);
       if (categoryDiff !== 0) return categoryDiff;
@@ -1985,6 +1990,7 @@ function GuideScreenContent() {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
         if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        if (query && b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
         const categoryDiff = sortByCategoryAffinity(a, b);
         if (categoryDiff !== 0) return categoryDiff;
         const aHero = a.place.summary.hero_rank ?? a.place.summary.rank;
@@ -2000,6 +2006,7 @@ function GuideScreenContent() {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
         if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        if (query && b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
         const categoryDiff = sortByCategoryAffinity(a, b);
         if (categoryDiff !== 0) return categoryDiff;
         const aDist = a.distance ?? 99999;

@@ -37,7 +37,7 @@ import useRouteBuilderDiscoveryState, {
 import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
-import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
+import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, ExtremeConfig, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -1427,6 +1427,8 @@ function RouteBuilderScreenContent() {
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const user = useStore(st => st.user);
+  const token = useStore(st => st.token);
+  const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const tripHistory = useStore(st => st.tripHistory);
   const setTabBarHidden = useStore(st => st.setTabBarHidden);
@@ -1546,6 +1548,14 @@ function RouteBuilderScreenContent() {
     () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
     [welcomeSetupPreferences],
   );
+  const routeBuilderMapboxBridgeEnabled = useMemo(() => {
+    const allowed = extremeConfig?.allowed_surfaces ?? [];
+    return Platform.OS !== 'web'
+      && !!extremeConfig?.enabled
+      && !!extremeConfig?.mapbox_entitled
+      && !!extremeConfig?.feature_flags?.navigation
+      && allowed.includes('route_builder');
+  }, [extremeConfig]);
   const fmtRouteDistance = (mi: number) => fmtUnitDistance(mi, weatherUnitMode);
   const builderIntentFor = (inputDays: number[] = days): RouteBuilderIntent => ({
     shape: tripShapeMode,
@@ -1562,6 +1572,18 @@ function RouteBuilderScreenContent() {
       setCampReusePolicy('same_camp_window');
     }
   }
+
+  useEffect(() => {
+    let mounted = true;
+    if (!user) {
+      setExtremeConfig(null);
+      return () => { mounted = false; };
+    }
+    api.getExtremeConfig()
+      .then(cfg => { if (mounted) setExtremeConfig(cfg); })
+      .catch(() => { if (mounted) setExtremeConfig(null); });
+    return () => { mounted = false; };
+  }, [user?.id]);
 
   useEffect(() => {
     let mounted = true;
@@ -2369,11 +2391,32 @@ function RouteBuilderScreenContent() {
     const isPrivateStay = /(private|farm|ranch|winery|vineyard|glamping|yurt|cabin|hipcamp|harvest)/i.test(text);
     const distance = camp.route_distance_mi ?? 0;
     const photoAdjust = campHasPhotos(camp) ? -8 : (campPhotoOnly ? 60 : 0);
-    if (campPreferenceMode === 'rv') return distance + photoAdjust + (isRv ? -14 : 8) + (isReservable ? -3 : 0);
-    if (campPreferenceMode === 'private') return distance + photoAdjust + (isPrivateStay ? -14 : 10) + (isReservable ? -4 : 0) + (isPublic ? 6 : 0);
-    if (campPreferenceMode === 'developed') return distance + photoAdjust + (isReservable ? -10 : 0) + (isPublic ? -4 : 0) + (isRv ? 3 : 0);
-    if (campPreferenceMode === 'public') return distance + photoAdjust + (isPublic ? -16 : 8) + (isRv ? 18 : 0);
-    return distance + photoAdjust + (isPublic ? -6 : 0) + (isRv ? 3 : 0);
+    const qualityPenalty = weakRouteCampNamePenalty(camp.name);
+    if (campPreferenceMode === 'rv') return distance + photoAdjust + qualityPenalty + (isRv ? -14 : 8) + (isReservable ? -3 : 0);
+    if (campPreferenceMode === 'private') return distance + photoAdjust + qualityPenalty + (isPrivateStay ? -14 : 10) + (isReservable ? -4 : 0) + (isPublic ? 6 : 0);
+    if (campPreferenceMode === 'developed') return distance + photoAdjust + qualityPenalty + (isReservable ? -10 : 0) + (isPublic ? -4 : 0) + (isRv ? 3 : 0);
+    if (campPreferenceMode === 'public') return distance + photoAdjust + qualityPenalty + (isPublic ? -16 : 8) + (isRv ? 18 : 0);
+    return distance + photoAdjust + qualityPenalty + (isPublic ? -6 : 0) + (isRv ? 3 : 0);
+  }
+
+  function weakRouteCampNamePenalty(name?: string | null) {
+    const raw = String(name || '').trim().toLowerCase();
+    if (!raw) return 38;
+    if (/^(camp|campground|tent camp|primitive camp|primitive\/dispersed camp|dispersed camp|basic camp)$/i.test(raw)) return 36;
+    if (/^(bureau of land management|national park|national forest|wilderness area)$/i.test(raw)) return 32;
+    if (/\b(bureau of land management|national park|national forest|wilderness area)\b/i.test(raw)) return 24;
+    if (/free camping|sunset\s*-\s*sunrise|boondock|overnight parking/i.test(raw)) return 28;
+    return 0;
+  }
+
+  function routeCampDisplayName(camp: Pick<CampsitePin, 'name' | 'land_type'>, fallbackLabel: string) {
+    const raw = String(camp.name || '').trim().replace(/\s+/g, ' ').replace(/\bCa\b/g, 'CA').replace(/\bUsa\b/g, 'USA').replace(/\.\s+([A-Z][A-Za-z .'-]+)$/g, ', $1').replace(/\.$/, '');
+    if (!weakRouteCampNamePenalty(raw)) return raw || fallbackLabel;
+    if (/\b(national park|national forest|wilderness area)\b/i.test(raw)) return `${raw} camp review area`;
+    const place = raw.match(/\b([A-Z][A-Za-z .'-]{2,}),\s*(?:CA|UT|NV|AZ|CO|OR|WA|ID|MT|WY|NM|USA)\b/)?.[1]?.trim();
+    const base = place || fallbackLabel.replace(/\s+(camp area|camp|overnight|review area)$/i, '').trim() || 'Overnight';
+    const type = /dispersed|primitive|free|boondock/i.test(`${raw} ${camp.land_type || ''}`) ? 'dispersed camp area' : 'camp review area';
+    return `${base} ${type}`;
   }
 
   async function runSearch() {
@@ -3539,6 +3582,9 @@ function RouteBuilderScreenContent() {
     opts: { backRoads: boolean; avoidHighways: boolean; avoidTolls: boolean; noFerries: boolean },
     units: 'miles' | 'kilometers',
   ) {
+    if (!routeBuilderMapboxBridgeEnabled) {
+      return api.buildRoute(locations, opts, units);
+    }
     try {
       return await api.mapContextRouteBuild(locations, opts, units);
     } catch (err) {
@@ -3678,21 +3724,22 @@ function RouteBuilderScreenContent() {
     const best = scored[0];
     if (best) {
       const strong = (best.route_distance_mi ?? 999) <= 22 && haversineMi(best, target) <= 42;
+      const displayName = routeCampDisplayName(best, `Day ${day} camp area`);
       return {
         stop: {
           id: `camp_anchor_${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`,
           day,
-          name: best.name,
+          name: displayName,
           lat: best.lat,
           lng: best.lng,
           type: 'camp' as BuilderStopType,
           description: `Picked for Day ${day}. Swap it if you want a different camp or distance.`,
           land_type: best.land_type || 'camp',
           source: 'camp' as const,
-          camp: best,
+          camp: { ...best, name: displayName },
           routeShapeRole: 'overnight' as const,
         },
-        strong,
+        strong: strong && weakRouteCampNamePenalty(best.name) === 0,
         found: scored.length,
       };
     }
@@ -3746,14 +3793,19 @@ function RouteBuilderScreenContent() {
       });
       return result.windows.map(originalWin => {
         const win = originalWin;
-        const selectedCamp = win.selected ?? win.camp ?? win.candidates?.[0] ?? null;
+        const candidatePool = [win.selected, win.camp, ...(win.candidates ?? [])]
+          .filter((camp): camp is CampsitePin => !!camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
+          .filter((camp, idx, arr) => arr.findIndex(other => String(other.id ?? `${other.lat},${other.lng}`) === String(camp.id ?? `${camp.lat},${camp.lng}`)) === idx);
+        const selectedCamp = candidatePool
+          .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b))[0] ?? null;
         if (selectedCamp) {
-          const needsReview = win.confidence !== 'strong' && !win.strong;
+          const needsReview = (win.confidence !== 'strong' && !win.strong) || weakRouteCampNamePenalty(selectedCamp.name) > 0;
+          const displayName = routeCampDisplayName(selectedCamp, win.fallback_label || `${win.label} camp area`);
           return {
             stop: {
               id: `camp_anchor_${Date.now()}_${win.day}_${Math.random().toString(36).slice(2, 6)}`,
               day: win.day,
-              name: selectedCamp.name,
+              name: displayName,
               lat: selectedCamp.lat,
               lng: selectedCamp.lng,
               type: 'camp' as BuilderStopType,
@@ -3764,6 +3816,7 @@ function RouteBuilderScreenContent() {
               source: 'camp' as const,
               camp: {
                 ...selectedCamp,
+                name: displayName,
                 source_freshness: selectedCamp.source_freshness || win.reason,
               },
               campWindowStart: win.start,
@@ -3824,12 +3877,10 @@ function RouteBuilderScreenContent() {
       targetMiles.push(mile);
       if (targetMiles.length >= 8) break;
     }
-    const placed: GasStation[] = [];
-    const stops: BuilderStop[] = [];
-    for (const targetMi of targetMiles) {
+    setFrameworkStatus('Checking fuel along the route...');
+    const fuelGroups = await Promise.all(targetMiles.map(async targetMi => {
       const target = pointAtRouteMile(spine, targetMi);
-      if (!target) continue;
-      setFrameworkStatus(`Checking fuel around mile ${Math.round(targetMi)}...`);
+      if (!target) return null;
       const radius = Math.max(28, Math.min(55, intervalMi * 0.22));
       let liveFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
         center: target,
@@ -3862,6 +3913,14 @@ function RouteBuilderScreenContent() {
         }))
         .filter(station => (station.route_distance_mi ?? 999) <= radius + 8)
         .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
+      return { targetMi, candidates };
+    }));
+
+    const placed: GasStation[] = [];
+    const stops: BuilderStop[] = [];
+    for (const group of fuelGroups.filter((item): item is NonNullable<typeof item> => !!item).sort((a, b) => a.targetMi - b.targetMi)) {
+      const { targetMi } = group;
+      const candidates = group.candidates.filter(station => !placed.some(existing => haversineMi(existing, station) < 45));
       const best = candidates[0];
       if (!best) continue;
       placed.push(best);
@@ -4299,9 +4358,11 @@ function RouteBuilderScreenContent() {
         planned_at: Date.now(),
       });
       await saveOfflineTrip(tripToSave);
-      api.saveTrip(tripToSave, routeGeometryPayload, builderState, 'mobile-route-builder').catch(err => {
-        console.warn('Route Builder server save failed', err?.message ?? err);
-      });
+      if (user && token) {
+        api.saveTrip(tripToSave, routeGeometryPayload, builderState, 'mobile-route-builder').catch(err => {
+          console.warn('Route Builder server save failed', err?.message ?? err);
+        });
+      }
       if (openMap) {
         if (settleBeforeOpenMs > 0) {
           await new Promise(resolve => setTimeout(resolve, settleBeforeOpenMs));
@@ -4961,7 +5022,7 @@ function RouteBuilderScreenContent() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Choose camp style</Text>
-              <Text style={s.wizardHelp}>Trailhead will prefer these camp types when placing overnight stops. Public first avoids random RV parks unless they are the best fallback.</Text>
+              <Text style={s.wizardHelp}>Trailhead will prefer these camp types when placing overnight stops. Public first avoids private RV parks unless they are the best fallback.</Text>
             </View>
             <View style={s.campPreferenceGrid}>
               {CAMP_PREFERENCE_OPTIONS.map(option => {

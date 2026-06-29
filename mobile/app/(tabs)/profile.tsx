@@ -116,6 +116,21 @@ const DEFAULT_RIG: RigProfile = {
   is_towing: false, trailer_length_ft: '', tow_capacity_lbs: '',
 };
 
+const AUTH_REQUEST_TIMEOUT_MS = 25_000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  return new Promise<T>((resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+    promise
+      .then(value => resolve(value))
+      .catch(reject)
+      .finally(() => {
+        if (timer) clearTimeout(timer);
+      });
+  });
+}
+
 const PROFILE_SECTIONS = [
   { id: 'account', label: 'Account', icon: 'person-circle-outline' },
   { id: 'library', label: 'Library', icon: 'albums-outline' },
@@ -254,6 +269,12 @@ export default function ProfileScreen() {
     Keyboard.dismiss();
     setAuthSuccess(successMsg);
     setLoading(false);
+    if (Platform.OS === 'web') {
+      setView('main');
+      authFade.setValue(1);
+      setAuthSuccess('');
+      return;
+    }
     setTimeout(() => {
       Animated.timing(authFade, { toValue: 0, duration: 280, useNativeDriver: true }).start(() => {
         setView('main');
@@ -483,7 +504,11 @@ export default function ProfileScreen() {
     setLoading(true);
     try {
       const cleanEmail = email.trim().toLowerCase();
-      const res = await api.login(cleanEmail, password);
+      const res = await withTimeout(
+        api.login(cleanEmail, password),
+        AUTH_REQUEST_TIMEOUT_MS,
+        'Sign in is taking too long. Check your connection and try again.',
+      );
       setAuth(res.token, res.user);
       transitionToMain(`Welcome back, ${res.user.username}!`);
     } catch (e: any) {

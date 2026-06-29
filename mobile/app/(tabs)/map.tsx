@@ -61,6 +61,14 @@ import {
   normalizeCampDetailArrays,
 } from '@/lib/campNearby';
 import {
+  cleanExploreSourceLabel,
+  relatedPlaceCanShow,
+  relatedPlaceNameKey,
+  relatedThingToDoCanShow,
+  relatedThingToSeeCanShow,
+  uniqueRelatedPlaces,
+} from '@/lib/exploreContextFilters';
+import {
   buildTrailDiscoveries,
   buildTrailSupport,
   featureFromPoi,
@@ -132,6 +140,7 @@ try {
 const USE_IOS_NATIVE_NAV_ENGINE = Platform.OS === 'ios' && hasNativeNavigationEngine();
 const STADIA_API_KEY = process.env.EXPO_PUBLIC_STADIA_API_KEY ?? '4d2b6230-f506-42ca-b556-35f419510aa2';
 const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 const LIVE_CONDITION_SOURCE = 'pro' + 'vider';
 
 type TrailGuideAvatarState = 'idle' | 'listening' | 'userSpeaking' | 'thinking' | 'speaking' | 'error' | 'noMicPermission' | 'disconnected';
@@ -1625,6 +1634,26 @@ function searchPlaceFromSelectableFeature(feature: MapSelectableFeature): Search
     summary: raw.summary || feature.summary || (isMapboxRendered ? undefined : 'Selected from the visible map.'),
     distance_mi: raw.distance_mi ?? feature.distance_mi ?? undefined,
   };
+}
+
+function cleanRelatedPlaceList<T extends OsmPoi>(
+  items: T[] | undefined | null,
+  canShow: (item: T) => boolean = relatedPlaceCanShow,
+) {
+  return uniqueRelatedPlaces((items ?? []).filter((item): item is T => (
+    !!item?.name &&
+    Number.isFinite(Number(item.lat)) &&
+    Number.isFinite(Number(item.lng)) &&
+    canShow(item)
+  )));
+}
+
+function cleanRelatedThingsToDo<T extends OsmPoi>(items: T[] | undefined | null) {
+  return cleanRelatedPlaceList(items, relatedThingToDoCanShow);
+}
+
+function cleanRelatedThingsToSee<T extends OsmPoi>(items: T[] | undefined | null) {
+  return cleanRelatedPlaceList(items, relatedThingToSeeCanShow);
 }
 
 function pointSegmentDistanceMi(
@@ -6309,10 +6338,18 @@ function MapScreen() {
 
   // On mount: check if already granted; otherwise show disclosure first
   useEffect(() => {
-    Location.getForegroundPermissionsAsync().then(({ status }) => {
-      if (status === 'granted') setLocGranted(true);
-      else setShowLocDisclosure(true);
-    }).catch(() => setShowLocDisclosure(true));
+    let cancelled = false;
+    (async () => {
+      const existing = await Location.getForegroundPermissionsAsync().catch(() => null);
+      if (cancelled) return;
+      if (existing?.status === 'granted') {
+        setLocGranted(true);
+        return;
+      }
+      const alreadyPrompted = await storage.get(LOCATION_WARMUP_PROMPT_KEY).catch(() => null);
+      if (!cancelled && !alreadyPrompted) setShowLocDisclosure(true);
+    })();
+    return () => { cancelled = true; };
   }, []);
 
   // Start watch only after permission is confirmed granted
@@ -6846,11 +6883,14 @@ function MapScreen() {
         .filter((p): p is CampsitePin => !!p);
       const trails = resolved.related?.trails ?? [];
       setSelectedPlaceContext(prev => {
-        const resolvedPlaces = smartPlaces.filter(p => p.name && p.name.trim()) as OsmPoi[];
-        const resolvedSights = smartSights.filter(p => p.name && p.name.trim()) as OsmPoi[];
-        const resolvedVisitors = smartVisitorCenters.filter(p => p.name && p.name.trim()) as OsmPoi[];
+        const resolvedSights = cleanRelatedThingsToSee(smartSights as OsmPoi[]);
+        const resolvedSightNames = new Set(resolvedSights.map(relatedPlaceNameKey).filter(Boolean));
+        const resolvedThingsToDo = cleanRelatedThingsToDo(smartPlaces as OsmPoi[])
+          .filter(item => !resolvedSightNames.has(relatedPlaceNameKey(item)));
+        const resolvedVisitors = cleanRelatedPlaceList(smartVisitorCenters as OsmPoi[]);
         const resolvedServices = smartServices.filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[];
-        const resolvedHasContext = resolvedPlaces.length || resolvedSights.length || resolvedVisitors.length || smartCamps.length || trails.length || resolvedServices.length;
+        const contextPlaces = uniqueRelatedPlaces([...resolvedThingsToDo, ...resolvedSights, ...resolvedVisitors]);
+        const resolvedHasContext = contextPlaces.length || resolvedSights.length || resolvedVisitors.length || smartCamps.length || trails.length || resolvedServices.length;
         const previousHasContext = selectedPlaceIsExplore && prev && (
           prev.places.length || prev.camps.length || prev.trails.length ||
           (prev.things_to_do?.length ?? 0) || (prev.things_to_see?.length ?? 0) ||
@@ -6862,10 +6902,10 @@ function MapScreen() {
         }
         return {
           loading: false,
-          places: resolvedPlaces,
+          places: contextPlaces,
           camps: smartCamps,
           trails,
-          things_to_do: resolvedPlaces,
+          things_to_do: resolvedThingsToDo,
           things_to_see: resolvedSights,
           visitor_centers: resolvedVisitors,
           campgrounds_nearby: smartCamps,
@@ -7781,13 +7821,14 @@ function MapScreen() {
     }
     if (pendingMapSelection.kind === 'explorePlace') {
       const explore = pendingMapSelection.place;
+      const sourceLabel = cleanExploreSourceLabel(explore.sourceLabel, 'Explore Area');
       const photos: TrailheadGalleryPhoto[] = (explore.photos ?? [])
         .map((photo, idx) => ({
           id: idx,
           url: mediaUrl(photo.url),
           caption: photo.caption,
           credit: photo.credit,
-          source: photo.source || explore.sourceLabel || 'Trailhead Explore',
+          source: photo.source || sourceLabel,
         }))
         .filter(photo => !!photo.url);
       const photoUrl = mediaUrl(explore.imageUrl) || photos[0]?.url || null;
@@ -7805,7 +7846,7 @@ function MapScreen() {
         type: 'place',
         subtype: explore.category || 'Explore area',
         source: 'trailhead_explore',
-        source_label: explore.sourceLabel || 'Trailhead Explore',
+        source_label: sourceLabel,
         summary: explore.summary || explore.note || 'Explore area',
         photo_url: photoUrl,
         photos,
@@ -7816,14 +7857,19 @@ function MapScreen() {
       });
       const related = explore.relatedContext;
       const relatedCamps = related?.campgrounds_nearby ?? [];
+      const relatedThingsToSee = cleanRelatedThingsToSee((related?.things_to_see ?? []) as OsmPoi[]);
+      const relatedSightNames = new Set(relatedThingsToSee.map(relatedPlaceNameKey).filter(Boolean));
+      const relatedThingsToDo = cleanRelatedThingsToDo((related?.things_to_do ?? related?.places ?? []) as OsmPoi[])
+        .filter(item => !relatedSightNames.has(relatedPlaceNameKey(item)));
+      const relatedVisitors = cleanRelatedPlaceList((related?.visitor_centers ?? []) as OsmPoi[]);
       setSelectedPlaceContext({
         loading: !related,
-        places: related?.places ?? [],
+        places: uniqueRelatedPlaces([...relatedThingsToDo, ...relatedThingsToSee, ...relatedVisitors]),
         camps: relatedCamps,
         trails: [],
-        things_to_do: related?.things_to_do ?? related?.places ?? [],
-        things_to_see: related?.things_to_see ?? [],
-        visitor_centers: related?.visitor_centers ?? [],
+        things_to_do: relatedThingsToDo,
+        things_to_see: relatedThingsToSee,
+        visitor_centers: relatedVisitors,
         campgrounds_nearby: relatedCamps,
         trip_services: related?.trip_services ?? [],
       });
@@ -23116,6 +23162,7 @@ function MapScreen() {
               style={s.locDisclosureAllow}
               onPress={() => {
                 setShowLocDisclosure(false);
+                storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
                 Location.requestForegroundPermissionsAsync().then(({ status }) => {
                   if (status === 'granted') setLocGranted(true);
                 });

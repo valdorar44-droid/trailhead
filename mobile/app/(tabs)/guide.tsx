@@ -36,6 +36,13 @@ import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
+import {
+  cleanExploreSourceLabel,
+  sourcePackItemCanShow,
+  sourcePackThingToDoCanShow,
+  sourcePackThingToSeeCanShow,
+  uniqueRelatedPlaces,
+} from '@/lib/exploreContextFilters';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_index_v3';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
@@ -193,21 +200,6 @@ function normalizeExploreText(value: string) {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-}
-
-function sourcePackThingToDoLooksLikeSpeciesProfile(item?: ExploreSourcePackItem | null) {
-  const source = String(item?.source || item?.source_label || '').toLowerCase();
-  const kind = String(item?.kind || item?.category || '').toLowerCase();
-  const title = String(item?.title || '').toLowerCase();
-  const description = String(item?.description || '').toLowerCase();
-  const url = String(item?.url || '').toLowerCase();
-  if (!/nps|national park service/.test(source) || !/thing_to_do|todo/.test(kind)) return false;
-  if (/\b(watch|watching|view|viewing|safety|drive|hike|trail|tour|program|visit|visitor|lodge|road|walk|camp|fish|boat|bike|climb)\b/.test(title)) {
-    return false;
-  }
-  const animalTitle = /\b(duck|osprey|loon|owl|eagle|thrush|dipper|woodpecker|weasel|pika|otter|lion|goat|moose|marmot|coyote|squirrel|lynx|bobcat|beaver|bear|bat|marten|bison|elk|deer|wolf|fox|snake|turtle|frog|salmon|trout|fish|bird|raptor|insect|mammal|wildlife)\b/.test(title);
-  const profileCopy = /\b(species|subspecies|genus|family|feathers|wings|fur|rodent|mammal|bird|reproductive|habitat|predator|prey|listed as|scientific name)\b/.test(description);
-  return (animalTitle && profileCopy) || (/\/thingstodo\/[^/]+\.htm$/.test(url) && animalTitle);
 }
 
 function destinationRootFromTitle(title?: string | null) {
@@ -757,21 +749,8 @@ function campMetaLine(camp: CampsitePin) {
   ].filter(Boolean).join(' · ');
 }
 
-function sourcePackItemLooksLikeArticle(item?: ExploreSourcePackItem | null) {
-  const source = String(item?.source || item?.source_label || '').toLowerCase();
-  const kind = String(item?.kind || item?.category || '').toLowerCase();
-  const url = String(item?.url || '').toLowerCase();
-  const title = String(item?.title || '').toLowerCase();
-  if (/(^|\/)(articles|news|stories)\//.test(url)) return true;
-  if (/\b(article|news|story|research|publication|collection)\b/.test(kind)) return true;
-  if (/nps|national park service/.test(source)) {
-    return /\b(species database|species spotlight|nifty finds|humanities research|photograph collection|bioaccumulation|cracking the code|research methods|holding the line|conservation across the national park service)\b/.test(title);
-  }
-  return false;
-}
-
 function sourcePackItemToRelatedPoi(item: ExploreSourcePackItem, fallbackType: OsmPoi['type'] = 'poi'): OsmPoi | null {
-  if (sourcePackItemLooksLikeArticle(item)) return null;
+  if (!sourcePackItemCanShow(item)) return null;
   const title = String(item.title || '').replace(/\s+/g, ' ').trim();
   if (!title || /^(places?|things to do|details?|overview)$/i.test(title)) return null;
   const lat = Number(item.lat);
@@ -805,18 +784,19 @@ function sourcePackItemToRelatedPoi(item: ExploreSourcePackItem, fallbackType: O
 
 function exploreMapRelatedContext(place: ExplorePlaceProfile, campgrounds: CampsitePin[] = []) {
   const pack = place.source_pack ?? {};
-  const thingsToDo = (pack.things_to_do ?? [])
-    .filter(item => !sourcePackThingToDoLooksLikeSpeciesProfile(item))
+  const thingsToDo = uniqueRelatedPlaces((pack.things_to_do ?? [])
+    .filter(sourcePackThingToDoCanShow)
     .map(item => sourcePackItemToRelatedPoi(item, 'poi'))
-    .filter((item): item is OsmPoi => !!item);
-  const thingsToSee = (pack.things_to_see ?? [])
+    .filter((item): item is OsmPoi => !!item));
+  const thingsToSee = uniqueRelatedPlaces((pack.things_to_see ?? [])
+    .filter(sourcePackThingToSeeCanShow)
     .map(item => sourcePackItemToRelatedPoi(item, 'viewpoint'))
-    .filter((item): item is OsmPoi => !!item);
-  const visitorCenters = (pack.visitor_centers ?? [])
+    .filter((item): item is OsmPoi => !!item));
+  const visitorCenters = uniqueRelatedPlaces((pack.visitor_centers ?? [])
     .map(item => sourcePackItemToRelatedPoi(item, 'poi'))
-    .filter((item): item is OsmPoi => !!item);
+    .filter((item): item is OsmPoi => !!item));
   return {
-    places: [...thingsToDo, ...thingsToSee, ...visitorCenters].slice(0, 18),
+    places: uniqueRelatedPlaces([...thingsToDo, ...thingsToSee, ...visitorCenters]).slice(0, 18),
     things_to_do: thingsToDo.slice(0, 12),
     things_to_see: thingsToSee.slice(0, 12),
     visitor_centers: visitorCenters.slice(0, 8),
@@ -1884,7 +1864,7 @@ function GuideScreenContent() {
         note: place.summary.short_description || place.summary.hook || 'Explore area',
         imageUrl: mediaUrl(place.summary.image_url || place.summary.thumbnail_url),
         photos,
-        sourceLabel: place.source_quality?.primary_name || place.source_pack?.primary || place.attribution || 'Trailhead Explore',
+        sourceLabel: cleanExploreSourceLabel(place.source_quality?.primary_name || place.source_pack?.primary || place.attribution, 'Explore Area'),
         sourceUrl: place.summary.source_url || place.facts?.source_url,
         officialUrl: place.source_pack?.official_url || place.facts?.official_url,
         freshnessLabel: place.source_quality?.freshness_label || (place.facts?.last_updated ? `Updated ${new Date(Number(place.facts.last_updated) * 1000).toLocaleDateString()}` : ''),

@@ -20,6 +20,14 @@ import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, PaywallError, type PlaceComment, type PlaceDetail, type PlaceReservationStatus, type TrailheadPlace } from '@/lib/api';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
+import {
+  cleanExploreSourceLabel,
+  relatedPlaceCanShow,
+  relatedPlaceNameKey,
+  relatedThingToDoCanShow,
+  relatedThingToSeeCanShow,
+  uniqueRelatedPlaces,
+} from '@/lib/exploreContextFilters';
 import { TrailheadButton, TrailheadButtonDock, TrailheadLoadingRow, TrailheadRailSkeleton, TrailheadSheet } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 
@@ -291,7 +299,7 @@ function itemIcon(type?: string): keyof typeof Ionicons.glyphMap {
 
 function itemMeta(item: RelatedItem) {
   const distance = item.route_distance_mi ?? item.distance_mi;
-  const label = item.source_label || item.display_type || titleCase(item.subtype || item.type);
+  const label = cleanExploreSourceLabel(item.source_label || item.display_type, titleCase(item.subtype || item.type));
   return [
     item.length_mi != null ? `${Number(item.length_mi).toFixed(Number(item.length_mi) >= 10 ? 0 : 1)} mi trail` : label,
     distance != null && Number.isFinite(Number(distance)) ? `${Number(distance).toFixed(1)} mi` : '',
@@ -457,18 +465,36 @@ export default function PremiumPlaceSheet({
       : userPhotos;
   const reviews = (detail?.reviews ?? []).filter(review => !['google', 'foursquare'].includes(String(review.source || '').toLowerCase()));
   const broadDestination = isBroadDestinationCard(data);
+  const relatedThingsToSee = uniqueRelatedPlaces((related?.things_to_see ?? []).filter(relatedThingToSeeCanShow));
+  const relatedThingsToSeeNames = new Set(relatedThingsToSee.map(relatedPlaceNameKey).filter(Boolean));
+  const relatedThingsToDo = uniqueRelatedPlaces((related?.things_to_do ?? related?.places ?? [])
+    .filter(relatedThingToDoCanShow)
+    .filter(item => !relatedThingsToSeeNames.has(relatedPlaceNameKey(item))));
+  const relatedVisitorCenters = uniqueRelatedPlaces((related?.visitor_centers ?? []).filter(relatedPlaceCanShow));
+  const relatedCampgrounds = related?.campgrounds_nearby ?? related?.camps ?? [];
+  const relatedTrails = related?.trails ?? [];
+  const relatedTripServices = related?.trip_services ?? [];
+  const relatedHasContext = !!(
+    related?.loading ||
+    relatedThingsToDo.length ||
+    relatedThingsToSee.length ||
+    relatedVisitorCenters.length ||
+    relatedCampgrounds.length ||
+    relatedTrails.length ||
+    relatedTripServices.length ||
+    related?.error
+  );
   const relatedHero = broadDestination ? '' : [
-    ...(related?.things_to_do ?? []),
-    ...(related?.places ?? []),
-    ...(related?.campgrounds_nearby ?? []),
-    ...(related?.camps ?? []),
-    ...(related?.trails ?? []),
+    ...relatedThingsToDo,
+    ...relatedThingsToSee,
+    ...relatedCampgrounds,
+    ...relatedTrails,
   ]
     .filter(item => String(item.type || '').toLowerCase() !== 'event')
     .map(item => mediaUrl(item.photo_url))
     .find(Boolean);
   const hero = photos[0]?.url || relatedHero;
-  const sourceLabel = data.source_label || data.attribution || data.source || 'Trailhead';
+  const sourceLabel = cleanExploreSourceLabel(data.source_label || data.attribution || data.source, titleCase(data.subtype || data.type || 'Place'));
   const addToRoute = () => onAddToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const promoteToRoute = () => onPromoteToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const distanceLabel = data.route_distance_mi != null && Number.isFinite(data.route_distance_mi)
@@ -752,7 +778,7 @@ export default function PremiumPlaceSheet({
                   <Text style={s.infoText} numberOfLines={4}>{sourceFreshness}</Text>
                 </View>
               )}
-              {stage === 'full' && (related?.loading || related?.things_to_do?.length || related?.places?.length || related?.things_to_see?.length || related?.visitor_centers?.length || related?.campgrounds_nearby?.length || related?.camps?.length || related?.trip_services?.length || related?.trails?.length || related?.error) ? (
+              {stage === 'full' && relatedHasContext ? (
                 <View style={s.relatedBlock}>
                   <View style={s.relatedHeader}>
                     <Text style={s.sectionLabel}>NEARBY CONTEXT</Text>
@@ -773,20 +799,20 @@ export default function PremiumPlaceSheet({
                   )}
                   {broadDestination ? (
                     <>
-                      <RelatedRail title="Things to see" items={(related?.things_to_see ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Visitor centers" items={(related?.visitor_centers ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Things to do" items={(related?.things_to_do ?? related?.places ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Things to see" items={relatedThingsToSee.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Visitor centers" items={relatedVisitorCenters.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Things to do" items={relatedThingsToDo.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
                     </>
                   ) : (
                     <>
-                      <RelatedRail title="Things to do" items={(related?.things_to_do ?? related?.places ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Things to see" items={(related?.things_to_see ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
-                      <RelatedRail title="Visitor centers" items={(related?.visitor_centers ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Things to do" items={relatedThingsToDo.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Things to see" items={relatedThingsToSee.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                      <RelatedRail title="Visitor centers" items={relatedVisitorCenters.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
                     </>
                   )}
-                  <RelatedRail title="Campgrounds nearby" items={(related?.campgrounds_nearby ?? related?.camps ?? []).slice(0, 8)} onPress={onOpenRelatedCamp} C={C} styles={s} />
-                  <RelatedRail title="Trails" items={(related?.trails ?? []).slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
-                  <RelatedRail title="Trip services" items={(related?.trip_services ?? []).slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
+                  <RelatedRail title="Campgrounds nearby" items={relatedCampgrounds.slice(0, 8)} onPress={onOpenRelatedCamp} C={C} styles={s} />
+                  <RelatedRail title="Trails" items={relatedTrails.slice(0, 8)} onPress={onOpenRelatedTrail} C={C} styles={s} />
+                  <RelatedRail title="Trip services" items={relatedTripServices.slice(0, 8)} onPress={onOpenRelatedPlace} C={C} styles={s} />
                 </View>
               ) : null}
               {stage === 'full' && !!hours.length && (

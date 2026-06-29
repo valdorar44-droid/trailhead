@@ -673,6 +673,12 @@ function exploreCategoryMatchesWithHub(place: ExplorePlaceProfile, key: ExploreC
   return hubCategories.get(place.id)?.has(key) ?? false;
 }
 
+function exploreCategoryAffinity(place: ExplorePlaceProfile, key: ExploreCategoryKey, hubCategories: Map<string, Set<ExploreCategoryKey>>) {
+  if (key === 'all' || key === 'nearby') return 0;
+  if (exploreCategoryMatches(place, key)) return 2;
+  return hubCategories.get(place.id)?.has(key) ? 1 : 0;
+}
+
 function explorePlaceMatchesThingsToDo(place: ExplorePlaceProfile, hubCategories: Map<string, Set<ExploreCategoryKey>>) {
   const blocked = new Set<ExploreCategoryKey>(['camp', 'glamping', 'huts', 'fuel', 'resupply']);
   const allowed = new Set<ExploreCategoryKey>(['parks', 'land', 'trails', 'trailheads', 'views', 'waterfalls', 'peaks', 'springs', 'climb', 'water', 'scenic', 'tours']);
@@ -1748,17 +1754,29 @@ function GuideScreenContent() {
       ...item,
       queryScore: queryScoreForPlace(item.place),
       trustScore: scoreExploreTrust(item.place),
+      categoryAffinity: exploreCategoryAffinity(item.place, exploreCategory, exploreHubMeta.categoryKeysByHubId),
     }));
+    const sortByCategoryAffinity = (a: typeof decorated[number], b: typeof decorated[number]) => (
+      exploreCategory === 'all' ? 0 : b.categoryAffinity - a.categoryAffinity
+    );
     const sortByNearest = (a: typeof decorated[number], b: typeof decorated[number]) => {
       const aDist = a.distance ?? 99999;
       const bDist = b.distance ?? 99999;
       if (aDist !== bDist) return aDist - bDist;
+      const categoryDiff = sortByCategoryAffinity(a, b);
+      if (categoryDiff !== 0) return categoryDiff;
       if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
       return a.place.summary.rank - b.place.summary.rank;
     };
     const sortBySource = (a: typeof decorated[number], b: typeof decorated[number]) => {
+      if (!query) {
+        const categoryDiff = sortByCategoryAffinity(a, b);
+        if (categoryDiff !== 0) return categoryDiff;
+      }
       if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
       if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+      const categoryDiff = sortByCategoryAffinity(a, b);
+      if (categoryDiff !== 0) return categoryDiff;
       const aDist = a.distance ?? 99999;
       const bDist = b.distance ?? 99999;
       if (aDist !== bDist) return aDist - bDist;
@@ -1769,6 +1787,8 @@ function GuideScreenContent() {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
         if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        const categoryDiff = sortByCategoryAffinity(a, b);
+        if (categoryDiff !== 0) return categoryDiff;
         const aHero = a.place.summary.hero_rank ?? a.place.summary.rank;
         const bHero = b.place.summary.hero_rank ?? b.place.summary.rank;
         if (aHero !== bHero) return aHero - bHero;
@@ -1782,6 +1802,8 @@ function GuideScreenContent() {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
         if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        const categoryDiff = sortByCategoryAffinity(a, b);
+        if (categoryDiff !== 0) return categoryDiff;
         const aDist = a.distance ?? 99999;
         const bDist = b.distance ?? 99999;
         const distanceThreshold = exploreMode === 'trip' ? 10 : 20;
@@ -1845,6 +1867,11 @@ function GuideScreenContent() {
     }
     return picks.slice(0, 4);
   }, [featuredLead?.place.id, rankedExplore, showExploreHome]);
+  const trendingExploreCategory = useMemo<ExploreCategoryKey>(() => {
+    return trendingExplore
+      .map(({ place }) => getExploreCategoryKey(place))
+      .find(key => key !== 'all') ?? 'parks';
+  }, [trendingExplore]);
   const featuredReservedExploreIds = useMemo(() => {
     const used = new Set<string>();
     if (featuredLead?.place.id) used.add(featuredLead.place.id);
@@ -2873,7 +2900,7 @@ function GuideScreenContent() {
                           ? 'Search Results'
                           : exploreCategory === 'all'
                             ? 'Featured Explorer Hubs'
-                            : `${exploreCategoryLabel(exploreCategory)} Areas`}
+                            : exploreCategoryLabel(exploreCategory)}
                 </Text>
                 <Text style={s.exploreHomeCount}>{exploreHomeCountLabel}</Text>
               </View>
@@ -2912,7 +2939,7 @@ function GuideScreenContent() {
                   <View style={s.trendingSection}>
                     <View style={s.trendingHeader}>
                       <Text style={s.trendingTitle}>Trending This Week</Text>
-                      <TouchableOpacity onPress={() => setExploreCategory('views')} activeOpacity={0.8}>
+                      <TouchableOpacity onPress={() => setExploreCategory(trendingExploreCategory)} activeOpacity={0.8}>
                         <Text style={s.trendingLink}>View all</Text>
                       </TouchableOpacity>
                     </View>

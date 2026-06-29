@@ -40,7 +40,7 @@ export function ExploreHomeControls({
 }: Props) {
   const C = useTheme();
   const sortLabel = sortLabelForMode(sortMode);
-  const countLabel = shownLabel(shownCount);
+  const countLabel = category === 'tours' && shownCount === 0 ? 'Search first' : shownLabel(shownCount);
   return (
     <View style={styles.shell}>
       <ExploreModeTabs value={mode} onChange={onModeChange} />
@@ -48,7 +48,7 @@ export function ExploreHomeControls({
       <ExploreFilterRow
         shownCount={shownCount}
         countLabel={countLabel}
-        sourceLabel="Official + community"
+        sourceLabel="Trusted sources"
         sortLabel={sortLabel}
         onCountPress={onShowMore}
         onSourcePress={onSourcePress}

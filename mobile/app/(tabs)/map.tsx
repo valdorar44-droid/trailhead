@@ -5013,6 +5013,19 @@ function PremiumActionButton({
   );
 }
 
+function userFacingCampNote(text?: string | null) {
+  if (!text) return '';
+  return String(text)
+    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Official Recreation.gov data. ')
+    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Available source data. ')
+    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Available camp data. ')
+    .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, 'OpenStreetMap data. ')
+    .replace(/data packaged by Trailhead;?\s*/gi, 'source data. ')
+    .replace(/cached by Trailhead;?\s*/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 function MapScreen() {
@@ -21609,7 +21622,7 @@ function MapScreen() {
                   { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
                   { title: 'STAY LIMIT', text: campDetail.stay_limit },
                   { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                  { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                  { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
                   { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
                 ].some(item => !!item.text) ? (
                   <View style={s.detailSection}>
@@ -21626,7 +21639,7 @@ function MapScreen() {
                       { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
                       { title: 'STAY LIMIT', text: campDetail.stay_limit },
                       { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                      { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                      { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
                       { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
                     ].filter(item => !!item.text).map(item => (
                       <View key={item.title} style={s.campNoteCard}>
@@ -21974,7 +21987,7 @@ function MapScreen() {
                   { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
                   { title: 'STAY LIMIT', text: campDetail.stay_limit },
                   { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                  { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                  { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
                   { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
                 ].some(item => !!item.text) ? (
                   <View style={s.detailSection}>
@@ -21991,7 +22004,7 @@ function MapScreen() {
                       { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
                       { title: 'STAY LIMIT', text: campDetail.stay_limit },
                       { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                      { title: 'SOURCE CONFIDENCE', text: campDetail.source_confidence_notes },
+                      { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
                       { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
                     ].filter(item => !!item.text).map(item => (
                       <View key={item.title} style={s.campNoteCard}>

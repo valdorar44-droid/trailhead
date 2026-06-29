@@ -23,7 +23,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, 
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.label, { color: C.orange }]}>TOURS & ACTIVITIES</Text>
           <Text style={[styles.sub, { color: C.text3 }]}>
-            {experiences.length ? `${experiences.length} bookable option${experiences.length === 1 ? '' : 's'} nearby` : 'Bookable options near this area'}
+            {experiences.length ? `${experiences.length} bookable option${experiences.length === 1 ? '' : 's'} nearby` : 'Search a destination to compare options'}
           </Text>
         </View>
         {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="ticket-outline" size={23} color={C.orange} />}

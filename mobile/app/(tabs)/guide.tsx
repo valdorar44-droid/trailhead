@@ -1334,6 +1334,12 @@ export default function GuideScreen() {
       if (!retryingLive) setExploreSearchExperienceError('');
       const placeQuery = placeQueryFromExploreQuery(exploreQuery);
       let center = userLoc ? { ...userLoc, name: 'this area' } : null;
+      if (!center && placeQuery.length < 2) {
+        setExploreSearchExperiences([]);
+        setExploreSearchExperienceError('Search a destination to see tours and activities.');
+        setExploreSearchExperienceLoading(false);
+        return;
+      }
       if (placeQuery.length >= 2) {
         const [resolved] = await api.geocodePlaces(placeQuery, 1, { prefer: 'search_center' }).catch(() => []);
         if (cancelled) return;
@@ -1617,6 +1623,7 @@ export default function GuideScreen() {
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
   const exploreHomeCountLabel = useMemo(() => {
+    if (showExperienceSearch && rankedExplore.length <= 0) return 'Search a destination';
     if (!showExploreHome) {
       if (rankedExplore.length <= 0) {
         if (exploreSavedOnly) return 'No saved places';
@@ -1629,7 +1636,7 @@ export default function GuideScreen() {
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
     return `${count.toLocaleString()} featured picks`;
-  }, [exploreSavedOnly, exploreTripNeedsRoute, featuredLead, featuredSections, rankedExplore.length, showExploreHome, trendingExplore.length]);
+  }, [exploreSavedOnly, exploreTripNeedsRoute, featuredLead, featuredSections, rankedExplore.length, showExperienceSearch, showExploreHome, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -1889,6 +1896,10 @@ export default function GuideScreen() {
   function routeExplore(place: ExplorePlaceProfile) {
     const { lat, lng, title } = place.summary;
     if (lat == null || lng == null) {
+      showExploreOnMap(place);
+      return;
+    }
+    if (!userLoc) {
       showExploreOnMap(place);
       return;
     }
@@ -2556,6 +2567,8 @@ export default function GuideScreen() {
                       ? 'Along Your Trip'
                       : exploreSavedOnly
                         ? 'Saved Places'
+                        : showExperienceSearch
+                          ? 'Tours & Activities'
                         : hasExploreQuery
                           ? 'Search Results'
                           : exploreCategory === 'all'
@@ -2569,8 +2582,8 @@ export default function GuideScreen() {
             {exploreLoading && (
               <View style={s.exploreLoadingBlock}>
                 <TrailheadLoadingRow
-                  label="Ranking official sources"
-                  sub="Loading parks, trails, stays, water, and route-ready Explore cards."
+                  label="Finding the best places"
+                  sub="Loading parks, trails, stays, water, and route-ready cards."
                   icon="sparkles-outline"
                 />
                 {explorePlaces.length === 0 ? (
@@ -2628,7 +2641,7 @@ export default function GuideScreen() {
                 </View>
                 ))}
               </>
-            ) : !exploreLoading && rankedExplore.length === 0 && (!showExperienceSearch || (!exploreSearchExperienceLoading && exploreSearchExperiences.length === 0)) ? (
+            ) : !showExperienceSearch && !exploreLoading && rankedExplore.length === 0 ? (
               <View style={s.emptyState}>
                 <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : exploreTripNeedsRoute ? 'map-outline' : 'search-outline'} size={44} color={C.text3} />
                 <Text style={s.emptyTitle}>

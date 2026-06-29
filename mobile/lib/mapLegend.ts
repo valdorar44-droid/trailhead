@@ -69,7 +69,7 @@ export const MAP_MODE_PRESETS: readonly MapModePreset[] = [
     title: 'Tonight',
     purpose: 'Places to stay, water, food, and current notes near the next stop.',
     bestFor: 'last-mile camp choice',
-    trust: 'Official + community',
+    trust: 'Trusted sources',
     icons: ['moon-outline', 'bonfire-outline', 'restaurant-outline'],
     colors: ['#111827', '#14b8a6', '#f59e0b', '#38bdf8'],
     legendFocus: 'camps',

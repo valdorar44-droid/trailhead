@@ -802,14 +802,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       <View style={styles.grid} />
       <View style={styles.header}>
         <Ionicons name="map-outline" size={16} color="#fff" />
-        <Text style={styles.headerText}>WEB MAP PREVIEW</Text>
+        <Text style={styles.headerText}>MAP PREVIEW</Text>
       </View>
       {hasRouteLine ? <View style={styles.routeLine} /> : null}
       {!hasMapContent ? (
         <View style={styles.emptyState}>
           <Ionicons name="trail-sign-outline" size={24} color={C.orange} />
-          <Text style={[styles.emptyTitle, { color: C.text }]}>Build the base route</Text>
-          <Text style={[styles.emptyText, { color: C.text3 }]}>Add a start and destination to preview the line, camps, fuel, and places.</Text>
+          <Text style={[styles.emptyTitle, { color: C.text }]}>Plan a route</Text>
+          <Text style={[styles.emptyText, { color: C.text3 }]}>Choose a start and destination to see the line, camps, fuel, and places.</Text>
         </View>
       ) : null}
       <View style={styles.pinCloud}>

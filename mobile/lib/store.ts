@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
-import { User, TripResult, Report, CampsitePin, OsmPoi } from './api';
+import { User, TripResult, Report, CampsitePin, OsmPoi, TrailProfile } from './api';
 
 // File-based trip storage — no 2KB SecureStore limit
 const TRIP_FILE = () => `${FileSystem.documentDirectory}active_trip.json`;
@@ -76,6 +76,7 @@ export interface ExploreMapSelection {
     things_to_do?: OsmPoi[];
     things_to_see?: OsmPoi[];
     visitor_centers?: OsmPoi[];
+    trails?: TrailProfile[];
     campgrounds_nearby?: CampsitePin[];
     trip_services?: OsmPoi[];
   };

@@ -172,9 +172,36 @@ export function relatedPlaceCanShow(item?: RelatedContextPlace | null) {
   return sourcePackItemCanShow(relatedToSourcePackLike(item)) && !sourcePackItemLooksLikeSpeciesProfile(relatedToSourcePackLike(item));
 }
 
+export function relatedPlaceLooksLikeGenericRoad(item?: RelatedContextPlace | null) {
+  const like = relatedToSourcePackLike(item);
+  const title = itemTitle(like).toLowerCase();
+  if (!/\b(?:road|rd|route|highway|hwy)\b/.test(title)) return false;
+  if (/\b(trail|trailhead|scenic|historic|drive|byway|loop|overlook|viewpoint)\b/.test(title)) return false;
+  const context = `${itemBody(like).toLowerCase()} ${itemKind(like)} ${itemUrl(like)}`;
+  return !/\b(trail|trailhead|scenic|historic|drive|byway|overlook|viewpoint|hike|walk|visitor|waterfall|falls)\b/.test(context);
+}
+
+export function relatedTrailCanShow(item?: RelatedContextPlace | null) {
+  if (!relatedPlaceCanShow(item) || relatedPlaceLooksLikeGenericRoad(item)) return false;
+  const like = relatedToSourcePackLike(item);
+  const title = itemTitle(like).toLowerCase();
+  if (/\b(?:national forest development road|forest(?: service)? road|nf-?\d|fs-?\d|fr\s*\d|road\s*\d+[a-z]?|rd\s*\d)\b/.test(title)) {
+    return false;
+  }
+  if (/\b(?:road|rd|route|highway|hwy|drive|dr|byway)\b/.test(title) && !/\b(?:trail|trailhead|path|walk|loop|overlook|viewpoint|falls?|waterfall|summit|pass)\b/.test(title)) {
+    return false;
+  }
+  const context = `${title} ${itemBody(like).toLowerCase()} ${itemKind(like)}`;
+  return /\b(?:trail|trailhead|hike|hiking|walk|footpath|singletrack|summit|pass|falls?|waterfall|lake|creek|canyon)\b/.test(context)
+    || Number.isFinite(Number(item?.length_mi));
+}
+
 export function relatedThingToDoCanShow(item?: RelatedContextPlace | null) {
   const like = relatedToSourcePackLike(item);
-  return relatedPlaceCanShow(item) && !/\bpodcast\b/i.test(itemTitle(like)) && sourcePackItemLooksLikeActivity(like);
+  return relatedPlaceCanShow(item)
+    && !relatedPlaceLooksLikeGenericRoad(item)
+    && !/\bpodcast\b/i.test(itemTitle(like))
+    && sourcePackItemLooksLikeActivity(like);
 }
 
 export function relatedThingToSeeCanShow(item?: RelatedContextPlace | null) {

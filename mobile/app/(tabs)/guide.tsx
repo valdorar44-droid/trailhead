@@ -23,6 +23,7 @@ import {
   exploreQueryScore as scoreExploreQuery,
   exploreTrustScore as scoreExploreTrust,
   getExploreCategoryKey,
+  getExploreTrailCards,
   mergeCuratedExplorePlaces,
   type ExploreCategoryKey,
   type ExploreDetailTab,
@@ -31,7 +32,7 @@ import {
   type ExploreSortMode,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperiencesResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi } from '@/lib/api';
+import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperiencesResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
@@ -1094,6 +1095,70 @@ function sourcePackItemToRelatedPoi(item: ExploreSourcePackItem, fallbackType: O
   };
 }
 
+function exploreTrailCardToRelatedProfile(trail: ExploreTrailCard): TrailProfile | null {
+  const lat = Number(trail.lat ?? trail.route_target?.lat);
+  const lng = Number(trail.lng ?? trail.route_target?.lng);
+  const title = String(trail.title || trail.route_target?.name || '').replace(/\s+/g, ' ').trim();
+  if (!title || !Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (exploreTrailCardLooksLikeRoad(trail, title)) return null;
+  const photoUrl = trail.image_url || trail.photos?.find(photo => !!photo.url)?.url || '';
+  const source = trail.source_label || trail.source_pack?.primary || 'Trailhead Trails';
+  return {
+    id: String(trail.trail_id || trail.id || title),
+    name: title,
+    summary: trail.summary,
+    description: trail.description || trail.summary,
+    lat,
+    lng,
+    length_mi: trail.distance_mi,
+    difficulty: trail.difficulty,
+    route_type: trail.route_type,
+    elevation_gain_ft: trail.elevation_gain_ft,
+    best_season: trail.best_season || trail.season_window,
+    feature_type: trail.feature_type,
+    feature_label: trail.feature_label,
+    trekking_only: trail.trekking_only,
+    guide_required: trail.guide_required,
+    permit_note: trail.permit_note,
+    glacier_crossing: trail.glacier_crossing,
+    altitude_ft: trail.altitude_ft,
+    season_window: trail.season_window,
+    route_target: trail.route_target,
+    geometry_ref: trail.geometry_ref,
+    area_name: trail.area,
+    activities: ['hiking'],
+    trailheads: [{ name: title, lat, lng, source }],
+    official_url: trail.source_url,
+    photos: photoUrl ? [{ url: mediaUrl(photoUrl), credit: trail.image_credit, source, license: trail.image_license }] : [],
+    source,
+    source_label: source,
+    source_pack: trail.source_pack,
+    provenance: {},
+    last_checked: Math.floor(Date.now() / 1000),
+  };
+}
+
+function exploreTrailCardLooksLikeRoad(trail: ExploreTrailCard, title: string) {
+  const name = title.toLowerCase();
+  if (/\b(?:national forest development road|forest(?: service)? road|nf-?\d|fs-?\d|fr\s*\d|road\s*\d+[a-z]?|rd\s*\d)\b/.test(name)) {
+    return true;
+  }
+  if (!/\b(?:road|rd|route|highway|hwy|drive|dr|byway)\b/.test(name)) return false;
+  if (/\b(?:trail|trailhead|path|walk|loop|overlook|viewpoint|falls?|waterfall|summit|pass)\b/.test(name)) {
+    return false;
+  }
+  const context = [
+    trail.summary,
+    trail.description,
+    trail.feature_type,
+    trail.feature_label,
+    trail.route_type,
+    trail.source_label,
+    ...(trail.tags ?? []),
+  ].join(' ').toLowerCase();
+  return !/\b(?:hike|hiking|footpath|singletrack|trailhead|walking route)\b/.test(context);
+}
+
 function exploreMapRelatedContext(place: ExplorePlaceProfile, campgrounds: CampsitePin[] = []) {
   const pack = place.source_pack ?? {};
   const thingsToDo = uniqueRelatedPlaces((pack.things_to_do ?? [])
@@ -1107,11 +1172,15 @@ function exploreMapRelatedContext(place: ExplorePlaceProfile, campgrounds: Camps
   const visitorCenters = uniqueRelatedPlaces((pack.visitor_centers ?? [])
     .map(item => sourcePackItemToRelatedPoi(item, 'poi'))
     .filter((item): item is OsmPoi => !!item));
+  const trails = getExploreTrailCards(place)
+    .map(exploreTrailCardToRelatedProfile)
+    .filter((item): item is TrailProfile => !!item);
   return {
     places: uniqueRelatedPlaces([...thingsToDo, ...thingsToSee, ...visitorCenters]).slice(0, 18),
     things_to_do: thingsToDo.slice(0, 12),
     things_to_see: thingsToSee.slice(0, 12),
     visitor_centers: visitorCenters.slice(0, 8),
+    trails: trails.slice(0, 24),
     campgrounds_nearby: campgrounds.slice(0, 12),
     trip_services: [],
   };

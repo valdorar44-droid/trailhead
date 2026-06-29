@@ -66,6 +66,7 @@ import {
   relatedPlaceNameKey,
   relatedThingToDoCanShow,
   relatedThingToSeeCanShow,
+  relatedTrailCanShow,
   uniqueRelatedPlaces,
 } from '@/lib/exploreContextFilters';
 import {
@@ -6881,7 +6882,8 @@ function MapScreen() {
       const smartCamps = (resolved.related?.campgrounds_nearby ?? resolved.related?.camps ?? [])
         .map(p => smartPlaceToCampPin(p as OsmPoi))
         .filter((p): p is CampsitePin => !!p);
-      const trails = resolved.related?.trails ?? [];
+      const trails = ((resolved.related?.trails ?? []) as TrailProfile[])
+        .filter(trail => relatedTrailCanShow(trail));
       setSelectedPlaceContext(prev => {
         const resolvedSights = cleanRelatedThingsToSee(smartSights as OsmPoi[]);
         const resolvedSightNames = new Set(resolvedSights.map(relatedPlaceNameKey).filter(Boolean));
@@ -6910,7 +6912,7 @@ function MapScreen() {
           visitor_centers: resolvedVisitors,
           campgrounds_nearby: smartCamps,
           trip_services: resolvedServices,
-          error: !resolvedHasContext ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
+          error: !resolvedHasContext && !selectedPlaceIsExplore ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
         };
       });
     };
@@ -7862,11 +7864,13 @@ function MapScreen() {
       const relatedThingsToDo = cleanRelatedThingsToDo((related?.things_to_do ?? related?.places ?? []) as OsmPoi[])
         .filter(item => !relatedSightNames.has(relatedPlaceNameKey(item)));
       const relatedVisitors = cleanRelatedPlaceList((related?.visitor_centers ?? []) as OsmPoi[]);
+      const relatedTrails = ((related?.trails ?? []) as TrailProfile[])
+        .filter(trail => relatedTrailCanShow(trail));
       setSelectedPlaceContext({
         loading: !related,
         places: uniqueRelatedPlaces([...relatedThingsToDo, ...relatedThingsToSee, ...relatedVisitors]),
         camps: relatedCamps,
-        trails: [],
+        trails: relatedTrails,
         things_to_do: relatedThingsToDo,
         things_to_see: relatedThingsToSee,
         visitor_centers: relatedVisitors,

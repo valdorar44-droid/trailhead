@@ -48,6 +48,8 @@ export function isLowValueGenericBlmPlace(place: Partial<OsmPoi> | null | undefi
     (place as { attribution?: string }).attribution ||
     ''
   ).toLowerCase();
+  const adminOfficeName = /\b(?:field office|permit office|ranger district|district office|administrative office|headquarters|bureau of land management)\b/.test(name);
+  if (adminOfficeName && !photoBackedNearbyPlace(place)) return true;
   const lowName = !name || ['blm recreation site', 'recreation site', 'trailhead', 'viewpoint', 'parking', 'campground', 'campsite'].includes(name);
   return source.includes('blm') && lowName && !hasNearbyPhoto(place);
 }

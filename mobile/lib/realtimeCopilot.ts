@@ -170,7 +170,7 @@ function shouldIgnoreAssistantTranscript(text: string): boolean {
 function toolResponseInstructions(output: Record<string, unknown> | void): string {
   const routeScoutSummary = compactRouteScoutSummary(output);
   if (routeScoutSummary) {
-    return `The Trailhead route scout has already updated the app. Say exactly this and then stop: "${routeScoutSummary}" Do not repeat the full route summary. Do not call another tool unless the user asks a new follow-up.`;
+    return `The Trailhead trip overview has already updated the app. Say exactly this and then stop: "${routeScoutSummary}" Do not repeat the full route summary. Do not call another tool unless the user asks a new follow-up.`;
   }
   const summary = typeof output?.spoken_summary === 'string' ? output.spoken_summary.trim() : '';
   if (summary) {

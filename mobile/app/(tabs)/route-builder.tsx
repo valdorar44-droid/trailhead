@@ -2069,8 +2069,8 @@ function RouteBuilderScreenContent() {
   const rigRouteSummary = useMemo(() => {
     if (!rigProfile || (!rigProfile.make && !rigProfile.model && !rigProfile.vehicle_type)) {
       return {
-        title: 'No rig profile yet',
-        meta: `${weatherUnitMode === 'metric' ? `${(235.214583 / Math.max(1, planningStats.mpg)).toFixed(1)} L/100km` : `${planningStats.mpg} MPG`} fallback · add rig specs in Profile`,
+        title: 'Add rig profile',
+        meta: `Uses conservative fuel and vehicle defaults until specs are added.`,
         ready: false,
       };
     }
@@ -2535,7 +2535,7 @@ function RouteBuilderScreenContent() {
                 .map(camp => ({
                   ...withLegProjection(camp, searchLeg!),
                   photo_status: 'missing',
-                  route_fit: camp.route_fit || 'No photo fallback',
+                  route_fit: camp.route_fit || 'Photo backup',
                   photo_fallback_reason: 'Photos only found no photo-backed camp near this overnight stop.',
                 }))
                 .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to))
@@ -2699,7 +2699,7 @@ function RouteBuilderScreenContent() {
           tours: found,
           summary: found.length
             ? `${found.length} tour${found.length === 1 ? '' : 's'} near this ${useLeg ? 'leg' : 'area'}`
-            : response.live_message || 'No bookable tours found near this segment yet.',
+            : response.live_message || 'Tour availability is still loading for this segment.',
         });
         if (!found.length && response.live_status === 'processing' && !opts.retryingLive) {
           setTimeout(() => {
@@ -3234,14 +3234,14 @@ function RouteBuilderScreenContent() {
 
   function renderInlineEmptyState(day: number, tab: DiscoveryTab) {
     const title = tab === 'camps'
-      ? 'No camp cards landed on this day segment.'
+      ? 'Camp cards are ready for a wider scan.'
       : tab === 'gas'
-        ? 'No fuel stops landed on this day segment.'
+        ? 'Fuel stops are ready for a wider scan.'
         : tab === 'excursions'
-          ? 'No side trips landed on this day segment.'
+          ? 'Side trips are ready for a wider scan.'
           : tab === 'tours'
-            ? 'No tours landed on this day segment.'
-            : 'No place cards landed on this day segment.';
+            ? 'Tours are ready for a wider scan.'
+            : 'Place cards are ready for a wider scan.';
     const hint = tab === 'camps'
       ? campPhotoOnly
         ? 'Photo-only is still on. Open the search to no-photo camp backups or rerun the segment scan.'
@@ -4267,7 +4267,7 @@ function RouteBuilderScreenContent() {
           : campCadenceMode === 'alternate' && !needsWindowCamp
           ? `${window.label} shares an overnight camp on Day ${window.end}.`
           : wps.length
-          ? `Manual route day with ${wps.length} planned stop${wps.length === 1 ? '' : 's'}.`
+          ? `Drive day with ${wps.length} planned stop${wps.length === 1 ? '' : 's'}.`
           : hasPlanningTarget
           ? 'Planning day. Pick an overnight camp before using GPS navigation.'
           : 'Open day. Add a destination, fuel, places, and camp.',
@@ -4285,8 +4285,8 @@ function RouteBuilderScreenContent() {
       plan: {
         trip_name: nameOverride ?? resolvedRouteName(),
         overview: importedTripId
-          ? 'A Trailhead route edited in Route Builder with user-selected stops, fuel, places, and camps.'
-          : 'A manually built Trailhead route with user-selected stops, fuel, places, and camps.',
+          ? 'A Trailhead route updated with selected stops, fuel, places, and camps.'
+          : 'A Trailhead route with selected stops, fuel, places, and camps.',
         duration_days: inputDays.length,
         states: importedTripId ? activeTrip?.plan.states ?? [] : [],
         total_est_miles: Math.round(inputMiles),
@@ -4746,7 +4746,7 @@ function RouteBuilderScreenContent() {
             <RouteBuilderInlineCampCard
               key={camp.id}
               title={camp.name}
-              meta={`Day ${day} · ${camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}${routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}${(camp as any).photo_status === 'missing' ? 'No photo fallback · ' : ''}${[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · ${camp.cost || 'See site'}`}
+              meta={`Day ${day} · ${camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}${routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}${(camp as any).photo_status === 'missing' ? 'Photo backup · ' : ''}${[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · ${camp.cost || 'See site'}`}
               photoUrl={camp.photo_url}
               fallbackColor={landColor(camp.land_type).text}
               fallbackBackgroundColor={landColor(camp.land_type).bg}
@@ -4851,7 +4851,7 @@ function RouteBuilderScreenContent() {
     const url = selected.affiliate_url || selected.booking_url || '';
     api.trackOutdoorOfferEvent('click', rentalEventPayload(selected)).catch(() => {});
     if (!url) {
-      Alert.alert('No rental options here yet.', 'Try nearby camps, routes, and official places.');
+      Alert.alert('Rental options are still loading here.', 'Try nearby camps, routes, and official places.');
       return;
     }
     api.trackOutdoorOfferEvent('redirect', rentalEventPayload(selected)).catch(() => {});
@@ -5005,7 +5005,7 @@ function RouteBuilderScreenContent() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Choose the route feel</Text>
-              <Text style={s.wizardHelp}>Recommended places camp options along the route. Start from scratch gives you day areas to build by hand.</Text>
+              <Text style={s.wizardHelp}>Plan Mode places camp options along the route. Build Mode gives you day areas to shape by hand.</Text>
             </View>
             <View style={s.premiumModeControl}>
               {([

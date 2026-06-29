@@ -688,7 +688,7 @@ function normalizeTrailSnapFailure(err: unknown, mode: TrailSnapMode) {
     return 'Trail routing graph is not downloaded for this area. Download the trail pack or use straight line for this segment.';
   }
   if (lower.includes('could not be identified') || lower.includes('no trail graph here')) {
-    return 'No trail graph here yet. Use straight line, add manual points, or report a missing trail.';
+    return 'Trail graph is not ready here yet. Use straight line, add manual points, or report a missing trail.';
   }
   if (lower.includes('no visible trail connection') || lower.includes('could not connect pins')) {
     return 'Gap between trail segments. Add a pin on the trail between those points or switch to straight line.';
@@ -739,7 +739,7 @@ function localRouteBrief(trip: TripResult, reports: Report[] = []): RouteBrief {
   const routeName = trip.plan.trip_name || 'this route';
   const topConcerns = [
     missingCampDays > 0 ? `${missingCampDays} day${missingCampDays === 1 ? '' : 's'} still need a confirmed overnight camp or lodging stop.` : '',
-    fuelStops === 0 && miles > 180 ? 'No fuel stops are saved yet; add fuel before remote stretches.' : '',
+    fuelStops === 0 && miles > 180 ? 'Fuel stops need to be saved before remote stretches.' : '',
     reports.length ? `${reports.length} recent route alert${reports.length === 1 ? '' : 's'} should be reviewed before departure.` : '',
   ].filter(Boolean).slice(0, 3);
   const mustDo = [
@@ -998,6 +998,33 @@ function routeFitLabel(item?: { route_distance_mi?: number | null; route_progres
     routeProgressLabel(item.route_progress),
   ].filter(Boolean);
   return bits.join(' · ');
+}
+
+function tripOverviewSummary(stats: { days: number; miles: number; camps: number; fuel: number; places?: number }) {
+  return [
+    stats.days ? `${stats.days} day${stats.days === 1 ? '' : 's'}` : '',
+    stats.miles ? `${Math.round(stats.miles).toLocaleString()} mi` : '',
+    stats.camps ? `${stats.camps} camp${stats.camps === 1 ? '' : 's'}` : '',
+    stats.fuel ? `${stats.fuel} fuel` : '',
+    stats.places ? `${stats.places} place${stats.places === 1 ? '' : 's'}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function tripTimelineMetaLabel(input: { legMiles: number; fuelCount: number; placeCount: number; stopCount: number; weatherLabel?: string }) {
+  return [
+    `${Math.round(input.legMiles).toLocaleString()} mi`,
+    input.fuelCount ? `${input.fuelCount} fuel` : '',
+    input.placeCount ? `${input.placeCount} place${input.placeCount === 1 ? '' : 's'}` : '',
+    input.weatherLabel || (input.stopCount ? `${input.stopCount} stop${input.stopCount === 1 ? '' : 's'}` : ''),
+  ].filter(Boolean).join(' · ');
+}
+
+function cleanTripTimelineSummary(value?: string | null) {
+  return String(value || '')
+    .replace(/\bManual route day\b/gi, 'Drive day')
+    .replace(/\bmanual route day\b/gi, 'drive day')
+    .replace(/\bmanually built Trailhead route\b/gi, 'Trailhead route')
+    .trim();
 }
 
 function campTags(camp: Partial<CampsitePin> | OsmPoi | null | undefined): string[] {
@@ -1289,7 +1316,7 @@ function fmtTrailElevation(plan?: Pick<TrailRoutePlan, 'elevationGainFt' | 'elev
 }
 
 function trailElevationLabel(plan?: Pick<TrailRoutePlan, 'elevationConfidence'> | null) {
-  if (!plan?.elevationConfidence || plan.elevationConfidence === 'unavailable') return 'No DEM sample';
+  if (!plan?.elevationConfidence || plan.elevationConfidence === 'unavailable') return 'Elevation sample unavailable';
   return plan.elevationConfidence === 'high' ? 'Elevation' : 'Est. elevation';
 }
 
@@ -6914,7 +6941,7 @@ function MapScreen() {
           visitor_centers: resolvedVisitors,
           campgrounds_nearby: smartCamps,
           trip_services: resolvedServices,
-          error: !resolvedHasContext && !selectedPlaceIsExplore ? 'No nearby camps, trails, or useful places loaded yet.' : undefined,
+          error: !resolvedHasContext && !selectedPlaceIsExplore ? 'Nearby camps, trails, and useful places are still loading.' : undefined,
         };
       });
     };
@@ -9532,7 +9559,7 @@ function MapScreen() {
         loading: false,
         title: actionTitle,
         subtitle: items.length ? `${items.length} option${items.length === 1 ? '' : 's'} found${legLabel ? ` · ${legLabel}` : ''}` : legLabel || null,
-        message: kind === 'tours' ? 'No bookable tours found near this day yet.' : 'No options found near this day yet.',
+        message: kind === 'tours' ? 'Tour availability is still loading for this day.' : 'Try a wider search from this day.',
         items,
       });
     } catch {
@@ -12971,7 +12998,7 @@ function MapScreen() {
         : findVisibleCandidate(args, visibleCandidates);
       const { feature, ambiguous, matches } = resolved;
       if (!feature) {
-        setQuickToast('No visible map feature matched.');
+        setQuickToast('Could not match a visible map feature.');
         setTimeout(() => setQuickToast(''), 2400);
         return { applied: false, status: 'failed', reason: 'no_visible_feature', spoken_summary: 'I could not match that to a visible map feature. Ask what I see, then choose by number or name.' };
       }
@@ -13046,7 +13073,7 @@ function MapScreen() {
       if (wantsCamp) {
         const camp = resolveCampResultFromArgs(args);
         if (!camp) {
-          setQuickToast('No current camp result matched.');
+          setQuickToast('Could not match the current camp results.');
           setTimeout(() => setQuickToast(''), 2400);
           return {
             applied: false,
@@ -13096,7 +13123,7 @@ function MapScreen() {
       if (wantsTrail) {
         const trail = resolveTrailResultFromArgs(args);
         if (!trail) {
-          setQuickToast('No current trail result matched.');
+          setQuickToast('Could not match the current trail results.');
           setTimeout(() => setQuickToast(''), 2400);
           return {
             applied: false,
@@ -13144,7 +13171,7 @@ function MapScreen() {
       if (wantsPlace) {
         const place = resolvePlaceResultFromArgs(args);
         if (!place) {
-          setQuickToast('No current place result matched.');
+          setQuickToast('Could not match the current place results.');
           setTimeout(() => setQuickToast(''), 2400);
           return {
             applied: false,
@@ -13191,7 +13218,7 @@ function MapScreen() {
         closeCopilotForMapAction();
         return { applied: true, status: 'applied', selected: place.name, selected_type: place.type || 'place', place: copilotPlacePayload(place), selection_guard: guard, spoken_summary: spokenSummary };
       }
-      setQuickToast('No Copilot result list yet.');
+      setQuickToast('Co-Pilot result list is still loading.');
       setTimeout(() => setQuickToast(''), 2400);
       return { applied: false, status: 'failed', reason: 'no_result_list', spoken_summary: 'I do not have a result list to choose from yet.' };
     }
@@ -13365,7 +13392,7 @@ function MapScreen() {
           applied: false,
           status: 'blocked',
           reason: 'profile_open_blocked_after_route_scout',
-          spoken_summary: 'The route scout is still active. I will stay on the planned trip unless you explicitly ask to open the rig profile.',
+          spoken_summary: 'The trip overview is still active. I will stay on the planned trip unless you explicitly ask to open the rig profile.',
         };
       }
       setShowExtremeCopilot(false);
@@ -13544,9 +13571,9 @@ function MapScreen() {
     const stagedText = action.requires_confirmation
       ? 'Confirm this voice action before I apply it.'
       : action.action_type === 'startRouteScout'
-        ? 'Starting route scout.'
+        ? 'Starting trip overview.'
         : action.action_type === 'saveScoutToRouteBuilder'
-          ? 'Saving scout to Route Builder.'
+          ? 'Saving trip to Route Builder.'
           : action.action_type === 'searchPlaces'
             ? 'Searching places.'
             : 'Applying voice action.';
@@ -13633,7 +13660,7 @@ function MapScreen() {
       setExtremeCopilotVoiceMode(null);
       const voiceError = String(e?.message ?? '');
       const noMic = /microphone|mic|permission|not allowed|denied/i.test(voiceError);
-      setExtremeCopilotVoiceStatus(noMic ? 'No mic permission.' : 'Voice unavailable. Text Copilot still works.');
+      setExtremeCopilotVoiceStatus(noMic ? 'Mic permission needed.' : 'Voice unavailable. Text Co-Pilot still works.');
       appendCopilotMessage({
         id: `copilot-voice-error-${Date.now()}`,
         role: 'assistant',
@@ -13717,7 +13744,7 @@ function MapScreen() {
     );
     const transcript = payload?.transcript || copilotDebugTranscript;
     if (!transcript) {
-      setQuickToast('No support log available.');
+      setQuickToast('Support log unavailable.');
       setTimeout(() => setQuickToast(''), 2200);
       return;
     }
@@ -14065,7 +14092,7 @@ function MapScreen() {
         .map(({ _score, ...c }: CampsitePin & { _score?: number }) => c)
         .slice(0, 30);
       setCampCandidates(sorted);
-      if (sorted.length === 0) setCampPickerError('No camps found near this day yet. Try the map search or choose a nearby map camp and tap Use for Day.');
+      if (sorted.length === 0) setCampPickerError('Try the map search or choose a nearby map camp and tap Use for Day.');
     } catch (e: any) {
       if (e instanceof PaywallError) {
         setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
@@ -15681,6 +15708,11 @@ function MapScreen() {
     ].filter(Boolean).join(' · ');
   }
 
+  function tripDayPlaceMaxDetourMi(day?: number | null) {
+    const legMiles = day ? dayEndpointsForTripPlace(day).legMiles : 0;
+    return Math.max(12, Math.min(30, legMiles * 0.08 || 18));
+  }
+
   function tripDayNearbyCenters(day?: number) {
     const overview = tripOverviewDays.find(item => item.day.day === day);
     const { start, finish } = day ? dayEndpointsForTripPlace(day) : { start: null, finish: null };
@@ -16673,6 +16705,12 @@ function MapScreen() {
       });
       return merged
         .filter(place => !isLowValueGenericBlmPlace(place, isTripServicePlace(place)))
+        .filter(place => {
+          if (!day) return true;
+          const context = tripPlaceContextFor(place, day);
+          const routeDistance = context?.route_distance_mi;
+          return routeDistance == null || routeDistance <= tripDayPlaceMaxDetourMi(day);
+        })
         .sort((a, b) => {
           const ac = tripPlaceContextFor(a, day);
           const bc = tripPlaceContextFor(b, day);
@@ -16735,7 +16773,7 @@ function MapScreen() {
         [key]: {
           loading: false,
           places,
-          error: places.length ? undefined : 'No nearby place cards loaded yet. Try a wider search from the map.',
+          error: places.length ? undefined : 'Nearby place cards are ready for a wider map search.',
           loadedAt: Date.now(),
           sourceLabel,
         },
@@ -17813,7 +17851,7 @@ function MapScreen() {
             for (let i = 0; i < anchors.length - 1; i += 1) {
               const segment = captureLegFromVisibleGeometry(anchors[i], anchors[i + 1]);
               if (!segment?.length) {
-                localStatuses.push({ label: `${i + 1}-${i + 2}`, status: 'failed', engine: 'Needs pins', message: 'No visible trail connection found' });
+                localStatuses.push({ label: `${i + 1}-${i + 2}`, status: 'failed', engine: 'Needs pins', message: 'Visible trail connection unavailable' });
                 setTrailRouteSegmentStatus(localStatuses);
                 throw new Error(`Could not connect pins ${i + 1} and ${i + 2}. Add another pin on the trail between them.`);
               }
@@ -18222,13 +18260,13 @@ function MapScreen() {
     (!showPlacePins || placeFilterChanged ? 1 : 0);
   const campFilterSummary = showCampPins
     ? activeFilters.length === 0
-      ? 'No camp types visible'
+      ? 'Camp types hidden'
       : allCampFiltersSelected(activeFilters)
         ? 'All camp types visible'
         : `${activeFilters.length} visible`
     : 'Hidden';
   const activeCampFilterLabel = activeFilters.length === 0
-    ? 'No camp types visible'
+    ? 'Camp types hidden'
     : allCampFiltersSelected(activeFilters)
       ? 'Camps, RV parks, and stays nearby'
       : activeFilters.map(cleanDisplayLabel).slice(0, 3).join(' · ');
@@ -18592,7 +18630,11 @@ function MapScreen() {
   );
   const campDiscoveryActive = !campDiscoverySheetDismissed || campDiscoveryWideActive;
   const campDiscoveryRefreshing = Boolean(isLoadingAreaCamps || campDiscoveryLoadingKey);
-  const nativeMapCampPins = (showCampPins || campDiscoveryActive)
+  const activeTripCampPins = (activeTrip?.campsites ?? [])
+    .filter(camp => camp.lat != null && camp.lng != null && isFinite(camp.lat) && isFinite(camp.lng));
+  const nativeMapCampPins = activeTripCampPins.length > 0 && !campDiscoveryWideActive
+    ? activeTripCampPins
+    : (showCampPins || campDiscoveryActive)
     ? (campDiscoveryActive ? currentDiscoveryCamps : discoveryCamps)
     : [];
 
@@ -19390,7 +19432,7 @@ function MapScreen() {
           {!campDiscoveryRefreshing && currentDiscoveryCamps.length === 0 ? (
             <View style={s.campDiscoveryState}>
               <Ionicons name="map-outline" size={22} color="#0f766e" />
-              <Text style={s.campDiscoveryStateTitle}>No camps loaded here yet</Text>
+              <Text style={s.campDiscoveryStateTitle}>Camps are ready for a wider search</Text>
               <Text style={s.campDiscoveryStateText}>Move the map or search a wider area.</Text>
             </View>
           ) : (
@@ -19553,7 +19595,7 @@ function MapScreen() {
               ) : searchResults.some(place => place.name === '__error__') ? (
                 <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
               ) : searchResults.length === 0 ? (
-                <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>No places found</Text>
+                <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Try a wider place search</Text>
               ) : (
                 searchResults.slice(0, 4).map(place => {
                   const distMi = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) * 0.621371 : null;
@@ -19612,7 +19654,7 @@ function MapScreen() {
           ) : mapSearchSession.places.length === 0 ? (
             <View style={s.scopedSearchEmpty}>
               <Ionicons name="search-outline" size={16} color={OVR.text3} />
-              <Text style={s.scopedSearchEmptyText} numberOfLines={2}>{mapSearchSession.error || 'No results found'}</Text>
+              <Text style={s.scopedSearchEmptyText} numberOfLines={2}>{mapSearchSession.error || 'Try a wider search area'}</Text>
             </View>
           ) : (
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.scopedSearchCards}>
@@ -20474,7 +20516,7 @@ function MapScreen() {
                     );
                   })}
                   {trailFieldReports.length === 0 && !showTrailFieldReportForm && (
-                    <Text style={s.frEmpty}>No trail reports yet.</Text>
+                    <Text style={s.frEmpty}>Trail reports are waiting for the first update.</Text>
                   )}
                   {showTrailFieldReportForm ? (
                     <FieldReportComposer
@@ -20763,7 +20805,7 @@ function MapScreen() {
               {!isSearchingTrails && trailDiscoveries.length === 0 ? (
                 <View style={s.campDiscoveryState}>
                   <Ionicons name="trail-sign-outline" size={22} color="#0f766e" />
-                  <Text style={s.campDiscoveryStateTitle}>No trails loaded here yet</Text>
+                  <Text style={s.campDiscoveryStateTitle}>Trails are ready for a scan</Text>
                   <Text style={s.campDiscoveryStateText}>Move the map over trail lines, then search this area again.</Text>
                 </View>
               ) : null}
@@ -21098,8 +21140,8 @@ function MapScreen() {
                   setAiReportVisible(true);
                 }}
               >
-                <Ionicons name="bug-outline" size={14} color={C.orange} />
-                <Text style={s.extremeCopilotReportText}>REPORT BUG</Text>
+                <Ionicons name="alert-circle-outline" size={14} color={C.orange} />
+                <Text style={s.extremeCopilotReportText}>REPORT ISSUE</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={s.extremeCopilotReportBtn}
@@ -22682,7 +22724,7 @@ function MapScreen() {
               {trailDiscoveries.length === 0 ? (
                 <View style={s.trailEmptyState}>
                   <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
-                  <Text style={s.trailEmptyTitle}>No trail places loaded</Text>
+                  <Text style={s.trailEmptyTitle}>Trail places are ready for a scan</Text>
                   <Text style={s.trailEmptyText}>Use the trail button to scan the visible map area.</Text>
                 </View>
               ) : trailDiscoveries.map(trail => (
@@ -22728,7 +22770,7 @@ function MapScreen() {
               ? `${hydroContourCount} bathymetry contour${hydroContourCount === 1 ? '' : 's'}, ${hydroShallowCount} shallow zone${hydroShallowCount === 1 ? '' : 's'}, ${hydroHazardCount} hydro hazard${hydroHazardCount === 1 ? '' : 's'}, ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'}, and ${waterNavPointCount} buoy/nav aid pin${waterNavPointCount === 1 ? '' : 's'} loaded in this view. Sources: ${waterChartSourceNames}.`
               : waterNavFeatureCount > 0
                 ? `${waterNavLineCount} open chart line${waterNavLineCount === 1 ? '' : 's'}, ${waterNavPointCount} aid/hazard pin${waterNavPointCount === 1 ? '' : 's'}, ${waterNavHazardCount} hazard${waterNavHazardCount === 1 ? '' : 's'}, and ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'} loaded in this view. Hydro bathymetry coverage: ${hydroCoverage?.coverage || 'none'}. Sources: ${waterChartSourceNames}.`
-                : 'No hydro bathymetry or open seamark chart lines are loaded in this view yet. NOAA/CHS/OpenSeaMap context may still be visible without pretending local depth contours exist.'}
+                : 'Hydro bathymetry and open seamark chart lines are still loading for this view. NOAA/CHS/OpenSeaMap context may still be visible without pretending local depth contours exist.'}
             safeWaterStationSummary={waterConditionsLabel ? `${waterConditions?.station?.name}: ${waterConditionsLabel}` : null}
             safeWaterDisclosure="Informational only; not certified chartplotter data, not turn-by-turn boat routing, and not an offline nautical chart."
             conditionLegendVisible={layerTrails || layerMvum || layerAva}
@@ -23245,7 +23287,7 @@ function MapScreen() {
               <Text style={s.tripPanelKicker}>TRIP OVERVIEW</Text>
               <Text style={s.tripPanelTitle} numberOfLines={1}>{activeTrip.plan.trip_name}</Text>
               <Text style={s.tripPanelSub}>
-                {tripOverviewStats.days} days · {tripOverviewStats.miles} mi · {tripOverviewStats.camps} camps · {tripOverviewStats.fuel} fuel
+                {tripOverviewSummary(tripOverviewStats)}
               </Text>
             </View>
             <TouchableOpacity
@@ -23308,6 +23350,14 @@ function MapScreen() {
                 const nearbyFeed = nearbyKey ? nearbyPlaceFeeds[nearbyKey] : null;
                 const nearbyPlaces = nearbyFeed?.places?.slice(0, 4) ?? [];
                 const visiblePlaceCount = Math.max(poiStops.length, nearbyFeed?.places?.length ?? 0);
+                const weatherLabel = hi != null || lo != null ? `${hi != null ? Math.round(hi) : '-'}°/${lo != null ? Math.round(lo) : '-'}°` : '';
+                const dayMetaLabel = tripTimelineMetaLabel({
+                  legMiles,
+                  fuelCount: gasStops.length,
+                  placeCount: visiblePlaceCount,
+                  stopCount: dayWps.length,
+                  weatherLabel,
+                });
                 const startMeta = day.day === 1
                   ? 'Start location'
                   : start?.type === 'camp' || start?.type === 'motel'
@@ -23333,15 +23383,15 @@ function MapScreen() {
                         <View style={s.tripTimelineDayHeader}>
                           <View style={{ flex: 1 }}>
                             <Text style={s.tripTimelineDayTitle}>Day {day.day}</Text>
-                            <Text style={s.tripTimelineMeta}>{legMiles} mi · {gasStops.length} fuel · {visiblePlaceCount} places · {hi != null || lo != null ? `${hi != null ? Math.round(hi) : '-'}°/${lo != null ? Math.round(lo) : '-'}°` : `${dayWps.length} stops`}</Text>
+                            <Text style={s.tripTimelineMeta}>{dayMetaLabel}</Text>
                           </View>
                           <View style={[s.tripTimelineStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
                             <Text style={[s.tripTimelineStatusText, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
                           </View>
                         </View>
                         <Text style={s.tripTimelineRouteName} numberOfLines={2}>{start?.name ?? 'Start'} to {finish?.name ?? day.title}</Text>
-                        {timelineDay?.summary ? (
-                          <Text style={s.tripTimelineSummary} numberOfLines={3}>{timelineDay.summary}</Text>
+                        {cleanTripTimelineSummary(timelineDay?.summary) ? (
+                          <Text style={s.tripTimelineSummary} numberOfLines={3}>{cleanTripTimelineSummary(timelineDay?.summary)}</Text>
                         ) : null}
                         <View style={s.tripTimelineRows}>
                           <View style={s.tripTimelineStop}>
@@ -23468,7 +23518,7 @@ function MapScreen() {
                 }, {});
               const campEntries = Object.values(campDays).sort((a, b) => a.day - b.day);
               if (campEntries.length === 0) {
-                return <Text style={s.weatherNone}>No camp waypoints</Text>;
+                return <Text style={s.weatherNone}>Add an overnight to show camp forecasts.</Text>;
               }
               return (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.weatherScroll}>
@@ -23507,7 +23557,7 @@ function MapScreen() {
                 </ScrollView>
               );
             })() : (
-              <Text style={s.weatherNone}>No weather cached — build a trip to download forecasts</Text>
+              <Text style={s.weatherNone}>Refresh the trip to add camp forecasts.</Text>
             )}
           </View>
 
@@ -23686,7 +23736,7 @@ function MapScreen() {
             {trailDiscoveries.length === 0 ? (
               <View style={s.trailEmptyState}>
                 <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
-                <Text style={s.trailEmptyTitle}>No trail places loaded</Text>
+                <Text style={s.trailEmptyTitle}>Trail places are ready for a scan</Text>
                 <Text style={s.trailEmptyText}>Use the trail button to scan the visible map area.</Text>
               </View>
             ) : trailDiscoveries.map(trail => (
@@ -23892,7 +23942,7 @@ function MapScreen() {
                       <Text style={s.pinDescription}>{selectedCommunityPin.description}</Text>
                     )}
                     {!selectedCommunityPin.description && (
-                      <Text style={s.pinDescription}>No description yet. Use suggest update when you can add access, hours, condition, or verification details.</Text>
+                      <Text style={s.pinDescription}>Description waiting for access, hours, condition, or verification details.</Text>
                     )}
                   </View>
                   <View style={s.communitySection}>
@@ -23938,7 +23988,7 @@ function MapScreen() {
                     <Text style={s.communityContextNote}>
                       {liveSupport.nearestCampName
                         ? `Nearest camp: ${liveSupport.nearestCampName}${liveSupport.nearestCampDistanceMi != null ? ` · ${liveSupport.nearestCampDistanceMi.toFixed(1)} mi` : ''}`
-                        : liveContext?.loadedAt ? 'No nearby camp found within 20 mi.' : 'Nearby context loads live when this card opens.'}
+                        : liveContext?.loadedAt ? 'Try a wider nearby camp search.' : 'Nearby context loads live when this card opens.'}
                     </Text>
                   </View>
                   {detailRows.length > 0 && (

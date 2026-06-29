@@ -385,7 +385,7 @@ export default function RouteScoutPanel({
                     ))}
                   </View>
                 ) : (
-                  <Text style={s.inlineEmpty}>{dayAction.message || 'No options found near this leg yet.'}</Text>
+                  <Text style={s.inlineEmpty}>{dayAction.message || 'Try a wider search from this leg.'}</Text>
                 )}
               </View>
             ) : null}
@@ -427,8 +427,8 @@ export default function RouteScoutPanel({
           <View style={[s.progressFill, { width: progressWidth, backgroundColor: statusColor }]} />
         </View>
         <View style={s.statRow}>
-          <Text style={s.stat}>{routeScout.days ? `${routeScout.days} days` : 'Days TBD'}</Text>
-          <Text style={s.stat}>{routeScout.driveHours ? `${routeScout.driveHours}h/day` : 'Drive TBD'}</Text>
+          <Text style={s.stat}>{routeScout.days ? `${routeScout.days} days` : 'Set days'}</Text>
+          <Text style={s.stat}>{routeScout.driveHours ? `${routeScout.driveHours}h/day` : 'Set drive'}</Text>
           <Text style={s.stat}>{routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : 'Routing'}</Text>
           <Text style={s.stat}>{lockedCount} set</Text>
           {reviewCount ? <Text style={[s.stat, s.reviewStat]}>{reviewCount} review</Text> : null}

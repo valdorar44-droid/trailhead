@@ -142,7 +142,7 @@ export default function RouteBuilderHub({
         ) : (
           <TrailheadCard style={s.emptyCard}>
             <Ionicons name="map-outline" size={20} color={C.text3} />
-            <Text style={s.emptyTitle}>No adventures yet</Text>
+            <Text style={s.emptyTitle}>Start your first route</Text>
           </TrailheadCard>
         )}
 
@@ -183,7 +183,7 @@ export default function RouteBuilderHub({
         ) : (
           <TrailheadCard style={s.emptyCompact}>
             <Ionicons name="git-branch-outline" size={18} color={C.text3} />
-            <Text style={s.emptyText}>Saved pinned trail routes will appear here after you tap SAVE in the trail planner.</Text>
+            <Text style={s.emptyText}>Saved trail routes appear here after you tap Save in the trail planner.</Text>
           </TrailheadCard>
         )}
       </ScrollView>

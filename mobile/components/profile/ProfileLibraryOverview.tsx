@@ -30,15 +30,16 @@ export default function ProfileLibraryOverview({
   const C = useTheme();
   const s = styles(C);
   const savedNearbyCount = savedCampCount + savedPlaceCount;
+  const importedTotal = importedRouteCount + importedPinCount;
   const offlineTotal = Math.max(offlineTripCount, 0) + Math.max(offlineOnlyCount, 0);
 
   return (
     <View style={s.root}>
       <TrailheadMetricRow
         metrics={[
-          { label: 'Trips', value: String(savedTripCount), icon: 'map-outline', tone: C.silverBright },
-          { label: 'Saved', value: String(savedNearbyCount), icon: 'bookmark-outline', tone: C.orange },
-          { label: 'GPX', value: String(importedRouteCount + importedPinCount), icon: 'git-branch-outline', tone: '#38bdf8' },
+          { label: 'Trips', value: savedTripCount > 0 ? String(savedTripCount) : 'Plan', icon: 'map-outline', tone: C.silverBright },
+          { label: 'Saved', value: savedNearbyCount > 0 ? String(savedNearbyCount) : 'Save', icon: 'bookmark-outline', tone: C.orange },
+          { label: 'GPX', value: importedTotal > 0 ? String(importedTotal) : 'Import', icon: 'git-branch-outline', tone: '#38bdf8' },
         ]}
       />
 

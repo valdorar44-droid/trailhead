@@ -1243,7 +1243,7 @@ export default function ProfileScreen() {
                         { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: '#d4af37', onPress: startWelcomePrompt },
                         { icon: 'mic-outline', label: 'TRIP AUDIO', color: '#3b82f6', onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
                         { icon: 'partly-sunny-outline', label: 'WEATHER', color: '#0ea5e9', onPress: () => router.push('/(tabs)/guide?view=weather' as any) },
-                        { icon: 'bug-outline', label: 'BUG', color: C.red, onPress: () => setShowBugModal(true) },
+                        { icon: 'alert-circle-outline', label: 'REPORT', color: C.red, onPress: () => setShowBugModal(true) },
                         ...(user?.is_admin ? [{ icon: 'refresh-circle-outline', label: adminClearingCampCache ? 'CLEARING' : 'CAMP CACHE', color: C.yellow, onPress: clearCampCacheAdmin }] : []),
                       ];
           return (
@@ -1304,7 +1304,7 @@ export default function ProfileScreen() {
             <Text style={s.supportMetaText}>
               {supportThreads.length
                 ? `${supportThreads.length} thread${supportThreads.length === 1 ? '' : 's'}`
-                : 'No threads yet'}
+                : 'Inbox ready'}
             </Text>
             <Text style={s.supportMetaAction}>OPEN</Text>
           </View>
@@ -1681,8 +1681,8 @@ export default function ProfileScreen() {
                 const done  = checklist.reduce((n, s) => n + s.items.filter(i => i.done).length, 0);
                 return (
                   <>
-                    <Text style={[s.checklistProgressText, done === total && { color: C.green }]}>
-                      {done}/{total}
+                    <Text style={[s.checklistProgressText, done === total && total > 0 && { color: C.green }]}>
+                      {done === 0 ? 'Start prep' : `${done}/${total}`}
                     </Text>
                     {done > 0 && done < total && (
                       <View style={s.checklistBar}>
@@ -1979,9 +1979,9 @@ export default function ProfileScreen() {
         {profileSection === 'settings' && (
         <TouchableOpacity style={s.bugCard} onPress={() => setShowBugModal(true)}>
           <View style={s.bugCardLeft}>
-            <Ionicons name="bug-outline" size={20} color={C.red} />
+            <Ionicons name="alert-circle-outline" size={20} color={C.red} />
             <View style={{ flex: 1 }}>
-              <Text style={s.bugCardTitle}>Found a bug?</Text>
+              <Text style={s.bugCardTitle}>Report a problem</Text>
               <Text style={s.bugCardSub}>Send details so support can review it.</Text>
             </View>
           </View>
@@ -1994,9 +1994,9 @@ export default function ProfileScreen() {
           <SafeAreaView style={[s.container, { padding: 0 }]}>
             <View style={s.bugModal}>
               <TrailheadTopBar
-                title="REPORT A BUG"
-                subtitle="Describe what went wrong"
-                icon="bug-outline"
+                title="REPORT A PROBLEM"
+                subtitle="Describe what happened"
+                icon="alert-circle-outline"
                 style={s.bugModalHeader}
                 right={<TouchableOpacity onPress={() => setShowBugModal(false)}><Ionicons name="close" size={22} color={C.text3} /></TouchableOpacity>}
               />
@@ -2005,7 +2005,7 @@ export default function ProfileScreen() {
                 <View style={s.bugSentWrap}>
                   <Ionicons name="checkmark-circle" size={52} color={C.green} />
                   <Text style={s.bugSentTitle}>Report received!</Text>
-                  <Text style={s.bugSentSub}>We'll review it. If it's a real bug you'll earn credits — thanks for helping make Trailhead better.</Text>
+                  <Text style={s.bugSentSub}>We'll review it. Verified reports may earn credits.</Text>
                 </View>
               ) : (
                 <>
@@ -2013,7 +2013,7 @@ export default function ProfileScreen() {
                     <Ionicons name="flash" size={14} color={C.orange} />
                     <Text style={s.bugCreditText}>Verified reports may earn credits. You must be logged in to receive them.</Text>
                   </TrailheadCard>
-                  <Text style={s.bugFieldLabel}>WHAT WENT WRONG</Text>
+                  <Text style={s.bugFieldLabel}>WHAT HAPPENED</Text>
                   <TextInput
                     style={s.bugTitleInput}
                     placeholder="Short summary (e.g. Map crashes when tapping Day 2 route)"
@@ -2412,15 +2412,15 @@ export default function ProfileScreen() {
         <View style={s.versionCard}>
           <Text style={[s.versionLabel, { marginBottom: 8, letterSpacing: 0.5 }]}>TRAILHEAD</Text>
           <View style={s.versionRow}>
-            <Text style={s.versionLabel}>BINARY</Text>
+            <Text style={s.versionLabel}>APP VERSION</Text>
             <Text style={s.versionValue}>
               {Application.nativeApplicationVersion ?? Constants.nativeAppVersion ?? Constants.expoConfig?.version ?? '—'}
-              {' '}(build {Application.nativeBuildVersion ?? Constants.nativeBuildVersion ?? '?'})
+              {Application.nativeBuildVersion || Constants.nativeBuildVersion ? ` (${Application.nativeBuildVersion ?? Constants.nativeBuildVersion})` : ''}
             </Text>
           </View>
           <View style={s.versionRow}>
-            <Text style={s.versionLabel}>OTA UPDATE</Text>
-            <Text style={s.versionValue}>{Updates.updateId ? Updates.updateId.slice(0, 8) : 'base build'}</Text>
+            <Text style={s.versionLabel}>RELEASE</Text>
+            <Text style={s.versionValue}>{Updates.updateId ? Updates.updateId.slice(0, 8) : 'Current'}</Text>
           </View>
           <View style={s.versionRow}>
             <Text style={s.versionLabel}>UPDATED</Text>

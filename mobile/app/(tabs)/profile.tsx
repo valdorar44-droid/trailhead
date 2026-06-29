@@ -811,7 +811,7 @@ export default function ProfileScreen() {
       const content = await FileSystem.readAsStringAsync(file.uri);
       const parsed = parseGpx(content, file.name);
       if (parsed.waypoints.length === 0 && parsed.tracks.length === 0) {
-        setGpxResult('No waypoints or track points found in this GPX file.');
+        setGpxResult('This GPX file did not include waypoints or track points.');
         return;
       }
 
@@ -1037,7 +1037,7 @@ export default function ProfileScreen() {
               <Text style={s.forgotText}>Forgot your password?</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.switchRow} onPress={() => setView('register')}>
-              <Text style={s.switchText}>No account?</Text>
+              <Text style={s.switchText}>New here?</Text>
               <Text style={s.switchLink}> Create one →</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { openPaywall(); setShowPaywall(true); }}>
@@ -1796,7 +1796,7 @@ export default function ProfileScreen() {
               ))
             ) : (
               <View style={s.emptyMiniCard}>
-                <Text style={s.emptyMiniTitle}>No credit activity yet</Text>
+                <Text style={s.emptyMiniTitle}>Credit activity starts here</Text>
                 <Text style={s.emptyMiniSub}>Reports, confirmations, and referrals will show here.</Text>
               </View>
             )}
@@ -1882,7 +1882,7 @@ export default function ProfileScreen() {
                       ) : null}
                     </TouchableOpacity>
                   )) : (
-                    <Text style={s.contestMuted}>No admin or support threads yet. Send a message below to start one.</Text>
+                    <Text style={s.contestMuted}>Start a support thread below.</Text>
                   )}
                 </TrailheadCard>
 
@@ -2142,7 +2142,7 @@ export default function ProfileScreen() {
                       <Text style={s.contributionMetricLabel}>{item.label}</Text>
                       <Text style={s.contestLeaderPoints}>{item.points.toLocaleString()} pts</Text>
                     </View>
-                  )) : <Text style={s.contestMuted}>No contribution points yet.</Text>}
+                  )) : <Text style={s.contestMuted}>Contribution points start with field updates.</Text>}
                 </TrailheadCard>
               </ScrollView>
             )}
@@ -2229,7 +2229,7 @@ export default function ProfileScreen() {
                       <Text style={s.contestLeaderPoints}>{row.points.toLocaleString()}</Text>
                     </View>
                   ))}
-                  {!contest?.month_leaders?.length && <Text style={s.contestMuted}>No contributions yet this month.</Text>}
+                  {!contest?.month_leaders?.length && <Text style={s.contestMuted}>Monthly standings start with field updates.</Text>}
                 </TrailheadCard>
 
                 <TrailheadCard style={s.contestBoardCard}>
@@ -2241,7 +2241,7 @@ export default function ProfileScreen() {
                       <Text style={s.contestLeaderPoints}>{row.points.toLocaleString()}</Text>
                     </View>
                   ))}
-                  {!contest?.year_leaders?.length && <Text style={s.contestMuted}>No yearly standings yet.</Text>}
+                  {!contest?.year_leaders?.length && <Text style={s.contestMuted}>Yearly standings start with field updates.</Text>}
                 </TrailheadCard>
 
                 <TrailheadCard style={s.contestRulesCard}>

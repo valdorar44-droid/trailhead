@@ -349,7 +349,7 @@ function ReportScreenContent() {
     const items = await loadQueuedReports();
     if (items.length === 0) {
       setQueuedReports([]);
-      if (showResult) Alert.alert('Queue empty', 'No saved reports are waiting.');
+      if (showResult) Alert.alert('Queue empty', 'Saved reports are all clear.');
       return;
     }
     setQueueFlushing(true);
@@ -398,7 +398,7 @@ function ReportScreenContent() {
           remaining.length ? `${remaining.length} still waiting` : '',
           dropped ? `${dropped} dropped` : '',
         ].filter(Boolean);
-        Alert.alert('Offline queue', parts.join(' · ') || 'No changes.');
+        Alert.alert('Offline queue', parts.join(' · ') || 'Queue is already current.');
       }
     } finally {
       setQueueFlushing(false);
@@ -707,7 +707,7 @@ function ReportScreenContent() {
             <Text style={s.nearbySubtitle}>{options.subtitle}</Text>
           </View>
           <View style={s.nearbyCount}>
-            <Text style={s.nearbyCountNum}>{options.loading ? '…' : reports.length > 0 ? reports.length : 'NONE'}</Text>
+            <Text style={s.nearbyCountNum}>{options.loading ? '…' : reports.length > 0 ? reports.length : 'CLEAR'}</Text>
             <Text style={s.nearbyCountLabel}>{options.countLabel}</Text>
           </View>
         </View>
@@ -1070,7 +1070,7 @@ function ReportScreenContent() {
               subtitle: activeTrip?.plan.trip_name || 'Active route',
               countLabel: 'ON ROUTE',
               loading: routeLoading,
-              emptyTitle: 'No active route reports',
+              emptyTitle: 'Route looks clear right now',
               emptySub: 'Your saved route is clear right now. If you hit a closure, washed road, or fuel issue, post it from Submit.',
               primaryActionLabel: 'SUBMIT REPORT',
               primaryAction: () => setView('submit'),
@@ -1081,7 +1081,7 @@ function ReportScreenContent() {
                 <View style={s.emptyIconWrap}>
                   <Ionicons name="trail-sign-outline" size={30} color={C.text3} />
                 </View>
-                <Text style={s.emptyText}>No active route yet</Text>
+                <Text style={s.emptyText}>Open a route to watch it here</Text>
                 <Text style={s.emptySub}>Build or open a trip first, then Report can show what affects the route instead of just what is nearby.</Text>
                 <TouchableOpacity style={s.emptyAction} onPress={() => setView('nearby')}>
                   <Ionicons name="locate-outline" size={14} color={C.orange} />
@@ -1100,7 +1100,7 @@ function ReportScreenContent() {
               subtitle: tonightAnchor.name || 'Camp area',
               countLabel: 'NEAR CAMP',
               loading: campLoading,
-              emptyTitle: 'No active reports near camp tonight',
+              emptyTitle: 'Tonight’s camp looks clear',
               emptySub: 'This stop looks quiet. If the camp is full, trashed, closed, or sketchy, add the update before the next rig rolls in.',
               primaryActionLabel: 'ADD CAMP REPORT',
               primaryAction: () => {
@@ -1114,7 +1114,7 @@ function ReportScreenContent() {
                 <View style={s.emptyIconWrap}>
                   <Ionicons name="bonfire-outline" size={30} color={C.text3} />
                 </View>
-                <Text style={s.emptyText}>No camp stop selected yet</Text>
+                <Text style={s.emptyText}>Add a camp stop to watch it here</Text>
                 <Text style={s.emptySub}>Once your trip has an overnight stop, this view will focus on what matters around tonight’s camp.</Text>
                 <TouchableOpacity style={s.emptyAction} onPress={() => setView('route')}>
                   <Ionicons name="trail-sign-outline" size={14} color={C.orange} />
@@ -1131,7 +1131,7 @@ function ReportScreenContent() {
         subtitle: 'Local conditions around your current position',
         countLabel: 'ACTIVE',
         loading: nearbyLoading,
-        emptyTitle: 'No active reports nearby',
+        emptyTitle: 'Nearby looks clear right now',
         emptySub: 'This area looks quiet. If you spot a closure, washed road, full camp, or fuel issue, add the first report.',
         primaryActionLabel: 'ADD REPORT',
         primaryAction: () => setView('submit'),
@@ -1176,7 +1176,7 @@ function ReportScreenContent() {
           ) : topUsers.length === 0 ? (
             <View style={s.emptyWrap}>
               <Ionicons name="trophy-outline" size={42} color={C.text3} />
-              <Text style={s.emptyText}>No contribution points yet</Text>
+              <Text style={s.emptyText}>Contribution points start with field updates</Text>
               <Text style={s.emptySub}>Useful reports and field updates will rank here.</Text>
             </View>
           ) : (
@@ -1276,6 +1276,10 @@ function ContributorProfileModal({ profile, onClose }:
   { profile: ContributorProfile; loading: boolean; onClose: () => void }) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
+  const impactValue = (value: number | null | undefined) => {
+    const count = Number(value || 0);
+    return count > 0 ? count.toLocaleString() : 'Start';
+  };
   const badgeIcon = (icon: string) => {
     const map: Record<string, keyof typeof Ionicons.glyphMap> = {
       trophy: 'trophy-outline', ribbon: 'ribbon-outline', medal: 'medal-outline',
@@ -1337,7 +1341,7 @@ function ContributorProfileModal({ profile, onClose }:
             ].map(([label, value]) => (
               <View key={label} style={s.contribActivityRow}>
                 <Text style={s.contribActivityLabel}>{label}</Text>
-                <Text style={s.contribActivityValue}>{Number(value).toLocaleString()}</Text>
+                <Text style={s.contribActivityValue}>{impactValue(Number(value))}</Text>
               </View>
             ))}
           </View>

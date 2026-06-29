@@ -1430,6 +1430,7 @@ function RouteBuilderScreenContent() {
   const token = useStore(st => st.token);
   const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const addTripToHistory = useStore(st => st.addTripToHistory);
+  const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
   const tripHistory = useStore(st => st.tripHistory);
   const setTabBarHidden = useStore(st => st.setTabBarHidden);
   const userLoc = useStore(st => st.userLoc);
@@ -4537,6 +4538,11 @@ function RouteBuilderScreenContent() {
       setActiveTrip(trip, activeTrip?.trip_id !== tripId);
       setRouteTabMode('hub');
       router.replace('/(tabs)/map');
+      return;
+    }
+    if (tripId.startsWith('manual_') || tripId.includes('_edited_')) {
+      removeTripFromHistory(tripId);
+      Alert.alert('Route unavailable', 'This saved route was missing from local storage, so the stale shortcut was removed.');
       return;
     }
     const serverTrip = await api.getTrip(tripId).catch(() => null);

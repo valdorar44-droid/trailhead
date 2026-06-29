@@ -98,6 +98,7 @@ function sortLabelForMode(sortMode: ExploreSortMode) {
 }
 
 function shownLabel(count: number) {
+  if (count <= 0) return 'No matches';
   if (count < 1000) return `${count} shown`;
   const compact = count / 1000;
   return `${compact.toFixed(compact >= 10 ? 0 : 1)}K shown`;

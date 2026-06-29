@@ -15,6 +15,8 @@ import {
   getExploreSourceRows,
   getExploreTrustBadge,
   normalizeExploreCopyBlock,
+  sentenceAwarePreview,
+  sentenceAwarePreviewText,
   type ExploreNearbyModule,
   type ExploreDisplayContext,
 } from './exploreDisplay';
@@ -149,17 +151,47 @@ function sourcePackItemCanShow(item?: ExploreSourcePackItem | null) {
   return !sourcePackItemLooksLikeArticle(item);
 }
 
+function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
+  const title = normalizeExploreCopyBlock(item?.title);
+  let clean = normalizeExploreCopyBlock(item?.description)
+    .replace(/\bsource pack\b/gi, 'details')
+    .replace(/\broute-ready\b/gi, 'ready')
+    .replace(/\bmap context\b/gi, 'area detail')
+    .replace(/\bAI\b/g, '')
+    .trim();
+  if (!clean || clean.length < 24) return '';
+  if (title && clean.toLowerCase() === title.toLowerCase()) return '';
+  if (/^(places?|things to do|details?|overview|open map|map)\.?$/i.test(clean)) return '';
+  if (/\b(undefined|null|nan)\b/i.test(clean)) return '';
+  if (/\b(wikidata|disambiguation|source pack|search blob)\b/i.test(clean)) return '';
+  return clean;
+}
+
 function ExpandableText({
   value,
   textStyle,
+  previewChars = 260,
 }: {
   value?: string | null;
   textStyle: StyleProp<TextStyle>;
   previewChars?: number;
 }) {
+  const C = useTheme();
+  const [expanded, setExpanded] = useState(false);
   const clean = normalizeExploreCopyBlock(value);
   if (!clean) return null;
-  return <Text style={textStyle}>{clean}</Text>;
+  const preview = sentenceAwarePreview(clean, previewChars);
+  const text = expanded || !preview.expandable ? clean : sentenceAwarePreviewText(clean, previewChars);
+  return (
+    <View>
+      <Text style={textStyle}>{text}</Text>
+      {preview.expandable && (
+        <TouchableOpacity style={styles.moreTextButton} onPress={() => setExpanded(current => !current)} activeOpacity={0.8}>
+          <Text style={[styles.moreText, { color: C.orange }]}>{expanded ? 'Less' : 'More'}</Text>
+        </TouchableOpacity>
+      )}
+    </View>
+  );
 }
 
 export function ExploreDetailSheet({
@@ -252,7 +284,6 @@ export function ExploreDetailSheet({
       if (primary) usedTileImages.add(imageKey(primary));
       return { imageUrl: primary, imageCandidates: primary ? [primary, ...candidates.filter(url => url !== primary)] : candidates };
     };
-    const activityCount = (pack?.activities?.length ?? 0) + (place.amenities?.length ?? 0);
     const hasCoords = place.summary.lat != null && place.summary.lng != null;
     const seeImages = tileImages(sourcePackLists.thingsToSee);
     const doImages = tileImages(sourcePackLists.thingsToDo);
@@ -282,7 +313,7 @@ export function ExploreDetailSheet({
       count: count(sourcePackLists.thingsToDo) || undefined,
       imageUrl: doImages.imageUrl,
       imageCandidates: doImages.imageCandidates,
-      searchText: `${searchTextForItems(sourcePackLists.thingsToDo)} ${(pack?.activities ?? []).join(' ')} ${(place.amenities ?? []).join(' ')}`,
+      searchText: searchTextForItems(sourcePackLists.thingsToDo),
     });
 
     add(Boolean(count(sourcePackLists.campgrounds) || campgroundsSlot) && {
@@ -448,12 +479,13 @@ export function ExploreDetailSheet({
   };
   const itemCanRenderOnMap = (item?: ExploreSourcePackItem | null, active = false) => {
     if (!itemHasCoords(item)) return false;
-    if (active) return true;
     if (item?.map_hidden) return false;
+    if (Math.abs(Number(item?.lat)) < 0.0001 && Math.abs(Number(item?.lng)) < 0.0001) return false;
     const explicitDistance = Number(item?.distance_mi);
     if (Number.isFinite(explicitDistance) && explicitDistance > mapRadiusMi) return false;
     const measuredDistance = itemDistanceFromParent(item);
     if (measuredDistance != null && measuredDistance > mapRadiusMi) return false;
+    if (!hasParentCoords && !active && !item?.address && !item?.location && !item?.source_id) return false;
     return true;
   };
 
@@ -532,8 +564,10 @@ export function ExploreDetailSheet({
               {itemImages.length > 0 && <ResilientImage uris={itemImages} style={styles.detailItemImage} />}
               <View style={styles.detailItemBody}>
                 <Text style={[styles.detailItemTitle, { color: C.text }]} numberOfLines={2}>{item.title || 'Place'}</Text>
-                {!!item.description && (
-                  <Text style={[styles.detailItemCopy, { color: C.text2 }]}>{normalizeExploreCopyBlock(item.description)}</Text>
+                {!!cleanSourcePackItemCopy(item) && (
+                  <Text style={[styles.detailItemCopy, { color: C.text2 }]}>
+                    {sentenceAwarePreviewText(cleanSourcePackItemCopy(item), 150)}
+                  </Text>
                 )}
                 <View style={styles.detailItemMeta}>
                   {!!item.source_label && <Text style={[styles.detailItemMetaText, { color: C.text3 }]} numberOfLines={1}>{item.source_label}</Text>}
@@ -681,7 +715,7 @@ export function ExploreDetailSheet({
   }
 
   function renderCalendarItems(items: ExploreSourcePackItem[]) {
-    if (!items.length) return renderItemList([], 'No events saved yet.');
+    if (!items.length) return renderItemList([], 'No events yet.');
     return (
       <View style={styles.calendarList}>
         <View style={[styles.calendarPicker, { backgroundColor: C.s1, borderColor: C.border }]}>
@@ -764,6 +798,7 @@ export function ExploreDetailSheet({
   function renderChildDetail(item: ExploreSourcePackItem) {
     const itemImages = item.image_url ? mediaCandidates(item.image_url, activeModuleDef?.imageCandidates ?? [], imageUrl) : [];
     const siblingItems = activeModule ? moduleItems(activeModule) : moduleItems('map');
+    const itemCopy = cleanSourcePackItemCopy(item);
     return (
       <>
         <View style={styles.childHero}>
@@ -795,13 +830,13 @@ export function ExploreDetailSheet({
           {itemImages.length === 0 && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>{item.title || 'Place'}</Text>
-              {!!item.description && <ExpandableText value={item.description} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />}
+              {!!itemCopy && <ExpandableText value={itemCopy} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />}
             </View>
           )}
-          {!!item.description && itemImages.length > 0 && (
+          {!!itemCopy && itemImages.length > 0 && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Details</Text>
-              <ExpandableText value={item.description} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
+              <ExpandableText value={itemCopy} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
             </View>
           )}
           {renderDetailFacts(item)}
@@ -834,26 +869,24 @@ export function ExploreDetailSheet({
       const seeItems = filteredItems(pack?.things_to_see);
       return (
         <>
-          {seeItems.length > 0 ? renderItemList(seeItems, 'No saved highlights yet.') : null}
+          {seeItems.length > 0 ? renderItemList(seeItems, 'Nothing listed yet.') : null}
           {!!place.profile?.why_it_matters && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Why Go</Text>
               <ExpandableText value={place.profile.why_it_matters} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
             </View>
           )}
-          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], 'No saved highlights yet.') : null}
+          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], 'Nothing listed yet.') : null}
         </>
       );
     }
     if (key === 'do') {
       const doItems = filteredItems(pack?.things_to_do);
-      const hasActivities = Boolean((pack?.activities?.length ?? 0) || (place.amenities?.length ?? 0));
       return (
         <>
-          {doItems.length > 0 ? renderItemList(doItems, 'No saved activities yet.') : null}
-          {renderActivityGrid()}
+          {doItems.length > 0 ? renderItemList(doItems, 'Nothing listed yet.') : null}
           {experiencesSlot}
-          {doItems.length === 0 && !hasActivities && !experiencesSlot ? renderItemList([], 'No saved activities yet.') : null}
+          {doItems.length === 0 && !experiencesSlot ? renderItemList([], 'Nothing listed yet.') : null}
         </>
       );
     }
@@ -861,16 +894,16 @@ export function ExploreDetailSheet({
       const stayItems = filteredItems(pack?.campgrounds);
       return (
         <>
-          {stayItems.length > 0 ? renderItemList(stayItems, 'No saved stays yet.') : null}
+          {stayItems.length > 0 ? renderItemList(stayItems, 'Nothing listed yet.') : null}
           {stayItems.length === 0 ? campgroundsSlot : null}
-          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], 'No saved stays yet.') : null}
+          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], 'Nothing listed yet.') : null}
         </>
       );
     }
     if (key === 'visitor') {
       return (
         <>
-          {renderItemList(filteredItems(pack?.visitor_centers), 'No visitor centers saved yet.')}
+          {renderItemList(filteredItems(pack?.visitor_centers), 'Nothing listed yet.')}
           {!!sourceUrl && renderAction('Official site', 'open-outline', () => Linking.openURL(sourceUrl))}
         </>
       );
@@ -886,7 +919,7 @@ export function ExploreDetailSheet({
     if (key === 'amenities') {
       return renderActivityGrid() ?? (
         <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
-          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>No amenities saved yet.</Text>
+          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Nothing listed yet.</Text>
         </View>
       );
     }
@@ -966,7 +999,7 @@ export function ExploreDetailSheet({
       return (
         <View style={[styles.panel, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <ScrollView ref={storyScrollRef} style={styles.storyBox} nestedScrollEnabled showsVerticalScrollIndicator>
-            {(storySentences.length ? storySentences : ['No story saved yet.']).map((sentence, idx) => (
+            {(storySentences.length ? storySentences : ['No story yet.']).map((sentence, idx) => (
               <Text
                 key={`${idx}-${sentence.slice(0, 24)}`}
                 style={[
@@ -1151,7 +1184,7 @@ export function ExploreDetailSheet({
         {!!sourceUrl && (
           <TouchableOpacity style={[styles.sourceButton, { borderColor: C.border }]} onPress={() => Linking.openURL(sourceUrl)}>
             <Ionicons name="open-outline" size={16} color={C.text2} />
-            <Text style={[styles.sourceButtonText, { color: C.text3 }]} numberOfLines={2}>{place.attribution}</Text>
+            <Text style={[styles.sourceButtonText, { color: C.text3 }]} numberOfLines={2}>{sourceButtonLabelForPlace(place)}</Text>
           </TouchableOpacity>
         )}
       </ScrollView>
@@ -1218,15 +1251,6 @@ function SourcePack({
       {!!pack.fees?.length && (
         <Text style={[styles.packText, { color: C.text2 }]}>Fees: {pack.fees.slice(0, 2).join(' · ')}</Text>
       )}
-      {!!pack.activities?.length && (
-        <View style={styles.pillRow}>
-          {pack.activities.slice(0, 8).map(activity => (
-            <View key={activity} style={[styles.packPill, { borderColor: C.border, backgroundColor: C.s2 }]}>
-              <Text style={[styles.packPillText, { color: C.text2 }]}>{activity}</Text>
-            </View>
-          ))}
-        </View>
-      )}
       {rows.map(([label, rawItems]) => {
         const items = Array.isArray(rawItems) ? rawItems.filter(sourcePackItemCanShow) : [];
         return items.length ? (
@@ -1252,7 +1276,11 @@ function SourcePack({
                   {!!item.image_url && <ResilientImage uris={[sizedNpsMediaUrl(mediaUrl(item.image_url)), mediaUrl(item.image_url)]} style={styles.miniImage} />}
                   <View style={styles.miniBody}>
                     <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
-                    {!!item.description && <Text style={[styles.miniDesc, { color: C.text3 }]}>{normalizeExploreCopyBlock(item.description)}</Text>}
+                    {!!cleanSourcePackItemCopy(item) && (
+                      <Text style={[styles.miniDesc, { color: C.text3 }]}>
+                        {sentenceAwarePreviewText(cleanSourcePackItemCopy(item), 110)}
+                      </Text>
+                    )}
                   </View>
                 </TouchableOpacity>
               );
@@ -1270,7 +1298,17 @@ function sourceBodyForPlace(place: ExplorePlaceProfile) {
   if (/wiki|source pack/i.test(raw)) {
     return 'Check current access, fees, closures, and rules before you go.';
   }
-  return raw || place.attribution || 'Details available. Verify access before you go.';
+  return raw || place.attribution || 'Check current access before you go.';
+}
+
+function sourceButtonLabelForPlace(place: ExplorePlaceProfile) {
+  const raw = normalizeExploreCopyBlock(place.attribution)
+    .replace(/;\s*photo credit:\s*not available\.?/gi, '')
+    .replace(/\bphoto credit:\s*not available\.?/gi, '')
+    .replace(/\s*;\s*$/g, '')
+    .trim();
+  if (!raw || /wikidata|wikimedia|wikipedia|not available/i.test(raw)) return 'Open source';
+  return raw;
 }
 
 function sourcePublisherLabel(primary: string) {
@@ -1397,6 +1435,8 @@ const styles = StyleSheet.create({
   copyTitle: { fontSize: 15, lineHeight: 19, fontWeight: '900' },
   copyBody: { fontSize: 13, lineHeight: 19, fontWeight: '700' },
   expandLink: { fontWeight: '900' },
+  moreTextButton: { alignSelf: 'flex-start', minHeight: 28, justifyContent: 'center', paddingTop: 2 },
+  moreText: { fontSize: 12, fontWeight: '900' },
   infoRowCard: { borderWidth: 1, borderRadius: 14, padding: 14, flexDirection: 'row', alignItems: 'flex-start', gap: 11 },
   mapActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   moduleMapHero: { height: 360, backgroundColor: '#101811' },
@@ -1516,9 +1556,6 @@ const styles = StyleSheet.create({
   packTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
   packBadge: { fontSize: 10, fontFamily: mono, fontWeight: '900' },
   packText: { fontSize: 13, lineHeight: 18, fontWeight: '700' },
-  pillRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  packPill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 6 },
-  packPillText: { fontSize: 11, fontWeight: '800' },
   packLabel: { fontSize: 10, fontFamily: mono, fontWeight: '900', marginTop: 6, marginBottom: 6 },
   miniRail: { gap: 10, paddingRight: 6 },
   miniCard: { width: 210, borderWidth: 1, borderRadius: 13, overflow: 'hidden' },

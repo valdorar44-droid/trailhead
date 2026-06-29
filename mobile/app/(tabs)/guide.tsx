@@ -373,6 +373,22 @@ function protectedDestinationTitleForExplorePlace(place: ExplorePlaceProfile) {
   return '';
 }
 
+function destinationSearchTitlesForExploreChild(place: ExplorePlaceProfile) {
+  const terms = new Set<string>();
+  const protectedTitle = protectedDestinationTitleForExplorePlace(place);
+  if (protectedTitle) terms.add(protectedTitle);
+  [
+    destinationRootFromTitle(place.summary.title),
+    destinationRootFromTitle(place.summary.region || ''),
+    destinationRootFromTitle(place.summary.state || ''),
+  ].forEach(term => {
+    if (term && term.length >= 3 && !/^(ca|ut|az|co|wy|mt|or|wa|nv|id|nm)$/i.test(term)) {
+      terms.add(titleCaseExploreDestination(term));
+    }
+  });
+  return Array.from(terms).slice(0, 3);
+}
+
 function titleCaseExploreDestination(value: string) {
   return value
     .split(/\s+/)
@@ -1515,12 +1531,19 @@ export default function GuideScreen() {
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
   const exploreHomeCountLabel = useMemo(() => {
-    if (!showExploreHome) return `${rankedExplore.length.toLocaleString()} places`;
+    if (!showExploreHome) {
+      if (rankedExplore.length <= 0) {
+        if (exploreSavedOnly) return 'No saved places';
+        if (exploreTripNeedsRoute) return 'No active trip';
+        return 'No matches';
+      }
+      return `${rankedExplore.length.toLocaleString()} places`;
+    }
     const count = (featuredLead ? 1 : 0)
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
     return `${count.toLocaleString()} featured picks`;
-  }, [featuredLead, featuredSections, rankedExplore.length, showExploreHome, trendingExplore.length]);
+  }, [exploreSavedOnly, exploreTripNeedsRoute, featuredLead, featuredSections, rankedExplore.length, showExploreHome, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -1929,23 +1952,22 @@ export default function GuideScreen() {
 
   async function resolveExploreParentHubForChild(place: ExplorePlaceProfile) {
     if (!isNestedExploreChildCandidate(place)) return null;
-    const title = protectedDestinationTitleForExplorePlace(place);
-    if (!title) return null;
-    const normalizedTitle = normalizeExploreText(title);
-    const localHub = enrichedExplorePlaces.find(item => (
-      item.id !== place.id
-      && isDestinationExploreHub(item)
-      && normalizeExploreText(item.summary.title) === normalizedTitle
-    ));
+    const localHub = findExploreParentHub(place, enrichedExplorePlaces.filter(item => item.id !== place.id && isDestinationExploreHub(item)));
     if (localHub) return localHub;
+    const searchTitles = destinationSearchTitlesForExploreChild(place);
+    if (!searchTitles.length) return null;
     try {
-      const catalog = await api.getExploreCatalogIndex({ q: title, category: 'parks', limit: 8 });
-      const remoteHub = (catalog.places ?? [])
-        .map(exploreIndexItemToProfile)
-        .find(item => isDestinationExploreHub(item) && normalizeExploreText(item.summary.title) === normalizedTitle);
-      if (!remoteHub) return null;
-      setExplorePlaces(prev => prev.some(item => item.id === remoteHub.id) ? prev : [remoteHub, ...prev]);
-      return remoteHub;
+      for (const title of searchTitles) {
+        const catalog = await api.getExploreCatalogIndex({ q: title, category: 'parks', limit: 10 });
+        const remoteHubs = (catalog.places ?? [])
+          .map(exploreIndexItemToProfile)
+          .filter(item => isDestinationExploreHub(item));
+        const remoteHub = findExploreParentHub(place, remoteHubs) ?? remoteHubs.find(item => normalizeExploreText(item.summary.title).includes(normalizeExploreText(title)));
+        if (!remoteHub) continue;
+        setExplorePlaces(prev => prev.some(item => item.id === remoteHub.id) ? prev : [remoteHub, ...prev]);
+        return remoteHub;
+      }
+      return null;
     } catch {
       return null;
     }

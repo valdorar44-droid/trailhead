@@ -729,7 +729,7 @@ function ReportScreenContent() {
           </View>
           <View style={{ flex: 1 }}>
             <Text style={s.notifSettingsBtnText}>Community standings</Text>
-            <Text style={s.notifSettingsSub}>Leaderboard moved out of the main report flow, but it is still here.</Text>
+            <Text style={s.notifSettingsSub}>See top contributors and recent trail reports.</Text>
           </View>
           <Ionicons name="chevron-forward" size={13} color={C.text3} />
         </TouchableOpacity>

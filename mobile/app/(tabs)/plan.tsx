@@ -5,7 +5,7 @@ import {
   Share, Animated, Alert, Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -84,7 +84,7 @@ function appendAiMessage(messages: Message[], text?: string): Message[] {
   return [...messages, { role: 'ai', text: clean }];
 }
 
-export default function PlanScreen() {
+function PlanScreenContent() {
   const C  = useTheme();
   const s  = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
@@ -1087,6 +1087,12 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
       )}
     </Animated.View>
   );
+}
+
+export default function PlanScreen() {
+  const pathname = usePathname();
+  if (!pathname.includes('/plan')) return null;
+  return <PlanScreenContent />;
 }
 
 // ── Styles ─────────────────────────────────────────────────────────────────────

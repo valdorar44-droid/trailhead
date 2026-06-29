@@ -10,6 +10,7 @@ import * as Notifications from 'expo-notifications';
 import { storage } from '@/lib/storage';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
+import { usePathname } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import { api, Report, ReportPayload, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
@@ -247,7 +248,7 @@ function tonightAnchorForTrip(
   return overnights[overnights.length - 1].wp;
 }
 
-export default function ReportScreen() {
+function ReportScreenContent() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const { user, setAuth, addLiveReport } = useStore();
@@ -429,7 +430,6 @@ export default function ReportScreen() {
         .catch(() => {}); // prevent unhandled rejection crash
     }).catch(() => {});
 
-    api.getContributionsLeaderboard('month').then(res => setTopUsers(res.leaders)).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -444,8 +444,12 @@ export default function ReportScreen() {
 
   useEffect(() => {
     if (view !== 'leaderboard') return;
+    if (!user) {
+      setTopUsers([]);
+      return;
+    }
     api.getContributionsLeaderboard(topPeriod).then(res => setTopUsers(res.leaders)).catch(() => {});
-  }, [view, topPeriod]);
+  }, [view, topPeriod, user?.id]);
 
   // Refresh route alerts each time user opens the route tab
   useEffect(() => {
@@ -703,7 +707,7 @@ export default function ReportScreen() {
             <Text style={s.nearbySubtitle}>{options.subtitle}</Text>
           </View>
           <View style={s.nearbyCount}>
-            <Text style={s.nearbyCountNum}>{options.loading ? '…' : reports.length}</Text>
+            <Text style={s.nearbyCountNum}>{options.loading ? '…' : reports.length > 0 ? reports.length : 'NONE'}</Text>
             <Text style={s.nearbyCountLabel}>{options.countLabel}</Text>
           </View>
         </View>
@@ -1163,7 +1167,13 @@ export default function ReportScreen() {
             </View>
           </View>
 
-          {topUsers.length === 0 ? (
+          {!user ? (
+            <View style={s.emptyWrap}>
+              <Ionicons name="person-circle-outline" size={42} color={C.text3} />
+              <Text style={s.emptyText}>Sign in to view community standings</Text>
+              <Text style={s.emptySub}>Field reports and confirmations count toward your profile.</Text>
+            </View>
+          ) : topUsers.length === 0 ? (
             <View style={s.emptyWrap}>
               <Ionicons name="trophy-outline" size={42} color={C.text3} />
               <Text style={s.emptyText}>No contribution points yet</Text>
@@ -1250,6 +1260,12 @@ export default function ReportScreen() {
       )}
     </SafeAreaView>
   );
+}
+
+export default function ReportScreen() {
+  const pathname = usePathname();
+  if (!pathname.includes('/report')) return null;
+  return <ReportScreenContent />;
 }
 
 async function getToken() {

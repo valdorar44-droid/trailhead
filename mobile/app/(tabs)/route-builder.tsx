@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, usePathname, useRouter } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
@@ -1413,7 +1413,7 @@ async function searchNominatimNearby(query: string, center: { lat: number; lng: 
   })).filter((p: OsmPoi) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
 }
 
-export default function RouteBuilderScreen() {
+function RouteBuilderScreenContent() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
@@ -5877,6 +5877,12 @@ export default function RouteBuilderScreen() {
       <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
+}
+
+export default function RouteBuilderScreen() {
+  const pathname = usePathname();
+  if (!pathname.includes('/route-builder')) return null;
+  return <RouteBuilderScreenContent />;
 }
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({

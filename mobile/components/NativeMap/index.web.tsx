@@ -767,6 +767,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   ].slice(0, 12);
   const hasRouteLine = props.waypoints.length > 1;
   const hasMapContent = pins.length > 0 || !!props.searchMarker || !!props.userLoc;
+  const footerParts = [
+    props.waypoints.length > 0 ? `${props.waypoints.length} stop${props.waypoints.length === 1 ? '' : 's'}` : '',
+    props.camps.length > 0 ? `${props.camps.length} camp${props.camps.length === 1 ? '' : 's'}` : '',
+    props.gas.length > 0 ? `${props.gas.length} fuel` : '',
+    props.pois.length > 0 ? `${props.pois.length} place${props.pois.length === 1 ? '' : 's'}` : '',
+  ].filter(Boolean);
+  const previewFooterText = footerParts.length ? footerParts.join(' · ') : 'No route yet';
 
   if (isExtremeWeb) {
     return (
@@ -774,18 +781,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         {React.createElement('div', { ref: mapElRef, style: mapboxContainerStyle })}
         <View style={styles.header}>
           <Ionicons name="planet-outline" size={16} color="#fff" />
-          <Text style={styles.headerText}>EXTREME · MAPBOX GL JS {MAPBOX_GL_VERSION.toUpperCase()}</Text>
+          <Text style={styles.headerText}>EXTREME MAP</Text>
         </View>
         {mapboxError ? (
           <View style={styles.emptyState}>
             <Ionicons name="warning-outline" size={24} color={C.orange} />
-            <Text style={[styles.emptyTitle, { color: C.text }]}>Mapbox GL JS did not load</Text>
+            <Text style={[styles.emptyTitle, { color: C.text }]}>Map preview unavailable</Text>
             <Text style={[styles.emptyText, { color: C.text3 }]}>{mapboxError}</Text>
           </View>
         ) : null}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            {premiumStyle.replace(/_/g, ' ').toUpperCase()} · {props.camps.length} camps · {props.pois.length} places
+            {[premiumStyle.replace(/_/g, ' ').toUpperCase(), ...footerParts].join(' · ')}
           </Text>
         </View>
         {props.children}
@@ -828,7 +835,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       </View>
       <View style={styles.footer}>
         <Text style={styles.footerText}>
-          {props.waypoints.length} stops · {props.camps.length} camps · {props.gas.length} fuel · {props.pois.length} places
+          {previewFooterText}
         </Text>
       </View>
       {props.children}

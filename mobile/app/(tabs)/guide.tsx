@@ -6,7 +6,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -855,7 +855,7 @@ function exploreCampFallbackRadius(place: ExplorePlaceProfile) {
   return 38;
 }
 
-export default function GuideScreen() {
+function GuideScreenContent() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
@@ -2905,6 +2905,12 @@ export default function GuideScreen() {
       </Modal>
     </SafeAreaView>
   );
+}
+
+export default function GuideScreen() {
+  const pathname = usePathname();
+  if (pathname !== '/' && !pathname.includes('/guide')) return null;
+  return <GuideScreenContent />;
 }
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({

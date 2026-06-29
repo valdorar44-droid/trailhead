@@ -933,6 +933,10 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
     profile = {
         "id": place_id,
         "category": category,
+        "canonical_role": place.get("canonical_role") or "",
+        "parent_hub_id": place.get("parent_hub_id") or "",
+        "parent_hub_title": place.get("parent_hub_title") or "",
+        "module_target": place.get("module_target") or "",
         "subcategories": place.get("subcategories") or [],
         "sources": place.get("sources") or [],
         "source_ids": place.get("source_ids") or [],
@@ -1063,6 +1067,10 @@ def _merge_explore_sidecar_enrichment(base: dict, sidecar: dict) -> dict:
         if side_summary.get(key):
             base_summary[key] = _explore_richer_text(base_summary.get(key), side_summary.get(key))
     enriched["summary"] = base_summary
+
+    for key in ("canonical_role", "parent_hub_id", "parent_hub_title", "module_target"):
+        if sidecar.get(key) and not enriched.get(key):
+            enriched[key] = sidecar.get(key)
 
     base_profile = dict(enriched.get("profile") or {})
     side_profile = sidecar.get("profile") if isinstance(sidecar.get("profile"), dict) else {}
@@ -1208,6 +1216,10 @@ def _explore_query_text(place: dict) -> str:
     source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
     values = [
         place.get("id"),
+        place.get("canonical_role"),
+        place.get("parent_hub_id"),
+        place.get("parent_hub_title"),
+        place.get("module_target"),
         summary.get("title"),
         summary.get("state"),
         summary.get("category"),
@@ -1514,6 +1526,10 @@ def _explore_place_index_item(place: dict) -> dict:
         "source_url": source_url,
         "source_quality": (place.get("facts") or {}).get("source_quality") or source_pack.get("quality") or "",
         "v3_category": place.get("category") or "",
+        "canonical_role": place.get("canonical_role") or "",
+        "parent_hub_id": place.get("parent_hub_id") or "",
+        "parent_hub_title": place.get("parent_hub_title") or "",
+        "module_target": place.get("module_target") or "",
         "subcategories": place.get("subcategories") or [],
         "sources": place.get("sources") or [],
         "source_ids": place.get("source_ids") or [],

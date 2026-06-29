@@ -225,6 +225,10 @@ function explorePlaceSearchText(place: ExplorePlaceProfile) {
     place.summary.region,
     place.summary.hook,
     place.summary.short_description,
+    (place as any).canonical_role,
+    (place as any).parent_hub_id,
+    (place as any).parent_hub_title,
+    (place as any).module_target,
     place.profile?.summary,
     place.profile?.why_it_matters,
     (place as any).search_blob,
@@ -235,7 +239,24 @@ function explorePlaceSearchText(place: ExplorePlaceProfile) {
   ].filter(Boolean).join(' '));
 }
 
+function canonicalExploreModuleTarget(place: ExplorePlaceProfile): ExploreDetailTab | null {
+  const target = String((place as any).module_target || '').toLowerCase().trim();
+  const valid: ExploreDetailTab[] = ['summary', 'see', 'do', 'stay', 'visitor', 'trails', 'amenities', 'fees', 'alerts', 'calendar', 'weather', 'map', 'story', 'nearby'];
+  return valid.includes(target as ExploreDetailTab) ? target as ExploreDetailTab : null;
+}
+
+function canonicalExploreParentId(place: ExplorePlaceProfile) {
+  return String((place as any).parent_hub_id || '').trim();
+}
+
+function canonicalExploreParentTitle(place: ExplorePlaceProfile) {
+  return String((place as any).parent_hub_title || '').trim();
+}
+
 function isDestinationExploreHub(place: ExplorePlaceProfile) {
+  const role = String((place as any).canonical_role || '').toLowerCase();
+  if (role === 'hub') return true;
+  if (role === 'child' || canonicalExploreParentId(place)) return false;
   const title = normalizeExploreText(place.summary.title || '');
   const categoryText = normalizeExploreText([
     place.category,
@@ -260,6 +281,9 @@ function isDestinationExploreHub(place: ExplorePlaceProfile) {
 }
 
 function isNestedExploreChildCandidate(place: ExplorePlaceProfile) {
+  const role = String((place as any).canonical_role || '').toLowerCase();
+  if (role === 'hub') return false;
+  if (role === 'child' || canonicalExploreParentId(place)) return true;
   if (isDestinationExploreHub(place)) return false;
   const key = getExploreCategoryKey(place);
   if (['camp', 'glamping', 'huts', 'trails', 'trailheads', 'climb', 'tours'].includes(key)) return true;
@@ -284,6 +308,16 @@ function exploreHubMatchDistanceOk(child: ExplorePlaceProfile, hub: ExplorePlace
 }
 
 function findExploreParentHub(child: ExplorePlaceProfile, hubs: ExplorePlaceProfile[]) {
+  const explicitParentId = canonicalExploreParentId(child);
+  if (explicitParentId) {
+    const byId = hubs.find(hub => hub.id === explicitParentId);
+    if (byId) return byId;
+  }
+  const explicitParentTitle = normalizeExploreText(canonicalExploreParentTitle(child));
+  if (explicitParentTitle) {
+    const byTitle = hubs.find(hub => normalizeExploreText(hub.summary.title || '') === explicitParentTitle);
+    if (byTitle) return byTitle;
+  }
   const childTitle = normalizeExploreText(child.summary.title || '');
   const childText = explorePlaceSearchText(child);
   const childRoot = destinationRootFromTitle(child.summary.title);
@@ -305,6 +339,12 @@ function findExploreParentHub(child: ExplorePlaceProfile, hubs: ExplorePlaceProf
 
 function categoryKeysForNestedPlace(place: ExplorePlaceProfile) {
   const keys = new Set<ExploreCategoryKey>([getExploreCategoryKey(place)]);
+  const explicitTarget = canonicalExploreModuleTarget(place);
+  if (explicitTarget === 'stay') keys.add('camp');
+  if (explicitTarget === 'trails') keys.add('trails');
+  if (explicitTarget === 'do') keys.add('tours');
+  if (explicitTarget === 'see') keys.add('views');
+  if (explicitTarget === 'visitor') keys.add('parks');
   for (const key of FEATURED_SECTION_ORDER) {
     if (exploreCategoryMatches(place, key)) keys.add(key);
   }
@@ -320,6 +360,8 @@ function categoryKeysForNestedPlace(place: ExplorePlaceProfile) {
 }
 
 function exploreTabForNestedPlace(place: ExplorePlaceProfile): ExploreDetailTab {
+  const explicitTarget = canonicalExploreModuleTarget(place);
+  if (explicitTarget) return explicitTarget;
   const keys = categoryKeysForNestedPlace(place);
   const text = explorePlaceSearchText(place);
   if (/\bvisitor centers?|ranger station|information center\b/.test(text)) return 'visitor';
@@ -375,6 +417,8 @@ function protectedDestinationTitleForExplorePlace(place: ExplorePlaceProfile) {
 
 function destinationSearchTitlesForExploreChild(place: ExplorePlaceProfile) {
   const terms = new Set<string>();
+  const parentTitle = canonicalExploreParentTitle(place);
+  if (parentTitle) terms.add(parentTitle);
   const protectedTitle = protectedDestinationTitleForExplorePlace(place);
   if (protectedTitle) terms.add(protectedTitle);
   [
@@ -529,6 +573,10 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
   return {
     id: item.id,
     category: item.v3_category || item.category,
+    canonical_role: item.canonical_role || '',
+    parent_hub_id: item.parent_hub_id || '',
+    parent_hub_title: item.parent_hub_title || '',
+    module_target: item.module_target || '',
     subcategories: item.subcategories ?? [],
     sources: item.sources ?? [],
     source_ids: item.source_ids ?? [],

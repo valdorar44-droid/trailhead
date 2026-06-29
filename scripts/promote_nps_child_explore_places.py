@@ -173,6 +173,20 @@ def endpoint_label(endpoint: str) -> str:
     }.get(endpoint, "Place")
 
 
+def module_target_for_child(endpoint: str, category: str) -> str:
+    if endpoint == "campgrounds" or category in {"campground", "dispersed_camp", "rv_park"}:
+        return "stay"
+    if endpoint == "visitorcenters" or category == "visitor_center":
+        return "visitor"
+    if category in {"trail", "trailhead", "climbing_area", "bouldering_area"}:
+        return "trails"
+    if endpoint == "thingstodo":
+        return "do"
+    if category in {"waterfall", "lake", "river", "shore", "hot_spring", "peak", "viewpoint", "historic_site"}:
+        return "see"
+    return "see"
+
+
 def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], generated_at: int) -> dict[str, Any] | None:
     title = child_title(item)
     lat, lng = item_lat_lng(item)
@@ -187,6 +201,7 @@ def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], 
     url = child_url(item, park)
     source_id = compact_text(item.get("id") or item.get("url") or f"{park_code}:{endpoint}:{slugify(title)}")
     category = category_for_item(endpoint, item)
+    module_target = module_target_for_child(endpoint, category)
     image = first_image(item)
     image_url = compact_text(image.get("url"))
     image_caption = compact_text(image.get("caption") or image.get("title") or title)
@@ -205,6 +220,10 @@ def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], 
         "source_ids": [f"nps:{park_code}:{endpoint}:{slugify(source_id)}"],
         "name": title,
         "category": category,
+        "canonical_role": "child",
+        "parent_hub_id": f"place:nps:{park_code}",
+        "parent_hub_title": park_name,
+        "module_target": module_target,
         "subcategories": [endpoint_label(endpoint).lower().replace(" ", "_")],
         "lat": lat,
         "lng": lng,
@@ -216,7 +235,7 @@ def place_from_child(park: dict[str, Any], endpoint: str, item: dict[str, Any], 
         "description": description,
         "tags": tags,
         "search_aliases": [park_name, park_code.upper(), endpoint_label(endpoint), category.replace("_", " ")],
-        "search_blob": " ".join([title, park_name, endpoint, category, description, url]).lower(),
+        "search_blob": " ".join([title, park_name, endpoint, category, module_target, description, url]).lower(),
         "amenities": [],
         "media": [{
             "url": image_url,

@@ -3186,6 +3186,10 @@ export interface ExplorePlaceProfile {
     facts?: string[];
   };
   category?: string;
+  canonical_role?: 'hub' | 'child' | string;
+  parent_hub_id?: string;
+  parent_hub_title?: string;
+  module_target?: 'see' | 'do' | 'stay' | 'visitor' | 'trails' | 'amenities' | 'fees' | 'alerts' | 'calendar' | 'weather' | 'map' | 'story' | 'nearby' | 'summary' | string;
   subcategories?: string[];
   sources?: { title?: string; publisher?: string; name?: string; url?: string; kind?: string }[];
   quality?: string;
@@ -3370,6 +3374,10 @@ export interface ExploreCatalogIndexItem {
   source_url?: string;
   source_quality?: string;
   v3_category?: string;
+  canonical_role?: 'hub' | 'child' | string;
+  parent_hub_id?: string;
+  parent_hub_title?: string;
+  module_target?: 'see' | 'do' | 'stay' | 'visitor' | 'trails' | 'amenities' | 'fees' | 'alerts' | 'calendar' | 'weather' | 'map' | 'story' | 'nearby' | 'summary' | string;
   subcategories?: string[];
   sources?: { title?: string; publisher?: string; name?: string; url?: string; kind?: string }[];
   source_ids?: string[];

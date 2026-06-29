@@ -7,6 +7,7 @@ import dashboard.server as server
 from db import store
 from ingestors import osm
 from ingestors.pakistan_curated import get_pakistan_curated_treks
+from scripts import promote_nps_child_explore_places as promote_nps_children
 
 
 class TrailCatalogTests(unittest.TestCase):
@@ -24,6 +25,10 @@ class TrailCatalogTests(unittest.TestCase):
             "description": "Baltoro Glacier is a major Karakoram glacier.",
             "tags": ["glacier", "karakoram"],
             "search_aliases": ["ice", "trek"],
+            "canonical_role": "child",
+            "parent_hub_id": "place:nps:k2",
+            "parent_hub_title": "K2 National Park",
+            "module_target": "see",
             "quality": "open_community_data",
             "quality_score": 72,
             "media": [{"url": "https://example.test/baltoro.jpg", "credit": "Commons"}],
@@ -47,6 +52,10 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(profile["facts"]["source_quality"], "open")
         self.assertEqual(profile["media"][0]["url"], "https://example.test/baltoro.jpg")
         self.assertIn("trek", profile["search_aliases"])
+        self.assertEqual(profile["canonical_role"], "child")
+        self.assertEqual(profile["parent_hub_id"], "place:nps:k2")
+        self.assertEqual(profile["parent_hub_title"], "K2 National Park")
+        self.assertEqual(profile["module_target"], "see")
 
     def test_load_explore_catalog_merges_v3_sidecar(self):
         old_catalog = server.EXPLORE_CATALOG
@@ -107,6 +116,10 @@ class TrailCatalogTests(unittest.TestCase):
             "summary": "Mapped waterfall.",
             "search_aliases": ["falls"],
             "search_blob": "vernal fall waterfall yosemite",
+            "canonical_role": "child",
+            "parent_hub_id": "place:nps:yose",
+            "parent_hub_title": "Yosemite National Park",
+            "module_target": "see",
             "media": [{"url": "https://example.test/fall.jpg"}],
             "sources": [{"source": "osm", "title": "OpenStreetMap", "url": "https://www.openstreetmap.org/node/1"}],
         })
@@ -119,6 +132,37 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(item["search_aliases"], ["falls"])
         self.assertEqual(item["media"][0]["url"], "https://example.test/fall.jpg")
         self.assertEqual(item["sources"][0]["title"], "OpenStreetMap")
+        self.assertEqual(item["canonical_role"], "child")
+        self.assertEqual(item["parent_hub_id"], "place:nps:yose")
+        self.assertEqual(item["parent_hub_title"], "Yosemite National Park")
+        self.assertEqual(item["module_target"], "see")
+
+    def test_nps_child_promotion_adds_canonical_hub_metadata(self):
+        place = promote_nps_children.place_from_child(
+            {
+                "parkCode": "yose",
+                "fullName": "Yosemite National Park",
+                "states": "CA",
+                "url": "https://www.nps.gov/yose/",
+            },
+            "campgrounds",
+            {
+                "id": "camp-1",
+                "name": "Upper Pines Campground",
+                "description": "A well-known campground in Yosemite Valley with seasonal access and official park information.",
+                "latitude": "37.742",
+                "longitude": "-119.565",
+            },
+            123,
+        )
+
+        self.assertIsNotNone(place)
+        assert place is not None
+        self.assertEqual(place["canonical_role"], "child")
+        self.assertEqual(place["parent_hub_id"], "place:nps:yose")
+        self.assertEqual(place["parent_hub_title"], "Yosemite National Park")
+        self.assertEqual(place["module_target"], "stay")
+        self.assertIn("stay", place["search_blob"])
 
     def test_explore_category_request_matches_v3_direct_categories(self):
         glacier = server._explore_v3_place_to_profile({

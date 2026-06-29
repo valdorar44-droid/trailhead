@@ -1337,13 +1337,20 @@ function buildTrailAreaPlace(seed: TrailAreaSeed): ExplorePlaceProfile {
       photos: trails.slice(0, 4).map(trail => ({ url: trail.image_url, caption: trail.title, credit: 'Wikimedia Commons' })),
       activities: ['Hiking', 'Viewpoints', 'Trailheads', 'Backcountry access'],
       things_to_do: trails.map(trail => ({
+        kind: 'trail',
+        source: 'National Park Service',
+        source_id: trail.id,
         title: trail.title,
-        description: `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi · ${trail.route_type} · ${trail.difficulty}`,
+        description: trailSourcePackDescription(trail),
         url: trail.source_url || seed.officialUrl,
         lat: trail.lat,
         lng: trail.lng,
         image_url: trail.image_url,
         image_credit: 'Wikimedia Commons',
+        source_label: 'National Park Service',
+        category: `${trail.difficulty} ${trail.route_type}`,
+        amenities: trail.highlights,
+        distance_mi: trail.distance_mi,
       })),
       things_to_see: trails.slice(0, 3).map(trail => ({
         title: trail.title,
@@ -1375,6 +1382,15 @@ function difficultyRangeLabel(trails: ExploreTrailCard[]) {
   if (labels.has('Easy') && labels.has('Hard')) return 'Easy - Hard';
   if (labels.has('Moderate') && labels.has('Hard')) return 'Moderate - Hard';
   return Array.from(labels).join(' / ') || 'Check difficulty';
+}
+
+function trailSourcePackDescription(trail: ExploreTrailCard) {
+  const parts = [
+    `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi · ${trail.route_type} · ${trail.difficulty}`,
+    trail.summary,
+    trail.description,
+  ].map(part => String(part || '').trim().replace(/\.+$/, '')).filter(Boolean);
+  return parts.length ? `${parts.join('. ')}.` : '';
 }
 
 function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlaceProfile {
@@ -1562,13 +1578,20 @@ function buildYosemiteTrailArea(): ExplorePlaceProfile {
       photos: YOSEMITE_TRAILS.slice(0, 4).map(trail => ({ url: trail.image_url, caption: trail.title, credit: 'Wikimedia Commons' })),
       activities: ['Hiking', 'Waterfalls', 'Viewpoints', 'Backcountry access'],
       things_to_do: YOSEMITE_TRAILS.map(trail => ({
+        kind: 'trail',
+        source: 'National Park Service',
+        source_id: trail.id,
         title: trail.title,
-        description: `${trail.distance_mi.toFixed(1)} mi · ${trail.route_type} · ${trail.difficulty}`,
+        description: trailSourcePackDescription(trail),
         url: trail.source_url || YOSEMITE_TRAILS_URL,
         lat: trail.lat,
         lng: trail.lng,
         image_url: trail.image_url,
         image_credit: 'Wikimedia Commons',
+        source_label: 'National Park Service',
+        category: `${trail.difficulty} ${trail.route_type}`,
+        amenities: trail.highlights,
+        distance_mi: trail.distance_mi,
       })),
       things_to_see: [
         { title: 'Vernal Fall', description: 'Mist Trail waterfall viewpoint.', url: 'https://www.nps.gov/yose/planyourvisit/vernalnevadatrail.htm', image_url: VERNAL_FALL_IMAGE },

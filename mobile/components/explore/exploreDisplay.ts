@@ -167,6 +167,10 @@ function normalize(value: string) {
   return value.toLowerCase().replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
 }
 
+function isOpenKnowledgePublisher(value?: string | null) {
+  return /\b(wikidata|wikipedia|wikimedia|commons)\b/i.test(String(value || ''));
+}
+
 export function normalizeExploreCopyBlock(value?: string | null) {
   return String(value || '').replace(/\s+/g, ' ').trim();
 }
@@ -336,6 +340,7 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
   const facts = place.facts ?? {};
   const quality = normalize(String(v3.quality || place.source_pack?.quality || facts.source_quality || ''));
   const primary = String(place.source_pack?.primary || sources[0]?.publisher || sources[0]?.name || '').trim();
+  if (isOpenKnowledgePublisher(primary)) return 'Multiple sources';
   if (quality.includes('official')) {
     if (!primary) return 'Official source';
     if (/official/i.test(primary)) return primary;

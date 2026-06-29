@@ -1752,9 +1752,10 @@ function GuideScreenContent() {
     const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
     const queryHasDestinationTerms = exploreQueryHasDestinationTerms(placeQuery);
     const queryDestinationPhrase = exploreQueryDestinationPhrase(placeQuery);
-    const queryRequiresIdentityMatch = queryDestinationPhrase.split(/\s+/).filter(Boolean).length > 1;
     const queryHasBrowseIntent = exploreQueryHasBrowseIntent(placeQuery);
     const thingsToDoQuery = isThingsToDoExploreQuery(query);
+    const queryRequiresIdentityMatch = queryDestinationPhrase.split(/\s+/).filter(Boolean).length > 1
+      || (thingsToDoQuery && queryHasDestinationTerms);
     const queryScoreForPlace = (place: ExplorePlaceProfile) => {
       const identityScore = queryDestinationPhrase && explorePlaceIdentitySearchText(place).includes(queryDestinationPhrase)
         ? 85
@@ -1775,7 +1776,10 @@ function GuideScreenContent() {
       if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
       if (!exploreSavedOnly && !placeQuery && shouldHideExploreHomeWrapper(place)) return false;
       if (!exploreSavedOnly && !placeQuery && exploreHubMeta.parentByChildId.has(place.id)) return false;
-      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id)) return false;
+      const directThingsToDoDestinationWrapper = thingsToDoQuery
+        && !!queryDestinationPhrase
+        && explorePlaceIdentitySearchText(place).includes(queryDestinationPhrase);
+      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id) && !directThingsToDoDestinationWrapper) return false;
       const categoryOk = exploreCategoryMatchesWithHub(place, exploreCategory, exploreHubMeta.categoryKeysByHubId);
       if (!categoryOk) return false;
       if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;

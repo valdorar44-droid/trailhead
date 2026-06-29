@@ -757,6 +757,9 @@ export function ExploreDetailSheet({
           <TouchableOpacity style={styles.roundButton} onPress={onShowArea}>
             <Ionicons name="map-outline" size={23} color="#fff" />
           </TouchableOpacity>
+          <TouchableOpacity style={styles.roundButton} onPress={onClose}>
+            <Ionicons name="close" size={24} color="#fff" />
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -901,6 +904,9 @@ export function ExploreDetailSheet({
                 <Ionicons name="open-outline" size={23} color="#fff" />
               </TouchableOpacity>
             )}
+            <TouchableOpacity style={styles.roundButton} onPress={onClose}>
+              <Ionicons name="close" size={24} color="#fff" />
+            </TouchableOpacity>
           </View>
           {itemImages.length > 0 && (
             <View style={styles.heroText}>
@@ -1193,7 +1199,7 @@ export function ExploreDetailSheet({
           )}
           <View style={styles.heroShade} />
           <TouchableOpacity style={[styles.roundButton, styles.backButton, { top: Math.max(topInset + 10, 22) }]} onPress={onClose}>
-            <Ionicons name="arrow-back" size={25} color="#fff" />
+            <Ionicons name="close" size={25} color="#fff" />
           </TouchableOpacity>
           <View style={[styles.heroRight, { top: Math.max(topInset + 10, 22) }]}>
             <TouchableOpacity style={styles.roundButton} onPress={onToggleSave}>

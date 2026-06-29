@@ -2391,6 +2391,9 @@ function GuideScreenContent() {
         ? { icon: 'partly-sunny-outline', temp: 'Weather', detail: 'Forecast' }
         : null;
     }
+    if (weather.available === false) {
+      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Unavailable' };
+    }
     const daily = weather.daily;
     const code = Number(weather?.current?.weather_code ?? daily?.weathercode?.[0] ?? 3);
     const units = weather?.trailhead_units;
@@ -2414,6 +2417,7 @@ function GuideScreenContent() {
     const error = exploreWeatherErrors[place.id];
     const loading = exploreWeatherLoadingId === place.id;
     if (!weather && !error && !loading) return null;
+    const unavailable = weather?.available === false;
     const daily = weather?.daily;
     const code = Number(weather?.current?.weather_code ?? daily?.weathercode?.[0] ?? 3);
     const units = weather?.trailhead_units;
@@ -2434,8 +2438,8 @@ function GuideScreenContent() {
         </View>
         {loading ? (
           <Text style={s.exploreWeatherText}>Loading forecast...</Text>
-        ) : error ? (
-          <Text style={s.exploreWeatherText}>{error}</Text>
+        ) : error || unavailable ? (
+          <Text style={s.exploreWeatherText}>{error || 'Weather unavailable right now.'}</Text>
         ) : (
           <View style={s.exploreWeatherStats}>
             <View style={s.exploreWeatherStat}>

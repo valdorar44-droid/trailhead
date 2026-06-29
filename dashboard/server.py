@@ -5987,6 +5987,40 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
     if cached:
         return cached
 
+    def unavailable_payload(reason: str) -> dict:
+        return {
+            "available": False,
+            "daily": {
+                "time": [],
+                "temperature_2m_max": [],
+                "temperature_2m_min": [],
+                "precipitation_sum": [],
+                "precipitation_probability_max": [],
+                "windspeed_10m_max": [],
+                "wind_gusts_10m_max": [],
+                "weathercode": [],
+                "uv_index_max": [],
+            },
+            "current": {},
+            "hourly": {
+                "time": [],
+                "temperature_2m": [],
+                "relative_humidity_2m": [],
+                "precipitation_probability": [],
+                "precipitation": [],
+                "weather_code": [],
+                "wind_speed_10m": [],
+            },
+            "air_quality": {"available": False},
+            "trailhead_units": unit_meta,
+            "source_label": "Open-Meteo",
+            "health_summary": {
+                "air_quality_source": "Unavailable",
+                "advisory": "Weather is temporarily unavailable. Verify severe weather with official alerts before travel.",
+            },
+            "error": reason,
+        }
+
     async with httpx.AsyncClient(timeout=10) as client:
         forecast_task = client.get(
             "https://api.open-meteo.com/v1/forecast",
@@ -6015,8 +6049,11 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
         )
         r, air = await asyncio.gather(forecast_task, air_task, return_exceptions=True)
         if isinstance(r, Exception):
-            raise r
-        r.raise_for_status()
+            return unavailable_payload("forecast_unavailable")
+        try:
+            r.raise_for_status()
+        except httpx.HTTPStatusError:
+            return unavailable_payload("forecast_unavailable")
         data = r.json()
         if not isinstance(air, Exception):
             try:

@@ -3567,6 +3567,7 @@ export interface PackingList {
   optional_nice_to_have: string[]; leave_at_home: string[];
 }
 export interface WeatherForecast {
+  available?: boolean;
   trailhead_units?: {
     mode: 'imperial' | 'metric';
     temperature_label: string;

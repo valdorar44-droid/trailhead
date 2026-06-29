@@ -215,6 +215,10 @@ BASE_FALLBACKS = {
         "lat": 38.3269, "lng": -109.8783,
         "source_url": "https://www.nps.gov/cany/index.htm",
     },
+    "Catskill Park": {
+        "lat": 42.0833, "lng": -74.5,
+        "source_url": "https://en.wikipedia.org/wiki/Catskill_Park",
+    },
     "Capitol Reef National Park": {
         "lat": 38.367, "lng": -111.2615,
         "source_url": "https://www.nps.gov/care/index.htm",

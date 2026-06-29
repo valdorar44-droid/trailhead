@@ -666,11 +666,25 @@ function scoreExploreBrowseIntent(
   if (!text) return 0;
   const primaryKey = getExploreCategoryKey(place);
   const keys = new Set<ExploreCategoryKey>([primaryKey]);
+  const titleIntentText = normalizeExploreText([
+    place.summary.title,
+    place.summary.category,
+    place.summary.explore_group,
+    place.category,
+    ...(place.summary.tags ?? []),
+    ...(place.subcategories ?? []),
+  ].filter(Boolean).join(' '));
+  const campIntent = /\b(campgrounds?|campsites?|camping|rv|tent|horse camp)\b/.test(titleIntentText);
+  const glampingIntent = /\b(glamping|airstream|yurt|canvas cabin|basecamp)\b/.test(titleIntentText);
+  const lodgingIntent = /\b(huts?|cabins?|lodges?|lodging|hotels?|inn|shelter)\b/.test(titleIntentText);
+  const trailIntent = /\b(trails?|trailheads?|hikes?|hiking|trek|trekking|climb|climbing)\b/.test(titleIntentText);
+  const viewIntent = /\b(views?|overlooks?|waterfalls?|scenic|springs?|peaks?)\b/.test(titleIntentText);
+  const tourIntent = /\b(tours?|guided|activities|things to do|tickets?)\b/.test(titleIntentText);
   const explicitTarget = canonicalExploreModuleTarget(place);
   if (explicitTarget === 'stay') {
-    if (primaryKey === 'camp') keys.add('camp');
-    else if (primaryKey === 'glamping') keys.add('glamping');
-    else keys.add('huts');
+    if (campIntent) keys.add('camp');
+    if (glampingIntent) keys.add('glamping');
+    if (lodgingIntent) keys.add('huts');
   }
   if (explicitTarget === 'trails') keys.add('trails');
   if (explicitTarget === 'do') keys.add('tours');
@@ -678,29 +692,35 @@ function scoreExploreBrowseIntent(
   if (includeHubCategories && isDestinationExploreHub(place)) {
     (hubCategories.get(place.id) ?? new Set<ExploreCategoryKey>()).forEach(key => keys.add(key));
   }
+  const stayFamily = explicitTarget === 'stay' || keys.has('camp') || keys.has('glamping') || keys.has('huts');
   if (/\b(lodge|lodges|lodging|hotel|hotels|cabin|cabins|hut|huts|stay|stays)\b/.test(text)) {
-    if (keys.has('huts')) return 90;
-    if (keys.has('glamping')) return 55;
-    if (keys.has('camp')) return 22;
+    if (!stayFamily) {
+      if (keys.has('trails') || keys.has('trailheads') || keys.has('climb')) return -28;
+      return 0;
+    }
+    if (lodgingIntent || keys.has('huts')) return 90;
+    if (glampingIntent || keys.has('glamping')) return 55;
+    if (campIntent || keys.has('camp')) return 22;
     if (keys.has('trails') || keys.has('trailheads')) return -28;
   }
   if (/\b(camp|camps|campground|campgrounds|campsite|campsites|rv|tent)\b/.test(text)) {
-    if (keys.has('camp')) return 90;
-    if (keys.has('glamping')) return 36;
-    if (keys.has('huts')) return 18;
+    const strictCampQuery = /\b(campground|campgrounds|campsite|campsites)\b/.test(text);
+    if (campIntent) return 90;
+    if ((glampingIntent || keys.has('glamping')) && !strictCampQuery) return 36;
+    if ((lodgingIntent || keys.has('huts')) && !strictCampQuery) return 18;
     if (keys.has('trails') || keys.has('trailheads')) return -22;
   }
   if (/\b(trail|trails|trailhead|trailheads|hike|hikes|hiking|trek|trekking)\b/.test(text)) {
-    if (keys.has('trails') || keys.has('trailheads')) return 90;
-    if (keys.has('views') || keys.has('waterfalls') || keys.has('peaks')) return 20;
+    if (trailIntent || keys.has('trails') || keys.has('trailheads')) return 90;
+    if (viewIntent || keys.has('views') || keys.has('waterfalls') || keys.has('peaks')) return 20;
     if (keys.has('huts') || keys.has('camp')) return -16;
   }
   if (/\b(tour|tours|guided|activity|activities|things to do)\b/.test(text)) {
-    if (keys.has('tours')) return 80;
+    if (tourIntent || keys.has('tours')) return 80;
     if (keys.has('parks')) return 20;
   }
   if (/\b(view|views|overlook|overlooks|waterfall|waterfalls|scenic|spring|springs|peak|peaks)\b/.test(text)) {
-    if (keys.has('views') || keys.has('waterfalls') || keys.has('peaks') || keys.has('springs') || keys.has('scenic')) return 80;
+    if (viewIntent || keys.has('views') || keys.has('waterfalls') || keys.has('peaks') || keys.has('springs') || keys.has('scenic')) return 80;
     if (keys.has('trails')) return 16;
   }
   return 0;
@@ -1643,6 +1663,7 @@ function GuideScreenContent() {
     const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
     const queryHasDestinationTerms = exploreQueryHasDestinationTerms(placeQuery);
     const queryDestinationPhrase = exploreQueryDestinationPhrase(placeQuery);
+    const queryRequiresIdentityMatch = queryDestinationPhrase.split(/\s+/).filter(Boolean).length > 1;
     const queryHasBrowseIntent = exploreQueryHasBrowseIntent(placeQuery);
     const queryScoreForPlace = (place: ExplorePlaceProfile) => {
       const identityScore = queryDestinationPhrase && explorePlaceIdentitySearchText(place).includes(queryDestinationPhrase)
@@ -1654,7 +1675,7 @@ function GuideScreenContent() {
         scoreExploreRichText(place, placeQuery),
         scoreExploreHubExtraText(place, placeQuery, exploreHubMeta.searchTextByHubId),
       );
-      if (queryHasDestinationTerms && queryDestinationPhrase && identityScore <= 0) return 0;
+      if (queryHasDestinationTerms && queryRequiresIdentityMatch && identityScore <= 0) return 0;
       const intentScore = scoreExploreBrowseIntent(place, placeQuery, exploreHubMeta.categoryKeysByHubId, false);
       if (queryHasDestinationTerms && baseScore <= 0) return 0;
       if (queryHasBrowseIntent && intentScore < 35) return 0;
@@ -1663,7 +1684,7 @@ function GuideScreenContent() {
     const filtered = places.filter(({ place }) => {
       if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
       if (!exploreSavedOnly && !placeQuery && shouldHideExploreHomeWrapper(place)) return false;
-      if (!exploreSavedOnly && exploreHubMeta.parentByChildId.has(place.id)) return false;
+      if (!exploreSavedOnly && !placeQuery && exploreHubMeta.parentByChildId.has(place.id)) return false;
       const categoryOk = exploreCategoryMatchesWithHub(place, exploreCategory, exploreHubMeta.categoryKeysByHubId);
       if (!categoryOk) return false;
       if (queryCategory && queryCategory !== 'tours' && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;

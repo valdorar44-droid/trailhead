@@ -12,6 +12,7 @@ import argparse
 import json
 import sys
 from collections import Counter
+from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
@@ -86,7 +87,7 @@ def audit_catalog(path: Path, *, sample_limit: int) -> tuple[list[str], list[str
     warnings: list[str] = []
     raw_weak = []
     normalized_weak = []
-    title_counts: Counter[str] = Counter()
+    title_locations: dict[str, list[tuple[str, Any, Any]]] = defaultdict(list)
     coord_counts: Counter[str] = Counter()
     category_counts: Counter[str] = Counter()
     missing_sources = 0
@@ -121,8 +122,14 @@ def audit_catalog(path: Path, *, sample_limit: int) -> tuple[list[str], list[str
                 coord_counts[f"{float(lat):.4f},{float(lng):.4f}"] += 1
 
         source_pack = clean.get("source_pack") if isinstance(clean.get("source_pack"), dict) else {}
+        sources = clean.get("sources") if isinstance(clean.get("sources"), list) else []
         summary = summary_for(clean)
-        source_url = source_pack.get("official_url") or summary.get("source_url") or (clean.get("facts") or {}).get("source_url")
+        source_url = (
+            source_pack.get("official_url")
+            or summary.get("source_url")
+            or (clean.get("facts") or {}).get("source_url")
+            or next((item.get("url") or item.get("source_url") for item in sources if isinstance(item, dict) and (item.get("url") or item.get("source_url"))), "")
+        )
         if not source_url:
             missing_sources += 1
 
@@ -148,19 +155,33 @@ def audit_catalog(path: Path, *, sample_limit: int) -> tuple[list[str], list[str
 
         title_key = clean_title.lower()
         if title_key:
-            title_counts[title_key] += 1
+            lat, lng = coord_for(clean)
+            title_locations[title_key].append((clean_title, lat, lng))
 
     if normalized_weak:
         for title in normalized_weak[:sample_limit]:
             failures.append(f"{path.name}: normalized weak description remains: {title}")
 
-    duplicate_titles = sum(1 for _, count in title_counts.items() if count > 1)
+    duplicate_titles: list[str] = []
+    for title_key, records in title_locations.items():
+        if len(records) < 2:
+            continue
+        near_duplicate = False
+        for idx, first in enumerate(records):
+            for second in records[idx + 1:]:
+                distance = distance_mi(first[1], first[2], second[1], second[2])
+                if distance is None or distance <= 1:
+                    near_duplicate = True
+                    break
+            if near_duplicate:
+                break
+        if near_duplicate:
+            duplicate_titles.append(title_key)
     duplicate_coords = sum(1 for _, count in coord_counts.items() if count > 1)
     if raw_weak:
         warnings.append(f"{path.name}: raw weak descriptions sanitized={len(raw_weak)} samples={raw_weak[:sample_limit]}")
     if duplicate_titles:
-        examples = [title for title, count in title_counts.items() if count > 1][:sample_limit]
-        warnings.append(f"{path.name}: duplicate titles={duplicate_titles} samples={examples}")
+        warnings.append(f"{path.name}: nearby duplicate titles={len(duplicate_titles)} samples={duplicate_titles[:sample_limit]}")
     if duplicate_coords:
         examples = [coord for coord, count in coord_counts.items() if count > 1][:sample_limit]
         warnings.append(f"{path.name}: duplicate coordinate clusters={duplicate_coords} samples={examples}")

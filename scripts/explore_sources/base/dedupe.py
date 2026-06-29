@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from collections import defaultdict
+
 from .normalize import coord_pair, haversine_m, normalize_name, sorted_unique
 from .quality import score_place
 from .schema import ExplorePlaceV3, TrailGeometry
@@ -10,6 +12,27 @@ COMPATIBLE_CATEGORIES = {
     ("hut", "shelter"),
     ("public_land", "park"),
     ("wildlife_area", "public_land"),
+}
+
+LANDMARK_CATEGORIES = {
+    "glacier",
+    "peak",
+    "viewpoint",
+    "waterfall",
+    "lake",
+    "historic_site",
+    "monument",
+    "park",
+    "public_land",
+}
+
+DISPLAY_SUFFIX_BY_CATEGORY = {
+    "trail": "Trail",
+    "trailhead": "Trailhead",
+    "viewpoint": "Viewpoint",
+    "visitor_center": "Visitor Center",
+    "campground": "Campground",
+    "rv_park": "RV Park",
 }
 
 NO_AUTO_MERGE = {
@@ -39,12 +62,16 @@ def should_merge(a: ExplorePlaceV3, b: ExplorePlaceV3) -> bool:
     if a.lat is None or a.lng is None or b.lat is None or b.lng is None:
         return False
     categories = frozenset((a.category, b.category))
-    if categories in NO_AUTO_MERGE:
-        return False
     distance = haversine_m(a.lat, a.lng, b.lat, b.lng)
     same_name = normalize_name(a.name) == normalize_name(b.name)
-    if same_name and a.category == b.category and distance <= 150:
+    if same_name and a.category == b.category and distance <= 500:
         return True
+    if same_name and a.category == b.category and a.category in LANDMARK_CATEGORIES and distance <= 25000:
+        return True
+    if same_name and categories in NO_AUTO_MERGE and {a.category, b.category} <= LANDMARK_CATEGORIES and distance <= 500:
+        return True
+    if categories in NO_AUTO_MERGE:
+        return False
     if same_name and category_compatible(a.category, b.category) and distance <= 75:
         return True
     if same_name and {a.category, b.category} <= {"campground", "rv_park"} and distance <= 250:
@@ -104,6 +131,42 @@ def dedupe_places(places: list[ExplorePlaceV3]) -> list[ExplorePlaceV3]:
         else:
             merged.append(place)
     return merged
+
+
+def disambiguate_duplicate_display_names(places: list[ExplorePlaceV3], radius_m: float = 1000.0) -> None:
+    by_name: dict[str, list[ExplorePlaceV3]] = defaultdict(list)
+    for place in places:
+        key = normalize_name(place.name)
+        if key:
+            by_name[key].append(place)
+    for key, group in by_name.items():
+        if len(group) < 2:
+            continue
+        close_pair = False
+        for idx, first in enumerate(group):
+            if first.lat is None or first.lng is None:
+                continue
+            for second in group[idx + 1:]:
+                if second.lat is None or second.lng is None:
+                    continue
+                if haversine_m(first.lat, first.lng, second.lat, second.lng) <= radius_m:
+                    close_pair = True
+                    break
+            if close_pair:
+                break
+        if not close_pair:
+            continue
+        for place in group:
+            suffix = DISPLAY_SUFFIX_BY_CATEGORY.get(place.category)
+            if not suffix:
+                continue
+            normalized_suffix = normalize_name(suffix)
+            if normalized_suffix and key.endswith(normalized_suffix):
+                continue
+            original = place.name
+            place.name = f"{place.name} {suffix}".strip()
+            place.search_aliases = sorted_unique([original, *place.search_aliases])
+            place.search_blob = " ".join(part for part in (place.search_blob, original, suffix) if part)
 
 
 def link_trailheads_to_trails(places: list[ExplorePlaceV3], trails: list[TrailGeometry], radius_m: float = 350.0) -> None:

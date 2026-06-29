@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 
 from scripts.explore_sources.base.aliases import apply_aliases
 from scripts.explore_sources.base.cards import build_card
-from scripts.explore_sources.base.dedupe import dedupe_places, link_trailheads_to_trails
+from scripts.explore_sources.base.dedupe import dedupe_places, disambiguate_duplicate_display_names, link_trailheads_to_trails
 from scripts.explore_sources.base.fetch import parse_headers, resolve_input_paths
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
@@ -161,6 +161,7 @@ def build_catalog(
         all_places.extend(places)
         all_trails.extend(trails)
     places = dedupe_places(all_places)
+    disambiguate_duplicate_display_names(places)
     link_trailheads_to_trails(places, all_trails)
     trail_names = {trail.id: trail.name for trail in all_trails}
     for place in places:

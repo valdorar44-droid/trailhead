@@ -322,6 +322,19 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         b = ExplorePlaceV3(id="b", source_ids=["osm:node/2"], name="Yosemite Valley Campground", category="campground", lat=37.7422, lng=-119.5651)
         self.assertEqual(len(dedupe_places([a, b])), 1)
 
+    def test_exact_name_landmark_duplicates_dedupe_across_close_sources(self):
+        osm = ExplorePlaceV3(id="osm", source_ids=["osm:node/1"], name="Sentinel Dome", category="peak", lat=37.7220, lng=-119.5840)
+        view = ExplorePlaceV3(id="view", source_ids=["osm:node/2"], name="Sentinel Dome", category="viewpoint", lat=37.7221, lng=-119.5841)
+        k2_a = ExplorePlaceV3(id="k2a", source_ids=["wikidata:Q102470"], name="K2", category="peak", lat=35.8808, lng=76.5158)
+        k2_b = ExplorePlaceV3(id="k2b", source_ids=["wikidata:Q43512"], name="K2", category="peak", lat=35.881111111, lng=76.513333333)
+        self.assertEqual(len(dedupe_places([osm, view])), 1)
+        self.assertEqual(len(dedupe_places([k2_a, k2_b])), 1)
+
+    def test_same_name_far_landmarks_do_not_dedupe(self):
+        nz = ExplorePlaceV3(id="nz", source_ids=["wikidata:Q1049584"], name="Mitre Peak", category="peak", lat=-44.633, lng=167.856)
+        pk = ExplorePlaceV3(id="pk", source_ids=["wikidata:Q571991"], name="Mitre Peak", category="peak", lat=35.7, lng=76.48)
+        self.assertEqual(len(dedupe_places([nz, pk])), 2)
+
     def test_trailhead_near_trail_links_but_does_not_merge(self):
         _records, places, trails = build_catalog([str(YOSEMITE)])
         trailhead = next(place for place in places if place.name == "Mist Trail Trailhead")
@@ -494,11 +507,16 @@ class ExploreSourcePipelineTests(unittest.TestCase):
         self.assertTrue(all(record.license.startswith("OpenBeta") for record in records))
         self.assertTrue(all("OpenBeta contributors" in record.attribution for record in records))
 
-    def test_peak_viewpoint_and_trail_same_name_do_not_auto_merge(self):
+    def test_peak_viewpoint_same_name_merges_but_trail_stays_separate(self):
         _records, places, _trails = build_catalog([str(YOSEMITE)])
-        sentinel = [place for place in places if place.name == "Sentinel Dome"]
-        self.assertGreaterEqual(len(sentinel), 3)
-        self.assertEqual({"peak", "viewpoint", "trail"}, {place.category for place in sentinel})
+        sentinel = [place for place in places if place.name.startswith("Sentinel Dome")]
+        self.assertEqual(len(sentinel), 2)
+        self.assertIn("trail", {place.category for place in sentinel})
+        landmark = next(place for place in sentinel if place.category != "trail")
+        trail = next(place for place in sentinel if place.category == "trail")
+        self.assertEqual(landmark.name, "Sentinel Dome")
+        self.assertEqual(trail.name, "Sentinel Dome Trail")
+        self.assertTrue({"peak", "viewpoint"}.intersection({landmark.category, *landmark.subcategories}))
 
     def test_smart_card_fallbacks_for_sparse_categories(self):
         for category, expected in [("trail", "trail conditions"), ("hut", "Backcountry shelter"), ("waterfall", "seasonal flow")]:

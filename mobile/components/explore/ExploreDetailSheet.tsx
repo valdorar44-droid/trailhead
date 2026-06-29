@@ -568,7 +568,7 @@ export function ExploreDetailSheet({
                 <Text style={[styles.detailItemTitle, { color: C.text }]} numberOfLines={2}>{item.title || 'Place'}</Text>
                 {!!cleanSourcePackItemCopy(item) && (
                   <Text style={[styles.detailItemCopy, { color: C.text2 }]}>
-                    {sentenceAwarePreviewText(cleanSourcePackItemCopy(item), 150)}
+                    {cleanSourcePackItemCopy(item)}
                   </Text>
                 )}
                 <View style={styles.detailItemMeta}>
@@ -1280,7 +1280,7 @@ function SourcePack({
                     <Text style={[styles.miniTitle, { color: C.text }]} numberOfLines={2}>{item.title}</Text>
                     {!!cleanSourcePackItemCopy(item) && (
                       <Text style={[styles.miniDesc, { color: C.text3 }]}>
-                        {sentenceAwarePreviewText(cleanSourcePackItemCopy(item), 110)}
+                        {cleanSourcePackItemCopy(item)}
                       </Text>
                     )}
                   </View>
@@ -1297,7 +1297,7 @@ function SourcePack({
 
 function sourceBodyForPlace(place: ExplorePlaceProfile) {
   const raw = String(place.source_pack?.source_note || '').trim();
-  if (/wiki|source pack/i.test(raw)) {
+  if (/wiki|source pack|open map|openstreetmap|generated from/i.test(raw)) {
     return 'Check current access, fees, closures, and rules before you go.';
   }
   return raw || place.attribution || 'Check current access before you go.';
@@ -1309,7 +1309,7 @@ function sourceButtonLabelForPlace(place: ExplorePlaceProfile) {
     .replace(/\bphoto credit:\s*not available\.?/gi, '')
     .replace(/\s*;\s*$/g, '')
     .trim();
-  if (!raw || /wikidata|wikimedia|wikipedia|not available/i.test(raw)) return 'Open source';
+  if (!raw || /wikidata|wikimedia|wikipedia|not available|open map|openstreetmap/i.test(raw)) return 'Source link';
   return raw;
 }
 

@@ -4,7 +4,7 @@ import {
   TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -129,6 +129,7 @@ export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
+  const pathname = usePathname();
   const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; auth?: string }>();
   const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
   const tripHistory    = useStore(st => st.tripHistory);
@@ -901,6 +902,8 @@ export default function ProfileScreen() {
       setContributorApplying(false);
     }
   }
+
+  if (!pathname.includes('/profile')) return null;
 
   function renderVerificationPanel() {
     const target = pendingVerifyEmail || email.trim().toLowerCase();
@@ -2298,20 +2301,20 @@ export default function ProfileScreen() {
         <View style={s.earnCard}>
           <Text style={s.sectionLabel}>HOW TO EARN CREDITS</Text>
           {[
-            [`+${CREDIT_REWARDS.signup}`, 'Signup welcome bonus (after email verification)'],
-            [`+${CREDIT_REWARDS.communityReport}`,  'Submit a community report (max 8/day)'],
-            [`+${CREDIT_REWARDS.reportPhotoBonus}`, 'Add a photo to a report'],
-            [`+${CREDIT_REWARDS.confirmReport}`,  'Confirm another user report'],
-            [`+${CREDIT_REWARDS.communityPin}`,  'Add a manual community pin'],
-            [`+${CREDIT_REWARDS.gpxImport}`,  'Import GPX pins (unverified)'],
-            [`+${CREDIT_REWARDS.referral}`, 'Refer a friend who signs up'],
-            [`+${CREDIT_REWARDS.campEditSuggestion}`, 'Suggest a camp profile edit'],
-            [`+${CREDIT_REWARDS.streak3}`, '3-day reporting streak bonus'],
-            [`+${CREDIT_REWARDS.streak7}`, '7-day reporting streak bonus'],
-            [`+${CREDIT_REWARDS.streak30}`, '30-day reporting streak bonus'],
-          ].map(([amount, action]) => (
+            [CREDIT_REWARDS.signup, 'Signup welcome bonus (after email verification)'],
+            [CREDIT_REWARDS.communityReport,  'Submit a community report (max 8/day)'],
+            [CREDIT_REWARDS.reportPhotoBonus, 'Add a photo to a report'],
+            [CREDIT_REWARDS.confirmReport,  'Confirm another user report'],
+            [CREDIT_REWARDS.communityPin,  'Add a manual community pin'],
+            [CREDIT_REWARDS.gpxImport,  'Import GPX pins (unverified)'],
+            [CREDIT_REWARDS.referral, 'Refer a friend who signs up'],
+            [CREDIT_REWARDS.campEditSuggestion, 'Suggest a camp profile edit'],
+            [CREDIT_REWARDS.streak3, '3-day reporting streak bonus'],
+            [CREDIT_REWARDS.streak7, '7-day reporting streak bonus'],
+            [CREDIT_REWARDS.streak30, '30-day reporting streak bonus'],
+          ].filter(([amount]) => Number(amount) > 0).map(([amount, action]) => (
             <View key={action} style={s.earnRow}>
-              <Text style={s.earnAmount}>{amount}</Text>
+              <Text style={s.earnAmount}>+{amount}</Text>
               <Text style={s.earnAction}>{action}</Text>
             </View>
           ))}

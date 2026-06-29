@@ -436,7 +436,7 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   }
   if (sourceNote) {
     const cleanedNote = cleanExploreCopy(sourceNote, place);
-    if (!/will be added|future|enrichment/i.test(cleanedNote)) {
+    if (!/will be added|future|enrichment|generated from|open map|openstreetmap/i.test(cleanedNote)) {
       rows.push({
         label: 'Note',
         value: cleanedNote,

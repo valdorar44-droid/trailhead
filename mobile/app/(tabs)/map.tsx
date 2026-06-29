@@ -21028,7 +21028,7 @@ function MapScreen() {
             )}
 
             <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.extremeCopilotChips}>
-              {user?.is_admin && (
+              {Boolean(user?.is_admin) && (
                 <TouchableOpacity style={[s.extremeCopilotChip, s.extremeCopilotDebugChip]} onPress={shareAdminCopilotDebugTranscript} disabled={extremeCopilotBusy}>
                   <Ionicons name="bug-outline" size={13} color={C.yellow} />
                   <Text style={[s.extremeCopilotChipText, s.extremeCopilotDebugChipText]}>support log</Text>
@@ -27839,7 +27839,8 @@ const makeStyles = (C: ColorPalette) => {
     position: 'absolute',
     right: 16,
     alignItems: 'center',
-    zIndex: 70,
+    zIndex: 140,
+    elevation: 60,
   },
   extremeCopilotFab: {
     minWidth: 64,

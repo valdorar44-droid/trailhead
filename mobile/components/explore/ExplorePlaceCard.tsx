@@ -24,6 +24,7 @@ type Props = {
   context?: ExploreDisplayContext;
   saved?: boolean;
   canRoute?: boolean;
+  routeLabel?: string;
   onOpen: () => void;
   onArea: () => void;
   onRoute: () => void;
@@ -39,6 +40,7 @@ export function ExplorePlaceCard({
   context,
   saved,
   canRoute = true,
+  routeLabel = 'Route',
   onOpen,
   onArea,
   onRoute,
@@ -150,7 +152,7 @@ export function ExplorePlaceCard({
             disabled={!canRoute}
           >
             <Ionicons name="navigate" size={16} color={C.orange} />
-            <Text style={[styles.actionText, { color: C.text2 }]}>Route</Text>
+            <Text style={[styles.actionText, { color: C.text2 }]}>{routeLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>

@@ -79,6 +79,7 @@ type Props = {
   onPlayAudio: () => void;
   onShowArea: () => void;
   onRoute: () => void;
+  routeLabel?: string;
   onToggleSave: () => void;
   onNearbyAction?: (module: ExploreNearbyModule) => void;
   onSourcePackItem?: (item: ExploreSourcePackItem) => void;
@@ -216,6 +217,7 @@ export function ExploreDetailSheet({
   onPlayAudio,
   onShowArea,
   onRoute,
+  routeLabel = 'Route',
   onToggleSave,
   onNearbyAction,
   onSourcePackItem,
@@ -989,7 +991,7 @@ export function ExploreDetailSheet({
           })}
           <View style={styles.mapActions}>
             {renderAction('Show Area', 'map-outline', onShowArea, true)}
-            {renderAction('Route', 'navigate-outline', onRoute)}
+            {renderAction(routeLabel, 'navigate-outline', onRoute)}
             {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}
           </View>
         </View>
@@ -1159,7 +1161,7 @@ export function ExploreDetailSheet({
         {!activeModuleDef && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRail}>
           {renderAction('Area', 'map-outline', onShowArea, true)}
-          {renderAction('Route', 'navigate-outline', onRoute)}
+          {renderAction(routeLabel, 'navigate-outline', onRoute)}
           {renderAction('Weather', 'partly-sunny-outline', () => openModule('weather'))}
           {renderAction(isPlaying ? 'Stop' : 'Audio', isPlaying ? 'stop' : 'play', onPlayAudio)}
           {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}

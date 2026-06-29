@@ -2262,6 +2262,7 @@ export default function GuideScreen() {
         }}
         saved={isExploreSaved(place)}
         canRoute={place.summary.lat != null && place.summary.lng != null}
+        routeLabel={userLoc ? 'Route' : 'Map'}
         onOpen={() => openExplorePlace(place, exploreTabForBrowseIntent(exploreQuery, exploreCategory))}
         onArea={() => showExploreOnMap(place)}
         onRoute={() => routeExplore(place)}
@@ -2595,7 +2596,7 @@ export default function GuideScreen() {
                 ) : null}
               </View>
             )}
-            {!!exploreError && explorePlaces.length === 0 && (
+            {!!exploreError && !exploreLoading && rankedExplore.length === 0 && featuredSections.length === 0 && !featuredLead && (
               <View style={s.emptyState}>
                 <Ionicons name="cloud-offline-outline" size={44} color={C.text3} />
                 <Text style={s.emptySub}>{exploreError}</Text>
@@ -2892,6 +2893,7 @@ export default function GuideScreen() {
             onPlayAudio={() => playExplore(selectedExplore)}
             onShowArea={() => showExploreOnMap(selectedExplore)}
             onRoute={() => routeExplore(selectedExplore)}
+            routeLabel={userLoc ? 'Route' : 'Map'}
             onToggleSave={() => toggleSavedExplore(selectedExplore)}
             onNearbyAction={module => handleExploreNearbyAction(selectedExplore, module)}
             onSourcePackItem={showSourcePackItemOnMap}

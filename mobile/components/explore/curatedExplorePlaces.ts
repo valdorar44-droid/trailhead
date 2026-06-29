@@ -38,7 +38,12 @@ type TrailAreaSeed = {
 };
 
 const LAST_UPDATED = 1781496931;
+const YOSEMITE_PARK_URL = 'https://www.nps.gov/yose/index.htm';
 const YOSEMITE_TRAILS_URL = 'https://www.nps.gov/yose/planyourvisit/hiking.htm';
+const YOSEMITE_THINGS_TO_DO_URL = 'https://www.nps.gov/yose/planyourvisit/things2do.htm';
+const YOSEMITE_CAMPING_URL = 'https://www.nps.gov/yose/planyourvisit/camping.htm';
+const YOSEMITE_LODGING_URL = 'https://www.nps.gov/yose/planyourvisit/lodging.htm';
+const YOSEMITE_VISITOR_URL = 'https://www.nps.gov/yose/planyourvisit/visitorcenters.htm';
 const YOSEMITE_FALLS_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/38/Yosemite_falls_winter_2010.JPG/960px-Yosemite_falls_winter_2010.JPG';
 const VERNAL_FALL_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/3/36/Vernal_Fall%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg/960px-Vernal_Fall%2C_Yosemite_NP%2C_CA%2C_US_-_Diliff.jpg';
 const HALF_DOME_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/90/Half_dome_yosemite_nationalpark.JPG/1280px-Half_dome_yosemite_nationalpark.JPG';
@@ -1060,6 +1065,7 @@ const WATERFALLS: WaterfallSeed[] = [
   },
 ];
 
+const YOSEMITE_PARK_HUB = buildYosemiteParkHub();
 const YOSEMITE_TRAIL_AREA = buildYosemiteTrailArea();
 const CURATED_TRAIL_AREAS = TRAIL_AREA_SEEDS.map(seed => buildTrailAreaPlace(seed));
 const ALL_TRAIL_AREA_GUIDES = [YOSEMITE_TRAIL_AREA, ...CURATED_TRAIL_AREAS];
@@ -1072,6 +1078,7 @@ const TRAIL_AREA_BY_REGION_TITLE = new Map(
 );
 
 export const CURATED_EXPLORE_PLACES: ExplorePlaceProfile[] = [
+  YOSEMITE_PARK_HUB,
   YOSEMITE_TRAIL_AREA,
   ...CURATED_TRAIL_AREAS,
   ...WATERFALLS.map((seed, index) => buildWaterfallPlace(seed, index)),
@@ -1503,6 +1510,128 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
       last_updated: LAST_UPDATED,
     },
     attribution: 'Official access source + Wikimedia Commons image reference',
+  };
+}
+
+function buildYosemiteParkHub(): ExplorePlaceProfile {
+  const id = 'place:nps:yose';
+  const story = 'Yosemite National Park works best as a hub: choose the valley, high-country roads, sequoia groves, waterfall walks, longer hikes, campgrounds, or lodge stays before committing the day.';
+  return {
+    id,
+    canonical_role: 'hub',
+    category: 'Parks',
+    subcategories: ['parks', 'trails', 'waterfalls', 'camp', 'huts', 'views'],
+    quality: 'official_plus_open_media',
+    quality_score: 96,
+    search_aliases: [
+      'yosemite',
+      'yosemite national park',
+      'things to do in yosemite',
+      'yosemite things to do',
+      'yosemite camping',
+      'yosemite lodging',
+      'yosemite trails',
+      'yosemite waterfalls',
+    ],
+    best_season: 'Year-round, with seasonal road and trail checks',
+    access: { summary: 'Yosemite Valley, Wawona, Tioga Road, Glacier Point Road, and gateway towns' },
+    safety: { summary: 'Reservations, road openings, water, heat, snow, smoke, river conditions, and permits can shape the plan' },
+    sources: [
+      { title: 'Yosemite National Park', publisher: 'National Park Service', url: YOSEMITE_PARK_URL, kind: 'official' },
+      { title: 'Things to do', publisher: 'National Park Service', url: YOSEMITE_THINGS_TO_DO_URL, kind: 'official' },
+      { title: 'Yosemite hiking', publisher: 'National Park Service', url: YOSEMITE_TRAILS_URL, kind: 'official' },
+    ],
+    card: {
+      title: 'Yosemite National Park',
+      region: 'Sierra Nevada',
+      headline: 'Waterfalls, granite walls, valley trails, sequoias, campgrounds, and lodge stays.',
+      summary: 'Use Yosemite as the main hub for trails, waterfalls, viewpoints, camping, lodging, visitor centers, and current access checks.',
+      highlight: 'Start here, then drill into Yosemite trails, Yosemite Falls, campgrounds, lodging, and visitor services.',
+      facts: ['National Park Service', 'Trails', 'Waterfalls', 'Campgrounds', 'Lodging'],
+    },
+    summary: {
+      id,
+      title: 'Yosemite National Park',
+      category: 'Parks',
+      explore_group: 'parks',
+      state: 'CA',
+      region: 'Sierra Nevada',
+      lat: 37.7485,
+      lng: -119.5870,
+      rank: 4,
+      hero_rank: 4,
+      tags: ['parks', 'trails', 'waterfalls', 'camping', 'lodging', 'views', 'yosemite'],
+      badges: ['Parks', 'Official'],
+      hook: 'Yosemite hub for trails, waterfalls, viewpoints, campgrounds, lodging, and current access checks.',
+      short_description: 'Plan Yosemite from one hub: trails, falls, viewpoints, campgrounds, lodging, visitor centers, and road status.',
+      thumbnail_url: GLACIER_POINT_IMAGE,
+      image_url: GLACIER_POINT_IMAGE,
+      image_credit: 'Wikimedia Commons',
+      image_license: 'Open image reference',
+      source_url: YOSEMITE_PARK_URL,
+      source_title: 'National Park Service',
+    },
+    profile: {
+      hook: 'Plan Yosemite from one place, then drill into the day you actually want.',
+      summary: 'Yosemite combines short valley walks, high-exposure trails, major waterfalls, sequoia groves, campgrounds, lodging, shuttles, permits, and seasonal roads.',
+      story,
+      why_it_matters: 'Yosemite choices are tightly linked: a campground, valley shuttle, trailhead, road opening, or permit can decide the entire day.',
+      what_to_know: 'Check reservations, road openings, trail closures, water, smoke, snow, heat, river conditions, and permit requirements before building the day.',
+      best_time_to_stop: 'Year-round, with spring waterfalls, summer high country, fall shoulder-season access, and winter road limits.',
+      access_notes: 'Use the official park pages for entrance reservations, campground rules, lodging windows, shuttle details, road status, and closures.',
+      nearby_context: 'Yosemite Valley trails, waterfalls, campgrounds, visitor centers, lodging, fuel towns, and gateway roads sit close together but can require different timing.',
+    },
+    audio_script: story,
+    wiki_extract: '',
+    source_pack: {
+      quality: 'official',
+      primary: 'National Park Service',
+      official_url: YOSEMITE_PARK_URL,
+      nps_park_code: 'yose',
+      sources: [
+        { title: 'Yosemite National Park', publisher: 'National Park Service', url: YOSEMITE_PARK_URL, kind: 'official' },
+        { title: 'Things to do', publisher: 'National Park Service', url: YOSEMITE_THINGS_TO_DO_URL, kind: 'official' },
+        { title: 'Hiking', publisher: 'National Park Service', url: YOSEMITE_TRAILS_URL, kind: 'official' },
+        { title: 'Camping', publisher: 'National Park Service', url: YOSEMITE_CAMPING_URL, kind: 'official' },
+        { title: 'Lodging', publisher: 'National Park Service', url: YOSEMITE_LODGING_URL, kind: 'official' },
+      ],
+      photos: [
+        { url: GLACIER_POINT_IMAGE, caption: 'Glacier Point', credit: 'Wikimedia Commons' },
+        { url: YOSEMITE_FALLS_IMAGE, caption: 'Yosemite Falls', credit: 'Wikimedia Commons' },
+        { url: MARIPOSA_GROVE_IMAGE, caption: 'Mariposa Grove', credit: 'Wikimedia Commons' },
+      ],
+      activities: ['Hiking', 'Waterfalls', 'Viewpoints', 'Camping', 'Lodging', 'Visitor centers'],
+      things_to_do: [
+        { title: 'Yosemite Trails', description: 'Compare Mist Trail, Half Dome, Mirror Lake, Yosemite Falls, Taft Point, and Mariposa Grove.', url: YOSEMITE_TRAILS_URL, lat: 37.7485, lng: -119.5870, image_url: GLACIER_POINT_IMAGE, source_label: 'National Park Service', category: 'Trails' },
+        { title: 'Mist Trail', description: 'Waterfall route toward Vernal Fall with wet steps and heavy peak-season use.', url: 'https://www.nps.gov/yose/planyourvisit/vernalnevadatrail.htm', lat: 37.7325, lng: -119.5586, image_url: VERNAL_FALL_IMAGE, source_label: 'National Park Service', category: 'Trail' },
+        { title: 'Half Dome', description: 'Permit-only cable route with exposure, elevation, and all-day commitment.', url: 'https://www.nps.gov/yose/planyourvisit/halfdome.htm', lat: 37.7460, lng: -119.5332, image_url: HALF_DOME_IMAGE, source_label: 'National Park Service', category: 'Permit trail' },
+        { title: 'Mariposa Grove', description: 'Giant sequoia grove walks near the South Entrance with seasonal shuttle and snow checks.', url: YOSEMITE_THINGS_TO_DO_URL, lat: 37.5116, lng: -119.6008, image_url: MARIPOSA_GROVE_IMAGE, source_label: 'National Park Service', category: 'Sequoia grove' },
+      ],
+      things_to_see: [
+        { title: 'Yosemite Falls', description: 'Major valley waterfall with lower-view access and a strenuous upper-falls trail.', url: 'https://www.nps.gov/yose/planyourvisit/yosemitefalls.htm', lat: 37.756845, lng: -119.596785, image_url: YOSEMITE_FALLS_IMAGE, source_label: 'National Park Service', category: 'Waterfall' },
+        { title: 'Glacier Point', description: 'High viewpoint over Yosemite Valley, Half Dome, and the high country when the road is open.', url: YOSEMITE_THINGS_TO_DO_URL, lat: 37.7309, lng: -119.5731, image_url: GLACIER_POINT_IMAGE, source_label: 'National Park Service', category: 'Viewpoint' },
+        { title: 'Mirror Lake', description: 'Seasonal valley lake and easy walk below Half Dome.', url: 'https://www.nps.gov/yose/planyourvisit/mirrorlaketrail.htm', lat: 37.7485, lng: -119.5491, image_url: MIRROR_LAKE_IMAGE, source_label: 'National Park Service', category: 'Lake walk' },
+      ],
+      campgrounds: [
+        { title: 'Yosemite campgrounds', description: 'Use the official camping page for reservation windows, seasonal openings, and campground rules.', url: YOSEMITE_CAMPING_URL, source_label: 'National Park Service', category: 'Camping' },
+        { title: 'Yosemite lodging', description: 'Use the official lodging page for in-park hotels, cabins, tent cabins, and seasonal availability.', url: YOSEMITE_LODGING_URL, source_label: 'National Park Service', category: 'Lodging' },
+      ],
+      visitor_centers: [
+        { title: 'Yosemite Valley Visitor Center', description: 'Main visitor services in Yosemite Valley.', url: YOSEMITE_VISITOR_URL, lat: 37.7487, lng: -119.5871, source_label: 'National Park Service', category: 'Visitor center' },
+      ],
+      source_note: 'Curated with National Park Service pages and open image references. Verify current reservations, road status, closures, permits, and seasonal services before you go.',
+      license: 'Open image reference; verify media license at source.',
+      image_asset: GLACIER_POINT_IMAGE,
+    },
+    facts: {
+      coordinates: '37.74850, -119.58700',
+      source_url: YOSEMITE_PARK_URL,
+      source_title: 'National Park Service',
+      official_url: YOSEMITE_PARK_URL,
+      source_quality: 'official',
+      last_updated: LAST_UPDATED,
+    },
+    attribution: 'National Park Service pages + Wikimedia Commons image references',
   };
 }
 

@@ -1133,14 +1133,22 @@ function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
   return ['camping', 'glamping', 'huts_lodging', 'trails', 'parks', 'water'].includes(groupForExplorePlace(place));
 }
 
+function isLocalCuratedExplorePlace(place: ExplorePlaceProfile) {
+  return place.id === 'place:nps:yose'
+    || place.id === 'explore:trails:yosemite-trails'
+    || place.id.startsWith('explore:waterfalls:');
+}
+
 function shouldUseExploreCampgroundEndpoint(place: ExplorePlaceProfile) {
   if (place.id.startsWith('explore:hub:')) return false;
+  if (isLocalCuratedExplorePlace(place)) return false;
   return !place.id.startsWith('explore:waterfalls:') && !place.id.startsWith('explore:trails:');
 }
 
 function shouldUseExploreDetailEndpoint(place: ExplorePlaceProfile) {
   if (place.id.startsWith('explore:hub:')) return false;
-  return !place.id.startsWith('explore:waterfalls:') && place.id !== 'explore:trails:yosemite-trails';
+  if (isLocalCuratedExplorePlace(place)) return false;
+  return true;
 }
 
 function exploreCampRailTitle(place: ExplorePlaceProfile) {
@@ -1653,6 +1661,12 @@ function GuideScreenContent() {
     if (!selectedExplore) return;
     const place = selectedExplore;
     const placeId = place.id;
+    if (isLocalCuratedExplorePlace(place)) {
+      setExploreExperiencesById(prev => prev[placeId] ? prev : ({ ...prev, [placeId]: [] }));
+      setExploreExperienceErrors(prev => ({ ...prev, [placeId]: '' }));
+      setExploreExperienceLoadingId(current => current === placeId ? null : current);
+      return;
+    }
     let cancelled = false;
     const cacheKey = `${EXPLORE_EXPERIENCES_CACHE_PREFIX}${placeId}`;
     storage.get(cacheKey).then(raw => {
@@ -1850,12 +1864,20 @@ function GuideScreenContent() {
       if (!placeQuery) return true;
       return queryScoreForPlace(place) > 0;
     });
-    const decorated = filtered.map(item => ({
-      ...item,
-      queryScore: queryScoreForPlace(item.place),
-      trustScore: scoreExploreTrust(item.place),
-      categoryAffinity: exploreCategoryAffinity(item.place, exploreCategory, exploreHubMeta.categoryKeysByHubId),
-    }));
+    const decorated = filtered.map(item => {
+      const destinationHubBoost = thingsToDoQuery
+        && !!queryDestinationPhrase
+        && isDestinationExploreHub(item.place)
+        && explorePlaceIdentitySearchText(item.place).includes(queryDestinationPhrase)
+        ? 120
+        : 0;
+      return {
+        ...item,
+        queryScore: queryScoreForPlace(item.place) + destinationHubBoost,
+        trustScore: scoreExploreTrust(item.place),
+        categoryAffinity: exploreCategoryAffinity(item.place, exploreCategory, exploreHubMeta.categoryKeysByHubId),
+      };
+    });
     const sortByCategoryAffinity = (a: typeof decorated[number], b: typeof decorated[number]) => (
       exploreCategory === 'all' ? 0 : b.categoryAffinity - a.categoryAffinity
     );

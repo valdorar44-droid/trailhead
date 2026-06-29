@@ -130,14 +130,14 @@ export default function AiReportModal({
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={s.overlay}>
-        <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+        <TouchableOpacity style={[StyleSheet.absoluteFillObject, s.backdropHit]} activeOpacity={1} onPress={onClose} />
         <View style={s.sheet}>
           <View style={s.header}>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={s.title}>Report {surfaceLabel}</Text>
               <Text style={s.sub}>Send recent trip notes with your feedback.</Text>
             </View>
-            <TouchableOpacity style={s.closeBtn} onPress={onClose}>
+            <TouchableOpacity style={s.closeBtn} onPress={onClose} accessibilityLabel="Close report" accessibilityRole="button">
               <Ionicons name="close" size={17} color={C.text2} />
             </TouchableOpacity>
           </View>
@@ -208,6 +208,9 @@ function makeStyles(C: ColorPalette) {
       justifyContent: 'flex-end',
       backgroundColor: 'rgba(0,0,0,0.58)',
     },
+    backdropHit: {
+      zIndex: 0,
+    },
     sheet: {
       borderTopLeftRadius: 22,
       borderTopRightRadius: 22,
@@ -217,6 +220,8 @@ function makeStyles(C: ColorPalette) {
       padding: 16,
       gap: 12,
       maxHeight: '84%',
+      zIndex: 1,
+      elevation: 8,
     },
     header: {
       flexDirection: 'row',

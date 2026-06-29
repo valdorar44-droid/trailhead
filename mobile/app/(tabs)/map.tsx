@@ -20975,7 +20975,7 @@ function MapScreen() {
         tripId={activeTrip?.trip_id ?? null}
       />
 
-      <Modal visible={showExtremeCopilot && !navMode} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowExtremeCopilot(false)}>
+      <Modal visible={showExtremeCopilot && !navMode && !aiReportVisible} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowExtremeCopilot(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.extremeCopilotOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowExtremeCopilot(false)} />
           <View style={[s.extremeCopilotSheet, { paddingBottom: bottomInset + 14 }]}>

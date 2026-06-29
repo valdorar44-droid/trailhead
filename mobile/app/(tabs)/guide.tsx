@@ -1456,6 +1456,19 @@ function GuideScreenContent() {
     const fallbackRadius = exploreCampFallbackRadius(place);
     let cancelled = false;
     const cacheKey = `${EXPLORE_CAMPGROUNDS_CACHE_PREFIX}${placeId}`;
+    const withCampTimeout = <T,>(promise: Promise<T>, ms = 8000) => new Promise<T>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Explore campgrounds timeout')), ms);
+      promise.then(
+        value => {
+          clearTimeout(timer);
+          resolve(value);
+        },
+        error => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      );
+    });
     storage.get(cacheKey).then(raw => {
       if (cancelled || !raw || exploreCampgroundsById[placeId]?.length) return;
       try {
@@ -1471,13 +1484,16 @@ function GuideScreenContent() {
     setExploreCampLoadingId(placeId);
     const loadFallbackCamps = async () => {
       if (fallbackLat != null && fallbackLng != null) {
-        const fallback = await api.getDiscoveryCamps(fallbackLat, fallbackLng, fallbackRadius, [], {
-          limit: 140,
-          mode: 'light',
-          stays: true,
-          surface: 'explore_camp_rail',
-          stale_after_hours: 12,
-        }).catch(() => []);
+        const fallback = await withCampTimeout(
+          api.getDiscoveryCamps(fallbackLat, fallbackLng, fallbackRadius, [], {
+            limit: 140,
+            mode: 'light',
+            stays: true,
+            surface: 'explore_camp_rail',
+            stale_after_hours: 12,
+          }),
+          9000,
+        ).catch(() => []);
         if (cancelled) return true;
         if (fallback.length) {
           setExploreCampgroundsById(prev => ({ ...prev, [placeId]: fallback }));
@@ -1498,23 +1514,26 @@ function GuideScreenContent() {
         })
         .finally(() => {
           if (!cancelled) setExploreCampLoadingId(current => current === placeId ? null : current);
-        });
+      });
       return () => { cancelled = true; };
     }
-    api.getExploreCampgrounds(placeId)
+    withCampTimeout(api.getExploreCampgrounds(placeId), 7000)
       .then(async res => {
         if (cancelled) return;
         const primary = res.campgrounds ?? [];
         let merged = primary;
         let sourceMode: 'official' | 'fallback' = 'official';
         if (fallbackLat != null && fallbackLng != null && primary.length < 6) {
-          const fallback = await api.getDiscoveryCamps(fallbackLat, fallbackLng, fallbackRadius, [], {
-            limit: 140,
-            mode: 'light',
-            stays: true,
-            surface: 'explore_camp_rail',
-            stale_after_hours: 12,
-          }).catch(() => []);
+          const fallback = await withCampTimeout(
+            api.getDiscoveryCamps(fallbackLat, fallbackLng, fallbackRadius, [], {
+              limit: 140,
+              mode: 'light',
+              stays: true,
+              surface: 'explore_camp_rail',
+              stale_after_hours: 12,
+            }),
+            9000,
+          ).catch(() => []);
           if (cancelled) return;
           if (fallback.length) {
             merged = mergeCampPins(primary, fallback);

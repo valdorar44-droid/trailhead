@@ -5,6 +5,30 @@ import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } fr
 const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 
+function isLocalWebProductionApi() {
+  if (Platform.OS !== 'web') return false;
+  const location = (globalThis as typeof globalThis & { location?: { hostname?: string } }).location;
+  const hostname = String(location?.hostname || '').toLowerCase();
+  const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
+  return isLocalhost && /^https:\/\/api\.gettrailhead\.app\b/i.test(BASE);
+}
+
+function isLocalManualTripId(tripId: string) {
+  return /^manual[_-]/i.test(String(tripId || ''));
+}
+
+function emptyRouteToursResponse(source = 'viator'): ExploreExperiencesResponse {
+  return {
+    source,
+    results: [],
+    count: 0,
+    live_enabled: false,
+    live_status: 'disabled',
+    live_message: '',
+    route_anchor_count: 0,
+  };
+}
+
 export type DiscoveryContextRequest = {
   bounds?: { n: number; s: number; e: number; w: number };
   center?: { lat: number; lng: number };
@@ -309,15 +333,19 @@ export const api = {
   getNearbyReports: (lat: number, lng: number, radius = 0.5) =>
     req<Report[]>(`/api/reports?lat=${lat}&lng=${lng}&radius=${radius}`),
   getReportsAlongRoute: (waypoints: Waypoint[]) =>
-    req<Report[]>('/api/reports/along-route', {
-      method: 'POST', body: JSON.stringify({ waypoints }),
-    }),
+    isLocalWebProductionApi()
+      ? Promise.resolve([])
+      : req<Report[]>('/api/reports/along-route', {
+          method: 'POST', body: JSON.stringify({ waypoints }),
+        }),
   getNearbyAlerts: (lat: number, lng: number, radius = 0.5) =>
     req<Report[]>(`/api/conditions/nearby?lat=${lat}&lng=${lng}&radius=${radius}`),
   getAlertsAlongRoute: (waypoints: Waypoint[]) =>
-    req<Report[]>('/api/conditions/along-route', {
-      method: 'POST', body: JSON.stringify({ waypoints }),
-    }),
+    isLocalWebProductionApi()
+      ? Promise.resolve([])
+      : req<Report[]>('/api/conditions/along-route', {
+          method: 'POST', body: JSON.stringify({ waypoints }),
+        }),
   upvoteReport: (id: number) => req(`/api/reports/${id}/upvote`, { method: 'POST' }),
   downvoteReport: (id: number) => req(`/api/reports/${id}/downvote`, { method: 'POST' }),
   confirmReport: (id: number) =>
@@ -624,7 +652,9 @@ export const api = {
   downvotePin: (id: number) => req<{ ok: boolean; upvotes: number; downvotes: number; hidden: boolean }>(`/api/pins/${id}/downvote`, { method: 'POST' }),
 
   getAudioGuide: (tripId: string, generate = false) =>
-    req<Record<string, string>>(`/api/trip/${tripId}/guide${generate ? '?generate=true' : ''}`),
+    isLocalWebProductionApi() && isLocalManualTripId(tripId)
+      ? Promise.resolve({})
+      : req<Record<string, string>>(`/api/trip/${tripId}/guide${generate ? '?generate=true' : ''}`),
   getExploreCatalog: () =>
     req<ExploreCatalog>('/api/explore/catalog'),
   getExploreCatalogIndex: (params: { q?: string; category?: string; limit?: number; cursor?: number } = {}) => {
@@ -672,10 +702,12 @@ export const api = {
   getExploreExperience: (experienceId: string) =>
     req<BookableExperience>(`/api/explore/experiences/${encodeURIComponent(experienceId)}`),
   getRouteTours: (data: RouteTourSuggestionRequest) =>
-    req<ExploreExperiencesResponse>('/api/tours/route', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    isLocalWebProductionApi()
+      ? Promise.resolve<ExploreExperiencesResponse>(emptyRouteToursResponse(data.source))
+      : req<ExploreExperiencesResponse>('/api/tours/route', {
+          method: 'POST',
+          body: JSON.stringify(data),
+        }),
   getRentalOffers: (params: RentalOffersQuery = {}) => {
     const qs = new URLSearchParams({ provider: params.provider || 'outdoorsy', limit: String(params.limit ?? 12) });
     if (params.lat != null) qs.set('lat', String(params.lat));
@@ -721,7 +753,9 @@ export const api = {
   getWeather: (lat: number, lng: number, days = 7, units: WeatherUnitMode = 'auto') =>
     req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}&units=${encodeURIComponent(units)}`),
   getRouteWeather: (tripId: string, waypoints: Waypoint[], units: WeatherUnitMode = 'auto') =>
-    req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints, units }) }),
+    isLocalWebProductionApi() && isLocalManualTripId(tripId)
+      ? Promise.resolve<RouteWeatherResult>({ trip_id: tripId, forecasts: {} })
+      : req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints, units }) }),
   buildRoute: (locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>, options: RouteBuildOptions = {}, units: 'miles' | 'kilometers' = 'miles') =>
     req<RouteBuildResult>('/api/route', {
       method: 'POST',
@@ -856,23 +890,37 @@ export const api = {
     route?: [number, number][],
     options: { scope_id?: string; recommended_day?: number; route_scope?: 'leg' | 'route' | 'area' } = {},
   ) =>
-    guardedRequest(
-      `smart-pack:${stableNumber(lat)}:${stableNumber(lng)}:${Math.round(radius)}:${categories.split(',').map(c => c.trim()).filter(Boolean).sort().join(',')}:${stableRouteKey(route)}:${options.scope_id ?? ''}:${options.recommended_day ?? ''}:${options.route_scope ?? ''}`,
-      5 * 60_000,
-      () => req<NearbySmartPackResponse>('/api/nearby/smart-pack', {
-        method: 'POST',
-        body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route, ...options }),
-      }),
-    ),
+    isLocalWebProductionApi()
+      ? Promise.resolve<NearbySmartPackResponse>({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), places: [] })
+      : guardedRequest(
+          `smart-pack:${stableNumber(lat)}:${stableNumber(lng)}:${Math.round(radius)}:${categories.split(',').map(c => c.trim()).filter(Boolean).sort().join(',')}:${stableRouteKey(route)}:${options.scope_id ?? ''}:${options.recommended_day ?? ''}:${options.route_scope ?? ''}`,
+          5 * 60_000,
+          () => req<NearbySmartPackResponse>('/api/nearby/smart-pack', {
+            method: 'POST',
+            body: JSON.stringify({ center: { lat, lng }, radius, categories: categories.split(',').filter(Boolean), route, ...options }),
+          }),
+        ),
   getRouteIntelligence: (data: RouteIntelligenceRequest) =>
-    guardedRequest(
-      `route-intel:${stableRouteKey(data.route)}:${data.center ? `${stableNumber(data.center.lat)}:${stableNumber(data.center.lng)}` : ''}:${Math.round(data.radius ?? 35)}:${(data.categories ?? []).map(c => c.trim()).filter(Boolean).sort().join(',')}:${data.scope_id ?? ''}:${data.recommended_day ?? ''}:${data.route_scope ?? ''}:${data.force_refresh ? 'force' : 'cache'}`,
-      5 * 60_000,
-      () => req<RouteIntelligenceResponse>('/api/route/intelligence', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
-    ),
+    isLocalWebProductionApi()
+      ? Promise.resolve<RouteIntelligenceResponse>({
+          samples: [],
+          radius: data.radius ?? 0,
+          categories: data.categories ?? [],
+          scope_id: data.scope_id,
+          recommended_day: data.recommended_day,
+          route_scope: data.route_scope,
+          places: [],
+          camps: [],
+          fuel: [],
+        })
+      : guardedRequest(
+          `route-intel:${stableRouteKey(data.route)}:${data.center ? `${stableNumber(data.center.lat)}:${stableNumber(data.center.lng)}` : ''}:${Math.round(data.radius ?? 35)}:${(data.categories ?? []).map(c => c.trim()).filter(Boolean).sort().join(',')}:${data.scope_id ?? ''}:${data.recommended_day ?? ''}:${data.route_scope ?? ''}:${data.force_refresh ? 'force' : 'cache'}`,
+          5 * 60_000,
+          () => req<RouteIntelligenceResponse>('/api/route/intelligence', {
+            method: 'POST',
+            body: JSON.stringify(data),
+          }),
+        ),
   getPlaceDetail: (source: string, placeId: string, category = '') =>
     guardedRequest(
       `place-detail:${String(source || '').toLowerCase()}:${placeId}:${String(category || '').toLowerCase()}`,

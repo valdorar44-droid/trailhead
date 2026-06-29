@@ -682,6 +682,41 @@ function explorePlaceIdentitySearchText(place: ExplorePlaceProfile) {
   ].filter(Boolean).join(' '));
 }
 
+function explorePlaceMatchedActiveSearch(place: ExplorePlaceProfile, query: string) {
+  const matchedQuery = normalizeExploreText(String((place as any).matched_explore_query || ''));
+  return !!matchedQuery && matchedQuery === normalizeExploreText(query);
+}
+
+function explorePlacePrimaryCategoryMatchesBrowseIntent(place: ExplorePlaceProfile, query: string) {
+  const text = normalizeExploreText(query);
+  const primary = getExploreCategoryKey(place);
+  if (/\b(camp|camps|campground|campgrounds|campsite|campsites|rv|tent)\b/.test(text)) {
+    const strictCampQuery = /\b(campground|campgrounds|campsite|campsites)\b/.test(text);
+    return primary === 'camp' || (!strictCampQuery && (primary === 'glamping' || primary === 'huts'));
+  }
+  if (/\b(lodge|lodges|lodging|hotel|hotels|cabin|cabins|hut|huts|stay|stays)\b/.test(text)) {
+    return primary === 'huts' || primary === 'glamping' || primary === 'camp';
+  }
+  if (/\b(trail|trails|trailhead|trailheads|hike|hikes|hiking|trek|trekking)\b/.test(text)) {
+    return primary === 'trails' || primary === 'trailheads' || primary === 'climb';
+  }
+  if (/\b(tour|tours|guided|activity|activities|things to do)\b/.test(text)) {
+    return primary === 'tours' || primary === 'parks' || primary === 'land' || primary === 'trails' || primary === 'views' || primary === 'waterfalls' || primary === 'scenic';
+  }
+  if (/\b(view|views|overlook|overlooks|waterfall|waterfalls|scenic|spring|springs|peak|peaks)\b/.test(text)) {
+    return primary === 'views' || primary === 'waterfalls' || primary === 'peaks' || primary === 'springs' || primary === 'scenic' || primary === 'trails';
+  }
+  return true;
+}
+
+function explorePlaceActiveSearchCanSatisfyIdentity(place: ExplorePlaceProfile, query: string) {
+  if (!explorePlaceMatchedActiveSearch(place, query)) return false;
+  if (isDestinationExploreHub(place) || isLegacyExploreAreaWrapper(place)) return false;
+  if (!explorePlacePrimaryCategoryMatchesBrowseIntent(place, query)) return false;
+  const rank = Number((place as any).matched_explore_rank);
+  return Number.isFinite(rank) && rank < 16;
+}
+
 function scoreExploreRichText(place: ExplorePlaceProfile, query: string) {
   const normalized = normalizeExploreText(query);
   if (!normalized) return 0;
@@ -1345,13 +1380,31 @@ function GuideScreenContent() {
       })
         .then(catalog => {
           if (cancelled) return;
-          const remotePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+          const matchedQuery = normalizeExploreText(query);
+          const remotePlaces = (catalog.places ?? []).map((item, index) => ({
+            ...exploreIndexItemToProfile(item),
+            matched_explore_query: matchedQuery,
+            matched_explore_rank: index,
+          }));
           if (!remotePlaces.length) return;
           setExplorePlaces(current => {
             const seen = new Set(current.map(place => place.id));
             const merged = [...current];
             for (const place of remotePlaces) {
-              if (!place?.id || seen.has(place.id)) continue;
+              if (!place?.id) continue;
+              if (seen.has(place.id)) {
+                const index = merged.findIndex(item => item.id === place.id);
+                if (index >= 0) {
+                  const previousRank = Number((merged[index] as any).matched_explore_rank);
+                  const nextRank = Number((place as any).matched_explore_rank);
+                  merged[index] = {
+                    ...merged[index],
+                    matched_explore_query: matchedQuery,
+                    matched_explore_rank: Number.isFinite(previousRank) ? Math.min(previousRank, nextRank) : nextRank,
+                  } as ExplorePlaceProfile;
+                }
+                continue;
+              }
               seen.add(place.id);
               merged.push(place);
             }
@@ -1754,19 +1807,23 @@ function GuideScreenContent() {
     const queryDestinationPhrase = exploreQueryDestinationPhrase(placeQuery);
     const queryHasBrowseIntent = exploreQueryHasBrowseIntent(placeQuery);
     const thingsToDoQuery = isThingsToDoExploreQuery(query);
+    const browseIntentNeedsPrimaryMatch = queryHasBrowseIntent && queryHasDestinationTerms && !thingsToDoQuery;
     const queryRequiresIdentityMatch = queryDestinationPhrase.split(/\s+/).filter(Boolean).length > 1
-      || (thingsToDoQuery && queryHasDestinationTerms);
+      || (thingsToDoQuery && queryHasDestinationTerms)
+      || (queryHasBrowseIntent && queryHasDestinationTerms && !!queryDestinationPhrase);
     const queryScoreForPlace = (place: ExplorePlaceProfile) => {
       const identityScore = queryDestinationPhrase && explorePlaceIdentitySearchText(place).includes(queryDestinationPhrase)
         ? 85
         : 0;
+      const activeSearchScore = explorePlaceActiveSearchCanSatisfyIdentity(place, query) ? 70 : 0;
       const baseScore = Math.max(
         identityScore,
+        activeSearchScore,
         scoreExploreQuery(place, placeQuery),
         scoreExploreRichText(place, placeQuery),
         scoreExploreHubExtraText(place, placeQuery, exploreHubMeta.searchTextByHubId),
       );
-      if (queryHasDestinationTerms && queryRequiresIdentityMatch && identityScore <= 0) return 0;
+      if (queryHasDestinationTerms && queryRequiresIdentityMatch && identityScore <= 0 && activeSearchScore <= 0) return 0;
       const intentScore = scoreExploreBrowseIntent(place, placeQuery, exploreHubMeta.categoryKeysByHubId, false);
       if (queryHasDestinationTerms && baseScore <= 0) return 0;
       if (queryHasBrowseIntent && intentScore < 35) return 0;
@@ -1783,6 +1840,7 @@ function GuideScreenContent() {
       const categoryOk = exploreCategoryMatchesWithHub(place, exploreCategory, exploreHubMeta.categoryKeysByHubId);
       if (!categoryOk) return false;
       if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;
+      if (browseIntentNeedsPrimaryMatch && !explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery)) return false;
       if (queryCategory && queryCategory !== 'tours' && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
       if (!placeQuery) return true;
       return queryScoreForPlace(place) > 0;

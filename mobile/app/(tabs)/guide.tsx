@@ -2671,6 +2671,7 @@ function GuideScreenContent() {
     const experiences = exploreExperiencesById[place.id] ?? [];
     const loading = exploreExperienceLoadingId === place.id && experiences.length === 0;
     const error = exploreExperienceErrors[place.id];
+    if (!loading && !error && experiences.length === 0) return null;
     return (
       <ExploreExperiencesRail
         experiences={experiences}

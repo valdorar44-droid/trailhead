@@ -288,6 +288,10 @@ export function getExploreCategoryKey(place: ExplorePlaceProfile): ExploreCatego
     place.summary.category,
     ...(Array.isArray(v3.subcategories) ? v3.subcategories : []),
   ]).join(' ')));
+  const title = categoryFromText(titleText);
+  if (nestedDestinationTitle && title && title !== explicit) {
+    return title;
+  }
   if (
     destinationTitle
     && !nestedDestinationTitle
@@ -298,7 +302,6 @@ export function getExploreCategoryKey(place: ExplorePlaceProfile): ExploreCatego
   }
   if (explicit) return explicit;
   if (destinationTitle && !nestedDestinationTitle) return destinationTitle;
-  const title = categoryFromText(titleText);
   if (title) return title;
   const group = categoryFromGroup(normalize(String(place.summary.explore_group || '')));
   if (group) return group;
@@ -672,6 +675,12 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   }
   if (/Use .+ as the overnight search area|gives camp search a real center|Start camp planning around .+ then narrow it with live results/i.test(text)) {
     return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
+  }
+  if (/\b(campgrounds?|lodging|glamping|stays?)\b/i.test(title) && /Good for overnight planning|live map results|blank camp search|Search around .+ legal overnight options/i.test(text)) {
+    return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
+  }
+  if (/Trailhead groups .* records into one map-ready card list/i.test(text)) {
+    return `${title} shows nearby trail access and overnight planning context. Check current access, closures, and conditions.`;
   }
   if (/when the route needs a softer landing|is for the night you want comfort|setup time matters more than roughing it/i.test(text)) {
     return `${title} is a comfort-focused stay option. Check booking, road access, and availability.`;

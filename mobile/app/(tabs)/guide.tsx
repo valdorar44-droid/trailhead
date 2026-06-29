@@ -433,6 +433,25 @@ function exploreTabForBrowseIntent(query: string, category: ExploreCategoryKey):
 
 function protectedDestinationTitleForExplorePlace(place: ExplorePlaceProfile) {
   const text = explorePlaceSearchText(place);
+  const root = destinationRootFromTitle(place.summary.title);
+  const designations = [
+    'national park and preserve',
+    'national park preserve',
+    'national park',
+    'national monument',
+    'national forest',
+    'national recreation area',
+    'national seashore',
+    'national lakeshore',
+    'state park',
+    'provincial park',
+  ];
+  if (root && root.length >= 3) {
+    for (const designation of designations) {
+      const phrase = `${root} ${designation}`;
+      if (text.includes(phrase)) return titleCaseExploreDestination(phrase);
+    }
+  }
   const matches = text.matchAll(/\b(national park|national monument|national forest|national recreation area|national seashore|national lakeshore)\b/g);
   const stopWords = new Set([
     'wikipedia',
@@ -480,6 +499,13 @@ function destinationSearchTitlesForExploreChild(place: ExplorePlaceProfile) {
   if (parentTitle) terms.add(parentTitle);
   const protectedTitle = protectedDestinationTitleForExplorePlace(place);
   if (protectedTitle) terms.add(protectedTitle);
+  const text = explorePlaceSearchText(place);
+  const root = destinationRootFromTitle(place.summary.title);
+  if (root && root.length >= 3 && !/^(ca|ut|az|co|wy|mt|or|wa|nv|id|nm)$/i.test(root)) {
+    if (text.includes(`${root} np`) || text.includes(`${root} national park`) || /\bnps\.gov\b/.test(text)) {
+      terms.add(`${titleCaseExploreDestination(root)} National Park`);
+    }
+  }
   [
     destinationRootFromTitle(place.summary.title),
     destinationRootFromTitle(place.summary.region || ''),
@@ -490,6 +516,10 @@ function destinationSearchTitlesForExploreChild(place: ExplorePlaceProfile) {
     }
   });
   return Array.from(terms).slice(0, 3);
+}
+
+function shouldResolveExploreWrapperBeforeOpen(place: ExplorePlaceProfile) {
+  return isLegacyExploreAreaWrapper(place);
 }
 
 function titleCaseExploreDestination(value: string) {
@@ -1745,6 +1775,7 @@ function GuideScreenContent() {
       if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
       if (!exploreSavedOnly && !placeQuery && shouldHideExploreHomeWrapper(place)) return false;
       if (!exploreSavedOnly && !placeQuery && exploreHubMeta.parentByChildId.has(place.id)) return false;
+      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id)) return false;
       const categoryOk = exploreCategoryMatchesWithHub(place, exploreCategory, exploreHubMeta.categoryKeysByHubId);
       if (!categoryOk) return false;
       if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;
@@ -2397,20 +2428,31 @@ function GuideScreenContent() {
   }
 
   async function openExplorePlace(place: ExplorePlaceProfile, initialTab: ExploreDetailTab = 'summary') {
-    const local = showExploreSheet(place, initialTab);
+    const parentTab = initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab;
     const parentHubId = exploreHubMeta.parentByChildId.get(place.id);
     if (parentHubId && parentHubId !== place.id) {
       const parentHub = enrichedExplorePlaces.find(item => item.id === parentHubId)
         ?? explorePlaces.find(item => item.id === parentHubId);
       if (parentHub) {
-        await openExplorePlace(parentHub, initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab);
+        await openExplorePlace(parentHub, parentTab);
         return;
       }
     }
-    const resolvedParentHub = await resolveExploreParentHubForChild(place);
-    if (resolvedParentHub && resolvedParentHub.id !== place.id) {
-      await openExplorePlace(resolvedParentHub, initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab);
-      return;
+    const resolvesBeforeOpen = shouldResolveExploreWrapperBeforeOpen(place);
+    if (resolvesBeforeOpen) {
+      const resolvedParentHub = await resolveExploreParentHubForChild(place);
+      if (resolvedParentHub && resolvedParentHub.id !== place.id) {
+        await openExplorePlace(resolvedParentHub, parentTab);
+        return;
+      }
+    }
+    const local = showExploreSheet(place, initialTab);
+    if (!resolvesBeforeOpen) {
+      const resolvedParentHub = await resolveExploreParentHubForChild(place);
+      if (resolvedParentHub && resolvedParentHub.id !== place.id) {
+        await openExplorePlace(resolvedParentHub, parentTab);
+        return;
+      }
     }
     if (!shouldUseExploreDetailEndpoint(place)) {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});

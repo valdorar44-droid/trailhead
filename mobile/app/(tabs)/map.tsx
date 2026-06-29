@@ -23601,9 +23601,24 @@ function MapScreen() {
                   Day {campPickerDay ?? selectedDay ?? 1} · sorted near this day's route
                 </Text>
               </View>
-              <TouchableOpacity style={s.campPickerRefresh} onPress={() => openCampPicker(campPickerDay ?? undefined)}>
-                <Ionicons name="refresh" size={15} color={C.orange} />
-              </TouchableOpacity>
+              <View style={s.campPickerHeaderActions}>
+                <TouchableOpacity
+                  style={s.campPickerRefresh}
+                  onPress={() => openCampPicker(campPickerDay ?? undefined)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Refresh camp choices"
+                >
+                  <Ionicons name="refresh" size={15} color={C.orange} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={s.campPickerClose}
+                  onPress={() => setCampPickerVisible(false)}
+                  accessibilityRole="button"
+                  accessibilityLabel="Close camp picker"
+                >
+                  <Ionicons name="close" size={16} color={OVR.text3} />
+                </TouchableOpacity>
+              </View>
             </View>
             {campPickerLoading ? (
               <View style={s.campPickerLoading}>
@@ -26712,9 +26727,14 @@ const makeStyles = (C: ColorPalette) => {
   },
   daySheetSub: { color: OVR.text3, fontSize: 12, marginBottom: 16 },
   campPickerHeader: { flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 },
+  campPickerHeaderActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   campPickerRefresh: {
     width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orange + '12',
+  },
+  campPickerClose: {
+    width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
+    borderWidth: 1, borderColor: OVR.border2, backgroundColor: OVR.bg2,
   },
   campPickerLoading: { alignItems: 'center', justifyContent: 'center', gap: 10, paddingVertical: 28 },
   campPickerLoadingText: { color: OVR.text2, fontSize: 11, fontFamily: mono },

@@ -737,12 +737,16 @@ export function ExploreDetailSheet({
   function renderModuleHero(module: ExploreDetailModule) {
     const items = moduleItems(module.key);
     const mappedCount = items.filter(item => itemCanRenderOnMap(item)).length;
+    const subtitle = [
+      module.label,
+      mappedCount ? `${mappedCount} places` : module.detail,
+    ].filter(Boolean).join(' · ');
     return (
       <View style={styles.moduleMapHero}>
         {renderMapPreview({
           items,
-          title: module.label,
-          subtitle: mappedCount ? `${mappedCount} places` : getExploreDisplayTitle(place),
+          title: getExploreDisplayTitle(place),
+          subtitle,
           onPress: onShowArea,
           height: 360,
         })}

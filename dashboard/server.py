@@ -11124,8 +11124,8 @@ def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: l
         "card": {
             "title": title,
             "headline": "Trek and glacier options near this stop" if is_pakistan else "Trail options near this stop",
-            "summary": "Trailhead groups northern Pakistan trek, glacier, and staging records into one map-ready card list." if is_pakistan else "Trailhead groups nearby trail records into one map-ready card list.",
-            "highlight": "Route to staging points and verify permits, guide, glacier, bridge, weather, and local safety." if is_pakistan else "Open a trail to route to it or highlight it on the map.",
+            "summary": "Compare trek, glacier, base-camp, staging, permit, and guide context." if is_pakistan else "Compare nearby trail access, distance, route type, photos, and source links.",
+            "highlight": "Route to staging points and verify permits, guide, glacier, bridge, weather, and local safety." if is_pakistan else "Check access, distance, terrain, and current conditions before starting.",
             "region": "Gilgit-Baltistan" if is_pakistan else "Nearby",
         },
         "category": "trails",

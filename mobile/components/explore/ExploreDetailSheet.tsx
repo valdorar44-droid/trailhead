@@ -19,7 +19,6 @@ import {
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
-export type ExploreDetailTab = 'summary' | 'story' | 'nearby';
 type ExploreDetailModuleKey =
   | 'see'
   | 'do'
@@ -34,6 +33,7 @@ type ExploreDetailModuleKey =
   | 'map'
   | 'story'
   | 'nearby';
+export type ExploreDetailTab = 'summary' | ExploreDetailModuleKey;
 
 type ExploreDetailModule = {
   key: ExploreDetailModuleKey;
@@ -211,13 +211,7 @@ export function ExploreDetailSheet({
   useEffect(() => {
     setPlaceSearch('');
     setSelectedItem(null);
-    if (tab === 'story') {
-      setActiveModule('story');
-    } else if (tab === 'nearby') {
-      setActiveModule('nearby');
-    } else {
-      setActiveModule(null);
-    }
+    setActiveModule(tab === 'summary' ? null : tab);
   }, [place.id, tab]);
 
   const mediaCandidates = (...groups: Array<Array<string | null | undefined> | string | null | undefined>) => {
@@ -267,25 +261,25 @@ export function ExploreDetailSheet({
     const trailImages = tileImages([], (place.trails ?? []).map(trail => trail.image_url));
     const eventImages = tileImages(sourcePackLists.events);
 
-    add({
+    add(count(sourcePackLists.thingsToSee) > 0 && {
       key: 'see',
       label: 'What to See',
-      detail: count(sourcePackLists.thingsToSee) ? `${count(sourcePackLists.thingsToSee)} places` : 'Highlights',
+      detail: `${count(sourcePackLists.thingsToSee)} places`,
       icon: 'camera-outline',
       tone: '#0f766e',
-      count: count(sourcePackLists.thingsToSee) || undefined,
+      count: count(sourcePackLists.thingsToSee),
       imageUrl: seeImages.imageUrl,
       imageCandidates: seeImages.imageCandidates,
       searchText: `${searchTextForItems(sourcePackLists.thingsToSee)} ${place.profile?.why_it_matters ?? ''} ${place.wiki_extract ?? ''}`,
     });
 
-    add(Boolean(count(sourcePackLists.thingsToDo) || activityCount > 0 || experiencesSlot) && {
+    add(Boolean(count(sourcePackLists.thingsToDo) || experiencesSlot) && {
       key: 'do',
       label: 'Things to Do',
-      detail: count(sourcePackLists.thingsToDo) ? `${count(sourcePackLists.thingsToDo)} options` : 'Activities',
+      detail: count(sourcePackLists.thingsToDo) ? `${count(sourcePackLists.thingsToDo)} options` : 'Bookable options',
       icon: 'walk-outline',
       tone: '#f97316',
-      count: count(sourcePackLists.thingsToDo) || activityCount || undefined,
+      count: count(sourcePackLists.thingsToDo) || undefined,
       imageUrl: doImages.imageUrl,
       imageCandidates: doImages.imageCandidates,
       searchText: `${searchTextForItems(sourcePackLists.thingsToDo)} ${(pack?.activities ?? []).join(' ')} ${(place.amenities ?? []).join(' ')}`,
@@ -294,7 +288,7 @@ export function ExploreDetailSheet({
     add(Boolean(count(sourcePackLists.campgrounds) || campgroundsSlot) && {
       key: 'stay',
       label: 'Where to Stay',
-      detail: count(sourcePackLists.campgrounds) ? `${count(sourcePackLists.campgrounds)} stays` : 'Camp nearby',
+      detail: count(sourcePackLists.campgrounds) ? `${count(sourcePackLists.campgrounds)} stays` : 'Nearby stays',
       icon: 'bonfire-outline',
       tone: '#16a34a',
       count: count(sourcePackLists.campgrounds) || undefined,
@@ -303,13 +297,13 @@ export function ExploreDetailSheet({
       searchText: `${searchTextForItems(sourcePackLists.campgrounds)} camp campground lodge cabin rv overnight`,
     });
 
-    add(Boolean(count(sourcePackLists.visitorCenters) || pack?.nps_park_code) && {
+    add(count(sourcePackLists.visitorCenters) > 0 && {
       key: 'visitor',
       label: 'Visitor Centers',
-      detail: count(sourcePackLists.visitorCenters) ? `${count(sourcePackLists.visitorCenters)} centers` : 'Park info',
+      detail: `${count(sourcePackLists.visitorCenters)} centers`,
       icon: 'information-circle-outline',
       tone: '#2563eb',
-      count: count(sourcePackLists.visitorCenters) || undefined,
+      count: count(sourcePackLists.visitorCenters),
       imageUrl: visitorImages.imageUrl,
       imageCandidates: visitorImages.imageCandidates,
       searchText: `${searchTextForItems(sourcePackLists.visitorCenters)} visitor center ranger station park info`,
@@ -318,23 +312,13 @@ export function ExploreDetailSheet({
     add(((place.trails?.length ?? 0) > 0 || (place.linked_trail_ids?.length ?? 0) > 0 || /trail|trek|peak|waterfall|glacier/i.test(`${place.category ?? ''} ${(place.subcategories ?? []).join(' ')}`)) && {
       key: 'trails',
       label: 'Trails',
-      detail: place.trails?.length ? `${place.trails.length} trail cards` : 'Trail cards',
+      detail: place.trails?.length ? `${place.trails.length} trails` : 'Trails',
       icon: 'trail-sign-outline',
       tone: '#ca8a04',
       count: place.trails?.length || undefined,
       imageUrl: trailImages.imageUrl,
       imageCandidates: trailImages.imageCandidates,
       searchText: `${(place.trails ?? []).map(trail => `${trail.title} ${trail.summary} ${trail.description ?? ''}`).join(' ')} trail trek route hike glacier`,
-    });
-
-    add(activityCount > 0 && {
-      key: 'amenities',
-      label: 'Amenities',
-      detail: `${activityCount} listed`,
-      icon: 'grid-outline',
-      tone: '#7c3aed',
-      count: activityCount,
-      searchText: `${(pack?.activities ?? []).join(' ')} ${(place.amenities ?? []).join(' ')}`,
     });
 
     add(((pack?.fees?.length ?? 0) > 0 || !!pack?.operating_hours) && {
@@ -372,7 +356,7 @@ export function ExploreDetailSheet({
     add(hasCoords && {
       key: 'weather',
       label: 'Weather',
-      detail: weather?.loading ? 'Loading forecast' : weather?.detail || 'Forecast',
+      detail: weather?.loading ? 'Loading' : weather?.detail || 'Forecast',
       icon: weather?.icon || 'partly-sunny-outline',
       tone: '#0ea5e9',
       searchText: 'weather forecast temperature wind precipitation conditions',
@@ -380,8 +364,8 @@ export function ExploreDetailSheet({
 
     add({
       key: 'map',
-      label: 'Map & Directions',
-      detail: 'Preview',
+      label: 'Directions',
+      detail: 'Open route',
       icon: 'map-outline',
       tone: '#0f766e',
       searchText: 'map route directions area navigation campgrounds visitor centers stops',
@@ -390,7 +374,7 @@ export function ExploreDetailSheet({
     add(storySentences.length > 0 && {
       key: 'story',
       label: 'Story',
-      detail: 'Read aloud',
+      detail: 'Listen',
       icon: 'book-outline',
       tone: '#9333ea',
       searchText: storySentences.join(' '),
@@ -399,7 +383,7 @@ export function ExploreDetailSheet({
     add(Boolean(relatedSlot || context?.relatedCount) && {
       key: 'nearby',
       label: 'Nearby',
-      detail: context?.relatedCount ? `${context.relatedCount} close by` : 'Close by',
+      detail: context?.relatedCount ? `${context.relatedCount} nearby` : 'Nearby',
       icon: 'locate-outline',
       tone: '#a855f7',
       count: context?.relatedCount,
@@ -500,7 +484,7 @@ export function ExploreDetailSheet({
       onNearbyAction?.({ label: 'Weather', detail: 'Forecast', icon: 'partly-sunny-outline', tone: '#0ea5e9', action: 'weather' });
     }
     if (key === 'trails') {
-      onNearbyAction?.({ label: 'Trails', detail: 'Trail cards', icon: 'trail-sign-outline', tone: '#ca8a04', action: 'trails' });
+      onNearbyAction?.({ label: 'Trails', detail: 'Trails', icon: 'trail-sign-outline', tone: '#ca8a04', action: 'trails' });
     }
   }
 
@@ -645,7 +629,7 @@ export function ExploreDetailSheet({
         {renderMapPreview({
           items,
           title: module.label,
-          subtitle: mappedCount ? `${mappedCount} mapped places` : getExploreDisplayTitle(place),
+          subtitle: mappedCount ? `${mappedCount} places` : getExploreDisplayTitle(place),
           onPress: onShowArea,
           height: 360,
         })}
@@ -822,17 +806,17 @@ export function ExploreDetailSheet({
           )}
           {renderDetailFacts(item)}
           <View style={styles.childSection}>
-            <Text style={[styles.blockHeading, { color: C.text, marginHorizontal: 0 }]}>Map & Directions</Text>
+            <Text style={[styles.blockHeading, { color: C.text, marginHorizontal: 0 }]}>Directions</Text>
             {renderMapPreview({
               items: siblingItems,
               activeItem: item,
               title: item.title || 'Map',
-              subtitle: itemHasCoords(item) ? 'Selected pin' : getExploreDisplayTitle(place),
+              subtitle: itemHasCoords(item) ? 'Selected place' : getExploreDisplayTitle(place),
               onPress: () => showItemOnMap(item),
               height: 230,
             })}
             <View style={styles.mapActions}>
-              {renderAction('Show on Map', 'map-outline', () => showItemOnMap(item), true)}
+              {renderAction('Show Area', 'map-outline', () => showItemOnMap(item), true)}
               {renderAction('Directions', 'navigate-outline', () => openItemDirections(item))}
               {!!item.reservation_url && renderAction('Reserve', 'calendar-outline', () => Linking.openURL(item.reservation_url!))}
             </View>
@@ -965,8 +949,8 @@ export function ExploreDetailSheet({
         <View style={styles.itemList}>
           {renderMapPreview({
             items: mapItems,
-            title: 'Map & Directions',
-            subtitle: `${mapItems.length} mapped places`,
+            title: 'Directions',
+            subtitle: mapItems.length ? `${mapItems.length} places` : getExploreDisplayTitle(place),
             onPress: onShowArea,
             height: 240,
           })}
@@ -1141,7 +1125,7 @@ export function ExploreDetailSheet({
 
         {!activeModuleDef && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRail}>
-          {renderAction('Map', 'map-outline', onShowArea, true)}
+          {renderAction('Area', 'map-outline', onShowArea, true)}
           {renderAction('Route', 'navigate-outline', onRoute)}
           {renderAction('Weather', 'partly-sunny-outline', () => openModule('weather'))}
           {renderAction(isPlaying ? 'Stop' : 'Audio', isPlaying ? 'stop' : 'play', onPlayAudio)}

@@ -46,7 +46,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
           Trails near {getExploreDisplayTitle(place).replace(/\s+Trails$/i, '')}
         </Text>
         <Text style={[styles.introText, { color: C.text2 }]}>
-          Pick a route, preview the basics, then open it on the map.
+          Distance, gain, time, and route notes.
         </Text>
       </View>
 
@@ -54,7 +54,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
         <View>
           <Text style={[styles.sectionLabel, { color: C.orange }]}>TRAILS IN THIS AREA</Text>
           <Text style={[styles.sectionSub, { color: C.text3 }]}>
-            {filter === 'all' ? `${trails.length} trails found` : `${visibleTrails.length} ${filter} trails`}
+            {filter === 'all' ? `${trails.length} trails` : `${visibleTrails.length} ${filter}`}
           </Text>
         </View>
         <TouchableOpacity

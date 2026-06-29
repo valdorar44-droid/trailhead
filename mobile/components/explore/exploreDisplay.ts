@@ -470,7 +470,7 @@ export function getExploreHighlightCopy(place: ExplorePlaceProfile) {
     place.profile.summary ||
     place.profile.hook ||
     FALLBACK_COPY[key] ||
-    'Check the map, nearby options, and current access before you go.',
+    'Check nearby options and current access before you go.',
   ), place).trim();
 }
 
@@ -484,7 +484,7 @@ export function getExploreWhyCopy(place: ExplorePlaceProfile) {
         ? 'Trail areas need clear distance, difficulty, route type, nearby stops, and current conditions.'
         : key === 'camp'
           ? 'Named campground areas make it easier to compare access, rules, fees, and nearby trail options.'
-          : FALLBACK_COPY[key] || 'This stop adds useful map context and planning checks to your route.'),
+          : FALLBACK_COPY[key] || 'This stop helps compare access, timing, and nearby options.'),
   ), place).trim();
 }
 
@@ -515,11 +515,11 @@ export function getExploreQuickFacts(place: ExplorePlaceProfile, context: Explor
   } else if (key === 'resupply') {
     facts.push({ label: 'Verify supply', icon: 'basket-outline', tone: '#7c3aed' });
   } else {
-    facts.push({ label: 'Map stop', icon: 'navigate-outline', tone: '#2563eb' });
+    facts.push({ label: 'Area', icon: 'navigate-outline', tone: '#2563eb' });
   }
   facts.push({ label: getExploreBestSeason(place), icon: 'calendar-outline', tone: '#c4552d' });
   facts.push({ label: getExploreSourceBadge(place), icon: 'shield-checkmark-outline', tone: '#2563eb' });
-  facts.push({ label: 'Offline maps', value: 'Recommended', icon: 'cloud-download-outline', tone: '#7c3aed' });
+  facts.push({ label: 'Offline', value: 'Recommended', icon: 'cloud-download-outline', tone: '#7c3aed' });
   return facts.slice(0, 4);
 }
 
@@ -541,7 +541,7 @@ export function getExplorePlanNotes(place: ExplorePlaceProfile): ExplorePlanNote
   if (key === 'waterfalls') {
     return [
       { label: 'Drop', value: explicitFacts[0] || 'Verify height', icon: 'water-outline', tone: '#0284c7' },
-      { label: 'Access', value: explicitFacts[1] || compact([place.profile.access_notes, 'Open area map']).join(' · ') || 'Check trailhead', icon: 'trail-sign-outline', tone: '#16a34a' },
+      { label: 'Access', value: explicitFacts[1] || compact([place.profile.access_notes, 'Open area']).join(' · ') || 'Check trailhead', icon: 'trail-sign-outline', tone: '#16a34a' },
       { label: 'Best Flow', value: explicitFacts[2] || getExploreBestSeason(place), icon: 'calendar-outline', tone: '#ca8a04' },
       { label: 'Safety', value: explicitFacts[3] || 'Wet rock, ice, closures', icon: 'alert-circle-outline', tone: '#dc2626' },
     ];
@@ -554,9 +554,9 @@ export function getExplorePlanNotes(place: ExplorePlaceProfile): ExplorePlanNote
     const pointToPoint = /\b(point to point|point-to-point|through hike|thru hike)\b/.test(text);
     return [
       { label: 'Route Type', value: loopLikely ? 'Loop likely' : pointToPoint ? 'Point-to-point' : 'Loop / out-and-back options', icon: 'git-compare-outline', tone: '#f97316' },
-      { label: 'Distance', value: distance ? `${distance[1]} ${distance[2].replace('mile', 'mi').replace('kilometer', 'km')}` : 'Choose on map', icon: 'walk-outline', tone: '#16a34a' },
+      { label: 'Distance', value: distance ? `${distance[1]} ${distance[2].replace('mile', 'mi').replace('kilometer', 'km')}` : 'Choose trail', icon: 'walk-outline', tone: '#16a34a' },
       { label: 'Difficulty', value: difficulty ? difficulty[1].replace(/^\w/, c => c.toUpperCase()) : 'Verify grade', icon: 'trending-up-outline', tone: '#7c3aed' },
-      { label: 'Trail Map', value: 'Open map for segments', icon: 'map-outline', tone: '#2563eb' },
+      { label: 'Trail Lines', value: 'Open segments', icon: 'map-outline', tone: '#2563eb' },
     ];
   }
 
@@ -568,8 +568,8 @@ export function getExploreNearbyModules(place: ExplorePlaceProfile, context: Exp
   if (key === 'waterfalls') {
     return [
       { label: 'Trails', detail: context.relatedCount ? `${context.relatedCount} nearby` : 'Nearby access', icon: 'walk-outline', tone: '#16a34a', action: 'trails' },
-      { label: 'Parking', detail: 'Open map', icon: 'car-outline', tone: '#2563eb', action: 'parking' },
-      { label: 'Fuel', detail: 'Open map', icon: 'car-sport-outline', tone: '#ea580c', action: 'fuel' },
+      { label: 'Parking', detail: 'Open area', icon: 'car-outline', tone: '#2563eb', action: 'parking' },
+      { label: 'Fuel', detail: 'Open area', icon: 'car-sport-outline', tone: '#ea580c', action: 'fuel' },
       { label: 'Weather', detail: 'Forecast', icon: 'partly-sunny-outline', tone: '#9333ea', action: 'weather' },
     ];
   }
@@ -577,15 +577,15 @@ export function getExploreNearbyModules(place: ExplorePlaceProfile, context: Exp
     return [
       { label: 'Hours', detail: 'Check hours', icon: 'time-outline', tone: '#ea580c', action: 'hours' },
       { label: 'Route', detail: 'Start route', icon: 'navigate-outline', tone: '#2563eb', action: 'route' },
-      { label: 'Services', detail: 'Open map', icon: 'build-outline', tone: '#7c3aed', action: 'services' },
-      { label: 'Road access', detail: 'Open map', icon: 'map-outline', tone: '#16a34a', action: 'map' },
+      { label: 'Services', detail: 'Open area', icon: 'build-outline', tone: '#7c3aed', action: 'services' },
+      { label: 'Road access', detail: 'Open area', icon: 'map-outline', tone: '#16a34a', action: 'map' },
     ];
   }
   return [
     { label: 'Trails', detail: context.relatedCount ? `${context.relatedCount} nearby` : 'Nearby', icon: 'walk-outline', tone: '#16a34a', action: 'trails' },
-    { label: 'Views', detail: 'Open map', icon: 'image-outline', tone: '#2563eb', action: 'views' },
-    { label: 'Fuel', detail: 'Open map', icon: 'car-sport-outline', tone: '#ea580c', action: 'fuel' },
-    { label: 'Water', detail: 'Open map', icon: 'water-outline', tone: '#0ea5e9', action: 'water' },
+    { label: 'Views', detail: 'Open area', icon: 'image-outline', tone: '#2563eb', action: 'views' },
+    { label: 'Fuel', detail: 'Open area', icon: 'car-sport-outline', tone: '#ea580c', action: 'fuel' },
+    { label: 'Water', detail: 'Open area', icon: 'water-outline', tone: '#0ea5e9', action: 'water' },
     { label: 'Weather', detail: 'Forecast', icon: 'partly-sunny-outline', tone: '#9333ea', action: 'weather' },
   ];
 }

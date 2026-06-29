@@ -319,6 +319,68 @@ function categoryKeysForNestedPlace(place: ExplorePlaceProfile) {
   return keys;
 }
 
+function exploreTabForNestedPlace(place: ExplorePlaceProfile): ExploreDetailTab {
+  const keys = categoryKeysForNestedPlace(place);
+  const text = explorePlaceSearchText(place);
+  if (/\bvisitor centers?|ranger station|information center\b/.test(text)) return 'visitor';
+  if (keys.has('camp') || keys.has('glamping') || keys.has('huts')) return 'stay';
+  if (keys.has('trails') || keys.has('trailheads') || keys.has('climb')) return 'trails';
+  if (keys.has('tours')) return 'do';
+  if (keys.has('views') || keys.has('waterfalls') || keys.has('peaks') || keys.has('springs') || keys.has('water') || keys.has('scenic')) return 'see';
+  return 'summary';
+}
+
+function protectedDestinationTitleForExplorePlace(place: ExplorePlaceProfile) {
+  const text = explorePlaceSearchText(place);
+  const matches = text.matchAll(/\b(national park|national monument|national forest|national recreation area|national seashore|national lakeshore)\b/g);
+  const stopWords = new Set([
+    'wikipedia',
+    'wikimedia',
+    'encyclopedia',
+    'source',
+    'official',
+    'agency',
+    'enrichment',
+    'added',
+    'when',
+    'matching',
+    'available',
+    'near',
+    'around',
+    'in',
+    'and',
+    'the',
+    'open',
+    'linked',
+    'for',
+    'current',
+    'access',
+    'pricing',
+    'reservation',
+    'rules',
+    'availability',
+    'is',
+    'a',
+    'an',
+  ]);
+  for (const match of matches) {
+    const words = text.slice(0, match.index).trim().split(/\s+/).slice(-6);
+    while (words.length && stopWords.has(words[0])) words.shift();
+    const root = words.filter(word => !stopWords.has(word)).join(' ').trim();
+    if (!root || root.length < 3 || root.split(' ').length > 5) continue;
+    return `${titleCaseExploreDestination(root)} ${titleCaseExploreDestination(match[1])}`;
+  }
+  return '';
+}
+
+function titleCaseExploreDestination(value: string) {
+  return value
+    .split(/\s+/)
+    .filter(Boolean)
+    .map(word => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
+}
+
 function buildExploreHubMeta(places: ExplorePlaceProfile[]) {
   const hubs = places.filter(isDestinationExploreHub);
   const parentByChildId = new Map<string, string>();
@@ -446,8 +508,8 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
   const title = String(item.title || 'Explore stop').trim();
   const category = item.category || 'Explore';
   const region = item.region || '';
-  const hook = item.hook || item.short_description || `${title} is a mapped Explore stop.`;
-  const short = item.short_description || item.hook || 'Open the card for source details, nearby stops, weather, and map context.';
+  const hook = item.hook || item.short_description || `Plan around ${title}.`;
+  const short = item.short_description || item.hook || 'Check nearby stays, trails, weather, and directions.';
   return {
     id: item.id,
     category: item.v3_category || item.category,
@@ -495,8 +557,8 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
       why_it_matters: short,
       what_to_know: 'Check current access, fees, closures, permits, and local rules before you go.',
       best_time_to_stop: 'Check season and current conditions.',
-      access_notes: 'Open the source link and map before committing to the stop.',
-      nearby_context: 'Use nearby camps, trails, services, weather, and map context from this stop.',
+      access_notes: 'Check the source link before you go.',
+      nearby_context: 'Compare nearby camps, trails, services, and weather.',
     },
     audio_script: short,
     wiki_extract: '',
@@ -666,10 +728,12 @@ function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
 }
 
 function shouldUseExploreCampgroundEndpoint(place: ExplorePlaceProfile) {
+  if (place.id.startsWith('explore:hub:')) return false;
   return !place.id.startsWith('explore:waterfalls:') && !place.id.startsWith('explore:trails:');
 }
 
 function shouldUseExploreDetailEndpoint(place: ExplorePlaceProfile) {
+  if (place.id.startsWith('explore:hub:')) return false;
   return !place.id.startsWith('explore:waterfalls:') && place.id !== 'explore:trails:yosemite-trails';
 }
 
@@ -1515,10 +1579,10 @@ export default function GuideScreen() {
         await storage.set(cacheKey, JSON.stringify({ area, fetched_at: Date.now() })).catch(() => {});
         return applyHydratedTrailArea(place.id, place, area);
       }
-      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'No trail cards found near this stop yet.' }));
+      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'No nearby trails found yet.' }));
       return place;
     } catch {
-      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'Could not load trail cards right now.' }));
+      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'Could not load trails right now.' }));
       return place;
     } finally {
       setExploreTrailAreaLoadingId(current => current === place.id ? null : current);
@@ -1863,7 +1927,45 @@ export default function GuideScreen() {
     }
   }
 
+  async function resolveExploreParentHubForChild(place: ExplorePlaceProfile) {
+    if (!isNestedExploreChildCandidate(place)) return null;
+    const title = protectedDestinationTitleForExplorePlace(place);
+    if (!title) return null;
+    const normalizedTitle = normalizeExploreText(title);
+    const localHub = enrichedExplorePlaces.find(item => (
+      item.id !== place.id
+      && isDestinationExploreHub(item)
+      && normalizeExploreText(item.summary.title) === normalizedTitle
+    ));
+    if (localHub) return localHub;
+    try {
+      const catalog = await api.getExploreCatalogIndex({ q: title, category: 'parks', limit: 8 });
+      const remoteHub = (catalog.places ?? [])
+        .map(exploreIndexItemToProfile)
+        .find(item => isDestinationExploreHub(item) && normalizeExploreText(item.summary.title) === normalizedTitle);
+      if (!remoteHub) return null;
+      setExplorePlaces(prev => prev.some(item => item.id === remoteHub.id) ? prev : [remoteHub, ...prev]);
+      return remoteHub;
+    } catch {
+      return null;
+    }
+  }
+
   async function openExplorePlace(place: ExplorePlaceProfile, initialTab: ExploreDetailTab = 'summary') {
+    const parentHubId = exploreHubMeta.parentByChildId.get(place.id);
+    if (parentHubId && parentHubId !== place.id) {
+      const parentHub = enrichedExplorePlaces.find(item => item.id === parentHubId)
+        ?? explorePlaces.find(item => item.id === parentHubId);
+      if (parentHub) {
+        await openExplorePlace(parentHub, initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab);
+        return;
+      }
+    }
+    const resolvedParentHub = await resolveExploreParentHubForChild(place);
+    if (resolvedParentHub && resolvedParentHub.id !== place.id) {
+      await openExplorePlace(resolvedParentHub, initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab);
+      return;
+    }
     setProfileReadMode(initialTab);
     const local = exploreTrailAreasById[place.id] ?? place;
     setSelectedExplore(local);
@@ -2008,13 +2110,13 @@ export default function GuideScreen() {
       <TrailheadCard style={s.exploreTrailStatusCard}>
         <View style={s.exploreWeatherTop}>
           <View style={{ flex: 1, minWidth: 0 }}>
-            <Text style={s.profileLabel}>TRAIL CARDS</Text>
+            <Text style={s.profileLabel}>TRAILS</Text>
             <Text style={s.exploreWeatherSub}>{place.summary.title}</Text>
           </View>
           {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="trail-sign-outline" size={24} color={C.orange} />}
         </View>
         <Text style={s.exploreWeatherText}>
-          {loading ? 'Loading trails, treks, and glacier cards...' : error}
+          {loading ? 'Loading trails...' : error}
         </Text>
         {loading ? <TrailheadCardSkeleton lines={2} style={s.exploreTrailSkeleton} /> : null}
       </TrailheadCard>

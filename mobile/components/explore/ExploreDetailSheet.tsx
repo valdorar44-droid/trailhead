@@ -1389,10 +1389,12 @@ function SourcePack({
 
 function sourceBodyForPlace(place: ExplorePlaceProfile) {
   const raw = String(place.source_pack?.source_note || '').trim();
-  if (/wiki|source pack|open map|openstreetmap|generated from/i.test(raw)) {
+  const fallback = String(place.attribution || '').trim();
+  const body = raw || fallback;
+  if (/wiki|source pack|open map|openstreetmap|generated from|open the full card/i.test(body)) {
     return 'Check current access, fees, closures, and rules before you go.';
   }
-  return raw || place.attribution || 'Check current access before you go.';
+  return body || 'Check current access before you go.';
 }
 
 function sourceButtonLabelForPlace(place: ExplorePlaceProfile) {

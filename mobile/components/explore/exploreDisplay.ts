@@ -352,9 +352,9 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
     if (/official/i.test(primary)) return primary;
     return `${primary} official`;
   }
-  if (sources.length > 1 || place.source_pack?.sources?.length) return 'Multiple sources';
   if (quality.includes('wiki') || /wikipedia/i.test(facts.source_title || primary)) return 'Curated details';
   if (primary) return primary;
+  if (sources.length > 1 || place.source_pack?.sources?.length) return 'Multiple sources';
   return 'Map details';
 }
 

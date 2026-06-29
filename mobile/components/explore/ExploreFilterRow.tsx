@@ -25,7 +25,7 @@ export function ExploreFilterRow({
   const C = useTheme();
   const compactCount = countLabel ?? formatShownCount(shownCount);
   const compactSort = sortLabel === 'Best match' ? 'Best' : sortLabel;
-  const countAccessibilityLabel = shownCount <= 0 ? compactCount : `${shownCount} places shown`;
+  const countAccessibilityLabel = shownCount <= 0 ? compactCount : `${shownCount} ${shownCount === 1 ? 'place' : 'places'} shown`;
   const items = [
     { icon: 'list-outline', label: compactCount, accessibilityLabel: countAccessibilityLabel, onPress: onCountPress, flex: 0.95 },
     { icon: 'shield-checkmark-outline', label: sourceLabel, accessibilityLabel: 'Sources', onPress: onSourcePress, flex: 1.3 },

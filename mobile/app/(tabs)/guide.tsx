@@ -46,7 +46,7 @@ import {
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_index_v3';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
-const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v1:';
+const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v2:';
 const EXPLORE_EXPERIENCES_CACHE_PREFIX = 'trailhead_explore_experiences_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
@@ -843,14 +843,11 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
     .find(Boolean);
   const imageUrl = place.summary.image_url || area.summary.image_url || firstTrailPhoto || place.summary.thumbnail_url || area.summary.thumbnail_url || '';
   const imageCredit = place.summary.image_credit || area.summary.image_credit || trails.find((trail: ExploreTrailCard) => trail.image_credit)?.image_credit || '';
-  const preserveHubIdentity = isDestinationExploreHub(place);
   return {
     ...place,
-    category: preserveHubIdentity ? place.category : area.category || place.category,
-    subcategories: preserveHubIdentity
-      ? (place.subcategories ?? [])
-      : Array.from(new Set([...(place.subcategories ?? []), ...(area.subcategories ?? [])])),
-    quality: area.quality || place.quality,
+    category: place.category || area.category,
+    subcategories: Array.from(new Set([...(place.subcategories ?? []), ...(area.subcategories ?? [])])),
+    quality: place.quality || area.quality,
     quality_score: Math.max(Number((place as any).quality_score || 0), Number((area as any).quality_score || 0)),
     search_aliases: Array.from(new Set([...((place as any).search_aliases ?? []), ...((area as any).search_aliases ?? [])])),
     trails,
@@ -860,19 +857,19 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
       ...(place.card || {}),
       title: place.card?.title || place.summary.title || area.card?.title,
       region: place.card?.region || area.card?.region,
-      headline: preserveHubIdentity ? place.card?.headline || area.card?.headline : area.card?.headline || place.card?.headline,
-      summary: preserveHubIdentity ? place.card?.summary || area.card?.summary : area.card?.summary || place.card?.summary,
-      highlight: preserveHubIdentity ? place.card?.highlight || area.card?.highlight : area.card?.highlight || place.card?.highlight,
+      headline: place.card?.headline || area.card?.headline,
+      summary: place.card?.summary || area.card?.summary,
+      highlight: place.card?.highlight || area.card?.highlight,
       facts: place.card?.facts || area.card?.facts,
     },
     summary: {
       ...place.summary,
-      category: preserveHubIdentity ? place.summary.category : area.summary.category || place.summary.category,
-      explore_group: preserveHubIdentity ? place.summary.explore_group : area.summary.explore_group || place.summary.explore_group,
+      category: place.summary.category || area.summary.category,
+      explore_group: place.summary.explore_group || area.summary.explore_group,
       region: place.summary.region || area.summary.region,
       tags: Array.from(new Set([...(place.summary.tags ?? []), ...(area.summary.tags ?? [])])),
-      hook: preserveHubIdentity ? place.summary.hook || area.summary.hook : area.summary.hook || place.summary.hook,
-      short_description: preserveHubIdentity ? place.summary.short_description || area.summary.short_description : area.summary.short_description || place.summary.short_description,
+      hook: place.summary.hook || area.summary.hook,
+      short_description: place.summary.short_description || area.summary.short_description,
       image_url: imageUrl,
       thumbnail_url: imageUrl || place.summary.thumbnail_url,
       image_credit: imageCredit,
@@ -882,15 +879,21 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
     },
     profile: {
       ...place.profile,
-      why_it_matters: preserveHubIdentity ? place.profile.why_it_matters || area.profile?.why_it_matters : area.profile?.why_it_matters || place.profile.why_it_matters,
-      what_to_know: preserveHubIdentity ? place.profile.what_to_know || area.profile?.what_to_know : area.profile?.what_to_know || place.profile.what_to_know,
-      best_time_to_stop: preserveHubIdentity ? place.profile.best_time_to_stop || area.profile?.best_time_to_stop : area.profile?.best_time_to_stop || place.profile.best_time_to_stop,
-      access_notes: preserveHubIdentity ? place.profile.access_notes || area.profile?.access_notes : area.profile?.access_notes || place.profile.access_notes,
-      nearby_context: preserveHubIdentity ? place.profile.nearby_context || area.profile?.nearby_context : area.profile?.nearby_context || place.profile.nearby_context,
+      why_it_matters: place.profile.why_it_matters || area.profile?.why_it_matters,
+      what_to_know: place.profile.what_to_know || area.profile?.what_to_know,
+      best_time_to_stop: place.profile.best_time_to_stop || area.profile?.best_time_to_stop,
+      access_notes: place.profile.access_notes || area.profile?.access_notes,
+      nearby_context: place.profile.nearby_context || area.profile?.nearby_context,
     },
     source_pack: {
-      ...(place.source_pack || {}),
       ...(area.source_pack || {}),
+      ...(place.source_pack || {}),
+      primary: place.source_pack?.primary || area.source_pack?.primary,
+      quality: place.source_pack?.quality || area.source_pack?.quality,
+      source_note: place.source_pack?.source_note || area.source_pack?.source_note,
+      official_url: place.source_pack?.official_url || area.source_pack?.official_url,
+      booking_url: place.source_pack?.booking_url || area.source_pack?.booking_url,
+      sources: place.source_pack?.sources || area.source_pack?.sources,
       photos: [
         ...((place.source_pack?.photos ?? []) as any[]),
         ...((area.source_pack?.photos ?? []) as any[]),
@@ -909,10 +912,10 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
       ],
     },
     facts: {
-      ...place.facts,
       ...area.facts,
+      ...place.facts,
     },
-    attribution: area.attribution || place.attribution,
+    attribution: place.attribution || area.attribution,
   };
 }
 
@@ -1137,6 +1140,10 @@ function isLocalCuratedExplorePlace(place: ExplorePlaceProfile) {
   return place.id === 'place:nps:yose'
     || place.id === 'explore:trails:yosemite-trails'
     || place.id.startsWith('explore:waterfalls:');
+}
+
+function exploreCountLabel(count: number, singular: string, plural: string) {
+  return `${count.toLocaleString()} ${count === 1 ? singular : plural}`;
 }
 
 function shouldUseExploreCampgroundEndpoint(place: ExplorePlaceProfile) {
@@ -2059,7 +2066,7 @@ function GuideScreenContent() {
   }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
   const exploreHomeCountLabel = useMemo(() => {
     if (showExperienceSearch && rankedExplore.length <= 0) {
-      if (exploreSearchExperiences.length > 0) return `${exploreSearchExperiences.length.toLocaleString()} tours`;
+      if (exploreSearchExperiences.length > 0) return exploreCountLabel(exploreSearchExperiences.length, 'tour', 'tours');
       if (exploreSearchExperienceLoading) return experienceDestinationLabel ? 'Checking tours' : 'Search first';
       if (exploreSearchExperienceError) return /unavailable|failed/i.test(exploreSearchExperienceError) ? 'Unavailable' : 'No tours';
       return experienceDestinationLabel ? 'No tours' : 'Search first';
@@ -2071,12 +2078,12 @@ function GuideScreenContent() {
         if (exploreTripNeedsRoute) return 'No active trip';
         return 'No matches';
       }
-      return `${rankedExplore.length.toLocaleString()} places`;
+      return exploreCountLabel(rankedExplore.length, 'place', 'places');
     }
     const count = (featuredLead ? 1 : 0)
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
-    return `${count.toLocaleString()} featured picks`;
+    return exploreCountLabel(count, 'featured pick', 'featured picks');
   }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchExperienceError, exploreSearchExperienceLoading, exploreSearchExperiences.length, exploreTripNeedsRoute, experienceDestinationLabel, featuredLead, featuredSections, rankedExplore.length, showExperienceSearch, showExploreHome, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];

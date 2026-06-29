@@ -299,6 +299,25 @@ function isNestedExploreChildCandidate(place: ExplorePlaceProfile) {
   return /\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodges?|lodging|trails?|trailheads?|visitor centers?|parking|tours?|activities|things to do|places to stay|base camp|trek)\b/.test(text);
 }
 
+function isLegacyExploreAreaWrapper(place: ExplorePlaceProfile) {
+  if (!place.id.startsWith('explore:')) return false;
+  const title = normalizeExploreText(place.summary.title || '');
+  const group = normalizeExploreText(place.summary.explore_group || place.category || place.summary.category || '');
+  if (group === 'camping' && /\b(campgrounds?|campsites?|camping)\b/.test(title)) return true;
+  if (group === 'glamping' && /\b(glamping|basecamps?|stays?)\b/.test(title)) return true;
+  if (group === 'huts lodging' && /\b(lodging|stays?|huts?|cabins?|camps?)\b/.test(title)) return true;
+  if (group === 'trails' && /\b(trails?|hikes?|treks?)\b/.test(title)) return true;
+  return false;
+}
+
+function shouldHideExploreHomeWrapper(place: ExplorePlaceProfile) {
+  if (isDestinationExploreHub(place)) return false;
+  if ((place as any).hidden_from_featured) return true;
+  const role = String((place as any).canonical_role || '').toLowerCase();
+  if (role === 'child') return true;
+  return isLegacyExploreAreaWrapper(place);
+}
+
 function exploreHubMatchDistanceOk(child: ExplorePlaceProfile, hub: ExplorePlaceProfile) {
   if (child.summary.lat == null || child.summary.lng == null || hub.summary.lat == null || hub.summary.lng == null) return true;
   return distMi(
@@ -369,6 +388,23 @@ function exploreTabForNestedPlace(place: ExplorePlaceProfile): ExploreDetailTab 
   if (keys.has('trails') || keys.has('trailheads') || keys.has('climb')) return 'trails';
   if (keys.has('tours')) return 'do';
   if (keys.has('views') || keys.has('waterfalls') || keys.has('peaks') || keys.has('springs') || keys.has('water') || keys.has('scenic')) return 'see';
+  return 'summary';
+}
+
+function exploreTabForBrowseIntent(query: string, category: ExploreCategoryKey): ExploreDetailTab {
+  const text = normalizeExploreText(`${query} ${category}`);
+  if (/\b(camp|campground|campgrounds|camping|glamping|hut|huts|cabin|cabins|lodging|stay|stays)\b/.test(text)) {
+    return 'stay';
+  }
+  if (/\b(trail|trails|trailhead|trailheads|hike|hiking|trek|trekking|climb|climbing)\b/.test(text)) {
+    return 'trails';
+  }
+  if (/\b(tour|tours|activity|activities|ticket|tickets|guided|things to do)\b/.test(text)) {
+    return 'do';
+  }
+  if (/\b(view|views|waterfall|waterfalls|scenic|spring|springs|water|mountain|mountains)\b/.test(text)) {
+    return 'see';
+  }
   return 'summary';
 }
 
@@ -508,10 +544,10 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
       ...(place.card || {}),
       title: place.card?.title || place.summary.title || area.card?.title,
       region: place.card?.region || area.card?.region,
-      headline: area.card?.headline || place.card?.headline,
-      summary: area.card?.summary || place.card?.summary,
-      highlight: area.card?.highlight || place.card?.highlight,
-      facts: area.card?.facts || place.card?.facts,
+      headline: preserveHubIdentity ? place.card?.headline || area.card?.headline : area.card?.headline || place.card?.headline,
+      summary: preserveHubIdentity ? place.card?.summary || area.card?.summary : area.card?.summary || place.card?.summary,
+      highlight: preserveHubIdentity ? place.card?.highlight || area.card?.highlight : area.card?.highlight || place.card?.highlight,
+      facts: place.card?.facts || area.card?.facts,
     },
     summary: {
       ...place.summary,
@@ -519,8 +555,8 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
       explore_group: preserveHubIdentity ? place.summary.explore_group : area.summary.explore_group || place.summary.explore_group,
       region: place.summary.region || area.summary.region,
       tags: Array.from(new Set([...(place.summary.tags ?? []), ...(area.summary.tags ?? [])])),
-      hook: area.summary.hook || place.summary.hook,
-      short_description: area.summary.short_description || place.summary.short_description,
+      hook: preserveHubIdentity ? place.summary.hook || area.summary.hook : area.summary.hook || place.summary.hook,
+      short_description: preserveHubIdentity ? place.summary.short_description || area.summary.short_description : area.summary.short_description || place.summary.short_description,
       image_url: imageUrl,
       thumbnail_url: imageUrl || place.summary.thumbnail_url,
       image_credit: imageCredit,
@@ -530,11 +566,11 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
     },
     profile: {
       ...place.profile,
-      why_it_matters: area.profile?.why_it_matters || place.profile.why_it_matters,
-      what_to_know: area.profile?.what_to_know || place.profile.what_to_know,
-      best_time_to_stop: area.profile?.best_time_to_stop || place.profile.best_time_to_stop,
-      access_notes: area.profile?.access_notes || place.profile.access_notes,
-      nearby_context: area.profile?.nearby_context || place.profile.nearby_context,
+      why_it_matters: preserveHubIdentity ? place.profile.why_it_matters || area.profile?.why_it_matters : area.profile?.why_it_matters || place.profile.why_it_matters,
+      what_to_know: preserveHubIdentity ? place.profile.what_to_know || area.profile?.what_to_know : area.profile?.what_to_know || place.profile.what_to_know,
+      best_time_to_stop: preserveHubIdentity ? place.profile.best_time_to_stop || area.profile?.best_time_to_stop : area.profile?.best_time_to_stop || place.profile.best_time_to_stop,
+      access_notes: preserveHubIdentity ? place.profile.access_notes || area.profile?.access_notes : area.profile?.access_notes || place.profile.access_notes,
+      nearby_context: preserveHubIdentity ? place.profile.nearby_context || area.profile?.nearby_context : area.profile?.nearby_context || place.profile.nearby_context,
     },
     source_pack: {
       ...(place.source_pack || {}),
@@ -577,6 +613,7 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
     parent_hub_id: item.parent_hub_id || '',
     parent_hub_title: item.parent_hub_title || '',
     module_target: item.module_target || '',
+    hidden_from_featured: Boolean((item as any).hidden_from_featured),
     subcategories: item.subcategories ?? [],
     sources: item.sources ?? [],
     source_ids: item.source_ids ?? [],
@@ -1401,6 +1438,7 @@ export default function GuideScreen() {
     const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
     const filtered = places.filter(({ place }) => {
       if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
+      if (!exploreSavedOnly && !placeQuery && shouldHideExploreHomeWrapper(place)) return false;
       if (!exploreSavedOnly && exploreHubMeta.parentByChildId.has(place.id)) return false;
       const categoryOk = exploreCategoryMatchesWithHub(place, exploreCategory, exploreHubMeta.categoryKeysByHubId);
       if (!categoryOk) return false;
@@ -2213,7 +2251,7 @@ export default function GuideScreen() {
         }}
         saved={isExploreSaved(place)}
         canRoute={place.summary.lat != null && place.summary.lng != null}
-        onOpen={() => openExplorePlace(place)}
+        onOpen={() => openExplorePlace(place, exploreTabForBrowseIntent(exploreQuery, exploreCategory))}
         onArea={() => showExploreOnMap(place)}
         onRoute={() => routeExplore(place)}
         onNearby={() => openExplorePlace(place, 'nearby')}

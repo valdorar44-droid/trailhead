@@ -937,6 +937,7 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         "parent_hub_id": place.get("parent_hub_id") or "",
         "parent_hub_title": place.get("parent_hub_title") or "",
         "module_target": place.get("module_target") or "",
+        "hidden_from_featured": bool(place.get("hidden_from_featured")),
         "subcategories": place.get("subcategories") or [],
         "sources": place.get("sources") or [],
         "source_ids": place.get("source_ids") or [],
@@ -1032,6 +1033,112 @@ def _explore_title_merge_key(place: dict) -> str:
     title = re.sub(r"&", " and ", title)
     title = re.sub(r"[^a-z0-9]+", " ", title)
     return re.sub(r"\s+", " ", title).strip()
+
+
+def _explore_legacy_wrapper_target(place: dict) -> str:
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    title = _explore_title_merge_key(place)
+    group = str(summary.get("explore_group") or "").lower().strip()
+    place_id = str(place.get("id") or "").lower()
+    if not place_id.startswith("explore:"):
+        return ""
+    if group == "camping" and re.search(r"\b(campgrounds?|campsites?|camping)\b", title):
+        return "stay"
+    if group == "glamping" and re.search(r"\b(glamping|basecamps?|stays?)\b", title):
+        return "stay"
+    if group == "huts_lodging" and re.search(r"\b(lodging|stays?|huts?|cabins?|camps?)\b", title):
+        return "stay"
+    if group == "trails" and re.search(r"\b(trails?|hikes?|treks?)\b", title):
+        return "trails"
+    return ""
+
+
+def _explore_legacy_wrapper_root(place: dict) -> str:
+    title = _explore_title_merge_key(place)
+    title = re.sub(
+        r"\b(campgrounds?|campsites?|camping|glamping|basecamps?|stays?|lodging|huts?|cabins?|camps?|corridor trails?|canyon trails?|high country trails?|coastal trails?|trails?|hikes?|treks?)\b.*$",
+        " ",
+        title,
+    )
+    title = re.sub(r"\b(u s|usa|united states|national park|national monument|national forest|national preserve|state park)\b", " ", title)
+    return re.sub(r"\s+", " ", title).strip()
+
+
+def _explore_legacy_wrapper_parent(place: dict, hubs: list[dict]) -> dict | None:
+    root = _explore_legacy_wrapper_root(place)
+    if len(root) < 3:
+        return None
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    state = str(summary.get("state") or "").strip().lower()
+    source_url = str(summary.get("source_url") or (place.get("facts") or {}).get("source_url") or "").lower()
+    nps_code_match = re.search(r"nps\.gov/([a-z0-9]{3,5})(?:/|$)", source_url)
+    nps_code = nps_code_match.group(1) if nps_code_match else ""
+    best: tuple[int, dict] | None = None
+    for hub in hubs:
+        hub_summary = hub.get("summary") if isinstance(hub.get("summary"), dict) else {}
+        hub_title = _explore_title_merge_key(hub)
+        if not hub_title:
+            continue
+        score = 0
+        if hub_title.startswith(f"{root} ") or hub_title == root or root in hub_title:
+            score += 80
+        if state and state in str(hub_summary.get("state") or hub_summary.get("region") or "").lower():
+            score += 12
+        if nps_code:
+            hub_text = json.dumps({
+                "id": hub.get("id"),
+                "source_pack": hub.get("source_pack"),
+                "sources": hub.get("sources"),
+                "facts": hub.get("facts"),
+                "summary": hub_summary,
+            }).lower()
+            if f"nps.gov/{nps_code}" in hub_text or f"place:nps:{nps_code}" in hub_text:
+                score += 45
+        if score <= 0:
+            continue
+        if not best or score > best[0]:
+            best = (score, hub)
+    return best[1] if best else None
+
+
+def _apply_explore_legacy_wrapper_metadata(places: list[dict]) -> list[dict]:
+    hubs = [place for place in places if isinstance(place, dict) and _explore_is_destination_hub(place)]
+    by_id = {str(place.get("id") or ""): place for place in places if isinstance(place, dict)}
+    for place in places:
+        if not isinstance(place, dict):
+            continue
+        target = _explore_legacy_wrapper_target(place)
+        if not target:
+            continue
+        summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+        title = str(summary.get("title") or "").strip()
+        parent = _explore_legacy_wrapper_parent(place, hubs)
+        place["canonical_role"] = place.get("canonical_role") or "child"
+        place["module_target"] = place.get("module_target") or target
+        place["hidden_from_featured"] = True
+        if parent:
+            parent_summary = parent.get("summary") if isinstance(parent.get("summary"), dict) else {}
+            place["parent_hub_id"] = place.get("parent_hub_id") or str(parent.get("id") or "")
+            place["parent_hub_title"] = place.get("parent_hub_title") or str(parent_summary.get("title") or "")
+            parent_blob = " ".join(str(part or "") for part in [
+                parent.get("search_blob"),
+                title,
+                summary.get("category"),
+                summary.get("explore_group"),
+                summary.get("hook"),
+                summary.get("short_description"),
+                "where to stay campgrounds lodging trails",
+            ]).strip()
+            if parent_blob:
+                parent["search_blob"] = parent_blob
+                if parent.get("id") in by_id:
+                    by_id[str(parent.get("id"))]["search_blob"] = parent_blob
+        aliases = list(place.get("search_aliases") or [])
+        for alias in [title, "where to stay", "campgrounds", "lodging", "trails"]:
+            if alias and alias not in aliases:
+                aliases.append(alias)
+        place["search_aliases"] = aliases
+    return places
 
 
 def _explore_richer_text(current: object, candidate: object) -> object:
@@ -1138,6 +1245,7 @@ def _load_explore_catalog() -> dict:
                     if title_key:
                         title_to_index[title_key] = len(places) - 1
                     seen.add(place_id)
+            places = _apply_explore_legacy_wrapper_metadata(places)
             merged = {
                 **catalog,
                 "catalog_id": "explore-us-top-v1-plus-real-data-v3",
@@ -1530,6 +1638,7 @@ def _explore_place_index_item(place: dict) -> dict:
         "parent_hub_id": place.get("parent_hub_id") or "",
         "parent_hub_title": place.get("parent_hub_title") or "",
         "module_target": place.get("module_target") or "",
+        "hidden_from_featured": bool(place.get("hidden_from_featured")),
         "subcategories": place.get("subcategories") or [],
         "sources": place.get("sources") or [],
         "source_ids": place.get("source_ids") or [],

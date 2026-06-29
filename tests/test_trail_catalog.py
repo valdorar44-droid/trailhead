@@ -137,6 +137,68 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(item["parent_hub_title"], "Yosemite National Park")
         self.assertEqual(item["module_target"], "see")
 
+    def test_legacy_explore_area_wrappers_resolve_to_parent_hubs(self):
+        old_catalog = server.EXPLORE_CATALOG
+        old_catalog_v3 = server.EXPLORE_CATALOG_V3
+        old_overrides = server.get_explore_story_overrides
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                server.EXPLORE_CATALOG = tmp_path / "explore_catalog_v1.json"
+                server.EXPLORE_CATALOG_V3 = tmp_path / "explore_catalog_v3.json"
+                server.get_explore_story_overrides = lambda: {}
+                server.EXPLORE_CATALOG.write_text(json.dumps({
+                    "schema_version": 1,
+                    "catalog_id": "test-v1",
+                    "source": "test",
+                    "places": [
+                        {
+                            "id": "explore:camping:glacier-campgrounds",
+                            "summary": {
+                                "title": "Glacier Campgrounds",
+                                "category": "Camping",
+                                "explore_group": "camping",
+                                "state": "MT",
+                                "rank": 1,
+                                "source_url": "https://www.nps.gov/glac/index.htm",
+                            },
+                            "profile": {"summary": "Legacy campground wrapper."},
+                            "source_pack": {"primary": "Wikipedia"},
+                        },
+                        {
+                            "id": "explore:parks:glacier-national-park",
+                            "summary": {
+                                "title": "Glacier National Park",
+                                "category": "Parks",
+                                "explore_group": "parks",
+                                "state": "MT",
+                                "rank": 2,
+                            },
+                            "profile": {"summary": "Official park hub."},
+                            "source_pack": {"primary": "National Park Service"},
+                        },
+                    ],
+                }))
+                server.EXPLORE_CATALOG_V3.write_text(json.dumps({"schema_version": 3, "places": []}))
+
+                catalog = server._load_explore_catalog()
+
+            wrapper = next(place for place in catalog["places"] if place["id"] == "explore:camping:glacier-campgrounds")
+            hub = next(place for place in catalog["places"] if place["id"] == "explore:parks:glacier-national-park")
+            index_item = server._explore_place_index_item(wrapper)
+
+            self.assertEqual(wrapper["canonical_role"], "child")
+            self.assertEqual(wrapper["parent_hub_id"], "explore:parks:glacier-national-park")
+            self.assertEqual(wrapper["parent_hub_title"], "Glacier National Park")
+            self.assertEqual(wrapper["module_target"], "stay")
+            self.assertTrue(wrapper["hidden_from_featured"])
+            self.assertTrue(index_item["hidden_from_featured"])
+            self.assertIn("Glacier Campgrounds", hub["search_blob"])
+        finally:
+            server.EXPLORE_CATALOG = old_catalog
+            server.EXPLORE_CATALOG_V3 = old_catalog_v3
+            server.get_explore_story_overrides = old_overrides
+
     def test_nps_child_promotion_adds_canonical_hub_metadata(self):
         place = promote_nps_children.place_from_child(
             {

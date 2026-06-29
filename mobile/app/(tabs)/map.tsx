@@ -9497,7 +9497,7 @@ function MapScreen() {
             loading: !retryingLive,
             title: actionTitle,
             subtitle: legLabel || 'Checking tour availability',
-            message: retryingLive ? 'Tours are still refreshing. Tap Tours again in a moment.' : (response.live_message || 'Tours are refreshing. Checking again.'),
+            message: retryingLive ? 'Still checking tour availability. Try again in a moment.' : 'Checking tour availability.',
             items: [],
           });
           if (!retryingLive) {

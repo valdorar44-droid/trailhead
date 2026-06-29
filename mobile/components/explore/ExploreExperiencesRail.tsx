@@ -9,22 +9,24 @@ type Props = {
   experiences: BookableExperience[];
   loading?: boolean;
   error?: string;
+  emptySubtitle?: string;
   mediaUrl: (url?: string | null) => string;
   onSave?: (experience: BookableExperience) => void;
   onShowArea?: (experience: BookableExperience) => void;
 };
 
-export function ExploreExperiencesRail({ experiences, loading, error, mediaUrl, onSave, onShowArea }: Props) {
+export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, mediaUrl, onSave, onShowArea }: Props) {
   const C = useTheme();
   if (!loading && !error && !experiences.length) return null;
+  const subtitle = experiences.length
+    ? `${experiences.length} bookable option${experiences.length === 1 ? '' : 's'} nearby`
+    : emptySubtitle || (loading ? 'Checking current options' : 'Search a destination to compare options');
   return (
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.top}>
         <View style={{ flex: 1, minWidth: 0 }}>
           <Text style={[styles.label, { color: C.orange }]}>TOURS & ACTIVITIES</Text>
-          <Text style={[styles.sub, { color: C.text3 }]}>
-            {experiences.length ? `${experiences.length} bookable option${experiences.length === 1 ? '' : 's'} nearby` : 'Search a destination to compare options'}
-          </Text>
+          <Text style={[styles.sub, { color: C.text3 }]}>{subtitle}</Text>
         </View>
         {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="ticket-outline" size={23} color={C.orange} />}
       </View>

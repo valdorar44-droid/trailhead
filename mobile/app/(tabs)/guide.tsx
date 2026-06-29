@@ -203,7 +203,11 @@ function experienceSearchMessage(res: ExploreExperiencesResponse, areaName: stri
   const status = String(res.live_status || '').toLowerCase();
   const message = String(res.live_message || '').trim();
   if (status === 'provider_error' || status === 'disabled') return 'Tours unavailable right now.';
-  if (status === 'processing') return message || 'Tours are still loading. Try again in a moment.';
+  if (status === 'processing') {
+    return areaName === 'this area'
+      ? 'Checking tour availability for this area.'
+      : `Checking tour availability near ${areaName}.`;
+  }
   return message || `No bookable tours found near ${areaName} yet.`;
 }
 
@@ -1769,6 +1773,7 @@ function GuideScreenContent() {
   const exploreHubMeta = useMemo(() => buildExploreHubMeta(enrichedExplorePlaces), [enrichedExplorePlaces]);
   const heroHeight = Math.max(480, Math.min(560, Math.round(windowHeight * 0.58)));
   const hasExploreQuery = exploreQuery.trim().length > 0;
+  const experienceDestinationLabel = placeQueryFromExploreQuery(exploreQuery);
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
   const exploreNearbyNeedsLocation = exploreMode === 'nearby' && !userLoc;
@@ -2031,7 +2036,12 @@ function GuideScreenContent() {
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
   const exploreHomeCountLabel = useMemo(() => {
-    if (showExperienceSearch && rankedExplore.length <= 0) return 'Search a destination';
+    if (showExperienceSearch && rankedExplore.length <= 0) {
+      if (exploreSearchExperiences.length > 0) return `${exploreSearchExperiences.length.toLocaleString()} tours`;
+      if (exploreSearchExperienceLoading) return experienceDestinationLabel ? 'Checking tours' : 'Search first';
+      if (exploreSearchExperienceError) return /unavailable|failed/i.test(exploreSearchExperienceError) ? 'Unavailable' : 'No tours';
+      return experienceDestinationLabel ? 'No tours' : 'Search first';
+    }
     if (!showExploreHome) {
       if (rankedExplore.length <= 0) {
         if (exploreSavedOnly) return 'No saved places';
@@ -2045,7 +2055,7 @@ function GuideScreenContent() {
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
     return `${count.toLocaleString()} featured picks`;
-  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreTripNeedsRoute, featuredLead, featuredSections, rankedExplore.length, showExperienceSearch, showExploreHome, trendingExplore.length]);
+  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchExperienceError, exploreSearchExperienceLoading, exploreSearchExperiences.length, exploreTripNeedsRoute, experienceDestinationLabel, featuredLead, featuredSections, rankedExplore.length, showExperienceSearch, showExploreHome, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -2811,6 +2821,7 @@ function GuideScreenContent() {
         experiences={experiences}
         loading={loading}
         error={error}
+        emptySubtitle={`Near ${place.summary.title}`}
         mediaUrl={mediaUrl}
         onSave={saveExperienceToPlanner}
         onShowArea={showExperienceOnMap}
@@ -2933,7 +2944,7 @@ function GuideScreenContent() {
               savedOnly={exploreSavedOnly}
               hasQuery={hasExploreQuery}
               shownCount={rankedExplore.length}
-              countLabel={exploreNearbyNeedsLocation ? 'Location needed' : undefined}
+              countLabel={showExperienceSearch ? exploreHomeCountLabel : exploreNearbyNeedsLocation ? 'Location needed' : undefined}
               sortMode={exploreSortMode}
               onModeChange={mode => {
                 setExploreSavedOnly(false);
@@ -2952,6 +2963,13 @@ function GuideScreenContent() {
                 experiences={exploreSearchExperiences}
                 loading={exploreSearchExperienceLoading}
                 error={exploreSearchExperienceError}
+                emptySubtitle={
+                  experienceDestinationLabel
+                    ? exploreSearchExperienceLoading
+                      ? `Checking options near ${experienceDestinationLabel}`
+                      : `Near ${experienceDestinationLabel}`
+                    : 'Search a destination to compare options'
+                }
                 mediaUrl={mediaUrl}
                 onSave={saveExperienceToPlanner}
                 onShowArea={showExperienceOnMap}

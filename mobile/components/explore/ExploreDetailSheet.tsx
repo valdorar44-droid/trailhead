@@ -14,6 +14,7 @@ import {
   getExploreIcon,
   getExploreSourceRows,
   getExploreTrustBadge,
+  cleanSourcePublisherLabel,
   normalizeExploreCopyBlock,
   sentenceAwarePreview,
   sentenceAwarePreviewText,
@@ -1397,7 +1398,7 @@ function sourceButtonLabelForPlace(place: ExplorePlaceProfile) {
     .replace(/\s*;\s*$/g, '')
     .trim();
   if (!raw || /wikidata|wikimedia|wikipedia|not available|open map|openstreetmap/i.test(raw)) return 'Source link';
-  return raw;
+  return cleanSourcePublisherLabel(raw);
 }
 
 function sourcePublisherLabel(primary: string) {

@@ -171,7 +171,7 @@ function isOpenKnowledgePublisher(value?: string | null) {
   return /\b(wikidata|wikipedia|wikimedia|commons)\b/i.test(String(value || ''));
 }
 
-function cleanSourcePublisherLabel(value?: string | null) {
+export function cleanSourcePublisherLabel(value?: string | null) {
   const clean = String(value || '').trim();
   if (!clean) return '';
   return clean.replace(/\b(blm|nps|usfs|usgs|nws)\b/gi, match => match.toUpperCase());
@@ -445,7 +445,7 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   if (photoCredit) {
     rows.push({
       label: 'Photo',
-      value: photoCredit,
+      value: cleanSourcePublisherLabel(photoCredit),
       icon: 'image-outline',
       tone: '#0f766e',
     });

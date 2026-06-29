@@ -2238,6 +2238,7 @@ function GuideScreenContent() {
       if (url) Linking.openURL(url).catch(() => {});
       return;
     }
+    const mapCategory = getExploreCategoryKey(place);
     const photos = [
       ...(place.summary.image_url ? [{ url: mediaUrl(place.summary.image_url), source: place.attribution || place.source_pack?.primary }] : []),
       ...(place.summary.thumbnail_url ? [{ url: mediaUrl(place.summary.thumbnail_url), source: place.attribution || place.source_pack?.primary }] : []),
@@ -2256,7 +2257,7 @@ function GuideScreenContent() {
         name: title,
         lat: Number(lat),
         lng: Number(lng),
-        category: place.category || place.subcategories?.[0],
+        category: mapCategory,
         region: place.card?.region,
         summary: place.profile.summary || place.profile.hook || place.summary.short_description || place.summary.hook,
         note: place.summary.short_description || place.summary.hook || 'Explore area',

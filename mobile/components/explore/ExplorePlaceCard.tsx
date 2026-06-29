@@ -13,6 +13,7 @@ import {
   getExploreIcon,
   getExploreQuickFacts,
   normalizeExploreCopyBlock,
+  sentenceAwarePreview,
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
@@ -52,7 +53,7 @@ export function ExplorePlaceCard({
   const facts = getExploreQuickFacts(place, context).slice(0, 2);
   const title = getExploreDisplayTitle(place);
   const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
-  const summary = normalizeExploreCopyBlock(getExploreCardSummary(place));
+  const summary = cardSummaryPreview(getExploreCardSummary(place));
   if (compact) {
     return (
       <TouchableOpacity
@@ -71,7 +72,7 @@ export function ExplorePlaceCard({
           <View style={styles.railShade} />
           <View style={[styles.badge, styles.railBadge]}>
             <Ionicons name={getExploreIcon(place) as any} size={11} color="#fff" />
-            <Text style={styles.badgeText}>{getExploreDisplayCategory(place).toUpperCase()}</Text>
+            <Text style={styles.badgeText}>{getExploreDisplayCategory(place)}</Text>
           </View>
           <TouchableOpacity style={[styles.bookmark, styles.railBookmark]} onPress={onToggleSave} hitSlop={8}>
             <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={18} color="#fff" />
@@ -105,7 +106,7 @@ export function ExplorePlaceCard({
         <View style={styles.imageShade} />
         <View style={styles.badge}>
           <Ionicons name={getExploreIcon(place) as any} size={12} color="#fff" />
-          <Text style={styles.badgeText}>{getExploreDisplayCategory(place).toUpperCase()}</Text>
+          <Text style={styles.badgeText}>{getExploreDisplayCategory(place)}</Text>
         </View>
         <TouchableOpacity style={styles.bookmark} onPress={onToggleSave} hitSlop={8}>
           <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={20} color="#fff" />
@@ -163,6 +164,14 @@ export function ExplorePlaceCard({
 function formatMiles(mi: number) {
   if (!Number.isFinite(mi)) return '';
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
+}
+
+function cardSummaryPreview(value?: string | null) {
+  const clean = normalizeExploreCopyBlock(value);
+  if (!clean) return '';
+  const preview = sentenceAwarePreview(clean, 260).text;
+  if (!/\b(?:St|Mt|Ft)\.$/.test(preview)) return preview;
+  return sentenceAwarePreview(clean, 220).text.replace(/\s+\b(?:St|Mt|Ft)\.$/, '').trim();
 }
 
 const styles = StyleSheet.create({

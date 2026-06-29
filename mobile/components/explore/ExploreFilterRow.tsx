@@ -28,7 +28,7 @@ export function ExploreFilterRow({
   const countAccessibilityLabel = shownCount <= 0 ? compactCount : `${shownCount} ${shownCount === 1 ? 'place' : 'places'} shown`;
   const items = [
     { icon: 'list-outline', label: compactCount, accessibilityLabel: countAccessibilityLabel, onPress: onCountPress, flex: 0.95 },
-    { icon: 'shield-checkmark-outline', label: sourceLabel, accessibilityLabel: 'Sources', onPress: onSourcePress, flex: 1.3 },
+    { icon: 'shield-checkmark-outline', label: sourceLabel, accessibilityLabel: 'Trip-ready details', onPress: onSourcePress, flex: 1.3 },
     { icon: 'filter-outline', label: compactSort, accessibilityLabel: `Sort: ${sortLabel}`, onPress: onSortPress, flex: 0.95 },
   ];
   return (

@@ -25,7 +25,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.top}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.label, { color: C.orange }]}>TOURS & ACTIVITIES</Text>
+          <Text style={[styles.label, { color: C.orange }]}>Tours & Activities</Text>
           <Text style={[styles.sub, { color: C.text3 }]}>{subtitle}</Text>
         </View>
         {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="ticket-outline" size={23} color={C.orange} />}
@@ -53,7 +53,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
                     </View>
                   )}
                   <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{(experience.source_badge || 'Viator').toUpperCase()}</Text>
+                    <Text style={styles.badgeText}>{sourceBadgeLabel(experience.source_badge || 'Viator')}</Text>
                   </View>
                 </View>
                 <View style={styles.body}>
@@ -117,6 +117,14 @@ function money(value: string, currency?: string) {
   const symbol = (currency || 'USD').toUpperCase() === 'USD' ? '$' : `${currency || ''} `;
   if (!Number.isFinite(amount)) return `${symbol}${value}`.trim();
   return `${symbol}${amount.toFixed(amount >= 100 ? 0 : 2)}`;
+}
+
+function sourceBadgeLabel(value: string) {
+  return String(value || 'Viator')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase());
 }
 
 const styles = StyleSheet.create({

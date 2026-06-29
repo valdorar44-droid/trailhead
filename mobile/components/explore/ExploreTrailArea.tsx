@@ -52,7 +52,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
 
       <View style={styles.sectionTop}>
         <View>
-          <Text style={[styles.sectionLabel, { color: C.orange }]}>TRAILS IN THIS AREA</Text>
+          <Text style={[styles.sectionLabel, { color: C.orange }]}>Trails in this area</Text>
           <Text style={[styles.sectionSub, { color: C.text3 }]}>
             {filter === 'all' ? `${trails.length} trails` : `${visibleTrails.length} ${filter}`}
           </Text>
@@ -64,7 +64,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
         >
           <Ionicons name="options-outline" size={16} color={C.text2} />
           <Text style={[styles.filterText, { color: C.text2 }]}>
-            {filter === 'all' ? 'FILTERS' : filter.toUpperCase()}
+            {filter === 'all' ? 'Filters' : titleCaseFilter(filter)}
           </Text>
         </TouchableOpacity>
       </View>
@@ -107,9 +107,9 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
               {selected && (
                 <View style={[styles.detail, { borderTopColor: C.border }]}>
                   <View style={styles.statGrid}>
-                    <TrailStat label="DISTANCE" value={formatMiles(trail.distance_mi)} />
-                    <TrailStat label="GAIN" value={formatGain(trail.elevation_gain_ft) || 'Check'} />
-                    <TrailStat label="TIME" value={trail.typical_time || 'Check'} />
+                    <TrailStat label="Distance" value={formatMiles(trail.distance_mi)} />
+                    <TrailStat label="Gain" value={formatGain(trail.elevation_gain_ft) || 'Check'} />
+                    <TrailStat label="Time" value={trail.typical_time || 'Check'} />
                   </View>
                   <Text style={[styles.description, { color: C.text2 }]}>{trail.description || trail.summary}</Text>
                   {!!photoCredit(trail) && (
@@ -150,6 +150,10 @@ function nextTrailFilter(current: TrailFilter): TrailFilter {
   if (current === 'easy') return 'moderate';
   if (current === 'moderate') return 'hard';
   return 'all';
+}
+
+function titleCaseFilter(filter: TrailFilter) {
+  return filter.replace(/^\w/, char => char.toUpperCase());
 }
 
 function TrailStat({ label, value }: { label: string; value: string }) {

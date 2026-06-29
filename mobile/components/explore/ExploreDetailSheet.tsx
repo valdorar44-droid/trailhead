@@ -14,6 +14,7 @@ import {
   getExploreIcon,
   getExploreSourceRows,
   getExploreTrustBadge,
+  isExploreLocationMismatchCopy,
   cleanSourcePublisherLabel,
   normalizeExploreCopyBlock,
   sentenceAwarePreview,
@@ -37,6 +38,8 @@ type ExploreDetailModuleKey =
   | 'story'
   | 'nearby';
 export type ExploreDetailTab = 'summary' | ExploreDetailModuleKey;
+
+const EMPTY_DETAIL_MESSAGE = 'Check closer to your trip.';
 
 type ExploreDetailModule = {
   key: ExploreDetailModuleKey;
@@ -238,7 +241,7 @@ function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
   if (
     /\bis a managed outdoor area near\b/i.test(clean)
     || /\bCheck official access, fees, closures, permits, weather\b/i.test(clean)
-    || /\bUse it to stage trail time, nearby stays, weather, and map context\b/i.test(clean)
+    || /\bUse it to stage trail time, nearby stays, weather, and (?:map context|area detail)\b/i.test(clean)
     || /\bsource-backed Explore destination\b/i.test(clean)
   ) {
     return replacementForGenericSourcePackCopy(title, item);
@@ -248,6 +251,54 @@ function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
   if (/^(places?|things to do|details?|overview|open map|map)\.?$/i.test(clean)) return '';
   if (/\b(undefined|null|nan)\b/i.test(clean)) return '';
   if (/\b(wikidata|disambiguation|source pack|search blob)\b/i.test(clean)) return '';
+  return clean;
+}
+
+function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePlaceProfile) {
+  const title = getExploreDisplayTitle(place);
+  let clean = normalizeExploreCopyBlock(value)
+    .replace(/\bTrailhead Explore\b/gi, 'this destination')
+    .replace(/\bsource-backed Explore destination\b/gi, 'destination')
+    .replace(/\bcurated\s+this destination\s+destination\b/gi, 'destination')
+    .replace(/\bcurated\s+destination\b/gi, 'destination')
+    .replace(/\bmap context\b/gi, 'area detail')
+    .replace(/\bAI\b/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!clean) return '';
+  if (isExploreLocationMismatchCopy(clean, place)) {
+    return getExploreCardSummary(place);
+  }
+  if (/\bUse it to stage trail time, nearby stays, weather, and (?:map context|area detail)\b/i.test(clean)) {
+    return getExploreCardSummary(place);
+  }
+  const waterfallFallback = clean.match(/^(.+?)\s+is a waterfall or cascade near\s+([^.]+)\.\s+Check trail access, seasonal flow, closures, water levels, and slippery terrain before visiting\.?$/i);
+  if (waterfallFallback) {
+    return `Waterfall near ${waterfallFallback[2]}. Check trail access, seasonal flow, closures, and slippery terrain before visiting.`;
+  }
+  const mappedTrailFallback = clean.match(/^(.+?)\s+is a mapped trail area near\s+([^.]+)\.\s+Check distance, difficulty, route type, weather, daylight, permits, closures, and navigation before starting\.?$/i);
+  if (mappedTrailFallback) {
+    return `Trail area near ${mappedTrailFallback[2]}. Check route distance, difficulty, weather, daylight, permits, closures, and navigation before starting.`;
+  }
+  const mappedFallback = clean.match(/^(.+?)\s+is mapped as\s+([a-z\s-]+)\s+in OpenStreetMap\.\s+Verify access, current conditions, and local rules before relying on it\.?$/i);
+  if (mappedFallback) {
+    return `${title} is a ${mappedFallback[2].trim()}. Check access, current conditions, and local rules before you go.`;
+  }
+  const trailTargetFallback = clean.match(/^(.+?)\s+is a trail target\.\s+Check route, access, weather, permits, and current conditions before you go\.?$/i);
+  if (trailTargetFallback) {
+    return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
+  }
+  clean = clean
+    .replace(/\bUse it for context, photos, and a cleaner break in the drive\b/gi, 'Use it for a focused stop, photos, and a cleaner break in the drive')
+    .replace(/(?:^|\s)[^.]{1,120}\bis a destination\.\s*/gi, ' ')
+    .replace(/\bBuild the stop around current conditions, reservation rules, and the time you want on the ground\.?/gi, 'Build the stop around current access, timing, and the time you want on the ground.')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (/^(destination|this destination)\.?$/i.test(clean)) return '';
+  if (/\b(undefined|null|nan|wikidata|source pack|search blob)\b/i.test(clean)) return '';
+  if (/destination\.?\s*$/i.test(clean) && clean.length < 80) {
+    return `${title}. Check access, timing, closures, and local rules before you go.`;
+  }
   return clean;
 }
 
@@ -316,6 +367,10 @@ export function ExploreDetailSheet({
   const [selectedItem, setSelectedItem] = useState<ExploreSourcePackItem | null>(null);
   const [placeSearch, setPlaceSearch] = useState('');
   const searchNeedle = placeSearch.trim().toLowerCase();
+  const cleanStorySentences = useMemo(
+    () => storySentences.map(sentence => cleanDetailStoryCopy(sentence, place)).filter(Boolean),
+    [place, storySentences],
+  );
   const sourcePackLists = useMemo(() => ({
     thingsToDo: uniqueSourcePackItems((pack?.things_to_do ?? []).filter(sourcePackThingToDoCanShow)),
     thingsToSee: uniqueSourcePackItems((pack?.things_to_see ?? []).filter(sourcePackItemCanShow)),
@@ -429,7 +484,7 @@ export function ExploreDetailSheet({
     add(((place.trails?.length ?? 0) > 0 || (place.linked_trail_ids?.length ?? 0) > 0 || /trail|trek|peak|waterfall|glacier/i.test(`${place.category ?? ''} ${(place.subcategories ?? []).join(' ')}`)) && {
       key: 'trails',
       label: 'Trails',
-      detail: place.trails?.length ? `${place.trails.length} trails` : 'Trails',
+      detail: place.trails?.length ? `${place.trails.length} trails` : 'Nearby routes',
       icon: 'trail-sign-outline',
       tone: '#ca8a04',
       count: place.trails?.length || undefined,
@@ -488,13 +543,13 @@ export function ExploreDetailSheet({
       searchText: 'map route directions area navigation campgrounds visitor centers stops',
     });
 
-    add(storySentences.length > 0 && {
+    add(cleanStorySentences.length > 0 && {
       key: 'story',
       label: 'Story',
       detail: 'Listen',
       icon: 'book-outline',
       tone: '#9333ea',
-      searchText: storySentences.join(' '),
+      searchText: cleanStorySentences.join(' '),
     });
 
     add(Boolean(relatedSlot || context?.relatedCount) && {
@@ -527,7 +582,7 @@ export function ExploreDetailSheet({
     place.wiki_extract,
     relatedSlot,
     sourcePackLists,
-    storySentences,
+    cleanStorySentences,
     weather?.detail,
     weather?.icon,
     weather?.loading,
@@ -920,7 +975,7 @@ export function ExploreDetailSheet({
           </View>
           {itemImages.length > 0 && (
             <View style={styles.heroText}>
-              <Text style={[styles.kicker, { color: '#bbf7d0' }]} numberOfLines={1}>{(item.kind || activeModuleDef?.label || 'Place').replace(/_/g, ' ').toUpperCase()}</Text>
+              <Text style={[styles.kicker, { color: '#bbf7d0' }]} numberOfLines={1}>{titleCaseLabel(item.kind || activeModuleDef?.label || 'Place')}</Text>
               <Text style={styles.title} numberOfLines={3}>{item.title || 'Place'}</Text>
             </View>
           )}
@@ -968,14 +1023,14 @@ export function ExploreDetailSheet({
       const seeItems = moduleItems('see');
       return (
         <>
-          {seeItems.length > 0 ? renderItemList(seeItems, 'Nothing listed yet.') : null}
+          {seeItems.length > 0 ? renderItemList(seeItems, EMPTY_DETAIL_MESSAGE) : null}
           {!!place.profile?.why_it_matters && (
             <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
               <Text style={[styles.copyTitle, { color: C.text }]}>Why Go</Text>
               <ExpandableText value={place.profile.why_it_matters} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
             </View>
           )}
-          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], 'Nothing listed yet.') : null}
+          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
         </>
       );
     }
@@ -983,9 +1038,9 @@ export function ExploreDetailSheet({
       const doItems = moduleItems('do');
       return (
         <>
-          {doItems.length > 0 ? renderItemList(doItems, 'Nothing listed yet.') : null}
+          {doItems.length > 0 ? renderItemList(doItems, EMPTY_DETAIL_MESSAGE) : null}
           {experiencesSlot}
-          {doItems.length === 0 && !experiencesSlot ? renderItemList([], 'Nothing listed yet.') : null}
+          {doItems.length === 0 && !experiencesSlot ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
         </>
       );
     }
@@ -993,16 +1048,16 @@ export function ExploreDetailSheet({
       const stayItems = moduleItems('stay');
       return (
         <>
-          {stayItems.length > 0 ? renderItemList(stayItems, 'Nothing listed yet.') : null}
+          {stayItems.length > 0 ? renderItemList(stayItems, EMPTY_DETAIL_MESSAGE) : null}
           {stayItems.length === 0 ? campgroundsSlot : null}
-          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], 'Nothing listed yet.') : null}
+          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
         </>
       );
     }
     if (key === 'visitor') {
       return (
         <>
-          {renderItemList(moduleItems('visitor'), 'Nothing listed yet.')}
+          {renderItemList(moduleItems('visitor'), EMPTY_DETAIL_MESSAGE)}
           {!!sourceUrl && renderAction('Official site', 'open-outline', () => Linking.openURL(sourceUrl))}
         </>
       );
@@ -1018,7 +1073,7 @@ export function ExploreDetailSheet({
     if (key === 'amenities') {
       return renderActivityGrid() ?? (
         <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
-          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Nothing listed yet.</Text>
+          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>{EMPTY_DETAIL_MESSAGE}</Text>
         </View>
       );
     }
@@ -1098,7 +1153,7 @@ export function ExploreDetailSheet({
       return (
         <View style={[styles.panel, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <ScrollView ref={storyScrollRef} style={styles.storyBox} nestedScrollEnabled showsVerticalScrollIndicator>
-            {(storySentences.length ? storySentences : ['Story unavailable.']).map((sentence, idx) => (
+            {(cleanStorySentences.length ? cleanStorySentences : ['Story unavailable.']).map((sentence, idx) => (
               <Text
                 key={`${idx}-${sentence.slice(0, 24)}`}
                 style={[
@@ -1124,18 +1179,19 @@ export function ExploreDetailSheet({
   }
 
   function renderModuleHub() {
-    const aboutCopy = normalizeExploreCopyBlock(
+    const aboutCopy = cleanDetailStoryCopy(
       place.profile?.story
-      || place.wiki_extract
       || place.source_pack?.extract
       || place.profile?.summary
       || place.profile?.why_it_matters
-      || getExploreCardSummary(place),
+      || getExploreCardSummary(place)
+      || place.wiki_extract,
+      place,
     );
     return (
       <View style={styles.moduleHub}>
         <View style={styles.moduleIntro}>
-          <Text style={[styles.moduleIntroTitle, { color: C.text }]}>Explore this place</Text>
+          <Text style={[styles.moduleIntroTitle, { color: C.text }]}>Trip Notes</Text>
         </View>
         {!!aboutCopy && (
           <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
@@ -1179,7 +1235,7 @@ export function ExploreDetailSheet({
         {visibleModules.length === 0 && (
           <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
             <Ionicons name="search-outline" size={22} color={C.text3} />
-            <Text style={[styles.emptyModuleText, { color: C.text2 }]}>No matching section.</Text>
+            <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Try a different section.</Text>
           </View>
         )}
         <SourceFreshnessPanel place={place} />
@@ -1223,7 +1279,7 @@ export function ExploreDetailSheet({
           </View>
           <View style={styles.heroText}>
             <Text style={[styles.kicker, { color: '#fed7aa' }]} numberOfLines={1}>
-              {getExploreDisplayCategory(place).toUpperCase()} · {place.summary.state || getExploreDisplayRegion(place)}
+              {getExploreDisplayCategory(place)} · {place.summary.state || getExploreDisplayRegion(place)}
             </Text>
             <Text style={styles.title} numberOfLines={3}>{getExploreDisplayTitle(place)}</Text>
             <View style={styles.heroMetaRow}>
@@ -1301,7 +1357,7 @@ function SourceFreshnessPanel({ place }: { place: ExplorePlaceProfile }) {
           <Ionicons name="shield-checkmark-outline" size={23} color="#2563eb" />
         </View>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.sourcePanelTitle, { color: C.text }]}>Details</Text>
+          <Text style={[styles.sourcePanelTitle, { color: C.text }]}>Before You Go</Text>
           <ExpandableText value={sourceBodyForPlace(place)} textStyle={[styles.sourcePanelBody, { color: C.text2 }]} previewChars={230} />
         </View>
       </View>
@@ -1310,7 +1366,7 @@ function SourceFreshnessPanel({ place }: { place: ExplorePlaceProfile }) {
           <View key={`${row.label}-${row.value}`} style={[styles.sourceRow, { borderColor: C.border, backgroundColor: C.s2 }]}>
             <Ionicons name={row.icon as any} size={17} color={row.tone} />
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={[styles.sourceRowLabel, { color: C.text3 }]} numberOfLines={1}>{row.label.toUpperCase()}</Text>
+              <Text style={[styles.sourceRowLabel, { color: C.text3 }]} numberOfLines={1}>{row.label}</Text>
               <Text style={[styles.sourceRowValue, { color: C.text }]} numberOfLines={2}>{row.value}</Text>
             </View>
           </View>
@@ -1354,7 +1410,7 @@ function SourcePack({
         const items = Array.isArray(rawItems) ? rawItems.filter(sourcePackItemCanShow) : [];
         return items.length ? (
         <View key={label}>
-          <Text style={[styles.packLabel, { color: C.text3 }]}>{label.toUpperCase()}</Text>
+          <Text style={[styles.packLabel, { color: C.text3 }]}>{label}</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.miniRail}>
             {items.slice(0, 6).map((item, idx) => {
               const hasLocation = item.lat != null && item.lng != null;
@@ -1396,7 +1452,9 @@ function sourceBodyForPlace(place: ExplorePlaceProfile) {
   const raw = String(place.source_pack?.source_note || '').trim();
   const fallback = String(place.attribution || '').trim();
   const body = raw || fallback;
-  if (/wiki|source pack|open map|openstreetmap|generated from|open the full card/i.test(body)) {
+  const officialSource = body.match(/^official\s+(.+?)\s+data\.?$/i);
+  if (officialSource?.[1]) return cleanSourcePublisherLabel(officialSource[1]);
+  if (/wiki|source pack|open map|openstreetmap|generated from|open the full card|open image references|verify media license/i.test(body)) {
     return 'Check current access, fees, closures, and rules before you go.';
   }
   return body || 'Check current access before you go.';
@@ -1408,13 +1466,21 @@ function sourceButtonLabelForPlace(place: ExplorePlaceProfile) {
     .replace(/\bphoto credit:\s*not available\.?/gi, '')
     .replace(/\s*;\s*$/g, '')
     .trim();
-  if (!raw || /wikidata|wikimedia|wikipedia|not available|open map|openstreetmap/i.test(raw)) return 'Source link';
+  if (!raw || /wikidata|wikimedia|wikipedia|not available|open map|openstreetmap/i.test(raw)) return 'Open website';
   return cleanSourcePublisherLabel(raw);
 }
 
+function titleCaseLabel(value: string) {
+  return String(value || 'Place')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, char => char.toUpperCase());
+}
+
 function sourcePublisherLabel(primary: string) {
-  if (/wiki/i.test(primary)) return 'CURATED';
-  return primary.toUpperCase();
+  if (/wiki/i.test(primary)) return 'Curated';
+  return cleanSourcePublisherLabel(titleCaseLabel(primary));
 }
 
 function exploreMapRadiusMi(place: ExplorePlaceProfile) {

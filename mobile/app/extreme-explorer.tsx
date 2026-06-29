@@ -332,7 +332,7 @@ function placeCardFromDemo(place: DemoPlace): ExplorerPlaceCard {
     lng: place.lng,
     type: place.type,
     source: place.source || 'extreme',
-    source_label: place.source_label || 'Premium discovery',
+    source_label: place.source_label || 'Explore pick',
     address: place.address,
     phone: place.phone,
     website: place.website,
@@ -435,7 +435,7 @@ function makeHtml(payload: DemoPayload) {
 </head>
 <body>
   <div id="map"></div>
-  <div id="loading" class="loading"><div class="load-card"><div class="pulse"></div><div class="load-title">EXPLORER EXPLORER</div><div class="load-sub">Loading premium route preview</div></div></div>
+  <div id="loading" class="loading"><div class="load-card"><div class="pulse"></div><div class="load-title">EXPLORER</div><div class="load-sub">Loading route preview</div></div></div>
   <div class="stylebar" id="stylebar"></div>
   <script>
     const demo = ${data};
@@ -631,7 +631,7 @@ export default function ExplorerExplorerScreen() {
         }
         if (!cfg.mapbox_public_token) {
           setStatus('error');
-          setMessage('Premium map preview is not configured.');
+          setMessage('Route preview is not available right now.');
           return;
         }
         const auth = await api.authorizeExplorerSession({
@@ -1104,8 +1104,8 @@ export default function ExplorerExplorerScreen() {
           <Ionicons name="chevron-back" size={20} color="#f8fafc" />
         </TouchableOpacity>
         <View style={styles.titlePill}>
-          <Text style={styles.titleKicker}>EXPLORER EXPLORER</Text>
-          <Text style={styles.titleText} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Premium map preview'}</Text>
+          <Text style={styles.titleKicker}>EXPLORER</Text>
+          <Text style={styles.titleText} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Route preview'}</Text>
         </View>
       </View>
       {!selectedPlace && missionEnabled && (

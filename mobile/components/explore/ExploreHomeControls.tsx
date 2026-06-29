@@ -44,7 +44,7 @@ export function ExploreHomeControls({
 }: Props) {
   const C = useTheme();
   const sortLabel = sortLabelForMode(sortMode);
-  const countLabel = countLabelOverride || (category === 'tours' && shownCount === 0 ? (hasQuery ? 'No tours' : 'Search first') : shownLabel(shownCount));
+  const countLabel = countLabelOverride || (category === 'tours' && shownCount === 0 ? (hasQuery ? 'No matches' : 'Search tours') : shownLabel(shownCount));
   return (
     <View style={styles.shell}>
       <ExploreModeTabs value={mode} onChange={onModeChange} />
@@ -52,7 +52,7 @@ export function ExploreHomeControls({
       <ExploreFilterRow
         shownCount={shownCount}
         countLabel={countLabel}
-        sourceLabel="Trusted sources"
+        sourceLabel="Trip-ready"
         sortLabel={sortLabel}
         onCountPress={onShowMore}
         onSourcePress={onSourcePress}
@@ -60,14 +60,14 @@ export function ExploreHomeControls({
       />
       {category !== 'all' ? (
         <ClearControl
-          label="Show all Explore places"
+          label="Show all places"
           color={C.orange}
           onPress={onClearCategory}
         />
       ) : null}
       {savedOnly ? (
         <ClearControl
-          label="Show all Explore places"
+          label="Show all places"
           color={C.orange}
           onPress={onClearSaved}
         />
@@ -97,7 +97,7 @@ function ClearControl({
 
 function sortLabelForMode(sortMode: ExploreSortMode) {
   if (sortMode === 'nearest') return 'Nearest';
-  if (sortMode === 'source') return 'Trusted first';
+  if (sortMode === 'source') return 'Ready first';
   return 'Best match';
 }
 

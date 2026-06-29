@@ -186,6 +186,78 @@ function isOpenKnowledgePublisher(value?: string | null) {
   return /\b(wikidata|wikipedia|wikimedia|commons)\b/i.test(String(value || ''));
 }
 
+const COUNTRY_ALIASES: Array<[string, string[]]> = [
+  ['united states', ['united states', 'usa', 'u.s.', 'u.s.a.']],
+  ['canada', ['canada']],
+  ['mexico', ['mexico']],
+  ['switzerland', ['switzerland', 'swiss']],
+  ['austria', ['austria']],
+  ['italy', ['italy', 'italian']],
+  ['france', ['france', 'french']],
+  ['germany', ['germany', 'german']],
+  ['spain', ['spain', 'spanish']],
+  ['portugal', ['portugal']],
+  ['norway', ['norway', 'norwegian']],
+  ['sweden', ['sweden', 'swedish']],
+  ['finland', ['finland', 'finnish']],
+  ['iceland', ['iceland', 'icelandic']],
+  ['ireland', ['ireland', 'irish']],
+  ['united kingdom', ['united kingdom', 'uk', 'u.k.', 'england', 'scotland', 'wales']],
+  ['australia', ['australia', 'australian']],
+  ['new zealand', ['new zealand']],
+  ['japan', ['japan', 'japanese']],
+];
+
+function normalizedWords(value: string) {
+  return value
+    .toLowerCase()
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function countryMentions(value: string) {
+  const normalized = normalizedWords(value);
+  const countries = new Set<string>();
+  for (const [country, aliases] of COUNTRY_ALIASES) {
+    if (aliases.some(alias => new RegExp(`(^|\\s)${normalizedWords(alias).replace(/\s+/g, '\\s+')}($|\\s)`).test(normalized))) {
+      countries.add(country);
+    }
+  }
+  return countries;
+}
+
+function locationNeedlesForPlace(place: ExplorePlaceProfile) {
+  const location = compact([
+    readV3(place).card?.region,
+    place.summary.state,
+    place.summary.region,
+  ]).join(' ');
+  const normalized = normalizedWords(location);
+  const parts = normalized
+    .split(' ')
+    .filter(part => part.length >= 5 && !/^(canton|county|state|province|region|national|park|district|municipality|republic|kingdom|united)$/.test(part));
+  return new Set(parts);
+}
+
+export function isExploreLocationMismatchCopy(value: string | null | undefined, place: ExplorePlaceProfile) {
+  const clean = normalizeExploreCopyBlock(value);
+  if (!clean) return false;
+  const placeCountries = countryMentions(compact([
+    readV3(place).card?.region,
+    place.summary.state,
+    place.summary.region,
+  ]).join(' '));
+  const copyCountries = countryMentions(clean);
+  if (!placeCountries.size || !copyCountries.size) return false;
+  if ([...placeCountries].some(country => copyCountries.has(country))) return false;
+  const normalizedCopy = normalizedWords(clean);
+  if ([...locationNeedlesForPlace(place)].some(part => new RegExp(`(^|\\s)${part}($|\\s)`).test(normalizedCopy))) return false;
+  return true;
+}
+
 export function cleanSourcePublisherLabel(value?: string | null) {
   const clean = String(value || '').trim();
   if (!clean) return '';
@@ -193,7 +265,23 @@ export function cleanSourcePublisherLabel(value?: string | null) {
 }
 
 export function normalizeExploreCopyBlock(value?: string | null) {
-  return String(value || '').replace(/\s+/g, ' ').trim();
+  return String(value || '')
+    .replace(/<\s*br\s*\/?>/gi, '. ')
+    .replace(/<\/\s*(p|div|li|h[1-6])\s*>/gi, '. ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/&amp;/gi, '&')
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, '<')
+    .replace(/&gt;/gi, '>')
+    .replace(/\bClick the reservation button below for details\.?/gi, '')
+    .replace(/\bUse the reservation button below for details\.?/gi, '')
+    .replace(/\bClick below for details\.?/gi, '')
+    .replace(/\s+([,.;:!?])/g, '$1')
+    .replace(/(?:\.\s*){2,}/g, '. ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 export function sentenceAwarePreview(value?: string | null, maxChars = 220) {
@@ -361,25 +449,22 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
   const facts = place.facts ?? {};
   const quality = normalize(String(v3.quality || place.source_pack?.quality || facts.source_quality || ''));
   const primary = cleanSourcePublisherLabel(place.source_pack?.primary || sources[0]?.publisher || sources[0]?.name);
-  if (isOpenKnowledgePublisher(primary)) return 'Open references';
+  if (isOpenKnowledgePublisher(primary)) return 'Check locally';
   if (quality.includes('official')) {
-    if (!primary) return 'Official source';
-    if (/official/i.test(primary)) return primary;
-    return `${primary} official`;
+    return 'Official details';
   }
-  if (quality.includes('wiki') || /wikipedia|wikidata|wikimedia/i.test(facts.source_title || primary)) return 'Open references';
-  if (primary) return primary;
-  if (sources.length > 1 || place.source_pack?.sources?.length) return 'Multiple sources';
-  return 'Map details';
+  if (quality.includes('wiki') || /wikipedia|wikidata|wikimedia/i.test(facts.source_title || primary)) return 'Check locally';
+  if (primary || sources.length > 1 || place.source_pack?.sources?.length) return 'Area details';
+  return 'Check access';
 }
 
 export function getExploreTrustBadge(place: ExplorePlaceProfile) {
   const confidence = sourceConfidenceFromRecord(readV3(place));
-  if (confidence.score >= 85) return 'High confidence';
-  if (confidence.score >= 65) return 'Good confidence';
+  if (confidence.score >= 85) return 'Plan-ready';
+  if (confidence.score >= 65) return 'Ready to compare';
   const badge = getExploreSourceBadge(place);
-  if (/official/i.test(badge)) return 'Verified details';
-  if (/community|curated|multiple|open references/i.test(badge)) return 'Curated details';
+  if (/official/i.test(badge)) return 'Plan-ready';
+  if (/community|curated|multiple|area details/i.test(badge)) return 'Ready to compare';
   return 'Check access';
 }
 
@@ -393,15 +478,15 @@ export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
     });
   }
   const badge = getExploreSourceBadge(place);
-  if (/official/i.test(badge)) return 'Official details';
-  if (/open references/i.test(badge)) return 'Verify locally';
+  if (/official/i.test(badge)) return 'Current access';
+  if (/check locally/i.test(badge)) return 'Confirm locally';
   return 'Check current status';
 }
 
 export function getExploreCardSourceLine(place: ExplorePlaceProfile) {
   return compact([
-    getExploreSourceBadge(place),
-    getExploreFreshnessLabel(place),
+    getExploreTrustBadge(place),
+    getExploreBestSeason(place),
   ]).filter((part, index, parts) => parts.indexOf(part) === index).join(' · ');
 }
 
@@ -409,74 +494,36 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   const v3 = readV3(place);
   const facts = place.facts ?? {};
   const sourceBadge = getExploreSourceBadge(place);
-  const freshness = getExploreFreshnessLabel(place);
+  const season = getExploreBestSeason(place);
   const confidence = sourceConfidenceFromRecord(v3);
-  const sourceCount = Math.max(
-    Array.isArray(v3.sources) ? v3.sources.length : 0,
-    Array.isArray(place.source_pack?.sources) ? place.source_pack?.sources?.length ?? 0 : 0,
-  );
-  const photoCredit = compact([
-    place.summary.image_credit,
-    place.summary.image_license,
-    place.media?.find(item => item.credit)?.credit,
-    place.source_pack?.photos?.find(item => item.credit)?.credit,
-  ])[0];
-  const sourceNote = String(place.source_pack?.source_note || '').trim();
   const officialUrl = place.source_pack?.official_url || facts.official_url || place.summary.source_url || facts.source_url;
   const rows: ExploreSourceRow[] = [
     {
-      label: 'Source',
-      value: sourceBadge,
+      label: 'Access',
+      value: /official/i.test(sourceBadge) ? 'Official details' : 'Check current access',
       icon: /official/i.test(sourceBadge) ? 'shield-checkmark-outline' : 'map-outline',
       tone: /official/i.test(sourceBadge) ? '#16a34a' : '#2563eb',
     },
     {
-      label: 'Updated',
-      value: freshness,
+      label: 'Season',
+      value: season,
       icon: 'calendar-outline',
       tone: facts.last_updated ? '#16a34a' : '#ca8a04',
     },
     {
-      label: 'Status',
-      value: confidence.score >= 65 ? 'Ready to compare' : 'Confirm before going',
+      label: 'Trip check',
+      value: confidence.score >= 65 || /official/i.test(sourceBadge) ? 'Ready to compare' : 'Check before going',
       icon: 'shield-outline',
-      tone: confidence.score >= 65 ? '#0ea5e9' : '#ca8a04',
+      tone: confidence.score >= 65 || /official/i.test(sourceBadge) ? '#0ea5e9' : '#ca8a04',
     },
   ];
-  if (sourceCount > 1) {
-    rows.push({
-      label: 'References',
-      value: `${sourceCount} sources`,
-      icon: 'layers-outline',
-      tone: '#6366f1',
-    });
-  }
   if (officialUrl) {
     rows.push({
-      label: 'Link',
+      label: 'Website',
       value: /viator|booking/i.test(String(officialUrl)) ? 'Booking page' : 'Official website',
       icon: 'open-outline',
       tone: '#f97316',
     });
-  }
-  if (photoCredit) {
-    rows.push({
-      label: 'Photo',
-      value: cleanSourcePublisherLabel(photoCredit),
-      icon: 'image-outline',
-      tone: '#0f766e',
-    });
-  }
-  if (sourceNote) {
-    const cleanedNote = cleanExploreCopy(sourceNote, place);
-    if (!/will be added|future|enrichment|generated from|open map|openstreetmap/i.test(cleanedNote)) {
-      rows.push({
-        label: 'Note',
-        value: cleanedNote,
-        icon: 'information-circle-outline',
-        tone: '#64748b',
-      });
-    }
   }
   return rows;
 }
@@ -555,7 +602,7 @@ export function getExploreQuickFacts(place: ExplorePlaceProfile, context: Explor
     facts.push({ label: 'Area', icon: 'navigate-outline', tone: '#2563eb' });
   }
   facts.push({ label: getExploreBestSeason(place), icon: 'calendar-outline', tone: '#c4552d' });
-  facts.push({ label: getExploreSourceBadge(place), icon: 'shield-checkmark-outline', tone: '#2563eb' });
+  facts.push({ label: getExploreTrustBadge(place), icon: 'shield-checkmark-outline', tone: '#2563eb' });
   facts.push({ label: 'Offline', value: 'Recommended', icon: 'cloud-download-outline', tone: '#7c3aed' });
   return facts.slice(0, 4);
 }
@@ -766,9 +813,16 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     .replace(/\bAI\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (isExploreLocationMismatchCopy(text, place)) {
+    if (key === 'peaks') return `${title} is a mountain target. Check route, weather, access, and current conditions before you go.`;
+    if (key === 'trails' || key === 'trailheads' || key === 'climb') return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
+    if (key === 'water') return `${title} has water access, views, and nearby stops to check before you go.`;
+    if (key === 'camp' || key === 'glamping' || key === 'huts') return `${title} shows stay options for the area. Check booking, access, rules, and closures.`;
+    return FALLBACK_COPY[key] || `${title} has area details and current access checks.`;
+  }
   if (/Use it to stage trail time, nearby stays, weather, and map context|Use this card for map context, nearby stops, weather, and access checks/i.test(text)) {
     if (key === 'peaks') return `${title} is a mountain target. Check route, weather, access, and current conditions before you go.`;
-    if (key === 'trails' || key === 'trailheads' || key === 'climb') return `${title} is a trail target. Check route, access, weather, permits, and current conditions before you go.`;
+    if (key === 'trails' || key === 'trailheads' || key === 'climb') return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
     return `${title} has area details to compare with weather, access, nearby stops, and current conditions.`;
   }
   if (/safer overnight or weather-reset lead|Verify reservations, seasonal access, food, hut rules, and route approach/i.test(text)) {
@@ -786,8 +840,24 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   if (/Use it to start a camp search near a real destination/i.test(text)) {
     return `${title} is an overnight-area lead. Check legal camping, fees, closures, road access, and booking rules.`;
   }
+  const waterfallFallback = text.match(/^(.+?)\s+is a waterfall or cascade near\s+([^.]+)\.\s+Check trail access, seasonal flow, closures, water levels, and slippery terrain before visiting\.?$/i);
+  if (waterfallFallback) {
+    return `Waterfall near ${waterfallFallback[2]}. Check trail access, seasonal flow, closures, and slippery terrain before visiting.`;
+  }
+  const mappedFallback = text.match(/^(.+?)\s+is mapped as\s+([a-z\s-]+)\s+in OpenStreetMap\.\s+Verify access, current conditions, and local rules before relying on it\.?$/i);
+  if (mappedFallback) {
+    return `${title} is a ${mappedFallback[2].trim()}. Check access, current conditions, and local rules before you go.`;
+  }
+  const mappedTrailFallback = text.match(/^(.+?)\s+is a mapped trail area near\s+([^.]+)\.\s+Check distance, difficulty, route type, weather, daylight, permits, closures, and navigation before starting\.?$/i);
+  if (mappedTrailFallback) {
+    return `Trail area near ${mappedTrailFallback[2]}. Check route distance, difficulty, weather, daylight, permits, closures, and navigation before starting.`;
+  }
+  const trailTargetFallback = text.match(/^(.+?)\s+is a trail target\.\s+Check route, access, weather, permits, and current conditions before you go\.?$/i);
+  if (trailTargetFallback) {
+    return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
+  }
   if (isWeakExploreCopy(text, place)) {
-    return FALLBACK_COPY[key] || `${title} has map details and current access checks.`;
+    return FALLBACK_COPY[key] || `${title} has area details and current access checks.`;
   }
   if (/Use .+ as the overnight search area|gives camp search a real center|Start camp planning around .+ then narrow it with live results/i.test(text)) {
     return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
@@ -816,7 +886,7 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   if (/works as a real day stop|not just a map label|when the route needs more than road miles|Put .+ on the route/i.test(text)) {
     if (key === 'parks') return `${title} has trails, viewpoints, access roads, and nearby stops to scout.`;
     if (key === 'water') return `${title} has water access, views, and nearby stops to check before you go.`;
-    return FALLBACK_COPY[key] || `${title} has map details and current access checks.`;
+    return FALLBACK_COPY[key] || `${title} has area details and current access checks.`;
   }
   if (/is the place to start looking for legal stays/i.test(text)) {
     return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;

@@ -1515,7 +1515,7 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
 
 function buildYosemiteParkHub(): ExplorePlaceProfile {
   const id = 'place:nps:yose';
-  const story = 'Yosemite National Park works best as a hub: choose the valley, high-country roads, sequoia groves, waterfall walks, longer hikes, campgrounds, or lodge stays before committing the day.';
+  const story = 'Plan Yosemite around the valley, high-country roads, sequoia groves, waterfall walks, longer hikes, campgrounds, or lodge stays before committing the day.';
   return {
     id,
     canonical_role: 'hub',
@@ -1545,7 +1545,7 @@ function buildYosemiteParkHub(): ExplorePlaceProfile {
       title: 'Yosemite National Park',
       region: 'Sierra Nevada',
       headline: 'Waterfalls, granite walls, valley trails, sequoias, campgrounds, and lodge stays.',
-      summary: 'Use Yosemite as the main hub for trails, waterfalls, viewpoints, camping, lodging, visitor centers, and current access checks.',
+      summary: 'Plan Yosemite around trails, waterfalls, viewpoints, camping, lodging, visitor centers, and current access checks.',
       highlight: 'Start here, then drill into Yosemite trails, Yosemite Falls, campgrounds, lodging, and visitor services.',
       facts: ['National Park Service', 'Trails', 'Waterfalls', 'Campgrounds', 'Lodging'],
     },
@@ -1562,8 +1562,8 @@ function buildYosemiteParkHub(): ExplorePlaceProfile {
       hero_rank: 4,
       tags: ['parks', 'trails', 'waterfalls', 'camping', 'lodging', 'views', 'yosemite'],
       badges: ['Parks', 'Official'],
-      hook: 'Yosemite hub for trails, waterfalls, viewpoints, campgrounds, lodging, and current access checks.',
-      short_description: 'Plan Yosemite from one hub: trails, falls, viewpoints, campgrounds, lodging, visitor centers, and road status.',
+      hook: 'Yosemite trails, waterfalls, viewpoints, campgrounds, lodging, and current access checks.',
+      short_description: 'Plan Yosemite around trails, falls, viewpoints, campgrounds, lodging, visitor centers, and road status.',
       thumbnail_url: GLACIER_POINT_IMAGE,
       image_url: GLACIER_POINT_IMAGE,
       image_credit: 'Wikimedia Commons',

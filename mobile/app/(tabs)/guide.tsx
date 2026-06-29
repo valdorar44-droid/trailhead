@@ -508,14 +508,202 @@ function scoreExploreHubExtraText(place: ExplorePlaceProfile, query: string, ext
   const extra = extraTextById.get(place.id);
   if (!extra) return 0;
   const tokens = normalized.split(/\s+/).filter(token => token.length >= 2);
-  if (!tokens.length || tokens.some(token => !extra.includes(token))) return 0;
+  if (!tokens.length || tokens.some(token => !exploreSearchTextIncludesToken(extra, token))) return 0;
   return 35 + Math.min(tokens.length * 8, 40) + (extra.includes(normalized) ? 20 : 0);
+}
+
+function exploreSearchTokenVariants(token: string) {
+  const variants = new Set([token]);
+  if (token.endsWith('ies') && token.length > 4) variants.add(`${token.slice(0, -3)}y`);
+  if (token.endsWith('es') && token.length > 4) variants.add(token.slice(0, -2));
+  if (token.endsWith('s') && token.length > 3) variants.add(token.slice(0, -1));
+  return Array.from(variants);
+}
+
+function exploreSearchTextIncludesToken(text: string, token: string) {
+  return exploreSearchTokenVariants(token).some(variant => text.includes(variant));
+}
+
+const EXPLORE_QUERY_INTENT_TOKENS = new Set([
+  'activity',
+  'activities',
+  'cabin',
+  'cabins',
+  'camp',
+  'campground',
+  'campgrounds',
+  'camping',
+  'camps',
+  'campsite',
+  'campsites',
+  'glamping',
+  'guided',
+  'hike',
+  'hikes',
+  'hiking',
+  'hotel',
+  'hotels',
+  'hut',
+  'huts',
+  'lodge',
+  'lodges',
+  'lodging',
+  'overlook',
+  'overlooks',
+  'peak',
+  'peaks',
+  'scenic',
+  'spring',
+  'springs',
+  'stay',
+  'stays',
+  'tent',
+  'things',
+  'ticket',
+  'tickets',
+  'tour',
+  'tours',
+  'trail',
+  'trailhead',
+  'trailheads',
+  'trails',
+  'trek',
+  'trekking',
+  'view',
+  'views',
+  'waterfall',
+  'waterfalls',
+]);
+
+const EXPLORE_QUERY_STOP_TOKENS = new Set([
+  'a',
+  'an',
+  'and',
+  'around',
+  'at',
+  'best',
+  'by',
+  'for',
+  'in',
+  'me',
+  'my',
+  'near',
+  'nearby',
+  'of',
+  'open',
+  'the',
+  'to',
+  'top',
+]);
+
+function exploreQueryHasDestinationTerms(query: string) {
+  const tokens = normalizeExploreText(query).split(/\s+/).filter(Boolean);
+  return tokens.some(token => (
+    token.length >= 2
+    && !EXPLORE_QUERY_STOP_TOKENS.has(token)
+    && !EXPLORE_QUERY_INTENT_TOKENS.has(token)
+  ));
+}
+
+function exploreQueryDestinationPhrase(query: string) {
+  return normalizeExploreText(query)
+    .split(/\s+/)
+    .filter(token => (
+      token.length >= 2
+      && !EXPLORE_QUERY_STOP_TOKENS.has(token)
+      && !EXPLORE_QUERY_INTENT_TOKENS.has(token)
+    ))
+    .join(' ');
+}
+
+function exploreQueryHasBrowseIntent(query: string) {
+  return normalizeExploreText(query)
+    .split(/\s+/)
+    .filter(Boolean)
+    .some(token => EXPLORE_QUERY_INTENT_TOKENS.has(token));
+}
+
+function explorePlaceIdentitySearchText(place: ExplorePlaceProfile) {
+  return normalizeExploreText([
+    place.id,
+    place.summary.title,
+    place.summary.state,
+    place.summary.region,
+    canonicalExploreParentTitle(place),
+    protectedDestinationTitleForExplorePlace(place),
+    ...((place as any).search_aliases ?? []),
+  ].filter(Boolean).join(' '));
+}
+
+function scoreExploreRichText(place: ExplorePlaceProfile, query: string) {
+  const normalized = normalizeExploreText(query);
+  if (!normalized) return 0;
+  const text = explorePlaceSearchText(place);
+  if (!text) return 0;
+  let score = text.includes(normalized) ? 28 : 0;
+  const tokens = normalized.split(/\s+/).filter(token => token.length >= 2);
+  if (!tokens.length) return score;
+  const matched = tokens.filter(token => exploreSearchTextIncludesToken(text, token));
+  if (matched.length === tokens.length) {
+    score += 24 + Math.min(tokens.length * 8, 40);
+  }
+  return score;
 }
 
 function exploreCategoryMatchesWithHub(place: ExplorePlaceProfile, key: ExploreCategoryKey, hubCategories: Map<string, Set<ExploreCategoryKey>>) {
   if (key === 'all' || key === 'nearby') return true;
   if (exploreCategoryMatches(place, key)) return true;
   return hubCategories.get(place.id)?.has(key) ?? false;
+}
+
+function scoreExploreBrowseIntent(
+  place: ExplorePlaceProfile,
+  query: string,
+  hubCategories: Map<string, Set<ExploreCategoryKey>>,
+  includeHubCategories = true,
+) {
+  const text = normalizeExploreText(query);
+  if (!text) return 0;
+  const primaryKey = getExploreCategoryKey(place);
+  const keys = new Set<ExploreCategoryKey>([primaryKey]);
+  const explicitTarget = canonicalExploreModuleTarget(place);
+  if (explicitTarget === 'stay') {
+    if (primaryKey === 'camp') keys.add('camp');
+    else if (primaryKey === 'glamping') keys.add('glamping');
+    else keys.add('huts');
+  }
+  if (explicitTarget === 'trails') keys.add('trails');
+  if (explicitTarget === 'do') keys.add('tours');
+  if (explicitTarget === 'see') keys.add('views');
+  if (includeHubCategories && isDestinationExploreHub(place)) {
+    (hubCategories.get(place.id) ?? new Set<ExploreCategoryKey>()).forEach(key => keys.add(key));
+  }
+  if (/\b(lodge|lodges|lodging|hotel|hotels|cabin|cabins|hut|huts|stay|stays)\b/.test(text)) {
+    if (keys.has('huts')) return 90;
+    if (keys.has('glamping')) return 55;
+    if (keys.has('camp')) return 22;
+    if (keys.has('trails') || keys.has('trailheads')) return -28;
+  }
+  if (/\b(camp|camps|campground|campgrounds|campsite|campsites|rv|tent)\b/.test(text)) {
+    if (keys.has('camp')) return 90;
+    if (keys.has('glamping')) return 36;
+    if (keys.has('huts')) return 18;
+    if (keys.has('trails') || keys.has('trailheads')) return -22;
+  }
+  if (/\b(trail|trails|trailhead|trailheads|hike|hikes|hiking|trek|trekking)\b/.test(text)) {
+    if (keys.has('trails') || keys.has('trailheads')) return 90;
+    if (keys.has('views') || keys.has('waterfalls') || keys.has('peaks')) return 20;
+    if (keys.has('huts') || keys.has('camp')) return -16;
+  }
+  if (/\b(tour|tours|guided|activity|activities|things to do)\b/.test(text)) {
+    if (keys.has('tours')) return 80;
+    if (keys.has('parks')) return 20;
+  }
+  if (/\b(view|views|overlook|overlooks|waterfall|waterfalls|scenic|spring|springs|peak|peaks)\b/.test(text)) {
+    if (keys.has('views') || keys.has('waterfalls') || keys.has('peaks') || keys.has('springs') || keys.has('scenic')) return 80;
+    if (keys.has('trails')) return 16;
+  }
+  return 0;
 }
 
 function exploreHomeShelfKey(place: ExplorePlaceProfile, hubCategories: Map<string, Set<ExploreCategoryKey>>) {
@@ -1453,6 +1641,25 @@ function GuideScreenContent() {
     const query = exploreQuery.trim();
     const placeQuery = showExperienceSearch ? placeQueryFromExploreQuery(query) : query;
     const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
+    const queryHasDestinationTerms = exploreQueryHasDestinationTerms(placeQuery);
+    const queryDestinationPhrase = exploreQueryDestinationPhrase(placeQuery);
+    const queryHasBrowseIntent = exploreQueryHasBrowseIntent(placeQuery);
+    const queryScoreForPlace = (place: ExplorePlaceProfile) => {
+      const identityScore = queryDestinationPhrase && explorePlaceIdentitySearchText(place).includes(queryDestinationPhrase)
+        ? 85
+        : 0;
+      const baseScore = Math.max(
+        identityScore,
+        scoreExploreQuery(place, placeQuery),
+        scoreExploreRichText(place, placeQuery),
+        scoreExploreHubExtraText(place, placeQuery, exploreHubMeta.searchTextByHubId),
+      );
+      if (queryHasDestinationTerms && queryDestinationPhrase && identityScore <= 0) return 0;
+      const intentScore = scoreExploreBrowseIntent(place, placeQuery, exploreHubMeta.categoryKeysByHubId, false);
+      if (queryHasDestinationTerms && baseScore <= 0) return 0;
+      if (queryHasBrowseIntent && intentScore < 35) return 0;
+      return baseScore + intentScore;
+    };
     const filtered = places.filter(({ place }) => {
       if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
       if (!exploreSavedOnly && !placeQuery && shouldHideExploreHomeWrapper(place)) return false;
@@ -1461,17 +1668,11 @@ function GuideScreenContent() {
       if (!categoryOk) return false;
       if (queryCategory && queryCategory !== 'tours' && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
       if (!placeQuery) return true;
-      return Math.max(
-        scoreExploreQuery(place, placeQuery),
-        scoreExploreHubExtraText(place, placeQuery, exploreHubMeta.searchTextByHubId),
-      ) > 0;
+      return queryScoreForPlace(place) > 0;
     });
     const decorated = filtered.map(item => ({
       ...item,
-      queryScore: Math.max(
-        scoreExploreQuery(item.place, placeQuery),
-        scoreExploreHubExtraText(item.place, placeQuery, exploreHubMeta.searchTextByHubId),
-      ),
+      queryScore: queryScoreForPlace(item.place),
       trustScore: scoreExploreTrust(item.place),
     }));
     const sortByNearest = (a: typeof decorated[number], b: typeof decorated[number]) => {

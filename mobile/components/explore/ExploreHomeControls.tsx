@@ -13,6 +13,7 @@ type Props = {
   category: ExploreCategoryKey;
   mode: ExploreMode;
   savedOnly: boolean;
+  hasQuery?: boolean;
   shownCount: number;
   sortMode: ExploreSortMode;
   onModeChange: (mode: ExploreMode) => void;
@@ -28,6 +29,7 @@ export function ExploreHomeControls({
   category,
   mode,
   savedOnly,
+  hasQuery,
   shownCount,
   sortMode,
   onModeChange,
@@ -40,7 +42,7 @@ export function ExploreHomeControls({
 }: Props) {
   const C = useTheme();
   const sortLabel = sortLabelForMode(sortMode);
-  const countLabel = category === 'tours' && shownCount === 0 ? 'Search first' : shownLabel(shownCount);
+  const countLabel = category === 'tours' && shownCount === 0 ? (hasQuery ? 'No tours' : 'Search first') : shownLabel(shownCount);
   return (
     <View style={styles.shell}>
       <ExploreModeTabs value={mode} onChange={onModeChange} />

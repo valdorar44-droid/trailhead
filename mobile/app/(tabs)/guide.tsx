@@ -195,6 +195,21 @@ function normalizeExploreText(value: string) {
     .trim();
 }
 
+function sourcePackThingToDoLooksLikeSpeciesProfile(item?: ExploreSourcePackItem | null) {
+  const source = String(item?.source || item?.source_label || '').toLowerCase();
+  const kind = String(item?.kind || item?.category || '').toLowerCase();
+  const title = String(item?.title || '').toLowerCase();
+  const description = String(item?.description || '').toLowerCase();
+  const url = String(item?.url || '').toLowerCase();
+  if (!/nps|national park service/.test(source) || !/thing_to_do|todo/.test(kind)) return false;
+  if (/\b(watch|watching|view|viewing|safety|drive|hike|trail|tour|program|visit|visitor|lodge|road|walk|camp|fish|boat|bike|climb)\b/.test(title)) {
+    return false;
+  }
+  const animalTitle = /\b(duck|osprey|loon|owl|eagle|thrush|dipper|woodpecker|weasel|pika|otter|lion|goat|moose|marmot|coyote|squirrel|lynx|bobcat|beaver|bear|bat|marten|bison|elk|deer|wolf|fox|snake|turtle|frog|salmon|trout|fish|bird|raptor|insect|mammal|wildlife)\b/.test(title);
+  const profileCopy = /\b(species|subspecies|genus|family|feathers|wings|fur|rodent|mammal|bird|reproductive|habitat|predator|prey|listed as|scientific name)\b/.test(description);
+  return (animalTitle && profileCopy) || (/\/thingstodo\/[^/]+\.htm$/.test(url) && animalTitle);
+}
+
 function destinationRootFromTitle(title?: string | null) {
   let clean = normalizeExploreText(String(title || ''));
   if (!clean) return '';
@@ -791,6 +806,7 @@ function sourcePackItemToRelatedPoi(item: ExploreSourcePackItem, fallbackType: O
 function exploreMapRelatedContext(place: ExplorePlaceProfile, campgrounds: CampsitePin[] = []) {
   const pack = place.source_pack ?? {};
   const thingsToDo = (pack.things_to_do ?? [])
+    .filter(item => !sourcePackThingToDoLooksLikeSpeciesProfile(item))
     .map(item => sourcePackItemToRelatedPoi(item, 'poi'))
     .filter((item): item is OsmPoi => !!item);
   const thingsToSee = (pack.things_to_see ?? [])
@@ -1014,26 +1030,41 @@ function GuideScreenContent() {
     // Compact home load: show a curated first page, keep source-rich data findable through search/filter.
     setExploreLoading(true);
     (async () => {
-      try {
-        const firstPage = await withExploreTimeout(api.getExploreCatalogIndex({ limit: 120, cursor: 0 }));
+      const applyFirstPage = (firstPage: Awaited<ReturnType<typeof api.getExploreCatalogIndex>>) => {
         const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
-        if (cancelled) return;
         setExplorePlaces(firstPlaces);
         setExploreError('');
         setExploreLoading(false);
         backgroundTimer = setTimeout(() => {
           hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
         }, 3200);
+      };
+      const firstPageRequest = api.getExploreCatalogIndex({ limit: 120, cursor: 0 });
+      try {
+        const firstPage = await withExploreTimeout(firstPageRequest);
+        if (cancelled) return;
+        applyFirstPage(firstPage);
       } catch {
         const cached = await readCachedCatalog();
         if (cancelled) return;
         if (cached.length) {
           setExplorePlaces(cached.slice(0, 160));
           setExploreError('');
+          setExploreLoading(false);
         } else {
-          setExploreError('Explore catalog unavailable offline until it has been loaded once.');
+          setExploreError('');
+          setExploreLoading(true);
+          try {
+            const firstPage = await firstPageRequest;
+            if (cancelled) return;
+            applyFirstPage(firstPage);
+            return;
+          } catch {
+            if (cancelled) return;
+            setExploreError('Explore catalog could not load. Try again when connected.');
+            setExploreLoading(false);
+          }
         }
-        setExploreLoading(false);
       }
     })();
 
@@ -2070,7 +2101,18 @@ function GuideScreenContent() {
     }
   }
 
+  function showExploreSheet(place: ExplorePlaceProfile, initialTab: ExploreDetailTab) {
+    setProfileReadMode(initialTab);
+    const local = exploreTrailAreasById[place.id] ?? place;
+    setSelectedExplore(local);
+    if (!exploreWeatherById[local.id] && exploreWeatherLoadingId !== local.id) {
+      fetchExploreWeather(local).catch(() => {});
+    }
+    return local;
+  }
+
   async function openExplorePlace(place: ExplorePlaceProfile, initialTab: ExploreDetailTab = 'summary') {
+    const local = showExploreSheet(place, initialTab);
     const parentHubId = exploreHubMeta.parentByChildId.get(place.id);
     if (parentHubId && parentHubId !== place.id) {
       const parentHub = enrichedExplorePlaces.find(item => item.id === parentHubId)
@@ -2084,12 +2126,6 @@ function GuideScreenContent() {
     if (resolvedParentHub && resolvedParentHub.id !== place.id) {
       await openExplorePlace(resolvedParentHub, initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab);
       return;
-    }
-    setProfileReadMode(initialTab);
-    const local = exploreTrailAreasById[place.id] ?? place;
-    setSelectedExplore(local);
-    if (!exploreWeatherById[local.id] && exploreWeatherLoadingId !== local.id) {
-      fetchExploreWeather(local).catch(() => {});
     }
     if (!shouldUseExploreDetailEndpoint(place)) {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
@@ -2344,8 +2380,8 @@ function GuideScreenContent() {
                     </View>
                     <View style={s.campgroundActions}>
                       <TouchableOpacity style={s.campgroundOpenBtn} onPress={() => showExploreCampOnMap(camp)}>
-                        <Ionicons name="map-outline" size={13} color="#fff" />
-                        <Text style={s.campgroundOpenText}>OPEN CAMP</Text>
+                        <Ionicons name="bonfire-outline" size={13} color="#fff" />
+                        <Text style={s.campgroundOpenText}>VIEW CAMP</Text>
                       </TouchableOpacity>
                       {!!officialUrl && (
                         <TouchableOpacity style={s.campgroundSourceBtn} onPress={() => Linking.openURL(officialUrl)}>
@@ -2584,7 +2620,7 @@ function GuideScreenContent() {
               <View style={s.exploreLoadingBlock}>
                 <TrailheadLoadingRow
                   label="Finding the best places"
-                  sub="Loading parks, trails, stays, water, and route-ready cards."
+                  sub="Loading parks, trails, stays, water, and trip ideas."
                   icon="sparkles-outline"
                 />
                 {explorePlaces.length === 0 ? (

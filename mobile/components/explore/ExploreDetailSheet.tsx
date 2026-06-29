@@ -138,11 +138,14 @@ function sourcePackItemLooksLikeArticle(item?: ExploreSourcePackItem | null) {
   const kind = String(item?.kind || item?.category || '').toLowerCase();
   const url = String(item?.url || '').toLowerCase();
   const title = String(item?.title || '').toLowerCase();
+  const description = String(item?.description || '').toLowerCase();
   if (/(^|\/)(articles|news|stories)\//.test(url)) return true;
+  if (/\/learn\/(nature|history|science|photosmultimedia)\//.test(url)) return true;
   if (/\b(article|news|story|research|publication|collection)\b/.test(kind)) return true;
   if (/nps|national park service/.test(source)) {
     return /\b(species database|species spotlight|nifty finds|humanities research|photograph collection|bioaccumulation|cracking the code|research methods|holding the line|conservation across the national park service)\b/.test(title);
   }
+  if (/\b(disambiguation|wikidata|wikipedia extract)\b/.test(description)) return true;
   return false;
 }
 
@@ -150,6 +153,77 @@ function sourcePackItemCanShow(item?: ExploreSourcePackItem | null) {
   const title = normalizeExploreCopyBlock(item?.title);
   if (!title || /^(places?|things to do|details?|overview)$/i.test(title)) return false;
   return !sourcePackItemLooksLikeArticle(item);
+}
+
+function sourcePackItemDedupeKey(item?: ExploreSourcePackItem | null) {
+  const title = normalizeExploreCopyBlock(item?.title).toLowerCase();
+  const kind = String(item?.kind || item?.category || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+  if (title) return `${kind}:${title.replace(/[^a-z0-9]+/g, ' ').trim()}`;
+  return String(item?.source_id || item?.url || '').toLowerCase();
+}
+
+function uniqueSourcePackItems(items: ExploreSourcePackItem[]) {
+  const seen = new Set<string>();
+  const unique: ExploreSourcePackItem[] = [];
+  for (const item of items) {
+    const key = sourcePackItemDedupeKey(item);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    unique.push(item);
+  }
+  return unique;
+}
+
+function sourcePackItemLooksLikeActivity(item?: ExploreSourcePackItem | null) {
+  const text = [
+    item?.title,
+    item?.description,
+    item?.kind,
+    item?.category,
+    item?.url,
+  ].map(value => String(value || '').toLowerCase()).join(' ');
+  return /\b(hikes?|hiking|trail|walk|walking|drive|driving|road|tour|program|ranger|visit|visitor|birding|wildlife watching|watching safety|scenic|overlook|viewpoint|camp|camping|fish|fishing|boat|boating|paddle|paddling|kayak|climb|climbing|bike|biking|cycle|cycling|horse|ride|ski|snowshoe|lodge|historic)\b/.test(text);
+}
+
+function sourcePackItemLooksLikeSpeciesProfile(item?: ExploreSourcePackItem | null) {
+  const source = String(item?.source || item?.source_label || '').toLowerCase();
+  const kind = String(item?.kind || item?.category || '').toLowerCase();
+  const title = String(item?.title || '').toLowerCase();
+  const description = String(item?.description || '').toLowerCase();
+  const url = String(item?.url || '').toLowerCase();
+  if (!/nps|national park service/.test(source) || !/thing_to_do|todo/.test(kind)) return false;
+  if (/\b(watch|watching|view|viewing|safety|drive|hike|trail|tour|program|visit|visitor|lodge|road|walk|camp|fish|boat|bike|climb)\b/.test(title)) {
+    return false;
+  }
+  const animalTitle = /\b(duck|osprey|loon|owl|eagle|thrush|dipper|woodpecker|weasel|pika|otter|lion|goat|moose|marmot|coyote|squirrel|lynx|bobcat|beaver|bear|bat|marten|bison|elk|deer|wolf|fox|snake|turtle|frog|salmon|trout|fish|bird|raptor|insect|mammal|wildlife)\b/.test(title);
+  const profileCopy = /\b(species|subspecies|genus|family|feathers|wings|fur|rodent|mammal|bird|reproductive|habitat|predator|prey|listed as|scientific name)\b/.test(description);
+  return (animalTitle && profileCopy) || (/\/thingstodo\/[^/]+\.htm$/.test(url) && animalTitle);
+}
+
+function sourcePackThingToDoCanShow(item?: ExploreSourcePackItem | null) {
+  return sourcePackItemCanShow(item) && !sourcePackItemLooksLikeSpeciesProfile(item) && sourcePackItemLooksLikeActivity(item);
+}
+
+function replacementForGenericSourcePackCopy(title: string, item?: ExploreSourcePackItem | null) {
+  const hay = [
+    title,
+    item?.kind,
+    item?.category,
+    item?.url,
+  ].map(value => String(value || '').toLowerCase()).join(' ');
+  if (/\b(hike|hiking|trail|walk|walking)\b/.test(hay)) {
+    return 'Check current trail conditions, distance, closures, daylight, and access before choosing this outing.';
+  }
+  if (/\b(tour|drive|driving|road)\b/.test(hay)) {
+    return 'Check stops, timing, road access, closures, and current conditions before building this into your day.';
+  }
+  if (/\b(program|ranger|talk|event)\b/.test(hay)) {
+    return 'Check the current schedule, location, accessibility, and seasonal availability before planning around it.';
+  }
+  if (/\b(lodge|hotel|cabin|camp|campground)\b/.test(hay)) {
+    return 'Check access, booking details, seasonal rules, and current availability before planning around it.';
+  }
+  return 'Check current access, timing, seasonal rules, and conditions before planning around it.';
 }
 
 function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
@@ -160,6 +234,9 @@ function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
     .replace(/\bmap context\b/gi, 'area detail')
     .replace(/\bAI\b/g, '')
     .trim();
+  if (/\bis a managed outdoor area near\b/i.test(clean) || /\bCheck official access, fees, closures, permits, weather\b/i.test(clean)) {
+    return replacementForGenericSourcePackCopy(title, item);
+  }
   if (!clean || clean.length < 24) return '';
   if (title && clean.toLowerCase() === title.toLowerCase()) return '';
   if (/^(places?|things to do|details?|overview|open map|map)\.?$/i.test(clean)) return '';
@@ -234,12 +311,12 @@ export function ExploreDetailSheet({
   const [placeSearch, setPlaceSearch] = useState('');
   const searchNeedle = placeSearch.trim().toLowerCase();
   const sourcePackLists = useMemo(() => ({
-    thingsToDo: (pack?.things_to_do ?? []).filter(sourcePackItemCanShow),
-    thingsToSee: (pack?.things_to_see ?? []).filter(sourcePackItemCanShow),
-    visitorCenters: (pack?.visitor_centers ?? []).filter(sourcePackItemCanShow),
-    campgrounds: (pack?.campgrounds ?? []).filter(sourcePackItemCanShow),
-    events: (pack?.events ?? []).filter(sourcePackItemCanShow),
-    parkingLots: (pack?.parking_lots ?? []).filter(sourcePackItemCanShow),
+    thingsToDo: uniqueSourcePackItems((pack?.things_to_do ?? []).filter(sourcePackThingToDoCanShow)),
+    thingsToSee: uniqueSourcePackItems((pack?.things_to_see ?? []).filter(sourcePackItemCanShow)),
+    visitorCenters: uniqueSourcePackItems((pack?.visitor_centers ?? []).filter(sourcePackItemCanShow)),
+    campgrounds: uniqueSourcePackItems((pack?.campgrounds ?? []).filter(sourcePackItemCanShow)),
+    events: uniqueSourcePackItems((pack?.events ?? []).filter(sourcePackItemCanShow)),
+    parkingLots: uniqueSourcePackItems((pack?.parking_lots ?? []).filter(sourcePackItemCanShow)),
   }), [pack]);
 
   useEffect(() => {
@@ -460,7 +537,7 @@ export function ExploreDetailSheet({
   const placeHeroCandidates = mediaCandidates(imageUrl, (pack?.photos ?? []).map(photo => photo.url), place.summary.image_url, place.summary.thumbnail_url);
 
   const filteredItems = (items?: ExploreSourcePackItem[]) => {
-    const list = (items ?? []).filter(sourcePackItemCanShow);
+    const list = uniqueSourcePackItems((items ?? []).filter(sourcePackItemCanShow));
     if (!searchNeedle) return list;
     return list.filter(item => `${item.title ?? ''} ${item.description ?? ''} ${item.kind ?? ''} ${item.source_label ?? ''}`.toLowerCase().includes(searchNeedle));
   };
@@ -868,7 +945,7 @@ export function ExploreDetailSheet({
 
   function renderModuleContent(key: ExploreDetailModuleKey) {
     if (key === 'see') {
-      const seeItems = filteredItems(pack?.things_to_see);
+      const seeItems = moduleItems('see');
       return (
         <>
           {seeItems.length > 0 ? renderItemList(seeItems, 'Nothing listed yet.') : null}
@@ -883,7 +960,7 @@ export function ExploreDetailSheet({
       );
     }
     if (key === 'do') {
-      const doItems = filteredItems(pack?.things_to_do);
+      const doItems = moduleItems('do');
       return (
         <>
           {doItems.length > 0 ? renderItemList(doItems, 'Nothing listed yet.') : null}
@@ -893,7 +970,7 @@ export function ExploreDetailSheet({
       );
     }
     if (key === 'stay') {
-      const stayItems = filteredItems(pack?.campgrounds);
+      const stayItems = moduleItems('stay');
       return (
         <>
           {stayItems.length > 0 ? renderItemList(stayItems, 'Nothing listed yet.') : null}
@@ -905,7 +982,7 @@ export function ExploreDetailSheet({
     if (key === 'visitor') {
       return (
         <>
-          {renderItemList(filteredItems(pack?.visitor_centers), 'Nothing listed yet.')}
+          {renderItemList(moduleItems('visitor'), 'Nothing listed yet.')}
           {!!sourceUrl && renderAction('Official site', 'open-outline', () => Linking.openURL(sourceUrl))}
         </>
       );
@@ -968,7 +1045,7 @@ export function ExploreDetailSheet({
       );
     }
     if (key === 'calendar') {
-      return renderCalendarItems(filteredItems(pack?.events));
+      return renderCalendarItems(moduleItems('calendar'));
     }
     if (key === 'weather') {
       return weatherSlot ?? (

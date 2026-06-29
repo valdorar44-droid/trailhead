@@ -149,6 +149,8 @@ const WEAK_COPY_PATTERNS = [
   /\bmay refer to\b/i,
   /\b(disambiguation|wikimedia|wikidata)\b/i,
   /\b(undefined|null|nan)\b/i,
+  /\bis a managed outdoor area near\b/i,
+  /\bCheck official access, fees, closures, permits, weather\b/i,
   /^\s*(lake|mountain|waterfall|glacier|island|hill|volcano|national park|former national park|marine reserve|animal sanctuary|locality|river|peak)\s+(in|on|near|of)\s+[^.]{1,90}\.?\s*$/i,
   /^\s*(mountain|waterfall|glacier|lake|peak|park|trail|campground|historic site|protected area|places?|things to do)\s*\.?\s*$/i,
 ];

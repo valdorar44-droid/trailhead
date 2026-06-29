@@ -55,7 +55,7 @@ export function StaticMapboxPreview({ pins, title, subtitle, height = 260, onPre
       <View style={styles.shade} />
       <View style={styles.badge}>
         <Ionicons name="navigate-outline" size={15} color="#fff" />
-        <Text style={styles.badgeText}>{cleanPins.length ? `${cleanPins.length} pins` : 'Map'}</Text>
+        <Text style={styles.badgeText}>{cleanPins.length ? (cleanPins.length === 1 ? '1 area' : `${cleanPins.length} places`) : 'Area'}</Text>
       </View>
       <View style={styles.copy}>
         <Text style={styles.title} numberOfLines={2}>{title}</Text>

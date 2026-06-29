@@ -38,11 +38,23 @@ CATEGORY_COPY: dict[str, str] = {
     "bouldering_area": "{title} is a bouldering area near {region}. Check access, closures, landing conditions, pads, route information, local rules, and current conditions.",
     "historic_site": "{title} is a historic or cultural stop near {region}. Check access, hours, preservation rules, weather, and nearby route context before visiting.",
     "monument": "{title} is a landmark near {region}. Check access, hours, preservation rules, weather, and nearby route context before visiting.",
+    "scenic_drive": "{title} is a drive or road-based stop near {region}. Check road status, stops, closures, timing, and current conditions before routing it.",
+    "activity": "{title} is an activity option near {region}. Check current access, timing, reservations, closures, and conditions before planning around it.",
     "fuel": "{title} is a service stop near {region}. Verify hours, fuel availability, payment options, road access, and backup stops before depending on it.",
     "resupply": "{title} is a resupply stop near {region}. Verify hours, inventory, payment options, road access, and backup stops before depending on it.",
 }
 
 GROUP_CATEGORY_HINTS = (
+    ("thing to do", "activity"),
+    ("things to do", "activity"),
+    ("activity", "activity"),
+    ("program", "activity"),
+    ("tour", "activity"),
+    ("guided", "activity"),
+    ("hike", "trail"),
+    ("walking", "trail"),
+    ("drive", "scenic_drive"),
+    ("road", "scenic_drive"),
     ("camp", "campground"),
     ("glamp", "glamping"),
     ("hut", "hut"),
@@ -238,4 +250,3 @@ def sanitize_place_profile(place: dict[str, Any]) -> dict[str, Any]:
                 pack[key] = values
         clean["source_pack"] = pack
     return clean
-

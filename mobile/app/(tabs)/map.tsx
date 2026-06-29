@@ -23296,6 +23296,12 @@ function MapScreen() {
                 const timelineEvents = (timelineDay?.events ?? [])
                   .filter(event => !['start', 'depart', 'drive', 'overnight'].includes(String(event.type)))
                   .slice(0, 5);
+                const nearbyAnchor = pin ?? campWp ?? finish ?? last ?? first;
+                const nearbyKey = tripDayNearbyFeedKey(day.day)
+                  || (nearbyAnchor?.lat && nearbyAnchor?.lng ? nearbyFeedKey('day', nearbyAnchor.lat, nearbyAnchor.lng) : '');
+                const nearbyFeed = nearbyKey ? nearbyPlaceFeeds[nearbyKey] : null;
+                const nearbyPlaces = nearbyFeed?.places?.slice(0, 4) ?? [];
+                const visiblePlaceCount = Math.max(poiStops.length, nearbyFeed?.places?.length ?? 0);
                 return (
                   <TouchableOpacity
                     key={day.day}
@@ -23316,7 +23322,7 @@ function MapScreen() {
                         <View style={s.tripTimelineDayHeader}>
                           <View style={{ flex: 1 }}>
                             <Text style={s.tripTimelineDayTitle}>Day {day.day}</Text>
-                            <Text style={s.tripTimelineMeta}>{legMiles} mi · {gasStops.length} fuel · {poiStops.length} places · {hi != null || lo != null ? `${hi != null ? Math.round(hi) : '-'}°/${lo != null ? Math.round(lo) : '-'}°` : `${dayWps.length} stops`}</Text>
+                            <Text style={s.tripTimelineMeta}>{legMiles} mi · {gasStops.length} fuel · {visiblePlaceCount} places · {hi != null || lo != null ? `${hi != null ? Math.round(hi) : '-'}°/${lo != null ? Math.round(lo) : '-'}°` : `${dayWps.length} stops`}</Text>
                           </View>
                           <View style={[s.tripTimelineStatusPill, { borderColor: statusColor + '66', backgroundColor: statusColor + '12' }]}>
                             <Text style={[s.tripTimelineStatusText, { color: statusColor }]} numberOfLines={1}>{statusText}</Text>
@@ -23363,19 +23369,14 @@ function MapScreen() {
                             </View>
                           ))}
                           {(() => {
-                            const nearbyAnchor = pin ?? campWp ?? finish ?? last ?? first;
-                            const key = tripDayNearbyFeedKey(day.day)
-                              || (nearbyAnchor?.lat && nearbyAnchor?.lng ? nearbyFeedKey('day', nearbyAnchor.lat, nearbyAnchor.lng) : '');
-                            const feed = key ? nearbyPlaceFeeds[key] : null;
-                            const places = feed?.places?.slice(0, 4) ?? [];
-                            if (!feed?.loading && places.length === 0) return null;
+                            if (!nearbyFeed?.loading && nearbyPlaces.length === 0) return null;
                             return (
                               <View style={s.tripPlacesBlock}>
                                 <View style={s.tripPlacesHeader}>
                                   <Text style={s.tripPlacesTitle}>PLACES NEARBY</Text>
-                                  {feed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
+                                  {nearbyFeed?.loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
                                 </View>
-                                {places.map(place => (
+                                {nearbyPlaces.map(place => (
                                   <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={s.tripPlaceRow} onPress={() => openNearbyPlace(place, day.day)} activeOpacity={0.86}>
                                     <View style={s.tripTimelineIcon}>
                                       <Ionicons name={placeTypeIcon(place.type)} size={13} color={C.orange} />

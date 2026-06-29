@@ -211,7 +211,7 @@ function experienceSearchMessage(res: ExploreExperiencesResponse, areaName: stri
       ? 'Checking tour availability for this area.'
       : `Checking tour availability near ${areaName}.`;
   }
-  return message || `No bookable tours found near ${areaName} yet.`;
+  return message || `Tour availability is still loading near ${areaName}.`;
 }
 
 function normalizeExploreText(value: string) {

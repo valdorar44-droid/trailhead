@@ -17782,7 +17782,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
             card["summary"] = "Mapped hot spring or public bath feature. Verify access, rules, fees, and current conditions before visiting."
         elif _is_broad_map_place(body, card):
             display = card.get("display_type") or "place"
-            card["summary"] = f"Selected {str(display).lower()} with nearby camps, trails, scenic places, events, and trip services from open source data."
+            card["summary"] = f"Use this {str(display).lower()} as a starting point for nearby camps, trails, scenic stops, events, and trip services."
         else:
             card["summary"] = card.get("address") or "Selected map place."
     card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"

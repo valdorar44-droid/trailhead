@@ -79,7 +79,7 @@ export default function CampFieldReportsSection({
         );
       })}
 
-      {reports.length === 0 ? <Text style={s.emptyText}>No field reports yet. Be the first to check in.</Text> : null}
+      {reports.length === 0 ? <Text style={s.emptyText}>Share recent access, crowding, or road notes.</Text> : null}
 
       {canAddReport ? (
         <TouchableOpacity style={s.addBtn} onPress={onAddReport}>

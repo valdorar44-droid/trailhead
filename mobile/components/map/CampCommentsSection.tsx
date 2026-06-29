@@ -56,7 +56,7 @@ export default function CampCommentsSection({
       ))}
 
       {!comments.length && !showForm ? (
-        <Text style={s.emptyText}>No comments yet. Ask a question or leave a recent note.</Text>
+        <Text style={s.emptyText}>Ask a question or leave a recent note.</Text>
       ) : null}
 
       {showForm ? (

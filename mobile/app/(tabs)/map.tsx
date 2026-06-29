@@ -849,8 +849,8 @@ function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | nu
     (detail as any)?.summary,
     detail?.description,
     camp?.description,
-    detail?.source_freshness,
-    camp?.source_freshness,
+    userFacingCampNote(detail?.source_freshness),
+    userFacingCampNote(camp?.source_freshness),
     (detail as any)?.access_note,
   ]
     .map(cleanCampDescriptionText)
@@ -5047,11 +5047,13 @@ function userFacingCampNote(text?: string | null) {
   if (!text) return '';
   return String(text)
     .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Official Recreation.gov data. ')
+    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'Official BLM recreation data. ')
     .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Available source data. ')
     .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Available camp data. ')
     .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, 'OpenStreetMap data. ')
     .replace(/data packaged by Trailhead;?\s*/gi, 'source data. ')
     .replace(/cached by Trailhead;?\s*/gi, '')
+    .replace(/\.\s*verify\b/g, '. Verify')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -21841,7 +21843,7 @@ function MapScreen() {
 	                ) : hasPlan ? (
 	                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
 	                    <Ionicons name="sparkles-outline" size={15} color={C.orange} />
-	                    <Text style={s.lockedInlineText}>Generate camp insight for route fit, hazards, and nearby highlights.</Text>
+	                    <Text style={s.lockedInlineText}>Check camp fit, hazards, and nearby highlights.</Text>
 	                  </TouchableOpacity>
 	                ) : (
 	                  <TouchableOpacity style={s.lockedAiPreview} onPress={() => openCampInsight(selectedCamp, campDetail)} activeOpacity={0.9}>
@@ -21863,7 +21865,7 @@ function MapScreen() {
                     </View>
 	                    <View style={s.lockedAiOverlay}>
 	                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
-	                      <Text style={s.lockedAiOverlayText}>Unlock full camp fit, hazards, best season, and nearby highlights with credits or a plan.</Text>
+	                      <Text style={s.lockedAiOverlayText}>Unlock camp fit, hazards, best season, and nearby highlights with credits or a plan.</Text>
                     </View>
                   </TouchableOpacity>
                 )}

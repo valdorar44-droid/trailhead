@@ -185,6 +185,9 @@ export function relatedTrailCanShow(item?: RelatedContextPlace | null) {
   if (!relatedPlaceCanShow(item) || relatedPlaceLooksLikeGenericRoad(item)) return false;
   const like = relatedToSourcePackLike(item);
   const title = itemTitle(like).toLowerCase();
+  if (/^mapped\s+(trail|trail route|rough track|backroad)$/.test(title)) {
+    return false;
+  }
   if (/\b(?:national forest development road|forest(?: service)? road|nf-?\d|fs-?\d|fr\s*\d|road\s*\d+[a-z]?|rd\s*\d)\b/.test(title)) {
     return false;
   }

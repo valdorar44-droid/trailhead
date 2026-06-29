@@ -24,6 +24,7 @@ import {
   cleanExploreSourceLabel,
   relatedPlaceCanShow,
   relatedPlaceNameKey,
+  relatedTrailCanShow,
   relatedThingToDoCanShow,
   relatedThingToSeeCanShow,
   uniqueRelatedPlaces,
@@ -239,6 +240,26 @@ function cleanDetailText(value?: string | null) {
     .replace(/&amp;/gi, '&')
     .replace(/&quot;/gi, '"')
     .replace(/&#39;/gi, "'")
+    .replace(
+      /^Selected\s+([a-z\s_-]+)\s+with nearby camps, trails, scenic places, events, and trip services from open source data\.?$/i,
+      (_, kind) => `Use this ${String(kind || 'place').trim().toLowerCase()} as a starting point for nearby camps, trails, scenic stops, events, and trip services.`,
+    )
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanSourceFreshnessText(value?: string | null) {
+  return cleanDetailText(value)
+    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Official Recreation.gov data. ')
+    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'Official BLM recreation data. ')
+    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Available source data. ')
+    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Available camp data. ')
+    .replace(/OpenStreetMap\/Nominatim place identity cached by Trailhead;?\s*/gi, 'OpenStreetMap/Nominatim place data. ')
+    .replace(/Wikipedia\/Wikimedia context cached by Trailhead;?\s*/gi, 'Wikipedia/Wikimedia references. ')
+    .replace(/GeoNames\/Wikipedia context cached by Trailhead;?\s*/gi, 'GeoNames/Wikipedia references. ')
+    .replace(/Open town profile data cached by Trailhead;?\s*/gi, 'Open town profile data. ')
+    .replace(/cached by Trailhead;?\s*/gi, '')
+    .replace(/\.\s*verify\b/g, '. Verify')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -472,7 +493,12 @@ export default function PremiumPlaceSheet({
     .filter(item => !relatedThingsToSeeNames.has(relatedPlaceNameKey(item))));
   const relatedVisitorCenters = uniqueRelatedPlaces((related?.visitor_centers ?? []).filter(relatedPlaceCanShow));
   const relatedCampgrounds = related?.campgrounds_nearby ?? related?.camps ?? [];
-  const relatedTrails = related?.trails ?? [];
+  const relatedTrails = uniqueRelatedPlaces((related?.trails ?? []).filter(relatedTrailCanShow))
+    .filter((item, index, items) => {
+      const name = relatedPlaceNameKey(item);
+      if (!name) return true;
+      return items.findIndex(candidate => relatedPlaceNameKey(candidate) === name) === index;
+    });
   const relatedTripServices = related?.trip_services ?? [];
   const relatedHasContext = !!(
     related?.loading ||
@@ -509,7 +535,7 @@ export default function PremiumPlaceSheet({
     openNowLabel(data.open_now),
   ].filter(Boolean).join(' · ');
   const hours = detail?.hours?.length ? detail.hours : data.hours?.length ? data.hours : normalizeHours(data.open_hours, data.hours_label);
-  const sourceFreshness = data.source_freshness || (data.last_checked ? `Downloaded source checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : '');
+  const sourceFreshness = cleanSourceFreshnessText(data.source_freshness || (data.last_checked ? `Downloaded source checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : ''));
   const providerDetails = cleanDetailText(data.description || data.details);
   const summaryText = cleanDetailText(data.summary);
   const showProviderDetails = providerDetails && providerDetails !== summaryText;
@@ -979,7 +1005,7 @@ export default function PremiumPlaceSheet({
                       )}
                     </View>
                   ))}
-                  {!comments.length && !showCommentForm ? <Text style={s.sectionText}>No comments yet.</Text> : null}
+                  {!comments.length && !showCommentForm ? <Text style={s.sectionText}>Ask a question or leave a recent access note.</Text> : null}
                   {showCommentForm ? (
                     <View style={s.formCard}>
                       <TextInput

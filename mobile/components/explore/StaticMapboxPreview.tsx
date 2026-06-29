@@ -17,6 +17,7 @@ type Props = {
   pins: StaticMapboxPin[];
   title: string;
   subtitle?: string;
+  badgeLabel?: string;
   height?: number;
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
@@ -24,7 +25,7 @@ type Props = {
 
 const MAPBOX_STATIC_STYLE = 'mapbox/outdoors-v12';
 
-export function StaticMapboxPreview({ pins, title, subtitle, height = 260, onPress, style }: Props) {
+export function StaticMapboxPreview({ pins, title, subtitle, badgeLabel, height = 260, onPress, style }: Props) {
   const C = useTheme();
   const token = useStore(st => st.mapboxToken);
   const [failedUrl, setFailedUrl] = useState('');
@@ -55,7 +56,7 @@ export function StaticMapboxPreview({ pins, title, subtitle, height = 260, onPre
       <View style={styles.shade} />
       <View style={styles.badge}>
         <Ionicons name="navigate-outline" size={15} color="#fff" />
-        <Text style={styles.badgeText}>{cleanPins.length ? (cleanPins.length === 1 ? '1 area' : `${cleanPins.length} places`) : 'Area'}</Text>
+        <Text style={styles.badgeText}>{badgeLabel || (cleanPins.length ? (cleanPins.length === 1 ? '1 area' : `${cleanPins.length} places`) : 'Area')}</Text>
       </View>
       <View style={styles.copy}>
         <Text style={styles.title} numberOfLines={2}>{title}</Text>

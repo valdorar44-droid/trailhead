@@ -356,6 +356,7 @@ export function ExploreDetailSheet({
       if (module) modules.push(module);
     };
     const count = (items?: ExploreSourcePackItem[]) => Array.isArray(items) ? items.length : 0;
+    const countLabel = (value: number, singular: string, plural: string) => `${value} ${value === 1 ? singular : plural}`;
     const packPhotoCandidates = mediaCandidates((pack?.photos ?? []).map(photo => photo.url));
     const imageKey = (url: string) => url.replace(/\?.*$/, '');
     const tileImages = (items?: ExploreSourcePackItem[], extra: Array<string | null | undefined> = []) => {
@@ -375,7 +376,7 @@ export function ExploreDetailSheet({
     add(count(sourcePackLists.thingsToSee) > 0 && {
       key: 'see',
       label: 'What to See',
-      detail: `${count(sourcePackLists.thingsToSee)} places`,
+      detail: countLabel(count(sourcePackLists.thingsToSee), 'place', 'places'),
       icon: 'camera-outline',
       tone: '#0f766e',
       count: count(sourcePackLists.thingsToSee),
@@ -387,7 +388,7 @@ export function ExploreDetailSheet({
     add(Boolean(count(sourcePackLists.thingsToDo) || experiencesSlot) && {
       key: 'do',
       label: 'Things to Do',
-      detail: count(sourcePackLists.thingsToDo) ? `${count(sourcePackLists.thingsToDo)} options` : 'Bookable options',
+      detail: count(sourcePackLists.thingsToDo) ? countLabel(count(sourcePackLists.thingsToDo), 'option', 'options') : 'Bookable options',
       icon: 'walk-outline',
       tone: '#f97316',
       count: count(sourcePackLists.thingsToDo) || undefined,
@@ -399,7 +400,7 @@ export function ExploreDetailSheet({
     add(Boolean(count(sourcePackLists.campgrounds) || campgroundsSlot) && {
       key: 'stay',
       label: 'Where to Stay',
-      detail: count(sourcePackLists.campgrounds) ? `${count(sourcePackLists.campgrounds)} stays` : 'Nearby stays',
+      detail: count(sourcePackLists.campgrounds) ? countLabel(count(sourcePackLists.campgrounds), 'stay', 'stays') : 'Nearby stays',
       icon: 'bonfire-outline',
       tone: '#16a34a',
       count: count(sourcePackLists.campgrounds) || undefined,
@@ -411,7 +412,7 @@ export function ExploreDetailSheet({
     add(count(sourcePackLists.visitorCenters) > 0 && {
       key: 'visitor',
       label: 'Visitor Centers',
-      detail: `${count(sourcePackLists.visitorCenters)} centers`,
+      detail: countLabel(count(sourcePackLists.visitorCenters), 'center', 'centers'),
       icon: 'information-circle-outline',
       tone: '#2563eb',
       count: count(sourcePackLists.visitorCenters),
@@ -455,7 +456,7 @@ export function ExploreDetailSheet({
     add(sourcePackLists.events.length > 0 && {
       key: 'calendar',
       label: 'Calendar',
-      detail: `${sourcePackLists.events.length} events`,
+      detail: countLabel(sourcePackLists.events.length, 'event', 'events'),
       icon: 'calendar-outline',
       tone: '#22c55e',
       count: sourcePackLists.events.length,
@@ -685,6 +686,7 @@ export function ExploreDetailSheet({
     activeItem,
     title,
     subtitle,
+    badgeLabel,
     onPress,
     height = 260,
   }: {
@@ -692,6 +694,7 @@ export function ExploreDetailSheet({
     activeItem?: ExploreSourcePackItem | null;
     title: string;
     subtitle?: string;
+    badgeLabel?: string;
     onPress?: () => void;
     height?: number;
   }) {
@@ -729,6 +732,7 @@ export function ExploreDetailSheet({
         pins={pins}
         title={title}
         subtitle={subtitle}
+        badgeLabel={badgeLabel}
         height={height}
         onPress={onPress}
       />
@@ -737,10 +741,9 @@ export function ExploreDetailSheet({
 
   function renderModuleHero(module: ExploreDetailModule) {
     const items = moduleItems(module.key);
-    const mappedCount = items.filter(item => itemCanRenderOnMap(item)).length;
     const subtitle = [
       module.label,
-      mappedCount ? `${mappedCount} places` : module.detail,
+      module.detail,
     ].filter(Boolean).join(' · ');
     return (
       <View style={styles.moduleMapHero}>
@@ -748,6 +751,7 @@ export function ExploreDetailSheet({
           items,
           title: getExploreDisplayTitle(place),
           subtitle,
+          badgeLabel: module.detail,
           onPress: onShowArea,
           height: 360,
         })}

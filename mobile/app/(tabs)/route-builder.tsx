@@ -3867,6 +3867,32 @@ function RouteBuilderScreenContent() {
     }
   }
 
+  function buildManualDayAnchors(count: number, sourceDays: number[], spine: Array<{ lat: number; lng: number }>, totalMi: number) {
+    if (tripBuildMode !== 'blank' || tripLoop || count < 2 || spine.length < 2) return [] as BuilderStop[];
+    return sourceDays.slice(0, -1).map(day => {
+      const targetMi = totalMi * (day / count);
+      const target = pointAtRouteMile(spine, targetMi)
+        ?? spine[Math.min(spine.length - 1, Math.max(0, Math.round((day / count) * (spine.length - 1))))];
+      const window = campWindowFor(day, sourceDays);
+      return {
+        id: `manual_anchor_${Date.now()}_${day}_${Math.random().toString(36).slice(2, 6)}`,
+        day,
+        name: `${window.label} stop area`,
+        lat: target.lat,
+        lng: target.lng,
+        type: 'waypoint' as BuilderStopType,
+        description: 'Pick a camp or lodging near this point, then add fuel or places if needed.',
+        land_type: 'route',
+        source: 'map' as const,
+        routePointType: 'break' as const,
+        campWindowStart: window.start,
+        campWindowEnd: window.end,
+        campWindowLabel: window.label,
+        routeShapeRole: 'overnight' as const,
+      };
+    });
+  }
+
   async function findFuelStopsForRoute(count: number, spine: Array<{ lat: number; lng: number }>, totalMi: number) {
     const rigRange = parsePositiveNumber(rigProfile?.fuel_range_miles);
     const inferredRange = Math.max(180, Math.min(320, planningStats.mpg * 15));
@@ -3983,6 +4009,8 @@ function RouteBuilderScreenContent() {
           if (anchor.strong) strongAnchors += 1;
           else weakAnchors += 1;
         }
+      } else {
+        framework.push(...buildManualDayAnchors(count, nextDays, spine, routeMiles));
       }
       setFrameworkStatus('Checking fuel range and resupply...');
       const fuelStops = await findFuelStopsForRoute(count, spine, routeMiles);
@@ -4129,7 +4157,7 @@ function RouteBuilderScreenContent() {
           title: stop.name,
           description: stop.description,
           day,
-          source: stop.camp?.verified_source || stop.poi?.source_label || sourceLabel(stop.source),
+          source: stop.id.startsWith('manual_anchor_') ? 'Route point' : stop.camp?.verified_source || stop.poi?.source_label || sourceLabel(stop.source),
           warning_level: isFrameworkTarget(stop) ? 'warn' : 'info',
           point: { lat: stop.lat, lng: stop.lng },
           quick_actions: stop.type === 'camp' ? ['swap_camp', 'add_rest_day'] : ['open', 'swap_stop'],
@@ -4230,9 +4258,10 @@ function RouteBuilderScreenContent() {
       const first = wps[0]?.name?.split(',')[0] ?? 'Start';
       const last = wps[wps.length - 1]?.name?.split(',')[0] ?? (hasPlanningTarget ? 'overnight camp needed' : 'Finish');
       const rest = restDays.includes(day);
+      const hasPickedOvernight = wps.some(st => st.type === 'camp' || st.type === 'motel');
       return {
         day,
-        title: rest ? `Day ${day}: Rest / local exploring` : needsWindowCamp ? `${window.label} Camp: ${first} to ${last}` : `${window.label}: Travel window`,
+        title: rest ? `Day ${day}: Rest / local exploring` : needsWindowCamp ? `${window.label}${hasPickedOvernight ? ' Camp' : ''}: ${first} to ${last}` : `${window.label}: Travel window`,
         description: rest
           ? 'Rest day. Keep the camp, add local places, or set a shorter drive max.'
           : campCadenceMode === 'alternate' && !needsWindowCamp
@@ -4976,12 +5005,12 @@ function RouteBuilderScreenContent() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Choose the route feel</Text>
-              <Text style={s.wizardHelp}>Recommended builds a camp-aware base route. Blank keeps it simple for hand-building.</Text>
+              <Text style={s.wizardHelp}>Recommended places camp options along the route. Start from scratch gives you day areas to build by hand.</Text>
             </View>
             <View style={s.premiumModeControl}>
               {([
                 { id: 'recommended' as TripBuildMode, label: 'Plan Mode', icon: 'sparkles-outline' as const, sub: 'Camp-aware' },
-                { id: 'blank' as TripBuildMode, label: 'Build Mode', icon: 'construct-outline' as const, sub: 'Manual base' },
+                { id: 'blank' as TripBuildMode, label: 'Build Mode', icon: 'construct-outline' as const, sub: 'Start from scratch' },
               ]).map(mode => {
                 const active = tripBuildMode === mode.id;
                 return (

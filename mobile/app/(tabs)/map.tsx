@@ -23302,6 +23302,11 @@ function MapScreen() {
                 const nearbyFeed = nearbyKey ? nearbyPlaceFeeds[nearbyKey] : null;
                 const nearbyPlaces = nearbyFeed?.places?.slice(0, 4) ?? [];
                 const visiblePlaceCount = Math.max(poiStops.length, nearbyFeed?.places?.length ?? 0);
+                const startMeta = day.day === 1
+                  ? 'Start location'
+                  : start?.type === 'camp' || start?.type === 'motel'
+                    ? 'Start from previous camp'
+                    : 'Start from previous stop';
                 return (
                   <TouchableOpacity
                     key={day.day}
@@ -23339,7 +23344,7 @@ function MapScreen() {
                             </View>
                             <View style={{ flex: 1 }}>
                               <Text style={s.tripTimelineStopName} numberOfLines={1}>{start?.name ?? 'Start location'}</Text>
-                              <Text style={s.tripTimelineStopMeta}>{day.day === 1 ? 'Start location' : 'Start from previous camp'}</Text>
+                              <Text style={s.tripTimelineStopMeta}>{startMeta}</Text>
                             </View>
                           </View>
                           <View style={s.tripTimelineLeg}>
@@ -23358,15 +23363,22 @@ function MapScreen() {
                             </View>
                           ))}
                           {timelineEvents.map((event, eventIdx) => (
-                            <View key={`timeline_${day.day}_${eventIdx}_${event.title}`} style={s.tripTimelineStop}>
-                              <View style={[s.tripTimelineIcon, { backgroundColor: event.warning_level === 'warn' ? C.yellow + '18' : C.orange + '14', borderColor: event.warning_level === 'warn' ? C.yellow + '55' : C.orange + '44' }]}>
-                                <Ionicons name={event.type === 'fuel' ? 'flash-outline' : event.type === 'rest' ? 'bed-outline' : 'location-outline'} size={13} color={event.warning_level === 'warn' ? C.yellow : C.orange} />
-                              </View>
-                              <View style={{ flex: 1, minWidth: 0 }}>
-                                <Text style={s.tripTimelineStopName} numberOfLines={1}>{event.title}</Text>
-                                <Text style={s.tripTimelineStopMeta} numberOfLines={1}>{[event.source, event.description].filter(Boolean).join(' · ')}</Text>
-                              </View>
-                            </View>
+                            (() => {
+                              const eventSource = event.source === 'map tap' && /^Day \d+ stop area$/i.test(event.title)
+                                ? 'Route point'
+                                : event.source;
+                              return (
+                                <View key={`timeline_${day.day}_${eventIdx}_${event.title}`} style={s.tripTimelineStop}>
+                                  <View style={[s.tripTimelineIcon, { backgroundColor: event.warning_level === 'warn' ? C.yellow + '18' : C.orange + '14', borderColor: event.warning_level === 'warn' ? C.yellow + '55' : C.orange + '44' }]}>
+                                    <Ionicons name={event.type === 'fuel' ? 'flash-outline' : event.type === 'rest' ? 'bed-outline' : 'location-outline'} size={13} color={event.warning_level === 'warn' ? C.yellow : C.orange} />
+                                  </View>
+                                  <View style={{ flex: 1, minWidth: 0 }}>
+                                    <Text style={s.tripTimelineStopName} numberOfLines={1}>{event.title}</Text>
+                                    <Text style={s.tripTimelineStopMeta} numberOfLines={1}>{[eventSource, event.description].filter(Boolean).join(' · ')}</Text>
+                                  </View>
+                                </View>
+                              );
+                            })()
                           ))}
                           {(() => {
                             if (!nearbyFeed?.loading && nearbyPlaces.length === 0) return null;

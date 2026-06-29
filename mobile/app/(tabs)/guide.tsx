@@ -1688,7 +1688,9 @@ function GuideScreenContent() {
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
+  const exploreNearbyNeedsLocation = exploreMode === 'nearby' && !userLoc;
   const rankedExplore = useMemo(() => {
+    if (exploreNearbyNeedsLocation) return [];
     if (exploreMode === 'trip' && waypoints.length === 0) return [];
     if (showExperienceSearch && (exploreCategory === 'tours' || isExplicitTourOnlyQuery(exploreQuery))) return [];
     const places = enrichedExplorePlaces.map(place => {
@@ -1811,7 +1813,7 @@ function GuideScreenContent() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
@@ -1940,6 +1942,7 @@ function GuideScreenContent() {
     if (!showExploreHome) {
       if (rankedExplore.length <= 0) {
         if (exploreSavedOnly) return 'No saved places';
+        if (exploreNearbyNeedsLocation) return 'Location needed';
         if (exploreTripNeedsRoute) return 'No active trip';
         return 'No matches';
       }
@@ -1949,7 +1952,7 @@ function GuideScreenContent() {
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
     return `${count.toLocaleString()} featured picks`;
-  }, [exploreSavedOnly, exploreTripNeedsRoute, featuredLead, featuredSections, rankedExplore.length, showExperienceSearch, showExploreHome, trendingExplore.length]);
+  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreTripNeedsRoute, featuredLead, featuredSections, rankedExplore.length, showExperienceSearch, showExploreHome, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -2826,6 +2829,7 @@ function GuideScreenContent() {
               savedOnly={exploreSavedOnly}
               hasQuery={hasExploreQuery}
               shownCount={rankedExplore.length}
+              countLabel={exploreNearbyNeedsLocation ? 'Location needed' : undefined}
               sortMode={exploreSortMode}
               onModeChange={mode => {
                 setExploreSavedOnly(false);
@@ -2856,7 +2860,9 @@ function GuideScreenContent() {
                   <Text style={s.livePlacesTitle}>LIVE PLACES NEAR YOU</Text>
                   {liveExploreLoading && <ActivityIndicator color={C.orange} size="small" />}
                 </View>
-                {liveExploreLoading && liveExplorePlaces.length === 0 ? (
+                {exploreNearbyNeedsLocation ? (
+                  <Text style={s.livePlacesEmpty}>Turn on location to see nearby services and places.</Text>
+                ) : liveExploreLoading && liveExplorePlaces.length === 0 ? (
                   <>
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
@@ -2906,7 +2912,7 @@ function GuideScreenContent() {
               </View>
             </View>
 
-            {exploreLoading && (
+            {exploreLoading && !exploreNearbyNeedsLocation && (
               <View style={s.exploreLoadingBlock}>
                 <TrailheadLoadingRow
                   label="Finding the best places"
@@ -2968,18 +2974,34 @@ function GuideScreenContent() {
                 </View>
                 ))}
               </>
-            ) : !showExperienceSearch && !exploreLoading && rankedExplore.length === 0 ? (
+            ) : !showExperienceSearch && (!exploreLoading || exploreNearbyNeedsLocation) && rankedExplore.length === 0 ? (
               <View style={s.emptyState}>
                 <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : exploreTripNeedsRoute ? 'map-outline' : 'search-outline'} size={44} color={C.text3} />
                 <Text style={s.emptyTitle}>
-                  {exploreSavedOnly ? 'No saved places yet' : exploreTripNeedsRoute ? 'No active trip' : 'No exact match'}
+                  {exploreSavedOnly
+                    ? 'No saved places yet'
+                    : exploreNearbyNeedsLocation
+                      ? 'Location needed'
+                      : exploreTripNeedsRoute
+                        ? 'No active trip'
+                        : exploreCategory === 'fuel'
+                          ? 'Fuel loads from the map'
+                          : exploreCategory === 'resupply'
+                            ? 'Resupply loads from the map'
+                            : 'No exact match'}
                 </Text>
                 <Text style={s.emptySub}>
                   {exploreSavedOnly
                     ? 'Save Explore cards to build a short list for your route.'
-                    : exploreTripNeedsRoute
-                      ? 'Open or build a route to rank Explore places around your trip stops.'
-                    : 'Try camp, trail, viewpoint, waterfall, hut, fuel, tour, or hot spring.'}
+                    : exploreNearbyNeedsLocation
+                      ? 'Turn on location or search a destination to explore nearby places.'
+                      : exploreTripNeedsRoute
+                        ? 'Open or build a route to rank Explore places around your trip stops.'
+                        : exploreCategory === 'fuel'
+                          ? 'Open Map or Route to search fuel stops around an area.'
+                          : exploreCategory === 'resupply'
+                            ? 'Open Map or Route to search groceries, repair, water, and services.'
+                            : 'Try camp, trail, viewpoint, waterfall, hut, fuel, tour, or hot spring.'}
                 </Text>
               </View>
             ) : (
@@ -3460,6 +3482,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   livePlacesBlock: { marginHorizontal: 20, backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border, borderRadius: 16, padding: 10, gap: 8 },
   livePlacesTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2 },
   livePlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
+  livePlacesEmpty: { color: C.text3, fontSize: 12, lineHeight: 18, paddingHorizontal: 2, paddingBottom: 2 },
   livePlaceSkeleton: { minHeight: 64, padding: 8 },
   livePlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 13, padding: 8 },
   livePlacePhoto: { width: 46, height: 46, borderRadius: 11, backgroundColor: C.s2 },

@@ -2433,8 +2433,9 @@ function GuideScreenContent() {
 
   async function openExplorePlace(place: ExplorePlaceProfile, initialTab: ExploreDetailTab = 'summary') {
     const parentTab = initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab;
+    const resolvesBeforeOpen = shouldResolveExploreWrapperBeforeOpen(place);
     const parentHubId = exploreHubMeta.parentByChildId.get(place.id);
-    if (parentHubId && parentHubId !== place.id) {
+    if (resolvesBeforeOpen && parentHubId && parentHubId !== place.id) {
       const parentHub = enrichedExplorePlaces.find(item => item.id === parentHubId)
         ?? explorePlaces.find(item => item.id === parentHubId);
       if (parentHub) {
@@ -2442,7 +2443,6 @@ function GuideScreenContent() {
         return;
       }
     }
-    const resolvesBeforeOpen = shouldResolveExploreWrapperBeforeOpen(place);
     if (resolvesBeforeOpen) {
       const resolvedParentHub = await resolveExploreParentHubForChild(place);
       if (resolvedParentHub && resolvedParentHub.id !== place.id) {
@@ -2451,13 +2451,6 @@ function GuideScreenContent() {
       }
     }
     const local = showExploreSheet(place, initialTab);
-    if (!resolvesBeforeOpen) {
-      const resolvedParentHub = await resolveExploreParentHubForChild(place);
-      if (resolvedParentHub && resolvedParentHub.id !== place.id) {
-        await openExplorePlace(resolvedParentHub, parentTab);
-        return;
-      }
-    }
     if (!shouldUseExploreDetailEndpoint(place)) {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
       return;
@@ -2482,6 +2475,12 @@ function GuideScreenContent() {
     } catch {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
     }
+  }
+
+  function exploreTabForResultCardOpen(place: ExplorePlaceProfile): ExploreDetailTab {
+    return shouldResolveExploreWrapperBeforeOpen(place)
+      ? exploreTabForBrowseIntent(exploreQuery, exploreCategory)
+      : 'summary';
   }
 
   function handleExploreNearbyAction(place: ExplorePlaceProfile, module: ExploreNearbyModule) {
@@ -2634,7 +2633,7 @@ function GuideScreenContent() {
         saved={isExploreSaved(place)}
         canRoute={place.summary.lat != null && place.summary.lng != null}
         routeLabel={userLoc ? 'Route' : 'Map'}
-        onOpen={() => openExplorePlace(place, exploreTabForBrowseIntent(exploreQuery, exploreCategory))}
+        onOpen={() => openExplorePlace(place, exploreTabForResultCardOpen(place))}
         onArea={() => showExploreOnMap(place)}
         onRoute={() => routeExplore(place)}
         onNearby={() => openExplorePlace(place, 'nearby')}

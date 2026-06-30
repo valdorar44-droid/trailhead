@@ -250,6 +250,7 @@ DASH    = Path(__file__).parent / "dashboard.html"
 LANDING = Path(__file__).parent / "landing.html"
 ADMIN   = Path(__file__).parent / "admin.html"
 WEB_DIST = Path(__file__).parent / "site" / "dist"
+WEB_PUBLIC = Path(__file__).parent / "site" / "public"
 BLOG_INDEX = Path(__file__).parent / "blog.html"
 BLOG_DIR = Path(__file__).parent / "blog"
 EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
@@ -267,6 +268,14 @@ if (WEB_DIST / "_astro").exists():
     app.mount("/_astro", StaticFiles(directory=str(WEB_DIST / "_astro")), name="astro-assets")
 if (WEB_DIST / "assets").exists():
     app.mount("/assets", StaticFiles(directory=str(WEB_DIST / "assets")), name="site-assets")
+elif (WEB_PUBLIC / "assets").exists():
+    app.mount("/assets", StaticFiles(directory=str(WEB_PUBLIC / "assets")), name="site-public-assets")
+
+WEB_APP_ROOT = WEB_DIST / "app" if (WEB_DIST / "app" / "index.html").exists() else WEB_PUBLIC / "app"
+if (WEB_APP_ROOT / "_expo").exists():
+    app.mount("/app/_expo", StaticFiles(directory=str(WEB_APP_ROOT / "_expo")), name="web-app-expo")
+if (WEB_APP_ROOT / "assets").exists():
+    app.mount("/app/assets", StaticFiles(directory=str(WEB_APP_ROOT / "assets")), name="web-app-assets")
 
 BLOG_POSTS = {
     "offline-maps-are-not-magic": "offline-maps-are-not-magic.html",
@@ -3987,13 +3996,30 @@ async def index_head():
 
 @app.get("/app", response_class=HTMLResponse)
 async def app_page():
-    web_index = WEB_DIST / "app" / "index.html"
+    web_index = WEB_APP_ROOT / "index.html"
     if web_index.exists():
         return FileResponse(web_index, media_type="text/html")
     return DASH.read_text()
 
 @app.head("/app")
 async def app_page_head():
+    return Response(status_code=200, media_type="text/html")
+
+@app.get("/app/{route_path:path}", response_class=HTMLResponse)
+async def app_route_page(route_path: str):
+    route_path = unquote(route_path).strip("/")
+    if ".." in Path(route_path).parts:
+        raise HTTPException(status_code=404, detail="Not found")
+    route_index = WEB_APP_ROOT / route_path / "index.html"
+    if route_index.exists():
+        return FileResponse(route_index, media_type="text/html")
+    app_index = WEB_APP_ROOT / "index.html"
+    if app_index.exists():
+        return FileResponse(app_index, media_type="text/html")
+    return DASH.read_text()
+
+@app.head("/app/{route_path:path}")
+async def app_route_page_head(route_path: str):
     return Response(status_code=200, media_type="text/html")
 
 @app.get("/journal", response_class=HTMLResponse)

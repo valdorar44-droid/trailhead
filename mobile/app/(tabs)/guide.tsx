@@ -211,7 +211,7 @@ function placeQueryFromExploreQuery(query: string) {
 function experienceSearchMessage(res: ExploreExperiencesResponse, areaName: string) {
   const status = String(res.live_status || '').toLowerCase();
   const message = String(res.live_message || '').trim();
-  if (status === 'provider_error' || status === 'disabled') return 'Guided trips are paused right now.';
+  if (status === 'provider_error' || status === 'disabled') return 'Guided trips are not available right now.';
   if (status === 'processing') {
     return areaName === 'this area'
       ? 'Checking guided trip availability for this area.'
@@ -1477,15 +1477,16 @@ function GuideScreenContent() {
   useEffect(() => {
     if (mapboxToken) return;
     let cancelled = false;
+    storage.get('trailhead_mapbox_token').then(token => {
+      if (!cancelled && token) setMapboxToken(token);
+    }).catch(() => {});
     api.getConfig().then(cfg => {
       const token = cfg.mapbox_token || '';
       if (!token || cancelled) return;
       setMapboxToken(token);
       storage.set('trailhead_mapbox_token', token).catch(() => {});
     }).catch(() => {
-      storage.get('trailhead_mapbox_token').then(token => {
-        if (!cancelled && token) setMapboxToken(token);
-      }).catch(() => {});
+      // Cached token was already attempted; keep the preview quiet if offline.
     });
     return () => { cancelled = true; };
   }, [mapboxToken, setMapboxToken]);
@@ -1936,7 +1937,7 @@ function GuideScreenContent() {
         storage.set(cacheKey, JSON.stringify({ experiences, fetched_at: Date.now() })).catch(() => {});
       })
       .catch(() => {
-        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Guided trips are paused right now.' }));
+        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Guided trips are not available right now.' }));
       })
       .finally(() => {
         if (!cancelled) setExploreExperienceLoadingId(current => current === placeId ? null : current);
@@ -1982,7 +1983,7 @@ function GuideScreenContent() {
           }
         })
         .catch(() => {
-          if (!cancelled) setExploreSearchExperienceError('Guided trips are paused right now.');
+          if (!cancelled) setExploreSearchExperienceError('Guided trips are not available right now.');
         })
         .finally(() => {
           if (!cancelled) setExploreSearchExperienceLoading(false);
@@ -2038,13 +2039,13 @@ function GuideScreenContent() {
   const experienceDestinationLabel = placeQueryFromExploreQuery(exploreQuery);
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const tourSearchPaused = !BOOKABLE_EXPERIENCES_ENABLED && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery));
+  const browseExploreCategory: ExploreCategoryKey = tourSearchPaused ? 'things' : exploreCategory;
   const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
   const exploreNearbyNeedsLocation = exploreMode === 'nearby' && !userLoc;
   const rankedExplore = useMemo(() => {
     if (exploreNearbyNeedsLocation) return [];
     if (exploreMode === 'trip' && waypoints.length === 0) return [];
-    if (tourSearchPaused) return [];
-    if (showExperienceSearch && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery))) return [];
+    if (!tourSearchPaused && showExperienceSearch && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery))) return [];
     const places = enrichedExplorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
         ? { lat: Number(place.summary.lat), lng: Number(place.summary.lng) }
@@ -2129,9 +2130,9 @@ function GuideScreenContent() {
         && isDestinationExploreHub(place)
         && explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase);
 	      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id) && !directThingsToDoDestinationWrapper) return false;
-	      const categoryOk = exploreCategory === 'all'
-	        ? exploreCategoryMatchesWithHub(place, exploreCategory, exploreHubMeta.categoryKeysByHubId)
-	        : exploreCategoryMatches(place, exploreCategory);
+	      const categoryOk = browseExploreCategory === 'all'
+	        ? exploreCategoryMatchesWithHub(place, browseExploreCategory, exploreHubMeta.categoryKeysByHubId)
+	        : exploreCategoryMatches(place, browseExploreCategory);
 	      if (!categoryOk && !directStayDestinationHub) return false;
 	      if (!queryHasDestinationTerms && isExactWaterfallBrowseQuery(placeQuery) && !explorePlaceStronglyMatchesWaterfall(place)) return false;
 	      if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;
@@ -2152,11 +2153,11 @@ function GuideScreenContent() {
         queryScore: queryScoreForPlace(item.place) + destinationHubBoost,
         trustScore: scoreExploreTrust(item.place),
         contentScore: exploreContentQualityScore(item.place),
-        categoryAffinity: exploreCategoryAffinity(item.place, exploreCategory, exploreHubMeta.categoryKeysByHubId),
+        categoryAffinity: exploreCategoryAffinity(item.place, browseExploreCategory, exploreHubMeta.categoryKeysByHubId),
       };
     });
     const sortByCategoryAffinity = (a: typeof decorated[number], b: typeof decorated[number]) => (
-      exploreCategory === 'all' ? 0 : b.categoryAffinity - a.categoryAffinity
+      browseExploreCategory === 'all' ? 0 : b.categoryAffinity - a.categoryAffinity
     );
     const sortByNearest = (a: typeof decorated[number], b: typeof decorated[number]) => {
       const aDist = a.distance ?? 99999;
@@ -2213,7 +2214,7 @@ function GuideScreenContent() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [browseExploreCategory, enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
@@ -2480,7 +2481,7 @@ function GuideScreenContent() {
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
   const exploreHomeCountLabel = useMemo(() => {
-    if (tourSearchPaused) return 'Paused';
+    if (tourSearchPaused) return 'Free ideas';
     if (holdLegacySearchWrapper) return 'Searching';
     if (exploreSearchResolving && rankedExplore.length <= 0) return 'Searching';
     if (showExperienceSearch && rankedExplore.length <= 0) {
@@ -3425,10 +3426,10 @@ function GuideScreenContent() {
               <ExploreExperiencesRail
                 experiences={exploreSearchExperiences}
                 loading={tourSearchPaused ? false : exploreSearchExperienceLoading}
-                error={tourSearchPaused ? 'Guided trips are paused while booking access is updated.' : exploreSearchExperienceError}
+                error={tourSearchPaused ? 'Guided trips are not available right now.' : exploreSearchExperienceError}
                 emptySubtitle={
                   tourSearchPaused
-                    ? 'Coming back soon'
+                    ? 'Free things to do still show below'
                     : (
                   experienceDestinationLabel
                     ? exploreSearchExperienceLoading

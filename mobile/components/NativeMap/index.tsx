@@ -816,7 +816,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
-    onTraceStart, onTraceMove, onTraceEnd, onDebugEvent,
+    onTraceStart, onTraceMove, onTraceEnd, onDebugEvent, onError,
   } = props;
 
   const mapRef = useRef<any>(null);
@@ -2208,6 +2208,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     restoreRecentViewportIfNeeded().catch(() => {});
   }, [emitDebugEvent, onMapReady, restoreRecentViewportIfNeeded]);
 
+  const handleMapLoadFail = useCallback(() => {
+    emitDebugEvent('map:load-failed');
+    onError?.('map-load-failed');
+  }, [emitDebugEvent, onError]);
+
   const handleRegionIsChanging = useCallback((feat: any) => {
     if (!isUserCameraEvent(feat)) return;
     const props = feat?.properties ?? {};
@@ -2548,6 +2553,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         onRegionIsChanging={handleRegionIsChanging}
         onRegionDidChange={handleRegionChange}
         onDidFinishLoadingMap={handleMapReady}
+        onDidFailLoadingMap={handleMapLoadFail}
         onDidFinishLoadingStyle={() => emitDebugEvent('map:style-loaded', { tileSession, effectiveMapLayer, contourMode, trailMode })}
         compassEnabled={false}
         attributionEnabled={false}

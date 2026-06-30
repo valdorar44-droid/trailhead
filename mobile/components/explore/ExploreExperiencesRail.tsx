@@ -19,7 +19,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
   const C = useTheme();
   if (!loading && !error && !experiences.length) return null;
   const subtitle = experiences.length
-    ? `${experiences.length} bookable option${experiences.length === 1 ? '' : 's'} nearby`
+    ? `${experiences.length} guided trip${experiences.length === 1 ? '' : 's'} nearby`
     : emptySubtitle || (loading ? 'Checking current options' : 'Search a destination to compare options');
   return (
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
@@ -53,7 +53,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
                     </View>
                   )}
                   <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{sourceBadgeLabel(experience.source_badge || 'Partner')}</Text>
+                    <Text style={styles.badgeText}>{sourceBadgeLabel(experience.source_badge || 'Trip')}</Text>
                   </View>
                 </View>
                 <View style={styles.body}>
@@ -67,10 +67,10 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
                       style={[styles.bookButton, { backgroundColor: C.orange, opacity: url ? 1 : 0.55 }]}
                       disabled={!url}
                       onPress={() => url && Linking.openURL(url)}
-                      accessibilityLabel={`Open booking for ${experience.title}`}
+                      accessibilityLabel={`Open ${experience.title}`}
                     >
                       <Ionicons name="open-outline" size={15} color="#fff" />
-                      <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Open Booking</Text>
+                      <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Open</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.iconButton, { borderColor: C.border }]}
@@ -97,7 +97,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
         <TrailheadRailSkeleton count={3} cardWidth={224} />
       ) : null}
       {experiences.length ? (
-        <Text style={[styles.attribution, { color: C.text3 }]}>Trailhead may earn from booking links. Availability and payment happen on the booking site.</Text>
+        <Text style={[styles.attribution, { color: C.text3 }]}>Times, prices, and checkout open on the tour site.</Text>
       ) : null}
     </View>
   );
@@ -111,7 +111,7 @@ function experienceMeta(experience: BookableExperience) {
     bits.push(`${experience.rating.toFixed(1)}${experience.review_count ? ` (${experience.review_count})` : ''}`);
   }
   if (typeof experience.distance_mi === 'number') bits.push(`${experience.distance_mi.toFixed(experience.distance_mi >= 10 ? 0 : 1)} mi`);
-  return bits.join(' · ') || experience.region || 'Partner option';
+  return bits.join(' · ') || experience.region || 'Guided trip';
 }
 
 function money(value: string, currency?: string) {
@@ -122,7 +122,7 @@ function money(value: string, currency?: string) {
 }
 
 function sourceBadgeLabel(value: string) {
-  return String(value || 'Partner')
+  return String(value || 'Trip')
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

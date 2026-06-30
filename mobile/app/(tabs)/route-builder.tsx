@@ -2224,9 +2224,9 @@ function RouteBuilderScreenContent() {
     : discoverTab === 'gas'
       ? 'Tap scan to find fuel between the selected stops.'
       : discoverTab === 'excursions'
-        ? 'Tap scan to find side trips, parks, trails, viewpoints, climbing, and historic stops from real map sources.'
+        ? 'Tap scan to find side trips, parks, trails, viewpoints, climbing, and historic stops.'
         : discoverTab === 'tours'
-          ? 'Tap scan to find bookable tours near this leg.'
+          ? 'Tap scan to find guided trips near this leg.'
           : 'Tap scan to find water, trailheads, viewpoints, peaks, and hot springs near this route.';
 
   function fly(_lat: number, _lng: number, _zoom = 11) {}

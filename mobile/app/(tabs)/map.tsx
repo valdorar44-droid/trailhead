@@ -34,6 +34,7 @@ import {
   TrailheadCardSkeleton,
   TrailheadMetricRow,
   TrailheadSheet,
+  TrailheadSkeletonLine,
 } from '@/components/TrailheadUI';
 
 // ── Native MapLibre SDK active ────────────────────────────────────────────────
@@ -5785,6 +5786,7 @@ function MapScreen() {
   const [mapMoved, setMapMoved] = useState(false);
   const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
+  const [mapSurfaceReady, setMapSurfaceReady] = useState(false);
   const [mapLoadFailed, setMapLoadFailed] = useState(false);
   const [showLocDisclosure, setShowLocDisclosure] = useState(false);
 
@@ -6117,7 +6119,9 @@ function MapScreen() {
 
   // Fetch Mapbox token + Protomaps key once on mount; fall back to cached when offline
   useEffect(() => {
+    let cancelled = false;
     function applyConfig(token: string, pmKey: string) {
+      if (cancelled) return;
       if (token) { setMapboxToken(token); setStoreToken(token); }
       if (pmKey) setProtomapsKey(pmKey);
       if (webLoadedRef.current) {
@@ -6129,6 +6133,10 @@ function MapScreen() {
         }));
       }
     }
+    Promise.all([
+      storage.get('trailhead_mapbox_token').catch(() => null),
+      storage.get('trailhead_protomaps_key').catch(() => null),
+    ]).then(([t, k]) => applyConfig(t || '', k || ''));
     api.getConfig().then(c => {
       const token = c.mapbox_token || '';
       const pmKey = c.protomaps_key || '';
@@ -6137,13 +6145,10 @@ function MapScreen() {
       applyConfig(token, pmKey);
       setIsActuallyOffline(false); // confirmed online
     }).catch(() => {
+      if (cancelled) return;
       setIsActuallyOffline(true);
-      // Offline — use cached values so the map can load from tile cache
-      Promise.all([
-        storage.get('trailhead_mapbox_token').catch(() => null),
-        storage.get('trailhead_protomaps_key').catch(() => null),
-      ]).then(([t, k]) => applyConfig(t || '', k || ''));
     });
+    return () => { cancelled = true; };
   }, []);
 
   // Load cached route weather from FileSystem when active trip changes
@@ -18835,6 +18840,8 @@ function MapScreen() {
           hideMapStatusBadge={scopedMapSearchActive}
           onMapReady={() => {
             webLoadedRef.current = true;
+            setMapSurfaceReady(true);
+            setMapLoadFailed(false);
             // Load camps in the current area — this is what the WebView did on map_ready.
             // Without this, no camp/POI pins show on the native map until user pans.
             const vp = viewportRef.current;
@@ -19051,6 +19058,10 @@ function MapScreen() {
           onTraceStart={coord => appendTrailTracePoint(coord, true)}
           onTraceMove={coord => appendTrailTracePoint(coord)}
           onTraceEnd={finishTrailTrace}
+          onError={() => {
+            setMapSurfaceReady(false);
+            setMapLoadFailed(true);
+          }}
         />
       ) : (
         // ── WebView (current binary) ────────────────────────────────────────
@@ -19079,6 +19090,19 @@ function MapScreen() {
           onError={() => setMapLoadFailed(true)}
         />
       )}
+      {USE_NATIVE_MAP && !mapSurfaceReady && !mapLoadFailed && (
+        <View style={s.mapWarmupOverlay} pointerEvents="none">
+          <View style={s.mapWarmupCard}>
+            <View style={s.mapWarmupIcon}>
+              <Ionicons name="navigate-outline" size={18} color={C.orange} />
+            </View>
+            <View style={s.mapWarmupLines}>
+              <TrailheadSkeletonLine width="88%" height={10} style={s.mapWarmupLine} />
+              <TrailheadSkeletonLine width="64%" height={10} style={s.mapWarmupLine} />
+            </View>
+          </View>
+        </View>
+      )}
       <TrailPreviewPlayer
         visible={trailPreviewOpen}
         trail={selectedTrail}
@@ -19101,7 +19125,7 @@ function MapScreen() {
       {mapLoadFailed && (
         <View style={[s.mapLoadFailBanner, topChromeLaneStyle]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#fbbf24" />
-          <Text style={s.mapLoadFailText}>MAP FAILED TO LOAD — OFFLINE MAPS NOT DOWNLOADED FOR THIS AREA</Text>
+          <Text style={s.mapLoadFailText}>Map could not open here. Check signal or saved areas.</Text>
         </View>
       )}
 
@@ -24331,6 +24355,53 @@ const makeStyles = (C: ColorPalette) => {
   return StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   map: { flex: 1 },
+  mapWarmupOverlay: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    zIndex: 70,
+    elevation: 18,
+    backgroundColor: light ? 'rgba(246,247,242,0.74)' : 'rgba(8,12,18,0.68)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  mapWarmupCard: {
+    width: 168,
+    minHeight: 68,
+    borderRadius: 16,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: light ? 'rgba(255,255,255,0.94)' : 'rgba(15,19,26,0.94)',
+    borderWidth: 1,
+    borderColor: light ? 'rgba(15,23,42,0.10)' : 'rgba(255,255,255,0.12)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    shadowColor: '#000',
+    shadowOpacity: light ? 0.10 : 0.28,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  mapWarmupIcon: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange + '18',
+    borderWidth: 1,
+    borderColor: C.orange + '3d',
+  },
+  mapWarmupLines: {
+    flex: 1,
+    minWidth: 0,
+    gap: 7,
+  },
+  mapWarmupLine: {
+    borderRadius: 7,
+  },
 
   topBar: {
     position: 'absolute', top: 56, left: 16, right: 16,

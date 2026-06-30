@@ -29,6 +29,7 @@ export function StaticMapboxPreview({ pins, title, subtitle, badgeLabel, height 
   const C = useTheme();
   const token = useStore(st => st.mapboxToken);
   const [failedUrl, setFailedUrl] = useState('');
+  const [loadedUrl, setLoadedUrl] = useState('');
   const cleanPins = useMemo(
     () => dedupePreviewPins(pins).slice(0, 16),
     [pins],
@@ -38,12 +39,11 @@ export function StaticMapboxPreview({ pins, title, subtitle, badgeLabel, height 
     [cleanPins, height, token],
   );
   const Wrapper: any = onPress ? TouchableOpacity : View;
-  const imageReady = !!url && failedUrl !== url;
+  const canLoadImage = !!url && failedUrl !== url;
+  const imageReady = canLoadImage && loadedUrl === url;
   return (
     <Wrapper style={[styles.wrap, { height, backgroundColor: C.s1 }, style]} activeOpacity={0.9} onPress={onPress as any}>
-      {imageReady ? (
-        <Image source={{ uri: url }} style={StyleSheet.absoluteFillObject} resizeMode="cover" onError={() => setFailedUrl(url)} />
-      ) : (
+      {!imageReady ? (
         <View style={[StyleSheet.absoluteFillObject, styles.fallbackBase, { backgroundColor: C.s2 }]}>
           <View style={[styles.fallbackLine, styles.fallbackLineOne]} />
           <View style={[styles.fallbackLine, styles.fallbackLineTwo]} />
@@ -52,7 +52,16 @@ export function StaticMapboxPreview({ pins, title, subtitle, badgeLabel, height 
             <Ionicons name="map-outline" size={24} color={C.text3} />
           </View>
         </View>
-      )}
+      ) : null}
+      {canLoadImage ? (
+        <Image
+          source={{ uri: url }}
+          style={[StyleSheet.absoluteFillObject, !imageReady && styles.pendingImage]}
+          resizeMode="cover"
+          onLoad={() => setLoadedUrl(url)}
+          onError={() => setFailedUrl(url)}
+        />
+      ) : null}
       <View style={styles.shade} />
       <View style={styles.badge}>
         <Ionicons name="navigate-outline" size={15} color="#fff" />
@@ -110,6 +119,7 @@ function pinColor(pin: StaticMapboxPin) {
 
 const styles = StyleSheet.create({
   wrap: { width: '100%', borderRadius: 0, overflow: 'hidden' },
+  pendingImage: { opacity: 0 },
   shade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(3,7,18,0.22)' },
   badge: {
     position: 'absolute',

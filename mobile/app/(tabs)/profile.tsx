@@ -8,6 +8,7 @@ import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'ex
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
+import * as Sharing from 'expo-sharing';
 import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
@@ -34,6 +35,7 @@ import {
 } from '@/lib/gpxImport';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { trackPhase0Event } from '@/lib/telemetry';
+import { BookedTour, loadBookedTours } from '@/lib/bookedTours';
 import {
   displayConsumptionToMpg,
   displayToMiles,
@@ -139,8 +141,67 @@ function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promi
   });
 }
 
+function parseTourDate(value?: string) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  return Number.isFinite(parsed.getTime()) ? parsed : null;
+}
+
+function formatTourDate(value?: string, timezone?: string) {
+  const date = parseTourDate(value);
+  if (!date) return 'Date to be confirmed';
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: timezone || undefined,
+    }).format(date);
+  } catch {
+    return date.toLocaleString();
+  }
+}
+
+function formatShortTourDate(value?: string) {
+  const date = parseTourDate(value);
+  if (!date) return '';
+  try {
+    return new Intl.DateTimeFormat(undefined, {
+      month: 'short',
+      day: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+    }).format(date);
+  } catch {
+    return '';
+  }
+}
+
+function formatTourPrice(tour: BookedTour) {
+  const price = String(tour.totalPrice || '').trim();
+  if (!price) return '';
+  if (/^[A-Z]{3}\s/i.test(price) || price.startsWith('$')) return `Total ${price}`;
+  return `Total ${[tour.currency, price].filter(Boolean).join(' ')}`;
+}
+
+function icsDate(date: Date) {
+  return date.toISOString().replace(/[-:]/g, '').replace(/\.\d{3}Z$/, 'Z');
+}
+
+function icsText(value?: string) {
+  return String(value || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/,/g, '\\,')
+    .replace(/;/g, '\\;');
+}
+
 const PROFILE_SECTIONS = [
   { id: 'account', label: 'Account', icon: 'person-circle-outline' },
+  { id: 'booked', label: 'Booked', icon: 'ticket-outline' },
   { id: 'library', label: 'Library', icon: 'albums-outline' },
   { id: 'rig', label: 'Rig', icon: 'car-sport-outline' },
   { id: 'settings', label: 'Settings', icon: 'settings-outline' },
@@ -218,6 +279,8 @@ export default function ProfileScreen() {
   const [supportDraft, setSupportDraft] = useState('');
   const [supportSending, setSupportSending] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
+  const [bookedTours, setBookedTours] = useState<BookedTour[]>([]);
+  const [bookedToursLoaded, setBookedToursLoaded] = useState(false);
   const [adminClearingCampCache, setAdminClearingCampCache] = useState(false);
 
   const [editingRig, setEditingRig] = useState(false);
@@ -364,11 +427,28 @@ export default function ProfileScreen() {
     getOfflineTripSummaries().then(setOfflineTripSummaries).catch(() => {});
   }, []);
 
+  const refreshBookedTours = useCallback(() => {
+    loadBookedTours()
+      .then(tours => {
+        setBookedTours(tours);
+        setBookedToursLoaded(true);
+      })
+      .catch(() => {
+        setBookedTours([]);
+        setBookedToursLoaded(true);
+      });
+  }, []);
+
   // Load offline trip index to show cache badges
   useEffect(() => {
     refreshOfflineTrips();
+    refreshBookedTours();
     loadGpxImportBatches().then(setGpxBatches).catch(() => {});
-  }, [refreshOfflineTrips]);
+  }, [refreshBookedTours, refreshOfflineTrips]);
+
+  useFocusEffect(useCallback(() => {
+    refreshBookedTours();
+  }, [refreshBookedTours]));
 
   const offlineTripCount = useMemo(
     () => tripHistory.filter(trip => offlineCachedIds.has(trip.trip_id)).length,
@@ -390,6 +470,123 @@ export default function ProfileScreen() {
   function openOfflineMapsManager() {
     setPendingOpenOfflineModal(true);
     router.push('/(tabs)/map');
+  }
+
+  function openBookedTourDetails(tour: BookedTour) {
+    const url = tour.ticketUrl || tour.detailsUrl;
+    if (url) {
+      Linking.openURL(url).catch(() => Alert.alert('Tickets', 'Could not open this booking.'));
+      return;
+    }
+    Alert.alert('Tickets', 'Tickets will appear here when checkout is complete.');
+  }
+
+  async function addBookedTourToCalendar(tour: BookedTour) {
+    const start = parseTourDate(tour.startAt);
+    if (!start) {
+      Alert.alert('Calendar', 'Date is not ready for this booking.');
+      return;
+    }
+    const end = parseTourDate(tour.endAt) ?? new Date(start.getTime() + 2 * 60 * 60 * 1000);
+    const uid = `${tour.id}@gettrailhead.app`;
+    const ics = [
+      'BEGIN:VCALENDAR',
+      'VERSION:2.0',
+      'PRODID:-//Trailhead//Booked Tours//EN',
+      'BEGIN:VEVENT',
+      `UID:${icsText(uid)}`,
+      `DTSTAMP:${icsDate(new Date())}`,
+      `DTSTART:${icsDate(start)}`,
+      `DTEND:${icsDate(end)}`,
+      `SUMMARY:${icsText(tour.title)}`,
+      tour.location ? `LOCATION:${icsText(tour.location)}` : '',
+      tour.calendarNote || tour.confirmationCode ? `DESCRIPTION:${icsText([tour.calendarNote, tour.confirmationCode ? `Confirmation ${tour.confirmationCode}` : ''].filter(Boolean).join('\\n'))}` : '',
+      'END:VEVENT',
+      'END:VCALENDAR',
+    ].filter(Boolean).join('\r\n');
+    try {
+      const baseDir = FileSystem.cacheDirectory || FileSystem.documentDirectory;
+      if (!baseDir) throw new Error('Missing calendar export directory');
+      const safeId = tour.id.replace(/[^a-z0-9_-]/gi, '-').slice(0, 80) || 'tour';
+      const uri = `${baseDir}trailhead-${safeId}.ics`;
+      await FileSystem.writeAsStringAsync(uri, ics);
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(uri, { mimeType: 'text/calendar', dialogTitle: 'Add to calendar', UTI: 'com.apple.ical.ics' });
+      } else {
+        await Share.share({ message: `${tour.title}\n${formatTourDate(tour.startAt, tour.timezone)}` });
+      }
+    } catch {
+      Alert.alert('Calendar', 'Could not prepare this event.');
+    }
+  }
+
+  const upcomingBookedTour = useMemo(
+    () => bookedTours.find(tour => tour.status !== 'cancelled') ?? bookedTours[0] ?? null,
+    [bookedTours],
+  );
+
+  function renderBookedTourCard(tour: BookedTour) {
+    const price = formatTourPrice(tour);
+    const dateLabel = formatTourDate(tour.startAt, tour.timezone);
+    const cancellationDate = formatShortTourDate(tour.cancellationUntil);
+    const status = tour.status || 'confirmed';
+    const cancelled = status === 'cancelled';
+    const pending = status === 'pending';
+    const cancellationTitle = cancelled
+      ? 'Booking cancelled'
+      : pending
+        ? 'Booking pending'
+        : 'Free cancellation available';
+    const cancellationSub = cancelled
+      ? ''
+      : cancellationDate
+        ? `Cancel before ${cancellationDate}`
+        : tour.cancellationSummary || '';
+    return (
+      <View key={tour.id} style={s.bookedTourCard}>
+        <View style={s.bookedTourHead}>
+          {tour.imageUrl ? (
+            <Image source={{ uri: tour.imageUrl }} style={s.bookedTourImage} resizeMode="cover" />
+          ) : (
+            <View style={s.bookedTourImageFallback}>
+              <Ionicons name="ticket-outline" size={30} color={C.orange} />
+            </View>
+          )}
+          <View style={s.bookedTourTitleWrap}>
+            <Text style={s.bookedTourTitle} numberOfLines={2}>{tour.title}</Text>
+            {!!price && <Text style={s.bookedTourPrice} numberOfLines={1}>{price}</Text>}
+            {!!tour.location && <Text style={s.bookedTourLocation} numberOfLines={1}>{tour.location}</Text>}
+          </View>
+        </View>
+
+        <View style={s.bookedInfoRow}>
+          <Ionicons name="calendar-outline" size={20} color={C.text} />
+          <Text style={s.bookedInfoText} numberOfLines={2}>{dateLabel}</Text>
+        </View>
+        <View style={s.bookedInfoRow}>
+          <Ionicons name="ticket-outline" size={20} color={C.text} />
+          <Text style={s.bookedInfoText} numberOfLines={2}>{tour.quantity || 1} x {tour.productTitle || tour.title}</Text>
+        </View>
+        <View style={s.bookedCancelRow}>
+          <Ionicons
+            name={cancelled ? 'close-outline' : pending ? 'time-outline' : 'checkmark-outline'}
+            size={20}
+            color={cancelled ? C.red : pending ? C.orange : C.green}
+          />
+          <View style={{ flex: 1 }}>
+            <Text style={[s.bookedCancelTitle, { color: cancelled ? C.red : pending ? C.orange : C.green }]} numberOfLines={1}>
+              {cancellationTitle}
+            </Text>
+            {!!cancellationSub && <Text style={s.bookedCancelSub} numberOfLines={2}>{cancellationSub}</Text>}
+          </View>
+        </View>
+
+        <View style={s.bookedDivider} />
+        <TouchableOpacity style={s.bookedDetailsButton} onPress={() => openBookedTourDetails(tour)} activeOpacity={0.84}>
+          <Text style={s.bookedDetailsText}>View tickets and details</Text>
+        </TouchableOpacity>
+      </View>
+    );
   }
 
   useFocusEffect(useCallback(() => {
@@ -1222,6 +1419,12 @@ export default function ProfileScreen() {
                 { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
                 { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
               ]
+            : profileSection === 'booked'
+              ? [
+                  { icon: 'ticket-outline', label: 'TOURS', color: '#0f766e', onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
+                  { icon: 'map-outline', label: 'ROUTE', color: C.orange, onPress: () => router.push('/(tabs)/route-builder' as any) },
+                  ...(upcomingBookedTour ? [{ icon: 'calendar-outline', label: 'CALENDAR', color: '#3b82f6', onPress: () => addBookedTourToCalendar(upcomingBookedTour) }] : []),
+                ]
             : profileSection === 'library'
               ? [
                   { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
@@ -1271,6 +1474,70 @@ export default function ProfileScreen() {
             </ScrollView>
           );
         })()}
+
+        {profileSection === 'booked' && (
+          <View style={s.bookedScreen}>
+            <View>
+              <Text style={s.bookedScreenTitle}>Booked tours</Text>
+              <Text style={s.bookedScreenSub}>Tickets and confirmed activities.</Text>
+            </View>
+
+            {!bookedToursLoaded ? (
+              <TrailheadCard style={s.bookedEmptyCard}>
+                <ActivityIndicator color={C.orange} />
+              </TrailheadCard>
+            ) : bookedTours.length > 0 ? (
+              <>
+                {bookedTours.map(renderBookedTourCard)}
+                <View style={s.planAheadWrap}>
+                  <Text style={s.planAheadTitle}>Plan ahead</Text>
+                  <View style={s.planAheadCard}>
+                    {!!upcomingBookedTour && (
+                      <TouchableOpacity style={s.planAheadRow} onPress={() => addBookedTourToCalendar(upcomingBookedTour)} activeOpacity={0.84}>
+                        <View style={s.planAheadIcon}>
+                          <Ionicons name="calendar-outline" size={22} color={C.text} />
+                        </View>
+                        <Text style={s.planAheadText}>Add to calendar</Text>
+                        <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                      </TouchableOpacity>
+                    )}
+                    <TouchableOpacity style={s.planAheadRow} onPress={() => router.push('/(tabs)/guide?view=explore' as any)} activeOpacity={0.84}>
+                      <View style={s.planAheadIcon}>
+                        <Ionicons name="compass-outline" size={22} color={C.text} />
+                      </View>
+                      <Text style={s.planAheadText}>Find more things to do</Text>
+                      <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </>
+            ) : (
+              <View style={s.bookedEmptyCard}>
+                <View style={s.bookedEmptyIcon}>
+                  <Ionicons name="ticket-outline" size={30} color={C.orange} />
+                </View>
+                <Text style={s.bookedEmptyTitle}>No tours booked yet</Text>
+                <Text style={s.bookedEmptyText}>Confirmed activities will show here.</Text>
+                <View style={s.planAheadCard}>
+                  <TouchableOpacity style={s.planAheadRow} onPress={() => router.push('/(tabs)/guide?view=explore' as any)} activeOpacity={0.84}>
+                    <View style={s.planAheadIcon}>
+                      <Ionicons name="compass-outline" size={22} color={C.text} />
+                    </View>
+                    <Text style={s.planAheadText}>Find things to do</Text>
+                    <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                  </TouchableOpacity>
+                  <TouchableOpacity style={s.planAheadRow} onPress={() => router.push('/(tabs)/route-builder' as any)} activeOpacity={0.84}>
+                    <View style={s.planAheadIcon}>
+                      <Ionicons name="map-outline" size={22} color={C.text} />
+                    </View>
+                    <Text style={s.planAheadText}>Open Route Builder</Text>
+                    <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+          </View>
+        )}
 
         {profileSection === 'library' && (
           <ProfileLibraryOverview
@@ -2594,6 +2861,86 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,
   },
   quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.5, textAlign: 'center' },
+  bookedScreen: { gap: 14 },
+  bookedScreenTitle: { color: C.text, fontSize: 30, lineHeight: 35, fontWeight: '900', letterSpacing: 0 },
+  bookedScreenSub: { color: C.text3, fontSize: 13, lineHeight: 18, marginTop: 3 },
+  bookedTourCard: {
+    backgroundColor: C.s2,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 14,
+    gap: 13,
+    shadowColor: '#000',
+    shadowOpacity: 0.13,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+  },
+  bookedTourHead: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  bookedTourImage: { width: 76, height: 76, borderRadius: 12, backgroundColor: C.s3 },
+  bookedTourImageFallback: {
+    width: 76,
+    height: 76,
+    borderRadius: 12,
+    backgroundColor: C.orangeGlow,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bookedTourTitleWrap: { flex: 1, minWidth: 0, gap: 3 },
+  bookedTourTitle: { color: C.text, fontSize: 19, lineHeight: 23, fontWeight: '900', letterSpacing: 0 },
+  bookedTourPrice: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '800' },
+  bookedTourLocation: { color: C.text3, fontSize: 12, lineHeight: 16 },
+  bookedInfoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  bookedInfoText: { flex: 1, color: C.text, fontSize: 16, lineHeight: 22, fontWeight: '700' },
+  bookedCancelRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  bookedCancelTitle: { fontSize: 16, lineHeight: 21, fontWeight: '800' },
+  bookedCancelSub: { color: C.text3, fontSize: 13, lineHeight: 19, marginTop: 2 },
+  bookedDivider: { height: 1, backgroundColor: C.border, marginTop: 2 },
+  bookedDetailsButton: { minHeight: 42, alignItems: 'center', justifyContent: 'center' },
+  bookedDetailsText: { color: C.blueGlow, fontSize: 16, lineHeight: 21, fontWeight: '800' },
+  planAheadWrap: { gap: 10, marginTop: 4 },
+  planAheadTitle: { color: C.text, fontSize: 25, lineHeight: 30, fontWeight: '900', letterSpacing: 0 },
+  planAheadCard: {
+    backgroundColor: C.s2,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.border,
+    overflow: 'hidden',
+  },
+  planAheadRow: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  planAheadIcon: { width: 34, alignItems: 'center' },
+  planAheadText: { flex: 1, color: C.text, fontSize: 17, lineHeight: 22, fontWeight: '900' },
+  bookedEmptyCard: {
+    backgroundColor: C.s2,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 16,
+    gap: 12,
+  },
+  bookedEmptyIcon: {
+    width: 58,
+    height: 58,
+    borderRadius: 20,
+    backgroundColor: C.orangeGlow,
+    borderWidth: 1,
+    borderColor: C.orange + '44',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  bookedEmptyTitle: { color: C.text, fontSize: 21, lineHeight: 26, fontWeight: '900', letterSpacing: 0 },
+  bookedEmptyText: { color: C.text3, fontSize: 13, lineHeight: 18 },
   supportCard: { backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 14, gap: 10 },
   supportCardTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   supportCardIcon: { width: 38, height: 38, borderRadius: 14, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '44', alignItems: 'center', justifyContent: 'center' },

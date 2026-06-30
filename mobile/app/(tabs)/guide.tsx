@@ -57,6 +57,7 @@ const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 const EXPLORE_INITIAL_VISIBLE = 48;
 const EXPLORE_VISIBLE_STEP = 48;
 const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const BOOKABLE_EXPERIENCES_ENABLED = false;
 const FEATURED_SECTION_ORDER: ExploreCategoryKey[] = [
   'camp',
   'glamping',
@@ -184,6 +185,7 @@ function shouldHydrateExploreTrailArea(place?: ExplorePlaceProfile | null) {
 }
 
 function shouldSearchBookableExperiences(query: string, category: ExploreCategoryKey) {
+  if (!BOOKABLE_EXPERIENCES_ENABLED) return false;
   if (category === 'tours') return true;
   return /\b(tour|tours|experience|experiences|ticket|tickets|guide|guided|jeep|rafting|boat|shuttle)\b/i.test(query);
 }
@@ -206,7 +208,7 @@ function placeQueryFromExploreQuery(query: string) {
 function experienceSearchMessage(res: ExploreExperiencesResponse, areaName: string) {
   const status = String(res.live_status || '').toLowerCase();
   const message = String(res.live_message || '').trim();
-  if (status === 'provider_error' || status === 'disabled') return 'Tours unavailable right now.';
+  if (status === 'provider_error' || status === 'disabled') return 'Tours are paused right now.';
   if (status === 'processing') {
     return areaName === 'this area'
       ? 'Checking tour availability for this area.'
@@ -1870,6 +1872,12 @@ function GuideScreenContent() {
     if (!selectedExplore) return;
     const place = selectedExplore;
     const placeId = place.id;
+    if (!BOOKABLE_EXPERIENCES_ENABLED) {
+      setExploreExperiencesById(prev => prev[placeId] ? prev : ({ ...prev, [placeId]: [] }));
+      setExploreExperienceErrors(prev => ({ ...prev, [placeId]: '' }));
+      setExploreExperienceLoadingId(current => current === placeId ? null : current);
+      return;
+    }
     if (isLocalCuratedExplorePlace(place)) {
       setExploreExperiencesById(prev => prev[placeId] ? prev : ({ ...prev, [placeId]: [] }));
       setExploreExperienceErrors(prev => ({ ...prev, [placeId]: '' }));
@@ -1897,7 +1905,7 @@ function GuideScreenContent() {
         storage.set(cacheKey, JSON.stringify({ experiences, fetched_at: Date.now() })).catch(() => {});
       })
       .catch(() => {
-        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Tours unavailable right now.' }));
+        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Tours are paused right now.' }));
       })
       .finally(() => {
         if (!cancelled) setExploreExperienceLoadingId(current => current === placeId ? null : current);
@@ -1921,7 +1929,7 @@ function GuideScreenContent() {
       let center = userLoc ? { ...userLoc, name: 'this area' } : null;
       if (!center && placeQuery.length < 2) {
         setExploreSearchExperiences([]);
-        setExploreSearchExperienceError('Search a destination to see tours and activities.');
+        setExploreSearchExperienceError('Search a destination to compare tours and activities.');
         setExploreSearchExperienceLoading(false);
         return;
       }
@@ -1943,7 +1951,7 @@ function GuideScreenContent() {
           }
         })
         .catch(() => {
-          if (!cancelled) setExploreSearchExperienceError('Tours unavailable right now.');
+          if (!cancelled) setExploreSearchExperienceError('Tours are paused right now.');
         })
         .finally(() => {
           if (!cancelled) setExploreSearchExperienceLoading(false);
@@ -1998,11 +2006,13 @@ function GuideScreenContent() {
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const experienceDestinationLabel = placeQueryFromExploreQuery(exploreQuery);
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
+  const tourSearchPaused = !BOOKABLE_EXPERIENCES_ENABLED && (exploreCategory === 'tours' || isExplicitTourOnlyQuery(exploreQuery));
   const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
   const exploreNearbyNeedsLocation = exploreMode === 'nearby' && !userLoc;
   const rankedExplore = useMemo(() => {
     if (exploreNearbyNeedsLocation) return [];
     if (exploreMode === 'trip' && waypoints.length === 0) return [];
+    if (tourSearchPaused) return [];
     if (showExperienceSearch && (exploreCategory === 'tours' || isExplicitTourOnlyQuery(exploreQuery))) return [];
     const places = enrichedExplorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
@@ -2169,7 +2179,7 @@ function GuideScreenContent() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
@@ -2372,6 +2382,7 @@ function GuideScreenContent() {
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
   const exploreHomeCountLabel = useMemo(() => {
+    if (tourSearchPaused) return 'Paused';
     if (holdLegacySearchWrapper) return 'Searching';
     if (exploreSearchResolving && rankedExplore.length <= 0) return 'Searching';
     if (showExperienceSearch && rankedExplore.length <= 0) {
@@ -2396,7 +2407,7 @@ function GuideScreenContent() {
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
     return exploreCountLabel(count, 'featured pick', 'featured picks');
-  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchExperienceError, exploreSearchExperienceLoading, exploreSearchExperiences.length, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredLead, featuredSections, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, trendingExplore.length]);
+  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchExperienceError, exploreSearchExperienceLoading, exploreSearchExperiences.length, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredLead, featuredSections, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, tourSearchPaused, trendingExplore.length]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -2480,7 +2491,7 @@ function GuideScreenContent() {
       setActiveTrip({ ...activeTrip, audio_guide: generated });
     } catch (e: any) {
       if (e instanceof PaywallError) {
-        setGuideError(e.message || 'Audio guide needs credits or an active plan.');
+        setGuideError(e.message || 'Explorer is required for new trip audio.');
         showPaywall(e);
       } else {
         setGuideError('Could not generate the audio guide right now.');
@@ -2767,7 +2778,7 @@ function GuideScreenContent() {
       day: activeTrip.plan.waypoints[0]?.day ?? 1,
       name: experience.title,
       type: 'bookable_experience',
-      description: experience.summary || experience.description || 'Partner experience saved for external checkout.',
+      description: experience.summary || experience.description || 'Saved for external checkout.',
       land_type: 'external_booking',
       notes: [
         experience.duration_label,
@@ -2776,7 +2787,7 @@ function GuideScreenContent() {
       ].filter(Boolean).join(' · '),
       lat: experience.lat ?? undefined,
       lng: experience.lng ?? undefined,
-      verified_source: 'Viator',
+      verified_source: 'Booking partner',
       needs_review: true,
       verification_note: experience.booking_url || experience.affiliate_url || experience.source_url || '',
     };
@@ -3298,7 +3309,7 @@ function GuideScreenContent() {
               savedOnly={exploreSavedOnly}
               hasQuery={hasExploreQuery}
               shownCount={holdLegacySearchWrapper ? 0 : rankedExplore.length}
-              countLabel={showExperienceSearch || exploreSearchResolving ? exploreHomeCountLabel : exploreNearbyNeedsLocation ? 'Location needed' : undefined}
+              countLabel={tourSearchPaused ? exploreHomeCountLabel : showExperienceSearch || exploreSearchResolving ? exploreHomeCountLabel : exploreNearbyNeedsLocation ? 'Location needed' : undefined}
               sortMode={exploreSortMode}
               onModeChange={mode => {
                 setExploreSavedOnly(false);
@@ -3312,17 +3323,21 @@ function GuideScreenContent() {
               onSortCycle={cycleExploreSortMode}
             />
 
-            {showExperienceSearch && (
+            {(showExperienceSearch || tourSearchPaused) && (
               <ExploreExperiencesRail
                 experiences={exploreSearchExperiences}
-                loading={exploreSearchExperienceLoading}
-                error={exploreSearchExperienceError}
+                loading={tourSearchPaused ? false : exploreSearchExperienceLoading}
+                error={tourSearchPaused ? 'Tours are paused while booking access is updated.' : exploreSearchExperienceError}
                 emptySubtitle={
+                  tourSearchPaused
+                    ? 'Coming back soon'
+                    : (
                   experienceDestinationLabel
                     ? exploreSearchExperienceLoading
                       ? `Checking options near ${experienceDestinationLabel}`
                       : `Near ${experienceDestinationLabel}`
                     : 'Search a destination to compare options'
+                    )
                 }
                 mediaUrl={mediaUrl}
                 onSave={saveExperienceToPlanner}
@@ -3376,7 +3391,7 @@ function GuideScreenContent() {
                         ? 'Saved Places'
                         : isThingsToDoExploreQuery(exploreQuery)
                           ? 'Things To Do'
-                        : showExperienceSearch
+                        : showExperienceSearch || tourSearchPaused
                           ? 'Tours & Activities'
                         : hasExploreQuery
                           ? 'Search Results'
@@ -3388,7 +3403,7 @@ function GuideScreenContent() {
               </View>
             </View>
 
-            {(exploreLoading || exploreSearchResolving) && !exploreNearbyNeedsLocation && (rankedExplore.length === 0 || holdLegacySearchWrapper) && featuredSections.length === 0 && !featuredLead && (
+            {(exploreLoading || exploreSearchResolving) && !tourSearchPaused && !exploreNearbyNeedsLocation && (rankedExplore.length === 0 || holdLegacySearchWrapper) && featuredSections.length === 0 && !featuredLead && (
               <View style={s.exploreLoadingBlock}>
                 <TrailheadLoadingRow
                   label={exploreSearchResolving ? 'Searching places' : 'Finding the best places'}
@@ -3450,7 +3465,7 @@ function GuideScreenContent() {
                 </View>
                 ))}
               </>
-            ) : !showExperienceSearch && ((!exploreLoading && !exploreSearchResolving) || exploreNearbyNeedsLocation) && rankedExplore.length === 0 ? (
+            ) : !tourSearchPaused && !showExperienceSearch && ((!exploreLoading && !exploreSearchResolving) || exploreNearbyNeedsLocation) && rankedExplore.length === 0 ? (
               <View style={s.emptyState}>
                 <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : exploreTripNeedsRoute ? 'map-outline' : 'search-outline'} size={44} color={C.text3} />
                 <Text style={s.emptyTitle}>
@@ -3520,7 +3535,7 @@ function GuideScreenContent() {
               <View style={s.emptyState}>
                 <Ionicons name="map-outline" size={48} color={C.text3} />
                 <Text style={s.emptyTitle}>No Active Trip</Text>
-                <Text style={s.emptySub}>Plan a trip on the PLAN tab to unlock waypoint tools and narrations. Tours now live in Explore search and place details.</Text>
+                <Text style={s.emptySub}>Plan a trip first to use waypoint tools and route audio.</Text>
               </View>
             )}
             {!!activeTrip && guideLoading && (
@@ -3536,7 +3551,7 @@ function GuideScreenContent() {
                 </View>
                 <Text style={s.guidePromptTitle}>Generate trip narrations</Text>
                 <Text style={s.guidePromptText}>
-                  Creates short spoken notes for each mapped stop. Costs 10 credits unless you have Explorer. First-time audio can take up to a minute; cached guides are free to replay.
+                  Creates short spoken notes for each stop. Explorer covers new narration, and saved guides replay instantly.
                 </Text>
                 {!!guideError && <Text style={s.guideError}>{guideError}</Text>}
                 <TrailheadButton label="Generate Guide" icon="sparkles-outline" variant="primary" onPress={generateGuide} style={{ alignSelf: 'stretch' }} />
@@ -3579,7 +3594,7 @@ function GuideScreenContent() {
             <TourTarget id="guide.audio">
               <View style={s.nearbyCard}>
                 <Text style={s.nearbyLabel}>What's around me?</Text>
-                <Text style={s.nearbySub}>Location narration for your current GPS position. Costs 5 credits unless you have Explorer and can take up to a minute to load.</Text>
+                <Text style={s.nearbySub}>Location narration for your current position. Explorer covers new narration.</Text>
                 {!!nearbyNarration && <Text style={s.nearbyText}>{nearbyNarration}</Text>}
                 <TouchableOpacity style={s.nearbyBtn} onPress={whatIsHere} disabled={nearbyLoading}>
                   {nearbyLoading

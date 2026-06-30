@@ -221,7 +221,7 @@ export default function MapLayerSheetContent({
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.sheetContent}>
-      <Text style={s.sectionHead}>MAP STYLE</Text>
+      <Text style={s.sectionHead}>Map style</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
         {primaryMapStyleOptions.map(option => {
           const active = option.id === activeMapLayer;
@@ -293,7 +293,7 @@ export default function MapLayerSheetContent({
         })}
       </ScrollView>
 
-      <Text style={s.sectionHead}>LAYERS</Text>
+      <Text style={s.sectionHead}>Layers</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
         {layerItems.map(layer => (
           <TouchableOpacity
@@ -311,7 +311,7 @@ export default function MapLayerSheetContent({
 
       {mapToolsVisible ? (
         <>
-          <Text style={s.sectionHead}>MAP TOOLS</Text>
+          <Text style={s.sectionHead}>Tools</Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
             {mapToolItems.map(layer => (
               <TouchableOpacity
@@ -329,7 +329,7 @@ export default function MapLayerSheetContent({
                   {layer.val ? <View style={[s.layerToggleOnDot, { backgroundColor: layer.color }]} /> : null}
                 </View>
                 <Text style={s.styleTitle} numberOfLines={1}>{layer.label}</Text>
-                <Text style={s.styleSub} numberOfLines={1}>{layer.enabled ? layer.sub : 'Not available yet'}</Text>
+                <Text style={s.styleSub} numberOfLines={1}>{layer.enabled ? layer.sub : 'Set up required'}</Text>
               </TouchableOpacity>
             ))}
           </ScrollView>
@@ -338,7 +338,7 @@ export default function MapLayerSheetContent({
 
       {safeWaterLegendVisible ? (
         <View style={s.legendSection}>
-          <Text style={s.sectionHead}>SAFE WATER LEGEND</Text>
+          <Text style={s.sectionHead}>Water safety legend</Text>
           {safeWaterLegendItems.map(item => (
             <View key={item.label} style={s.legendRow}>
               <View style={[s.legendBar, { backgroundColor: item.color }]} />
@@ -361,7 +361,7 @@ export default function MapLayerSheetContent({
             </View>
           ))}
           {trailLegendItems.length > 0 && mvumLegendItems.length > 0 ? (
-            <Text style={[s.sectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>MVUM LEGEND</Text>
+                <Text style={[s.sectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>Motor access legend</Text>
           ) : null}
           {mvumLegendItems.map(item => (
             <View key={item.label} style={s.legendRow}>
@@ -373,7 +373,7 @@ export default function MapLayerSheetContent({
           {avalancheLegendItems.length > 0 ? (
             <>
               {(trailLegendItems.length > 0 || mvumLegendItems.length > 0) ? (
-                <Text style={[s.sectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>AVALANCHE LEGEND</Text>
+                <Text style={[s.sectionHead, { paddingHorizontal: 0, marginTop: 10 }]}>Avalanche legend</Text>
               ) : null}
               <View style={s.avaRow}>
                 {avalancheLegendItems.map(item => (
@@ -400,10 +400,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   sectionHead: {
     color: C.text3,
-    fontSize: 10,
+    fontSize: 12,
     fontWeight: '800',
-    fontFamily: mono,
-    letterSpacing: 1.5,
+    letterSpacing: 0,
     paddingHorizontal: 16,
     paddingTop: 12,
     paddingBottom: 7,

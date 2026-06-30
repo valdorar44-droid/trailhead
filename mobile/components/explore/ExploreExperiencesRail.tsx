@@ -53,7 +53,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
                     </View>
                   )}
                   <View style={styles.badge}>
-                    <Text style={styles.badgeText}>{sourceBadgeLabel(experience.source_badge || 'Viator')}</Text>
+                    <Text style={styles.badgeText}>{sourceBadgeLabel(experience.source_badge || 'Partner')}</Text>
                   </View>
                 </View>
                 <View style={styles.body}>
@@ -96,7 +96,9 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
       ) : loading ? (
         <TrailheadRailSkeleton count={3} cardWidth={224} />
       ) : null}
-      <Text style={[styles.attribution, { color: C.text3 }]}>Trailhead may earn from booking links. Availability and payment happen on the booking site.</Text>
+      {experiences.length ? (
+        <Text style={[styles.attribution, { color: C.text3 }]}>Trailhead may earn from booking links. Availability and payment happen on the booking site.</Text>
+      ) : null}
     </View>
   );
 }
@@ -109,7 +111,7 @@ function experienceMeta(experience: BookableExperience) {
     bits.push(`${experience.rating.toFixed(1)}${experience.review_count ? ` (${experience.review_count})` : ''}`);
   }
   if (typeof experience.distance_mi === 'number') bits.push(`${experience.distance_mi.toFixed(experience.distance_mi >= 10 ? 0 : 1)} mi`);
-  return bits.join(' · ') || experience.region || 'Partner experience';
+  return bits.join(' · ') || experience.region || 'Partner option';
 }
 
 function money(value: string, currency?: string) {
@@ -120,7 +122,7 @@ function money(value: string, currency?: string) {
 }
 
 function sourceBadgeLabel(value: string) {
-  return String(value || 'Viator')
+  return String(value || 'Partner')
     .replace(/[_-]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim()

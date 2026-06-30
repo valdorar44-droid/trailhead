@@ -18086,8 +18086,8 @@ function MapScreen() {
     extreme: 'EXTREME',
   };
   const mapStyleOptions: Array<{ id: MapLayer; title: string; sub: string; colors: [string, string, string] }> = [
-    { id: 'topo', title: 'Trailhead Topo', sub: 'Trails, terrain, public land', colors: ['#182118', '#25633a', '#061a2f'] },
-    { id: 'satellite', title: 'Satellite', sub: 'Imagery-first map', colors: ['#111827', '#4b5563', '#1f2937'] },
+    { id: 'topo', title: 'Topo', sub: 'Trails, terrain, public land', colors: ['#182118', '#25633a', '#061a2f'] },
+    { id: 'satellite', title: 'Satellite', sub: 'Imagery first', colors: ['#111827', '#4b5563', '#1f2937'] },
     { id: 'hybrid', title: 'Hybrid', sub: 'Imagery with labels', colors: ['#101827', '#6b7280', '#f59e0b'] },
     { id: 'light', title: 'Light', sub: 'Bright road view', colors: ['#f8fafc', '#dbeafe', '#2563eb'] },
     { id: 'city', title: 'City', sub: 'Clear streets and places', colors: ['#f3f4f6', '#cbd5e1', '#0284c7'] },
@@ -18098,28 +18098,28 @@ function MapScreen() {
     { id: 'red', title: 'Red / Night', sub: 'Night-friendly contrast', colors: ['#12090b', '#7f1d1d', '#ef4444'] },
   ];
   const mapboxStyleOptions: Array<{ id: PremiumMapStyle; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; color: string }> = [
-    { id: 'outdoors', label: 'Mapbox Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
-    { id: 'standard', label: 'Mapbox Standard', sub: 'Dynamic day base', icon: 'map-outline', color: '#38bdf8' },
-    { id: 'standard_satellite', label: 'Mapbox Sat', sub: 'Satellite + Standard', icon: 'earth-outline', color: '#22c55e' },
-    { id: 'streets', label: 'Mapbox Streets', sub: 'Rendered road view', icon: 'navigate-outline', color: '#60a5fa' },
-    { id: 'navigation_day', label: 'Mapbox Nav Day', sub: 'Traffic guidance', icon: 'git-merge-outline', color: '#f97316' },
-    { id: 'navigation_night', label: 'Mapbox Nav Night', sub: 'Night guidance', icon: 'moon-outline', color: '#ef4444' },
-    { id: 'dawn', label: 'Mapbox Dawn', sub: 'Low sun lighting', icon: 'partly-sunny-outline', color: '#f59e0b' },
-    { id: 'dusk', label: 'Mapbox Dusk', sub: 'Evening lighting', icon: 'cloudy-night-outline', color: '#a855f7' },
-    { id: 'night', label: 'Mapbox Night', sub: 'Standard night', icon: 'moon-outline', color: '#818cf8' },
-    { id: 'satellite_streets', label: 'Mapbox Sat Streets', sub: 'Classic satellite', icon: 'image-outline', color: '#14b8a6' },
+    { id: 'outdoors', label: 'Outdoors', sub: 'Trails and terrain', icon: 'trail-sign-outline', color: '#84cc16' },
+    { id: 'standard', label: 'Standard', sub: 'Clear day view', icon: 'map-outline', color: '#38bdf8' },
+    { id: 'standard_satellite', label: 'Satellite Plus', sub: 'Imagery with labels', icon: 'earth-outline', color: '#22c55e' },
+    { id: 'streets', label: 'Streets', sub: 'Roads and places', icon: 'navigate-outline', color: '#60a5fa' },
+    { id: 'navigation_day', label: 'Traffic Day', sub: 'Road guidance', icon: 'git-merge-outline', color: '#f97316' },
+    { id: 'navigation_night', label: 'Traffic Night', sub: 'Low-glare guidance', icon: 'moon-outline', color: '#ef4444' },
+    { id: 'dawn', label: 'Dawn', sub: 'Low sun lighting', icon: 'partly-sunny-outline', color: '#f59e0b' },
+    { id: 'dusk', label: 'Dusk', sub: 'Evening lighting', icon: 'cloudy-night-outline', color: '#a855f7' },
+    { id: 'night', label: 'Night', sub: 'Low-glare standard', icon: 'moon-outline', color: '#818cf8' },
+    { id: 'satellite_streets', label: 'Satellite Streets', sub: 'Imagery with roads', icon: 'image-outline', color: '#14b8a6' },
   ];
   const layerSheetItems = [
-    { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat map' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
+    { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat view' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
     { key: 'lands', label: 'Public Land', sub: 'BLM / USFS / parks tint', icon: 'map-outline', val: showLands, color: '#22c55e', onPress: () => toggleLandOverlay(!showLands) },
-    { key: 'usgs', label: 'USGS Topo', sub: 'Topo raster + trails', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
+    { key: 'usgs', label: 'USGS Topo', sub: 'Topo contours and trails', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
     { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', onPress: () => togglePoiOverlay(!showPois) },
-    { key: 'trails', label: 'Offroad', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
-    { key: 'nautical', label: 'Safe Water', sub: 'Structure and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', onPress: () => { if (layerNautical) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
+    { key: 'trails', label: 'Trails & Dirt', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
+    { key: 'nautical', label: 'Water Safety', sub: 'Markers and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', onPress: () => { if (layerNautical) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
     { key: 'fire', label: 'Wildfire', sub: 'Active fire perimeters', icon: 'flame-outline', val: layerFire, color: '#ef4444', onPress: () => { const next = !layerFire; setLayerFire(next); toggleDataLayer('fire', next); } },
     { key: 'ava', label: 'Avalanche', sub: 'Danger zones', icon: 'snow-outline', val: layerAva, color: '#3b82f6', onPress: () => { const next = !layerAva; setLayerAva(next); toggleDataLayer('ava', next); } },
     { key: 'radar', label: 'Radar', sub: 'Rain radar', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', onPress: () => { const next = !layerRadar; setLayerRadar(next); toggleDataLayer('radar', next); } },
-    { key: 'mvum', label: 'MVUM', sub: 'Legal access', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
+    { key: 'mvum', label: 'Motor Access', sub: 'Seasonal road access', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
   ] as const;
   const mapboxStyleItems = mapboxStyleOptions.map(option => ({
     ...option,
@@ -18136,7 +18136,7 @@ function MapScreen() {
   }));
   const extremeFeatureItems = [
     { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain camera', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
-    { key: 'search_box', label: 'Search Box', sub: 'Find and fly to places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.enabled, onPress: () => { if (extremeConfig?.enabled) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('Search is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'search_box', label: 'Search', sub: 'Find places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.enabled, onPress: () => { if (extremeConfig?.enabled) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('Search is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('Directions are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('Traffic is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('Weather layers are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
@@ -18264,7 +18264,7 @@ function MapScreen() {
       : allCampFiltersSelected(activeFilters)
         ? 'All camp types visible'
         : `${activeFilters.length} visible`
-    : 'Hidden';
+    : 'Off';
   const activeCampFilterLabel = activeFilters.length === 0
     ? 'Camp types hidden'
     : allCampFiltersSelected(activeFilters)
@@ -18272,15 +18272,15 @@ function MapScreen() {
       : activeFilters.map(cleanDisplayLabel).slice(0, 3).join(' · ');
   const placeFilterSummary = showPlacePins
     ? `${activePlaceFilters.length} selected`
-    : 'Hidden';
+    : 'Off';
   const communityFilterSummary = showCommunityPins
     ? `${activePinFilters.length} visible`
-    : 'Hidden';
+    : 'Off';
   const mapContentSummary = [
     showCampPins ? 'Camps' : null,
     showPlacePins ? 'Places' : null,
     showCommunityPins ? 'Community' : null,
-  ].filter(Boolean).join(' · ') || 'Map pins hidden';
+  ].filter(Boolean).join(' · ') || 'Everything hidden';
   const waterFilterSummary = waterFilterBroadActive
     ? 'All water points'
     : waterFilterNarrowCount > 0 ? `${waterFilterNarrowCount} selected` : 'Choose water access types';
@@ -21185,7 +21185,7 @@ function MapScreen() {
           {
             key: 'showCampPins',
             title: 'Camps',
-            sub: 'All camp pins and route camps',
+            sub: 'Campgrounds, stays, and trip camps',
             enabled: showCampPins,
             icon: 'bonfire-outline',
             onPress: () => setShowCampPins(!showCampPins),
@@ -21200,8 +21200,8 @@ function MapScreen() {
           },
           {
             key: 'showCommunityPins',
-            title: 'Community Pins',
-            sub: 'Shared road, camp, service, and trail notes',
+            title: 'Community notes',
+            sub: 'Road, camp, service, and trail reports',
             enabled: showCommunityPins,
             icon: 'people-outline',
             onPress: () => setShowCommunityPins(!showCommunityPins),
@@ -21228,7 +21228,7 @@ function MapScreen() {
           {
             key: 'trails',
             title: 'Trails',
-            sub: 'Trail overlays on the map',
+            sub: 'Trails and dirt roads',
             enabled: layerTrails,
             icon: 'trail-sign-outline',
             onPress: () => setLayerTrails(!layerTrails),
@@ -21236,7 +21236,7 @@ function MapScreen() {
           {
             key: 'radar',
             title: 'Radar',
-            sub: 'Weather radar layer',
+            sub: 'Weather radar',
             enabled: layerRadar,
             icon: 'rainy-outline',
             onPress: () => {
@@ -21248,7 +21248,7 @@ function MapScreen() {
           {
             key: 'mvum',
             title: 'MVUM',
-            sub: 'Motor vehicle use map layer',
+            sub: 'Motor vehicle access',
             enabled: layerMvum,
             icon: 'trail-sign-outline',
             onPress: () => {
@@ -21276,7 +21276,7 @@ function MapScreen() {
           {
             key: 'public-land',
             title: 'Public Land',
-            sub: 'Public land overlay',
+            sub: 'Public land boundaries',
             enabled: showLands,
             icon: 'map-outline',
             onPress: () => toggleLandOverlay(!showLands),
@@ -21284,7 +21284,7 @@ function MapScreen() {
           {
             key: 'usgs',
             title: 'USGS',
-            sub: 'USGS map overlay',
+            sub: 'Topo base layer',
             enabled: showUsgs,
             icon: 'layers-outline',
             onPress: () => toggleUsgsOverlay(!showUsgs),
@@ -21890,10 +21890,10 @@ function MapScreen() {
 	                ) : (
 	                  <TouchableOpacity style={s.lockedAiPreview} onPress={() => openCampInsight(selectedCamp, campDetail)} activeOpacity={0.9}>
 	                    <View style={s.lockedAiPreviewTop}>
-	                      <Text style={s.detailSectionTitle}>CAMP INSIGHT</Text>
+	                      <Text style={s.detailSectionTitle}>Camp insight</Text>
                       <View style={s.lockedAiBadge}>
                         <Ionicons name="lock-closed-outline" size={12} color={C.orange} />
-                        <Text style={s.lockedAiBadgeText}>UNLOCK</Text>
+                        <Text style={s.lockedAiBadgeText}>Unlock</Text>
                       </View>
                     </View>
                     <View style={s.lockedAiFakeBlock}>
@@ -21907,7 +21907,7 @@ function MapScreen() {
                     </View>
 	                    <View style={s.lockedAiOverlay}>
 	                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
-	                      <Text style={s.lockedAiOverlayText}>Unlock camp fit, hazards, best season, and nearby highlights with credits or a plan.</Text>
+	                      <Text style={s.lockedAiOverlayText}>Explorer includes camp fit, hazards, best season, and nearby highlights.</Text>
                     </View>
                   </TouchableOpacity>
                 )}
@@ -22709,7 +22709,7 @@ function MapScreen() {
               </TouchableOpacity>
             ) : null}
             <View style={{ flex: 1 }}>
-              <Text style={s.layerSheetTitle}>{showTrailList ? 'TRAIL DISCOVERY' : 'LAYERS'}</Text>
+              <Text style={s.layerSheetTitle}>{showTrailList ? 'Trail discovery' : 'Layers'}</Text>
               {showTrailList ? (
                 <Text style={s.trailListSub}>{trailDiscoveries.length ? `${trailDiscoveries.length} trail places loaded` : 'Search near you or in the visible map area'}</Text>
               ) : null}
@@ -22767,18 +22767,18 @@ function MapScreen() {
             safeWaterLegendVisible={layerNautical}
             safeWaterLegendItems={safeWaterLegendItems}
             safeWaterSummary={hydroAvailable
-              ? `${hydroContourCount} bathymetry contour${hydroContourCount === 1 ? '' : 's'}, ${hydroShallowCount} shallow zone${hydroShallowCount === 1 ? '' : 's'}, ${hydroHazardCount} hydro hazard${hydroHazardCount === 1 ? '' : 's'}, ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'}, and ${waterNavPointCount} buoy/nav aid pin${waterNavPointCount === 1 ? '' : 's'} loaded in this view. Sources: ${waterChartSourceNames}.`
+              ? `${hydroContourCount} depth contour${hydroContourCount === 1 ? '' : 's'}, ${hydroShallowCount} shallow zone${hydroShallowCount === 1 ? '' : 's'}, ${hydroHazardCount} hazard${hydroHazardCount === 1 ? '' : 's'}, ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'}, and ${waterNavPointCount} marker${waterNavPointCount === 1 ? '' : 's'} loaded here. Sources: ${waterChartSourceNames}.`
               : waterNavFeatureCount > 0
-                ? `${waterNavLineCount} open chart line${waterNavLineCount === 1 ? '' : 's'}, ${waterNavPointCount} aid/hazard pin${waterNavPointCount === 1 ? '' : 's'}, ${waterNavHazardCount} hazard${waterNavHazardCount === 1 ? '' : 's'}, and ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'} loaded in this view. Hydro bathymetry coverage: ${hydroCoverage?.coverage || 'none'}. Sources: ${waterChartSourceNames}.`
-                : 'Hydro bathymetry and open seamark chart lines are still loading for this view. NOAA/CHS/OpenSeaMap context may still be visible without pretending local depth contours exist.'}
+                ? `${waterNavLineCount} chart line${waterNavLineCount === 1 ? '' : 's'}, ${waterNavPointCount} aid or hazard marker${waterNavPointCount === 1 ? '' : 's'}, ${waterNavHazardCount} hazard${waterNavHazardCount === 1 ? '' : 's'}, and ${waterNavRecommendedCount} recommended track${waterNavRecommendedCount === 1 ? '' : 's'} loaded here. Sources: ${waterChartSourceNames}.`
+                : 'Water safety details are still loading for this view.'}
             safeWaterStationSummary={waterConditionsLabel ? `${waterConditions?.station?.name}: ${waterConditionsLabel}` : null}
-            safeWaterDisclosure="Informational only; not certified chartplotter data, not turn-by-turn boat routing, and not an offline nautical chart."
+            safeWaterDisclosure="For planning only. Always follow official charts and local conditions."
             conditionLegendVisible={layerTrails || layerMvum || layerAva}
-            conditionLegendTitle={layerTrails ? 'OFFROAD TRAILS LEGEND' : layerMvum ? 'MVUM LEGEND' : 'CONDITION LEGEND'}
+            conditionLegendTitle={layerTrails ? 'Trail legend' : layerMvum ? 'Motor access legend' : 'Condition legend'}
             trailLegendItems={trailLegendItems}
             mvumLegendItems={mvumLegendItems}
             avalancheLegendItems={avalancheLegendItems}
-            mvumNote={layerMvum ? 'MVUM is a legal-access overlay. Offroad Trails uses subdued base-map roads and paths until classified trail tiles are rebuilt.' : null}
+            mvumNote={layerMvum ? 'Motor access can change. Confirm local closures before driving.' : null}
           />
           )}
         </View>
@@ -23725,7 +23725,7 @@ function MapScreen() {
         <View style={s.layerSheet}>
           <View style={s.layerSheetHeader}>
             <View>
-              <Text style={s.layerSheetTitle}>TRAIL DISCOVERY</Text>
+              <Text style={s.layerSheetTitle}>Trail discovery</Text>
               <Text style={s.trailListSub}>{trailDiscoveries.length ? `${trailDiscoveries.length} trail places loaded` : 'Search near you or in the visible map area'}</Text>
             </View>
             <TouchableOpacity onPress={() => setShowTrailList(false)}>
@@ -27840,7 +27840,7 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 18, paddingTop: 8, paddingBottom: 10,
     borderBottomWidth: 1, borderBottomColor: C.border,
   },
-  layerSheetTitle: { color: C.text, fontSize: 14, fontWeight: '900', fontFamily: mono, letterSpacing: 1 },
+  layerSheetTitle: { color: C.text, fontSize: 16, fontWeight: '900', letterSpacing: 0 },
   layerRow: {
     flexDirection: 'row', alignItems: 'center', gap: 12,
     paddingHorizontal: 16, paddingVertical: 12,

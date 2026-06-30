@@ -73,47 +73,56 @@ const REGION_GROUPS: Array<{
 }> = [
   {
     key: 'west',
-    label: 'WEST',
+    label: 'West',
     title: 'Western U.S.',
     subtitle: 'Mountain states, coast, desert, Alaska, Hawaii',
     ids: ['ak', 'az', 'ca', 'co', 'hi', 'id', 'mt', 'nm', 'nv', 'or', 'ut', 'wa', 'wy'],
   },
   {
     key: 'central',
-    label: 'CENTRAL',
+    label: 'Central',
     title: 'Central / Plains / South',
     subtitle: 'Great Plains, Texas, Ozarks, upper Mississippi',
     ids: ['ks', 'mn', 'mo', 'nd', 'ne', 'ok', 'sd', 'tx'],
   },
   {
     key: 'southeast',
-    label: 'SOUTHEAST',
+    label: 'Southeast',
     title: 'Southeast / Appalachia',
     subtitle: 'Gulf states, Appalachians, Atlantic South',
     ids: ['al', 'ar', 'fl', 'ga', 'ky', 'la', 'ms', 'nc', 'sc', 'tn', 'va', 'wv'],
   },
   {
     key: 'northeastMidwest',
-    label: 'NE / MIDWEST',
+    label: 'NE / Midwest',
     title: 'Northeast / Midwest',
     subtitle: 'Great Lakes, New England, Mid-Atlantic',
     ids: ['ct', 'de', 'ia', 'il', 'in', 'ma', 'md', 'me', 'mi', 'nh', 'nj', 'ny', 'oh', 'pa', 'ri', 'vt', 'wi'],
   },
   {
     key: 'international',
-    label: 'GLOBAL',
+    label: 'Global',
     title: 'International',
     subtitle: 'Canada, Mexico, Pakistan, and more regions',
     ids: ['canada', 'mexico', 'pk'],
   },
   {
     key: 'europe',
-    label: 'EUROPE',
+    label: 'Europe',
     title: 'Europe',
     subtitle: 'Finland first, more countries next',
     ids: ['fi'],
   },
 ];
+
+function offlinePlacePackDescription(packId: string, fallback?: string) {
+  if (packId === 'essentials') return 'Core road-trip services, outdoor stops, lodging, and useful town stops.';
+  if (packId === 'services') return 'Fuel, water, dump stations, showers, groceries, food, repairs, medical stops, and other practical support.';
+  if (packId === 'outdoors') return 'Trailheads, viewpoints, peaks, hot springs, and other outdoor stops.';
+  if (packId === 'camps') return 'Campgrounds and campsites saved for offline planning. Confirm fees, closures, and availability before you go.';
+  if (packId === 'water') return 'Water access, fill points, boat ramps, paddle launches, and hazard markers where available.';
+  return fallback || 'Saved places for searching nearby.';
+}
 
 function regionGroupFor(id: string): RegionGroupKey {
   return REGION_GROUPS.find(group => group.ids.includes(id))?.key ?? 'west';
@@ -196,7 +205,7 @@ function Section({ label }: { label: string }) {
   return (
     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 10 }}>
       <View style={{ width: 3, height: 12, backgroundColor: C.orange, borderRadius: 1 }} />
-      <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '800', letterSpacing: 2 }}>
+      <Text style={{ color: C.text3, fontSize: 11, fontWeight: '800', letterSpacing: 0 }}>
         {label}
       </Text>
       <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
@@ -208,7 +217,7 @@ function Section({ label }: { label: string }) {
 function StatusChip({ label, color }: { label: string; color: string }) {
   return (
     <View style={{ paddingHorizontal: 7, paddingVertical: 3, borderRadius: 3, borderWidth: 1, borderColor: color + '60', backgroundColor: color + '18' }}>
-      <Text style={{ color, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 }}>{label}</Text>
+      <Text style={{ color, fontSize: 9, fontWeight: '800', letterSpacing: 0 }}>{label}</Text>
     </View>
   );
 }
@@ -257,7 +266,7 @@ function StateReadinessPanel({
   const busy = mapBusy || routeBusy || contourBusy || trailBusy;
   const statusParts = [
     mapReady ? 'Map saved' : available ? 'Map ready to download' : 'Map pending',
-    routeReady ? 'Nav saved' : available ? 'Nav ready to download' : 'Nav pending',
+    routeReady ? 'Routes saved' : available ? 'Routes ready to download' : 'Routes pending',
     trailAvailable ? (trailReady ? 'Trails saved' : 'Trails optional') : null,
     contourAvailable ? (contourReady ? 'Topo saved' : 'Topo optional') : null,
     placeAvailable ? placeLabel : null,
@@ -285,7 +294,7 @@ function StateReadinessPanel({
             style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: busy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: busy ? C.border : C.orange + '55' }}
           >
             <Text style={{ color: busy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-              {busy ? 'BUSY' : 'SAVE'}
+              {busy ? 'Busy' : 'Save'}
             </Text>
           </TouchableOpacity>
         )}
@@ -338,10 +347,10 @@ function ConusCard({
         <View style={{ flex: 1 }}>
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
             <Text style={{ color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' }}>{region.name}</Text>
-            {isComplete && <StatusChip label="DOWNLOADED" color={C.green} />}
-            {isActive   && <StatusChip label="DOWNLOADING"   color={C.orange} />}
-            {isPaused   && <StatusChip label="PAUSED"        color={C.orange} />}
-            {isError    && <StatusChip label="ERROR"         color={C.red} />}
+            {isComplete && <StatusChip label="Saved" color={C.green} />}
+            {isActive   && <StatusChip label="Downloading"   color={C.orange} />}
+            {isPaused   && <StatusChip label="Paused"        color={C.orange} />}
+            {isError    && <StatusChip label="Error"         color={C.red} />}
           </View>
           <Text style={{ color: isComplete ? C.green : C.text3, fontSize: 10, fontFamily: mono, fontWeight: isComplete ? '700' : '500' }}>{sizeText}</Text>
           {state.details ? (
@@ -363,14 +372,14 @@ function ConusCard({
             </TouchableOpacity>
           ) : isPaused ? (
             <TouchableOpacity onPress={onResume} style={{ backgroundColor: C.orangeGlow, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 }}>
-              <Text style={{ color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' }}>RESUME</Text>
+              <Text style={{ color: C.orange, fontSize: 10, fontWeight: '900' }}>Resume</Text>
             </TouchableOpacity>
           ) : (
             <View style={{ alignItems: 'flex-end', gap: 4 }}>
               <TouchableOpacity onPress={onStart} style={{ backgroundColor: C.orangeGlow, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.orange + '55' }}>
-                <Text style={{ color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' }}>DOWNLOAD</Text>
+                <Text style={{ color: C.orange, fontSize: 10, fontWeight: '900' }}>Download</Text>
               </TouchableOpacity>
-              <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono }}>wifi recommended</Text>
+              <Text style={{ color: C.text3, fontSize: 8, fontWeight: '700' }}>Wi-Fi recommended</Text>
             </View>
           )}
         </View>
@@ -388,7 +397,7 @@ function ConusCard({
                 {isActive ? fmtSpeed(state.speedBps).split('/')[0].trim() : '─'}
               </Text>
               <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 1 }}>
-                {isActive ? (fmtSpeed(state.speedBps).includes('MB') ? 'MB/s' : 'KB/s') : 'PAUSED'}
+                {isActive ? (fmtSpeed(state.speedBps).includes('MB') ? 'MB/s' : 'KB/s') : 'Paused'}
               </Text>
             </View>
             <View style={{ width: 1, height: 28, backgroundColor: C.border }} />
@@ -413,7 +422,7 @@ function ConusCard({
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: C.s2, borderRadius: 6, padding: 8 }}>
               <Ionicons name="flash-outline" size={12} color={C.orange} />
               <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, flex: 1, lineHeight: 13 }}>
-                Keep app open + screen on. If interrupted, tap RESUME — download continues from where it stopped.
+                Keep the app open and screen on for the fastest download. If it stops, tap Resume.
               </Text>
             </View>
           )}
@@ -421,7 +430,7 @@ function ConusCard({
             <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: C.orangeGlow, borderRadius: 6, padding: 8 }}>
               <Ionicons name="pause-outline" size={12} color={C.orange} />
               <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, flex: 1, lineHeight: 13 }}>
-                Paused at {state.progress.toFixed(1)}%. Tap RESUME — continues from this point, no restart.
+                Paused at {state.progress.toFixed(1)}%. Tap Resume to continue from this point.
               </Text>
             </View>
           )}
@@ -433,7 +442,7 @@ function ConusCard({
           <Ionicons name="alert-circle-outline" size={12} color={C.red} />
           <Text style={{ color: C.red, fontSize: 10, fontFamily: mono, flex: 1 }}>{state.error}</Text>
           <TouchableOpacity onPress={onStart}>
-            <Text style={{ color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' }}>RETRY</Text>
+            <Text style={{ color: C.orange, fontSize: 10, fontWeight: '700' }}>Retry</Text>
           </TouchableOpacity>
         </View>
       )}
@@ -441,7 +450,7 @@ function ConusCard({
       {isComplete && (
         <View style={{ margin: 12, marginTop: 0, padding: 10, backgroundColor: C.green + '15', borderRadius: 6, borderWidth: 1, borderColor: C.green + '30' }}>
           <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>
-            {completeTitle ?? 'DOWNLOADED'}
+            {completeTitle ?? 'Saved'}
           </Text>
           <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 }}>
             {completeText ?? 'Saved on this device for offline use.'}
@@ -473,7 +482,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
         {isCached ? (
           <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
             <Ionicons name="checkmark-circle" size={12} color={C.green} />
-            <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>SAVED</Text>
+            <Text style={{ color: C.green, fontSize: 9, fontWeight: '700' }}>Saved</Text>
             <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
               <Ionicons name="trash-outline" size={14} color={C.red} />
             </TouchableOpacity>
@@ -492,7 +501,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
             style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 4, borderWidth: 1, borderColor: isDownloading ? C.border : C.orange + '55', backgroundColor: isDownloading ? 'transparent' : C.orangeGlow }}
           >
             <Text style={{ color: isDownloading ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>
-              {isDownloading ? 'BUSY' : 'GET'}
+              {isDownloading ? 'Busy' : 'Get'}
             </Text>
           </TouchableOpacity>
         )}
@@ -501,7 +510,7 @@ function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDow
         <View style={{ paddingHorizontal: 4, paddingBottom: 8 }}>
           <ShimmerBar pct={progress ?? 0} />
           <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-            Downloading map data — keep app open
+            Downloading. Keep the app open.
           </Text>
         </View>
       )}
@@ -1017,8 +1026,8 @@ export default function OfflineModal({
           <View style={s.header}>
             <View style={s.headerAccent} />
             <View style={{ flex: 1 }}>
-              <Text style={s.title}>DOWNLOADS</Text>
-              <Text style={s.subtitle}>Offline maps, corridors, places, trails, files</Text>
+              <Text style={s.title}>Downloads</Text>
+              <Text style={s.subtitle}>Offline regions, route areas, places, and trails</Text>
             </View>
             <TouchableOpacity onPress={onClose} style={s.closeBtn}>
               <Ionicons name="close" size={18} color={C.text3} />
@@ -1034,7 +1043,7 @@ export default function OfflineModal({
                 onPress={() => setActiveTab(tab)}
               >
                 <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
-                  {tab === 'files' ? 'FILES' : tab === 'areas' ? 'CORRIDORS' : 'COUNTRIES'}
+                  {tab === 'files' ? 'Files' : tab === 'areas' ? 'Areas' : 'Regions'}
                 </Text>
               </TouchableOpacity>
             ))}
@@ -1043,7 +1052,7 @@ export default function OfflineModal({
           {!user ? (
             <View style={s.noUser}>
               <Ionicons name="lock-closed-outline" size={24} color={C.text3} />
-              <Text style={s.noUserText}>SIGN IN TO DOWNLOAD MAPS, NAVIGATION, AND PLACES</Text>
+              <Text style={s.noUserText}>Sign in to save offline regions, routes, and places.</Text>
             </View>
           ) : (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomPad + 28 }}>
@@ -1052,11 +1061,11 @@ export default function OfflineModal({
                 <View style={{ flex: 1 }}>
                   <Text style={s.storageTitle}>Device storage</Text>
                   <Text style={s.storageText}>
-                    {freeDiskBytes != null ? `${fmtBytes(freeDiskBytes)} free before install` : 'Storage check unavailable'}
+                    {freeDiskBytes != null ? `${fmtBytes(freeDiskBytes)} free before install` : 'Storage estimate appears on device'}
                   </Text>
                 </View>
                 <Text style={s.storageEstimate}>
-                  {freeDiskBytes != null ? `After selected map: ~${fmtBytes(Math.max(0, freeDiskBytes - getTotalBytes(selectedState)))}` : 'Check pack size'}
+                  {freeDiskBytes != null ? `After selected region: ~${fmtBytes(Math.max(0, freeDiskBytes - getTotalBytes(selectedState)))}` : 'Select a region'}
                 </Text>
               </View>
 
@@ -1083,7 +1092,7 @@ export default function OfflineModal({
 
                   {downloadSearch.trim() ? (
                     <>
-                      <Section label="SEARCH RESULTS" />
+                      <Section label="Search results" />
                       {explorerSearchResults.length > 0 ? explorerSearchResults.map(renderExplorerRow) : (
                         <View style={s.explorerEmpty}>
                           <Ionicons name="file-tray-outline" size={22} color={C.text3} />
@@ -1093,11 +1102,13 @@ export default function OfflineModal({
                     </>
                   ) : (
                     <>
-                      <Section label="FOLDERS" />
+                      <Section label="Folders" />
                       {renderExplorerRow({
                         id: 'countries',
                         title: 'Countries',
-                        detail: `${explorerStats.savedMaps} map packs · ${explorerStats.savedRoutes} navigation packs saved`,
+                        detail: explorerStats.savedMaps + explorerStats.savedRoutes > 0
+                          ? `${explorerStats.savedMaps} map packs · ${explorerStats.savedRoutes} route packs saved`
+                          : 'Region packs are ready when you need them',
                         icon: 'folder-outline',
                         status: 'Open',
                         onPress: () => setActiveTab('regions'),
@@ -1105,25 +1116,29 @@ export default function OfflineModal({
                       {renderExplorerRow({
                         id: 'corridors',
                         title: 'Corridors',
-                        detail: `${explorerStats.corridorCount} saved route corridors and custom areas`,
+                        detail: explorerStats.corridorCount > 0
+                          ? `${explorerStats.corridorCount} saved route corridors and custom areas`
+                          : 'Route areas and custom areas will appear here',
                         icon: 'git-branch-outline',
                         status: 'Open',
                         onPress: () => setActiveTab('areas'),
                       })}
                       {renderExplorerRow({
                         id: 'favorites',
-                        title: 'Downloaded Favorites',
-                        detail: `${explorerStats.placeCount} saved camp and place pins from offline packs`,
+                        title: 'Downloaded favorites',
+                        detail: explorerStats.placeCount > 0
+                          ? `${explorerStats.placeCount} saved camps and places from offline packs`
+                          : 'Saved camps and places from offline packs appear here',
                         icon: 'star-outline',
-                        status: `${explorerStats.placeCount}`,
+                        status: explorerStats.placeCount > 0 ? `${explorerStats.placeCount}` : 'None',
                         onPress: () => setActiveTab('regions'),
                       })}
                       {renderExplorerRow({
                         id: 'places',
                         title: 'Camps & Places',
-                        detail: 'Campgrounds, water, fuel, trailheads, viewpoints, and service pins',
+                        detail: 'Campgrounds, water, fuel, trailheads, viewpoints, and services',
                         icon: 'location-outline',
-                        status: `${placePacks.length} packs`,
+                        status: placePacks.length > 0 ? `${placePacks.length} packs` : 'None',
                         onPress: () => setActiveTab('regions'),
                       })}
                       {renderExplorerRow({
@@ -1131,7 +1146,7 @@ export default function OfflineModal({
                         title: 'Trails',
                         detail: 'Saved trail line packs and trail preview data by region',
                         icon: 'trail-sign-outline',
-                        status: `${explorerStats.savedTrails} saved`,
+                        status: explorerStats.savedTrails > 0 ? `${explorerStats.savedTrails} saved` : 'None',
                         onPress: () => setActiveTab('regions'),
                       })}
                       {renderExplorerRow({
@@ -1151,11 +1166,11 @@ export default function OfflineModal({
                         onPress: () => setActiveTab('areas'),
                       })}
 
-                      <Section label="COUNTRIES" />
+                      <Section label="Regions" />
                       {renderExplorerRow({
                         id: 'country:us',
                         title: 'United States',
-                        detail: 'State folders with map, navigation, places, trails, and topo packs',
+                        detail: 'State folders with map, routes, places, trails, and topo packs',
                         icon: 'map-outline',
                         status: `${explorerStats.regionIds.filter(id => id.length === 2).length} states`,
                         onPress: () => {
@@ -1169,7 +1184,7 @@ export default function OfflineModal({
                         return renderExplorerRow({
                           id: `country:${id}`,
                           title: region.name,
-                          detail: `${regionCodeFor(id)} · country map and navigation packs`,
+                          detail: `${regionCodeFor(id)} · region map and route packs`,
                           icon: 'earth-outline',
                           status: getState(id).status === 'complete' && getRoutingState(id).status === 'complete' ? 'Saved' : 'Available',
                           onPress: () => {
@@ -1195,7 +1210,7 @@ export default function OfflineModal({
                       {Math.round(packProgress?.percentage ?? 0)}%
                     </Text>
                     <TouchableOpacity onPress={() => { activePackName && pausePack(activePackName); setActivePackName(null); }}>
-                      <Text style={{ color: C.red, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>■ STOP</Text>
+                      <Text style={{ color: C.red, fontSize: 9, fontWeight: '900' }}>Stop</Text>
                     </TouchableOpacity>
                   </View>
                   <ShimmerBar pct={packProgress?.percentage ?? 0} />
@@ -1216,21 +1231,21 @@ export default function OfflineModal({
               {/* ══════════════════ AREAS TAB ═══════════════════════════ */}
               {activeTab === 'areas' && (
                 <>
-                  <Section label="SELECT AN AREA" />
+                  <Section label="Select an area" />
                   <View style={s.customAreaCard}>
                     <View style={s.customAreaTop}>
                       <View style={s.customAreaIcon}>
                         <Ionicons name="scan-outline" size={20} color={C.orange} />
                       </View>
                       <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={s.customAreaTitle}>{selectedArea ? selectedArea.label.toUpperCase() : 'DRAW A DOWNLOAD BOX'}</Text>
+                        <Text style={s.customAreaTitle}>{selectedArea ? selectedArea.label : 'Choose an area'}</Text>
                         <Text style={s.customAreaText}>
                           {selectedArea
                             ? `${selectedArea.detail === 'high' ? 'High' : 'Standard'} detail · ${Math.round(selectedArea.areaSqMi).toLocaleString()} sq mi · about ${Math.max(1, Math.round(selectedArea.estimatedMb))} MB`
                             : 'Pick a small area on the map, resize it, then save full map detail for that box.'}
                         </Text>
                       </View>
-                      <StatusChip label={selectedArea ? 'SELECTED' : 'MAP'} color={selectedArea ? C.green : C.orange} />
+                      <StatusChip label={selectedArea ? 'Selected' : 'Map'} color={selectedArea ? C.green : C.orange} />
                     </View>
                     {selectedArea && (
                       <View style={s.customAreaNameRow}>
@@ -1250,12 +1265,12 @@ export default function OfflineModal({
                       {selectedArea && (
                         <TouchableOpacity style={s.customAreaSecondary} onPress={() => onStartAreaSelect?.(null)}>
                           <Ionicons name="add-outline" size={13} color={C.text2} />
-                          <Text style={s.customAreaSecondaryText}>NEW AREA</Text>
+                          <Text style={s.customAreaSecondaryText}>New area</Text>
                         </TouchableOpacity>
                       )}
                       <TouchableOpacity style={s.customAreaSecondary} onPress={() => onStartAreaSelect?.(selectedArea ?? null)}>
                         <Ionicons name={selectedArea ? 'resize-outline' : 'expand-outline'} size={13} color={C.text2} />
-                        <Text style={s.customAreaSecondaryText}>{selectedArea ? 'ADJUST' : 'CHOOSE AREA'}</Text>
+                        <Text style={s.customAreaSecondaryText}>{selectedArea ? 'Adjust' : 'Choose area'}</Text>
                       </TouchableOpacity>
                       <TouchableOpacity
                         disabled={!selectedArea || !!activePackName || !!webIsDownloading}
@@ -1263,7 +1278,7 @@ export default function OfflineModal({
                         onPress={downloadSelectedArea}
                       >
                         <Ionicons name="cloud-download-outline" size={13} color="#fff" />
-                        <Text style={s.customAreaPrimaryText}>{activePackName || webIsDownloading ? 'DOWNLOADING' : 'DOWNLOAD'}</Text>
+                        <Text style={s.customAreaPrimaryText}>{activePackName || webIsDownloading ? 'Downloading' : 'Download'}</Text>
                       </TouchableOpacity>
                       {selectedArea && (
                         <TouchableOpacity style={s.customAreaDeleteBtn} onPress={() => confirmDeleteArea(selectedArea)}>
@@ -1275,7 +1290,7 @@ export default function OfflineModal({
 
                   {savedAreas.length > 0 && (
                     <>
-                      <Section label="SAVED AREAS" />
+                      <Section label="Saved areas" />
                       {savedAreas.map(area => {
                         const active = selectedArea?.id === area.id;
                         return (
@@ -1286,9 +1301,9 @@ export default function OfflineModal({
                                 {area.detail === 'high' ? 'High detail' : 'Standard'} · {Math.round(area.areaSqMi).toLocaleString()} sq mi · ~{Math.max(1, Math.round(area.estimatedMb))} MB
                               </Text>
                             </TouchableOpacity>
-                            {active ? <StatusChip label="SELECTED" color={C.green} /> : (
+                            {active ? <StatusChip label="Selected" color={C.green} /> : (
                               <TouchableOpacity style={s.savedAreaAction} onPress={() => onSelectArea?.(area)}>
-                                <Text style={s.savedAreaActionText}>SELECT</Text>
+                                <Text style={s.savedAreaActionText}>Select</Text>
                               </TouchableOpacity>
                             )}
                             <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => { onSelectArea?.(area); onStartAreaSelect?.(area); }}>
@@ -1303,7 +1318,7 @@ export default function OfflineModal({
                     </>
                   )}
 
-                  <Section label="DOWNLOAD THIS TRIP" />
+                  <Section label="Download this trip" />
                   {waypoints.length > 0 ? (
                     <TouchableOpacity
                       disabled={placeBusy || !!activePackName || !!webIsDownloading}
@@ -1314,22 +1329,22 @@ export default function OfflineModal({
                         <Ionicons name="cloud-download-outline" size={22} color={C.orange} />
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={s.tripBundleTitle}>{(tripName ?? 'CURRENT TRIP').toUpperCase()}</Text>
-                        <Text style={s.tripBundleText}>Saves route coverage plus fuel, camp, and place pins for offline discovery.</Text>
+                        <Text style={s.tripBundleTitle}>{tripName ?? 'Current trip'}</Text>
+                        <Text style={s.tripBundleText}>Saves route coverage plus fuel, camps, and places for offline use.</Text>
                       </View>
-                      <StatusChip label={placeBusy || activePackName || webIsDownloading ? 'BUSY' : currentPlacePack ? 'REFRESH' : 'DOWNLOAD'} color={placeBusy || activePackName || webIsDownloading ? C.text3 : C.orange} />
+                      <StatusChip label={placeBusy || activePackName || webIsDownloading ? 'Busy' : currentPlacePack ? 'Refresh' : 'Download'} color={placeBusy || activePackName || webIsDownloading ? C.text3 : C.orange} />
                     </TouchableOpacity>
                   ) : (
                     <View style={s.noTrip}>
                       <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
-                        PLAN A TRIP FIRST TO DOWNLOAD IT
+                        Plan a trip first to download it.
                       </Text>
                     </View>
                   )}
 
                   {offlineTrips.length > 0 && (
                     <>
-                      <Section label="ROUTE FILES" />
+                      <Section label="Route files" />
                       {offlineTrips.map(trip => (
                         <View key={`route-file-${trip.trip_id}`} style={s.savedAreaRow}>
                           <TouchableOpacity style={s.savedAreaMain} onPress={() => openOfflineTrip(trip.trip_id)}>
@@ -1338,7 +1353,7 @@ export default function OfflineModal({
                               {trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0} days · {Math.round(trip.plan.total_est_miles || 0)} mi · {formatOfflineTripDate((trip as any).cached_at)}
                             </Text>
                           </TouchableOpacity>
-                          <StatusChip label="ROUTE" color={C.green} />
+                          <StatusChip label="Route" color={C.green} />
                           <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => openOfflineTrip(trip.trip_id)}>
                             <Ionicons name="open-outline" size={14} color={C.text2} />
                           </TouchableOpacity>
@@ -1349,7 +1364,7 @@ export default function OfflineModal({
                       ))}
                     </>
                   )}
-                  <Section label="CONTINENTAL US — MAP" />
+                  <Section label="Continental US · Map" />
                   <Text style={s.hint}>
                     Download large map coverage before remote travel. Use Wi-Fi for big regions and keep the app open for the fastest transfer.
                   </Text>
@@ -1364,7 +1379,7 @@ export default function OfflineModal({
                   />
 
                   {/* Trip corridor */}
-                  <Section label="TRIP DOWNLOAD — MAP + NAVIGATION" />
+                  <Section label="Trip download · Map and routes" />
                   {waypoints.length > 0 ? (() => {
                     const name   = (tripName ?? 'Trip') + '-corridor';
                     const cached = useNativeMap
@@ -1381,7 +1396,7 @@ export default function OfflineModal({
                       >
                         <View style={{ flex: 1 }}>
                           <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                            {(tripName ?? 'CURRENT TRIP').toUpperCase()}
+                            {tripName ?? 'Current trip'}
                           </Text>
                           <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
                             Route map and navigation coverage around your planned drive.
@@ -1393,28 +1408,28 @@ export default function OfflineModal({
                           )}
                         </View>
                         {cached
-                          ? <StatusChip label="DOWNLOADED" color={C.green} />
-                          : <StatusChip label={busy ? 'BUSY' : 'DOWNLOAD'} color={busy ? C.text3 : C.orange} />
+                          ? <StatusChip label="Saved" color={C.green} />
+                          : <StatusChip label={busy ? 'Busy' : 'Download'} color={busy ? C.text3 : C.orange} />
                         }
                       </TouchableOpacity>
                     );
                   })() : (
                     <View style={s.noTrip}>
                       <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
-                        PLAN A TRIP FIRST TO DOWNLOAD IT
+                        Plan a trip first to download it.
                       </Text>
                     </View>
                   )}
 
-                  <Section label="TRIP DOWNLOAD — PLACES" />
+                  <Section label="Trip download · Places" />
                   {waypoints.length > 0 ? (
                     <View style={[s.corridorCard, currentPlacePack && { borderLeftColor: C.green }]}>
                       <View style={{ flex: 1 }}>
                         <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                          {(tripName ?? 'CURRENT TRIP').toUpperCase()} PLACES
+                          {tripName ?? 'Current trip'} places
                         </Text>
                         <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                          Camps, fuel, water, trailheads, viewpoints, peaks, and hot springs near the route. Saves to the map for offline use.
+                          Camps, fuel, water, trailheads, viewpoints, peaks, and hot springs near the route.
                         </Text>
                         {currentPlacePack && (
                           <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
@@ -1426,14 +1441,14 @@ export default function OfflineModal({
                         )}
                       </View>
                       <View style={{ gap: 8, alignItems: 'flex-end' }}>
-                        {currentPlacePack && <StatusChip label="SAVED" color={C.green} />}
+                        {currentPlacePack && <StatusChip label="Saved" color={C.green} />}
                         <TouchableOpacity
                           disabled={placeBusy}
                           onPress={downloadTripEssentials}
                           style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
                         >
                           <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-                            {placeBusy ? 'SAVING' : currentPlacePack ? 'REFRESH' : 'DOWNLOAD'}
+                            {placeBusy ? 'Saving' : currentPlacePack ? 'Refresh' : 'Download'}
                           </Text>
                         </TouchableOpacity>
                         {currentPlacePack && (
@@ -1446,7 +1461,7 @@ export default function OfflineModal({
                   ) : (
                     <View style={s.noTrip}>
                       <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
-                        PLAN A TRIP FIRST TO SAVE ITS OFFLINE PLACES
+                        Plan a trip first to save its offline places.
                       </Text>
                     </View>
                   )}
@@ -1454,7 +1469,7 @@ export default function OfflineModal({
                   {/* Downloaded packs */}
                   {mlnPacks.length > 0 && (
                     <>
-                      <Section label="DOWNLOADED PACKS — TAP TO DELETE" />
+                      <Section label="Saved packs" />
                       {mlnPacks.map(pack => (
                         <View key={pack.name} style={s.packRow}>
                           <Ionicons name="checkmark-circle" size={12} color={C.green} />
@@ -1475,7 +1490,7 @@ export default function OfflineModal({
               {/* ══════════════════ REGIONS TAB ═════════════════════════ */}
               {activeTab === 'regions' && (
                 <>
-                  <Section label="REGIONS" />
+                  <Section label="Regions" />
                   <Text style={s.hint}>
                     Pick a region, then download the packs you want for remote travel.
                   </Text>
@@ -1503,7 +1518,7 @@ export default function OfflineModal({
                               {mapDone && routeDone ? 'Saved on this device' : `~${region.estimatedGb} GB`}
                             </Text>
                             <Text style={[s.featuredRegionStatus, mapDone && routeDone && { color: C.green }]}>
-                              {mapDone && routeDone ? `SAVED${contourDone ? ' · TOPO' : ''}` : 'DOWNLOAD'}
+                              {mapDone && routeDone ? `Saved${contourDone ? ' · Topo' : ''}` : 'Download'}
                             </Text>
                           </View>
                         </TouchableOpacity>
@@ -1538,7 +1553,7 @@ export default function OfflineModal({
                             <Text style={s.regionPickerTitle}>{group.title}</Text>
                             <Text style={s.regionPickerSub}>{group.subtitle}</Text>
                           </View>
-                          <Text style={s.regionPickerCount}>{group.ids.length}</Text>
+                          <Text style={s.regionPickerCount}>{group.ids.length} regions</Text>
                         </View>
                         <View style={s.stateGrid}>
                           {group.ids.map(id => {
@@ -1610,7 +1625,7 @@ export default function OfflineModal({
                     const regionPlacesReady = savedRegionPlacePacks.length > 0;
                     const regionPlacesLabel = regionPlacesReady
                       ? `${savedRegionPlaceCount} places`
-                      : regionPlacesAvailable ? 'Places needed' : 'Places planned';
+                      : regionPlacesAvailable ? 'Places ready to save' : 'Places planned';
                     return (
                       <>
                         <StateReadinessPanel
@@ -1640,7 +1655,7 @@ export default function OfflineModal({
                               </View>
                               <View style={{ flex: 1 }}>
                                 <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>
-                                  {mapRegion.name.toUpperCase()} DOWNLOADS ARE BEING PREPARED
+                                  {mapRegion.name} downloads are being prepared
                                 </Text>
                                 <Text style={{ color: C.text3, fontSize: 10, marginTop: 3, lineHeight: 14 }}>
                                 Download buttons will appear as soon as this region is ready.
@@ -1648,8 +1663,8 @@ export default function OfflineModal({
                               </View>
                             </View>
                             <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                              <StatusChip label={mapPublished ? 'MAP AVAILABLE' : `MAP ${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
-                              <StatusChip label={routePublished ? 'NAV AVAILABLE' : `NAV ${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
+                              <StatusChip label={mapPublished ? 'Map ready' : `Map ${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
+                              <StatusChip label={routePublished ? 'Routes ready' : `Routes ${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
                             </View>
                             {'storageNote' in mapRegion && (
                               <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 10 }}>
@@ -1659,7 +1674,7 @@ export default function OfflineModal({
                           </View>
                         ) : (
                           <>
-                        <Section label={`${mapRegion.name.toUpperCase()} — MAP`} />
+                        <Section label={`${mapRegion.name} · Map`} />
                         <ConusCard
                           state={mapState}
                           totalBytes={getTotalBytes(selectedState)}
@@ -1669,11 +1684,11 @@ export default function OfflineModal({
                           onPause={() => pauseDownload(selectedState)}
                           onResume={() => resumeDownload(selectedState)}
                           onDelete={() => deleteDownload(selectedState)}
-                          completeTitle="MAP SAVED"
+                          completeTitle="Map saved"
                           completeText="Roads, trails, towns, parks, and labels are available offline for this region."
                         />
 
-                        <Section label={`${mapRegion.name.toUpperCase()} — NAVIGATION`} />
+                        <Section label={`${mapRegion.name} · Routes`} />
                         <ConusCard
                           state={routingState}
                           totalBytes={getRoutingTotalBytes(selectedState)}
@@ -1683,10 +1698,10 @@ export default function OfflineModal({
                           onPause={() => pauseRoutingDownload(selectedState)}
                           onResume={() => resumeRoutingDownload(selectedState)}
                           onDelete={() => deleteRoutingDownload(selectedState)}
-                          completeTitle="NAVIGATION SAVED"
+                          completeTitle="Routes saved"
                           completeText="Offline driving routes can use this region without needing signal."
                         />
-                        <Section label={`${mapRegion.name.toUpperCase()} — TRAILS`} />
+                        <Section label={`${mapRegion.name} · Trails`} />
                         {trailPublished ? (
                           <ConusCard
                             state={trailState}
@@ -1697,7 +1712,7 @@ export default function OfflineModal({
                             onPause={() => pauseTrailDownload(selectedState)}
                             onResume={() => resumeTrailDownload(selectedState)}
                             onDelete={() => deleteTrailDownload(selectedState)}
-                            completeTitle="TRAILS SAVED"
+                            completeTitle="Trails saved"
                             completeText="Trail lines and follow mode are available offline for this region."
                           />
                         ) : (
@@ -1706,7 +1721,7 @@ export default function OfflineModal({
                               <Ionicons name="trail-sign-outline" size={18} color={C.orange} />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={s.contourPlannedTitle}>TRAIL DOWNLOAD PLANNED</Text>
+                              <Text style={s.contourPlannedTitle}>Trail download planned</Text>
                               <Text style={s.contourPlannedText}>
                                 Downloadable trail lines for this region are coming soon. MVUM can still help check legal motorized access where available.
                               </Text>
@@ -1718,7 +1733,7 @@ export default function OfflineModal({
                         )}
                         {(currentManifestPlacePacks.length > 0 || waterPlacePackDefinition) && (
                           <>
-                            <Section label={`${mapRegion.name.toUpperCase()} — PLACES`} />
+                            <Section label={`${mapRegion.name} · Places`} />
                             {currentManifestPlacePacks.map(([manifestKey, manifestEntry]) => {
                               const saved = placePacks.find(pack => pack.region_id === selectedState && pack.pack_id === `${selectedState}-${manifestEntry.pack_id}`);
                               const def = placeManifest?.definitions?.[manifestEntry.pack_id];
@@ -1726,10 +1741,10 @@ export default function OfflineModal({
                                 <View key={manifestKey} style={[s.corridorCard, { marginBottom: 10 }, saved && { borderLeftColor: C.green }]}>
                                   <View style={{ flex: 1 }}>
                                     <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                      {manifestEntry.pack_id === 'camps' ? 'CAMPS' : manifestEntry.pack_id === 'water' ? 'WATER' : `${(def?.name ?? manifestEntry.pack_id).toUpperCase()} PLACES`}
+                                      {manifestEntry.pack_id === 'camps' ? 'Camps' : manifestEntry.pack_id === 'water' ? 'Water' : `${def?.name ?? manifestEntry.pack_id} places`}
                                     </Text>
                                     <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                                      {def?.description ?? 'Offline places saved as map pins.'}
+                                      {offlinePlacePackDescription(manifestEntry.pack_id, def?.description)}
                                     </Text>
                                     <Text style={{ color: saved ? C.green : C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
                                       {saved
@@ -1741,14 +1756,14 @@ export default function OfflineModal({
                                     )}
                                   </View>
                                   <View style={{ gap: 8, alignItems: 'flex-end' }}>
-                                    {saved && <StatusChip label="SAVED" color={C.green} />}
+                                    {saved && <StatusChip label="Saved" color={C.green} />}
                                     <TouchableOpacity
                                       disabled={placeBusy}
                                       onPress={() => downloadRegionPlacePack(manifestEntry.pack_id)}
                                       style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
                                     >
                                       <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-                                        {placeBusy ? 'SAVING' : saved ? 'REFRESH' : 'DOWNLOAD'}
+                                        {placeBusy ? 'Saving' : saved ? 'Refresh' : 'Download'}
                                       </Text>
                                     </TouchableOpacity>
                                     {saved && (
@@ -1764,21 +1779,21 @@ export default function OfflineModal({
                               <View style={[s.corridorCard, { marginBottom: 10, opacity: 0.72 }]}>
                                 <View style={{ flex: 1 }}>
                                   <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                    WATER
+                                    Water
                                   </Text>
                                   <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                                    {waterPlacePackDefinition.description}
+                                    {offlinePlacePackDescription('water', waterPlacePackDefinition.description)}
                                   </Text>
                                   <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
-                                    Uploading for {mapRegion.name}. The download button appears here when this state pack is live.
+                                    Download will appear when {mapRegion.name} is ready.
                                   </Text>
                                 </View>
-                                <StatusChip label="UPLOADING" color={C.orange} />
+                                <StatusChip label="Preparing" color={C.orange} />
                               </View>
                             )}
                           </>
                         )}
-                        <Section label={`${mapRegion.name.toUpperCase()} — TOPO`} />
+                        <Section label={`${mapRegion.name} · Topo`} />
                         {contourPublished ? (
                           <ConusCard
                             state={contourState}
@@ -1789,7 +1804,7 @@ export default function OfflineModal({
                             onPause={() => pauseContourDownload(selectedState)}
                             onResume={() => resumeContourDownload(selectedState)}
                             onDelete={() => deleteContourDownload(selectedState)}
-                            completeTitle="TOPO SAVED"
+                            completeTitle="Topo saved"
                             completeText="Topo contour lines are ready as an offline map layer."
                           />
                         ) : (
@@ -1798,7 +1813,7 @@ export default function OfflineModal({
                               <Ionicons name="analytics-outline" size={18} color={C.orange} />
                             </View>
                             <View style={{ flex: 1 }}>
-                              <Text style={s.contourPlannedTitle}>TOPO DOWNLOAD PLANNED</Text>
+                              <Text style={s.contourPlannedTitle}>Topo download planned</Text>
                               <Text style={s.contourPlannedText}>
                                 Topo contour downloads for this region are coming soon. They will appear as an optional map layer.
                               </Text>

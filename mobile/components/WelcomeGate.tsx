@@ -54,18 +54,18 @@ type NeedOption = SingleChoiceOption<WelcomeTravelNeed>;
 const FEATURES: Feature[] = [
   {
     icon: 'map-outline',
-    title: 'Routes that match the trip',
-    body: 'Plan around camps, trails, fuel, weather, and the places you want close.',
+    title: 'Trip shape',
+    body: 'Plan around drive time, camps, fuel, weather, and the stops you want close.',
   },
   {
     icon: 'car-sport-outline',
-    title: 'Your travel style comes first',
-    body: 'Bring your own vehicle, rent when it helps, or decide later.',
+    title: 'Vehicle fit',
+    body: 'Use your own rig, rent when it helps, or keep it flexible.',
   },
   {
     icon: 'bookmark-outline',
-    title: 'Save the good finds',
-    body: 'Keep trips, stops, notes, and downloads together for the next drive.',
+    title: 'Ready offline',
+    body: 'Keep trips, stops, notes, and downloads together before signal drops.',
   },
 ];
 
@@ -216,7 +216,7 @@ export default function WelcomeGate({
   const setupBody = useMemo(() => {
     if (step === 0) return 'This helps routes, rentals, and stops fit the way you actually travel.';
     if (step === 1) return 'Choose the stay style you look for most often. You can change this later.';
-    if (step === 2) return 'Trailhead will keep trip timing and stop choices practical.';
+    if (step === 2) return 'Keep timing and stop choices practical for the people coming along.';
     return 'Pick any that matter. Leave this blank if you want to decide later.';
   }, [step]);
   const canAdvance = step === 0 ? !!vehicle : step === 1 ? !!camping : step === 2 ? !!party : true;
@@ -319,9 +319,9 @@ export default function WelcomeGate({
                 </View>
 
                 <View style={s.heroCopy}>
-                  <Text style={s.title}>Plan the drive. Find the places. Keep it together.</Text>
+                  <Text style={s.title}>Plan around the way you travel.</Text>
                   <Text style={s.body}>
-                    Build trips around how you travel, then keep routes, stays, notes, and downloads close.
+                    Pick your vehicle, stay style, and must-haves once. Keep routes, stays, notes, and downloads close.
                   </Text>
                 </View>
 
@@ -341,7 +341,7 @@ export default function WelcomeGate({
 
                 <View style={s.actionDock}>
                   <TouchableOpacity style={s.primaryButton} onPress={() => setMode('setup')} activeOpacity={0.86}>
-                    <Text style={s.primaryText}>Set up Trailhead</Text>
+                    <Text style={s.primaryText}>Set up trip style</Text>
                     <Ionicons name="arrow-forward" size={18} color="#ffffff" />
                   </TouchableOpacity>
                   <View style={s.accountRow}>
@@ -402,7 +402,7 @@ export default function WelcomeGate({
                   <View style={s.selectionSummary}>
                     <Ionicons name="checkmark-done-outline" size={16} color={selectedCount > 0 ? C.orange : 'rgba(255,255,255,0.5)'} />
                     <Text style={s.selectionText}>
-                      {selectedCount > 0 ? `${selectedCount} preference${selectedCount === 1 ? '' : 's'} selected` : 'No preferences selected yet'}
+                      {selectedCount > 0 ? `${selectedCount} preference${selectedCount === 1 ? '' : 's'} selected` : 'Pick what matters now'}
                     </Text>
                   </View>
                   <TouchableOpacity

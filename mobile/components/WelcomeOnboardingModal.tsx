@@ -24,49 +24,49 @@ type OnboardingPage = {
 
 const PAGES: OnboardingPage[] = [
   {
-    kicker: 'EXPLORE',
-    title: 'Start with the places worth building a trip around.',
-    body: 'Search trails, camps, parks, tours, fuel, weather, and services from one place. Save a stop or open it on the map when it fits the trip.',
+    kicker: 'Explore',
+    title: 'Find places worth the drive.',
+    body: 'Search camps, trails, parks, fuel, weather, and services from one place. Save what fits the trip.',
     icon: 'sparkles-outline',
     tone: '#d4af37',
     cards: [
-      { title: 'Explore', body: 'Destination cards with photos, details, nearby trails, and map actions.', icon: 'compass-outline', tone: '#d4af37' },
-      { title: 'Tours', body: 'Experiences and guided options live beside camps, parks, and trail areas.', icon: 'ticket-outline', tone: '#0ea5e9' },
-      { title: 'Weather', body: 'Check the forecast around a stop before it becomes part of the route.', icon: 'partly-sunny-outline', tone: '#f59e0b' },
+      { title: 'Places', body: 'Photos, practical details, nearby trails, and ways to save a stop.', icon: 'compass-outline', tone: '#d4af37' },
+      { title: 'Weather', body: 'Check the forecast before a stop becomes part of the route.', icon: 'partly-sunny-outline', tone: '#f59e0b' },
+      { title: 'Saved stops', body: 'Keep camps, parks, services, and ideas close while you plan.', icon: 'bookmark-outline', tone: '#0ea5e9' },
     ],
   },
   {
-    kicker: 'ROUTE',
-    title: 'Build the drive around your rig and your pace.',
-    body: 'Plan Direct, Balanced, Wild, Loop, or There and back routes. Adjust daily miles, hours, camps, fuel, and stops as the trip takes shape.',
+    kicker: 'Route',
+    title: 'Shape each day around your pace.',
+    body: 'Balance drive time, camp windows, fuel range, and stops before you leave.',
     icon: 'map-outline',
     tone: '#22c55e',
     cards: [
-      { title: 'Trip Planner', body: 'Turn a destination into days, route legs, camp windows, and warnings.', icon: 'navigate-outline', tone: '#22c55e' },
-      { title: 'Rig Profile', body: 'Fuel range, clearance, towing, and comfort help shape the route.', icon: 'car-sport-outline', tone: '#f97316' },
-      { title: 'Downloads', body: 'Keep map, topo, trails, places, navigation, and trip data ready offline.', icon: 'cloud-download-outline', tone: '#8b5cf6' },
+      { title: 'Daily plan', body: 'Turn a destination into days, stops, and overnight windows.', icon: 'navigate-outline', tone: '#22c55e' },
+      { title: 'Vehicle fit', body: 'Fuel range, clearance, towing, and comfort help shape the route.', icon: 'car-sport-outline', tone: '#f97316' },
+      { title: 'Offline areas', body: 'Keep important regions and trip stops ready without signal.', icon: 'cloud-download-outline', tone: '#8b5cf6' },
     ],
   },
   {
-    kicker: 'MAP',
-    title: 'Use the map for scouting, filters, and trail work.',
-    body: 'Search near a place, switch layers, check filters, build trails, and add reports without leaving the map.',
+    kicker: 'Scout',
+    title: 'Scout the area before you commit.',
+    body: 'Search nearby, switch layers, check public land, and save reports while you compare options.',
     icon: 'layers-outline',
     tone: '#38bdf8',
     cards: [
-      { title: 'Search', body: 'Find places near a city, camp, trail, or route area and focus the map.', icon: 'search-outline', tone: '#38bdf8' },
-      { title: 'Filters', body: 'Show camps, trails, 4WD lines, public land, reports, and travel layers.', icon: 'options-outline', tone: '#14b8a6' },
-      { title: 'Trail Builder', body: 'Drop anchors, shape a line, save it, or send it into a trip.', icon: 'git-branch-outline', tone: '#f59e0b' },
+      { title: 'Nearby search', body: 'Find camps, trails, fuel, water, and services around a place.', icon: 'search-outline', tone: '#38bdf8' },
+      { title: 'Layers', body: 'Focus on camps, trails, public land, weather, or water safety.', icon: 'options-outline', tone: '#14b8a6' },
+      { title: 'Trail tools', body: 'Draw a line, save it, or bring it into a trip.', icon: 'git-branch-outline', tone: '#f59e0b' },
     ],
   },
   {
-    kicker: 'SAVED',
-    title: 'Keep the trip organized before signal drops.',
-    body: 'Saved places, trip history, offline maps, reports, and your profile stay together so the next drive is easier to prepare.',
+    kicker: 'Saved',
+    title: 'Keep the important pieces together.',
+    body: 'Saved places, trip history, downloads, reports, and profile choices stay close for the next drive.',
     icon: 'shield-checkmark-outline',
     tone: '#d4af37',
     cards: [
-      { title: 'Saved', body: 'Keep camps, places, trails, and trips close for the next planning session.', icon: 'bookmark-outline', tone: '#60a5fa' },
+      { title: 'Saved places', body: 'Keep camps, places, trails, and trips close for the next planning session.', icon: 'bookmark-outline', tone: '#60a5fa' },
       { title: 'Reports', body: 'Add field notes, closures, photos, and confirmations from the route.', icon: 'pin-outline', tone: '#ef4444' },
       { title: 'Profile', body: 'Manage your rig, downloads, saved trips, support, and account settings.', icon: 'person-circle-outline', tone: '#d4af37' },
     ],
@@ -127,7 +127,7 @@ export default function WelcomeOnboardingModal({
               <Ionicons name={page.icon} size={23} color={page.tone} />
             </View>
             <View style={styles.headerCopy}>
-              <Text style={[styles.kicker, { color: page.tone }]}>TRAILHEAD {page.kicker}</Text>
+              <Text style={[styles.kicker, { color: page.tone }]}>{page.kicker}</Text>
               <Text style={[styles.title, { color: C.text }]}>{page.title}</Text>
             </View>
             <TouchableOpacity
@@ -177,10 +177,10 @@ export default function WelcomeOnboardingModal({
                 onPress={goBackOrClose}
                 style={[styles.secondaryButton, { backgroundColor: C.s2, borderColor: C.border }]}
               >
-                <Text style={[styles.secondaryText, { color: C.text2 }]}>{pageIndex <= 0 ? 'CLOSE' : 'BACK'}</Text>
+                <Text style={[styles.secondaryText, { color: C.text2 }]}>{pageIndex <= 0 ? 'Close' : 'Back'}</Text>
               </TouchableOpacity>
               <TouchableOpacity onPress={goNextOrFinish} style={[styles.primaryButton, { backgroundColor: isLast ? C.orange : page.tone }]}>
-                <Text style={styles.primaryText}>{isLast ? 'SET UP RIG' : 'NEXT'}</Text>
+                <Text style={styles.primaryText}>{isLast ? 'Set up vehicle' : 'Next'}</Text>
               </TouchableOpacity>
             </View>
           </View>

@@ -158,11 +158,11 @@ export default function MapFilterSheet({
             onPress={() => {
               if (locked) {
                 Alert.alert(
-                  'Open services for today',
-                  'Town services use live search. Open this group with credits, or use map search.',
+                  'Add services',
+                  'Show food, groceries, repairs, lodging, medical stops, and connection spots.',
                   [
-                    { text: 'Cancel', style: 'cancel' },
-                    { text: 'Open Search', onPress: onUnlockExplore },
+                    { text: 'Not now', style: 'cancel' },
+                    { text: 'Show services', onPress: onUnlockExplore },
                   ],
                 );
                 return;
@@ -239,15 +239,15 @@ export default function MapFilterSheet({
           >
             <View style={styles.header}>
               <View style={styles.headerCopy}>
-                <Text style={styles.title}>MAP FILTERS</Text>
-                <Text style={styles.sub}>{activeModeTitle} · {changedCount} changed</Text>
+                <Text style={styles.title}>Map layers</Text>
+                <Text style={styles.sub}>{activeModeTitle} · {changedCount > 0 ? `${changedCount} changed` : 'Default view'}</Text>
               </View>
               <View style={styles.headerActions}>
                 <TouchableOpacity onPress={onOpenLegend} style={styles.resetBtn}>
-                  <Text style={styles.resetText}>LEGEND</Text>
+                  <Text style={styles.resetText}>Legend</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={onResetAll} style={styles.resetBtn}>
-                  <Text style={styles.resetText}>RESET</Text>
+                  <Text style={styles.resetText}>Reset</Text>
                 </TouchableOpacity>
                 <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
                   <Ionicons name="close" size={20} color={C.text2} />
@@ -271,8 +271,8 @@ export default function MapFilterSheet({
               />
               {categoryUnlocking ? (
                 <TrailheadLoadingRow
-                  label="Opening filters"
-                  sub="Getting services ready for this session."
+                  label="Adding services"
+                  sub="Food, repairs, lodging, and medical stops are being added."
                   icon="sparkles-outline"
                   style={styles.sheetLoadingRow}
                 />
@@ -282,7 +282,7 @@ export default function MapFilterSheet({
               {renderSectionRow({
                 icon: 'map-outline',
                 iconColor: C.orange,
-                title: 'Map Content',
+                title: 'Base layers',
                 summary: mapContentSummary,
                 expanded: expandedSections.includes('map-content'),
                 onPress: () => onToggleSection('map-content'),
@@ -297,13 +297,13 @@ export default function MapFilterSheet({
                 title: 'Camps',
                 summary: campFilterSummary,
                 expanded: expandedSections.includes('camps'),
-                actionLabel: activeCampFilterCount > 0 ? 'RESET' : undefined,
+                actionLabel: activeCampFilterCount > 0 ? 'Reset' : undefined,
                 onPress: () => onToggleSection('camps'),
                 onActionPress: onResetCamps,
               })}
               {expandedSections.includes('camps') ? (
                 <>
-                  <Text style={styles.hintText}>Select the camp types to show. Turn Camps off above to hide all camp pins.</Text>
+                  <Text style={styles.hintText}>Choose the stay types to show. Turn Camps off above to hide them all.</Text>
                   {renderCheckRows(campOptions, activeCampFilters, onToggleCampFilter)}
                 </>
               ) : null}
@@ -316,13 +316,13 @@ export default function MapFilterSheet({
                 title: 'Places',
                 summary: placeFilterSummary,
                 expanded: expandedSections.includes('places'),
-                actionLabel: 'DEFAULT',
+                actionLabel: 'Default',
                 onPress: () => onToggleSection('places'),
                 onActionPress: onResetPlacesDefault,
               })}
               {expandedSections.includes('places') ? (
                 <>
-                  <Text style={styles.hintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repair visible.</Text>
+                  <Text style={styles.hintText}>Default keeps camps, trails, water, fuel, dump, propane, parking, and repairs visible.</Text>
                   {renderCheckRows(essentialPlaceOptions, activePlaceFilters, onToggleEssentialPlace)}
                 </>
               ) : null}
@@ -335,7 +335,7 @@ export default function MapFilterSheet({
                 title: 'Water',
                 summary: waterSummary,
                 expanded: expandedSections.includes('water'),
-                actionLabel: 'SAFE WATER',
+                actionLabel: 'Safe preset',
                 onPress: () => onToggleSection('water'),
                 onActionPress: onSafeWaterPreset,
               })}
@@ -349,7 +349,7 @@ export default function MapFilterSheet({
                 title: 'Camps & Stays',
                 summary: 'Private stays, glamping, lodging-style camps',
                 expanded: expandedSections.includes('stays'),
-                actionLabel: 'ALL',
+                actionLabel: 'Show all',
                 onPress: () => onToggleSection('stays'),
                 onActionPress: onEnableAllStays,
               })}
@@ -361,9 +361,9 @@ export default function MapFilterSheet({
                 icon: 'sparkles-outline',
                 iconColor: '#06b6d4',
                 title: 'Services',
-                summary: 'Food, groceries, lodging, attractions, parts, medical, wifi',
+                summary: 'Food, groceries, lodging, repairs, medical, and connection',
                 expanded: expandedSections.includes('explore-services'),
-                actionLabel: exploreCategoriesUnlocked ? undefined : (categoryUnlocking ? 'OPENING' : 'OPEN'),
+                actionLabel: exploreCategoriesUnlocked ? undefined : (categoryUnlocking ? 'Adding' : 'Show'),
                 actionDisabled: categoryUnlocking,
                 onPress: () => onToggleSection('explore-services'),
                 onActionPress: onUnlockExplore,
@@ -377,10 +377,10 @@ export default function MapFilterSheet({
               {renderSectionRow({
                 icon: 'people-outline',
                 iconColor: '#22c55e',
-                title: 'Community Pins',
+                title: 'Community notes',
                 summary: communityFilterSummary,
                 expanded: expandedSections.includes('community'),
-                actionLabel: 'DEFAULT',
+                actionLabel: 'Default',
                 onPress: () => onToggleSection('community'),
                 onActionPress: onResetCommunityDefault,
               })}
@@ -388,7 +388,7 @@ export default function MapFilterSheet({
                 <>
                   <View style={styles.pinHint}>
                     <Ionicons name="shield-checkmark-outline" size={12} color={C.text3} />
-                    <Text style={styles.pinHintText}>Default shows shared pins and keeps GPX imports hidden.</Text>
+                    <Text style={styles.pinHintText}>Default shows shared notes and keeps GPX imports hidden.</Text>
                   </View>
                   {renderCheckRows(pinOptions, activePinFilters, onTogglePin)}
                 </>
@@ -399,8 +399,8 @@ export default function MapFilterSheet({
               {renderSectionRow({
                 icon: 'partly-sunny-outline',
                 iconColor: '#f59e0b',
-                title: 'Weather & Layers',
-                summary: 'Radar, trails, MVUM, land, and map overlays',
+                title: 'Weather & trails',
+                summary: 'Radar, trails, public land, topo, and water safety',
                 expanded: expandedSections.includes('weather-layers'),
                 onPress: () => onToggleSection('weather-layers'),
               })}

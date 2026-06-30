@@ -213,6 +213,21 @@ function clampMapZoom(value: number, fallback = 11) {
   return Math.max(3, Math.min(18, zoom));
 }
 
+function premiumStyleLabel(style: PremiumMapStyle) {
+  switch (style) {
+    case 'standard_satellite':
+      return 'Satellite Plus';
+    case 'satellite_streets':
+      return 'Satellite';
+    case 'navigation_day':
+      return 'Traffic Day';
+    case 'navigation_night':
+      return 'Traffic Night';
+    default:
+      return style.replace(/_/g, ' ').replace(/\b\w/g, char => char.toUpperCase());
+  }
+}
+
 function syncWebRoute(map: any, waypoints: WP[]) {
   if (!map?.getStyle?.()) return;
   const coords = waypoints
@@ -781,7 +796,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         {React.createElement('div', { ref: mapElRef, style: mapboxContainerStyle })}
         <View style={styles.header}>
           <Ionicons name="planet-outline" size={16} color="#fff" />
-          <Text style={styles.headerText}>EXTREME MAP</Text>
+          <Text style={styles.headerText}>Trail map</Text>
         </View>
         {mapboxError ? (
           <View style={styles.emptyState}>
@@ -792,7 +807,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         ) : null}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
-            {[premiumStyle.replace(/_/g, ' ').toUpperCase(), ...footerParts].join(' · ')}
+            {[premiumStyleLabel(premiumStyle), ...footerParts].join(' · ')}
           </Text>
         </View>
         {props.children}
@@ -809,7 +824,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       <View style={styles.grid} />
       <View style={styles.header}>
         <Ionicons name="map-outline" size={16} color="#fff" />
-        <Text style={styles.headerText}>MAP PREVIEW</Text>
+        <Text style={styles.headerText}>Trail map</Text>
       </View>
       {hasRouteLine ? <View style={styles.routeLine} /> : null}
       {!hasMapContent ? (

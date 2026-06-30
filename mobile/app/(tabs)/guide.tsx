@@ -73,7 +73,8 @@ const FEATURED_SECTION_ORDER: ExploreCategoryKey[] = [
   'parks',
   'land',
   'trailheads',
-  'tours',
+  'things',
+  'guided',
 ];
 
 const HOME_SHELF_ASSIGNMENT_ORDER: ExploreCategoryKey[] = [
@@ -88,7 +89,8 @@ const HOME_SHELF_ASSIGNMENT_ORDER: ExploreCategoryKey[] = [
   'waterfalls',
   'peaks',
   'springs',
-  'tours',
+  'things',
+  'guided',
   'climb',
   'water',
   'scenic',
@@ -168,6 +170,7 @@ function hasExploreTrailCards(place?: ExplorePlaceProfile | null) {
 
 function shouldHydrateExploreTrailArea(place?: ExplorePlaceProfile | null) {
   if (!place || hasExploreTrailCards(place)) return false;
+  if (isPakistanCuratedExplorePlace(place)) return false;
   const key = getExploreCategoryKey(place);
   const text = [
     place.id,
@@ -186,8 +189,8 @@ function shouldHydrateExploreTrailArea(place?: ExplorePlaceProfile | null) {
 
 function shouldSearchBookableExperiences(query: string, category: ExploreCategoryKey) {
   if (!BOOKABLE_EXPERIENCES_ENABLED) return false;
-  if (category === 'tours') return true;
-  return /\b(tour|tours|experience|experiences|ticket|tickets|guide|guided|jeep|rafting|boat|shuttle)\b/i.test(query);
+  if (category === 'guided' || category === 'tours') return true;
+  return /\b(tour|tours|experience|experiences|ticket|tickets|guide|guided|book|booking|jeep tour|rafting tour|boat tour|shuttle)\b/i.test(query);
 }
 
 function isExplicitTourOnlyQuery(query: string) {
@@ -195,12 +198,12 @@ function isExplicitTourOnlyQuery(query: string) {
 }
 
 function isThingsToDoExploreQuery(query: string) {
-  return /\b(things to do|activity|activities)\b/i.test(query) && !isExplicitTourOnlyQuery(query);
+  return /\b(things to do|what to do|activity|activities|see and do)\b/i.test(query) && !isExplicitTourOnlyQuery(query);
 }
 
 function placeQueryFromExploreQuery(query: string) {
   return query
-    .replace(/\b(things to do|tour|tours|experience|experiences|activity|activities|ticket|tickets|guide|guided|book|booking)\b/gi, ' ')
+    .replace(/\b(things to do|what to do|see and do|tour|tours|experience|experiences|activity|activities|ticket|tickets|guide|guided|book|booking)\b/gi, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -208,13 +211,13 @@ function placeQueryFromExploreQuery(query: string) {
 function experienceSearchMessage(res: ExploreExperiencesResponse, areaName: string) {
   const status = String(res.live_status || '').toLowerCase();
   const message = String(res.live_message || '').trim();
-  if (status === 'provider_error' || status === 'disabled') return 'Tours are paused right now.';
+  if (status === 'provider_error' || status === 'disabled') return 'Guided trips are paused right now.';
   if (status === 'processing') {
     return areaName === 'this area'
-      ? 'Checking tour availability for this area.'
-      : `Checking tour availability near ${areaName}.`;
+      ? 'Checking guided trip availability for this area.'
+      : `Checking guided trip availability near ${areaName}.`;
   }
-  return message || `Tour availability is still loading near ${areaName}.`;
+  return message || `Guided trip availability is still loading near ${areaName}.`;
 }
 
 function normalizeExploreText(value: string) {
@@ -302,7 +305,7 @@ function isDestinationExploreHub(place: ExplorePlaceProfile) {
   if (/\b(national|state|provincial|regional|county|territorial)\s+(park|monument|preserve|seashore|lakeshore|forest|wilderness|reserve|historic site|historical park|recreation area)\b/.test(title)) {
     return true;
   }
-  if (/\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodging|trails?|trailheads?|visitor centers?|parking|tours?|activities|climb|climbing)\b/.test(categoryText)) {
+  if (/\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodging|trails?|trailheads?|visitor centers?|parking|tours?|guided|activities|things to do|climb|climbing)\b/.test(categoryText)) {
     return false;
   }
   if (['parks', 'land'].includes(key) && /\b(park|monument|preserve|forest|wilderness|reserve|seashore|lakeshore)\b/.test(title)) {
@@ -319,7 +322,7 @@ function isNestedExploreChildCandidate(place: ExplorePlaceProfile) {
   if (role === 'child' || canonicalExploreParentId(place)) return true;
   if (isDestinationExploreHub(place)) return false;
   const key = getExploreCategoryKey(place);
-  if (['camp', 'glamping', 'huts', 'trails', 'trailheads', 'climb', 'tours'].includes(key)) return true;
+  if (['camp', 'glamping', 'huts', 'trails', 'trailheads', 'climb', 'things', 'guided', 'tours'].includes(key)) return true;
   const text = normalizeExploreText([
     place.id,
     place.summary.title,
@@ -329,7 +332,7 @@ function isNestedExploreChildCandidate(place: ExplorePlaceProfile) {
     ...(place.subcategories ?? []),
     ...(place.summary.tags ?? []),
   ].filter(Boolean).join(' '));
-  return /\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodges?|lodging|trails?|trailheads?|visitor centers?|parking|tours?|activities|things to do|places to stay|base camp|trek)\b/.test(text);
+  return /\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodges?|lodging|trails?|trailheads?|visitor centers?|parking|tours?|guided|activities|things to do|places to stay|base camp|trek)\b/.test(text);
 }
 
 function isLegacyExploreAreaWrapper(place: ExplorePlaceProfile) {
@@ -394,7 +397,7 @@ function categoryKeysForNestedPlace(place: ExplorePlaceProfile) {
   const explicitTarget = canonicalExploreModuleTarget(place);
   if (explicitTarget === 'stay') keys.add('camp');
   if (explicitTarget === 'trails') keys.add('trails');
-  if (explicitTarget === 'do') keys.add('tours');
+  if (explicitTarget === 'do') keys.add('things');
   if (explicitTarget === 'see') keys.add('views');
   if (explicitTarget === 'visitor') keys.add('parks');
   for (const key of FEATURED_SECTION_ORDER) {
@@ -407,7 +410,8 @@ function categoryKeysForNestedPlace(place: ExplorePlaceProfile) {
   if (/\b(trails?|hiking|hike|trek|trekking)\b/.test(text)) keys.add('trails');
   if (/\b(trailheads?|access point)\b/.test(text)) keys.add('trailheads');
   if (/\b(visitor center|visitor centres?)\b/.test(text)) keys.add('parks');
-  if (/\b(tours?|tickets?|guided|activities|things to do)\b/.test(text)) keys.add('tours');
+  if (/\b(activities|things to do|what to do|see and do)\b/.test(text)) keys.add('things');
+  if (/\b(tours?|tickets?|guided|booking|book)\b/.test(text)) keys.add('guided');
   return keys;
 }
 
@@ -419,7 +423,7 @@ function exploreTabForNestedPlace(place: ExplorePlaceProfile): ExploreDetailTab 
   if (/\bvisitor centers?|ranger station|information center\b/.test(text)) return 'visitor';
   if (keys.has('camp') || keys.has('glamping') || keys.has('huts')) return 'stay';
   if (keys.has('trails') || keys.has('trailheads') || keys.has('climb')) return 'trails';
-  if (keys.has('tours')) return 'do';
+  if (keys.has('things') || keys.has('guided') || keys.has('tours')) return 'do';
   if (keys.has('views') || keys.has('waterfalls') || keys.has('peaks') || keys.has('springs') || keys.has('water') || keys.has('scenic')) return 'see';
   return 'summary';
 }
@@ -432,7 +436,7 @@ function exploreTabForBrowseIntent(query: string, category: ExploreCategoryKey):
   if (/\b(trail|trails|trailhead|trailheads|hike|hiking|trek|trekking|climb|climbing)\b/.test(text)) {
     return 'trails';
   }
-  if (/\b(tour|tours|activity|activities|ticket|tickets|guided|things to do)\b/.test(text)) {
+  if (/\b(tour|tours|activity|activities|ticket|tickets|guided|things to do|what to do|see and do)\b/.test(text)) {
     return 'do';
   }
   if (/\b(view|views|waterfall|waterfalls|scenic|spring|springs|water|mountain|mountains)\b/.test(text)) {
@@ -707,6 +711,17 @@ function explorePlaceIdentityMatchesDestination(place: ExplorePlaceProfile, phra
   return tokens.length > 1 && tokens.every(token => exploreSearchTextIncludesToken(text, token));
 }
 
+function explorePlaceTitleMatchesDestination(place: ExplorePlaceProfile, phrase: string) {
+  const normalized = normalizeExploreText(phrase);
+  if (!normalized) return false;
+  const title = normalizeExploreText(place.summary.title || '');
+  if (title.includes(normalized)) return true;
+  const tokens = normalized
+    .split(/\s+/)
+    .filter(token => token.length >= 2 && !EXPLORE_QUERY_STOP_TOKENS.has(token));
+  return tokens.length > 1 && tokens.every(token => exploreSearchTextIncludesToken(title, token));
+}
+
 function explorePlaceMatchedActiveSearch(place: ExplorePlaceProfile, query: string) {
   const matchedQuery = normalizeExploreText(String((place as any).matched_explore_query || ''));
   return !!matchedQuery && matchedQuery === normalizeExploreText(query);
@@ -725,8 +740,11 @@ function explorePlacePrimaryCategoryMatchesBrowseIntent(place: ExplorePlaceProfi
   if (/\b(trail|trails|trailhead|trailheads|hike|hikes|hiking|trek|trekking)\b/.test(text)) {
     return primary === 'trails' || primary === 'trailheads' || primary === 'climb';
   }
-  if (/\b(tour|tours|guided|activity|activities|things to do)\b/.test(text)) {
-    return primary === 'tours' || primary === 'parks' || primary === 'land' || primary === 'trails' || primary === 'views' || primary === 'waterfalls' || primary === 'scenic';
+  if (/\b(activity|activities|things to do|what to do|see and do)\b/.test(text)) {
+    return primary === 'things' || primary === 'parks' || primary === 'land' || primary === 'trails' || primary === 'views' || primary === 'waterfalls' || primary === 'scenic';
+  }
+  if (/\b(tour|tours|guided|ticket|tickets)\b/.test(text)) {
+    return primary === 'guided' || primary === 'tours';
   }
   if (/\b(view|views|overlook|overlooks|waterfall|waterfalls|scenic|spring|springs|peak|peaks)\b/.test(text)) {
     return primary === 'views' || primary === 'waterfalls' || primary === 'peaks' || primary === 'springs' || primary === 'scenic' || primary === 'trails';
@@ -754,7 +772,8 @@ function exploreCategoryFetchParamFromQuery(query: string, category: ExploreCate
   if (/\b(glamping|yurt|basecamp)\b/.test(text)) return 'glamping';
   if (/\b(lodge|lodges|lodging|hotel|hotels|cabin|cabins|hut|huts|stay|stays)\b/.test(text)) return 'huts';
   if (/\b(trail|trails|trailhead|trailheads|hike|hikes|hiking|trek|trekking)\b/.test(text)) return 'trails';
-  if (/\b(tour|tours|guided|activity|activities|things to do)\b/.test(text)) return 'tours';
+  if (/\b(activity|activities|things to do|what to do|see and do)\b/.test(text)) return 'things';
+  if (/\b(tour|tours|guided|ticket|tickets|book|booking)\b/.test(text)) return 'guided';
   if (/\b(waterfall|waterfalls)\b/.test(text)) return 'waterfalls';
   if (/\b(view|views|overlook|overlooks|scenic)\b/.test(text)) return 'views';
   if (/\b(spring|springs)\b/.test(text)) return 'springs';
@@ -800,7 +819,8 @@ function exploreCategoryAffinity(place: ExplorePlaceProfile, key: ExploreCategor
 
 function explorePlaceMatchesThingsToDo(place: ExplorePlaceProfile, hubCategories: Map<string, Set<ExploreCategoryKey>>) {
   const blocked = new Set<ExploreCategoryKey>(['camp', 'glamping', 'huts', 'fuel', 'resupply']);
-  const allowed = new Set<ExploreCategoryKey>(['parks', 'land', 'trails', 'trailheads', 'views', 'waterfalls', 'peaks', 'springs', 'climb', 'water', 'scenic', 'tours']);
+  const allowed = new Set<ExploreCategoryKey>(['things', 'parks', 'land', 'trails', 'trailheads', 'views', 'waterfalls', 'peaks', 'springs', 'climb', 'water', 'scenic']);
+  if (Array.isArray(place.source_pack?.things_to_do) && place.source_pack.things_to_do.length > 0) return true;
   const primary = getExploreCategoryKey(place);
   if (blocked.has(primary)) return false;
   if (allowed.has(primary)) return true;
@@ -830,7 +850,8 @@ function scoreExploreBrowseIntent(
   const lodgingIntent = /\b(huts?|cabins?|lodges?|lodging|hotels?|inn|shelter)\b/.test(titleIntentText);
   const trailIntent = /\b(trails?|trailheads?|hikes?|hiking|trek|trekking|climb|climbing)\b/.test(titleIntentText);
   const viewIntent = /\b(views?|overlooks?|waterfalls?|scenic|springs?|peaks?)\b/.test(titleIntentText);
-  const tourIntent = /\b(tours?|guided|activities|things to do|tickets?)\b/.test(titleIntentText);
+  const thingsIntent = /\b(activities|things to do|what to do|see and do|attractions?)\b/.test(titleIntentText);
+  const guidedIntent = /\b(tours?|guided|tickets?|booking|book)\b/.test(titleIntentText);
   const explicitTarget = canonicalExploreModuleTarget(place);
   if (explicitTarget === 'stay') {
     if (campIntent) keys.add('camp');
@@ -838,7 +859,7 @@ function scoreExploreBrowseIntent(
     if (lodgingIntent) keys.add('huts');
   }
   if (explicitTarget === 'trails') keys.add('trails');
-  if (explicitTarget === 'do') keys.add('tours');
+  if (explicitTarget === 'do') keys.add('things');
   if (explicitTarget === 'see') keys.add('views');
   if (includeHubCategories && isDestinationExploreHub(place)) {
     (hubCategories.get(place.id) ?? new Set<ExploreCategoryKey>()).forEach(key => keys.add(key));
@@ -866,9 +887,12 @@ function scoreExploreBrowseIntent(
     if (viewIntent || keys.has('views') || keys.has('waterfalls') || keys.has('peaks')) return 20;
     if (keys.has('huts') || keys.has('camp')) return -16;
   }
-  if (/\b(tour|tours|guided|activity|activities|things to do)\b/.test(text)) {
-    if (tourIntent || keys.has('tours')) return 80;
+  if (/\b(activity|activities|things to do|what to do|see and do)\b/.test(text)) {
+    if (thingsIntent || keys.has('things')) return 80;
     if (keys.has('parks')) return 48;
+  }
+  if (/\b(tour|tours|guided|ticket|tickets)\b/.test(text)) {
+    if (guidedIntent || keys.has('guided') || keys.has('tours')) return 80;
   }
   if (/\b(view|views|overlook|overlooks|waterfall|waterfalls|scenic|spring|springs|peak|peaks)\b/.test(text)) {
     if (viewIntent || keys.has('views') || keys.has('waterfalls') || keys.has('peaks') || keys.has('springs') || keys.has('scenic')) return 80;
@@ -1306,12 +1330,18 @@ function mergeCampPins(primary: CampsitePin[], fallback: CampsitePin[]) {
 }
 
 function shouldLoadExploreCamps(place: ExplorePlaceProfile) {
+  if (isPakistanCuratedExplorePlace(place)) return false;
   return ['camping', 'glamping', 'huts_lodging', 'trails', 'parks', 'water'].includes(groupForExplorePlace(place));
+}
+
+function isPakistanCuratedExplorePlace(place: ExplorePlaceProfile) {
+  return place.id.startsWith('explore:pk:');
 }
 
 function isLocalCuratedExplorePlace(place: ExplorePlaceProfile) {
   return place.id === 'place:nps:yose'
     || place.id === 'explore:trails:yosemite-trails'
+    || isPakistanCuratedExplorePlace(place)
     || place.id.startsWith('explore:waterfalls:');
 }
 
@@ -1439,6 +1469,7 @@ function GuideScreenContent() {
   const locationSub = useRef<Location.LocationSubscription | null>(null);
   const exploreLocationPrompted = useRef(false);
   const exploreSearchRefinementKeys = useRef<Set<string>>(new Set());
+  const exploreEnrichmentKeys = useRef<Set<string>>(new Set());
   const storyScrollRef = useRef<ScrollView | null>(null);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
@@ -1905,7 +1936,7 @@ function GuideScreenContent() {
         storage.set(cacheKey, JSON.stringify({ experiences, fetched_at: Date.now() })).catch(() => {});
       })
       .catch(() => {
-        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Tours are paused right now.' }));
+        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Guided trips are paused right now.' }));
       })
       .finally(() => {
         if (!cancelled) setExploreExperienceLoadingId(current => current === placeId ? null : current);
@@ -1929,7 +1960,7 @@ function GuideScreenContent() {
       let center = userLoc ? { ...userLoc, name: 'this area' } : null;
       if (!center && placeQuery.length < 2) {
         setExploreSearchExperiences([]);
-        setExploreSearchExperienceError('Search a destination to compare tours and activities.');
+        setExploreSearchExperienceError('Search a destination to compare guided trips.');
         setExploreSearchExperienceLoading(false);
         return;
       }
@@ -1951,7 +1982,7 @@ function GuideScreenContent() {
           }
         })
         .catch(() => {
-          if (!cancelled) setExploreSearchExperienceError('Tours are paused right now.');
+          if (!cancelled) setExploreSearchExperienceError('Guided trips are paused right now.');
         })
         .finally(() => {
           if (!cancelled) setExploreSearchExperienceLoading(false);
@@ -2006,14 +2037,14 @@ function GuideScreenContent() {
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const experienceDestinationLabel = placeQueryFromExploreQuery(exploreQuery);
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
-  const tourSearchPaused = !BOOKABLE_EXPERIENCES_ENABLED && (exploreCategory === 'tours' || isExplicitTourOnlyQuery(exploreQuery));
+  const tourSearchPaused = !BOOKABLE_EXPERIENCES_ENABLED && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery));
   const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
   const exploreNearbyNeedsLocation = exploreMode === 'nearby' && !userLoc;
   const rankedExplore = useMemo(() => {
     if (exploreNearbyNeedsLocation) return [];
     if (exploreMode === 'trip' && waypoints.length === 0) return [];
     if (tourSearchPaused) return [];
-    if (showExperienceSearch && (exploreCategory === 'tours' || isExplicitTourOnlyQuery(exploreQuery))) return [];
+    if (showExperienceSearch && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery))) return [];
     const places = enrichedExplorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
         ? { lat: Number(place.summary.lat), lng: Number(place.summary.lng) }
@@ -2057,7 +2088,10 @@ function GuideScreenContent() {
       const identityMatch = queryDestinationPhrase
         ? exactIdentityMatch || explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase)
         : false;
-      const identityScore = identityMatch ? (exactIdentityMatch ? 85 : 72) : 0;
+      const titleIdentityMatch = queryDestinationPhrase
+        ? explorePlaceTitleMatchesDestination(place, queryDestinationPhrase)
+        : false;
+      const identityScore = identityMatch ? (titleIdentityMatch ? 118 : exactIdentityMatch ? 85 : 72) : 0;
       const activeSearchScore = explorePlaceActiveSearchCanSatisfyIdentity(place, query) ? 70 : 0;
       const baseScore = Math.max(
         identityScore,
@@ -2102,7 +2136,7 @@ function GuideScreenContent() {
 	      if (!queryHasDestinationTerms && isExactWaterfallBrowseQuery(placeQuery) && !explorePlaceStronglyMatchesWaterfall(place)) return false;
 	      if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;
       if (browseIntentNeedsPrimaryMatch && !directStayDestinationHub && !explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery)) return false;
-      if (queryCategory && queryCategory !== 'tours' && !directStayDestinationHub && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
+      if (queryCategory && queryCategory !== 'guided' && queryCategory !== 'tours' && !directStayDestinationHub && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
       if (!placeQuery) return true;
       return queryScoreForPlace(place) > 0;
     });
@@ -2263,6 +2297,70 @@ function GuideScreenContent() {
     && exploreQueryHasBrowseIntent(exploreQuery)
     && rankedExplore.length === 1
     && isLegacyExploreAreaWrapper(rankedExplore[0].place);
+
+  useEffect(() => {
+    const query = exploreQuery.trim();
+    if (
+      tab !== 'explore'
+      || exploreMode !== 'featured'
+      || exploreSavedOnly
+      || exploreLoading
+      || exploreSearchResolving
+      || tourSearchPaused
+      || showExperienceSearch
+      || query.length < 3
+    ) {
+      return;
+    }
+    const category = exploreCategoryFetchParamFromQuery(query, exploreCategory);
+    const enrichmentQuery = isThingsToDoExploreQuery(query) ? placeQueryFromExploreQuery(query) : query;
+    if (enrichmentQuery.length < 2) return;
+    const shouldEnrich = rankedExplore.length === 0 || (category === 'things' && rankedExplore.length < 4);
+    if (!shouldEnrich) return;
+    const key = `${normalizeExploreText(enrichmentQuery)}:${category || 'all'}`;
+    if (exploreEnrichmentKeys.current.has(key)) return;
+    exploreEnrichmentKeys.current.add(key);
+
+    let cancelled = false;
+    api.getExploreEnrichment({
+      q: enrichmentQuery,
+      category: category || undefined,
+      limit: 8,
+    })
+      .then(res => {
+        if (cancelled || !Array.isArray(res.places) || res.places.length === 0) return;
+        const matchedQuery = normalizeExploreText(enrichmentQuery);
+        setExplorePlaces(current => {
+          const seen = new Set(current.map(place => place.id));
+          const merged = [...current];
+          res.places.forEach((place, index) => {
+            if (!place?.id) return;
+            const enriched = {
+              ...place,
+              matched_explore_query: matchedQuery,
+              matched_explore_rank: index,
+            } as ExplorePlaceProfile;
+            const existingIndex = merged.findIndex(item => item.id === place.id);
+            if (existingIndex >= 0) {
+              merged[existingIndex] = {
+                ...merged[existingIndex],
+                ...enriched,
+              } as ExplorePlaceProfile;
+              return;
+            }
+            if (seen.has(place.id)) return;
+            seen.add(place.id);
+            merged.push(enriched);
+          });
+          return merged;
+        });
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [exploreCategory, exploreLoading, exploreMode, exploreQuery, exploreSavedOnly, exploreSearchResolving, rankedExplore.length, showExperienceSearch, tab, tourSearchPaused]);
+
   const visibleRankedExplore = useMemo(
     () => holdLegacySearchWrapper ? [] : rankedExplore.slice(0, exploreVisibleLimit),
     [holdLegacySearchWrapper, rankedExplore, exploreVisibleLimit],
@@ -2386,8 +2484,8 @@ function GuideScreenContent() {
     if (holdLegacySearchWrapper) return 'Searching';
     if (exploreSearchResolving && rankedExplore.length <= 0) return 'Searching';
     if (showExperienceSearch && rankedExplore.length <= 0) {
-      if (exploreSearchExperiences.length > 0) return exploreCountLabel(exploreSearchExperiences.length, 'tour', 'tours');
-      if (exploreSearchExperienceLoading) return experienceDestinationLabel ? 'Finding tours' : 'Search destination';
+      if (exploreSearchExperiences.length > 0) return exploreCountLabel(exploreSearchExperiences.length, 'guided trip', 'guided trips');
+      if (exploreSearchExperienceLoading) return experienceDestinationLabel ? 'Finding guided trips' : 'Search destination';
       if (exploreSearchExperienceError) {
         if (!experienceDestinationLabel) return 'Search destination';
         return /unavailable|failed/i.test(exploreSearchExperienceError) ? 'Unavailable' : 'No matches';
@@ -3327,7 +3425,7 @@ function GuideScreenContent() {
               <ExploreExperiencesRail
                 experiences={exploreSearchExperiences}
                 loading={tourSearchPaused ? false : exploreSearchExperienceLoading}
-                error={tourSearchPaused ? 'Tours are paused while booking access is updated.' : exploreSearchExperienceError}
+                error={tourSearchPaused ? 'Guided trips are paused while booking access is updated.' : exploreSearchExperienceError}
                 emptySubtitle={
                   tourSearchPaused
                     ? 'Coming back soon'
@@ -3390,9 +3488,9 @@ function GuideScreenContent() {
                       : exploreSavedOnly
                         ? 'Saved Places'
                         : isThingsToDoExploreQuery(exploreQuery)
-                          ? 'Things To Do'
+                        ? 'Things To Do'
                         : showExperienceSearch || tourSearchPaused
-                          ? 'Tours & Activities'
+                          ? 'Guided Trips'
                         : hasExploreQuery
                           ? 'Search Results'
                           : exploreCategory === 'all'

@@ -44,7 +44,7 @@ export function ExploreHomeControls({
 }: Props) {
   const C = useTheme();
   const sortLabel = sortLabelForMode(sortMode);
-  const countLabel = countLabelOverride || (category === 'tours' && shownCount === 0 ? (hasQuery ? 'No matches' : 'Search tours') : shownLabel(shownCount));
+  const countLabel = countLabelOverride || ((category === 'guided' || category === 'tours') && shownCount === 0 ? (hasQuery ? 'No matches' : 'Search guided trips') : shownLabel(shownCount));
   return (
     <View style={styles.shell}>
       <ExploreModeTabs value={mode} onChange={onModeChange} />

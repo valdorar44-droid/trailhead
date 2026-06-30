@@ -37,6 +37,29 @@ type TrailAreaSeed = {
   trails: ExploreTrailCard[];
 };
 
+type OfficialPlaceSeed = {
+  id: string;
+  title: string;
+  category: string;
+  group: string;
+  state: string;
+  region: string;
+  lat: number;
+  lng: number;
+  rank: number;
+  officialUrl: string;
+  publisher: string;
+  summary: string;
+  highlight: string;
+  access: string;
+  season: string;
+  safety: string;
+  aliases: string[];
+  tags: string[];
+  thingsToDo: ExploreSourcePackItem[];
+  extraSources?: { title?: string; publisher?: string; url?: string; kind?: string }[];
+};
+
 const LAST_UPDATED = 1781496931;
 const YOSEMITE_PARK_URL = 'https://www.nps.gov/yose/index.htm';
 const YOSEMITE_TRAILS_URL = 'https://www.nps.gov/yose/planyourvisit/hiking.htm';
@@ -57,6 +80,246 @@ const ROCKY_MOUNTAIN_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thu
 const GRAND_TETON_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/d/d0/Barns_grand_tetons.jpg';
 const SMOKIES_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/b/bc/View_atop_Cliff_Tops_on_Mount_LeConte%2C_GSMNP%2C_TN.jpg';
 const ACADIA_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/e/e9/Acadia_National_Park_02.JPG';
+const CDA_ADVENTURE_URL = 'https://www.cda.gov.pk/adventure#gsc.tab=0';
+const PUNJAB_WILDLIFE_PARKS_URL = 'https://fw.punjab.gov.pk/parks';
+const GB_TOURISM_URL = 'https://visitgilgitbaltistan.gov.pk/';
+
+const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
+  {
+    id: 'explore:pk:cda:margalla-hills-trails',
+    title: 'Margalla Hills Trails',
+    category: 'Trails',
+    group: 'trails',
+    state: 'Islamabad',
+    region: 'Margalla Hills National Park',
+    lat: 33.7515,
+    lng: 73.0848,
+    rank: 118,
+    officialUrl: CDA_ADVENTURE_URL,
+    publisher: 'Capital Development Authority',
+    summary: 'Islamabad trail area with marked Margalla routes, ridge viewpoints, and quick city access.',
+    highlight: 'Check Trail 3, Trail 5, Trail 6, Daman-e-Koh, and Pir Sohawa from one hub.',
+    access: 'Trailheads sit above Islamabad; parking, daylight, heat, and police/local guidance matter.',
+    season: 'Cooler mornings and shoulder seasons are usually easier.',
+    safety: 'Carry water, start early in heat, stay on marked trails, and check local guidance.',
+    aliases: ['margalla trails', 'trail 3', 'trail 5', 'trail 6', 'islamabad hiking', 'daman e koh', 'pir sohawa'],
+    tags: ['trails', 'hiking', 'views', 'islamabad', 'margalla'],
+    thingsToDo: [
+      { title: 'Trail 3', description: 'Steep city-side Margalla route with ridge views and a strong fitness feel.', url: CDA_ADVENTURE_URL, source_label: 'Capital Development Authority', category: 'Hiking' },
+      { title: 'Trail 5', description: 'Popular forested Margalla route with stream sections and flexible turnaround points.', url: CDA_ADVENTURE_URL, source_label: 'Capital Development Authority', category: 'Hiking' },
+      { title: 'Daman-e-Koh', description: 'Viewpoint stop above Islamabad for a shorter scenic visit.', url: CDA_ADVENTURE_URL, source_label: 'Capital Development Authority', category: 'Viewpoint' },
+    ],
+  },
+  {
+    id: 'explore:pk:gb:deosai-national-park',
+    title: 'Deosai National Park',
+    category: 'Parks',
+    group: 'parks',
+    state: 'Gilgit-Baltistan',
+    region: 'Skardu / Astore',
+    lat: 35.0300,
+    lng: 75.4100,
+    rank: 119,
+    officialUrl: GB_TOURISM_URL,
+    publisher: 'Government of Gilgit-Baltistan',
+    summary: 'High-altitude plateau route area between Skardu and Astore, with seasonal access and weather limits.',
+    highlight: 'Plan around Sheosar Lake, Bara Pani, high winds, altitude, and seasonal road openings.',
+    access: 'Road access is seasonal and conditions can change quickly across the plateau.',
+    season: 'Summer access window; verify road status before committing.',
+    safety: 'Altitude, cold, storms, fuel range, and limited services can shape the day.',
+    aliases: ['deosai', 'deosai plains', 'deosai national park', 'sheosar lake', 'bara pani'],
+    tags: ['parks', 'high altitude', 'views', 'water', 'gilgit baltistan'],
+    thingsToDo: [
+      { title: 'Sheosar Lake', description: 'High plateau lake stop with weather and road-status checks.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Lake' },
+      { title: 'Bara Pani', description: 'Seasonal plateau crossing area; verify bridge, road, and weather conditions.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Route stop' },
+      { title: 'Skardu to Astore Crossing', description: 'Big-view seasonal road link; confirm current access locally before routing.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Scenic drive' },
+    ],
+  },
+  {
+    id: 'explore:pk:gb:k2-baltoro-planning',
+    title: 'K2 and Baltoro Trek Area',
+    category: 'Trails',
+    group: 'trails',
+    state: 'Gilgit-Baltistan',
+    region: 'Shigar / Central Karakoram',
+    lat: 35.7455,
+    lng: 76.5142,
+    rank: 120,
+    officialUrl: GB_TOURISM_URL,
+    publisher: 'Government of Gilgit-Baltistan',
+    summary: 'Remote trek-planning hub for Askole, Baltoro Glacier, Concordia, and K2 Base Camp.',
+    highlight: 'Keep permits, licensed guide support, glacier travel, bridges, weather, and rescue logistics front and center.',
+    access: 'Stage through Skardu and Askole; do not use trek lines as vehicle navigation.',
+    season: 'June through September is the usual planning window.',
+    safety: 'Guide support, permits, glacier conditions, bridges, altitude, and weather must be verified locally.',
+    aliases: ['k2 base camp', 'baltoro glacier', 'concordia', 'askole', 'karakoram trek', 'central karakoram'],
+    tags: ['trails', 'trek', 'glacier', 'k2', 'karakoram', 'guide required'],
+    thingsToDo: [
+      { title: 'Askole Staging', description: 'Last practical staging area before the Baltoro approach; verify transport, permits, and local support.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging' },
+      { title: 'Baltoro Glacier', description: 'Glacier trek corridor for planning context only; guide and permit checks are essential.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
+      { title: 'Concordia', description: 'High mountain camp area near K2 views; weather, altitude, and support plans decide feasibility.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'High camp' },
+    ],
+  },
+  {
+    id: 'explore:pk:gb:khaplu-hushe-trek-area',
+    title: 'Khaplu and Hushe Trek Area',
+    category: 'Trails',
+    group: 'trails',
+    state: 'Gilgit-Baltistan',
+    region: 'Khaplu / Hushe Valley',
+    lat: 35.4519,
+    lng: 76.3582,
+    rank: 123,
+    officialUrl: GB_TOURISM_URL,
+    publisher: 'Government of Gilgit-Baltistan',
+    summary: 'Khaplu and Hushe form a practical staging side for Masherbrum, Laila Peak, K7, and Charakusa-area trekking.',
+    highlight: 'Use Hushe as the conservative planning anchor before drilling into Laila Peak, Masherbrum, and K7.',
+    access: 'Stage through Khaplu and Hushe; confirm road status, permits, guide support, and weather locally.',
+    season: 'Summer trekking window; verify current route and pass conditions.',
+    safety: 'Remote valley travel can involve glacier terrain, rockfall, altitude, and limited rescue options.',
+    aliases: ['khaplu treks', 'hushe valley', 'hushe trek', 'khaplu hushe', 'charakusa valley', 'mashabrum', 'masherbrum', 'k7', 'laila peak'],
+    tags: ['trails', 'trek', 'glacier', 'khaplu', 'hushe', 'karakoram'],
+    thingsToDo: [
+      { title: 'Hushe Staging', description: 'Use Hushe as the route-planning base for Khaplu-side treks and climber approaches.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging' },
+      { title: 'Laila Peak View Trek', description: 'High-alpine objective near Gondogoro; plan as guided mountain terrain, not a casual hike.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Peak view' },
+      { title: 'Masherbrum Base Camp Trek', description: 'Hushe-side approach toward Masherbrum Base Camp; verify guide, permits, and conditions locally.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
+      { title: 'K7 / Charakusa Approach', description: 'Remote Charakusa-area mountain approach for experienced teams with local support.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
+    ],
+    extraSources: [
+      { title: 'Hushe Valley', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Hushe_Valley', kind: 'open_reference' },
+    ],
+  },
+  {
+    id: 'explore:pk:gb:laila-peak-hushe',
+    title: 'Laila Peak, Hushe Valley',
+    category: 'Mountain',
+    group: 'peaks',
+    state: 'Gilgit-Baltistan',
+    region: 'Hushe / Gondogoro Glacier',
+    lat: 35.5911,
+    lng: 76.4056,
+    rank: 124,
+    officialUrl: GB_TOURISM_URL,
+    publisher: 'Government of Gilgit-Baltistan',
+    summary: 'Spear-shaped Karakoram peak near Hushe and Gondogoro Glacier, best treated as a high-alpine planning objective.',
+    highlight: 'A findable Khaplu-side peak card for Laila Peak approaches, viewpoints, and safety checks.',
+    access: 'Approach planning usually runs through Khaplu and Hushe; verify restricted-zone permits and guide needs locally.',
+    season: 'Summer alpine window; snow, rockfall, and glacier conditions decide access.',
+    safety: 'High-alpine terrain with rockfall, avalanche, glacier, permit, guide, insurance, and rescue considerations.',
+    aliases: ['laila peak', 'laila peak hushe', 'gondogoro glacier', 'hushe laila', 'khaplu laila peak'],
+    tags: ['peaks', 'mountain', 'glacier', 'trek', 'hushe', 'khaplu'],
+    thingsToDo: [
+      { title: 'Hushe Approach Check', description: 'Confirm road status, local guide support, permits, and weather before leaving Khaplu/Hushe.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Access' },
+      { title: 'Gondogoro Glacier Context', description: 'Use the map card for orientation around Gondogoro and nearby high-alpine terrain.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Map context' },
+    ],
+    extraSources: [
+      { title: 'Laila Peak, Hushe Valley', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Laila_Peak_(Hushe_Valley)', kind: 'open_reference' },
+    ],
+  },
+  {
+    id: 'explore:pk:gb:masherbrum-base-camp',
+    title: 'Masherbrum Base Camp Trek',
+    category: 'Trails',
+    group: 'trails',
+    state: 'Gilgit-Baltistan',
+    region: 'Hushe Valley',
+    lat: 35.5609,
+    lng: 76.2997,
+    rank: 125,
+    officialUrl: GB_TOURISM_URL,
+    publisher: 'Government of Gilgit-Baltistan',
+    summary: 'Hushe-side trek planning card for Masherbrum, also known as K1, and its base-camp approach.',
+    highlight: 'A findable Masherbrum trek anchor for Khaplu/Hushe route planning.',
+    access: 'Stage through Khaplu and Hushe; verify route condition, local support, and overnight rules before departure.',
+    season: 'Summer trekking window; confirm snow, bridge, and glacier conditions locally.',
+    safety: 'Remote mountain terrain with altitude, weather, glacier, guide, permit, and rescue constraints.',
+    aliases: ['masherbrum', 'mashabrum', 'masherbrum base camp', 'mashabrum trek', 'k1 peak', 'hushe masherbrum'],
+    tags: ['trails', 'trek', 'mountain', 'glacier', 'hushe', 'masherbrum'],
+    thingsToDo: [
+      { title: 'Hushe Trailhead', description: 'Use Hushe as the practical staging point and verify local route advice.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging' },
+      { title: 'Base Camp Planning', description: 'Check guide support, altitude, weather, bridge status, and overnight plans before committing.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
+    ],
+    extraSources: [
+      { title: 'Masherbrum', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Masherbrum', kind: 'open_reference' },
+    ],
+  },
+  {
+    id: 'explore:pk:gb:k7-charakusa',
+    title: 'K7 and Charakusa Valley',
+    category: 'Mountain',
+    group: 'peaks',
+    state: 'Gilgit-Baltistan',
+    region: 'Hushe / Charakusa',
+    lat: 35.4642,
+    lng: 76.5767,
+    rank: 126,
+    officialUrl: GB_TOURISM_URL,
+    publisher: 'Government of Gilgit-Baltistan',
+    summary: 'Remote Hushe-side mountain area around K7 and Charakusa, best used for orientation and guided planning.',
+    highlight: 'Adds K7 and Charakusa as findable map context for experienced Khaplu/Hushe planning.',
+    access: 'Approach through Khaplu and Hushe; confirm guides, permits, route status, and border-area considerations locally.',
+    season: 'Summer alpine window; weather and snowpack can change plans fast.',
+    safety: 'Remote alpine terrain with glacier travel, rockfall, altitude, and limited rescue options.',
+    aliases: ['k7', 'k7 peak', 'charakusa valley', 'charkusa', 'khaplu k7', 'hushe k7', 'mashab k7'],
+    tags: ['peaks', 'mountain', 'glacier', 'trek', 'charakusa', 'hushe'],
+    thingsToDo: [
+      { title: 'Charakusa Valley Approach', description: 'Use this as orientation only; confirm local conditions and support before route planning.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Map context' },
+      { title: 'K7 View / Climber Context', description: 'K7 is a serious mountaineering objective; keep this as a planning reference, not a casual trail.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Peak context' },
+    ],
+    extraSources: [
+      { title: 'K7', publisher: 'Open reference', url: 'https://fr.wikipedia.org/wiki/K7_(montagne)', kind: 'open_reference' },
+      { title: 'Hushe Valley', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Hushe_Valley', kind: 'open_reference' },
+    ],
+  },
+  {
+    id: 'explore:pk:punjab:lal-suhanra-national-park',
+    title: 'Lal Suhanra National Park',
+    category: 'Parks',
+    group: 'parks',
+    state: 'Punjab',
+    region: 'Bahawalpur',
+    lat: 29.3830,
+    lng: 71.9080,
+    rank: 121,
+    officialUrl: PUNJAB_WILDLIFE_PARKS_URL,
+    publisher: 'Punjab Wildlife & Parks Department',
+    summary: 'Punjab desert, wetland, and wildlife park area near Bahawalpur.',
+    highlight: 'A practical wildlife, lake, and Bahawalpur route-planning stop.',
+    access: 'Confirm park hours, entry rules, road access, heat, and local guidance before visiting.',
+    season: 'Cooler months are easier for long outdoor time.',
+    safety: 'Heat, water, road distance, wildlife rules, and visitor-area boundaries matter.',
+    aliases: ['lal suhanra', 'lal suhanra national park', 'bahawalpur park', 'punjab wildlife park'],
+    tags: ['parks', 'wildlife', 'desert', 'wetland', 'punjab'],
+    thingsToDo: [
+      { title: 'Wildlife Park Visit', description: 'Use official park guidance for visitor access and current rules.', url: PUNJAB_WILDLIFE_PARKS_URL, source_label: 'Punjab Wildlife & Parks Department', category: 'Wildlife' },
+      { title: 'Patisar Lake Area', description: 'Plan lake and birding stops around heat, water, and access rules.', url: PUNJAB_WILDLIFE_PARKS_URL, source_label: 'Punjab Wildlife & Parks Department', category: 'Water' },
+    ],
+  },
+  {
+    id: 'explore:pk:punjab:changa-manga-forest-park',
+    title: 'Changa Manga Forest Park',
+    category: 'Parks',
+    group: 'parks',
+    state: 'Punjab',
+    region: 'Kasur',
+    lat: 31.0850,
+    lng: 73.9690,
+    rank: 122,
+    officialUrl: PUNJAB_WILDLIFE_PARKS_URL,
+    publisher: 'Punjab Wildlife & Parks Department',
+    summary: 'Punjab forest park area useful for family stops, shade, short walks, and route breaks near Lahore/Kasur.',
+    highlight: 'A lighter stop for shade, picnic time, and quick outdoor breaks.',
+    access: 'Confirm visitor timing, park rules, and local road access before depending on it.',
+    season: 'Morning and cooler months are more comfortable.',
+    safety: 'Heat, crowds, opening hours, and local park rules should be checked first.',
+    aliases: ['changa manga', 'changa manga forest', 'kasur park', 'punjab forest park'],
+    tags: ['parks', 'forest', 'picnic', 'family', 'punjab'],
+    thingsToDo: [
+      { title: 'Forest Park Stop', description: 'Plan a shade and picnic break with current park access confirmed.', url: PUNJAB_WILDLIFE_PARKS_URL, source_label: 'Punjab Wildlife & Parks Department', category: 'Park' },
+      { title: 'Short Walks', description: 'Keep walks short in heat and follow posted visitor-area rules.', url: PUNJAB_WILDLIFE_PARKS_URL, source_label: 'Punjab Wildlife & Parks Department', category: 'Walk' },
+    ],
+  },
+];
 
 const YOSEMITE_TRAILS: ExploreTrailCard[] = [
   {
@@ -1068,6 +1331,7 @@ const WATERFALLS: WaterfallSeed[] = [
 const YOSEMITE_PARK_HUB = buildYosemiteParkHub();
 const YOSEMITE_TRAIL_AREA = buildYosemiteTrailArea();
 const CURATED_TRAIL_AREAS = TRAIL_AREA_SEEDS.map(seed => buildTrailAreaPlace(seed));
+const PAKISTAN_OFFICIAL_PLACES = PAKISTAN_OFFICIAL_SEEDS.map(seed => buildOfficialPlace(seed));
 const ALL_TRAIL_AREA_GUIDES = [YOSEMITE_TRAIL_AREA, ...CURATED_TRAIL_AREAS];
 const TRAIL_AREA_BY_ID = new Map(ALL_TRAIL_AREA_GUIDES.map(place => [place.id, place]));
 const TRAIL_AREA_BY_TITLE_STATE = new Map(
@@ -1081,6 +1345,7 @@ export const CURATED_EXPLORE_PLACES: ExplorePlaceProfile[] = [
   YOSEMITE_PARK_HUB,
   YOSEMITE_TRAIL_AREA,
   ...CURATED_TRAIL_AREAS,
+  ...PAKISTAN_OFFICIAL_PLACES,
   ...WATERFALLS.map((seed, index) => buildWaterfallPlace(seed, index)),
 ];
 
@@ -1510,6 +1775,102 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
       last_updated: LAST_UPDATED,
     },
     attribution: 'Official access source + Wikimedia Commons image reference',
+  };
+}
+
+function buildOfficialPlace(seed: OfficialPlaceSeed): ExplorePlaceProfile {
+  const story = `${seed.title} sits in ${seed.region}. ${seed.summary} ${seed.safety}`;
+  const sources = [
+    { title: seed.title, publisher: seed.publisher, url: seed.officialUrl, kind: 'official' },
+    ...(seed.extraSources ?? []),
+  ];
+  return {
+    id: seed.id,
+    canonical_role: 'hub',
+    category: seed.category,
+    subcategories: Array.from(new Set([seed.group, ...seed.tags])),
+    quality: 'official',
+    quality_score: 88,
+    search_aliases: seed.aliases,
+    best_season: seed.season,
+    access: { summary: seed.access },
+    safety: { summary: seed.safety },
+    sources,
+    card: {
+      title: seed.title,
+      region: seed.region,
+      headline: seed.highlight,
+      summary: seed.summary,
+      highlight: seed.highlight,
+      facts: [seed.publisher, seed.season, seed.access],
+    },
+    summary: {
+      id: seed.id,
+      title: seed.title,
+      category: seed.category,
+      explore_group: seed.group,
+      state: seed.state,
+      region: seed.region,
+      lat: seed.lat,
+      lng: seed.lng,
+      rank: seed.rank,
+      hero_rank: seed.rank,
+      tags: seed.tags,
+      badges: [seed.category, 'Official'],
+      hook: seed.highlight,
+      short_description: seed.summary,
+      thumbnail_url: '',
+      image_url: '',
+      image_credit: '',
+      image_license: '',
+      source_url: seed.officialUrl,
+      source_title: seed.publisher,
+    },
+    profile: {
+      hook: seed.highlight,
+      summary: seed.summary,
+      story,
+      why_it_matters: seed.highlight,
+      what_to_know: seed.safety,
+      best_time_to_stop: seed.season,
+      access_notes: seed.access,
+      nearby_context: 'Use nearby stops, road access, weather, fuel, and local guidance before committing the day.',
+    },
+    audio_script: story,
+    wiki_extract: '',
+    source_pack: {
+      quality: 'official',
+      primary: seed.publisher,
+      official_url: seed.officialUrl,
+      sources,
+      activities: seed.tags,
+      things_to_do: seed.thingsToDo.map(item => ({
+        ...item,
+        source: item.source || seed.publisher,
+        url: item.url || seed.officialUrl,
+        source_label: item.source_label || seed.publisher,
+      })),
+      things_to_see: seed.thingsToDo
+        .filter(item => /view|lake|park|glacier|plateau|wildlife|forest|camp/i.test(`${item.title} ${item.category}`))
+        .slice(0, 4)
+        .map(item => ({
+          ...item,
+          source: item.source || seed.publisher,
+          url: item.url || seed.officialUrl,
+          source_label: item.source_label || seed.publisher,
+        })),
+      source_note: 'Verify access, permits, hours, road status, weather, and local rules before travel.',
+      license: 'Public travel guidance.',
+    },
+    facts: {
+      coordinates: `${seed.lat.toFixed(5)}, ${seed.lng.toFixed(5)}`,
+      source_url: seed.officialUrl,
+      source_title: seed.publisher,
+      official_url: seed.officialUrl,
+      source_quality: 'official',
+      last_updated: LAST_UPDATED,
+    },
+    attribution: seed.publisher,
   };
 }
 

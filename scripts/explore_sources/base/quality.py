@@ -15,7 +15,7 @@ QUALITY_SCORES = {
 }
 
 
-OFFICIAL_SOURCES = {"ridb", "recreation.gov", "nps", "usfs", "blm", "usgs", "nws", "airnow", "firms"}
+OFFICIAL_SOURCES = {"ridb", "recreation.gov", "nps", "usfs", "blm", "usgs", "nws", "airnow", "firms", "pakistan_gov"}
 
 
 def quality_for_source(source: str) -> str:

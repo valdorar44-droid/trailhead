@@ -20,6 +20,8 @@ export type ExploreCategoryKey =
   | 'land'
   | 'fuel'
   | 'resupply'
+  | 'things'
+  | 'guided'
   | 'tours'
   | 'nearby';
 
@@ -83,7 +85,8 @@ export const EXPLORE_CATEGORY_CHIPS: Array<{
   { key: 'land', label: 'Land', icon: 'map-outline', color: '#84cc16' },
   { key: 'fuel', label: 'Fuel', icon: 'car-outline', color: '#ea580c' },
   { key: 'resupply', label: 'Resupply', icon: 'basket-outline', color: '#7c3aed' },
-  { key: 'tours', label: 'Tours', icon: 'ticket-outline', color: '#d97706' },
+  { key: 'things', label: 'Things', icon: 'compass-outline', color: '#0f766e' },
+  { key: 'guided', label: 'Guided', icon: 'ticket-outline', color: '#d97706' },
   { key: 'nearby', label: 'Near', icon: 'locate-outline', color: '#a855f7' },
 ];
 
@@ -105,7 +108,9 @@ const CATEGORY_ALIASES: Record<ExploreCategoryKey, string[]> = {
   land: ['public land', 'blm', 'national forest', 'wilderness', 'conservation'],
   fuel: ['fuel', 'gas', 'diesel', 'petrol', 'service station'],
   resupply: ['resupply', 'grocery', 'gear', 'supplies', 'food', 'market'],
-  tours: ['tour', 'tours', 'experience', 'experiences', 'things to do', 'activity', 'activities', 'ticket', 'tickets', 'guide', 'guided'],
+  things: ['things to do', 'what to do', 'activity', 'activities', 'attraction', 'sights', 'see and do'],
+  guided: ['tour', 'tours', 'experience', 'experiences', 'ticket', 'tickets', 'guide', 'guided', 'book', 'booking'],
+  tours: ['tour', 'tours', 'experience', 'experiences', 'ticket', 'tickets', 'guide', 'guided', 'book', 'booking'],
   nearby: [],
 };
 
@@ -122,7 +127,8 @@ const DESTINATION_PRIMARY_OVERRIDES: ExploreCategoryKey[] = [
   'climb',
   'water',
   'scenic',
-  'tours',
+  'things',
+  'guided',
 ];
 
 const FALLBACK_COPY: Record<string, string> = {
@@ -138,7 +144,9 @@ const FALLBACK_COPY: Record<string, string> = {
   climb: 'Climbing area or crag. Check access, closures, route information, rules, and conditions.',
   fuel: 'Fuel or service stop. Verify hours, availability, road access, and payment options.',
   resupply: 'Resupply stop. Verify hours, inventory, payment options, and road access before depending on it.',
-  tours: 'Bookable guided trips, tickets, local tours, and activities from external providers.',
+  things: 'Activities, viewpoints, trails, stops, and visitor options from public sources.',
+  guided: 'Guided trips and bookable options. Availability returns when partner access is ready.',
+  tours: 'Guided trips and bookable options. Availability returns when partner access is ready.',
   water: 'Water access or feature. Verify safety, access, seasonal conditions, and local rules.',
   scenic: 'Scenic stop for photos, short walks, and nearby exploration.',
   parks: 'Outdoor destination. Check official access, fees, closures, and local rules before setting dates.',
@@ -317,14 +325,15 @@ function categoryFromText(text: string): ExploreCategoryKey | null {
   if (/hot spring|thermal|soak/.test(text)) return 'springs';
   if (/trailhead|trail head/.test(text)) return 'trailheads';
   if (/viewpoint|overlook|lookout|vista|view\b/.test(text)) return 'views';
+  if (/trail|hike|trek|ohv|route/.test(text)) return 'trails';
   if (/peak|summit|mountain/.test(text)) return 'peaks';
   if (/climb|crag|boulder/.test(text)) return 'climb';
   if (/fuel|gas|diesel|petrol/.test(text)) return 'fuel';
   if (/resupply|grocery|gear|supplies|market/.test(text)) return 'resupply';
-  if (/things to do|tour|experience|activity|ticket|guided|guide\b/.test(text)) return 'tours';
+  if (/things to do|what to do|activities|activity|see and do/.test(text)) return 'things';
+  if (/tour|experience|ticket|guided|guide\b|booking|book\b/.test(text)) return 'guided';
   if (/glamp|private stay|yurt/.test(text)) return 'glamping';
   if (/hut|shelter|refuge|cabin|lodg/.test(text)) return 'huts';
-  if (/trail|hike|trek|ohv|route/.test(text)) return 'trails';
   if (/camp|rv|tent|overnight/.test(text)) return 'camp';
   if (/lake|river|shore|beach|marina|boat|water/.test(text)) return 'water';
   if (/public land|blm|wilderness|forest/.test(text)) return 'land';
@@ -396,7 +405,11 @@ export function getExploreCategoryKey(place: ExplorePlaceProfile): ExploreCatego
   const titleText = normalize(getExploreDisplayTitle(place));
   const destinationTitle = categoryFromDestinationTitle(titleText);
   const nestedDestinationTitle = isNestedDestinationTitle(titleText);
-  const explicit = categoryFromText(normalize(compact([
+  const primaryExplicit = categoryFromText(normalize(compact([
+    v3.category,
+    place.summary.category,
+  ]).join(' ')));
+  const explicit = primaryExplicit || categoryFromText(normalize(compact([
     v3.category,
     place.summary.category,
     ...(Array.isArray(v3.subcategories) ? v3.subcategories : []),
@@ -451,7 +464,7 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
   const primary = cleanSourcePublisherLabel(place.source_pack?.primary || sources[0]?.publisher || sources[0]?.name);
   if (isOpenKnowledgePublisher(primary)) return 'Check locally';
   if (quality.includes('official')) {
-    return 'Official details';
+    return 'Current access';
   }
   if (quality.includes('wiki') || /wikipedia|wikidata|wikimedia/i.test(facts.source_title || primary)) return 'Check locally';
   if (primary || sources.length > 1 || place.source_pack?.sources?.length) return 'Area details';
@@ -463,7 +476,7 @@ export function getExploreTrustBadge(place: ExplorePlaceProfile) {
   if (confidence.score >= 85) return 'Plan-ready';
   if (confidence.score >= 65) return 'Ready to compare';
   const badge = getExploreSourceBadge(place);
-  if (/official/i.test(badge)) return 'Plan-ready';
+  if (/official|current access/i.test(badge)) return 'Plan-ready';
   if (/community|curated|multiple|area details/i.test(badge)) return 'Ready to compare';
   return 'Check access';
 }
@@ -478,8 +491,8 @@ export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
     });
   }
   const badge = getExploreSourceBadge(place);
-  if (/official/i.test(badge)) return 'Current access';
   if (/check locally/i.test(badge)) return 'Confirm locally';
+  if (/current access/i.test(badge)) return 'Current access';
   return 'Check current status';
 }
 
@@ -500,9 +513,9 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
   const rows: ExploreSourceRow[] = [
     {
       label: 'Access',
-      value: /official/i.test(sourceBadge) ? 'Official details' : 'Check current access',
-      icon: /official/i.test(sourceBadge) ? 'shield-checkmark-outline' : 'map-outline',
-      tone: /official/i.test(sourceBadge) ? '#16a34a' : '#2563eb',
+      value: /current access/i.test(sourceBadge) ? 'Current access' : 'Check current access',
+      icon: /current access/i.test(sourceBadge) ? 'shield-checkmark-outline' : 'map-outline',
+      tone: /current access/i.test(sourceBadge) ? '#16a34a' : '#2563eb',
     },
     {
       label: 'Season',
@@ -700,9 +713,16 @@ export function getExploreSearchText(place: ExplorePlaceProfile) {
 
 export function exploreCategoryMatches(place: ExplorePlaceProfile, selected: ExploreCategoryKey) {
   if (selected === 'all') return true;
-  if (selected === 'tours') return false;
+  if (selected === 'guided' || selected === 'tours') return false;
   if (selected === 'nearby') return true;
   const key = getExploreCategoryKey(place);
+  if (selected === 'things') {
+    const sourcePack = place.source_pack ?? {};
+    if (Array.isArray(sourcePack.things_to_do) && sourcePack.things_to_do.length > 0) return true;
+    if (key === 'things') return true;
+    if (['camp', 'glamping', 'huts', 'fuel', 'resupply', 'guided', 'tours'].includes(key)) return false;
+    return ['parks', 'land', 'trails', 'trailheads', 'views', 'waterfalls', 'peaks', 'springs', 'climb', 'water', 'scenic'].includes(key);
+  }
   return key === selected;
 }
 

@@ -21,6 +21,7 @@ from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, fetc
 from scripts.explore_sources.nps.import_nps import import_nps_fixture
 from scripts.explore_sources.openbeta.import_openbeta import import_openbeta_fixture
 from scripts.explore_sources.osm.import_geofabrik import import_osm_fixture, write_import_outputs
+from scripts.explore_sources.pakistan_gov.import_pakistan_gov import import_pakistan_gov_fixture
 from scripts.explore_sources.ridb.fetch_ridb import fetch_ridb_facilities_to_cache
 from scripts.explore_sources.ridb.import_ridb import import_ridb_fixture
 from scripts.explore_sources.usfs.import_usfs import import_usfs_fixture
@@ -37,6 +38,7 @@ def build_catalog(
     blm_fixtures: list[str] | None = None,
     wikidata_fixtures: list[str] | None = None,
     openbeta_fixtures: list[str] | None = None,
+    pakistan_gov_fixtures: list[str] | None = None,
     source_urls: list[str] | None = None,
     ridb_urls: list[str] | None = None,
     nps_urls: list[str] | None = None,
@@ -44,6 +46,7 @@ def build_catalog(
     blm_urls: list[str] | None = None,
     wikidata_urls: list[str] | None = None,
     openbeta_urls: list[str] | None = None,
+    pakistan_gov_seed: bool = False,
     source_cache_dir: str = "data/explore/source_cache",
     http_headers: dict[str, str] | None = None,
     http_timeout: float = 30.0,
@@ -131,6 +134,7 @@ def build_catalog(
             force=force_fetch,
         )))
     openbeta_paths = resolve_input_paths(openbeta_fixtures, openbeta_urls, source="openbeta", cache_dir=source_cache_dir, headers=http_headers, timeout=http_timeout, force=force_fetch)
+    pakistan_gov_paths = list(pakistan_gov_fixtures or [])
     import_jobs = [
         ("osm", fixture, import_osm_fixture)
         for fixture in source_paths
@@ -152,7 +156,12 @@ def build_catalog(
     ] + [
         ("openbeta", fixture, import_openbeta_fixture)
         for fixture in openbeta_paths
+    ] + [
+        ("pakistan_gov", fixture, import_pakistan_gov_fixture)
+        for fixture in pakistan_gov_paths
     ]
+    if pakistan_gov_seed:
+        import_jobs.append(("pakistan_gov", None, import_pakistan_gov_fixture))
     if not import_jobs:
         raise ValueError("at least one source fixture or source URL is required")
     for _source, fixture, importer in import_jobs:
@@ -195,6 +204,7 @@ def main() -> int:
     parser.add_argument("--blm-fixture", action="append", default=[], help="Prepared BLM recreation/public-land fixture.")
     parser.add_argument("--wikidata-fixture", action="append", default=[], help="Prepared Wikidata/Wikimedia landmark fixture.")
     parser.add_argument("--openbeta-fixture", action="append", default=[], help="Prepared OpenBeta climbing fixture.")
+    parser.add_argument("--pakistan-gov-fixture", action="append", default=[], help="Prepared Pakistan government tourism/wildlife fixture.")
     parser.add_argument("--source-url", action="append", default=[], help="URL for prepared OSM-derived GeoJSON/JSON source data.")
     parser.add_argument("--ridb-url", action="append", default=[], help="URL for prepared RIDB/Recreation.gov JSON source data.")
     parser.add_argument("--nps-url", action="append", default=[], help="URL for prepared NPS JSON source data.")
@@ -202,6 +212,7 @@ def main() -> int:
     parser.add_argument("--blm-url", action="append", default=[], help="URL for prepared BLM GeoJSON/JSON source data.")
     parser.add_argument("--wikidata-url", action="append", default=[], help="URL for prepared Wikidata/Wikimedia JSON source data.")
     parser.add_argument("--openbeta-url", action="append", default=[], help="URL for prepared OpenBeta JSON source data.")
+    parser.add_argument("--pakistan-gov-seed", action="store_true", help="Include built-in Pakistan government tourism/wildlife seed records.")
     parser.add_argument("--source-cache-dir", default="data/explore/source_cache", help="Directory for downloaded source payloads.")
     parser.add_argument("--http-header", action="append", default=[], help="Header for source URL requests, e.g. 'X-Api-Key: ...'.")
     parser.add_argument("--http-timeout", type=float, default=30.0, help="Source URL request timeout in seconds.")
@@ -247,6 +258,7 @@ def main() -> int:
         blm_fixtures=args.blm_fixture,
         wikidata_fixtures=args.wikidata_fixture,
         openbeta_fixtures=args.openbeta_fixture,
+        pakistan_gov_fixtures=args.pakistan_gov_fixture,
         source_urls=args.source_url,
         ridb_urls=args.ridb_url,
         nps_urls=args.nps_url,
@@ -254,6 +266,7 @@ def main() -> int:
         blm_urls=args.blm_url,
         wikidata_urls=args.wikidata_url,
         openbeta_urls=args.openbeta_url,
+        pakistan_gov_seed=args.pakistan_gov_seed,
         source_cache_dir=args.source_cache_dir,
         http_headers=parse_headers(args.http_header),
         http_timeout=args.http_timeout,

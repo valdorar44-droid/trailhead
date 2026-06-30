@@ -685,6 +685,16 @@ export const api = {
     ),
   getExplorePlace: (placeId: string) =>
     req<ExplorePlaceProfile>(`/api/explore/places/${encodeURIComponent(placeId)}`),
+  getExploreEnrichment: (params: { q?: string; category?: string; place_id?: string; limit?: number; force_refresh?: boolean } = {}) => {
+    const qs = new URLSearchParams({
+      limit: String(params.limit ?? 6),
+    });
+    if (params.q) qs.set('q', params.q);
+    if (params.category) qs.set('category', params.category);
+    if (params.place_id) qs.set('place_id', params.place_id);
+    if (params.force_refresh) qs.set('force_refresh', 'true');
+    return req<ExploreEnrichmentResponse>(`/api/explore/enrich?${qs.toString()}`);
+  },
   getExploreCampgrounds: (placeId: string, limit = 24) =>
     req<ExploreCampgroundsResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/campgrounds?limit=${limit}`)
       .then(res => ({ ...res, campgrounds: canonicalizeCampsitePins(res.campgrounds ?? []) })),
@@ -3459,6 +3469,14 @@ export interface ExploreCatalogIndex {
   cursor: number;
   next_cursor?: number | null;
   places: ExploreCatalogIndexItem[];
+}
+export interface ExploreEnrichmentResponse {
+  schema_version: number;
+  status: 'hit' | 'enriched' | 'partial' | 'unsupported' | string;
+  source: 'catalog' | 'nps' | 'none' | string;
+  count: number;
+  places: ExplorePlaceProfile[];
+  message?: string;
 }
 export interface ExploreCampgroundsResponse {
   place_id: string;

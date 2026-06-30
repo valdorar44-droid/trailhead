@@ -1627,13 +1627,13 @@ def _explore_place_matches_categories(place_type: str, requested: set[str] | Non
     if place_type == "camp":
         return bool(normalized.intersection({"camp", "camping", "rv", "private_stay"}))
     if place_type == "park":
-        return bool(normalized.intersection({"park", "attraction", "tourism", "viewpoint"}))
+        return bool(normalized.intersection({"park", "attraction", "tourism", "viewpoint", "things"}))
     if place_type == "historic":
-        return bool(normalized.intersection({"historic", "monument", "attraction", "tourism"}))
+        return bool(normalized.intersection({"historic", "monument", "attraction", "tourism", "things"}))
     if place_type == "viewpoint":
-        return bool(normalized.intersection({"viewpoint", "water", "attraction", "tourism", "park"}))
+        return bool(normalized.intersection({"viewpoint", "water", "attraction", "tourism", "park", "things"}))
     if place_type == "trail":
-        return bool(normalized.intersection({"trail", "trailhead", "attraction", "tourism"}))
+        return bool(normalized.intersection({"trail", "trailhead", "attraction", "tourism", "things"}))
     return bool(normalized.intersection({place_type, "attraction", "tourism", "place", "poi"}))
 
 
@@ -1654,11 +1654,15 @@ def _explore_place_category_tokens(place: dict) -> set[str]:
         tokens.update({"camp", "camping", "campground"})
     if source_pack.get("visitor_centers"):
         tokens.update({"visitor_center", "park"})
+    if source_pack.get("things_to_do"):
+        tokens.update({"things", "activity"})
     nested_text = _explore_source_pack_query_text(source_pack)
     if re.search(r"\b(trails?|hiking|hike|trek|trekking|trailheads?)\b", nested_text):
         tokens.update({"trail", "trails", "trailhead"})
-    if re.search(r"\b(tours?|guided|tickets?|activities|things to do)\b", nested_text):
-        tokens.update({"tour", "tours", "activity"})
+    if re.search(r"\b(activities|things to do|what to do|see and do)\b", nested_text):
+        tokens.update({"things", "activity"})
+    if re.search(r"\b(tours?|guided|tickets?|booking|book)\b", nested_text):
+        tokens.update({"guided"})
     if re.search(r"\b(waterfalls?|falls|lake|river|viewpoint|overlook|scenic)\b", nested_text):
         tokens.update({"water", "viewpoint", "scenic"})
     if "waterfall" in tokens:
@@ -1673,12 +1677,31 @@ def _explore_place_category_tokens(place: dict) -> set[str]:
     return tokens
 
 
+def _explore_place_matches_things_request(place: dict) -> bool:
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    tokens = _explore_place_category_tokens(place)
+    if tokens.intersection({"camp", "camping", "campground", "rv", "private_stay", "lodging", "fuel", "gas", "grocery"}):
+        return False
+    if isinstance(source_pack.get("things_to_do"), list) and source_pack.get("things_to_do"):
+        return True
+    if tokens.intersection({"things", "activity", "park", "trail", "trails", "trailhead", "viewpoint", "water", "scenic", "historic", "monument", "climb", "climbing"}):
+        return True
+    return _catalog_place_category(place.get("summary") or {}) in {"park", "historic", "viewpoint", "trail", "attraction"}
+
+
 def _explore_place_matches_category_request(place: dict, requested: set[str] | None) -> bool:
     if not requested:
         return True
     normalized = {_normalize_place_category(c) for c in requested if str(c).strip()}
     if not normalized:
         return True
+    if normalized == {"guided"}:
+        return False
+    if "things" in normalized:
+        if _explore_place_matches_things_request(place):
+            return True
+        if normalized == {"things"}:
+            return False
     if _explore_place_category_tokens(place).intersection(normalized):
         return True
     return _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), normalized)
@@ -2228,6 +2251,17 @@ EXPLORE_PLACE_CATEGORIES = {
     "climbing", "ohv",
 }
 EXPLORE_CATEGORY_ALIASES = {
+    "activity": "things",
+    "activities": "things",
+    "seeanddo": "things",
+    "thingstodo": "things",
+    "whattodo": "things",
+    "guidedtrip": "guided",
+    "guidedtrips": "guided",
+    "tour": "guided",
+    "tours": "guided",
+    "ticket": "guided",
+    "tickets": "guided",
     "restaurant": "food",
     "restaurants": "food",
     "hotel": "lodging",
@@ -19100,6 +19134,144 @@ def _find_explore_place(place_id: str) -> dict | None:
         if str(place.get("id") or "") == str(place_id):
             return place
     return None
+
+
+def _explore_enrichment_cache_key(q: str = "", category: str = "", place_id: str = "") -> str:
+    raw = json.dumps({
+        "q": re.sub(r"\s+", " ", str(q or "").strip().lower()),
+        "category": _normalize_place_category(category),
+        "place_id": str(place_id or "").strip(),
+    }, sort_keys=True)
+    return f"explore_enrich_v1:{hashlib.sha1(raw.encode('utf-8')).hexdigest()[:28]}"
+
+
+def _explore_enrichment_catalog_candidates(q: str = "", category: str = "", place_id: str = "", limit: int = 8) -> list[dict]:
+    catalog = _load_explore_catalog()
+    places = list(catalog.get("places") or [])
+    if place_id:
+        place = next((item for item in places if str(item.get("id") or "") == str(place_id)), None)
+        return [place] if place else []
+    query_terms = _explore_query_terms(q)
+    if query_terms:
+        places = [place for place in places if _explore_query_terms_match(place, query_terms)]
+    if category:
+        requested = {_normalize_place_category(category)}
+        places = [place for place in places if _explore_place_matches_category_request(place, requested)]
+    places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
+    return places[:max(1, min(int(limit or 8), 24))]
+
+
+def _explore_place_is_enriched_enough(place: dict, requested: str = "") -> bool:
+    if not isinstance(place, dict):
+        return False
+    requested = _normalize_place_category(requested)
+    if requested == "things":
+        source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+        return bool(source_pack.get("things_to_do") or source_pack.get("things_to_see") or source_pack.get("visitor_centers") or place.get("trails"))
+    return _explore_has_rich_content(place)
+
+
+def _explore_should_try_live_nps(q: str = "", category: str = "", seed_place: dict | None = None) -> bool:
+    if not (os.getenv("NPS_API_KEY") or "").strip():
+        return False
+    text = " ".join(str(value or "") for value in [
+        q,
+        category,
+        (seed_place or {}).get("id") if isinstance(seed_place, dict) else "",
+        json.dumps((seed_place or {}).get("summary") or {}) if isinstance(seed_place, dict) else "",
+        json.dumps((seed_place or {}).get("source_pack") or {}) if isinstance(seed_place, dict) else "",
+    ]).lower()
+    if "nps.gov" in text or "national park service" in text or "place:nps:" in text:
+        return True
+    if re.search(r"\b(national park|national monument|national preserve|national seashore|national lakeshore|national battlefield|national historic|national recreation area|nps)\b", text):
+        return True
+    # Direct destination searches like "Yosemite things to do" should be allowed; cache keeps misses cheap.
+    return bool(str(q or "").strip()) and _normalize_place_category(category) in {"things", "park", "parks", "attraction", ""}
+
+
+def _explore_fetch_nps_enrichment_sync(q: str, limit: int = 5) -> list[dict]:
+    query = re.sub(r"\s+", " ", str(q or "").strip())
+    if len(query) < 2:
+        return []
+    from scripts.explore_sources.nps.fetch_nps import fetch_nps_source_pack_to_cache
+    from scripts.explore_sources.nps.import_nps import import_nps_fixture
+
+    cache_dir = os.getenv("EXPLORE_SOURCE_CACHE_DIR", "data/explore/source_cache")
+    path = fetch_nps_source_pack_to_cache(
+        cache_dir=cache_dir,
+        query=query,
+        limit=5,
+        max_records=max(1, min(int(limit or 5), 8)),
+        related_endpoints=("places", "thingstodo", "visitorcenters", "alerts", "events", "parkinglots", "feespasses", "campgrounds"),
+        related_max_records=14,
+        timeout=14.0,
+        force=False,
+        request_budget=20,
+    )
+    _records, places, _trails = import_nps_fixture(path, fetched_at=int(time.time()))
+    profiles = []
+    for idx, place in enumerate(places[:max(1, min(int(limit or 5), 8))], start=1):
+        try:
+            profiles.append(_explore_v3_place_to_profile(place.to_dict(), rank=650000 + idx))
+        except Exception:
+            continue
+    return profiles
+
+
+@app.get("/api/explore/enrich")
+async def explore_enrich(q: str = "", category: str = "", place_id: str = "", limit: int = 6, force_refresh: bool = False):
+    """Cache-first Explore enrichment for thin searches. Uses official sources when available."""
+    limit = max(1, min(int(limit or 6), 12))
+    category = _normalize_place_category(category)
+    cache_key = _explore_enrichment_cache_key(q=q, category=category, place_id=place_id)
+    if not force_refresh:
+        cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24 * 7)
+        if isinstance(cached, dict):
+            return cached
+
+    catalog_candidates = _explore_enrichment_catalog_candidates(q=q, category=category, place_id=place_id, limit=limit)
+    rich_candidates = [place for place in catalog_candidates if _explore_place_is_enriched_enough(place, category)]
+    if rich_candidates:
+        payload = {
+            "schema_version": 1,
+            "status": "hit",
+            "source": "catalog",
+            "count": len(rich_candidates),
+            "places": rich_candidates[:limit],
+        }
+        set_cached("campsite_cache", cache_key, payload)
+        return payload
+
+    live_places: list[dict] = []
+    seed_place = catalog_candidates[0] if catalog_candidates else None
+    if _explore_should_try_live_nps(q=q, category=category, seed_place=seed_place):
+        try:
+            live_places = await asyncio.to_thread(_explore_fetch_nps_enrichment_sync, q or (seed_place.get("summary") or {}).get("title") or "", limit)
+        except Exception:
+            live_places = []
+
+    seen = set()
+    merged: list[dict] = []
+    for place in [*live_places, *catalog_candidates]:
+        place_id_value = str(place.get("id") or "")
+        if not place_id_value or place_id_value in seen:
+            continue
+        seen.add(place_id_value)
+        merged.append(place)
+        if len(merged) >= limit:
+            break
+
+    payload = {
+        "schema_version": 1,
+        "status": "enriched" if live_places else ("partial" if merged else "unsupported"),
+        "source": "nps" if live_places else ("catalog" if merged else "none"),
+        "count": len(merged),
+        "places": merged,
+    }
+    if not merged:
+        payload["message"] = "More details are not available yet."
+    set_cached("campsite_cache", cache_key, payload)
+    return payload
 
 
 @app.get("/api/explore/places/{place_id}")

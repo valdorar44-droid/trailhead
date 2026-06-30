@@ -25,7 +25,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.top}>
         <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={[styles.label, { color: C.orange }]}>Tours & Activities</Text>
+          <Text style={[styles.label, { color: C.orange }]}>Guided Trips</Text>
           <Text style={[styles.sub, { color: C.text3 }]}>{subtitle}</Text>
         </View>
         {loading ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="ticket-outline" size={23} color={C.orange} />}

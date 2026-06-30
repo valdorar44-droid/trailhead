@@ -18,7 +18,7 @@ import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import ProfileLibraryOverview from '@/components/profile/ProfileLibraryOverview';
 import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
-import { freeTrialLabel, useSubscription } from '@/lib/useSubscription';
+import { useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { deleteOfflineTrip, getOfflineTripIndex, getOfflineTripSummaries, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -53,6 +53,14 @@ const AppleAuthentication: AppleAuthModule | null = (() => {
 
 type ChecklistItem = { id: string; label: string; done: boolean };
 type ChecklistSection = { title: string; icon: keyof typeof Ionicons.glyphMap; items: ChecklistItem[] };
+type ExplorerPlanPoint = { icon: keyof typeof Ionicons.glyphMap; label: string };
+
+const EXPLORER_PLAN_POINTS: ExplorerPlanPoint[] = [
+  { icon: 'trail-sign-outline', label: 'Unlimited trip planner' },
+  { icon: 'chatbubble-ellipses-outline', label: 'Map Co-Pilot' },
+  { icon: 'bonfire-outline', label: 'Camp Briefs' },
+  { icon: 'car-sport-outline', label: 'Voice and CarPlay' },
+];
 
 const DEFAULT_CHECKLIST: ChecklistSection[] = [
   { title: 'Vehicle', icon: 'car-sport-outline', items: [
@@ -181,7 +189,6 @@ export default function ProfileScreen() {
   const hasPlan     = useStore(st => st.hasPlan);
   const setPlan     = useStore(st => st.setPlan);
   const { purchase, restore, openPaywall, monthlyProduct, annualProduct, purchasing, restoring } = useSubscription();
-  const planTrial = freeTrialLabel(annualProduct) || freeTrialLabel(monthlyProduct);
   const [gpxImporting, setGpxImporting] = useState(false);
   const [gpxResult, setGpxResult] = useState('');
   const [gpxBatches, setGpxBatches] = useState<GpxImportBatch[]>([]);
@@ -253,8 +260,8 @@ export default function ProfileScreen() {
         onPress: async () => {
           setAdminClearingCampCache(true);
           try {
-            const result = await api.adminClearCampCache({ scope: 'all' });
-            Alert.alert('Camp cache cleared', `${result.deleted} cache row${result.deleted === 1 ? '' : 's'} cleared. ${result.brief_deleted || 0} AI brief row${result.brief_deleted === 1 ? '' : 's'} cleared.`);
+            await api.adminClearCampCache({ scope: 'all' });
+            Alert.alert('Camp cache cleared', 'Camp profiles will reload fresh details as needed.');
           } catch (e: any) {
             Alert.alert('Could not clear cache', e?.message || 'Try again in a moment.');
           } finally {
@@ -1002,7 +1009,7 @@ export default function ProfileScreen() {
               </View>
             </View>
             <Text style={s.authHeading}>Welcome back</Text>
-            <Text style={s.authSub}>Sign in to plan trips, sync downloads, manage Explorer, and track your field reports.</Text>
+            <Text style={s.authSub}>Sign in to save trips, downloads, reports, and Explorer.</Text>
             <View style={s.socialAuthStack}>
               {appleAuthAvailable && AppleAuthentication ? (
                 <AppleAuthentication.AppleAuthenticationButton
@@ -1041,7 +1048,7 @@ export default function ProfileScreen() {
               <Text style={s.switchLink}> Create one →</Text>
             </TouchableOpacity>
             <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { openPaywall(); setShowPaywall(true); }}>
-              <Text style={s.secondaryAuthText}>View Explorer plans without an account</Text>
+              <Text style={s.secondaryAuthText}>See Explorer plans</Text>
             </TouchableOpacity>
             <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} />
           </ScrollView>
@@ -1109,7 +1116,7 @@ export default function ProfileScreen() {
             <Text style={s.authHeading}>Create account</Text>
             <View style={s.signupPerk}>
               <Ionicons name="flash" size={14} color={C.orange} />
-              <Text style={s.signupPerkText}>{CREDIT_REWARDS.signup} free credits on signup + earn more by contributing to the map</Text>
+              <Text style={s.signupPerkText}>Start with {CREDIT_REWARDS.signup} credits. Helpful reports can earn more.</Text>
             </View>
             <View style={s.socialAuthStack}>
               {appleAuthAvailable && AppleAuthentication ? (
@@ -1150,7 +1157,7 @@ export default function ProfileScreen() {
           <Text style={s.switchLink}> Sign in →</Text>
         </TouchableOpacity>
         <TouchableOpacity style={s.secondaryAuthBtn} onPress={() => { openPaywall(); setShowPaywall(true); }}>
-          <Text style={s.secondaryAuthText}>View Explorer plans without an account</Text>
+          <Text style={s.secondaryAuthText}>See Explorer plans</Text>
         </TouchableOpacity>
         <PaywallModal visible={showPaywall} onClose={() => setShowPaywall(false)} />
       </ScrollView>
@@ -1727,13 +1734,18 @@ export default function ProfileScreen() {
         {/* Plan + Credits */}
         {profileSection === 'account' && (
         <View style={s.creditsCard}>
-          <View style={s.creditsTop}>
-            <View>
-              <Text style={s.creditsLabel}>TRAIL CREDITS</Text>
-              <Text style={s.creditsBalance}>{user?.credits ?? 0}</Text>
+          <View style={s.planSignupHeader}>
+            <View style={[s.planSignupIcon, hasPlan && s.planSignupIconActive]}>
+              <Ionicons name={hasPlan ? 'shield-checkmark' : 'compass-outline'} size={21} color={hasPlan ? C.green : C.orange} />
             </View>
-            <View style={[s.creditsBadge, hasPlan && s.creditsBadgeActive]}>
-              <Ionicons name={hasPlan ? 'shield-checkmark' : 'flash'} size={22} color={C.orange} />
+            <View style={{ flex: 1, minWidth: 0 }}>
+              <Text style={s.planSignupEyebrow}>Explorer</Text>
+              <Text style={s.planSignupTitle}>{hasPlan ? 'Explorer active' : 'Plan better trips'}</Text>
+              <Text style={s.planSignupText}>
+                {hasPlan
+                  ? 'Unlimited planning, Camp Briefs, Co-Pilot, and voice tools are ready.'
+                  : 'Unlimited planning, Camp Briefs, Co-Pilot, packing lists, tour deals, and voice tools.'}
+              </Text>
             </View>
           </View>
 
@@ -1741,7 +1753,7 @@ export default function ProfileScreen() {
             <>
               <View style={s.planActiveBanner}>
                 <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
-                <Text style={s.planActiveText}>Explorer Plan active</Text>
+                <Text style={s.planActiveText}>Active</Text>
               </View>
               <TouchableOpacity style={s.managePlanBtn} onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}>
                 <Text style={s.managePlanBtnText}>Manage subscription</Text>
@@ -1750,12 +1762,19 @@ export default function ProfileScreen() {
             </>
           ) : (
             <>
-              <View style={s.divider} />
+              <View style={s.planSignupList}>
+                {EXPLORER_PLAN_POINTS.map(item => (
+                  <View key={item.label} style={s.planSignupPoint}>
+                    <Ionicons name={item.icon} size={14} color={C.orange} />
+                    <Text style={s.planSignupPointText}>{item.label}</Text>
+                  </View>
+                ))}
+              </View>
               <TouchableOpacity style={s.getPlanBtn} onPress={() => { openPaywall(); setShowPaywall(true); }} activeOpacity={0.85}>
                 <View>
-                  <Text style={s.getPlanBtnLabel}>Get Explorer Plan</Text>
+                  <Text style={s.getPlanBtnLabel}>Start Explorer</Text>
                   <Text style={s.getPlanBtnSub}>
-                    {annualProduct?.localizedPrice ?? '$49.99'}/yr · {monthlyProduct?.localizedPrice ?? '$7.99'}/mo{planTrial ? ` · ${planTrial}` : ''}
+                    {annualProduct?.localizedPrice ?? '$49.99'}/yr · {monthlyProduct?.localizedPrice ?? '$7.99'}/mo
                   </Text>
                 </View>
                 <Ionicons name="arrow-forward" size={18} color="#fff" />
@@ -1770,9 +1789,13 @@ export default function ProfileScreen() {
           )}
 
           <View style={s.divider} />
+          <View style={s.creditMiniRow}>
+            <Text style={s.creditMiniLabel}>Trail credits</Text>
+            <Text style={s.creditMiniValue}>{(user?.credits ?? 0) > 0 ? user?.credits : 'Earn'}</Text>
+          </View>
           <TouchableOpacity style={s.historyBtn} onPress={loadHistory}>
             <Ionicons name="time-outline" size={14} color={C.text3} />
-            <Text style={s.historyBtnText}>CREDIT HISTORY</Text>
+            <Text style={s.historyBtnText}>Credit history</Text>
           </TouchableOpacity>
         </View>
         )}
@@ -2799,45 +2822,51 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   checkResetText: { color: C.text3, fontSize: 10, fontFamily: mono },
 
   creditsCard: {
-    backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border, padding: 16,
+    backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 16, gap: 12,
   },
-  creditsTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 },
-  creditsLabel: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1 },
-  creditsBalance: { color: C.orange, fontSize: 52, fontWeight: '800', fontFamily: mono, lineHeight: 58 },
-  creditsBadge: {
-    width: 52, height: 52, borderRadius: 26,
+  planSignupHeader: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
+  planSignupIcon: {
+    width: 42, height: 42, borderRadius: 14,
     backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center',
-    borderWidth: 1, borderColor: C.orange,
+    borderWidth: 1, borderColor: C.orange + '55',
   },
-  creditsBadgeActive: { backgroundColor: C.green + '20', borderColor: C.green },
-  divider: { height: 1, backgroundColor: C.border, marginBottom: 12, marginTop: 4 },
+  planSignupIconActive: { backgroundColor: C.green + '18', borderColor: C.green + '55' },
+  planSignupEyebrow: { color: C.orange, fontSize: 11, fontWeight: '800', marginBottom: 2 },
+  planSignupTitle: { color: C.text, fontSize: 23, lineHeight: 27, fontWeight: '900' },
+  planSignupText: { color: C.text2, fontSize: 13, lineHeight: 18, marginTop: 4 },
+  planSignupList: { gap: 9 },
+  planSignupPoint: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  planSignupPointText: { color: C.text2, fontSize: 13, flex: 1 },
+  divider: { height: 1, backgroundColor: C.border },
   planActiveBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
     backgroundColor: C.green + '18', borderRadius: 10, borderWidth: 1, borderColor: C.green + '44',
-    paddingHorizontal: 12, paddingVertical: 10, marginTop: 8,
+    paddingHorizontal: 12, paddingVertical: 10,
   },
   planActiveText: { color: C.green, fontSize: 13, fontWeight: '700' },
   managePlanBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
-    paddingVertical: 10, marginTop: 4,
+    paddingVertical: 6,
   },
   managePlanBtnText: { color: C.text3, fontSize: 12 },
   getPlanBtn: {
-    backgroundColor: C.orange, borderRadius: 14, padding: 14,
+    backgroundColor: C.orange, borderRadius: 16, padding: 15,
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
-    marginBottom: 8,
     shadowColor: C.orange, shadowOffset: { width: 0, height: 3 }, shadowOpacity: 0.3, shadowRadius: 8,
   },
-  getPlanBtnLabel: { color: '#fff', fontSize: 15, fontWeight: '700' },
-  getPlanBtnSub: { color: 'rgba(255,255,255,0.75)', fontSize: 11, marginTop: 2 },
-  restoreRow: { alignItems: 'center', paddingVertical: 8, marginBottom: 4 },
+  getPlanBtnLabel: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  getPlanBtnSub: { color: 'rgba(255,255,255,0.78)', fontSize: 12, marginTop: 2 },
+  restoreRow: { alignItems: 'center', paddingVertical: 4 },
   restoreRowText: { color: C.text3, fontSize: 12 },
+  creditMiniRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  creditMiniLabel: { color: C.text3, fontSize: 12 },
+  creditMiniValue: { color: C.orange, fontSize: 14, fontWeight: '800' },
   historyBtn: {
     flexDirection: 'row', alignItems: 'center', gap: 6,
     borderWidth: 1, borderColor: C.border, borderRadius: 10,
-    padding: 10, alignSelf: 'flex-start', marginTop: 8,
+    paddingHorizontal: 10, paddingVertical: 9, alignSelf: 'flex-start',
   },
-  historyBtnText: { color: C.text3, fontSize: 11, fontFamily: mono },
+  historyBtnText: { color: C.text3, fontSize: 12 },
 
   historyCard: {
     backgroundColor: C.s2, borderRadius: 14, borderWidth: 1, borderColor: C.border, padding: 14,

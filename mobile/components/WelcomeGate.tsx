@@ -54,8 +54,8 @@ type NeedOption = SingleChoiceOption<WelcomeTravelNeed>;
 const FEATURES: Feature[] = [
   {
     icon: 'map-outline',
-    title: 'Trip shape',
-    body: 'Plan around drive time, camps, fuel, weather, and the stops you want close.',
+    title: 'Route days',
+    body: 'Shape drive time, camps, fuel, weather, and stops in one place.',
   },
   {
     icon: 'car-sport-outline',
@@ -63,9 +63,9 @@ const FEATURES: Feature[] = [
     body: 'Use your own rig, rent when it helps, or keep it flexible.',
   },
   {
-    icon: 'bookmark-outline',
-    title: 'Ready offline',
-    body: 'Keep trips, stops, notes, and downloads together before signal drops.',
+    icon: 'compass-outline',
+    title: 'Explore nearby',
+    body: 'Compare camps, trails, places to stay, and stops around the route.',
   },
 ];
 
@@ -319,9 +319,9 @@ export default function WelcomeGate({
                 </View>
 
                 <View style={s.heroCopy}>
-                  <Text style={s.title}>Plan around the way you travel.</Text>
+                  <Text style={s.title}>Find the next stop.</Text>
                   <Text style={s.body}>
-                    Pick your vehicle, stay style, and must-haves once. Keep routes, stays, notes, and downloads close.
+                    Set your vehicle, stay style, and must-haves once. Trailhead keeps trips practical from the first search.
                   </Text>
                 </View>
 
@@ -443,7 +443,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 20,
   },
   heroTop: {
-    minHeight: 74,
+    minHeight: 62,
     justifyContent: 'center',
   },
   brandRow: {
@@ -471,24 +471,24 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   heroCopy: {
     flex: 1,
     justifyContent: 'center',
-    gap: 14,
-    paddingBottom: 18,
+    gap: 12,
+    paddingBottom: 12,
   },
   title: {
     color: '#ffffff',
-    fontSize: 42,
-    lineHeight: 47,
+    fontSize: 36,
+    lineHeight: 40,
     fontWeight: '900',
     letterSpacing: 0,
-    maxWidth: 380,
+    maxWidth: 340,
     textShadowColor: 'rgba(0,0,0,0.36)',
     textShadowRadius: 14,
     textShadowOffset: { width: 0, height: 2 },
   },
   body: {
     color: 'rgba(255,255,255,0.82)',
-    fontSize: 16,
-    lineHeight: 23,
+    fontSize: 15,
+    lineHeight: 22,
     letterSpacing: 0,
     maxWidth: 360,
   },

@@ -425,11 +425,11 @@ function mapWebMapboxFeatureToPlace(feature: any, fallbackLat: number, fallbackL
     lng,
     type,
     source: 'mapbox_feature',
-    source_label: 'Mapbox',
+    source_label: 'Map data',
     place_id: props.mapbox_id || props.id,
     provider_place_id: props.mapbox_id || props.id,
-    attribution: 'Mapbox',
-    summary: 'Temporary Mapbox basemap feature selected from EXTREME.',
+    attribution: 'Map data',
+    summary: 'Selected place from the map.',
   };
 }
 
@@ -480,7 +480,7 @@ function webPlaceToCandidate(place: any, idx: number, map: any): MapSelectableFe
     type: place.type || 'poi',
     subtype: place.subtype || null,
     source: place.source || 'mapbox_feature',
-    source_label: place.source_label || 'Mapbox',
+    source_label: place.source_label || 'Map data',
     source_layer: place.source_layer || null,
     screen_x: Number.isFinite(point?.x) ? point.x : null,
     screen_y: Number.isFinite(point?.y) ? point.y : null,
@@ -502,7 +502,7 @@ const mapboxContainerStyle: React.CSSProperties = {
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const C = useTheme();
   const mapboxToken = useStore(st => st.mapboxToken);
-  const isExtremeWeb = props.mapLayer === 'extreme' && !!mapboxToken;
+  const isMapboxWeb = !!mapboxToken;
   const mapElRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const mapboxGlRef = useRef<any>(null);
@@ -682,11 +682,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }));
 
   React.useEffect(() => {
-    if (!isExtremeWeb) props.onMapReady?.();
-  }, [isExtremeWeb]);
+    if (!isMapboxWeb) props.onMapReady?.();
+  }, [isMapboxWeb]);
 
   useEffect(() => {
-    if (!isExtremeWeb || !mapElRef.current || mapRef.current) return;
+    if (!isMapboxWeb || !mapElRef.current || mapRef.current) return;
     let cancelled = false;
     setMapboxError('');
     loadMapboxGl()
@@ -746,10 +746,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         mapRef.current = null;
       }
     };
-  }, [isExtremeWeb, mapboxToken]);
+  }, [isMapboxWeb, mapboxToken]);
 
   useEffect(() => {
-    if (!isExtremeWeb || !mapRef.current) return;
+    if (!isMapboxWeb || !mapRef.current) return;
     routeReadyRef.current = false;
     mapRef.current.setStyle(MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard, { config: styleConfig(premiumStyle, props.showTerrain) });
     mapRef.current.once('style.load', () => {
@@ -762,17 +762,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         });
       }
     });
-  }, [isExtremeWeb, premiumStyle, props.showTerrain]);
+  }, [isMapboxWeb, premiumStyle, props.showTerrain]);
 
   useEffect(() => {
-    if (!isExtremeWeb || !mapRef.current || !routeReadyRef.current) return;
+    if (!isMapboxWeb || !mapRef.current || !routeReadyRef.current) return;
     syncWebRoute(mapRef.current, props.waypoints);
-  }, [isExtremeWeb, props.waypoints]);
+  }, [isMapboxWeb, props.waypoints]);
 
   useEffect(() => {
-    if (!isExtremeWeb || !mapRef.current || !mapboxGlRef.current) return;
+    if (!isMapboxWeb || !mapRef.current || !mapboxGlRef.current) return;
     syncWebMarkers(mapboxGlRef.current, mapRef.current, props, markerRefs);
-  }, [isExtremeWeb, props.waypoints, props.camps, props.gas, props.pois, props.searchMarker, props.userLoc, props.suppressFeatureTaps]);
+  }, [isMapboxWeb, props.waypoints, props.camps, props.gas, props.pois, props.searchMarker, props.userLoc, props.suppressFeatureTaps]);
 
   const pins = [
     ...props.waypoints.map((p, idx) => ({ key: `wp_${idx}`, name: p.name, type: p.type, color: '#c65f39', onPress: () => props.onWaypointTap(idx, p.name) })),
@@ -790,7 +790,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   ].filter(Boolean);
   const previewFooterText = footerParts.length ? footerParts.join(' · ') : 'No route yet';
 
-  if (isExtremeWeb) {
+  if (isMapboxWeb) {
     return (
       <View style={[styles.wrap, styles.mapboxWrap, { backgroundColor: '#05070a' }]}>
         {React.createElement('div', { ref: mapElRef, style: mapboxContainerStyle })}

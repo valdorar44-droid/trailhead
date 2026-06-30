@@ -7,17 +7,17 @@
   "nav": [
     { "label": "App", "href": "/#app" },
     { "label": "Explore", "href": "/#explore" },
-    { "label": "Trips", "href": "/#offline" },
+    { "label": "Routes", "href": "/#routes" },
     { "label": "Open app", "href": "/app" },
     { "label": "Download", "href": "/#download" }
   ],
   "footer": {
     "headline": {
       "lead": "Find the",
-      "italic": "way in.",
-      "tail": "Carry the way out."
+      "italic": "next stop.",
+      "tail": "Build the route."
     },
-    "blurb": "Trailhead keeps camps, trails, routes, stays, and trip details in one place.",
+    "blurb": "Trailhead brings camps, trails, routes, search, and place details into one outdoor travel app.",
     "columns": [
       {
         "title": "Download",
@@ -31,7 +31,7 @@
         "title": "Trailhead",
         "links": [
           { "label": "Explore", "href": "/#explore" },
-          { "label": "Trips", "href": "/#offline" }
+          { "label": "Routes", "href": "/#routes" }
         ]
       },
       {

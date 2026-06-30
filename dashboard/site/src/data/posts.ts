@@ -14,12 +14,12 @@ export const posts = [
   {
     slug: 'app-on-web-phone-in-field',
     category: 'Product note',
-    title: 'Open the app on web. Carry it on the phone.',
-    description: 'A browser is a good place to think. It is a questionable place to trust your day when the road gets rough and the signal disappears.',
+    title: 'One place for trip work.',
+    description: 'Trailhead keeps search, saved places, routes, and account work in the same flow.',
     body: [
-      'Trailhead on web uses the same app surface, so trips, places, and account work do not feel detached from the phone.',
-      'The phone stores the route, map packs, and field data locally. It keeps location and map controls built for motion and poor service.',
-      'That split is not a limitation. It is the product being honest about where each surface is strongest.'
+      'Trailhead keeps the browser and phone experience close so places, routes, and saved work do not feel detached.',
+      'Use the bigger screen when it helps. Use the phone when location, camera, and field controls matter.',
+      'The important part is continuity: the place you found should be the place you can route to, save, report on, and reopen later.'
     ]
   },
   {

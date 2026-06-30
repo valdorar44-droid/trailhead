@@ -19125,7 +19125,7 @@ function MapScreen() {
       {mapLoadFailed && (
         <View style={[s.mapLoadFailBanner, topChromeLaneStyle]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#fbbf24" />
-          <Text style={s.mapLoadFailText}>Map could not open here. Check signal or saved areas.</Text>
+          <Text style={s.mapLoadFailText}>Map is taking longer than expected.</Text>
         </View>
       )}
 

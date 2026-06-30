@@ -821,6 +821,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   const mapRef = useRef<any>(null);
   const camRef = useRef<any>(null);
+  const mapReadyRef = useRef(false);
   const lastNativeStandardTapRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const onPoiTapRef = useRef(onPoiTap);
   const suppressFeatureTapsRef = useRef(suppressFeatureTaps);
@@ -2203,13 +2204,16 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // ── Map event handlers ───────────────────────────────────────────────────────
   const handleMapReady = useCallback(() => {
+    mapReadyRef.current = true;
     emitDebugEvent('map:ready');
     onMapReady();
     restoreRecentViewportIfNeeded().catch(() => {});
   }, [emitDebugEvent, onMapReady, restoreRecentViewportIfNeeded]);
 
-  const handleMapLoadFail = useCallback(() => {
-    emitDebugEvent('map:load-failed');
+  const handleMapLoadFail = useCallback((event?: any) => {
+    const afterReady = mapReadyRef.current;
+    emitDebugEvent('map:load-failed', { afterReady, message: event?.message ?? event?.nativeEvent?.message ?? null });
+    if (afterReady) return;
     onError?.('map-load-failed');
   }, [emitDebugEvent, onError]);
 

@@ -35,31 +35,5 @@ const { title, description, image, transparentNav = false } = Astro.props;
     )}
     <slot />
     <Footer data={site.footer} client:load />
-    <script is:inline>
-      (function () {
-        function applyTheme() {
-          const saved = localStorage.getItem("hq-theme");
-          if (saved) {
-            document.documentElement.setAttribute("data-theme", saved);
-          }
-        }
-
-        // Apply theme on initial load
-        applyTheme();
-
-        // Apply theme after view transitions
-        document.addEventListener("astro:after-swap", applyTheme);
-
-        // Handle theme toggle
-        document.addEventListener("click", (e) => {
-          const t = e.target.closest("#theme-toggle");
-          if (!t) return;
-          const cur = document.documentElement.getAttribute("data-theme");
-          const next = cur === "dark" ? "light" : "dark";
-          document.documentElement.setAttribute("data-theme", next);
-          localStorage.setItem("hq-theme", next);
-        });
-      })();
-    </script>
   </body>
 </html>

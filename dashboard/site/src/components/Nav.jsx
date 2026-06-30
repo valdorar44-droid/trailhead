@@ -5,7 +5,7 @@ export default function Nav({ brand, links, active, transparent = false }) {
 
   const base = transparent
     ? 'nav-transparent bg-transparent border-transparent text-white'
-    : 'bg-[color-mix(in_srgb,var(--bg)_82%,transparent)] border-b border-[var(--rule)] backdrop-blur-xl text-[var(--fg)]';
+    : 'bg-[color-mix(in_srgb,var(--bg)_92%,transparent)] border-b border-[var(--rule)] backdrop-blur-xl text-[var(--fg)]';
 
   const linkBase = transparent ? 'text-white/90 hover:text-[var(--accent)]' : 'text-[var(--fg)] hover:text-[var(--accent)]';
 
@@ -14,13 +14,10 @@ export default function Nav({ brand, links, active, transparent = false }) {
       <div className="max-w-[1440px] mx-auto px-5 md:px-14 relative z-10">
         <div className="flex items-center justify-between py-[1.1rem]">
           <a href="/" className={`font-display flex items-center gap-3 font-semibold tracking-tight text-[1.05rem] ${transparent ? '' : 'text-(--fg)'}`}>
-            <img src="/assets/app-icon.png" alt="" className="w-8 h-8 rounded-[9px] shadow-[0_12px_24px_rgba(0,0,0,.28)]" />
+            <img src="/assets/app-icon.png" alt="" className="w-8 h-8 rounded-[9px] shadow-[0_10px_22px_rgba(45,38,30,.16)]" />
             <span>
               {brand.name}
               {brand.mark && <sup className="ml-0.5 text-[0.55em] opacity-60">{brand.mark}</sup>}
-            </span>
-            <span className={`font-mono text-[0.68rem] tracking-[0.18em] hidden lg:inline ${transparent ? 'opacity-70' : 'opacity-55'}`}>
-              / {brand.tagline}
             </span>
           </a>
 
@@ -40,17 +37,6 @@ export default function Nav({ brand, links, active, transparent = false }) {
                 </a>
               );
             })}
-            <button
-              id="theme-toggle"
-              aria-label="Toggle theme"
-              className="nav-btn hidden md:grid w-10 h-10 rounded-full place-items-center transition-all duration-500 hover:rotate-90"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                <circle cx="12" cy="12" r="4" />
-                <path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41" />
-              </svg>
-            </button>
-
             <button
               onClick={() => setOpen((o) => !o)}
               aria-label="Menu"

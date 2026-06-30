@@ -2,14 +2,13 @@
   "brand": {
     "name": "Trailhead",
     "mark": "",
-    "tagline": "Camp / Trail / Offline"
+    "tagline": "Camps and routes"
   },
   "nav": [
     { "label": "App", "href": "/#app" },
     { "label": "Explore", "href": "/#explore" },
-    { "label": "Offline", "href": "/#offline" },
-    { "label": "Web app", "href": "/app" },
-    { "label": "Journal", "href": "/blog" },
+    { "label": "Trips", "href": "/#offline" },
+    { "label": "Open app", "href": "/app" },
     { "label": "Download", "href": "/#download" }
   ],
   "footer": {
@@ -18,22 +17,21 @@
       "italic": "way in.",
       "tail": "Carry the way out."
     },
-    "blurb": "Trailhead brings camps, trails, route planning, Explore cards, field reports, and offline map packs into one trip app.",
+    "blurb": "Trailhead keeps camps, trails, routes, stays, and trip details in one place.",
     "columns": [
       {
         "title": "Download",
         "links": [
           { "label": "Download iOS", "href": "https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349" },
           { "label": "Download Android", "href": "https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US" },
-          { "label": "Open web app", "href": "/app" }
+          { "label": "Open app", "href": "/app" }
         ]
       },
       {
         "title": "Trailhead",
         "links": [
           { "label": "Explore", "href": "/#explore" },
-          { "label": "Offline maps", "href": "/#offline" },
-          { "label": "Journal", "href": "/blog" }
+          { "label": "Trips", "href": "/#offline" }
         ]
       },
       {

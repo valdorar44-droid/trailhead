@@ -7,18 +7,15 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.trailhead.
 
 <Layout
   title="Trailhead - Camps, trails, routes, and offline maps"
-  description="Trailhead helps overland and outdoor travelers find camps, trails, route context, Explore cards, field reports, and offline map packs on iOS, Android, and the web app."
-  transparentNav={true}
+  description="Trailhead helps travelers find camps, trails, stays, route stops, and offline trip details on iOS, Android, and web."
 >
   <main class="trailhead-home">
-    <section class="th-hero" id="app">
-      <video class="th-hero-video" src="/hero.mp4" poster="/hero.jpg" autoplay muted loop playsinline></video>
-      <div class="th-hero-shade"></div>
+    <section class="th-hero" id="app" aria-label="Trailhead app">
       <div class="th-hero-inner">
         <div class="th-hero-copy">
-          <p class="th-eyebrow">Trailhead for iOS, Android, and web</p>
-          <h1>Find the camp. Keep the route. Carry the map.</h1>
-          <p class="th-lead">Trailhead brings camps, trails, Explore cards, field reports, route planning, and offline map packs into one trip app.</p>
+          <p class="th-eyebrow">Trailhead</p>
+          <h1>Find the next place worth stopping.</h1>
+          <p class="th-lead">Browse camps, trails, stays, routes, and trip details before service drops.</p>
           <div class="th-actions">
             <a class="th-store-link" href={iosUrl} aria-label="Download Trailhead on the App Store">
               <span>Download on the</span>
@@ -28,91 +25,56 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.trailhead.
               <span>Get it on</span>
               <strong>Google Play</strong>
             </a>
-            <a class="th-btn th-btn-ghost" href="/app">Open web app</a>
-          </div>
-          <div class="th-proof-row" aria-label="Trailhead highlights">
-            <span>Offline map packs</span>
-            <span>Camp and trail search</span>
-            <span>Trip tools</span>
-            <span>Explore guides</span>
+            <a class="th-btn th-btn-ghost" href="/app">Open app</a>
           </div>
         </div>
-        <div class="th-phone-stack" aria-label="Trailhead app screenshots">
-          <img class="th-phone th-phone-main" src="/assets/screenshots/explore-home.jpg" alt="Trailhead Explore home with destination cards" loading="eager" />
-          <img class="th-phone th-phone-side" src="/assets/screenshots/map-main.jpg" alt="Trailhead app map with camp pins and layers" loading="eager" />
+
+        <div class="th-phone-stack" aria-label="Trailhead app screens">
+          <figure class="th-phone-frame th-phone-main">
+            <img src="/assets/screenshots/map-main.jpg" alt="Trailhead map screen with nearby camp and water pins" loading="eager" />
+          </figure>
+          <figure class="th-phone-frame th-phone-side">
+            <img src="/assets/screenshots/yosemite-detail.jpg" alt="Trailhead camp detail screen with nearby camp options" loading="eager" />
+          </figure>
         </div>
       </div>
     </section>
 
-    <section class="th-product-strip" id="explore" aria-label="Trailhead app surfaces">
-      <article>
-        <span>01</span>
-        <h2>Explore that feels useful</h2>
-        <p>Destination cards can cover trails, camps, parks, monuments, glaciers, tours, routes, and nearby context without making every place feel the same.</p>
-      </article>
-      <article>
-        <span>02</span>
-        <h2>Trip tools without clutter</h2>
-        <p>Use the web app when the bigger screen helps, then keep saved places, camps, maps, and trip context on the phone.</p>
-      </article>
-      <article>
-        <span>03</span>
-        <h2>Field details on the phone</h2>
-        <p>Keep saved routes, offline packs, reports, layers, and guide audio where they matter most: in the app before service drops.</p>
-      </article>
-    </section>
-
-    <section class="th-section th-section-app">
-      <div>
-        <p class="th-eyebrow">The app is the field tool</p>
-        <h2>Built for the places that make service unreliable.</h2>
-        <p>Search places, inspect camp details, save map packs, and bring the trip with you. The web app stays available for account and trip work, but the mobile app is the center of the experience.</p>
-        <div class="th-actions th-actions-tight" id="download">
-          <a class="th-btn th-btn-primary" href={iosUrl}>Download iOS</a>
-          <a class="th-btn th-btn-primary th-btn-android" href={androidUrl}>Download Android</a>
-          <a class="th-btn th-btn-ghost" href="/app">Open web app</a>
-        </div>
-      </div>
-      <div class="th-shot th-shot-wide">
-        <img src="/assets/screenshots/yosemite-detail.jpg" alt="Trailhead Yosemite detail screen with nearby camp cards" loading="lazy" />
-      </div>
-    </section>
-
-    <section class="th-feature-grid" id="offline">
-      <article>
-        <span>Offline</span>
-        <h3>Map packs before the dead zone</h3>
-        <p>Prepare regions on the phone instead of hoping the map stays cached.</p>
-      </article>
-      <article>
-        <span>Layers</span>
-        <h3>Terrain, public land, and conditions</h3>
-        <p>Use readable layer controls for land context, trails, water, weather, fire, avalanche, and road information.</p>
-      </article>
-      <article>
-        <span>Explore</span>
-        <h3>Cards with a reason to open them</h3>
-        <p>See places, photos, details, nearby trails, camps, and route options from one surface.</p>
-      </article>
-      <article>
-        <span>Reports</span>
-        <h3>Field notes that stay practical</h3>
-        <p>Keep trail and camp context short, current, and easy to read when time matters.</p>
-      </article>
-    </section>
-
-    <section class="th-section">
-      <div class="th-shot th-layer-shot">
-        <img src="/assets/screenshots/map-layers.jpg" alt="Trailhead map layers sheet" loading="lazy" />
+    <section class="th-section" id="explore">
+      <div class="th-shot th-shot-detail">
+        <img src="/assets/screenshots/yosemite-detail.jpg" alt="Trailhead Yosemite camp detail screen" loading="lazy" />
       </div>
       <div>
-        <p class="th-eyebrow">One account, useful surfaces</p>
-        <h2>Plan on web. Carry it in the app.</h2>
-        <p>The web app is there when a laptop makes sense. Trailhead on iOS and Android is where saved trips, offline packs, layers, reports, and location-aware tools are meant to live.</p>
+        <p class="th-eyebrow">Explore</p>
+        <h2>Open the place, then find what is nearby.</h2>
+        <p>See camps, trails, stays, photos, nearby stops, and useful notes from one clean place page.</p>
+      </div>
+    </section>
+
+    <section class="th-section th-section-map">
+      <div>
+        <p class="th-eyebrow">Map</p>
+        <h2>Search around the route, not around a guess.</h2>
+        <p>Find camps, water, trailheads, fuel, and stops from the same view you use on the road.</p>
         <div class="th-actions th-actions-tight">
-          <a class="th-btn th-btn-primary" href={iosUrl}>iOS download</a>
-          <a class="th-btn th-btn-primary th-btn-android" href={androidUrl}>Android download</a>
+          <a class="th-btn th-btn-primary" href="/app">Open app</a>
         </div>
+      </div>
+      <div class="th-shot th-shot-map">
+        <img src="/assets/screenshots/map-main.jpg" alt="Trailhead map with camp, water, and route pins" loading="lazy" />
+      </div>
+    </section>
+
+    <section class="th-closing" id="offline">
+      <div>
+        <p class="th-eyebrow">Trips</p>
+        <h2>Keep the details close when service gets thin.</h2>
+        <p>Save places, check routes, and keep the trip ready before you leave town.</p>
+      </div>
+      <div class="th-actions" id="download">
+        <a class="th-btn th-btn-primary" href={iosUrl}>Download iOS</a>
+        <a class="th-btn th-btn-primary th-btn-android" href={androidUrl}>Download Android</a>
+        <a class="th-btn th-btn-ghost" href="/app">Open app</a>
       </div>
     </section>
   </main>

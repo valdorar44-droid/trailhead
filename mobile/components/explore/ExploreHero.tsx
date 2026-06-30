@@ -5,7 +5,24 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { EXPLORE_CATEGORY_CHIPS, type ExploreCategoryKey, type ExploreMode } from './exploreDisplay';
 
 const DEFAULT_HERO_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
-const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = ['all', 'camp', 'glamping', 'trails', 'waterfalls', 'peaks', 'huts'];
+const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = [
+  'all',
+  'guided',
+  'parks',
+  'camp',
+  'trails',
+  'things',
+  'views',
+  'waterfalls',
+  'peaks',
+  'trailheads',
+  'water',
+  'fuel',
+  'resupply',
+  'huts',
+  'glamping',
+  'nearby',
+];
 
 type HeroWeather = {
   loading: boolean;
@@ -125,15 +142,17 @@ export function ExploreHero({
           {HERO_CATEGORY_KEYS.map(key => {
             const source = EXPLORE_CATEGORY_CHIPS.find(item => item.key === key);
             if (!source) return null;
-            const active = key === 'all'
-              ? selectedCategory === 'all' && mode !== 'nearby'
-              : selectedCategory === key && mode !== 'nearby';
-            const label = key === 'huts' ? 'Cabins' : key === 'peaks' ? 'Mountains' : source.label;
-            const icon = key === 'huts' ? 'home-outline' : key === 'peaks' ? 'triangle-outline' : source.icon;
+            const active = key === 'nearby'
+              ? mode === 'nearby'
+              : key === 'all'
+                ? selectedCategory === 'all' && mode !== 'nearby'
+                : selectedCategory === key && mode !== 'nearby';
+            const label = heroCategoryLabel(key, source.label);
+            const icon = heroCategoryIcon(key, source.icon);
             return (
               <TouchableOpacity
                 key={key}
-                style={styles.categoryItem}
+                style={[styles.categoryItem, { width: heroCategoryWidth(key) }]}
                 onPress={() => onCategorySelect(key)}
                 activeOpacity={0.84}
               >
@@ -148,6 +167,31 @@ export function ExploreHero({
       </View>
     </View>
   );
+}
+
+function heroCategoryLabel(key: ExploreCategoryKey, fallback: string) {
+  if (key === 'parks') return 'National Parks';
+  if (key === 'camp') return 'Camps';
+  if (key === 'huts') return 'Cabins';
+  if (key === 'peaks') return 'Mountains';
+  if (key === 'things') return 'Things';
+  if (key === 'resupply') return 'Supplies';
+  if (key === 'nearby') return 'Nearby';
+  return fallback;
+}
+
+function heroCategoryIcon(key: ExploreCategoryKey, fallback: string) {
+  if (key === 'huts') return 'home-outline';
+  if (key === 'peaks') return 'triangle-outline';
+  return fallback;
+}
+
+function heroCategoryWidth(key: ExploreCategoryKey) {
+  if (key === 'parks') return 96;
+  if (key === 'waterfalls' || key === 'trailheads' || key === 'glamping' || key === 'peaks') return 84;
+  if (key === 'resupply' || key === 'guided') return 74;
+  if (key === 'things' || key === 'nearby') return 70;
+  return 64;
 }
 
 const styles = StyleSheet.create({
@@ -247,7 +291,7 @@ const styles = StyleSheet.create({
   unitTextActive: { color: '#0f172a' },
   categoryScroller: { flexGrow: 0, flexShrink: 0, height: 82 },
   categoryRail: { gap: 10, paddingTop: 5, paddingRight: 30 },
-  categoryItem: { width: 62, alignItems: 'center', gap: 7 },
+  categoryItem: { alignItems: 'center', gap: 7 },
   categoryIcon: {
     width: 50,
     height: 50,
@@ -264,7 +308,7 @@ const styles = StyleSheet.create({
   },
   categoryLabel: {
     color: '#fff',
-    fontSize: 12,
+    fontSize: 11,
     lineHeight: 15,
     fontWeight: '900',
     textShadowColor: 'rgba(0,0,0,0.38)',

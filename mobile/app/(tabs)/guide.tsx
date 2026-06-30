@@ -16,7 +16,6 @@ import {
   ExploreDetailSheet,
   ExploreExperiencesRail,
   ExploreHero,
-  ExploreHomeControls,
   ExplorePlaceCard,
   exploreCategoryFromQuery,
   exploreCategoryMatches,
@@ -115,6 +114,7 @@ function wmoIcon(code: number) {
 
 function exploreCategoryLabel(key: ExploreCategoryKey) {
   if (key === 'huts') return 'Cabins';
+  if (key === 'parks') return 'National Parks';
   return EXPLORE_CATEGORY_CHIPS.find(item => item.key === key)?.label ?? 'Explore';
 }
 
@@ -1427,7 +1427,7 @@ function GuideScreenContent() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [tab, setTab] = useState<'explore' | 'narrations' | 'weather'>('explore');
   const [exploreMode, setExploreMode] = useState<'featured' | 'nearby' | 'trip'>('featured');
-  const [exploreSortMode, setExploreSortMode] = useState<ExploreSortMode>('best');
+  const [exploreSortMode] = useState<ExploreSortMode>('best');
   const [exploreCategory, setExploreCategory] = useState<ExploreCategoryKey>('all');
   const [exploreSavedOnly, setExploreSavedOnly] = useState(false);
   const [exploreQuery, setExploreQuery] = useState('');
@@ -2218,7 +2218,7 @@ function GuideScreenContent() {
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
-  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, exploreSortMode]);
+  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly]);
 
   useEffect(() => {
     const query = exploreQuery.trim();
@@ -3309,14 +3309,6 @@ function GuideScreenContent() {
 	    }
 	  }
 
-  function cycleExploreSortMode() {
-    setExploreSortMode(current => {
-      if (current === 'best') return 'nearest';
-      if (current === 'nearest') return 'source';
-      return 'best';
-    });
-  }
-
   function renderLandingHeader() {
     return (
       <View style={s.landingHeader}>
@@ -3402,26 +3394,6 @@ function GuideScreenContent() {
 
         {tab === 'explore' && (
           <View style={s.exploreFeedSheet}>
-            <ExploreHomeControls
-              mode={exploreMode}
-              category={exploreCategory}
-              savedOnly={exploreSavedOnly}
-              hasQuery={hasExploreQuery}
-              shownCount={holdLegacySearchWrapper ? 0 : rankedExplore.length}
-              countLabel={tourSearchPaused ? exploreHomeCountLabel : showExperienceSearch || exploreSearchResolving ? exploreHomeCountLabel : exploreNearbyNeedsLocation ? 'Location needed' : undefined}
-              sortMode={exploreSortMode}
-              onModeChange={mode => {
-                setExploreSavedOnly(false);
-                setExploreMode(mode);
-              }}
-              onCategorySelect={selectExploreHomeCategory}
-              onClearCategory={() => setExploreCategory('all')}
-              onClearSaved={() => setExploreSavedOnly(false)}
-              onShowMore={!holdLegacySearchWrapper && visibleRankedExplore.length < rankedExplore.length ? () => setExploreVisibleLimit(limit => limit + EXPLORE_VISIBLE_STEP) : undefined}
-              onSourcePress={() => setExploreSortMode(current => current === 'source' ? 'best' : 'source')}
-              onSortCycle={cycleExploreSortMode}
-            />
-
             {(showExperienceSearch || tourSearchPaused) && (
               <ExploreExperiencesRail
                 experiences={exploreSearchExperiences}

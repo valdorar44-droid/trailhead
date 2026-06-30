@@ -5770,6 +5770,7 @@ function MapScreen() {
   const lastAndroidLocationDebugRef = useRef<{ at: number; lat: number; lng: number } | null>(null);
   const discoverRef  = useRef<CampsitePin[]>([]);
   const campAreaRequestRef = useRef(0);
+  const campPinsLockUntilRef = useRef(0);
 
   const webLoadedRef = useRef(false);
   const viewportRef  = useRef<{ n: number; s: number; e: number; w: number; zoom: number } | null>(null);
@@ -8334,6 +8335,7 @@ function MapScreen() {
     setInlineSearchOpen(false);
     setShowSearch(false);
     setShowCampPins(true);
+    campPinsLockUntilRef.current = Date.now() + 18_000;
     setCampDiscoveryWideActive(true);
     setCampDiscoverySheetDismissed(false);
     setQuickToast('Searching camps and stays');
@@ -14445,6 +14447,7 @@ function MapScreen() {
     const radiusMi = Math.min(Math.ceil(Math.sqrt(latMi * latMi + lngMi * lngMi)), opts.radiusCapMi ?? MAX_FREECAM_CAMP_SEARCH_RADIUS_MI);
     const requestId = campAreaRequestRef.current + 1;
     campAreaRequestRef.current = requestId;
+    campPinsLockUntilRef.current = Math.max(campPinsLockUntilRef.current, Date.now() + 18_000);
     const includeStays = Boolean(opts.campOnly || lookupTypes.length === 0 || lookupTypes.some(type => ['private', 'private_stay', 'farm', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp'].includes(type)));
     const campLimit = opts.campOnly ? 420 : 300;
     setIsLoadingAreaCamps(true);
@@ -14564,6 +14567,7 @@ function MapScreen() {
       // Feed results to WebView (legacy path) AND native map
       webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: tagged }));
       setAreaCamps(tagged);
+      campPinsLockUntilRef.current = Date.now() + 12_000;
       setCampDiscoveryResultKey(boundsKey);
       if (opts.openSheet) setCampDiscoverySheetDismissed(false);
       setSearchResult({ count: tagged.length });
@@ -18870,7 +18874,13 @@ function MapScreen() {
               : campLookupFilters(activeFilters)?.length
                 ? MIN_FILTERED_CAMP_SEARCH_ZOOM
                 : MIN_CAMP_SEARCH_ZOOM;
-            if ((b.zoom ?? 0) < campClearZoom) setAreaCamps([]);
+            const campResultsProtected = (
+              campDiscoveryWideActive ||
+              isLoadingAreaCamps ||
+              !!campDiscoveryLoadingKey ||
+              Date.now() < campPinsLockUntilRef.current
+            );
+            if ((b.zoom ?? 0) < campClearZoom && !campResultsProtected) setAreaCamps([]);
             const lat = (b.n + b.s) / 2;
             const lng = (b.e + b.w) / 2;
             const radius = Math.max(1.0, Math.min(4.0, Math.max(Math.abs(b.n - b.s), Math.abs(b.e - b.w)) / 2 + 0.5));

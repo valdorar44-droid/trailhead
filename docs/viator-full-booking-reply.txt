@@ -1,0 +1,165 @@
+Trailhead - Viator Full + Booking Access Reply
+Prepared: July 1, 2026
+
+Quick position
+Trailhead is pursuing Full + Booking access. Viator remains merchant of record. Trailhead intends to use Viator's iframe payment solution, not direct card collection, to reduce PCI scope. We are requesting sandbox booking endpoint access to build and certify. Production booking launch depends on Viator certification and SAQ A AOC.
+
+Email reply to Ryan
+
+Dear Ryan,
+
+Thank you for the detailed clarification. Yes, Trailhead does intend to pursue Full + Booking access.
+
+Our goal is to keep the customer inside the Trailhead app and website for tour selection and checkout while Viator remains the merchant of record and owns post-booking customer support. We understand this requires Trailhead to build the required booking questions flow, payment handoff, booking confirmation, voucher display, cancellation quote/cancel flow, supplier cancellation polling, and certification requirements before production booking access can go live.
+
+For payments, we plan to implement the Viator iframe payment solution. We are choosing iframe to reduce PCI scope compared with direct API card collection. We understand we still need to provide the required SAQ A AOC certification before production booking access is enabled.
+
+We are requesting sandbox access to the booking endpoints so we can build and test the certified implementation. We understand production booking credentials require successful front-end and back-end certification and valid PCI documentation.
+
+Answers:
+
+1. Payments solution selected
+Trailhead will implement the iframe payment solution.
+
+2. PCI compliance
+We do not have a PCI certificate to submit today. Because we plan to use the iframe solution, our target certification path is SAQ A AOC. We understand this must be completed and shared before production booking access can go live, and we will maintain an updated certificate as required.
+
+3. Endpoint usage
+Trailhead will use the real-time search model, not ingestion. Search endpoints will only be called from user-initiated searches, with pagination. Product detail, schedule, availability, booking questions, hold, payment, and book endpoints will only be used after a customer selects a specific product and moves through the booking flow. We will not use search endpoints for ingestion.
+
+4. Certification requirements
+Confirmed. Trailhead will comply with Viator front-end and back-end certification requirements before production launch of booking.
+
+5. Product catalog
+Yes, we are interested in the out-of-the-box high-performing catalog for the initial certified booking launch if it supports our outdoor/adventure use case. Trailhead also serves adventure destinations, trail towns, national parks, overlanding routes, and international trekking regions, so please advise if the curated catalog would limit coverage for destinations such as Pakistan/K2. If so, we would prefer broader product access with compliant real-time search and filtering.
+
+Website and app surfaces:
+https://gettrailhead.app
+https://api.gettrailhead.app
+Trailhead mobile app for iOS and Android
+
+Expected live date:
+Target: sandbox implementation and certification build during July-August 2026. Production booking launch depends on Viator certification and PCI SAQ A AOC completion.
+
+Best regards,
+Trailhead
+
+
+Backend-check answers
+
+Company name:
+Trailhead / GetTrailhead
+
+B2B/B2C:
+B2C
+
+Implementation surface:
+Mobile app for iOS and Android, plus responsive web.
+
+Destinations:
+Viator-supported destinations, with focus on outdoor, parks, adventure, trail-town, road-trip, overlanding, and trekking destinations. No planned destination exclusions unless Viator supply, legal restrictions, or partner policy requires it.
+
+Products:
+No fixed product ingestion for launch. Products are surfaced from user-initiated real-time search, paginated as the customer requests more results. Ranking/filtering may use outdoor relevance, rating, availability, price, duration, destination fit, free cancellation, and Viator fields.
+
+Endpoint usage model:
+Real-time search model. No product ingestion.
+
+/products/modified-since
+Not used.
+
+/products/bulk
+Not used except edge cases if approved.
+
+/products/{product-code}
+Real-time only for one selected product. Cache max 1 hour.
+
+/availability/schedules/modified-since
+Not used.
+
+/availability/schedules/bulk
+Not used except edge cases if approved.
+
+/availability/schedules/{product-code}
+Real-time only for one selected product. Cache max 1 hour.
+
+/products/search
+Real-time user search only. Max 50 per request. More pages only when the customer asks for more. Cache max 1 hour.
+
+/search/freetext
+Real-time typed search only. Max 50 per request. More pages only when the customer asks for more. Cache max 1 hour.
+
+/products/tags
+Weekly cache if used.
+
+/products/booking-questions
+Monthly cache and selected-product checkout refresh if required.
+
+/locations/bulk
+Monthly cache if used; on demand for new location references if needed.
+
+/exchange-rates
+Cache by expiry if used.
+
+/reviews/product
+Weekly/monthly cache if used; not indexed; provider attribution shown.
+
+/suppliers/search/product-codes
+Weekly cache if used.
+
+/destinations
+Weekly/monthly cache if used.
+
+/attractions/search and /attractions/{attraction-id}
+Weekly/monthly cache if used; not indexed.
+
+/availability/check
+Real-time only after product, date, and passenger mix are selected. Re-check before booking if required.
+
+/bookings/cart/hold
+Real-time checkout only, used with /bookings/cart/book.
+
+/bookings/cart/book
+Real-time checkout only after hold/payment flow; booking status verified; Viator voucher shared.
+
+/v1/checkoutsessions/{sessionToken}/paymentaccounts
+Real-time iframe payment flow only.
+
+/bookings/status
+Exception/pending/unclear status only; not broad polling.
+
+/bookings/modified-since
+Every 2-5 minutes after booking go-live for supplier cancellations.
+
+/bookings/modified-since/acknowledge
+Every 2-5 minutes as required by acknowledgeBy timestamp.
+
+/bookings/cancel-reasons
+Monthly cache.
+
+/bookings/{booking-reference}/cancel-quote
+Real-time cancellation flow before canceling.
+
+/bookings/{booking-reference}/cancel
+Real-time cancellation flow after customer confirmation.
+
+Product search:
+Search results come from Viator real-time search endpoints. Trailhead will not ingest search results into a permanent product database for launch. Pagination is applied. Trailhead will not request more than 50 products per call.
+
+Attractions:
+Not initially. If enabled later, attraction data will not be indexed.
+
+Reviews:
+If ratings or reviews are displayed, they will not be indexed. Viator/Tripadvisor attribution will be shown.
+
+Exchange rates:
+Not initially. If enabled later, refreshed according to expiry timestamp.
+
+Locations:
+Trailhead does not rely on Viator-provided Google location details for initial launch. We use our own map/place providers. If Google location details from provider references are displayed later, Trailhead will use its own Google Places access.
+
+Real-time availability and pricing:
+Trailhead will call /availability/check after the customer selects a specific product, travel date, and passenger mix based on Viator age bands. We will also re-check before booking if hold is unsupported or expired. Any new price from /availability/check will be applied and shown before booking.
+
+Timeout:
+Trailhead supports Viator's 120-second upstream API timeout requirement. The app may show loading, cached states, or retry options sooner, but backend provider calls will support the required timeout for certification.

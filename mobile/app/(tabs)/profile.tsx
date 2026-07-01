@@ -1141,7 +1141,7 @@ export default function ProfileScreen() {
         regions,
         sample_note: contributorSample.trim() || undefined,
       });
-      setContributorApplyResult('Application received. Imports still stay untrusted until review, verification, or trusted contributor approval.');
+      setContributorApplyResult('Application received. We will review it before field-check access is enabled.');
     } catch (e: any) {
       setContributorApplyResult(e?.message ?? 'Application failed. Please try again.');
     } finally {
@@ -2217,13 +2217,13 @@ export default function ProfileScreen() {
             <View style={s.bugModal}>
               <TrailheadTopBar
                 title="MAP CONTRIBUTOR"
-                subtitle="Reviewed import limits"
+                subtitle="Field review access"
                 icon="ribbon-outline"
                 style={s.bugModalHeader}
                 right={<TouchableOpacity onPress={() => setShowContributorApply(false)}><Ionicons name="close" size={22} color={C.text3} /></TouchableOpacity>}
               />
               <Text style={s.contributorIntro}>
-                Apply for higher reviewed import limits. Approved contributors can help upgrade imported points, but new GPX imports still start untrusted.
+                Apply to help review field-check camp leads. Approved contributors can see private leads, confirm what is still there, and flag bad locations before anything goes public.
               </Text>
               <Text style={s.bugFieldLabel}>REGIONS YOU KNOW</Text>
               <TextInput

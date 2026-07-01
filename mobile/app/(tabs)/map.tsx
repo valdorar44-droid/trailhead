@@ -48,7 +48,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead } from '@/lib/api';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -3303,11 +3303,74 @@ function normalizedPinDetails(details: Pin['details'] | string | null | undefine
   return details;
 }
 
+function privateLeadPinId(leadKey: string): number {
+  let hash = 0;
+  for (let i = 0; i < leadKey.length; i += 1) {
+    hash = ((hash << 5) - hash + leadKey.charCodeAt(i)) | 0;
+  }
+  return -Math.max(1, Math.abs(hash));
+}
+
+function isDispersedLeadPin(pin: Pick<Pin, 'details'>): boolean {
+  return normalizedPinDetails(pin.details).private_lead === '1';
+}
+
+function dispersedLeadStatusLabel(status?: string) {
+  switch (status) {
+    case 'published': return 'Published';
+    case 'trailhead_verified': return 'Checked';
+    case 'community_verified': return 'Checked';
+    case 'needs_field_check': return 'Needs check';
+    case 'rejected': return 'Not found';
+    default: return 'Needs check';
+  }
+}
+
+function dispersedLeadProfileFromDetails(details: Pick<Pin, 'details'>): Partial<CampsiteDetail> {
+  const raw = normalizedPinDetails(details.details).profile_json;
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function dispersedLeadToPin(lead: DispersedLead): Pin {
+  const verifiedMs = lead.source_verified_at ? Date.parse(`${lead.source_verified_at}T00:00:00Z`) : NaN;
+  const submittedAt = Number.isFinite(verifiedMs) ? Math.floor(verifiedMs / 1000) : undefined;
+  const profile = lead.profile ?? {};
+  const label = String(profile.name || '').trim() || 'Dispersed tent site';
+  return {
+    id: privateLeadPinId(lead.lead_key || lead.id),
+    lat: Number(lead.lat),
+    lng: Number(lead.lng),
+    name: label,
+    type: lead.category,
+    land_type: 'Dispersed',
+    description: String(profile.description || '').trim() || 'Check access, rules, and current condition.',
+    submitted_at: submittedAt,
+    upvotes: 0,
+    downvotes: 0,
+    details: {
+      private_lead: '1',
+      lead_key: lead.lead_key || lead.id,
+      status: dispersedLeadStatusLabel(lead.status),
+      checked: lead.source_verified_at || 'Needs recent check',
+      distance: lead.distance_mi != null ? `${Number(lead.distance_mi).toFixed(1)} mi` : '',
+      canonical_camp_id: lead.canonical_camp_id || '',
+      profile_json: JSON.stringify(profile),
+    },
+  };
+}
+
 function pinDetailRows(pin: Pin): { label: string; value: string }[] {
   const type = normalizedCommunityPinType(pin) as CommunityPinTypeId;
   const details = normalizedPinDetails(pin.details);
   const labels = new Map(pinFields(type).map(f => [f.key, f.label]));
   return Object.entries(details)
+    .filter(([key]) => !['private_lead', 'lead_key', 'profile_json', 'canonical_camp_id'].includes(key))
     .filter(([, value]) => String(value || '').trim())
     .map(([key, value]) => ({ label: labels.get(key) ?? key.replace(/_/g, ' '), value: String(value) }));
 }
@@ -5309,6 +5372,8 @@ function MapScreen() {
   const [routeClosing, setRouteClosing] = useState(false);
   const [showAlerts,  setShowAlerts]   = useState(false);
   const [communityPins, setCommunityPins] = useState<Pin[]>([]);
+  const [dispersedLeadPins, setDispersedLeadPins] = useState<Pin[]>([]);
+  const [dispersedLeadAccess, setDispersedLeadAccess] = useState<'admin' | 'map_contributor' | null>(null);
   const [routeLegs,    setRouteLegs]    = useState<RouteStep[][]>([]);
   const [lastRouteCoords, setLastRouteCoords] = useState<[number,number][]>([]);
   const [routeProgress, setRouteProgress] = useState<{ distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number } | null>(null);
@@ -6387,6 +6452,17 @@ function MapScreen() {
     api.getNearbyPins(target.lat, target.lng, radiusDeg)
       .then(setCommunityPins)
       .catch(() => {});
+    api.getDispersedLeadsNearby(target.lat, target.lng, Math.min(65, Math.max(12, radiusDeg * 55)), 80)
+      .then(res => {
+        setDispersedLeadAccess(res.access);
+        setDispersedLeadPins((res.leads ?? []).map(dispersedLeadToPin));
+      })
+      .catch((err) => {
+        if (err?.status === 401 || err?.status === 403) {
+          setDispersedLeadAccess(null);
+          setDispersedLeadPins([]);
+        }
+      });
   }, [userLoc?.lat, userLoc?.lng, waypoints]);
 
   // ── Location watch ──────────────────────────────────────────────────────────
@@ -8062,6 +8138,7 @@ function MapScreen() {
   }
 
   async function voteCommunityPin(pin: Pin, action: 'upvote' | 'downvote') {
+    if (isDispersedLeadPin(pin)) return;
     try {
       const res = action === 'upvote' ? await api.upvotePin(pin.id) : await api.downvotePin(pin.id);
       setCommunityPins(prev => res.hidden
@@ -8077,8 +8154,134 @@ function MapScreen() {
   }
 
   function openCommunityUpdate(pin: Pin) {
+    if (isDispersedLeadPin(pin)) return;
     setCommunityUpdatePin(pin);
     setCommunityUpdateNote('');
+  }
+
+  function openDispersedLeadEdit(pin: Pin) {
+    const details = normalizedPinDetails(pin.details);
+    const leadKey = details.lead_key;
+    if (!leadKey) return;
+    const profile = dispersedLeadProfileFromDetails(pin);
+    const detail = {
+      id: `dispersed_lead:${leadKey}`,
+      private_lead_key: leadKey,
+      name: String(profile.name || pin.name || 'Dispersed tent site'),
+      lat: pin.lat,
+      lng: pin.lng,
+      land_type: 'Dispersed',
+      description: String(profile.description || ''),
+      cost: String((profile as any).cost || ''),
+      reservable: false,
+      url: String((profile as any).url || ''),
+      ada: false,
+      tags: ['dispersed', 'tent'],
+      photos: [],
+      amenities: Array.isArray((profile as any).amenities) ? (profile as any).amenities : [],
+      site_types: Array.isArray((profile as any).site_types) ? (profile as any).site_types : ['Tent'],
+      activities: Array.isArray((profile as any).activities) ? (profile as any).activities : [],
+      campsites_count: 0,
+      source: 'trailhead',
+      verified_source: 'Trailhead',
+      source_badge: 'Trailhead',
+      phone: String((profile as any).phone || ''),
+      access_notes: String((profile as any).access_notes || ''),
+      bail_out_notes: String((profile as any).bail_out_notes || ''),
+      stay_limit: String((profile as any).stay_limit || ''),
+      reservation_notes: String((profile as any).reservation_notes || ''),
+      source_confidence_notes: String((profile as any).source_confidence_notes || ''),
+      max_rig_length: String((profile as any).max_rig_length || ''),
+    } as CampsiteDetail & { private_lead_key: string };
+    setCampDetail(detail);
+    setCampEditMode(user?.is_admin ? 'admin' : 'suggest');
+    setCampEditDraft({
+      name: detail.name || '',
+      description: stripHtml(detail.description || ''),
+      cost: detail.cost || '',
+      phone: detail.phone || '',
+      url: detail.url || '',
+      accessNotes: (detail as any).access_notes || '',
+      bailOutNotes: (detail as any).bail_out_notes || '',
+      stayLimit: (detail as any).stay_limit || '',
+      reservationNotes: (detail as any).reservation_notes || '',
+      sourceConfidenceNotes: (detail as any).source_confidence_notes || '',
+      maxRigLength: (detail as any).max_rig_length || '',
+      siteTypes: [...(detail.site_types ?? [])],
+      amenities: [...(detail.amenities ?? [])],
+      activities: [...(detail.activities ?? [])],
+      note: '',
+    });
+    setShowCampEdit(true);
+  }
+
+  async function reviewDispersedLeadPin(pin: Pin, status: DispersedLead['status'], note?: string) {
+    const details = normalizedPinDetails(pin.details);
+    const leadKey = details.lead_key;
+    if (!leadKey) return;
+    try {
+      const res = await api.reviewDispersedLead(leadKey, status, note);
+      const next = dispersedLeadToPin(res.lead);
+      if (status === 'rejected') {
+        setDispersedLeadPins(prev => prev.filter(item => normalizedPinDetails(item.details).lead_key !== leadKey));
+        setSelectedCommunityPin(null);
+        setQuickToast('Marked not found');
+      } else {
+        setDispersedLeadPins(prev => prev.map(item => normalizedPinDetails(item.details).lead_key === leadKey ? next : item));
+        setSelectedCommunityPin(p => p && normalizedPinDetails(p.details).lead_key === leadKey ? next : p);
+        setQuickToast('Checked');
+      }
+      setTimeout(() => setQuickToast(''), 2500);
+    } catch (e: any) {
+      setQuickToast(e?.status === 403 ? 'Admin review required' : 'Could not update');
+      setTimeout(() => setQuickToast(''), 2500);
+    }
+  }
+
+  async function publishDispersedLeadPin(pin: Pin) {
+    const details = normalizedPinDetails(pin.details);
+    const leadKey = details.lead_key;
+    if (!leadKey || dispersedLeadAccess !== 'admin') return;
+    try {
+      await api.publishDispersedLead(leadKey);
+      setDispersedLeadPins(prev => prev.filter(item => normalizedPinDetails(item.details).lead_key !== leadKey));
+      setSelectedCommunityPin(null);
+      setQuickToast('Dispersed camp published');
+      const bounds = viewportRef.current;
+      if (bounds) setTimeout(() => loadCampsInArea(bounds, activeFilters), 150);
+      setTimeout(() => setQuickToast(''), 2500);
+    } catch (e: any) {
+      setQuickToast(e?.status === 403 ? 'Admin only' : 'Could not publish');
+      setTimeout(() => setQuickToast(''), 2500);
+    }
+  }
+
+  async function addDispersedLeadPhoto(pin: Pin) {
+    const details = normalizedPinDetails(pin.details);
+    const leadKey = details.lead_key;
+    if (!leadKey) return;
+    try {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') return;
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true,
+        quality: 0.6,
+        base64: true,
+      });
+      const asset = result.canceled ? null : result.assets[0];
+      if (!asset?.base64) return;
+      await api.addDispersedLeadPhoto(leadKey, {
+        photo_data: asset.base64,
+        caption: pin.name || 'Dispersed tent site',
+        content_type: (asset as any).mimeType || 'image/jpeg',
+      });
+      setQuickToast('Photo saved');
+      setTimeout(() => setQuickToast(''), 2500);
+    } catch {
+      setQuickToast('Could not save photo');
+      setTimeout(() => setQuickToast(''), 2500);
+    }
   }
 
   async function submitCommunityUpdate() {
@@ -15196,6 +15399,21 @@ function MapScreen() {
         amenities: campEditDraft.amenities,
         activities: campEditDraft.activities,
       };
+      const privateLeadKey = String((campDetail as any).private_lead_key || '').trim();
+      if (privateLeadKey) {
+        const res = await api.saveDispersedLeadProfile(privateLeadKey, {
+          ...payload,
+          note: campEditDraft.note.trim() || undefined,
+        });
+        const next = dispersedLeadToPin(res.lead);
+        setDispersedLeadPins(prev => prev.map(item => normalizedPinDetails(item.details).lead_key === privateLeadKey ? next : item));
+        setSelectedCommunityPin(prev => prev && normalizedPinDetails(prev.details).lead_key === privateLeadKey ? next : prev);
+        setCampDetail(prev => prev ? { ...prev, ...payload, name: payload.name || prev.name } as CampsiteDetail : prev);
+        setQuickToast('Details saved');
+        setShowCampEdit(false);
+        setTimeout(() => setQuickToast(''), 2500);
+        return;
+      }
       if (campEditMode === 'admin' && user?.is_admin) {
         const res = await api.adminUpdateCampsite(campDetail.id, payload);
         setCampDetail(prev => prev ? { ...prev, ...res.override, admin_edited: true } as CampsiteDetail : prev);
@@ -15416,9 +15634,18 @@ function MapScreen() {
     const allowed = new Set(activePinFilters);
     return communityPins.filter(p => allowed.has(normalizedCommunityPinType(p)));
   }, [communityPins, activePinFilters, showCommunityPins]);
+  const visibleDispersedLeadPins = useMemo(() => {
+    if (!showCommunityPins) return [];
+    if (activePinFilters.length === 0) return [];
+    const allowed = new Set(activePinFilters);
+    return dispersedLeadPins.filter(p => allowed.has(normalizedCommunityPinType(p)));
+  }, [activePinFilters, dispersedLeadPins, showCommunityPins]);
   const displayCommunityPins = useMemo(() =>
-    visibleCommunityPins.map(p => ({ ...p, type: normalizedCommunityPinType(p) })),
-    [visibleCommunityPins]
+    [
+      ...visibleCommunityPins.map(p => ({ ...p, type: normalizedCommunityPinType(p) })),
+      ...visibleDispersedLeadPins.map(p => ({ ...p, type: normalizedCommunityPinType(p) })),
+    ],
+    [visibleCommunityPins, visibleDispersedLeadPins]
   );
   const routePois = useMemo(() => {
     const trailPinsActive = showTrailList || (showDiscoveryPanel && discoveryMode === 'trails');
@@ -23839,6 +24066,7 @@ function MapScreen() {
 
       {/* ── Community pin card ── */}
       {selectedCommunityPin && (() => {
+        const privateLead = isDispersedLeadPin(selectedCommunityPin);
         const meta = communityPinMeta(normalizedCommunityPinType(selectedCommunityPin));
         const detailRows = pinDetailRows(selectedCommunityPin);
         const communitySupport = buildTrailSupport(
@@ -23862,7 +24090,7 @@ function MapScreen() {
           : communitySupport;
         const contextPois = liveContext?.loadedAt ? liveContext.pois : trailSourcePois;
         const nearbyTrails = contextPois.filter(p => p.type !== 'water' && haversineKm(selectedCommunityPin.lat, selectedCommunityPin.lng, p.lat, p.lng) * 0.621371 <= 8).length;
-        const updateOpen = communityUpdatePin?.id === selectedCommunityPin.id;
+        const updateOpen = !privateLead && communityUpdatePin?.id === selectedCommunityPin.id;
         const saveCommunityPlace = () => {
           addSavedPlace({
             id: `community-pin-${selectedCommunityPin.id}`,
@@ -23892,29 +24120,31 @@ function MapScreen() {
                       <Ionicons name={meta.icon as any} size={18} color="#fff" />
                     </View>
                     <View style={s.communityHeroText}>
-                      <Text style={s.communityHeroKicker}>{meta.label.toUpperCase()}</Text>
+                      <Text style={s.communityHeroKicker}>{privateLead ? 'DISPERSED' : meta.label.toUpperCase()}</Text>
                       <Text style={s.wpSheetName} numberOfLines={2}>{selectedCommunityPin.name || meta.label}</Text>
                     </View>
                   </View>
                   <View style={s.pinTrustRow}>
                     <View style={s.pinTrustChip}>
-                      <Ionicons name="people-outline" size={12} color={OVR.text2} />
-                      <Text style={s.pinTrustText}>UNTRUSTED COMMUNITY PLACE</Text>
+                      <Ionicons name={privateLead ? 'shield-checkmark-outline' : 'people-outline'} size={12} color={OVR.text2} />
+                      <Text style={s.pinTrustText}>{privateLead ? 'NEEDS CHECK' : 'COMMUNITY PLACE'}</Text>
                     </View>
                     {selectedCommunityPin.submitted_at ? (
                       <Text style={s.pinAgeText}>{ageLabel(selectedCommunityPin.submitted_at)}</Text>
                     ) : null}
                   </View>
                   <Text style={s.wpSheetMeta}>
-                    {selectedCommunityPin.upvotes ?? 0} up · {selectedCommunityPin.downvotes ?? 0} down · verify before relying on access or legality
+                    {privateLead
+                      ? 'Check access, rules, and current condition.'
+                      : `${selectedCommunityPin.upvotes ?? 0} up · ${selectedCommunityPin.downvotes ?? 0} down · verify before relying on access or legality`}
                   </Text>
                   <View style={s.communitySection}>
-                    <Text style={s.communitySectionLabel}>PLACE NOTES</Text>
+                    <Text style={s.communitySectionLabel}>NOTES</Text>
                     {!!selectedCommunityPin.description && (
                       <Text style={s.pinDescription}>{selectedCommunityPin.description}</Text>
                     )}
                     {!selectedCommunityPin.description && (
-                      <Text style={s.pinDescription}>Description waiting for access, hours, condition, or verification details.</Text>
+                      <Text style={s.pinDescription}>{privateLead ? 'Add what you can confirm.' : 'Add access, hours, condition, or verification details.'}</Text>
                     )}
                   </View>
                   <View style={s.communitySection}>
@@ -24003,7 +24233,35 @@ function MapScreen() {
                       </View>
                     </View>
                   )}
-                  {!updateOpen && <View style={s.communityActionsGrid}>
+                  {!updateOpen && privateLead && <View style={s.communityActionsGrid}>
+                    <TouchableOpacity style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
+                      <Ionicons name="navigate" size={14} color="#fff" />
+                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>NAVIGATE</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.communityActionBtn} onPress={() => openDispersedLeadEdit(selectedCommunityPin)}>
+                      <Ionicons name="create-outline" size={14} color={OVR.text2} />
+                      <Text style={s.communityActionText} numberOfLines={1}>EDIT</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.communityActionBtn} onPress={() => addDispersedLeadPhoto(selectedCommunityPin)}>
+                      <Ionicons name="camera-outline" size={14} color={OVR.text2} />
+                      <Text style={s.communityActionText} numberOfLines={1}>PHOTO</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={s.communityActionBtn} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'community_verified')}>
+                      <Ionicons name="checkmark-circle-outline" size={14} color={OVR.text2} />
+                      <Text style={s.communityActionText} numberOfLines={1}>CHECKED</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'rejected', 'Not found during field check')}>
+                      <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
+                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>NOT FOUND</Text>
+                    </TouchableOpacity>
+                    {dispersedLeadAccess === 'admin' && (
+                      <TouchableOpacity style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => publishDispersedLeadPin(selectedCommunityPin)}>
+                        <Ionicons name="shield-checkmark-outline" size={14} color={C.orange} />
+                        <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>PUBLISH</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>}
+                  {!updateOpen && !privateLead && <View style={s.communityActionsGrid}>
                     <TouchableOpacity style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
                       <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>NAVIGATE</Text>

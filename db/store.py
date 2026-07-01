@@ -325,6 +325,45 @@ def init_db():
             created_at         INTEGER NOT NULL,
             updated_at         INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS dispersed_site_leads (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_key           TEXT NOT NULL UNIQUE,
+            source             TEXT NOT NULL DEFAULT 'private_lead',
+            source_batch       TEXT NOT NULL,
+            source_record_hash TEXT NOT NULL,
+            lat                REAL NOT NULL,
+            lng                REAL NOT NULL,
+            rounded_lat        REAL NOT NULL,
+            rounded_lng        REAL NOT NULL,
+            category           TEXT NOT NULL,
+            status             TEXT NOT NULL DEFAULT 'lead',
+            confidence         INTEGER NOT NULL DEFAULT 25,
+            source_verified_at TEXT,
+            review_flags       TEXT NOT NULL DEFAULT '[]',
+            canonical_camp_id  TEXT,
+            profile_data       TEXT NOT NULL DEFAULT '{}',
+            reviewed_by        INTEGER,
+            reviewed_at        INTEGER,
+            rejection_reason   TEXT,
+            published_by       INTEGER,
+            published_at       INTEGER,
+            provenance         TEXT NOT NULL DEFAULT '{}',
+            imported_at        INTEGER NOT NULL,
+            updated_at         INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS dispersed_site_lead_photos (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_key           TEXT NOT NULL,
+            user_id            INTEGER NOT NULL REFERENCES users(id),
+            username           TEXT NOT NULL,
+            caption            TEXT,
+            photo_data         TEXT NOT NULL,
+            content_type       TEXT NOT NULL DEFAULT 'image/jpeg',
+            status             TEXT NOT NULL DEFAULT 'private',
+            published_photo_id INTEGER,
+            created_at         INTEGER NOT NULL,
+            FOREIGN KEY (lead_key) REFERENCES dispersed_site_leads(lead_key)
+        );
         CREATE TABLE IF NOT EXISTS place_comments (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             trailhead_place_id  TEXT NOT NULL,
@@ -617,6 +656,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_trail_edit_suggestions_status ON trail_edit_suggestions(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_places_geo ON places(lat, lng)",
         "CREATE INDEX IF NOT EXISTS idx_places_source ON places(source, source_place_id)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_leads_geo ON dispersed_site_leads(lat, lng, status)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_leads_batch ON dispersed_site_leads(source_batch, status)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_leads_category ON dispersed_site_leads(category, status, source_verified_at)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_lead_photos_lead ON dispersed_site_lead_photos(lead_key, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_comments_place ON place_comments(trailhead_place_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_photos_place ON place_photos(trailhead_place_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_edit_suggestions_status ON place_edit_suggestions(status, created_at)",
@@ -662,6 +705,22 @@ def init_db():
         "ALTER TABLE community_pins ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN details TEXT",
+        "ALTER TABLE dispersed_site_leads ADD COLUMN profile_data TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE dispersed_site_leads ADD COLUMN published_by INTEGER",
+        "ALTER TABLE dispersed_site_leads ADD COLUMN published_at INTEGER",
+        """CREATE TABLE IF NOT EXISTS dispersed_site_lead_photos (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_key           TEXT NOT NULL,
+            user_id            INTEGER NOT NULL REFERENCES users(id),
+            username           TEXT NOT NULL,
+            caption            TEXT,
+            photo_data         TEXT NOT NULL,
+            content_type       TEXT NOT NULL DEFAULT 'image/jpeg',
+            status             TEXT NOT NULL DEFAULT 'private',
+            published_photo_id INTEGER,
+            created_at         INTEGER NOT NULL,
+            FOREIGN KEY (lead_key) REFERENCES dispersed_site_leads(lead_key)
+        )""",
         """CREATE TABLE IF NOT EXISTS pin_interactions (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             pin_id     INTEGER NOT NULL,
@@ -805,6 +864,45 @@ def init_db():
             created_at         INTEGER NOT NULL,
             updated_at         INTEGER NOT NULL
         )""",
+        """CREATE TABLE IF NOT EXISTS dispersed_site_leads (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_key           TEXT NOT NULL UNIQUE,
+            source             TEXT NOT NULL DEFAULT 'private_lead',
+            source_batch       TEXT NOT NULL,
+            source_record_hash TEXT NOT NULL,
+            lat                REAL NOT NULL,
+            lng                REAL NOT NULL,
+            rounded_lat        REAL NOT NULL,
+            rounded_lng        REAL NOT NULL,
+            category           TEXT NOT NULL,
+            status             TEXT NOT NULL DEFAULT 'lead',
+            confidence         INTEGER NOT NULL DEFAULT 25,
+            source_verified_at TEXT,
+            review_flags       TEXT NOT NULL DEFAULT '[]',
+            canonical_camp_id  TEXT,
+            profile_data       TEXT NOT NULL DEFAULT '{}',
+            reviewed_by        INTEGER,
+            reviewed_at        INTEGER,
+            rejection_reason   TEXT,
+            published_by       INTEGER,
+            published_at       INTEGER,
+            provenance         TEXT NOT NULL DEFAULT '{}',
+            imported_at        INTEGER NOT NULL,
+            updated_at         INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS dispersed_site_lead_photos (
+            id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+            lead_key           TEXT NOT NULL,
+            user_id            INTEGER NOT NULL REFERENCES users(id),
+            username           TEXT NOT NULL,
+            caption            TEXT,
+            photo_data         TEXT NOT NULL,
+            content_type       TEXT NOT NULL DEFAULT 'image/jpeg',
+            status             TEXT NOT NULL DEFAULT 'private',
+            published_photo_id INTEGER,
+            created_at         INTEGER NOT NULL,
+            FOREIGN KEY (lead_key) REFERENCES dispersed_site_leads(lead_key)
+        )""",
         """CREATE TABLE IF NOT EXISTS place_comments (
             id                  INTEGER PRIMARY KEY AUTOINCREMENT,
             trailhead_place_id  TEXT NOT NULL,
@@ -863,6 +961,10 @@ def init_db():
         )""",
         "CREATE INDEX IF NOT EXISTS idx_places_geo ON places(lat, lng)",
         "CREATE INDEX IF NOT EXISTS idx_places_source ON places(source, source_place_id)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_leads_geo ON dispersed_site_leads(lat, lng, status)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_leads_batch ON dispersed_site_leads(source_batch, status)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_leads_category ON dispersed_site_leads(category, status, source_verified_at)",
+        "CREATE INDEX IF NOT EXISTS idx_dispersed_site_lead_photos_lead ON dispersed_site_lead_photos(lead_key, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_comments_place ON place_comments(trailhead_place_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_photos_place ON place_photos(trailhead_place_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_edit_suggestions_status ON place_edit_suggestions(status, created_at)",
@@ -2476,6 +2578,12 @@ def get_contributor_profile(user_id: int, viewer_id: int | None = None) -> dict 
     stats, recent = _contributor_stats(db, user_id)
     awards = _contributor_awards(db, user_id)
     badges = _manual_contributor_badges(db, user_id) + _auto_contributor_badges(stats, awards, all_points, user["created_at"])
+    map_contributor_row = db.execute(
+        """SELECT status,created_at,updated_at FROM map_contributor_applications
+           WHERE user_id=? ORDER BY updated_at DESC,id DESC LIMIT 1""",
+        (user_id,),
+    ).fetchone()
+    map_contributor_status = map_contributor_row["status"] if map_contributor_row else "not_applied"
     seen = set()
     unique_badges = []
     for badge in badges:
@@ -2506,6 +2614,11 @@ def get_contributor_profile(user_id: int, viewer_id: int | None = None) -> dict 
         "badges": unique_badges,
         "awards": awards,
         "recent_activity": recent,
+        "map_contributor": {
+            "status": map_contributor_status,
+            "approved": map_contributor_status == "approved",
+            "updated_at": map_contributor_row["updated_at"] if map_contributor_row else None,
+        },
     }
     db.close()
     return profile
@@ -2615,12 +2728,40 @@ def update_map_contributor_application_status(application_id: int, status: str) 
     if status not in {"pending", "approved", "dismissed"}:
         return False
     db = _conn()
+    row = db.execute("SELECT * FROM map_contributor_applications WHERE id=?", (application_id,)).fetchone()
+    if not row:
+        db.close()
+        return False
     cur = db.execute(
         "UPDATE map_contributor_applications SET status=?,updated_at=? WHERE id=?",
         (status, int(time.time()), application_id),
     )
+    if status == "approved":
+        db.execute(
+            """INSERT OR REPLACE INTO contributor_badges (user_id,badge_id,label,description,granted_by,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (
+                row["user_id"],
+                "map_contributor",
+                "Map Contributor",
+                "Approved to review private map leads.",
+                None,
+                int(time.time()),
+            ),
+        )
     db.commit(); db.close()
     return cur.rowcount > 0
+
+def has_approved_map_contributor(user_id: int | None) -> bool:
+    if not user_id:
+        return False
+    db = _conn()
+    row = db.execute(
+        "SELECT status FROM map_contributor_applications WHERE user_id=? ORDER BY updated_at DESC,id DESC LIMIT 1",
+        (user_id,),
+    ).fetchone()
+    db.close()
+    return bool(row and row["status"] == "approved")
 
 def grant_contributor_badge(user_id: int, badge_id: str, label: str, description: str = "", admin_id: int | None = None) -> dict | None:
     now = int(time.time())
@@ -3887,6 +4028,478 @@ def get_camp_comments(camp_id: str, limit: int = 50) -> list[dict]:
     return [dict(r) for r in rows]
 
 
+# ── Private dispersed camp lead queue ────────────────────────────────────────
+
+DISPERSED_LEAD_ALLOWED_KEYS = {
+    "lead_key", "source", "source_batch", "source_record_hash",
+    "lat", "lng", "rounded_lat", "rounded_lng", "category", "status",
+    "confidence", "source_verified_at", "review_flags", "canonical_camp_id",
+    "profile_data", "reviewed_by", "reviewed_at", "rejection_reason",
+    "published_by", "published_at", "provenance", "imported_at", "updated_at",
+}
+
+DISPERSED_LEAD_STATUSES = {
+    "lead", "needs_field_check", "community_verified", "trailhead_verified",
+    "published", "rejected", "merged", "expired",
+}
+
+DISPERSED_LEAD_PROFILE_KEYS = {
+    "name", "description", "cost", "phone", "url", "access_notes",
+    "bail_out_notes", "stay_limit", "reservation_notes",
+    "source_confidence_notes", "max_rig_length", "site_types",
+    "amenities", "activities",
+}
+
+
+def _dispersed_lead_json(raw: object, fallback):
+    if raw in (None, ""):
+        return fallback
+    if isinstance(raw, (dict, list)):
+        return raw
+    try:
+        return json.loads(str(raw))
+    except Exception:
+        return fallback
+
+
+def _decode_dispersed_site_lead(row: sqlite3.Row | dict) -> dict:
+    d = dict(row)
+    d["review_flags"] = _dispersed_lead_json(d.get("review_flags"), [])
+    d["profile_data"] = _dispersed_lead_json(d.get("profile_data"), {})
+    d["provenance"] = _dispersed_lead_json(d.get("provenance"), {})
+    return d
+
+
+def _clean_dispersed_lead_profile(data: dict | None) -> dict:
+    clean: dict = {}
+    if not isinstance(data, dict):
+        return clean
+    for key, value in data.items():
+        if key not in DISPERSED_LEAD_PROFILE_KEYS:
+            continue
+        if isinstance(value, str):
+            text = re.sub(r"\s+", " ", value.strip())
+            limit = 4000 if key == "description" else 900
+            if text:
+                clean[key] = text[:limit]
+        elif isinstance(value, list):
+            items = []
+            for item in value:
+                text = re.sub(r"\s+", " ", str(item or "").strip())[:80]
+                if text and text.lower() not in {"0", "none", "unknown"}:
+                    items.append(text)
+            if items:
+                clean[key] = sorted(dict.fromkeys(items))[:40]
+    return clean
+
+
+def upsert_dispersed_site_leads(leads: list[dict], source_batch: str) -> dict:
+    """Store sanitized private dispersed-site leads.
+
+    This helper is intentionally strict: any unexpected key is treated as a
+    failed row so source names, notes, reviews, amenities, or photos cannot leak
+    into the staging table.
+    """
+    batch = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(source_batch or "").strip())[:120]
+    if not batch:
+        raise ValueError("source_batch is required")
+
+    now = int(time.time())
+    saved = 0
+    skipped = 0
+    errors: list[dict] = []
+    db = _conn()
+    for index, lead in enumerate(leads or [], start=1):
+        try:
+            if not isinstance(lead, dict):
+                raise ValueError("lead must be an object")
+            unexpected = sorted(set(lead) - DISPERSED_LEAD_ALLOWED_KEYS)
+            if unexpected:
+                raise ValueError(f"unexpected lead fields: {', '.join(unexpected[:5])}")
+
+            lat = float(lead.get("lat"))
+            lng = float(lead.get("lng"))
+            if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+                raise ValueError("lead lat/lng out of range")
+            rounded_lat = round(float(lead.get("rounded_lat", lat)), 5)
+            rounded_lng = round(float(lead.get("rounded_lng", lng)), 5)
+            category = re.sub(r"[^a-z0-9_]+", "_", str(lead.get("category") or "").lower()).strip("_")[:60]
+            if category not in {"wild_camp", "informal_camp"}:
+                raise ValueError("unsupported dispersed lead category")
+            status = re.sub(r"[^a-z0-9_]+", "_", str(lead.get("status") or "lead").lower()).strip("_")[:40] or "lead"
+            if status not in DISPERSED_LEAD_STATUSES:
+                raise ValueError("unsupported dispersed lead status")
+            source = re.sub(r"[^a-z0-9_.:-]+", "_", str(lead.get("source") or "private_lead").lower()).strip("_")[:80] or "private_lead"
+            source_record_hash = re.sub(r"[^a-fA-F0-9]+", "", str(lead.get("source_record_hash") or ""))[:64]
+            if not source_record_hash:
+                source_record_hash = hashlib.sha256(f"{source}:{category}:{lat:.5f}:{lng:.5f}".encode("utf-8")).hexdigest()
+            lead_key = str(lead.get("lead_key") or "").strip()
+            if not lead_key:
+                lead_key = "dsl_" + hashlib.sha256(f"{source}:{category}:{rounded_lat:.5f}:{rounded_lng:.5f}".encode("utf-8")).hexdigest()[:24]
+            lead_key = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", lead_key)[:90]
+            flags = lead.get("review_flags") or []
+            if not isinstance(flags, list):
+                flags = [str(flags)]
+            flags = [re.sub(r"[^a-z0-9_:-]+", "_", str(flag).lower()).strip("_")[:60] for flag in flags if str(flag).strip()]
+            provenance = lead.get("provenance") or {}
+            if not isinstance(provenance, dict):
+                provenance = {}
+            safe_provenance = {
+                str(key)[:60]: value
+                for key, value in provenance.items()
+                if key in {"source_kind", "source_label", "import_file", "license_state", "date_policy", "raw_fields_stripped"}
+            }
+            profile_data = _clean_dispersed_lead_profile(lead.get("profile_data") if isinstance(lead.get("profile_data"), dict) else {})
+            confidence = max(0, min(int(lead.get("confidence") or 25), 100))
+            db.execute(
+                """INSERT INTO dispersed_site_leads
+                   (lead_key,source,source_batch,source_record_hash,lat,lng,rounded_lat,rounded_lng,
+                    category,status,confidence,source_verified_at,review_flags,canonical_camp_id,
+                    profile_data,reviewed_by,reviewed_at,rejection_reason,published_by,published_at,
+                    provenance,imported_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                   ON CONFLICT(lead_key) DO UPDATE SET
+                    source_batch=excluded.source_batch,
+                    source_record_hash=excluded.source_record_hash,
+                    lat=excluded.lat,
+                    lng=excluded.lng,
+                    rounded_lat=excluded.rounded_lat,
+                    rounded_lng=excluded.rounded_lng,
+                    category=excluded.category,
+                    status=excluded.status,
+                    confidence=excluded.confidence,
+                    source_verified_at=excluded.source_verified_at,
+                    review_flags=excluded.review_flags,
+                    profile_data=CASE
+                        WHEN dispersed_site_leads.profile_data IS NULL OR dispersed_site_leads.profile_data='{}' THEN excluded.profile_data
+                        ELSE dispersed_site_leads.profile_data
+                    END,
+                    provenance=excluded.provenance,
+                    updated_at=excluded.updated_at""",
+                (
+                    lead_key, source, batch, source_record_hash, lat, lng, rounded_lat, rounded_lng,
+                    category, status, confidence, lead.get("source_verified_at"),
+                    json.dumps(flags), lead.get("canonical_camp_id"), json.dumps(profile_data),
+                    lead.get("reviewed_by"), lead.get("reviewed_at"), lead.get("rejection_reason"),
+                    lead.get("published_by"), lead.get("published_at"), json.dumps(safe_provenance),
+                    int(lead.get("imported_at") or now), now,
+                ),
+            )
+            saved += 1
+        except Exception as exc:
+            skipped += 1
+            errors.append({"index": index, "error": str(exc)})
+    db.commit()
+    db.close()
+    return {"saved": saved, "skipped": skipped, "errors": errors[:25]}
+
+
+def get_dispersed_site_lead_summary(source_batch: str | None = None) -> dict:
+    db = _conn()
+    where = ""
+    params: tuple = ()
+    if source_batch:
+        where = "WHERE source_batch=?"
+        params = (source_batch,)
+    total = db.execute(f"SELECT COUNT(*) AS c FROM dispersed_site_leads {where}", params).fetchone()["c"]
+    by_status = {
+        row["status"]: row["c"]
+        for row in db.execute(
+            f"SELECT status,COUNT(*) AS c FROM dispersed_site_leads {where} GROUP BY status ORDER BY status",
+            params,
+        ).fetchall()
+    }
+    by_category = {
+        row["category"]: row["c"]
+        for row in db.execute(
+            f"SELECT category,COUNT(*) AS c FROM dispersed_site_leads {where} GROUP BY category ORDER BY category",
+            params,
+        ).fetchall()
+    }
+    db.close()
+    return {"total": total, "by_status": by_status, "by_category": by_category}
+
+
+def list_dispersed_site_leads_near(
+    lat: float,
+    lng: float,
+    radius_mi: float = 35,
+    statuses: list[str] | None = None,
+    limit: int = 120,
+) -> list[dict]:
+    radius_mi = max(1.0, min(float(radius_mi or 35), 90.0))
+    limit = max(1, min(int(limit or 120), 200))
+    allowed_statuses = {
+        status for status in (statuses or ["lead", "needs_field_check", "trailhead_verified", "community_verified"])
+        if status in DISPERSED_LEAD_STATUSES
+    }
+    if not allowed_statuses:
+        return []
+
+    lat_delta = radius_mi / 69.0
+    lng_delta = radius_mi / max(8.0, 69.0 * math.cos(math.radians(lat)))
+    placeholders = ",".join("?" for _ in allowed_statuses)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT * FROM dispersed_site_leads
+            WHERE status IN ({placeholders})
+              AND lat BETWEEN ? AND ?
+              AND lng BETWEEN ? AND ?
+            ORDER BY confidence DESC, source_verified_at DESC, updated_at DESC
+            LIMIT ?""",
+        (*sorted(allowed_statuses), lat - lat_delta, lat + lat_delta, lng - lng_delta, lng + lng_delta, limit * 4),
+    ).fetchall()
+    out: list[dict] = []
+    for row in rows:
+        item = _decode_dispersed_site_lead(row)
+        distance = _place_distance_mi(lat, lng, item)
+        if distance > radius_mi:
+            continue
+        item["distance_mi"] = round(distance, 2)
+        out.append(item)
+        if len(out) >= limit:
+            break
+    db.close()
+    return out
+
+
+def get_dispersed_site_lead(lead_key: str) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT * FROM dispersed_site_leads WHERE lead_key=?", (lead_key,)).fetchone()
+    db.close()
+    return _decode_dispersed_site_lead(row) if row else None
+
+
+def update_dispersed_site_lead_status(
+    lead_key: str,
+    status: str,
+    reviewer_id: int | None = None,
+    rejection_reason: str | None = None,
+) -> dict | None:
+    status = re.sub(r"[^a-z0-9_]+", "_", str(status or "").lower()).strip("_")
+    if status not in DISPERSED_LEAD_STATUSES:
+        raise ValueError("unsupported dispersed lead status")
+    reason = (rejection_reason or "").strip()[:300] or None
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """UPDATE dispersed_site_leads
+           SET status=?,reviewed_by=?,reviewed_at=?,rejection_reason=?,updated_at=? WHERE lead_key=?""",
+        (status, reviewer_id, now, reason, now, lead_key),
+    )
+    row = db.execute("SELECT * FROM dispersed_site_leads WHERE lead_key=?", (lead_key,)).fetchone()
+    db.commit(); db.close()
+    if cur.rowcount <= 0 or not row:
+        return None
+    return _decode_dispersed_site_lead(row)
+
+
+def update_dispersed_site_lead_profile(
+    lead_key: str,
+    profile_data: dict,
+    reviewer_id: int | None = None,
+) -> dict | None:
+    clean = _clean_dispersed_lead_profile(profile_data)
+    existing = get_dispersed_site_lead(lead_key)
+    if not existing:
+        return None
+    merged = {**(existing.get("profile_data") or {}), **clean}
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """UPDATE dispersed_site_leads
+           SET profile_data=?,reviewed_by=COALESCE(?,reviewed_by),reviewed_at=?,updated_at=?
+           WHERE lead_key=?""",
+        (json.dumps(merged), reviewer_id, now, now, lead_key),
+    )
+    row = db.execute("SELECT * FROM dispersed_site_leads WHERE lead_key=?", (lead_key,)).fetchone()
+    db.commit(); db.close()
+    return _decode_dispersed_site_lead(row) if row else None
+
+
+def add_dispersed_site_lead_photo(
+    lead_key: str,
+    user_id: int,
+    username: str,
+    photo_data: str,
+    caption: str | None = None,
+    content_type: str = "image/jpeg",
+) -> dict | None:
+    if not get_dispersed_site_lead(lead_key):
+        return None
+    now = int(time.time())
+    db = _conn()
+    cur = db.execute(
+        """INSERT INTO dispersed_site_lead_photos
+           (lead_key,user_id,username,caption,photo_data,content_type,status,created_at)
+           VALUES (?,?,?,?,?,?, 'private', ?)""",
+        (
+            lead_key,
+            user_id,
+            (username or "")[:120],
+            (caption or "")[:500] or None,
+            photo_data,
+            (content_type or "image/jpeg")[:120],
+            now,
+        ),
+    )
+    row = db.execute(
+        """SELECT id,lead_key,user_id,username,caption,content_type,status,published_photo_id,created_at
+           FROM dispersed_site_lead_photos WHERE id=?""",
+        (cur.lastrowid,),
+    ).fetchone()
+    db.commit(); db.close()
+    return dict(row) if row else None
+
+
+def get_dispersed_site_lead_photos(lead_key: str, status: str | None = None) -> list[dict]:
+    db = _conn()
+    if status:
+        rows = db.execute(
+            """SELECT * FROM dispersed_site_lead_photos
+               WHERE lead_key=? AND status=? ORDER BY created_at ASC""",
+            (lead_key, status),
+        ).fetchall()
+    else:
+        rows = db.execute(
+            """SELECT * FROM dispersed_site_lead_photos
+               WHERE lead_key=? ORDER BY created_at ASC""",
+            (lead_key,),
+        ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
+def _nearby_public_dispersed_place(lat: float, lng: float, max_mi: float = 0.12) -> dict | None:
+    lat_delta = max_mi / 69.0
+    lng_delta = max_mi / max(8.0, 69.0 * math.cos(math.radians(lat)))
+    db = _conn()
+    rows = db.execute(
+        """SELECT * FROM places
+           WHERE source='trailhead'
+             AND category='camp'
+             AND lat BETWEEN ? AND ?
+             AND lng BETWEEN ? AND ?
+           ORDER BY updated_at DESC
+           LIMIT 40""",
+        (lat - lat_delta, lat + lat_delta, lng - lng_delta, lng + lng_delta),
+    ).fetchall()
+    db.close()
+    best: tuple[float, dict] | None = None
+    for row in rows:
+        place = dict(row)
+        metadata = _dispersed_lead_json(place.get("display_metadata"), {})
+        if isinstance(metadata, dict):
+            place.update(metadata)
+        if str(place.get("trailhead_dataset") or "") != "dispersed_camp":
+            continue
+        if str(place.get("trailhead_public") or "").lower() not in {"1", "true", "yes"} and place.get("trailhead_public") is not True:
+            continue
+        distance = _place_distance_mi(lat, lng, place)
+        if distance > max_mi:
+            continue
+        if best is None or distance < best[0]:
+            best = (distance, place)
+    return best[1] if best else None
+
+
+def publish_dispersed_site_lead(
+    lead_key: str,
+    admin_id: int | None = None,
+    profile_data: dict | None = None,
+) -> dict | None:
+    lead = get_dispersed_site_lead(lead_key)
+    if not lead:
+        return None
+    if lead.get("status") in {"rejected", "expired"}:
+        raise ValueError("cannot publish a rejected or expired site")
+    merged_profile = {**(lead.get("profile_data") or {}), **_clean_dispersed_lead_profile(profile_data)}
+    lat = float(lead.get("lat"))
+    lng = float(lead.get("lng"))
+    merge_target = _nearby_public_dispersed_place(lat, lng)
+    name = str(merged_profile.get("name") or "").strip() or "Dispersed tent site"
+    if merge_target and name == "Dispersed tent site" and str(merge_target.get("name") or "").strip():
+        name = str(merge_target.get("name")).strip()
+    source_place_id = f"dispersed:{lead_key}"
+    if merge_target:
+        source_place_id = str(merge_target.get("source_place_id") or source_place_id)
+    now = int(time.time())
+    payload = {
+        "source": "trailhead",
+        "source_label": "Trailhead",
+        "source_place_id": source_place_id,
+        "name": name,
+        "lat": merge_target.get("lat") if merge_target else lat,
+        "lng": merge_target.get("lng") if merge_target else lng,
+        "category": "camp",
+        "subtype": "Dispersed",
+        "land_type": "Dispersed",
+        "description": merged_profile.get("description") or "",
+        "cost": merged_profile.get("cost") or "",
+        "phone": merged_profile.get("phone") or "",
+        "url": merged_profile.get("url") or "",
+        "amenities": merged_profile.get("amenities") or [],
+        "site_types": merged_profile.get("site_types") or ["Tent"],
+        "activities": merged_profile.get("activities") or [],
+        "access_notes": merged_profile.get("access_notes") or "",
+        "bail_out_notes": merged_profile.get("bail_out_notes") or "",
+        "stay_limit": merged_profile.get("stay_limit") or "",
+        "reservation_notes": merged_profile.get("reservation_notes") or "",
+        "max_rig_length": merged_profile.get("max_rig_length") or "",
+        "reservable": False,
+        "verified_source": "Trailhead",
+        "source_freshness": "Recently checked",
+        "trailhead_dataset": "dispersed_camp",
+        "trailhead_public": True,
+        "published_at": now,
+        "source_updated_at": now,
+        "last_refreshed_at": now,
+        "refresh_after": now + 90 * 86400,
+    }
+    place = upsert_canonical_place(payload)
+    place_id = place.get("trailhead_place_id")
+    if place_id:
+        set_camp_profile_override(str(place_id), {
+            **merged_profile,
+            "name": name,
+            "land_type": "Dispersed",
+            "reservable": False,
+            "verified_source": "Trailhead",
+            "source_freshness": "Recently checked",
+            "site_types": merged_profile.get("site_types") or ["Tent"],
+            "amenities": merged_profile.get("amenities") or [],
+            "activities": merged_profile.get("activities") or [],
+        }, admin_id)
+        for private_photo in get_dispersed_site_lead_photos(lead_key, status="private"):
+            photo = add_place_photo(
+                str(place_id),
+                int(private_photo["user_id"]),
+                str(private_photo["username"] or ""),
+                caption=private_photo.get("caption") or name,
+                photo_data=private_photo.get("photo_data"),
+                content_type=private_photo.get("content_type") or "image/jpeg",
+            )
+            db_photo = _conn()
+            db_photo.execute(
+                "UPDATE dispersed_site_lead_photos SET status='published',published_photo_id=? WHERE id=?",
+                (photo.get("id") if photo else None, private_photo["id"]),
+            )
+            db_photo.commit(); db_photo.close()
+    db = _conn()
+    db.execute(
+        """UPDATE dispersed_site_leads
+           SET status='published',canonical_camp_id=?,profile_data=?,reviewed_by=?,reviewed_at=?,
+               published_by=?,published_at=?,updated_at=?
+           WHERE lead_key=?""",
+        (place_id, json.dumps(merged_profile), admin_id, now, admin_id, now, now, lead_key),
+    )
+    row = db.execute("SELECT * FROM dispersed_site_leads WHERE lead_key=?", (lead_key,)).fetchone()
+    db.commit(); db.close()
+    out = _decode_dispersed_site_lead(row) if row else lead
+    out["camp"] = place
+    return out
+
+
 # ── Canonical places / all-pin community layer ───────────────────────────────
 
 PLACE_PHOTO_CREDITS = 5
@@ -3902,6 +4515,7 @@ PLACE_METADATA_KEYS = {
     "confidence", "cache_status", "stale_reason", "source_updated_at",
     "last_refreshed_at", "refresh_after", "refresh_priority",
     "route_distance_mi", "route_progress", "route_progress_mi",
+    "trailhead_dataset", "trailhead_public", "published_at",
 }
 
 def _place_source_clean(value: object) -> str:

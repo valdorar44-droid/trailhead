@@ -80,7 +80,7 @@ export default function CampEditSheet({
   const s = useMemo(() => makeStyles(C), [C]);
   if (!draft) return null;
   const editingDirectly = mode === 'admin' && canAdmin;
-  const submitLabel = editingDirectly ? 'Save changes' : 'Send update';
+  const submitLabel = editingDirectly ? 'Save changes' : 'Save details';
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
@@ -91,8 +91,8 @@ export default function CampEditSheet({
               <Ionicons name="chevron-back" size={22} color={C.text} />
             </TouchableOpacity>
             <View style={s.topText}>
-              <Text style={s.topTitle}>{editingDirectly ? 'Edit camp' : 'Suggest an update'}</Text>
-              <Text style={s.topSub} numberOfLines={1}>{campName || draft.name || 'Camp profile'}</Text>
+              <Text style={s.topTitle}>Edit camp</Text>
+              <Text style={s.topSub} numberOfLines={1}>{campName || draft.name || 'Camp'}</Text>
             </View>
             <TouchableOpacity style={s.iconBtn} onPress={onClose}>
               <Ionicons name="close" size={21} color={C.text} />
@@ -101,12 +101,10 @@ export default function CampEditSheet({
 
           <ScrollView style={s.scroll} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
             <View style={s.hero}>
-              <Text style={s.heroKicker}>{editingDirectly ? 'Profile editor' : 'Community update'}</Text>
-              <Text style={s.heroTitle}>{editingDirectly ? 'Keep this camp profile current.' : 'Help the next traveler know what to expect.'}</Text>
+              <Text style={s.heroKicker}>Camp details</Text>
+              <Text style={s.heroTitle}>Update the fields you know.</Text>
               <Text style={s.heroBody}>
-                {editingDirectly
-                  ? 'Update the fields that should change. Leave unknown details blank.'
-                  : 'Send details you trust. Trailhead reviews updates before changing public camp information.'}
+                Leave anything uncertain blank.
               </Text>
             </View>
 

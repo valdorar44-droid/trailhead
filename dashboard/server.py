@@ -116,7 +116,10 @@ from db.store import (
     update_contest_award_status, backfill_contest_events_from_credits,
     get_contributor_profile, get_contributor_leaderboard, set_contributor_visibility,
     submit_map_contributor_application, get_map_contributor_applications,
-    update_map_contributor_application_status,
+    update_map_contributor_application_status, has_approved_map_contributor,
+    list_dispersed_site_leads_near, update_dispersed_site_lead_status,
+    get_dispersed_site_lead_summary, update_dispersed_site_lead_profile,
+    add_dispersed_site_lead_photo, publish_dispersed_site_lead,
 )
 from ingestors.active import get_active_activities, get_active_campgrounds
 from ingestors.fcc import get_mobile_coverage
@@ -2231,6 +2234,11 @@ def _require_admin(user: dict = Depends(_current_user)) -> dict:
     if not user.get("is_admin"):
         raise HTTPException(403, "Admin access required")
     return user
+
+def _require_map_contributor(user: dict = Depends(_current_user)) -> dict:
+    if user.get("is_admin") or has_approved_map_contributor(user.get("id")):
+        return user
+    raise HTTPException(403, "Map contributor access required")
 
 def _check_credits(user: dict, cost: int, reason: str) -> None:
     """Deduct credits; admins always pass with no deduction."""
@@ -10210,14 +10218,18 @@ async def campsites_search(
         get_active_campgrounds(lat, lng, radius_miles=radius, filters={"group_site": bool(type_filters and "group" in type_filters)}),
         *international_tasks,
     )
-    merged = _merge_camp_sources(ridb, blm, active, *international_sources, type_filters=type_filters)
+    trailhead_camps = _trailhead_dispersed_camps(lat, lng, radius, limit=160)
+    merged = _merge_camp_sources(trailhead_camps, ridb, blm, active, *international_sources, type_filters=type_filters)
     if len(merged) < 8:
         merged = _merge_camp_sources(merged, _explore_catalog_fallback_camps(lat, lng, max(radius, 75), limit=24), type_filters=type_filters)
     return merged[:80]
 
 @app.get("/api/campsites/{facility_id}/detail")
 async def campsite_detail(facility_id: str):
-    if facility_id.startswith("osm_"):
+    if facility_id.startswith("thp_"):
+        place = get_place(facility_id)
+        detail = _camp_from_trailhead_place(place or {}) if place else None
+    elif facility_id.startswith("osm_"):
         detail = await get_osm_campsite_detail(facility_id)
     elif facility_id.startswith("blm_"):
         detail = await get_blm_campsite_detail(facility_id)
@@ -12874,6 +12886,33 @@ class MapContributorApplicationBody(BaseModel):
     regions: str = ""
     sample_note: str = ""
 
+class DispersedLeadReviewBody(BaseModel):
+    status: str
+    note: Optional[str] = None
+    profile: Optional[dict] = None
+
+class DispersedLeadProfileBody(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    amenities: Optional[list[str]] = None
+    site_types: Optional[list[str]] = None
+    activities: Optional[list[str]] = None
+    cost: Optional[str] = None
+    phone: Optional[str] = None
+    url: Optional[str] = None
+    access_notes: Optional[str] = None
+    bail_out_notes: Optional[str] = None
+    stay_limit: Optional[str] = None
+    reservation_notes: Optional[str] = None
+    source_confidence_notes: Optional[str] = None
+    max_rig_length: Optional[str] = None
+    note: Optional[str] = None
+
+class DispersedLeadPhotoBody(BaseModel):
+    photo_data: str
+    caption: Optional[str] = None
+    content_type: str = "image/jpeg"
+
 @app.get("/api/contributions/me")
 async def contributions_me(user: dict = Depends(_current_user)):
     if has_active_plan(user):
@@ -12913,6 +12952,116 @@ async def map_contributor_apply(body: MapContributorApplicationBody, user: dict 
         user["id"], user.get("username") or "", experience, regions, sample_note,
     )
     return {"ok": True, "application": application}
+
+def _public_dispersed_lead(lead: dict) -> dict:
+    profile = lead.get("profile_data") if isinstance(lead.get("profile_data"), dict) else {}
+    return {
+        "lead_key": lead.get("lead_key"),
+        "id": lead.get("lead_key"),
+        "lat": lead.get("lat"),
+        "lng": lead.get("lng"),
+        "category": lead.get("category"),
+        "status": lead.get("status"),
+        "confidence": lead.get("confidence"),
+        "source_verified_at": lead.get("source_verified_at"),
+        "review_flags": lead.get("review_flags") or [],
+        "distance_mi": lead.get("distance_mi"),
+        "reviewed_at": lead.get("reviewed_at"),
+        "rejection_reason": lead.get("rejection_reason"),
+        "canonical_camp_id": lead.get("canonical_camp_id"),
+        "published_at": lead.get("published_at"),
+        "profile": {
+            key: value for key, value in profile.items()
+            if key in {
+                "name", "description", "cost", "phone", "url", "access_notes",
+                "bail_out_notes", "stay_limit", "reservation_notes",
+                "source_confidence_notes", "max_rig_length", "site_types",
+                "amenities", "activities",
+            }
+        },
+    }
+
+@app.get("/api/dispersed-leads/summary")
+async def dispersed_leads_summary(user: dict = Depends(_require_map_contributor)):
+    return {
+        "access": "admin" if user.get("is_admin") else "map_contributor",
+        "summary": get_dispersed_site_lead_summary(),
+    }
+
+@app.get("/api/dispersed-leads/nearby")
+async def dispersed_leads_nearby(lat: float, lng: float, radius: float = 35,
+                                 statuses: str = "lead,needs_field_check,community_verified,trailhead_verified",
+                                 limit: int = 80,
+                                 user: dict = Depends(_require_map_contributor)):
+    status_list = [s.strip().lower() for s in statuses.split(",") if s.strip()]
+    leads = list_dispersed_site_leads_near(lat, lng, radius_mi=radius, statuses=status_list, limit=limit)
+    return {
+        "access": "admin" if user.get("is_admin") else "map_contributor",
+        "leads": [_public_dispersed_lead(lead) for lead in leads],
+    }
+
+@app.post("/api/dispersed-leads/{lead_key}/review")
+async def dispersed_lead_review(lead_key: str, body: DispersedLeadReviewBody,
+                                user: dict = Depends(_require_map_contributor)):
+    status = (body.status or "").strip().lower()
+    if status not in {"lead", "needs_field_check", "community_verified", "rejected", "trailhead_verified"}:
+        raise HTTPException(400, "Invalid review status")
+    if status == "trailhead_verified" and not user.get("is_admin"):
+        raise HTTPException(403, "Admin review required")
+    if body.profile:
+        update_dispersed_site_lead_profile(lead_key, body.profile, reviewer_id=user.get("id"))
+    lead = update_dispersed_site_lead_status(
+        lead_key,
+        status,
+        reviewer_id=user.get("id"),
+        rejection_reason=(body.note or "").strip() if status == "rejected" else None,
+    )
+    if not lead:
+        raise HTTPException(404, "Lead not found")
+    log_event(user.get("id"), None, "dispersed_lead_review", {"lead_key": lead_key, "status": status})
+    return {"ok": True, "lead": _public_dispersed_lead(lead)}
+
+@app.post("/api/dispersed-leads/{lead_key}/profile")
+async def dispersed_lead_profile(lead_key: str, body: DispersedLeadProfileBody,
+                                 user: dict = Depends(_require_map_contributor)):
+    raw = body.dict(exclude_unset=True)
+    raw.pop("note", None)
+    lead = update_dispersed_site_lead_profile(lead_key, raw, reviewer_id=user.get("id"))
+    if not lead:
+        raise HTTPException(404, "Site not found")
+    log_event(user.get("id"), None, "dispersed_lead_profile", {"lead_key": lead_key})
+    return {"ok": True, "lead": _public_dispersed_lead(lead)}
+
+@app.post("/api/dispersed-leads/{lead_key}/photos")
+async def dispersed_lead_photo(lead_key: str, body: DispersedLeadPhotoBody,
+                               user: dict = Depends(_require_map_contributor)):
+    _decode_place_photo_payload(body.photo_data, body.content_type)
+    photo = add_dispersed_site_lead_photo(
+        lead_key,
+        user["id"],
+        user.get("username") or "",
+        body.photo_data,
+        caption=(body.caption or "").strip()[:500] or None,
+        content_type=body.content_type,
+    )
+    if not photo:
+        raise HTTPException(404, "Site not found")
+    log_event(user.get("id"), None, "dispersed_lead_photo", {"lead_key": lead_key, "photo_id": photo.get("id")})
+    return {"ok": True, "photo": photo}
+
+@app.post("/api/admin/dispersed-leads/{lead_key}/publish")
+async def dispersed_lead_publish(lead_key: str, body: DispersedLeadProfileBody | None = None,
+                                 user: dict = Depends(_require_admin)):
+    profile = body.dict(exclude_unset=True) if body else {}
+    profile.pop("note", None)
+    try:
+        lead = publish_dispersed_site_lead(lead_key, admin_id=user.get("id"), profile_data=profile)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    if not lead:
+        raise HTTPException(404, "Site not found")
+    log_event(user.get("id"), None, "dispersed_lead_publish", {"lead_key": lead_key, "camp_id": lead.get("canonical_camp_id")})
+    return {"ok": True, "lead": _public_dispersed_lead(lead), "camp": _camp_from_trailhead_place(lead.get("camp") or {})}
 
 
 # ── GPX export ────────────────────────────────────────────────────────────────
@@ -13489,6 +13638,8 @@ def _camp_cluster_name(value: object) -> str:
 def _camp_source_rank(camp: dict) -> int:
     source = str(camp.get("source") or camp.get("verified_source") or "").lower()
     verified = str(camp.get("verified_source") or "").lower()
+    if "trailhead" in source or "trailhead" in verified:
+        return 0
     if any(v in source or v in verified for v in ("ridb", "recreation.gov", "nps")):
         return 0
     if "blm" in source or "blm" in verified:
@@ -13692,6 +13843,77 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "site_types": [land_type] if is_private_stay else (["RV"] if "rv" in tags else ["Tent", "Campground"]),
     }
 
+def _truthy_place_value(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
+
+def _camp_from_trailhead_place(place: dict) -> dict | None:
+    try:
+        lat = float(place.get("lat"))
+        lng = float(place.get("lng"))
+    except Exception:
+        return None
+    if str(place.get("source") or "").lower() != "trailhead":
+        return None
+    if str(place.get("trailhead_dataset") or "") != "dispersed_camp":
+        return None
+    if not _truthy_place_value(place.get("trailhead_public")):
+        return None
+    name = re.sub(r"\s+", " ", str(place.get("name") or "").strip()) or "Dispersed tent site"
+    photos = place.get("photos") if isinstance(place.get("photos"), list) else []
+    photo_url = place.get("photo_url") or place.get("hero_photo_url") or (photos[0].get("url") if photos and isinstance(photos[0], dict) else "")
+    return {
+        "id": str(place.get("trailhead_place_id") or place.get("id")),
+        "name": name,
+        "lat": lat,
+        "lng": lng,
+        "tags": sorted(set(["camp", "dispersed", "tent", *[str(tag).lower() for tag in (place.get("tags") or []) if str(tag).strip()]])),
+        "land_type": "Dispersed",
+        "summary": place.get("summary") or "",
+        "description": place.get("description") or "",
+        "photo_url": photo_url or "",
+        "photos": photos,
+        "reservable": False,
+        "cost": place.get("cost") or "",
+        "url": place.get("url") or place.get("official_url") or "",
+        "official_url": place.get("official_url") or place.get("url") or "",
+        "booking_url": "",
+        "ada": False,
+        "source": "trailhead",
+        "verified_source": "Trailhead",
+        "source_badge": "Trailhead",
+        "source_freshness": place.get("source_freshness") or "Recently checked",
+        "last_checked": place.get("published_at") or place.get("last_seen") or place.get("updated_at"),
+        "phone": place.get("phone") or "",
+        "address": place.get("address") or "",
+        "provider_place_id": "",
+        "place_id": str(place.get("trailhead_place_id") or place.get("id") or ""),
+        "amenities": place.get("amenities") if isinstance(place.get("amenities"), list) else [],
+        "site_types": place.get("site_types") if isinstance(place.get("site_types"), list) else ["Tent"],
+        "activities": place.get("activities") if isinstance(place.get("activities"), list) else [],
+        "access_notes": place.get("access_notes") or "",
+        "bail_out_notes": place.get("bail_out_notes") or "",
+        "stay_limit": place.get("stay_limit") or "",
+        "reservation_notes": place.get("reservation_notes") or "",
+        "max_rig_length": place.get("max_rig_length") or "",
+        "feature_source": "trailhead",
+        "cache_status": "hit",
+        "rich_detail_available": True,
+        "rich_detail_locked": False,
+    }
+
+def _trailhead_dispersed_camps(lat: float, lng: float, radius_miles: float, limit: int = 160) -> list[dict]:
+    places = list_cached_places_near_samples(
+        [{"lat": lat, "lng": lng}],
+        radius_mi=radius_miles,
+        categories=["camp"],
+        include_stale=True,
+        limit=limit,
+    )
+    camps = [_camp_from_trailhead_place(place) for place in places if isinstance(place, dict)]
+    return [camp for camp in camps if camp]
+
 def _camp_first_photo_url(camp: dict) -> str:
     for key in ("photo_url", "hero_photo_url", "primary_image", "image_url"):
         value = str(camp.get(key) or "").strip()
@@ -13783,7 +14005,8 @@ async def _aggregate_nearby_camps(
         *international_tasks,
     )
     hosted_camps = [_camp_from_live_place(place) for place in hosted_private if isinstance(place, dict)]
-    merged = _merge_camp_sources(ridb, blm, osm, active, [c for c in hosted_camps if c], *international_sources, type_filters=type_filters)
+    trailhead_camps = _trailhead_dispersed_camps(lat, lng, radius, limit=160)
+    merged = _merge_camp_sources(trailhead_camps, ridb, blm, osm, active, [c for c in hosted_camps if c], *international_sources, type_filters=type_filters)
     if len(merged) < 10:
         merged = _merge_camp_sources(merged, _explore_catalog_fallback_camps(lat, lng, max(radius, 75), limit=32), type_filters=type_filters)
     return _camp_discovery_response(merged, mode=mode, limit=limit)
@@ -14855,9 +15078,10 @@ async def camps_bbox(n: float, s: float, e: float, w: float, types: str = "", li
         *international_tasks,
     )
     hosted_camps = [_camp_from_live_place(place) for place in hosted_private if isinstance(place, dict)]
+    trailhead_camps = _trailhead_dispersed_camps(lat, lng, radius_miles, limit=240)
     in_box = [
         [c for c in source if s <= c.get("lat", 999) <= n and w <= c.get("lng", 999) <= e]
-        for source in (ridb, blm, osm, active, [c for c in hosted_camps if c], *international_sources)
+        for source in (trailhead_camps, ridb, blm, osm, active, [c for c in hosted_camps if c], *international_sources)
     ]
     merged = _merge_camp_sources(*in_box, type_filters=type_filters)
     return _camp_discovery_response(merged, mode=mode, limit=limit)

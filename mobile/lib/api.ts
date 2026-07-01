@@ -1074,6 +1074,24 @@ export const api = {
     req<{ ok: boolean; application: MapContributorApplication }>('/api/contributions/map-contributor/apply', {
       method: 'POST', body: JSON.stringify(data),
     }),
+  getDispersedLeadsNearby: (lat: number, lng: number, radius = 35, limit = 80) =>
+    req<DispersedLeadsNearbyResponse>(`/api/dispersed-leads/nearby?lat=${lat}&lng=${lng}&radius=${radius}&limit=${limit}`),
+  reviewDispersedLead: (leadKey: string, status: DispersedLead['status'], note?: string, profile?: Partial<CampAdminUpdatePayload>) =>
+    req<{ ok: boolean; lead: DispersedLead }>(`/api/dispersed-leads/${encodeURIComponent(leadKey)}/review`, {
+      method: 'POST', body: JSON.stringify({ status, note, profile }),
+    }),
+  saveDispersedLeadProfile: (leadKey: string, data: Partial<CampAdminUpdatePayload> & { note?: string }) =>
+    req<{ ok: boolean; lead: DispersedLead }>(`/api/dispersed-leads/${encodeURIComponent(leadKey)}/profile`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  addDispersedLeadPhoto: (leadKey: string, data: { photo_data: string; caption?: string; content_type?: string }) =>
+    req<{ ok: boolean; photo: { id: number; lead_key: string; status: string; created_at: number } }>(`/api/dispersed-leads/${encodeURIComponent(leadKey)}/photos`, {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  publishDispersedLead: (leadKey: string, data?: Partial<CampAdminUpdatePayload>) =>
+    req<{ ok: boolean; lead: DispersedLead; camp?: CampsiteDetail }>(`/api/admin/dispersed-leads/${encodeURIComponent(leadKey)}/publish`, {
+      method: 'POST', body: JSON.stringify(data ?? {}),
+    }),
 
   getLandCheck: (lat: number, lng: number) =>
     req<LandCheck>(`/api/land-check?lat=${lat}&lng=${lng}`),
@@ -2410,6 +2428,7 @@ export interface ContributorProfile {
   rank: { month?: number | null; year?: number | null; all?: number | null };
   streak: number; tier: ContributorTier; stats: ContributorStats; badges: ContributorBadge[];
   awards: ContributorAward[]; recent_activity: { label: string; count: number; points: number }[];
+  map_contributor?: { status: 'not_applied' | 'pending' | 'approved' | 'dismissed'; approved: boolean; updated_at?: number | null };
 }
 export interface ContributorLeader {
   user_id: number; username: string; display_name: string; is_self?: boolean; rank_number: number; points_for_period: number;
@@ -2432,6 +2451,27 @@ export interface MapContributorApplication extends MapContributorApplicationPayl
   status: 'pending' | 'approved' | 'dismissed';
   created_at: number;
   updated_at: number;
+}
+export interface DispersedLead {
+  lead_key: string;
+  id: string;
+  lat: number;
+  lng: number;
+  category: 'wild_camp' | 'informal_camp';
+  status: 'lead' | 'needs_field_check' | 'community_verified' | 'trailhead_verified' | 'published' | 'rejected' | 'merged' | 'expired';
+  confidence?: number;
+  source_verified_at?: string | null;
+  review_flags?: string[];
+  distance_mi?: number | null;
+  reviewed_at?: number | null;
+  rejection_reason?: string | null;
+  canonical_camp_id?: string | null;
+  published_at?: number | null;
+  profile?: Partial<CampAdminUpdatePayload>;
+}
+export interface DispersedLeadsNearbyResponse {
+  access: 'admin' | 'map_contributor';
+  leads: DispersedLead[];
 }
 export interface Pin {
   id: number; lat: number; lng: number; name: string; type: string; description: string; land_type: string;

@@ -15,6 +15,10 @@ from pathlib import Path
 from typing import Any
 
 
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 KEEP_COLUMNS = {"Latitude", "Longitude", "Category", "Date verified", "Open"}
 CATEGORY_MAP = {
     "wild camping": "wild_camp",

@@ -120,6 +120,7 @@ from db.store import (
     list_dispersed_site_leads_near, update_dispersed_site_lead_status,
     get_dispersed_site_lead_summary, update_dispersed_site_lead_profile,
     add_dispersed_site_lead_photo, publish_dispersed_site_lead,
+    save_viator_booking_intent, update_viator_booking, get_viator_booking, list_viator_bookings,
 )
 from ingestors.active import get_active_activities, get_active_campgrounds
 from ingestors.fcc import get_mobile_coverage
@@ -20047,6 +20048,22 @@ class RouteTourRequest(BaseModel):
     sort: str = "recommended"
     order: str = "descending"
 
+class ViatorBookingIntentRequest(BaseModel):
+    product_code: str
+    product_title: Optional[str] = None
+    travel_date: Optional[str] = None
+    currency: str = "USD"
+    amount: Optional[float] = None
+    booking_url: Optional[str] = None
+    provider_payload: dict = Field(default_factory=dict)
+
+class ViatorBookingProviderRequest(BaseModel):
+    booking_id: Optional[str] = None
+    payload: dict = Field(default_factory=dict)
+
+class ViatorCancelRequest(BaseModel):
+    payload: dict = Field(default_factory=dict)
+
 VIATOR_DESTINATION_HINTS = [
     {"id": "5600", "name": "Moab", "lat": 38.573315, "lng": -109.54984, "radius_mi": 95.0},
     {"id": "5265", "name": "Yosemite National Park", "lat": 37.8499232, "lng": -119.5676663, "radius_mi": 95.0},
@@ -20102,6 +20119,60 @@ def _viator_provider_status(payload: dict | None) -> dict:
         "provider_message": payload.get("provider_message") or payload.get("reason"),
         "tracking_id": payload.get("tracking_id"),
         "fetched_at": payload.get("fetched_at"),
+    }
+
+
+def _viator_booking_enabled(client: ViatorClient | None = None) -> bool:
+    provider = client or ViatorClient(viator_config_from_env())
+    return bool(getattr(provider, "booking_ready", provider.ready)())
+
+
+def _viator_booking_config(client: ViatorClient | None = None) -> dict:
+    provider = client or ViatorClient(viator_config_from_env())
+    enabled = _viator_booking_enabled(provider)
+    return {
+        "source": "viator",
+        "merchant_of_record": "Viator",
+        "payment_solution": "iframe",
+        "booking_enabled": enabled,
+        "live_enabled": provider.ready(),
+        "requires_certification": True,
+        "requires_pci": True,
+        "status": "enabled" if enabled else "pending_access",
+    }
+
+
+def _clean_viator_product_code(value: object) -> str:
+    return re.sub(r"[^A-Za-z0-9_-]+", "", str(value or "").strip())[:120]
+
+
+def _deep_first(payload: object, keys: set[str]) -> str:
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            if str(key) in keys and value not in {None, ""}:
+                return str(value)
+        for value in payload.values():
+            found = _deep_first(value, keys)
+            if found:
+                return found
+    if isinstance(payload, list):
+        for value in payload:
+            found = _deep_first(value, keys)
+            if found:
+                return found
+    return ""
+
+
+def _viator_booking_update_from_provider(payload: dict, fallback_status: str) -> dict:
+    status = str(payload.get("status") or "").lower()
+    provider_ok = status in {"ok", "confirmed", "booked", "success"} or bool(_deep_first(payload, {"bookingReference", "booking_reference"}))
+    return {
+        "status": fallback_status if provider_ok else (status or "provider_pending"),
+        "booking_reference": _deep_first(payload, {"bookingReference", "booking_reference", "reference"}),
+        "cart_id": _deep_first(payload, {"cartId", "cart_id", "cartReference", "cart_reference"}),
+        "hold_expires_at": _deep_first(payload, {"holdExpiresAt", "hold_expires_at", "pricingHoldExpiry", "availabilityHoldExpiry"}),
+        "voucher_url": _deep_first(payload, {"voucherUrl", "voucher_url"}),
+        "provider_payload": payload,
     }
 
 
@@ -20622,6 +20693,175 @@ async def explore_experience_detail(experience_id: str):
     if not item:
         raise HTTPException(404, "Experience not found")
     return item
+
+
+@app.get("/api/viator/booking/config")
+async def viator_booking_config():
+    return _viator_booking_config()
+
+
+@app.get("/api/viator/products/{product_code}/booking-data")
+async def viator_product_booking_data(product_code: str, currency: str = "USD"):
+    code = _clean_viator_product_code(product_code)
+    if not code:
+        raise HTTPException(400, "Product code is required")
+    client = ViatorClient(viator_config_from_env())
+    product = client.get_product(code)
+    schedule = client.get_availability_schedule(code, currency=currency)
+    questions = client.get_booking_questions(product_code=code)
+    return {
+        **_viator_booking_config(client),
+        "product_code": code,
+        "product": product,
+        "availability_schedule": schedule,
+        "booking_questions": questions,
+        "provider_status": [
+            {"name": "product", **_viator_provider_status(product)},
+            {"name": "availability_schedule", **_viator_provider_status(schedule)},
+            {"name": "booking_questions", **_viator_provider_status(questions)},
+        ],
+    }
+
+
+@app.get("/api/viator/bookings")
+async def viator_user_bookings(limit: int = 50, user: dict = Depends(_current_user)):
+    return {
+        **_viator_booking_config(),
+        "bookings": list_viator_bookings(user["id"], limit=max(1, min(int(limit or 50), 100))),
+    }
+
+
+@app.post("/api/viator/bookings/intent")
+async def viator_booking_intent(body: ViatorBookingIntentRequest, user: dict = Depends(_current_user)):
+    code = _clean_viator_product_code(body.product_code)
+    if not code:
+        raise HTTPException(400, "Product code is required")
+    booking = save_viator_booking_intent(
+        user["id"],
+        code,
+        product_title=body.product_title,
+        travel_date=body.travel_date,
+        currency=body.currency,
+        amount=body.amount,
+        booking_url=body.booking_url,
+        provider_payload=body.provider_payload,
+    )
+    return {**_viator_booking_config(), "booking": booking}
+
+
+def _update_booking_from_provider_if_present(booking_id: str | None, user_id: int, payload: dict, status: str) -> dict | None:
+    if not booking_id:
+        return None
+    if str(payload.get("status") or "").lower() == "disabled":
+        booking = get_viator_booking(booking_id, user_id)
+        return booking
+    return update_viator_booking(booking_id, user_id, **_viator_booking_update_from_provider(payload, status))
+
+
+@app.post("/api/viator/availability/check")
+async def viator_availability_check(body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
+    client = ViatorClient(viator_config_from_env())
+    payload = client.check_availability(body.payload or {})
+    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "availability_checked")
+    return {
+        **_viator_booking_config(client),
+        "result": payload,
+        "booking": booking,
+        "provider_status": _viator_provider_status(payload),
+    }
+
+
+@app.post("/api/viator/bookings/cart/hold")
+async def viator_cart_hold(body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
+    client = ViatorClient(viator_config_from_env())
+    payload = client.cart_hold(body.payload or {})
+    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "held")
+    return {
+        **_viator_booking_config(client),
+        "result": payload,
+        "booking": booking,
+        "provider_status": _viator_provider_status(payload),
+    }
+
+
+@app.post("/api/viator/bookings/cart/book")
+async def viator_cart_book(body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
+    client = ViatorClient(viator_config_from_env())
+    payload = client.cart_book(body.payload or {})
+    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "booked")
+    return {
+        **_viator_booking_config(client),
+        "result": payload,
+        "booking": booking,
+        "provider_status": _viator_provider_status(payload),
+    }
+
+
+@app.post("/api/viator/checkoutsessions/{session_token}/paymentaccounts")
+async def viator_checkout_payment_accounts(session_token: str, body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
+    client = ViatorClient(viator_config_from_env())
+    payload = client.checkout_payment_accounts(session_token, body.payload or {})
+    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "payment_ready")
+    return {
+        **_viator_booking_config(client),
+        "result": payload,
+        "booking": booking,
+        "provider_status": _viator_provider_status(payload),
+    }
+
+
+@app.post("/api/viator/bookings/status")
+async def viator_booking_status(body: ViatorBookingProviderRequest, user: dict = Depends(_current_user)):
+    client = ViatorClient(viator_config_from_env())
+    payload = client.booking_status(body.payload or {})
+    booking = _update_booking_from_provider_if_present(body.booking_id, user["id"], payload, "status_checked")
+    return {
+        **_viator_booking_config(client),
+        "result": payload,
+        "booking": booking,
+        "provider_status": _viator_provider_status(payload),
+    }
+
+
+@app.get("/api/viator/bookings/cancel-reasons")
+async def viator_cancel_reasons(user: dict = Depends(_current_user)):
+    client = ViatorClient(viator_config_from_env())
+    payload = client.get_cancel_reasons()
+    return {**_viator_booking_config(client), "result": payload, "provider_status": _viator_provider_status(payload)}
+
+
+@app.post("/api/viator/bookings/{booking_id}/cancel-quote")
+async def viator_cancel_quote(booking_id: str, body: ViatorCancelRequest, user: dict = Depends(_current_user)):
+    booking = get_viator_booking(booking_id, user["id"])
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    reference = str(booking.get("booking_reference") or body.payload.get("bookingReference") or body.payload.get("booking_reference") or "")
+    client = ViatorClient(viator_config_from_env())
+    payload = client.cancel_quote(reference, body.payload or {})
+    updated = _update_booking_from_provider_if_present(booking_id, user["id"], payload, "cancel_quote")
+    return {
+        **_viator_booking_config(client),
+        "result": payload,
+        "booking": updated or booking,
+        "provider_status": _viator_provider_status(payload),
+    }
+
+
+@app.post("/api/viator/bookings/{booking_id}/cancel")
+async def viator_cancel_booking(booking_id: str, body: ViatorCancelRequest, user: dict = Depends(_current_user)):
+    booking = get_viator_booking(booking_id, user["id"])
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    reference = str(booking.get("booking_reference") or body.payload.get("bookingReference") or body.payload.get("booking_reference") or "")
+    client = ViatorClient(viator_config_from_env())
+    payload = client.cancel_booking(reference, body.payload or {})
+    updated = _update_booking_from_provider_if_present(booking_id, user["id"], payload, "canceled")
+    return {
+        **_viator_booking_config(client),
+        "result": payload,
+        "booking": updated or booking,
+        "provider_status": _viator_provider_status(payload),
+    }
 
 
 def _explore_experience_radius_mi(place: dict) -> float:

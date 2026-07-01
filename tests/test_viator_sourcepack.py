@@ -6,9 +6,12 @@ import io
 import tempfile
 import unittest
 import urllib.error
+import urllib.parse
 from pathlib import Path
 
 import dashboard.server as server
+from config.settings import settings
+from db import store
 from scripts.explore_sources.travel.cache_policy import CachePolicy, is_expired
 from scripts.explore_sources.travel.ranking import rank_experiences
 from scripts.explore_sources.travel.schema import planner_stop_from_experience
@@ -180,6 +183,76 @@ class ViatorSourcePackTests(unittest.TestCase):
         self.assertEqual(payload["provider_code"], "SERVER_ERROR")
         self.assertEqual(payload["provider_message"], "Viator failed")
         self.assertEqual(payload["tracking_id"], "track-500")
+
+    def test_booking_endpoints_are_separately_guarded(self):
+        opener = CapturingOpener({"status": "ok", "cartId": "cart-123"})
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True, enable_booking=False), opener=opener)
+        disabled = client.cart_hold({"lineItems": []})
+        self.assertEqual(disabled["status"], "disabled")
+        self.assertEqual(len(opener.requests), 0)
+
+        enabled_client = ViatorClient(ViatorConfig(api_key="test", enable_live=True, enable_booking=True), opener=opener)
+        payload = enabled_client.cart_hold({"lineItems": [{"productCode": "MOAB-JEEP-001"}]})
+        self.assertEqual(payload["status"], "ok")
+        self.assertEqual(urllib.parse.urlparse(opener.requests[0].full_url).path, "/partner/bookings/cart/hold")
+        self.assertEqual(opener.bodies[0]["lineItems"][0]["productCode"], "MOAB-JEEP-001")
+
+    def test_booking_cancel_quote_and_iframe_payment_paths(self):
+        opener = CapturingOpener({"status": "ok"})
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True, enable_booking=True), opener=opener)
+        client.cancel_quote("BR 123", {"reasonCode": "CUSTOMER_REQUEST"})
+        client.checkout_payment_accounts("session 123", {"account": {"type": "iframe"}})
+        first = urllib.parse.urlparse(opener.requests[0].full_url)
+        second = urllib.parse.urlparse(opener.requests[1].full_url)
+        self.assertEqual(opener.requests[0].get_method(), "GET")
+        self.assertEqual(first.path, "/partner/bookings/BR%20123/cancel-quote")
+        self.assertEqual(urllib.parse.parse_qs(first.query)["reasonCode"], ["CUSTOMER_REQUEST"])
+        self.assertEqual(opener.requests[1].get_method(), "POST")
+        self.assertEqual(second.path, "/partner/v1/checkoutsessions/session%20123/paymentaccounts")
+        self.assertEqual(opener.bodies[0]["account"]["type"], "iframe")
+
+    def test_product_detail_and_schedule_paths_are_encoded(self):
+        opener = CapturingOpener({"status": "ok"})
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=opener)
+        client.get_product("MOAB JEEP/001")
+        client.get_availability_schedule("MOAB JEEP/001", currency="USD")
+        paths = [urllib.parse.urlparse(request.full_url).path for request in opener.requests]
+        self.assertEqual(paths[0], "/partner/products/MOAB%20JEEP%2F001")
+        self.assertEqual(paths[1], "/partner/availability/schedules/MOAB%20JEEP%2F001")
+
+    def test_viator_booking_store_round_trip(self):
+        old_path = settings.db_path
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                settings.db_path = str(Path(tmp) / "trailhead-test.db")
+                store.init_db()
+                user_id = store.create_user("tour@example.com", "touruser", "hash", "tour-ref")
+                booking = store.save_viator_booking_intent(
+                    user_id,
+                    "MOAB-JEEP-001",
+                    product_title="Moab Jeep Tour",
+                    travel_date="2026-08-20",
+                    currency="usd",
+                    amount=120.5,
+                    provider_payload={"selected": True},
+                )
+                self.assertEqual(booking["status"], "intent")
+                self.assertEqual(booking["currency"], "USD")
+                self.assertEqual(booking["provider_payload"], {"selected": True})
+
+                updated = store.update_viator_booking(
+                    booking["id"],
+                    user_id,
+                    status="booked",
+                    booking_reference="BR-123",
+                    voucher_url="https://viator.test/voucher",
+                    provider_payload={"status": "CONFIRMED"},
+                )
+                self.assertEqual(updated["status"], "booked")
+                self.assertEqual(updated["booking_reference"], "BR-123")
+                self.assertEqual(store.list_viator_bookings(user_id)[0]["voucher_url"], "https://viator.test/voucher")
+            finally:
+                settings.db_path = old_path
 
     def test_cache_expiry_decision(self):
         self.assertFalse(is_expired(200, now=100))

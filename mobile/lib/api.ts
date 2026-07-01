@@ -737,6 +737,54 @@ export const api = {
   },
   getExploreExperience: (experienceId: string) =>
     req<BookableExperience>(`/api/explore/experiences/${encodeURIComponent(experienceId)}`),
+  getViatorBookingConfig: () =>
+    req<ViatorBookingConfig>('/api/viator/booking/config'),
+  getViatorProductBookingData: (productCode: string, currency = 'USD') =>
+    req<ViatorProductBookingData>(`/api/viator/products/${encodeURIComponent(productCode)}/booking-data?currency=${encodeURIComponent(currency)}`),
+  getViatorBookings: (limit = 50) =>
+    req<ViatorBookingsResponse>(`/api/viator/bookings?limit=${limit}`),
+  createViatorBookingIntent: (payload: ViatorBookingIntentPayload) =>
+    req<ViatorBookingResponse>('/api/viator/bookings/intent', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  checkViatorAvailability: (payload: ViatorProviderPayload) =>
+    req<ViatorBookingResponse>('/api/viator/availability/check', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  holdViatorCart: (payload: ViatorProviderPayload) =>
+    req<ViatorBookingResponse>('/api/viator/bookings/cart/hold', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  bookViatorCart: (payload: ViatorProviderPayload) =>
+    req<ViatorBookingResponse>('/api/viator/bookings/cart/book', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  createViatorPaymentAccount: (sessionToken: string, payload: ViatorProviderPayload) =>
+    req<ViatorBookingResponse>(`/api/viator/checkoutsessions/${encodeURIComponent(sessionToken)}/paymentaccounts`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  checkViatorBookingStatus: (payload: ViatorProviderPayload) =>
+    req<ViatorBookingResponse>('/api/viator/bookings/status', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getViatorCancelReasons: () =>
+    req<ViatorBookingResponse>('/api/viator/bookings/cancel-reasons'),
+  quoteViatorCancel: (bookingId: string, payload: Record<string, any> = {}) =>
+    req<ViatorBookingResponse>(`/api/viator/bookings/${encodeURIComponent(bookingId)}/cancel-quote`, {
+      method: 'POST',
+      body: JSON.stringify({ payload }),
+    }),
+  cancelViatorBooking: (bookingId: string, payload: Record<string, any> = {}) =>
+    req<ViatorBookingResponse>(`/api/viator/bookings/${encodeURIComponent(bookingId)}/cancel`, {
+      method: 'POST',
+      body: JSON.stringify({ payload }),
+    }),
   getRouteTours: (data: RouteTourSuggestionRequest) =>
     isLocalWebProductionApi()
       ? Promise.resolve<ExploreExperiencesResponse>(emptyRouteToursResponse(data.source))
@@ -3599,6 +3647,73 @@ export interface BookableExperience {
     leg_index?: number | null;
     distance_mi?: number | null;
   };
+}
+export interface ViatorBookingConfig {
+  source: 'viator' | string;
+  merchant_of_record: string;
+  payment_solution: 'iframe' | string;
+  booking_enabled: boolean;
+  live_enabled: boolean;
+  requires_certification?: boolean;
+  requires_pci?: boolean;
+  status: 'enabled' | 'pending_access' | string;
+}
+export interface ViatorBookingRecord {
+  id: string;
+  user_id: number;
+  product_code: string;
+  product_title?: string;
+  travel_date?: string;
+  currency?: string;
+  amount?: number | null;
+  status: string;
+  booking_reference?: string;
+  cart_id?: string;
+  hold_expires_at?: string;
+  payment_solution?: string;
+  booking_url?: string;
+  voucher_url?: string;
+  provider_payload?: Record<string, any>;
+  created_at?: number;
+  updated_at?: number;
+}
+export interface ViatorProviderStatus {
+  status?: string;
+  endpoint?: string;
+  http_status?: number | null;
+  provider_code?: string | null;
+  provider_message?: string | null;
+  tracking_id?: string | null;
+  fetched_at?: number | null;
+  name?: string;
+}
+export interface ViatorProductBookingData extends ViatorBookingConfig {
+  product_code: string;
+  product?: Record<string, any>;
+  availability_schedule?: Record<string, any>;
+  booking_questions?: Record<string, any>;
+  provider_status?: ViatorProviderStatus[];
+}
+export interface ViatorBookingsResponse extends ViatorBookingConfig {
+  bookings: ViatorBookingRecord[];
+}
+export interface ViatorBookingIntentPayload {
+  product_code: string;
+  product_title?: string;
+  travel_date?: string;
+  currency?: string;
+  amount?: number;
+  booking_url?: string;
+  provider_payload?: Record<string, any>;
+}
+export interface ViatorProviderPayload {
+  booking_id?: string;
+  payload: Record<string, any>;
+}
+export interface ViatorBookingResponse extends ViatorBookingConfig {
+  booking?: ViatorBookingRecord | null;
+  result?: Record<string, any>;
+  provider_status?: ViatorProviderStatus | ViatorProviderStatus[];
 }
 export interface ExploreExperiencesResponse {
   source: string;

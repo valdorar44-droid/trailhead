@@ -420,6 +420,25 @@ def init_db():
             UNIQUE(trailhead_place_id, user_id, start_date, end_date),
             FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
         );
+        CREATE TABLE IF NOT EXISTS viator_bookings (
+            id                  TEXT PRIMARY KEY,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            product_code        TEXT NOT NULL,
+            product_title       TEXT,
+            travel_date         TEXT,
+            currency            TEXT NOT NULL DEFAULT 'USD',
+            amount              REAL,
+            status              TEXT NOT NULL DEFAULT 'intent',
+            booking_reference   TEXT,
+            cart_id             TEXT,
+            hold_expires_at     TEXT,
+            payment_solution    TEXT NOT NULL DEFAULT 'iframe',
+            booking_url         TEXT,
+            voucher_url         TEXT,
+            provider_payload    TEXT NOT NULL DEFAULT '{}',
+            created_at          INTEGER NOT NULL,
+            updated_at          INTEGER NOT NULL
+        );
         CREATE TABLE IF NOT EXISTS trail_field_reports (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             trail_id         TEXT NOT NULL,
@@ -959,6 +978,25 @@ def init_db():
             UNIQUE(trailhead_place_id, user_id, start_date, end_date),
             FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
         )""",
+        """CREATE TABLE IF NOT EXISTS viator_bookings (
+            id                  TEXT PRIMARY KEY,
+            user_id             INTEGER NOT NULL REFERENCES users(id),
+            product_code        TEXT NOT NULL,
+            product_title       TEXT,
+            travel_date         TEXT,
+            currency            TEXT NOT NULL DEFAULT 'USD',
+            amount              REAL,
+            status              TEXT NOT NULL DEFAULT 'intent',
+            booking_reference   TEXT,
+            cart_id             TEXT,
+            hold_expires_at     TEXT,
+            payment_solution    TEXT NOT NULL DEFAULT 'iframe',
+            booking_url         TEXT,
+            voucher_url         TEXT,
+            provider_payload    TEXT NOT NULL DEFAULT '{}',
+            created_at          INTEGER NOT NULL,
+            updated_at          INTEGER NOT NULL
+        )""",
         "CREATE INDEX IF NOT EXISTS idx_places_geo ON places(lat, lng)",
         "CREATE INDEX IF NOT EXISTS idx_places_source ON places(source, source_place_id)",
         "CREATE INDEX IF NOT EXISTS idx_dispersed_site_leads_geo ON dispersed_site_leads(lat, lng, status)",
@@ -969,6 +1007,8 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_place_photos_place ON place_photos(trailhead_place_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_edit_suggestions_status ON place_edit_suggestions(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_reservation_alerts_user ON place_reservation_alerts(user_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_viator_bookings_user ON viator_bookings(user_id, status, updated_at)",
+        "CREATE INDEX IF NOT EXISTS idx_viator_bookings_reference ON viator_bookings(booking_reference)",
         """CREATE TABLE IF NOT EXISTS trail_field_reports (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             trail_id         TEXT NOT NULL,
@@ -5097,6 +5137,89 @@ def get_place_reservation_alerts(trailhead_place_id: str, user_id: int | None = 
         ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+
+def _decode_viator_booking(row: sqlite3.Row | dict) -> dict:
+    data = dict(row)
+    try:
+        data["provider_payload"] = json.loads(data.get("provider_payload") or "{}")
+    except Exception:
+        data["provider_payload"] = {}
+    return data
+
+def save_viator_booking_intent(user_id: int, product_code: str, product_title: str | None = None,
+                               travel_date: str | None = None, currency: str | None = "USD",
+                               amount: float | None = None, booking_url: str | None = None,
+                               provider_payload: dict | None = None, status: str = "intent") -> dict:
+    now = int(time.time())
+    booking_id = "vtr_" + secrets.token_urlsafe(18).replace("-", "").replace("_", "")[:24]
+    db = _conn()
+    db.execute(
+        """INSERT INTO viator_bookings
+           (id,user_id,product_code,product_title,travel_date,currency,amount,status,booking_url,provider_payload,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (
+            booking_id,
+            int(user_id),
+            str(product_code or "").strip()[:120],
+            str(product_title or "").strip()[:300],
+            str(travel_date or "").strip()[:40],
+            str(currency or "USD").strip().upper()[:8],
+            amount,
+            str(status or "intent").strip()[:40],
+            str(booking_url or "").strip()[:1200],
+            json.dumps(provider_payload or {}, separators=(",", ":")),
+            now,
+            now,
+        ),
+    )
+    row = db.execute("SELECT * FROM viator_bookings WHERE id=? AND user_id=?", (booking_id, int(user_id))).fetchone()
+    db.commit(); db.close()
+    return _decode_viator_booking(row) if row else {}
+
+def update_viator_booking(booking_id: str, user_id: int, **updates) -> dict | None:
+    allowed = {
+        "product_title", "travel_date", "currency", "amount", "status", "booking_reference",
+        "cart_id", "hold_expires_at", "payment_solution", "booking_url", "voucher_url",
+        "provider_payload",
+    }
+    values = {}
+    for key, value in updates.items():
+        if key not in allowed:
+            continue
+        if key == "provider_payload":
+            values[key] = json.dumps(value or {}, separators=(",", ":"))
+        elif key == "currency":
+            values[key] = str(value or "USD").strip().upper()[:8]
+        elif isinstance(value, str):
+            values[key] = value.strip()
+        else:
+            values[key] = value
+    if not values:
+        return get_viator_booking(booking_id, user_id)
+    values["updated_at"] = int(time.time())
+    assignments = ", ".join(f"{key}=?" for key in values.keys())
+    params = list(values.values()) + [str(booking_id), int(user_id)]
+    db = _conn()
+    db.execute(f"UPDATE viator_bookings SET {assignments} WHERE id=? AND user_id=?", params)
+    row = db.execute("SELECT * FROM viator_bookings WHERE id=? AND user_id=?", (str(booking_id), int(user_id))).fetchone()
+    db.commit(); db.close()
+    return _decode_viator_booking(row) if row else None
+
+def get_viator_booking(booking_id: str, user_id: int) -> dict | None:
+    db = _conn()
+    row = db.execute("SELECT * FROM viator_bookings WHERE id=? AND user_id=?", (str(booking_id), int(user_id))).fetchone()
+    db.close()
+    return _decode_viator_booking(row) if row else None
+
+def list_viator_bookings(user_id: int, limit: int = 50) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        "SELECT * FROM viator_bookings WHERE user_id=? ORDER BY updated_at DESC LIMIT ?",
+        (int(user_id), max(1, min(int(limit or 50), 100))),
+    ).fetchall()
+    db.close()
+    return [_decode_viator_booking(r) for r in rows]
 
 
 # ── Trail Field Reports ───────────────────────────────────────────────────────

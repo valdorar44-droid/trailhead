@@ -23,7 +23,7 @@ class ViatorConfig:
     enable_live: bool = False
     cache_ttl_hours: int = 1
     request_timeout_seconds: float = 8.0
-    page_size: int = 6
+    page_size: int = 12
 
 
 def config_from_env(env: dict[str, str] | None = None) -> ViatorConfig:
@@ -36,7 +36,7 @@ def config_from_env(env: dict[str, str] | None = None) -> ViatorConfig:
         enable_live=str(values.get("VIATOR_ENABLE_LIVE", "false")).lower() in {"1", "true", "yes", "on"},
         cache_ttl_hours=max(1, min(int(values.get("VIATOR_CACHE_TTL_HOURS", "1") or 1), 1)),
         request_timeout_seconds=max(2.0, min(float(values.get("VIATOR_TIMEOUT_SECONDS", "8") or 8), 20.0)),
-        page_size=max(1, min(int(values.get("VIATOR_PAGE_SIZE", "6") or 6), 12)),
+        page_size=max(1, min(int(values.get("VIATOR_PAGE_SIZE", "12") or 12), 12)),
     )
 
 

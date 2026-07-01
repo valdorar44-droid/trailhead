@@ -19932,6 +19932,7 @@ def _live_viator_route_suggestions(
     ranked_by_key: dict[str, dict] = {}
     searched_destinations: set[str] = set()
     page_count = max(1, min(int(getattr(config, "page_size", 6) or 6), 12))
+    target_limit = max(1, min(int(limit or 8), 24))
     for point in points[:8]:
         destination = _viator_destination_for_point(point)
         if not destination:
@@ -19940,28 +19941,43 @@ def _live_viator_route_suggestions(
         if destination_id in searched_destinations:
             continue
         searched_destinations.add(destination_id)
-        payload = client.search_products(
-            destination_id=destination_id,
-            flags=flags,
-            start_date=start_date,
-            end_date=end_date,
-            lowest_price=lowest_price,
-            highest_price=highest_price,
-            sort=sort_value,
-            order=order_value,
-            count=max(1, min(int(limit or page_count), page_count)),
-            start=1,
-        )
-        statuses.append({"destination_id": destination_id, "destination": destination.get("name"), **_viator_provider_status(payload)})
-        for item in _normalize_live_viator_experiences(payload, point, destination, config.cache_ttl_hours):
-            key = str(item.get("id") or item.get("source_id") or item.get("title"))
-            current = ranked_by_key.get(key)
-            if not current or float(item.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
-                ranked_by_key[key] = item
-        if len(ranked_by_key) >= limit or len(searched_destinations) >= 4:
+        max_pages = max(1, min(int(math.ceil(target_limit / page_count)), 4))
+        for page_index in range(max_pages):
+            if len(ranked_by_key) >= target_limit:
+                break
+            request_count = max(1, min(page_count, target_limit - len(ranked_by_key)))
+            request_start = (page_index * page_count) + 1
+            payload = client.search_products(
+                destination_id=destination_id,
+                flags=flags,
+                start_date=start_date,
+                end_date=end_date,
+                lowest_price=lowest_price,
+                highest_price=highest_price,
+                sort=sort_value,
+                order=order_value,
+                count=request_count,
+                start=request_start,
+            )
+            products_payload = _viator_products_payload(payload)
+            product_count = len(products_payload.get("products") or [])
+            statuses.append({
+                "destination_id": destination_id,
+                "destination": destination.get("name"),
+                "page": page_index + 1,
+                **_viator_provider_status(payload),
+            })
+            for item in _normalize_live_viator_experiences(products_payload, point, destination, config.cache_ttl_hours):
+                key = str(item.get("id") or item.get("source_id") or item.get("title"))
+                current = ranked_by_key.get(key)
+                if not current or float(item.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
+                    ranked_by_key[key] = item
+            if product_count < request_count:
+                break
+        if len(ranked_by_key) >= target_limit or len(searched_destinations) >= 4:
             break
     if not ranked_by_key and q.strip():
-        payload = client.search_freetext(search_term=q.strip(), count=max(1, min(int(limit or page_count), page_count)), start=1)
+        payload = client.search_freetext(search_term=q.strip(), count=max(1, min(target_limit, page_count)), start=1)
         statuses.append({"query": q.strip(), **_viator_provider_status(payload)})
         anchor = points[0] if points else {"lat": 0, "lng": 0, "name": "Route"}
         for item in _normalize_live_viator_experiences(payload, anchor, None, config.cache_ttl_hours):
@@ -19982,7 +19998,7 @@ def _live_viator_route_suggestions(
             -float(item.get("rating") or 0),
             str(item.get("title") or ""),
         ),
-    )[:max(1, min(int(limit or 8), 24))]
+    )[:target_limit]
     return ranked, statuses
 
 
@@ -20034,7 +20050,7 @@ def _viator_live_results_for_points(
         "order": order,
     }
     filter_token = _experience_filter_cache_token(**filters)
-    cache_key = _viator_route_cache_key(points, q or "", filter_token)
+    cache_key = _viator_route_cache_key(points, q or "", f"{filter_token}|limit:{max_results}")
     cached_live = _fresh_viator_route_cache(cache_key)
     if cached_live:
         meta.update({

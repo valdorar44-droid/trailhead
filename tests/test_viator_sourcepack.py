@@ -56,6 +56,36 @@ class CapturingOpener:
         return JsonResponse(self.payload, headers={"X-Unique-ID": "trace-123"})
 
 
+class PagedViatorOpener:
+    def __init__(self, total: int = 18):
+        self.total = total
+        self.requests = []
+        self.bodies = []
+
+    def __call__(self, request, *_args, **_kwargs):
+        self.requests.append(request)
+        body = json.loads(request.data.decode("utf-8")) if request.data else {}
+        self.bodies.append(body)
+        pagination = body.get("pagination") or {}
+        start = int(pagination.get("start") or 1)
+        count = int(pagination.get("count") or 1)
+        products = []
+        for index in range(start, min(start + count, self.total + 1)):
+            products.append({
+                "productCode": f"MOAB-PAGED-{index:03d}",
+                "title": f"Moab Guided Tour {index}",
+                "description": "Guided Moab trip with red-rock scenery, local route knowledge, and flexible pacing.",
+                "lat": 38.573315,
+                "lng": -109.54984,
+                "reviews": {"totalReviews": 100 - index, "combinedAverageRating": 4.8},
+                "pricing": {"summary": {"fromPrice": 100 + index}, "currency": "USD"},
+                "productUrl": f"https://www.viator.com/tours/Moab/Moab-Guided-Tour-{index}/d5600-MOAB-PAGED-{index:03d}",
+                "destinations": [{"ref": "5600", "name": "Moab", "primary": True}],
+                "flags": ["FREE_CANCELLATION"],
+            })
+        return JsonResponse({"products": products, "status": "ok"}, headers={"X-Unique-ID": f"trace-{start}"})
+
+
 class HttpErrorOpener:
     def __call__(self, request, *_args, **_kwargs):
         body = json.dumps({"code": "SERVER_ERROR", "message": "Viator failed", "trackingId": "track-500"}).encode("utf-8")
@@ -106,6 +136,21 @@ class ViatorSourcePackTests(unittest.TestCase):
         self.assertEqual(headers["exp-api-key"], "test")
         self.assertEqual(opener.bodies[0]["sorting"]["sort"], "TRAVELER_RATING")
         self.assertEqual(opener.bodies[0]["pagination"]["count"], 3)
+
+    def test_live_route_suggestions_fetches_multiple_viator_pages(self):
+        opener = PagedViatorOpener(total=18)
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True, page_size=6), opener=opener)
+        results, statuses = server._live_viator_route_suggestions(
+            client,
+            [{"lat": 38.573315, "lng": -109.54984, "name": "Moab", "leg_index": 0}],
+            limit=16,
+            q="Moab",
+            filters={},
+        )
+        self.assertEqual(len(results), 16)
+        self.assertEqual([body["pagination"]["start"] for body in opener.bodies], [1, 7, 13])
+        self.assertEqual([body["pagination"]["count"] for body in opener.bodies], [6, 6, 4])
+        self.assertEqual(len(statuses), 3)
 
     def test_client_preserves_viator_http_error_details(self):
         client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=HttpErrorOpener())

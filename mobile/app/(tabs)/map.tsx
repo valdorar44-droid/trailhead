@@ -8338,8 +8338,6 @@ function MapScreen() {
     campPinsLockUntilRef.current = Date.now() + 18_000;
     setCampDiscoveryWideActive(true);
     setCampDiscoverySheetDismissed(false);
-    setQuickToast('Searching camps and stays');
-    setTimeout(() => setQuickToast(''), 2200);
     if (center) queueMapWeatherFetch(center, true);
     loadCampsInArea(
       { ...base, zoom: Math.max(base.zoom ?? 0, MIN_MANUAL_CAMP_SEARCH_ZOOM) },
@@ -21408,8 +21406,6 @@ function MapScreen() {
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
           const bounds = { n: place.lat + 0.35, s: place.lat - 0.35, e: place.lng + 0.35, w: place.lng - 0.35, zoom: 11 };
-          setQuickToast('Searching camps nearby');
-          setTimeout(() => setQuickToast(''), 2500);
           setTimeout(() => {
             viewportRef.current = bounds;
             nativeMapRef.current?.flyTo(place.lat, place.lng, 11);
@@ -21508,8 +21504,6 @@ function MapScreen() {
         onNearbyCamps={place => {
           setTappedPoi(null);
           const bounds = { n: place.lat + 0.35, s: place.lat - 0.35, e: place.lng + 0.35, w: place.lng - 0.35, zoom: 11 };
-          setQuickToast('Searching camps nearby');
-          setTimeout(() => setQuickToast(''), 2500);
           setTimeout(() => {
             viewportRef.current = bounds;
             nativeMapRef.current?.flyTo(place.lat, place.lng, 11);
@@ -23849,8 +23843,6 @@ function MapScreen() {
                     const trail = tappedTrail;
                     setTappedTrail(null);
                     const bounds = { n: trail.lat + 0.35, s: trail.lat - 0.35, e: trail.lng + 0.35, w: trail.lng - 0.35, zoom: 11 };
-                    setQuickToast('Searching camps near trailhead');
-                    setTimeout(() => setQuickToast(''), 2500);
                     setTimeout(() => {
                       viewportRef.current = bounds;
                       setShowLayerSheet(false);

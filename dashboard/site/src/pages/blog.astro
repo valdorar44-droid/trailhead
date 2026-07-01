@@ -3,12 +3,12 @@ import Layout from "../layouts/Layout.astro";
 import { posts } from "../data/posts";
 ---
 
-<Layout title="Trailhead Journal" description="Trailhead field notes on offline maps, routes, places, and overland navigation.">
+<Layout title="Trailhead Journal" description="Trailhead notes on maps, routes, places, and outdoor trip planning.">
   <main class="th-journal">
     <header>
       <p class="th-eyebrow">Journal</p>
       <h1>Field notes for the road.</h1>
-      <p>Practical notes on offline maps, route handoff, and what the app should do in the field.</p>
+      <p>Short notes on maps, routes, places, and how Trailhead should feel in use.</p>
     </header>
     <section class="th-post-list">
       {posts.map(post => (

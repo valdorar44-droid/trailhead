@@ -60,11 +60,11 @@ const FEATURES: Feature[] = [
   {
     icon: 'car-sport-outline',
     title: 'Vehicle fit',
-    body: 'Use your own rig, rent when it helps, or keep it flexible.',
+    body: 'Use your own vehicle, rent when it helps, or keep it flexible.',
   },
   {
     icon: 'compass-outline',
-    title: 'Explore nearby',
+    title: 'Nearby places',
     body: 'Compare camps, trails, places to stay, and stops around the route.',
   },
 ];
@@ -321,7 +321,7 @@ export default function WelcomeGate({
                 <View style={s.heroCopy}>
                   <Text style={s.title}>Find the next stop.</Text>
                   <Text style={s.body}>
-                    Set your vehicle, stay style, and must-haves once. Trailhead keeps trips practical from the first search.
+                    Choose your travel style once. Trailhead keeps trips practical from the first search.
                   </Text>
                 </View>
 

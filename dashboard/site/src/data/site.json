@@ -2,11 +2,12 @@
   "brand": {
     "name": "Trailhead",
     "mark": "",
-    "tagline": "Camps and routes"
+    "tagline": "Outdoor map"
   },
   "nav": [
     { "label": "App", "href": "/#app" },
-    { "label": "Explore", "href": "/#explore" },
+    { "label": "Map", "href": "/#map" },
+    { "label": "Camps", "href": "/#camps" },
     { "label": "Routes", "href": "/#routes" },
     { "label": "Open app", "href": "/app" },
     { "label": "Download", "href": "/#download" }
@@ -17,7 +18,7 @@
       "italic": "next stop.",
       "tail": "Build the route."
     },
-    "blurb": "Trailhead brings camps, trails, routes, search, and place details into one outdoor travel app.",
+    "blurb": "Trailhead brings camps, trails, routes, guided trips, and saved places into one outdoor travel app.",
     "columns": [
       {
         "title": "Download",
@@ -30,7 +31,8 @@
       {
         "title": "Trailhead",
         "links": [
-          { "label": "Explore", "href": "/#explore" },
+          { "label": "Map", "href": "/#map" },
+          { "label": "Camps", "href": "/#camps" },
           { "label": "Routes", "href": "/#routes" }
         ]
       },

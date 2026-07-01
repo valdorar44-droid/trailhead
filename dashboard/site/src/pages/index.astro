@@ -6,76 +6,122 @@ const androidUrl = "https://play.google.com/store/apps/details?id=com.trailhead.
 ---
 
 <Layout
-  title="Trailhead - Camps, trails, routes, and outdoor places"
-  description="Trailhead brings camps, trails, route days, map search, and place details into one outdoor travel app."
+  title="Trailhead - Camps, trails, routes, and guided trips"
+  description="Trailhead brings camps, trails, routes, guided trips, and saved places into one outdoor travel app."
 >
-  <main class="trailhead-home">
-    <section class="th-hero" id="app" aria-label="Trailhead app">
-      <div class="th-hero-inner">
-        <div class="th-hero-copy">
-          <p class="th-eyebrow">Trailhead</p>
-          <h1>Camps, trails, routes, and places in one app.</h1>
-          <p class="th-lead">Open the map, compare nearby stops, and build trip days without bouncing between tools.</p>
-          <div class="th-actions">
-            <a class="th-store-link" href={iosUrl} aria-label="Download Trailhead on the App Store">
-              <span>Download on the</span>
-              <strong>App Store</strong>
-            </a>
-            <a class="th-store-link" href={androidUrl} aria-label="Get Trailhead on Google Play">
-              <span>Get it on</span>
-              <strong>Google Play</strong>
-            </a>
-            <a class="th-btn th-btn-ghost" href="/app">Open app</a>
-          </div>
+  <main class="site-home">
+    <section class="site-hero" id="app" aria-label="Trailhead app">
+      <div class="site-hero-copy">
+        <p class="site-kicker">Trailhead</p>
+        <h1>Plan the next stop from the map.</h1>
+        <p class="site-lead">Search camps, trails, guided trips, fuel, and places to stay in one clean place.</p>
+        <div class="site-actions" id="download">
+          <a class="site-store" href={iosUrl} aria-label="Download Trailhead on the App Store">
+            <span>Download on the</span>
+            <strong>App Store</strong>
+          </a>
+          <a class="site-store" href={androidUrl} aria-label="Get Trailhead on Google Play">
+            <span>Get it on</span>
+            <strong>Google Play</strong>
+          </a>
+          <a class="site-button site-button-light" href="/app">Open app</a>
         </div>
+      </div>
 
-        <div class="th-phone-stack" aria-label="Trailhead app screens">
-          <figure class="th-phone-frame th-phone-main">
-            <img src="/assets/screenshots/map-main.jpg" alt="Trailhead map screen with nearby camp and water pins" loading="eager" />
-          </figure>
-          <figure class="th-phone-frame th-phone-side">
-            <img src="/assets/screenshots/yosemite-detail.jpg" alt="Trailhead camp detail screen with nearby camp options" loading="eager" />
-          </figure>
-        </div>
+      <div class="site-hero-media" aria-label="Trailhead app screens">
+        <figure class="site-phone site-phone-main">
+          <img src="/assets/screenshots/camp-card.jpg" alt="Trailhead map showing Moab camp results" loading="eager" />
+        </figure>
+        <figure class="site-phone site-phone-back">
+          <img src="/assets/screenshots/route-builder.jpg" alt="Trailhead route builder on a terrain map" loading="eager" />
+        </figure>
       </div>
     </section>
 
-    <section class="th-section" id="explore">
-      <div class="th-shot th-shot-detail">
-        <img src="/assets/screenshots/yosemite-detail.jpg" alt="Trailhead Yosemite camp detail screen" loading="lazy" />
+    <section class="site-band" id="map">
+      <div class="site-section-copy">
+        <p class="site-kicker">Map</p>
+        <h2>Search where you are looking.</h2>
+        <p>Move around, open nearby results, and keep camps, routes, reports, and places close together.</p>
+        <a class="site-text-link" href="/app/map">Open the map</a>
       </div>
-      <div>
-        <p class="th-eyebrow">Explore</p>
-        <h2>Every place opens into useful next steps.</h2>
-        <p>Browse nearby camps, trails, stays, photos, and route options from the same page.</p>
-      </div>
+      <figure class="site-wide-shot">
+        <img src="/assets/screenshots/map-main.jpg" alt="Trailhead map across North America with weather and location layers" loading="lazy" />
+      </figure>
     </section>
 
-    <section class="th-section th-section-map">
-      <div>
-        <p class="th-eyebrow">Map</p>
-        <h2>Find stops around your route.</h2>
-        <p>Search camps, water, trailheads, fuel, and places from the same screen.</p>
-        <div class="th-actions th-actions-tight">
-          <a class="th-btn th-btn-primary" href="/app">Open app</a>
+    <section class="site-grid" aria-label="Trailhead features">
+      <article class="site-feature" id="camps">
+        <figure>
+          <img src="/assets/screenshots/camp-card.jpg" alt="Trailhead camp search results in Moab" loading="lazy" />
+        </figure>
+        <div>
+          <p class="site-kicker">Camps</p>
+          <h2>Compare nearby stays.</h2>
+          <p>Open camps around the map with distance, land type, photos, and booking notes where available.</p>
         </div>
+      </article>
+
+      <article class="site-feature" id="routes">
+        <figure>
+          <img src="/assets/screenshots/route-builder.jpg" alt="Trailhead trail builder with snapped route points" loading="lazy" />
+        </figure>
+        <div>
+          <p class="site-kicker">Routes</p>
+          <h2>Build on trails or roads.</h2>
+          <p>Sketch a line, snap points, switch modes, and turn a trip idea into a route you can inspect.</p>
+        </div>
+      </article>
+
+      <article class="site-feature" id="layers">
+        <figure>
+          <img src="/assets/screenshots/map-layers.jpg" alt="Trailhead layers sheet over K2 terrain" loading="lazy" />
+        </figure>
+        <div>
+          <p class="site-kicker">Layers</p>
+          <h2>Change the view fast.</h2>
+          <p>Switch terrain, public land, topo, and view controls without leaving the screen.</p>
+        </div>
+      </article>
+
+      <article class="site-feature" id="places">
+        <figure>
+          <img src="/assets/screenshots/explore-home.jpg" alt="Trailhead places screen with search and featured outdoor places" loading="lazy" />
+        </figure>
+        <div>
+          <p class="site-kicker">Places</p>
+          <h2>Start with what is nearby.</h2>
+          <p>Browse parks, trails, guided trips, camps, and viewpoints, then open the place on the map.</p>
+        </div>
+      </article>
+    </section>
+
+    <section class="site-app-panel" aria-label="Trailhead web app">
+      <div>
+        <p class="site-kicker">Web app</p>
+        <h2>Try Trailhead in the browser.</h2>
+        <p>Use the same trip tools on the website, then open Trailhead on your phone when you are ready to go.</p>
       </div>
-      <div class="th-shot th-shot-map">
-        <img src="/assets/screenshots/map-main.jpg" alt="Trailhead map with camp, water, and route pins" loading="lazy" />
+      <div class="site-actions site-actions-right">
+        <a class="site-button" href="/app">Open app</a>
+        <a class="site-button site-button-light" href={iosUrl}>Download iOS</a>
+        <a class="site-button site-button-light" href={androidUrl}>Download Android</a>
       </div>
     </section>
 
-    <section class="th-closing" id="routes">
-      <div>
-        <p class="th-eyebrow">Routes</p>
-        <h2>Turn stops into a route you can actually use.</h2>
-        <p>Build days, inspect stops, and keep the route connected to the places you care about.</p>
-      </div>
-      <div class="th-actions" id="download">
-        <a class="th-btn th-btn-primary" href={iosUrl}>Download iOS</a>
-        <a class="th-btn th-btn-primary th-btn-android" href={androidUrl}>Download Android</a>
-        <a class="th-btn th-btn-ghost" href="/app">Open app</a>
-      </div>
+    <section class="site-link-check" aria-label="Trailhead pages">
+      <a href="/app/guide">
+        <span>Guided trips</span>
+        <strong>Search tours</strong>
+      </a>
+      <a href="/app/route-builder">
+        <span>Route builder</span>
+        <strong>Build a route</strong>
+      </a>
+      <a href="/app/profile">
+        <span>Profile</span>
+        <strong>Saved trips</strong>
+      </a>
     </section>
   </main>
 </Layout>

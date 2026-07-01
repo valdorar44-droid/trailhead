@@ -1,14 +1,13 @@
 export const posts = [
   {
-    slug: 'offline-maps-are-not-magic',
-    category: 'Offline maps',
-    title: 'Offline maps are not magic.',
-    description: 'They are files. Boring, specific, heavy files. If the files are not on your phone before service disappears, the map cannot politely manifest itself.',
+    slug: 'start-from-the-map',
+    category: 'Map',
+    title: 'Start from the map.',
+    description: 'A trip is easier to shape when camps, trails, routes, and reports stay in the same place.',
     body: [
-      'Trailhead keeps the full app close. Use the website when a larger screen helps, then keep downloaded regions, route details, and saved places ready on the phone.',
-      'Cached is not the same as downloaded. A route you viewed five minutes ago may stay alive in memory. That is useful. It is not the same as a deliberate offline pack with the map data, route data, and supporting files already stored.',
-      'Prepare the map region you will actually drive through, the route geometry, planned stops, surrounding bail-out area, and enough fuel and camp notes to work without a live request.',
-      'Road closures, fire restrictions, weather, land access, washouts, and gates still need current local verification. Trailhead helps you prepare. It should not replace judgment.'
+      'Trailhead keeps search, routes, saved places, and reports close so a trip does not turn into a stack of disconnected tabs.',
+      'The map is the starting point. Search a place, open nearby camps or trails, then decide whether it belongs in the route.',
+      'Conditions, prices, access, and weather can change. Check current details before travel.'
     ]
   },
   {
@@ -23,14 +22,14 @@ export const posts = [
     ]
   },
   {
-    slug: 'trailhead-vs-ioverlander',
-    category: 'Comparison',
-    title: 'Trailhead and iOverlander are not trying to be the same thing.',
-    description: 'iOverlander is useful for finding spots. Trailhead is built around routes, offline packs, saved places, and field handoff.',
+    slug: 'routes-need-more-than-pins',
+    category: 'Routes',
+    title: 'Routes need more than pins.',
+    description: 'A saved place is more useful when it stays connected to the map, route, reports, and nearby options.',
     body: [
-      'iOverlander is useful because people have added a lot of places. That does not automatically make it an offline map system or a trail-building tool.',
-      'Trailhead is more opinionated. Camps, reports, pins, trails, route geometry, GPX, credits, and offline packs should live in one trip flow.',
-      'The goal is not to insult another app. The goal is to avoid pretending a long list of pins is the same as a field-ready route.'
+      'A long list of places is useful, but it does not tell the whole route story.',
+      'Trailhead keeps camps, reports, trails, route geometry, GPX, and saved places in one flow.',
+      'The goal is simple: find a place, understand the nearby options, and keep moving.'
     ]
   }
 ];

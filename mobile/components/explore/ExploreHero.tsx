@@ -80,7 +80,7 @@ export function ExploreHero({
         style={styles.bottomShade}
       />
       <View style={styles.content}>
-        <Text style={styles.greeting}>{greeting}, {displayName}</Text>
+        <Text style={styles.greeting}>{displayName ? `${greeting}, ${displayName}` : greeting}</Text>
         <Text style={styles.title}>Find your next adventure</Text>
         {!hideSearch ? (
           <View style={styles.searchRow}>

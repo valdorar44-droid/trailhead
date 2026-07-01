@@ -2225,7 +2225,7 @@ function GuideScreenContent() {
   }, [activeTrip?.trip_id, activeTrip?.updated_at, weatherUnitMode]);
 
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id, activeTrip?.updated_at]);
-  const displayName = useMemo(() => (user?.username || 'Explorer').trim().split(/\s+/)[0] || 'Explorer', [user?.username]);
+  const displayName = useMemo(() => (user?.username || '').trim().split(/\s+/)[0] || '', [user?.username]);
   const enrichedExplorePlaces = useMemo(() => (
     mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
   ), [explorePlaces, exploreTrailAreasById]);
@@ -4004,7 +4004,7 @@ function GuideScreenContent() {
                         : hasExploreQuery
                           ? 'Search Results'
                           : exploreCategory === 'all'
-                            ? 'Featured Explorer Hubs'
+                          ? 'Featured Places'
                             : exploreCategoryLabel(exploreCategory)}
                 </Text>
                 <Text style={s.exploreHomeCount}>{exploreHomeCountLabel}</Text>

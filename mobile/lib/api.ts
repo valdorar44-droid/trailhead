@@ -3551,6 +3551,7 @@ export interface BookableExperience {
   attribution?: string;
   primary_action?: string;
   secondary_actions?: string[];
+  raw?: Record<string, any>;
   distance_mi?: number;
   route_anchor?: {
     name?: string;

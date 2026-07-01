@@ -17,6 +17,7 @@ import {
   ExploreExperiencesRail,
   ExploreHero,
   ExplorePlaceCard,
+  GuidedTripDetailModal,
   exploreCategoryFromQuery,
   exploreCategoryMatches,
   exploreContentQualityScore,
@@ -60,7 +61,7 @@ const BOOKABLE_EXPERIENCES_ENABLED = true;
 
 type GuidedTourCategory = 'all' | 'outdoor' | 'water' | 'short' | 'private' | 'family';
 type GuidedTourSort = 'top_rated' | 'price';
-type GuidedTourDate = 'any' | 'today' | 'weekend';
+type GuidedTourDate = 'any' | 'today' | 'weekend' | 'custom';
 
 const GUIDED_CATEGORY_OPTIONS: Array<{ key: GuidedTourCategory; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
   { key: 'all', label: 'All', icon: 'sparkles-outline' },
@@ -232,6 +233,27 @@ function placeQueryFromExploreQuery(query: string) {
     .trim();
 }
 
+type GuidedSearchCenter = { lat: number; lng: number; name: string };
+
+const GUIDED_TOUR_DESTINATION_CENTERS: Array<GuidedSearchCenter & { terms: string[] }> = [
+  { name: 'Moab', lat: 38.5738, lng: -109.5462, terms: ['moab', 'moab utah'] },
+  { name: 'Big Sur', lat: 36.2704, lng: -121.8081, terms: ['big sur', 'big sur california'] },
+  { name: 'Yosemite National Park', lat: 37.7485, lng: -119.587, terms: ['yosemite', 'yosemite national park'] },
+  { name: 'Zion National Park', lat: 37.2982, lng: -113.0263, terms: ['zion', 'zion national park'] },
+  { name: 'Grand Canyon National Park', lat: 36.1069, lng: -112.1129, terms: ['grand canyon', 'grand canyon national park'] },
+  { name: 'K2 Base Camp', lat: 35.8808, lng: 76.5155, terms: ['k2', 'k2 base camp', 'k2 base camp trek', 'baltoro', 'baltoro trek'] },
+  { name: 'Khaplu', lat: 35.159, lng: 76.335, terms: ['khaplu', 'hushe', 'laila peak', 'masherbrum', 'mashabrum', 'k7'] },
+];
+
+function guidedTourKnownDestinationCenter(query: string): GuidedSearchCenter | null {
+  const clean = normalizeExploreText(placeQueryFromExploreQuery(query));
+  if (clean.length < 2) return null;
+  const found = GUIDED_TOUR_DESTINATION_CENTERS.find(center =>
+    center.terms.some(term => clean === term || clean.includes(term)),
+  );
+  return found ? { lat: found.lat, lng: found.lng, name: found.name } : null;
+}
+
 function formatTourDate(date: Date) {
   const y = date.getFullYear();
   const m = String(date.getMonth() + 1).padStart(2, '0');
@@ -239,7 +261,26 @@ function formatTourDate(date: Date) {
   return `${y}-${m}-${d}`;
 }
 
-function guidedTourDateWindow(value: GuidedTourDate) {
+function addTourDays(date: Date, days: number) {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
+
+function parseTourDate(value?: string) {
+  const clean = String(value || '').trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) return null;
+  const parsed = new Date(`${clean}T12:00:00`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function tourDateLabel(value?: string) {
+  const parsed = parseTourDate(value);
+  if (!parsed) return '';
+  return parsed.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function guidedTourDateWindow(value: GuidedTourDate, customDate = '') {
   const today = new Date();
   if (value === 'today') {
     const date = formatTourDate(today);
@@ -254,11 +295,16 @@ function guidedTourDateWindow(value: GuidedTourDate) {
     end.setDate(start.getDate() + 1);
     return { startDate: formatTourDate(start), endDate: formatTourDate(end) };
   }
+  if (value === 'custom') {
+    const date = parseTourDate(customDate);
+    const clean = date ? formatTourDate(date) : '';
+    return { startDate: clean, endDate: clean };
+  }
   return { startDate: '', endDate: '' };
 }
 
-function guidedTourQueryOptions(category: GuidedTourCategory, sort: GuidedTourSort, date: GuidedTourDate, freeCancel: boolean): ExploreExperienceQueryOptions {
-  const window = guidedTourDateWindow(date);
+function guidedTourQueryOptions(category: GuidedTourCategory, sort: GuidedTourSort, date: GuidedTourDate, customDate: string, freeCancel: boolean): ExploreExperienceQueryOptions {
+  const window = guidedTourDateWindow(date, customDate);
   return {
     category: category === 'all' ? '' : category,
     free_cancel: freeCancel,
@@ -267,6 +313,52 @@ function guidedTourQueryOptions(category: GuidedTourCategory, sort: GuidedTourSo
     sort: sort === 'price' ? 'price_low_to_high' : 'top_rated',
     order: sort === 'price' ? 'ascending' : 'descending',
   };
+}
+
+function guidedTourDateLabel(date: GuidedTourDate, customDate = '') {
+  if (date === 'today') return 'Today';
+  if (date === 'weekend') return 'This weekend';
+  if (date === 'custom') return tourDateLabel(customDate) || 'Pick a date';
+  return 'Any date';
+}
+
+function guidedTourFilterSummary(category: GuidedTourCategory, sort: GuidedTourSort, freeCancel: boolean, englishOnly: boolean) {
+  const categoryLabel = GUIDED_CATEGORY_OPTIONS.find(item => item.key === category)?.label || 'All';
+  const sortLabel = GUIDED_SORT_OPTIONS.find(item => item.key === sort)?.label || 'Recommended';
+  const details = [categoryLabel, sortLabel];
+  if (freeCancel) details.push('Free cancellation');
+  if (englishOnly) details.push('English');
+  return details.join(' · ');
+}
+
+function experienceMatchesEnglishFilter(experience: BookableExperience) {
+  const languages = Array.isArray(experience.languages) ? experience.languages.map(value => String(value || '').toLowerCase()) : [];
+  if (!languages.length) return true;
+  return languages.some(language => /\b(en|eng|english)\b/.test(language));
+}
+
+function mergeMatchedExplorePlaces(current: ExplorePlaceProfile[], remotePlaces: ExplorePlaceProfile[]) {
+  const seen = new Set(current.map(place => place.id));
+  const merged = [...current];
+  for (const place of remotePlaces) {
+    if (!place?.id) continue;
+    if (seen.has(place.id)) {
+      const index = merged.findIndex(item => item.id === place.id);
+      if (index >= 0) {
+        const previousRank = Number((merged[index] as any).matched_explore_rank);
+        const nextRank = Number((place as any).matched_explore_rank);
+        merged[index] = {
+          ...merged[index],
+          matched_explore_query: (place as any).matched_explore_query || (merged[index] as any).matched_explore_query,
+          matched_explore_rank: Number.isFinite(previousRank) && Number.isFinite(nextRank) ? Math.min(previousRank, nextRank) : Number.isFinite(nextRank) ? nextRank : previousRank,
+        } as ExplorePlaceProfile;
+      }
+      continue;
+    }
+    seen.add(place.id);
+    merged.push(place);
+  }
+  return merged;
 }
 
 function experienceSearchMessage(res: ExploreExperiencesResponse, areaName: string) {
@@ -1493,10 +1585,16 @@ function GuideScreenContent() {
   const [guidedTourCategory, setGuidedTourCategory] = useState<GuidedTourCategory>('all');
   const [guidedTourSort, setGuidedTourSort] = useState<GuidedTourSort>('top_rated');
   const [guidedTourDate, setGuidedTourDate] = useState<GuidedTourDate>('any');
+  const [guidedTourCustomDate, setGuidedTourCustomDate] = useState('');
   const [guidedTourFreeCancel, setGuidedTourFreeCancel] = useState(false);
+  const [guidedTourEnglishOnly, setGuidedTourEnglishOnly] = useState(false);
+  const [guidedDateSheetOpen, setGuidedDateSheetOpen] = useState(false);
+  const [guidedFilterSheetOpen, setGuidedFilterSheetOpen] = useState(false);
+  const [guidedCalendarMonth, setGuidedCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [guidedTourDraft, setGuidedTourDraft] = useState('');
   const [guidedTourSearchQuery, setGuidedTourSearchQuery] = useState('');
   const [guidedTourSearchRunId, setGuidedTourSearchRunId] = useState(0);
+  const [guidedFallbackExplorePlaces, setGuidedFallbackExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
   const [exploreSavedOnly, setExploreSavedOnly] = useState(false);
   const [exploreQuery, setExploreQuery] = useState('');
   const [exploreVisibleLimit, setExploreVisibleLimit] = useState(EXPLORE_INITIAL_VISIBLE);
@@ -1518,7 +1616,10 @@ function GuideScreenContent() {
   const [exploreExperienceErrors, setExploreExperienceErrors] = useState<Record<string, string>>({});
   const [exploreSearchExperiences, setExploreSearchExperiences] = useState<BookableExperience[]>([]);
   const [exploreSearchExperienceLoading, setExploreSearchExperienceLoading] = useState(false);
+  const [exploreSearchExperiencePending, setExploreSearchExperiencePending] = useState(false);
   const [exploreSearchExperienceError, setExploreSearchExperienceError] = useState('');
+  const [selectedExperience, setSelectedExperience] = useState<BookableExperience | null>(null);
+  const [selectedExperienceLoading, setSelectedExperienceLoading] = useState(false);
   const [exploreHomeWeather, setExploreHomeWeather] = useState<any>(null);
   const [exploreHomeWeatherLoading, setExploreHomeWeatherLoading] = useState(false);
   const [exploreHomeWeatherError, setExploreHomeWeatherError] = useState('');
@@ -2029,42 +2130,56 @@ function GuideScreenContent() {
       setExploreSearchExperiences([]);
       setExploreSearchExperienceError('');
       setExploreSearchExperienceLoading(false);
+      setExploreSearchExperiencePending(false);
       return;
     }
     let cancelled = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
-    const loadTours = async (retryingLive = false) => {
+    const maxLiveRetries = 3;
+    const loadTours = async (retryAttempt = 0) => {
       setExploreSearchExperienceLoading(true);
-      if (!retryingLive) setExploreSearchExperienceError('');
+      if (retryAttempt === 0) {
+        setExploreSearchExperienceError('');
+        setExploreSearchExperiencePending(false);
+      }
       const effectiveQuery = guidedCategoryActive ? (guidedTourSearchQuery || exploreQuery) : exploreQuery;
       const placeQuery = placeQueryFromExploreQuery(effectiveQuery);
       let center = userLoc ? { ...userLoc, name: 'this area' } : null;
+      const knownCenter = guidedCategoryActive ? guidedTourKnownDestinationCenter(placeQuery) : null;
+      if (knownCenter) center = knownCenter;
       if (!center && placeQuery.length < 2) {
         setExploreSearchExperiences([]);
         setExploreSearchExperienceError('Search a destination to compare guided trips.');
         setExploreSearchExperienceLoading(false);
+        setExploreSearchExperiencePending(false);
         return;
       }
-      if (placeQuery.length >= 2) {
+      if (!knownCenter && placeQuery.length >= 2) {
         const [resolved] = await api.geocodePlaces(placeQuery, 1, { prefer: 'search_center' }).catch(() => []);
         if (cancelled) return;
         if (resolved?.lat != null && resolved?.lng != null) {
           center = { lat: Number(resolved.lat), lng: Number(resolved.lng), name: resolved.name || placeQuery };
         }
       }
-      const tourOptions = guidedTourQueryOptions(guidedTourCategory, guidedTourSort, guidedTourDate, guidedTourFreeCancel);
-      withExploreTimeout(api.getExploreExperiences(center?.lat, center?.lng, center ? 60 : 100, 'viator', 24, effectiveQuery, tourOptions), 12000)
+      const tourOptions = guidedTourQueryOptions(guidedTourCategory, guidedTourSort, guidedTourDate, guidedTourCustomDate, guidedTourFreeCancel);
+      withExploreTimeout(api.getExploreExperiences(center?.lat, center?.lng, center ? 60 : 100, 'viator', 24, effectiveQuery, tourOptions), 30000)
         .then(res => {
           if (cancelled) return;
           const results = res.results ?? [];
+          const processing = String(res.live_status || '').toLowerCase() === 'processing';
+          const shouldRetryLive = results.length === 0 && processing && retryAttempt < maxLiveRetries;
           setExploreSearchExperiences(results);
           setExploreSearchExperienceError(results.length ? '' : experienceSearchMessage(res, center?.name || 'this area'));
-          if (!retryingLive && results.length === 0 && res.live_status === 'processing') {
-            retryTimer = setTimeout(() => loadTours(true), 7000);
+          setExploreSearchExperiencePending(shouldRetryLive);
+          if (shouldRetryLive) {
+            retryTimer = setTimeout(() => loadTours(retryAttempt + 1), 6000);
           }
         })
         .catch(() => {
-          if (!cancelled) setExploreSearchExperienceError('Guided trips are not available right now.');
+          if (!cancelled) {
+            setExploreSearchExperienceError('Guided trips are not available right now.');
+            setExploreSearchExperiencePending(false);
+          }
         })
         .finally(() => {
           if (!cancelled) setExploreSearchExperienceLoading(false);
@@ -2075,7 +2190,7 @@ function GuideScreenContent() {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [tab, exploreCategory, exploreQuery, guidedTourCategory, guidedTourDate, guidedTourFreeCancel, guidedTourSearchQuery, guidedTourSearchRunId, guidedTourSort, userLoc?.lat, userLoc?.lng]);
+  }, [tab, exploreCategory, exploreQuery, guidedTourCategory, guidedTourCustomDate, guidedTourDate, guidedTourFreeCancel, guidedTourSearchQuery, guidedTourSearchRunId, guidedTourSort, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -2120,15 +2235,66 @@ function GuideScreenContent() {
   const guidedCategoryActive = exploreCategory === 'guided' || exploreCategory === 'tours';
   const guidedPanelQuery = guidedTourSearchQuery || guidedTourDraft || exploreQuery;
   const experienceDestinationLabel = placeQueryFromExploreQuery(guidedCategoryActive ? guidedPanelQuery : exploreQuery);
+  const guidedVisibleExperiences = useMemo(() => (
+    guidedTourEnglishOnly
+      ? exploreSearchExperiences.filter(experienceMatchesEnglishFilter)
+      : exploreSearchExperiences
+  ), [exploreSearchExperiences, guidedTourEnglishOnly]);
+  const guidedResultsError = guidedTourEnglishOnly && exploreSearchExperiences.length > 0 && guidedVisibleExperiences.length === 0
+    ? 'No guided trips match these filters.'
+    : exploreSearchExperienceError;
+  const guidedExperienceSearchLoading = guidedCategoryActive
+    ? exploreSearchExperienceLoading || exploreSearchExperiencePending
+    : exploreSearchExperienceLoading;
+  const guidedFallbackDisplayPlaces = useMemo(() => {
+    if (!guidedCategoryActive || guidedTourSearchRunId <= 0 || guidedVisibleExperiences.length > 0) return [];
+    const query = normalizeExploreText(placeQueryFromExploreQuery(guidedTourSearchQuery || exploreQuery));
+    if (query.length < 2) return [];
+    const sourcePlaces = guidedFallbackExplorePlaces.length ? guidedFallbackExplorePlaces : enrichedExplorePlaces;
+    return sourcePlaces
+      .map(place => {
+        const identityScore = explorePlaceIdentitySearchText(place).includes(query) ? 130 : 0;
+        const queryScore = Math.max(
+          identityScore,
+          scoreExploreQuery(place, query),
+          scoreExploreRichText(place, query),
+        );
+        return { place, queryScore };
+      })
+      .filter(item => item.queryScore > 0)
+      .sort((a, b) => {
+        if (b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        const aRank = Number((a.place as any).matched_explore_rank ?? a.place.summary.hero_rank ?? a.place.summary.rank ?? 999999);
+        const bRank = Number((b.place as any).matched_explore_rank ?? b.place.summary.hero_rank ?? b.place.summary.rank ?? 999999);
+        return aRank - bRank;
+      })
+      .map(item => item.place)
+      .slice(0, 6);
+  }, [enrichedExplorePlaces, exploreQuery, guidedCategoryActive, guidedFallbackExplorePlaces, guidedTourSearchQuery, guidedTourSearchRunId, guidedVisibleExperiences.length]);
+  const hasGuidedFallbackPlaces = guidedCategoryActive
+    && guidedTourSearchRunId > 0
+    && guidedVisibleExperiences.length === 0
+    && guidedFallbackDisplayPlaces.length > 0;
+  const showGuidedFallbackPlaces = hasGuidedFallbackPlaces && !guidedExperienceSearchLoading;
+  const guidedExperienceRailError = hasGuidedFallbackPlaces ? '' : guidedResultsError;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
+  const holdGuidedExploreResults = showExperienceSearch
+    && guidedCategoryActive
+    && guidedExperienceSearchLoading
+    && guidedVisibleExperiences.length === 0;
   const tourSearchPaused = !BOOKABLE_EXPERIENCES_ENABLED && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery));
-  const browseExploreCategory: ExploreCategoryKey = tourSearchPaused ? 'things' : exploreCategory;
+  const browseExploreCategory: ExploreCategoryKey = tourSearchPaused ? 'things' : ((exploreCategory === 'guided' || exploreCategory === 'tours') && guidedVisibleExperiences.length === 0) ? 'all' : exploreCategory;
   const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
   const exploreNearbyNeedsLocation = exploreMode === 'nearby' && !userLoc;
   const rankedExplore = useMemo(() => {
     if (exploreNearbyNeedsLocation) return [];
     if (exploreMode === 'trip' && waypoints.length === 0) return [];
-    if (!tourSearchPaused && showExperienceSearch && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery))) return [];
+    if ((exploreCategory === 'guided' || exploreCategory === 'tours') && guidedTourSearchRunId <= 0 && !isExplicitTourOnlyQuery(exploreQuery)) return [];
+    if (!tourSearchPaused
+      && showExperienceSearch
+      && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery))
+      && guidedVisibleExperiences.length > 0
+    ) return [];
     const places = enrichedExplorePlaces.map(place => {
       const loc = place.summary.lat != null && place.summary.lng != null
         ? { lat: Number(place.summary.lat), lng: Number(place.summary.lng) }
@@ -2212,14 +2378,16 @@ function GuideScreenContent() {
         && !!queryDestinationPhrase
         && isDestinationExploreHub(place)
         && explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase);
-	      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id) && !directThingsToDoDestinationWrapper) return false;
+      const directQueryIdentityMatch = !!queryDestinationPhrase
+        && explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase);
+	      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id) && !directThingsToDoDestinationWrapper && !directQueryIdentityMatch) return false;
 	      const categoryOk = browseExploreCategory === 'all'
 	        ? exploreCategoryMatchesWithHub(place, browseExploreCategory, exploreHubMeta.categoryKeysByHubId)
 	        : exploreCategoryMatches(place, browseExploreCategory);
 	      if (!categoryOk && !directStayDestinationHub) return false;
 	      if (!queryHasDestinationTerms && isExactWaterfallBrowseQuery(placeQuery) && !explorePlaceStronglyMatchesWaterfall(place)) return false;
 	      if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;
-      if (browseIntentNeedsPrimaryMatch && !directStayDestinationHub && !explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery)) return false;
+      if (browseIntentNeedsPrimaryMatch && !directStayDestinationHub && !directQueryIdentityMatch && !explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery)) return false;
       if (queryCategory && queryCategory !== 'guided' && queryCategory !== 'tours' && !directStayDestinationHub && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
       if (!placeQuery) return true;
       return queryScoreForPlace(place) > 0;
@@ -2297,7 +2465,7 @@ function GuideScreenContent() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
-  }, [browseExploreCategory, enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [browseExploreCategory, enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, guidedTourSearchRunId, guidedVisibleExperiences.length, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
@@ -2343,29 +2511,7 @@ function GuideScreenContent() {
           matched_explore_rank: index,
         }));
         if (!remotePlaces.length) return;
-        setExplorePlaces(current => {
-          const seen = new Set(current.map(place => place.id));
-          const merged = [...current];
-          for (const place of remotePlaces) {
-            if (!place?.id) continue;
-            if (seen.has(place.id)) {
-              const index = merged.findIndex(item => item.id === place.id);
-              if (index >= 0) {
-                const previousRank = Number((merged[index] as any).matched_explore_rank);
-                const nextRank = Number((place as any).matched_explore_rank);
-                merged[index] = {
-                  ...merged[index],
-                  matched_explore_query: matchedQuery,
-                  matched_explore_rank: Number.isFinite(previousRank) ? Math.min(previousRank, nextRank) : nextRank,
-                } as ExplorePlaceProfile;
-              }
-              continue;
-            }
-            seen.add(place.id);
-            merged.push(place);
-          }
-          return merged;
-        });
+        setExplorePlaces(current => mergeMatchedExplorePlaces(current, remotePlaces));
       })
       .catch(() => {})
       .finally(() => {
@@ -2376,6 +2522,46 @@ function GuideScreenContent() {
       setExploreSearchResolving(false);
     };
   }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, rankedExplore, tab]);
+
+  useEffect(() => {
+    const guidedCategoryActiveNow = exploreCategory === 'guided' || exploreCategory === 'tours';
+    const query = (guidedTourSearchQuery || exploreQuery).trim();
+    const destination = placeQueryFromExploreQuery(query);
+    if (
+      tab !== 'explore'
+      || exploreMode !== 'featured'
+      || exploreSavedOnly
+      || !guidedCategoryActiveNow
+      || guidedTourSearchRunId <= 0
+      || destination.length < 2
+    ) {
+      setGuidedFallbackExplorePlaces([]);
+      return;
+    }
+    let cancelled = false;
+    const matchedQuery = normalizeExploreText(query);
+    withExploreTimeout(api.getExploreCatalogIndex({
+      q: destination,
+      limit: 120,
+      cursor: 0,
+    }), 9000)
+      .then(catalog => {
+        if (cancelled) return;
+        const remotePlaces = (catalog.places ?? []).map((item, index) => ({
+          ...exploreIndexItemToProfile(item),
+          matched_explore_query: matchedQuery,
+          matched_explore_rank: index,
+        }));
+        setGuidedFallbackExplorePlaces(remotePlaces.slice(0, 6));
+        if (remotePlaces.length) setExplorePlaces(current => mergeMatchedExplorePlaces(current, remotePlaces));
+      })
+      .catch(() => {
+        if (!cancelled) setGuidedFallbackExplorePlaces([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, guidedTourSearchQuery, guidedTourSearchRunId, tab]);
 
   const holdLegacySearchWrapper = exploreSearchResolving
     && exploreQueryHasBrowseIntent(exploreQuery)
@@ -2567,13 +2753,14 @@ function GuideScreenContent() {
     if (tourSearchPaused) return 'Free ideas';
     if (holdLegacySearchWrapper) return 'Searching';
     if (exploreSearchResolving && rankedExplore.length <= 0) return 'Searching';
-    if (showExperienceSearch && rankedExplore.length <= 0) {
+    if (showExperienceSearch) {
       if (guidedCategoryActive && guidedTourSearchRunId <= 0 && !isExplicitTourOnlyQuery(exploreQuery)) return 'Search trips';
-      if (exploreSearchExperiences.length > 0) return exploreCountLabel(exploreSearchExperiences.length, 'guided trip', 'guided trips');
-      if (exploreSearchExperienceLoading) return experienceDestinationLabel ? 'Finding guided trips' : 'Search destination';
-      if (exploreSearchExperienceError) {
+      if (guidedVisibleExperiences.length > 0) return exploreCountLabel(guidedVisibleExperiences.length, 'guided trip', 'guided trips');
+      if (guidedExperienceSearchLoading) return experienceDestinationLabel ? 'Finding guided trips' : 'Search destination';
+      if (showGuidedFallbackPlaces) return exploreCountLabel(guidedFallbackDisplayPlaces.length, 'place', 'places');
+      if (guidedResultsError) {
         if (!experienceDestinationLabel) return 'Search destination';
-        return /unavailable|failed/i.test(exploreSearchExperienceError) ? 'Unavailable' : 'No matches';
+        return /unavailable|failed/i.test(guidedResultsError) ? 'Unavailable' : 'No matches';
       }
       return experienceDestinationLabel ? 'No matches' : 'Search destination';
     }
@@ -2590,7 +2777,7 @@ function GuideScreenContent() {
       + trendingExplore.length
       + featuredSections.reduce((total, section) => total + section.rows.length, 0);
     return exploreCountLabel(count, 'featured pick', 'featured picks');
-  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchExperienceError, exploreSearchExperienceLoading, exploreSearchExperiences.length, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredLead, featuredSections, guidedCategoryActive, guidedTourSearchRunId, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, tourSearchPaused, trendingExplore.length, exploreQuery]);
+  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredLead, featuredSections, guidedCategoryActive, guidedExperienceSearchLoading, guidedFallbackDisplayPlaces.length, guidedResultsError, guidedTourSearchRunId, guidedVisibleExperiences.length, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, showGuidedFallbackPlaces, tourSearchPaused, trendingExplore.length, exploreQuery]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -2939,7 +3126,7 @@ function GuideScreenContent() {
         lat: Number(experience.lat),
         lng: Number(experience.lng),
         icon: 'star',
-        note: experience.summary || 'Bookable tour or local experience',
+        note: experience.summary || 'Guided trip or local experience',
         createdAt: Date.now(),
       },
     });
@@ -2947,30 +3134,51 @@ function GuideScreenContent() {
     router.push('/(tabs)/map');
   }
 
+  function openExperienceDetail(experience: BookableExperience) {
+    setSelectedExperience(experience);
+    setSelectedExperienceLoading(true);
+    api.getExploreExperience(experience.id)
+      .then(detail => {
+        setSelectedExperience(current => {
+          if (!current || current.id !== experience.id) return current;
+          return { ...current, ...detail };
+        });
+      })
+      .catch(() => {})
+      .finally(() => {
+        setSelectedExperienceLoading(false);
+      });
+  }
+
+  function closeExperienceDetail() {
+    setSelectedExperience(null);
+    setSelectedExperienceLoading(false);
+  }
+
+  function showSelectedExperienceOnMap(experience: BookableExperience) {
+    closeExperienceDetail();
+    showExperienceOnMap(experience);
+  }
+
   function saveExperienceToPlanner(experience: BookableExperience) {
     if (!activeTrip) {
-      const url = experience.booking_url || experience.affiliate_url || experience.source_url;
-      if (url) {
-        Linking.openURL(url).catch(() => showExperienceOnMap(experience));
-      } else {
-        showExperienceOnMap(experience);
-      }
+      openExperienceDetail(experience);
       return;
     }
     const waypoint = {
       day: activeTrip.plan.waypoints[0]?.day ?? 1,
       name: experience.title,
       type: 'bookable_experience',
-      description: experience.summary || experience.description || 'Saved for external checkout.',
+      description: experience.summary || experience.description || 'Saved for trip planning.',
       land_type: 'external_booking',
       notes: [
         experience.duration_label,
         experience.price_from ? `From ${experience.currency || 'USD'} ${experience.price_from}` : '',
-        'Status: checkout with partner',
+        'Check availability before you go',
       ].filter(Boolean).join(' · '),
       lat: experience.lat ?? undefined,
       lng: experience.lng ?? undefined,
-      verified_source: 'Booking partner',
+      verified_source: 'Travel partner',
       needs_review: true,
       verification_note: experience.booking_url || experience.affiliate_url || experience.source_url || '',
     };
@@ -3362,6 +3570,7 @@ function GuideScreenContent() {
         error={error}
         emptySubtitle={`Near ${place.summary.title}`}
         mediaUrl={mediaUrl}
+        onOpen={openExperienceDetail}
         onSave={saveExperienceToPlanner}
         onShowArea={showExperienceOnMap}
       />
@@ -3378,60 +3587,39 @@ function GuideScreenContent() {
   }
 
   function renderGuidedTourControls() {
-    const dateLabel = guidedTourDate === 'today' ? 'Today' : guidedTourDate === 'weekend' ? 'Weekend' : 'Any date';
-    const categoryLabel = GUIDED_CATEGORY_OPTIONS.find(item => item.key === guidedTourCategory)?.label || 'All';
-    const sortLabel = guidedTourSort === 'price' ? 'Price' : 'Top rated';
+    const dateLabel = guidedTourDateLabel(guidedTourDate, guidedTourCustomDate);
+    const filterLabel = guidedTourFilterSummary(guidedTourCategory, guidedTourSort, guidedTourFreeCancel, guidedTourEnglishOnly);
     const canSearch = guidedTourDraft.trim().length >= 2 || !!userLoc;
-    const renderOption = (
-      key: string,
+    const renderSelector = (
       label: string,
+      value: string,
       icon: keyof typeof Ionicons.glyphMap,
-      active: boolean,
       onPress: () => void,
     ) => (
       <TouchableOpacity
-        key={key}
-        style={[s.guidedOption, active && s.guidedOptionActive]}
+        style={s.guidedSelector}
         activeOpacity={0.82}
         onPress={onPress}
         accessibilityRole="button"
         accessibilityLabel={label}
       >
-        <Ionicons name={icon} size={15} color={active ? C.orange : C.text3} />
-        <Text style={[s.guidedOptionText, active && s.guidedOptionTextActive]} numberOfLines={1}>{label}</Text>
+        <View style={s.guidedSelectorIcon}>
+          <Ionicons name={icon} size={18} color={C.orange} />
+        </View>
+        <View style={{ flex: 1, minWidth: 0 }}>
+          <Text style={s.guidedFieldLabel}>{label}</Text>
+          <Text style={s.guidedSelectorValue} numberOfLines={2}>{value}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={16} color={C.text3} />
       </TouchableOpacity>
     );
-    const renderDateOption = (item: typeof GUIDED_DATE_OPTIONS[number]) => {
-      const active = guidedTourDate === item.key;
-      return (
-        <TouchableOpacity
-          key={`date:${item.key}`}
-          style={[s.guidedOption, s.guidedDateOption, active && s.guidedOptionActive]}
-          activeOpacity={0.82}
-          onPress={() => setGuidedTourDate(item.key)}
-          accessibilityRole="button"
-          accessibilityLabel={item.label}
-        >
-          <Ionicons name={item.icon} size={14} color={active ? C.orange : C.text3} />
-          <Text
-            style={[s.guidedOptionText, s.guidedDateOptionText, active && s.guidedOptionTextActive]}
-            numberOfLines={1}
-            adjustsFontSizeToFit
-            minimumFontScale={0.78}
-          >
-            {item.label}
-          </Text>
-        </TouchableOpacity>
-      );
-    };
     return (
       <View style={s.guidedSearchPanel}>
         <View style={s.guidedPanelTop}>
           <View style={{ flex: 1, minWidth: 0 }}>
             <Text style={s.guidedPanelTitle}>Find guided trips</Text>
-            <Text style={s.guidedPanelSub}>Choose a place, date, and trip style.</Text>
           </View>
-          {exploreSearchExperienceLoading ? <ActivityIndicator color={C.orange} size="small" /> : null}
+          {guidedExperienceSearchLoading ? <ActivityIndicator color={C.orange} size="small" /> : null}
         </View>
 
         <View style={s.guidedField}>
@@ -3452,51 +3640,8 @@ function GuideScreenContent() {
           </View>
         </View>
 
-        <View style={s.guidedFieldGrid}>
-          <View style={s.guidedMiniField}>
-            <Text style={s.guidedFieldLabel}>Date</Text>
-            <Text style={s.guidedMiniValue} numberOfLines={1}>{dateLabel}</Text>
-          </View>
-          <View style={s.guidedMiniField}>
-            <Text style={s.guidedFieldLabel}>Type</Text>
-            <Text style={s.guidedMiniValue} numberOfLines={1}>{categoryLabel}</Text>
-          </View>
-          <View style={s.guidedMiniField}>
-            <Text style={s.guidedFieldLabel}>Sort</Text>
-            <Text style={s.guidedMiniValue} numberOfLines={1}>{sortLabel}</Text>
-          </View>
-        </View>
-
-        <View style={s.guidedDateRow}>
-          {GUIDED_DATE_OPTIONS.map(renderDateOption)}
-        </View>
-
-        <View style={s.guidedOptionWrapRow}>
-          {GUIDED_CATEGORY_OPTIONS.map(item => renderOption(
-            `category:${item.key}`,
-            item.label,
-            item.icon,
-            guidedTourCategory === item.key,
-            () => setGuidedTourCategory(item.key),
-          ))}
-        </View>
-
-        <View style={s.guidedOptionWrapRow}>
-          {GUIDED_SORT_OPTIONS.map(item => renderOption(
-            `sort:${item.key}`,
-            item.label,
-            item.icon,
-            guidedTourSort === item.key,
-            () => setGuidedTourSort(item.key),
-          ))}
-          {renderOption(
-            'free-cancel',
-            'Free cancel',
-            'shield-checkmark-outline',
-            guidedTourFreeCancel,
-            () => setGuidedTourFreeCancel(value => !value),
-          )}
-        </View>
+        {renderSelector('Date', dateLabel, 'calendar-outline', () => setGuidedDateSheetOpen(true))}
+        {renderSelector('Filters', filterLabel, 'options-outline', () => setGuidedFilterSheetOpen(true))}
 
         <TouchableOpacity
           style={[s.guidedSearchButton, { opacity: canSearch ? 1 : 0.55 }]}
@@ -3505,9 +3650,165 @@ function GuideScreenContent() {
           onPress={submitGuidedTourSearch}
         >
           <Ionicons name="search-outline" size={17} color="#fff" />
-          <Text style={s.guidedSearchButtonText}>Search trips</Text>
+          <Text style={s.guidedSearchButtonText}>Search</Text>
         </TouchableOpacity>
       </View>
+    );
+  }
+
+  function setGuidedPresetDate(date: GuidedTourDate) {
+    setGuidedTourDate(date);
+    if (date !== 'custom') setGuidedTourCustomDate('');
+    setGuidedDateSheetOpen(false);
+  }
+
+  function setGuidedCalendarDate(date: Date) {
+    setGuidedTourDate('custom');
+    setGuidedTourCustomDate(formatTourDate(date));
+    setGuidedDateSheetOpen(false);
+  }
+
+  function renderGuidedDateSheet() {
+    const today = new Date();
+    const monthStart = new Date(guidedCalendarMonth.getFullYear(), guidedCalendarMonth.getMonth(), 1);
+    const daysInMonth = new Date(guidedCalendarMonth.getFullYear(), guidedCalendarMonth.getMonth() + 1, 0).getDate();
+    const blanks = monthStart.getDay();
+    const selectedDate = guidedTourDate === 'custom' ? parseTourDate(guidedTourCustomDate) : null;
+    const cells: Array<Date | null> = [
+      ...Array.from({ length: blanks }, () => null),
+      ...Array.from({ length: daysInMonth }, (_, index) => new Date(guidedCalendarMonth.getFullYear(), guidedCalendarMonth.getMonth(), index + 1)),
+    ];
+    while (cells.length % 7 !== 0) cells.push(null);
+    const monthLabel = guidedCalendarMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
+    const renderPreset = (item: typeof GUIDED_DATE_OPTIONS[number]) => {
+      const active = guidedTourDate === item.key;
+      return (
+        <TouchableOpacity key={item.key} style={s.sheetRow} onPress={() => setGuidedPresetDate(item.key)} activeOpacity={0.82}>
+          <Ionicons name={item.icon} size={19} color={active ? C.orange : C.text2} />
+          <Text style={s.sheetRowText}>{item.key === 'weekend' ? 'This weekend' : item.label === 'Any' ? 'Any date' : item.label}</Text>
+          {active ? <Ionicons name="checkmark" size={19} color={C.orange} /> : null}
+        </TouchableOpacity>
+      );
+    };
+    return (
+      <Modal visible={guidedDateSheetOpen} animationType="slide" transparent onRequestClose={() => setGuidedDateSheetOpen(false)}>
+        <View style={s.sheetBackdrop}>
+          <View style={[s.sheet, { paddingBottom: Math.max(16, insets.bottom + 12) }]}>
+            <View style={s.sheetHeader}>
+              <Text style={s.sheetTitle}>Choose date</Text>
+              <TouchableOpacity style={s.sheetClose} onPress={() => setGuidedDateSheetOpen(false)} accessibilityLabel="Close date picker">
+                <Ionicons name="close" size={18} color={C.text} />
+              </TouchableOpacity>
+            </View>
+            <View style={s.sheetRows}>
+              {GUIDED_DATE_OPTIONS.map(renderPreset)}
+            </View>
+            <View style={s.calendarHeader}>
+              <TouchableOpacity style={s.calendarNav} onPress={() => setGuidedCalendarMonth(month => new Date(month.getFullYear(), month.getMonth() - 1, 1))}>
+                <Ionicons name="chevron-back" size={18} color={C.text2} />
+              </TouchableOpacity>
+              <Text style={s.calendarMonth}>{monthLabel}</Text>
+              <TouchableOpacity style={s.calendarNav} onPress={() => setGuidedCalendarMonth(month => new Date(month.getFullYear(), month.getMonth() + 1, 1))}>
+                <Ionicons name="chevron-forward" size={18} color={C.text2} />
+              </TouchableOpacity>
+            </View>
+            <View style={s.weekdayRow}>
+              {['S', 'M', 'T', 'W', 'T', 'F', 'S'].map((day, index) => (
+                <Text key={`${day}:${index}`} style={s.weekdayText}>{day}</Text>
+              ))}
+            </View>
+            <View style={s.calendarGrid}>
+              {cells.map((date, index) => {
+                const dateKey = date ? formatTourDate(date) : `blank:${index}`;
+                const disabled = !!date && formatTourDate(date) < formatTourDate(today);
+                const selected = !!date && !!selectedDate && formatTourDate(date) === formatTourDate(selectedDate);
+                return (
+                  <TouchableOpacity
+                    key={dateKey}
+                    style={[s.calendarCell, selected && s.calendarCellSelected, disabled && s.calendarCellDisabled]}
+                    disabled={!date || disabled}
+                    onPress={() => date && setGuidedCalendarDate(date)}
+                    activeOpacity={0.82}
+                  >
+                    <Text style={[s.calendarCellText, selected && s.calendarCellTextSelected, disabled && s.calendarCellTextDisabled]}>
+                      {date ? date.getDate() : ''}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      </Modal>
+    );
+  }
+
+  function renderGuidedFilterSheet() {
+    const renderRadio = (
+      label: string,
+      icon: keyof typeof Ionicons.glyphMap,
+      active: boolean,
+      onPress: () => void,
+    ) => (
+      <TouchableOpacity key={label} style={s.sheetRow} onPress={onPress} activeOpacity={0.82}>
+        <Ionicons name={icon} size={19} color={active ? C.orange : C.text2} />
+        <Text style={s.sheetRowText}>{label}</Text>
+        {active ? <Ionicons name="checkmark" size={19} color={C.orange} /> : null}
+      </TouchableOpacity>
+    );
+    const renderToggle = (
+      label: string,
+      icon: keyof typeof Ionicons.glyphMap,
+      active: boolean,
+      onPress: () => void,
+    ) => (
+      <TouchableOpacity key={label} style={s.sheetRow} onPress={onPress} activeOpacity={0.82}>
+        <Ionicons name={icon} size={19} color={active ? C.orange : C.text2} />
+        <Text style={s.sheetRowText}>{label}</Text>
+        <View style={[s.sheetCheckBox, active && s.sheetCheckBoxActive]}>
+          {active ? <Ionicons name="checkmark" size={14} color="#fff" /> : null}
+        </View>
+      </TouchableOpacity>
+    );
+    return (
+      <Modal visible={guidedFilterSheetOpen} animationType="slide" transparent onRequestClose={() => setGuidedFilterSheetOpen(false)}>
+        <View style={s.sheetBackdrop}>
+          <View style={[s.sheet, { paddingBottom: Math.max(16, insets.bottom + 12) }]}>
+            <View style={s.sheetHeader}>
+              <Text style={s.sheetTitle}>Filters</Text>
+              <TouchableOpacity style={s.sheetClose} onPress={() => setGuidedFilterSheetOpen(false)} accessibilityLabel="Close filters">
+                <Ionicons name="close" size={18} color={C.text} />
+              </TouchableOpacity>
+            </View>
+            <Text style={s.sheetSectionTitle}>Trip style</Text>
+            <View style={s.sheetRows}>
+              {GUIDED_CATEGORY_OPTIONS.map(item => renderRadio(
+                item.label,
+                item.icon,
+                guidedTourCategory === item.key,
+                () => setGuidedTourCategory(item.key),
+              ))}
+            </View>
+            <Text style={s.sheetSectionTitle}>Sort</Text>
+            <View style={s.sheetRows}>
+              {GUIDED_SORT_OPTIONS.map(item => renderRadio(
+                item.label,
+                item.icon,
+                guidedTourSort === item.key,
+                () => setGuidedTourSort(item.key),
+              ))}
+            </View>
+            <Text style={s.sheetSectionTitle}>Details</Text>
+            <View style={s.sheetRows}>
+              {renderToggle('Free cancellation', 'shield-checkmark-outline', guidedTourFreeCancel, () => setGuidedTourFreeCancel(value => !value))}
+              {renderToggle('English', 'language-outline', guidedTourEnglishOnly, () => setGuidedTourEnglishOnly(value => !value))}
+            </View>
+            <TouchableOpacity style={s.sheetApplyButton} onPress={() => setGuidedFilterSheetOpen(false)} activeOpacity={0.86}>
+              <Text style={s.sheetApplyText}>Apply filters</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     );
   }
 
@@ -3548,6 +3849,7 @@ function GuideScreenContent() {
           selectedCategory={exploreCategory}
           mode={exploreMode}
           weather={heroWeather}
+          hideSearch={guidedCategoryActive}
 	          onQueryChange={handleExploreQueryChange}
           onClearQuery={() => setExploreQuery('')}
           onCategorySelect={selectExploreHomeCategory}
@@ -3625,9 +3927,9 @@ function GuideScreenContent() {
               <>
                 {renderGuidedTourControls()}
                 <ExploreExperiencesRail
-                  experiences={exploreSearchExperiences}
-                  loading={tourSearchPaused ? false : exploreSearchExperienceLoading}
-                  error={tourSearchPaused ? 'Guided trips are not available right now.' : exploreSearchExperienceError}
+                  experiences={guidedVisibleExperiences}
+                  loading={tourSearchPaused ? false : guidedExperienceSearchLoading}
+                  error={tourSearchPaused ? 'Guided trips are not available right now.' : guidedExperienceRailError}
                   title="Available trips"
                   variant="list"
                   emptySubtitle={
@@ -3635,13 +3937,14 @@ function GuideScreenContent() {
                       ? 'Free things to do still show below'
                       : (
                     experienceDestinationLabel
-                      ? exploreSearchExperienceLoading
+                      ? guidedExperienceSearchLoading
                         ? `Checking options near ${experienceDestinationLabel}`
                         : `Near ${experienceDestinationLabel}`
                       : 'Search a destination to compare options'
                       )
                   }
                   mediaUrl={mediaUrl}
+                  onOpen={openExperienceDetail}
                   onSave={saveExperienceToPlanner}
                   onShowArea={showExperienceOnMap}
                 />
@@ -3694,8 +3997,10 @@ function GuideScreenContent() {
                         ? 'Saved Places'
                         : isThingsToDoExploreQuery(exploreQuery)
                         ? 'Things To Do'
-                        : showExperienceSearch || tourSearchPaused
-                          ? 'Guided Trips'
+	                        : showGuidedFallbackPlaces
+	                          ? 'Related places'
+	                        : showExperienceSearch || tourSearchPaused
+	                          ? 'Guided Trips'
                         : hasExploreQuery
                           ? 'Search Results'
                           : exploreCategory === 'all'
@@ -3728,7 +4033,12 @@ function GuideScreenContent() {
                 <Text style={s.emptySub}>{exploreError}</Text>
               </View>
             )}
-            {featuredSections.length > 0 ? (
+            {showGuidedFallbackPlaces ? (
+              <View style={s.guidedFallbackBlock}>
+                {guidedFallbackDisplayPlaces.map((place, idx) => renderExploreCard({ place, distance: null }, idx))}
+              </View>
+            ) : holdGuidedExploreResults ? null
+            : featuredSections.length > 0 ? (
               <>
                 {!!featuredLead && (
                   <View style={s.exploreLeadBlock}>
@@ -3981,6 +4291,9 @@ function GuideScreenContent() {
         )}
       </ScrollView>
 
+      {renderGuidedDateSheet()}
+      {renderGuidedFilterSheet()}
+
       <PaywallModal
         visible={paywallVisible}
         code={paywallCode}
@@ -3998,6 +4311,17 @@ function GuideScreenContent() {
           setSelectedLivePlace(null);
           router.push('/(tabs)/map');
         }}
+      />
+
+      <GuidedTripDetailModal
+        visible={!!selectedExperience}
+        experience={selectedExperience}
+        loading={selectedExperienceLoading}
+        topInset={insets.top}
+        mediaUrl={mediaUrl}
+        onClose={closeExperienceDetail}
+        onSave={activeTrip ? saveExperienceToPlanner : undefined}
+        onShowArea={showSelectedExperienceOnMap}
       />
 
       <Modal visible={!!selectedExplore} animationType="slide" onRequestClose={() => setSelectedExplore(null)}>
@@ -4246,13 +4570,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0,
   },
-  guidedPanelSub: {
-    color: C.text3,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '700',
-    marginTop: 3,
-  },
   guidedField: {
     minHeight: 62,
     flexDirection: 'row',
@@ -4279,73 +4596,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontWeight: '800',
     paddingVertical: 4,
   },
-  guidedFieldGrid: {
-    flexDirection: 'row',
-    gap: 8,
-  },
-  guidedMiniField: {
-    flex: 1,
-    minHeight: 58,
-    borderRadius: 13,
+  guidedSelector: {
+    minHeight: 64,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s2,
-    paddingHorizontal: 11,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    justifyContent: 'center',
-    gap: 4,
-  },
-  guidedMiniValue: {
-    color: C.text,
-    fontSize: 12,
-    lineHeight: 15,
-    fontWeight: '900',
-  },
-  guidedOptionWrapRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-  },
-  guidedDateRow: {
-    flexDirection: 'row',
-    gap: 6,
-  },
-  guidedOption: {
-    minHeight: 38,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s1,
-    borderRadius: 999,
-    paddingHorizontal: 13,
-    flexShrink: 0,
+    gap: 10,
   },
-  guidedDateOption: {
-    flex: 1,
-    minWidth: 0,
+  guidedSelectorIcon: {
+    width: 34,
+    height: 34,
+    borderRadius: 11,
+    alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 6,
-  },
-  guidedOptionActive: {
-    borderColor: C.orange + '88',
     backgroundColor: C.orangeGlow,
   },
-  guidedOptionText: {
-    color: C.text2,
-    fontSize: 12,
-    lineHeight: 15,
-    fontWeight: '800',
-  },
-  guidedDateOptionText: {
-    flexShrink: 1,
-    minWidth: 0,
-    fontSize: 11,
-  },
-  guidedOptionTextActive: {
-    color: C.orange,
+  guidedSelectorValue: {
+    color: C.text,
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '900',
+    marginTop: 2,
   },
   guidedSearchButton: {
     minHeight: 48,
@@ -4362,6 +4638,168 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     lineHeight: 18,
     fontWeight: '900',
   },
+  sheetBackdrop: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(15,23,42,0.34)',
+  },
+  sheet: {
+    maxHeight: '88%',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    backgroundColor: C.bg,
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    gap: 12,
+  },
+  sheetHeader: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  sheetTitle: {
+    color: C.text,
+    fontSize: 22,
+    lineHeight: 27,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  sheetClose: {
+    width: 36,
+    height: 36,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.s2,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  sheetSectionTitle: {
+    color: C.text3,
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: '900',
+    marginTop: 4,
+    letterSpacing: 0,
+  },
+  sheetRows: {
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    overflow: 'hidden',
+  },
+  sheetRow: {
+    minHeight: 50,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: C.border,
+  },
+  sheetRowText: {
+    flex: 1,
+    minWidth: 0,
+    color: C.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '800',
+  },
+  sheetCheckBox: {
+    width: 24,
+    height: 24,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.s2,
+  },
+  sheetCheckBoxActive: {
+    borderColor: C.orange,
+    backgroundColor: C.orange,
+  },
+  sheetApplyButton: {
+    minHeight: 50,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.orange,
+  },
+  sheetApplyText: {
+    color: '#fff',
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '900',
+  },
+  calendarHeader: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  calendarNav: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.s1,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  calendarMonth: {
+    color: C.text,
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: '900',
+  },
+  weekdayRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  weekdayText: {
+    flex: 1,
+    textAlign: 'center',
+    color: C.text3,
+    fontSize: 11,
+    lineHeight: 16,
+    fontWeight: '900',
+  },
+  calendarGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    paddingBottom: 4,
+  },
+  calendarCell: {
+    width: '14.2857%',
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 13,
+  },
+  calendarCellSelected: {
+    backgroundColor: C.orange,
+  },
+  calendarCellDisabled: {
+    opacity: 0.35,
+  },
+  calendarCellText: {
+    color: C.text,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900',
+  },
+  calendarCellTextSelected: {
+    color: '#fff',
+  },
+  calendarCellTextDisabled: {
+    color: C.text3,
+  },
   exploreSectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -4373,6 +4811,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   exploreSectionSub: { color: C.text3, fontSize: 10, fontFamily: mono },
   exploreSectionLink: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
   exploreLeadBlock: { marginHorizontal: 20 },
+  guidedFallbackBlock: { marginHorizontal: 20, gap: 14 },
   trendingSection: { gap: 12, marginBottom: 10 },
   trendingHeader: { marginHorizontal: 20, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   trendingTitle: { color: C.text, fontSize: 20, lineHeight: 24, fontWeight: '900', letterSpacing: 0 },

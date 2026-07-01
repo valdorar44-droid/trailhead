@@ -19358,9 +19358,26 @@ def _experience_distance_filter(experiences: list[dict], lat: float | None, lng:
 
 def _find_experience(experience_id: str) -> dict | None:
     decoded = unquote(str(experience_id or ""))
+    decoded_key = decoded.strip().lower()
+    decoded_source_key = decoded_key.split(":", 1)[1] if ":" in decoded_key else decoded_key
+
+    def matches(item: dict) -> bool:
+        item_id = str(item.get("id") or "").strip().lower()
+        item_source_id = str(item.get("source_id") or "").strip().lower()
+        item_source_key = item_id.split(":", 1)[1] if ":" in item_id else item_id
+        return decoded_key in {item_id, item_source_id} or decoded_source_key in {item_source_id, item_source_key}
+
     for item in _load_explore_experiences().get("experiences") or []:
-        if str(item.get("id") or "") == decoded:
+        if matches(item):
             return item
+    for cached in _viator_route_live_cache.values():
+        if not isinstance(cached, dict):
+            continue
+        for item in cached.get("results") or []:
+            if not isinstance(item, dict):
+                continue
+            if matches(item):
+                return item
     return None
 
 
@@ -20231,7 +20248,7 @@ async def route_tour_suggestions(body: RouteTourRequest):
 @app.post("/api/explore/experiences/refresh")
 async def explore_experience_refresh(source: str = "viator", destination_id: str = "", limit: int = 12):
     if source.lower() != "viator":
-        raise HTTPException(400, "Only Viator refresh is supported in this source pack.")
+        raise HTTPException(400, "Only Viator refresh is supported here.")
     config = viator_config_from_env()
     client = ViatorClient(config)
     if not client.ready():

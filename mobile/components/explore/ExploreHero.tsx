@@ -43,6 +43,7 @@ type Props = {
   selectedCategory: ExploreCategoryKey;
   mode: ExploreMode;
   weather: HeroWeather;
+  hideSearch?: boolean;
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
   onCategorySelect: (key: ExploreCategoryKey) => void;
@@ -57,6 +58,7 @@ export function ExploreHero({
   selectedCategory,
   mode,
   weather,
+  hideSearch = false,
   onQueryChange,
   onClearQuery,
   onCategorySelect,
@@ -80,24 +82,26 @@ export function ExploreHero({
       <View style={styles.content}>
         <Text style={styles.greeting}>{greeting}, {displayName}</Text>
         <Text style={styles.title}>Find your next adventure</Text>
-        <View style={styles.searchRow}>
-          <View style={styles.search}>
-            <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.9)" />
-            <TextInput
-              value={query}
-              onChangeText={onQueryChange}
-              placeholder="Search camps, trails, fuel"
-              placeholderTextColor="rgba(255,255,255,0.72)"
-              style={styles.input}
-              returnKeyType="search"
-            />
-            {query ? (
-              <TouchableOpacity onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
-                <Ionicons name="close" size={16} color="rgba(255,255,255,0.86)" />
-              </TouchableOpacity>
-            ) : null}
+        {!hideSearch ? (
+          <View style={styles.searchRow}>
+            <View style={styles.search}>
+              <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.9)" />
+              <TextInput
+                value={query}
+                onChangeText={onQueryChange}
+                placeholder="Search camps, trails, fuel"
+                placeholderTextColor="rgba(255,255,255,0.72)"
+                style={styles.input}
+                returnKeyType="search"
+              />
+              {query ? (
+                <TouchableOpacity onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
+                  <Ionicons name="close" size={16} color="rgba(255,255,255,0.86)" />
+                </TouchableOpacity>
+              ) : null}
+            </View>
           </View>
-        </View>
+        ) : null}
         {weather.loading || !weather.unavailable ? (
           <View style={styles.weather}>
             <View style={styles.weatherLeft}>

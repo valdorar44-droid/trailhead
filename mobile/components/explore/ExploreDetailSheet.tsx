@@ -289,7 +289,7 @@ function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePl
     return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
   }
   clean = clean
-    .replace(/\bUse it for context, photos, and a cleaner break in the drive\b/gi, 'Use it for a focused stop, photos, and a cleaner break in the drive')
+    .replace(/\bUse it for context, photos, and a cleaner break in the drive\b/gi, 'Good for a focused stop, photos, and a cleaner break in the drive')
     .replace(/(?:^|\s)[^.]{1,120}\bis a destination\.\s*/gi, ' ')
     .replace(/\bBuild the stop around current conditions, reservation rules, and the time you want on the ground\.?/gi, 'Build the stop around current access, timing, and the time you want on the ground.')
     .replace(/\s+/g, ' ')

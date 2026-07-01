@@ -152,6 +152,25 @@ class ViatorSourcePackTests(unittest.TestCase):
         self.assertEqual([body["pagination"]["count"] for body in opener.bodies], [6, 6, 4])
         self.assertEqual(len(statuses), 3)
 
+    def test_experience_detail_finds_live_cache_result(self):
+        old_cache = dict(server._viator_route_live_cache)
+        try:
+            server._viator_route_live_cache.clear()
+            server._viator_route_live_cache["moab-live"] = {
+                "status": "ok",
+                "results": [{
+                    "id": "viator:LIVE-DETAIL-001",
+                    "source_id": "LIVE-DETAIL-001",
+                    "title": "Moab Canyon Tour",
+                }],
+            }
+            self.assertEqual(server._find_experience("viator:LIVE-DETAIL-001")["title"], "Moab Canyon Tour")
+            self.assertEqual(server._find_experience("LIVE-DETAIL-001")["title"], "Moab Canyon Tour")
+            self.assertEqual(server._find_experience("viator:live-detail-001")["title"], "Moab Canyon Tour")
+        finally:
+            server._viator_route_live_cache.clear()
+            server._viator_route_live_cache.update(old_cache)
+
     def test_client_preserves_viator_http_error_details(self):
         client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=HttpErrorOpener())
         payload = client.search_products(destination_id="5600")

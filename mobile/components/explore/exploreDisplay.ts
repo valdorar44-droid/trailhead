@@ -283,6 +283,20 @@ export function normalizeExploreCopyBlock(value?: string | null) {
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&lt;/gi, '<')
     .replace(/&gt;/gi, '>')
+    .replace(/\bscenic-route anchor\b/gi, 'scenic route stop')
+    .replace(/\bscenic route anchor\b/gi, 'scenic route stop')
+    .replace(/\broute-area anchor\b/gi, 'route area')
+    .replace(/\bmountain route anchor\b/gi, 'mountain route')
+    .replace(/\bday anchor\b/gi, 'day stop')
+    .replace(/\bovernight anchor\b/gi, 'overnight option')
+    .replace(/\broute anchor\b/gi, 'route stop')
+    .replace(/\bplanning anchor\b/gi, 'stop')
+    .replace(/\bclassic overnight option\b/gi, 'reliable overnight option')
+    .replace(/\bUse it for context, photos, and a cleaner break in the drive\b/gi, 'Good for a focused stop, photos, and a cleaner break in the drive')
+    .replace(/\bUse it for a reset night when camping every day stops sounding fun\b/gi, 'Good for a reset night between camp days')
+    .replace(/\bUse it when a hike should decide the day, not just fill an hour\b/gi, 'Good when a hike should shape the day')
+    .replace(/\bGood for staging the route before and after trail time\b/gi, 'Good before or after trail time')
+    .replace(/\bUse it for a recovery night or a safer end to a hard day\b/gi, 'Good for a recovery night or a safer end to a hard day')
     .replace(/\bClick the reservation button below for details\.?/gi, '')
     .replace(/\bUse the reservation button below for details\.?/gi, '')
     .replace(/\bClick below for details\.?/gi, '')
@@ -474,10 +488,10 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
 export function getExploreTrustBadge(place: ExplorePlaceProfile) {
   const confidence = sourceConfidenceFromRecord(readV3(place));
   if (confidence.score >= 85) return 'Plan-ready';
-  if (confidence.score >= 65) return 'Ready to compare';
+  if (confidence.score >= 65) return 'Area details';
   const badge = getExploreSourceBadge(place);
   if (/official|current access/i.test(badge)) return 'Plan-ready';
-  if (/community|curated|multiple|area details/i.test(badge)) return 'Ready to compare';
+  if (/community|curated|multiple|area details/i.test(badge)) return 'Area details';
   return 'Check access';
 }
 
@@ -525,7 +539,7 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
     },
     {
       label: 'Trip check',
-      value: confidence.score >= 65 || /official/i.test(sourceBadge) ? 'Ready to compare' : 'Check before going',
+      value: confidence.score >= 65 || /official/i.test(sourceBadge) ? 'Area details' : 'Check before going',
       icon: 'shield-outline',
       tone: confidence.score >= 65 || /official/i.test(sourceBadge) ? '#0ea5e9' : '#ca8a04',
     },
@@ -551,7 +565,7 @@ export function getExploreCardSummary(place: ExplorePlaceProfile) {
     place.summary.short_description ||
     place.profile.summary ||
     FALLBACK_COPY[key] ||
-    'Use this stop with current access checks before you go.',
+    'Check access before you go.',
   ), place).trim();
 }
 
@@ -828,7 +842,20 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   let text = raw
     .replace(/\broute-ready\b/gi, 'ready')
     .replace(/\broute planner\b/gi, 'map')
+    .replace(/\bscenic-route anchor\b/gi, 'scenic route stop')
+    .replace(/\bscenic route anchor\b/gi, 'scenic route stop')
+    .replace(/\broute-area anchor\b/gi, 'route area')
+    .replace(/\bmountain route anchor\b/gi, 'mountain route')
+    .replace(/\bday anchor\b/gi, 'day stop')
+    .replace(/\bovernight anchor\b/gi, 'overnight option')
+    .replace(/\broute anchor\b/gi, 'route stop')
     .replace(/\bplanning anchor\b/gi, 'stop')
+    .replace(/\bclassic overnight option\b/gi, 'reliable overnight option')
+    .replace(/\bUse it for context, photos, and a cleaner break in the drive\b/gi, 'Good for a focused stop, photos, and a cleaner break in the drive')
+    .replace(/\bUse it for a reset night when camping every day stops sounding fun\b/gi, 'Good for a reset night between camp days')
+    .replace(/\bUse it when a hike should decide the day, not just fill an hour\b/gi, 'Good when a hike should shape the day')
+    .replace(/\bGood for staging the route before and after trail time\b/gi, 'Good before or after trail time')
+    .replace(/\bUse it for a recovery night or a safer end to a hard day\b/gi, 'Good for a recovery night or a safer end to a hard day')
     .replace(/\bsource pack\b/gi, 'details')
     .replace(/\bAI\b/g, '')
     .replace(/\s+/g, ' ')
@@ -848,6 +875,15 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   if (/safer overnight or weather-reset lead|Verify reservations, seasonal access, food, hut rules, and route approach/i.test(text)) {
     return `${title} is a hut or shelter option. Check reservations, seasonal access, route approach, and current conditions.`;
   }
+  if (/Build around this only if the reservation and access details work/i.test(text)) {
+    return `${title} is a lodging option. Check reservation timing, access, food, shuttles, and operating dates.`;
+  }
+  if (/Use it as a day stop when the drive needs more than mileage/i.test(text)) {
+    return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
+  }
+  if (/Build extra time around this stop, especially if weather or crowds matter/i.test(text)) {
+    return `${title} is worth extra time when weather or crowds matter. Check access, fees, closures, and overnight rules.`;
+  }
   if (/day anchor for nearby camps, trailheads, access notes, and weather/i.test(text)) {
     return `${title} has nearby camps, trails, access notes, and weather to check before setting dates.`;
   }
@@ -859,6 +895,15 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   }
   if (/Use it to start a camp search near a real destination/i.test(text)) {
     return `${title} is an overnight-area lead. Check legal camping, fees, closures, road access, and booking rules.`;
+  }
+  if (/Use this as .*K2\/Baltoro route area/i.test(text)) {
+    return `${title} covers the K2/Baltoro trek area. Confirm permits, guides, road access, glacier conditions, and rescue logistics before travel.`;
+  }
+  if (/Use this as orientation only/i.test(text)) {
+    return `${title} is an orientation point. Confirm local conditions, guide support, permits, and access before travel.`;
+  }
+  if (/Use this as .*route area/i.test(text)) {
+    return `${title} is a route area. Check permits, access, seasonal conditions, local support, and safety logistics before travel.`;
   }
   const waterfallFallback = text.match(/^(.+?)\s+is a waterfall or cascade near\s+([^.]+)\.\s+Check trail access, seasonal flow, closures, water levels, and slippery terrain before visiting\.?$/i);
   if (waterfallFallback) {
@@ -890,6 +935,12 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   }
   if (/when the route needs a softer landing|is for the night you want comfort|setup time matters more than roughing it/i.test(text)) {
     return `${title} is a comfort-focused stay option. Check booking, road access, and availability.`;
+  }
+  if (/Good for a reset night between camp days/i.test(text)) {
+    return `${title} is a comfortable stay option near the area. Check booking, access, rules, and closures.`;
+  }
+  if (/Good before or after trail time|Good when a hike should shape the day/i.test(text)) {
+    return `${title} has trail access, nearby stops, and conditions to check before you go.`;
   }
   if (/weather or mileage makes camping less appealing/i.test(text)) {
     return `${title} gives you an indoor stay option near the area. Check booking and seasonal access.`;

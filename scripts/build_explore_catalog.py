@@ -138,14 +138,14 @@ GROUP_COPY = {
     "glamping": {
         "category": "Glamping",
         "tags": ["glamping", "stays", "basecamp"],
-        "reason": "comfortable outdoor stays near a major scenery or road-trip anchor",
+        "reason": "comfortable outdoor stays near major scenery and road-trip stops",
         "timing": "Book early around weekends and peak seasons; confirm the exact address, check-in rules, and cancellation terms before driving out.",
         "access": "Open the external stay page for current pricing, availability, included amenities, and property rules.",
     },
     "huts_lodging": {
         "category": "Huts & Lodging",
         "tags": ["lodging", "huts", "cabins"],
-        "reason": "classic park lodging, hut systems, or cabin-style stays that work as route anchors",
+        "reason": "classic park lodging, hut systems, or cabin-style stays that work for overnight planning",
         "timing": "Plan far ahead for historic lodges, high huts, and remote stays; many book months in advance or close seasonally.",
         "access": "Confirm reservations, shuttle access, road status, and food or gear requirements with the official operator.",
     },
@@ -159,7 +159,7 @@ GROUP_COPY = {
     "parks": {
         "category": "Parks",
         "tags": ["parks", "monuments", "historic sites", "landmarks"],
-        "reason": "national parks, monuments, historic sites, and protected landscapes worth anchoring a route around",
+        "reason": "national parks, monuments, historic sites, and protected landscapes worth planning a route around",
         "timing": "Check seasonal access, road closures, permits, visitor capacity, and weather before building a route around the stop.",
         "access": "Use the official land-manager page for current access, fees, closures, cultural protocols, and safety notices.",
     },
@@ -821,7 +821,7 @@ def copy_theme(title: str, base: str, group_key: str, tags: list[str] | None = N
         }
     if any(term in text for term in ("mount", "mountain", "alpine", "glacier", "teton", "rainier", "rocky", "kluane", "fiordland", "aspiring")):
         return {
-            "terrain": "mountain access, elevation, weather windows, and big-scenery route anchors",
+            "terrain": "mountain access, elevation, weather windows, and big-scenery routes",
             "action": "check snow, storms, shuttle rules, and road openings",
         }
     if group_key == "glamping":
@@ -831,7 +831,7 @@ def copy_theme(title: str, base: str, group_key: str, tags: list[str] | None = N
         }
     if group_key == "huts_lodging":
         return {
-            "terrain": "fixed-roof lodging that can anchor a hard weather day or a classic park overnight",
+            "terrain": "fixed-roof lodging for a hard weather day or a classic park overnight",
             "action": "confirm reservation windows, food, shuttle access, and operating dates",
         }
     if group_key == "trails":
@@ -910,7 +910,7 @@ def generated_copy_for_seed(entry: dict, base_title: str) -> tuple[str, str, str
         ], title=title, region=region)
         summary = choose_template(title, [
             "A good place to slow the route down. Before you go, {action}.",
-            "Use it as a day anchor when the drive needs more than mileage. {Action}.",
+            "Use it as a real stop when the drive needs more than mileage. {Action}.",
             "Build extra time around this stop, especially if weather or crowds matter. {Action}.",
             "Worth planning around, not just passing on the highway. {Action}.",
         ], action=action, Action=action_sentence)
@@ -926,7 +926,7 @@ def generated_copy_for_seed(entry: dict, base_title: str) -> tuple[str, str, str
             "Plan enough time to get out, read the place, and walk it properly. {Action}.",
             "Best as a focused stop, not a drive-by pin. {Action}.",
             "A short detour can be worth it here if you give the site time. {Action}.",
-            "Use it for context, photos, and a cleaner break in the drive. {Action}.",
+            "Good for context, photos, and a cleaner break in the drive. {Action}.",
         ], Action=action_sentence)
         why = f"{title} adds context to the map: history, land protection, and a specific reason to leave the fastest road."
     elif group_key == "water_scenic":
@@ -948,12 +948,12 @@ def generated_copy_for_seed(entry: dict, base_title: str) -> tuple[str, str, str
             "Plan around {title} if hiking is the main event{region}.",
             "{title} can decide where the rest of the day goes.",
             "Use {title} to stage parking, camps, and post-hike services{region}.",
-            "{title} is a better day anchor than a last-minute trail search.",
+            "{title} is better planned ahead than left to a last-minute trail search.",
         ], title=title, region=region)
         summary = choose_template(title, [
             "Plan parking, daylight, nearby camps, and food around this one. {Action}.",
-            "Use it when a hike should decide the day, not just fill an hour. {Action}.",
-            "Good for staging the route before and after trail time. {Action}.",
+            "Good when a hike should shape the day. {Action}.",
+            "Useful before or after trail time. {Action}.",
             "Trail logistics can ripple into camp plans. {Action}.",
         ], Action=action_sentence)
         why = f"{title} belongs in Explore because trail timing often decides the rest of the day: sleep, food, fuel, and how far to drive next."
@@ -965,7 +965,7 @@ def generated_copy_for_seed(entry: dict, base_title: str) -> tuple[str, str, str
             "Choose {title} when setup time matters more than roughing it.",
         ], title=title, base=preview_base, region=region)
         summary = choose_template(title, [
-            "Use it for a reset night when camping every day stops sounding fun. {Action}.",
+            "Good for a reset night between camp days. {Action}.",
             "A paid comfort stop near {base}; useful after heat, weather, or long miles. {Action}.",
             "Good when the trip needs showers, easier sleep, and less setup. {Action}.",
             "Treat it as lodging, not public campground inventory. {Action}.",
@@ -981,12 +981,12 @@ def generated_copy_for_seed(entry: dict, base_title: str) -> tuple[str, str, str
         summary = choose_template(title, [
             "Useful when weather, mileage, or park access calls for a real roof. {Action}.",
             "Build around this only if the reservation and access details work. {Action}.",
-            "A classic overnight anchor, especially when camp logistics get tight. {Action}.",
-            "Use it for a recovery night or a safer end to a hard day. {Action}.",
+            "A reliable overnight option, especially when camp logistics get tight. {Action}.",
+            "Good for a recovery night or a safer end to a hard day. {Action}.",
         ], Action=action_sentence)
         why = f"{title} is useful because lodging can decide the safe end point for a long mountain, desert, or park day."
     else:
-        hook = f"{title} is a Trailhead Explore anchor{region} for {theme['terrain']}."
+        hook = f"{title} is a Trailhead Explore stop{region} for {theme['terrain']}."
         summary = f"Use it as a starting point for route context, then {theme['action']}."
         why = f"{title} adds enough travel context to be worth surfacing before a user zooms into the map."
     return hook, summary, why, theme["action"]
@@ -999,7 +999,7 @@ def is_generic_seed_text(value: str, title: str) -> bool:
         not text
         or "puts " in text and " on the shortlist for " in text
         or "curated trailhead pick" in text
-        or "seeded trailhead campground-area anchor" in text
+        or "seeded trailhead campground-area stop" in text
         or text.startswith(f"{title_lower} keeps ")
     )
 
@@ -1027,7 +1027,7 @@ def profile_from_summary(title: str, category: str, extract: str, state: str) ->
             f"Confirm current access, fees, hours, road closures, and permit rules before detouring to this {category.lower()} in {state}."
         ),
         "nearby_context": (
-            "Treat this as an anchor stop: check nearby fuel, weather, camps, and road conditions before committing to a longer detour."
+            "Check nearby fuel, weather, camps, and road conditions before committing to a longer detour."
         ),
     }
 
@@ -1053,14 +1053,14 @@ def profile_from_seed(entry: dict, base_title: str, extract: str) -> dict:
         ),
         "why_it_matters": entry.get("why_it_matters") or generated_why,
         "what_to_know": entry.get("what_to_know") or (
-            f"This is a planning card, not live availability. Use it for discovery, then {generated_action}."
+            f"This card is for discovery. {generated_action.capitalize()} before you go."
         ),
         "best_time_to_stop": entry.get("best_time_to_stop") or group["timing"],
         "access_notes": entry.get("access_notes") or (
             f"{group['access']} {('Region: ' + state + '.') if state else ''}".strip()
         ),
         "nearby_context": entry.get("nearby_context") or (
-            "Check nearby fuel, food, water, weather, and road time before using it as an overnight or trail-day anchor."
+            "Check nearby fuel, food, water, weather, and road time before using it for an overnight or trail day."
         ),
     }
 
@@ -1099,7 +1099,7 @@ def source_pack_from_wiki(summary: dict, extract: str) -> dict:
         "fees": [],
         "operating_hours": "",
         "alerts": [],
-        "source_note": "Wikipedia/Wikimedia source pack. Official agency enrichment will be added when a matching source is available.",
+        "source_note": "Open reference details. Official agency enrichment will be added when a matching source is available.",
         "extract": extract,
     }
 
@@ -1132,9 +1132,9 @@ def source_pack_from_seed(entry: dict, base_pack: dict, summary: dict, extract: 
         "license": entry.get("license") or base_pack.get("license") or "",
         "image_asset": entry.get("image_asset") or "",
         "source_note": entry.get("source_note") or (
-            "Curated Explore source pack. Open the linked source for current access, pricing, reservation rules, and availability."
+            "Curated Explore details. Open the linked source for current access, pricing, reservation rules, and availability."
             if entry.get("explore_group") in {"glamping", "huts_lodging"}
-            else base_pack.get("source_note") or "Curated Explore source pack."
+            else base_pack.get("source_note") or "Curated Explore details."
         ),
         "extract": extract or base_pack.get("extract") or "",
     }
@@ -1213,7 +1213,7 @@ def fetch_nps_pack(client: httpx.Client, title: str, api_key: str) -> dict | Non
             }
             for alert in alerts[:5]
         ],
-        "source_note": "Official NPS source pack with live park details captured at catalog build time.",
+        "source_note": "Official NPS details captured at catalog build time.",
         "extract": park.get("description") or "",
     }
 

@@ -13,17 +13,19 @@ type Props = {
   title?: string;
   variant?: 'rail' | 'list';
   mediaUrl: (url?: string | null) => string;
+  onOpen?: (experience: BookableExperience) => void;
   onSave?: (experience: BookableExperience) => void;
   onShowArea?: (experience: BookableExperience) => void;
 };
 
-export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', variant = 'rail', mediaUrl, onSave, onShowArea }: Props) {
+export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', variant = 'rail', mediaUrl, onOpen, onSave, onShowArea }: Props) {
   const C = useTheme();
   if (!loading && !error && !experiences.length) return null;
   const subtitle = experiences.length
     ? `${experiences.length} guided trip${experiences.length === 1 ? '' : 's'} nearby`
     : emptySubtitle || (loading ? 'Checking current options' : 'Search a destination to compare options');
   const listMode = variant === 'list';
+  const visibleExperiences = listMode ? experiences.slice(0, 24) : experiences.slice(0, 12);
   return (
     <View style={[listMode ? styles.listShell : styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.top}>
@@ -42,11 +44,12 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
       {experiences.length ? (
         listMode ? (
           <View style={styles.list}>
-            {experiences.slice(0, 12).map(experience => (
+            {visibleExperiences.map(experience => (
               <ExperienceCard
                 key={experience.id}
                 experience={experience}
                 mediaUrl={mediaUrl}
+                onOpen={onOpen}
                 onSave={onSave}
                 onShowArea={onShowArea}
                 variant="list"
@@ -55,11 +58,12 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
           </View>
         ) : (
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
-            {experiences.slice(0, 12).map(experience => (
+            {visibleExperiences.map(experience => (
               <ExperienceCard
                 key={experience.id}
                 experience={experience}
                 mediaUrl={mediaUrl}
+                onOpen={onOpen}
                 onSave={onSave}
                 onShowArea={onShowArea}
                 variant="rail"
@@ -71,7 +75,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
         listMode ? <GuidedExperienceListSkeleton /> : <TrailheadRailSkeleton count={3} cardWidth={224} />
       ) : null}
       {experiences.length ? (
-        <Text style={[styles.attribution, { color: C.text3 }]}>Times, prices, and checkout open on the tour site.</Text>
+        <Text style={[styles.attribution, { color: C.text3 }]}>Times and prices can change.</Text>
       ) : null}
     </View>
   );
@@ -80,12 +84,14 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
 function ExperienceCard({
   experience,
   mediaUrl,
+  onOpen,
   onSave,
   onShowArea,
   variant,
 }: {
   experience: BookableExperience;
   mediaUrl: (url?: string | null) => string;
+  onOpen?: (experience: BookableExperience) => void;
   onSave?: (experience: BookableExperience) => void;
   onShowArea?: (experience: BookableExperience) => void;
   variant: 'rail' | 'list';
@@ -121,12 +127,12 @@ function ExperienceCard({
         <View style={styles.actions}>
           <TouchableOpacity
             style={[styles.bookButton, { backgroundColor: C.orange, opacity: url ? 1 : 0.55 }]}
-            disabled={!url}
-            onPress={() => url && Linking.openURL(url)}
-            accessibilityLabel={`Open ${experience.title}`}
+            disabled={!url && !onOpen}
+            onPress={() => onOpen ? onOpen(experience) : url && Linking.openURL(url)}
+            accessibilityLabel={`Open details for ${experience.title}`}
           >
-            <Ionicons name="open-outline" size={15} color="#fff" />
-            <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>{listMode ? 'View trip' : 'View'}</Text>
+            <Ionicons name="information-circle-outline" size={15} color="#fff" />
+            <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Details</Text>
           </TouchableOpacity>
           <TouchableOpacity
             style={[styles.iconButton, { borderColor: C.border }]}

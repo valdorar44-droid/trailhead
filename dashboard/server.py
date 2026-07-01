@@ -17075,7 +17075,7 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
         "subtype": display_type or body.subtype or card_type,
         "display_type": display_type,
         "source": source,
-        "source_label": body.source_label or ("Trailhead trail" if card_type == "trail" else "Map search" if source == "search" else body.source or "Map source"),
+        "source_label": body.source_label or ("Trailhead trail" if card_type == "trail" else "Place" if source == "search" else body.source or "Place"),
         "selection_source": body.selection_source or source,
         "feature_id": body.feature_id,
         "provider_place_id": body.provider_place_id,
@@ -17240,6 +17240,9 @@ def _map_card_overnight_fallback(body: MapCardResolveRequest, card: dict) -> dic
     else:
         land_type = "Campground"
         tags = ["camp", "campground", "tent"]
+    fallback_source = card.get("source_label") or body.source_label or land_type
+    if _map_card_bad_visible_source_label(fallback_source):
+        fallback_source = land_type
     return {
         "id": str(card.get("id") or f"map_card:overnight:{float(body.lat):.5f}:{float(body.lng):.5f}"),
         "name": card.get("name") or body.name or "Overnight stop",
@@ -17249,7 +17252,7 @@ def _map_card_overnight_fallback(body: MapCardResolveRequest, card: dict) -> dic
         "subtype": card.get("subtype") or body.subtype or land_type,
         "tags": tags,
         "land_type": land_type,
-        "description": card.get("summary") or card.get("address") or "Map-sourced overnight option. Verify current access, booking rules, fees, and stay limits before relying on it.",
+        "description": card.get("summary") or card.get("address") or "Verify current access, booking rules, fees, and stay limits before relying on it.",
         "photo_url": card.get("photo_url") or "",
         "photos": card.get("photos") or [],
         "reservable": False,
@@ -17259,8 +17262,8 @@ def _map_card_overnight_fallback(body: MapCardResolveRequest, card: dict) -> dic
         "booking_url": card.get("booking_url") or "",
         "ada": False,
         "source": card.get("source") or body.source or "map",
-        "verified_source": card.get("source_label") or body.source_label or "Map source",
-        "source_badge": card.get("source_label") or body.source_label or "Map source",
+        "verified_source": fallback_source,
+        "source_badge": fallback_source,
         "rating": card.get("rating"),
         "rating_count": card.get("rating_count"),
         "phone": card.get("phone") or "",
@@ -17270,7 +17273,7 @@ def _map_card_overnight_fallback(body: MapCardResolveRequest, card: dict) -> dic
         "source_confidence": "review",
         "link_label": "Official page",
         "rich_detail_available": False,
-        "rich_detail_reason": "Mapbox rendered place upgraded into Trailhead's overnight card flow; confirm details with the source.",
+        "rich_detail_reason": "Confirm details with the source before you go.",
         "amenities": card.get("amenities") or [],
         "site_types": card.get("site_types") or ([land_type] if is_private or is_lodging else (["RV"] if is_rv else ["Tent", "Campground"])),
     }
@@ -17291,6 +17294,72 @@ def _map_card_camp_match_score(body: MapCardResolveRequest, camp: dict) -> float
             score -= 600
     score += _camp_source_rank(camp) * 80
     return score
+
+
+_MAP_CARD_GENERIC_CAMP_WORDS = {
+    "camp", "campground", "campgrounds", "camping", "campsite", "campsites",
+    "site", "sites", "rv", "park", "area", "group", "tent", "shelter",
+    "primitive", "dispersed", "spot", "spots", "trailhead", "trail",
+}
+
+
+def _map_card_name_words(value: object) -> set[str]:
+    words = {
+        word
+        for word in re.findall(r"[a-z0-9]{3,}", str(value or "").lower())
+        if word not in _MAP_CARD_GENERIC_CAMP_WORDS
+    }
+    return words
+
+
+def _map_card_camp_name_match(body: MapCardResolveRequest, camp: dict) -> bool:
+    body_token = _camp_cluster_name(body.name)
+    camp_token = _camp_cluster_name(camp.get("name"))
+    if body_token and camp_token and len(body_token) >= 5 and len(camp_token) >= 5:
+        if body_token == camp_token or body_token in camp_token or camp_token in body_token:
+            return True
+    body_words = _map_card_name_words(body.name)
+    camp_words = _map_card_name_words(camp.get("name"))
+    if not body_words or not camp_words:
+        return False
+    common = body_words.intersection(camp_words)
+    if len(common) >= 2:
+        return True
+    if len(body_words) == 1 and next(iter(body_words)) in camp_words:
+        return True
+    return False
+
+
+def _map_card_source_text(body: MapCardResolveRequest, card: dict | None = None) -> str:
+    return " ".join(str(value or "").lower() for value in (
+        body.source,
+        body.source_label,
+        body.selection_source,
+        body.source_layer,
+        (card or {}).get("source"),
+        (card or {}).get("source_label"),
+        (card or {}).get("source_layer"),
+    ))
+
+
+def _map_card_rendered_source(body: MapCardResolveRequest, card: dict | None = None) -> bool:
+    source_text = _map_card_source_text(body, card)
+    return any(token in source_text for token in ("mapbox", "rendered", "map_tile", "map tile", "basemap", "poi-label", "place-label"))
+
+
+def _map_card_camp_candidate_ok(body: MapCardResolveRequest, card: dict, camp: dict) -> bool:
+    try:
+        distance_m = _haversine_m(float(body.lat), float(body.lng), float(camp.get("lat")), float(camp.get("lng")))
+    except Exception:
+        return False
+    if distance_m <= 275:
+        return True
+    name_match = _map_card_camp_name_match(body, camp)
+    if not name_match:
+        return False
+    if distance_m <= (6500 if _map_card_rendered_source(body, card) else 3000):
+        return True
+    return False
 
 
 async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -> tuple[dict | None, dict | None]:
@@ -17323,12 +17392,12 @@ async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -
         bridge = await discovery_context(
             DiscoveryContextRequest(
                 center=PlannerPoint(lat=float(body.lat), lng=float(body.lng)),
-                radius=12,
+                radius=18 if _map_card_rendered_source(body, card) else 12,
                 categories=["camp", "camping", "private_stay", "glamping"],
                 filters=[],
                 surface="map_card_overnight",
                 mode="full",
-                limit=80,
+                limit=120,
                 include_stays=True,
                 stale_after_hours=12,
             ),
@@ -17338,13 +17407,13 @@ async def _resolve_map_card_overnight(body: MapCardResolveRequest, card: dict) -
     except Exception:
         candidates = []
     if not candidates:
-        candidates = await nearby_camps(body.lat, body.lng, radius=12, types="", limit=80, mode="full", stays=True)
+        candidates = await nearby_camps(body.lat, body.lng, radius=18 if _map_card_rendered_source(body, card) else 12, types="", limit=120, mode="full", stays=True)
     close = [
         camp for camp in candidates
         if isinstance(camp, dict)
         and camp.get("lat") is not None
         and camp.get("lng") is not None
-        and _camp_distance_m({"lat": body.lat, "lng": body.lng}, camp) <= 1800
+        and _map_card_camp_candidate_ok(body, card, camp)
     ]
     matched = min(close, key=lambda camp: _map_card_camp_match_score(body, camp), default=None)
     if not matched:
@@ -17431,6 +17500,27 @@ def _normalize_map_card_display(card: dict, body: MapCardResolveRequest) -> dict
     if not normalized.get("photo_status"):
         normalized["photo_status"] = "open_photo" if normalized.get("photo_url") or normalized.get("photos") else "placeholder"
     return normalized
+
+
+def _map_card_bad_visible_source_label(value: object) -> bool:
+    clean = str(value or "").strip().lower()
+    if not clean:
+        return True
+    return bool(re.search(r"\b(mapbox|rendered\s+map|map\s+feature|map\s+source|map\s+search|map\s+data|map\s+tile|basemap)\b", clean))
+
+
+def _map_card_display_source_label(card: dict, body: MapCardResolveRequest, enriched_by: object = None) -> str:
+    for value in (
+        card.get("source_label"),
+        card.get("source_badge"),
+        card.get("verified_source"),
+        enriched_by,
+    ):
+        if value and not _map_card_bad_visible_source_label(value):
+            return str(value)
+    display = card.get("display_type") or card.get("land_type") or card.get("subtype") or body.subtype or body.type or body.kind or "Place"
+    display = re.sub(r"[_-]+", " ", str(display or "Place")).strip()
+    return display[:1].upper() + display[1:] if display else "Place"
 
 
 def _is_weak_card_summary(value: object) -> bool:
@@ -17782,6 +17872,12 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
         card = _map_card_merge(card, camp_card)
         card["type"] = "camp"
         card["subtype"] = camp_card.get("land_type") or camp_card.get("subtype") or card.get("subtype") or "camp"
+        camp_label = camp_card.get("source_badge") or camp_card.get("verified_source") or camp_card.get("source_label") or camp_card.get("source")
+        if camp_label:
+            card["source_label"] = camp_label
+            card["source_badge"] = camp_label
+        if camp_card.get("source"):
+            card["source"] = camp_card.get("source")
         for key in (
             "tags", "land_type", "amenities", "site_types", "activities", "cost", "reservable",
             "url", "official_url", "booking_url", "ada", "verified_source", "source_badge",
@@ -17850,9 +17946,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     related["context_status"] = context_status
     related["rail_status"] = context_status
     enriched_by = card.get("enriched_by")
-    display_source_label = card["source_label"]
-    if enriched_by and str(enriched_by).lower() not in str(display_source_label).lower():
-        display_source_label = f"{display_source_label} · enriched by {enriched_by}"
+    display_source_label = _map_card_display_source_label(card, body, enriched_by)
     photo_candidates = card.get("photos") or ([{"url": card["photo_url"], "source": card.get("source_label", "")}] if card.get("photo_url") else [])
     response = {
         "card": card,

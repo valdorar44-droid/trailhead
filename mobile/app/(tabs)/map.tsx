@@ -4175,24 +4175,44 @@ const buildMapHtml = (
     map.on('rotate',function(){
       if(userMarker&&smoothedHdg>=0){var svg=userMarker.getElement().querySelector('svg');if(svg)svg.style.transform='rotate('+(smoothedHdg-map.getBearing())+'deg)';}
     });
+    function renderedFeatureText(props){
+      var p=props||{};
+      return [p.maki,p.poi_category,p.category,p.class,p.feature_type,p.icon,p.symbol,p.type,p.group,p.kind,p.subclass,p.name,p.name_en,p.brand,p.full_address,p.place_name,p.label].filter(Boolean).join(' ').toLowerCase();
+    }
     function renderedPlaceType(props){
-      var raw=String((props&&((props.maki)||(props.poi_category)||(props.category)||(props.class)||(props.type)||(props.group)||(props.kind)))||'').toLowerCase();
-      if(/camp|caravan|rv/.test(raw))return'camp';
+      var raw=renderedFeatureText(props);
+      if(!/\b(campus|summer camp|boot camp|training camp|campbell)\b/.test(raw)&&/camp\s*ground|campground|camp\s*site|campsite|camping|caravan|rv\s*(park|resort|camp)?/.test(raw))return'camp';
+      if(/trailhead|trail\s*head/.test(raw))return'trailhead';
+      if(/hot\s*spring|thermal|public_bath|bath/.test(raw))return'hot_spring';
+      if(/viewpoint|view_point|overlook|vista|lookout/.test(raw))return'viewpoint';
+      if(/peak|summit|mountain/.test(raw))return'peak';
       if(/fuel|gas|charging/.test(raw))return'fuel';
       if(/restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee/.test(raw))return'food';
-      if(/grocery|supermarket|market/.test(raw))return'grocery';
-      if(/hotel|lodg|motel/.test(raw))return'lodging';
-      if(/view|attraction|museum|monument|landmark/.test(raw))return'attraction';
-      if(/water|drinking/.test(raw))return'water';
-      if(/trailhead/.test(raw))return'trailhead';
-      if(/trail|hiking/.test(raw))return'trail';
-      if(/\bpark\b/.test(raw))return'attraction';
+      if(/grocery|supermarket|shop|market/.test(raw))return'grocery';
+      if(/hotel|lodg|motel|hostel|inn|cabin/.test(raw))return'lodging';
+      if(/water|drinking|spring/.test(raw))return'water';
+      if(/historic|museum|monument|landmark|attraction|tourist|gallery|art|visitor/.test(raw))return'attraction';
+      if(/trail|hiking/.test(raw))return'trailhead';
+      if(/\bpark\b|national_park|protected_area/.test(raw))return'attraction';
       return'poi';
+    }
+    function renderedPlaceLabel(type){
+      if(type==='camp')return'Campground';
+      if(type==='trailhead')return'Trailhead';
+      if(type==='fuel')return'Fuel';
+      if(type==='food')return'Food';
+      if(type==='grocery')return'Grocery';
+      if(type==='lodging')return'Stay';
+      if(type==='water')return'Water';
+      if(type==='viewpoint')return'Viewpoint';
+      if(type==='peak')return'Peak';
+      if(type==='hot_spring')return'Hot Spring';
+      return'Place';
     }
     function renderedFeatureScore(f){
       var p=f&&f.properties||{};
       var lid=String((f&&f.layer&&f.layer.id)||(f&&f.sourceLayer)||(f&&f.source)||'').toLowerCase();
-      var raw=String((p.maki||p.poi_category||p.category||p.class||p.type||p.group||p.kind)||'').toLowerCase();
+      var raw=renderedFeatureText(p);
       var score=100;
       if(lid.indexOf('poi')>=0)score-=55;
       if(lid.indexOf('place')>=0)score-=28;
@@ -4214,8 +4234,9 @@ const buildMapHtml = (
       var cc=f&&f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates;
       var lng=Number(cc&&cc[0]);var lat=Number(cc&&cc[1]);
       if(!isFinite(lat)||!isFinite(lng)){lat=lngLat.lat;lng=lngLat.lng;}
-      var subtype=String(p.maki||p.poi_category||p.category||p.class||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim();
-      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:renderedPlaceType(p),subtype:subtype||'rendered place',source:'rendered_mapbox_standard',selection_source:'rendered_mapbox_standard',source_label:'Mapbox Standard',source_layer:lid,feature_id:p.mapbox_id||p.id,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,mapbox_id:p.mapbox_id||p.id,source_badge:'Mapbox basemap',enrichment_source:'mapbox_standard',enrichment_status:'pending',raw_feature:{id:f&&f.id,layer:f&&f.layer,source:f&&f.source,sourceLayer:f&&f.sourceLayer,properties:p,geometry:f&&f.geometry}};
+      var type=renderedPlaceType(p);
+      var subtype=String(p.maki||p.poi_category||p.category||p.class||p.feature_type||p.icon||p.symbol||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim()||renderedPlaceLabel(type);
+      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:type,subtype:subtype,source:'rendered_mapbox_standard',selection_source:'rendered_mapbox_standard',source_label:renderedPlaceLabel(type),source_layer:lid,feature_id:p.mapbox_id||p.id,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,mapbox_id:p.mapbox_id||p.id,source_badge:'Mapbox basemap',enrichment_source:'mapbox_standard',enrichment_status:'pending',raw_feature:{id:f&&f.id,layer:f&&f.layer,source:f&&f.source,sourceLayer:f&&f.sourceLayer,properties:p,geometry:f&&f.geometry}};
     }
     function pickRenderedPlaceFeature(features,lngLat){
       if(!features||!features.length)return null;
@@ -7257,7 +7278,7 @@ function MapScreen() {
       lng,
       tags,
       land_type: String(landType),
-      description: String(source.description || source.summary || place.summary || place.address || 'Overnight option from the selected map feature. Verify access, fees, stay limits, and booking rules.'),
+      description: String(source.description || source.summary || place.summary || place.address || 'Overnight option. Verify access, fees, stay limits, and booking rules.'),
       amenities: Array.isArray(source.amenities) ? source.amenities : undefined,
       site_types: Array.isArray(source.site_types) ? source.site_types : undefined,
       photos: Array.isArray(source.photos) ? source.photos : resolved.photo_candidates?.length ? resolved.photo_candidates : resolved.photos,
@@ -7269,8 +7290,8 @@ function MapScreen() {
       booking_url: String(source.booking_url || ''),
       ada: Boolean(source.ada),
       source: String(source.source || place.source || 'map'),
-      verified_source: String(source.verified_source || source.source_badge || source.source_label || place.source_label || 'Map source'),
-      source_badge: String(source.source_badge || source.verified_source || source.source_label || place.source_label || 'Map source'),
+      verified_source: String(source.verified_source || source.source_badge || source.source_label || place.source_label || landType || 'Campground'),
+      source_badge: String(source.source_badge || source.verified_source || source.source_label || place.source_label || landType || 'Campground'),
       source_freshness: source.source_freshness,
       last_checked: source.last_checked,
       link_label: source.link_label,
@@ -14882,43 +14903,7 @@ function MapScreen() {
         openTrailFromPoint(msg.name, msg.lat, msg.lng, msg.cls ?? 'path');
       }
       if (msg.type === 'base_camp_tapped') {
-        setTappedTrail(null);
-        const minId = `map_${msg.lat.toFixed(5)}_${msg.lng.toFixed(5)}`;
-        const minPin: CampsitePin = {
-          id: minId,
-          name: msg.name,
-          lat: msg.lat,
-          lng: msg.lng,
-          tags: [],
-          land_type: 'Dispersed',
-          description: '',
-          reservable: false,
-          cost: '',
-          url: '',
-          ada: false,
-        };
-        setSelectedCamp(minPin);
-        setCampDetail(null);
-        setCampInsight(null);
-        setWikiArticles([]);
-        setCampFullness(null);
-        setCampWeather(null);
-        api.getCampFullness(minId).then(r => setCampFullness(r)).catch(() => {});
-        api.getWeather(msg.lat, msg.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
-        // Silently upgrade to full camp data if our backend has it
-        api.getDiscoveryCamps(msg.lat, msg.lng, 2, [], {
-          limit: 30,
-          mode: 'full',
-          stays: true,
-          surface: 'map_tile_camp_match',
-          stale_after_hours: 12,
-        }).then(results => {
-          if (!results.length) return;
-          const match = strictBackendCampMatch(minPin, results);
-          if (!match) return;
-          // Only update if user hasn't closed/changed the card
-          setSelectedCamp(prev => prev?.id === minId ? match : prev);
-        }).catch(() => {});
+        openMapTileCamp(msg.name || 'Campground', String(msg.landType || 'camp_site'), msg.lat, msg.lng, msg.landType);
       }
       if (msg.type === 'map_long_press') {
         runLandCheck(msg.lat, msg.lng);
@@ -16407,77 +16392,38 @@ function MapScreen() {
         dispersed ? 'dispersed' : shelter ? 'shelter' : 'campground',
       ].filter(Boolean),
       land_type: landType || (dispersed ? 'Dispersed' : shelter ? 'Shelter' : 'Campground'),
-      description: 'Map-sourced camp feature. Verify current access, rules, road conditions, and stay limits before relying on it.',
+      description: 'Verify current access, rules, road conditions, and stay limits before relying on it.',
       reservable: false,
       cost: '',
       url: '',
       ada: false,
       source: 'map_tile',
-      verified_source: 'Map tile',
+      verified_source: 'Campground',
     };
-  }
-
-  function campTileNameToken(value: string) {
-    return value.toLowerCase().replace(/\b(campground|camp ground|camp|campsite|camp site|site|area|rv|park|dispersed|spot|shelter)\b/g, ' ').replace(/[^a-z0-9]/g, '');
-  }
-
-  function strictBackendCampMatch(tapped: Pick<CampsitePin, 'name' | 'lat' | 'lng'>, results: CampsitePin[]) {
-    const tappedToken = campTileNameToken(tapped.name || '');
-    const usable = results
-      .filter(camp => Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
-      .map(camp => ({
-        camp,
-        distanceKm: haversineKm(tapped.lat, tapped.lng, camp.lat, camp.lng),
-        token: campTileNameToken(camp.name || ''),
-      }))
-      .filter(item => Number.isFinite(item.distanceKm));
-    const named = usable
-      .filter(item => {
-        if (item.distanceKm > 0.5) return false;
-        if (tappedToken.length < 5 || item.token.length < 5) return false;
-        return item.token.includes(tappedToken.slice(0, 10)) || tappedToken.includes(item.token.slice(0, 10));
-      })
-      .sort((a, b) => a.distanceKm - b.distanceKm)[0];
-    if (named) return named.camp;
-    const coordinateExact = usable
-      .filter(item => item.distanceKm <= 0.08)
-      .sort((a, b) => a.distanceKm - b.distanceKm)[0];
-    return coordinateExact?.camp ?? null;
   }
 
   function openMapTileCamp(name: string, kind: string, lat: number, lng: number, landType?: string) {
     const pin = mapTileCampPin(name, kind, lat, lng, landType);
-    setTappedPoi(null);
-    setTappedGas(null);
-    setTappedTrail(null);
-    setTappedTileSpot(null);
-    setSelectedPlace(null);
-    setSelectedTrail(null);
-    setSelectedCommunityPin(null);
-    setSelectedCamp(pin);
-    setCampDetail(null);
-    setCampInsight(null);
-    setWikiArticles([]);
-    setCampFullness(null);
-    setCampWeather(null);
-    if (pin.id) api.getCampFullness(pin.id).then(r => setCampFullness(r)).catch(() => {});
-    api.getWeather(lat, lng, 3, weatherUnitMode).then(r => {
-      if (selectedCampRef.current?.id === pin.id) setCampWeather(r);
-    }).catch(() => {});
-
-    api.getDiscoveryCamps(lat, lng, 2, [], {
-      limit: 30,
-      mode: 'full',
-      stays: true,
-      surface: 'map_tile_camp_match',
-      stale_after_hours: 12,
-    }).then(results => {
-      if (!results.length) return;
-      const match = strictBackendCampMatch(pin, results);
-      if (!match) return;
-      setSelectedCamp(prev => prev?.id === pin.id ? match : prev);
-      if (match?.id) api.getCampFullness(match.id).then(r => setCampFullness(r)).catch(() => {});
-    }).catch(() => {});
+    const isTrailhead = String(kind || '').toLowerCase() === 'trailhead' || /trailhead/i.test(`${landType || ''} ${pin.name || ''}`);
+    openPoiFeature({
+      id: pin.id,
+      name: pin.name,
+      lat: pin.lat,
+      lng: pin.lng,
+      type: isTrailhead ? 'trailhead' : 'camp',
+      subtype: isTrailhead ? 'Trailhead' : pin.land_type || 'Campground',
+      source: 'map_tile',
+      source_label: isTrailhead ? 'Trailhead' : 'Campground',
+      source_badge: isTrailhead ? 'Trailhead' : 'Campground',
+      feature_id: pin.id,
+      provider_place_id: pin.id,
+      place_id: pin.id,
+      summary: isTrailhead ? 'Trail access point.' : 'Campground.',
+      raw_feature: {
+        source: 'map_tile',
+        properties: { kind, landType, name: pin.name },
+      },
+    } as unknown as OsmPoi);
   }
 
   function renderedMapboxPlaceKey(place: Pick<SearchPlace, 'id' | 'name' | 'lat' | 'lng' | 'place_id' | 'provider_place_id'>) {
@@ -16545,10 +16491,10 @@ function MapScreen() {
     const nextPlace = {
       ...place,
       source: place.source || 'map',
-      source_label: place.source_label || place.source_badge || 'Map source',
+      source_label: place.source_label || place.source_badge || cleanDisplayLabel(place.type || 'Place') || 'Place',
       summary: renderedMapbox
         ? place.summary || place.address
-        : place.summary || place.address || `${cleanDisplayLabel(place.type || 'place')} selected from the map.`,
+        : place.summary || place.address,
     } as SearchPlace;
     if (renderedMapbox) {
       recentRenderedMapboxSelectionRef.current = {
@@ -21468,10 +21414,10 @@ function MapScreen() {
       <PremiumPlaceSheet
         place={tappedPoi ? {
           ...tappedPoi,
-          source_label: tappedPoi.source_label || 'Map source',
+          source_label: tappedPoi.source_label || cleanDisplayLabel(tappedPoi.type || 'Place') || 'Place',
           summary: ['rendered_mapbox_standard', 'mapbox_feature', 'rendered_map'].includes(String(tappedPoi.source || '').toLowerCase())
             ? (tappedPoi as any).summary || tappedPoi.address
-            : (tappedPoi as any).summary || tappedPoi.address || `${cleanDisplayLabel(tappedPoi.type)} selected from the map.`,
+            : (tappedPoi as any).summary || tappedPoi.address,
         } as any : null}
         visible={!!tappedPoi && !navMode && !safeWaterPlanningActive}
         initialStage="full"

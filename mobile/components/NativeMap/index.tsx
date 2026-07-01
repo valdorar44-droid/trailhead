@@ -3513,36 +3513,86 @@ function kindLabel(kind: string): string {
   }
 }
 
+const MAPBOX_FALSE_CAMP_RE = /\b(campus|summer camp|boot camp|training camp|campbell)\b/i;
+
+function mapboxFeatureText(props: Record<string, any>): string {
+  return [
+    props?.maki,
+    props?.poi_category,
+    props?.category,
+    props?.class,
+    props?.feature_type,
+    props?.icon,
+    props?.symbol,
+    props?.type,
+    props?.group,
+    props?.kind,
+    props?.subclass,
+    props?.name,
+    props?.name_en,
+    props?.brand,
+    props?.full_address,
+    props?.place_name,
+    props?.label,
+  ].filter(value => value != null && value !== '').map(String).join(' ').toLowerCase();
+}
+
 function mapboxPlaceType(props: Record<string, any>): OsmPoi['type'] {
-  const raw = String(
-    props?.maki
-    || props?.poi_category
-    || props?.category
-    || props?.class
-    || props?.feature_type
-    || props?.icon
-    || props?.symbol
-    || props?.type
-    || props?.group
-    || props?.kind
-    || ''
-  ).toLowerCase();
-  if (/(camp|caravan|rv)/.test(raw)) return 'camp';
+  const raw = mapboxFeatureText(props);
+  if (!MAPBOX_FALSE_CAMP_RE.test(raw) && /(camp\s*ground|campground|camp\s*site|campsite|camping|caravan|rv\s*(park|resort|camp)?)/.test(raw)) return 'camp';
+  if (/(trailhead|trail\s*head)/.test(raw)) return 'trailhead';
+  if (/(hot\s*spring|thermal|public_bath|bath)/.test(raw)) return 'hot_spring';
+  if (/(viewpoint|view_point|overlook|vista|lookout)/.test(raw)) return 'viewpoint';
+  if (/(peak|summit|mountain)/.test(raw)) return 'peak';
   if (/(fuel|gas|charging)/.test(raw)) return 'fuel';
   if (/(restaurant|cafe|bar|pub|bakery|food|pizza|burger|sandwich|coffee)/.test(raw)) return 'food';
   if (/(grocery|supermarket|shop|market)/.test(raw)) return 'grocery';
-  if (/(hotel|lodg|motel)/.test(raw)) return 'lodging';
-  if (/(view|attraction|museum|monument|landmark)/.test(raw)) return 'attraction';
-  if (/(water|drinking)/.test(raw)) return 'water';
-  if (/(trailhead|trail|hiking)/.test(raw)) return 'trailhead';
-  if (/\bpark\b/.test(raw)) return 'attraction';
+  if (/(hotel|lodg|motel|hostel|inn|cabin)/.test(raw)) return 'lodging';
+  if (/(water|drinking|spring)/.test(raw)) return 'water';
+  if (/(historic|museum|monument|landmark|attraction|tourist|gallery|art|visitor)/.test(raw)) return 'attraction';
+  if (/(trail|hiking)/.test(raw)) return 'trailhead';
+  if (/\bpark\b|national_park|protected_area/.test(raw)) return 'attraction';
   return 'poi';
+}
+
+function mapboxPlaceSourceLabel(type: OsmPoi['type']): string {
+  switch (type) {
+    case 'camp': return 'Campground';
+    case 'trailhead': return 'Trailhead';
+    case 'fuel': return 'Fuel';
+    case 'food': return 'Food';
+    case 'grocery': return 'Grocery';
+    case 'lodging': return 'Stay';
+    case 'water': return 'Water';
+    case 'viewpoint': return 'Viewpoint';
+    case 'peak': return 'Peak';
+    case 'hot_spring': return 'Hot Spring';
+    case 'attraction': return 'Place';
+    default: return 'Place';
+  }
+}
+
+function mapboxSubtype(props: Record<string, any>, fallback: string): string {
+  const value = String(
+    props.maki
+    || props.poi_category
+    || props.category
+    || props.class
+    || props.feature_type
+    || props.icon
+    || props.symbol
+    || props.type
+    || props.group
+    || props.kind
+    || ''
+  ).replace(/[_-]+/g, ' ').trim();
+  return value || fallback;
 }
 
 function mapboxFeaturePickScore(feature: any): number {
   const props = feature?.properties ?? {};
   const layerId = String(feature?.layer?.id || feature?.sourceLayer || feature?.source || '').toLowerCase();
-  const raw = String(props.maki || props.poi_category || props.category || props.class || props.feature_type || props.icon || props.symbol || props.type || props.group || props.kind || '').toLowerCase();
+  const raw = mapboxFeatureText(props);
   const name = String(props.name || props.name_en || props.name_script || props.name_local || props.brand || props.full_address || '').trim();
   const hasPoiSignal = !!String(props.maki || props.poi_category || props.category || props.feature_type || props.icon || props.symbol || props.type || '').trim();
   let score = 100;
@@ -3590,7 +3640,7 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
   const lat = Number(coords[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const type = mapboxPlaceType(props);
-  const subtype = String(props.maki || props.poi_category || props.category || props.class || props.feature_type || props.icon || props.symbol || props.type || props.group || props.kind || '').replace(/[_-]+/g, ' ').trim();
+  const subtype = mapboxSubtype(props, mapboxPlaceSourceLabel(type));
   return {
     id: `mapbox_feature:${String(props.mapbox_id || props.id || `${lat.toFixed(5)}:${lng.toFixed(5)}:${name}`).slice(0, 160)}`,
     name,
@@ -3600,7 +3650,7 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
     subtype: subtype || 'mapbox place',
     source: 'rendered_mapbox_standard',
     selection_source: 'rendered_mapbox_standard',
-    source_label: 'Mapbox Standard',
+    source_label: mapboxPlaceSourceLabel(type),
     source_layer: layerId,
     feature_id: props.mapbox_id || props.id || feature?.id,
     provider_place_id: props.mapbox_id || props.id,
@@ -3817,7 +3867,7 @@ function mapboxStandardFeatureEventToPoi(event: any): OsmPoi | null {
     feature_type: event?.featureset,
   });
   const providerId = String(event?.mapbox_id || event?.feature_id || '').trim();
-  const subtype = String(event?.maki || event?.category || event?.class || event?.group || event?.featureset || '').replace(/[_-]+/g, ' ').trim();
+  const subtype = mapboxSubtype({ ...raw, maki: event?.maki, category: event?.category, class: event?.class, group: event?.group, feature_type: event?.featureset }, mapboxPlaceSourceLabel(type));
   return {
     id: `mapbox_standard:${String(providerId || `${lat.toFixed(5)}:${lng.toFixed(5)}:${name}`).slice(0, 160)}`,
     name,
@@ -3827,7 +3877,7 @@ function mapboxStandardFeatureEventToPoi(event: any): OsmPoi | null {
     subtype: subtype || 'mapbox standard feature',
     source: 'rendered_mapbox_standard',
     selection_source: 'rendered_mapbox_standard',
-    source_label: 'Mapbox Standard',
+    source_label: mapboxPlaceSourceLabel(type),
     source_layer: event?.featureset || null,
     feature_id: providerId || null,
     provider_place_id: providerId || null,

@@ -64,6 +64,7 @@ export function cleanExploreSourceLabel(label?: string | null, fallback = 'Explo
   if (/trailhead\s+explore/i.test(clean)) return fallback;
   if (/wikidata|wikipedia|wikimedia|multiple sources/i.test(clean)) return fallback;
   if (/offline\s+place\s+pack|downloaded\s+place\s+packs/i.test(clean)) return 'Downloaded Places';
+  if (/mapbox|rendered\s+map|map\s+feature|map\s+source|map\s+search|map\s+data|map\s+tile|basemap/i.test(clean)) return fallback;
   return clean;
 }
 

@@ -22,8 +22,8 @@ class ViatorConfig:
     base_url: str = DEFAULT_BASE_URL
     enable_live: bool = False
     cache_ttl_hours: int = 1
-    request_timeout_seconds: float = 8.0
-    page_size: int = 12
+    request_timeout_seconds: float = 120.0
+    page_size: int = 24
 
 
 def config_from_env(env: dict[str, str] | None = None) -> ViatorConfig:
@@ -35,8 +35,8 @@ def config_from_env(env: dict[str, str] | None = None) -> ViatorConfig:
         base_url=values.get("VIATOR_API_BASE_URL", DEFAULT_BASE_URL).rstrip("/"),
         enable_live=str(values.get("VIATOR_ENABLE_LIVE", "false")).lower() in {"1", "true", "yes", "on"},
         cache_ttl_hours=max(1, min(int(values.get("VIATOR_CACHE_TTL_HOURS", "1") or 1), 1)),
-        request_timeout_seconds=max(2.0, min(float(values.get("VIATOR_TIMEOUT_SECONDS", "8") or 8), 20.0)),
-        page_size=max(1, min(int(values.get("VIATOR_PAGE_SIZE", "12") or 12), 12)),
+        request_timeout_seconds=max(2.0, min(float(values.get("VIATOR_TIMEOUT_SECONDS", "120") or 120), 120.0)),
+        page_size=max(1, min(int(values.get("VIATOR_PAGE_SIZE", "24") or 24), 50)),
     )
 
 
@@ -85,7 +85,7 @@ class ViatorClient:
         payload = {
             "filtering": filtering,
             "sorting": {"sort": sort, "order": order},
-            "pagination": {"start": max(1, int(start or 1)), "count": max(1, min(int(count), 12))},
+            "pagination": {"start": max(1, int(start or 1)), "count": max(1, min(int(count), 50))},
             "currency": currency,
         }
         return self._post_json("/products/search", payload, timeout=timeout or self.config.request_timeout_seconds)
@@ -111,7 +111,7 @@ class ViatorClient:
             "searchTypes": [
                 {
                     "searchType": search_type,
-                    "pagination": {"start": max(1, int(start or 1)), "count": max(1, min(int(count), 12))},
+                    "pagination": {"start": max(1, int(start or 1)), "count": max(1, min(int(count), 50))},
                 }
             ],
         }

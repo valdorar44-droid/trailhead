@@ -20162,7 +20162,7 @@ def _queue_viator_route_refresh(cache_key: str, client: ViatorClient, points: li
 async def _refresh_viator_route_cache(cache_key: str, config, points: list[dict], *, limit: int, q: str = "", filters: dict | None = None) -> None:
     now = int(time.time())
     _viator_route_live_jobs[cache_key] = {"status": "running", "started_at": now}
-    timeout = max(6.0, min(float(getattr(config, "request_timeout_seconds", 8.0)) * 4, 24.0))
+    timeout = max(6.0, min(float(getattr(config, "request_timeout_seconds", 120.0)) + 5.0, 125.0))
     try:
         def run_live() -> tuple[list[dict], list[dict]]:
             client = ViatorClient(config)
@@ -20266,7 +20266,7 @@ def _live_viator_route_suggestions(
     statuses: list[dict] = []
     ranked_by_key: dict[str, dict] = {}
     searched_destinations: set[str] = set()
-    page_count = max(1, min(int(getattr(config, "page_size", 6) or 6), 12))
+    page_count = max(1, min(int(getattr(config, "page_size", 24) or 24), 50))
     target_limit = max(1, min(int(limit or 8), 24))
     for point in points[:8]:
         destination = _viator_destination_for_point(point)

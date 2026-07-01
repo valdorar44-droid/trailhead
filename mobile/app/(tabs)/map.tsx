@@ -3365,6 +3365,58 @@ function dispersedLeadToPin(lead: DispersedLead): Pin {
   };
 }
 
+function privateLeadKeyFromCamp(camp?: Partial<CampsitePin> | null, detail?: Partial<CampsiteDetail> | null): string {
+  const direct = String(
+    (detail as any)?.private_lead_key
+    || (camp as any)?.private_lead_key
+    || (camp as any)?.lead_key
+    || '',
+  ).trim();
+  if (direct) return direct;
+  const id = String(detail?.id || camp?.id || '');
+  return id.startsWith('dispersed_lead:') ? id.slice('dispersed_lead:'.length) : '';
+}
+
+function privateReviewCampToPin(camp?: Partial<CampsitePin> | null, detail?: Partial<CampsiteDetail> | null): Pin | null {
+  if (!camp || camp.lat == null || camp.lng == null || !Number.isFinite(camp.lat) || !Number.isFinite(camp.lng)) return null;
+  const leadKey = privateLeadKeyFromCamp(camp, detail);
+  if (!leadKey) return null;
+  const profile = {
+    name: detail?.name || camp.name || 'Dispersed tent site',
+    description: detail?.description || camp.description || '',
+    cost: detail?.cost || camp.cost || '',
+    phone: detail?.phone || camp.phone || '',
+    url: detail?.url || camp.url || '',
+    access_notes: (detail as any)?.access_notes || (camp as any)?.access_notes || '',
+    bail_out_notes: (detail as any)?.bail_out_notes || (camp as any)?.bail_out_notes || '',
+    stay_limit: (detail as any)?.stay_limit || (camp as any)?.stay_limit || '',
+    reservation_notes: (detail as any)?.reservation_notes || (camp as any)?.reservation_notes || '',
+    source_confidence_notes: (detail as any)?.source_confidence_notes || (camp as any)?.source_confidence_notes || '',
+    max_rig_length: (detail as any)?.max_rig_length || (camp as any)?.max_rig_length || '',
+    amenities: Array.isArray(detail?.amenities) ? detail?.amenities : camp.amenities ?? [],
+    site_types: Array.isArray(detail?.site_types) ? detail?.site_types : camp.site_types ?? ['Tent'],
+    activities: Array.isArray((detail as any)?.activities) ? (detail as any).activities : [],
+  };
+  return {
+    id: privateLeadPinId(leadKey),
+    lat: Number(camp.lat),
+    lng: Number(camp.lng),
+    name: String(profile.name || 'Dispersed tent site'),
+    type: 'wild_camp',
+    land_type: 'Dispersed',
+    description: String(profile.description || 'Check access, rules, and current condition.'),
+    details: {
+      private_lead: '1',
+      lead_key: leadKey,
+      status: dispersedLeadStatusLabel((camp as any).review_status || (detail as any)?.review_status),
+      checked: String(camp.last_checked || detail?.last_checked || 'Needs recent check'),
+      distance: camp.route_distance_mi != null ? `${Number(camp.route_distance_mi).toFixed(1)} mi` : '',
+      canonical_camp_id: '',
+      profile_json: JSON.stringify(profile),
+    },
+  };
+}
+
 function pinDetailRows(pin: Pin): { label: string; value: string }[] {
   const type = normalizedCommunityPinType(pin) as CommunityPinTypeId;
   const details = normalizedPinDetails(pin.details);
@@ -8282,6 +8334,67 @@ function MapScreen() {
       setQuickToast('Could not save photo');
       setTimeout(() => setQuickToast(''), 2500);
     }
+  }
+
+  function selectedPrivateReviewPin(): Pin | null {
+    return privateReviewCampToPin(selectedCamp, campDetail);
+  }
+
+  function openSelectedPrivateReviewEdit() {
+    const pin = selectedPrivateReviewPin();
+    if (!pin) return;
+    openDispersedLeadEdit(pin);
+  }
+
+  async function reviewSelectedPrivateReviewCamp(status: DispersedLead['status'], note?: string) {
+    const pin = selectedPrivateReviewPin();
+    if (!pin) return;
+    const leadKey = normalizedPinDetails(pin.details).lead_key;
+    if (!leadKey) return;
+    try {
+      const res = await api.reviewDispersedLead(leadKey, status, note);
+      const next = dispersedLeadToPin(res.lead);
+      setDispersedLeadPins(prev => prev.map(item => normalizedPinDetails(item.details).lead_key === leadKey ? next : item));
+      if (status === 'rejected') {
+        setDispersedLeadPins(prev => prev.filter(item => normalizedPinDetails(item.details).lead_key !== leadKey));
+        setSelectedCamp(null);
+        setCampDetail(null);
+        setQuickToast('Marked not found');
+      } else {
+        setSelectedCamp(prev => prev ? { ...prev, review_status: res.lead.status } : prev);
+        setCampDetail(prev => prev ? { ...prev, review_status: res.lead.status } as CampsiteDetail : prev);
+        setQuickToast('Checked');
+      }
+      setTimeout(() => setQuickToast(''), 2500);
+    } catch (e: any) {
+      setQuickToast(e?.status === 403 ? 'Admin review required' : 'Could not update');
+      setTimeout(() => setQuickToast(''), 2500);
+    }
+  }
+
+  async function publishSelectedPrivateReviewCamp() {
+    const pin = selectedPrivateReviewPin();
+    if (!pin || !user?.is_admin) return;
+    const leadKey = normalizedPinDetails(pin.details).lead_key;
+    if (!leadKey) return;
+    try {
+      await api.publishDispersedLead(leadKey);
+      setDispersedLeadPins(prev => prev.filter(item => normalizedPinDetails(item.details).lead_key !== leadKey));
+      setSelectedCamp(null);
+      setCampDetail(null);
+      setQuickToast('Dispersed camp published');
+      const bounds = viewportRef.current;
+      if (bounds) setTimeout(() => loadCampsInArea(bounds, activeFilters), 150);
+      setTimeout(() => setQuickToast(''), 2500);
+    } catch (e: any) {
+      setQuickToast(e?.status === 403 ? 'Admin only' : 'Could not publish');
+      setTimeout(() => setQuickToast(''), 2500);
+    }
+  }
+
+  function addSelectedPrivateReviewPhoto() {
+    const pin = selectedPrivateReviewPin();
+    if (pin) addDispersedLeadPhoto(pin);
   }
 
   async function submitCommunityUpdate() {
@@ -15175,6 +15288,9 @@ function MapScreen() {
       return;
     }
     setCampDetail(detail);
+    if (privateLeadKeyFromCamp(camp, detail)) {
+      return;
+    }
     if (opts.loadInsight) openCampInsight(camp, detail).catch(() => {});
     if (selectedCampRef.current?.id !== camp.id) {
       return;
@@ -15342,6 +15458,13 @@ function MapScreen() {
       source_freshness: camp.source_freshness,
       source_confidence_notes: camp.source_freshness,
       last_checked: camp.last_checked,
+      private_lead_key: camp.private_lead_key || camp.lead_key || (camp.id?.startsWith('dispersed_lead:') ? camp.id.slice('dispersed_lead:'.length) : ''),
+      review_status: camp.review_status,
+      access_notes: (camp as any).access_notes,
+      bail_out_notes: (camp as any).bail_out_notes,
+      stay_limit: (camp as any).stay_limit,
+      reservation_notes: (camp as any).reservation_notes,
+      max_rig_length: (camp as any).max_rig_length,
     } as CampsiteDetail;
   }
 
@@ -15408,6 +15531,15 @@ function MapScreen() {
         const next = dispersedLeadToPin(res.lead);
         setDispersedLeadPins(prev => prev.map(item => normalizedPinDetails(item.details).lead_key === privateLeadKey ? next : item));
         setSelectedCommunityPin(prev => prev && normalizedPinDetails(prev.details).lead_key === privateLeadKey ? next : prev);
+        setSelectedCamp(prev => prev && privateLeadKeyFromCamp(prev, campDetail) === privateLeadKey ? {
+          ...prev,
+          ...payload,
+          name: payload.name || prev.name,
+          description: payload.description || prev.description,
+          amenities: payload.amenities,
+          site_types: payload.site_types,
+          private_lead_key: privateLeadKey,
+        } as CampsitePin : prev);
         setCampDetail(prev => prev ? { ...prev, ...payload, name: payload.name || prev.name } as CampsiteDetail : prev);
         setQuickToast('Details saved');
         setShowCampEdit(false);
@@ -21807,7 +21939,7 @@ function MapScreen() {
               </View>
             ) : null; })()}
             {/* Camp Fullness */}
-            {campFullness && campFullness.status === 'full' ? (
+            {!privateLeadKeyFromCamp(selectedCamp, campDetail) && campFullness && campFullness.status === 'full' ? (
               <View style={s.fullnessBanner}>
                 <View style={s.fullnessBannerTop}>
                   <Ionicons name="warning" size={13} color="#dc2626" />
@@ -21835,12 +21967,12 @@ function MapScreen() {
                   </TouchableOpacity>
                 </View>
               </View>
-            ) : (
+            ) : !privateLeadKeyFromCamp(selectedCamp, campDetail) ? (
               <TouchableOpacity style={s.reportFullBtn} onPress={handleReportFull} disabled={fullnessVoting}>
                 <Ionicons name="warning-outline" size={12} color="#f59e0b" />
                 <Text style={s.reportFullText}>REPORT CAMP FULL</Text>
               </TouchableOpacity>
-            )}
+            ) : null}
             {activeTrip && (
               <TouchableOpacity
                 style={s.quickCardTripBtn}
@@ -22115,6 +22247,36 @@ function MapScreen() {
               </>
               );
             })() : null}
+            {privateLeadKeyFromCamp(selectedCamp, campDetail) ? (
+              <View style={s.communityActionsGrid}>
+                <TouchableOpacity style={s.communityPrimaryAction} onPress={() => navigateToCamp(selectedCamp)}>
+                  <Ionicons name="navigate" size={14} color="#fff" />
+                  <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>NAVIGATE</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.communityActionBtn} onPress={openSelectedPrivateReviewEdit}>
+                  <Ionicons name="create-outline" size={14} color={OVR.text2} />
+                  <Text style={s.communityActionText} numberOfLines={1}>EDIT</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.communityActionBtn} onPress={addSelectedPrivateReviewPhoto}>
+                  <Ionicons name="camera-outline" size={14} color={OVR.text2} />
+                  <Text style={s.communityActionText} numberOfLines={1}>PHOTO</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.communityActionBtn} onPress={() => reviewSelectedPrivateReviewCamp('community_verified')}>
+                  <Ionicons name="checkmark-circle-outline" size={14} color={OVR.text2} />
+                  <Text style={s.communityActionText} numberOfLines={1}>CHECKED</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewSelectedPrivateReviewCamp('rejected', 'Not found during field check')}>
+                  <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
+                  <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>NOT FOUND</Text>
+                </TouchableOpacity>
+                {user?.is_admin && (
+                  <TouchableOpacity style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={publishSelectedPrivateReviewCamp}>
+                    <Ionicons name="shield-checkmark-outline" size={14} color={C.orange} />
+                    <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>PUBLISH</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            ) : null}
             <View style={s.quickCardSecondaryActions}>
               <TouchableOpacity
                 style={s.quickCardSecondaryBtn}
@@ -22128,15 +22290,17 @@ function MapScreen() {
                 <Ionicons name="bonfire-outline" size={12} color={C.text2} />
                 <Text style={s.quickCardSecondaryText}>NEARBY CAMPS</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={handleReportFull}>
-                <Ionicons name="warning-outline" size={12} color={C.text2} />
-                <Text style={s.quickCardSecondaryText}>REPORT</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => openCampEdit('suggest')}>
+              {!privateLeadKeyFromCamp(selectedCamp, campDetail) && (
+                <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={handleReportFull}>
+                  <Ionicons name="warning-outline" size={12} color={C.text2} />
+                  <Text style={s.quickCardSecondaryText}>REPORT</Text>
+                </TouchableOpacity>
+              )}
+              <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => privateLeadKeyFromCamp(selectedCamp, campDetail) ? openSelectedPrivateReviewEdit() : openCampEdit('suggest')}>
                 <Ionicons name="create-outline" size={12} color={C.text2} />
                 <Text style={s.quickCardSecondaryText}>EDIT</Text>
               </TouchableOpacity>
-              {!!campSourceUrl(campDetail || selectedCamp) && (
+              {!privateLeadKeyFromCamp(selectedCamp, campDetail) && !!campSourceUrl(campDetail || selectedCamp) && (
                 <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => Linking.openURL(campSourceUrl(campDetail || selectedCamp))}>
                   <Ionicons name="open-outline" size={12} color={C.text2} />
                   <Text style={s.quickCardSecondaryText}>OFFICIAL SOURCE</Text>

@@ -309,6 +309,70 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
             finally:
                 settings.db_path = old_path
 
+    def test_private_review_leads_surface_as_camps_only_for_map_contributors(self):
+        old_path = settings.db_path
+        with tempfile.TemporaryDirectory() as td:
+            try:
+                settings.db_path = str(Path(td) / "trailhead-test.db")
+                store.init_db()
+                db = sqlite3.connect(settings.db_path)
+                try:
+                    db.execute(
+                        """INSERT INTO users (id,email,username,password_hash,credits,email_verified,created_at)
+                           VALUES (?,?,?,?,?,?,?)""",
+                        (7, "mapper@example.com", "mapper", "x", 0, 1, 1),
+                    )
+                    db.commit()
+                finally:
+                    db.close()
+                app = store.submit_map_contributor_application(
+                    7,
+                    "mapper",
+                    "I verify camps with land manager sources and field checks.",
+                    "Moab",
+                    "I would check signs and access before saving details.",
+                )
+                self.assertTrue(store.update_map_contributor_application_status(app["id"], "approved"))
+                store.upsert_dispersed_site_leads([
+                    {
+                        "lead_key": "dsl_hidden_review_camp",
+                        "source": "ioverlander_private_lead",
+                        "source_batch": "review_batch",
+                        "source_record_hash": "e" * 64,
+                        "lat": 38.5001,
+                        "lng": -109.5001,
+                        "rounded_lat": 38.5001,
+                        "rounded_lng": -109.5001,
+                        "category": "wild_camp",
+                        "status": "lead",
+                        "confidence": 25,
+                        "source_verified_at": "2026-06-01",
+                        "review_flags": ["source_content_stripped"],
+                        "provenance": {"source_kind": "private_lead", "raw_fields_stripped": True},
+                    }
+                ], "review_batch")
+
+                from dashboard import server as api_server
+
+                public_camps = api_server._private_review_dispersed_camps(38.5, -109.5, 5, None)
+                self.assertEqual(public_camps, [])
+
+                contributor_camps = api_server._private_review_dispersed_camps(
+                    38.5,
+                    -109.5,
+                    5,
+                    {"id": 7, "is_admin": 0},
+                )
+                self.assertEqual(len(contributor_camps), 1)
+                camp = contributor_camps[0]
+                self.assertEqual(camp["id"], "dispersed_lead:dsl_hidden_review_camp")
+                self.assertEqual(camp["private_lead_key"], "dsl_hidden_review_camp")
+                self.assertEqual(camp["land_type"], "Dispersed")
+                self.assertEqual(camp["source"], "trailhead")
+                self.assertNotIn("ioverlander", repr(camp).lower())
+            finally:
+                settings.db_path = old_path
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2195,7 +2195,7 @@ export interface CampsitePin {
   visitor_centers?: NearbySmartPlace[];
   campgrounds_nearby?: NearbySmartPlace[];
   trip_services?: NearbySmartPlace[];
-  official_url?: string; booking_url?: string; source_badge?: string; source_freshness?: string; last_checked?: number;
+  official_url?: string; booking_url?: string; source_badge?: string; source_freshness?: string; last_checked?: number | string;
   link_label?: 'Reserve' | 'Official page' | 'Search official site' | string;
   route_distance_mi?: number; route_fit?: string; recommended_day?: number;
   route_progress?: number; route_progress_mi?: number; route_segment_index?: number;
@@ -2204,6 +2204,9 @@ export interface CampsitePin {
   rating?: number; rating_count?: number; phone?: string; address?: string;
   provider_place_id?: string; place_id?: string;
   provider_notices?: Array<{ label?: string; text?: string }>;
+  private_lead_key?: string;
+  lead_key?: string;
+  review_status?: string;
 }
 
 function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): string {

@@ -19391,6 +19391,171 @@ def _filter_experiences_by_query(experiences: list[dict], q: str = "") -> list[d
     return [item for item in experiences if all(term in _experience_query_text(item) for term in query_terms)]
 
 
+def _experience_bool(value) -> bool:
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _experience_price_value(item: dict) -> float | None:
+    value = item.get("price_from")
+    if value in {None, ""}:
+        return None
+    try:
+        return float(str(value).replace("$", "").replace(",", "").strip())
+    except Exception:
+        return None
+
+
+def _experience_duration_minutes(item: dict) -> int | None:
+    label = str(item.get("duration_label") or "").lower()
+    if not label:
+        return None
+    matches = re.findall(r"(\d+(?:\.\d+)?)\s*(day|days|hour|hours|hr|hrs|minute|minutes|min|mins)", label)
+    if not matches:
+        return None
+    total = 0.0
+    for amount, unit in matches:
+        value = float(amount)
+        if unit.startswith("day"):
+            total += value * 1440
+        elif unit.startswith(("hour", "hr")):
+            total += value * 60
+        else:
+            total += value
+    return int(total) if total > 0 else None
+
+
+def _experience_filter_text(item: dict) -> str:
+    values = [
+        item.get("category"),
+        item.get("title"),
+        item.get("summary"),
+        item.get("description"),
+        item.get("cancellation_summary"),
+        item.get("availability_summary"),
+        " ".join(item.get("subcategories") or []),
+        " ".join(item.get("highlights") or []),
+    ]
+    raw = item.get("raw") if isinstance(item.get("raw"), dict) else {}
+    values.extend([
+        " ".join(str(flag or "") for flag in raw.get("flags") or []),
+        " ".join(str(tag or "") for tag in raw.get("tags") or []),
+    ])
+    return " ".join(str(v or "") for v in values).lower()
+
+
+def _experience_matches_category(item: dict, category: str = "") -> bool:
+    key = re.sub(r"[^a-z0-9]+", "_", str(category or "").strip().lower()).strip("_")
+    if not key or key in {"all", "any"}:
+        return True
+    text = _experience_filter_text(item)
+    if key == "outdoor":
+        return bool(re.search(r"\b(hik|trail|park|canyon|desert|jeep|4x4|off.?road|climb|outdoor|backcountry)\b", text))
+    if key == "water":
+        return bool(re.search(r"\b(raft|river|lake|boat|kayak|paddle|water|snorkel|sail)\b", text))
+    if key == "private":
+        return "private" in text
+    if key == "short":
+        minutes = _experience_duration_minutes(item)
+        if minutes is not None:
+            return minutes <= 240
+        return bool(re.search(r"\b(short|half.?day|2 hour|3 hour|4 hour)\b", text))
+    if key == "family":
+        return bool(re.search(r"\b(family|easy|sightseeing|scenic|van|minivan|boat|wildlife)\b", text))
+    return key.replace("_", " ") in text or key in text
+
+
+def _filter_experiences_for_destination_page(
+    experiences: list[dict],
+    *,
+    category: str = "",
+    free_cancel: bool = False,
+    lowest_price: float | None = None,
+    highest_price: float | None = None,
+) -> list[dict]:
+    out: list[dict] = []
+    for item in experiences or []:
+        if not _experience_matches_category(item, category):
+            continue
+        text = _experience_filter_text(item)
+        if free_cancel and "free_cancellation" not in text and "free cancellation" not in text:
+            continue
+        price = _experience_price_value(item)
+        if lowest_price is not None and price is not None and price < float(lowest_price):
+            continue
+        if highest_price is not None and price is not None and price > float(highest_price):
+            continue
+        out.append(item)
+    return out
+
+
+def _sort_experiences(results: list[dict], sort: str = "recommended", order: str = "descending") -> list[dict]:
+    key = re.sub(r"[^a-z0-9]+", "_", str(sort or "recommended").strip().lower()).strip("_")
+    desc = str(order or "descending").strip().lower() not in {"asc", "ascending"}
+    if key in {"price", "price_low", "price_low_to_high"}:
+        return sorted(results, key=lambda item: (_experience_price_value(item) is None, _experience_price_value(item) or 999999))
+    if key in {"price_high", "price_high_to_low"}:
+        return sorted(results, key=lambda item: _experience_price_value(item) or -1, reverse=True)
+    if key in {"rating", "traveler_rating", "top_rated"}:
+        return sorted(results, key=lambda item: (float(item.get("rating") or 0), int(item.get("review_count") or 0)), reverse=True)
+    if key in {"duration", "shortest"}:
+        return sorted(results, key=lambda item: (_experience_duration_minutes(item) is None, _experience_duration_minutes(item) or 999999))
+    if key in {"title", "name"}:
+        return sorted(results, key=lambda item: str(item.get("title") or ""), reverse=desc)
+    return results
+
+
+def _clean_experience_date(value: str = "") -> str:
+    text = str(value or "").strip()
+    return text if re.match(r"^\d{4}-\d{2}-\d{2}$", text) else ""
+
+
+def _clean_experience_price(value) -> float | None:
+    if value in {None, ""}:
+        return None
+    try:
+        parsed = float(value)
+    except Exception:
+        return None
+    return max(0.0, min(parsed, 50000.0))
+
+
+def _viator_sort_params(sort: str = "recommended", order: str = "descending") -> tuple[str, str]:
+    key = re.sub(r"[^a-z0-9]+", "_", str(sort or "recommended").strip().lower()).strip("_")
+    requested_order = str(order or "descending").strip().lower()
+    viator_order = "ASCENDING" if requested_order in {"asc", "ascending"} else "DESCENDING"
+    if key in {"price", "price_low", "price_low_to_high"}:
+        return "PRICE", "ASCENDING"
+    if key in {"price_high", "price_high_to_low"}:
+        return "PRICE", "DESCENDING"
+    if key in {"rating", "traveler_rating", "top_rated"}:
+        return "TRAVELER_RATING", "DESCENDING"
+    return "TRAVELER_RATING", viator_order
+
+
+def _experience_filter_cache_token(
+    *,
+    category: str = "",
+    free_cancel: bool = False,
+    start_date: str = "",
+    end_date: str = "",
+    lowest_price: float | None = None,
+    highest_price: float | None = None,
+    sort: str = "recommended",
+    order: str = "descending",
+) -> str:
+    parts = [
+        re.sub(r"[^a-z0-9]+", "_", str(category or "all").lower()).strip("_") or "all",
+        "free" if free_cancel else "any",
+        _clean_experience_date(start_date) or "any",
+        _clean_experience_date(end_date) or "any",
+        str(int(lowest_price)) if lowest_price is not None else "min",
+        str(int(highest_price)) if highest_price is not None else "max",
+        re.sub(r"[^a-z0-9]+", "_", str(sort or "recommended").lower()).strip("_") or "recommended",
+        "asc" if str(order or "").lower().startswith("asc") else "desc",
+    ]
+    return ":".join(parts)[:180]
+
+
 def _experience_response(source: str, results: list[dict], place_id: str = "", cache_status: str = "fresh", **extra) -> dict:
     payload = {
         "source": source or "viator",
@@ -19405,7 +19570,18 @@ def _experience_response(source: str, results: list[dict], place_id: str = "", c
 
 
 @app.get("/api/explore/places/{place_id}/experiences")
-async def explore_place_experiences(place_id: str, source: str = "viator", limit: int = 12, radius: float | None = None):
+async def explore_place_experiences(
+    place_id: str,
+    source: str = "viator",
+    limit: int = 12,
+    radius: float | None = None,
+    category: str = "",
+    free_cancel: bool = False,
+    lowest_price: float | None = None,
+    highest_price: float | None = None,
+    sort: str = "recommended",
+    order: str = "descending",
+):
     place = _find_explore_place(place_id)
     if not place:
         raise HTTPException(404, "Explore place not found")
@@ -19418,32 +19594,86 @@ async def explore_place_experiences(place_id: str, source: str = "viator", limit
         item for item in payload.get("experiences") or []
         if source in {"", "all"} or str(item.get("source") or "").lower() == source.lower()
     ]
+    experiences = _filter_experiences_for_destination_page(
+        experiences,
+        category=category,
+        free_cancel=free_cancel,
+        lowest_price=_clean_experience_price(lowest_price),
+        highest_price=_clean_experience_price(highest_price),
+    )
     nearby = _experience_distance_filter(experiences, float(lat) if isinstance(lat, (int, float)) else None, float(lng) if isinstance(lng, (int, float)) else None, radius_mi)
-    ranked = rank_experiences(nearby, place)[:max(1, min(int(limit or 12), 24))]
+    ranked = rank_experiences(nearby, place)
+    ranked = _sort_experiences(ranked, sort, order)[:max(1, min(int(limit or 12), 24))]
     return _experience_response(source, ranked, place_id=place_id, cache_status="fresh" if payload.get("generated_at") else "empty")
 
 
 @app.get("/api/explore/experiences")
-async def explore_experiences(lat: float | None = None, lng: float | None = None, radius: float = 30, source: str = "viator", limit: int = 20, q: str = ""):
+async def explore_experiences(
+    lat: float | None = None,
+    lng: float | None = None,
+    radius: float = 30,
+    source: str = "viator",
+    limit: int = 20,
+    q: str = "",
+    category: str = "",
+    free_cancel: bool = False,
+    start_date: str = "",
+    end_date: str = "",
+    lowest_price: float | None = None,
+    highest_price: float | None = None,
+    sort: str = "recommended",
+    order: str = "descending",
+):
     payload = _load_explore_experiences()
     result_limit = max(1, min(int(limit or 20), 50))
+    min_price = _clean_experience_price(lowest_price)
+    max_price = _clean_experience_price(highest_price)
     experiences = [
         item for item in payload.get("experiences") or []
         if source in {"", "all"} or str(item.get("source") or "").lower() == source.lower()
     ]
     experiences = _filter_experiences_by_query(experiences, q)
+    experiences = _filter_experiences_for_destination_page(
+        experiences,
+        category=category,
+        free_cancel=free_cancel,
+        lowest_price=min_price,
+        highest_price=max_price,
+    )
     nearby = _experience_distance_filter(experiences, lat, lng, max(1.0, min(float(radius or 30), 100.0)))
-    ranked = rank_experiences(nearby, lat=lat, lng=lng)[:result_limit]
+    ranked = _sort_experiences(rank_experiences(nearby, lat=lat, lng=lng), sort, order)[:result_limit]
     points: list[dict] = []
     if lat is not None and lng is not None:
         try:
             points.append({"lat": float(lat), "lng": float(lng), "name": q.strip() or "Explore search", "leg_index": 0})
         except Exception:
             points = []
-    live_ranked, live_meta = _viator_live_results_for_points(points, source, q, result_limit, existing_count=len(ranked))
+    live_ranked, live_meta = _viator_live_results_for_points(
+        points,
+        source,
+        q,
+        result_limit,
+        existing_count=len(ranked),
+        category=category,
+        free_cancel=free_cancel,
+        start_date=start_date,
+        end_date=end_date,
+        lowest_price=min_price,
+        highest_price=max_price,
+        sort=sort,
+        order=order,
+    )
     if live_ranked:
         existing = {str(item.get("id") or item.get("source_id") or item.get("title")) for item in ranked}
         for item in live_ranked:
+            if not _filter_experiences_for_destination_page(
+                [item],
+                category=category,
+                free_cancel=free_cancel,
+                lowest_price=min_price,
+                highest_price=max_price,
+            ):
+                continue
             key = str(item.get("id") or item.get("source_id") or item.get("title"))
             if key in existing:
                 continue
@@ -19451,6 +19681,7 @@ async def explore_experiences(lat: float | None = None, lng: float | None = None
             existing.add(key)
             if len(ranked) >= result_limit:
                 break
+        ranked = _sort_experiences(ranked, sort, order)[:result_limit]
     return _experience_response(
         source,
         ranked,
@@ -19472,6 +19703,14 @@ class RouteTourRequest(BaseModel):
     limit: int = 8
     source: str = "viator"
     q: str = ""
+    category: str = ""
+    free_cancel: bool = False
+    start_date: str = ""
+    end_date: str = ""
+    lowest_price: Optional[float] = None
+    highest_price: Optional[float] = None
+    sort: str = "recommended"
+    order: str = "descending"
 
 VIATOR_DESTINATION_HINTS = [
     {"id": "5600", "name": "Moab", "lat": 38.573315, "lng": -109.54984, "radius_mi": 95.0},
@@ -19549,7 +19788,7 @@ def _viator_destination_for_point(point: dict, max_radius_mi: float = 95.0) -> d
             best = (distance, destination)
     return best[1] if best else None
 
-def _viator_route_cache_key(points: list[dict], q: str = "") -> str:
+def _viator_route_cache_key(points: list[dict], q: str = "", filter_token: str = "") -> str:
     destination_ids: list[str] = []
     for point in points[:8]:
         destination = _viator_destination_for_point(point)
@@ -19561,7 +19800,7 @@ def _viator_route_cache_key(points: list[dict], q: str = "") -> str:
         if len(destination_ids) >= 4:
             break
     query = re.sub(r"\s+", " ", str(q or "").strip().lower())[:96]
-    return f"dest:{','.join(destination_ids) or 'none'}|q:{query}"
+    return f"dest:{','.join(destination_ids) or 'none'}|q:{query}|f:{filter_token or 'base'}"
 
 def _fresh_viator_route_cache(cache_key: str) -> dict | None:
     cached = _viator_route_live_cache.get(cache_key)
@@ -19573,7 +19812,7 @@ def _fresh_viator_route_cache(cache_key: str) -> dict | None:
         return None
     return cached
 
-def _queue_viator_route_refresh(cache_key: str, client: ViatorClient, points: list[dict], *, limit: int, q: str = "") -> bool:
+def _queue_viator_route_refresh(cache_key: str, client: ViatorClient, points: list[dict], *, limit: int, q: str = "", filters: dict | None = None) -> bool:
     now = int(time.time())
     job = _viator_route_live_jobs.get(cache_key)
     if job and job.get("status") in {"queued", "running"} and now - int(job.get("started_at") or now) < 90:
@@ -19582,17 +19821,17 @@ def _queue_viator_route_refresh(cache_key: str, client: ViatorClient, points: li
     if stale_error and stale_error.get("status") in {"error", "provider_error", "timeout"} and now - int(stale_error.get("fetched_at") or 0) < VIATOR_LIVE_ERROR_RETRY_SECONDS:
         return False
     _viator_route_live_jobs[cache_key] = {"status": "queued", "started_at": now}
-    asyncio.create_task(_refresh_viator_route_cache(cache_key, client.config, points, limit=limit, q=q))
+    asyncio.create_task(_refresh_viator_route_cache(cache_key, client.config, points, limit=limit, q=q, filters=filters or {}))
     return True
 
-async def _refresh_viator_route_cache(cache_key: str, config, points: list[dict], *, limit: int, q: str = "") -> None:
+async def _refresh_viator_route_cache(cache_key: str, config, points: list[dict], *, limit: int, q: str = "", filters: dict | None = None) -> None:
     now = int(time.time())
     _viator_route_live_jobs[cache_key] = {"status": "running", "started_at": now}
     timeout = max(6.0, min(float(getattr(config, "request_timeout_seconds", 8.0)) * 4, 24.0))
     try:
         def run_live() -> tuple[list[dict], list[dict]]:
             client = ViatorClient(config)
-            return _live_viator_route_suggestions(client, points, limit=limit, q=q)
+            return _live_viator_route_suggestions(client, points, limit=limit, q=q, filters=filters or {})
         results, statuses = await asyncio.wait_for(asyncio.to_thread(run_live), timeout=timeout)
         fetched_at = int(time.time())
         provider_error = any(
@@ -19678,8 +19917,17 @@ def _live_viator_route_suggestions(
     *,
     limit: int,
     q: str = "",
+    filters: dict | None = None,
 ) -> tuple[list[dict], list[dict]]:
     config = client.config
+    filter_values = filters or {}
+    free_cancel = _experience_bool(filter_values.get("free_cancel"))
+    flags = ["FREE_CANCELLATION"] if free_cancel else None
+    start_date = _clean_experience_date(str(filter_values.get("start_date") or ""))
+    end_date = _clean_experience_date(str(filter_values.get("end_date") or ""))
+    lowest_price = _clean_experience_price(filter_values.get("lowest_price"))
+    highest_price = _clean_experience_price(filter_values.get("highest_price"))
+    sort_value, order_value = _viator_sort_params(str(filter_values.get("sort") or "recommended"), str(filter_values.get("order") or "descending"))
     statuses: list[dict] = []
     ranked_by_key: dict[str, dict] = {}
     searched_destinations: set[str] = set()
@@ -19692,7 +19940,18 @@ def _live_viator_route_suggestions(
         if destination_id in searched_destinations:
             continue
         searched_destinations.add(destination_id)
-        payload = client.search_products(destination_id=destination_id, count=max(1, min(int(limit or page_count), page_count)), start=1)
+        payload = client.search_products(
+            destination_id=destination_id,
+            flags=flags,
+            start_date=start_date,
+            end_date=end_date,
+            lowest_price=lowest_price,
+            highest_price=highest_price,
+            sort=sort_value,
+            order=order_value,
+            count=max(1, min(int(limit or page_count), page_count)),
+            start=1,
+        )
         statuses.append({"destination_id": destination_id, "destination": destination.get("name"), **_viator_provider_status(payload)})
         for item in _normalize_live_viator_experiences(payload, point, destination, config.cache_ttl_hours):
             key = str(item.get("id") or item.get("source_id") or item.get("title"))
@@ -19708,8 +19967,16 @@ def _live_viator_route_suggestions(
         for item in _normalize_live_viator_experiences(payload, anchor, None, config.cache_ttl_hours):
             key = str(item.get("id") or item.get("source_id") or item.get("title"))
             ranked_by_key[key] = item
+    category = str(filter_values.get("category") or "")
+    filtered = _filter_experiences_for_destination_page(
+        list(ranked_by_key.values()),
+        category=category,
+        free_cancel=free_cancel,
+        lowest_price=lowest_price,
+        highest_price=highest_price,
+    )
     ranked = sorted(
-        ranked_by_key.values(),
+        filtered,
         key=lambda item: (
             float(item.get("distance_mi") or 9999),
             -float(item.get("rating") or 0),
@@ -19719,7 +19986,22 @@ def _live_viator_route_suggestions(
     return ranked, statuses
 
 
-def _viator_live_results_for_points(points: list[dict], source: str, q: str, limit: int, *, existing_count: int = 0) -> tuple[list[dict], dict]:
+def _viator_live_results_for_points(
+    points: list[dict],
+    source: str,
+    q: str,
+    limit: int,
+    *,
+    existing_count: int = 0,
+    category: str = "",
+    free_cancel: bool = False,
+    start_date: str = "",
+    end_date: str = "",
+    lowest_price: float | None = None,
+    highest_price: float | None = None,
+    sort: str = "recommended",
+    order: str = "descending",
+) -> tuple[list[dict], dict]:
     client = ViatorClient(viator_config_from_env())
     source_key = str(source or "viator").lower()
     meta = {
@@ -19741,7 +20023,18 @@ def _viator_live_results_for_points(points: list[dict], source: str, q: str, lim
         return [], meta
 
     live_limit = max(1, max_results - existing_count)
-    cache_key = _viator_route_cache_key(points, q or "")
+    filters = {
+        "category": category,
+        "free_cancel": free_cancel,
+        "start_date": start_date,
+        "end_date": end_date,
+        "lowest_price": lowest_price,
+        "highest_price": highest_price,
+        "sort": sort,
+        "order": order,
+    }
+    filter_token = _experience_filter_cache_token(**filters)
+    cache_key = _viator_route_cache_key(points, q or "", filter_token)
     cached_live = _fresh_viator_route_cache(cache_key)
     if cached_live:
         meta.update({
@@ -19759,7 +20052,7 @@ def _viator_live_results_for_points(points: list[dict], source: str, q: str, lim
         })
         return list(cached_live.get("results") or [])[:live_limit], meta
 
-    queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(max_results, 8)), q=q or "")
+    queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(max_results, 8)), q=q or "", filters=filters)
     job = _viator_route_live_jobs.get(cache_key) or {}
     recent_error = _viator_route_live_cache.get(cache_key)
     if not queued and recent_error and recent_error.get("status") in {"error", "provider_error", "timeout"}:
@@ -19800,6 +20093,15 @@ async def route_tour_suggestions(body: RouteTourRequest):
         if source in {"", "all"} or str(item.get("source") or "").lower() == source
     ]
     experiences = _filter_experiences_by_query(experiences, body.q or "")
+    min_price = _clean_experience_price(body.lowest_price)
+    max_price = _clean_experience_price(body.highest_price)
+    experiences = _filter_experiences_for_destination_page(
+        experiences,
+        category=body.category,
+        free_cancel=bool(body.free_cancel),
+        lowest_price=min_price,
+        highest_price=max_price,
+    )
     points = _route_tour_points(body)
     radius_mi = max(5.0, min(float(body.radius or 45), 120.0))
     ranked_by_key: dict[str, dict] = {}
@@ -19817,13 +20119,17 @@ async def route_tour_suggestions(body: RouteTourRequest):
             }
             if not current or float(enriched.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
                 ranked_by_key[key] = enriched
-    ranked = sorted(
-        ranked_by_key.values(),
-        key=lambda item: (
-            float(item.get("distance_mi") or 9999),
-            -float(item.get("rating") or 0),
-            str(item.get("title") or ""),
+    ranked = _sort_experiences(
+        sorted(
+            ranked_by_key.values(),
+            key=lambda item: (
+                float(item.get("distance_mi") or 9999),
+                -float(item.get("rating") or 0),
+                str(item.get("title") or ""),
+            ),
         ),
+        body.sort,
+        body.order,
     )[:max(1, min(int(body.limit or 8), 24))]
     provider_status: list[dict] = []
     live_status = "disabled"
@@ -19831,7 +20137,18 @@ async def route_tour_suggestions(body: RouteTourRequest):
     client = ViatorClient(viator_config_from_env())
     if len(ranked) < max(1, min(int(body.limit or 8), 24)) and source in {"", "all", "viator"} and client.ready():
         live_limit = max(1, min(int(body.limit or 8), 24)) - len(ranked)
-        cache_key = _viator_route_cache_key(points, body.q or "")
+        filters = {
+            "category": body.category,
+            "free_cancel": bool(body.free_cancel),
+            "start_date": body.start_date,
+            "end_date": body.end_date,
+            "lowest_price": min_price,
+            "highest_price": max_price,
+            "sort": body.sort,
+            "order": body.order,
+        }
+        filter_token = _experience_filter_cache_token(**filters)
+        cache_key = _viator_route_cache_key(points, body.q or "", filter_token)
         cached_live = _fresh_viator_route_cache(cache_key)
         live_ranked: list[dict] = []
         if cached_live:
@@ -19846,7 +20163,7 @@ async def route_tour_suggestions(body: RouteTourRequest):
             live_status = "cache_hit"
             live_message = "Live tour cache used."
         else:
-            queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(int(body.limit or 8), 8)), q=body.q or "")
+            queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(int(body.limit or 8), 8)), q=body.q or "", filters=filters)
             job = _viator_route_live_jobs.get(cache_key) or {}
             recent_error = _viator_route_live_cache.get(cache_key)
             if not queued and recent_error and recent_error.get("status") in {"error", "provider_error", "timeout"}:
@@ -19870,12 +20187,21 @@ async def route_tour_suggestions(body: RouteTourRequest):
                 live_message = "Tours are refreshing in the background."
         existing = {str(item.get("id") or item.get("source_id") or item.get("title")) for item in ranked}
         for item in live_ranked:
+            if not _filter_experiences_for_destination_page(
+                [item],
+                category=body.category,
+                free_cancel=bool(body.free_cancel),
+                lowest_price=min_price,
+                highest_price=max_price,
+            ):
+                continue
             key = str(item.get("id") or item.get("source_id") or item.get("title"))
             if key not in existing:
                 ranked.append(item)
                 existing.add(key)
             if len(ranked) >= max(1, min(int(body.limit or 8), 24)):
                 break
+        ranked = _sort_experiences(ranked, body.sort, body.order)[:max(1, min(int(body.limit or 8), 24))]
     return {
         **_experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty"),
         "route_anchor_count": len(points),

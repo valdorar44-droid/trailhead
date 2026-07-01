@@ -70,7 +70,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
                       accessibilityLabel={`Open ${experience.title}`}
                     >
                       <Ionicons name="open-outline" size={15} color="#fff" />
-                      <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Open</Text>
+                      <Text style={styles.bookText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>View</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       style={[styles.iconButton, { borderColor: C.border }]}

@@ -159,6 +159,17 @@ export type RentalOffersQuery = {
   provider?: string;
 };
 
+export type ExploreExperienceQueryOptions = {
+  category?: string;
+  free_cancel?: boolean;
+  start_date?: string;
+  end_date?: string;
+  lowest_price?: number;
+  highest_price?: number;
+  sort?: string;
+  order?: string;
+};
+
 export type OutdoorOffersResponse = {
   provider: string;
   status: 'ok' | 'empty';
@@ -239,6 +250,17 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     throw new ApiError(msg, res.status, detail);
   }
   return res.json();
+}
+
+function appendExploreExperienceOptions(qs: URLSearchParams, options: ExploreExperienceQueryOptions = {}) {
+  if (options.category && options.category !== 'all') qs.set('category', options.category);
+  if (options.free_cancel) qs.set('free_cancel', 'true');
+  if (options.start_date) qs.set('start_date', options.start_date);
+  if (options.end_date) qs.set('end_date', options.end_date);
+  if (typeof options.lowest_price === 'number') qs.set('lowest_price', String(options.lowest_price));
+  if (typeof options.highest_price === 'number') qs.set('highest_price', String(options.highest_price));
+  if (options.sort) qs.set('sort', options.sort);
+  if (options.order) qs.set('order', options.order);
 }
 
 export const api = {
@@ -698,15 +720,19 @@ export const api = {
   getExploreCampgrounds: (placeId: string, limit = 24) =>
     req<ExploreCampgroundsResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/campgrounds?limit=${limit}`)
       .then(res => ({ ...res, campgrounds: canonicalizeCampsitePins(res.campgrounds ?? []) })),
-  getExplorePlaceExperiences: (placeId: string, limit = 12, source = 'viator') =>
-    req<ExploreExperiencesResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/experiences?source=${encodeURIComponent(source)}&limit=${limit}`),
-  getExploreExperiences: (lat?: number, lng?: number, radius = 30, source = 'viator', limit = 20, q = '') => {
+  getExplorePlaceExperiences: (placeId: string, limit = 12, source = 'viator', options: ExploreExperienceQueryOptions = {}) => {
+    const qs = new URLSearchParams({ source, limit: String(limit) });
+    appendExploreExperienceOptions(qs, options);
+    return req<ExploreExperiencesResponse>(`/api/explore/places/${encodeURIComponent(placeId)}/experiences?${qs.toString()}`);
+  },
+  getExploreExperiences: (lat?: number, lng?: number, radius = 30, source = 'viator', limit = 20, q = '', options: ExploreExperienceQueryOptions = {}) => {
     const qs = new URLSearchParams({ source, radius: String(radius), limit: String(limit) });
     if (lat != null && lng != null) {
       qs.set('lat', String(lat));
       qs.set('lng', String(lng));
     }
     if (q.trim()) qs.set('q', q.trim());
+    appendExploreExperienceOptions(qs, options);
     return req<ExploreExperiencesResponse>(`/api/explore/experiences?${qs.toString()}`);
   },
   getExploreExperience: (experienceId: string) =>
@@ -3552,6 +3578,14 @@ export interface RouteTourSuggestionRequest {
   limit?: number;
   source?: string;
   q?: string;
+  category?: string;
+  free_cancel?: boolean;
+  start_date?: string;
+  end_date?: string;
+  lowest_price?: number;
+  highest_price?: number;
+  sort?: string;
+  order?: string;
 }
 export interface WikiArticle {
   title: string; lat: number; lng: number; dist_m: number; extract: string; url: string;

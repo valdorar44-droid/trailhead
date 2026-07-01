@@ -56,6 +56,8 @@ class ViatorClient:
         flags: list[str] | None = None,
         start_date: str = "",
         end_date: str = "",
+        lowest_price: float | None = None,
+        highest_price: float | None = None,
         sort: str = "TRAVELER_RATING",
         order: str = "DESCENDING",
         count: int = 12,
@@ -76,6 +78,10 @@ class ViatorClient:
             filtering["startDate"] = start_date
         if end_date:
             filtering["endDate"] = end_date
+        if lowest_price is not None:
+            filtering["lowestPrice"] = float(lowest_price)
+        if highest_price is not None:
+            filtering["highestPrice"] = float(highest_price)
         payload = {
             "filtering": filtering,
             "sorting": {"sort": sort, "order": order},

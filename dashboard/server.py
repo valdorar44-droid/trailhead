@@ -13876,6 +13876,8 @@ def _camp_from_trailhead_place(place: dict) -> dict | None:
     name = re.sub(r"\s+", " ", str(place.get("name") or "").strip()) or "Dispersed tent site"
     photos = place.get("photos") if isinstance(place.get("photos"), list) else []
     photo_url = place.get("photo_url") or place.get("hero_photo_url") or (photos[0].get("url") if photos and isinstance(photos[0], dict) else "")
+    description = place.get("description") or place.get("summary") or "Dispersed spots can change quickly. Check access, rules, and current conditions before relying on this spot."
+    source_freshness = place.get("source_freshness") or place.get("freshness_label") or ""
     return {
         "id": str(place.get("trailhead_place_id") or place.get("id")),
         "name": name,
@@ -13883,8 +13885,8 @@ def _camp_from_trailhead_place(place: dict) -> dict | None:
         "lng": lng,
         "tags": sorted(set(["camp", "dispersed", "tent", *[str(tag).lower() for tag in (place.get("tags") or []) if str(tag).strip()]])),
         "land_type": "Dispersed",
-        "summary": place.get("summary") or "",
-        "description": place.get("description") or "",
+        "summary": description,
+        "description": description,
         "photo_url": photo_url or "",
         "photos": photos,
         "reservable": False,
@@ -13894,10 +13896,10 @@ def _camp_from_trailhead_place(place: dict) -> dict | None:
         "booking_url": "",
         "ada": False,
         "source": "trailhead",
-        "verified_source": "Trailhead",
-        "source_badge": "Trailhead",
-        "source_freshness": place.get("source_freshness") or "Recently checked",
-        "last_checked": place.get("published_at") or place.get("last_seen") or place.get("updated_at"),
+        "verified_source": place.get("verified_source") or "Recent dispersed spot",
+        "source_badge": place.get("source_badge") or "Trailhead",
+        "source_freshness": source_freshness,
+        "last_checked": place.get("source_updated_at") or place.get("published_at") or place.get("last_seen") or place.get("updated_at"),
         "phone": place.get("phone") or "",
         "address": place.get("address") or "",
         "provider_place_id": "",
@@ -14152,8 +14154,9 @@ def _camp_lightweight_record(camp: dict) -> dict:
         "verified_source": camp.get("verified_source") or "",
         "source_badge": camp.get("source_badge") or camp.get("verified_source") or source,
         "source_confidence": _camp_source_confidence(camp),
+        "source_freshness": camp.get("source_freshness") or "",
         "last_checked": freshness,
-        "freshness_label": camp.get("freshness_label") or ("Source checked" if freshness else "Freshness unknown"),
+        "freshness_label": camp.get("source_freshness") or camp.get("freshness_label") or ("Source checked" if freshness else "Freshness unknown"),
         "phone": camp.get("phone") or "",
         "address": camp.get("address") or "",
         "rating": camp.get("rating"),

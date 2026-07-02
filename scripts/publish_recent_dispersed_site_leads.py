@@ -17,10 +17,12 @@ from db import store  # noqa: E402
 
 def build_report(args: argparse.Namespace) -> dict:
     store.init_db()
+    statuses = ["published"] if args.repair_published else None
     leads = store.list_dispersed_site_leads_for_publication(
         max_age_days=args.max_age_days,
         source_batch=args.source_batch,
         limit=args.limit,
+        statuses=statuses,
     )
     report = {
         "mode": "commit" if args.commit else "dry_run",
@@ -85,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, default=0, help="0 means all eligible leads.")
     parser.add_argument("--admin-id", type=int, default=None)
     parser.add_argument("--commit", action="store_true")
+    parser.add_argument("--repair-published", action="store_true", help="Refresh public card metadata for already-published leads.")
     parser.add_argument(
         "--coordinate-only-confirmed",
         action="store_true",

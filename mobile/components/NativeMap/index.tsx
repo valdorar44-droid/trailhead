@@ -436,7 +436,51 @@ function maneuverArrowText(step: RouteStep): string | null {
   return null;
 }
 
+function isUsableCampPin(c: CampsitePin | null | undefined): c is CampsitePin {
+  const lat = Number(c?.lat);
+  const lng = Number(c?.lng);
+  return Number.isFinite(lat) && Number.isFinite(lng) && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+
+function normalizeCampPin(c: CampsitePin): CampsitePin {
+  return { ...c, lat: Number(c.lat), lng: Number(c.lng) };
+}
+
+function campClusterCandidates(camps: CampsitePin[], lat: number, lng: number, pointCount: number): CampsitePin[] {
+  const targetCount = Number.isFinite(pointCount) && pointCount > 0 ? Math.min(Math.ceil(pointCount), camps.length) : Math.min(24, camps.length);
+  return camps
+    .map(camp => ({ camp, distance: haversineMiles(lat, lng, Number(camp.lat), Number(camp.lng)) }))
+    .sort((a, b) => a.distance - b.distance)
+    .slice(0, Math.max(1, targetCount))
+    .map(item => item.camp);
+}
+
+function campBounds(camps: CampsitePin[], fallbackLat: number, fallbackLng: number) {
+  const lats = camps.map(camp => Number(camp.lat)).filter(Number.isFinite);
+  const lngs = camps.map(camp => Number(camp.lng)).filter(Number.isFinite);
+  if (!lats.length || !lngs.length) {
+    return {
+      center: { lat: fallbackLat, lng: fallbackLng },
+      ne: [fallbackLng + 0.01, fallbackLat + 0.01] as [number, number],
+      sw: [fallbackLng - 0.01, fallbackLat - 0.01] as [number, number],
+    };
+  }
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const padLat = Math.max(0.006, (maxLat - minLat) * 0.22);
+  const padLng = Math.max(0.006, (maxLng - minLng) * 0.22);
+  return {
+    center: { lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 },
+    ne: [maxLng + padLng, maxLat + padLat] as [number, number],
+    sw: [minLng - padLng, minLat - padLat] as [number, number],
+  };
+}
+
 function campFeat(c: CampsitePin): GeoJSON.Feature {
+  const lat = Number(c.lat);
+  const lng = Number(c.lng);
   const raw = [
     ...(Array.isArray(c.tags) ? c.tags : []),
     ...(Array.isArray(c.site_types) ? c.site_types : []),
@@ -466,7 +510,7 @@ function campFeat(c: CampsitePin): GeoJSON.Feature {
     : kind === 'state' ? 'S'
     : kind === 'corps' ? 'W'
     : 'C';
-  return { type: 'Feature', geometry: { type: 'Point', coordinates: [c.lng, c.lat] },
+  return { type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] },
     properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', camp_kind: kind, camp_code: code, cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
 }
 
@@ -2080,7 +2124,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [userLoc, navMode, nativeNavEngineActive, navSpeed, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress]);
 
   // ── GeoJSON sources ─────────────────────────────────────────────────────────
-  const campFC = useMemo(() => pointFC(camps.map(campFeat)), [camps]);
+  const drawableCamps = useMemo(
+    () => camps.filter(isUsableCampPin).map(normalizeCampPin),
+    [camps],
+  );
+  const campFC = useMemo(() => pointFC(drawableCamps.map(campFeat)), [drawableCamps]);
+  const shouldClusterCamps = drawableCamps.length > 80;
   const gasFC  = useMemo(() => pointFC(gas.map(g => ({
     type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [g.lng, g.lat] },
     properties: { name: g.name },
@@ -2432,7 +2481,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     }
   }, [emitDebugEvent, onBoundsChange, showMvum, fetchMvum, navMode, persistRecentViewport, showTerrain, refreshMapSourcesForBounds]);
 
-  const handleCampPress = useCallback((e: any) => {
+  const handleCampPress = useCallback(async (e: any) => {
     const feat = e.features?.[0];
     if (!feat) return;
     const coords = (feat.geometry as any)?.coordinates;
@@ -2445,26 +2494,35 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const lng = Number(coords?.[0]);
       const lat = Number(coords?.[1]);
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        const nearest = camps
-          .filter(camp => Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
-          .map(camp => ({
-            camp,
-            distance: haversineMiles(lat, lng, camp.lat, camp.lng),
-          }))
-          .filter(item => item.distance <= 35)
-          .sort((a, b) => a.distance - b.distance)[0]?.camp;
-        const targetLat = Number.isFinite(nearest?.lat) ? nearest!.lat : lat;
-        const targetLng = Number.isFinite(nearest?.lng) ? nearest!.lng : lng;
-        const nextZoom = Math.min(13, Math.max(9, Number(freeCameraDefaultRef.current.zoomLevel || 9) + 2.2));
-        programmaticCameraUntilRef.current = Date.now() + 900;
-        rememberFreeCamera(targetLat, targetLng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
-        camRef.current?.setCamera({
-          centerCoordinate: [targetLng, targetLat],
-          zoomLevel: nextZoom,
-          pitch: navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0,
-          animationDuration: 420,
-          animationMode: 'flyTo',
-        } as any);
+        const pointCount = Number(p.point_count ?? p.point_count_abbreviated ?? 0);
+        const clusterCamps = campClusterCandidates(drawableCamps, lat, lng, pointCount);
+        const bounds = campBounds(clusterCamps, lat, lng);
+        let currentZoom = Number.NaN;
+        try {
+          const zoomValue = typeof mapRef.current?.getZoom === 'function' ? await mapRef.current.getZoom() : null;
+          currentZoom = Number(zoomValue);
+        } catch {}
+        const nextZoom = Math.min(14, Math.max(
+          shouldClusterCamps ? 9.8 : 11,
+          Number.isFinite(currentZoom) ? currentZoom + 1.8 : Number(freeCameraDefaultRef.current.zoomLevel || 10) + 1.8,
+        ));
+        programmaticCameraUntilRef.current = Date.now() + 1200;
+        rememberFreeCamera(bounds.center.lat, bounds.center.lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
+        if (clusterCamps.length > 1) {
+          camRef.current?.fitBounds(bounds.ne, bounds.sw, [92, 72, 150, 72], 520);
+        } else {
+          camRef.current?.setCamera({
+            centerCoordinate: [bounds.center.lng, bounds.center.lat],
+            zoomLevel: nextZoom,
+            pitch: navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0,
+            animationDuration: 420,
+            animationMode: 'flyTo',
+          } as any);
+        }
+        setTimeout(() => {
+          const b = boundsRef.current;
+          if (b) refreshMapSourcesForBounds(b.n, b.s, b.e, b.w);
+        }, 650);
       }
       return;
     }
@@ -2472,7 +2530,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     try { raw = JSON.parse(p.raw || '{}'); } catch { raw = p as any; }
     if (!raw || !Number.isFinite(Number(raw.lat)) || !Number.isFinite(Number(raw.lng))) return;
     onCampTap(raw);
-  }, [camps, navMode, onCampTap, onMapTap, rememberFreeCamera, showTerrain, suppressFeatureTaps]);
+  }, [drawableCamps, navMode, onCampTap, onMapTap, refreshMapSourcesForBounds, rememberFreeCamera, shouldClusterCamps, showTerrain, suppressFeatureTaps]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
   const userLocationShape = userLoc
@@ -3066,11 +3124,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
       {/* ── Campsites (clustered) ──────────────────────────────────────── */}
       <MapGL.ShapeSource
+        key={shouldClusterCamps ? 'camps-clustered' : 'camps-flat'}
         id="camps"
         shape={campFC}
-        cluster
-        clusterMaxZoomLevel={11}
-        clusterRadius={45}
+        cluster={shouldClusterCamps}
+        clusterMaxZoomLevel={8}
+        clusterRadius={30}
         onPress={handleCampPress}
       >
           <MapGL.CircleLayer
@@ -3078,9 +3137,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             filter={['has', 'point_count']}
             style={{
               circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'],
-              circleRadius: ['step', ['get', 'point_count'], 22, 10, 29, 50, 36],
-              circleOpacity: 0.94,
-              circleStrokeWidth: 3,
+              circleRadius: ['step', ['get', 'point_count'], 17, 10, 22, 50, 27],
+              circleOpacity: 0.9,
+              circleStrokeWidth: 2.5,
               circleStrokeColor: '#fff',
             }}
           />
@@ -3090,7 +3149,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             style={{
               textField: '{point_count_abbreviated}',
               textColor: '#fff',
-              textSize: 12,
+              textSize: 11,
+              textFont: ['Noto Sans Bold'],
             }}
           />
           <MapGL.CircleLayer

@@ -450,6 +450,22 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
                 self.assertEqual(override["verified_source"], "Recent dispersed spot")
                 self.assertNotIn("phone", override)
                 self.assertNotIn("url", override)
+
+                from dashboard import server as api_server
+
+                card = api_server._camp_from_trailhead_place({
+                    **fixed,
+                    "phone": "555-0100",
+                    "address": "Old sourced address",
+                    "official_url": "https://example.com/old-source",
+                    "url": "https://example.com/old-source",
+                    "cost": "$20",
+                })
+                self.assertEqual(card["phone"], "")
+                self.assertEqual(card["address"], "")
+                self.assertEqual(card["url"], "")
+                self.assertEqual(card["official_url"], "")
+                self.assertEqual(card["cost"], "")
             finally:
                 settings.db_path = old_path
 

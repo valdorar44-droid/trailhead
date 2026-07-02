@@ -27,7 +27,7 @@ export default function CampReviewsSection({
 
   return (
     <View style={s.section}>
-      <Text style={s.sectionTitle}>REVIEWS</Text>
+      <Text style={s.sectionTitle}>Reviews</Text>
       {reviews.slice(0, limit).map((review, idx) => (
         <View key={`${review.authorName || 'review'}-${idx}`} style={s.reviewCard}>
           <View style={s.reviewTop}>
@@ -60,8 +60,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontSize: 10,
     fontFamily: mono,
     fontWeight: '800',
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 10,
   },
   reviewCard: {

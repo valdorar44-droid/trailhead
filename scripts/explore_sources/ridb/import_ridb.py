@@ -14,7 +14,7 @@ from scripts.explore_sources.base.source_policy import assert_source_allowed
 
 
 RIDB_LICENSE = "RIDB/Recreation.gov public API; verify current terms before redistribution"
-RIDB_ATTRIBUTION = "RIDB / Recreation.gov"
+RIDB_ATTRIBUTION = "Recreation.gov"
 
 
 def load_facilities(path: str | Path) -> list[dict[str, Any]]:
@@ -115,7 +115,7 @@ def place_from_record(record: SourceRecord) -> ExplorePlaceV3:
         admin=compact_text(props.get("FacilityCity") or props.get("city")),
         summary=summary_from_facility(props, record.name),
         description=compact_text(props.get("FacilityDescription") or props.get("description")),
-        tags=sorted_unique([record.category, record.subcategory, "official", "camping", "recreation.gov"]),
+        tags=sorted_unique([record.category, record.subcategory, "camping"]),
         amenities=amenities_from_facility(props),
         reservations=reservation_info(props),
         media=media,
@@ -131,7 +131,7 @@ def summary_from_facility(facility: dict[str, Any], name: str) -> str:
     desc = compact_text(facility.get("FacilityDescription") or facility.get("description"))
     if desc:
         return desc[:420]
-    return f"{name} is an official recreation facility record. Verify access, fees, fire restrictions, reservations, and seasonal road conditions before relying on it."
+    return f"{name} is a managed recreation stop. Check current access, fees, fire restrictions, reservations, and seasonal road conditions before you go."
 
 
 def amenities_from_facility(facility: dict[str, Any]) -> list[str]:

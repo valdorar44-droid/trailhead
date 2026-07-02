@@ -70,7 +70,8 @@ class RidbCampsiteMediaTests(unittest.TestCase):
         self.assertEqual(summary["max"], 40)
         self.assertEqual(summary["sample_count"], 2)
         self.assertEqual(summary["last_year"], 2025)
-        self.assertIn("historical", summary["source"].lower())
+        self.assertEqual(summary["source"], "Recreation.gov")
+        self.assertIn("Historical Recreation.gov", summary["freshness"])
 
     def test_adventure_normalization_uses_media_and_official_handoff(self):
         permit = {
@@ -90,7 +91,7 @@ class RidbCampsiteMediaTests(unittest.TestCase):
         self.assertEqual(normalized["type"], "permit")
         self.assertEqual(normalized["photo_url"], "https://cdn.example/permit.jpg")
         self.assertIn("Needles", normalized["zones"])
-        self.assertIn("Checkout", normalized["reservation_notes"])
+        self.assertEqual(normalized["reservation_notes"], "Reserve on Recreation.gov when available.")
 
     def test_campsite_record_marks_photo_status(self):
         normalized = ridb._normalize_campsite_record(

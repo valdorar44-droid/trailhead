@@ -1,0 +1,224 @@
+{
+  "schema_version": 1,
+  "updated_at": "2026-07-02",
+  "sources": [
+    {
+      "id": "nps-api",
+      "agency": "National Park Service",
+      "source_name": "NPS Data API",
+      "source_type": "api-cache",
+      "source_url": "https://www.nps.gov/subjects/developer/api-documentation.htm",
+      "api_base": "https://developer.nps.gov/api/v1",
+      "attribution_text": "National Park Service",
+      "license_note": "National Park Service public data; preserve source attribution.",
+      "refresh_type": "scheduled-cache",
+      "refresh_frequency": "weekly for general content; hourly or every few hours for alerts",
+      "enabled": true,
+      "env": ["NPS_API_KEY"],
+      "endpoints": [
+        "parks",
+        "campgrounds",
+        "visitorcenters",
+        "thingstodo",
+        "places",
+        "activities",
+        "alerts",
+        "articles",
+        "events",
+        "newsreleases"
+      ]
+    },
+    {
+      "id": "nps-national-spatial",
+      "agency": "National Park Service",
+      "source_name": "NPS National Spatial Services",
+      "source_type": "arcgis-feature-server",
+      "source_url": "https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets",
+      "attribution_text": "National Park Service",
+      "license_note": "National Park Service public data; preserve source attribution.",
+      "refresh_type": "bulk-spatial",
+      "refresh_frequency": "monthly",
+      "enabled": true,
+      "layers": [
+        {
+          "id": "nps-public-pois",
+          "name": "NPS Public POIs",
+          "url": "https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/NPS_Public_POIs_Geographic/FeatureServer/0",
+          "maps_to": ["place"]
+        },
+        {
+          "id": "nps-public-trails",
+          "name": "NPS Public Trails",
+          "url": "https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/NPS_Public_Trails_Geographic/FeatureServer/0",
+          "maps_to": ["trail"]
+        },
+        {
+          "id": "nps-public-roads",
+          "name": "NPS Public Roads",
+          "url": "https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/NPS_Public_Roads_Geographic/FeatureServer/0",
+          "maps_to": ["access_reference"]
+        },
+        {
+          "id": "nps-public-buildings",
+          "name": "NPS Public Buildings",
+          "url": "https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/NPS_Public_Buildings_Geographic/FeatureServer/0",
+          "maps_to": ["facility"]
+        },
+        {
+          "id": "nps-public-parking",
+          "name": "NPS Public Parking Lots",
+          "url": "https://mapservices.nps.gov/arcgis/rest/services/NationalDatasets/NPS_Public_ParkingLots_Geographic/FeatureServer/0",
+          "maps_to": ["place", "facility"]
+        },
+        {
+          "id": "nps-wilderness",
+          "name": "NPS Legislated Wilderness",
+          "url": "https://mapservices.nps.gov/arcgis/rest/services/Wilderness/NPS_Legislated_Wilderness/FeatureServer/0",
+          "maps_to": ["land_unit"]
+        }
+      ]
+    },
+    {
+      "id": "ridb",
+      "agency": "Recreation.gov",
+      "source_name": "Recreation Information Database",
+      "source_type": "bulk-or-api-cache",
+      "source_url": "https://ridb.recreation.gov/docs",
+      "download_url": "https://ridb.recreation.gov/download",
+      "api_base": "https://ridb.recreation.gov/api/v1",
+      "attribution_text": "Recreation.gov",
+      "license_note": "Use according to Recreation.gov/RIDB terms; preserve source attribution.",
+      "refresh_type": "scheduled-cache",
+      "refresh_frequency": "weekly for recreation/facility/campsite data",
+      "enabled": true,
+      "env": ["RIDB_API_KEY"],
+      "endpoints": [
+        "recareas",
+        "facilities",
+        "campsites",
+        "activities",
+        "organizations",
+        "facilityaddresses",
+        "facilitymedia",
+        "facilitylinks",
+        "facilityactivities",
+        "recareaactivities",
+        "recareamedia",
+        "recarealinks"
+      ]
+    },
+    {
+      "id": "usfs-edw",
+      "agency": "US Forest Service",
+      "source_name": "USFS EDW Geodata",
+      "source_type": "file-geodatabase",
+      "source_url": "https://data.fs.usda.gov/geodata/edw/datasets.php",
+      "attribution_text": "US Forest Service",
+      "license_note": "USFS public geodata; preserve source attribution.",
+      "refresh_type": "bulk-spatial",
+      "refresh_frequency": "monthly",
+      "enabled": true,
+      "datasets": [
+        {
+          "id": "recreation-sites",
+          "name": "USFS Recreation Sites",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/Rec_Infra_RecSite.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/Rec_Infra_RecSite.zip",
+          "maps_to": ["place", "facility"]
+        },
+        {
+          "id": "recreation-opportunities",
+          "name": "USFS Recreation Opportunities",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/Rec_RecOpportunities.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/Rec_RecOpportunities.zip",
+          "maps_to": ["place", "activity", "facility"]
+        },
+        {
+          "id": "recreation-area-activities",
+          "name": "USFS Recreation Area Activities",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/Rec_RecArea_Activities_V.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/Rec_RecArea_Activities_V.zip",
+          "maps_to": ["activity"]
+        },
+        {
+          "id": "trails",
+          "name": "USFS Trails",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/Trans_Trail_NFS_Publish.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/Trans_Trail_NFS_Publish.zip",
+          "maps_to": ["trail"]
+        },
+        {
+          "id": "roads",
+          "name": "USFS Roads",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/Trans_RoadCore_FS.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/Trans_RoadCore_FS.zip",
+          "maps_to": ["access_reference"]
+        },
+        {
+          "id": "national-forest-system-land-units",
+          "name": "USFS National Forest System Land Units",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/BdyDesg_LSRS_NationalForestSystemLandUnit.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/BdyDesg_LSRS_NationalForestSystemLandUnit.zip",
+          "maps_to": ["land_unit"]
+        },
+        {
+          "id": "ranger-districts",
+          "name": "USFS Ranger Districts",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/BdyAdm_LSRS_RangerDistrict.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/BdyAdm_LSRS_RangerDistrict.zip",
+          "maps_to": ["land_unit"]
+        },
+        {
+          "id": "final-fire-perimeters",
+          "name": "USFS Final Fire Perimeters",
+          "download_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/fc/S_USA.FirePerimeterFinal.gdb.zip",
+          "fallback_url": "https://data.fs.usda.gov/geodata/edw/edw_resources/shp/S_USA.FirePerimeterFinal.zip",
+          "maps_to": ["historical_safety_reference"]
+        }
+      ]
+    },
+    {
+      "id": "padus",
+      "agency": "USGS",
+      "source_name": "Protected Areas Database of the United States",
+      "source_type": "file-geodatabase",
+      "source_url": "https://www.usgs.gov/programs/gap-analysis-project/science/pad-us-data-download",
+      "metadata_url": "https://www.sciencebase.gov/catalog/item/652d4fc5d34e44db0e2ee45e?format=json",
+      "target_file": "PADUS4_1Geodatabase.zip",
+      "attribution_text": "USGS PAD-US",
+      "license_note": "USGS public data; preserve source attribution.",
+      "refresh_type": "bulk-spatial",
+      "refresh_frequency": "quarterly or manual",
+      "enabled": true,
+      "maps_to": ["land_unit"]
+    },
+    {
+      "id": "nws",
+      "agency": "NOAA / National Weather Service",
+      "source_name": "NWS API",
+      "source_type": "dynamic-api-cache",
+      "api_base": "https://api.weather.gov",
+      "source_url": "https://www.weather.gov/documentation/services-web-api",
+      "attribution_text": "National Weather Service",
+      "license_note": "Public weather data; cache briefly and expire safety records.",
+      "refresh_type": "dynamic",
+      "refresh_frequency": "hourly or less",
+      "enabled": false,
+      "endpoints": ["alerts/active", "points/{lat},{lon}"]
+    },
+    {
+      "id": "firms-nifc",
+      "agency": "NASA FIRMS / NIFC",
+      "source_name": "Active Fire and Current Fire Perimeters",
+      "source_type": "dynamic-api-cache",
+      "source_url": "https://firms.modaps.eosdis.nasa.gov/download/",
+      "api_base": "https://firms.modaps.eosdis.nasa.gov/usfs/api/area/",
+      "attribution_text": "NASA FIRMS / NIFC",
+      "license_note": "Cache briefly; never show stale active fire data as current.",
+      "refresh_type": "dynamic",
+      "refresh_frequency": "hourly or less",
+      "enabled": false,
+      "env": ["FIRMS_MAP_KEY"]
+    }
+  ]
+}

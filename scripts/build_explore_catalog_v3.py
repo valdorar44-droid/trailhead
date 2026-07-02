@@ -15,6 +15,7 @@ from scripts.explore_sources.base.aliases import apply_aliases
 from scripts.explore_sources.base.cards import build_card
 from scripts.explore_sources.base.dedupe import dedupe_places, disambiguate_duplicate_display_names, link_trailheads_to_trails
 from scripts.explore_sources.base.fetch import parse_headers, resolve_input_paths
+from scripts.explore_sources.base.content_quality import sanitize_place_profile
 from scripts.explore_sources.base.quality import score_place
 from scripts.explore_sources.blm.import_blm import import_blm_fixture
 from scripts.explore_sources.nps.fetch_nps import fetch_nps_parks_to_cache, fetch_nps_source_pack_to_cache
@@ -305,7 +306,7 @@ def main() -> int:
         "generated_at": generated_at,
         "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, BLM, Wikidata, and OpenBeta fixtures; source attribution preserved",
         "count": len(places),
-        "places": [place.to_dict() for place in places],
+        "places": [sanitize_place_profile(place.to_dict()) for place in places],
     }
     trail_payload = {
         "schema_version": 1,

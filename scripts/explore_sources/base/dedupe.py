@@ -109,7 +109,7 @@ def merge_source_pack(primary: dict, secondary: dict) -> dict:
     if not isinstance(secondary, dict) or not secondary:
         return primary
     merged = {**secondary, **primary}
-    for key in ("sources", "photos", "things_to_do", "things_to_see", "visitor_centers", "campgrounds", "alerts", "events", "parking_lots"):
+    for key in ("sources", "photos", "things_to_do", "guided", "things_to_see", "visitor_centers", "campgrounds", "alerts", "events", "parking_lots"):
         values = []
         for item in [*(secondary.get(key) or []), *(primary.get(key) or [])]:
             if isinstance(item, dict) and item not in values:
@@ -123,13 +123,37 @@ def merge_source_pack(primary: dict, secondary: dict) -> dict:
 
 def dedupe_places(places: list[ExplorePlaceV3]) -> list[ExplorePlaceV3]:
     merged: list[ExplorePlaceV3] = []
+    source_index: dict[str, int] = {}
+    name_index: dict[str, list[int]] = defaultdict(list)
     for place in places:
-        for idx, existing in enumerate(merged):
+        match_idx: int | None = None
+        candidate_indexes: list[int] = []
+        seen_indexes: set[int] = set()
+        for source_id in place.source_ids:
+            idx = source_index.get(source_id)
+            if idx is not None and idx not in seen_indexes:
+                candidate_indexes.append(idx)
+                seen_indexes.add(idx)
+        name_key = normalize_name(place.name)
+        for idx in name_index.get(name_key, []):
+            if idx not in seen_indexes:
+                candidate_indexes.append(idx)
+                seen_indexes.add(idx)
+        for idx in candidate_indexes:
+            existing = merged[idx]
             if should_merge(existing, place):
-                merged[idx] = merge_places(existing, place)
+                match_idx = idx
                 break
-        else:
+        if match_idx is None:
+            match_idx = len(merged)
             merged.append(place)
+        else:
+            merged[match_idx] = merge_places(merged[match_idx], place)
+        for source_id in merged[match_idx].source_ids:
+            source_index[source_id] = match_idx
+        merged_name_key = normalize_name(merged[match_idx].name)
+        if merged_name_key and match_idx not in name_index[merged_name_key]:
+            name_index[merged_name_key].append(match_idx)
     return merged
 
 

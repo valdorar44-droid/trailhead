@@ -786,13 +786,27 @@ function normalizeRouteBrief(brief: RouteBrief | null | undefined, trip: TripRes
   };
 }
 
+function stripClippedTail(value: string): string {
+  const markerMatch = value.match(/(?:\.{3,}|…)\s*$/);
+  if (!markerMatch || markerMatch.index == null) return value;
+  const before = value.slice(0, markerMatch.index).trim();
+  const sentenceBreak = Math.max(before.lastIndexOf('. '), before.lastIndexOf('! '), before.lastIndexOf('? '));
+  if (sentenceBreak > 120) return before.slice(0, sentenceBreak + 1).trim();
+  return before;
+}
+
 function cleanCampDescriptionText(value?: string | null): string {
-  return String(value ?? '')
+  const decoded = String(value ?? '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
     .replace(/&quot;/gi, '"')
-    .replace(/&#39;/gi, "'")
+    .replace(/&#39;/gi, "'");
+  return stripClippedTail(decoded)
+    .replace(/…/g, '.')
+    .replace(/\.{3,}/g, '.')
+    .replace(/([.!?])\s+(?:Recreation|Facilities|Nearby Attractions|Natural Features)\s+(?=[A-Z][a-z])/g, '$1 ')
+    .replace(/^(?:Recreation|Facilities|Nearby Attractions|Natural Features)\s+(?=[A-Z][a-z])/i, '')
     .replace(/\s+/g, ' ')
     .replace(/^(about|overview|summary)\s*[:\-–—]?\s*/i, '')
     .trim();
@@ -809,7 +823,7 @@ function compactText(value: string, max = 520): string {
   if (cleaned.length <= max) return cleaned;
   const clipped = cleaned.slice(0, max - 1);
   const cut = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf(' '));
-  return `${clipped.slice(0, cut > 220 ? cut : max - 1).trim()}...`;
+  return clipped.slice(0, cut > 220 ? cut : max - 1).trim();
 }
 
 function ExpandableDetailText({
@@ -829,19 +843,27 @@ function ExpandableDetailText({
   const [expanded, setExpanded] = useState(false);
   if (!cleaned) return null;
   const shouldClamp = cleaned.length > previewChars;
-  const preview = shouldClamp && !expanded ? `${cleaned.slice(0, previewChars).replace(/\s+\S*$/, '').trim()}...` : cleaned;
+  const preview = shouldClamp && !expanded ? previewCampDetailText(cleaned, previewChars) : cleaned;
   return (
     <View>
-      <Text style={style} numberOfLines={expanded ? undefined : previewLines}>{preview}</Text>
+      <Text style={style}>{preview}</Text>
       {shouldClamp ? (
         <TouchableOpacity style={{ alignSelf: 'flex-start', marginTop: 7 }} onPress={() => setExpanded(value => !value)} activeOpacity={0.78}>
           <Text style={{ color: linkColor, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 }}>
-            {expanded ? 'LESS' : 'MORE'}
+            {expanded ? 'Less' : 'More'}
           </Text>
         </TouchableOpacity>
       ) : null}
     </View>
   );
+}
+
+function previewCampDetailText(cleaned: string, max: number): string {
+  if (cleaned.length <= max) return cleaned;
+  const clipped = cleaned.slice(0, max);
+  const sentenceBreak = Math.max(clipped.lastIndexOf('. '), clipped.lastIndexOf('! '), clipped.lastIndexOf('? '));
+  if (sentenceBreak > Math.min(220, max * 0.45)) return clipped.slice(0, sentenceBreak + 1).trim();
+  return clipped.replace(/\s+\S*$/, '').trim();
 }
 
 function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | null): string {
@@ -872,6 +894,31 @@ function uniqueCleanLabels(values: Array<string | undefined | null>): string[] {
     const label = canonicalCampFeatureLabel(cleanDisplayLabel(value || ''));
     if (!label) continue;
     const key = label.toLowerCase();
+    if (
+      key === 'trailhead'
+      || key === 'trailhead explore'
+      || key === 'recent dispersed spot'
+      || key === 'source data'
+      || key === 'map data'
+      || key === 'available source data'
+      || key === 'osm'
+      || key === 'openstreetmap'
+      || key === 'open street map'
+      || key === 'recreation.gov'
+      || key === 'recreation gov'
+      || key === 'national park service'
+      || key === 'nps'
+      || key === 'us forest service'
+      || key === 'u.s. forest service'
+      || key === 'usfs'
+      || key === 'mapbox'
+      || key === 'geoapify'
+      || key === 'state'
+      || key === 'federal'
+      || key === 'public'
+    ) {
+      continue;
+    }
     if (seen.has(key)) continue;
     seen.add(key);
     out.push(label);
@@ -3045,9 +3092,9 @@ function mapWaterNavigationPlace(props: Record<string, any>, lat: number, lng: n
     category: 'water',
     subtype,
     source: 'openseamap',
-    source_label: String(props.source || 'OpenStreetMap / OpenSeaMap'),
-    source_badge: 'OpenSeaMap / OSM',
-    source_freshness: String(props.source_freshness || 'Open seamark data; verify against official charts and local markers.'),
+    source_label: String(props.source || 'Water markers'),
+    source_badge: 'Water markers',
+    source_freshness: String(props.source_freshness || 'Water marker data; verify against official charts and local markers.'),
     waterbody_name: name,
     waterbody_type: 'navigation',
     access: 'verify locally',
@@ -4351,7 +4398,7 @@ const buildMapHtml = (
       if(!isFinite(lat)||!isFinite(lng)){lat=lngLat.lat;lng=lngLat.lng;}
       var type=renderedPlaceType(p);
       var subtype=String(p.maki||p.poi_category||p.category||p.class||p.feature_type||p.icon||p.symbol||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim()||renderedPlaceLabel(type);
-      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:type,subtype:subtype,source:'rendered_mapbox_standard',selection_source:'rendered_mapbox_standard',source_label:renderedPlaceLabel(type),source_layer:lid,feature_id:p.mapbox_id||p.id,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,mapbox_id:p.mapbox_id||p.id,source_badge:'Mapbox basemap',enrichment_source:'mapbox_standard',enrichment_status:'pending',raw_feature:{id:f&&f.id,layer:f&&f.layer,source:f&&f.source,sourceLayer:f&&f.sourceLayer,properties:p,geometry:f&&f.geometry}};
+      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:type,subtype:subtype,source:'rendered_mapbox_standard',selection_source:'rendered_mapbox_standard',source_label:renderedPlaceLabel(type),source_layer:lid,feature_id:p.mapbox_id||p.id,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,mapbox_id:p.mapbox_id||p.id,source_badge:'Map data',enrichment_source:'mapbox_standard',enrichment_status:'pending',raw_feature:{id:f&&f.id,layer:f&&f.layer,source:f&&f.source,sourceLayer:f&&f.sourceLayer,properties:p,geometry:f&&f.geometry}};
     }
     function pickRenderedPlaceFeature(features,lngLat){
       if(!features||!features.length)return null;
@@ -4373,7 +4420,7 @@ const buildMapHtml = (
           var navFs=map.queryRenderedFeatures(e.point,{layers:['water-nav-aid','water-nav-code','water-nav-line']});
           if(navFs&&navFs.length){
             var nf=navFs[0], np=nf.properties||{}, nc=(nf.geometry&&nf.geometry.type==='Point'&&nf.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];
-            postRN({type:'poi_tapped',poi:Object.assign({},np,{id:np.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:nc[1]||e.lngLat.lat,lng:nc[0]||e.lngLat.lng,type:'water',category:'water',subtype:np.subtype||np.kind||'channel_marker',source:'openseamap',source_label:np.source||'OpenStreetMap / OpenSeaMap',source_badge:'OpenSeaMap / OSM',navigation_feature:np.navigation_feature||np.label||np.seamark_type||np.kind,navigation_note:np.navigation_note||'Open seamark data only. Verify against official charts, local markers, water levels, and weather.'})});
+            postRN({type:'poi_tapped',poi:Object.assign({},np,{id:np.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:nc[1]||e.lngLat.lat,lng:nc[0]||e.lngLat.lng,type:'water',category:'water',subtype:np.subtype||np.kind||'channel_marker',source:'openseamap',source_label:np.source||'Water markers',source_badge:'Water markers',navigation_feature:np.navigation_feature||np.label||np.seamark_type||np.kind,navigation_note:np.navigation_note||'Water marker data only. Verify against official charts, local markers, water levels, and weather.'})});
             return;
           }
           var safeWaterFs=map.queryRenderedFeatures(e.point,{layers:['water-poly','water-river']});
@@ -4421,6 +4468,11 @@ const buildMapHtml = (
         // 4. Generic rendered labels/icons — classic MapLibre/Protomaps/Mapbox places.
         var genericPoi=pickRenderedPlaceFeature([].concat(ptFs||[],boxFs||[]),e.lngLat);
         if(genericPoi){
+          if(genericPoi.type==='camp'){
+            var camp={id:genericPoi.id||('rendered_camp:'+genericPoi.lat.toFixed(5)+':'+genericPoi.lng.toFixed(5)),name:genericPoi.name||'Campground',lat:genericPoi.lat,lng:genericPoi.lng,tags:['camp','campground'],land_type:genericPoi.subtype||'Campground',description:'Check current access, rules, road conditions, and stay limits before relying on it.',reservable:false,cost:'',url:genericPoi.website||'',ada:false,source:'rendered_mapbox_standard',verified_source:'Campground',source_badge:'Campground',provider_place_id:genericPoi.provider_place_id||genericPoi.place_id||genericPoi.id,place_id:genericPoi.place_id||genericPoi.provider_place_id||genericPoi.id};
+            postRN({type:'campsite_tapped',id:camp.id,name:camp.name,camp:camp});
+            return;
+          }
           postRN({type:'map_feature_selected',poi:genericPoi});
           return;
         }
@@ -4507,7 +4559,7 @@ const buildMapHtml = (
     map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
     map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties||{};postRN({type:'poi_tapped',poi:{id:p.id||('fuel:'+e.lngLat.lat.toFixed(5)+':'+e.lngLat.lng.toFixed(5)),name:p.name||'Fuel',lat:e.lngLat.lat,lng:e.lngLat.lng,type:'fuel',subtype:'fuel station',source:'fuel',source_label:'Fuel'}});e.preventDefault();});
     map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties||{};var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'poi_tapped',poi:Object.assign({},raw,{id:raw.id||p.id||((p.type||'poi')+':'+e.lngLat.lat.toFixed(5)+':'+e.lngLat.lng.toFixed(5)),lat:raw.lat||e.lngLat.lat,lng:raw.lng||e.lngLat.lng,name:raw.name||p.name||'Place',type:raw.type||p.type||'poi',subtype:raw.subtype||p.subtype||'',source:raw.source||'trailhead_poi',source_label:raw.source_label||raw.source_badge||'Trailhead place'})});e.preventDefault();});
-    function postWaterNavFeature(e){if(!e.features||!e.features[0])return;var f=e.features[0],p=f.properties||{},cc=(f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];postRN({type:'poi_tapped',poi:Object.assign({},p,{id:p.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:cc[1]||e.lngLat.lat,lng:cc[0]||e.lngLat.lng,type:'water',category:'water',subtype:p.subtype||p.kind||'channel_marker',source:'openseamap',source_label:p.source||'OpenStreetMap / OpenSeaMap',source_badge:'OpenSeaMap / OSM',navigation_feature:p.navigation_feature||p.label||p.seamark_type||p.kind,navigation_note:p.navigation_note||'Open seamark data only. Verify against official charts, local markers, water levels, and weather.'})});e.preventDefault();}
+    function postWaterNavFeature(e){if(!e.features||!e.features[0])return;var f=e.features[0],p=f.properties||{},cc=(f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];postRN({type:'poi_tapped',poi:Object.assign({},p,{id:p.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:cc[1]||e.lngLat.lat,lng:cc[0]||e.lngLat.lng,type:'water',category:'water',subtype:p.subtype||p.kind||'channel_marker',source:'openseamap',source_label:p.source||'Water markers',source_badge:'Water markers',navigation_feature:p.navigation_feature||p.label||p.seamark_type||p.kind,navigation_note:p.navigation_note||'Water marker data only. Verify against official charts, local markers, water levels, and weather.'})});e.preventDefault();}
     map.on('click','water-nav-line',postWaterNavFeature);
     map.on('click','water-nav-aid',postWaterNavFeature);
     map.on('click','water-nav-code',postWaterNavFeature);
@@ -5210,16 +5262,101 @@ function PremiumActionButton({
 function userFacingCampNote(text?: string | null) {
   if (!text) return '';
   return String(text)
-    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Official Recreation.gov data. ')
-    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'Official BLM recreation data. ')
-    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Available source data. ')
-    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Available camp data. ')
-    .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, 'OpenStreetMap data. ')
-    .replace(/data packaged by Trailhead;?\s*/gi, 'source data. ')
+    .replace(/Official RIDB fee text;?\s*/gi, '')
+    .replace(/Official Recreation\.gov fee text;?\s*/gi, '')
+    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Recreation.gov listing. ')
+    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'BLM recreation listing. ')
+    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Recent listing. ')
+    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Camp listing. ')
+    .replace(/Trailhead links to the official Recreation\.gov campground page\.?\s*Checkout stays on Recreation\.gov\.?/gi, 'Reserve on Recreation.gov when available.')
+    .replace(/Trailhead links to official Recreation\.gov booking and availability\.?\s*Checkout stays on Recreation\.gov\.?/gi, 'Reserve on Recreation.gov when available.')
+    .replace(/Recreation\.gov does not expose live checkout pricing for this card\.?/gi, 'Check Recreation.gov for current pricing.')
+    .replace(/does not expose live checkout pricing(?: for this card)?\.?/gi, 'Check Recreation.gov for current pricing.')
+    .replace(/Community-mapped OpenStreetMap camp data/gi, 'Community-mapped campsite.')
+    .replace(/OpenStreetMap camp data/gi, 'Community-mapped campsite.')
+    .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, 'Community map listing. ')
+    .replace(/data packaged by Trailhead;?\s*/gi, 'listing. ')
     .replace(/cached by Trailhead;?\s*/gi, '')
+    .replace(/\bOpenStreetMap data\b/gi, 'Community map listing')
+    .replace(/\bRIDB\b/gi, 'Recreation.gov')
+    .replace(/^(?:Recreation\.gov|Recreation gov)\s*[:;,-]?\s*Check Recreation\.gov/gi, 'Check Recreation.gov')
+    .replace(/\bsource data\b/gi, 'listing')
+    .replace(/\bfee text\b/gi, 'fee')
+    .replace(/Community-mapped campsite\.?\s+verify\b/gi, 'Community-mapped campsite. Verify')
+    .replace(/^verify\b/i, 'Verify')
     .replace(/\.\s*verify\b/g, '. Verify')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function userFacingCampFeeText(text?: string | null) {
+  return userFacingCampNote(text)
+    .replace(/;\s*verify current price on Recreation\.gov\.?/i, '')
+    .replace(/;\s*check Recreation\.gov for current pricing\.?/i, '')
+    .replace(/^Listed fee\s*:\s*/i, 'Listed fee: ')
+    .replace(/^Current fee\s*:\s*/i, 'Current fee: ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function campSourceDisplayLabel(text?: string | null, fallback = 'Details') {
+  const label = cleanDisplayLabel(String(text || '').replace(/\bsignal\b/gi, '').trim());
+  if (!label) return fallback;
+  const key = label.toLowerCase();
+  if (key.includes('recent dispersed spot')) return 'Recently checked';
+  if (key === 'trailhead') return fallback;
+  if (key.includes('openstreetmap') || key === 'osm') return fallback === 'Camp profile' ? 'Campsite' : 'Map contributors';
+  if (key.includes('ridb') || key.includes('recreation.gov') || key.includes('recreation gov')) return 'Recreation.gov';
+  if (key.includes('bureau of land management') || key === 'blm') return 'BLM';
+  if (key.includes('forest service') || key === 'usfs') return 'US Forest Service';
+  if (key.includes('national park service') || key === 'nps') return 'National Park Service';
+  if (key.includes('source') || key.includes('data') || key.includes('cached')) return fallback;
+  return label;
+}
+
+function campBadgeLabel(text?: string | null, fallback = 'Camp') {
+  const label = cleanDisplayLabel(String(text || '').replace(/_/g, ' ').trim());
+  return label || fallback;
+}
+
+function campDisplayName(name?: string | null, fallback = 'Campground') {
+  const clean = String(name || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return fallback;
+  const hasLowercase = /[a-z]/.test(clean);
+  if (hasLowercase || clean.length < 4) return clean;
+  return clean
+    .toLowerCase()
+    .split(/(\s+|-|\/)/)
+    .map(part => {
+      if (/^\s+$|^[-/]$/.test(part)) return part;
+      const upper = part.toUpperCase();
+      if (['RV', 'BLM', 'USFS', 'NPS', 'OHV', 'KOA'].includes(upper)) return upper;
+      return part.replace(/^[a-z]/, char => char.toUpperCase());
+    })
+    .join('');
+}
+
+function campSiteMetaLabel(text?: string | null): string {
+  return campDisplayName(cleanDisplayLabel(String(text || '').replace(/_/g, ' ')), '');
+}
+
+const CAMP_DETAIL_NOTE_ROWS = [
+  { key: 'access_notes', title: 'Access' },
+  { key: 'bail_out_notes', title: 'Alternate plans' },
+  { key: 'stay_limit', title: 'Stay limit' },
+  { key: 'reservation_notes', title: 'Reservations', transform: userFacingCampNote },
+  { key: 'source_confidence_notes', title: 'Recent check', transform: userFacingCampNote },
+  { key: 'max_rig_length', title: 'Max vehicle length' },
+] as const;
+
+function campDetailNoteRows(detail: CampsiteDetail) {
+  return CAMP_DETAIL_NOTE_ROWS
+    .map(row => {
+      const value = (detail as any)?.[row.key];
+      const text = 'transform' in row ? row.transform(value) : value;
+      return { title: row.title, text };
+    })
+    .filter(item => !!String(item.text || '').trim());
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -6504,6 +6641,12 @@ function MapScreen() {
     api.getNearbyPins(target.lat, target.lng, radiusDeg)
       .then(setCommunityPins)
       .catch(() => {});
+    const canLoadDispersedLeads = Boolean(user?.is_admin || user?.map_contributor?.approved);
+    if (!canLoadDispersedLeads) {
+      setDispersedLeadAccess(null);
+      setDispersedLeadPins([]);
+      return;
+    }
     api.getDispersedLeadsNearby(target.lat, target.lng, Math.min(65, Math.max(12, radiusDeg * 55)), 80)
       .then(res => {
         setDispersedLeadAccess(res.access);
@@ -6515,7 +6658,7 @@ function MapScreen() {
           setDispersedLeadPins([]);
         }
       });
-  }, [userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [user?.is_admin, user?.map_contributor?.approved, userLoc?.lat, userLoc?.lng, waypoints]);
 
   // ── Location watch ──────────────────────────────────────────────────────────
 
@@ -7229,19 +7372,74 @@ function MapScreen() {
     return String(p.id || `${p.type || 'poi'}:${p.name || ''}:${Number(p.lat).toFixed(4)}:${Number(p.lng).toFixed(4)}`);
   }
 
+  function campMapClusterName(value: unknown) {
+    return String(value || '')
+      .toLowerCase()
+      .replace(/\([^)]*\)/g, ' ')
+      .replace(/\b(group|standard|tent|rv|primitive|walk[- ]?in|drive[- ]?in|single|double|site|loop|area|unit|campground|camp\s*ground|campsite|camp\s*site)\b/g, ' ')
+      .replace(/[^a-z0-9]+/g, '')
+      .slice(0, 42);
+  }
+
+  function campMapSourceRank(camp: Partial<CampsitePin> | null | undefined) {
+    const source = String((camp as any)?.source_badge || camp?.verified_source || camp?.source || '').toLowerCase();
+    if (/trailhead|recreation\.gov|nps|national park/.test(source)) return 0;
+    if (/blm|bureau of land management|usfs|forest service|national forest/.test(source)) return 1;
+    if (/reserveamerica|active/.test(source)) return 2;
+    if (/openstreetmap|osm|open data|department of conservation/.test(source)) return 3;
+    if (/mapbox|geoapify|google|foursquare/.test(source)) return 5;
+    return 4;
+  }
+
+  function mergeCampPinForMap(existing: CampsitePin, incoming: CampsitePin): CampsitePin {
+    const primary = campMapSourceRank(incoming) < campMapSourceRank(existing) ? incoming : existing;
+    const secondary = primary === incoming ? existing : incoming;
+    const alternateSources = Array.from(new Set([
+      ...(((existing as any).alternate_sources || []) as string[]),
+      ...(((incoming as any).alternate_sources || []) as string[]),
+      existing.source_badge || existing.verified_source || existing.source,
+      incoming.source_badge || incoming.verified_source || incoming.source,
+    ].filter(Boolean).map(String)));
+    return {
+      ...secondary,
+      ...primary,
+      photo_url: primary.photo_url || secondary.photo_url,
+      photos: (primary as any).photos?.length ? (primary as any).photos : (secondary as any).photos,
+      description: primary.description || secondary.description,
+      summary: (primary as any).summary || (secondary as any).summary,
+      address: (primary as any).address || (secondary as any).address,
+      phone: (primary as any).phone || (secondary as any).phone,
+      url: primary.url || (primary as any).official_url || (primary as any).booking_url || secondary.url || (secondary as any).official_url || (secondary as any).booking_url,
+      tags: Array.from(new Set([...(existing.tags || []), ...(incoming.tags || [])].filter(Boolean).map(String))),
+      amenities: Array.from(new Set([...(existing.amenities || []), ...(incoming.amenities || [])].filter(Boolean).map(String))),
+      site_types: Array.from(new Set([...(existing.site_types || []), ...(incoming.site_types || [])].filter(Boolean).map(String))),
+      alternate_sources: alternateSources,
+    } as CampsitePin;
+  }
+
   function campKey(camp: Pick<CampsitePin, 'id' | 'name' | 'lat' | 'lng'>) {
-    return String(camp.id || `${camp.name || 'camp'}:${Number(camp.lat).toFixed(4)}:${Number(camp.lng).toFixed(4)}`);
+    const lat = Number(camp.lat);
+    const lng = Number(camp.lng);
+    const name = campMapClusterName(camp.name) || 'camp';
+    if (Number.isFinite(lat) && Number.isFinite(lng)) {
+      return `${name}:${lat.toFixed(3)}:${lng.toFixed(3)}`;
+    }
+    return String(camp.id || `${name}:unknown`);
   }
 
   function mergeCampPinsForMap(lists: Array<Array<CampsitePin | null | undefined>>, limit = 520) {
-    const seen = new Set<string>();
+    const byKey = new Map<string, number>();
     const merged: CampsitePin[] = [];
     for (const list of lists) {
       for (const camp of list) {
         if (!camp || camp.lat == null || camp.lng == null || !Number.isFinite(Number(camp.lat)) || !Number.isFinite(Number(camp.lng))) continue;
         const key = campKey(camp);
-        if (seen.has(key)) continue;
-        seen.add(key);
+        const existingIndex = byKey.get(key);
+        if (existingIndex != null) {
+          merged[existingIndex] = mergeCampPinForMap(merged[existingIndex], camp);
+          continue;
+        }
+        byKey.set(key, merged.length);
         merged.push(camp);
         if (merged.length >= limit) return merged;
       }
@@ -15262,7 +15460,10 @@ function MapScreen() {
       }
       if (msg.type === 'poi_tapped') {
         const rawPoi = msg.poi as OsmPoi;
-        if (rawPoi?.type === 'water' && rawPoi?.source === 'openseamap') {
+        const campPin = renderedPoiToCampPin(rawPoi);
+        if (campPin) {
+          openCampFromDiscovery(campPin);
+        } else if (rawPoi?.type === 'water' && rawPoi?.source === 'openseamap') {
           openPoiFeature(mapWaterNavigationPlace(rawPoi as any, Number(rawPoi.lat), Number(rawPoi.lng)));
         } else {
           openPoiFeature(rawPoi);
@@ -15270,7 +15471,9 @@ function MapScreen() {
       }
       if (msg.type === 'map_feature_selected') {
         const rawPoi = msg.poi as OsmPoi;
-        if (rawPoi) openPoiFeature(rawPoi);
+        const campPin = renderedPoiToCampPin(rawPoi);
+        if (campPin) openCampFromDiscovery(campPin);
+        else if (rawPoi) openPoiFeature(rawPoi);
       }
       if (msg.type === 'waterbody_tapped' && Number.isFinite(Number(msg.lat)) && Number.isFinite(Number(msg.lng))) {
         openPoiFeature(mapWaterbodyPlace(Number(msg.lat), Number(msg.lng), msg.name, msg.kind));
@@ -16821,9 +17024,40 @@ function MapScreen() {
     };
   }
 
+  function renderedPoiToCampPin(poi?: OsmPoi | null): CampsitePin | null {
+    if (!poi) return null;
+    const lat = Number(poi.lat);
+    const lng = Number(poi.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+    const text = [
+      poi.type,
+      poi.subtype,
+      (poi as any).source_label,
+      (poi as any).source_badge,
+      poi.name,
+    ].filter(Boolean).join(' ').toLowerCase();
+    if (/\b(campus|summer camp|boot camp|training camp|campbell)\b/.test(text)) return null;
+    if (!/\b(camp|campground|camping|campsite|caravan|rv park|rv resort|informal_camp|wild_camp)\b/.test(text)) return null;
+    const pin = mapTileCampPin(poi.name || 'Campground', String(poi.subtype || poi.type || 'camp_site'), lat, lng, poi.subtype || 'Campground');
+    return {
+      ...pin,
+      id: String(poi.id || pin.id),
+      source: String((poi as any).source || 'rendered_map'),
+      verified_source: 'Campground',
+      source_badge: 'Campground',
+      provider_place_id: String((poi as any).provider_place_id || (poi as any).place_id || poi.id || ''),
+      place_id: String((poi as any).place_id || (poi as any).provider_place_id || poi.id || ''),
+      url: String((poi as any).website || (poi as any).url || ''),
+    };
+  }
+
   function openMapTileCamp(name: string, kind: string, lat: number, lng: number, landType?: string) {
     const pin = mapTileCampPin(name, kind, lat, lng, landType);
     const isTrailhead = String(kind || '').toLowerCase() === 'trailhead' || /trailhead/i.test(`${landType || ''} ${pin.name || ''}`);
+    if (!isTrailhead) {
+      openCampFromDiscovery(pin);
+      return;
+    }
     openPoiFeature({
       id: pin.id,
       name: pin.name,
@@ -18483,15 +18717,15 @@ function MapScreen() {
   ];
   const layerSheetItems = [
     { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat view' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
-    { key: 'lands', label: 'Public Land', sub: 'BLM / USFS / parks tint', icon: 'map-outline', val: showLands, color: '#22c55e', onPress: () => toggleLandOverlay(!showLands) },
-    { key: 'usgs', label: 'USGS Topo', sub: 'Topo contours and trails', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
+    { key: 'lands', label: 'Public Land', sub: 'Boundaries and public areas', icon: 'map-outline', val: showLands, color: '#22c55e', onPress: () => toggleLandOverlay(!showLands) },
+    { key: 'usgs', label: 'Topo Lines', sub: 'Contours and trail context', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
     { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', onPress: () => togglePoiOverlay(!showPois) },
     { key: 'trails', label: 'Trails & Dirt', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
     { key: 'nautical', label: 'Water Safety', sub: 'Markers and hazards', icon: 'boat-outline', val: layerNautical, color: '#0891b2', onPress: () => { if (layerNautical) { closeSafeWaterMode(); return; } setLayerNautical(true); toggleDataLayer('nautical', true); setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS]))); } },
-    { key: 'fire', label: 'Wildfire', sub: 'Active fire perimeters', icon: 'flame-outline', val: layerFire, color: '#ef4444', onPress: () => { const next = !layerFire; setLayerFire(next); toggleDataLayer('fire', next); } },
-    { key: 'ava', label: 'Avalanche', sub: 'Danger zones', icon: 'snow-outline', val: layerAva, color: '#3b82f6', onPress: () => { const next = !layerAva; setLayerAva(next); toggleDataLayer('ava', next); } },
-    { key: 'radar', label: 'Radar', sub: 'Rain radar', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', onPress: () => { const next = !layerRadar; setLayerRadar(next); toggleDataLayer('radar', next); } },
-    { key: 'mvum', label: 'Motor Access', sub: 'Seasonal road access', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
+    { key: 'fire', label: 'Wildfire', sub: 'Current fire areas', icon: 'flame-outline', val: layerFire, color: '#ef4444', onPress: () => { const next = !layerFire; setLayerFire(next); toggleDataLayer('fire', next); } },
+    { key: 'ava', label: 'Avalanche', sub: 'Snow danger areas', icon: 'snow-outline', val: layerAva, color: '#3b82f6', onPress: () => { const next = !layerAva; setLayerAva(next); toggleDataLayer('ava', next); } },
+    { key: 'radar', label: 'Radar', sub: 'Rain and storms', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', onPress: () => { const next = !layerRadar; setLayerRadar(next); toggleDataLayer('radar', next); } },
+    { key: 'mvum', label: 'Motor Access', sub: 'Seasonal roads', icon: 'car-outline', val: layerMvum, color: '#22c55e', onPress: () => { const next = !layerMvum; setLayerMvum(next); toggleDataLayer('mvum', next); } },
   ] as const;
   const mapboxStyleItems = mapboxStyleOptions.map(option => ({
     ...option,
@@ -18499,19 +18733,21 @@ function MapScreen() {
     onPress: () => {
       applyMapLayer('extreme');
       setPremiumMapStyle(option.id);
-      api.logExtremeLedger({
-        event_type: 'mapbox_style_selected',
-        surface: 'map_layers',
-        event_data: { style: option.id },
-      }).catch(() => {});
+      if (user?.id) {
+        api.logExtremeLedger({
+          event_type: 'mapbox_style_selected',
+          surface: 'map_layers',
+          event_data: { style: option.id },
+        }).catch(() => {});
+      }
     },
   }));
   const extremeFeatureItems = [
-    { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain camera', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
+    { key: 'globe_terrain', label: map3dEnabled ? '2D Terrain' : 'Globe / 3D', sub: map3dEnabled ? 'Flatten camera' : 'Terrain view', icon: 'planet-outline', val: map3dEnabled, color: '#a3e635', enabled: true, onPress: () => toggleMap3d() },
     { key: 'search_box', label: 'Search', sub: 'Find places', icon: 'search-outline', val: inlineSearchOpen, color: '#38bdf8', enabled: !!extremeConfig?.enabled, onPress: () => { if (extremeConfig?.enabled) { setShowLayerSheet(false); openInlineMapSearch(); return; } setQuickToast('Search is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'directions', label: 'Directions', sub: searchRouteCard ? 'Preview selected route' : 'Choose destination', icon: 'navigate-outline', val: !!searchRouteCard, color: '#f97316', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { openExtremeDirections(); return; } setQuickToast('Directions are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
     { key: 'traffic', label: 'Traffic', sub: 'Congestion style', icon: 'git-merge-outline', val: extremeTrafficEnabled, color: '#ef4444', enabled: !!extremeConfig?.feature_flags?.navigation, onPress: () => { if (extremeConfig?.feature_flags?.navigation) { toggleExtremeTraffic(); return; } setQuickToast('Traffic is not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
-    { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar + route conditions' : 'Radar overlay', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('Weather layers are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
+    { key: 'weather', label: 'Weather', sub: extremeConfig?.weather?.mapbox_conditions_enabled ? 'Radar and route weather' : 'Radar view', icon: 'rainy-outline', val: layerRadar, color: '#06b6d4', enabled: !!extremeConfig?.feature_flags?.weather, onPress: () => { if (extremeConfig?.feature_flags?.weather) { openExtremeWeather(); return; } setQuickToast('Weather layers are not available on this account yet.'); setTimeout(() => setQuickToast(''), 2400); } },
   ] as const;
   const safeWaterLegendItems = [
     { color: '#f97316', label: '0-5 ft shallow structure' },
@@ -21916,7 +22152,7 @@ function MapScreen() {
                     : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
                         <Ionicons name={(selectedCamp.tags ?? []).includes('rv') ? 'car-outline' : (selectedCamp.tags ?? []).includes('dispersed') ? 'moon-outline' : 'bonfire-outline'} size={34} color={landColor(selectedCamp.land_type).text} />
                         <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
-                          {(selectedCamp.land_type || 'CAMP').toUpperCase().slice(0, 12)}
+                          {campBadgeLabel(selectedCamp.land_type).slice(0, 18)}
                         </Text>
                       </View>
                   }
@@ -21952,9 +22188,9 @@ function MapScreen() {
                   </View>
                   <View style={s.quickCardHeroText}>
                     <Text style={s.quickCardHeroKicker} numberOfLines={1}>
-                      {(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type || 'Trailhead camp').toUpperCase()}
+                      {campSourceDisplayLabel(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type, 'Campsite')}
                     </Text>
-                    <Text style={s.quickCardHeroTitle} numberOfLines={2}>{selectedCamp.name}</Text>
+                    <Text style={s.quickCardHeroTitle} numberOfLines={2}>{campDisplayName(selectedCamp.name)}</Text>
                     {(() => {
                       const weather = campWeather;
                       if (!weather?.daily?.time?.length) return null;
@@ -22017,21 +22253,21 @@ function MapScreen() {
                     onPress={() => handleFullnessVote('confirm')}
                     disabled={fullnessVoting}
                   >
-                    <Text style={s.fullnessStillFullText}>STILL FULL</Text>
+                    <Text style={s.fullnessStillFullText}>Still full</Text>
                   </TouchableOpacity>
                   <TouchableOpacity
                     style={[s.fullnessVoteBtn, s.fullnessOpen]}
                     onPress={() => handleFullnessVote('dispute')}
                     disabled={fullnessVoting}
                   >
-                    <Text style={s.fullnessOpenText}>IT'S OPEN</Text>
+                    <Text style={s.fullnessOpenText}>Open now</Text>
                   </TouchableOpacity>
                 </View>
               </View>
             ) : !privateLeadKeyFromCamp(selectedCamp, campDetail) ? (
               <TouchableOpacity style={s.reportFullBtn} onPress={handleReportFull} disabled={fullnessVoting}>
                 <Ionicons name="warning-outline" size={12} color="#f59e0b" />
-                <Text style={s.reportFullText}>REPORT CAMP FULL</Text>
+                <Text style={s.reportFullText}>Report</Text>
               </TouchableOpacity>
             ) : null}
             {activeTrip && (
@@ -22041,7 +22277,7 @@ function MapScreen() {
               >
                 <Ionicons name="add-circle-outline" size={13} color={C.green} />
                 <Text style={s.quickCardTripText}>
-                  USE FOR DAY {selectedDay ?? selectedCamp.recommended_day ?? activeTrip.plan.daily_itinerary[0]?.day ?? 1}
+                  Use for Day {selectedDay ?? selectedCamp.recommended_day ?? activeTrip.plan.daily_itinerary[0]?.day ?? 1}
                 </Text>
               </TouchableOpacity>
             )}
@@ -22060,16 +22296,16 @@ function MapScreen() {
               <>
 	                {summaryText ? (
 	                  <View style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>SUMMARY</Text>
+	                    <Text style={s.detailSectionTitle}>Summary</Text>
 	                    <ExpandableDetailText text={summaryText} style={s.detailDesc} linkColor={C.orange} />
 	                  </View>
 	                ) : null}
 	                {campDetail.provider_notices?.length ? (
 	                  <View style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>SOURCE NOTICES</Text>
+	                    <Text style={s.detailSectionTitle}>Updates</Text>
 	                    {campDetail.provider_notices.slice(0, 3).map((notice, idx) => (
 	                      <View key={`${notice.label || 'notice'}-${idx}`} style={s.campNoteCard}>
-	                        <Text style={s.campNoteTitle}>{notice.label || 'SOURCE NOTICE'}</Text>
+	                        <Text style={s.campNoteTitle}>{campSourceDisplayLabel(notice.label, 'Update')}</Text>
 	                        <ExpandableDetailText text={notice.text} style={s.campNoteText} linkColor={C.orange} previewChars={420} previewLines={4} />
 	                      </View>
 	                    ))}
@@ -22078,11 +22314,11 @@ function MapScreen() {
 
 	                {campDetail.price_summary?.label ? (
 	                  <View style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>PRICE</Text>
+	                    <Text style={s.detailSectionTitle}>Fees</Text>
 	                    <View style={s.campNoteCard}>
-	                      <Text style={s.campNoteTitle}>{campDetail.price_summary.source || 'RIDB PRICE SIGNAL'}</Text>
-	                      <Text style={s.campNoteText}>{campDetail.price_summary.label}</Text>
-	                      {!!campDetail.price_summary.freshness && <Text style={s.campNoteText}>{campDetail.price_summary.freshness}</Text>}
+	                      <Text style={s.campNoteTitle}>Current pricing</Text>
+	                      <Text style={s.campNoteText}>{userFacingCampFeeText(campDetail.price_summary.label)}</Text>
+	                      {!!campDetail.price_summary.freshness && <Text style={s.campNoteText}>{userFacingCampNote(campDetail.price_summary.freshness)}</Text>}
 	                    </View>
 	                  </View>
 	                ) : null}
@@ -22091,7 +22327,7 @@ function MapScreen() {
 	                  const coverage = campMobileCoverage(campDetail, selectedCamp);
 	                  return coverage ? (
 	                    <View style={s.detailSection}>
-	                      <Text style={s.detailSectionTitle}>MOBILE COVERAGE</Text>
+	                      <Text style={s.detailSectionTitle}>Mobile coverage</Text>
 	                      <View style={s.mobileCoverageCard}>
 	                        <View style={s.mobileCoverageTop}>
 	                          <Ionicons name="cellular-outline" size={16} color={C.blueGlow} />
@@ -22105,31 +22341,17 @@ function MapScreen() {
 	                  ) : null;
 	                })()}
 
-                {[
-                  { title: 'ACCESS NOTES', text: campDetail.access_notes },
-                  { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
-                  { title: 'STAY LIMIT', text: campDetail.stay_limit },
-                  { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                  { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
-                  { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
-                ].some(item => !!item.text) ? (
+                {campDetailNoteRows(campDetail).length ? (
                   <View style={s.detailSection}>
                     <View style={s.sectionTitleRow}>
-                      <Text style={s.detailSectionTitle}>FIELD NOTES</Text>
+                      <Text style={s.detailSectionTitle}>Notes</Text>
                       {user?.is_admin ? (
                         <TouchableOpacity onPress={() => openCampEdit('admin')}>
-                          <Text style={s.sectionEditText}>EDIT</Text>
+                          <Text style={s.sectionEditText}>Edit</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
-                    {[
-                      { title: 'ACCESS NOTES', text: campDetail.access_notes },
-                      { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
-                      { title: 'STAY LIMIT', text: campDetail.stay_limit },
-                      { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                      { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
-                      { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
-                    ].filter(item => !!item.text).map(item => (
+                    {campDetailNoteRows(campDetail).map(item => (
                       <View key={item.title} style={s.campNoteCard}>
                         <Text style={s.campNoteTitle}>{item.title}</Text>
                         <Text style={s.campNoteText}>{item.text}</Text>
@@ -22141,10 +22363,10 @@ function MapScreen() {
                 {featureItems.length > 0 ? (
                   <View style={s.detailSection}>
                     <View style={s.sectionTitleRow}>
-                      <Text style={s.detailSectionTitle}>FEATURES</Text>
+                      <Text style={s.detailSectionTitle}>Features</Text>
                       {user?.is_admin ? (
                         <TouchableOpacity onPress={() => openCampEdit('admin')}>
-                          <Text style={s.sectionEditText}>EDIT</Text>
+                          <Text style={s.sectionEditText}>Edit</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
@@ -22153,7 +22375,7 @@ function MapScreen() {
                       if (!items.length) return null;
                       return (
                         <View key={bucket} style={s.featureGroup}>
-                          <Text style={s.featureGroupTitle}>{bucket === 'campers' ? 'FOR CAMPERS' : 'FOR VEHICLES'}</Text>
+                          <Text style={s.featureGroupTitle}>{bucket === 'campers' ? 'For campers' : 'For vehicles'}</Text>
                           <View style={s.featureGrid}>
                             {items.map(a => (
                               <View key={a} style={s.featureItem}>
@@ -22172,7 +22394,7 @@ function MapScreen() {
                   <View style={s.detailSection}>
                     {siteTypeItems.length > 0 ? (
                       <>
-                        <Text style={s.detailSectionTitle}>SITE TYPES</Text>
+                        <Text style={s.detailSectionTitle}>Site types</Text>
                         <View style={s.featureGrid}>
                           {siteTypeItems.map(st => (
                             <View key={st} style={s.featureItem}>
@@ -22191,15 +22413,15 @@ function MapScreen() {
 
 	                {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
 	                  <View style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>SITES</Text>
+	                    <Text style={s.detailSectionTitle}>Sites</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                       {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
-	                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0] || campDetail.photo_url || campDetail.photos?.[0]);
+                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0] || campDetail.photo_url || campDetail.photos?.[0]);
                         const meta = [
-                          site.type,
+                          campSiteMetaLabel(site.type),
                           site.max_people ? `${site.max_people} people` : '',
                           site.equipment_length ? `${site.equipment_length} ft` : '',
-                          site.surface,
+                          campSiteMetaLabel(site.surface),
                           site.accessible ? 'ADA' : '',
                         ].filter(Boolean).join(' · ');
 	                        const siteCardId = site.map_card_id || (campDetail.id && site.id ? `ridb_site:${campDetail.id}:${site.id}` : site.id);
@@ -22218,8 +22440,8 @@ function MapScreen() {
                               </View>
                             )}
                             <View style={s.siteBody}>
-                              <Text style={s.siteName} numberOfLines={2}>{site.name || `Site ${idx + 1}`}</Text>
-	                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
+                              <Text style={s.siteName} numberOfLines={2}>{campDisplayName(site.name, `Site ${idx + 1}`)}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{meta || campSourceDisplayLabel(site.source_badge, 'Recreation.gov site')}</Text>
 	                            </View>
 	                          </TouchableOpacity>
 	                        );
@@ -22229,7 +22451,7 @@ function MapScreen() {
 	                ) : null}
 
                 <CampCoordinatesSection
-                  title="COORDINATES"
+                  title="Coordinates"
                   lat={campDetail.lat}
                   lng={campDetail.lng}
                   onCopy={() => copyCoordinates(campDetail.lat, campDetail.lng)}
@@ -22270,8 +22492,8 @@ function MapScreen() {
 
                 {(campInsight || loadingInsight) ? (
                   <CampInsightSection
-                    title="CAMP INSIGHT"
-                    nearbyTitle="NEARBY"
+                    title="Camp guide"
+                    nearbyTitle="Nearby"
                     insight={campInsight}
                     loading={loadingInsight}
                     showLoadingSpinner
@@ -22279,12 +22501,12 @@ function MapScreen() {
 	                ) : hasPlan ? (
 	                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
 	                    <Ionicons name="sparkles-outline" size={15} color={C.orange} />
-	                    <Text style={s.lockedInlineText}>Check camp fit, hazards, and nearby highlights.</Text>
+	                    <Text style={s.lockedInlineText}>Check fit, hazards, and nearby highlights.</Text>
 	                  </TouchableOpacity>
 	                ) : (
 	                  <TouchableOpacity style={s.lockedAiPreview} onPress={() => openCampInsight(selectedCamp, campDetail)} activeOpacity={0.9}>
 	                    <View style={s.lockedAiPreviewTop}>
-	                      <Text style={s.detailSectionTitle}>Camp insight</Text>
+	                      <Text style={s.detailSectionTitle}>Camp guide</Text>
                       <View style={s.lockedAiBadge}>
                         <Ionicons name="lock-closed-outline" size={12} color={C.orange} />
                         <Text style={s.lockedAiBadgeText}>Unlock</Text>
@@ -22301,7 +22523,7 @@ function MapScreen() {
                     </View>
 	                    <View style={s.lockedAiOverlay}>
 	                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
-	                      <Text style={s.lockedAiOverlayText}>Explorer includes camp fit, hazards, best season, and nearby highlights.</Text>
+	                      <Text style={s.lockedAiOverlayText}>Check fit, hazards, best season, and nearby highlights.</Text>
                     </View>
                   </TouchableOpacity>
                 )}
@@ -22312,28 +22534,28 @@ function MapScreen() {
               <View style={s.communityActionsGrid}>
                 <TouchableOpacity style={s.communityPrimaryAction} onPress={() => navigateToCamp(selectedCamp)}>
                   <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>NAVIGATE</Text>
+                  <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.communityActionBtn} onPress={openSelectedPrivateReviewEdit}>
                   <Ionicons name="create-outline" size={14} color={OVR.text2} />
-                  <Text style={s.communityActionText} numberOfLines={1}>EDIT</Text>
+                  <Text style={s.communityActionText} numberOfLines={1}>Edit</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.communityActionBtn} onPress={addSelectedPrivateReviewPhoto}>
                   <Ionicons name="camera-outline" size={14} color={OVR.text2} />
-                  <Text style={s.communityActionText} numberOfLines={1}>PHOTO</Text>
+                  <Text style={s.communityActionText} numberOfLines={1}>Photo</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.communityActionBtn} onPress={() => reviewSelectedPrivateReviewCamp('community_verified')}>
                   <Ionicons name="checkmark-circle-outline" size={14} color={OVR.text2} />
-                  <Text style={s.communityActionText} numberOfLines={1}>CHECKED</Text>
+                  <Text style={s.communityActionText} numberOfLines={1}>Checked</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewSelectedPrivateReviewCamp('rejected', 'Not found during field check')}>
                   <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
-                  <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>NOT FOUND</Text>
+                  <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>Not found</Text>
                 </TouchableOpacity>
                 {user?.is_admin && (
                   <TouchableOpacity style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={publishSelectedPrivateReviewCamp}>
                     <Ionicons name="shield-checkmark-outline" size={14} color={C.orange} />
-                    <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>PUBLISH</Text>
+                    <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>Publish</Text>
                   </TouchableOpacity>
                 )}
               </View>
@@ -22349,22 +22571,22 @@ function MapScreen() {
                 }}
               >
                 <Ionicons name="bonfire-outline" size={12} color={C.text2} />
-                <Text style={s.quickCardSecondaryText}>NEARBY CAMPS</Text>
+                <Text style={s.quickCardSecondaryText}>Nearby camps</Text>
               </TouchableOpacity>
               {!privateLeadKeyFromCamp(selectedCamp, campDetail) && (
                 <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={handleReportFull}>
                   <Ionicons name="warning-outline" size={12} color={C.text2} />
-                  <Text style={s.quickCardSecondaryText}>REPORT</Text>
+                  <Text style={s.quickCardSecondaryText}>Report</Text>
                 </TouchableOpacity>
               )}
               <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => privateLeadKeyFromCamp(selectedCamp, campDetail) ? openSelectedPrivateReviewEdit() : openCampEdit('suggest')}>
                 <Ionicons name="create-outline" size={12} color={C.text2} />
-                <Text style={s.quickCardSecondaryText}>EDIT</Text>
+                <Text style={s.quickCardSecondaryText}>Edit</Text>
               </TouchableOpacity>
               {!privateLeadKeyFromCamp(selectedCamp, campDetail) && !!campSourceUrl(campDetail || selectedCamp) && (
                 <TouchableOpacity style={s.quickCardSecondaryBtn} onPress={() => Linking.openURL(campSourceUrl(campDetail || selectedCamp))}>
                   <Ionicons name="open-outline" size={12} color={C.text2} />
-                  <Text style={s.quickCardSecondaryText}>OFFICIAL SOURCE</Text>
+                  <Text style={s.quickCardSecondaryText}>Open details</Text>
                 </TouchableOpacity>
               )}
             </View>
@@ -22398,9 +22620,9 @@ function MapScreen() {
                 </TouchableOpacity>
                 <View style={s.detailHeroText}>
                   <Text style={s.detailHeroKicker} numberOfLines={1}>
-                    {(campDetail.verified_source || campDetail.source || campDetail.land_type || 'Camp profile').toUpperCase()}
+                    {campSourceDisplayLabel(campDetail.verified_source || campDetail.source || campDetail.land_type, 'Camp profile')}
                   </Text>
-                  <Text style={s.detailHeroTitle} numberOfLines={2}>{campDetail.name}</Text>
+                  <Text style={s.detailHeroTitle} numberOfLines={2}>{campDisplayName(campDetail.name)}</Text>
                 </View>
               </View>
 
@@ -22409,23 +22631,23 @@ function MapScreen() {
                   {campDetail.verified_source || campDetail.source ? (
                     <View style={s.verifiedChip}>
                       <Ionicons name="checkmark-circle-outline" size={12} color={C.green} />
-                      <Text style={s.verifiedChipText}>{(campDetail.verified_source || campDetail.source || 'SOURCE').toUpperCase()}</Text>
+                      <Text style={s.verifiedChipText}>{campSourceDisplayLabel(campDetail.verified_source || campDetail.source, 'Checked')}</Text>
                     </View>
                   ) : null}
                   {campDetail.admin_edited ? (
                     <View style={s.verifiedChip}>
                       <Ionicons name="shield-checkmark-outline" size={12} color={C.green} />
-                      <Text style={s.verifiedChipText}>TRAILHEAD EDITED</Text>
+                      <Text style={s.verifiedChipText}>Updated</Text>
                     </View>
                   ) : null}
                   <TouchableOpacity style={s.editLinkBtn} onPress={() => openCampEdit('suggest')}>
                     <Ionicons name="create-outline" size={13} color={C.orange} />
-                    <Text style={s.editLinkText}>SUGGEST EDIT</Text>
+                    <Text style={s.editLinkText}>Suggest edit</Text>
                   </TouchableOpacity>
                   {user?.is_admin ? (
                     <TouchableOpacity style={s.editLinkBtn} onPress={() => openCampEdit('admin')}>
                       <Ionicons name="construct-outline" size={13} color={C.red} />
-                      <Text style={[s.editLinkText, { color: C.red }]}>ADMIN EDIT</Text>
+                      <Text style={[s.editLinkText, { color: C.red }]}>Admin edit</Text>
                     </TouchableOpacity>
                   ) : null}
                 </View>
@@ -22434,11 +22656,11 @@ function MapScreen() {
                 <View style={s.detailTags}>
                   {campDetail.land_type ? (
                     <View style={[s.detailLandBadge, { backgroundColor: landColor(campDetail.land_type).bg, borderColor: landColor(campDetail.land_type).border }]}>
-                      <Text style={[s.detailLandText, { color: landColor(campDetail.land_type).text }]}>{campDetail.land_type.toUpperCase()}</Text>
+                      <Text style={[s.detailLandText, { color: landColor(campDetail.land_type).text }]}>{campBadgeLabel(campDetail.land_type)}</Text>
                     </View>
                   ) : null}
                   {(campDetail.tags ?? []).map(cleanDisplayLabel).filter(Boolean).map(t => (
-                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{t.replace(/_/g, ' ').toUpperCase()}</Text></View>
+                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{campBadgeLabel(t)}</Text></View>
                   ))}
                   {campDetail.ada && (
                     <View style={[s.qTag, { borderColor: '#3b82f6', backgroundColor: '#eff6ff' }]}>
@@ -22457,10 +22679,10 @@ function MapScreen() {
 
 	                {campDetail.price_summary?.freshness ? (
 	                  <View style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>PRICE SOURCE</Text>
+	                    <Text style={s.detailSectionTitle}>Fees</Text>
 	                    <View style={s.campNoteCard}>
-	                      <Text style={s.campNoteTitle}>{campDetail.price_summary.source || 'RIDB PRICE SIGNAL'}</Text>
-	                      <Text style={s.campNoteText}>{campDetail.price_summary.freshness}</Text>
+	                      <Text style={s.campNoteTitle}>Current pricing</Text>
+	                      <Text style={s.campNoteText}>{userFacingCampNote(campDetail.price_summary.freshness)}</Text>
 	                    </View>
 	                  </View>
 	                ) : null}
@@ -22469,7 +22691,7 @@ function MapScreen() {
 	                  const coverage = campMobileCoverage(campDetail, selectedCamp);
 	                  return coverage ? (
 	                    <View style={s.detailSection}>
-	                      <Text style={s.detailSectionTitle}>MOBILE COVERAGE</Text>
+	                      <Text style={s.detailSectionTitle}>Mobile coverage</Text>
 	                      <View style={s.mobileCoverageCard}>
 	                        <View style={s.mobileCoverageTop}>
 	                          <Ionicons name="cellular-outline" size={16} color={C.blueGlow} />
@@ -22492,41 +22714,27 @@ function MapScreen() {
                 ) : null}
                 {campDetail.provider_notices?.length ? (
                   <View style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>Source notices</Text>
+                    <Text style={s.detailSectionTitle}>Updates</Text>
                     {campDetail.provider_notices.slice(0, 3).map((notice, idx) => (
                       <View key={`${notice.label || 'notice'}-${idx}`} style={s.campNoteCard}>
-                        <Text style={s.campNoteTitle}>{notice.label || 'SOURCE NOTICE'}</Text>
+                        <Text style={s.campNoteTitle}>{campSourceDisplayLabel(notice.label, 'Update')}</Text>
                         <ExpandableDetailText text={notice.text} style={s.campNoteText} linkColor={C.orange} previewChars={420} previewLines={4} />
                       </View>
                     ))}
                   </View>
                 ) : null}
 
-                {[
-                  { title: 'ACCESS NOTES', text: campDetail.access_notes },
-                  { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
-                  { title: 'STAY LIMIT', text: campDetail.stay_limit },
-                  { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                  { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
-                  { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
-                ].some(item => !!item.text) ? (
+                {campDetailNoteRows(campDetail).length ? (
                   <View style={s.detailSection}>
                     <View style={s.sectionTitleRow}>
-                      <Text style={s.detailSectionTitle}>FIELD NOTES</Text>
+                      <Text style={s.detailSectionTitle}>Notes</Text>
                       {user?.is_admin ? (
                         <TouchableOpacity onPress={() => openCampEdit('admin')}>
-                          <Text style={s.sectionEditText}>EDIT</Text>
+                          <Text style={s.sectionEditText}>Edit</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
-                    {[
-                      { title: 'ACCESS NOTES', text: campDetail.access_notes },
-                      { title: 'BAIL-OUT NOTES', text: campDetail.bail_out_notes },
-                      { title: 'STAY LIMIT', text: campDetail.stay_limit },
-                      { title: 'RESERVATION NOTES', text: campDetail.reservation_notes },
-                      { title: 'SOURCE NOTES', text: userFacingCampNote(campDetail.source_confidence_notes) },
-                      { title: 'MAX RIG LENGTH', text: campDetail.max_rig_length },
-                    ].filter(item => !!item.text).map(item => (
+                    {campDetailNoteRows(campDetail).map(item => (
                       <View key={item.title} style={s.campNoteCard}>
                         <Text style={s.campNoteTitle}>{item.title}</Text>
                         <Text style={s.campNoteText}>{item.text}</Text>
@@ -22539,10 +22747,10 @@ function MapScreen() {
                 {(campDetail.amenities ?? []).length > 0 && (
                   <View style={s.detailSection}>
                     <View style={s.sectionTitleRow}>
-                      <Text style={s.detailSectionTitle}>FEATURES</Text>
+                      <Text style={s.detailSectionTitle}>Features</Text>
                       {user?.is_admin ? (
                         <TouchableOpacity onPress={() => openCampEdit('admin')}>
-                          <Text style={s.sectionEditText}>EDIT</Text>
+                          <Text style={s.sectionEditText}>Edit</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
@@ -22551,7 +22759,7 @@ function MapScreen() {
                       if (!items.length) return null;
                       return (
                         <View key={bucket} style={s.featureGroup}>
-                          <Text style={s.featureGroupTitle}>{bucket === 'campers' ? 'FOR CAMPERS' : 'FOR VEHICLES'}</Text>
+                          <Text style={s.featureGroupTitle}>{bucket === 'campers' ? 'For campers' : 'For vehicles'}</Text>
                           <View style={s.featureGrid}>
                             {items.map(a => (
                               <View key={a} style={s.featureItem}>
@@ -22570,18 +22778,18 @@ function MapScreen() {
                 {(campDetail.site_types ?? []).length > 0 && (
                   <View style={s.detailSection}>
                     <View style={s.sectionTitleRow}>
-                      <Text style={s.detailSectionTitle}>SITE TYPES</Text>
+                      <Text style={s.detailSectionTitle}>Site types</Text>
                       {user?.is_admin ? (
                         <TouchableOpacity onPress={() => openCampEdit('admin')}>
-                          <Text style={s.sectionEditText}>EDIT</Text>
+                          <Text style={s.sectionEditText}>Edit</Text>
                         </TouchableOpacity>
                       ) : null}
                     </View>
                     <View style={s.featureGrid}>
-                      {(campDetail.site_types ?? []).map(cleanDisplayLabel).filter(Boolean).map(st => (
+                      {(campDetail.site_types ?? []).map(campSiteMetaLabel).filter(Boolean).map(st => (
                         <View key={st} style={s.featureItem}>
                           <Ionicons name={campOptionIcon(st)} size={24} color={C.green} />
-                          <Text style={s.featureText}>{cleanDisplayLabel(st)}</Text>
+                          <Text style={s.featureText}>{st}</Text>
                         </View>
                       ))}
                     </View>
@@ -22593,12 +22801,12 @@ function MapScreen() {
                     <Text style={s.detailSectionTitle}>Sites</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                       {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
-	                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0] || campDetail.photo_url || campDetail.photos?.[0]);
+                        const photo = campPhotoUrl(site.photo_url || site.photos?.[0] || campDetail.photo_url || campDetail.photos?.[0]);
                         const meta = [
-                          site.type,
+                          campSiteMetaLabel(site.type),
                           site.max_people ? `${site.max_people} people` : '',
                           site.equipment_length ? `${site.equipment_length} ft` : '',
-                          site.surface,
+                          campSiteMetaLabel(site.surface),
                           site.accessible ? 'ADA' : '',
                         ].filter(Boolean).join(' · ');
                         return (
@@ -22611,8 +22819,8 @@ function MapScreen() {
                               </View>
                             )}
                             <View style={s.siteBody}>
-                              <Text style={s.siteName} numberOfLines={2}>{site.name || `Site ${idx + 1}`}</Text>
-                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
+                              <Text style={s.siteName} numberOfLines={2}>{campDisplayName(site.name, `Site ${idx + 1}`)}</Text>
+                              <Text style={s.siteMeta} numberOfLines={2}>{meta || campSourceDisplayLabel(site.source_badge, 'Recreation.gov site')}</Text>
                             </View>
                           </View>
                         );
@@ -22640,7 +22848,7 @@ function MapScreen() {
 
 	                {/* Camp insight */}
                 <CampInsightSection
-                  title="Camp Insight"
+                  title="Camp guide"
                   nearbyTitle="Nearby"
                   insight={campInsight}
                   loading={loadingInsight}
@@ -22693,17 +22901,17 @@ function MapScreen() {
                   {campDetail.url && !campDetail.url.includes('openstreetmap.org/node') && (
                     <TouchableOpacity style={s.detailDirBtn} onPress={() => Linking.openURL(campDetail.url)}>
                       <Ionicons name="open-outline" size={16} color={C.orange} />
-                      <Text style={s.detailDirText}>OFFICIAL SOURCE</Text>
+                      <Text style={s.detailDirText}>Open details</Text>
                     </TouchableOpacity>
                   )}
                   <TouchableOpacity style={s.detailDirBtn} onPress={() => openExternalMaps(campDetail.lat, campDetail.lng, campDetail.name)}>
                     <Ionicons name="navigate-outline" size={16} color={C.orange} />
-                    <Text style={s.detailDirText}>GET DIRECTIONS</Text>
+                    <Text style={s.detailDirText}>Directions</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={[s.detailDirBtn, { borderColor: '#3b82f6' }]}
                     onPress={() => copyCoordinates(campDetail.lat, campDetail.lng)}>
                     <Ionicons name="copy-outline" size={16} color="#3b82f6" />
-                    <Text style={[s.detailDirText, { color: '#3b82f6' }]}>COPY GPS COORDS</Text>
+                    <Text style={[s.detailDirText, { color: '#3b82f6' }]}>Copy coordinates</Text>
                   </TouchableOpacity>
                 </View>
               </View>
@@ -24122,7 +24330,7 @@ function MapScreen() {
                         <Text style={s.campPickName} numberOfLines={2}>{camp.name}</Text>
                         <Text style={s.campPickMeta} numberOfLines={1}>
                           {[
-                            (camp.land_type || 'camp').toUpperCase(),
+                            campBadgeLabel(camp.land_type || 'camp'),
                             camp.route_distance_mi != null ? `${camp.route_distance_mi.toFixed(1)} mi off route` : '',
                             routeProgressLabel(camp.route_progress),
                             camp.cost || '',
@@ -24135,7 +24343,7 @@ function MapScreen() {
                         )}
                       </View>
                       <View style={s.campPickUse}>
-                        <Text style={s.campPickUseText}>USE</Text>
+                        <Text style={s.campPickUseText}>Use</Text>
                       </View>
                     </TouchableOpacity>
                   );
@@ -24218,7 +24426,7 @@ function MapScreen() {
                   }}
                 >
                   <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
+                  <Text style={s.wpSheetNavText}>Navigate here</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[s.wpSheetDayBtn, { borderColor: '#22c55e44' }]}
@@ -24233,7 +24441,7 @@ function MapScreen() {
                   }}
                 >
                   <Ionicons name="add-circle-outline" size={14} color="#22c55e" />
-                  <Text style={[s.wpSheetDayText, { color: '#22c55e' }]}>ADD NOTE</Text>
+                  <Text style={[s.wpSheetDayText, { color: '#22c55e' }]}>Add note</Text>
                 </TouchableOpacity>
                 <TouchableOpacity
                   style={[s.wpSheetDayBtn, { borderColor: C.orange + '44' }]}
@@ -24249,11 +24457,11 @@ function MapScreen() {
                   }}
                 >
                   <Ionicons name="bonfire-outline" size={14} color={C.orange} />
-                  <Text style={[s.wpSheetDayText, { color: C.orange }]}>NEARBY CAMPS</Text>
+                  <Text style={[s.wpSheetDayText, { color: C.orange }]}>Nearby camps</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedTrail(null)}>
                   <Ionicons name="close" size={14} color={OVR.text2} />
-                  <Text style={s.wpSheetDayText}>DISMISS</Text>
+                  <Text style={s.wpSheetDayText}>Dismiss</Text>
                 </TouchableOpacity>
               </View>
             </TrailheadSheet>
@@ -24277,11 +24485,11 @@ function MapScreen() {
               <View style={s.wpSheetActions}>
                 <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => { setTappedGas(null); navigateToCamp(tappedGas); }}>
                   <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.wpSheetNavText}>NAVIGATE HERE</Text>
+                  <Text style={s.wpSheetNavText}>Navigate here</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => setTappedGas(null)}>
                   <Ionicons name="close" size={14} color={OVR.text2} />
-                  <Text style={s.wpSheetDayText}>DISMISS</Text>
+                  <Text style={s.wpSheetDayText}>Dismiss</Text>
                 </TouchableOpacity>
               </View>
             </TrailheadSheet>
@@ -24450,10 +24658,10 @@ function MapScreen() {
                       <View style={s.wpSheetActions}>
                         <TouchableOpacity style={s.wpSheetNavBtn} onPress={submitCommunityUpdate} disabled={communityUpdateSubmitting}>
                           {communityUpdateSubmitting ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="checkmark" size={14} color="#fff" />}
-                          <Text style={s.wpSheetNavText}>SUBMIT UPDATE</Text>
+                          <Text style={s.wpSheetNavText}>Submit update</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => { setCommunityUpdatePin(null); setCommunityUpdateNote(''); }}>
-                          <Text style={s.wpSheetDayText}>CANCEL</Text>
+                          <Text style={s.wpSheetDayText}>Cancel</Text>
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -24461,35 +24669,35 @@ function MapScreen() {
                   {!updateOpen && privateLead && <View style={s.communityActionsGrid}>
                     <TouchableOpacity style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
-                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>NAVIGATE</Text>
+                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={s.communityActionBtn} onPress={() => openDispersedLeadEdit(selectedCommunityPin)}>
                       <Ionicons name="create-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>EDIT</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>Edit</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={s.communityActionBtn} onPress={() => addDispersedLeadPhoto(selectedCommunityPin)}>
                       <Ionicons name="camera-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>PHOTO</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>Photo</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={s.communityActionBtn} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'community_verified')}>
                       <Ionicons name="checkmark-circle-outline" size={14} color={OVR.text2} />
-                      <Text style={s.communityActionText} numberOfLines={1}>CHECKED</Text>
+                      <Text style={s.communityActionText} numberOfLines={1}>Checked</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[s.communityActionBtn, { borderColor: '#ef4444' + '44' }]} onPress={() => reviewDispersedLeadPin(selectedCommunityPin, 'rejected', 'Not found during field check')}>
                       <Ionicons name="close-circle-outline" size={14} color="#ef4444" />
-                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>NOT FOUND</Text>
+                      <Text style={[s.communityActionText, { color: '#ef4444' }]} numberOfLines={1}>Not found</Text>
                     </TouchableOpacity>
                     {dispersedLeadAccess === 'admin' && (
                       <TouchableOpacity style={[s.communityActionBtn, { borderColor: C.orange + '44' }]} onPress={() => publishDispersedLeadPin(selectedCommunityPin)}>
                         <Ionicons name="shield-checkmark-outline" size={14} color={C.orange} />
-                        <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>PUBLISH</Text>
+                        <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>Publish</Text>
                       </TouchableOpacity>
                     )}
                   </View>}
                   {!updateOpen && !privateLead && <View style={s.communityActionsGrid}>
                     <TouchableOpacity style={s.communityPrimaryAction} onPress={() => { setSelectedCommunityPin(null); navigateToCamp(selectedCommunityPin); }}>
                       <Ionicons name="navigate" size={14} color="#fff" />
-                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>NAVIGATE</Text>
+                      <Text style={s.communityPrimaryActionText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Navigate</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={s.communityActionBtn} onPress={saveCommunityPlace}>
                       <Ionicons name="bookmark-outline" size={14} color={OVR.text2} />
@@ -24575,7 +24783,7 @@ function MapScreen() {
 	                <View style={s.premiumFormBody}>
 	                  <View style={[s.pinTrustChip, { alignSelf: 'flex-start' }]}>
 	                    <Ionicons name={meta.icon as any} size={12} color={meta.color} />
-	                    <Text style={s.pinTrustText}>{meta.label.toUpperCase()} · REVIEWED BEFORE PUBLISHING</Text>
+	                    <Text style={s.pinTrustText}>{meta.label} · Reviewed before publishing</Text>
 	                  </View>
 	                  <TextInput
 	                    value={communityUpdateNote}
@@ -24745,11 +24953,11 @@ function MapScreen() {
               <View style={s.wpSheetActions}>
                 <TouchableOpacity style={s.wpSheetNavBtn} onPress={() => startDayNav(tappedWp.wp.day, tappedWp.idx)}>
                   <Ionicons name="navigate" size={14} color="#fff" />
-                  <Text style={s.wpSheetNavText}>NAVIGATE FROM HERE</Text>
+                  <Text style={s.wpSheetNavText}>Navigate from here</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.wpSheetDayBtn} onPress={() => { setTappedWp(null); setShowDayModal(true); }}>
                   <Ionicons name="calendar-outline" size={14} color={OVR.text2} />
-                  <Text style={s.wpSheetDayText}>CHANGE DAY</Text>
+                  <Text style={s.wpSheetDayText}>Change day</Text>
                 </TouchableOpacity>
               </View>
             </TrailheadSheet>

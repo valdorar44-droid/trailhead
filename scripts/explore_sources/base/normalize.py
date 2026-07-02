@@ -2,11 +2,15 @@ from __future__ import annotations
 
 import math
 import re
+from html import unescape
 from typing import Any, Iterable
 
 
 def compact_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "")).strip()
+    text = unescape(str(value or ""))
+    text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)
+    text = re.sub(r"(?s)<[^>]+>", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def normalize_name(value: Any) -> str:
@@ -91,4 +95,3 @@ def sorted_unique(values: Iterable[Any]) -> list[str]:
             seen.add(key)
             out.append(text)
     return out
-

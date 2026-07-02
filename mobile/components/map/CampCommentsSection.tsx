@@ -37,7 +37,7 @@ export default function CampCommentsSection({
   return (
     <View style={s.section}>
       <View style={s.header}>
-        <Text style={s.sectionTitle}>COMMENTS & QUESTIONS</Text>
+        <Text style={s.sectionTitle}>Comments and questions</Text>
         {comments.length > 0 ? (
           <Text style={s.count}>
             {comments.length} {comments.length === 1 ? 'comment' : 'comments'}
@@ -114,7 +114,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontFamily: mono,
     fontWeight: '800',
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
   },
   count: {
     color: C.text3,

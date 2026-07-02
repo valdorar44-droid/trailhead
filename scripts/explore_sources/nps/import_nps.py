@@ -145,7 +145,7 @@ def summary_from_park(park: dict[str, Any], name: str) -> str:
     desc = compact_text(park.get("description"))
     if desc:
         return sentence_safe_preview(desc, 560)
-    return f"{name} is an official National Park Service place record. Check current access, fees, permits, alerts, road status, and weather before building a route around it."
+    return f"{name} is managed by the National Park Service. Check current access, fees, permits, alerts, road status, and weather before building a route around it."
 
 
 def activity_names(park: dict[str, Any]) -> list[str]:
@@ -176,7 +176,11 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
     photos = media_from_park(park, related=related)
     things_to_do = dedupe_items([
         source_pack_item(item, "thing_to_do", park_code=record.source_id)
-        for item in [*related.get("thingstodo", []), *related.get("tours", [])]
+        for item in related.get("thingstodo", [])
+    ])
+    guided = dedupe_items([
+        source_pack_item(item, "guided", park_code=record.source_id)
+        for item in related.get("tours", [])
     ])
     things_to_see = dedupe_items([
         source_pack_item(item, "place", park_code=record.source_id)
@@ -214,6 +218,7 @@ def source_pack_from_park(park: dict[str, Any], record: SourceRecord, related: d
         "activities": activity_names(park),
         "topics": topic_names(park),
         "things_to_do": things_to_do,
+        "guided": guided,
         "things_to_see": things_to_see,
         "visitor_centers": visitor_centers,
         "campgrounds": campgrounds,

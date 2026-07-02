@@ -82,6 +82,7 @@ GROUP_CATEGORY_HINTS = (
 
 SOURCE_PACK_LIST_KEYS = (
     "things_to_do",
+    "guided",
     "things_to_see",
     "visitor_centers",
     "campgrounds",
@@ -90,6 +91,12 @@ SOURCE_PACK_LIST_KEYS = (
     "parking_lots",
     "trails",
     "events",
+)
+
+
+BOOKABLE_THINGS_TO_DO_PATTERNS = (
+    re.compile(r"\b(viator|tripadvisor|bookable|booking|checkout|reserve now|from\s+\$|per adult)\b", re.I),
+    re.compile(r"\b(guided tour|private tour|day tour|half[- ]day tour|full[- ]day tour|tour operator)\b", re.I),
 )
 
 
@@ -192,6 +199,14 @@ def sanitize_source_pack_item(item: dict[str, Any], *, parent: dict[str, Any]) -
     return clean
 
 
+def source_pack_item_is_bookable(item: dict[str, Any]) -> bool:
+    hay = " ".join(
+        compact_text(item.get(key))
+        for key in ("title", "name", "description", "summary", "kind", "category", "source", "source_label", "url", "reservation_url")
+    )
+    return any(pattern.search(hay) for pattern in BOOKABLE_THINGS_TO_DO_PATTERNS)
+
+
 def sanitize_place_profile(place: dict[str, Any]) -> dict[str, Any]:
     clean = deepcopy(place)
     summary = clean.get("summary") if isinstance(clean.get("summary"), dict) else {}
@@ -245,6 +260,8 @@ def sanitize_place_profile(place: dict[str, Any]) -> dict[str, Any]:
             values = []
             for item in pack.get(key) or []:
                 if isinstance(item, dict):
+                    if key == "things_to_do" and source_pack_item_is_bookable(item):
+                        continue
                     values.append(sanitize_source_pack_item(item, parent=clean))
             if values:
                 pack[key] = values

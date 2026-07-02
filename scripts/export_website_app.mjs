@@ -30,7 +30,10 @@ function rewriteFile(file) {
   next = next
     .replaceAll('/_expo/', '/app/_expo/')
     .replaceAll('/assets/assets/', '/app/assets/app/')
-    .replaceAll('/assets/node_modules/', '/app/assets/vendor/');
+    .replaceAll('/assets/node_modules/', '/app/assets/vendor/')
+    .replaceAll('/app/app/_expo/', '/app/_expo/')
+    .replaceAll('/app/app/assets/app/', '/app/assets/app/')
+    .replaceAll('/app/app/assets/vendor/', '/app/assets/vendor/');
 
   if (ext === '.js') {
     next = next
@@ -43,6 +46,21 @@ function rewriteFile(file) {
     next = next.replace(
       '<title>Trailhead</title>',
       '<title>Trailhead</title>\n    <link rel="icon" type="image/png" href="/assets/app-icon.png" />',
+    );
+  }
+
+  if (ext === '.html' && !next.includes('trailhead-normalize-exported-app-url')) {
+    next = next.replace(
+      '</head>',
+      `    <script id="trailhead-normalize-exported-app-url">
+      (function () {
+        var path = window.location.pathname;
+        if (!path.indexOf('/app/') && /\\/index\\.html$/.test(path)) {
+          window.history.replaceState(null, '', path.replace(/index\\.html$/, '') + window.location.search + window.location.hash);
+        }
+      })();
+    </script>
+  </head>`,
     );
   }
 
@@ -106,6 +124,7 @@ for (const route of appRoutes) {
   const routeEntry = join(targetDir, route, 'index.html');
   mkdirSync(dirname(routeEntry), { recursive: true });
   cpSync(existingEntry, routeEntry, { force: true });
+  rewriteFile(routeEntry);
 }
 
 rmSync(rawDir, { recursive: true, force: true });

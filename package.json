@@ -5,6 +5,14 @@
   "type": "module",
   "scripts": {
     "build": "node scripts/export_website_app.mjs && cd dashboard/site && ASTRO_TELEMETRY_DISABLED=1 astro build",
+    "data:download": "node scripts/data/download.ts",
+    "data:import": "node scripts/data/import.ts",
+    "data:normalize": "node scripts/data/normalize.ts",
+    "data:dedupe": "node scripts/data/dedupe.ts",
+    "data:refresh-dynamic": "node scripts/data/refresh-dynamic.ts",
+    "data:build-search": "node scripts/data/build-search.ts",
+    "data:build-tiles": "node scripts/data/build-tiles.ts",
+    "data:validate": "node scripts/data/validate.ts",
     "dev": "cd dashboard/site && ASTRO_TELEMETRY_DISABLED=1 astro dev --host 0.0.0.0",
     "export:webapp": "node scripts/export_website_app.mjs",
     "preview": "cd dashboard/site && ASTRO_TELEMETRY_DISABLED=1 astro preview --host 0.0.0.0"

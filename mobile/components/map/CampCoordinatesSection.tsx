@@ -13,7 +13,7 @@ type Props = {
 };
 
 export default function CampCoordinatesSection({
-  title = 'COORDINATES',
+  title = 'Coordinates',
   lat,
   lng,
   dms,
@@ -31,7 +31,7 @@ export default function CampCoordinatesSection({
         <Text style={s.text}>{lat.toFixed(6)}, {lng.toFixed(6)}</Text>
         <TouchableOpacity style={s.copyBtn} onPress={onCopy}>
           <Ionicons name="copy-outline" size={14} color={C.orange} />
-          <Text style={s.copyText}>COPY</Text>
+          <Text style={s.copyText}>Copy</Text>
         </TouchableOpacity>
       </View>
       {dms ? <Text style={s.dms}>{dms}</Text> : null}
@@ -52,7 +52,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontFamily: mono,
     fontWeight: '800',
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
     marginBottom: 10,
   },
   row: {

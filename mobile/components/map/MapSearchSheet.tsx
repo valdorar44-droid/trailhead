@@ -16,6 +16,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { mono, useTheme, type ColorPalette } from '@/lib/design';
+import { cleanExploreSourceLabel } from '@/lib/exploreContextFilters';
 
 export type MapSearchResultItem = {
   name: string;
@@ -160,7 +161,7 @@ export default function MapSearchSheet({
                 ) : usableResults.length === 0 ? (
                   <View style={s.stateCard}>
                     <Ionicons name="search-outline" size={18} color={C.text3} />
-                    <Text style={s.stateText}>No places found. Try a nearby town, park, or service.</Text>
+                    <Text style={s.stateText}>Try a nearby town, park, or service.</Text>
                   </View>
                 ) : (
                   usableResults.slice(0, 18).map((place, idx) => (
@@ -193,8 +194,8 @@ export default function MapSearchSheet({
                         <Ionicons name="time-outline" size={15} color={C.text2} />
                       </View>
                       <View style={s.resultCopy}>
-                        <Text style={s.resultName} numberOfLines={1}>{item.name}</Text>
-                        <Text style={s.resultMeta} numberOfLines={1}>{item.source_label || 'Recent search'}</Text>
+                        <Text style={s.resultName}>{item.name}</Text>
+                        <Text style={s.resultMeta}>{cleanSearchSourceLabel(item.source_label, 'Recent search')}</Text>
                       </View>
                     </TouchableOpacity>
                   ))
@@ -232,7 +233,7 @@ function ResultRow({
       ? place.dist * 0.621371
       : null;
   const source = [
-    place.source_label || cleanLabel(place.type || place.source || 'Place'),
+    cleanSearchSourceLabel(place.source_label || place.source, cleanLabel(place.subtype || place.type || 'Place')),
     dist != null ? `${dist >= 10 ? dist.toFixed(0) : dist.toFixed(1)} mi` : '',
     place.rating != null ? `${Number(place.rating).toFixed(1)} rating` : '',
   ].filter(Boolean).join(' · ');
@@ -243,10 +244,10 @@ function ResultRow({
         <Ionicons name={iconForPlace(place)} size={16} color={colors.orange} />
       </View>
       <View style={styles.resultCopy}>
-        <Text style={styles.resultName} numberOfLines={1}>{place.name}</Text>
-        <Text style={styles.resultMeta} numberOfLines={1}>{source}</Text>
+        <Text style={styles.resultName}>{place.name}</Text>
+        <Text style={styles.resultMeta}>{source}</Text>
         {!!detail && (
-          <Text style={styles.resultDetail} numberOfLines={1}>{detail}</Text>
+          <Text style={styles.resultDetail}>{detail}</Text>
         )}
       </View>
       <TouchableOpacity style={styles.routeBtn} onPress={onRoute} hitSlop={8}>
@@ -260,6 +261,10 @@ function cleanLabel(value?: string) {
   return String(value || 'Place').replace(/[_-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function cleanSearchSourceLabel(value?: string | null, fallback = 'Place') {
+  return cleanExploreSourceLabel(value, fallback);
+}
+
 function searchResultDetail(place: MapSearchResultItem) {
   const raw = place.address || place.summary || cleanLabel(place.subtype);
   if (!raw) return '';
@@ -270,7 +275,7 @@ function searchResultDetail(place: MapSearchResultItem) {
     .trim();
   if (!clean) return '';
   const firstSentence = clean.match(/^[^.!?]+[.!?]/)?.[0] || clean;
-  return firstSentence.length > 118 ? `${firstSentence.slice(0, 115).trim()}...` : firstSentence;
+  return firstSentence.length > 118 ? firstSentence.slice(0, 115).replace(/\s+\S*$/, '').trim() : firstSentence;
 }
 
 function iconForPlace(place: MapSearchResultItem): keyof typeof Ionicons.glyphMap {

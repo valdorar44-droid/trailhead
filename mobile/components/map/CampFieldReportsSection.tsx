@@ -28,7 +28,7 @@ export default function CampFieldReportsSection({
   return (
     <View style={s.section}>
       <View style={s.header}>
-        <Text style={s.sectionTitle}>FIELD REPORTS</Text>
+        <Text style={s.sectionTitle}>Field reports</Text>
         {summary?.count ? (
           <Text style={s.count}>
             {summary.count} {summary.count === 1 ? 'report' : 'reports'}
@@ -84,7 +84,7 @@ export default function CampFieldReportsSection({
       {canAddReport ? (
         <TouchableOpacity style={s.addBtn} onPress={onAddReport}>
           <Ionicons name="add-circle-outline" size={15} color={C.orange} />
-          <Text style={s.addBtnText}>ADD FIELD REPORT</Text>
+          <Text style={s.addBtnText}>Add field report</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -174,7 +174,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontFamily: mono,
     fontWeight: '800',
     letterSpacing: 1.5,
-    textTransform: 'uppercase',
   },
   count: {
     color: C.text3,

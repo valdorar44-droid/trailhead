@@ -24,6 +24,14 @@
         flex: 1;
       }
     </style>
+      <script id="trailhead-normalize-exported-app-url">
+      (function () {
+        var path = window.location.pathname;
+        if (!path.indexOf('/app/') && /\/index\.html$/.test(path)) {
+          window.history.replaceState(null, '', path.replace(/index\.html$/, '') + window.location.search + window.location.hash);
+        }
+      })();
+    </script>
   </head>
 
   <body>
@@ -33,6 +41,6 @@
     </noscript>
     <!-- The root element for your Expo app. -->
     <div id="root"></div>
-  <script src="/app/_expo/static/js/web/entry-19ab2d7a4be26686237cfa4d85390e24.js" defer></script>
+  <script src="/app/_expo/static/js/web/entry-242bb6397db82b945209b7b596522a66.js" defer></script>
 </body>
 </html>

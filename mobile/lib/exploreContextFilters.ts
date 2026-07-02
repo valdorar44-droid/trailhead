@@ -59,12 +59,17 @@ function itemBody(item?: SourcePackLike | null) {
 export function cleanExploreSourceLabel(label?: string | null, fallback = 'Explore Area') {
   const clean = compactText(label);
   if (!clean) return fallback;
+  if (/ridb|recreation\.gov/i.test(clean)) return 'Recreation.gov';
+  if (/blm|bureau\s+of\s+land\s+management/i.test(clean)) return 'BLM';
+  if (/usfs|forest\s+service/i.test(clean)) return 'Forest Service';
+  if (/national\s+park\s+service|\bnps\b/i.test(clean)) return 'National Park Service';
   if (/trailhead\s+northern\s+pakistan\s+trek\s+catalog/i.test(clean)) return 'Trek Area';
   if (/trailhead\s+trail\s+catalog/i.test(clean)) return 'Trail Area';
   if (/trailhead\s+explore/i.test(clean)) return fallback;
-  if (/wikidata|wikipedia|wikimedia|multiple sources/i.test(clean)) return fallback;
-  if (/offline\s+place\s+pack|downloaded\s+place\s+packs/i.test(clean)) return 'Downloaded Places';
-  if (/mapbox|rendered\s+map|map\s+feature|map\s+source|map\s+search|map\s+data|map\s+tile|basemap/i.test(clean)) return fallback;
+  if (/wikidata|wikipedia|wikimedia|geonames|multiple sources/i.test(clean)) return fallback;
+  if (/offline\s+place\s+pack|downloaded\s+place\s+packs/i.test(clean)) return 'Saved places';
+  if (/mapbox|geoapify|openstreetmap|nominatim|rendered\s+map|map\s+feature|map\s+source|map\s+search|map\s+data|map\s+tile|basemap/i.test(clean)) return fallback;
+  if (/source\s+data|cached|download|database|api|endpoint|feature\s*server|raw/i.test(clean)) return fallback;
   return clean;
 }
 

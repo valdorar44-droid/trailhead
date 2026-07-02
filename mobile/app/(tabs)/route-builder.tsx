@@ -1261,6 +1261,57 @@ function stripHtml(text?: string | null) {
     .trim();
 }
 
+function cleanCampDescriptionText(text?: string | null) {
+  return stripHtml(text)
+    .replace(/…/g, '.')
+    .replace(/\.{3,}/g, '.')
+    .replace(/([.!?])\s+(?:Recreation|Facilities|Nearby Attractions|Natural Features)\s+(?=[A-Z][a-z])/g, '$1 ')
+    .replace(/^(?:Recreation|Facilities|Nearby Attractions|Natural Features)\s+(?=[A-Z][a-z])/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function cleanCampLabel(text?: string | null, fallback = 'Camp') {
+  const label = stripHtml(text)
+    .replace(/_/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!label) return fallback;
+  return label
+    .split(' ')
+    .map(part => (/^(rv|ada|blm|usfs|nps)$/i.test(part) ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1).toLowerCase()))
+    .join(' ');
+}
+
+function cleanCampSourceLabel(text?: string | null, fallback = 'Campground') {
+  const label = cleanCampLabel(text, '').replace(/\bsignal\b/gi, '').trim();
+  const key = label.toLowerCase();
+  if (!key) return fallback;
+  if (key.includes('ridb') || key.includes('recreation.gov') || key.includes('recreation gov')) return 'Recreation.gov';
+  if (key.includes('bureau of land management') || key === 'blm') return 'BLM';
+  if (key.includes('forest service') || key === 'usfs') return 'US Forest Service';
+  if (key.includes('national park service') || key === 'nps') return 'National Park Service';
+  if (key.includes('openstreetmap') || key === 'osm') return 'Map contributors';
+  if (key.includes('source') || key.includes('data') || key.includes('metadata')) return fallback;
+  return label;
+}
+
+function cleanCampFeeText(text?: string | null) {
+  return stripHtml(text)
+    .replace(/Official RIDB fee text;?\s*/gi, '')
+    .replace(/Official Recreation\.gov fee text;?\s*/gi, '')
+    .replace(/Recreation\.gov does not expose live checkout pricing for this card\.?/gi, 'Check Recreation.gov for current pricing.')
+    .replace(/does not expose live checkout pricing(?: for this card)?\.?/gi, 'Check Recreation.gov for current pricing.')
+    .replace(/\bRIDB\b/gi, 'Recreation.gov')
+    .replace(/^(?:Recreation\.gov|Recreation gov)\s*[:;,-]?\s*Check Recreation\.gov/gi, 'Check Recreation.gov')
+    .replace(/;\s*verify current price on Recreation\.gov\.?/i, '')
+    .replace(/;\s*check Recreation\.gov for current pricing\.?/i, '')
+    .replace(/\bfee text\b/gi, 'fee')
+    .replace(/^verify\b/i, 'Verify')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function amenityIcon(name: string): keyof typeof Ionicons.glyphMap {
   const n = name.toLowerCase();
   if (n.includes('water')) return 'water-outline';
@@ -5399,7 +5450,7 @@ function RouteBuilderScreenContent() {
           bottom={18 + bottomInset}
           distanceLabel={fmtRouteDistance(totals.miles)}
           summaryLabel={`${totals.stops} stops · ${totals.camps} camps · ${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / $${totals.miles > 0 ? Math.max(1, Math.round(planningStats.fuelCost)) : 0} · ${fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg))}`}
-          actionLabel="OPEN ON MAP"
+          actionLabel="Open on map"
           saving={routeSaving}
           onPressAction={() => saveRoute(true)}
         />
@@ -5420,7 +5471,7 @@ function RouteBuilderScreenContent() {
                     <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp?.land_type).bg }]}>
                       <Ionicons name="bonfire-outline" size={34} color={landColor(selectedCamp?.land_type).text} />
                       <Text style={[s.placeholderLand, { color: landColor(selectedCamp?.land_type).text }]}>
-                        {(selectedCamp?.land_type || 'CAMP').toUpperCase().slice(0, 12)}
+                        {cleanCampLabel(selectedCamp?.land_type, 'Camp').slice(0, 18)}
                       </Text>
                     </View>
                   )}
@@ -5450,14 +5501,14 @@ function RouteBuilderScreenContent() {
               {selectedCamp?.land_type ? (
                 <View style={[s.landBadge, { backgroundColor: landColor(selectedCamp.land_type).bg, borderColor: landColor(selectedCamp.land_type).border }]}>
                   <Text style={[s.landBadgeText, { color: landColor(selectedCamp.land_type).text }]}>
-                    {selectedCamp.land_type.toUpperCase()}
+                    {cleanCampLabel(selectedCamp.land_type)}
                   </Text>
                 </View>
               ) : null}
               <View style={s.quickCardTags}>
                 {(selectedCamp?.tags ?? []).slice(0, 5).map(t => (
                   <View key={t} style={s.qTag}>
-                    <Text style={s.qTagText}>{tagEmoji(t) ? `${tagEmoji(t)} ` : ''}{t.toUpperCase()}</Text>
+                    <Text style={s.qTagText}>{cleanCampLabel(t)}</Text>
                   </View>
                 ))}
                 {selectedCamp?.ada && (
@@ -5470,7 +5521,7 @@ function RouteBuilderScreenContent() {
                 <Text style={s.quickCardCost}>{selectedCamp.reservable ? 'Reservable · ' : ''}{selectedCamp.cost}</Text>
               ) : null}
               <Text style={s.quickCardDesc}>
-                {stripHtml(selectedCamp?.description) || 'Camp profile preview. Full profile shows access notes, amenities, map details, and Trailhead camp brief.'}
+                {cleanCampDescriptionText(selectedCamp?.description) || 'Check access, amenities, and recent reports before adding it to the route.'}
               </Text>
             {campWeather?.daily?.time?.length ? (
               <View style={s.weatherStrip}>
@@ -5488,13 +5539,13 @@ function RouteBuilderScreenContent() {
               <View style={s.fullnessBanner}>
                 <View style={s.fullnessBannerTop}>
                   <Ionicons name="warning" size={13} color={C.red} />
-                  <Text style={s.fullnessBannerText}>REPORTED FULL · {campFullness.confirmations} confirmed</Text>
+                  <Text style={s.fullnessBannerText}>Reported full · {campFullness.confirmations} confirmed</Text>
                 </View>
               </View>
             ) : (
               <View style={s.reportFullBtn}>
                 <Ionicons name="checkmark-circle-outline" size={13} color={C.green} />
-                <Text style={[s.reportFullText, { color: C.green }]}>NO RECENT FULL REPORTS</Text>
+                <Text style={[s.reportFullText, { color: C.green }]}>No recent full reports</Text>
               </View>
             )}
               <View style={s.quickCardActions}>
@@ -5531,7 +5582,7 @@ function RouteBuilderScreenContent() {
 
               <View style={s.detailContent}>
                 <TrailheadTopBar
-                  title="CAMP PROFILE"
+                  title="Camp profile"
                   subtitle={campDetail.name}
                   icon="bonfire-outline"
                   style={s.detailHeader}
@@ -5544,11 +5595,11 @@ function RouteBuilderScreenContent() {
                 <View style={s.detailTags}>
                   {campDetail.land_type ? (
                     <View style={[s.detailLandBadge, { backgroundColor: landColor(campDetail.land_type).bg, borderColor: landColor(campDetail.land_type).border }]}>
-                      <Text style={[s.detailLandText, { color: landColor(campDetail.land_type).text }]}>{campDetail.land_type.toUpperCase()}</Text>
+                      <Text style={[s.detailLandText, { color: landColor(campDetail.land_type).text }]}>{cleanCampLabel(campDetail.land_type)}</Text>
                     </View>
                   ) : null}
                   {(campDetail.tags ?? []).map(t => (
-                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{tagEmoji(t) ? `${tagEmoji(t)} ` : ''}{t.toUpperCase()}</Text></View>
+                    <View key={t} style={s.qTag}><Text style={s.qTagText}>{cleanCampLabel(t)}</Text></View>
                   ))}
                   {campDetail.ada && (
                     <View style={[s.qTag, { borderColor: '#3b82f6', backgroundColor: '#eff6ff' }]}>
@@ -5557,27 +5608,27 @@ function RouteBuilderScreenContent() {
                   )}
 	                </View>
 	                <View style={s.detailMeta}>
-	                  <Text style={s.detailCost}>{campDetail.price_summary?.label || campDetail.cost || 'See site'}</Text>
+	                  <Text style={s.detailCost}>{cleanCampFeeText(campDetail.price_summary?.label || campDetail.cost) || 'See site'}</Text>
 	                  {(campDetail.verified_source || campDetail.source) ? (
-	                    <Text style={s.detailSiteCount}>{(campDetail.verified_source || campDetail.source || '').toUpperCase()}</Text>
+	                    <Text style={s.detailSiteCount}>{cleanCampSourceLabel(campDetail.verified_source || campDetail.source)}</Text>
 	                  ) : null}
 	                  {campDetail.campsites_count > 0 && <Text style={s.detailSiteCount}>{campDetail.campsites_count} sites</Text>}
 	                </View>
 	                {campDetail.price_summary?.freshness ? (
 	                  <TrailheadCard style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>PRICE SOURCE</Text>
-	                    <Text style={s.detailActivities}>{campDetail.price_summary.freshness}</Text>
+	                    <Text style={s.detailSectionTitle}>Fees</Text>
+	                    <Text style={s.detailActivities}>{cleanCampFeeText(campDetail.price_summary.freshness)}</Text>
 	                  </TrailheadCard>
 	                ) : null}
                 {campDetail.description ? (
                   <TrailheadCard style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>ABOUT</Text>
-                    <Text style={s.detailDesc}>{stripHtml(campDetail.description)}</Text>
+                    <Text style={s.detailSectionTitle}>Summary</Text>
+                    <Text style={s.detailDesc}>{cleanCampDescriptionText(campDetail.description)}</Text>
                   </TrailheadCard>
                 ) : null}
                 {(campDetail.amenities ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>AMENITIES</Text>
+                    <Text style={s.detailSectionTitle}>Features</Text>
                     <View style={s.amenityGrid}>
                       {(campDetail.amenities ?? []).map(a => (
                         <View key={a} style={s.amenityItem}>
@@ -5590,12 +5641,12 @@ function RouteBuilderScreenContent() {
                 )}
                 {(campDetail.site_types ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>SITE TYPES</Text>
+                    <Text style={s.detailSectionTitle}>Site types</Text>
                     <View style={s.amenityGrid}>
                       {(campDetail.site_types ?? []).map(st => (
                         <View key={st} style={[s.amenityItem, { backgroundColor: C.green + '12', borderColor: C.green + '55' }]}>
                           <Ionicons name="home-outline" size={13} color={C.green} />
-                          <Text style={[s.amenityText, { color: C.green }]}>{st}</Text>
+                          <Text style={[s.amenityText, { color: C.green }]}>{cleanCampLabel(st, '')}</Text>
                         </View>
                       ))}
                     </View>
@@ -5603,15 +5654,15 @@ function RouteBuilderScreenContent() {
                 )}
                 {(campDetail.campsites ?? []).some(site => site.name || site.photo_url || site.photos?.length) ? (
                   <TrailheadCard style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>SITES</Text>
+                    <Text style={s.detailSectionTitle}>Sites</Text>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                       {(campDetail.campsites ?? []).slice(0, 12).map((site, idx) => {
                         const photo = campPhotoUrl(site.photo_url || site.photos?.[0]);
                         const meta = [
-                          site.type,
+                          cleanCampLabel(site.type, ''),
                           site.max_people ? `${site.max_people} people` : '',
                           site.equipment_length ? `${site.equipment_length} ft` : '',
-                          site.surface,
+                          cleanCampLabel(site.surface, ''),
                           site.accessible ? 'ADA' : '',
                         ].filter(Boolean).join(' · ');
                         return (
@@ -5624,8 +5675,8 @@ function RouteBuilderScreenContent() {
                               </View>
                             )}
                             <View style={s.siteBody}>
-                              <Text style={s.siteName} numberOfLines={2}>{site.name || `Site ${idx + 1}`}</Text>
-                              <Text style={s.siteMeta} numberOfLines={2}>{meta || site.source_badge || 'Recreation.gov site'}</Text>
+                              <Text style={s.siteName} numberOfLines={2}>{cleanCampLabel(site.name, `Site ${idx + 1}`)}</Text>
+                              <Text style={s.siteMeta} numberOfLines={2}>{meta || cleanCampSourceLabel(site.source_badge, 'Recreation.gov site')}</Text>
                             </View>
                           </View>
                         );
@@ -5635,7 +5686,7 @@ function RouteBuilderScreenContent() {
 	                ) : null}
 	                {(campDetail.things_to_do ?? []).length > 0 ? (
 	                  <TrailheadCard style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>THINGS TO DO</Text>
+	                    <Text style={s.detailSectionTitle}>Things to do</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
 	                      {(campDetail.things_to_do ?? []).slice(0, 12).map((item: any, idx) => {
 	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
@@ -5649,8 +5700,8 @@ function RouteBuilderScreenContent() {
 	                              </View>
 	                            )}
 	                            <View style={s.siteBody}>
-	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Activity ${idx + 1}`}</Text>
-	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.type, item.fee_text, item.source_badge].filter(Boolean).join(' · ')}</Text>
+	                              <Text style={s.siteName} numberOfLines={2}>{cleanCampLabel(item.name, `Activity ${idx + 1}`)}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[cleanCampLabel(item.type, ''), cleanCampFeeText(item.fee_text), cleanCampSourceLabel(item.source_badge, '')].filter(Boolean).join(' · ')}</Text>
 	                            </View>
 	                          </TouchableOpacity>
 	                        );
@@ -5660,7 +5711,7 @@ function RouteBuilderScreenContent() {
 	                ) : null}
 	                {(campDetail.things_to_see ?? []).length > 0 ? (
 	                  <TrailheadCard style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>THINGS TO SEE</Text>
+	                    <Text style={s.detailSectionTitle}>Things to see</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
 	                      {(campDetail.things_to_see ?? []).slice(0, 12).map((item: any, idx) => {
 	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
@@ -5674,8 +5725,8 @@ function RouteBuilderScreenContent() {
 	                              </View>
 	                            )}
 	                            <View style={s.siteBody}>
-	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Place ${idx + 1}`}</Text>
-	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.type, item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                              <Text style={s.siteName} numberOfLines={2}>{cleanCampLabel(item.name, `Place ${idx + 1}`)}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[cleanCampLabel(item.type, ''), cleanCampSourceLabel(item.source_badge || item.source_label, '')].filter(Boolean).join(' · ')}</Text>
 	                            </View>
 	                          </TouchableOpacity>
 	                        );
@@ -5685,7 +5736,7 @@ function RouteBuilderScreenContent() {
 	                ) : null}
 	                {(campDetail.visitor_centers ?? []).length > 0 ? (
 	                  <TrailheadCard style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>VISITOR CENTERS</Text>
+	                    <Text style={s.detailSectionTitle}>Visitor centers</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
 	                      {(campDetail.visitor_centers ?? []).slice(0, 8).map((item: any, idx) => {
 	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
@@ -5699,8 +5750,8 @@ function RouteBuilderScreenContent() {
 	                              </View>
 	                            )}
 	                            <View style={s.siteBody}>
-	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Visitor center ${idx + 1}`}</Text>
-	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.type, item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                              <Text style={s.siteName} numberOfLines={2}>{cleanCampLabel(item.name, `Visitor center ${idx + 1}`)}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[cleanCampLabel(item.type, ''), cleanCampSourceLabel(item.source_badge || item.source_label, '')].filter(Boolean).join(' · ')}</Text>
 	                            </View>
 	                          </TouchableOpacity>
 	                        );
@@ -5710,7 +5761,7 @@ function RouteBuilderScreenContent() {
 	                ) : null}
 	                {(campDetail.campgrounds_nearby ?? []).length > 0 ? (
 	                  <TrailheadCard style={s.detailSection}>
-	                    <Text style={s.detailSectionTitle}>CAMPGROUNDS NEARBY</Text>
+	                    <Text style={s.detailSectionTitle}>Nearby campgrounds</Text>
 	                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
 	                      {(campDetail.campgrounds_nearby ?? []).slice(0, 8).map((item: any, idx) => {
 	                        const photo = campPhotoUrl(item.photo_url || item.photos?.[0]);
@@ -5724,8 +5775,8 @@ function RouteBuilderScreenContent() {
 	                              </View>
 	                            )}
 	                            <View style={s.siteBody}>
-	                              <Text style={s.siteName} numberOfLines={2}>{item.name || `Campground ${idx + 1}`}</Text>
-	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.distance_mi ? `${Number(item.distance_mi).toFixed(1)} mi` : '', item.source_badge || item.source_label].filter(Boolean).join(' · ')}</Text>
+	                              <Text style={s.siteName} numberOfLines={2}>{cleanCampLabel(item.name, `Campground ${idx + 1}`)}</Text>
+	                              <Text style={s.siteMeta} numberOfLines={2}>{[item.distance_mi ? `${Number(item.distance_mi).toFixed(1)} mi` : '', cleanCampSourceLabel(item.source_badge || item.source_label, '')].filter(Boolean).join(' · ')}</Text>
 	                            </View>
 	                          </TouchableOpacity>
 	                        );
@@ -5735,26 +5786,26 @@ function RouteBuilderScreenContent() {
 	                ) : null}
 	                {(campDetail.activities ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>ACTIVITIES</Text>
+                    <Text style={s.detailSectionTitle}>Activities</Text>
                     <Text style={s.detailActivities}>{(campDetail.activities ?? []).join(' · ')}</Text>
                   </TrailheadCard>
                 )}
                 <TrailheadCard style={s.detailSection}>
-                  <Text style={s.detailSectionTitle}>COORDINATES</Text>
+                  <Text style={s.detailSectionTitle}>Coordinates</Text>
                   <Text style={s.coordText}>{campDetail.lat.toFixed(6)}, {campDetail.lng.toFixed(6)}</Text>
                   {campInsight?.coordinates_dms ? <Text style={s.coordDms}>{campInsight.coordinates_dms}</Text> : null}
                 </TrailheadCard>
                 {campInsight && (
                   <TrailheadCard style={s.detailSection}>
                     <View style={s.aiHeader}>
-                      <Text style={s.detailSectionTitle}>TRAILHEAD BRIEF</Text>
+                      <Text style={s.detailSectionTitle}>Camp guide</Text>
                       {campInsight.star_rating ? (
                         <Text style={s.aiStars}>{campInsight.star_rating}/5</Text>
                       ) : null}
                     </View>
                     {campInsight.insider_tip ? (
                       <View style={s.insiderTip}>
-                        <Text style={s.insiderLabel}>INSIDER TIP</Text>
+                        <Text style={s.insiderLabel}>Good to know</Text>
                         <Text style={s.insiderText}>{campInsight.insider_tip}</Text>
                       </View>
                     ) : null}
@@ -5775,7 +5826,7 @@ function RouteBuilderScreenContent() {
                 )}
                 {(campDetail.reviews ?? []).length > 0 && (
                   <TrailheadCard style={s.detailSection}>
-                    <Text style={s.detailSectionTitle}>REVIEWS</Text>
+                    <Text style={s.detailSectionTitle}>Reviews</Text>
                     {(campDetail.reviews ?? []).slice(0, 3).map((review, idx) => (
                       <View key={`${review.authorName}-${idx}`} style={s.campReviewCard}>
                         <View style={s.campReviewTop}>
@@ -5790,7 +5841,7 @@ function RouteBuilderScreenContent() {
                 )}
                 <View style={s.detailActions}>
                   <TrailheadButton
-                    label={replaceStopId ? 'Replace Camp' : 'Use as Camp'}
+                    label={replaceStopId ? 'Replace camp' : 'Use as camp'}
                     icon="add-circle-outline"
                     variant="primary"
                     onPress={() => { if (selectedCamp) addCamp(selectedCamp); setShowCampDetail(false); setSelectedCamp(null); }}

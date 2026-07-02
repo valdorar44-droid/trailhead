@@ -281,33 +281,33 @@ def build_price_summary(facility: dict, reservation_records: list[dict] | None =
             "max": ordered[-1],
             "sample_count": len(ordered),
             "last_year": max(years) if years else None,
-            "source": "RIDB historical reservations",
+            "source": "Recreation.gov",
             "freshness": "Historical Recreation.gov reservation records; verify current price and availability on Recreation.gov.",
         }
     if text_prices:
         low, high = min(text_prices), max(text_prices)
-        label = f"Listed fee text: {_fmt_money(low)}" if low == high else f"Listed fee text: {_fmt_money(low)}-{_fmt_money(high)}"
+        label = f"Listed fee: {_fmt_money(low)}" if low == high else f"Listed fee: {_fmt_money(low)}-{_fmt_money(high)}"
         return {
             "label": label,
             "min": low,
             "median": None,
             "max": high,
             "sample_count": 0,
-            "source": "RIDB facility fee text",
-            "freshness": "Official RIDB fee text; verify current price and availability on Recreation.gov.",
+            "source": "Recreation.gov",
+            "freshness": "Verify current price and availability on Recreation.gov.",
         }
     if facility.get("Reservable"):
         return {
             "label": "Reservable; verify current price on Recreation.gov",
             "sample_count": 0,
-            "source": "RIDB facility metadata",
-            "freshness": "RIDB does not expose live checkout pricing for this card.",
+            "source": "Recreation.gov",
+            "freshness": "Check Recreation.gov for current price and availability.",
         }
     return {
         "label": "No fee listed",
         "sample_count": 0,
-        "source": "RIDB facility metadata",
-        "freshness": "Verify current fees, passes, and local rules with the source.",
+        "source": "Recreation.gov",
+        "freshness": "Verify current fees, passes, and local rules before you go.",
     }
 
 def _normalize_link(record: dict) -> dict:
@@ -318,7 +318,7 @@ def _normalize_link(record: dict) -> dict:
         "description": _clean_text(record.get("Description"), 240),
         "url": _record_value(record, "URL", "ResourceLink"),
         "source": "ridb",
-        "source_badge": "Official Recreation.gov",
+        "source_badge": "Recreation.gov",
     }
 
 def _normalize_adventure(record: dict, kind: str, facility_id: str = "") -> dict:
@@ -377,8 +377,8 @@ def _normalize_adventure(record: dict, kind: str, facility_id: str = "") -> dict
         "booking_url": url,
         "source": "ridb",
         "verified_source": "Recreation.gov",
-        "source_badge": "Official Recreation.gov",
-        "reservation_notes": "Trailhead helps you plan and links to the official source. Checkout, tickets, permits, and lotteries stay on Recreation.gov.",
+        "source_badge": "Recreation.gov",
+        "reservation_notes": "Reserve on Recreation.gov when available.",
     }
 
 def _normalize_campsite_record(campsite: dict, attrs: list[dict] | None = None, media: list[dict] | None = None) -> dict:
@@ -460,7 +460,7 @@ def _normalize_campsite_record(campsite: dict, attrs: list[dict] | None = None, 
         "photo_status": "campsite" if photos else "placeholder",
         "source": "ridb",
         "verified_source": "Recreation.gov",
-        "source_badge": "Official Recreation.gov",
+        "source_badge": "Recreation.gov",
     }
     return result
 
@@ -514,7 +514,7 @@ async def get_campsites_near(lat: float, lng: float, radius_miles: float = 30) -
             "booking_url": f"https://www.recreation.gov/camping/campgrounds/{facility.get('FacilityID')}",
             "source": "ridb",
             "verified_source": "Recreation.gov",
-            "source_badge": "Official Recreation.gov",
+            "source_badge": "Recreation.gov",
             "last_checked": int(time.time()),
         })
 
@@ -578,9 +578,9 @@ async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
                 "ada": f.get("FacilityAdaAccess") == "Y",
                 "source": "ridb",
                 "verified_source": "Recreation.gov",
-                "source_badge": "Official Recreation.gov",
-                "source_freshness": "Official RIDB source data cached by Trailhead; verify current availability on Recreation.gov.",
-                "reservation_notes": "Use Check availability or Reserve on Recreation.gov. Trailhead does not handle checkout.",
+                "source_badge": "Recreation.gov",
+                "source_freshness": "Verify current availability on Recreation.gov.",
+                "reservation_notes": "Reserve on Recreation.gov when available.",
                 "last_checked": int(time.time()),
             })
         cached = sites
@@ -670,9 +670,9 @@ async def get_campsite_detail(facility_id: str, campsite_id: str) -> dict | None
         "photo_fallback_chain": ["campsite_media", "facility_media", "open_photo", "trailhead_placeholder"],
         "source": "ridb",
         "verified_source": "Recreation.gov",
-        "source_badge": "Official Recreation.gov",
-        "source_freshness": "Official RIDB source data cached by Trailhead; verify current availability on Recreation.gov.",
-        "reservation_notes": "Trailhead links to the official Recreation.gov campground page. Checkout stays on Recreation.gov.",
+        "source_badge": "Recreation.gov",
+        "source_freshness": "Verify current availability on Recreation.gov.",
+        "reservation_notes": "Reserve on Recreation.gov when available.",
         "booking_url": facility_url,
         "official_url": facility_url,
         "url": facility_url,
@@ -918,9 +918,9 @@ async def get_facility_detail(facility_id: str) -> dict | None:
         "site_media_count": len(_dedupe(site_photo_urls, limit=999)),
         "source": "ridb",
         "verified_source": "Recreation.gov",
-        "source_badge": "Official Recreation.gov",
-        "source_freshness": "Official RIDB source data cached by Trailhead; verify current availability on Recreation.gov.",
-        "reservation_notes": "Trailhead links to official Recreation.gov booking and availability. Checkout stays on Recreation.gov.",
+        "source_badge": "Recreation.gov",
+        "source_freshness": "Verify current availability on Recreation.gov.",
+        "reservation_notes": "Reserve on Recreation.gov when available.",
         "last_checked": int(time.time()),
     }
     set_cached("campsite_cache", cache_key, result)

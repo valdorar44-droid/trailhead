@@ -1223,6 +1223,7 @@ export interface User {
   referral_code: string; report_streak: number; created_at: number;
   reporting_restricted_until?: number;
   is_admin?: boolean;
+  map_contributor?: { status: 'not_applied' | 'pending' | 'approved' | 'dismissed'; approved: boolean; updated_at?: number | null };
   email_verified?: boolean | number;
 }
 export interface SupportMessage {

@@ -204,8 +204,23 @@ function sourcePackItemLooksLikeSpeciesProfile(item?: ExploreSourcePackItem | nu
   return (animalTitle && profileCopy) || (/\/thingstodo\/[^/]+\.htm$/.test(url) && animalTitle);
 }
 
+function sourcePackItemLooksBookable(item?: ExploreSourcePackItem | null) {
+  const text = [
+    item?.title,
+    item?.description,
+    item?.kind,
+    item?.category,
+    item?.source,
+    item?.source_label,
+    item?.url,
+    item?.reservation_url,
+  ].map(value => String(value || '').toLowerCase()).join(' ');
+  return /\b(viator|tripadvisor|bookable|booking|checkout|reserve now|per adult|guided tour|private tour|day tour|half-day tour|full-day tour|tour operator)\b/.test(text)
+    || /\bfrom\s+\$/.test(text);
+}
+
 function sourcePackThingToDoCanShow(item?: ExploreSourcePackItem | null) {
-  return sourcePackItemCanShow(item) && !sourcePackItemLooksLikeSpeciesProfile(item) && sourcePackItemLooksLikeActivity(item);
+  return sourcePackItemCanShow(item) && !sourcePackItemLooksBookable(item) && !sourcePackItemLooksLikeSpeciesProfile(item) && sourcePackItemLooksLikeActivity(item);
 }
 
 function replacementForGenericSourcePackCopy(title: string, item?: ExploreSourcePackItem | null) {
@@ -342,7 +357,6 @@ export function ExploreDetailSheet({
   highlightedSentence,
   storyScrollRef,
   campgroundsSlot,
-  experiencesSlot,
   relatedSlot,
   weatherSlot,
   weather,
@@ -445,13 +459,13 @@ export function ExploreDetailSheet({
       searchText: `${searchTextForItems(sourcePackLists.thingsToSee)} ${place.profile?.why_it_matters ?? ''} ${place.wiki_extract ?? ''}`,
     });
 
-    add(Boolean(count(sourcePackLists.thingsToDo) || experiencesSlot) && {
+    add(count(sourcePackLists.thingsToDo) > 0 && {
       key: 'do',
       label: 'Things to Do',
-      detail: count(sourcePackLists.thingsToDo) ? countLabel(count(sourcePackLists.thingsToDo), 'option', 'options') : 'Bookable options',
+      detail: countLabel(count(sourcePackLists.thingsToDo), 'option', 'options'),
       icon: 'walk-outline',
       tone: '#f97316',
-      count: count(sourcePackLists.thingsToDo) || undefined,
+      count: count(sourcePackLists.thingsToDo),
       imageUrl: doImages.imageUrl,
       imageCandidates: doImages.imageCandidates,
       searchText: searchTextForItems(sourcePackLists.thingsToDo),
@@ -566,7 +580,6 @@ export function ExploreDetailSheet({
   }, [
     campgroundsSlot,
     context?.relatedCount,
-    experiencesSlot,
     imageUrl,
     mediaUrl,
     pack,
@@ -1039,8 +1052,7 @@ export function ExploreDetailSheet({
       return (
         <>
           {doItems.length > 0 ? renderItemList(doItems, EMPTY_DETAIL_MESSAGE) : null}
-          {experiencesSlot}
-          {doItems.length === 0 && !experiencesSlot ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
+          {doItems.length === 0 ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
         </>
       );
     }

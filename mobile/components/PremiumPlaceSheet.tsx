@@ -242,7 +242,7 @@ function cleanDetailText(value?: string | null) {
     .replace(/&#39;/gi, "'")
     .replace(
       /^Selected\s+([a-z\s_-]+)\s+with nearby camps, trails, scenic places, events, and trip services from open source data\.?$/i,
-      (_, kind) => `Use this ${String(kind || 'place').trim().toLowerCase()} as a starting point for nearby camps, trails, scenic stops, events, and trip services.`,
+      (_, kind) => `Nearby camps, trails, scenic stops, events, and services around this ${String(kind || 'place').trim().toLowerCase()}.`,
     )
     .replace(/\s+/g, ' ')
     .trim();
@@ -250,15 +250,20 @@ function cleanDetailText(value?: string | null) {
 
 function cleanSourceFreshnessText(value?: string | null) {
   return cleanDetailText(value)
-    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Official Recreation.gov data. ')
-    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'Official BLM recreation data. ')
-    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Available source data. ')
-    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Available camp data. ')
-    .replace(/OpenStreetMap\/Nominatim place identity cached by Trailhead;?\s*/gi, 'OpenStreetMap/Nominatim place data. ')
-    .replace(/Wikipedia\/Wikimedia context cached by Trailhead;?\s*/gi, 'Wikipedia/Wikimedia references. ')
-    .replace(/GeoNames\/Wikipedia context cached by Trailhead;?\s*/gi, 'GeoNames/Wikipedia references. ')
-    .replace(/Open town profile data cached by Trailhead;?\s*/gi, 'Open town profile data. ')
+    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Recreation.gov listing. ')
+    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'BLM recreation listing. ')
+    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Verify current details before you go. ')
+    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Verify current camp details before you go. ')
+    .replace(/OpenStreetMap\/Nominatim place identity cached by Trailhead;?\s*/gi, 'Community place listing. ')
+    .replace(/Wikipedia\/Wikimedia context cached by Trailhead;?\s*/gi, 'Reference details. ')
+    .replace(/GeoNames\/Wikipedia context cached by Trailhead;?\s*/gi, 'Reference details. ')
+    .replace(/Open town profile data cached by Trailhead;?\s*/gi, 'Town profile. ')
     .replace(/cached by Trailhead;?\s*/gi, '')
+    .replace(/\bdownloaded source checked\b/gi, 'Checked')
+    .replace(/\bsource data\b/gi, 'listing')
+    .replace(/\bopen source data\b/gi, 'public information')
+    .replace(/\bapi\b/gi, '')
+    .replace(/\bendpoint\b/gi, '')
     .replace(/\.\s*verify\b/g, '. Verify')
     .replace(/\s+/g, ' ')
     .trim();
@@ -281,13 +286,13 @@ function ExpandableText({
   const [expanded, setExpanded] = useState(false);
   if (!clean) return null;
   const shouldClamp = clean.length > previewChars;
-  const preview = shouldClamp && !expanded ? `${clean.slice(0, previewChars).replace(/\s+\S*$/, '').trim()}...` : clean;
+  const preview = shouldClamp && !expanded ? clean.slice(0, previewChars).replace(/\s+\S*$/, '').trim() : clean;
   return (
     <View>
-      <Text style={style} numberOfLines={expanded ? undefined : previewLines}>{preview}</Text>
+      <Text style={style}>{preview}</Text>
       {shouldClamp ? (
         <TouchableOpacity style={{ alignSelf: 'flex-start', marginTop: 6 }} onPress={() => setExpanded(value => !value)} activeOpacity={0.78}>
-          <Text style={{ color: linkColor, fontSize: 11, fontFamily: mono, fontWeight: '900' }}>{expanded ? 'LESS' : 'MORE'}</Text>
+          <Text style={{ color: linkColor, fontSize: 11, fontFamily: mono, fontWeight: '900' }}>{expanded ? 'Less' : 'More'}</Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -535,7 +540,7 @@ export default function PremiumPlaceSheet({
     openNowLabel(data.open_now),
   ].filter(Boolean).join(' · ');
   const hours = detail?.hours?.length ? detail.hours : data.hours?.length ? data.hours : normalizeHours(data.open_hours, data.hours_label);
-  const sourceFreshness = cleanSourceFreshnessText(data.source_freshness || (data.last_checked ? `Downloaded source checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : ''));
+  const sourceFreshness = cleanSourceFreshnessText(data.source_freshness || (data.last_checked ? `Checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : ''));
   const providerDetails = cleanDetailText(data.description || data.details);
   const summaryText = cleanDetailText(data.summary);
   const showProviderDetails = providerDetails && providerDetails !== summaryText;
@@ -649,7 +654,7 @@ export default function PremiumPlaceSheet({
         party_size: 1,
       });
       setReservation(prev => prev ? { ...prev, alerts: [res.alert, ...(prev.alerts ?? []).filter(a => a.id !== res.alert.id)] } : prev);
-      Alert.alert('Alert saved', 'Trailhead will hand off to the official booking source when availability is checked.');
+      Alert.alert('Alert saved', 'Trailhead will open booking details when availability is checked.');
     } catch (err: any) {
       Alert.alert('Could not save alert', err?.status === 401 || err?.status === 403 ? 'Sign in to save availability alerts.' : (err?.message ?? 'Try again in a moment.'));
     } finally {
@@ -699,8 +704,8 @@ export default function PremiumPlaceSheet({
               )}
               <View style={s.heroShade} />
               <View style={s.heroText}>
-                <Text style={s.kicker}>{sourceLabel.toUpperCase()}</Text>
-                <Text style={s.title} numberOfLines={2}>{data.name}</Text>
+                <Text style={s.kicker}>{sourceLabel}</Text>
+                <Text style={s.title}>{data.name}</Text>
               </View>
             </TouchableOpacity>
 
@@ -709,13 +714,13 @@ export default function PremiumPlaceSheet({
               {!!routeContextLabel && (
                 <View style={s.routeContextPill}>
                   <Ionicons name="git-branch-outline" size={13} color={C.orange} />
-                  <Text style={s.routeContextText} numberOfLines={2}>{routeContextLabel}</Text>
+                  <Text style={s.routeContextText}>{routeContextLabel}</Text>
                 </View>
               )}
               {!!data.address && (
                 <View style={s.infoRow}>
                   <Ionicons name="location-outline" size={15} color={C.text3} />
-                  <Text style={s.infoText} numberOfLines={2}>{data.address}</Text>
+                  <Text style={s.infoText}>{data.address}</Text>
                 </View>
               )}
               {!!summaryText && (
@@ -735,19 +740,19 @@ export default function PremiumPlaceSheet({
               ))}
               {stage === 'full' && !!showProviderDetails && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>PROVIDER DETAILS</Text>
+                  <Text style={s.sectionLabel}>Details</Text>
                   <ExpandableText text={providerDetails} style={s.sectionText} linkColor={C.orange} previewChars={720} previewLines={7} />
                 </View>
               )}
               {!!data.access_note && (
                 <View style={s.infoRow}>
                   <Ionicons name="alert-circle-outline" size={15} color={C.orange} />
-                  <Text style={s.infoText} numberOfLines={3}>{data.access_note}</Text>
+                  <Text style={s.infoText}>{data.access_note}</Text>
                 </View>
               )}
               {stage === 'full' && waterFacts.length > 0 ? (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>WATER ACCESS</Text>
+                  <Text style={s.sectionLabel}>Water access</Text>
                   {waterFacts.map(([label, value]) => (
                     <View key={label} style={s.infoRow}>
                       <Ionicons name={label === 'Fishing evidence' || label === 'Species' ? 'fish-outline' : label === 'Craft' || label === 'Navigation feature' ? 'boat-outline' : label === 'Hazard' ? 'warning-outline' : label === 'Depth' ? 'analytics-outline' : 'water-outline'} size={15} color={C.text3} />
@@ -757,7 +762,7 @@ export default function PremiumPlaceSheet({
                   {!!data.navigation_note && (
                     <View style={s.infoRow}>
                       <Ionicons name="warning-outline" size={15} color={C.orange} />
-                      <Text style={s.infoText} numberOfLines={4}>{data.navigation_note}</Text>
+                      <Text style={s.infoText}>{data.navigation_note}</Text>
                     </View>
                   )}
                   {!!data.regulations_url && (
@@ -801,13 +806,13 @@ export default function PremiumPlaceSheet({
               {stage === 'full' && !!sourceFreshness && (
                 <View style={s.infoRow}>
                   <Ionicons name="cloud-done-outline" size={15} color={C.text3} />
-                  <Text style={s.infoText} numberOfLines={4}>{sourceFreshness}</Text>
+                  <Text style={s.infoText}>{sourceFreshness}</Text>
                 </View>
               )}
               {stage === 'full' && relatedHasContext ? (
                 <View style={s.relatedBlock}>
                   <View style={s.relatedHeader}>
-                    <Text style={s.sectionLabel}>NEARBY CONTEXT</Text>
+                    <Text style={s.sectionLabel}>Nearby</Text>
                     {related?.loading ? <ActivityIndicator color={C.orange} size="small" /> : null}
                   </View>
                   {related?.loading ? (
@@ -843,7 +848,7 @@ export default function PremiumPlaceSheet({
               ) : null}
               {stage === 'full' && !!hours.length && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>HOURS</Text>
+                  <Text style={s.sectionLabel}>Hours</Text>
                   {hours.slice(0, 7).map(line => (
                     <Text key={line} style={s.sectionText}>{line}</Text>
                   ))}
@@ -861,7 +866,7 @@ export default function PremiumPlaceSheet({
                     </View>
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={s.richLockedTitle}>Show details · 5 credits</Text>
-                      <Text style={s.richLockedText}>Provider photo, contact details, and weekly hours load only when requested.</Text>
+                      <Text style={s.richLockedText}>Photos, contact details, and weekly hours.</Text>
                     </View>
                   </View>
                   <View style={s.richLockedPreview}>
@@ -946,10 +951,10 @@ export default function PremiumPlaceSheet({
               {stage === 'full' && reservation && (reservation.reservable || reservation.booking_url) ? (
                 <View style={s.communityBlock}>
                   <View style={s.communityHeader}>
-                    <Text style={s.sectionLabel}>RESERVATIONS</Text>
-                    <Text style={s.communityCount}>{reservation.source_label || 'Official source'}</Text>
+                    <Text style={s.sectionLabel}>Reservations</Text>
+                    <Text style={s.communityCount}>{cleanExploreSourceLabel(reservation.source_label, 'Booking')}</Text>
                   </View>
-                  <Text style={s.sectionText}>{reservation.notes || reservation.source_freshness}</Text>
+                  <Text style={s.sectionText}>{cleanSourceFreshnessText(reservation.notes || reservation.source_freshness)}</Text>
                   <View style={s.dateRow}>
                     <TextInput
                       value={alertStart}
@@ -970,13 +975,13 @@ export default function PremiumPlaceSheet({
                     {!!reservation.check_availability_url && (
                       <TouchableOpacity style={s.smallPrimaryBtn} onPress={() => Linking.openURL(String(reservation.check_availability_url))}>
                         <Ionicons name="calendar-outline" size={13} color="#fff" />
-                        <Text style={s.smallPrimaryText}>{(reservation.link_label || 'Check availability').toUpperCase()}</Text>
+                        <Text style={s.smallPrimaryText}>{reservation.link_label || 'Check availability'}</Text>
                       </TouchableOpacity>
                     )}
                     {reservation.alert_supported ? (
                       <TouchableOpacity style={s.smallSecondaryBtn} onPress={saveAvailabilityAlert} disabled={communityBusy}>
                         <Ionicons name="notifications-outline" size={13} color={C.orange} />
-                        <Text style={s.smallSecondaryText}>SAVE ALERT</Text>
+                        <Text style={s.smallSecondaryText}>Save alert</Text>
                       </TouchableOpacity>
                     ) : null}
                   </View>
@@ -986,7 +991,7 @@ export default function PremiumPlaceSheet({
               {stage === 'full' && (
                 <View style={s.communityBlock}>
                   <View style={s.communityHeader}>
-                    <Text style={s.sectionLabel}>TRAILHEAD COMMUNITY</Text>
+                    <Text style={s.sectionLabel}>Community notes</Text>
                     {comments.length > 0 ? <Text style={s.communityCount}>{comments.length}</Text> : null}
                   </View>
                   {comments.slice(0, 5).map(comment => (
@@ -1022,10 +1027,10 @@ export default function PremiumPlaceSheet({
                       </TouchableOpacity>
                       <View style={s.inlineActions}>
                         <TouchableOpacity style={s.smallSecondaryBtn} onPress={() => { setShowCommentForm(false); setCommentText(''); setCommentPhoto(null); }}>
-                          <Text style={s.smallSecondaryText}>CANCEL</Text>
+                          <Text style={s.smallSecondaryText}>Cancel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={[s.smallPrimaryBtn, (commentText.trim().length < 2 || communityBusy) && { opacity: 0.55 }]} onPress={submitComment} disabled={commentText.trim().length < 2 || communityBusy}>
-                          {communityBusy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.smallPrimaryText}>POST</Text>}
+                          {communityBusy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.smallPrimaryText}>Post</Text>}
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -1041,7 +1046,7 @@ export default function PremiumPlaceSheet({
               {stage === 'full' && (
                 <View style={s.communityBlock}>
                   <View style={s.communityHeader}>
-                    <Text style={s.sectionLabel}>SUGGEST EDIT</Text>
+                    <Text style={s.sectionLabel}>Suggest an edit</Text>
                   </View>
                   {showEditForm ? (
                     <View style={s.formCard}>
@@ -1074,10 +1079,10 @@ export default function PremiumPlaceSheet({
                       />
                       <View style={s.inlineActions}>
                         <TouchableOpacity style={s.smallSecondaryBtn} onPress={() => { setShowEditForm(false); setEditValue(''); setEditNote(''); }}>
-                          <Text style={s.smallSecondaryText}>CANCEL</Text>
+                          <Text style={s.smallSecondaryText}>Cancel</Text>
                         </TouchableOpacity>
                         <TouchableOpacity style={[s.smallPrimaryBtn, (editValue.trim().length < 2 || communityBusy) && { opacity: 0.55 }]} onPress={submitEdit} disabled={editValue.trim().length < 2 || communityBusy}>
-                          {communityBusy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.smallPrimaryText}>SEND EDIT</Text>}
+                          {communityBusy ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.smallPrimaryText}>Send edit</Text>}
                         </TouchableOpacity>
                       </View>
                     </View>
@@ -1102,22 +1107,22 @@ export default function PremiumPlaceSheet({
 
               {stage === 'full' && !!reviews.length && (
                 <View style={s.section}>
-                  <Text style={s.sectionLabel}>COMMUNITY NOTES</Text>
+                  <Text style={s.sectionLabel}>Notes</Text>
                   {reviews.slice(0, 3).map((review, idx) => (
                     <View key={`${review.authorName}-${idx}`} style={s.reviewCard}>
                       <View style={s.reviewTop}>
                         <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || 'Trailhead user'}</Text>
-                        <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : review.source || 'Trailhead'}</Text>
+                        <Text style={s.reviewRating}>{review.rating ? `${review.rating}/5` : 'Trailhead'}</Text>
                       </View>
                       {!!review.relativeTime && <Text style={s.reviewMeta}>{review.relativeTime}</Text>}
-                      {!!review.text && <Text style={s.reviewText} numberOfLines={4}>{review.text}</Text>}
+                      {!!review.text && <Text style={s.reviewText}>{review.text}</Text>}
                     </View>
                   ))}
                 </View>
               )}
 
               <View style={s.sourceFooter}>
-                <Text style={s.sourceText} numberOfLines={2}>
+                <Text style={s.sourceText}>
                   {sourceLabel}{photos[0]?.credit ? ` · Photo: ${photos[0].credit}` : ''}
                 </Text>
               </View>
@@ -1172,7 +1177,7 @@ function RelatedRail({
   if (!items.length) return null;
   return (
     <View style={styles.relatedSection}>
-      <Text style={styles.relatedTitle}>{title.toUpperCase()}</Text>
+      <Text style={styles.relatedTitle}>{title}</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.relatedRail}>
         {items.map((item, idx) => (
           <TouchableOpacity
@@ -1188,8 +1193,8 @@ function RelatedRail({
                 <Ionicons name={itemIcon(item.type)} size={17} color={C.orange} />
               </View>
             )}
-            <Text style={styles.relatedName} numberOfLines={2}>{item.name || titleCase(item.type)}</Text>
-            <Text style={styles.relatedMeta} numberOfLines={1}>{itemMeta(item)}</Text>
+            <Text style={styles.relatedName}>{item.name || titleCase(item.type)}</Text>
+            <Text style={styles.relatedMeta}>{itemMeta(item)}</Text>
           </TouchableOpacity>
         ))}
       </ScrollView>
@@ -1228,7 +1233,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   heroFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong },
   heroShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.22)' },
   heroText: { position: 'absolute', left: 16, right: 16, bottom: 14 },
-  kicker: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, opacity: 0.88 },
+  kicker: { color: '#fff', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0, opacity: 0.88 },
   title: { color: '#fff', fontSize: 23, lineHeight: 27, fontWeight: '900', marginTop: 4 },
   body: { padding: 14, gap: 10 },
   meta: { color: C.text2, fontSize: 12, fontFamily: mono, fontWeight: '700' },
@@ -1238,7 +1243,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   infoRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
   infoText: { flex: 1, color: C.text2, fontSize: 13, lineHeight: 19 },
   section: { marginTop: 4, borderTopWidth: 1, borderColor: C.border, paddingTop: 10 },
-  sectionLabel: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 5 },
+  sectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0, marginBottom: 5 },
   sectionText: { color: C.text2, fontSize: 12, lineHeight: 18 },
   richLockedCard: {
     marginTop: 4,
@@ -1271,7 +1276,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   relatedHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   relatedLoadingBody: { gap: 10 },
   relatedSection: { gap: 7 },
-  relatedTitle: { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.9, fontWeight: '900' },
+  relatedTitle: { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 0, fontWeight: '900' },
   relatedRail: { gap: 8, paddingRight: 12 },
   relatedCard: {
     width: 128,

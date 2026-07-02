@@ -3717,7 +3717,7 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
     place_id: props.mapbox_id || props.id,
     mapbox_id: props.mapbox_id || props.id || feature?.id,
     attribution: 'Mapbox',
-    source_badge: 'Mapbox basemap',
+    source_badge: 'Map data',
     enrichment_source: 'mapbox_standard',
     enrichment_status: 'pending',
     raw_feature: {
@@ -3947,7 +3947,7 @@ function mapboxStandardFeatureEventToPoi(event: any): OsmPoi | null {
     screen_position: event?.screen_position || null,
     selection_confidence: event?.selection_confidence || 'high',
     attribution: 'Mapbox',
-    source_badge: 'Mapbox basemap',
+    source_badge: 'Map data',
     mapbox_id: providerId || null,
     enrichment_source: 'mapbox_standard',
     enrichment_status: 'pending',

@@ -393,21 +393,34 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
                 db = sqlite3.connect(settings.db_path)
                 try:
                     db.execute(
-                        "UPDATE places SET display_metadata=? WHERE trailhead_place_id=?",
+                        "UPDATE places SET official_url=?, hero_photo_url=?, display_metadata=? WHERE trailhead_place_id=?",
                         (
+                            "https://example.com/old-source",
+                            "https://example.com/old-photo.jpg",
                             json.dumps({
                                 "trailhead_dataset": "dispersed_camp",
                                 "trailhead_public": True,
                                 "verified_source": "Trailhead",
                                 "source_freshness": "Source checked",
                                 "description": "",
+                                "address": "Old sourced address",
+                                "phone": "555-0100",
+                                "url": "https://example.com/old-source",
                             }),
                             recent["canonical_camp_id"],
                         ),
                     )
                     db.execute(
                         "UPDATE camp_profile_overrides SET data=? WHERE camp_id=?",
-                        (json.dumps({"description": "", "verified_source": "Trailhead"}), recent["canonical_camp_id"]),
+                        (
+                            json.dumps({
+                                "description": "",
+                                "verified_source": "Trailhead",
+                                "phone": "555-0100",
+                                "url": "https://example.com/old-source",
+                            }),
+                            recent["canonical_camp_id"],
+                        ),
                     )
                     db.commit()
                 finally:
@@ -427,9 +440,16 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
                 self.assertEqual(fixed["description"], store.DISPERSED_PUBLIC_DEFAULT_DESCRIPTION)
                 self.assertEqual(fixed["verified_source"], "Recent dispersed spot")
                 self.assertEqual(fixed["source_freshness"], "Verified this month")
+                self.assertFalse(fixed.get("official_url"))
+                self.assertFalse(fixed.get("hero_photo_url"))
+                self.assertFalse(fixed.get("phone"))
+                self.assertFalse(fixed.get("address"))
+                self.assertFalse(fixed.get("url"))
                 override = store.get_camp_profile_override(recent["canonical_camp_id"])
                 self.assertEqual(override["description"], store.DISPERSED_PUBLIC_DEFAULT_DESCRIPTION)
                 self.assertEqual(override["verified_source"], "Recent dispersed spot")
+                self.assertNotIn("phone", override)
+                self.assertNotIn("url", override)
             finally:
                 settings.db_path = old_path
 

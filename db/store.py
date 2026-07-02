@@ -4094,6 +4094,11 @@ DISPERSED_PUBLIC_DEFAULT_DESCRIPTION = (
     "Dispersed spots can change quickly. Check access, rules, and current conditions before relying on this spot."
 )
 
+DISPERSED_PUBLIC_SOURCE_CLEAR_KEYS = {
+    "address", "phone", "website", "url", "booking_url", "hours",
+    "rating", "rating_count", "cost", "hero_photo_url", "photo_url",
+}
+
 
 def _dispersed_lead_json(raw: object, fallback):
     if raw in (None, ""):
@@ -4516,6 +4521,53 @@ def _nearby_public_dispersed_place(lat: float, lng: float, max_mi: float = 0.12)
     return best[1] if best else None
 
 
+def _strip_public_dispersed_source_fields(data: dict) -> dict:
+    for key in DISPERSED_PUBLIC_SOURCE_CLEAR_KEYS:
+        data.pop(key, None)
+    return data
+
+
+def _clear_public_dispersed_place_source_fields(camp_id: str, *, now: int | None = None) -> None:
+    camp_id = str(camp_id or "").strip()
+    if not camp_id:
+        return
+    ts = now or int(time.time())
+    db = _conn()
+    try:
+        row = db.execute(
+            "SELECT display_metadata FROM places WHERE trailhead_place_id=?",
+            (camp_id,),
+        ).fetchone()
+        if row:
+            metadata = _dispersed_lead_json(row["display_metadata"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            _strip_public_dispersed_source_fields(metadata)
+            db.execute(
+                """UPDATE places
+                   SET official_url='', hero_photo_url=NULL, display_metadata=?, updated_at=?, last_seen=?
+                   WHERE trailhead_place_id=?""",
+                (json.dumps(metadata), ts, ts, camp_id),
+            )
+
+        override_row = db.execute(
+            "SELECT data FROM camp_profile_overrides WHERE camp_id=?",
+            (camp_id,),
+        ).fetchone()
+        if override_row:
+            override = _dispersed_lead_json(override_row["data"], {})
+            if not isinstance(override, dict):
+                override = {}
+            _strip_public_dispersed_source_fields(override)
+            db.execute(
+                "UPDATE camp_profile_overrides SET data=?, updated_at=? WHERE camp_id=?",
+                (json.dumps(override), ts, camp_id),
+            )
+        db.commit()
+    finally:
+        db.close()
+
+
 def publish_dispersed_site_lead(
     lead_key: str,
     admin_id: int | None = None,
@@ -4582,6 +4634,7 @@ def publish_dispersed_site_lead(
     place = upsert_canonical_place(payload)
     place_id = place.get("trailhead_place_id")
     if place_id:
+        _clear_public_dispersed_place_source_fields(str(place_id), now=now)
         set_camp_profile_override(str(place_id), {
             **merged_profile,
             "name": name,
@@ -4671,6 +4724,7 @@ def repair_published_dispersed_site_lead_metadata(
             metadata = _place_json(place_row["display_metadata"], {})
             if not isinstance(metadata, dict):
                 metadata = {}
+            _strip_public_dispersed_source_fields(metadata)
             metadata.update({
                 "summary": public_description,
                 "description": public_description,
@@ -4688,7 +4742,9 @@ def repair_published_dispersed_site_lead_metadata(
                 "refresh_after": now + 90 * 86400,
             })
             db.execute(
-                "UPDATE places SET display_metadata=?, updated_at=?, last_seen=? WHERE trailhead_place_id=?",
+                """UPDATE places
+                   SET official_url='', hero_photo_url=NULL, display_metadata=?, updated_at=?, last_seen=?
+                   WHERE trailhead_place_id=?""",
                 (json.dumps(metadata), now, now, camp_id),
             )
 
@@ -4699,6 +4755,7 @@ def repair_published_dispersed_site_lead_metadata(
             override = _place_json(override_row["data"], {}) if override_row else {}
             if not isinstance(override, dict):
                 override = {}
+            _strip_public_dispersed_source_fields(override)
             override.update({
                 "description": public_description,
                 "summary": public_description,

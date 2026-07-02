@@ -4625,6 +4625,107 @@ def publish_dispersed_site_lead(
     return out
 
 
+def repair_published_dispersed_site_lead_metadata(
+    *,
+    max_age_days: int = 366,
+    source_batch: str | None = None,
+    limit: int = 0,
+    admin_id: int | None = None,
+) -> dict:
+    """Refresh public-card metadata for already-published dispersed leads.
+
+    This intentionally avoids republishing through the nearby merge path. It only
+    repairs the fields the public card/API reads for leads that already have a
+    canonical public camp id.
+    """
+    leads = list_dispersed_site_leads_for_publication(
+        max_age_days=max_age_days,
+        source_batch=source_batch,
+        limit=limit,
+        statuses=["published"],
+    )
+    now = int(time.time())
+    report = {"eligible": len(leads), "repaired": 0, "skipped": 0, "missing_place": 0}
+    db = _conn()
+    try:
+        for lead in leads:
+            camp_id = str(lead.get("canonical_camp_id") or "").strip()
+            if not camp_id:
+                report["skipped"] += 1
+                continue
+            place_row = db.execute(
+                "SELECT display_metadata FROM places WHERE trailhead_place_id=?",
+                (camp_id,),
+            ).fetchone()
+            if not place_row:
+                report["missing_place"] += 1
+                continue
+
+            profile = lead.get("profile_data") or {}
+            public_description = (
+                str(profile.get("description") or "").strip()
+                or DISPERSED_PUBLIC_DEFAULT_DESCRIPTION
+            )
+            verified_ts = _parse_dispersed_verified_ts(lead.get("source_verified_at")) or now
+            source_freshness = dispersed_lead_verified_freshness(lead, now=now)
+            metadata = _place_json(place_row["display_metadata"], {})
+            if not isinstance(metadata, dict):
+                metadata = {}
+            metadata.update({
+                "summary": public_description,
+                "description": public_description,
+                "land_type": "Dispersed",
+                "reservable": False,
+                "verified_source": "Recent dispersed spot",
+                "source_badge": "Trailhead",
+                "source_freshness": source_freshness,
+                "source_confidence_notes": DISPERSED_PUBLIC_DEFAULT_DESCRIPTION,
+                "trailhead_dataset": "dispersed_camp",
+                "trailhead_public": True,
+                "source_verified_at": lead.get("source_verified_at") or "",
+                "source_updated_at": verified_ts,
+                "last_refreshed_at": now,
+                "refresh_after": now + 90 * 86400,
+            })
+            db.execute(
+                "UPDATE places SET display_metadata=?, updated_at=?, last_seen=? WHERE trailhead_place_id=?",
+                (json.dumps(metadata), now, now, camp_id),
+            )
+
+            override_row = db.execute(
+                "SELECT data FROM camp_profile_overrides WHERE camp_id=?",
+                (camp_id,),
+            ).fetchone()
+            override = _place_json(override_row["data"], {}) if override_row else {}
+            if not isinstance(override, dict):
+                override = {}
+            override.update({
+                "description": public_description,
+                "summary": public_description,
+                "land_type": "Dispersed",
+                "reservable": False,
+                "verified_source": "Recent dispersed spot",
+                "source_badge": "Trailhead",
+                "source_freshness": source_freshness,
+                "source_confidence_notes": DISPERSED_PUBLIC_DEFAULT_DESCRIPTION,
+                "site_types": override.get("site_types") or profile.get("site_types") or ["Tent"],
+                "amenities": override.get("amenities") or profile.get("amenities") or [],
+                "activities": override.get("activities") or profile.get("activities") or [],
+            })
+            db.execute(
+                """INSERT INTO camp_profile_overrides (camp_id,data,updated_by,updated_at)
+                   VALUES (?,?,?,?)
+                   ON CONFLICT(camp_id) DO UPDATE SET
+                    data=excluded.data, updated_by=excluded.updated_by, updated_at=excluded.updated_at""",
+                (camp_id, json.dumps(override), admin_id, now),
+            )
+            report["repaired"] += 1
+        db.commit()
+    finally:
+        db.close()
+    return report
+
+
 # ── Canonical places / all-pin community layer ───────────────────────────────
 
 PLACE_PHOTO_CREDITS = 5

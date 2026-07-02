@@ -30,6 +30,7 @@ def build_report(args: argparse.Namespace) -> dict:
         "source_batch": args.source_batch or None,
         "eligible": len(leads),
         "published": 0,
+        "repaired": 0,
         "merged": 0,
         "skipped": 0,
         "errors": [],
@@ -51,6 +52,17 @@ def build_report(args: argparse.Namespace) -> dict:
 
     if not args.coordinate_only_confirmed:
         raise SystemExit("--coordinate-only-confirmed is required with --commit")
+
+    if args.repair_published:
+        repair = store.repair_published_dispersed_site_lead_metadata(
+            max_age_days=args.max_age_days,
+            source_batch=args.source_batch or None,
+            limit=args.limit,
+            admin_id=args.admin_id,
+        )
+        report.update(repair)
+        report["db_summary"] = store.get_dispersed_site_lead_summary(args.source_batch or None)
+        return report
 
     for lead in leads:
         lead_key = str(lead.get("lead_key") or "").strip()

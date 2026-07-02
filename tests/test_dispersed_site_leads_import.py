@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import json
 import sqlite3
 import tempfile
 import unittest
@@ -388,6 +389,47 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
                 self.assertEqual(place["description"], store.DISPERSED_PUBLIC_DEFAULT_DESCRIPTION)
                 self.assertEqual(place["source_freshness"], "Verified this month")
                 self.assertNotIn("ioverlander", str(place).lower())
+
+                db = sqlite3.connect(settings.db_path)
+                try:
+                    db.execute(
+                        "UPDATE places SET display_metadata=? WHERE trailhead_place_id=?",
+                        (
+                            json.dumps({
+                                "trailhead_dataset": "dispersed_camp",
+                                "trailhead_public": True,
+                                "verified_source": "Trailhead",
+                                "source_freshness": "Source checked",
+                                "description": "",
+                            }),
+                            recent["canonical_camp_id"],
+                        ),
+                    )
+                    db.execute(
+                        "UPDATE camp_profile_overrides SET data=? WHERE camp_id=?",
+                        (json.dumps({"description": "", "verified_source": "Trailhead"}), recent["canonical_camp_id"]),
+                    )
+                    db.commit()
+                finally:
+                    db.close()
+                repaired = build_publish_report(SimpleNamespace(
+                    max_age_days=30,
+                    source_batch="auto_publish_batch",
+                    limit=0,
+                    commit=True,
+                    repair_published=True,
+                    coordinate_only_confirmed=True,
+                    admin_id=None,
+                    keep_going=False,
+                ))
+                self.assertEqual(repaired["repaired"], 1)
+                fixed = store.get_place(recent["canonical_camp_id"])
+                self.assertEqual(fixed["description"], store.DISPERSED_PUBLIC_DEFAULT_DESCRIPTION)
+                self.assertEqual(fixed["verified_source"], "Recent dispersed spot")
+                self.assertEqual(fixed["source_freshness"], "Verified this month")
+                override = store.get_camp_profile_override(recent["canonical_camp_id"])
+                self.assertEqual(override["description"], store.DISPERSED_PUBLIC_DEFAULT_DESCRIPTION)
+                self.assertEqual(override["verified_source"], "Recent dispersed spot")
             finally:
                 settings.db_path = old_path
 

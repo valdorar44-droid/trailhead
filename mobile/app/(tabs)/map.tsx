@@ -8245,6 +8245,33 @@ function MapScreen() {
       source_confidence_notes: String((profile as any).source_confidence_notes || ''),
       max_rig_length: String((profile as any).max_rig_length || ''),
     } as CampsiteDetail & { private_lead_key: string };
+    const campPin = {
+      id: detail.id,
+      private_lead_key: leadKey,
+      lead_key: leadKey,
+      review_status: details.status || 'needs_field_check',
+      name: detail.name,
+      lat: pin.lat,
+      lng: pin.lng,
+      land_type: detail.land_type,
+      description: detail.description || 'Check access, rules, and current condition.',
+      cost: detail.cost || '',
+      reservable: false,
+      url: detail.url || '',
+      ada: false,
+      tags: ['dispersed', 'tent'],
+      photos: [],
+      amenities: detail.amenities ?? [],
+      site_types: detail.site_types ?? ['Tent'],
+      source: 'trailhead',
+      verified_source: 'Trailhead',
+      source_badge: 'Trailhead',
+      phone: detail.phone || '',
+    } as CampsitePin;
+    setSelectedCamp(campPin);
+    setSelectedCommunityPin(null);
+    setCommunityUpdatePin(null);
+    setCommunityUpdateNote('');
     setCampDetail(detail);
     setCampEditMode(user?.is_admin ? 'admin' : 'suggest');
     setCampEditDraft({
@@ -24271,13 +24298,26 @@ function MapScreen() {
         const suggestCommunityUpdate = () => {
           openCommunityUpdate(selectedCommunityPin);
         };
-        return (
-          <Modal visible transparent animationType="slide" onRequestClose={() => { setSelectedCommunityPin(null); setCommunityUpdatePin(null); setCommunityUpdateNote(''); }}>
-            <View style={s.modalOverlay}>
-              <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => { setSelectedCommunityPin(null); setCommunityUpdatePin(null); setCommunityUpdateNote(''); }} />
-              <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
-                <View style={s.daySheetHandle} />
-                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.communityCardScroll}>
+        const closeCommunityPin = () => {
+          setSelectedCommunityPin(null);
+          setCommunityUpdatePin(null);
+          setCommunityUpdateNote('');
+        };
+        const contextTiles = [
+          { key: 'camps', icon: 'bonfire-outline', color: C.orange, value: Number(liveSupport.campsNearby || 0), label: 'camps' },
+          { key: 'fuel', icon: 'flash-outline', color: '#f97316', value: Number(liveSupport.fuelNearby || 0), label: 'fuel' },
+          { key: 'water', icon: 'water-outline', color: '#38bdf8', value: Number(liveSupport.waterNearby || 0), label: 'water' },
+          { key: 'trails', icon: 'trail-sign-outline', color: '#22c55e', value: Number(nearbyTrails || 0), label: 'trails' },
+          { key: 'reports', icon: 'warning-outline', color: '#f59e0b', value: Number(liveSupport.reportsNearby || 0), label: 'reports' },
+        ].filter(tile => tile.value > 0);
+        const nearestCampIsSelf = privateLead
+          && liveSupport.nearestCampDistanceMi != null
+          && liveSupport.nearestCampDistanceMi < 0.1;
+        const nearestCampText = liveSupport.nearestCampName && !nearestCampIsSelf
+          ? `Nearest camp: ${liveSupport.nearestCampName}${liveSupport.nearestCampDistanceMi != null ? ` · ${liveSupport.nearestCampDistanceMi.toFixed(1)} mi` : ''}`
+          : '';
+        const communityCard = (
+          <>
                   <View style={[s.communityHero, { borderColor: meta.color + '55' }]}>
                     <View style={[s.communityHeroGrid, { backgroundColor: meta.color + '18' }]} />
                     <View style={[s.pinIconBadge, { backgroundColor: meta.color }]}>
@@ -24287,6 +24327,9 @@ function MapScreen() {
                       <Text style={s.communityHeroKicker}>{privateLead ? 'DISPERSED' : meta.label.toUpperCase()}</Text>
                       <Text style={s.wpSheetName} numberOfLines={2}>{selectedCommunityPin.name || meta.label}</Text>
                     </View>
+                    <TouchableOpacity style={s.communityHeroClose} onPress={closeCommunityPin} activeOpacity={0.8}>
+                      <Ionicons name="close" size={16} color={OVR.text2} />
+                    </TouchableOpacity>
                   </View>
                   <View style={s.pinTrustRow}>
                     <View style={s.pinTrustChip}>
@@ -24313,7 +24356,7 @@ function MapScreen() {
                   </View>
                   <View style={s.communitySection}>
                     <View style={s.communitySectionHeader}>
-                      <Text style={s.communitySectionLabel}>NEARBY CONTEXT</Text>
+                      <Text style={s.communitySectionLabel}>NEARBY</Text>
                       {liveContext?.loading && (
                         <View style={s.contextSearchingPill}>
                           <Ionicons name="search" size={11} color={C.orange} />
@@ -24322,40 +24365,24 @@ function MapScreen() {
                       )}
                     </View>
                     {liveContext?.loading && (
-                      <Text style={s.communityContextNote}>Loading nearby camps, fuel, water, trails, and reports...</Text>
+                      <Text style={s.communityContextNote}>Checking nearby area...</Text>
                     )}
-                    <View style={s.communityContextGrid}>
-                      <View style={s.communityContextTile}>
-                        <Ionicons name="bonfire-outline" size={14} color={C.orange} />
-                        <Text style={s.communityContextValue}>{liveSupport.campsNearby}</Text>
-                        <Text style={s.communityContextLabel}>camps</Text>
+                    {contextTiles.length > 0 && (
+                      <View style={s.communityContextGrid}>
+                        {contextTiles.map(tile => (
+                          <View key={tile.key} style={s.communityContextTile}>
+                            <Ionicons name={tile.icon as any} size={14} color={tile.color} />
+                            <Text style={s.communityContextValue}>{tile.value}</Text>
+                            <Text style={s.communityContextLabel}>{tile.label}</Text>
+                          </View>
+                        ))}
                       </View>
-                      <View style={s.communityContextTile}>
-                        <Ionicons name="flash-outline" size={14} color="#f97316" />
-                        <Text style={s.communityContextValue}>{liveSupport.fuelNearby}</Text>
-                        <Text style={s.communityContextLabel}>fuel</Text>
-                      </View>
-                      <View style={s.communityContextTile}>
-                        <Ionicons name="water-outline" size={14} color="#38bdf8" />
-                        <Text style={s.communityContextValue}>{liveSupport.waterNearby}</Text>
-                        <Text style={s.communityContextLabel}>water</Text>
-                      </View>
-                      <View style={s.communityContextTile}>
-                        <Ionicons name="trail-sign-outline" size={14} color="#22c55e" />
-                        <Text style={s.communityContextValue}>{nearbyTrails}</Text>
-                        <Text style={s.communityContextLabel}>trails</Text>
-                      </View>
-                      <View style={s.communityContextTile}>
-                        <Ionicons name="warning-outline" size={14} color="#f59e0b" />
-                        <Text style={s.communityContextValue}>{liveSupport.reportsNearby}</Text>
-                        <Text style={s.communityContextLabel}>reports</Text>
-                      </View>
-                    </View>
-                    <Text style={s.communityContextNote}>
-                      {liveSupport.nearestCampName
-                        ? `Nearest camp: ${liveSupport.nearestCampName}${liveSupport.nearestCampDistanceMi != null ? ` · ${liveSupport.nearestCampDistanceMi.toFixed(1)} mi` : ''}`
-                        : liveContext?.loadedAt ? 'Try a wider nearby camp search.' : 'Nearby context loads live when this card opens.'}
-                    </Text>
+                    )}
+                    {!!nearestCampText && (
+                      <Text style={s.communityContextNote}>
+                        {nearestCampText}
+                      </Text>
+                    )}
                   </View>
                   {detailRows.length > 0 && (
                     <View style={s.pinDetailGrid}>
@@ -24451,6 +24478,41 @@ function MapScreen() {
                       <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>REPORT</Text>
                     </TouchableOpacity>
                   </View>}
+          </>
+        );
+        if (privateLead) {
+          return (
+            <TrailheadSnapSheet
+              initialStage="half"
+              maxFullRatio={0.82}
+              halfRatio={0.5}
+              style={s.privateLeadSnapSheet}
+              contentStyle={s.privateLeadSnapContent}
+              scrollContentStyle={s.communityCardScroll}
+              peekHeader={(
+                <View style={s.privateLeadPeekHeader}>
+                  <View style={s.privateLeadPeekCopy}>
+                    <Text style={s.privateLeadPeekTitle} numberOfLines={1}>{selectedCommunityPin.name || 'Dispersed tent site'}</Text>
+                    <Text style={s.privateLeadPeekMeta} numberOfLines={1}>Needs field check</Text>
+                  </View>
+                  <TouchableOpacity style={s.privateLeadPeekClose} onPress={closeCommunityPin} activeOpacity={0.8}>
+                    <Ionicons name="close" size={16} color={OVR.text2} />
+                  </TouchableOpacity>
+                </View>
+              )}
+            >
+              {communityCard}
+            </TrailheadSnapSheet>
+          );
+        }
+        return (
+          <Modal visible transparent animationType="slide" onRequestClose={closeCommunityPin}>
+            <View style={s.modalOverlay}>
+              <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={closeCommunityPin} />
+              <TrailheadSheet handle={false} style={[s.wpSheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
+                <View style={s.daySheetHandle} />
+                <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.communityCardScroll}>
+                  {communityCard}
                 </ScrollView>
               </TrailheadSheet>
             </View>
@@ -28102,7 +28164,42 @@ const makeStyles = (C: ColorPalette) => {
     opacity: 0.9,
   },
   communityHeroText: { flex: 1 },
+  communityHeroClose: {
+    position: 'absolute',
+    top: 10,
+    right: 10,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: OVR.bg,
+    borderWidth: 1,
+    borderColor: OVR.border,
+  },
   communityHeroKicker: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 4 },
+  privateLeadSnapSheet: { zIndex: 80 },
+  privateLeadSnapContent: { backgroundColor: OVR.bg },
+  privateLeadPeekHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingTop: 3,
+  },
+  privateLeadPeekCopy: { flex: 1, minWidth: 0 },
+  privateLeadPeekTitle: { color: OVR.text, fontSize: 13, fontWeight: '900' },
+  privateLeadPeekMeta: { color: OVR.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', marginTop: 2 },
+  privateLeadPeekClose: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: OVR.border2,
+    borderWidth: 1,
+    borderColor: OVR.border,
+  },
   communitySection: { marginTop: 14 },
   communitySectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10, marginBottom: 8 },
   communitySectionLabel: { color: OVR.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, marginBottom: 7 },

@@ -2715,9 +2715,9 @@ const MAP_FILTER_PREFS_VERSION = 2;
 const EXPLORE_CATEGORY_UNLOCK_KEY = 'trailhead_explore_category_unlock_day';
 const MIN_CAMP_SEARCH_ZOOM = 10;
 const MIN_FILTERED_CAMP_SEARCH_ZOOM = 7;
-const MIN_MANUAL_CAMP_SEARCH_ZOOM = 5.5;
+const MIN_MANUAL_CAMP_SEARCH_ZOOM = 4.4;
 const MAX_FREECAM_CAMP_SEARCH_RADIUS_MI = 75;
-const MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI = 180;
+const MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI = 320;
 const CAMP_DISCOVERY_PLACE_CATEGORIES = 'camp,camping,private_stay,farm_stay,ranch,winery,glamping,private_camp,lodging';
 const MAX_ALL_MAP_POIS = 1200;
 const MAX_VISIBLE_MAP_POIS = 450;
@@ -6975,8 +6975,9 @@ function MapScreen() {
     autoLoadedRef.current = true;
     const deg = 0.5;
     const bounds = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
-    viewportRef.current = bounds;
-    if (showCampPins) loadCampsInArea(bounds, activeFilters);
+    const targetBounds = viewportRef.current ?? bounds;
+    if (!viewportRef.current) viewportRef.current = bounds;
+    if (showCampPins) loadCampsInArea(targetBounds, activeFilters);
     refreshCommunityPins(userLoc, 3.0, true);
   }, [userLoc, showCampPins]);
 
@@ -7230,6 +7231,33 @@ function MapScreen() {
 
   function campKey(camp: Pick<CampsitePin, 'id' | 'name' | 'lat' | 'lng'>) {
     return String(camp.id || `${camp.name || 'camp'}:${Number(camp.lat).toFixed(4)}:${Number(camp.lng).toFixed(4)}`);
+  }
+
+  function mergeCampPinsForMap(lists: Array<Array<CampsitePin | null | undefined>>, limit = 520) {
+    const seen = new Set<string>();
+    const merged: CampsitePin[] = [];
+    for (const list of lists) {
+      for (const camp of list) {
+        if (!camp || camp.lat == null || camp.lng == null || !Number.isFinite(Number(camp.lat)) || !Number.isFinite(Number(camp.lng))) continue;
+        const key = campKey(camp);
+        if (seen.has(key)) continue;
+        seen.add(key);
+        merged.push(camp);
+        if (merged.length >= limit) return merged;
+      }
+    }
+    return merged;
+  }
+
+  function userLocationCampBounds() {
+    if (!userLoc) return null;
+    return {
+      n: userLoc.lat + 2.0,
+      s: userLoc.lat - 2.0,
+      e: userLoc.lng + 2.0,
+      w: userLoc.lng - 2.0,
+      zoom: MIN_MANUAL_CAMP_SEARCH_ZOOM,
+    };
   }
 
   function campSourceUrl(camp?: Partial<CampsitePin | CampsiteDetail> | null) {
@@ -7597,19 +7625,28 @@ function MapScreen() {
   }
 
   function queueViewportCampFetch(bounds: { n: number; s: number; e: number; w: number; zoom: number }) {
-    if ((bounds.zoom ?? 0) < MIN_CAMP_SEARCH_ZOOM) return;
+    const activeMinZoom = campDiscoveryWideActive ? MIN_MANUAL_CAMP_SEARCH_ZOOM : MIN_CAMP_SEARCH_ZOOM;
+    if ((bounds.zoom ?? 0) < activeMinZoom) return;
     const center = { lat: (bounds.n + bounds.s) / 2, lng: (bounds.e + bounds.w) / 2 };
     const last = lastCampFetchRef.current;
     const latSpan = Math.abs(bounds.n - bounds.s);
     const lngSpan = Math.abs(bounds.e - bounds.w);
-    const threshold = Math.max(0.03, Math.min(0.1, Math.max(latSpan, lngSpan) * 0.3));
+    const threshold = campDiscoveryWideActive
+      ? Math.max(0.16, Math.min(0.85, Math.max(latSpan, lngSpan) * 0.25))
+      : Math.max(0.03, Math.min(0.1, Math.max(latSpan, lngSpan) * 0.3));
     if (last && Math.abs(center.lat - last.lat) < threshold && Math.abs(center.lng - last.lng) < threshold) return;
     if (pendingCampFetchRef.current) clearTimeout(pendingCampFetchRef.current);
     pendingCampFetchRef.current = setTimeout(() => {
       pendingCampFetchRef.current = null;
       lastCampFetchRef.current = center;
-      loadCampsInArea(bounds, activeFilters);
-    }, 420);
+      loadCampsInArea(
+        { ...bounds, zoom: Math.max(bounds.zoom ?? 0, activeMinZoom) },
+        campDiscoveryWideActive ? DEFAULT_CAMP_FILTERS : activeFilters,
+        campDiscoveryWideActive
+          ? { force: true, minZoom: MIN_MANUAL_CAMP_SEARCH_ZOOM, radiusCapMi: MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI, campOnly: true, openSheet: true }
+          : {},
+      );
+    }, campDiscoveryWideActive ? 560 : 420);
   }
 
   function setWaterNavLineData(data: WaterNavigationLinesResponse | null) {
@@ -8680,15 +8717,10 @@ function MapScreen() {
     focusInlineMapSearch();
   }
 
-  function searchCampDiscoveryArea() {
+  async function searchCampDiscoveryArea() {
     dismissCampDiscoveryHint();
-    const base = viewportRef.current || (userLoc ? {
-      n: userLoc.lat + 2.0,
-      s: userLoc.lat - 2.0,
-      e: userLoc.lng + 2.0,
-      w: userLoc.lng - 2.0,
-      zoom: 7,
-    } : null);
+    const liveBounds = await syncCopilotVisibleBounds();
+    const base = liveBounds || viewportRef.current || userLocationCampBounds();
     if (!base) {
       setQuickToast('Move the map to a camp area first');
       setTimeout(() => setQuickToast(''), 2400);
@@ -8702,10 +8734,11 @@ function MapScreen() {
     campPinsLockUntilRef.current = Date.now() + 18_000;
     setCampDiscoveryWideActive(true);
     setCampDiscoverySheetDismissed(false);
+    lastCampFetchRef.current = center;
     if (center) queueMapWeatherFetch(center, true);
     loadCampsInArea(
       { ...base, zoom: Math.max(base.zoom ?? 0, MIN_MANUAL_CAMP_SEARCH_ZOOM) },
-      activeFilters,
+      DEFAULT_CAMP_FILTERS,
       {
         force: true,
         minZoom: MIN_MANUAL_CAMP_SEARCH_ZOOM,
@@ -18971,11 +19004,12 @@ function MapScreen() {
   const campDiscoveryRefreshing = Boolean(isLoadingAreaCamps || campDiscoveryLoadingKey);
   const activeTripCampPins = (activeTrip?.campsites ?? [])
     .filter(camp => camp.lat != null && camp.lng != null && isFinite(camp.lat) && isFinite(camp.lng));
-  const nativeMapCampPins = activeTripCampPins.length > 0 && !campDiscoveryWideActive
-    ? activeTripCampPins
-    : (showCampPins || campDiscoveryActive)
-    ? (campDiscoveryActive ? currentDiscoveryCamps : discoveryCamps)
-    : [];
+  const nativeMapCampPins = (showCampPins || campDiscoveryActive)
+    ? mergeCampPinsForMap([
+      campDiscoveryActive ? currentDiscoveryCamps : discoveryCamps,
+      campDiscoveryWideActive ? [] : activeTripCampPins as unknown as CampsitePin[],
+    ])
+    : activeTripCampPins as unknown as CampsitePin[];
 
   const nativeNavigationPanel = navMode ? (
     <Animated.View
@@ -19462,7 +19496,7 @@ function MapScreen() {
       </TourTarget>
 
       {/* Offline map load error banner */}
-      {mapLoadFailed && (
+      {mapLoadFailed && !mapSurfaceReady && !mapSearchChromeActive && !mapSheetOpen && (
         <View style={[s.mapLoadFailBanner, topChromeLaneStyle]}>
           <Ionicons name="cloud-offline-outline" size={14} color="#fbbf24" />
           <Text style={s.mapLoadFailText}>Map is taking longer than expected.</Text>
@@ -19764,7 +19798,7 @@ function MapScreen() {
               style={s.campDiscoverySearchArea}
               onPress={() => viewportRef.current && loadCampsInArea(
                 viewportRef.current,
-                activeFilters,
+                campDiscoveryWideActive ? DEFAULT_CAMP_FILTERS : activeFilters,
                 campDiscoveryWideActive
                   ? { force: true, minZoom: MIN_MANUAL_CAMP_SEARCH_ZOOM, radiusCapMi: MAX_DISCOVERY_CAMP_SEARCH_RADIUS_MI, campOnly: true, openSheet: true }
                   : { openSheet: true },

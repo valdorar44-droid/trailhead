@@ -4090,6 +4090,10 @@ DISPERSED_LEAD_PROFILE_KEYS = {
     "amenities", "activities",
 }
 
+DISPERSED_PUBLIC_DEFAULT_DESCRIPTION = (
+    "Dispersed spots can change quickly. Check access, rules, and current conditions before relying on this spot."
+)
+
 
 def _dispersed_lead_json(raw: object, fallback):
     if raw in (None, ""):
@@ -4131,6 +4135,35 @@ def _clean_dispersed_lead_profile(data: dict | None) -> dict:
             if items:
                 clean[key] = sorted(dict.fromkeys(items))[:40]
     return clean
+
+
+def _parse_dispersed_verified_ts(value: object) -> int | None:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    match = re.match(r"^(\d{4})-(\d{2})-(\d{2})", raw)
+    if not match:
+        return None
+    try:
+        return int(time.mktime((int(match.group(1)), int(match.group(2)), int(match.group(3)), 12, 0, 0, 0, 0, -1)))
+    except Exception:
+        return None
+
+
+def dispersed_lead_verified_freshness(lead: dict, *, now: int | None = None) -> str:
+    verified_ts = _parse_dispersed_verified_ts(lead.get("source_verified_at") if isinstance(lead, dict) else None)
+    if not verified_ts:
+        return "Recently verified"
+    age_days = max(0, int(((now or int(time.time())) - verified_ts) / 86400))
+    if age_days < 31:
+        return "Verified this month"
+    months = max(1, round(age_days / 30))
+    if months == 1:
+        return "Verified 1 month ago"
+    if months < 12:
+        return f"Verified {months} months ago"
+    years = max(1, round(months / 12))
+    return "Verified 1 year ago" if years == 1 else f"Verified {years} years ago"
 
 
 def upsert_dispersed_site_leads(leads: list[dict], source_batch: str) -> dict:
@@ -4258,6 +4291,46 @@ def get_dispersed_site_lead_summary(source_batch: str | None = None) -> dict:
     }
     db.close()
     return {"total": total, "by_status": by_status, "by_category": by_category}
+
+
+def list_dispersed_site_leads_for_publication(
+    *,
+    max_age_days: int = 366,
+    source_batch: str | None = None,
+    limit: int = 0,
+    statuses: list[str] | None = None,
+) -> list[dict]:
+    max_age_days = max(1, min(int(max_age_days or 366), 3660))
+    now = int(time.time())
+    cutoff = time.strftime("%Y-%m-%d", time.localtime(now - max_age_days * 86400))
+    allowed_statuses = {
+        status for status in (statuses or ["lead", "needs_field_check", "community_verified", "trailhead_verified"])
+        if status in DISPERSED_LEAD_STATUSES
+    }
+    if not allowed_statuses:
+        return []
+    params: list[object] = [*sorted(allowed_statuses), cutoff]
+    where = [
+        f"status IN ({','.join('?' for _ in allowed_statuses)})",
+        "source_verified_at IS NOT NULL",
+        "source_verified_at >= ?",
+    ]
+    if source_batch:
+        where.append("source_batch=?")
+        params.append(re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(source_batch).strip())[:120])
+    sql_limit = ""
+    if limit and int(limit) > 0:
+        sql_limit = " LIMIT ?"
+        params.append(max(1, min(int(limit), 100000)))
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT * FROM dispersed_site_leads
+            WHERE {' AND '.join(where)}
+            ORDER BY source_verified_at DESC, confidence DESC, updated_at DESC{sql_limit}""",
+        tuple(params),
+    ).fetchall()
+    db.close()
+    return [_decode_dispersed_site_lead(row) for row in rows]
 
 
 def list_dispersed_site_leads_near(
@@ -4464,6 +4537,12 @@ def publish_dispersed_site_lead(
     if merge_target:
         source_place_id = str(merge_target.get("source_place_id") or source_place_id)
     now = int(time.time())
+    verified_ts = _parse_dispersed_verified_ts(lead.get("source_verified_at")) or now
+    source_freshness = dispersed_lead_verified_freshness(lead, now=now)
+    public_description = (
+        str(merged_profile.get("description") or "").strip()
+        or DISPERSED_PUBLIC_DEFAULT_DESCRIPTION
+    )
     payload = {
         "source": "trailhead",
         "source_label": "Trailhead",
@@ -4474,7 +4553,8 @@ def publish_dispersed_site_lead(
         "category": "camp",
         "subtype": "Dispersed",
         "land_type": "Dispersed",
-        "description": merged_profile.get("description") or "",
+        "summary": public_description,
+        "description": public_description,
         "cost": merged_profile.get("cost") or "",
         "phone": merged_profile.get("phone") or "",
         "url": merged_profile.get("url") or "",
@@ -4485,14 +4565,17 @@ def publish_dispersed_site_lead(
         "bail_out_notes": merged_profile.get("bail_out_notes") or "",
         "stay_limit": merged_profile.get("stay_limit") or "",
         "reservation_notes": merged_profile.get("reservation_notes") or "",
+        "source_confidence_notes": merged_profile.get("source_confidence_notes") or DISPERSED_PUBLIC_DEFAULT_DESCRIPTION,
         "max_rig_length": merged_profile.get("max_rig_length") or "",
         "reservable": False,
-        "verified_source": "Trailhead",
-        "source_freshness": "Recently checked",
+        "verified_source": "Recent dispersed spot",
+        "source_badge": "Trailhead",
+        "source_freshness": source_freshness,
         "trailhead_dataset": "dispersed_camp",
         "trailhead_public": True,
         "published_at": now,
-        "source_updated_at": now,
+        "source_verified_at": lead.get("source_verified_at") or "",
+        "source_updated_at": verified_ts,
         "last_refreshed_at": now,
         "refresh_after": now + 90 * 86400,
     }
@@ -4504,8 +4587,10 @@ def publish_dispersed_site_lead(
             "name": name,
             "land_type": "Dispersed",
             "reservable": False,
-            "verified_source": "Trailhead",
-            "source_freshness": "Recently checked",
+            "verified_source": "Recent dispersed spot",
+            "source_badge": "Trailhead",
+            "source_freshness": source_freshness,
+            "description": public_description,
             "site_types": merged_profile.get("site_types") or ["Tent"],
             "amenities": merged_profile.get("amenities") or [],
             "activities": merged_profile.get("activities") or [],
@@ -4552,7 +4637,8 @@ PLACE_METADATA_KEYS = {
     "amenities", "activities", "access_note", "access_notes", "reservation_notes",
     "booking_url", "reservable", "rating", "rating_count", "source_badge",
     "source_freshness", "verified_source", "land_type", "cost",
-    "confidence", "cache_status", "stale_reason", "source_updated_at",
+    "confidence", "cache_status", "stale_reason", "source_verified_at",
+    "source_updated_at", "source_confidence_notes",
     "last_refreshed_at", "refresh_after", "refresh_priority",
     "route_distance_mi", "route_progress", "route_progress_mi",
     "trailhead_dataset", "trailhead_public", "published_at",

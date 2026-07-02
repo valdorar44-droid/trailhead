@@ -6,10 +6,12 @@ import tempfile
 import unittest
 from datetime import date
 from pathlib import Path
+from types import SimpleNamespace
 
 from config.settings import settings
 from db import store
 from scripts.import_dispersed_site_leads import build_import
+from scripts.publish_recent_dispersed_site_leads import build_report as build_publish_report
 
 
 CSV_FIELDS = [
@@ -274,6 +276,9 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
                 self.assertEqual(place["trailhead_dataset"], "dispersed_camp")
                 self.assertTrue(place["trailhead_public"])
                 self.assertEqual(place["name"], "Quiet desert pullout")
+                self.assertEqual(place["verified_source"], "Recent dispersed spot")
+                self.assertEqual(place["source_badge"], "Trailhead")
+                self.assertTrue(str(place["source_freshness"]).startswith("Verified"))
                 self.assertNotIn("ioverlander", str(place).lower())
                 self.assertEqual(len(place["photos"]), 1)
                 self.assertEqual(place["photos"][0]["caption"], "Flat tent site")
@@ -306,6 +311,81 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
                 ], "publish_batch")
                 duplicate = store.publish_dispersed_site_lead("dsl_publish_duplicate", admin_id=1)
                 self.assertEqual(duplicate["canonical_camp_id"], camp_id)
+            finally:
+                settings.db_path = old_path
+
+    def test_bulk_publish_recent_leads_creates_public_minimal_cards(self):
+        old_path = settings.db_path
+        with tempfile.TemporaryDirectory() as td:
+            try:
+                settings.db_path = str(Path(td) / "trailhead-test.db")
+                store.init_db()
+                today = date.today().isoformat()
+                store.upsert_dispersed_site_leads([
+                    {
+                        "lead_key": "dsl_recent_public",
+                        "source": "ioverlander_private_lead",
+                        "source_batch": "auto_publish_batch",
+                        "source_record_hash": "e" * 64,
+                        "lat": 38.5001,
+                        "lng": -109.5001,
+                        "rounded_lat": 38.5001,
+                        "rounded_lng": -109.5001,
+                        "category": "wild_camp",
+                        "status": "lead",
+                        "confidence": 25,
+                        "source_verified_at": today,
+                        "review_flags": ["source_content_stripped"],
+                        "provenance": {"source_kind": "private_lead", "raw_fields_stripped": True},
+                    },
+                    {
+                        "lead_key": "dsl_stale_private",
+                        "source": "ioverlander_private_lead",
+                        "source_batch": "auto_publish_batch",
+                        "source_record_hash": "f" * 64,
+                        "lat": 38.8,
+                        "lng": -109.8,
+                        "rounded_lat": 38.8,
+                        "rounded_lng": -109.8,
+                        "category": "informal_camp",
+                        "status": "lead",
+                        "confidence": 25,
+                        "source_verified_at": "2020-01-01",
+                        "review_flags": ["source_content_stripped"],
+                        "provenance": {"source_kind": "private_lead", "raw_fields_stripped": True},
+                    },
+                ], "auto_publish_batch")
+                dry = build_publish_report(SimpleNamespace(
+                    max_age_days=30,
+                    source_batch="auto_publish_batch",
+                    limit=0,
+                    commit=False,
+                    coordinate_only_confirmed=False,
+                    admin_id=None,
+                    keep_going=False,
+                ))
+                self.assertEqual(dry["eligible"], 1)
+                self.assertEqual(store.get_dispersed_site_lead("dsl_recent_public")["status"], "lead")
+
+                committed = build_publish_report(SimpleNamespace(
+                    max_age_days=30,
+                    source_batch="auto_publish_batch",
+                    limit=0,
+                    commit=True,
+                    coordinate_only_confirmed=True,
+                    admin_id=None,
+                    keep_going=False,
+                ))
+                self.assertEqual(committed["published"], 1)
+                recent = store.get_dispersed_site_lead("dsl_recent_public")
+                stale = store.get_dispersed_site_lead("dsl_stale_private")
+                self.assertEqual(recent["status"], "published")
+                self.assertEqual(stale["status"], "lead")
+                place = store.get_place(recent["canonical_camp_id"])
+                self.assertEqual(place["name"], "Dispersed tent site")
+                self.assertEqual(place["description"], store.DISPERSED_PUBLIC_DEFAULT_DESCRIPTION)
+                self.assertEqual(place["source_freshness"], "Verified this month")
+                self.assertNotIn("ioverlander", str(place).lower())
             finally:
                 settings.db_path = old_path
 

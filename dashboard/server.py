@@ -14080,6 +14080,37 @@ def _trailhead_dispersed_camps(lat: float, lng: float, radius_miles: float, limi
     camps = [_camp_from_trailhead_place(place) for place in places if isinstance(place, dict)]
     return [camp for camp in camps if camp]
 
+def _add_public_trailhead_camps_to_response(
+    response: dict,
+    *,
+    lat: float,
+    lng: float,
+    radius_miles: float,
+    type_filters: list[str] | None,
+    limit: int,
+    mode: str,
+    n: float | None = None,
+    s: float | None = None,
+    e: float | None = None,
+    w: float | None = None,
+) -> dict:
+    trailhead_camps = _trailhead_dispersed_camps(lat, lng, radius_miles, limit=min(max(limit, 120), 320))
+    if None not in {n, s, e, w}:
+        trailhead_camps = [camp for camp in trailhead_camps if _place_in_bounds(camp, float(n), float(s), float(e), float(w))]
+    if not trailhead_camps:
+        return response
+    current = response.get("camps") or response.get("pins") or []
+    merged = _merge_camp_sources(trailhead_camps, current, type_filters=type_filters)
+    camps = _camp_discovery_response(merged, mode=mode, limit=limit)
+    out = dict(response)
+    out["pins"] = camps
+    out["camps"] = camps
+    counts = dict(out.get("source_counts") or {})
+    counts["trailhead_public"] = len(trailhead_camps)
+    counts["merged"] = len(camps)
+    out["source_counts"] = counts
+    return out
+
 def _camp_first_photo_url(camp: dict) -> str:
     for key in ("photo_url", "hero_photo_url", "primary_image", "image_url"):
         value = str(camp.get(key) or "").strip()
@@ -14525,6 +14556,19 @@ async def discovery_context(body: DiscoveryContextRequest, user: dict | None = D
             }
             cached_response["timings"] = {"total_ms": round((time.time() - started) * 1000, 1)}
             if camp_requested:
+                cached_response = _add_public_trailhead_camps_to_response(
+                    cached_response,
+                    lat=lat,
+                    lng=lng,
+                    radius_miles=radius_miles,
+                    type_filters=type_filters or None,
+                    limit=limit,
+                    mode=mode,
+                    n=n,
+                    s=s,
+                    e=e,
+                    w=w,
+                )
                 cached_response = _add_private_review_camps_to_response(
                     cached_response,
                     user,
@@ -14621,6 +14665,20 @@ async def discovery_context(body: DiscoveryContextRequest, user: dict | None = D
         },
         "timings": {"total_ms": round((time.time() - started) * 1000, 1)},
     }
+    if camp_requested:
+        response = _add_public_trailhead_camps_to_response(
+            response,
+            lat=lat,
+            lng=lng,
+            radius_miles=radius_miles,
+            type_filters=type_filters or None,
+            limit=limit,
+            mode=mode,
+            n=n,
+            s=s,
+            e=e,
+            w=w,
+        )
     set_cached("campsite_cache", cache_key, response)
     if camp_requested:
         return _add_private_review_camps_to_response(

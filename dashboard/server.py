@@ -13676,6 +13676,24 @@ def _camp_distance_m(a: dict, b: dict) -> float:
     except Exception:
         return 999999.0
 
+def _camp_is_public_trailhead_dispersed(camp: dict) -> bool:
+    source = str(camp.get("source") or "").lower()
+    verified = str(camp.get("verified_source") or "").lower()
+    land_type = str(camp.get("land_type") or camp.get("subtype") or "").lower()
+    return "trailhead" in source and "dispersed" in land_type and (
+        "recent dispersed spot" in verified or str(camp.get("source_badge") or "").lower() == "trailhead"
+    )
+
+def _scrub_public_trailhead_dispersed_camp(camp: dict) -> dict:
+    if not _camp_is_public_trailhead_dispersed(camp):
+        return camp
+    for key in ("url", "official_url", "booking_url", "phone", "address", "provider_place_id"):
+        camp[key] = ""
+    camp["cost"] = ""
+    camp["rating"] = None
+    camp["rating_count"] = None
+    return camp
+
 def _merge_camp_record(existing: dict, incoming: dict) -> dict:
     primary, secondary = (incoming, existing) if _camp_source_rank(incoming) < _camp_source_rank(existing) else (existing, incoming)
     merged = dict(primary)
@@ -13697,7 +13715,7 @@ def _merge_camp_record(existing: dict, incoming: dict) -> dict:
         merged["photos"] = secondary.get("photos")
     if not secondary_paid and not merged.get("reviews") and secondary.get("reviews"):
         merged["reviews"] = secondary.get("reviews")
-    return merged
+    return _scrub_public_trailhead_dispersed_camp(merged)
 
 PRIVATE_STAY_PLACE_TYPES = {"private_stay", "farm_stay", "ranch", "winery", "glamping", "private_camp"}
 PRIVATE_STAY_FILTERS = {"private", "private_stay", "farm", "farm_stay", "ranch", "winery", "glamping", "private_camp"}

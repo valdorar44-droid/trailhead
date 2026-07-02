@@ -466,6 +466,25 @@ class DispersedSiteLeadImportTests(unittest.TestCase):
                 self.assertEqual(card["url"], "")
                 self.assertEqual(card["official_url"], "")
                 self.assertEqual(card["cost"], "")
+                merged = api_server._merge_camp_sources([card], [{
+                    "id": "geoapify_old_source",
+                    "name": card["name"],
+                    "lat": card["lat"],
+                    "lng": card["lng"],
+                    "source": "geoapify",
+                    "verified_source": "Map data",
+                    "land_type": "Commercial Campground",
+                    "url": "https://example.com/old-source",
+                    "phone": "555-0100",
+                    "address": "Old sourced address",
+                    "rating": 4.7,
+                    "rating_count": 12,
+                }])
+                self.assertEqual(merged[0]["phone"], "")
+                self.assertEqual(merged[0]["address"], "")
+                self.assertEqual(merged[0]["url"], "")
+                self.assertIsNone(merged[0]["rating"])
+                self.assertIsNone(merged[0]["rating_count"])
             finally:
                 settings.db_path = old_path
 

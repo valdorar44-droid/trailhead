@@ -49,6 +49,15 @@ function searchResultLabel(place: RouteBuilderSearchPlace, fallback: string) {
   return fallback;
 }
 
+function stopTypeLabel(type: RouteBuilderStopType) {
+  if (type === 'start') return 'Start';
+  if (type === 'fuel') return 'Fuel';
+  if (type === 'camp') return 'Camp';
+  if (type === 'motel') return 'Stay';
+  if (type === 'waypoint') return 'Stop';
+  return String(type || 'Stop').replace(/_/g, ' ');
+}
+
 export default function RouteBuilderSearchSurface({
   pendingType,
   query,
@@ -58,7 +67,7 @@ export default function RouteBuilderSearchSurface({
   targetDay,
   fallbackDay,
   stopTypes = DEFAULT_STOP_TYPES,
-  resultMetaLabel = 'Map result',
+  resultMetaLabel = 'Place',
   stopIcon,
   stopColor,
   onSelectType,
@@ -84,7 +93,7 @@ export default function RouteBuilderSearchSurface({
               activeOpacity={0.84}
             >
               <Ionicons name={stopIcon(type)} size={13} color={active ? color : C.text3} />
-              <Text style={[s.typeChipText, active && { color }]}>{type.toUpperCase()}</Text>
+              <Text style={[s.typeChipText, active && { color }]}>{stopTypeLabel(type)}</Text>
             </TouchableOpacity>
           );
         })}

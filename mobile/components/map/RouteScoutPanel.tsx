@@ -430,7 +430,7 @@ export default function RouteScoutPanel({
           <Text style={s.stat}>{routeScout.days ? `${routeScout.days} days` : 'Set days'}</Text>
           <Text style={s.stat}>{routeScout.driveHours ? `${routeScout.driveHours}h/day` : 'Set drive'}</Text>
           <Text style={s.stat}>{routeScout.totalMiles ? `${Math.round(routeScout.totalMiles)} mi` : 'Routing'}</Text>
-          <Text style={s.stat}>{lockedCount} set</Text>
+          <Text style={s.stat}>{lockedCount ? `${lockedCount} set` : 'Review camps'}</Text>
           {reviewCount ? <Text style={[s.stat, s.reviewStat]}>{reviewCount} review</Text> : null}
         </View>
       </View>

@@ -602,7 +602,7 @@ def _build_trip_timeline(
         "topo": False,
         "trails": False,
         "trip_download": False,
-        "message": "Download this trip to save the route corridor plus fuel, camps, and places for offline discovery.",
+        "message": "Save this trip before leaving signal to keep the route, fuel, camps, and places ready.",
     }
     if request_context and UNSUPPORTED_ROUTE_TERMS.search(request_context) and not re.search(r"\bfinland\b|\bfi\b", request_context, re.I):
         warnings.append(_event_warning("warn", "Request mentioned a region outside current Trailhead planner support."))
@@ -16768,12 +16768,10 @@ def _route_window_fit_notes(camp: dict | None, require_photos: bool = False) -> 
     elif isinstance(endpoint_distance, (int, float)):
         notes.append(f"{float(endpoint_distance):.1f} mi from the overnight window")
     if require_photos:
-        notes.append("photo-backed" if _camp_has_media(camp) else "no photos yet")
+        notes.append("has photos" if _camp_has_media(camp) else "needs photos")
     if camp.get("reservable"):
         notes.append("reservable")
     source_confidence = str(camp.get("source_confidence") or "").strip().lower()
-    if source_confidence in {"high", "medium"}:
-        notes.append(f"{source_confidence} source confidence")
     deduped: list[str] = []
     for note in notes:
         clean = re.sub(r"\s+", " ", str(note or "")).strip()
@@ -16796,7 +16794,7 @@ async def _select_camp_for_window(
 ) -> dict:
     label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
     target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
-    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=6)
+    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=4)
     base_radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
     filter_key = sorted(type_filters)
     pass_defs: list[dict] = []
@@ -16835,7 +16833,7 @@ async def _select_camp_for_window(
                     filters=filters,
                     surface="route_camp_window",
                     mode="full",
-                    limit=220,
+                    limit=160,
                     include_stays=True,
                     stale_after_hours=12,
                 ),
@@ -16846,7 +16844,7 @@ async def _select_camp_for_window(
                 return camps
         except Exception:
             pass
-        return await nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=220, mode="full", stays=True, user=user)
+        return await nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=160, mode="full", stays=True, user=user)
 
     try:
         by_key: dict[str, dict] = {}
@@ -16857,7 +16855,7 @@ async def _select_camp_for_window(
             pass_samples = [target] if pass_def.get("target_only") else samples
             async with sem:
                 results = await asyncio.gather(*[
-                    asyncio.wait_for(load_window_camps(sample, radius, filters), timeout=10.0)
+                    asyncio.wait_for(load_window_camps(sample, radius, filters), timeout=6.0)
                     for sample in pass_samples
                 ], return_exceptions=True)
             found = _merge_camp_sources(*[r for r in results if isinstance(r, list)], type_filters=filters or None)
@@ -16928,7 +16926,7 @@ async def _select_camp_for_window(
         reason = (
             f"{display_name} fits this overnight window with a short detour."
             if strong else
-            f"{display_name} is the best photo-backed overnight option here."
+            f"{display_name} is the best overnight option with photos here."
             if require_photos and not best else
             f"{display_name} is the best overnight fit here. Review access and rules before navigation."
             if best else
@@ -17002,7 +17000,7 @@ async def _select_camp_for_window(
 async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = Depends(_optional_user)):
     points = _route_points_from_body(body.route)
     if len(points) < 2:
-        raise HTTPException(400, "At least two route points are required")
+        raise HTTPException(400, "At least two route stops are required")
     windows = body.windows[:30]
     if not windows:
         return {"windows": [], "errors": {}}
@@ -21214,7 +21212,7 @@ async def _gather_essentials_for_sample(sample: dict) -> list[dict]:
 async def trip_essentials_pack(body: PlaceTripPackRequest, user: dict = Depends(_current_user)):
     samples = _trip_pack_samples(body)
     if len(samples) < 2:
-        raise HTTPException(400, "Trip essentials need at least two mapped route points.")
+        raise HTTPException(400, "Trip essentials need at least two mapped route stops.")
 
     semaphore = asyncio.Semaphore(2)
 
@@ -21428,7 +21426,7 @@ def _rank_explore_places_for_route(
 async def explore_route_rank(body: ExploreRouteRankRequest):
     route_points = _route_points_from_any(body.route, limit=400)
     if len(route_points) < 2:
-        raise HTTPException(400, "At least two route points are required")
+        raise HTTPException(400, "At least two route stops are required")
     catalog = _load_explore_catalog()
     categories = _explore_route_rank_categories(body.categories)
     ranked = _rank_explore_places_for_route(

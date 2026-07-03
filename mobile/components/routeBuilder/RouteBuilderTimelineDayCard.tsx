@@ -82,11 +82,11 @@ export default function RouteBuilderTimelineDayCard({
 
         <Text style={s.groupLabel}>{placesLabel}</Text>
         <View style={s.actionRail}>
-          <DayAction icon="bonfire-outline" label="CAMP" onPress={onFindCamp} />
-          <DayAction icon="flash-outline" label="FUEL" onPress={onFindFuel} />
-          <DayAction icon="trail-sign-outline" label="PLACES" onPress={onFindPlaces} />
-          <DayAction icon="compass-outline" label="SIDE TRIPS" onPress={onFindSideTrips} />
-          <DayAction icon="ticket-outline" label="TOURS" onPress={onFindTours} />
+          <DayAction icon="bonfire-outline" label="Camp" onPress={onFindCamp} />
+          <DayAction icon="flash-outline" label="Fuel" onPress={onFindFuel} />
+          <DayAction icon="trail-sign-outline" label="Places" onPress={onFindPlaces} />
+          <DayAction icon="compass-outline" label="Side trips" onPress={onFindSideTrips} />
+          <DayAction icon="ticket-outline" label="Tours" onPress={onFindTours} />
         </View>
       </View>
     </TouchableOpacity>

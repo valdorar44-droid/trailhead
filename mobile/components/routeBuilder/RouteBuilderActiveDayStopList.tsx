@@ -66,7 +66,7 @@ export default function RouteBuilderActiveDayStopList<TStop extends RouteBuilder
             key={stop.id}
             index={index}
             name={stop.name}
-            meta={`${stopLabel(stop)} · ${sourceLabel(stop.source)}${insertAfterId === stop.id ? ' · INSERT AFTER' : ''}`}
+            meta={`${stopLabel(stop)} · ${sourceLabel(stop.source)}${insertAfterId === stop.id ? ' · Add after' : ''}`}
             color={stopColor(stop.type)}
             selected={insertAfterId === stop.id}
             preview={renderStopPreview(stop)}

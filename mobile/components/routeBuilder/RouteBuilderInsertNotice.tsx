@@ -25,16 +25,16 @@ export default function RouteBuilderInsertNotice({
     <View style={[s.card, active && { borderColor: C.orange + '66', backgroundColor: C.orange + '10' }]}>
       <Ionicons name={active ? 'git-commit-outline' : 'add-circle-outline'} size={15} color={active ? C.orange : C.text3} />
       <View style={s.copy}>
-        <Text style={s.title}>{active ? 'Insert after stop' : 'Add to active day'}</Text>
+        <Text style={s.title}>{active ? 'Add after this stop' : 'Add to this day'}</Text>
         <Text style={s.text} numberOfLines={3}>
           {active
             ? `New stops will land after ${stopShortName || 'this stop'}${dayLabel ? ` on Day ${dayLabel}` : ''}.`
-            : 'Use a day action below to place fuel, camps, or places in the right leg.'}
+            : 'Choose camps, fuel, or places for this part of the route.'}
         </Text>
       </View>
       {active ? (
         <TouchableOpacity style={s.clear} onPress={onClearInsert} activeOpacity={0.84}>
-          <Text style={s.clearText}>END</Text>
+          <Text style={s.clearText}>Done</Text>
         </TouchableOpacity>
       ) : null}
     </View>

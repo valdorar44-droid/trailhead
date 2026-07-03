@@ -98,7 +98,7 @@ export default function RouteBuilderHub({
                 </View>
                 <View style={s.flex}>
                   <Text style={s.quickRowTitle} numberOfLines={1}>Open active route</Text>
-                  <Text style={s.quickRowMeta} numberOfLines={1}>Continue from the map workspace</Text>
+                  <Text style={s.quickRowMeta} numberOfLines={1}>Continue planning on the map</Text>
                 </View>
                 <Text style={s.quickRowAction}>OPEN</Text>
               </TouchableOpacity>
@@ -109,8 +109,8 @@ export default function RouteBuilderHub({
                 <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={16} color={rigRouteSummary.ready ? C.green : C.yellow} />
               </View>
               <View style={s.flex}>
-                <Text style={s.quickRowTitle} numberOfLines={1}>{rigRouteSummary.title}</Text>
-                <Text style={s.quickRowMeta} numberOfLines={1}>{rigRouteSummary.meta}</Text>
+                <Text style={s.quickRowTitle} numberOfLines={1}>{rigRouteSummary.ready ? rigRouteSummary.title : 'Add vehicle details'}</Text>
+                <Text style={s.quickRowMeta} numberOfLines={1}>{rigRouteSummary.ready ? rigRouteSummary.meta : 'Use safer fuel estimates for this route.'}</Text>
               </View>
               <Text style={s.quickRowAction}>{rigRouteSummary.ready ? 'EDIT' : 'ADD'}</Text>
             </TouchableOpacity>
@@ -161,8 +161,8 @@ export default function RouteBuilderHub({
                 <Text style={s.savedRouteName} numberOfLines={2}>{item.trail.name}</Text>
                 <Text style={s.savedRouteMeta} numberOfLines={1}>{savedTrailDistance(item)}</Text>
                 <View style={s.savedTrailPills}>
-                  <Text style={s.savedTrailPill}>TRAIL</Text>
-                  <Text style={s.savedTrailPill}>SAVED</Text>
+                  <Text style={s.savedTrailPill}>Trail</Text>
+                  <Text style={s.savedTrailPill}>Saved</Text>
                 </View>
               </View>
               <View style={s.savedTrailActions}>

@@ -85,6 +85,7 @@ import {
 
 const API_BASE_URL = TRAILHEAD_API_BASE;
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
+const ROUTE_CAMP_WINDOW_TIMEOUT_MS = 12000;
 const ROUTE_HERO_PHOTO = 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg';
 const ROUTE_BUILDER_RENTAL_DISMISSED_KEY = 'trailhead_route_builder_rental_dismissed_at';
 
@@ -234,21 +235,21 @@ const WATER_PLACE_FILTER_IDS = new Set(['boat_ramp', 'paddle_launch', 'fishing_a
 const FUEL_POI_TYPES = 'fuel,propane';
 const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,pass,glacier,bridge,checkpost,settlement,hot_spring,dump,shower,laundromat,lodging,private_stay,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction,medical';
 const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
-  { id: 'public', label: 'Public', sub: 'BLM / USFS first', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free', 'tent'] },
-  { id: 'developed', label: 'Developed', sub: 'Parks + reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
-  { id: 'rv', label: 'RV', sub: 'Hookups + parks', icon: 'car-sport-outline', filters: ['rv', 'reservable'] },
+  { id: 'public', label: 'Public', sub: 'Public land first', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free', 'tent'] },
+  { id: 'developed', label: 'Developed', sub: 'Parks and reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
+  { id: 'rv', label: 'RV', sub: 'Hookups and parks', icon: 'car-sport-outline', filters: ['rv', 'reservable'] },
   { id: 'private', label: 'Private Stays', sub: 'Farms, ranches, glamping', icon: 'home-outline', filters: ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'] },
   { id: 'any', label: 'Any legal', sub: 'Broad search', icon: 'map-outline', filters: [] },
 ];
 const CAMP_CADENCE_OPTIONS: Array<{ id: CampCadenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [
-  { id: 'nightly', label: 'Every night', sub: 'Camp each route day', icon: 'moon-outline' },
-  { id: 'alternate', label: 'Every other', sub: 'Camp on alternating days', icon: 'swap-horizontal-outline' },
-  { id: 'manual', label: 'Manual', sub: 'Pick camps yourself', icon: 'hand-left-outline' },
+  { id: 'nightly', label: 'Every night', sub: 'Overnight each route day', icon: 'moon-outline' },
+  { id: 'alternate', label: 'Every other', sub: 'Overnight on alternating days', icon: 'swap-horizontal-outline' },
+  { id: 'manual', label: 'Manual', sub: 'Choose each overnight', icon: 'hand-left-outline' },
 ];
 const CAMP_REUSE_OPTIONS: Array<{ id: CampReusePolicy; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [
-  { id: 'different_each_night', label: 'Different camps', sub: 'Move camp each drive day', icon: 'git-branch-outline' },
-  { id: 'same_camp_window', label: 'Same camp window', sub: 'Basecamp multi-night windows', icon: 'bed-outline' },
-  { id: 'manual', label: 'Manual reuse', sub: 'You decide night by night', icon: 'hand-left-outline' },
+  { id: 'different_each_night', label: 'Different camps', sub: 'Move each drive day', icon: 'git-branch-outline' },
+  { id: 'same_camp_window', label: 'Same camp area', sub: 'Stay put for a few nights', icon: 'bed-outline' },
+  { id: 'manual', label: 'Manual reuse', sub: 'Choose night by night', icon: 'hand-left-outline' },
 ];
 const BUILD_STATUS_LINES = [
   'Tracing the route line',
@@ -587,6 +588,16 @@ function parsePositiveNumber(value?: string | null) {
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, code: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(code)), ms);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) clearTimeout(timer);
+  });
+}
+
 function estimateMovingHours(mi: number) {
   // Manual builder does not have turn-by-turn route durations yet, so use a
   // conservative overland planning speed rather than interstate speed.
@@ -661,8 +672,8 @@ function estimateShapeMiles(stops: BuilderStop[], shape: TripShapeMode) {
 
 function fuelSourceLabel(estimate: FuelEstimate | null, hasRigMpg: boolean) {
   if (!hasRigMpg) return 'Add MPG in Profile';
-  if (!estimate) return 'Using rig profile';
-  return estimate.confidence === 'estimated' ? 'Estimated' : 'Using rig profile';
+  if (!estimate) return 'Using vehicle details';
+  return estimate.confidence === 'estimated' ? 'Estimated' : 'Using vehicle details';
 }
 
 function routeBufferForMiles(mi: number) {
@@ -905,7 +916,51 @@ function normalizeCampSubtype(value: string) {
   if (normalized === 'camp site') return 'Tent camp';
   if (normalized === 'caravan site') return 'RV/caravan site';
   if (normalized === 'basic camp') return 'Primitive camp';
+  if (normalized === 'informal camp') return 'Dispersed camp';
+  if (normalized === 'wild camp') return 'Dispersed camp';
+  if (normalized === 'rv park') return 'RV park';
+  if (normalized === 'private stay') return 'Private stay';
   return String(value || '').replace(/_/g, ' ').trim();
+}
+
+function displayCampFeature(value?: string | null) {
+  const clean = normalizeCampSubtype(value || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  const lower = clean.toLowerCase();
+  if (lower === 'camp') return 'Campground';
+  if (lower === 'campground') return 'Campground';
+  if (lower === 'camp site') return 'Tent camp';
+  if (lower === 'tent camp') return 'Tent camp';
+  if (lower.includes('primitive/dispersed')) return 'Primitive/dispersed camp';
+  if (lower === 'dispersed camp') return 'Dispersed camp';
+  if (lower === 'rv park') return 'RV park';
+  if (lower === 'rv/caravan site') return 'RV/caravan site';
+  return `${clean.charAt(0).toUpperCase()}${clean.slice(1)}`
+    .replace(/\bRv\b/g, 'RV')
+    .replace(/\bAda\b/g, 'ADA')
+    .replace(/\bBlm\b/g, 'BLM')
+    .replace(/\bUsfs\b/g, 'USFS')
+    .replace(/\bNps\b/g, 'NPS');
+}
+
+function compactCampFeatures(camp?: Partial<CampsitePin> | null, fallback?: string, limit = 5) {
+  const raw = [
+    ...(camp?.site_types ?? []),
+    ...(camp?.amenities ?? []),
+    ...(camp?.tags ?? []),
+    fallback,
+  ];
+  const seen = new Set<string>();
+  return raw
+    .map(item => displayCampFeature(String(item || '')))
+    .filter(label => {
+      const key = label.toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit)
+    .join(' · ');
 }
 
 function campFilterTags(camp: CampsitePin) {
@@ -1033,12 +1088,12 @@ function filterCampsByPhotoMode<T extends CampsitePin>(camps: T[], photoOnly: bo
 }
 
 function sourceLabel(source?: BuilderStop['source']) {
-  if (source === 'camp') return 'verified camp';
-  if (source === 'gas') return 'fuel search';
-  if (source === 'poi') return 'places search';
-  if (source === 'search') return 'search';
-  if (source === 'map') return 'map tap';
-  return 'manual';
+  if (source === 'camp') return 'Camp';
+  if (source === 'gas') return 'Fuel';
+  if (source === 'poi') return 'Place';
+  if (source === 'search') return 'Selected place';
+  if (source === 'map') return 'Dropped pin';
+  return 'Route stop';
 }
 
 function routeCoverPhotoFromValue(value: unknown) {
@@ -2121,12 +2176,12 @@ function RouteBuilderScreenContent() {
   const rigRouteSummary = useMemo(() => {
     if (!rigProfile || (!rigProfile.make && !rigProfile.model && !rigProfile.vehicle_type)) {
       return {
-        title: 'Add rig profile',
-        meta: `Uses conservative fuel and vehicle defaults until specs are added.`,
+        title: 'Add vehicle details',
+        meta: 'Uses safer fuel and drive estimates until your setup is saved.',
         ready: false,
       };
     }
-    const title = [rigProfile.year, rigProfile.make, rigProfile.model].filter(Boolean).join(' ') || rigProfile.vehicle_type || 'Saved rig';
+    const title = [rigProfile.year, rigProfile.make, rigProfile.model].filter(Boolean).join(' ') || rigProfile.vehicle_type || 'Saved vehicle';
     const specs = [
       rigProfile.vehicle_type,
       rigProfile.drive,
@@ -2587,15 +2642,15 @@ function RouteBuilderScreenContent() {
                 .map(camp => ({
                   ...withLegProjection(camp, searchLeg!),
                   photo_status: 'missing',
-                  route_fit: camp.route_fit || 'Photo backup',
-                  photo_fallback_reason: 'Photos only found no photo-backed camp near this overnight stop.',
+                  route_fit: camp.route_fit || 'Area match',
+                  photo_fallback_reason: 'No camp with photos was close to this overnight stop.',
                 }))
                 .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to))
                 .slice(0, 3);
-              fallbackText = ' using a no-photo fallback near the day-end area';
+              fallbackText = ' near the day-end area';
             }
           }
-          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} stop${fallbackText}` : 'spread along this leg'}` });
+          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} stop${fallbackText}` : 'along this leg'}` });
         } else {
           const offlineCamps = areaScopedOfflinePlaces(offlinePlaces, target, ['camp'], 50)
             .map(point => offlinePoiToCamp(point))
@@ -2621,7 +2676,7 @@ function RouteBuilderScreenContent() {
           const found = filterCampsByPhotoMode(uniqueByGeo([...liveCamps, ...offlineCamps]), campPhotoOnly)
             .filter(camp => campMatchesFilters(camp, campTypeFilters))
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
-          storeDiscoveryResults(key, { camps: found, summary: `${found.length} ${campPhotoOnly ? 'photo-backed ' : ''}${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area` });
+          storeDiscoveryResults(key, { camps: found, summary: `${found.length} ${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area` });
         }
       } else if (tab === 'gas') {
         if (useLeg) {
@@ -3586,7 +3641,7 @@ function RouteBuilderScreenContent() {
         lat: place.lat,
         lng: place.lng,
         type: 'waypoint',
-        description: 'Route destination.',
+        description: 'Destination.',
         land_type: 'route',
         source: 'search',
         routeShapeRole: 'destination',
@@ -3655,7 +3710,7 @@ function RouteBuilderScreenContent() {
     if (directMi > 2800 && Math.abs(first.lng - last.lng) > 45) {
       Alert.alert(
         'Route needs correction',
-        'Those route points look like an unsupported long jump. Add realistic land-route stops or keep this route inside Trailhead supported regions.'
+        'That route looks too long or disconnected. Add realistic land stops or keep this route inside supported regions.'
       );
       setRouteGeometry(null);
       return null;
@@ -3831,8 +3886,31 @@ function RouteBuilderScreenContent() {
       };
     });
     if (!windows.length) return [];
+    const reviewAnchors = () => windows.map(win => {
+      const fallbackPoint = pointAtRouteMile(spine, win.target_mi)
+        ?? spine[Math.min(spine.length - 1, Math.max(0, Math.round((win.day / count) * (spine.length - 1))))];
+      return {
+        stop: {
+          id: `review_${Date.now()}_${win.day}_${Math.random().toString(36).slice(2, 6)}`,
+          day: win.day,
+          name: `${win.label} review area`,
+          lat: fallbackPoint.lat,
+          lng: fallbackPoint.lng,
+          type: 'waypoint' as BuilderStopType,
+          description: 'Choose an overnight stop near this area before navigation.',
+          land_type: 'route',
+          source: 'map' as const,
+          campWindowStart: win.start,
+          campWindowEnd: win.end,
+          campWindowLabel: win.label,
+          routeShapeRole: 'overnight' as const,
+        },
+        strong: false,
+        found: 0,
+      };
+    });
     try {
-      const result = await api.getRouteCampWindows({
+      const result = await withTimeout(api.getRouteCampWindows({
         route: spine,
         windows,
         camp_filters: campTypeFilters,
@@ -3843,7 +3921,7 @@ function RouteBuilderScreenContent() {
         camp_reuse_policy: effectiveCampReusePolicy,
         max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
         max_radius: 90,
-      });
+      }), ROUTE_CAMP_WINDOW_TIMEOUT_MS, 'route-camp-window-timeout');
       return result.windows.map(originalWin => {
         const win = originalWin;
         const candidatePool = [win.selected, win.camp, ...(win.candidates ?? [])]
@@ -3909,13 +3987,17 @@ function RouteBuilderScreenContent() {
           found: win.found,
         };
       });
-    } catch {
+    } catch (err) {
+      if (err instanceof Error && err.message === 'route-camp-window-timeout') {
+        setFrameworkStatus('Opening the route for review...');
+        return reviewAnchors();
+      }
       const anchors = [];
       for (const day of campDays) {
         setFrameworkStatus(`Finding overnight options for ${campWindowFor(day, sourceDays).label}...`);
         anchors.push(await findCampAwareAnchor(day, count, spine, totalMi));
       }
-      return anchors;
+      return anchors.length ? anchors : reviewAnchors();
     }
   }
 
@@ -4285,7 +4367,7 @@ function RouteBuilderScreenContent() {
       name: st.name,
       type: st.type,
       description: st.description,
-      land_type: st.land_type,
+      land_type: displayCampFeature(st.land_type) || st.land_type,
       lat: st.lat,
       lng: st.lng,
       route_point_type: st.routePointType ?? (st.source === 'poi' && st.type === 'waypoint' ? 'side_stop' : 'break'),
@@ -4329,7 +4411,11 @@ function RouteBuilderScreenContent() {
       };
     });
     const timeline = buildBuilderTimeline(navStops, inputDays, daily_itinerary);
-    const campsites = navStops.filter(st => st.camp).map(st => ({ ...st.camp!, recommended_day: st.day }));
+    const campsites = navStops.filter(st => st.camp).map(st => ({
+      ...st.camp!,
+      land_type: displayCampFeature(st.camp?.land_type || st.land_type) || st.camp?.land_type || st.land_type,
+      recommended_day: st.day,
+    }));
     const gas_stations = navStops.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
     const routePois = sorted.filter(st => st.poi).map(st => ({ ...st.poi!, recommended_day: st.day }));
     return {
@@ -4356,7 +4442,7 @@ function RouteBuilderScreenContent() {
           trip_preferences: tripPreferenceContext,
         },
         logistics: {
-          vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against the saved rig profile before departure.`,
+          vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against your vehicle before departure.`,
           fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(inputMiles, planningStats.mpg, weatherUnitMode)} / $${Math.round(tripFuelCost)}. Fuel stops are manually selected.`,
           water_strategy: 'Carry water for each day and add water stops where needed.',
           permits_needed: `${tripShapeMode === 'loop' ? 'Loop route. ' : tripShapeMode === 'there_and_back' ? 'There-and-back route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
@@ -4666,11 +4752,7 @@ function RouteBuilderScreenContent() {
   function renderCampPreview(stop: BuilderStop, label: string, compact = false) {
     const camp = stop.camp;
     const land = landColor(stop.land_type);
-    const campFeatures = [
-      ...(camp?.site_types ?? []),
-      ...(camp?.amenities ?? []),
-      ...(camp?.tags ?? []).map(tag => tag.replace(/_/g, ' ')),
-    ].filter(Boolean).slice(0, compact ? 3 : 5).join(' · ');
+    const campFeatures = compactCampFeatures(camp, stop.land_type, compact ? 3 : 5);
     return (
       <RouteBuilderCampPreviewCard
         label={label}
@@ -4731,8 +4813,8 @@ function RouteBuilderScreenContent() {
         description={description}
         color={color}
         icon={icon}
-        sourceLabel={sourceLabel(stop.source).toUpperCase()}
-        typeLabel={stop.poi?.type ? stop.poi.type.replace(/_/g, ' ').toUpperCase() : undefined}
+        sourceLabel={sourceLabel(stop.source)}
+        typeLabel={stop.poi?.type ? displayCampFeature(stop.poi.type) : undefined}
       />
     );
   }
@@ -4798,7 +4880,7 @@ function RouteBuilderScreenContent() {
             <RouteBuilderInlineCampCard
               key={camp.id}
               title={camp.name}
-              meta={`Day ${day} · ${camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}${routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}${(camp as any).photo_status === 'missing' ? 'Photo backup · ' : ''}${[...(camp.site_types ?? []), ...(camp.amenities ?? []), camp.land_type || 'Camp'].filter(Boolean).slice(0, 3).join(' · ')} · ${camp.cost || 'See site'}`}
+              meta={`Day ${day} · ${camp.route_distance_mi != null ? `${fmtRouteDistance(camp.route_distance_mi)} off route · ` : ''}${routeProgressLabel((camp as any).route_progress) ? `${routeProgressLabel((camp as any).route_progress)} · ` : ''}${(camp as any).photo_status === 'missing' ? 'Area photo · ' : ''}${compactCampFeatures(camp, camp.land_type || 'Camp', 3)} · ${camp.cost || 'Details'}`}
               photoUrl={camp.photo_url}
               fallbackColor={landColor(camp.land_type).text}
               fallbackBackgroundColor={landColor(camp.land_type).bg}
@@ -4859,7 +4941,7 @@ function RouteBuilderScreenContent() {
               title={item.name}
               meta={`Day ${day} · ${item.distance_from_route_mi != null ? `${fmtRouteDistance(item.distance_from_route_mi)} off route · ` : ''}${routeProgressLabel((item as any).route_progress) ? `${routeProgressLabel((item as any).route_progress)} · ` : ''}${item.day_fit || item.type} · ${item.source_label}`}
               metaLines={2}
-              trailingLabel={item.offline_ready ? 'OFFLINE' : item.source_confidence?.toUpperCase() || 'SOURCE'}
+              trailingLabel="VIEW"
               trailingColor={item.offline_ready ? C.green : undefined}
               onPress={() => openRoutePlace({ kind: 'excursion', day, data: item, place: routeSheetPlaceFromExcursion(item) })}
             />
@@ -5001,8 +5083,8 @@ function RouteBuilderScreenContent() {
                 <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={17} color={rigRouteSummary.ready ? C.green : C.yellow} />
               </View>
               <View style={{ flex: 1 }}>
-                <Text style={s.routeHubRigTitle}>{rigRouteSummary.ready ? 'Planning with your rig' : 'Rig profile missing'}</Text>
-                <Text style={s.routeHubRigMeta} numberOfLines={2}>{rigRouteSummary.ready ? rigRouteSummary.meta : 'Trailhead will use conservative defaults until you add vehicle specs.'}</Text>
+                <Text style={s.routeHubRigTitle}>{rigRouteSummary.ready ? 'Planning with your vehicle' : 'Vehicle details missing'}</Text>
+                <Text style={s.routeHubRigMeta} numberOfLines={2}>{rigRouteSummary.ready ? rigRouteSummary.meta : 'Using safer fuel and drive estimates for now.'}</Text>
               </View>
             </View>
             <View style={s.setupInputWrap}>
@@ -5061,7 +5143,7 @@ function RouteBuilderScreenContent() {
             </View>
             <View style={s.premiumModeControl}>
               {([
-                { id: 'recommended' as TripBuildMode, label: 'Camp planner', icon: 'sparkles-outline' as const, sub: 'Suggested stops' },
+                { id: 'recommended' as TripBuildMode, label: 'Camp planner', icon: 'bonfire-outline' as const, sub: 'Guided route' },
                 { id: 'blank' as TripBuildMode, label: 'Build by hand', icon: 'construct-outline' as const, sub: 'Manual days' },
               ]).map(mode => {
                 const active = tripBuildMode === mode.id;
@@ -5079,7 +5161,7 @@ function RouteBuilderScreenContent() {
             <View style={s.loopChoiceRow}>
               {([
                 { id: 'one_way' as TripShapeMode, icon: 'arrow-forward-outline' as const, title: 'One way', text: 'Start and finish can be different places.' },
-                { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Outbound and return use different route points.' },
+                { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Take a different way back.' },
                 { id: 'there_and_back' as TripShapeMode, icon: 'repeat-outline' as const, title: 'There and back', text: 'Return to the start and reuse overnight areas by default.' },
               ]).map(shape => {
                 const active = tripShapeMode === shape.id;
@@ -5099,7 +5181,7 @@ function RouteBuilderScreenContent() {
                 <TouchableOpacity key={style} style={[s.routeStyleChip, routeStyle === style && s.routeStyleChipActive]} onPress={() => setRouteStyle(style)}>
                   <Ionicons name={style === 'direct' ? 'navigate-outline' : style === 'wild' ? 'trail-sign-outline' : 'options-outline'} size={12} color={routeStyle === style ? C.orange : C.text3} />
                   <Text style={[s.routeStyleText, routeStyle === style && { color: C.orange }]}>
-                    {style.toUpperCase()}
+                    {style === 'balanced' ? 'Balanced' : style === 'direct' ? 'Direct' : 'Wild'}
                   </Text>
                 </TouchableOpacity>
               ))}
@@ -5109,7 +5191,7 @@ function RouteBuilderScreenContent() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Choose camp style</Text>
-              <Text style={s.wizardHelp}>Trailhead will prefer these camp types when placing overnight stops. Public first avoids private RV parks unless they are the best fallback.</Text>
+              <Text style={s.wizardHelp}>Choose the kind of overnight stops you want. Public keeps private RV parks as a backup.</Text>
             </View>
             <View style={s.campPreferenceGrid}>
               {CAMP_PREFERENCE_OPTIONS.map(option => {
@@ -5132,12 +5214,12 @@ function RouteBuilderScreenContent() {
             >
               <Ionicons name={campPhotoOnly ? 'images' : 'images-outline'} size={16} color={campPhotoOnly ? C.orange : C.text3} />
               <View style={{ flex: 1, minWidth: 0 }}>
-                <Text style={[s.campPreferenceTitle, campPhotoOnly && { color: C.orange }]}>Photos only</Text>
-                <Text style={s.campPreferenceSub} numberOfLines={1}>Require camp media when placing overnight stops</Text>
+                <Text style={[s.campPreferenceTitle, campPhotoOnly && { color: C.orange }]}>With photos</Text>
+                <Text style={s.campPreferenceSub} numberOfLines={1}>Only choose camps with pictures</Text>
               </View>
               <Ionicons name={campPhotoOnly ? 'checkmark-circle' : 'ellipse-outline'} size={16} color={campPhotoOnly ? C.orange : C.text3} />
             </TouchableOpacity>
-            <Text style={s.setupLabel}>CAMP CADENCE</Text>
+            <Text style={s.setupLabel}>OVERNIGHT RHYTHM</Text>
             <View style={s.campPreferenceGrid}>
               {CAMP_CADENCE_OPTIONS.map(option => {
                 const active = campCadenceMode === option.id;
@@ -5157,7 +5239,7 @@ function RouteBuilderScreenContent() {
                 );
               })}
             </View>
-            <Text style={s.setupLabel}>MULTI-NIGHT CAMPS</Text>
+            <Text style={s.setupLabel}>BASECAMP STYLE</Text>
             <View style={s.campPreferenceGrid}>
               {CAMP_REUSE_OPTIONS.map(option => {
                 const active = campReusePolicy === option.id;
@@ -5185,7 +5267,7 @@ function RouteBuilderScreenContent() {
                 <TextInput value={plannedDays} onChangeText={setPlannedDays} keyboardType="number-pad" style={s.setupInput} placeholder="3" placeholderTextColor={C.text3} />
               </View>
               <View style={s.setupInputWrap}>
-                <Text style={s.setupLabel}>{distanceMode === 'hours' ? 'MAX HRS / DAY' : 'MI / STOP'}</Text>
+                <Text style={s.setupLabel}>{distanceMode === 'hours' ? 'HRS / DAY' : 'MI / STOP'}</Text>
                 <TextInput
                   value={distanceMode === 'hours' ? driveHoursPerDay : targetMiles}
                   onChangeText={distanceMode === 'hours' ? setDriveHoursPerDay : setTargetMiles}
@@ -5199,7 +5281,7 @@ function RouteBuilderScreenContent() {
             <View style={s.segmentRow}>
               {(['hours', 'miles'] as DistanceMode[]).map(mode => (
                 <TouchableOpacity key={mode} style={[s.segmentBtn, distanceMode === mode && s.segmentBtnActive]} onPress={() => setDistanceMode(mode)}>
-                  <Text style={[s.segmentText, distanceMode === mode && { color: '#fff' }]}>{mode === 'hours' ? 'HOURS' : 'MILES'}</Text>
+                  <Text style={[s.segmentText, distanceMode === mode && { color: '#fff' }]}>{mode === 'hours' ? 'Hours' : 'Miles'}</Text>
                 </TouchableOpacity>
               ))}
             </View>
@@ -5211,7 +5293,7 @@ function RouteBuilderScreenContent() {
             <ActivityStatusCard
               title={frameworkStatus}
               fallbackLines={BUILD_STATUS_LINES}
-              helper="Keeping the builder awake until it finishes."
+              helper="This should only take a moment."
               tone={C.orange}
             />
           )}
@@ -5250,7 +5332,7 @@ function RouteBuilderScreenContent() {
           <View style={s.buildingVideoTop}>
             <View style={s.buildingLivePill}>
               <ActivityIndicator size="small" color="#101820" />
-              <Text style={s.buildingLiveText}>BUILDING ROUTE</Text>
+              <Text style={s.buildingLiveText}>Planning route</Text>
             </View>
           </View>
 
@@ -5261,7 +5343,7 @@ function RouteBuilderScreenContent() {
             <Text style={s.buildingEyebrow}>Plan your adventure</Text>
             <Text style={s.buildingHeadline}>Building your route</Text>
             <Text style={s.buildingSubtitle}>
-              Checking camps, fuel, daily drive windows, and route options.
+              Checking camps, fuel, drive time, and route choices.
             </Text>
           </View>
 
@@ -5269,7 +5351,7 @@ function RouteBuilderScreenContent() {
             <ActivityStatusCard
               title={frameworkStatus}
               fallbackLines={BUILD_STATUS_LINES}
-              helper={routeToursLoading ? 'Looking for tours along this route.' : routeToursStatus || undefined}
+              helper={routeToursLoading ? 'Checking tours along this route.' : routeToursStatus || undefined}
               tone={C.orange}
             />
             {featuredTour ? (
@@ -5609,7 +5691,7 @@ function RouteBuilderScreenContent() {
                   )}
 	                </View>
 	                <View style={s.detailMeta}>
-	                  <Text style={s.detailCost}>{cleanCampFeeText(campDetail.price_summary?.label || campDetail.cost) || 'See site'}</Text>
+	                  <Text style={s.detailCost}>{cleanCampFeeText(campDetail.price_summary?.label || campDetail.cost) || 'Details'}</Text>
 	                  {(campDetail.verified_source || campDetail.source) ? (
 	                    <Text style={s.detailSiteCount}>{cleanCampSourceLabel(campDetail.verified_source || campDetail.source)}</Text>
 	                  ) : null}

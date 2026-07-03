@@ -31,7 +31,7 @@ export default function RouteBuilderReadinessCard({
       <View style={s.top}>
         <View style={s.copy}>
           <Text style={s.title}>Trip readiness</Text>
-          <Text style={s.sub}>Camps, fuel, route, and downloads to check before leaving signal.</Text>
+          <Text style={s.sub}>Camps, fuel, saved areas, and drive time to check before leaving signal.</Text>
         </View>
         <View style={[s.badge, needsCheck ? s.badgeWarn : s.badgeOk]}>
           <Text style={[s.badgeText, { color: needsCheck ? C.yellow : C.green }]}>

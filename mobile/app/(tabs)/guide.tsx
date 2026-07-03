@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
-  View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator,
+  View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Animated,
   Image, Modal, Linking, TextInput, useWindowDimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -3805,8 +3805,8 @@ function GuideScreenContent() {
         </View>
         {loading ? (
           <View style={s.campgroundListSkeleton}>
-            <TrailheadCardSkeleton media lines={3} style={s.campgroundLoadingSkeleton} />
-            <TrailheadCardSkeleton media lines={3} style={s.campgroundLoadingSkeleton} />
+            <ExploreCampgroundSkeletonCard C={C} styles={s} />
+            <ExploreCampgroundSkeletonCard C={C} styles={s} />
           </View>
         ) : displayCamps.length ? (
           <View style={s.campgroundList}>
@@ -3842,11 +3842,11 @@ function GuideScreenContent() {
                   </View>
                   <View style={s.campgroundBody}>
                     <Text style={s.campgroundName} numberOfLines={2}>{camp.name}</Text>
-                    <Text style={s.campgroundMeta} numberOfLines={1}>{campMetaLine(camp)}</Text>
+                    <Text style={s.campgroundMeta} numberOfLines={2}>{campMetaLine(camp)}</Text>
                     {!!campCostLabel(camp.cost) && <Text style={s.campgroundCost} numberOfLines={1}>{campCostLabel(camp.cost)}</Text>}
                     {tagLabels.length ? (
                       <View style={s.campgroundTags}>
-                      {tagLabels.slice(0, 3).map(tag => (
+                      {tagLabels.slice(0, 2).map(tag => (
                         <View key={`${camp.id}-${tag}`} style={s.campgroundTag}>
                           <Text style={s.campgroundTagText}>{tag}</Text>
                         </View>
@@ -4701,6 +4701,40 @@ function GuideScreenContent() {
   );
 }
 
+function ExploreCampgroundSkeletonCard({
+  C,
+  styles,
+}: {
+  C: ColorPalette;
+  styles: ReturnType<typeof makeStyles>;
+}) {
+  const pulse = useRef(new Animated.Value(0.58)).current;
+  useEffect(() => {
+    const loop = Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulse, { toValue: 1, duration: 760, useNativeDriver: true }),
+        Animated.timing(pulse, { toValue: 0.58, duration: 760, useNativeDriver: true }),
+      ]),
+    );
+    loop.start();
+    return () => loop.stop();
+  }, [pulse]);
+  return (
+    <View style={[styles.campgroundCard, { borderColor: C.border, backgroundColor: C.s1 }]}>
+      <Animated.View style={[styles.campgroundSkeletonImage, { opacity: pulse, backgroundColor: C.s2 }]} />
+      <View style={styles.campgroundSkeletonBody}>
+        <Animated.View style={[styles.campgroundSkeletonLine, styles.campgroundSkeletonTitle, { opacity: pulse, backgroundColor: C.s2 }]} />
+        <Animated.View style={[styles.campgroundSkeletonLine, { opacity: pulse, backgroundColor: C.s2 }]} />
+        <Animated.View style={[styles.campgroundSkeletonLine, styles.campgroundSkeletonShort, { opacity: pulse, backgroundColor: C.s2 }]} />
+        <View style={styles.campgroundSkeletonActions}>
+          <Animated.View style={[styles.campgroundSkeletonButton, { opacity: pulse, backgroundColor: C.orange + '22' }]} />
+          <Animated.View style={[styles.campgroundSkeletonIcon, { opacity: pulse, backgroundColor: C.s2 }]} />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function GuideScreen() {
   const pathname = usePathname();
   if (pathname !== '/' && !pathname.includes('/guide')) return null;
@@ -5289,29 +5323,37 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campgroundSectionSub: { color: C.text3, fontSize: 12, lineHeight: 17 },
   campgroundAreaBtn: { height: 36, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, flexDirection: 'row', alignItems: 'center', gap: 5 },
   campgroundAreaBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  campgroundListSkeleton: { gap: 10, paddingTop: 12 },
+  campgroundListSkeleton: { gap: 12, paddingTop: 12 },
   campgroundLoadingSkeleton: { marginHorizontal: 0 },
-  campgroundList: { gap: 10, paddingTop: 12 },
-  campgroundCard: { width: '100%', minHeight: 142, flexDirection: 'row', backgroundColor: C.s1, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
-  campgroundImageWrap: { width: 132, minHeight: 142, backgroundColor: C.s2 },
+  campgroundList: { gap: 12, paddingTop: 12 },
+  campgroundCard: { width: '100%', minHeight: 326, backgroundColor: C.s1, borderRadius: 16, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+  campgroundImageWrap: { width: '100%', height: 190, backgroundColor: C.s2 },
   campgroundImage: { width: '100%', height: '100%' },
   campgroundImageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s1 },
   campgroundImageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.16)' },
-  campgroundBadge: { position: 'absolute', left: 9, top: 9, maxWidth: 112, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.78)' },
+  campgroundBadge: { position: 'absolute', left: 11, top: 11, maxWidth: 178, paddingHorizontal: 9, paddingVertical: 6, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.78)' },
   campgroundBadgeText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900' },
-  campgroundPhotoNote: { position: 'absolute', right: 9, bottom: 9, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.72)' },
+  campgroundPhotoNote: { position: 'absolute', right: 11, bottom: 11, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.72)' },
   campgroundPhotoNoteText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900' },
-  campgroundBody: { flex: 1, minWidth: 0, padding: 11, gap: 7, justifyContent: 'center' },
-  campgroundName: { color: C.text, fontSize: 15, lineHeight: 19, fontWeight: '900' },
-  campgroundMeta: { color: C.text3, fontSize: 11, fontWeight: '700' },
+  campgroundBody: { minWidth: 0, padding: 13, gap: 8, justifyContent: 'center' },
+  campgroundName: { color: C.text, fontSize: 18, lineHeight: 23, fontWeight: '900' },
+  campgroundMeta: { color: C.text3, fontSize: 12, lineHeight: 17, fontWeight: '700' },
   campgroundCost: { color: C.orange, fontSize: 12, fontWeight: '900' },
   campgroundTags: { minHeight: 24, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   campgroundTag: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
   campgroundTagText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   campgroundActions: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 2 },
-  campgroundOpenBtn: { flex: 1, height: 34, borderRadius: 9, backgroundColor: C.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  campgroundOpenBtn: { flex: 1, height: 40, borderRadius: 12, backgroundColor: C.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   campgroundOpenText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  campgroundSourceBtn: { width: 34, height: 34, borderRadius: 9, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2 },
+  campgroundSourceBtn: { width: 40, height: 40, borderRadius: 12, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2 },
+  campgroundSkeletonImage: { width: '100%', height: 190 },
+  campgroundSkeletonBody: { padding: 13, gap: 10 },
+  campgroundSkeletonLine: { height: 12, width: '88%', borderRadius: 999 },
+  campgroundSkeletonTitle: { height: 18, width: '66%' },
+  campgroundSkeletonShort: { width: '52%' },
+  campgroundSkeletonActions: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 4 },
+  campgroundSkeletonButton: { flex: 1, height: 40, borderRadius: 12 },
+  campgroundSkeletonIcon: { width: 40, height: 40, borderRadius: 12 },
   campgroundEmpty: { marginTop: 12, paddingVertical: 18, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, alignItems: 'center', gap: 7 },
   campgroundEmptyText: { color: C.text3, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   profileHook: { color: C.text, fontSize: 17, lineHeight: 25, fontWeight: '800' },

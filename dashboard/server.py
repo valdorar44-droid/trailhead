@@ -16614,7 +16614,11 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
     )
     limited_public = _public_camp_supply_limited(region_hint)
     public = any(term in combined for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free"))
-    official_developed = any(term in combined for term in ("ridb", "recreation.gov", "nps", "state park", "county park", "municipal"))
+    dispersed_public = any(term in combined for term in ("dispersed", "primitive", "boondock", "free camping", "public land"))
+    official_developed = any(term in combined for term in ("ridb", "recreation.gov", "nps", "state park", "county park", "municipal", "corps"))
+    developed_site = official_developed or any(term in combined for term in ("campground", "campsite", "camp site", "reservable", "reservation"))
+    campground_named = bool(re.search(r"\bcampgrounds?\b", str(camp.get("name") or ""), re.I))
+    lookout_named = bool(re.search(r"\blookout\b", str(camp.get("name") or ""), re.I))
     rv_private = any(term in combined for term in ("rv park", "rv resort", "koa", "hookup", "electric", "private campground"))
     private_stay = any(term in combined for term in ("private_stay", "private stay", "farm stay", "ranch stay", "winery stay", "vineyard", "glamping", "private camp"))
     score = 0.0
@@ -16628,8 +16632,11 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
         score += -4 if any(term in combined for term in ("farm", "ranch", "winery", "vineyard", "glamping")) else 0
         score += 6 if public else 0
     elif preference == "developed":
-        score += -14 if official_developed else 4
-        score += -6 if public else 0
+        score += -16 if developed_site else 8
+        score += -6 if campground_named else 0
+        score += 9 if lookout_named else 0
+        score += 14 if dispersed_public and not official_developed else 0
+        score += 8 if public and not developed_site else 0
         score += 10 if private_stay and not limited_public else 0
         score += 8 if rv_private and not official_developed else 0
     elif preference == "any":
@@ -16697,12 +16704,27 @@ def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
     if not type_filters:
         return True
     text = _camp_text(camp)
+    descriptive_text = " ".join(str(v or "") for v in [
+        camp.get("name"),
+        camp.get("land_type"),
+        camp.get("cost"),
+        " ".join(camp.get("tags") or []),
+        " ".join(camp.get("amenities") or []),
+        " ".join(camp.get("site_types") or []),
+        camp.get("description"),
+    ]).lower()
     tags = {str(t or "").lower() for t in camp.get("tags") or []}
     for raw in type_filters:
         f = str(raw or "").lower().strip()
         if not f:
             continue
-        if f in tags or f in text:
+        if f in tags:
+            return True
+        if f == "state" and re.search(r"\bstate\s+(?:park|campground|recreation|forest|beach|reserve|preserve)\b", descriptive_text):
+            return True
+        if f == "nps" and re.search(r"\b(?:nps|national\s+park|national\s+monument|national\s+preserve|national\s+recreation\s+area)\b", text):
+            return True
+        if f == "corps" and re.search(r"\b(?:corps|army\s+corps|usace)\b", text):
             return True
         if f in {"private", "private_stay", "farm", "farm_stay", "ranch", "winery", "glamping", "private_camp"} and any(term in text for term in ("private_stay", "private stay", "farm stay", "farm", "ranch", "winery", "vineyard", "glamping", "private camp")):
             return True
@@ -16714,7 +16736,9 @@ def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
             return True
         if f in {"lodging", "lodge", "guesthouse", "guest_house", "hostel", "chalet"} and any(term in text for term in ("lodging", "lodge", "guest house", "guesthouse", "hostel", "chalet", "trekking lodge")):
             return True
-        if f == "tent" and not any(term in text for term in ("rv resort", "koa", "hookup-only")):
+        if f in {"campground", "campgrounds", "campsite", "campsites", "developed"} and any(term in descriptive_text for term in ("campground", "campsite", "camp site", "reservable", "reservation", "recreation.gov", "state park", "national park", "county park", "corps")):
+            return True
+        if f == "tent" and any(term in text for term in ("tent", "campsite", "camp site", "campground", "walk-in", "walk in", "primitive", "dispersed")) and not any(term in text for term in ("rv resort", "koa", "hookup-only")):
             return True
         if f == "reservable" and any(term in text for term in ("reservable", "reservation", "recreation.gov", "state park", "nps", "national park")):
             return True
@@ -16792,8 +16816,8 @@ def _route_window_fit_notes(camp: dict | None, require_photos: bool = False) -> 
         notes.append(f"{float(route_distance):.1f} mi off route")
     elif isinstance(endpoint_distance, (int, float)):
         notes.append(f"{float(endpoint_distance):.1f} mi from the overnight window")
-    if require_photos:
-        notes.append("has photos" if _camp_has_media(camp) else "needs photos")
+    if _camp_has_media(camp):
+        notes.append("photos")
     if camp.get("reservable"):
         notes.append("reservable")
     source_confidence = str(camp.get("source_confidence") or "").strip().lower()
@@ -16827,6 +16851,7 @@ async def _select_camp_for_window(
     if any_broad_preference:
         pass_defs.append({"name": "any_legal", "filters": ANY_LEGAL_ROUTE_CAMP_FILTERS, "radius": min(max_radius, max(base_radius * 1.25, 50.0)), "strict": False})
     elif type_filters:
+        pass_defs.append({"name": "preferred_target", "filters": type_filters, "radius": min(max_radius, max(base_radius * 1.1, 48.0)), "strict": True, "target_only": True})
         pass_defs.append({"name": "preferred", "filters": type_filters, "radius": base_radius, "strict": True})
         pass_defs.append({"name": "preferred_wide", "filters": [], "radius": min(max_radius, max(base_radius * 1.25, 45.0)), "strict": False})
         pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.55, 58.0)), "strict": False})
@@ -16836,7 +16861,7 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 15,
+        "v": 19,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -16855,7 +16880,7 @@ async def _select_camp_for_window(
 
     async def load_window_camps(sample: dict, radius: float, filters: list[str]) -> list[dict]:
         try:
-            bridge = await discovery_context(
+            bridge = await asyncio.wait_for(discovery_context(
                 DiscoveryContextRequest(
                     center=PlannerPoint(lat=float(sample["lat"]), lng=float(sample["lng"])),
                     radius=radius,
@@ -16868,13 +16893,19 @@ async def _select_camp_for_window(
                     stale_after_hours=12,
                 ),
                 user=user,
-            )
+            ), timeout=3.2)
             camps = (bridge or {}).get("camps") or (bridge or {}).get("pins") or []
             if camps:
                 return camps
         except Exception:
             pass
-        return await nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=100, mode="light", stays=True, user=user)
+        try:
+            return await asyncio.wait_for(
+                nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=100, mode="light", stays=True, user=user),
+                timeout=3.5,
+            )
+        except Exception:
+            return []
 
     try:
         by_key: dict[str, dict] = {}
@@ -16885,7 +16916,7 @@ async def _select_camp_for_window(
             pass_samples = [target] if pass_def.get("target_only") else samples
             async with sem:
                 results = await asyncio.gather(*[
-                    asyncio.wait_for(load_window_camps(sample, radius, filters), timeout=6.0)
+                    asyncio.wait_for(load_window_camps(sample, radius, filters), timeout=7.0)
                     for sample in pass_samples
                 ], return_exceptions=True)
             found = _merge_camp_sources(*[r for r in results if isinstance(r, list)], type_filters=filters or None)
@@ -16894,8 +16925,6 @@ async def _select_camp_for_window(
                 if pass_def["strict"] and not _camp_matches_filters(camp, type_filters):
                     continue
                 has_media = _camp_has_media(camp)
-                if require_photos and not has_media:
-                    continue
                 try:
                     route_distance = min(_haversine_m(float(camp["lat"]), float(camp["lng"]), s["lat"], s["lng"]) / 1609.344 for s in samples)
                     endpoint_distance = _haversine_m(float(camp["lat"]), float(camp["lng"]), target["lat"], target["lng"]) / 1609.344
@@ -16919,9 +16948,9 @@ async def _select_camp_for_window(
                     endpoint_distance * (0.62 if route_style != "direct" else 0.82)
                     + route_distance * (0.78 if route_style == "direct" else 0.95)
                     + _camp_pref_score(camp, route_style, camp_preference, region_hint)
-                    + (-8 if has_media else 0)
+                    + (-12 if require_photos and has_media else 18 if require_photos else -8 if has_media else 0)
                     + (0 if preferred_match or not type_filters else 14)
-                    + (0 if pass_def["name"] in {"preferred", "preferred_wide"} else 6 if pass_def["name"] == "any_legal" else 12)
+                    + (0 if pass_def["name"] in {"preferred", "preferred_target", "preferred_wide"} else 6 if pass_def["name"] == "any_legal" else 12)
                 )
                 camp["_score"] = round(score, 3)
                 key = _camp_merge_key(camp)
@@ -16929,7 +16958,7 @@ async def _select_camp_for_window(
                     by_key[key] = camp
                     kept += 1
             search_passes.append({"name": pass_def["name"], "radius_mi": round(radius, 1), "filters": filters, "found": len(found), "kept": kept, "target_only": bool(pass_def.get("target_only"))})
-            if len(by_key) >= 18 and (pass_def["name"] == "preferred" or (not type_filters and not any_broad_preference)):
+            if len(by_key) >= 18 and (pass_def["name"] in {"preferred", "preferred_target"} or (not type_filters and not any_broad_preference)):
                 break
         scored = sorted(by_key.values(), key=lambda c: float(c.get("_score", 999999)))
         candidates = [{k: v for k, v in camp.items() if k != "_score"} for camp in scored[:18]]
@@ -17082,8 +17111,14 @@ async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = 
         if camp_preference_raw in {"established", "campground", "campgrounds", "official"}
         else camp_preference_raw
     )
-    sem = asyncio.Semaphore(7 if camp_preference == "any" and not type_filters else 3)
-    deadline_s = max(4.0, min(float(body.response_deadline_s or 18.0), 28.0))
+    sem = asyncio.Semaphore(min(8, max(3, len(windows), 7 if camp_preference == "any" and not type_filters else 3)))
+    requested_deadline_s = float(body.response_deadline_s or 18.0)
+    window_deadline_floor_s = 18.0
+    if len(windows) >= 5:
+        window_deadline_floor_s = 24.0
+    if body.require_photos:
+        window_deadline_floor_s = max(window_deadline_floor_s, 26.0)
+    deadline_s = max(4.0, min(max(requested_deadline_s, window_deadline_floor_s), 28.0))
     tasks = [
         asyncio.create_task(_select_camp_for_window(
             window,

@@ -1,7 +1,7 @@
 import unittest
 
 from ai.planner import _normalize_plan
-from dashboard.server import _build_trip_timeline, _camp_pref_score, _camp_requires_review
+from dashboard.server import _build_trip_timeline, _camp_matches_filters, _camp_pref_score, _camp_requires_review, _route_window_fit_notes
 
 
 def _base_plan(duration=3):
@@ -136,11 +136,30 @@ class PlannerTimelineTests(unittest.TestCase):
     def test_established_camp_scoring_prefers_official_developed_before_rv(self):
         official = {"name": "Afton Canyon Campground", "land_type": "BLM Campground", "source": "Recreation.gov", "tags": ["reservable"]}
         rv_park = {"name": "Private RV Resort", "land_type": "private", "source": "commercial", "tags": ["rv park", "hookup"]}
+        dispersed = {"name": "Dispersed tent site", "land_type": "Dispersed", "source": "trailhead", "tags": ["camp", "dispersed", "tent"]}
+        lookout = {"name": "Oak Flat Lookout", "land_type": "National Forest", "source": "Recreation.gov", "tags": ["camp", "tent", "usfs"]}
 
         self.assertLess(
             _camp_pref_score(official, route_style="balanced", camp_preference="established", region_hint="CA"),
             _camp_pref_score(rv_park, route_style="balanced", camp_preference="established", region_hint="CA"),
         )
+        self.assertLess(
+            _camp_pref_score(official, route_style="balanced", camp_preference="developed", region_hint="UT"),
+            _camp_pref_score(dispersed, route_style="balanced", camp_preference="developed", region_hint="UT"),
+        )
+        self.assertLess(
+            _camp_pref_score(official, route_style="balanced", camp_preference="developed", region_hint="CA"),
+            _camp_pref_score(lookout, route_style="balanced", camp_preference="developed", region_hint="CA"),
+        )
+        self.assertTrue(_camp_matches_filters(official, ["campground", "reservable", "state", "nps", "corps"]))
+        self.assertFalse(_camp_matches_filters(dispersed, ["campground", "reservable", "state", "nps", "corps"]))
+
+    def test_route_photo_notes_do_not_surface_missing_photo_copy(self):
+        camp = {"name": "Afton Canyon Campground", "land_type": "BLM Campground", "source": "Recreation.gov", "route_fit": "short_detour", "route_distance_mi": 8.4}
+
+        notes = _route_window_fit_notes(camp, require_photos=True)
+
+        self.assertNotIn("needs photos", notes)
 
 
 if __name__ == "__main__":

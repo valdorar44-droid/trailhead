@@ -8,7 +8,7 @@ const REQUEST_TIMEOUT_MS = Number(process.env.TRAILHEAD_ROUTE_AUDIT_TIMEOUT_MS |
 
 const CAMP_PREFS = {
   public: ['blm', 'usfs', 'dispersed', 'free'],
-  developed: ['tent', 'reservable', 'state', 'nps', 'usfs'],
+  developed: ['campground', 'reservable', 'state', 'nps', 'corps'],
   rv: ['rv', 'reservable'],
   private: ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'],
   any: [],
@@ -26,6 +26,7 @@ const BASE_ROUTES = [
 
 const SMOKE_CASES = [
   { route: 'moab-big-sur', shape: 'one_way', style: 'wild', campPreference: 'public', cadence: 'nightly', reuse: 'different_each_night', days: 7, hours: 5 },
+  { route: 'moab-big-sur', shape: 'one_way', style: 'balanced', campPreference: 'developed', cadence: 'nightly', reuse: 'different_each_night', days: 7, hours: 8, requirePhotos: true },
   { route: 'moab-big-sur', shape: 'one_way', style: 'wild', campPreference: 'private', cadence: 'nightly', reuse: 'different_each_night', days: 7, hours: 5 },
   { route: 'moab-big-sur', shape: 'one_way', style: 'wild', campPreference: 'any', cadence: 'nightly', reuse: 'different_each_night', days: 7, hours: 5 },
   { route: 'moab-big-sur', shape: 'there_and_back', style: 'wild', campPreference: 'private', cadence: 'nightly', reuse: 'same_camp_window', days: 7, hours: 5 },
@@ -250,6 +251,7 @@ async function runCase(item) {
     shape: item.shape,
     style: item.style,
     campPreference: item.campPreference,
+    requirePhotos: item.requirePhotos === true,
     cadence: item.cadence,
     reuse: item.reuse,
     days: item.days,
@@ -277,6 +279,7 @@ async function runCase(item) {
     camp_filters: CAMP_PREFS[item.campPreference] || [],
     route_style: item.style,
     camp_preference: item.campPreference,
+    require_photos: item.requirePhotos === true,
     region_hint: base.region,
     camp_reuse_policy: item.reuse,
     max_daily_drive_hours: item.hours,
@@ -291,6 +294,7 @@ async function runCase(item) {
     confidence: win.confidence || (win.strong ? 'strong' : win.camp ? 'review' : 'missing'),
     coverage: win.coverage_status || null,
     camp: win.selected?.name || win.camp?.name || win.candidates?.[0]?.name || null,
+    has_photos: Boolean((win.selected || win.camp || win.candidates?.[0] || {}).has_photos),
     fallback: win.fallback?.name || null,
     passes: (win.search_passes || []).map(pass => `${pass.name}${pass.target_only ? '*' : ''}:${pass.kept ?? pass.found}`).join(','),
   }));

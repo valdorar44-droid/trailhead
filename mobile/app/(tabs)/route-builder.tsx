@@ -85,8 +85,8 @@ import {
 
 const API_BASE_URL = TRAILHEAD_API_BASE;
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
-const ROUTE_CAMP_WINDOW_TIMEOUT_MS = 12000;
-const ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S = 9.5;
+const ROUTE_CAMP_WINDOW_TIMEOUT_MS = 26000;
+const ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S = 22;
 const ROUTE_CAMP_WINDOW_ANY_TIMEOUT_MS = 28000;
 const ROUTE_CAMP_WINDOW_ANY_RESPONSE_DEADLINE_S = 23;
 const ROUTE_CAMP_WINDOW_ROUTE_POINT_LIMIT = 420;
@@ -245,7 +245,7 @@ const FUEL_POI_TYPES = 'fuel,propane';
 const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,pass,glacier,bridge,checkpost,settlement,hot_spring,dump,shower,laundromat,lodging,private_stay,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction,medical';
 const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
   { id: 'public', label: 'Dispersed', sub: 'Primitive and public land', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free'] },
-  { id: 'developed', label: 'Developed', sub: 'Parks and reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
+  { id: 'developed', label: 'Developed', sub: 'Parks and reservable', icon: 'bonfire-outline', filters: ['campground', 'reservable', 'state', 'nps', 'corps'] },
   { id: 'rv', label: 'RV', sub: 'Hookups and parks', icon: 'car-sport-outline', filters: ['rv', 'reservable'] },
   { id: 'private', label: 'Private Stays', sub: 'Farms, ranches, glamping', icon: 'home-outline', filters: ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'] },
   { id: 'any', label: 'Any legal', sub: 'Broad search', icon: 'map-outline', filters: [] },
@@ -1039,6 +1039,7 @@ function campFilterTags(camp: CampsitePin) {
   if (raw.includes('tent')) tags.add('tent');
   if (raw.includes('dispersed') || raw.includes('primitive') || raw.includes('boondock')) tags.add('dispersed');
   if (raw.includes('free') || raw.includes('self-issued') || raw.includes('self issued')) tags.add('free');
+  if (raw.includes('campground') || raw.includes('campsite') || raw.includes('camp site')) tags.add('campground');
   if (raw.includes('ada') || raw.includes('accessible')) tags.add('ada');
   if (raw.includes('blm') || raw.includes('bureau of land management')) tags.add('blm');
   if (raw.includes('usfs') || raw.includes('forest service') || raw.includes('national forest')) tags.add('usfs');
@@ -1058,7 +1059,7 @@ function campMatchesFilters(camp: CampsitePin, filters: string[], preference?: C
   const tags = campFilterTags(camp);
   const isPrivate = tags.has('private') || tags.has('farm') || tags.has('ranch') || tags.has('winery') || tags.has('glamping') || tags.has('private_camp');
   const isPrimitivePublic = tags.has('dispersed') || tags.has('free') || ((tags.has('blm') || tags.has('usfs')) && !tags.has('reservable') && !tags.has('rv') && !isPrivate);
-  const isDeveloped = tags.has('reservable') || tags.has('state') || tags.has('nps') || tags.has('tent') || tags.has('corps') || (tags.has('usfs') && !tags.has('free'));
+  const isDeveloped = tags.has('reservable') || tags.has('state') || tags.has('nps') || tags.has('campground') || tags.has('corps') || (tags.has('usfs') && (tags.has('reservable') || tags.has('campground')));
   if (preference === 'public') return isPrimitivePublic && !tags.has('rv') && !isPrivate;
   if (preference === 'developed') return isDeveloped && !tags.has('rv') && !isPrivate && !tags.has('dispersed') && !tags.has('free');
   if (preference === 'rv') return tags.has('rv');

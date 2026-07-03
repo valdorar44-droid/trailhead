@@ -17,6 +17,7 @@
 - Backend now returns per-window review fallbacks for slow/failed overnight windows instead of failing the full route.
 - Reduced camp-window lookup weight from full mode / 160 limit to light mode / 100 limit.
 - Fixed fuel-stop async de-dupe so it cannot throw before route commit.
+- Hardened route-overview nearby packs so a provider timeout does not turn the full smart pack into a 500.
 - Default new route drafts now start with 3 days instead of a single day.
 - Pace inputs now mirror the latest typed values in refs for immediate build taps.
 - Cleaned fuel-stop copy from "Auto-added..." to a clearer user-facing line.

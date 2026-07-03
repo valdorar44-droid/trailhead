@@ -20771,6 +20771,9 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
     async def guarded(name: str, fn, default, timeout: float = 9.0):
         try:
             return await asyncio.wait_for(fn(), timeout=timeout)
+        except asyncio.CancelledError:
+            errors[name] = "timed out"
+            return default
         except Exception as exc:
             errors[name] = str(exc)
             return default

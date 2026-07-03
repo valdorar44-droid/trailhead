@@ -147,6 +147,19 @@ class ViatorSourcePackTests(unittest.TestCase):
     def test_empty_fixture_returns_no_experiences(self):
         self.assertEqual(import_viator_fixture(EMPTY, fetched_at=123), [])
 
+    def test_multi_day_duration_uses_days(self):
+        products = normalize_viator_products({
+            "products": [{
+                "productCode": "K2-LONG-001",
+                "title": "K2 Base Camp Trek",
+                "description": "Guided trek.",
+                "duration": {"fixedDurationInMinutes": 21 * 24 * 60},
+                "pricing": {"summary": {"fromPrice": 3600}, "currency": "USD"},
+                "productUrl": "https://www.viator.com/tours/Skardu/K2/d51603-K2-LONG-001",
+            }]
+        }, fetched_at=123)
+        self.assertEqual(products[0].duration_label, "21 days")
+
     def test_client_without_key_returns_empty_safely(self):
         client = ViatorClient(ViatorConfig(api_key="", enable_live=False))
         payload = client.search_products(destination_id="5265")

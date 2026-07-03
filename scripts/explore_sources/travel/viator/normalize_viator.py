@@ -188,6 +188,12 @@ def minutes_label(minutes: int) -> str:
         return ""
     if minutes < 60:
         return f"{minutes} min"
+    if minutes >= 24 * 60:
+        days = minutes / (24 * 60)
+        if abs(days - round(days)) < 0.01:
+            whole_days = int(round(days))
+            return f"{whole_days} day" if whole_days == 1 else f"{whole_days} days"
+        return f"{days:.1f} days"
     hours = minutes / 60
     return f"{hours:.1f} hours".replace(".0", "")
 
@@ -228,4 +234,3 @@ def category_from_terms(terms: list[str]) -> str:
     if "tickets" in terms:
         return "attraction_ticket"
     return "local_experience"
-

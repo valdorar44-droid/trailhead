@@ -96,6 +96,43 @@ const RECENT_MAP_VIEWPORT_TTL_MS = 5 * 60 * 1000;
 const RECENT_MAP_VIEWPORT_WRITE_MS = 2500;
 const NAV_GESTURE_HOLD_MS = Platform.OS === 'ios' ? 2600 : 1800;
 const NAV_GESTURE_NOTIFY_COOLDOWN_MS = Platform.OS === 'ios' ? 1400 : 900;
+const CAMP_CLUSTER_MAX_ZOOM = 10;
+const CAMP_CLUSTER_RADIUS = 34;
+const CAMP_CLUSTER_PROPERTIES = {
+  camp_cluster_c: ['+', ['case', ['==', ['get', 'camp_code'], 'C'], 1, 0]],
+  camp_cluster_d: ['+', ['case', ['==', ['get', 'camp_code'], 'D'], 1, 0]],
+  camp_cluster_rv: ['+', ['case', ['==', ['get', 'camp_code'], 'RV'], 1, 0]],
+  camp_cluster_p: ['+', ['case', ['==', ['get', 'camp_code'], 'P'], 1, 0]],
+} as const;
+const CAMP_CLUSTER_D_DOMINANT = ['all',
+  ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_c']],
+  ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_rv']],
+  ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_p']],
+] as const;
+const CAMP_CLUSTER_RV_DOMINANT = ['all',
+  ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_c']],
+  ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_d']],
+  ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_p']],
+] as const;
+const CAMP_CLUSTER_P_DOMINANT = ['all',
+  ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_c']],
+  ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_d']],
+  ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_rv']],
+] as const;
+const CAMP_CLUSTER_CODE_EXPR = [
+  'case',
+  CAMP_CLUSTER_D_DOMINANT, 'D',
+  CAMP_CLUSTER_RV_DOMINANT, 'RV',
+  CAMP_CLUSTER_P_DOMINANT, 'P',
+  'C',
+] as const;
+const CAMP_CLUSTER_COLOR_EXPR = [
+  'case',
+  CAMP_CLUSTER_D_DOMINANT, '#8b5a2b',
+  CAMP_CLUSTER_RV_DOMINANT, '#2563eb',
+  CAMP_CLUSTER_P_DOMINANT, '#d97706',
+  '#14b8a6',
+] as const;
 
 type CachedMapViewport = {
   at: number;
@@ -870,6 +907,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const routeTurnFont = isExtremeMapbox
     ? ['DIN Pro Bold', 'Arial Unicode MS Regular']
     : ['Noto Sans Bold'];
+  const campCodeFont = isExtremeMapbox
+    ? ['DIN Pro Bold', 'Arial Unicode MS Regular']
+    : ['Noto Sans Bold'];
+  const campCountFont = isExtremeMapbox
+    ? ['DIN Pro Medium', 'Arial Unicode MS Regular']
+    : ['Noto Sans Medium'];
   const [localTiles,   setLocalTiles]   = useState(false);
   const [localContours, setLocalContours] = useState(false);
   const [localTrails, setLocalTrails] = useState(false);
@@ -3077,21 +3120,50 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         id="camps"
         shape={campFC}
         cluster={shouldClusterCamps}
-        clusterMaxZoomLevel={11}
-        clusterRadius={30}
+        clusterMaxZoomLevel={CAMP_CLUSTER_MAX_ZOOM}
+        clusterRadius={CAMP_CLUSTER_RADIUS}
+        clusterProperties={CAMP_CLUSTER_PROPERTIES as any}
+        maxZoomLevel={22}
+        hitbox={{ width: 54, height: 54 }}
         onPress={handleCampPress}
       >
+          <MapGL.CircleLayer
+            id="camp-cluster-halo"
+            {...mapboxTopSlotProps}
+            filter={['has', 'point_count']}
+            style={{
+              circleRadius: ['step', ['get', 'point_count'], 22, 10, 27, 50, 32],
+              circleColor: CAMP_CLUSTER_COLOR_EXPR,
+              circleOpacity: 0.2,
+              circleBlur: 0.55,
+            } as any}
+          />
           <MapGL.CircleLayer
             id="camp-cluster"
             {...mapboxTopSlotProps}
             filter={['has', 'point_count']}
             style={{
-              circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'],
-              circleRadius: ['step', ['get', 'point_count'], 17, 10, 22, 50, 27],
-              circleOpacity: 0.9,
-              circleStrokeWidth: 2.5,
+              circleColor: CAMP_CLUSTER_COLOR_EXPR,
+              circleRadius: ['step', ['get', 'point_count'], 17, 10, 21, 50, 25],
+              circleOpacity: 0.96,
+              circleStrokeWidth: 3,
               circleStrokeColor: '#fff',
-            }}
+            } as any}
+          />
+          <MapGL.SymbolLayer
+            id="camp-cluster-code"
+            {...mapboxTopSlotProps}
+            filter={['has', 'point_count']}
+            style={{
+              textField: CAMP_CLUSTER_CODE_EXPR,
+              textColor: '#fff',
+              textSize: ['case', CAMP_CLUSTER_RV_DOMINANT, 8.5, 10.5],
+              textFont: campCodeFont,
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+              textHaloColor: 'rgba(0,0,0,0.28)',
+              textHaloWidth: 0.8,
+            } as any}
           />
           <MapGL.SymbolLayer
             id="camp-count"
@@ -3100,31 +3172,57 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             style={{
               textField: '{point_count_abbreviated}',
               textColor: '#fff',
-              textSize: 11,
-              textFont: ['Noto Sans Bold'],
-            }}
+              textSize: 8.5,
+              textFont: campCountFont,
+              textOffset: [0, 1.35],
+              textAllowOverlap: true,
+              textIgnorePlacement: true,
+              textHaloColor: 'rgba(0,0,0,0.28)',
+              textHaloWidth: 0.7,
+            } as any}
+          />
+          <MapGL.CircleLayer
+            id="camp-halo"
+            {...mapboxTopSlotProps}
+            filter={['!', ['has', 'point_count']]}
+            style={{
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 4.5, 12, 8, 14, 12, 17, 15, 20, 18, 23],
+              circleColor: ['coalesce', ['get', 'camp_color'], '#14b8a6'],
+              circleOpacity: 0.18,
+              circleBlur: 0.55,
+            } as any}
           />
           <MapGL.CircleLayer
             id="camp-circle"
             {...mapboxTopSlotProps}
             filter={['!', ['has', 'point_count']]}
             style={{
-              circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 10, 12, 12, 15, 14],
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 4.5, 8, 8, 10.5, 12, 13, 15, 15.5, 18, 18],
               circleColor: ['coalesce', ['get', 'camp_color'], '#14b8a6'],
               circleOpacity: 0.96,
               circleStrokeWidth: ['case', ['==', ['get', 'full'], 1], 4, 3],
-              circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', '#fff'],
-            }}
+              circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', '#ffffff'],
+            } as any}
+          />
+          <MapGL.CircleLayer
+            id="camp-core"
+            {...mapboxTopSlotProps}
+            filter={['!', ['has', 'point_count']]}
+            style={{
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 4.5, 5.8, 8, 7.2, 12, 8.7, 15, 10, 18, 11.8],
+              circleColor: 'rgba(15,23,42,0.34)',
+              circleOpacity: 0.92,
+            } as any}
           />
           <MapGL.SymbolLayer
             id="camp-code"
             {...mapboxTopSlotProps}
-            minZoomLevel={8}
+            minZoomLevel={4.4}
             filter={['!', ['has', 'point_count']]}
             style={{
               textField: ['get', 'camp_code'],
-              textSize: ['case', ['==', ['get', 'camp_kind'], 'rv'], 9, 10.5],
-              textFont: ['Noto Sans Medium'],
+              textSize: ['case', ['==', ['get', 'camp_kind'], 'rv'], 9, 10.8],
+              textFont: campCodeFont,
               textColor: '#fff',
               textHaloColor: 'rgba(0,0,0,0.35)',
               textHaloWidth: 0.8,

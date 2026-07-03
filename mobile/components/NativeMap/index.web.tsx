@@ -108,6 +108,9 @@ export interface NativeMapProps {
 
 const noop = () => {};
 const MAPBOX_GL_VERSION = 'v3.11.1';
+const WEB_CAMP_MARKER_LIMIT = 360;
+const WEB_POI_MARKER_LIMIT = 120;
+const WEB_COMMUNITY_MARKER_LIMIT = 120;
 
 const MAPBOX_STYLE_URLS: Record<PremiumMapStyle, string> = {
   standard: 'mapbox://styles/mapbox/standard',
@@ -545,26 +548,44 @@ function markerElement(label: string, color: string, ariaLabel?: string, zIndex 
   const el = document.createElement('button');
   el.type = 'button';
   const cleanLabel = label.trim();
-  el.textContent = cleanLabel ? cleanLabel.slice(0, 2).toUpperCase() : '';
+  el.textContent = '';
   const accessibleLabel = String(ariaLabel || (cleanLabel ? `${cleanLabel} marker` : 'Place marker')).trim();
-  const size = cleanLabel.length > 1 ? 34 : cleanLabel ? 30 : 28;
+  const markerCode = cleanLabel ? cleanLabel.slice(0, 2).toUpperCase() : '';
+  const size = markerCode.length > 1 ? 38 : markerCode ? 34 : 30;
+  const plate = document.createElement('span');
+  plate.textContent = markerCode;
+  plate.style.width = markerCode.length > 1 ? '25px' : '22px';
+  plate.style.height = markerCode.length > 1 ? '20px' : '22px';
+  plate.style.borderRadius = '999px';
+  plate.style.background = 'rgba(15,23,42,0.38)';
+  plate.style.color = 'white';
+  plate.style.display = 'flex';
+  plate.style.alignItems = 'center';
+  plate.style.justifyContent = 'center';
+  plate.style.fontSize = markerCode.length > 1 ? '9px' : '10.5px';
+  plate.style.fontWeight = '900';
+  plate.style.letterSpacing = '0';
+  plate.style.lineHeight = '1';
+  plate.style.textShadow = '0 1px 2px rgba(0,0,0,0.32)';
+  plate.style.pointerEvents = 'none';
+  el.appendChild(plate);
   el.setAttribute('aria-label', accessibleLabel);
   el.title = accessibleLabel;
   el.style.width = `${size}px`;
   el.style.height = `${size}px`;
   el.style.borderRadius = '999px';
-  el.style.border = '2px solid white';
+  el.style.border = '3px solid white';
   el.style.background = color;
   el.style.color = 'white';
   el.style.display = 'flex';
   el.style.alignItems = 'center';
   el.style.justifyContent = 'center';
-  el.style.fontSize = cleanLabel.length > 1 ? '9px' : '10px';
+  el.style.fontSize = markerCode.length > 1 ? '9px' : '10px';
   el.style.fontWeight = '900';
   el.style.lineHeight = '1';
   el.style.padding = '0';
   el.style.appearance = 'none';
-  el.style.boxShadow = '0 8px 20px rgba(0,0,0,0.35)';
+  el.style.boxShadow = `0 0 0 7px ${color}2e, 0 10px 24px rgba(0,0,0,0.34)`;
   el.style.cursor = 'pointer';
   el.style.pointerEvents = 'auto';
   el.style.touchAction = 'manipulation';
@@ -614,10 +635,10 @@ function syncWebMarkers(
     marker.getElement?.()?.setAttribute('title', accessibleLabel);
     markerRefs.current.push(marker);
   };
-  props.gas.slice(0, 40).forEach(g => add(g.lng, g.lat, 'G', '#eab308', () => props.suppressFeatureTaps ? props.onMapTap(g.lat, g.lng) : props.onGasTap?.(g), `${g.name || 'Fuel'} marker`, 10));
-  props.pois.slice(0, 80).forEach(p => add(p.lng, p.lat, poiMarkerCode(p.type), '#38bdf8', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onPoiTap?.(p as any), `${p.name || 'Place'} marker`, 20));
-  props.communityPins.slice(0, 80).forEach(p => add(p.lng, p.lat, '!', '#a855f7', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onCommunityPinTap?.(p), `${(p as any).title || (p as any).name || p.description || 'Community pin'} marker`, 30));
-  props.camps.slice(0, 80).forEach(c => {
+  props.gas.slice(0, 60).forEach(g => add(g.lng, g.lat, 'G', '#eab308', () => props.suppressFeatureTaps ? props.onMapTap(g.lat, g.lng) : props.onGasTap?.(g), `${g.name || 'Fuel'} marker`, 10));
+  props.pois.slice(0, WEB_POI_MARKER_LIMIT).forEach(p => add(p.lng, p.lat, poiMarkerCode(p.type), '#38bdf8', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onPoiTap?.(p as any), `${p.name || 'Place'} marker`, 20));
+  props.communityPins.slice(0, WEB_COMMUNITY_MARKER_LIMIT).forEach(p => add(p.lng, p.lat, '!', '#a855f7', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onCommunityPinTap?.(p), `${(p as any).title || (p as any).name || p.description || 'Community pin'} marker`, 30));
+  props.camps.slice(0, WEB_CAMP_MARKER_LIMIT).forEach(c => {
     const visual = campMarkerVisual(c as any);
     add(c.lng, c.lat, visual.code, visual.color, () => props.onCampTap(c), `${c.name || visual.label} ${visual.label} marker`, 80);
   });
@@ -930,6 +951,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           mapOptions.config = styleConfig(premiumStyle, props.showTerrain);
         }
         mapRef.current = new mapgl.Map(mapOptions);
+        if (process.env.NODE_ENV !== 'production') {
+          (window as any).__trailheadWebMap = mapRef.current;
+        }
         mapRef.current.addControl(new mapgl.NavigationControl(isMapboxWeb ? { visualizePitch: true } : { showCompass: true }), 'top-right');
         mapRef.current.on('load', () => {
           routeReadyRef.current = true;
@@ -970,6 +994,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (mapRef.current) {
         mapRef.current.remove();
         mapRef.current = null;
+      }
+      if (process.env.NODE_ENV !== 'production' && (window as any).__trailheadWebMap) {
+        delete (window as any).__trailheadWebMap;
       }
     };
   }, [isWebMap, isMapboxWeb, mapboxToken]);

@@ -17071,7 +17071,6 @@ async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = 
     if not windows:
         return {"windows": [], "errors": {}}
     total_mi = _route_distance_mi(points)
-    sem = asyncio.Semaphore(3)
     type_filters = [str(t).strip() for t in body.camp_filters if str(t).strip()]
     route_style_raw = (body.route_style or "balanced").lower()
     route_style = "wild" if route_style_raw in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else route_style_raw
@@ -17083,6 +17082,7 @@ async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = 
         if camp_preference_raw in {"established", "campground", "campgrounds", "official"}
         else camp_preference_raw
     )
+    sem = asyncio.Semaphore(7 if camp_preference == "any" and not type_filters else 3)
     deadline_s = max(4.0, min(float(body.response_deadline_s or 18.0), 28.0))
     tasks = [
         asyncio.create_task(_select_camp_for_window(

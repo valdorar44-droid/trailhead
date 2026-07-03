@@ -87,6 +87,8 @@ const API_BASE_URL = TRAILHEAD_API_BASE;
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 const ROUTE_CAMP_WINDOW_TIMEOUT_MS = 12000;
 const ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S = 9.5;
+const ROUTE_CAMP_WINDOW_ANY_TIMEOUT_MS = 28000;
+const ROUTE_CAMP_WINDOW_ANY_RESPONSE_DEADLINE_S = 23;
 const ROUTE_CAMP_WINDOW_ROUTE_POINT_LIMIT = 420;
 const ROUTE_HERO_PHOTO = 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg';
 const ROUTE_BUILDER_RENTAL_DISMISSED_KEY = 'trailhead_route_builder_rental_dismissed_at';
@@ -4014,6 +4016,9 @@ function RouteBuilderScreenContent() {
     });
     if (!windows.length) return [];
     const campWindowRoute = downsampleRoutePoints(spine, ROUTE_CAMP_WINDOW_ROUTE_POINT_LIMIT);
+    const broadCampWindow = campPreferenceMode === 'any';
+    const campWindowDeadline = broadCampWindow ? ROUTE_CAMP_WINDOW_ANY_RESPONSE_DEADLINE_S : ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S;
+    const campWindowTimeout = broadCampWindow ? ROUTE_CAMP_WINDOW_ANY_TIMEOUT_MS : ROUTE_CAMP_WINDOW_TIMEOUT_MS;
     const reviewAnchors = () => windows.map(win => {
       const fallbackPoint = pointAtRouteMile(spine, win.target_mi)
         ?? spine[Math.min(spine.length - 1, Math.max(0, Math.round((win.day / count) * (spine.length - 1))))];
@@ -4049,9 +4054,9 @@ function RouteBuilderScreenContent() {
           camp_reuse_policy: effectiveCampReusePolicy,
           max_daily_drive_hours: currentDriveHoursValue() ?? undefined,
           max_radius: 90,
-          response_deadline_s: ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S,
+          response_deadline_s: campWindowDeadline,
         }, { signal }),
-        ROUTE_CAMP_WINDOW_TIMEOUT_MS,
+        campWindowTimeout,
         'route-camp-window-timeout',
       );
       return result.windows.map(originalWin => {

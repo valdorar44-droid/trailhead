@@ -281,6 +281,7 @@ async function runCase(item) {
     camp_reuse_policy: item.reuse,
     max_daily_drive_hours: item.hours,
     max_radius: item.campPreference === 'any' || item.campPreference === 'private' ? 115 : 100,
+    response_deadline_s: item.campPreference === 'any' ? 23 : 18,
   });
   const campEval = evaluateCampWindows(item, result.windows || [], base);
   report.camps = campEval;

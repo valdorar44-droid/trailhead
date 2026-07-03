@@ -53,31 +53,31 @@ export function campMarkerVisual(camp: Partial<CampsitePin> & Record<string, any
   }
 
   if (/\b(tent|walk-in|hike-in|backcountry)\b/.test(raw)) {
-    return { kind: 'tent', code: 'T', color: '#16a34a', label: 'Tent site' };
+    return { kind: 'tent', code: 'C', color: '#14b8a6', label: 'Campground' };
   }
 
   if (/\b(blm|bureau of land management)\b/.test(raw)) {
-    return { kind: 'blm', code: 'C', color: '#f97316', label: 'Campground' };
+    return { kind: 'blm', code: 'C', color: '#14b8a6', label: 'Campground' };
   }
 
   if (/\b(usfs|national forest|forest service)\b/.test(raw)) {
-    return { kind: 'usfs', code: 'C', color: '#22c55e', label: 'Campground' };
+    return { kind: 'usfs', code: 'C', color: '#14b8a6', label: 'Campground' };
   }
 
   if (/\b(nps|national park)\b/.test(raw)) {
-    return { kind: 'nps', code: 'C', color: '#3b82f6', label: 'Campground' };
+    return { kind: 'nps', code: 'C', color: '#14b8a6', label: 'Campground' };
   }
 
   if (/\b(state park|state campground|state forest)\b/.test(raw)) {
-    return { kind: 'state', code: 'C', color: '#8b5cf6', label: 'Campground' };
+    return { kind: 'state', code: 'C', color: '#14b8a6', label: 'Campground' };
   }
 
   if (/\b(corps|army corps|usace)\b/.test(raw)) {
-    return { kind: 'corps', code: 'C', color: '#0284c7', label: 'Campground' };
+    return { kind: 'corps', code: 'C', color: '#14b8a6', label: 'Campground' };
   }
 
   if (camp.reservable) {
-    return { kind: 'reservable', code: 'C', color: '#8b5cf6', label: 'Campground' };
+    return { kind: 'reservable', code: 'C', color: '#14b8a6', label: 'Campground' };
   }
 
   return { kind: 'camp', code: 'C', color: '#14b8a6', label: 'Campground' };

@@ -272,8 +272,8 @@ export default function MapFilterSheet({
               {categoryUnlocking ? (
                 <TrailheadLoadingRow
                   label="Adding services"
-                  sub="Food, repairs, lodging, and medical stops are being added."
-                  icon="sparkles-outline"
+                  sub="Food, repairs, lodging, and medical stops."
+                  icon="options-outline"
                   style={styles.sheetLoadingRow}
                 />
               ) : null}
@@ -358,7 +358,7 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
-                icon: 'sparkles-outline',
+                icon: 'briefcase-outline',
                 iconColor: '#06b6d4',
                 title: 'Services',
                 summary: 'Food, groceries, lodging, repairs, medical, and connection',

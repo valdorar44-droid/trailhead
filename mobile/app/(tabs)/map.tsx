@@ -686,8 +686,8 @@ function trailSnapModeHelp(mode: TrailSnapMode) {
 function normalizeTrailSnapFailure(err: unknown, mode: TrailSnapMode) {
   const raw = String((err as any)?.message ?? err ?? '').trim();
   const lower = raw.toLowerCase();
-  if (lower.includes('not downloaded') || lower.includes('missing trail graph')) {
-    return 'Trail routing graph is not downloaded for this area. Download the trail pack or use straight line for this segment.';
+  if (lower.includes('not ready') || lower.includes('not downloaded') || lower.includes('missing trail graph')) {
+    return 'Trail follow is not ready for this area. Save the region or use straight line for this segment.';
   }
   if (lower.includes('could not be identified') || lower.includes('no trail graph here')) {
     return 'Trail graph is not ready here yet. Use straight line, add manual points, or report a missing trail.';
@@ -695,7 +695,7 @@ function normalizeTrailSnapFailure(err: unknown, mode: TrailSnapMode) {
   if (lower.includes('no visible trail connection') || lower.includes('could not connect pins')) {
     return 'Gap between trail segments. Add a pin on the trail between those points or switch to straight line.';
   }
-  if (lower.includes('snapped one anchor')) {
+  if (lower.includes('snapped one point')) {
     return raw;
   }
   if (lower.includes('too many pins')) {
@@ -4561,18 +4561,19 @@ const buildMapHtml = (
   // ── GeoJSON helpers ───────────────────────────────────────────────────────────
   function campKind(c){
     var raw=[].concat(c.tags||[],c.site_types||[],[c.land_type,c.source_badge,c.verified_source,c.source,c.cost,c.description]).filter(Boolean).join(' ').toLowerCase();
+    if(raw.indexOf('rv')>=0||raw.indexOf('hookup')>=0||raw.indexOf('caravan')>=0||raw.indexOf('motorhome')>=0)return'rv';
+    if(raw.indexOf('overnight parking')>=0||raw.indexOf('truck stop')>=0||raw.indexOf('rest area')>=0||raw.indexOf('sleep in vehicle')>=0||raw.indexOf('vehicle overnight')>=0)return'overnight_parking';
     if(raw.indexOf('dispersed')>=0||raw.indexOf('primitive')>=0||raw.indexOf('boondock')>=0)return'dispersed';
+    if(raw.indexOf('tent')>=0||raw.indexOf('walk-in')>=0||raw.indexOf('hike-in')>=0||raw.indexOf('backcountry')>=0)return'tent';
     if(raw.indexOf('blm')>=0||raw.indexOf('bureau of land management')>=0)return'blm';
     if(raw.indexOf('usfs')>=0||raw.indexOf('national forest')>=0||raw.indexOf('forest service')>=0)return'usfs';
     if(raw.indexOf('nps')>=0||raw.indexOf('national park')>=0)return'nps';
     if(raw.indexOf('state park')>=0)return'state';
     if(raw.indexOf('corps')>=0)return'corps';
-    if(raw.indexOf('rv')>=0||raw.indexOf('hookup')>=0||raw.indexOf('caravan')>=0)return'rv';
     if(c.reservable)return'reservable';
-    if(raw.indexOf('tent')>=0)return'tent';
     return'camp';
   }
-  function campCode(kind){return kind==='dispersed'?'d':kind==='rv'?'R':kind==='tent'?'T':kind==='blm'?'B':kind==='usfs'?'F':kind==='nps'?'N':kind==='state'?'S':kind==='corps'?'W':'C';}
+  function campCode(kind){return kind==='dispersed'?'D':kind==='rv'?'RV':kind==='overnight_parking'?'P':'C';}
   function campFeat(c){var kind=campKind(c);return{type:'Feature',geometry:{type:'Point',coordinates:[c.lng,c.lat]},properties:{id:c.id||'',name:c.name||'',land_type:c.land_type||'Campground',camp_kind:kind,camp_code:campCode(kind),cost:c.cost||'',ada:c.ada?1:0,reservable:c.reservable?1:0,full:c.full||0,raw:JSON.stringify(c)}};}
 
   function setupSources(){
@@ -4611,10 +4612,10 @@ const buildMapHtml = (
     _a('poi-circle',{id:'poi-circle',type:'circle',source:'pois',paint:{'circle-radius':['case',['==',['get','type'],'peak'],9,8],'circle-color':['case',['==',['get','type'],'water'],['match',['get','subtype'],'boat_ramp','#1d4ed8','paddle_launch','#0f766e','fishing_access','#15803d','marina','#0891b2','dock','#0369a1','shore_access','#0e7490','swimming','#06b6d4','gauge','#64748b','navigation_aid','#7c3aed','channel_marker','#2563eb','water_hazard','#dc2626','anchorage','#0f766e','lock','#a16207','#3b82f6'],['match',['get','type'],'trail','#f97316','trailhead','#22c55e','trail_note','#16a34a','overlook','#0ea5e9','crossing','#0284c7','gate','#d97706','trail_closure','#dc2626','rock_art','#a855f7','cell_signal','#2563eb','trash','#64748b','wildlife','#7c3aed','viewpoint','#a855f7','peak','#92400e','hot_spring','#f97316','camp','#16a34a','informal_camp','#65a30d','wild_camp','#15803d','fuel','#ea580c','propane','#f97316','dump','#a16207','gpx_import','#64748b','#6b7280']],'circle-opacity':0.9,'circle-stroke-width':1.5,'circle-stroke-color':'#fff'}});
     _a('poi-code',{id:'poi-code',type:'symbol',source:'pois',layout:{'text-field':['case',['==',['get','type'],'water'],['match',['get','subtype'],'boat_ramp','R','paddle_launch','P','fishing_access','F','marina','M','dock','D','shore_access','S','swimming','S','gauge','G','navigation_aid','A','channel_marker','C','water_hazard','!','anchorage','A','lock','L','W'],['match',['get','type'],'trail','T','trailhead','T','trail_note','N','overlook','V','crossing','X','gate','G','trail_closure','C','rock_art','S','cell_signal','C','trash','R','wildlife','W','viewpoint','V','peak','P','hot_spring','H','camp','C','informal_camp','C','wild_camp','C','fuel','G','propane','P','dump','D','gpx_import','X','P']],'text-size':9.5,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
     _a('poi-label',{id:'poi-label',type:'symbol',source:'pois',filter:['>=',['zoom'],12],layout:{'text-field':['case',['all',['==',['get','type'],'peak'],['has','elevation']],['concat',['get','name'],'\\n▲ ',['get','elevation']],['get','name']],'text-size':['case',['==',['get','type'],'peak'],10,9],'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':['case',['==',['get','type'],'peak'],'#d97706','#f1f5f9'],'text-halo-color':['case',['==',['get','type'],'peak'],'rgba(255,255,255,0.95)','rgba(0,0,0,0.85)'],'text-halo-width':2}});
-    _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#6b7280',10,'#52525b',50,'#3f3f46'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
-    _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
-    _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','camp_kind'],'dispersed','#8b5a2b','primitive','#92400e','rv','#2563eb','tent','#16a34a','blm','#f97316','usfs','#22c55e','nps','#3b82f6','state','#8b5cf6','corps','#0284c7','reservable','#8b5cf6','#14b8a6'],'circle-opacity':0.9,'circle-stroke-width':['case',['==',['get','full'],1],3,2],'circle-stroke-color':['case',['==',['get','full'],1],'#ef4444','rgba(255,255,255,0.9)']}});
-    _a('camp-code',{id:'camp-code',type:'symbol',source:'camps',minzoom:12,filter:['!',['has','point_count']],layout:{'text-field':['get','camp_code'],'text-size':['case',['==',['get','camp_kind'],'dispersed'],11,10],'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
+    _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#14b8a6',10,'#0f766e',50,'#115e59'],'circle-radius':['step',['get','point_count'],17,10,23,50,29],'circle-opacity':0.9,'circle-stroke-width':2.5,'circle-stroke-color':'#fff'}});
+    _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.24)','text-halo-width':0.8}});
+    _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],8,9,12,12,15,14],'circle-color':['match',['get','camp_kind'],'dispersed','#8b5a2b','primitive','#92400e','rv','#2563eb','overnight_parking','#d97706','tent','#14b8a6','blm','#14b8a6','usfs','#14b8a6','nps','#14b8a6','state','#14b8a6','corps','#14b8a6','reservable','#14b8a6','#14b8a6'],'circle-opacity':0.96,'circle-stroke-width':['case',['==',['get','full'],1],4,3],'circle-stroke-color':['case',['==',['get','full'],1],'#ef4444','#fff']}});
+    _a('camp-code',{id:'camp-code',type:'symbol',source:'camps',minzoom:8,filter:['!',['has','point_count']],layout:{'text-field':['get','camp_code'],'text-size':['case',['==',['get','camp_kind'],'rv'],9,10.5],'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
     _a('camp-full-badge',{id:'camp-full-badge',type:'circle',source:'camps',filter:['all',['!',['has','point_count']],['==',['get','full'],1]],paint:{'circle-radius':5,'circle-color':'#ef4444','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-translate':[7,-7],'circle-opacity':0.95}});
     _a('camp-label',{id:'camp-label',type:'symbol',source:'camps',filter:['all',['!',['has','point_count']],['>=',['zoom'],12]],layout:{'text-field':['get','name'],'text-size':10,'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
     // Guard: only register click handlers once per map instance, never on style reload
@@ -5336,20 +5337,21 @@ function userFacingCampNote(text?: string | null) {
   return String(text)
     .replace(/Official RIDB fee text;?\s*/gi, '')
     .replace(/Official Recreation\.gov fee text;?\s*/gi, '')
-    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Recreation.gov listing. ')
-    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'BLM recreation listing. ')
-    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Recent listing. ')
-    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Camp listing. ')
+    .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, '')
+    .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, '')
+    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, '')
+    .replace(/Camp source data cached by Trailhead;?\s*/gi, '')
     .replace(/Trailhead links to the official Recreation\.gov campground page\.?\s*Checkout stays on Recreation\.gov\.?/gi, 'Reserve on Recreation.gov when available.')
     .replace(/Trailhead links to official Recreation\.gov booking and availability\.?\s*Checkout stays on Recreation\.gov\.?/gi, 'Reserve on Recreation.gov when available.')
     .replace(/Recreation\.gov does not expose live checkout pricing for this card\.?/gi, 'Check Recreation.gov for current pricing.')
     .replace(/does not expose live checkout pricing(?: for this card)?\.?/gi, 'Check Recreation.gov for current pricing.')
-    .replace(/Community-mapped OpenStreetMap camp data/gi, 'Community-mapped campsite.')
-    .replace(/OpenStreetMap camp data/gi, 'Community-mapped campsite.')
-    .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, 'Community listing. ')
+    .replace(/Community-mapped OpenStreetMap camp data/gi, 'Campsite details.')
+    .replace(/OpenStreetMap camp data/gi, 'Campsite details.')
+    .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, '')
     .replace(/data packaged by Trailhead;?\s*/gi, 'listing. ')
     .replace(/cached by Trailhead;?\s*/gi, '')
-    .replace(/\bOpenStreetMap data\b/gi, 'Community listing')
+    .replace(/\bOpenStreetMap data\b/gi, 'Campsite details')
+    .replace(/\bCommunity\s+listing\b/gi, 'Campground details')
     .replace(/\bRIDB\b/gi, 'Recreation.gov')
     .replace(/^(?:Recreation\.gov|Recreation gov)\s*[:;,-]?\s*Check Recreation\.gov/gi, 'Check Recreation.gov')
     .replace(/\bsource data\b/gi, 'listing')
@@ -5379,8 +5381,8 @@ function campSourceDisplayLabel(text?: string | null, fallback = 'Details') {
   const key = label.toLowerCase();
   if (key.includes('recent dispersed spot')) return 'Recently checked';
   if (key === 'trailhead') return fallback;
-  if (key.includes('map contributor')) return 'Community listing';
-  if (key.includes('openstreetmap') || key === 'osm') return fallback === 'Camp profile' ? 'Campsite' : 'Community listing';
+  if (key.includes('map contributor')) return 'Campground';
+  if (key.includes('openstreetmap') || key === 'osm') return fallback === 'Camp profile' ? 'Campsite' : 'Campground';
   if (key.includes('ridb') || key.includes('recreation.gov') || key.includes('recreation gov')) return 'Recreation.gov';
   if (key.includes('bureau of land management') || key === 'blm') return 'BLM';
   if (key.includes('forest service') || key === 'usfs') return 'US Forest Service';
@@ -15130,8 +15132,7 @@ function MapScreen() {
       setCampDiscoveryLoadingKey('');
       webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: [] }));
       if (opts.openSheet) setCampDiscoverySheetDismissed(false);
-      setSearchResult({ count: 0 });
-      setTimeout(() => setSearchResult(null), 3000);
+      setSearchResult(null);
       return [];
     }
     const hasActiveCampFilters = lookupTypes.length > 0;
@@ -17643,7 +17644,7 @@ function MapScreen() {
     if (!stateId) return null;
     const graphPath = trailRouteGraphLocalPath(stateId);
     const info = await FileSystem.getInfoAsync(graphPath).catch(() => null);
-    if (!info?.exists) throw new Error(`${stateId.toUpperCase()} trail routing graph is not downloaded yet`);
+    if (!info?.exists) throw new Error(`${stateId.toUpperCase()} trail follow is not ready yet`);
     if (((info as any)?.size ?? 0) <= 0) throw new Error(`${stateId.toUpperCase()} trail routing graph is empty`);
     const seed: [number, number] = [trail.lng, trail.lat];
     const hasLine = coords.length >= 2;
@@ -17797,7 +17798,7 @@ function MapScreen() {
 
   async function fetchMapboxPinnedTrailRoute(pins: [number, number][]) {
     if (!mapboxToken || pins.length < 2) return null;
-    if (pins.length > 25) throw new Error('Mapbox can route up to 25 anchors at once. Undo a few pins and try again.');
+    if (pins.length > 25) throw new Error('Mapbox can route up to 25 points at once. Undo a few pins and try again.');
     const pairs = pins.map(([lng, lat]) => `${lng.toFixed(6)},${lat.toFixed(6)}`);
     const radiuses = pins.map(() => '160').join(';');
     const url = `https://api.mapbox.com/directions/v5/mapbox/walking/${pairs.join(';')}` +
@@ -17817,14 +17818,14 @@ function MapScreen() {
           .map((pair: any) => [Number(pair?.[0]), Number(pair?.[1])] as [number, number])
           .filter((pair: [number, number]) => Number.isFinite(pair[0]) && Number.isFinite(pair[1]))
       : [];
-    if (coords.length < 2) throw new Error('Mapbox did not return a trail route for these anchors.');
+    if (coords.length < 2) throw new Error('Mapbox did not return a trail route for these points.');
 
     const waypointDistances = Array.isArray(data?.waypoints)
       ? data.waypoints.map((wp: any) => Number(wp?.distance)).filter((d: number) => Number.isFinite(d))
       : [];
     const worstSnapM = waypointDistances.length ? Math.max(...waypointDistances) : 0;
     if (worstSnapM > 180) {
-      throw new Error(`Mapbox snapped one anchor ${Math.round(worstSnapM)}m away. Drop pins closer to the intended trail.`);
+      throw new Error(`Mapbox snapped one point ${Math.round(worstSnapM)}m away. Drop pins closer to the intended trail.`);
     }
     return {
       coords: dedupeTrailCoords(coords),
@@ -17999,7 +18000,7 @@ function MapScreen() {
     const graphPath = trailRouteGraphLocalPath(stateId);
     const info = await FileSystem.getInfoAsync(graphPath).catch(() => null);
     if (!info?.exists || (((info as any)?.size ?? 0) <= 0)) {
-      throw new Error(`${stateId.toUpperCase()} trail routing graph is not downloaded yet`);
+      throw new Error(`${stateId.toUpperCase()} trail follow is not ready yet`);
     }
     const bounds = boundsForTrailCoords(coords, corridorM);
     const raw = await routeTrailGraph(graphPath, JSON.stringify({
@@ -18032,7 +18033,7 @@ function MapScreen() {
         };
     await saveOfflineTrail({
       id: `trail:${trail.id}`,
-      trail: { ...trail, support: { ...trail.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail downloaded for offline follow' : 'Download this region for full trail follow' } },
+      trail: { ...trail, support: { ...trail.support, offlineReady: coords.length >= 2, readinessLabel: coords.length >= 2 ? 'Trail is ready for offline follow' : 'Save this region for full trail follow' } },
       geometry: packGeometry,
       preview: trailPreviewManifest?.trail_id === trail.profile_id && trailPreviewManifest?.status === 'available' ? trailPreviewManifest : null,
       savedAt: Date.now(),
@@ -20168,8 +20169,8 @@ function MapScreen() {
           {!campDiscoveryRefreshing && currentDiscoveryCamps.length === 0 ? (
             <View style={s.campDiscoveryState}>
               <Ionicons name="map-outline" size={22} color="#0f766e" />
-              <Text style={s.campDiscoveryStateTitle}>Camps are ready for a wider search</Text>
-              <Text style={s.campDiscoveryStateText}>Move the map or search a wider area.</Text>
+              <Text style={s.campDiscoveryStateTitle}>Search a wider camp area</Text>
+              <Text style={s.campDiscoveryStateText}>Move the map, then search this area.</Text>
             </View>
           ) : (
           <View style={s.campDiscoveryCards}>
@@ -20227,8 +20228,8 @@ function MapScreen() {
         <View style={s.copilotResultRail} pointerEvents="auto">
           <View style={s.copilotResultHeader}>
             <View style={s.copilotResultTitleWrap}>
-              <Ionicons name="sparkles-outline" size={13} color={C.orange} />
-              <Text style={s.copilotResultTitle}>COPILOT RESULTS</Text>
+              <Ionicons name="list-outline" size={13} color={C.orange} />
+              <Text style={s.copilotResultTitle}>RESULTS</Text>
             </View>
             <TouchableOpacity onPress={() => { clearCopilotResultSession(); setSearchResults([]); }} hitSlop={10}>
               <Ionicons name="close" size={15} color={OVR.text3} />
@@ -22602,7 +22603,7 @@ function MapScreen() {
                   />
 	                ) : hasPlan ? (
 	                  <TouchableOpacity style={s.lockedInlineCard} onPress={() => openCampInsight(selectedCamp, campDetail)}>
-	                    <Ionicons name="sparkles-outline" size={15} color={C.orange} />
+	                    <Ionicons name="compass-outline" size={15} color={C.orange} />
 	                    <Text style={s.lockedInlineText}>Check fit, hazards, and nearby highlights.</Text>
 	                  </TouchableOpacity>
 	                ) : (
@@ -22624,7 +22625,7 @@ function MapScreen() {
                       </View>
                     </View>
 	                    <View style={s.lockedAiOverlay}>
-	                      <Ionicons name="sparkles-outline" size={17} color={C.orange} />
+	                      <Ionicons name="compass-outline" size={17} color={C.orange} />
 	                      <Text style={s.lockedAiOverlayText}>Check fit, hazards, best season, and nearby highlights.</Text>
                     </View>
                   </TouchableOpacity>

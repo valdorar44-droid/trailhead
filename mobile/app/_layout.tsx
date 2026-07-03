@@ -432,7 +432,7 @@ export default function RootLayout() {
           <View style={{ flex: 1 }}>
             <Text style={{ color: '#fff', fontSize: 13, fontWeight: '800', fontFamily: mono }}>Update ready</Text>
             <Text style={{ color: 'rgba(255,255,255,0.55)', fontSize: 11, fontFamily: mono, marginTop: 2 }}>
-              New features downloaded — restart to apply
+              New features are ready — restart to apply
             </Text>
           </View>
           <TouchableOpacity

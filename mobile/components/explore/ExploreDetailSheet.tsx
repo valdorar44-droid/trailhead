@@ -23,6 +23,8 @@ import {
   type ExploreDisplayContext,
 } from './exploreDisplay';
 
+const DETAIL_STAY_FALLBACK_IMAGE = require('@/assets/explore-hero-moraine-lake.jpg');
+
 type ExploreDetailModuleKey =
   | 'see'
   | 'do'
@@ -248,6 +250,8 @@ function replacementForGenericSourcePackCopy(title: string, item?: ExploreSource
 function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
   const title = normalizeExploreCopyBlock(item?.title);
   let clean = normalizeExploreCopyBlock(item?.description)
+    .replace(/^Use the official camping page for\b/i, 'Check camping details for')
+    .replace(/^Use the official lodging page for\b/i, 'Check lodging details for')
     .replace(/\bsource pack\b/gi, 'details')
     .replace(/\broute-ready\b/gi, 'ready')
     .replace(/\bmap context\b/gi, 'area detail')
@@ -744,9 +748,11 @@ export function ExploreDetailSheet({
     return (
       <View style={styles.itemList}>
         {items.map((item, idx) => {
-          const itemImages = item.image_url ? mediaCandidates(item.image_url, moduleFallbackImages, imageUrl) : [];
+          const isStayItem = activeModule === 'stay';
+          const itemImages = mediaCandidates(item.image_url, moduleFallbackImages, imageUrl);
           const canOpen = !!item.title || !!item.url || itemHasCoords(item);
           const metaLabel = cleanDetailItemMetaLabel(item);
+          const itemCopy = sentenceAwarePreview(cleanSourcePackItemCopy(item), isStayItem ? 190 : 230).text;
           return (
             <TouchableOpacity
               key={`${item.title}-${idx}`}
@@ -755,17 +761,21 @@ export function ExploreDetailSheet({
               disabled={!canOpen}
               onPress={() => openSourceItem(item)}
             >
-              {itemImages.length > 0 && <ResilientImage uris={itemImages} style={styles.detailItemImage} />}
+              {itemImages.length > 0 ? (
+                <ResilientImage uris={itemImages} style={[styles.detailItemImage, isStayItem && styles.detailItemStayImage]} />
+              ) : isStayItem ? (
+                <Image source={DETAIL_STAY_FALLBACK_IMAGE} style={[styles.detailItemImage, styles.detailItemStayImage]} resizeMode="cover" />
+              ) : null}
               <View style={styles.detailItemBody}>
-                <Text style={[styles.detailItemTitle, { color: C.text }]} numberOfLines={2}>{item.title || 'Place'}</Text>
-                {!!cleanSourcePackItemCopy(item) && (
+                <Text style={[styles.detailItemTitle, { color: C.text }]}>{item.title || 'Place'}</Text>
+                {!!itemCopy && (
                   <Text style={[styles.detailItemCopy, { color: C.text2 }]}>
-                    {cleanSourcePackItemCopy(item)}
+                    {itemCopy}
                   </Text>
                 )}
                 {(!!metaLabel || (item.lat != null && item.lng != null)) && (
                   <View style={styles.detailItemMeta}>
-                    {!!metaLabel && <Text style={[styles.detailItemMetaText, { color: C.text3 }]} numberOfLines={1}>{metaLabel}</Text>}
+                    {!!metaLabel && <Text style={[styles.detailItemMetaText, { color: C.text3 }]}>{metaLabel}</Text>}
                     {item.lat != null && item.lng != null && <Ionicons name="map-outline" size={15} color={accent} />}
                   </View>
                 )}
@@ -1445,7 +1455,6 @@ function SourcePack({
     ['Things to do', pack.things_to_do],
     ['Things to see', pack.things_to_see],
     ['Visitor centers', pack.visitor_centers],
-    ['Campgrounds', pack.campgrounds],
   ];
   return (
     <View style={[styles.pack, { borderColor: C.border, backgroundColor: C.s1 }]}>
@@ -1644,6 +1653,7 @@ const styles = StyleSheet.create({
   itemList: { gap: 12 },
   detailItem: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
   detailItemImage: { width: '100%', height: 150 },
+  detailItemStayImage: { height: 178 },
   detailItemBody: { padding: 13, gap: 7 },
   detailItemTitle: { fontSize: 17, lineHeight: 21, fontWeight: '900' },
   detailItemCopy: { fontSize: 13, lineHeight: 18, fontWeight: '700' },

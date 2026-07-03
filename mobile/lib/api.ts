@@ -2242,9 +2242,9 @@ function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): stri
   if (raw.includes('nps')) return 'NPS';
   if (raw.includes('blm')) return 'BLM';
   if (raw.includes('usfs') || raw.includes('forest')) return 'USFS';
-  if (raw.includes('mapbox') || raw.includes('geoapify') || raw.includes('mixed')) return 'Community listing';
-  if (raw.includes('osm') || raw.includes('openstreetmap')) return 'Community listing';
-  if (raw.includes('community')) return 'Community listing';
+  if (raw.includes('mapbox') || raw.includes('geoapify') || raw.includes('mixed')) return 'Campground';
+  if (raw.includes('osm') || raw.includes('openstreetmap')) return 'Campground';
+  if (raw.includes('community')) return 'Campground';
   const label = String(camp.source_badge || camp.verified_source || '').trim();
   return label || 'Camp listing';
 }

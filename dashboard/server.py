@@ -1129,6 +1129,7 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if not text:
         return ""
+    text = re.sub(r"([.!?])([A-Z][a-z])", r"\1 \2", text)
     camp_copy = "Compare nearby campground options. Check access, fees, rules, and seasonal closures before picking a night."
     text = re.sub(r"\b[^.]{1,90} Campgrounds is the place to start looking for legal stays near [^.]+\.?", camp_copy, text, flags=re.I)
     text = re.sub(r"\bUse [^.]{1,90} Campgrounds as the overnight search area for [^.]+\.?", camp_copy, text, flags=re.I)
@@ -1185,6 +1186,9 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     text = re.sub(r"\s+", " ", text).strip()
     if max_chars and len(text) > max_chars:
         text = text[:max_chars].rsplit(" ", 1)[0].strip()
+        sentence_end = max(text.rfind("."), text.rfind("!"), text.rfind("?"))
+        if sentence_end >= max(80, int(max_chars * 0.45)):
+            text = text[:sentence_end + 1].strip()
     return text
 
 
@@ -1273,6 +1277,7 @@ def _official_clean_text(value: object, max_chars: int = 520) -> str:
         pass
     text = re.sub(r"\bYosemite\s+NP\b", "Yosemite National Park", text, flags=re.I)
     text = re.sub(r"([a-z0-9])\.([A-Z])", r"\1. \2", text)
+    text = re.sub(r"([.!?])([A-Z][a-z])", r"\1 \2", text)
     text = re.split(r"\b(?:Hours|Getting Here|Directions|Accessibility|Parking):", text, maxsplit=1, flags=re.I)[0].strip()
     if len(text) <= max_chars:
         return text
@@ -1768,7 +1773,13 @@ def _official_cache_search_profiles(q: str = "", category: str = "", limit: int 
     if "guided" in requested:
         return []
     raw_terms = _explore_query_terms(q)
-    terms = [term for term in raw_terms if len(term) >= 3 and term not in {"near", "nearby", "around", "find", "show"}]
+    intent_stopwords = {
+        "near", "nearby", "around", "find", "show", "things", "thing", "todo",
+        "places", "place", "activities", "activity", "see", "visit", "best",
+        "top", "guide", "guided", "tours", "tour", "campgrounds", "campground",
+        "camps", "camping", "trails", "trail", "hikes", "hiking",
+    }
+    terms = [term for term in raw_terms if len(term) >= 3 and term not in intent_stopwords]
     category_clause, category_params = _official_cache_category_clause(requested)
     if raw_terms and not terms:
         return []
@@ -1792,6 +1803,7 @@ def _official_cache_search_profiles(q: str = "", category: str = "", limit: int 
     params.append(limit * 5)
     profiles: list[dict] = []
     seen: set[str] = set()
+    seen_titles: set[str] = set()
     try:
         with _official_cache_connect() as db:
             for idx, row in enumerate(db.execute(sql, params).fetchall(), start=1):
@@ -1806,7 +1818,14 @@ def _official_cache_search_profiles(q: str = "", category: str = "", limit: int 
                 profile_id = str(profile.get("id") or "")
                 if profile_id in seen:
                     continue
+                summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+                title_key = _explore_title_merge_key(profile)
+                title_category_key = f"{title_key}:{str(summary.get('category') or profile.get('category') or '').lower()}"
+                if title_key and title_category_key in seen_titles:
+                    continue
                 seen.add(profile_id)
+                if title_key:
+                    seen_titles.add(title_category_key)
                 profiles.append(profile)
                 if len(profiles) >= limit:
                     break
@@ -1822,6 +1841,7 @@ def _official_cache_featured_profiles(limit: int = 360) -> list[dict]:
     per_place_category = max(24, min(110, (limit // 6) + 24))
     profiles: list[dict] = []
     seen: set[str] = set()
+    seen_titles: set[str] = set()
 
     def add_profile(row: sqlite3.Row | dict, canonical_type: str, rank: int) -> None:
         if len(profiles) >= limit:
@@ -1841,7 +1861,13 @@ def _official_cache_featured_profiles(limit: int = 360) -> list[dict]:
             return
         if len(desc) < 10:
             return
+        title_key = _explore_title_merge_key(profile)
+        title_category_key = f"{title_key}:{str(summary.get('category') or profile.get('category') or '').lower()}"
+        if title_key and title_category_key in seen_titles:
+            return
         seen.add(place_id)
+        if title_key:
+            seen_titles.add(title_category_key)
         profiles.append(profile)
 
     place_categories = ("park", "campground", "visitor_center", "trailhead", "activity")
@@ -2004,6 +2030,126 @@ def _official_cache_nearby_profiles(
         candidates.append((distance_mi, enriched))
     candidates.sort(key=lambda item: item[0])
     return _merge_explore_profile_lists([], [profile for _distance, profile in candidates])[:limit]
+
+
+def _official_cache_source_pack_item(profile: dict, *, kind: str) -> dict | None:
+    if not isinstance(profile, dict):
+        return None
+    summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+    source_pack = profile.get("source_pack") if isinstance(profile.get("source_pack"), dict) else {}
+    title = str(summary.get("title") or summary.get("hook") or "").strip()
+    if not title:
+        return None
+    try:
+        lat = float(summary.get("lat"))
+        lng = float(summary.get("lng"))
+    except Exception:
+        lat = lng = None
+    distance_mi = None
+    try:
+        distance_m = float(summary.get("distance_m"))
+        if distance_m >= 0:
+            distance_mi = round(distance_m / 1609.344, 1)
+    except Exception:
+        pass
+    source_label = (
+        source_pack.get("primary")
+        or summary.get("source_title")
+        or profile.get("attribution")
+        or ""
+    )
+    description = _explore_clean_public_copy(
+        summary.get("short_description")
+        or (profile.get("profile") or {}).get("summary")
+        or "",
+        360,
+    )
+    item = {
+        "kind": kind,
+        "source": "official",
+        "source_id": str(profile.get("id") or title),
+        "title": title,
+        "description": description,
+        "url": source_pack.get("official_url") or summary.get("source_url") or "",
+        "lat": lat,
+        "lng": lng,
+        "image_url": summary.get("image_url") or summary.get("thumbnail_url") or "",
+        "image_caption": title,
+        "image_credit": source_label,
+        "image_license": "",
+        "source_label": source_label,
+        "category": str(summary.get("category") or kind).replace("_", " "),
+        "tags": [str(tag) for tag in (summary.get("tags") or summary.get("badges") or []) if str(tag).strip()][:5],
+    }
+    if distance_mi is not None:
+        item["distance_mi"] = distance_mi
+    return item
+
+
+def _attach_official_nearby_source_pack(place: dict) -> dict:
+    if not isinstance(place, dict) or not _official_cache_enabled():
+        return place
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    try:
+        lat = float(summary.get("lat"))
+        lng = float(summary.get("lng"))
+    except Exception:
+        return place
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return place
+    parent_id = str(place.get("id") or "")
+    enriched = dict(place)
+    pack = dict(enriched.get("source_pack") if isinstance(enriched.get("source_pack"), dict) else {})
+    seen = {
+        str(item.get("source_id") or item.get("title") or "").strip().lower()
+        for key in ("campgrounds", "visitor_centers", "things_to_see", "things_to_do")
+        for item in (pack.get(key) if isinstance(pack.get(key), list) else [])
+        if isinstance(item, dict)
+    }
+    seen.add(parent_id.lower())
+
+    def add_nearby(key: str, category: str, kind: str, *, limit: int, radius_mi: float) -> None:
+        existing = pack.get(key) if isinstance(pack.get(key), list) else []
+        if len(existing) >= limit:
+            return
+        additions: list[dict] = []
+        for child in _official_cache_nearby_profiles(lat, lng, category=category, limit=limit * 3, radius_mi=radius_mi):
+            child_id = str(child.get("id") or "").strip()
+            if child_id and child_id == parent_id:
+                continue
+            item = _official_cache_source_pack_item(child, kind=kind)
+            if not item:
+                continue
+            dedupe_key = str(item.get("source_id") or item.get("title") or "").strip().lower()
+            title_key = _explore_title_merge_key({"name": item.get("title")})
+            if not dedupe_key or dedupe_key in seen or title_key in seen:
+                continue
+            seen.add(dedupe_key)
+            if title_key:
+                seen.add(title_key)
+            additions.append(item)
+            if len(existing) + len(additions) >= limit:
+                break
+        if additions:
+            pack[key] = _merge_unique_dicts(existing, additions, ("source_id", "title"))
+
+    add_nearby("campgrounds", "camp", "campground", limit=8, radius_mi=55)
+    add_nearby("visitor_centers", "visitor_center", "visitor_center", limit=6, radius_mi=35)
+    add_nearby("things_to_see", "scenic", "place", limit=10, radius_mi=45)
+    add_nearby("things_to_do", "things", "activity", limit=12, radius_mi=45)
+    if pack:
+        topics = list(pack.get("topics") or [])
+        for key, topic in (
+            ("campgrounds", "campgrounds nearby"),
+            ("visitor_centers", "visitor centers"),
+            ("things_to_see", "things to see"),
+            ("things_to_do", "things to do"),
+        ):
+            if pack.get(key):
+                topics.append(topic)
+        pack["topics"] = sorted({str(topic).strip() for topic in topics if str(topic).strip()})
+        enriched["source_pack"] = pack
+    return sanitize_place_profile(enriched)
 
 
 def _explore_profile_merge_key(place: dict) -> str:
@@ -2578,12 +2724,17 @@ def _explore_query_terms(query: str) -> list[str]:
 def _explore_query_terms_for_category(query: str, category: str = "") -> list[str]:
     terms = _explore_query_terms(query)
     normalized_category = _normalize_place_category(category)
-    if normalized_category in {"parks", "land", "views", "scenic", "waterfalls", "peaks"}:
+    if normalized_category in {
+        "parks", "park", "land", "views", "viewpoint", "scenic", "waterfalls", "waterfall",
+        "peaks", "peak", "things", "activity", "attraction", "camp", "camping", "campground",
+        "trail", "trails", "trailhead", "guided", "tours",
+    }:
         intent_terms = {
             "camp", "camps", "campground", "campgrounds", "camping", "campsite", "campsites",
             "stay", "stays", "lodging", "lodge", "lodges", "glamping", "hut", "huts",
             "trail", "trails", "trailhead", "trailheads", "hike", "hikes", "hiking",
-            "thing", "things", "tour", "tours", "guided", "near", "nearby", "around",
+            "thing", "things", "todo", "activity", "activities", "place", "places",
+            "to", "do", "see", "visit", "best", "top", "tour", "tours", "guided", "near", "nearby", "around",
         }
         cleaned = [term for term in terms if term not in intent_terms]
         return cleaned or terms
@@ -3162,7 +3313,7 @@ def _explore_place_index_item(place: dict) -> dict:
     title = _explore_clean_display_title(summary.get("title"))
     category = str(summary.get("category") or place.get("category") or "").strip()
     region = _clean_explore_display_region((place.get("card") or {}).get("region") or summary.get("region") or summary.get("state") or "")
-    short_description = _explore_clean_public_copy(summary.get("short_description") or (place.get("profile") or {}).get("summary") or "", 620)
+    short_description = _explore_clean_public_copy(summary.get("short_description") or (place.get("profile") or {}).get("summary") or "", 360)
     if _looks_like_raw_record_text(short_description):
         short_description = ""
     short_description = re.sub(r"\s+A designated accessible parking space\b.*$", "", short_description, flags=re.I).strip()
@@ -12897,7 +13048,7 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
         "id": trail_id,
         "name": name[:180],
         "summary": summary,
-        "description": f"{summary} Verify current access, difficulty, closures, and local rules with the land manager before starting.",
+        "description": f"{summary} Check current access, difficulty, closures, and local rules before starting.",
         "lat": float(lat),
         "lng": float(lng),
         "length_mi": length_mi,
@@ -12905,11 +13056,11 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
         "activities": ["Overlanding", "Hiking"] if kind in {"trail", "trailhead", "viewpoint", "peak"} else ["Overlanding"],
         "land_manager": "",
         "geometry": geometry,
-        "trailheads": [{"name": name, "lat": float(lat), "lng": float(lng), "source": "Community listing"}],
+        "trailheads": [{"name": name, "lat": float(lat), "lng": float(lng), "source": "Trailhead"}],
         "official_url": official_url,
         "photos": [],
         "source": "osm",
-        "source_label": "Community listing",
+        "source_label": "Trailhead",
         "provenance": provenance,
         "last_checked": now,
     }
@@ -15675,7 +15826,7 @@ def _camp_public_source_label(value: object, fallback: str = "Camp listing") -> 
     if "forest service" in lowered or lowered == "usfs":
         return "US Forest Service"
     if "openstreetmap" in lowered or lowered == "osm" or "map contributor" in lowered:
-        return "Community listing"
+        return "Campground"
     if any(term in lowered for term in ("source data", "api", "cached", "packaged", "feature")):
         return fallback
     return text
@@ -15690,8 +15841,8 @@ def _camp_public_note(value: object, fallback: str = "Verify current access, fee
         (r"Official Recreation\.gov source data cached by Trailhead;?\s*verify current availability on Recreation\.gov\.?", "Check Recreation.gov for current availability."),
         (r"Official NPS API data cached by Trailhead;?\s*verify current closures, fees, and hours with NPS\.?", "Check park guidance for current closures, fees, and hours."),
         (r"Official BLM recreation layer cached by Trailhead;?\s*verify local closures and fire restrictions with the field office\.?", "Check local BLM guidance for closures and fire restrictions."),
-        (r"OpenStreetMap data packaged by Trailhead;?\s*verify fees, closures, and availability with the land manager\.?", "Community listing. Verify fees, closures, and availability with the land manager."),
-        (r"Camp source data packaged by Trailhead;?\s*verify current access, fees, closures, and availability with the source\.?", "Camp listing. Verify current access, fees, closures, and availability before you go."),
+        (r"OpenStreetMap data packaged by Trailhead;?\s*verify fees, closures, and availability with the land manager\.?", "Check fees, closures, and availability before you go."),
+        (r"Camp source data packaged by Trailhead;?\s*verify current access, fees, closures, and availability with the source\.?", "Check current access, fees, closures, and availability before you go."),
         (r"Camp or stay location from available public source data\.?", "Camp or stay location from public guidance."),
         (r"\bOfficial/source data\b", "Public guidance"),
         (r"\bsource data\b", "listing"),
@@ -19006,14 +19157,14 @@ async def _nominatim_town_profile(name: str, lat: float, lng: float, client: htt
                 "wikidata_id": extratags.get("wikidata") or "",
                 "wikipedia_title": wiki_title,
                 "source": "osm",
-                "source_label": "Community listing",
-                "source_badge": "Community listing",
+                "source_label": "Place",
+                "source_badge": "Place",
                 "source_freshness": "Verify current local conditions before you go.",
                 "last_checked": int(time.time()),
             }
             if image:
                 profile["photo_url"] = image
-                profile["photos"] = [{"url": image, "caption": profile["name"], "credit": "Linked image", "source": "Community listing"}]
+                profile["photos"] = [{"url": image, "caption": profile["name"], "credit": "Linked image", "source": "Place"}]
             return profile
     except Exception:
         return None
@@ -21225,7 +21376,7 @@ def _rank_explore_places_for_route(
 ) -> list[dict]:
     if len(route_points) < 2:
         return []
-    query_terms = _explore_query_terms(q)
+    query_terms = _explore_query_terms_for_category(q, category)
     ranked: list[tuple[float, dict]] = []
     max_distance = max(1.0, min(float(max_distance_mi or 90), 250.0))
     for place in places:
@@ -21312,7 +21463,7 @@ async def explore_places(
 ):
     catalog = _load_explore_catalog()
     places = list(catalog.get("places") or [])
-    query_terms = _explore_query_terms(q)
+    query_terms = _explore_query_terms_for_category(q, category)
     if query_terms:
         places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if category:
@@ -21378,7 +21529,7 @@ def _explore_enrichment_catalog_candidates(q: str = "", category: str = "", plac
             return [place]
         official_place = _official_cache_profile_by_id(place_id)
         return [official_place] if official_place else []
-    query_terms = _explore_query_terms(q)
+    query_terms = _explore_query_terms_for_category(q, category)
     if query_terms:
         places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if category:
@@ -21515,7 +21666,7 @@ async def explore_place_detail(place_id: str):
     place = _find_explore_place(place_id)
     if not place:
         raise HTTPException(404, "Explore place not found")
-    return place
+    return _attach_official_nearby_source_pack(place)
 
 
 def _load_explore_experiences() -> dict:

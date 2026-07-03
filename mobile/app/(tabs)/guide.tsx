@@ -10,7 +10,7 @@ import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
-import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadRailSkeleton } from '@/components/TrailheadUI';
+import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow } from '@/components/TrailheadUI';
 import {
   EXPLORE_CATEGORY_CHIPS,
   ExploreDetailSheet,
@@ -65,7 +65,7 @@ type GuidedTourSort = 'top_rated' | 'price';
 type GuidedTourDate = 'any' | 'today' | 'weekend' | 'custom';
 
 const GUIDED_CATEGORY_OPTIONS: Array<{ key: GuidedTourCategory; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
-  { key: 'all', label: 'All', icon: 'sparkles-outline' },
+  { key: 'all', label: 'All', icon: 'compass-outline' },
   { key: 'outdoor', label: 'Outdoors', icon: 'trail-sign-outline' },
   { key: 'water', label: 'Water', icon: 'water-outline' },
   { key: 'short', label: 'Half-day', icon: 'time-outline' },
@@ -3804,9 +3804,12 @@ function GuideScreenContent() {
           </TouchableOpacity>
         </View>
         {loading ? (
-          <TrailheadRailSkeleton label="Loading nearby options" count={3} cardWidth={190} style={s.campgroundLoadingSkeleton} />
+          <View style={s.campgroundListSkeleton}>
+            <TrailheadCardSkeleton media lines={3} style={s.campgroundLoadingSkeleton} />
+            <TrailheadCardSkeleton media lines={3} style={s.campgroundLoadingSkeleton} />
+          </View>
         ) : displayCamps.length ? (
-          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.campgroundRail}>
+          <View style={s.campgroundList}>
             {displayCamps.slice(0, 12).map(camp => {
               const image = campImageUrl(camp);
               const officialUrl = camp.booking_url || camp.official_url || camp.url;
@@ -3841,17 +3844,19 @@ function GuideScreenContent() {
                     <Text style={s.campgroundName} numberOfLines={2}>{camp.name}</Text>
                     <Text style={s.campgroundMeta} numberOfLines={1}>{campMetaLine(camp)}</Text>
                     {!!campCostLabel(camp.cost) && <Text style={s.campgroundCost} numberOfLines={1}>{campCostLabel(camp.cost)}</Text>}
-                    <View style={s.campgroundTags}>
-                      {tagLabels.map(tag => (
+                    {tagLabels.length ? (
+                      <View style={s.campgroundTags}>
+                      {tagLabels.slice(0, 3).map(tag => (
                         <View key={`${camp.id}-${tag}`} style={s.campgroundTag}>
                           <Text style={s.campgroundTagText}>{tag}</Text>
                         </View>
                       ))}
-                    </View>
+                      </View>
+                    ) : null}
                     <View style={s.campgroundActions}>
                       <TouchableOpacity style={s.campgroundOpenBtn} onPress={() => showExploreCampOnMap(camp)}>
                         <Ionicons name="bonfire-outline" size={13} color="#fff" />
-                        <Text style={s.campgroundOpenText}>View camp</Text>
+                        <Text style={s.campgroundOpenText}>View</Text>
                       </TouchableOpacity>
                       {!!officialUrl && (
                         <TouchableOpacity style={s.campgroundSourceBtn} onPress={() => Linking.openURL(officialUrl)}>
@@ -3863,7 +3868,7 @@ function GuideScreenContent() {
                 </TouchableOpacity>
               );
             })}
-          </ScrollView>
+          </View>
         ) : (
           <View style={s.campgroundEmpty}>
             <Ionicons name="compass-outline" size={22} color={C.text3} />
@@ -4339,7 +4344,7 @@ function GuideScreenContent() {
                 <TrailheadLoadingRow
                   label={exploreSearchResolving ? 'Searching places' : 'Finding the best places'}
                   sub={exploreSearchResolving ? 'Checking matches for this area.' : 'Loading parks, trails, stays, water, and trip ideas.'}
-                  icon={exploreSearchResolving ? 'search-outline' : 'sparkles-outline'}
+                  icon={exploreSearchResolving ? 'search-outline' : 'compass-outline'}
                 />
                 {rankedExplore.length === 0 || holdLegacySearchWrapper ? (
                   <>
@@ -4485,12 +4490,12 @@ function GuideScreenContent() {
                 <View style={s.guidePromptIcon}>
                   <Ionicons name="mic-outline" size={22} color={C.orange} />
                 </View>
-                <Text style={s.guidePromptTitle}>Generate trip narrations</Text>
+                <Text style={s.guidePromptTitle}>Build trip narrations</Text>
                 <Text style={s.guidePromptText}>
                   Creates short spoken notes for each stop. Explorer covers new narration, and saved guides replay instantly.
                 </Text>
                 {!!guideError && <Text style={s.guideError}>{guideError}</Text>}
-                <TrailheadButton label="Generate Guide" icon="sparkles-outline" variant="primary" onPress={generateGuide} style={{ alignSelf: 'stretch' }} />
+                <TrailheadButton label="Build Guide" icon="mic-outline" variant="primary" onPress={generateGuide} style={{ alignSelf: 'stretch' }} />
               </TrailheadCard>
             )}
 
@@ -5284,18 +5289,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campgroundSectionSub: { color: C.text3, fontSize: 12, lineHeight: 17 },
   campgroundAreaBtn: { height: 36, paddingHorizontal: 10, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, flexDirection: 'row', alignItems: 'center', gap: 5 },
   campgroundAreaBtnText: { color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-  campgroundLoadingSkeleton: { paddingTop: 4 },
-  campgroundRail: { gap: 12, paddingTop: 12, paddingRight: 2 },
-  campgroundCard: { width: 236, backgroundColor: C.s1, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
-  campgroundImageWrap: { height: 126, backgroundColor: C.s2 },
+  campgroundListSkeleton: { gap: 10, paddingTop: 12 },
+  campgroundLoadingSkeleton: { marginHorizontal: 0 },
+  campgroundList: { gap: 10, paddingTop: 12 },
+  campgroundCard: { width: '100%', minHeight: 142, flexDirection: 'row', backgroundColor: C.s1, borderRadius: 12, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
+  campgroundImageWrap: { width: 132, minHeight: 142, backgroundColor: C.s2 },
   campgroundImage: { width: '100%', height: '100%' },
   campgroundImageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s1 },
   campgroundImageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.16)' },
-  campgroundBadge: { position: 'absolute', left: 9, top: 9, maxWidth: 168, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.78)' },
-  campgroundBadgeText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
+  campgroundBadge: { position: 'absolute', left: 9, top: 9, maxWidth: 112, paddingHorizontal: 8, paddingVertical: 5, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.78)' },
+  campgroundBadgeText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900' },
   campgroundPhotoNote: { position: 'absolute', right: 9, bottom: 9, paddingHorizontal: 7, paddingVertical: 4, borderRadius: 999, backgroundColor: 'rgba(15,23,42,0.72)' },
-  campgroundPhotoNoteText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
-  campgroundBody: { padding: 11, gap: 7 },
+  campgroundPhotoNoteText: { color: '#fff', fontSize: 8, fontFamily: mono, fontWeight: '900' },
+  campgroundBody: { flex: 1, minWidth: 0, padding: 11, gap: 7, justifyContent: 'center' },
   campgroundName: { color: C.text, fontSize: 15, lineHeight: 19, fontWeight: '900' },
   campgroundMeta: { color: C.text3, fontSize: 11, fontWeight: '700' },
   campgroundCost: { color: C.orange, fontSize: 12, fontWeight: '900' },

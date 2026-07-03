@@ -880,8 +880,9 @@ export const api = {
   getNearbyCamps: (lat: number, lng: number, radius = 50, types: string[] = [], opts: { limit?: number; mode?: 'full' | 'light'; stays?: boolean } = {}) =>
     req<CampsitePin[]>(`/api/nearby-camps?lat=${lat}&lng=${lng}&radius=${radius}&types=${types.join(',')}&limit=${opts.limit ?? 220}&mode=${encodeURIComponent(opts.mode ?? 'full')}&stays=${opts.stays ? '1' : '0'}`)
       .then(canonicalizeCampsitePins),
-  getRouteCampWindows: (data: RouteCampWindowsRequest) =>
+  getRouteCampWindows: (data: RouteCampWindowsRequest, opts: Pick<RequestInit, 'signal'> = {}) =>
     req<RouteCampWindowsResponse>('/api/route/camp-windows', {
+      ...opts,
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -2324,6 +2325,7 @@ export interface RouteCampWindowsRequest {
   camp_reuse_policy?: CampReusePolicy;
   max_daily_drive_hours?: number;
   max_radius?: number;
+  response_deadline_s?: number;
 }
 export interface RouteCampWindowResult {
   day: number;

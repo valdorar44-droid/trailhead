@@ -86,8 +86,11 @@ import {
 const API_BASE_URL = TRAILHEAD_API_BASE;
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 const ROUTE_CAMP_WINDOW_TIMEOUT_MS = 12000;
+const ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S = 9.5;
+const ROUTE_CAMP_WINDOW_ROUTE_POINT_LIMIT = 420;
 const ROUTE_HERO_PHOTO = 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg';
 const ROUTE_BUILDER_RENTAL_DISMISSED_KEY = 'trailhead_route_builder_rental_dismissed_at';
+const DEFAULT_ROUTE_DAY_COUNT = 3;
 
 const ROUTE_COVER_FALLBACKS = [
   { match: /utah|moab|arches|canyonlands|red rock|\but\b/i, url: 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg' },
@@ -106,6 +109,10 @@ type RouteTripCardData = {
   coverUrl: string;
   stats: string;
 };
+
+function defaultRouteDays() {
+  return Array.from({ length: DEFAULT_ROUTE_DAY_COUNT }, (_, idx) => idx + 1);
+}
 
 function mediaUrl(url?: string | null) {
   if (!url) return '';
@@ -408,6 +415,23 @@ function routeDistanceMi(points: Array<{ lat: number; lng: number }>) {
   return miles;
 }
 
+function downsampleRoutePoints<T extends { lat: number; lng: number }>(points: T[], limit: number) {
+  if (points.length <= limit) return points;
+  if (limit <= 2) return [points[0], points[points.length - 1]];
+  const out: T[] = [];
+  const lastIndex = points.length - 1;
+  const used = new Set<number>();
+  for (let i = 0; i < limit; i += 1) {
+    const idx = Math.min(lastIndex, Math.round((i / (limit - 1)) * lastIndex));
+    if (!used.has(idx)) {
+      used.add(idx);
+      out.push(points[idx]);
+    }
+  }
+  if (out[out.length - 1] !== points[lastIndex]) out.push(points[lastIndex]);
+  return out;
+}
+
 function pointAtRouteMile(points: Array<{ lat: number; lng: number }>, targetMi: number) {
   if (points.length === 0) return null;
   if (points.length === 1 || targetMi <= 0) return points[0];
@@ -595,6 +619,38 @@ function withTimeout<T>(promise: Promise<T>, ms: number, code: string): Promise<
   });
   return Promise.race([promise, timeout]).finally(() => {
     if (timer) clearTimeout(timer);
+  });
+}
+
+function withAbortableTimeout<T>(
+  run: (signal?: AbortSignal) => Promise<T>,
+  ms: number,
+  code: string,
+): Promise<T> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let settled = false;
+  return new Promise<T>((resolve, reject) => {
+    const finishResolve = (value: T) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      resolve(value);
+    };
+    const finishReject = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      reject(error);
+    };
+    timer = setTimeout(() => {
+      controller?.abort();
+      finishReject(new Error(code));
+    }, ms);
+    run(controller?.signal).then(
+      value => finishResolve(value),
+      error => finishReject(error instanceof Error ? error : new Error(String(error))),
+    );
   });
 }
 
@@ -1562,11 +1618,14 @@ function RouteBuilderScreenContent() {
   const consumedRouteBuilderDraftRef = useRef('');
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
-  const [days, setDays] = useState([1]);
+  const [days, setDays] = useState(defaultRouteDays);
   const [stops, setStops] = useState<BuilderStop[]>([]);
   const [tripShapeMode, setTripShapeMode] = useState<TripShapeMode>('one_way');
   const [driveHoursPerDay, setDriveHoursPerDay] = useState('5');
   const [plannedDays, setPlannedDays] = useState('3');
+  const driveHoursPerDayRef = useRef('5');
+  const plannedDaysRef = useRef('3');
+  const targetMilesRef = useRef('180');
   const [routeStyle, setRouteStyle] = useState<RouteStyleMode>('balanced');
   const [tripBuildMode, setTripBuildMode] = useState<TripBuildMode>('recommended');
   const [distanceMode, setDistanceMode] = useState<DistanceMode>('hours');
@@ -1591,6 +1650,21 @@ function RouteBuilderScreenContent() {
   const [rentalDismissedAt, setRentalDismissedAt] = useState(0);
   const [rentalIdeaSaved, setRentalIdeaSaved] = useState(false);
   const gasPrice = '3.65';
+
+  function setDriveHoursPerDayValue(value: string) {
+    driveHoursPerDayRef.current = value;
+    setDriveHoursPerDay(value);
+  }
+
+  function setPlannedDaysValue(value: string) {
+    plannedDaysRef.current = value;
+    setPlannedDays(value);
+  }
+
+  function setTargetMilesValue(value: string) {
+    targetMilesRef.current = value;
+    setTargetMiles(value);
+  }
 
   useEffect(() => {
     if (!buildingFramework) {
@@ -1670,8 +1744,8 @@ function RouteBuilderScreenContent() {
     routeStyle,
     campReusePolicy: effectiveCampReusePolicy,
     days: inputDays,
-    maxDriveHoursPerDay: parsePositiveNumber(driveHoursPerDay),
-    targetMilesPerDay: parsePositiveNumber(targetMiles),
+    maxDriveHoursPerDay: parsePositiveNumber(driveHoursPerDayRef.current),
+    targetMilesPerDay: parsePositiveNumber(targetMilesRef.current),
   });
 
   function applyTripShapeMode(mode: TripShapeMode) {
@@ -1715,7 +1789,7 @@ function RouteBuilderScreenContent() {
   function applyCopilotDraft(draft: TrailheadRouteBuilderDraft) {
     const dayCount = draft.days ? Math.max(1, Math.min(30, Math.round(draft.days))) : days.length || 1;
     if (draft.days) {
-      setPlannedDays(String(dayCount));
+      setPlannedDaysValue(String(dayCount));
       setDays(Array.from({ length: dayCount }, (_, idx) => idx + 1));
     }
     setCopilotScoutSummary(draft.scoutSummary ?? null);
@@ -1729,11 +1803,11 @@ function RouteBuilderScreenContent() {
     if (draft.campReuse) setCampReusePolicy(draft.campReuse);
     if (draft.driveHours) {
       setDistanceMode('hours');
-      setDriveHoursPerDay(String(draft.driveHours));
+      setDriveHoursPerDayValue(String(draft.driveHours));
     }
     if (draft.targetMiles) {
       setDistanceMode('miles');
-      setTargetMiles(String(draft.targetMiles));
+      setTargetMilesValue(String(draft.targetMiles));
     }
     if (draft.restDays?.length) setRestDays(draft.restDays);
     const draftStops = Array.isArray(draft.stops)
@@ -3636,7 +3710,7 @@ function RouteBuilderScreenContent() {
       }
       const destination: BuilderStop = {
         id: `dest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        day: Math.max(1, Math.round(parsePositiveNumber(plannedDays) ?? 3)),
+        day: Math.max(1, Math.round(parsePositiveNumber(plannedDaysRef.current) ?? DEFAULT_ROUTE_DAY_COUNT)),
         name: place.name,
         lat: place.lat,
         lng: place.lng,
@@ -3886,6 +3960,7 @@ function RouteBuilderScreenContent() {
       };
     });
     if (!windows.length) return [];
+    const campWindowRoute = downsampleRoutePoints(spine, ROUTE_CAMP_WINDOW_ROUTE_POINT_LIMIT);
     const reviewAnchors = () => windows.map(win => {
       const fallbackPoint = pointAtRouteMile(spine, win.target_mi)
         ?? spine[Math.min(spine.length - 1, Math.max(0, Math.round((win.day / count) * (spine.length - 1))))];
@@ -3910,18 +3985,22 @@ function RouteBuilderScreenContent() {
       };
     });
     try {
-      const result = await withTimeout(api.getRouteCampWindows({
-        route: spine,
-        windows,
-        camp_filters: campTypeFilters,
-        route_style: routeStyle,
-        camp_preference: campPreferenceMode,
-        require_photos: campPhotoOnly,
-        region_hint: routeStates.join(','),
-        camp_reuse_policy: effectiveCampReusePolicy,
-        max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay) ?? undefined,
-        max_radius: 90,
-      }), ROUTE_CAMP_WINDOW_TIMEOUT_MS, 'route-camp-window-timeout');
+      const result = await withAbortableTimeout(signal => api.getRouteCampWindows({
+          route: campWindowRoute,
+          windows,
+          camp_filters: campTypeFilters,
+          route_style: routeStyle,
+          camp_preference: campPreferenceMode,
+          require_photos: campPhotoOnly,
+          region_hint: routeStates.join(','),
+          camp_reuse_policy: effectiveCampReusePolicy,
+          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDayRef.current) ?? undefined,
+          max_radius: 90,
+          response_deadline_s: ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S,
+        }, { signal }),
+        ROUTE_CAMP_WINDOW_TIMEOUT_MS,
+        'route-camp-window-timeout',
+      );
       return result.windows.map(originalWin => {
         const win = originalWin;
         const candidatePool = [win.selected, win.camp, ...(win.candidates ?? [])]
@@ -4065,7 +4144,6 @@ function RouteBuilderScreenContent() {
         ...liveFuel,
         ...offlineFuel,
       ])
-        .filter(station => !placed.some(existing => haversineMi(existing, station) < 45))
         .map(station => ({
           ...station,
           route_distance_mi: haversineMi(station, target),
@@ -4093,7 +4171,7 @@ function RouteBuilderScreenContent() {
         lat: best.lat,
         lng: best.lng,
         type: 'fuel',
-        description: `Auto-added because this route may exceed usable rig range (${Math.round(usableRange)} mi).`,
+        description: `Fuel stop added for a longer stretch. Plan around about ${Math.round(usableRange)} mi of usable range.`,
         land_type: 'town',
         source: 'gas',
         gas: best,
@@ -4120,8 +4198,8 @@ function RouteBuilderScreenContent() {
       const first = base[0];
       const last = base[base.length - 1];
       const roughMiles = haversineMi(first, last) * (tripLoop ? 2 : 1);
-      const plannedCount = parsePositiveNumber(plannedDays) ?? days.length ?? 3;
-      const milesCount = Math.ceil(roughMiles / (parsePositiveNumber(targetMiles) ?? 180));
+      const plannedCount = parsePositiveNumber(plannedDaysRef.current) ?? days.length ?? DEFAULT_ROUTE_DAY_COUNT;
+      const milesCount = Math.ceil(roughMiles / (parsePositiveNumber(targetMilesRef.current) ?? 180));
       const count = Math.max(1, Math.min(30, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
       const nextDays = Array.from({ length: count }, (_, i) => i + 1);
       const framework: BuilderStop[] = [
@@ -4437,7 +4515,7 @@ function RouteBuilderScreenContent() {
           require_photos: campPhotoOnly,
           camp_reuse_policy: effectiveCampReusePolicy,
           region_hint: routeStates.join(','),
-          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDay),
+          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDayRef.current),
           rental_interest: tripPreferenceContext?.rental_interest,
           trip_preferences: tripPreferenceContext,
         },
@@ -4500,11 +4578,11 @@ function RouteBuilderScreenContent() {
       routeStyle,
       tripShapeMode,
       tripLoop,
-      driveHoursPerDay,
-      plannedDays,
+      driveHoursPerDay: driveHoursPerDayRef.current,
+      plannedDays: plannedDaysRef.current,
       tripBuildMode,
       distanceMode,
-      targetMiles,
+      targetMiles: targetMilesRef.current,
       restDays,
       dayDriveTargets,
       activePlaceFilters,
@@ -4571,7 +4649,7 @@ function RouteBuilderScreenContent() {
 
   function resetRouteDraft() {
     setActiveDay(1);
-    setDays([1]);
+    setDays(defaultRouteDays());
     setStops([]);
     setTripShapeMode('one_way');
     setRouteStyle('balanced');
@@ -4582,9 +4660,9 @@ function RouteBuilderScreenContent() {
     setCampCadenceMode('nightly');
     setCampReusePolicy('different_each_night');
     setWizardStep(0);
-    setPlannedDays('3');
-    setDriveHoursPerDay('5');
-    setTargetMiles('180');
+    setPlannedDaysValue(String(DEFAULT_ROUTE_DAY_COUNT));
+    setDriveHoursPerDayValue('5');
+    setTargetMilesValue('180');
     setStartQuery('');
     setEndQuery('');
     setRouteName('');
@@ -5264,13 +5342,13 @@ function RouteBuilderScreenContent() {
             <View style={s.setupGridPair}>
               <View style={s.setupInputWrap}>
                 <Text style={s.setupLabel}>DAYS</Text>
-                <TextInput value={plannedDays} onChangeText={setPlannedDays} keyboardType="number-pad" style={s.setupInput} placeholder="3" placeholderTextColor={C.text3} />
+                <TextInput value={plannedDays} onChangeText={setPlannedDaysValue} keyboardType="number-pad" style={s.setupInput} placeholder="3" placeholderTextColor={C.text3} />
               </View>
               <View style={s.setupInputWrap}>
                 <Text style={s.setupLabel}>{distanceMode === 'hours' ? 'HRS / DAY' : 'MI / STOP'}</Text>
                 <TextInput
                   value={distanceMode === 'hours' ? driveHoursPerDay : targetMiles}
-                  onChangeText={distanceMode === 'hours' ? setDriveHoursPerDay : setTargetMiles}
+                  onChangeText={distanceMode === 'hours' ? setDriveHoursPerDayValue : setTargetMilesValue}
                   keyboardType="decimal-pad"
                   style={s.setupInput}
                   placeholder={distanceMode === 'hours' ? '5' : '180'}

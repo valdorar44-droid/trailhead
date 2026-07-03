@@ -6971,6 +6971,7 @@ class RouteCampWindowsRequest(BaseModel):
     camp_reuse_policy: str = "different_each_night"
     max_daily_drive_hours: Optional[float] = None
     max_radius: float = 58
+    response_deadline_s: Optional[float] = None
 
 class MapCardResolveRequest(BaseModel):
     kind: str = "place"
@@ -16432,6 +16433,24 @@ async def discovery_context(body: DiscoveryContextRequest, user: dict | None = D
     return response
 
 
+def _downsample_route_points(points: list[dict], limit: int = 900) -> list[dict]:
+    if len(points) <= limit:
+        return points
+    if limit <= 2:
+        return [points[0], points[-1]]
+    out: list[dict] = []
+    used: set[int] = set()
+    last = len(points) - 1
+    for idx in range(limit):
+        point_idx = min(last, round((idx / max(1, limit - 1)) * last))
+        if point_idx in used:
+            continue
+        used.add(point_idx)
+        out.append(points[point_idx])
+    if out[-1] is not points[-1]:
+        out.append(points[-1])
+    return out
+
 def _route_points_from_body(route: list[dict]) -> list[dict]:
     points: list[dict] = []
     for item in route or []:
@@ -16442,7 +16461,7 @@ def _route_points_from_body(route: list[dict]) -> list[dict]:
             continue
         if -90 <= lat <= 90 and -180 <= lng <= 180:
             points.append({"lat": lat, "lng": lng})
-    return points
+    return _downsample_route_points(points)
 
 def _route_distance_mi(points: list[dict]) -> float:
     total = 0.0
@@ -16794,7 +16813,7 @@ async def _select_camp_for_window(
 ) -> dict:
     label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
     target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
-    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=4)
+    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=3)
     base_radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
     filter_key = sorted(type_filters)
     pass_defs: list[dict] = []
@@ -16832,8 +16851,8 @@ async def _select_camp_for_window(
                     categories=["camp", "camping", "private_stay", "glamping"],
                     filters=filters,
                     surface="route_camp_window",
-                    mode="full",
-                    limit=160,
+                    mode="light",
+                    limit=100,
                     include_stays=True,
                     stale_after_hours=12,
                 ),
@@ -16844,7 +16863,7 @@ async def _select_camp_for_window(
                 return camps
         except Exception:
             pass
-        return await nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=160, mode="full", stays=True, user=user)
+        return await nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=100, mode="light", stays=True, user=user)
 
     try:
         by_key: dict[str, dict] = {}
@@ -16996,6 +17015,42 @@ async def _select_camp_for_window(
     set_cached("campsite_cache", cache_key, response)
     return response
 
+def _route_camp_window_review_response(window: RouteCampWindow, points: list[dict], reason: str = "") -> dict:
+    label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
+    target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
+    return {
+        "day": window.day,
+        "start": window.start,
+        "end": window.end,
+        "label": label,
+        "target_mi": window.target_mi,
+        "search_window_mi": window.search_window_mi,
+        "camp": None,
+        "selected": None,
+        "candidates": [],
+        "fallback": {
+            "lat": target["lat"],
+            "lng": target["lng"],
+            "name": f"{label} review area",
+            "description": "Choose an overnight stop near this area before navigation.",
+        },
+        "strong": False,
+        "confidence": "missing",
+        "coverage_status": "review",
+        "reason": "Choose an overnight stop for this day.",
+        "reason_short": f"{label} needs an overnight.",
+        "display_name": f"{label} review area",
+        "overnight_kind": "review",
+        "overnight_style": "unknown",
+        "fallback_label": f"{label} review area",
+        "fit_notes": [],
+        "search_radius_mi": round(float(window.search_window_mi or 45), 1),
+        "search_passes": [],
+        "found": 0,
+        "cache_status": "review",
+        **({"error": reason[:160]} if reason else {}),
+    }
+
 @app.post("/api/route/camp-windows")
 async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = Depends(_optional_user)):
     points = _route_points_from_body(body.route)
@@ -17017,8 +17072,9 @@ async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = 
         if camp_preference_raw in {"established", "campground", "campgrounds", "official"}
         else camp_preference_raw
     )
-    results = await asyncio.gather(*[
-        _select_camp_for_window(
+    deadline_s = max(4.0, min(float(body.response_deadline_s or 18.0), 28.0))
+    tasks = [
+        asyncio.create_task(_select_camp_for_window(
             window,
             points,
             type_filters,
@@ -17030,16 +17086,28 @@ async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = 
             require_photos=body.require_photos,
             region_hint=body.region_hint,
             user=user,
-        )
+        ))
         for window in windows
-    ], return_exceptions=True)
+    ]
+    done, pending = await asyncio.wait(tasks, timeout=deadline_s)
+    for task in pending:
+        task.cancel()
+    if pending:
+        await asyncio.gather(*pending, return_exceptions=True)
     out: list[dict] = []
     errors: dict[str, str] = {}
-    for idx, result in enumerate(results):
-        if isinstance(result, Exception):
-            errors[str(windows[idx].day)] = str(result)
+    for idx, task in enumerate(tasks):
+        window = windows[idx]
+        if task in done and not task.cancelled():
+            exc = task.exception()
+            if exc is None:
+                out.append(task.result())
+            else:
+                errors[str(window.day)] = str(exc)
+                out.append(_route_camp_window_review_response(window, points, str(exc)))
         else:
-            out.append(result)
+            errors[str(window.day)] = "overnight search took longer than expected"
+            out.append(_route_camp_window_review_response(window, points, errors[str(window.day)]))
     return {"windows": out, "errors": errors}
 
 

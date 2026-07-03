@@ -57,18 +57,24 @@ function itemBody(item?: SourcePackLike | null) {
 }
 
 export function cleanExploreSourceLabel(label?: string | null, fallback = 'Explore Area') {
-  const clean = compactText(label);
+  const clean = compactText(label).replace(/__+/g, ' ').replace(/_/g, ' ').trim();
   if (!clean) return fallback;
+  const lower = clean.toLowerCase();
+  if (/^monuments?\s+history$/.test(lower)) return 'Historic sites';
+  if (/^water\s+scenic$/.test(lower)) return 'Water and scenery';
+  if (/^outdoor\s+recreation$/.test(lower)) return 'Outdoor recreation';
+  if (/^visitor\s+centers?$/.test(lower)) return 'Visitor center';
   if (/ridb|recreation\.gov/i.test(clean)) return 'Recreation.gov';
   if (/blm|bureau\s+of\s+land\s+management/i.test(clean)) return 'BLM';
   if (/usfs|forest\s+service/i.test(clean)) return 'Forest Service';
   if (/national\s+park\s+service|\bnps\b/i.test(clean)) return 'National Park Service';
+  if (/^official(?:\s+access)?\s+source$/i.test(clean)) return 'Official guide';
   if (/trailhead\s+northern\s+pakistan\s+trek\s+catalog/i.test(clean)) return 'Trek Area';
   if (/trailhead\s+trail\s+catalog/i.test(clean)) return 'Trail Area';
   if (/trailhead\s+explore/i.test(clean)) return fallback;
   if (/wikidata|wikipedia|wikimedia|geonames|multiple sources/i.test(clean)) return fallback;
   if (/offline\s+place\s+pack|downloaded\s+place\s+packs/i.test(clean)) return 'Saved places';
-  if (/mapbox|geoapify|openstreetmap|nominatim|rendered\s+map|map\s+feature|map\s+source|map\s+search|map\s+data|map\s+tile|basemap/i.test(clean)) return fallback;
+  if (/mapbox|geoapify|openstreetmap|nominatim|rendered\s+map|map\s+feature|map\s+source|map\s+search|map\s+data|map\s+tile|map\s+result|open\s+place\s+data|place\s+data|place\s+search|place\s+details|basemap/i.test(clean)) return fallback;
   if (/source\s+data|cached|download|database|api|endpoint|feature\s*server|raw/i.test(clean)) return fallback;
   return clean;
 }

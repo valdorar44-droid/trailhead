@@ -50,16 +50,16 @@ export default function ProfileLibraryOverview({
           </View>
           <View style={s.summaryCopy}>
             <Text style={s.kicker}>LIBRARY</Text>
-            <Text style={s.summaryTitle}>Your saved Trailhead files stay on the map.</Text>
+            <Text style={s.summaryTitle}>Your saved trips stay close.</Text>
             <Text style={s.summaryText}>
-              Open the map drawer for downloads, route files, camps, places, trails, and GPX folders.
+              Open saved areas, route files, camps, places, trails, and GPX folders.
             </Text>
           </View>
         </View>
         <View style={s.actionRow}>
           <TouchableOpacity style={s.primaryAction} onPress={onOpenDownloads} activeOpacity={0.84}>
             <Ionicons name="cloud-download-outline" size={15} color="#fff" />
-            <Text style={s.primaryActionText}>{offlineTotal > 0 ? `DOWNLOADS (${offlineTotal})` : 'DOWNLOADS'}</Text>
+            <Text style={s.primaryActionText}>{offlineTotal > 0 ? `SAVED AREAS (${offlineTotal})` : 'SAVED AREAS'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.secondaryAction} onPress={onPlanTrip} activeOpacity={0.84}>
             <Ionicons name="compass-outline" size={15} color={C.orange} />

@@ -15,6 +15,7 @@ import { fetchJSOfflineRoute, ENABLE_JS_OFFLINE_ROUTER, getLastOfflineRouterDebu
 import { diagnoseValhalla, routeValhalla } from 'expo-valhalla-routing';
 import { ROUTING_REGIONS } from '../../lib/useOfflineFiles';
 import { api } from '../../lib/api';
+import { TRAILHEAD_API_BASE } from '../../lib/apiBase';
 
 export interface RouteResult {
   coords:        [number, number][];
@@ -41,7 +42,6 @@ const CACHE_DIR      = `${FileSystem.documentDirectory}routes/`;
 const LAST_ROUTE_PATH = `${FileSystem.documentDirectory}routes/last_route.json`;
 const LAST_ROUTE_DEST_TOLERANCE_M = 150;
 const LAST_ROUTE_START_TOLERANCE_M = 5_000;
-const TRAILHEAD_API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const ROUTE_CACHE_VERSION = 'valhalla-proxy-v2';
 const ROUTER_DEBUG_MARKER = 'DBGv4';
 

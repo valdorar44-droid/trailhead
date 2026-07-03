@@ -260,6 +260,7 @@ BLOG_INDEX = Path(__file__).parent / "blog.html"
 BLOG_DIR = Path(__file__).parent / "blog"
 EXPLORE_CATALOG = Path(__file__).parent / "explore_catalog_v1.json"
 EXPLORE_CATALOG_V3 = Path(__file__).parent / "explore_catalog_v3.json"
+EXPLORE_OFFICIAL_FEATURED = Path(__file__).parent / "explore_official_featured_v1.json"
 EXPLORE_BOOKABLE_EXPERIENCES = Path(__file__).parent / "explore_bookable_experiences_v1.json"
 EXPLORE_TOURS_VIATOR = Path(__file__).parent / "explore_tours_viator_v1.json"
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
@@ -865,7 +866,7 @@ def _explore_v3_place_to_profile(place: dict, rank: int = 900000) -> dict:
         region=region,
     )
     description = clean_explore_description(
-        place.get("description") or summary_text or f"{title} is mapped from open source data.",
+        place.get("description") or summary_text or f"{title} is listed with public outdoor guidance.",
         title=title,
         category=category,
         group=_v3_explore_group(category),
@@ -1042,6 +1043,38 @@ def _load_explore_catalog_v3_profiles() -> list[dict]:
     return profiles
 
 
+def _load_explore_official_featured_profiles() -> list[dict]:
+    if not EXPLORE_OFFICIAL_FEATURED.exists():
+        return []
+    try:
+        payload = json.loads(EXPLORE_OFFICIAL_FEATURED.read_text())
+    except Exception:
+        return []
+    profiles: list[dict] = []
+    for place in payload.get("places") or []:
+        if isinstance(place, dict):
+            profiles.append(_clean_explore_public_labels(sanitize_place_profile(place)))
+    return profiles
+
+
+_EXPLORE_CATALOG_CACHE: dict[str, Any] = {
+    "key": None,
+    "loaded_at": 0.0,
+    "catalog": None,
+}
+
+
+def _explore_catalog_cache_key() -> tuple[object, ...]:
+    parts: list[object] = []
+    for path in (EXPLORE_CATALOG, EXPLORE_CATALOG_V3, EXPLORE_OFFICIAL_FEATURED):
+        try:
+            stat = path.stat()
+            parts.append((str(path), stat.st_mtime_ns, stat.st_size))
+        except Exception:
+            parts.append((str(path), 0, 0))
+    return tuple(parts)
+
+
 OFFICIAL_CACHE_EMPTY_VALUES = {"", "0", "n/a", "na", "none", "null", "undefined"}
 
 
@@ -1096,6 +1129,42 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     if not text:
         return ""
+    camp_copy = "Compare nearby campground options. Check access, fees, rules, and seasonal closures before picking a night."
+    text = re.sub(r"\b[^.]{1,90} Campgrounds is the place to start looking for legal stays near [^.]+\.?", camp_copy, text, flags=re.I)
+    text = re.sub(r"\bUse [^.]{1,90} Campgrounds as the overnight search area for [^.]+\.?", camp_copy, text, flags=re.I)
+    text = re.sub(r"\b[^.]{1,90} Campgrounds gives camp search a real center near .{1,180}?(?: in [A-Z]{2}|$)\.?", camp_copy, text, flags=re.I)
+    text = re.sub(r"\bStart near ([^.;]+);\s*live results show actual sites\.?", r"Compare nearby campground options around \1.", text, flags=re.I)
+    text = re.sub(r"\bSearch around ([^.;]+) for legal overnight options\.?", r"Compare nearby campground options around \1.", text, flags=re.I)
+    text = re.sub(r"\bGood for overnight planning near ([^.;]+)\.?\s*Compare nearby options\.?", r"Compare nearby campground options around \1.", text, flags=re.I)
+    text = re.sub(r"\bUse this area to avoid a blank camp search\.?\s*", "", text, flags=re.I)
+    text = re.sub(r"\bnot just a blank map search\b", "with nearby options to compare", text, flags=re.I)
+    text = re.sub(r"\bThis is a planning card, not live availability\.?\s*Use it for discovery,?\s*then\s*", "Compare options, then ", text, flags=re.I)
+    text = re.sub(
+        r"\bUse it as a day (?:anchor|stop) for nearby camps, trailheads, access notes, and weather\.?\s*Check the official land manager before relying on dates or roads\.?",
+        "Nearby camps, trails, access notes, and weather are available to check before setting dates.",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\blive results show actual sites\b", "compare nearby options", text, flags=re.I)
+    text = re.sub(r"\blive map results\b", "nearby options", text, flags=re.I)
+    text = re.sub(
+        r"^(.+?) is a managed outdoor area near (?:the area|US Forest Service|Recreation\.gov|FWS|SDC|Trailhead)\.?\s*Check official access,\s*fees(?:,\s*closures,\s*permits,\s*weather,\s*and nearby services before committing dates)?\.?$",
+        r"\1 has access notes to check before you go. Confirm fees, closures, permits, and weather.",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r"^This stop is a managed outdoor area near (?:the area|US Forest Service|Recreation\.gov|FWS|SDC|Trailhead)\.?\s*Check official access,\s*fees(?:,\s*closures,\s*permits,\s*weather,\s*and nearby services before committing dates)?\.?$",
+        "Check current access, fees, closures, permits, and weather before you go.",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(
+        r"\bThis stop is a managed outdoor area\.?\s*Check current access,\s*fees,\s*closures,\s*permits,\s*and weather before you go\.?",
+        "Check current access, fees, closures, permits, and weather before you go.",
+        text,
+        flags=re.I,
+    )
     text = re.sub(r"\bOfficial campground facility record for ([^.]+)\.", r"Campground details for \1.", text, flags=re.I)
     text = re.sub(r"\bofficial campground facility record\b", "campground details", text, flags=re.I)
     text = re.sub(r"\bUse live map results\.\s*", "Compare nearby options. ", text, flags=re.I)
@@ -1107,6 +1176,12 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     text = re.sub(r"\bverify current terms before redistribution\b", "", text, flags=re.I)
     text = re.sub(r"\bOpen the source link and map before committing to the stop\.?\s*", "Check current access before you go. ", text, flags=re.I)
     text = re.sub(r"\bUse nearby camps, trails, services, weather, and map context from this stop\.?\s*", "", text, flags=re.I)
+    text = re.sub(r"\bnear (?:the area|US Forest Service|Recreation\.gov|FWS|SDC|Trailhead)\b", "", text, flags=re.I)
+    text = re.sub(r"\bCheck official access,\s*fees,?\s*$", "Check current access, fees, closures, permits, and weather before you go.", text, flags=re.I)
+    text = re.sub(r"\bnear the area\b", "nearby", text, flags=re.I)
+    text = re.sub(r"\bbefore committing dates\b", "before you go", text, flags=re.I)
+    text = re.sub(r"\bCheck official access\b", "Check current access", text, flags=re.I)
+    text = re.sub(r"\s+\.", ".", text)
     text = re.sub(r"\s+", " ", text).strip()
     if max_chars and len(text) > max_chars:
         text = text[:max_chars].rsplit(" ", 1)[0].strip()
@@ -1122,6 +1197,9 @@ def _clean_explore_public_labels(place: dict) -> dict:
     summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
     if summary.get("source_title"):
         summary["source_title"] = _explore_public_source_label(summary.get("source_title")) or summary.get("source_title")
+    for key in ("state", "region"):
+        if summary.get(key):
+            summary[key] = _clean_explore_display_region(summary.get(key))
     for key in ("hook", "short_description", "image_credit", "image_license"):
         if summary.get(key):
             summary[key] = _explore_clean_public_copy(summary.get(key), 900)
@@ -1152,6 +1230,8 @@ def _clean_explore_public_labels(place: dict) -> dict:
         if source.get("license"):
             source["license"] = _explore_clean_public_copy(source.get("license"), 160) or _explore_public_source_label(source.get("publisher")) or ""
     card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    if card.get("region"):
+        card["region"] = _clean_explore_display_region(card.get("region"))
     for key in ("headline", "summary", "highlight", "source_badge"):
         if card.get(key):
             card[key] = _explore_clean_public_copy(card.get(key), 900)
@@ -1185,13 +1265,21 @@ def _official_clean_text(value: object, max_chars: int = 520) -> str:
     text = re.sub(r"\s+", " ", text).strip()
     if text.lower() in OFFICIAL_CACHE_EMPTY_VALUES:
         return ""
+    if _looks_like_raw_record_text(text):
+        return ""
     try:
         text = clean_explore_description(text, title="", category="", group="", region="")
     except Exception:
         pass
+    text = re.sub(r"\bYosemite\s+NP\b", "Yosemite National Park", text, flags=re.I)
+    text = re.sub(r"([a-z0-9])\.([A-Z])", r"\1. \2", text)
+    text = re.split(r"\b(?:Hours|Getting Here|Directions|Accessibility|Parking):", text, maxsplit=1, flags=re.I)[0].strip()
     if len(text) <= max_chars:
         return text
     clipped = text[:max_chars].rsplit(" ", 1)[0].strip()
+    sentence_end = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
+    if sentence_end >= max(80, int(max_chars * 0.45)):
+        clipped = clipped[:sentence_end + 1].strip()
     return clipped or text[:max_chars].strip()
 
 
@@ -1260,6 +1348,157 @@ def _official_cache_source_url(row: dict) -> str:
     return ""
 
 
+SOURCE_ONLY_DISPLAY_LABELS = {
+    "national park service",
+    "nps",
+    "us forest service",
+    "u.s. forest service",
+    "forest service",
+    "recreation.gov",
+    "ridb",
+    "blm",
+    "bureau of land management",
+    "fws",
+    "us fish and wildlife service",
+    "public lands",
+    "trailhead",
+}
+
+
+OFFICIAL_CACHE_REGION_HINTS = (
+    (("yosemite", "/yose"), "Yosemite National Park · CA"),
+    (("grand canyon", "/grca"), "Grand Canyon National Park · AZ"),
+    (("zion", "/zion"), "Zion National Park · UT"),
+    (("glacier national park", "/glac"), "Glacier National Park · MT"),
+    (("yellowstone", "/yell"), "Yellowstone National Park · WY"),
+    (("grand teton", "/grte"), "Grand Teton National Park · WY"),
+    (("rocky mountain", "/romo"), "Rocky Mountain National Park · CO"),
+    (("arches", "/arch"), "Arches National Park · UT"),
+    (("canyonlands", "/cany"), "Canyonlands National Park · UT"),
+    (("death valley", "/deva"), "Death Valley National Park · CA"),
+    (("joshua tree", "/jotr"), "Joshua Tree National Park · CA"),
+    (("olympic", "/olym"), "Olympic National Park · WA"),
+    (("sequoia", "/seki"), "Sequoia & Kings Canyon · CA"),
+    (("kings canyon", "/seki"), "Sequoia & Kings Canyon · CA"),
+    (("acadia", "/acad"), "Acadia National Park · ME"),
+    (("great smoky", "/grsm"), "Great Smoky Mountains · TN/NC"),
+    (("cape cod", "/caco"), "Cape Cod National Seashore · MA"),
+)
+
+
+def _looks_like_raw_record_text(value: object) -> bool:
+    text = re.sub(r"\s+", " ", str(value or "")).strip()
+    if len(text) < 40:
+        return False
+    if text[0] not in "{[":
+        return False
+    return bool(re.search(r"['\"](?:id|title|category|summary|source_pack|lat|lng|canonical_name)['\"]\s*:", text))
+
+
+def _is_source_only_display_label(value: object) -> bool:
+    text = re.sub(r"\s+", " ", str(value or "").strip()).lower()
+    return text in SOURCE_ONLY_DISPLAY_LABELS
+
+
+def _clean_explore_display_region(value: object) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if not text or _is_source_only_display_label(text):
+        return ""
+    return text
+
+
+def _official_cache_display_region(row: dict, title: str, search_terms: str = "") -> str:
+    values = [
+        title,
+        search_terms,
+        row.get("land_unit_id"),
+        row.get("official_url"),
+        row.get("website"),
+        row.get("source_url"),
+        row.get("address"),
+    ]
+    hay = " ".join(str(value or "") for value in values).lower()
+    for needles, label in OFFICIAL_CACHE_REGION_HINTS:
+        if any(needle in hay for needle in needles):
+            return label
+    address = str(row.get("address") or "").strip()
+    match = re.search(r"(?:,\s*|\s)([A-Z]{2})(?:\s+\d{5}|\s*,|\s*$)", address)
+    return match.group(1) if match else ""
+
+
+def _official_cache_description_fallback(title: str, category_label: str, region: str = "") -> str:
+    place = region.split(" · ", 1)[0].strip()
+    target = f" around {place}" if place else ""
+    label = category_label.lower()
+    if "trail" in label:
+        return f"{title} has trail access{target}. Check current access, weather, permits, and closures before you go."
+    if "camp" in label:
+        return f"{title} has campground details{target}. Check access, fees, fire rules, and seasonal closures before picking a night."
+    if "visitor" in label:
+        return f"{title} has visitor services{target}. Check hours, access, and current conditions before you go."
+    if "waterfall" in label or "scenic" in label:
+        return f"{title} is a stop to check{target}. Confirm access, weather, and current conditions before you go."
+    return f"{title} has current access notes{target}. Check closures, hours, and local rules before you go."
+
+
+def _official_cache_skip_for_broad_search(profile: dict, terms: list[str]) -> bool:
+    summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+    profile_card = profile.get("card") if isinstance(profile.get("card"), dict) else {}
+    title = str(summary.get("title") or profile.get("id") or "").lower()
+    hay = " ".join(str(value or "") for value in [
+        title,
+        summary.get("category"),
+        summary.get("short_description"),
+        profile_card.get("summary"),
+        profile.get("category"),
+    ]).lower()
+    term_set = {str(term).lower() for term in terms if str(term or "").strip()}
+    specific_terms = {term for term in term_set if term not in EXPLORE_QUERY_GENERIC_TERMS}
+    if len(specific_terms) >= 2:
+        for pattern, explicit_terms in EXPLORE_BROAD_LOW_VALUE_PATTERNS:
+            if pattern.search(hay) and not term_set.intersection(explicit_terms):
+                return True
+    if "architecture" in title and "architecture" not in term_set:
+        return True
+    utility_terms = {"parking", "charge", "charger", "charging", "ev", "electric", "station"}
+    if any(term in title for term in ("parking", "charging station", "ev charging")) and not term_set.intersection(utility_terms):
+        return True
+    admin_terms = {"admin", "administration", "office", "clinic", "medical", "mail", "post", "postcard", "superintendent"}
+    if any(term in title for term in ("administration building", "superintendent", "post office", "medical clinic")) and not term_set.intersection(admin_terms):
+        return True
+    if re.search(r"\boffice\b", title) and not term_set.intersection(admin_terms):
+        return True
+    return False
+
+
+EXPLORE_BROAD_LOW_VALUE_PATTERNS: tuple[tuple[re.Pattern[str], set[str]], ...] = (
+    (
+        re.compile(r"\b(kennel|clinic|healthcare|medical|post office|headquarters|administration|superintendent|conservancy|foundation|association)\b", re.I),
+        {"kennel", "clinic", "medical", "healthcare", "office", "headquarters", "admin", "administration", "conservancy", "foundation", "association"},
+    ),
+    (
+        re.compile(r"\b(restaurant|steakhouse|cafe|coffee|grill|bar|dining|market|store|gift shop|shop)\b", re.I),
+        {"restaurant", "steakhouse", "cafe", "coffee", "food", "dining", "market", "store", "shop"},
+    ),
+    (
+        re.compile(r"\b(bus stop|shuttle stop|transit|parking|restroom|bathroom|toilet)\b", re.I),
+        {"bus", "shuttle", "transit", "parking", "restroom", "bathroom", "toilet"},
+    ),
+    (
+        re.compile(r"\b(theater|films?|movie|talk|program|ranger program|exhibit)\b", re.I),
+        {"theater", "film", "films", "movie", "talk", "program", "exhibit", "museum"},
+    ),
+    (
+        re.compile(r"\b(rocks are|appeared about|animal life|geologically speaking|history exhibit)\b", re.I),
+        {"geology", "geologic", "rocks", "fossil", "history", "exhibit"},
+    ),
+    (
+        re.compile(r"\bpermits?\b", re.I),
+        {"permit", "permits", "backcountry"},
+    ),
+)
+
+
 def _official_cache_profile_from_row(row: dict, canonical_type: str, *, rank: int = 760000, search_terms: str = "") -> dict | None:
     row = dict(row or {})
     canonical_type = str(canonical_type or "").strip().lower()
@@ -1311,6 +1550,12 @@ def _official_cache_profile_from_row(row: dict, canonical_type: str, *, rank: in
         return None
 
     category_label = _official_cache_category_label(category)
+    display_region = _official_cache_display_region(row, title, search_terms)
+    if _looks_like_raw_record_text(description):
+        description = ""
+    description = _explore_clean_public_copy(description, 620)
+    if not description:
+        description = _official_cache_description_fallback(title, category_label, display_region)
     search_blob = " ".join(
         part for part in (title, category_label, source_label, description, extra_source, search_terms)
         if str(part or "").strip()
@@ -1363,7 +1608,7 @@ def _official_cache_profile_from_row(row: dict, canonical_type: str, *, rank: in
             "headline": title,
             "summary": description,
             "highlight": description,
-            "region": source_label,
+            "region": display_region,
             "facts": [category_label],
         },
         "summary": {
@@ -1371,8 +1616,8 @@ def _official_cache_profile_from_row(row: dict, canonical_type: str, *, rank: in
             "title": title,
             "category": category_label,
             "explore_group": _v3_explore_group(category),
-            "state": source_label,
-            "region": source_label,
+            "state": display_region,
+            "region": display_region,
             "lat": lat,
             "lng": lng,
             "rank": rank,
@@ -1462,7 +1707,16 @@ def _official_cache_category_clause(requested: set[str] | None) -> tuple[str, li
     if normalized.intersection({"visitor_center"}):
         clauses.append("LOWER(category) = ?")
         params.append("visitor_center")
-    if normalized.intersection({"things", "activity", "attraction", "tourism", "viewpoint", "historic", "monument", "water", "scenic"}):
+    if normalized.intersection({"viewpoint", "scenic"}):
+        clauses.append("(LOWER(category) IN (?, ?) OR LOWER(title) LIKE ? OR LOWER(title) LIKE ? OR LOWER(title) LIKE ? OR LOWER(title) LIKE ?)")
+        params.extend(["viewpoint", "overlook", "%viewpoint%", "%overlook%", "%scenic%", "%vista%"])
+    if normalized.intersection({"waterfall"}):
+        clauses.append("(LOWER(category) = ? OR LOWER(title) LIKE ? OR LOWER(title) LIKE ?)")
+        params.extend(["waterfall", "%waterfall%", "%falls%"])
+    if normalized.intersection({"peak"}):
+        clauses.append("(LOWER(category) IN (?, ?) OR LOWER(title) LIKE ? OR LOWER(title) LIKE ?)")
+        params.extend(["peak", "mountain", "%peak%", "%mountain%"])
+    if normalized.intersection({"things", "activity", "attraction", "tourism", "historic", "monument", "water"}):
         clauses.append("(LOWER(category) IN (?, ?, ?, ?, ?) OR LOWER(title) LIKE ? OR LOWER(title) LIKE ?)")
         params.extend(["activity", "place", "park", "visitor_center", "trailhead", "%overlook%", "%historic%"])
     if not clauses:
@@ -1486,7 +1740,16 @@ def _official_cache_nearby_place_clause(requested: set[str] | None) -> tuple[str
         clauses.append("(LOWER(category) = ? OR LOWER(canonical_name) LIKE ?)")
         params.extend(["trailhead", "%trail%"])
         include_trails = True
-    if normalized.intersection({"park", "parks", "things", "activity", "attraction", "tourism", "visitor_center", "viewpoint", "historic", "monument", "water", "scenic"}):
+    if normalized.intersection({"viewpoint", "scenic"}):
+        clauses.append("(LOWER(category) IN (?, ?) OR LOWER(canonical_name) LIKE ? OR LOWER(canonical_name) LIKE ? OR LOWER(canonical_name) LIKE ? OR LOWER(canonical_name) LIKE ?)")
+        params.extend(["viewpoint", "overlook", "%viewpoint%", "%overlook%", "%scenic%", "%vista%"])
+    if normalized.intersection({"waterfall"}):
+        clauses.append("(LOWER(category) = ? OR LOWER(canonical_name) LIKE ? OR LOWER(canonical_name) LIKE ?)")
+        params.extend(["waterfall", "%waterfall%", "%falls%"])
+    if normalized.intersection({"peak"}):
+        clauses.append("(LOWER(category) IN (?, ?) OR LOWER(canonical_name) LIKE ? OR LOWER(canonical_name) LIKE ?)")
+        params.extend(["peak", "mountain", "%peak%", "%mountain%"])
+    if normalized.intersection({"park", "parks", "things", "activity", "attraction", "tourism", "visitor_center", "historic", "monument", "water"}):
         clauses.append("(LOWER(category) IN (?, ?, ?, ?, ?) OR LOWER(canonical_name) LIKE ? OR LOWER(canonical_name) LIKE ?)")
         params.extend(["activity", "place", "park", "visitor_center", "trailhead", "%overlook%", "%historic%"])
         include_trails = include_trails or bool(normalized.intersection({"things", "activity", "trail", "trails"}))
@@ -1536,6 +1799,8 @@ def _official_cache_search_profiles(q: str = "", category: str = "", limit: int 
                 profile = _official_cache_profile_by_id(row_dict["id"], row_dict["canonical_type"], row_dict, rank=760000 + idx)
                 if not profile:
                     continue
+                if _official_cache_skip_for_broad_search(profile, terms):
+                    continue
                 if requested and not _explore_place_matches_category_request(profile, requested):
                     continue
                 profile_id = str(profile.get("id") or "")
@@ -1548,6 +1813,112 @@ def _official_cache_search_profiles(q: str = "", category: str = "", limit: int 
     except Exception:
         return []
     return profiles
+
+
+def _official_cache_featured_profiles(limit: int = 360) -> list[dict]:
+    if not _official_cache_enabled():
+        return []
+    limit = max(1, min(int(limit or 360), 900))
+    per_place_category = max(24, min(110, (limit // 6) + 24))
+    profiles: list[dict] = []
+    seen: set[str] = set()
+
+    def add_profile(row: sqlite3.Row | dict, canonical_type: str, rank: int) -> None:
+        if len(profiles) >= limit:
+            return
+        profile = _official_cache_profile_from_row(dict(row), canonical_type, rank=rank)
+        if not profile:
+            return
+        place_id = str(profile.get("id") or "")
+        if not place_id or place_id in seen:
+            return
+        summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+        title = str(summary.get("title") or "").strip().lower()
+        desc = str(summary.get("short_description") or (profile.get("profile") or {}).get("summary") or "").strip()
+        if not title or title in OFFICIAL_CACHE_EMPTY_VALUES:
+            return
+        if sum(1 for char in title if char.isalpha()) < 3:
+            return
+        if len(desc) < 10:
+            return
+        seen.add(place_id)
+        profiles.append(profile)
+
+    place_categories = ("park", "campground", "visitor_center", "trailhead", "activity")
+    try:
+        with _official_cache_connect() as db:
+            for category in place_categories:
+                rows = db.execute(
+                    """
+                    SELECT id, canonical_name, slug, category, subcategory, managing_agency,
+                           land_unit_id, geom, address, phone, website, reservation_url,
+                           official_url, summary, description_source, season_text, fee_text,
+                           quality_score, popularity_score, safety_score, source_confidence,
+                           attribution_text, last_verified_at
+                    FROM place
+                    WHERE geom IS NOT NULL
+                      AND canonical_name IS NOT NULL
+                      AND TRIM(canonical_name) != ''
+                      AND LOWER(category) = ?
+                      AND summary IS NOT NULL
+                      AND LENGTH(TRIM(summary)) >= 24
+                    ORDER BY COALESCE(quality_score, 0) DESC,
+                             COALESCE(popularity_score, 0) DESC,
+                             canonical_name
+                    LIMIT ?
+                    """,
+                    (category, per_place_category),
+                ).fetchall()
+                base_rank = 730000 + len(profiles)
+                for idx, row in enumerate(rows, start=1):
+                    add_profile(row, "place", base_rank + idx)
+
+            trail_rows = db.execute(
+                """
+                SELECT id, name, slug, land_unit_id, managing_agency, route_geom, start_geom,
+                       distance_m, elevation_gain_m, difficulty, allowed_uses, surface,
+                       season_text, quality_score, source_confidence, attribution_text,
+                       last_verified_at
+                FROM trail
+                WHERE start_geom IS NOT NULL
+                  AND name IS NOT NULL
+                  AND TRIM(name) != ''
+                  AND (distance_m IS NULL OR distance_m > 0)
+                ORDER BY COALESCE(quality_score, 0) DESC, name
+                LIMIT ?
+                """,
+                (max(60, limit // 5),),
+            ).fetchall()
+            base_rank = 735000 + len(profiles)
+            for idx, row in enumerate(trail_rows, start=1):
+                add_profile(row, "trail", base_rank + idx)
+
+            land_rows = db.execute(
+                """
+                SELECT id, name, slug, agency, designation, parent_land_unit_id, geom,
+                       centroid, source_confidence, attribution_text, last_verified_at
+                FROM land_unit
+                WHERE centroid IS NOT NULL
+                  AND name IS NOT NULL
+                  AND TRIM(name) != ''
+                  AND (
+                    LOWER(designation) LIKE '%national park%'
+                    OR LOWER(designation) LIKE '%national forest%'
+                    OR LOWER(designation) LIKE '%wilderness%'
+                    OR LOWER(name) LIKE '%national park%'
+                    OR LOWER(name) LIKE '%national forest%'
+                  )
+                ORDER BY name
+                LIMIT ?
+                """,
+                (max(40, limit // 8),),
+            ).fetchall()
+            base_rank = 738000 + len(profiles)
+            for idx, row in enumerate(land_rows, start=1):
+                add_profile(row, "land_unit", base_rank + idx)
+    except Exception:
+        return []
+    return profiles[:limit]
 
 
 def _official_cache_nearby_profiles(
@@ -1705,6 +2076,38 @@ def _merge_explore_profile_lists(primary: list[dict], extra: list[dict]) -> list
     return out
 
 
+def _dedupe_ranked_explore_profiles(places: list[dict]) -> list[dict]:
+    out: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_destination_titles: set[str] = set()
+    seen_title_regions: set[str] = set()
+    for place in places:
+        if not isinstance(place, dict):
+            continue
+        place_id = str(place.get("id") or (place.get("summary") or {}).get("id") or "")
+        if place_id and place_id in seen_ids:
+            continue
+        summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+        card = place.get("card") if isinstance(place.get("card"), dict) else {}
+        title_key = _explore_title_merge_key(place)
+        title = str(summary.get("title") or "").lower()
+        region = re.sub(r"[^a-z0-9]+", " ", str(summary.get("region") or summary.get("state") or card.get("region") or "").lower()).strip()
+        destination_title = bool(re.search(r"\b(national park|national monument|national preserve|national seashore|national forest|wilderness|state park|provincial park)\b", title))
+        if title_key and (destination_title or _explore_is_destination_hub(place)):
+            if title_key in seen_destination_titles:
+                continue
+            seen_destination_titles.add(title_key)
+        title_region_key = f"{title_key}:{region}" if title_key and region else ""
+        if title_region_key:
+            if title_region_key in seen_title_regions:
+                continue
+            seen_title_regions.add(title_region_key)
+        out.append(place)
+        if place_id:
+            seen_ids.add(place_id)
+    return out
+
+
 def _explore_title_merge_key(place: dict) -> str:
     summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
     title = str(summary.get("title") or place.get("name") or "").lower()
@@ -1752,9 +2155,12 @@ def _explore_legacy_wrapper_parent(place: dict, hubs: list[dict]) -> dict | None
     nps_code_match = re.search(r"nps\.gov/([a-z0-9]{3,5})(?:/|$)", source_url)
     nps_code = nps_code_match.group(1) if nps_code_match else ""
     best: tuple[int, dict] | None = None
-    for hub in hubs:
+    for hub_entry in hubs:
+        hub = hub_entry.get("place") if isinstance(hub_entry, dict) and isinstance(hub_entry.get("place"), dict) else hub_entry
+        if not isinstance(hub, dict):
+            continue
         hub_summary = hub.get("summary") if isinstance(hub.get("summary"), dict) else {}
-        hub_title = _explore_title_merge_key(hub)
+        hub_title = str(hub_entry.get("title_key") or "") if isinstance(hub_entry, dict) else _explore_title_merge_key(hub)
         if not hub_title:
             continue
         score = 0
@@ -1763,7 +2169,7 @@ def _explore_legacy_wrapper_parent(place: dict, hubs: list[dict]) -> dict | None
         if state and state in str(hub_summary.get("state") or hub_summary.get("region") or "").lower():
             score += 12
         if nps_code:
-            hub_text = json.dumps({
+            hub_text = str(hub_entry.get("search_text") or "") if isinstance(hub_entry, dict) else json.dumps({
                 "id": hub.get("id"),
                 "source_pack": hub.get("source_pack"),
                 "sources": hub.get("sources"),
@@ -1780,7 +2186,22 @@ def _explore_legacy_wrapper_parent(place: dict, hubs: list[dict]) -> dict | None
 
 
 def _apply_explore_legacy_wrapper_metadata(places: list[dict]) -> list[dict]:
-    hubs = [place for place in places if isinstance(place, dict) and _explore_is_destination_hub(place)]
+    hubs = []
+    for place in places:
+        if not isinstance(place, dict) or not _explore_is_destination_hub(place):
+            continue
+        summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+        hubs.append({
+            "place": place,
+            "title_key": _explore_title_merge_key(place),
+            "search_text": json.dumps({
+                "id": place.get("id"),
+                "source_pack": place.get("source_pack"),
+                "sources": place.get("sources"),
+                "facts": place.get("facts"),
+                "summary": summary,
+            }).lower(),
+        })
     by_id = {str(place.get("id") or ""): place for place in places if isinstance(place, dict)}
     for place in places:
         if not isinstance(place, dict):
@@ -1894,7 +2315,114 @@ def _sanitize_explore_catalog(catalog: dict) -> dict:
     return {**catalog, "places": places, "count": len(places)}
 
 
+def _server_curated_explore_profiles() -> list[dict]:
+    return [
+        {
+            "id": "explore:waterfalls:havasu-falls",
+            "category": "waterfall",
+            "canonical_role": "",
+            "parent_hub_id": "place:nps:grca",
+            "parent_hub_title": "Grand Canyon National Park",
+            "module_target": "see",
+            "hidden_from_featured": False,
+            "subcategories": ["waterfall", "waterfalls", "viewpoint", "trail"],
+            "sources": [{"title": "Official site", "publisher": "Havasupai Tribe", "url": "https://theofficialhavasupaitribe.com/", "kind": "Official"}],
+            "source_ids": ["curated:havasu-falls"],
+            "quality": "curated",
+            "quality_score": 90,
+            "verified": True,
+            "search_aliases": ["Grand Canyon", "Grand Canyon National Park", "Havasupai", "Havasu Creek", "Arizona waterfalls"],
+            "search_blob": "Havasu Falls Grand Canyon Havasupai Havasu Creek Arizona waterfall permit canyon",
+            "best_season": "Permit season",
+            "access": "Permit required",
+            "safety": "Remote canyon travel, heat, water crossings, and tribal rules",
+            "amenities": [],
+            "media": [{"url": "https://upload.wikimedia.org/wikipedia/commons/4/41/New_havasu_falls.JPG", "caption": "Havasu Falls", "credit": "", "license": ""}],
+            "card": {
+                "title": "Havasu Falls",
+                "headline": "Havasu Falls",
+                "summary": "Blue-green Grand Canyon waterfall on Havasu Creek inside Havasupai tribal lands.",
+                "highlight": "A permit-controlled canyon waterfall to plan only after access, dates, and tribal rules are confirmed.",
+                "region": "Havasupai Reservation · AZ",
+                "facts": ["Waterfall", "Permit required"],
+            },
+            "summary": {
+                "id": "explore:waterfalls:havasu-falls",
+                "title": "Havasu Falls",
+                "category": "Waterfall",
+                "explore_group": "waterfalls",
+                "state": "AZ",
+                "region": "Havasupai Reservation · AZ",
+                "lat": 36.255278,
+                "lng": -112.698056,
+                "rank": 420120,
+                "hero_rank": 420120,
+                "tags": ["waterfalls", "falls", "viewpoint", "trail", "permit"],
+                "badges": ["Waterfall"],
+                "hook": "Havasu Falls",
+                "short_description": "Blue-green Grand Canyon waterfall on Havasu Creek inside Havasupai tribal lands.",
+                "thumbnail_url": "https://upload.wikimedia.org/wikipedia/commons/4/41/New_havasu_falls.JPG",
+                "image_url": "https://upload.wikimedia.org/wikipedia/commons/4/41/New_havasu_falls.JPG",
+                "image_credit": "",
+                "image_license": "",
+                "source_url": "https://theofficialhavasupaitribe.com/",
+                "source_title": "Official site",
+            },
+            "profile": {
+                "hook": "Havasu Falls",
+                "summary": "Blue-green Grand Canyon waterfall on Havasu Creek inside Havasupai tribal lands.",
+                "story": "Blue-green Grand Canyon waterfall on Havasu Creek inside Havasupai tribal lands.",
+                "why_it_matters": "A permit-controlled canyon waterfall to plan only after access, dates, and tribal rules are confirmed.",
+                "what_to_know": "Permit, campground reservation, weather, and tribal rules need to be checked before planning around this stop.",
+                "best_time_to_stop": "Permit season",
+                "access_notes": "Permit required.",
+                "nearby_context": "Havasu Creek sits inside Havasupai tribal lands west of the main South Rim village area.",
+            },
+            "audio_script": "Blue-green Grand Canyon waterfall on Havasu Creek inside Havasupai tribal lands.",
+            "wiki_extract": "",
+            "source_pack": {
+                "quality": "curated",
+                "primary": "Official site",
+                "official_url": "https://theofficialhavasupaitribe.com/",
+                "sources": [{"title": "Official site", "publisher": "Havasupai Tribe", "url": "https://theofficialhavasupaitribe.com/", "kind": "Official"}],
+                "photos": [],
+                "activities": ["Waterfall", "Viewpoint", "Trail access"],
+                "topics": ["Waterfall"],
+                "source_note": "Official site",
+                "extract": "Blue-green Grand Canyon waterfall on Havasu Creek inside Havasupai tribal lands.",
+                "booking_url": "",
+                "license": "",
+            },
+            "facts": {
+                "coordinates": "36.25528, -112.69806",
+                "source_url": "https://theofficialhavasupaitribe.com/",
+                "source_title": "Official site",
+                "official_url": "https://theofficialhavasupaitribe.com/",
+                "source_quality": "curated",
+                "last_updated": "",
+            },
+            "attribution": "Havasupai Tribe",
+        }
+    ]
+
+
 def _load_explore_catalog() -> dict:
+    cache_key = _explore_catalog_cache_key()
+    now = time.time()
+    cached = _EXPLORE_CATALOG_CACHE.get("catalog")
+    if (
+        isinstance(cached, dict)
+        and _EXPLORE_CATALOG_CACHE.get("key") == cache_key
+        and now - float(_EXPLORE_CATALOG_CACHE.get("loaded_at") or 0) < 120
+    ):
+        return cached
+
+    def store_cache(catalog: dict) -> dict:
+        _EXPLORE_CATALOG_CACHE["key"] = cache_key
+        _EXPLORE_CATALOG_CACHE["loaded_at"] = time.time()
+        _EXPLORE_CATALOG_CACHE["catalog"] = catalog
+        return catalog
+
     if EXPLORE_CATALOG.exists():
         try:
             catalog = json.loads(EXPLORE_CATALOG.read_text())
@@ -1906,7 +2434,7 @@ def _load_explore_catalog() -> dict:
                 for idx, place in enumerate(places)
                 if isinstance(place, dict) and (key := _explore_title_merge_key(place))
             }
-            for place in _load_explore_catalog_v3_profiles():
+            for place in [*_load_explore_catalog_v3_profiles(), *_load_explore_official_featured_profiles()]:
                 place_id = str(place.get("id") or "")
                 title_key = _explore_title_merge_key(place)
                 if place_id in id_to_index:
@@ -1923,6 +2451,19 @@ def _load_explore_catalog() -> dict:
                     if title_key:
                         title_to_index[title_key] = len(places) - 1
                     seen.add(place_id)
+            for place in _server_curated_explore_profiles():
+                place_id = str(place.get("id") or "")
+                title_key = _explore_title_merge_key(place)
+                if place_id in id_to_index:
+                    places[id_to_index[place_id]] = _merge_explore_sidecar_enrichment(places[id_to_index[place_id]], place)
+                    continue
+                if title_key and title_key in title_to_index:
+                    places[title_to_index[title_key]] = _merge_explore_sidecar_enrichment(places[title_to_index[title_key]], place)
+                    continue
+                places.append(place)
+                id_to_index[place_id] = len(places) - 1
+                if title_key:
+                    title_to_index[title_key] = len(places) - 1
             places = _apply_explore_legacy_wrapper_metadata(places)
             merged = {
                 **catalog,
@@ -1931,10 +2472,10 @@ def _load_explore_catalog() -> dict:
                 "count": len(places),
                 "places": places,
             }
-            return _sanitize_explore_catalog(_apply_explore_story_overrides(merged))
+            return store_cache(_sanitize_explore_catalog(_apply_explore_story_overrides(merged)))
         except Exception:
             pass
-    return _sanitize_explore_catalog(_apply_explore_story_overrides({
+    return store_cache(_sanitize_explore_catalog(_apply_explore_story_overrides({
         "schema_version": 1,
         "catalog_id": "explore-us-top-v1",
         "name": "Trailhead Featured Explore",
@@ -1942,7 +2483,13 @@ def _load_explore_catalog() -> dict:
         "source": "Fallback catalog",
         "future_pack_compatible": True,
         "places": [],
-    }))
+    })))
+
+
+@app.on_event("startup")
+async def _prewarm_explore_catalog():
+    await asyncio.to_thread(_load_explore_catalog)
+
 
 def _apply_explore_story_overrides(catalog: dict) -> dict:
     overrides = get_explore_story_overrides()
@@ -1984,12 +2531,12 @@ def _catalog_place_category(summary: dict) -> str:
     hay = f"{group} {category} {title}"
     if "camp" in hay:
         return "camp"
-    if any(term in hay for term in ("water", "lake", "coast", "shore", "marine", "reef", "river", "scenic")):
-        return "viewpoint"
-    if "trail" in hay:
+    if "trailhead" in hay or "trail" in hay:
         return "trail"
     if "visitor" in hay:
         return "visitor_center"
+    if any(term in hay for term in ("water", "lake", "coast", "shore", "marine", "reef", "river", "scenic")):
+        return "viewpoint"
     if any(term in hay for term in ("historic", "monument", "heritage")):
         return "historic"
     if any(term in hay for term in ("park", "marine", "preserve", "refuge")):
@@ -2026,6 +2573,21 @@ def _explore_query_text(place: dict) -> str:
 
 def _explore_query_terms(query: str) -> list[str]:
     return [t for t in re.findall(r"[a-z0-9]+", str(query or "").lower()) if len(t) >= 2]
+
+
+def _explore_query_terms_for_category(query: str, category: str = "") -> list[str]:
+    terms = _explore_query_terms(query)
+    normalized_category = _normalize_place_category(category)
+    if normalized_category in {"parks", "land", "views", "scenic", "waterfalls", "peaks"}:
+        intent_terms = {
+            "camp", "camps", "campground", "campgrounds", "camping", "campsite", "campsites",
+            "stay", "stays", "lodging", "lodge", "lodges", "glamping", "hut", "huts",
+            "trail", "trails", "trailhead", "trailheads", "hike", "hikes", "hiking",
+            "thing", "things", "tour", "tours", "guided", "near", "nearby", "around",
+        }
+        cleaned = [term for term in terms if term not in intent_terms]
+        return cleaned or terms
+    return terms
 
 
 def _explore_query_tokens(text: str) -> set[str]:
@@ -2096,6 +2658,25 @@ EXPLORE_QUERY_GENERIC_TERMS = {
 }
 
 
+EXPLORE_QUERY_SHORT_PREFIX_TERMS = {
+    "camp",
+    "camps",
+    "park",
+    "parks",
+    "trail",
+    "trails",
+    "view",
+    "views",
+}
+
+EXPLORE_EXACT_DESTINATION_PHRASES = (
+    "moab",
+    "grand canyon",
+    "grand teton",
+    "big sur",
+)
+
+
 def _explore_identity_query_text(place: dict) -> str:
     summary = place.get("summary") or {}
     profile = place.get("profile") or {}
@@ -2111,11 +2692,34 @@ def _explore_identity_query_text(place: dict) -> str:
     return " ".join(str(v or "") for v in values).lower()
 
 
+def _explore_exact_destination_phrase(query_terms: list[str]) -> str:
+    specific_terms = [
+        str(term or "").lower()
+        for term in query_terms
+        if str(term or "").lower() not in EXPLORE_QUERY_GENERIC_TERMS
+    ]
+    if not specific_terms:
+        return ""
+    specific_text = f" {' '.join(specific_terms)} "
+    for phrase in EXPLORE_EXACT_DESTINATION_PHRASES:
+        if f" {phrase} " in specific_text:
+            return phrase
+    return ""
+
+
+def _explore_identity_contains_exact_phrase(place: dict, phrase: str) -> bool:
+    if not phrase:
+        return True
+    identity = re.sub(r"[^a-z0-9]+", " ", _explore_identity_query_text(place).lower())
+    return f" {phrase} " in f" {identity} "
+
+
 def _explore_terms_match_tokens(query_terms: list[str], tokens: set[str]) -> bool:
     for term in query_terms:
         if term in tokens:
             continue
-        if len(term) >= 4 and any(token.startswith(term) or term.startswith(token) for token in tokens):
+        allow_prefix = len(term) >= 5 or term in EXPLORE_QUERY_SHORT_PREFIX_TERMS
+        if allow_prefix and any(len(token) >= 4 and (token.startswith(term) or term.startswith(token)) for token in tokens):
             continue
         return False
     return True
@@ -2124,6 +2728,9 @@ def _explore_terms_match_tokens(query_terms: list[str], tokens: set[str]) -> boo
 def _explore_query_terms_match(place: dict, query_terms: list[str]) -> bool:
     if not query_terms:
         return True
+    exact_phrase = _explore_exact_destination_phrase(query_terms)
+    if exact_phrase and not _explore_identity_contains_exact_phrase(place, exact_phrase):
+        return False
     specific_terms = [term for term in query_terms if term not in EXPLORE_QUERY_GENERIC_TERMS]
     if specific_terms and not _explore_terms_match_tokens(specific_terms, _explore_query_tokens(_explore_identity_query_text(place))):
         return False
@@ -2296,6 +2903,62 @@ def _explore_query_sort_key(place: dict, query_terms: list[str]) -> tuple[float,
     score -= max(-45.0, min(28.0, _explore_content_quality_score(place)))
     return (score, rank)
 
+
+def _explore_skip_for_broad_search(place: dict, query_terms: list[str]) -> bool:
+    if not query_terms:
+        return False
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    hay = " ".join(str(value or "") for value in [
+        summary.get("title"),
+        summary.get("category"),
+        summary.get("short_description"),
+        card.get("title"),
+        card.get("summary"),
+        place.get("category"),
+    ]).lower()
+    term_set = {str(term).lower() for term in query_terms if str(term or "").strip()}
+    specific_terms = {term for term in term_set if term not in EXPLORE_QUERY_GENERIC_TERMS}
+    broad_destination_query = len(specific_terms) >= 2
+    title = str(summary.get("title") or card.get("title") or "").lower()
+    if broad_destination_query:
+        for pattern, explicit_terms in EXPLORE_BROAD_LOW_VALUE_PATTERNS:
+            if pattern.search(hay) and not term_set.intersection(explicit_terms):
+                return True
+    if {"grand", "canyon"}.issubset(term_set):
+        if re.search(r"\bgrand canyon of (?:the )?(yellowstone|noatak)\b", title) and not term_set.intersection({"yellowstone", "noatak"}):
+            return True
+        if re.search(r"\blittle grand canyon\b", title) and "little" not in term_set:
+            return True
+        if "entrance station" in title and "entrance" not in term_set:
+            return True
+    admin_terms = {"admin", "administration", "office", "clinic", "medical", "mail", "post", "postcard", "superintendent"}
+    if re.search(r"\b(administration building|superintendent|post office|medical clinic|office)\b", hay) and not term_set.intersection(admin_terms):
+        return True
+    ranger_terms = {"ranger", "district", "office", "station", "permit"}
+    if re.search(r"\branger district\b", hay) and not term_set.intersection(ranger_terms):
+        return True
+    utility_terms = {"parking", "charge", "charger", "charging", "ev", "electric", "station"}
+    if re.search(r"\b(parking|charging station|ev charging)\b", hay) and not term_set.intersection(utility_terms):
+        return True
+    if "architecture" in hay and "architecture" not in term_set:
+        return True
+    return False
+
+
+def _safe_explore_image_url(value: object) -> str:
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    lower = url.lower()
+    if "test-yosemite-camp" in lower:
+        return ""
+    if "commons.wikimedia.org/wiki/special:" in lower:
+        return ""
+    if lower.startswith(("http://", "https://", "/assets/")):
+        return url
+    return ""
+
 def _explore_place_matches_categories(place_type: str, requested: set[str] | None) -> bool:
     if not requested:
         return True
@@ -2358,7 +3021,7 @@ def _explore_place_category_tokens(place: dict) -> set[str]:
 def _explore_place_matches_things_request(place: dict) -> bool:
     source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
     tokens = _explore_place_category_tokens(place)
-    if tokens.intersection({"camp", "camping", "campground", "rv", "private_stay", "lodging", "fuel", "gas", "grocery"}):
+    if tokens.intersection({"camp", "camping", "campground", "rv", "private_stay", "lodging", "glamping", "stays", "fuel", "gas", "grocery"}):
         return False
     if isinstance(source_pack.get("things_to_do"), list) and source_pack.get("things_to_do"):
         return True
@@ -2378,6 +3041,9 @@ def _explore_place_matches_category_request(place: dict, requested: set[str] | N
     camp_categories = {"camp", "camping", "campground", "rv", "rv_park", "private_stay"}
     if normalized and normalized.issubset(camp_categories):
         summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+        title_text = str(summary.get("title") or "").lower()
+        if re.search(r"\bday use\b", title_text) and not re.search(r"\b(camps?|campgrounds?|campsites?|camping|rv park|rv resort|glamping|huts?|cabins?|lodging|stays?)\b", title_text):
+            return False
         hay = " ".join(str(value or "") for value in [
             place.get("category"),
             summary.get("category"),
@@ -2391,9 +3057,100 @@ def _explore_place_matches_category_request(place: dict, requested: set[str] | N
             return True
         if normalized == {"things"}:
             return False
-    if _explore_place_category_tokens(place).intersection(normalized):
+    tokens = _explore_place_category_tokens(place)
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    hay = " ".join(str(value or "") for value in [
+        place.get("category"),
+        summary.get("category"),
+        summary.get("explore_group"),
+        summary.get("title"),
+        summary.get("short_description"),
+        *(place.get("subcategories") or []),
+        *(summary.get("tags") or []),
+    ]).lower()
+    title_hay = str(summary.get("title") or "").lower()
+    stay_like = bool(tokens.intersection({"camp", "camping", "campground", "rv", "private_stay", "lodging", "glamping", "stays"})) or bool(re.search(r"\b(camps?|campgrounds?|campsites?|camping|rv park|rv resort|glamping|huts?|cabins?|lodging|stays?)\b", hay))
+    visual_hay = " ".join(str(value or "") for value in [
+        summary.get("title"),
+        summary.get("short_description"),
+        summary.get("hook"),
+        *(summary.get("tags") or []),
+    ]).lower()
+    visual_blocked = bool(re.search(r"\b(bus stop|shuttle|entrance station|restaurant|steakhouse|cafe|grill|market|store|bookstore|kennel|conservancy|clinic|medical|healthcare|visitor center|exhibit|talk|program|parking|restroom|trailhead|appeared about|rocks are|geologically speaking)\b", visual_hay))
+    if normalized.intersection({"viewpoint", "scenic"}):
+        if stay_like and not re.search(r"\b(viewpoint|overlook|vista|scenic)\b", title_hay):
+            return False
+        if visual_blocked:
+            return False
+        return bool(re.search(r"\b(viewpoint|overlook|vista|scenic|window|rim|fault|fossil|canyon|mountain|summit|arch|bridge|falls?|waterfall|loop)\b", visual_hay))
+    if "waterfall" in normalized:
+        if stay_like and not re.search(r"\b(waterfalls?|falls|cascade)\b", title_hay):
+            return False
+        return bool(tokens.intersection({"waterfall", "waterfalls"})) or bool(re.search(r"\b(waterfalls?|falls|cascade)\b", hay))
+    if "peak" in normalized:
+        if stay_like and not re.search(r"\b(peaks?|mountains?|summit)\b", title_hay):
+            return False
+        return bool(tokens.intersection({"peak", "peaks"})) or bool(re.search(r"\b(peaks?|mountains?|summit)\b", hay))
+    if tokens.intersection(normalized):
         return True
     return _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), normalized)
+
+
+def _explore_index_display_category(place: dict, category: str) -> str:
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    title = str(summary.get("title") or card.get("title") or "").lower()
+    normalized = _normalize_place_category(category)
+    primary_hay = " ".join(str(value or "") for value in [
+        category,
+        place.get("category"),
+        summary.get("explore_group"),
+        *(place.get("subcategories") or []),
+    ]).lower()
+    hay = f"{title} {primary_hay}"
+    if re.search(r"\bday use\b", title) and not re.search(r"\b(campgrounds?|campsites?|camping|rv park|rv resort)\b", title):
+        return "Day Use"
+    if re.search(r"\btrailheads?\b", title) or re.search(r"\btrailheads?\b", primary_hay):
+        return "Trailhead"
+    if re.search(r"\b(campgrounds?|campsites?|camping|rv park|rv resort)\b", title) or normalized in {"camp", "camping", "campground", "rv", "rv_park"}:
+        return "Campground"
+    if normalized in {"park", "parks", "national_park", "national_monument", "national_forest", "wilderness", "public_land"}:
+        return "Park"
+    if re.search(r"\b(trails?|hikes?|treks?)\b", title) or normalized in {"trail", "trails"}:
+        return "Trail"
+    if re.search(r"\b(visitor center|visitor centre|ranger station)\b", hay) or normalized == "visitor_center":
+        return "Visitor Center"
+    if re.search(r"\b(waterfalls?|falls|cascade)\b", hay) or normalized == "waterfall":
+        return "Waterfall"
+    if re.search(r"\b(viewpoints?|view point|overlooks?|vista|scenic|rim|window|summit|fossil beds?)\b", hay) or normalized in {"viewpoint", "scenic"}:
+        return "Viewpoint"
+    if re.search(r"\b(lodges?|hotels?|inn|cabins?|huts?)\b", hay) or normalized in {"lodging", "huts_lodging", "cabin"}:
+        return "Lodging"
+    if normalized in {"place", "attraction"}:
+        return "Place"
+    return category
+
+
+def _explore_clean_display_title(value: object) -> str:
+    title = re.sub(r"\s+", " ", str(value or "").strip())
+    title = re.sub(r"\bLIttle\b", "Little", title)
+    letters = [char for char in title if char.isalpha()]
+    if letters and len(letters) >= 4:
+        upper_ratio = sum(1 for char in letters if char.isupper()) / len(letters)
+        if upper_ratio >= 0.85:
+            title = title.title()
+            replacements = {
+                " Rv ": " RV ",
+                " Ohv ": " OHV ",
+                " Atv ": " ATV ",
+                " Usfs ": " USFS ",
+                " Blm ": " BLM ",
+            }
+            padded = f" {title} "
+            for needle, replacement in replacements.items():
+                padded = padded.replace(needle, replacement)
+            title = padded.strip()
+    return title
 
 
 def _explore_place_index_item(place: dict) -> dict:
@@ -2402,27 +3159,43 @@ def _explore_place_index_item(place: dict) -> dict:
     sources = source_pack.get("sources") if isinstance(source_pack.get("sources"), list) else []
     primary_source = source_pack.get("primary") or summary.get("source_title") or ""
     primary_source = _explore_public_source_label(primary_source) or primary_source
+    title = _explore_clean_display_title(summary.get("title"))
+    category = str(summary.get("category") or place.get("category") or "").strip()
+    region = _clean_explore_display_region((place.get("card") or {}).get("region") or summary.get("region") or summary.get("state") or "")
+    short_description = _explore_clean_public_copy(summary.get("short_description") or (place.get("profile") or {}).get("summary") or "", 620)
+    if _looks_like_raw_record_text(short_description):
+        short_description = ""
+    short_description = re.sub(r"\s+A designated accessible parking space\b.*$", "", short_description, flags=re.I).strip()
+    short_description = re.sub(r"\b(?:shuttle\s+)?bus stops?\b", "shuttle area", short_description, flags=re.I)
+    if not short_description and title:
+        short_description = _official_cache_description_fallback(title, category or "Place", region)
+    hook = _explore_clean_public_copy(summary.get("hook") or (place.get("profile") or {}).get("hook") or "", 180)
+    if _looks_like_raw_record_text(hook):
+        hook = title
     source_url = (
         source_pack.get("official_url")
         or summary.get("source_url")
         or next((item.get("url") for item in sources if isinstance(item, dict) and item.get("url")), "")
         or ""
     )
+    image_url = _safe_explore_image_url(summary.get("image_url") or summary.get("thumbnail_url"))
+    thumbnail_url = _safe_explore_image_url(summary.get("thumbnail_url") or summary.get("image_url"))
+    category = _explore_index_display_category(place, category)
     return {
         "id": place.get("id") or summary.get("id") or "",
-        "title": summary.get("title") or "",
-        "category": summary.get("category") or place.get("category") or "",
+        "title": title,
+        "category": category,
         "explore_group": summary.get("explore_group") or "",
-        "region": summary.get("region") or summary.get("state") or "",
+        "region": region,
         "lat": summary.get("lat"),
         "lng": summary.get("lng"),
         "rank": summary.get("rank") or 999999,
         "hero_rank": summary.get("hero_rank") or summary.get("rank") or 999999,
         "tags": summary.get("tags") or [],
-        "hook": summary.get("hook") or (place.get("profile") or {}).get("hook") or "",
-        "short_description": summary.get("short_description") or (place.get("profile") or {}).get("summary") or "",
-        "thumbnail_url": summary.get("thumbnail_url") or summary.get("image_url") or "",
-        "image_url": summary.get("image_url") or summary.get("thumbnail_url") or "",
+        "hook": hook or title,
+        "short_description": short_description,
+        "thumbnail_url": thumbnail_url,
+        "image_url": image_url,
         "image_credit": summary.get("image_credit") or "",
         "image_license": summary.get("image_license") or "",
         "source_title": primary_source,
@@ -2957,6 +3730,20 @@ EXPLORE_CATEGORY_ALIASES = {
     "tours": "guided",
     "ticket": "guided",
     "tickets": "guided",
+    "view": "viewpoint",
+    "views": "viewpoint",
+    "overlook": "viewpoint",
+    "overlooks": "viewpoint",
+    "scenicview": "viewpoint",
+    "scenicviews": "viewpoint",
+    "waterfalls": "waterfall",
+    "falls": "waterfall",
+    "mountain": "peak",
+    "mountains": "peak",
+    "cabin": "lodging",
+    "cabins": "lodging",
+    "hut": "lodging",
+    "huts": "lodging",
     "restaurant": "food",
     "restaurants": "food",
     "hotel": "lodging",
@@ -6841,10 +7628,10 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
             },
             "air_quality": {"available": False},
             "trailhead_units": unit_meta,
-            "source_label": "Open-Meteo",
+            "source_label": "Weather",
             "health_summary": {
-                "air_quality_source": "Unavailable",
-                "advisory": "Weather is temporarily unavailable. Verify severe weather with official alerts before travel.",
+                "air_quality_source": "Not checked",
+                "advisory": "Weather did not load. Check conditions before travel.",
             },
             "error": reason,
         }
@@ -6892,9 +7679,9 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
         else:
             data["air_quality"] = {"available": False}
     data["trailhead_units"] = unit_meta
-    data["source_label"] = "Open-Meteo"
+    data["source_label"] = "Weather"
     data["health_summary"] = {
-        "air_quality_source": "Open-Meteo air quality" if data.get("air_quality", {}).get("current") else "Unavailable",
+        "air_quality_source": "Weather" if data.get("air_quality", {}).get("current") else "Not checked",
         "advisory": "Weather, air quality, pollen, and UV forecasts are modeled estimates. Verify severe weather with official alerts before travel.",
     }
 
@@ -7498,7 +8285,7 @@ async def api_place_reservation_status(trailhead_place_id: str, start_date: str 
         "alerts": alerts,
         "start_date": start_date or None,
         "end_date": end_date or None,
-        "source_freshness": f"Official/source data last seen {datetime.utcfromtimestamp(int(place.get('last_seen') or time.time())).strftime('%Y-%m-%d')}. Verify availability with the official source.",
+        "source_freshness": f"Last checked {datetime.utcfromtimestamp(int(place.get('last_seen') or time.time())).strftime('%Y-%m-%d')}. Verify current availability before you go.",
         "notes": metadata.get("reservation_notes") or ("Reserve on Recreation.gov when available." if ridb_backed else "Check current availability before you go."),
     }
 
@@ -7918,7 +8705,7 @@ def _map_context_normalize_mapbox_feature(feature: dict, *, category: str = "", 
         props.get("text"),
         feature.get("text"),
         feature.get("place_name"),
-        "Mapbox place",
+        "Selected place",
     )
     address = _first_text(
         props.get("full_address"),
@@ -7961,7 +8748,7 @@ def _map_context_normalize_mapbox_feature(feature: dict, *, category: str = "", 
         "type": place_type,
         "subtype": ", ".join(categories) or feature_type or place_type,
         "source": source,
-        "source_label": "Mapbox Search",
+        "source_label": "Place search",
         "provider": "mapbox",
         "provider_place_id": mapbox_id or stable_id,
         "place_id": mapbox_id or stable_id,
@@ -9484,6 +10271,8 @@ COUNTRY_QUERY_HINTS = {
     "canada": "ca", "alberta": "ca", "british columbia": "ca", "ontario": "ca", "quebec": "ca", "vancouver": "ca", "banff": "ca",
     "mexico": "mx", "baja": "mx", "sonora": "mx", "chihuahua": "mx", "oaxaca": "mx", "mexico city": "mx",
     "united states": "us", "usa": "us", "u.s.a": "us", "u.s.": "us",
+    "moab": "us", "big sur": "us", "yosemite": "us", "grand canyon": "us", "grand teton": "us",
+    "yellowstone": "us", "zion": "us", "arches": "us", "canyonlands": "us", "glacier national": "us",
     "france": "fr", "paris france": "fr", "paris, france": "fr", "eiffel tower": "fr", "eifel tower": "fr", "louvre": "fr",
     "italy": "it", "rome": "it", "venice": "it", "florence": "it",
     "spain": "es", "barcelona": "es", "madrid": "es",
@@ -9658,6 +10447,28 @@ def _geocode_candidate_score(query: str, place: dict, country_filter: str = "", 
         pass
     return score
 
+def _geocode_candidate_name_matches_query(query: str, place: dict) -> bool:
+    needle = _normalize_geocode_text(query)
+    name = _normalize_geocode_text(str(place.get("name") or ""))
+    if not needle or not name:
+        return False
+    if name == needle or name.startswith(needle) or needle.startswith(name):
+        return True
+    if needle in name or name in needle:
+        return True
+    terms = [term for term in needle.split() if len(term) >= 2]
+    return bool(terms and all(term in name for term in terms))
+
+def _geocode_filter_name_matched_candidates(query: str, places: list[dict], prefer_search_center: bool) -> list[dict]:
+    if not prefer_search_center or not _geocode_query_prefers_locality(query):
+        return places
+    matched = [
+        place for place in places
+        if _geocode_candidate_name_matches_query(query, place)
+        or str(place.get("source") or "").lower() == "trailhead_landmark"
+    ]
+    return matched or places
+
 def _explore_geocode_country_code(item: dict) -> str | None:
     hay = _normalize_geocode_text(" ".join([
         str(item.get("region") or ""),
@@ -9782,8 +10593,9 @@ def _merge_geocode_candidates(groups: list[list[dict]], limit: int) -> list[dict
     return merged[:limit]
 
 def _rank_geocode_candidates(query: str, places: list[dict], country_filter: str = "", prefer_search_center: bool = False, limit: int = 8) -> list[dict]:
+    places = _geocode_filter_name_matched_candidates(query, [place for place in places if isinstance(place, dict)], prefer_search_center)
     ranked = sorted(
-        [place for place in places if isinstance(place, dict)],
+        places,
         key=lambda place: (
             _geocode_candidate_score(query, place, country_filter, prefer_search_center),
             str(place.get("name") or ""),
@@ -9827,6 +10639,7 @@ def _resolve_geocode_candidates(query: str, places: list[dict], country_filter: 
         and isinstance(place.get("lat"), (int, float))
         and isinstance(place.get("lng"), (int, float))
     ]
+    valid = _geocode_filter_name_matched_candidates(query, valid, prefer_search_center)
     if not valid:
         return {"status": "not_found", "query": query, "normalized_query": query, "selected": None, "alternatives": [], "rejected": [], "reason": "no_candidates"}
     def score_place(place: dict) -> float:
@@ -10055,7 +10868,7 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = "", prefer:
                     return _rank_geocode_candidates(query, merged, country_filter, prefer_search_center, limit) if prefer_search_center else merged
                 raise HTTPException(502, f"Geocode failed: {e}")
 
-    cache_key = f"geocode:{query.lower()}:{country_filter}:{limit}:{_normalize_geocode_text(prefer)}"
+    cache_key = f"geocode:v2:{query.lower()}:{country_filter}:{limit}:{_normalize_geocode_text(prefer)}"
     return await runtime_cached_call(
         cache_key,
         10 * 60,
@@ -10072,7 +10885,7 @@ async def resolve_geocode_place(q: str, limit: int = 8, countrycodes: str = "", 
         return {"status": "not_found", "query": "", "normalized_query": "", "selected": None, "alternatives": [], "rejected": [], "reason": "empty_query"}
     limit = max(2, min(int(limit or 8), 10))
     country_filter = _clean_countrycodes(countrycodes) or _countrycodes_for_query(query)
-    prefer_search_center = _geocode_prefer_search_center(prefer)
+    prefer_search_center = _geocode_prefer_search_center(prefer) or (not str(prefer or "").strip() and _geocode_query_prefers_locality(query))
     normalized_query = re.sub(r"\s+", " ", query).strip()
     places = await geocode_places(normalized_query, limit, country_filter, prefer)
     result = _resolve_geocode_candidates(normalized_query, places, country_filter, prefer_search_center)
@@ -11763,12 +12576,14 @@ def _point_in_pakistan(lat: float, lng: float) -> bool:
 def _trail_difficulty_label(profile: dict) -> str:
     value = str(profile.get("difficulty") or "").strip()
     if value:
+        if re.fullmatch(r"scout first", value, re.I):
+            return "Check access"
         return value[:80]
     length = profile.get("length_mi")
     try:
         miles = float(length)
     except Exception:
-        return "Scout first"
+        return "Check access"
     if miles >= 8:
         return "Hard"
     if miles >= 3:
@@ -11795,7 +12610,7 @@ def _trail_source_pack(profile: dict) -> dict:
         })
     return {
         "quality": catalog.get("quality") or ("official" if official and profile.get("source") != "osm" else "open"),
-        "primary": profile.get("source_label") or "Open trail data",
+        "primary": profile.get("source_label") or "Trail details",
         "official_url": official,
         "sources": sources,
         "photos": profile.get("photos") or [],
@@ -11838,7 +12653,7 @@ def _trail_profile_to_explore_card(profile: dict) -> dict:
         "id": public.get("id"),
         "trail_id": public.get("id"),
         "title": public.get("name") or "Trail",
-        "difficulty": public.get("difficulty") or "Scout first",
+        "difficulty": public.get("difficulty") or "Check access",
         "feature_type": public.get("feature_type") or "trail",
         "feature_label": public.get("feature_label") or "Trail",
         "trekking_only": bool(public.get("trekking_only")),
@@ -11865,7 +12680,7 @@ def _trail_profile_to_explore_card(profile: dict) -> dict:
             "Trekking-only" if public.get("trekking_only") else "",
             "Guide required" if public.get("guide_required") else "",
             "Glacier context" if public.get("feature_type") == "glacier" or public.get("glacier_crossing") else "",
-            "Map geometry available" if public.get("geometry") or public.get("geometry_ref") else "",
+            "Route detail available" if public.get("geometry") or public.get("geometry_ref") else "",
             public.get("source_label") or "",
             "Photo source credited" if first_photo else "",
         ] if h],
@@ -11899,7 +12714,7 @@ def _trail_profile_rank(profile: dict, center_lat: float | None = None, center_l
         rank += 35
     provenance = (profile or {}).get("provenance") if isinstance((profile or {}).get("provenance"), dict) else {}
     catalog = provenance.get("catalog") if isinstance(provenance.get("catalog"), dict) else {}
-    if catalog.get("route_type") in {"Loop", "Out and back", "Mapped route"}:
+    if catalog.get("route_type") in {"Loop", "Out and back", "Mapped route", "Trail route"}:
         rank += 10
     if generated and preview and length < 0.15:
         rank -= 140
@@ -11959,15 +12774,15 @@ def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: l
             "rank": 1,
             "hero_rank": 1,
             "tags": ["treks", "glaciers", "pakistan", "karakoram"] if is_pakistan else ["trails", "hiking", "trailheads"],
-            "hook": "Trek and glacier cards for northern Pakistan." if is_pakistan else "Trail cards built from open map data and attributed sources.",
-            "short_description": "Compare trek, glacier, base-camp, staging, permit, and guide context." if is_pakistan else "Compare trail distance, route type, map context, and source-backed photos near this stop.",
+            "hook": "Trek and glacier cards for northern Pakistan." if is_pakistan else "Trail cards near this stop.",
+            "short_description": "Compare trek, glacier, base-camp, staging, permit, and guide context." if is_pakistan else "Compare trail distance, route type, access notes, and nearby photos.",
             "image_url": (photos[0] or {}).get("url") if photos else "",
             "image_credit": (photos[0] or {}).get("credit") if photos else "",
         },
         "card": {
             "title": title,
             "headline": "Trek and glacier options near this stop" if is_pakistan else "Trail options near this stop",
-            "summary": "Compare trek, glacier, base-camp, staging, permit, and guide context." if is_pakistan else "Compare nearby trail access, distance, route type, photos, and source links.",
+            "summary": "Compare trek, glacier, base-camp, staging, permit, and guide context." if is_pakistan else "Compare nearby trail access, distance, route type, and photos.",
             "highlight": "Route to staging points and verify permits, guide, glacier, bridge, weather, and local safety." if is_pakistan else "Check access, distance, terrain, and current conditions before starting.",
             "region": "Gilgit-Baltistan" if is_pakistan else "Nearby",
         },
@@ -11996,7 +12811,7 @@ def _trail_area_from_profiles(lat: float, lng: float, radius: float, profiles: l
                 {"title": "RGI 7.0 glacier outlines", "publisher": "NSIDC / GLIMS", "url": "https://www.glims.org/RGI/", "kind": "glacier_reference"},
             ] if is_pakistan else [{"title": "OpenStreetMap trail data", "publisher": "OpenStreetMap contributors", "kind": "geometry"}],
             "photos": photos[:12],
-            "source_note": "Mixed-source northern Pakistan planning leads. Verify all access, permits, guide requirements, glacier, bridge, weather, and local safety conditions." if is_pakistan else "Generated from open map records and enriched with credited media where available.",
+            "source_note": "Mixed-source northern Pakistan planning leads. Verify all access, permits, guide requirements, glacier, bridge, weather, and local safety conditions." if is_pakistan else "Check current access, trail status, weather, and local rules before starting.",
         },
         "facts": {"coordinates": f"{lat:.5f}, {lng:.5f}", "source_quality": "open", "last_updated": now},
         "attribution": "Gilgit-Baltistan official context, OpenStreetMap contributors, RGI/GLIMS glacier reference, and credited media sources." if is_pakistan else "Open map data and credited media sources.",
@@ -12047,12 +12862,12 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
     if re.search(r"\bgrade[1-5]\b", name, re.I):
         name = "Mapped rough track" if re.search(r"\bgrade[45]\b", name, re.I) else "Mapped backroad"
     summary = {
-        "trail": "Mapped trail route with nearby support context from Trailhead.",
-        "trailhead": "Mapped trail access point with nearby support context from Trailhead.",
-        "viewpoint": "Mapped viewpoint that can anchor a trail scouting route.",
-        "peak": "Mapped peak or summit feature for route scouting.",
-        "hot_spring": "Mapped hot spring or public bath feature near trails.",
-    }.get(kind, "Open-source trail feature with Trailhead scouting context.")
+        "trail": "Trail route with nearby access and support context.",
+        "trailhead": "Trail access point with nearby support context.",
+        "viewpoint": "Viewpoint near trail and route options.",
+        "peak": "Peak or summit feature for trail planning.",
+        "hot_spring": "Hot spring or public bath feature near trails.",
+    }.get(kind, "Trail feature with nearby access context.")
     now = int(time.time())
     official_url = str(item.get("url") or "")
     if not official_url and source_id.startswith("osm_"):
@@ -12072,29 +12887,29 @@ def _trail_profile_from_open_poi(item: dict) -> dict | None:
         "summary": {"source": "Trailhead generated from open-source tags", "last_checked": now},
         "activities": {"source": "Trailhead inference", "last_checked": now},
         "catalog": {
-            "route_type": "Mapped route" if geometry else "Point or route",
+            "route_type": "Trail route" if geometry else "Access point",
             "geometry_ref": trail_id,
             "quality": "open",
-            "source_note": "Seeded from open map data with route geometry where available; verify current trail status with the land manager.",
+            "source_note": "Verify current trail status with the land manager.",
         },
     }
     return {
         "id": trail_id,
         "name": name[:180],
         "summary": summary,
-        "description": f"{summary} Verify current access, difficulty, closures, and legality with the land manager before relying on this trail profile.",
+        "description": f"{summary} Verify current access, difficulty, closures, and local rules with the land manager before starting.",
         "lat": float(lat),
         "lng": float(lng),
         "length_mi": length_mi,
-        "difficulty": "Scout first",
+        "difficulty": "Check access",
         "activities": ["Overlanding", "Hiking"] if kind in {"trail", "trailhead", "viewpoint", "peak"} else ["Overlanding"],
         "land_manager": "",
         "geometry": geometry,
-        "trailheads": [{"name": name, "lat": float(lat), "lng": float(lng), "source": "OpenStreetMap"}],
+        "trailheads": [{"name": name, "lat": float(lat), "lng": float(lng), "source": "Community listing"}],
         "official_url": official_url,
         "photos": [],
         "source": "osm",
-        "source_label": "OpenStreetMap",
+        "source_label": "Community listing",
         "provenance": provenance,
         "last_checked": now,
     }
@@ -14550,7 +15365,7 @@ def _camp_from_live_place(place: dict) -> dict | None:
         "lng": lng,
         "tags": tags,
         "land_type": land_type,
-        "description": _planner_clean_text(place.get("summary") or place.get("address") or subtype or f"{land_type} found from available place data. Confirm access and overnight rules before relying on it.", 360),
+        "description": _planner_clean_text(place.get("summary") or place.get("address") or subtype or f"{land_type} found near this area. Confirm access and overnight rules before relying on it.", 360),
         "photo_url": place.get("photo_url") or "",
         "reservable": False,
         "cost": "",
@@ -14846,11 +15661,59 @@ def _camp_first_photo_url(camp: dict) -> str:
                 return value
     return ""
 
+def _camp_public_source_label(value: object, fallback: str = "Camp listing") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return fallback
+    lowered = text.lower()
+    if "recreation.gov" in lowered or "ridb" in lowered:
+        return "Recreation.gov"
+    if "national park service" in lowered or lowered == "nps" or "official nps" in lowered:
+        return "National Park Service"
+    if "bureau of land management" in lowered or lowered == "blm" or "official blm" in lowered:
+        return "BLM"
+    if "forest service" in lowered or lowered == "usfs":
+        return "US Forest Service"
+    if "openstreetmap" in lowered or lowered == "osm" or "map contributor" in lowered:
+        return "Community listing"
+    if any(term in lowered for term in ("source data", "api", "cached", "packaged", "feature")):
+        return fallback
+    return text
+
+def _camp_public_note(value: object, fallback: str = "Verify current access, fees, closures, and availability before you go.") -> str:
+    text = _planner_clean_text(value, 320)
+    if not text:
+        return fallback
+    replacements = (
+        (r"Official RIDB source data cached by Trailhead;?\s*verify current availability on Recreation\.gov\.?", "Check Recreation.gov for current availability."),
+        (r"Official Recreation\.gov fee text;?\s*", ""),
+        (r"Official Recreation\.gov source data cached by Trailhead;?\s*verify current availability on Recreation\.gov\.?", "Check Recreation.gov for current availability."),
+        (r"Official NPS API data cached by Trailhead;?\s*verify current closures, fees, and hours with NPS\.?", "Check park guidance for current closures, fees, and hours."),
+        (r"Official BLM recreation layer cached by Trailhead;?\s*verify local closures and fire restrictions with the field office\.?", "Check local BLM guidance for closures and fire restrictions."),
+        (r"OpenStreetMap data packaged by Trailhead;?\s*verify fees, closures, and availability with the land manager\.?", "Community listing. Verify fees, closures, and availability with the land manager."),
+        (r"Camp source data packaged by Trailhead;?\s*verify current access, fees, closures, and availability with the source\.?", "Camp listing. Verify current access, fees, closures, and availability before you go."),
+        (r"Camp or stay location from available public source data\.?", "Camp or stay location from public guidance."),
+        (r"\bOfficial/source data\b", "Public guidance"),
+        (r"\bsource data\b", "listing"),
+        (r"\bAPI data\b", "guidance"),
+        (r"\bcached by Trailhead\b;?\s*", ""),
+        (r"\bpackaged by Trailhead\b;?\s*", ""),
+        (r"\bRIDB\b", "Recreation.gov"),
+    )
+    for pattern, replacement in replacements:
+        text = re.sub(pattern, replacement, text, flags=re.I)
+    text = re.sub(r"\s+", " ", text).strip(" ;")
+    return text or fallback
+
 def _camp_lightweight_record(camp: dict) -> dict:
     photo_url = _camp_first_photo_url(camp)
     photos = [photo_url] if photo_url else []
     source = str(camp.get("source") or camp.get("verified_source") or "").strip()
     freshness = camp.get("last_checked") or camp.get("updated_at") or camp.get("fetched_at")
+    summary = _camp_public_note(camp.get("summary") or camp.get("description"), "")
+    description = _camp_public_note(camp.get("description") or camp.get("summary"), "")
+    source_badge = _camp_public_source_label(camp.get("source_badge") or camp.get("verified_source") or source)
+    source_freshness = _camp_public_note(camp.get("source_freshness") or camp.get("freshness_label"), "")
     return {
         "id": camp.get("id") or _camp_merge_key(camp),
         "name": camp.get("name") or "Camp stay",
@@ -14858,8 +15721,8 @@ def _camp_lightweight_record(camp: dict) -> dict:
         "lng": camp.get("lng"),
         "tags": camp.get("tags") or [],
         "land_type": camp.get("land_type") or camp.get("type") or "Campground",
-        "summary": camp.get("summary") or _planner_clean_text(camp.get("description"), 220),
-        "description": _planner_clean_text(camp.get("description") or camp.get("summary"), 260),
+        "summary": summary or "Verify current access, fees, closures, and availability before you go.",
+        "description": description or summary or "Verify current access, fees, closures, and availability before you go.",
         "photo_url": photo_url,
         "photos": photos,
         "has_photo": bool(photo_url),
@@ -14868,12 +15731,12 @@ def _camp_lightweight_record(camp: dict) -> dict:
         "url": camp.get("url") or "",
         "ada": bool(camp.get("ada")),
         "source": camp.get("source") or "",
-        "verified_source": camp.get("verified_source") or "",
-        "source_badge": camp.get("source_badge") or camp.get("verified_source") or source,
+        "verified_source": _camp_public_source_label(camp.get("verified_source") or source, ""),
+        "source_badge": source_badge,
         "source_confidence": _camp_source_confidence(camp),
-        "source_freshness": camp.get("source_freshness") or "",
+        "source_freshness": source_freshness,
         "last_checked": freshness,
-        "freshness_label": camp.get("source_freshness") or camp.get("freshness_label") or ("Source checked" if freshness else "Freshness unknown"),
+        "freshness_label": source_freshness or ("Recently checked" if freshness else "Verify before you go"),
         "phone": camp.get("phone") or "",
         "address": camp.get("address") or "",
         "rating": camp.get("rating"),
@@ -15054,7 +15917,7 @@ def _camp_from_pack_point(point: dict, region: str, generated_at: int = 0) -> di
         "tags": sorted(set(tags)),
         "land_type": subtype,
         "summary": point.get("summary") or point.get("description") or point.get("address") or "",
-        "description": point.get("description") or point.get("summary") or point.get("source_freshness") or "Camp or stay location from available public source data. Verify current access, fees, closures, and availability before relying on it.",
+        "description": point.get("description") or point.get("summary") or point.get("source_freshness") or "Camp or stay location from public guidance. Verify current access, fees, closures, and availability before you go.",
         "photo_url": point.get("photo_url") or "",
         "photos": [point.get("photo_url")] if point.get("photo_url") else [],
         "reservable": bool(point.get("reservable")),
@@ -15066,7 +15929,7 @@ def _camp_from_pack_point(point: dict, region: str, generated_at: int = 0) -> di
         "source": source,
         "verified_source": source_badge,
         "source_badge": source_badge,
-        "source_freshness": point.get("source_freshness") or "Camp source data packaged by Trailhead; verify current access, fees, closures, and availability with the source.",
+        "source_freshness": _camp_public_note(point.get("source_freshness") or "Camp listing. Verify current access, fees, closures, and availability before you go."),
         "source_confidence": point.get("source_confidence") or _camp_source_confidence({"source": source, "verified_source": source_badge}),
         "last_checked": int(point.get("last_checked") or generated_at or time.time()),
         "phone": point.get("phone") or "",
@@ -15916,7 +16779,7 @@ async def _select_camp_for_window(
             if strong else
             f"{display_name} is the best photo-backed overnight option here."
             if require_photos and not best else
-            f"{display_name} is the best legal overnight option here. Review the fit before navigation."
+            f"{display_name} is the best overnight fit here. Review access and rules before navigation."
             if best else
             f"No overnight is locked for {label.lower()} yet. Keep it as a review stop or choose a camp manually."
         )
@@ -16525,7 +17388,7 @@ async def excursions_nearby(body: ExcursionNearbyRequest):
                 item=place, center_lat=center_lat, center_lng=center_lng,
                 route=route, max_distance_mi=radius,
                 xtype=xtype, source=str(place.get("source") or "osm"),
-                source_label=str(place.get("source_label") or "Open place data"),
+                source_label=str(place.get("source_label") or "Trailhead"),
                 summary=place.get("address") or place.get("subtype") or "",
                 best_for="Quick stop" if ptype in {"water", "viewpoint"} else "Side trip",
             )
@@ -17819,7 +18682,7 @@ async def nearby_places(
         strip_lightweight_google_rich_fields(item)
         if _is_official_free_place(item):
             item["official_free"] = True
-            item.setdefault("source_badge", item.get("source_label") or item.get("verified_source") or "Open official data")
+            item.setdefault("source_badge", item.get("source_label") or item.get("verified_source") or "Official details")
             item.setdefault("source_freshness", "Verify current closures, hours, fees, and access before you go.")
         item.setdefault("category_access", {
             "explore_unlocked": access_meta["explore_unlocked"],
@@ -17846,8 +18709,8 @@ async def search_place_card(q: str, lat: float | None = None, lng: float | None 
             "subtype": "City" if _query_looks_like_locality(query) else "poi",
             "display_type": "City" if _query_looks_like_locality(query) else "Place",
             "source": "search",
-            "source_label": "Map search",
-            "summary": "Selected map place.",
+            "source_label": "Place search",
+            "summary": "Selected place.",
             "photo_status": "placeholder",
         }
     return None
@@ -17865,6 +18728,9 @@ BROAD_MAP_PLACE_TYPES = {
     "suburb",
     "district",
     "region",
+    "administrative",
+    "boundary",
+    "settlement",
 }
 
 
@@ -17896,9 +18762,9 @@ def _is_broad_map_place(body: MapCardResolveRequest | None = None, card: dict | 
         (card or {}).get("source_label"),
     ))
     name = str((card or {}).get("name") or getattr(body, "name", "") or "")
-    if typed.intersection(BROAD_MAP_PLACE_TYPES) and any(token in source for token in ("search", "mapbox", "map search", "geocode")):
+    if typed.intersection(BROAD_MAP_PLACE_TYPES) and any(token in source for token in ("search", "mapbox", "map search", "geocode", "nominatim")):
         return True
-    return any(token in source for token in ("search", "mapbox", "geocode")) and _query_looks_like_locality(name)
+    return any(token in source for token in ("search", "mapbox", "geocode", "nominatim")) and _query_looks_like_locality(name)
 
 
 def _broad_place_display_type(body: MapCardResolveRequest | None = None, card: dict | None = None) -> str:
@@ -18076,7 +18942,7 @@ async def _open_place_wiki_profile(name: str, lat: float, lng: float, client: ht
             "source": "wikipedia",
             "source_label": "Wikipedia",
             "source_badge": "Wikipedia / Wikimedia",
-            "source_freshness": "Wikipedia/Wikimedia context cached by Trailhead; verify current local conditions with official sources.",
+            "source_freshness": "Verify current local conditions before you go.",
             "last_checked": int(time.time()),
         }
         set_cached("campsite_cache", cache_key, profile)
@@ -18140,14 +19006,14 @@ async def _nominatim_town_profile(name: str, lat: float, lng: float, client: htt
                 "wikidata_id": extratags.get("wikidata") or "",
                 "wikipedia_title": wiki_title,
                 "source": "osm",
-                "source_label": "OpenStreetMap",
-                "source_badge": "OpenStreetMap / Nominatim",
-                "source_freshness": "OpenStreetMap/Nominatim place identity cached by Trailhead; verify current local conditions with official sources.",
+                "source_label": "Community listing",
+                "source_badge": "Community listing",
+                "source_freshness": "Verify current local conditions before you go.",
                 "last_checked": int(time.time()),
             }
             if image:
                 profile["photo_url"] = image
-                profile["photos"] = [{"url": image, "caption": profile["name"], "credit": "OpenStreetMap linked open image", "source": "OpenStreetMap"}]
+                profile["photos"] = [{"url": image, "caption": profile["name"], "credit": "Linked image", "source": "Community listing"}]
             return profile
     except Exception:
         return None
@@ -18187,7 +19053,7 @@ async def _geonames_town_profile(name: str, lat: float, lng: float, client: http
             "source": "geonames",
             "source_label": "GeoNames",
             "source_badge": "GeoNames / Wikipedia",
-            "source_freshness": "GeoNames/Wikipedia context cached by Trailhead; verify current local conditions with official sources.",
+            "source_freshness": "Verify current local conditions before you go.",
             "last_checked": int(time.time()),
         }
     except Exception:
@@ -18292,7 +19158,7 @@ def _map_card_base_from_request(body: MapCardResolveRequest) -> dict:
         "selection_confidence": body.selection_confidence,
         "raw_feature": body.raw_feature,
         "photo_url": body.photo_url,
-        "summary": body.summary or ("Mapped trail route with nearby support context from Trailhead." if card_type == "trail" else "Selected map place."),
+        "summary": body.summary or ("Trail route with nearby camps, fuel, and access notes." if card_type == "trail" else "Selected place."),
         "address": body.address,
         "rating": body.rating,
         "rating_count": body.rating_count,
@@ -18670,7 +19536,7 @@ def _normalize_map_card_display(card: dict, body: MapCardResolveRequest) -> dict
         normalized["type"] = "locality" if display in {"City", "Town", "Neighborhood", "Region"} else ctype
         normalized["subtype"] = display
         normalized["display_type"] = display
-        normalized.setdefault("source_label", "Map search")
+        normalized.setdefault("source_label", "Place")
         normalized.setdefault("photo_status", "open_photo" if normalized.get("photo_url") or normalized.get("photos") else "placeholder")
     elif ctype == "camp":
         display = "Group Site" if re.search(r"\b(group\s+sites?|group\s+campsites?)\b", name_text, re.I) else "Campground"
@@ -18742,6 +19608,26 @@ def _is_weak_card_summary(value: object) -> bool:
     if clean in weak:
         return True
     return clean.startswith("loading place details")
+
+
+def _clean_map_card_summary(card: dict, body: MapCardResolveRequest) -> dict:
+    if not _is_weak_card_summary(card.get("summary")):
+        return card
+    ctype = _smart_pack_type(card.get("type"))
+    if ctype == "peak":
+        card["summary"] = "Peak or summit feature. Verify route, access, weather, and exposure before using it as a destination."
+    elif ctype == "viewpoint":
+        card["summary"] = "Viewpoint or overlook. Verify current access, parking, and road conditions before relying on it."
+    elif ctype == "trailhead":
+        card["summary"] = "Trail access point. Check current closures, parking rules, and trail conditions before heading out."
+    elif ctype == "hot_spring":
+        card["summary"] = "Hot spring or public bath feature. Verify access, rules, fees, and current conditions before visiting."
+    elif _is_broad_map_place(body, card):
+        display = str(card.get("display_type") or "place").lower()
+        card["summary"] = f"Starting point for nearby camps, trails, scenic stops, events, and trip services around this {display}."
+    else:
+        card["summary"] = card.get("address") or "Selected place."
+    return card
 
 
 PLACE_CONTEXT_CATEGORIES = [
@@ -18991,6 +19877,9 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
     cache_key = _map_card_cache_key(body)
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=MAP_CARD_SAFE_TTL_SECONDS)
     if cached is not None and not _contains_restricted_provider(cached):
+        if isinstance(cached, dict) and isinstance(cached.get("card"), dict):
+            cached["card"] = _clean_map_card_summary(_normalize_map_card_display(dict(cached["card"]), body), body)
+            cached["display_source_label"] = _map_card_display_source_label(cached["card"], body, cached.get("enriched_by"))
         cached["cached"] = True
         cached["cache_status"] = "hit"
         cached.setdefault("timings", {})["total_ms"] = round((time.time() - started) * 1000)
@@ -19126,26 +20015,12 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
                 card["official_url"] = town_profile.get("official_url")
                 card["website"] = town_profile.get("official_url")
             card["town_profile"] = town_profile
-            card["enriched_by"] = town_profile.get("source_label") or "Open town profile"
+            card["enriched_by"] = town_profile.get("source_label") or "Town details"
             card.setdefault("source_badge", town_profile.get("source_badge"))
             card.setdefault("source_freshness", town_profile.get("source_freshness"))
             card.setdefault("last_checked", town_profile.get("last_checked"))
     card = _normalize_map_card_display(card, body)
-    if _is_weak_card_summary(card.get("summary")):
-        ctype = _smart_pack_type(card.get("type"))
-        if ctype == "peak":
-            card["summary"] = "Mapped peak or summit feature. Verify route, access, weather, and exposure before using it as a destination."
-        elif ctype == "viewpoint":
-            card["summary"] = "Mapped viewpoint or overlook. Verify current access, parking, and road conditions before relying on it."
-        elif ctype == "trailhead":
-            card["summary"] = "Mapped trail access point. Check current closures, parking rules, and trail conditions before heading out."
-        elif ctype == "hot_spring":
-            card["summary"] = "Mapped hot spring or public bath feature. Verify access, rules, fees, and current conditions before visiting."
-        elif _is_broad_map_place(body, card):
-            display = card.get("display_type") or "place"
-            card["summary"] = f"Use this {str(display).lower()} as a starting point for nearby camps, trails, scenic stops, events, and trip services."
-        else:
-            card["summary"] = card.get("address") or "Selected map place."
+    card = _clean_map_card_summary(card, body)
     card["source_label"] = card.get("source_label") or card.get("source") or "Trailhead"
     context_status = _context_status(related, errors)
     related["context_status"] = context_status
@@ -19579,7 +20454,7 @@ def _smart_place_from_poi(item: dict, center_lat: float, center_lng: float, rout
         "lng": lng,
         "type": ptype,
         "source": source,
-        "source_label": item.get("source_label") or item.get("attribution") or "Open place data",
+        "source_label": item.get("source_label") or item.get("attribution") or "Trailhead",
         "confidence": _excursion_source_confidence(source),
         "distance_mi": round(_haversine_m(center_lat, center_lng, lat, lng) / 1609.344, 2),
         "route_distance_mi": _excursion_route_distance_mi(center_lat, center_lng, {"lat": lat, "lng": lng}, route),
@@ -19645,7 +20520,7 @@ async def _enrich_nearby_card_photos(items: list[dict], limit: int = 24) -> list
             item["photos"] = found
             item["photo_url"] = found[0].get("url") if isinstance(found[0], dict) else found[0]
             item["photo_status"] = "open_photo"
-            item.setdefault("source_badge", item.get("source_label") or item.get("source") or "Open photo")
+            item.setdefault("source_badge", item.get("source_label") or item.get("source") or "Photo")
         else:
             item["photo_status"] = "placeholder"
         return item
@@ -19762,7 +20637,7 @@ async def nearby_smart_pack(body: NearbySmartPackRequest, user: dict | None = De
         strip_lightweight_google_rich_fields(item)
         if _is_official_free_place(item):
             item["official_free"] = True
-            item.setdefault("source_badge", item.get("source_label") or item.get("verified_source") or "Open official data")
+            item.setdefault("source_badge", item.get("source_label") or item.get("verified_source") or "Official details")
             item.setdefault("source_freshness", "Verify current closures, hours, fees, and access before you go.")
         ptype = _smart_pack_type(item.get("type"))
         if _is_low_value_generic_blm_place(item, keep_services=True):
@@ -20153,7 +21028,7 @@ def _normalize_pack_point(item: dict, category: str) -> dict | None:
             "tags": item.get("tags") if isinstance(item.get("tags"), list) else [],
             "amenities": item.get("amenities") if isinstance(item.get("amenities"), list) else [],
             "site_types": item.get("site_types") if isinstance(item.get("site_types"), list) else [],
-            "source_badge": item.get("source_badge") or item.get("verified_source") or item.get("source_label") or item.get("source") or "Camp source",
+            "source_badge": item.get("source_badge") or item.get("verified_source") or item.get("source_label") or item.get("source") or "Camp listing",
             "source_freshness": item.get("source_freshness") or "Verify current access, fees, closures, and availability before you go.",
             "last_checked": int(item.get("last_checked") or time.time()),
         })
@@ -20260,7 +21135,7 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
     """Return lightweight Explore cards for scalable browsing."""
     catalog = _load_explore_catalog()
     places = list(catalog.get("places") or [])
-    query_terms = _explore_query_terms(q)
+    query_terms = _explore_query_terms_for_category(q, category)
     if query_terms:
         places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if category:
@@ -20271,7 +21146,14 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
             places,
             _official_cache_search_profiles(q=q, category=category, limit=min(max(limit + cursor + 40, 40), 120)),
         )
+        if query_terms:
+            places = [place for place in places if _explore_query_terms_match(place, query_terms)]
+        if category:
+            places = [place for place in places if _explore_place_matches_category_request(place, requested)]
+    if query_terms:
+        places = [place for place in places if not _explore_skip_for_broad_search(place, query_terms)]
     places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
+    places = _dedupe_ranked_explore_profiles(places)
     cursor = max(0, int(cursor or 0))
     limit = max(1, min(int(limit or 500), 1000))
     items = [_explore_place_index_item(place) for place in places[cursor:cursor + limit]]
@@ -20443,6 +21325,10 @@ async def explore_places(
         official_places.extend(_official_cache_nearby_profiles(lat, lng, category=category, limit=min(max(limit + cursor + 30, 30), 120)))
     if official_places:
         places = _merge_explore_profile_lists(places, official_places)
+        if query_terms:
+            places = [place for place in places if _explore_query_terms_match(place, query_terms)]
+        if category:
+            places = [place for place in places if _explore_place_matches_category_request(place, requested)]
     if lat is not None and lng is not None and mode in {"nearby", "trip"}:
         ranked = []
         for place in places:
@@ -20458,6 +21344,7 @@ async def explore_places(
         places = sorted(ranked, key=lambda p: (p.get("summary") or {}).get("distance_m", 999999999))
     else:
         places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
+    places = _dedupe_ranked_explore_profiles(places)
     cursor = max(0, int(cursor or 0))
     limit = max(1, min(limit, 100))
     page = places[cursor:cursor + limit]
@@ -20502,6 +21389,10 @@ def _explore_enrichment_catalog_candidates(q: str = "", category: str = "", plac
             places,
             _official_cache_search_profiles(q=q, category=category, limit=max(limit * 3, 12)),
         )
+        if query_terms:
+            places = [place for place in places if _explore_query_terms_match(place, query_terms)]
+        if category:
+            places = [place for place in places if _explore_place_matches_category_request(place, requested)]
     places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
     return places[:max(1, min(int(limit or 8), 24))]
 

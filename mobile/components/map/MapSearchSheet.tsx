@@ -195,7 +195,7 @@ export default function MapSearchSheet({
                       </View>
                       <View style={s.resultCopy}>
                         <Text style={s.resultName}>{item.name}</Text>
-                        <Text style={s.resultMeta}>{cleanSearchSourceLabel(item.source_label, 'Recent search')}</Text>
+                        <Text style={s.resultMeta}>{cleanSearchSourceLabel(item.source_label, 'Recent')}</Text>
                       </View>
                     </TouchableOpacity>
                   ))
@@ -262,7 +262,7 @@ function cleanLabel(value?: string) {
 }
 
 function cleanSearchSourceLabel(value?: string | null, fallback = 'Place') {
-  return cleanExploreSourceLabel(value, fallback);
+  return cleanExploreSourceLabel(value, fallback || 'Place');
 }
 
 function searchResultDetail(place: MapSearchResultItem) {

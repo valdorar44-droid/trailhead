@@ -15,6 +15,7 @@ type WaterfallSeed = {
   safety: string;
   summary: string;
   highlight: string;
+  aliases?: string[];
 };
 
 type TrailAreaSeed = {
@@ -210,7 +211,7 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     tags: ['peaks', 'mountain', 'glacier', 'trek', 'hushe', 'khaplu'],
     thingsToDo: [
       { title: 'Hushe Approach Check', description: 'Confirm road status, local guide support, permits, and weather before leaving Khaplu/Hushe.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Access' },
-      { title: 'Gondogoro Glacier Context', description: 'Use the map card for orientation around Gondogoro and nearby high-alpine terrain.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Map context' },
+      { title: 'Gondogoro Glacier Context', description: 'Use the area card for orientation around Gondogoro and nearby high-alpine terrain.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Area context' },
     ],
     extraSources: [
       { title: 'Laila Peak, Hushe Valley', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Laila_Peak_(Hushe_Valley)', kind: 'open_reference' },
@@ -256,14 +257,14 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     officialUrl: GB_TOURISM_URL,
     publisher: 'Government of Gilgit-Baltistan',
     summary: 'Remote Hushe-side mountain area around K7 and Charakusa, best used for orientation and guided planning.',
-    highlight: 'Adds K7 and Charakusa as findable map context for experienced Khaplu/Hushe planning.',
+    highlight: 'Adds K7 and Charakusa as findable area context for experienced Khaplu/Hushe planning.',
     access: 'Approach through Khaplu and Hushe; confirm guides, permits, route status, and border-area considerations locally.',
     season: 'Summer alpine window; weather and snowpack can change plans fast.',
     safety: 'Remote alpine terrain with glacier travel, rockfall, altitude, and limited rescue options.',
     aliases: ['k7', 'k7 peak', 'charakusa valley', 'charkusa', 'khaplu k7', 'hushe k7', 'mashab k7'],
     tags: ['peaks', 'mountain', 'glacier', 'trek', 'charakusa', 'hushe'],
     thingsToDo: [
-      { title: 'Charakusa Valley Approach', description: 'Orientation point for Charakusa-area treks; confirm local conditions and support before travel.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Map context' },
+      { title: 'Charakusa Valley Approach', description: 'Orientation point for Charakusa-area treks; confirm local conditions and support before travel.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Area context' },
       { title: 'K7 View / Climber Context', description: 'K7 is a serious mountaineering objective; keep this as a planning reference, not a casual trail.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Peak context' },
     ],
     extraSources: [
@@ -1041,7 +1042,7 @@ const TRAIL_AREA_SEEDS: TrailAreaSeed[] = [
         typical_time: '3-4 hrs',
         area: 'Newfound Gap Road',
         image_url: SMOKIES_IMAGE,
-        summary: 'Short, steep climb with a protected overlook endpoint.',
+        summary: 'Short, steep climb to a protected overlook.',
         description: 'Steep grades, wet roots, and weather make this harder than the mileage suggests. Respect closure boundaries.',
         best_season: 'Spring through fall',
         dogs: 'Not allowed',
@@ -1229,6 +1230,7 @@ const WATERFALLS: WaterfallSeed[] = [
     safety: 'Remote canyon travel, heat, water crossings, and tribal rules',
     summary: 'Blue-green Grand Canyon waterfall on Havasu Creek inside Havasupai tribal lands.',
     highlight: 'A permit-controlled canyon waterfall that belongs in planning only after access, dates, and tribal rules are confirmed.',
+    aliases: ['Grand Canyon', 'Grand Canyon National Park', 'Havasupai', 'Havasu Creek', 'Arizona waterfalls'],
   },
   {
     title: 'Shoshone Falls',
@@ -1593,7 +1595,7 @@ function buildTrailAreaPlace(seed: TrailAreaSeed): ExplorePlaceProfile {
       what_to_know: seed.safety,
       best_time_to_stop: seed.season,
       access_notes: seed.access,
-      nearby_context: 'Use the map to layer trailheads, campgrounds, parking, fuel, weather, and road access around these hikes.',
+      nearby_context: 'Use the area card to compare trailheads, campgrounds, parking, fuel, weather, and road access around these hikes.',
     },
     audio_script: story,
     wiki_extract: '',
@@ -1658,11 +1660,21 @@ function difficultyRangeLabel(trails: ExploreTrailCard[]) {
 
 function trailSourcePackDescription(trail: ExploreTrailCard) {
   const parts = [
-    `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi · ${trail.route_type} · ${trail.difficulty}`,
+    `${formatCuratedMiles(trail.distance_mi)} · ${trail.route_type} · ${trail.difficulty}`,
     trail.summary,
     trail.description,
   ].map(part => String(part || '').trim().replace(/\.+$/, '')).filter(Boolean);
   return parts.length ? `${parts.join('. ')}.` : '';
+}
+
+function formatCuratedMiles(mi?: number | null) {
+  if (mi == null || !Number.isFinite(Number(mi))) return 'Check distance';
+  const value = Number(mi);
+  if (value <= 0) return 'Check distance';
+  if (value < 1) return 'Under 1 mi';
+  if (value >= 10) return `${Math.round(value)} mi`;
+  const rounded = Number(value.toFixed(1));
+  return `${Number.isInteger(rounded) ? Math.round(rounded) : rounded} mi`;
 }
 
 function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlaceProfile {
@@ -1690,12 +1702,12 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
     subcategories: ['waterfalls', 'viewpoints', 'trails'],
     quality: 'official_plus_open_media',
     quality_score: 86,
-    search_aliases: ['waterfall', 'waterfalls', 'falls', 'cascade', seed.region],
+    search_aliases: ['waterfall', 'waterfalls', 'falls', 'cascade', seed.region, ...(seed.aliases ?? [])],
     best_season: seed.season,
     access: { summary: seed.access },
     safety: { summary: seed.safety },
     sources: [
-      { title: `${seed.title} access`, publisher: 'Official source', url: seed.officialUrl, kind: 'official' },
+      { title: `${seed.title} access`, publisher: 'Land manager', url: seed.officialUrl, kind: 'official' },
       { title: `${seed.title} image reference`, publisher: 'Wikimedia Commons', url: seed.wikiUrl, kind: 'open_media' },
     ],
     card: {
@@ -1726,7 +1738,7 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
       image_credit: 'Wikimedia Commons',
       image_license: 'Open image reference',
       source_url: seed.officialUrl,
-      source_title: 'Official access source',
+      source_title: 'Access guide',
     },
     profile: {
       hook: seed.highlight,
@@ -1736,16 +1748,16 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
       what_to_know: `${seed.access}. ${seed.safety}.`,
       best_time_to_stop: seed.season,
       access_notes: seed.access,
-      nearby_context: 'Use the area map to layer trailheads, campgrounds, parking, fuel, weather, and road access around this waterfall.',
+      nearby_context: 'Use the area card to compare trailheads, campgrounds, parking, fuel, weather, and road access around this waterfall.',
     },
     audio_script: story,
     wiki_extract: '',
     source_pack: {
       quality: 'official',
-      primary: 'Official access source',
+      primary: 'Access guide',
       official_url: seed.officialUrl,
       sources: [
-        { title: `${seed.title} access`, publisher: 'Official source', url: seed.officialUrl, kind: 'official' },
+        { title: `${seed.title} access`, publisher: 'Land manager', url: seed.officialUrl, kind: 'official' },
         { title: `${seed.title} open image`, publisher: 'Wikimedia Commons', url: seed.wikiUrl, kind: 'open_media' },
       ],
       photos: [{ url: seed.image, caption: seed.title, credit: 'Wikimedia Commons' }],
@@ -1762,19 +1774,19 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
           image_credit: 'Wikimedia Commons',
         },
       ],
-      source_note: 'Curated with official access pages and open image references. Verify current access, fees, permits, closures, and rules before you go.',
+      source_note: 'Curated with official access pages and open image references. Check current access, fees, permits, closures, and rules before you go.',
       license: 'Open image reference; verify media license at source.',
       image_asset: seed.image,
     },
     facts: {
       coordinates: `${seed.lat.toFixed(5)}, ${seed.lng.toFixed(5)}`,
       source_url: seed.officialUrl,
-      source_title: 'Official access source',
+      source_title: 'Access guide',
       official_url: seed.officialUrl,
       source_quality: 'official',
       last_updated: LAST_UPDATED,
     },
-    attribution: 'Official access source + Wikimedia Commons image reference',
+    attribution: 'Land manager guidance + Wikimedia Commons image reference',
   };
 }
 
@@ -1784,14 +1796,22 @@ function buildOfficialPlace(seed: OfficialPlaceSeed): ExplorePlaceProfile {
     { title: seed.title, publisher: seed.publisher, url: seed.officialUrl, kind: 'official' },
     ...(seed.extraSources ?? []),
   ];
+  const regionalAliases = [
+    seed.state,
+    seed.region,
+    seed.id.startsWith('explore:pk:') ? 'Pakistan' : '',
+    seed.id.startsWith('explore:pk:') ? `${seed.title} Pakistan` : '',
+    seed.id.startsWith('explore:pk:') ? `${seed.region} Pakistan` : '',
+    seed.id.startsWith('explore:pk:') ? `${seed.state} Pakistan` : '',
+  ].map(alias => alias.trim()).filter(Boolean);
   return {
     id: seed.id,
     canonical_role: 'hub',
     category: seed.category,
-    subcategories: Array.from(new Set([seed.group, ...seed.tags])),
+    subcategories: Array.from(new Set([seed.group, ...seed.tags, ...regionalAliases])),
     quality: 'official',
     quality_score: 88,
-    search_aliases: seed.aliases,
+    search_aliases: Array.from(new Set([...seed.aliases, ...regionalAliases])),
     best_season: seed.season,
     access: { summary: seed.access },
     safety: { summary: seed.safety },
@@ -1859,7 +1879,7 @@ function buildOfficialPlace(seed: OfficialPlaceSeed): ExplorePlaceProfile {
           url: item.url || seed.officialUrl,
           source_label: item.source_label || seed.publisher,
         })),
-      source_note: 'Verify access, permits, hours, road status, weather, and local rules before travel.',
+      source_note: 'Check access, permits, hours, road status, weather, and local rules before travel.',
       license: 'Public travel guidance.',
     },
     facts: {
@@ -1980,7 +2000,7 @@ function buildYosemiteParkHub(): ExplorePlaceProfile {
       visitor_centers: [
         { title: 'Yosemite Valley Visitor Center', description: 'Main visitor services in Yosemite Valley.', url: YOSEMITE_VISITOR_URL, lat: 37.7487, lng: -119.5871, source_label: 'National Park Service', category: 'Visitor center' },
       ],
-      source_note: 'Curated with National Park Service pages and open image references. Verify current reservations, road status, closures, permits, and seasonal services before you go.',
+      source_note: 'Curated with National Park Service pages and open image references. Check current reservations, road status, closures, permits, and seasonal services before you go.',
       license: 'Open image reference; verify media license at source.',
       image_asset: GLACIER_POINT_IMAGE,
     },

@@ -22,13 +22,14 @@ export type MapLegendCategoryId =
   | 'water'
   | 'sources';
 
-export type MapLegendGlyph = 'dot' | 'line' | 'dash' | 'dotted' | 'icon';
+export type MapLegendGlyph = 'dot' | 'line' | 'dash' | 'dotted' | 'icon' | 'badge';
 
 export type MapLegendItem = {
   label: string;
   detail: string;
   color: string;
   glyph: MapLegendGlyph;
+  code?: string;
   icon?: ComponentProps<typeof Ionicons>['name'];
 };
 
@@ -77,7 +78,7 @@ export const MAP_MODE_PRESETS: readonly MapModePreset[] = [
   {
     id: 'remoteRoute',
     title: 'Remote Route',
-    purpose: 'Fuel, water, repair, offline readiness, signal, and hazards.',
+    purpose: 'Fuel, water, repair, saved areas, signal, and hazards.',
     bestFor: 'long gaps',
     trust: 'Route-aware',
     icons: ['navigate-outline', 'flash-outline', 'construct-outline'],
@@ -160,16 +161,17 @@ export const MAP_LEGEND_CATEGORIES: readonly MapLegendCategory[] = [
   {
     id: 'camps',
     title: 'Camps and Stays',
-    sub: 'Pin color explains stay type and review state.',
+    sub: 'Badges match the pins on the map.',
     icon: 'bonfire-outline',
     color: '#14b8a6',
-    source: 'Camp pins can combine official campground data, public-land candidates, private stays, and Trailhead review status.',
+    source: 'Camp cards show stay type, access notes, and recent checks when they are available.',
     items: [
-      { label: 'Public/developed camp', detail: 'Official or known campground.', color: '#16a34a', glyph: 'icon', icon: 'bonfire-outline' },
-      { label: 'Dispersed candidate', detail: 'Public-land stay that still needs local access judgment.', color: '#14b8a6', glyph: 'icon', icon: 'flame-outline' },
-      { label: 'Private stay / glamping', detail: 'Partner, private, or lodging-style stay.', color: '#8b5cf6', glyph: 'icon', icon: 'home-outline' },
-      { label: 'RV park', detail: 'RV-focused services or hookups.', color: '#94a3b8', glyph: 'icon', icon: 'car-outline' },
-      { label: 'Needs review', detail: 'Legal, access, or freshness confidence is not strong yet.', color: '#f59e0b', glyph: 'icon', icon: 'alert-circle-outline' },
+      { label: 'C Campground', detail: 'Regular campground or developed public camp.', color: '#14b8a6', glyph: 'badge', code: 'C' },
+      { label: 'D Dispersed', detail: 'Primitive or dispersed stay.', color: '#8b5a2b', glyph: 'badge', code: 'D' },
+      { label: 'RV Park', detail: 'RV services or hookups.', color: '#2563eb', glyph: 'badge', code: 'RV' },
+      { label: 'P Overnight parking', detail: 'Vehicle overnight or parking-style stay.', color: '#d97706', glyph: 'badge', code: 'P' },
+      { label: 'T Tent site', detail: 'Tent or walk-in camp.', color: '#16a34a', glyph: 'badge', code: 'T' },
+      { label: 'Needs review', detail: 'Access or freshness needs another check.', color: '#f59e0b', glyph: 'icon', icon: 'alert-circle-outline' },
     ],
   },
   {
@@ -253,17 +255,17 @@ export const MAP_LEGEND_CATEGORIES: readonly MapLegendCategory[] = [
   },
   {
     id: 'sources',
-    title: 'Sources and Trust',
-    sub: 'Every major result should say where it came from and how fresh it is.',
+    title: 'Guidance',
+    sub: 'See what each place is based on.',
     icon: 'shield-checkmark-outline',
     color: '#94a3b8',
-    source: 'Source lines help separate official data, open data, inferred geometry, live feeds, and community reports.',
+    source: 'Place cards combine land-manager guidance, open references, live safety notes, and community reports.',
     items: [
-      { label: 'Official source', detail: 'NPS, USFS, BLM, state, local, NOAA, or other agency data.', color: '#22c55e', glyph: 'icon', icon: 'shield-checkmark-outline' },
-      { label: 'Open map/source', detail: 'OSM, public datasets, or open provider context.', color: '#38bdf8', glyph: 'icon', icon: 'map-outline' },
+      { label: 'Land manager', detail: 'Park, forest, refuge, state, local, weather, or safety guidance.', color: '#22c55e', glyph: 'icon', icon: 'shield-checkmark-outline' },
+      { label: 'Open reference', detail: 'Public trail and place context.', color: '#38bdf8', glyph: 'icon', icon: 'map-outline' },
       { label: 'Trailhead report', detail: 'Community contribution with confirmations and expiry when available.', color: '#f97316', glyph: 'icon', icon: 'people-outline' },
-      { label: 'Inferred', detail: 'Trailhead-derived category, difficulty, route fit, or legal-stay confidence.', color: '#f59e0b', glyph: 'icon', icon: 'sparkles-outline' },
-      { label: 'Partner/live', detail: 'Provider search, bookable activity, or live availability handoff.', color: '#8b5cf6', glyph: 'icon', icon: 'briefcase-outline' },
+      { label: 'Best estimate', detail: 'Trailhead rating when details are limited.', color: '#f59e0b', glyph: 'icon', icon: 'sparkles-outline' },
+      { label: 'Guided trips', detail: 'Bookable activity or availability handoff.', color: '#8b5cf6', glyph: 'icon', icon: 'briefcase-outline' },
     ],
   },
 ];

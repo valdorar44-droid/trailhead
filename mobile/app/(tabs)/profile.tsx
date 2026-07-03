@@ -80,7 +80,7 @@ const DEFAULT_CHECKLIST: ChecklistSection[] = [
   { title: 'Comms & Nav', icon: 'radio-outline', items: [
     { id: 'garmin', label: 'Satellite comms (InReach / SPOT)', done: false },
     { id: 'radio', label: 'CB or GMRS radio', done: false },
-    { id: 'offline', label: 'Offline maps downloaded', done: false },
+    { id: 'offline', label: 'Offline maps saved', done: false },
     { id: 'paper', label: 'Paper maps / topo backup', done: false },
   ]},
   { title: 'Provisions', icon: 'water-outline', items: [
@@ -315,7 +315,7 @@ export default function ProfileScreen() {
 
   function clearCampCacheAdmin() {
     if (!user?.is_admin || adminClearingCampCache) return;
-    Alert.alert('Clear camp cache?', 'This clears cached camp search/detail data so popular areas reload fresh source data.', [
+    Alert.alert('Clear camp cache?', 'This clears saved camp search details so popular areas reload fresh place details.', [
       { text: 'Cancel', style: 'cancel' },
       {
         text: 'Clear',
@@ -428,7 +428,7 @@ export default function ProfileScreen() {
   }, []);
 
   const refreshBookedTours = useCallback(() => {
-    loadBookedTours()
+    loadBookedTours({ includeRemote: !!user })
       .then(tours => {
         setBookedTours(tours);
         setBookedToursLoaded(true);
@@ -437,7 +437,7 @@ export default function ProfileScreen() {
         setBookedTours([]);
         setBookedToursLoaded(true);
       });
-  }, []);
+  }, [user?.id]);
 
   // Load offline trip index to show cache badges
   useEffect(() => {
@@ -1159,7 +1159,7 @@ export default function ProfileScreen() {
           <Image source={require('@/assets/icon.png')} style={s.authIcon} />
           <View>
             <Text style={s.authWordmark}>TRAILHEAD</Text>
-            <Text style={s.authTagline}>OVERLAND PLANNER</Text>
+            <Text style={s.authTagline}>TRIP TOOLS</Text>
           </View>
         </View>
         <View style={s.verifyCard}>
@@ -1202,11 +1202,11 @@ export default function ProfileScreen() {
               <Image source={require('@/assets/icon.png')} style={s.authIcon} />
               <View>
                 <Text style={s.authWordmark}>TRAILHEAD</Text>
-                <Text style={s.authTagline}>OVERLAND PLANNER</Text>
+                <Text style={s.authTagline}>TRIP TOOLS</Text>
               </View>
             </View>
             <Text style={s.authHeading}>Welcome back</Text>
-            <Text style={s.authSub}>Sign in to save trips, downloads, reports, and Explorer.</Text>
+            <Text style={s.authSub}>Sign in to save trips, saved areas, reports, and Explorer.</Text>
             <View style={s.socialAuthStack}>
               {appleAuthAvailable && AppleAuthentication ? (
                 <AppleAuthentication.AppleAuthenticationButton
@@ -1261,7 +1261,7 @@ export default function ProfileScreen() {
           <Image source={require('@/assets/icon.png')} style={s.authIcon} />
           <View>
             <Text style={s.authWordmark}>TRAILHEAD</Text>
-            <Text style={s.authTagline}>OVERLAND PLANNER</Text>
+            <Text style={s.authTagline}>TRIP TOOLS</Text>
           </View>
         </View>
         <Text style={s.authHeading}>Reset password</Text>
@@ -1307,7 +1307,7 @@ export default function ProfileScreen() {
               <Image source={require('@/assets/icon.png')} style={s.authIcon} />
               <View>
                 <Text style={s.authWordmark}>TRAILHEAD</Text>
-                <Text style={s.authTagline}>OVERLAND PLANNER</Text>
+                <Text style={s.authTagline}>TRIP TOOLS</Text>
               </View>
             </View>
             <Text style={s.authHeading}>Create account</Text>
@@ -1429,7 +1429,7 @@ export default function ProfileScreen() {
               ? [
                   { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
                   { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
-                  { icon: 'cloud-download-outline', label: 'DOWNLOADS', color: C.green, onPress: openOfflineMapsManager },
+                  { icon: 'cloud-download-outline', label: 'SAVED AREAS', color: C.green, onPress: openOfflineMapsManager },
                 ]
             : profileSection === 'rig'
               ? [
@@ -1561,7 +1561,7 @@ export default function ProfileScreen() {
             </View>
             <View style={{ flex: 1 }}>
               <Text style={s.supportCardKicker}>NOTIFICATION BOARD</Text>
-              <Text style={s.supportCardTitle}>Admin and customer service messages</Text>
+              <Text style={s.supportCardTitle}>Messages</Text>
             </View>
             {supportUnreadCount > 0 ? (
               <View style={s.supportUnreadBadge}>
@@ -1572,7 +1572,7 @@ export default function ProfileScreen() {
           <Text style={s.supportCardBody}>
             {supportThreads[0]?.last_message_body
               ? supportThreads[0].last_message_body
-              : 'Support replies, payout questions, contest follow-ups, and account messages will show up here.'}
+              : 'Replies, contest updates, and account messages will show up here.'}
           </Text>
           <View style={s.supportMetaRow}>
             <Text style={s.supportMetaText}>
@@ -2010,8 +2010,8 @@ export default function ProfileScreen() {
               <Text style={s.planSignupTitle}>{hasPlan ? 'Explorer active' : 'Plan better trips'}</Text>
               <Text style={s.planSignupText}>
                 {hasPlan
-                  ? 'Unlimited planning, Camp Briefs, Co-Pilot, and voice tools are ready.'
-                  : 'Unlimited planning, Camp Briefs, Co-Pilot, packing lists, tour deals, and voice tools.'}
+                  ? 'Unlimited planning, Camp Briefs, Co-Pilot, and hands-free guidance are ready.'
+                  : 'Unlimited planning, Camp Briefs, Co-Pilot, packing lists, tour deals, and hands-free guidance.'}
               </Text>
             </View>
           </View>

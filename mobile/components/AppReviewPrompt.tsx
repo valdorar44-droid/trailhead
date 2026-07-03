@@ -48,10 +48,10 @@ export default function AppReviewPrompt({ visible, onClose }: Props) {
               ))}
             </View>
 
-            <Text style={s.kicker}>TRAILHEAD REVIEW</Text>
-            <Text style={s.title}>Enjoying Route Builder?</Text>
+            <Text style={s.kicker}>Review</Text>
+            <Text style={s.title}>Enjoying Trailhead?</Text>
             <Text style={s.body}>
-              A quick App Store review helps more overlanders find better camps, safer routes, and cleaner trip plans.
+              A quick review helps more travelers plan cleaner trips.
             </Text>
 
             <TrailheadButtonDock style={{ flexDirection: 'column', alignItems: 'stretch' }}>

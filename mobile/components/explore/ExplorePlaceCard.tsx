@@ -79,7 +79,7 @@ export function ExplorePlaceCard({
           </TouchableOpacity>
           <View style={styles.railOverlay}>
             <Text style={styles.railTitle} numberOfLines={2}>{title}</Text>
-            <Text style={styles.railMeta} numberOfLines={1}>{region}</Text>
+            <Text style={styles.railMeta} numberOfLines={2}>{region}</Text>
           </View>
         </View>
       </TouchableOpacity>
@@ -113,7 +113,7 @@ export function ExplorePlaceCard({
         </TouchableOpacity>
         <View style={styles.imageTitleBlock}>
           <Text style={styles.imageTitle} numberOfLines={2}>{title}</Text>
-          <Text style={styles.imageMeta} numberOfLines={1}>{region}</Text>
+          <Text style={styles.imageMeta} numberOfLines={2}>{region}</Text>
         </View>
       </View>
       <View style={styles.body}>
@@ -135,7 +135,7 @@ export function ExplorePlaceCard({
         <View style={styles.actions}>
           <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onArea}>
             <Ionicons name="map-outline" size={17} color={C.text2} />
-            <Text style={[styles.actionText, { color: C.text2 }]}>Area</Text>
+            <Text style={[styles.actionText, { color: C.text2 }]}>Open</Text>
           </TouchableOpacity>
           <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onToggleSave}>
             <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={16} color={C.text2} />
@@ -169,7 +169,11 @@ function formatMiles(mi: number) {
 function cardSummaryPreview(value?: string | null) {
   const clean = normalizeExploreCopyBlock(value);
   if (!clean) return '';
-  const preview = sentenceAwarePreview(clean, 260).text;
+  const previewModel = sentenceAwarePreview(clean, 260);
+  const completeFirstSentence = clean.match(/^.{72,}?[.!?](?=\s|$)/)?.[0]?.trim();
+  const preview = previewModel.expandable && completeFirstSentence
+    ? completeFirstSentence
+    : previewModel.text;
   if (!/\b(?:St|Mt|Ft)\.$/.test(preview)) return preview;
   return sentenceAwarePreview(clean, 220).text.replace(/\s+\b(?:St|Mt|Ft)\.$/, '').trim();
 }
@@ -243,7 +247,7 @@ const styles = StyleSheet.create({
   imageTitleBlock: {
     position: 'absolute',
     left: 18,
-    right: 58,
+    right: 18,
     bottom: 16,
     gap: 4,
   },

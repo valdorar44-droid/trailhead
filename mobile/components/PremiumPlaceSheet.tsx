@@ -19,6 +19,7 @@ import { Ionicons } from '@expo/vector-icons';
 import * as ImagePicker from 'expo-image-picker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { api, PaywallError, type PlaceComment, type PlaceDetail, type PlaceReservationStatus, type TrailheadPlace } from '@/lib/api';
+import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { useTheme, mono, type ColorPalette } from '@/lib/design';
 import {
   cleanExploreSourceLabel,
@@ -33,7 +34,7 @@ import { TrailheadButton, TrailheadButtonDock, TrailheadLoadingRow, TrailheadRai
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 
 type Stage = 'full' | 'half' | 'peek';
-const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const API_BASE = TRAILHEAD_API_BASE;
 
 type PlaceLike = {
   name: string;
@@ -171,6 +172,12 @@ function titleCase(value?: string) {
   return (value || 'Place').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
 }
 
+function titleCaseOrEmpty(value?: string | null) {
+  const clean = String(value ?? '').replace(/_/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  return clean.replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function sourceId(place: PlaceLike) {
   const rawId = String(place.id || '');
   const source = place.source || (rawId.startsWith('google:') ? 'google' : rawId.startsWith('foursquare:') ? 'foursquare' : '');
@@ -252,8 +259,8 @@ function cleanSourceFreshnessText(value?: string | null) {
   return cleanDetailText(value)
     .replace(/Official RIDB source data cached by Trailhead;?\s*/gi, 'Recreation.gov listing. ')
     .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'BLM recreation listing. ')
-    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Verify current details before you go. ')
-    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Verify current camp details before you go. ')
+    .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Check current details before you go. ')
+    .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Check current camp details before you go. ')
     .replace(/OpenStreetMap\/Nominatim place identity cached by Trailhead;?\s*/gi, 'Community place listing. ')
     .replace(/Wikipedia\/Wikimedia context cached by Trailhead;?\s*/gi, 'Reference details. ')
     .replace(/GeoNames\/Wikipedia context cached by Trailhead;?\s*/gi, 'Reference details. ')
@@ -264,7 +271,9 @@ function cleanSourceFreshnessText(value?: string | null) {
     .replace(/\bopen source data\b/gi, 'public information')
     .replace(/\bapi\b/gi, '')
     .replace(/\bendpoint\b/gi, '')
-    .replace(/\.\s*verify\b/g, '. Verify')
+    .replace(/\bverify current\b/gi, 'Check current')
+    .replace(/\bverify\b/gi, 'Check')
+    .replace(/\.\s*check\b/g, '. Check')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -323,12 +332,22 @@ function itemIcon(type?: string): keyof typeof Ionicons.glyphMap {
   return 'location-outline';
 }
 
+function formatSheetMiles(mi?: number | null) {
+  if (mi == null || !Number.isFinite(Number(mi))) return '';
+  const value = Number(mi);
+  if (value <= 0) return '';
+  if (value < 1) return 'Under 1 mi';
+  if (value >= 10) return `${Math.round(value)} mi`;
+  const rounded = Number(value.toFixed(1));
+  return `${Number.isInteger(rounded) ? Math.round(rounded) : rounded} mi`;
+}
+
 function itemMeta(item: RelatedItem) {
   const distance = item.route_distance_mi ?? item.distance_mi;
   const label = cleanExploreSourceLabel(item.source_label || item.display_type, titleCase(item.subtype || item.type));
   return [
-    item.length_mi != null ? `${Number(item.length_mi).toFixed(Number(item.length_mi) >= 10 ? 0 : 1)} mi trail` : label,
-    distance != null && Number.isFinite(Number(distance)) ? `${Number(distance).toFixed(1)} mi` : '',
+    item.length_mi != null ? `${formatSheetMiles(item.length_mi)} trail` : label,
+    formatSheetMiles(distance),
   ].filter(Boolean).join(' · ');
 }
 
@@ -374,6 +393,7 @@ export default function PremiumPlaceSheet({
   const [editNote, setEditNote] = useState('');
   const [alertStart, setAlertStart] = useState('');
   const [alertEnd, setAlertEnd] = useState('');
+  const [failedPhotoUrls, setFailedPhotoUrls] = useState<string[]>([]);
   const dragY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -396,6 +416,7 @@ export default function PremiumPlaceSheet({
     setEditValue('');
     setEditNote('');
     setGalleryIndex(null);
+    setFailedPhotoUrls([]);
     setLoading(false);
     if (isTransientMapboxPlace(place)) return;
     let canonicalCancelled = false;
@@ -524,23 +545,40 @@ export default function PremiumPlaceSheet({
     .filter(item => String(item.type || '').toLowerCase() !== 'event')
     .map(item => mediaUrl(item.photo_url))
     .find(Boolean);
-  const hero = photos[0]?.url || relatedHero;
-  const sourceLabel = cleanExploreSourceLabel(data.source_label || data.attribution || data.source, titleCase(data.subtype || data.type || 'Place'));
+  const visiblePhotos = photos.filter(photo => !!photo.url && !failedPhotoUrls.includes(photo.url));
+  const visibleRelatedHero = relatedHero && !failedPhotoUrls.includes(relatedHero) ? relatedHero : '';
+  const hero = visiblePhotos[0]?.url || visibleRelatedHero;
+  const markPhotoFailed = (url?: string | null) => {
+    if (!url) return;
+    setFailedPhotoUrls(prev => prev.includes(url) ? prev : [...prev, url]);
+  };
+  const typeLabel = titleCaseOrEmpty(data.display_type || data.subtype || data.type) || 'Place';
+  const sourceLabel = cleanExploreSourceLabel(data.source_label || data.attribution || data.source, typeLabel);
+  const sourceFooterLabel = cleanExploreSourceLabel(data.source_label || data.attribution || data.source, '');
+  const footerSourceKey = sourceFooterLabel.toLowerCase();
+  const meaningfulSourceFooterLabel = !sourceFooterLabel || footerSourceKey === typeLabel.toLowerCase() || /^(place|places|city|town|region|neighborhood)$/i.test(sourceFooterLabel)
+    ? ''
+    : sourceFooterLabel;
   const addToRoute = () => onAddToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const promoteToRoute = () => onPromoteToRoute?.({ name: place.name, lat: place.lat, lng: place.lng, note: data.summary || subtitle });
   const distanceLabel = data.route_distance_mi != null && Number.isFinite(data.route_distance_mi)
-    ? `${Number(data.route_distance_mi).toFixed(1)} mi off route`
+    ? `${formatSheetMiles(data.route_distance_mi)} off route`
     : data.distance_mi != null && Number.isFinite(data.distance_mi)
-      ? `${Number(data.distance_mi).toFixed(1)} mi away`
+      ? `${formatSheetMiles(data.distance_mi)} away`
       : '';
+  const ratingCount = Number(data.rating_count ?? data.review_count);
   const subtitle = [
-    data.brand || titleCase(data.subtype || data.type),
+    data.brand || typeLabel,
     distanceLabel,
-    data.rating || data.average_rating ? `${Number(data.rating ?? data.average_rating).toFixed(1)} (${data.rating_count ?? data.review_count ?? 0})` : '',
+    data.rating || data.average_rating ? [Number(data.rating ?? data.average_rating).toFixed(1), Number.isFinite(ratingCount) && ratingCount > 0 ? `(${ratingCount})` : ''].filter(Boolean).join(' ') : '',
     openNowLabel(data.open_now),
   ].filter(Boolean).join(' · ');
+  const sourceFooterParts = [
+    meaningfulSourceFooterLabel,
+    visiblePhotos[0]?.credit ? `Photo: ${visiblePhotos[0].credit}` : '',
+  ].filter(Boolean);
   const hours = detail?.hours?.length ? detail.hours : data.hours?.length ? data.hours : normalizeHours(data.open_hours, data.hours_label);
-  const sourceFreshness = cleanSourceFreshnessText(data.source_freshness || (data.last_checked ? `Checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Verify current access before relying on it.` : ''));
+  const sourceFreshness = cleanSourceFreshnessText(data.source_freshness || (data.last_checked ? `Checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Check current access before you go.` : ''));
   const providerDetails = cleanDetailText(data.description || data.details);
   const summaryText = cleanDetailText(data.summary);
   const showProviderDetails = providerDetails && providerDetails !== summaryText;
@@ -694,20 +732,16 @@ export default function PremiumPlaceSheet({
             scrollEnabled={stage === 'full'}
             contentContainerStyle={[s.content, addToRoutePrimary && !!onAddToRoute && s.contentWithStickyAction]}
           >
-            <TouchableOpacity style={s.hero} activeOpacity={hero ? 0.9 : 1} onPress={() => hero && setGalleryIndex(0)}>
-              {hero ? (
-                <Image source={{ uri: hero }} style={s.heroImage} resizeMode="cover" />
-              ) : (
-                <View style={s.heroFallback}>
-                  <Ionicons name="business-outline" size={34} color={C.silverBright} />
+            {hero ? (
+              <TouchableOpacity style={s.hero} activeOpacity={0.9} onPress={() => setGalleryIndex(0)}>
+                <Image source={{ uri: hero }} style={s.heroImage} resizeMode="cover" onError={() => markPhotoFailed(hero)} />
+                <View style={s.heroShade} />
+                <View style={s.heroText}>
+                  <Text style={s.kicker}>{typeLabel}</Text>
+                  <Text style={s.title}>{data.name}</Text>
                 </View>
-              )}
-              <View style={s.heroShade} />
-              <View style={s.heroText}>
-                <Text style={s.kicker}>{sourceLabel}</Text>
-                <Text style={s.title}>{data.name}</Text>
-              </View>
-            </TouchableOpacity>
+              </TouchableOpacity>
+            ) : null}
 
             <View style={s.body}>
               {!!subtitle && <Text style={s.meta}>{subtitle}</Text>}
@@ -1095,11 +1129,11 @@ export default function PremiumPlaceSheet({
                 </View>
               )}
 
-              {stage === 'full' && photos.length > 1 && (
+              {stage === 'full' && visiblePhotos.length > 1 && (
                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.photoRail}>
-                  {photos.slice(1, 7).map((photo, idx) => (
+                  {visiblePhotos.slice(1, 7).map((photo, idx) => (
                     <TouchableOpacity key={`${photo.url}-${idx}`} activeOpacity={0.86} onPress={() => setGalleryIndex(idx + 1)}>
-                      <Image source={{ uri: photo.url }} style={s.railPhoto} resizeMode="cover" />
+                      <Image source={{ uri: photo.url }} style={s.railPhoto} resizeMode="cover" onError={() => markPhotoFailed(photo.url)} />
                     </TouchableOpacity>
                   ))}
                 </ScrollView>
@@ -1121,11 +1155,11 @@ export default function PremiumPlaceSheet({
                 </View>
               )}
 
-              <View style={s.sourceFooter}>
-                <Text style={s.sourceText}>
-                  {sourceLabel}{photos[0]?.credit ? ` · Photo: ${photos[0].credit}` : ''}
-                </Text>
-              </View>
+              {sourceFooterParts.length ? (
+                <View style={s.sourceFooter}>
+                  <Text style={s.sourceText}>{sourceFooterParts.join(' · ')}</Text>
+                </View>
+              ) : null}
             </View>
           </ScrollView>
         )}
@@ -1152,7 +1186,7 @@ export default function PremiumPlaceSheet({
       </TrailheadSheet>
       <TrailheadPhotoGallery
         visible={galleryIndex !== null}
-        photos={photos}
+        photos={visiblePhotos}
         initialIndex={galleryIndex ?? 0}
         title={data.name}
         onClose={() => setGalleryIndex(null)}

@@ -19,8 +19,15 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
   const trails = getExploreTrailCards(place);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [filter, setFilter] = useState<TrailFilter>('all');
+  const availableFilters = useMemo(() => {
+    const next: TrailFilter[] = [];
+    (['easy', 'moderate', 'hard'] as TrailFilter[]).forEach(item => {
+      if (trails.some(trail => matchesTrailFilter(trail, item))) next.push(item);
+    });
+    return next;
+  }, [trails]);
   const visibleTrails = useMemo(
-    () => filter === 'all' ? trails : trails.filter(trail => trail.difficulty.toLowerCase().includes(filter)),
+    () => filter === 'all' ? trails : trails.filter(trail => matchesTrailFilter(trail, filter)),
     [filter, trails],
   );
   const areaPhoto = useMemo(() => primaryAreaPhoto(place), [place]);
@@ -32,10 +39,10 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
   }, [selectedId, trails]);
 
   useEffect(() => {
-    if (filter !== 'all' && trails.length > 0 && visibleTrails.length === 0) {
+    if (filter !== 'all' && !availableFilters.includes(filter)) {
       setFilter('all');
     }
-  }, [filter, trails.length, visibleTrails.length]);
+  }, [availableFilters, filter]);
 
   if (!trails.length) return null;
 
@@ -46,7 +53,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
           Trails near {getExploreDisplayTitle(place).replace(/\s+Trails$/i, '')}
         </Text>
         <Text style={[styles.introText, { color: C.text2 }]}>
-          Distance, gain, time, and route notes.
+          Distance, climb, and expected time.
         </Text>
       </View>
 
@@ -57,23 +64,27 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
             {filter === 'all' ? `${trails.length} trails` : `${visibleTrails.length} ${filter}`}
           </Text>
         </View>
-        <TouchableOpacity
-          style={[styles.filterButton, { borderColor: C.border, backgroundColor: C.s2 }]}
-          activeOpacity={0.84}
-          onPress={() => setFilter(current => nextTrailFilter(current))}
-        >
-          <Ionicons name="options-outline" size={16} color={C.text2} />
-          <Text style={[styles.filterText, { color: C.text2 }]}>
-            {filter === 'all' ? 'Filters' : titleCaseFilter(filter)}
-          </Text>
-        </TouchableOpacity>
+        {availableFilters.length > 0 && (
+          <TouchableOpacity
+            style={[styles.filterButton, { borderColor: C.border, backgroundColor: C.s2 }]}
+            activeOpacity={0.84}
+            onPress={() => setFilter(current => nextTrailFilter(current, availableFilters))}
+          >
+            <Ionicons name="options-outline" size={16} color={C.text2} />
+            <Text style={[styles.filterText, { color: C.text2 }]}>
+              {filter === 'all' ? 'Filters' : titleCaseFilter(filter)}
+            </Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       <View style={styles.list}>
         {visibleTrails.map(trail => {
           const selected = selectedId === trail.id;
           const photo = primaryTrailPhoto(trail) || areaPhoto;
-          const featureLabel = trail.feature_label || trail.feature_type?.replace(/_/g, ' ') || 'Trail';
+          const featureLabel = cleanTrailLabel(trail.feature_label || trail.feature_type?.replace(/_/g, ' ') || 'Trail');
+          const difficulty = cleanTrailDifficulty(trail.difficulty);
+          const routeType = cleanTrailRouteType(trail.route_type);
           return (
             <View key={trail.id} style={[styles.trailWrap, { borderColor: selected ? C.orange + '66' : C.border, backgroundColor: C.s2 }]}>
               <TouchableOpacity
@@ -95,11 +106,11 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                   </View>
                   <View style={[styles.difficultyPill, difficultyTone(trail.difficulty)]}>
                     <Text style={[styles.difficultyText, { color: difficultyTextColor(trail.difficulty) }]}>
-                      {featureLabel} · {trail.difficulty}
+                      {featureLabel} · {difficulty}
                     </Text>
                   </View>
                   <Text style={[styles.trailMeta, { color: C.text2 }]} numberOfLines={1}>
-                    {[formatMiles(trail.distance_mi), formatGain(trail.elevation_gain_ft), trail.route_type].filter(Boolean).join(' · ')}
+                    {[formatMiles(trail.distance_mi), formatGain(trail.elevation_gain_ft), routeType].filter(Boolean).join(' · ')}
                   </Text>
                   {!!trail.area && <Text style={[styles.trailArea, { color: C.text3 }]} numberOfLines={1}>{trail.area}</Text>}
                 </View>
@@ -121,7 +132,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                     <View style={[styles.warningBox, { borderColor: C.orange + '55', backgroundColor: C.orange + '12' }]}>
                       <Ionicons name="warning-outline" size={17} color={C.orange} />
                       <Text style={[styles.warningText, { color: C.text2 }]}>
-                        {trail.permit_note || 'Verify route, guide, weather, and local safety before heading out.'}
+                        {trail.permit_note || 'Check route, guide, weather, and local safety before heading out.'}
                       </Text>
                     </View>
                   )}
@@ -145,11 +156,11 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
   );
 }
 
-function nextTrailFilter(current: TrailFilter): TrailFilter {
-  if (current === 'all') return 'easy';
-  if (current === 'easy') return 'moderate';
-  if (current === 'moderate') return 'hard';
-  return 'all';
+function nextTrailFilter(current: TrailFilter, available: TrailFilter[]): TrailFilter {
+  if (!available.length) return 'all';
+  if (current === 'all') return available[0] || 'all';
+  const next = available[available.indexOf(current) + 1];
+  return next || 'all';
 }
 
 function titleCaseFilter(filter: TrailFilter) {
@@ -166,10 +177,38 @@ function TrailStat({ label, value }: { label: string; value: string }) {
   );
 }
 
+function cleanTrailLabel(value?: string | null) {
+  const clean = String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean || /^(mapped|open|source)$/i.test(clean)) return 'Trail';
+  return clean.replace(/\b\w/g, char => char.toUpperCase());
+}
+
+function cleanTrailDifficulty(value?: string | null) {
+  const clean = String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean || /^scout first$/i.test(clean)) return 'Check access';
+  if (/\b(undefined|null|nan)\b/i.test(clean)) return 'Check access';
+  return clean;
+}
+
+function cleanTrailRouteType(value?: string | null) {
+  const clean = String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean || /^(point or route|map|open map)$/i.test(clean)) return '';
+  if (/^mapped route$/i.test(clean)) return 'Trail route';
+  if (/\b(api|endpoint|feature|layer|schema|database|dump|import|raw|source)\b/i.test(clean)) return '';
+  return clean;
+}
+
+function matchesTrailFilter(trail: ExploreTrailCard, filter: TrailFilter) {
+  if (filter === 'all') return true;
+  return cleanTrailDifficulty(trail.difficulty).toLowerCase().includes(filter);
+}
+
 function formatMiles(mi?: number | null) {
   const value = typeof mi === 'number' ? mi : NaN;
   if (!Number.isFinite(value) || value <= 0) return 'Check';
-  return `${value.toFixed(value >= 10 ? 0 : 1)} mi`;
+  if (value >= 10) return `${Math.round(value)} mi`;
+  const rounded = Number(value.toFixed(1));
+  return `${Number.isInteger(rounded) ? Math.round(rounded) : rounded} mi`;
 }
 
 function formatGain(value?: number | null) {
@@ -204,14 +243,14 @@ function compactCredit(parts: Array<string | undefined>) {
 }
 
 function difficultyTone(value: string) {
-  const text = value.toLowerCase();
+  const text = cleanTrailDifficulty(value).toLowerCase();
   if (text.includes('hard')) return { backgroundColor: '#fee2e2' };
   if (text.includes('moderate')) return { backgroundColor: '#ffedd5' };
   return { backgroundColor: '#dcfce7' };
 }
 
 function difficultyTextColor(value: string) {
-  const text = value.toLowerCase();
+  const text = cleanTrailDifficulty(value).toLowerCase();
   if (text.includes('hard')) return '#b91c1c';
   if (text.includes('moderate')) return '#c2410c';
   return '#4d7c0f';

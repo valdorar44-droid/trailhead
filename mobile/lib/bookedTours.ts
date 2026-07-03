@@ -110,8 +110,9 @@ async function loadLocalBookedTours(): Promise<BookedTour[]> {
   }
 }
 
-export async function loadBookedTours(): Promise<BookedTour[]> {
+export async function loadBookedTours(options: { includeRemote?: boolean } = {}): Promise<BookedTour[]> {
   const local = await loadLocalBookedTours();
+  if (options.includeRemote === false) return local;
   try {
     const remote = await api.getViatorBookings(50);
     const tours = (remote.bookings || [])

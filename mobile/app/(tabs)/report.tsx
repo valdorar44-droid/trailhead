@@ -14,6 +14,7 @@ import { usePathname } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import { api, Report, ReportPayload, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
+import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
@@ -94,7 +95,7 @@ const SEVERITY = [
   { val: 'critical', label: 'AVOID',    color: '#ef4444' },
 ];
 
-const PHOTO_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const PHOTO_BASE = TRAILHEAD_API_BASE;
 const OFFLINE_REPORT_QUEUE_KEY = 'trailhead_report_queue_v1';
 
 type TabView = 'route' | 'camp' | 'nearby' | 'submit' | 'leaderboard';

@@ -17,15 +17,15 @@ GENERIC_COPY_PATTERNS = (
 )
 
 CATEGORY_COPY: dict[str, str] = {
-    "camp": "Use {title} to compare overnight options around {region}. Check reservations, access roads, fees, fire rules, closures, and current conditions before you rely on it.",
-    "campground": "Use {title} to compare overnight options around {region}. Check reservations, access roads, fees, fire rules, closures, and current conditions before you rely on it.",
-    "dispersed_camp": "Use {title} as a camping research area around {region}. Verify legal overnight limits, land rules, road access, fire restrictions, and current closures.",
+    "camp": "{title} has overnight options around {region}. Check reservations, access roads, fees, fire rules, closures, and current conditions before you rely on it.",
+    "campground": "{title} has overnight options around {region}. Check reservations, access roads, fees, fire rules, closures, and current conditions before you rely on it.",
+    "dispersed_camp": "{title} is a camping research area around {region}. Verify legal overnight limits, land rules, road access, fire restrictions, and current closures.",
     "glamping": "{title} is a comfort-focused outdoor stay near {region}. Check booking rules, road access, check-in details, fees, and seasonal availability.",
     "hut": "{title} is a shelter or hut option near {region}. Check reservations, condition, access, weather, and seasonal rules before planning around it.",
     "trail": "Trail area near {region}. Check route distance, difficulty, weather, daylight, permits, closures, and navigation before starting.",
     "trailhead": "{title} is a mapped trail access point near {region}. Confirm parking, road access, closures, daylight, and route details before starting.",
     "viewpoint": "{title} is a scenic stop near {region}. Check road access, weather, daylight, parking, and nearby trail options before routing there.",
-    "peak": "{title} is a mountain landmark near {region}. Use it for route context, weather checks, access research, and nearby trail planning.",
+    "peak": "{title} is a mountain landmark near {region}. Check route context, weather, access, and nearby trail options before planning around it.",
     "waterfall": "Waterfall near {region}. Check trail access, seasonal flow, closures, and slippery terrain before visiting.",
     "lake": "{title} is a water stop near {region}. Verify access, seasonal conditions, water safety, local rules, and nearby services before planning around it.",
     "water": "{title} is a water or scenic stop near {region}. Verify access, seasonal conditions, safety, local rules, and nearby services before planning around it.",

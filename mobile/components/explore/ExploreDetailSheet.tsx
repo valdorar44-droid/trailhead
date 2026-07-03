@@ -269,6 +269,19 @@ function cleanSourcePackItemCopy(item?: ExploreSourcePackItem | null) {
   return clean;
 }
 
+function cleanDetailItemMetaLabel(item?: ExploreSourcePackItem | null) {
+  const raw = normalizeExploreCopyBlock(item?.category || item?.kind)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!raw) return '';
+  if (/^(nps|national park service|recreation\.gov|ridb|map data|openstreetmap|source|source pack|thing to do|things to do|place|places|detail|details)$/i.test(raw)) {
+    return '';
+  }
+  if (/\b(api|endpoint|feature|layer|schema|database|dump|import|raw)\b/i.test(raw)) return '';
+  return raw.replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
 function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePlaceProfile) {
   const title = getExploreDisplayTitle(place);
   let clean = normalizeExploreCopyBlock(value)
@@ -278,9 +291,22 @@ function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePl
     .replace(/\bcurated\s+destination\b/gi, 'destination')
     .replace(/\bmap context\b/gi, 'area detail')
     .replace(/\bAI\b/g, '')
+    .replace(/\bbefore relying on it\b/gi, 'before you go')
+    .replace(/\bVerify\b/g, 'Check')
+    .replace(/\bverify\b/g, 'check')
     .replace(/\s+/g, ' ')
     .trim();
   if (!clean) return '';
+  if (/^Use it as a day stop when the drive needs more than mileage/i.test(clean)) {
+    return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
+  }
+  if (/^Use this as a protected-area anchor/i.test(clean)) {
+    return `${title} covers protected-area planning. Confirm permits, guide requirements, road access, weather, and safety conditions before travel.`;
+  }
+  clean = clean.replace(/^Use\s+(.+?)\s+as\s+a\s+(.+?)\./i, (_match, name, role) => `${name} is a ${role}.`);
+  if (/^it is a day stop when the drive needs more than mileage/i.test(clean)) {
+    return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
+  }
   if (isExploreLocationMismatchCopy(clean, place)) {
     return getExploreCardSummary(place);
   }
@@ -295,9 +321,22 @@ function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePl
   if (mappedTrailFallback) {
     return `Trail area near ${mappedTrailFallback[2]}. Check route distance, difficulty, weather, daylight, permits, closures, and navigation before starting.`;
   }
+  if (/^(.+?)\s+is a\s+(fuel|gas|diesel|petrol)\.\s+Check\b/i.test(clean)) {
+    return `${title} is a fuel stop. Check hours, access, current conditions, and payment options before you go.`;
+  }
+  if (/^(.+?)\s+is a\s+(resupply|grocery|market|shop|supplies|repair|service)\.\s+Check\b/i.test(clean)) {
+    return `${title} is a supply stop. Check hours, access, and current services before you go.`;
+  }
   const mappedFallback = clean.match(/^(.+?)\s+is mapped as\s+([a-z\s-]+)\s+in OpenStreetMap\.\s+Verify access, current conditions, and local rules before relying on it\.?$/i);
   if (mappedFallback) {
-    return `${title} is a ${mappedFallback[2].trim()}. Check access, current conditions, and local rules before you go.`;
+    const mappedType = mappedFallback[2].trim();
+    if (/\b(fuel|gas|diesel|petrol)\b/i.test(mappedType)) {
+      return `${title} is a fuel stop. Check hours, access, current conditions, and payment options before you go.`;
+    }
+    if (/\b(resupply|grocery|market|shop|supplies|repair|service)\b/i.test(mappedType)) {
+      return `${title} is a supply stop. Check hours, access, and current services before you go.`;
+    }
+    return `${title} is a ${mappedType}. Check access, current conditions, and local rules before you go.`;
   }
   const trailTargetFallback = clean.match(/^(.+?)\s+is a trail target\.\s+Check route, access, weather, permits, and current conditions before you go\.?$/i);
   if (trailTargetFallback) {
@@ -707,6 +746,7 @@ export function ExploreDetailSheet({
         {items.map((item, idx) => {
           const itemImages = item.image_url ? mediaCandidates(item.image_url, moduleFallbackImages, imageUrl) : [];
           const canOpen = !!item.title || !!item.url || itemHasCoords(item);
+          const metaLabel = cleanDetailItemMetaLabel(item);
           return (
             <TouchableOpacity
               key={`${item.title}-${idx}`}
@@ -723,10 +763,12 @@ export function ExploreDetailSheet({
                     {cleanSourcePackItemCopy(item)}
                   </Text>
                 )}
-                <View style={styles.detailItemMeta}>
-                  {!!item.source_label && <Text style={[styles.detailItemMetaText, { color: C.text3 }]} numberOfLines={1}>{item.source_label}</Text>}
-                  {item.lat != null && item.lng != null && <Ionicons name="map-outline" size={15} color={accent} />}
-                </View>
+                {(!!metaLabel || (item.lat != null && item.lng != null)) && (
+                  <View style={styles.detailItemMeta}>
+                    {!!metaLabel && <Text style={[styles.detailItemMetaText, { color: C.text3 }]} numberOfLines={1}>{metaLabel}</Text>}
+                    {item.lat != null && item.lng != null && <Ionicons name="map-outline" size={15} color={accent} />}
+                  </View>
+                )}
               </View>
             </TouchableOpacity>
           );
@@ -1138,7 +1180,7 @@ export function ExploreDetailSheet({
       return weatherSlot ?? (
         <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <Ionicons name="partly-sunny-outline" size={24} color={accent} />
-          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Forecast unavailable.</Text>
+          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Forecast will appear when this area has weather.</Text>
         </View>
       );
     }
@@ -1165,7 +1207,7 @@ export function ExploreDetailSheet({
       return (
         <View style={[styles.panel, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <ScrollView ref={storyScrollRef} style={styles.storyBox} nestedScrollEnabled showsVerticalScrollIndicator>
-            {(cleanStorySentences.length ? cleanStorySentences : ['Story unavailable.']).map((sentence, idx) => (
+            {(cleanStorySentences.length ? cleanStorySentences : ['Check closer to your trip.']).map((sentence, idx) => (
               <Text
                 key={`${idx}-${sentence.slice(0, 24)}`}
                 style={[
@@ -1203,7 +1245,7 @@ export function ExploreDetailSheet({
     return (
       <View style={styles.moduleHub}>
         <View style={styles.moduleIntro}>
-          <Text style={[styles.moduleIntroTitle, { color: C.text }]}>Trip Notes</Text>
+          <Text style={[styles.moduleIntroTitle, { color: C.text }]}>Overview</Text>
         </View>
         {!!aboutCopy && (
           <View style={[styles.copyPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
@@ -1235,7 +1277,6 @@ export function ExploreDetailSheet({
                 <View style={hasImage ? styles.moduleTileOverlay : styles.moduleTileBody}>
                   <View style={styles.moduleTileTop}>
                     <Ionicons name={module.icon} size={18} color={hasImage ? '#fff' : module.tone} />
-                    {!!module.count && <Text style={[styles.moduleCount, { color: hasImage ? '#fff' : C.text3 }]}>{module.count}</Text>}
                   </View>
                   <Text style={[styles.moduleTileTitle, { color: hasImage ? '#fff' : C.text }]} numberOfLines={2}>{module.label}</Text>
                   <Text style={[styles.moduleTileDetail, { color: hasImage ? 'rgba(255,255,255,0.82)' : C.text3 }]} numberOfLines={1}>{module.detail}</Text>
@@ -1466,6 +1507,9 @@ function sourceBodyForPlace(place: ExplorePlaceProfile) {
   const body = raw || fallback;
   const officialSource = body.match(/^official\s+(.+?)\s+data\.?$/i);
   if (officialSource?.[1]) return cleanSourcePublisherLabel(officialSource[1]);
+  if (/^(recreation\.gov|ridb|national park service|nps|us forest service|usfs|bureau of land management|blm)$/i.test(body)) {
+    return 'Check current access, fees, closures, and rules before you go.';
+  }
   if (/wiki|source pack|open map|openstreetmap|generated from|open the full card|open image references|verify media license/i.test(body)) {
     return 'Check current access, fees, closures, and rules before you go.';
   }

@@ -42,10 +42,11 @@ function writeState(state: ReviewPromptState) {
 }
 
 function isEligible(state: ReviewPromptState, reason: ReviewPromptReason) {
+  if (Platform.OS === 'web') return false;
   if (state.completedAt || state.promptCount >= MAX_PROMPTS) return false;
   if (state.lastPromptedAt && Date.now() - state.lastPromptedAt < PROMPT_COOLDOWN_MS) return false;
   if (reason === 'trip_built') return state.tripBuiltCount >= 1;
-  return state.campViewedCount >= 2;
+  return false;
 }
 
 export async function recordReviewMoment(reason: ReviewPromptReason) {

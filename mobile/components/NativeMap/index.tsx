@@ -17,6 +17,7 @@ import MapLibreGL from '@maplibre/maplibre-react-native';
 import MapboxGL from '@rnmapbox/maps';
 import { Ionicons } from '@expo/vector-icons';
 import { storage } from '@/lib/storage';
+import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 
 import { buildMapStyle, MapMode } from './mapStyle';
 import type { ContourSourceMode, PremiumMapStyle, TrailSourceMode } from './mapStyle';
@@ -26,6 +27,7 @@ import type { CampsitePin, MapSelectableFeature, OsmPoi, Pin, Report, WaterSpotC
 import type { WaterRoute } from '@/lib/store';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
+import { campMarkerVisual } from '@/lib/campMarkerVisual';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
 import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
 import { saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -51,7 +53,7 @@ try {
 } catch {}
 
 const TILE_BASE_URL = 'https://tiles.gettrailhead.app';
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const API_BASE_URL = TRAILHEAD_API_BASE;
 const BASE_DL_URL   = `${TILE_BASE_URL}/api/download/base.pmtiles`;
 const GLOBAL_BASE_DL_URL = `${TILE_BASE_URL}/api/download/base-global.pmtiles`;
 const BASE_PATH     = `${OFFLINE_DIR}base.pmtiles`;
@@ -446,72 +448,12 @@ function normalizeCampPin(c: CampsitePin): CampsitePin {
   return { ...c, lat: Number(c.lat), lng: Number(c.lng) };
 }
 
-function campClusterCandidates(camps: CampsitePin[], lat: number, lng: number, pointCount: number): CampsitePin[] {
-  const targetCount = Number.isFinite(pointCount) && pointCount > 0 ? Math.min(Math.ceil(pointCount), camps.length) : Math.min(24, camps.length);
-  return camps
-    .map(camp => ({ camp, distance: haversineMiles(lat, lng, Number(camp.lat), Number(camp.lng)) }))
-    .sort((a, b) => a.distance - b.distance)
-    .slice(0, Math.max(1, targetCount))
-    .map(item => item.camp);
-}
-
-function campBounds(camps: CampsitePin[], fallbackLat: number, fallbackLng: number) {
-  const lats = camps.map(camp => Number(camp.lat)).filter(Number.isFinite);
-  const lngs = camps.map(camp => Number(camp.lng)).filter(Number.isFinite);
-  if (!lats.length || !lngs.length) {
-    return {
-      center: { lat: fallbackLat, lng: fallbackLng },
-      ne: [fallbackLng + 0.01, fallbackLat + 0.01] as [number, number],
-      sw: [fallbackLng - 0.01, fallbackLat - 0.01] as [number, number],
-    };
-  }
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-  const padLat = Math.max(0.006, (maxLat - minLat) * 0.22);
-  const padLng = Math.max(0.006, (maxLng - minLng) * 0.22);
-  return {
-    center: { lat: (minLat + maxLat) / 2, lng: (minLng + maxLng) / 2 },
-    ne: [maxLng + padLng, maxLat + padLat] as [number, number],
-    sw: [minLng - padLng, minLat - padLat] as [number, number],
-  };
-}
-
 function campFeat(c: CampsitePin): GeoJSON.Feature {
   const lat = Number(c.lat);
   const lng = Number(c.lng);
-  const raw = [
-    ...(Array.isArray(c.tags) ? c.tags : []),
-    ...(Array.isArray(c.site_types) ? c.site_types : []),
-    c.land_type,
-    (c as any).source_badge,
-    c.verified_source,
-    c.source,
-    c.cost,
-    c.description,
-  ].filter(Boolean).join(' ').toLowerCase();
-  const kind = raw.includes('dispersed') || raw.includes('primitive') || raw.includes('boondock') ? 'dispersed'
-    : raw.includes('blm') || raw.includes('bureau of land management') ? 'blm'
-    : raw.includes('usfs') || raw.includes('national forest') || raw.includes('forest service') ? 'usfs'
-    : raw.includes('nps') || raw.includes('national park') ? 'nps'
-    : raw.includes('state park') ? 'state'
-    : raw.includes('corps') ? 'corps'
-    : raw.includes('rv') || raw.includes('hookup') || raw.includes('caravan') ? 'rv'
-    : c.reservable ? 'reservable'
-    : raw.includes('tent') ? 'tent'
-    : 'camp';
-  const code = kind === 'dispersed' ? 'd'
-    : kind === 'rv' ? 'R'
-    : kind === 'tent' ? 'T'
-    : kind === 'blm' ? 'B'
-    : kind === 'usfs' ? 'F'
-    : kind === 'nps' ? 'N'
-    : kind === 'state' ? 'S'
-    : kind === 'corps' ? 'W'
-    : 'C';
+  const visual = campMarkerVisual(c as any);
   return { type: 'Feature', geometry: { type: 'Point', coordinates: [lng, lat] },
-    properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', camp_kind: kind, camp_code: code, cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
+    properties: { id: c.id || '', name: c.name || '', land_type: c.land_type || 'Campground', camp_kind: visual.kind, camp_code: visual.code, camp_color: visual.color, cost: c.cost || '', full: (c as any).full || 0, raw: JSON.stringify(c) } };
 }
 
 function coordDistanceM(a: [number, number], b: [number, number]): number {
@@ -954,6 +896,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     });
   }, [isExtremeMapbox, localContours, localTiles, localTrails, mapLayer, navCameraFollow, navMode, props.premiumMapStyle, showTerrain, tileDebug]);
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyFC());
+  const campSourceRef = useRef<any>(null);
   const lastTracePointRef = useRef(0);
   const onlineTilesRef  = useRef(true);                // true = prefer live CDN tiles
   const loadedStateRef  = useRef<string | null>(null); // path of currently-active offline region file
@@ -1425,6 +1368,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   );
   const premiumStyle = props.premiumMapStyle ?? 'standard';
   const mapboxStyleURL = MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard;
+  const isMapboxStandardStyle = isExtremeMapbox && (
+    premiumStyle === 'standard' || premiumStyle === 'standard_satellite' || premiumStyle === 'dawn' || premiumStyle === 'dusk' || premiumStyle === 'night'
+  );
   const mapboxStyleImportConfig = useMemo(() => {
     const lightPreset = MAPBOX_LIGHT_PRESETS[premiumStyle] ?? (showTerrain ? 'day' : 'day');
     return {
@@ -1441,6 +1387,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       theme: premiumStyle === 'night' || premiumStyle === 'navigation_night' ? 'monochrome' : 'default',
     };
   }, [premiumStyle, showTerrain]);
+  const mapboxTopSlotProps = isMapboxStandardStyle ? ({ slot: 'top' } as any) : {};
 
   useEffect(() => {
     if (!mapboxToken) return;
@@ -2494,31 +2441,32 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const lng = Number(coords?.[0]);
       const lat = Number(coords?.[1]);
       if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        const pointCount = Number(p.point_count ?? p.point_count_abbreviated ?? 0);
-        const clusterCamps = campClusterCandidates(drawableCamps, lat, lng, pointCount);
-        const bounds = campBounds(clusterCamps, lat, lng);
         let currentZoom = Number.NaN;
+        let expansionZoom = Number.NaN;
         try {
           const zoomValue = typeof mapRef.current?.getZoom === 'function' ? await mapRef.current.getZoom() : null;
           currentZoom = Number(zoomValue);
         } catch {}
+        try {
+          const sourceZoom = typeof campSourceRef.current?.getClusterExpansionZoom === 'function'
+            ? await campSourceRef.current.getClusterExpansionZoom(feat)
+            : null;
+          expansionZoom = Number(sourceZoom);
+        } catch {}
         const nextZoom = Math.min(14, Math.max(
           shouldClusterCamps ? 9.8 : 11,
+          Number.isFinite(expansionZoom) ? expansionZoom + 0.35 : Number.NEGATIVE_INFINITY,
           Number.isFinite(currentZoom) ? currentZoom + 1.8 : Number(freeCameraDefaultRef.current.zoomLevel || 10) + 1.8,
         ));
         programmaticCameraUntilRef.current = Date.now() + 1200;
-        rememberFreeCamera(bounds.center.lat, bounds.center.lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
-        if (clusterCamps.length > 1) {
-          camRef.current?.fitBounds(bounds.ne, bounds.sw, [92, 72, 150, 72], 520);
-        } else {
-          camRef.current?.setCamera({
-            centerCoordinate: [bounds.center.lng, bounds.center.lat],
-            zoomLevel: nextZoom,
-            pitch: navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0,
-            animationDuration: 420,
-            animationMode: 'flyTo',
-          } as any);
-        }
+        rememberFreeCamera(lat, lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
+        camRef.current?.setCamera({
+          centerCoordinate: [lng, lat],
+          zoomLevel: nextZoom,
+          pitch: navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0,
+          animationDuration: 420,
+          animationMode: 'flyTo',
+        } as any);
         setTimeout(() => {
           const b = boundsRef.current;
           if (b) refreshMapSourcesForBounds(b.n, b.s, b.e, b.w);
@@ -3124,16 +3072,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
       {/* ── Campsites (clustered) ──────────────────────────────────────── */}
       <MapGL.ShapeSource
-        key={shouldClusterCamps ? 'camps-clustered' : 'camps-flat'}
+        ref={campSourceRef}
+        key={`camps-${isExtremeMapbox ? mapboxStyleURL : effectiveMapLayer}-${shouldClusterCamps ? 'clustered' : 'flat'}-${drawableCamps.length}`}
         id="camps"
         shape={campFC}
         cluster={shouldClusterCamps}
-        clusterMaxZoomLevel={8}
+        clusterMaxZoomLevel={11}
         clusterRadius={30}
         onPress={handleCampPress}
       >
           <MapGL.CircleLayer
             id="camp-cluster"
+            {...mapboxTopSlotProps}
             filter={['has', 'point_count']}
             style={{
               circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'],
@@ -3145,6 +3095,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="camp-count"
+            {...mapboxTopSlotProps}
             filter={['has', 'point_count']}
             style={{
               textField: '{point_count_abbreviated}',
@@ -3155,21 +3106,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.CircleLayer
             id="camp-circle"
+            {...mapboxTopSlotProps}
             filter={['!', ['has', 'point_count']]}
             style={{
-              circleRadius: ['interpolate', ['linear'], ['zoom'], 9, 7, 13, 11],
-              circleColor: ['match', ['get', 'camp_kind'],
-                'dispersed', '#8b5a2b',
-                'primitive', '#92400e',
-                'rv', '#2563eb',
-                'tent', '#16a34a',
-                'blm', '#f97316',
-                'usfs', '#22c55e',
-                'nps', '#3b82f6',
-                'state', '#8b5cf6',
-                'corps', '#0284c7',
-                'reservable', '#8b5cf6',
-                '#14b8a6'],
+              circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 10, 12, 12, 15, 14],
+              circleColor: ['coalesce', ['get', 'camp_color'], '#14b8a6'],
               circleOpacity: 0.96,
               circleStrokeWidth: ['case', ['==', ['get', 'full'], 1], 4, 3],
               circleStrokeColor: ['case', ['==', ['get', 'full'], 1], '#ef4444', '#fff'],
@@ -3177,10 +3118,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="camp-code"
+            {...mapboxTopSlotProps}
+            minZoomLevel={8}
             filter={['!', ['has', 'point_count']]}
             style={{
               textField: ['get', 'camp_code'],
-              textSize: ['case', ['==', ['get', 'camp_kind'], 'dispersed'], 11, 10],
+              textSize: ['case', ['==', ['get', 'camp_kind'], 'rv'], 9, 10.5],
               textFont: ['Noto Sans Medium'],
               textColor: '#fff',
               textHaloColor: 'rgba(0,0,0,0.35)',
@@ -3192,6 +3135,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           {/* Camp name labels — visible from z11, hidden when clustered */}
           <MapGL.SymbolLayer
             id="camp-name"
+            {...mapboxTopSlotProps}
             minZoomLevel={11}
             filter={['!', ['has', 'point_count']]}
             style={{
@@ -3717,7 +3661,7 @@ function mapMapboxFeatureToPoi(feature: any, fallbackLat: number, fallbackLng: n
     place_id: props.mapbox_id || props.id,
     mapbox_id: props.mapbox_id || props.id || feature?.id,
     attribution: 'Mapbox',
-    source_badge: 'Map data',
+    source_badge: mapboxPlaceSourceLabel(type) || 'Place',
     enrichment_source: 'mapbox_standard',
     enrichment_status: 'pending',
     raw_feature: {
@@ -3947,7 +3891,7 @@ function mapboxStandardFeatureEventToPoi(event: any): OsmPoi | null {
     screen_position: event?.screen_position || null,
     selection_confidence: event?.selection_confidence || 'high',
     attribution: 'Mapbox',
-    source_badge: 'Map data',
+    source_badge: mapboxPlaceSourceLabel(type) || 'Place',
     mapbox_id: providerId || null,
     enrichment_source: 'mapbox_standard',
     enrichment_status: 'pending',
@@ -4108,7 +4052,7 @@ function mapHydroPoi(props: Record<string, any> | undefined, lat: number, lng: n
     source: String(props?.source_id || props?.source || 'safe_water_hydro'),
     source_label: String(props?.source || 'Safe Water hydro bathymetry'),
     source_badge: 'Hydro awareness',
-    source_freshness: String(props?.source_freshness || 'Bathymetry context packaged by Trailhead; source dates and confidence vary by waterbody.'),
+    source_freshness: String(props?.source_freshness || 'Bathymetry context varies by waterbody. Verify local charts and conditions.'),
     waterbody_name: 'Lake of the Woods',
     waterbody_type: 'bathymetry',
     access: 'verify locally',

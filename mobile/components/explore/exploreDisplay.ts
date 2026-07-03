@@ -84,7 +84,7 @@ export const EXPLORE_CATEGORY_CHIPS: Array<{
   { key: 'parks', label: 'Parks', icon: 'leaf-outline', color: '#22c55e' },
   { key: 'land', label: 'Land', icon: 'map-outline', color: '#84cc16' },
   { key: 'fuel', label: 'Fuel', icon: 'car-outline', color: '#ea580c' },
-  { key: 'resupply', label: 'Resupply', icon: 'basket-outline', color: '#7c3aed' },
+  { key: 'resupply', label: 'Supplies', icon: 'basket-outline', color: '#7c3aed' },
   { key: 'things', label: 'Things', icon: 'compass-outline', color: '#0f766e' },
   { key: 'guided', label: 'Guided', icon: 'ticket-outline', color: '#d97706' },
   { key: 'nearby', label: 'Near', icon: 'locate-outline', color: '#a855f7' },
@@ -142,15 +142,15 @@ const FALLBACK_COPY: Record<string, string> = {
   waterfalls: 'Waterfall or cascade. Check trail access, seasonal flow, closures, and slippery terrain.',
   springs: 'Thermal feature. Check legality, access, temperature, water safety, and local rules.',
   climb: 'Climbing area or crag. Check access, closures, route information, rules, and conditions.',
-  fuel: 'Fuel or service stop. Verify hours, availability, road access, and payment options.',
-  resupply: 'Resupply stop. Verify hours, inventory, payment options, and road access before depending on it.',
+  fuel: 'Fuel or service stop. Check hours, availability, road access, and payment options.',
+  resupply: 'Supply stop. Check hours, inventory, payment options, and road access before you go.',
   things: 'Activities, viewpoints, trails, stops, and visitor options from public sources.',
   guided: 'Guided trips will return when bookings are available. Free things to do still show here.',
   tours: 'Guided trips will return when bookings are available. Free things to do still show here.',
-  water: 'Water access or feature. Verify safety, access, seasonal conditions, and local rules.',
+  water: 'Water access or feature. Check safety, access, seasonal conditions, and local rules.',
   scenic: 'Scenic stop for photos, short walks, and nearby exploration.',
   parks: 'Outdoor destination. Check official access, fees, closures, and local rules before setting dates.',
-  land: 'Public land or managed area. Verify land rules, camping limits, access, and current restrictions.',
+  land: 'Public land or managed area. Check land rules, camping limits, access, and current restrictions.',
 };
 
 const THIN_OPEN_REFERENCE_PATTERNS = [
@@ -226,6 +226,10 @@ function normalizedWords(value: string) {
     .trim();
 }
 
+function textLooksLikeStay(value: string) {
+  return /\b(inn|hotel|motel|lodge|lodging|cabin|cabins|hut|huts|shelter|hostel|resort|glamping|yurt|overnight stay|place to stay|places to stay)\b/.test(value);
+}
+
 function countryMentions(value: string) {
   const normalized = normalizedWords(value);
   const countries = new Set<string>();
@@ -272,7 +276,33 @@ export function cleanSourcePublisherLabel(value?: string | null) {
   return clean.replace(/\b(blm|nps|usfs|usgs|nws)\b/gi, match => match.toUpperCase());
 }
 
+function looksLikeRawRecordText(value?: string | null) {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim();
+  if (clean.length < 40 || !/^[{[]/.test(clean)) return false;
+  return /['"](?:id|title|category|summary|source_pack|lat|lng|canonical_name)['"]\s*:/.test(clean);
+}
+
+function isSourceOnlyDisplayLabel(value?: string | null) {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  return [
+    'national park service',
+    'nps',
+    'us forest service',
+    'u.s. forest service',
+    'forest service',
+    'recreation.gov',
+    'ridb',
+    'blm',
+    'bureau of land management',
+    'fws',
+    'us fish and wildlife service',
+    'public lands',
+    'trailhead',
+  ].includes(clean);
+}
+
 export function normalizeExploreCopyBlock(value?: string | null) {
+  if (looksLikeRawRecordText(value)) return '';
   return String(value || '')
     .replace(/<\s*br\s*\/?>/gi, '. ')
     .replace(/<\/\s*(p|div|li|h[1-6])\s*>/gi, '. ')
@@ -287,16 +317,32 @@ export function normalizeExploreCopyBlock(value?: string | null) {
     .replace(/\bscenic route anchor\b/gi, 'scenic route stop')
     .replace(/\broute-area anchor\b/gi, 'route area')
     .replace(/\bmountain route anchor\b/gi, 'mountain route')
+    .replace(/\bUse it for route context, weather checks, access research, and nearby trail planning\.?/gi, 'Check weather, access, local guidance, and nearby trail options before planning around it.')
+    .replace(/\bUse this as access context only\.?/gi, 'Access notes only.')
+    .replace(/\bUse this for ([^.]*?) trekking context\.?/gi, 'Good for $1 trek planning.')
+    .replace(/\bUse this for ([^.]*?) context\.?/gi, 'Good for $1 planning.')
+    .replace(/\bUse this for\b/gi, 'Good for')
+    .replace(/\bUse it for\b/gi, 'Good for')
+    .replace(/\bUse this when\b/gi, 'Good when')
+    .replace(/\bUse it when\b/gi, 'Good when')
     .replace(/\bday anchor\b/gi, 'day stop')
     .replace(/\bovernight anchor\b/gi, 'overnight option')
     .replace(/\broute anchor\b/gi, 'route stop')
     .replace(/\bplanning anchor\b/gi, 'stop')
     .replace(/\bclassic overnight option\b/gi, 'reliable overnight option')
+    .replace(/\bbefore relying on it\b/gi, 'before you go')
+    .replace(/\bVerify\b/g, 'Check')
+    .replace(/\bverify\b/g, 'check')
     .replace(/\bUse it for context, photos, and a cleaner break in the drive\b/gi, 'Good for a focused stop, photos, and a cleaner break in the drive')
     .replace(/\bUse it for a reset night when camping every day stops sounding fun\b/gi, 'Good for a reset night between camp days')
     .replace(/\bUse it when a hike should decide the day, not just fill an hour\b/gi, 'Good when a hike should shape the day')
     .replace(/\bGood for staging the route before and after trail time\b/gi, 'Good before or after trail time')
     .replace(/\bUse it for a recovery night or a safer end to a hard day\b/gi, 'Good for a recovery night or a safer end to a hard day')
+    .replace(/\bYosemite\s+NP\b/gi, 'Yosemite National Park')
+    .replace(/\b([A-Z][A-Za-z][A-Za-z .&'-]{1,80})\s+NP\s+Preserve\b/g, '$1 National Park Preserve')
+    .replace(/\b([A-Z][A-Za-z][A-Za-z .&'-]{1,80})\s+NP\b/g, '$1 National Park')
+    .replace(/\s+has area details around\s+/gi, ' covers access near ')
+    .replace(/([a-z0-9])\.([A-Z])/g, '$1. $2')
     .replace(/\bClick the reservation button below for details\.?/gi, '')
     .replace(/\bUse the reservation button below for details\.?/gi, '')
     .replace(/\bClick below for details\.?/gi, '')
@@ -335,21 +381,23 @@ export function sentenceAwarePreviewText(value?: string | null, maxChars = 220) 
 
 function categoryFromText(text: string): ExploreCategoryKey | null {
   if (!text) return null;
+  if (/\bday use\b/.test(text)) return 'things';
   if (/waterfall|falls|cascade/.test(text)) return 'waterfalls';
   if (/hot spring|thermal|soak/.test(text)) return 'springs';
   if (/trailhead|trail head/.test(text)) return 'trailheads';
+  if (/\b(trails?|treks?|trekking|ohv|route)\b/.test(text)) return 'trails';
+  if (/\b(glamp|private stay|yurts?)\b/.test(text)) return 'glamping';
+  if (textLooksLikeStay(text) || /hut|shelter|refuge|cabin|lodg/.test(text)) return 'huts';
+  if (/\b(campgrounds?|campsites?|camping|camp|rv|tent|overnight)\b/.test(text)) return 'camp';
   if (/viewpoint|overlook|lookout|vista|view\b/.test(text)) return 'views';
-  if (/trail|hike|trek|ohv|route/.test(text)) return 'trails';
-  if (/peak|summit|mountain/.test(text)) return 'peaks';
-  if (/climb|crag|boulder/.test(text)) return 'climb';
-  if (/fuel|gas|diesel|petrol/.test(text)) return 'fuel';
-  if (/resupply|grocery|gear|supplies|market/.test(text)) return 'resupply';
+  if (/\b(peaks?|summit|mountain)\b/.test(text)) return 'peaks';
+  if (/\b(climb|crag|boulder)\b/.test(text)) return 'climb';
+  if (/\b(fuel|gas|diesel|petrol)\b/.test(text)) return 'fuel';
+  if (/\b(resupply|grocery|gear|supplies|market)\b/.test(text)) return 'resupply';
   if (/things to do|what to do|activities|activity|see and do/.test(text)) return 'things';
-  if (/tour|experience|ticket|guided|guide\b|booking|book\b/.test(text)) return 'guided';
-  if (/glamp|private stay|yurt/.test(text)) return 'glamping';
-  if (/hut|shelter|refuge|cabin|lodg/.test(text)) return 'huts';
-  if (/camp|rv|tent|overnight/.test(text)) return 'camp';
-  if (/lake|river|shore|beach|marina|boat|water/.test(text)) return 'water';
+  if (/\b(tour|experience|ticket|guided|guide|booking|book)\b/.test(text)) return 'guided';
+  if (/\b(hikes?|hiking)\b/.test(text)) return 'trails';
+  if (/\b(lake|river|shore|beach|marina|boat|water)\b/.test(text)) return 'water';
   if (/public land|blm|wilderness|forest/.test(text)) return 'land';
   if (/scenic|historic|landmark|attraction|photo/.test(text)) return 'scenic';
   if (/park|preserve|monument|recreation area/.test(text)) return 'parks';
@@ -368,7 +416,7 @@ function categoryFromDestinationTitle(text: string): ExploreCategoryKey | null {
 }
 
 function isNestedDestinationTitle(text: string) {
-  return /\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodges?|lodging|trails?|trailheads?|visitor centers?|parking|rv|tent|overnight|tours?|activities|things to do|places to stay|where to stay)\b/.test(text);
+  return /\b(campgrounds?|campsites?|camping|glamping|huts?|cabins?|lodges?|lodging|inn|hotel|motel|resort|trails?|trailheads?|visitor centers?|parking|rv|tent|overnight|tours?|activities|things to do|places to stay|where to stay)\b/.test(text);
 }
 
 function categoryFromGroup(text: string): ExploreCategoryKey | null {
@@ -385,7 +433,18 @@ function categoryFromGroup(text: string): ExploreCategoryKey | null {
 
 export function getExploreDisplayTitle(place: ExplorePlaceProfile) {
   const v3 = readV3(place);
-  return String(v3.card?.title || v3.name || place.summary.title || 'Explore stop').trim();
+  const title = String(v3.card?.title || v3.name || place.summary.title || 'Explore stop').trim();
+  const letters = title.replace(/[^a-z]/gi, '');
+  if (letters.length >= 4) {
+    const upperRatio = letters.replace(/[^A-Z]/g, '').length / letters.length;
+    if (upperRatio >= 0.85) {
+      return title
+        .toLowerCase()
+        .replace(/\b\w/g, char => char.toUpperCase())
+        .replace(/\b(Rv|Ohv|Atv|Usfs|Blm)\b/g, token => token.toUpperCase());
+    }
+  }
+  return title;
 }
 
 export function exploreCategoryFromQuery(query: string): ExploreCategoryKey | null {
@@ -411,7 +470,11 @@ export function getExploreDisplayRegion(place: ExplorePlaceProfile) {
     v3.card?.region,
     place.summary.state,
     place.summary.region,
-  ]).filter((part, index, parts) => parts.indexOf(part) === index).join(' · ');
+  ])
+    .map(part => String(part || '').trim())
+    .filter(part => part && !isSourceOnlyDisplayLabel(part))
+    .filter((part, index, parts) => parts.indexOf(part) === index)
+    .join(' · ');
 }
 
 export function getExploreCategoryKey(place: ExplorePlaceProfile): ExploreCategoryKey {
@@ -481,17 +544,17 @@ export function getExploreSourceBadge(place: ExplorePlaceProfile) {
     return 'Current access';
   }
   if (quality.includes('wiki') || /wikipedia|wikidata|wikimedia/i.test(facts.source_title || primary)) return 'Check locally';
-  if (primary || sources.length > 1 || place.source_pack?.sources?.length) return 'Area details';
+  if (primary || sources.length > 1 || place.source_pack?.sources?.length) return 'Check details';
   return 'Check access';
 }
 
 export function getExploreTrustBadge(place: ExplorePlaceProfile) {
   const confidence = sourceConfidenceFromRecord(readV3(place));
-  if (confidence.score >= 85) return 'Plan-ready';
-  if (confidence.score >= 65) return 'Area details';
+  if (confidence.score >= 85) return 'Current access';
+  if (confidence.score >= 65) return 'Check details';
   const badge = getExploreSourceBadge(place);
-  if (/official|current access/i.test(badge)) return 'Plan-ready';
-  if (/community|curated|multiple|area details/i.test(badge)) return 'Area details';
+  if (/official|current access/i.test(badge)) return 'Current access';
+  if (/community|curated|multiple|area details|check details/i.test(badge)) return 'Check details';
   return 'Check access';
 }
 
@@ -538,8 +601,8 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
       tone: facts.last_updated ? '#16a34a' : '#ca8a04',
     },
     {
-      label: 'Trip check',
-      value: confidence.score >= 65 || /official/i.test(sourceBadge) ? 'Area details' : 'Check before going',
+      label: 'Details',
+      value: confidence.score >= 65 || /official/i.test(sourceBadge) ? 'Current details' : 'Check before going',
       icon: 'shield-outline',
       tone: confidence.score >= 65 || /official/i.test(sourceBadge) ? '#0ea5e9' : '#ca8a04',
     },
@@ -614,19 +677,19 @@ export function getExploreQuickFacts(place: ExplorePlaceProfile, context: Explor
       tone: '#16a34a',
     });
   } else if (key === 'camp' || key === 'glamping' || key === 'huts') {
-    facts.push({ label: 'Verify access', icon: 'trail-sign-outline', tone: '#16a34a' });
+    facts.push({ label: 'Check access', icon: 'trail-sign-outline', tone: '#16a34a' });
   } else if (key === 'waterfalls' || key === 'views') {
     facts.push({ label: key === 'waterfalls' ? 'Viewpoints nearby' : 'Scenic stop', icon: 'binoculars-outline', tone: '#15803d' });
   } else if (key === 'fuel') {
-    facts.push({ label: 'Verify hours', icon: 'car-outline', tone: '#ea580c' });
+    facts.push({ label: 'Check hours', icon: 'car-outline', tone: '#ea580c' });
   } else if (key === 'resupply') {
-    facts.push({ label: 'Verify supply', icon: 'basket-outline', tone: '#7c3aed' });
+    facts.push({ label: 'Check supply', icon: 'basket-outline', tone: '#7c3aed' });
   } else if (key === 'trails' || key === 'trailheads' || key === 'climb') {
     facts.push({ label: 'Trail access', icon: 'walk-outline', tone: '#f97316' });
   } else if (key === 'peaks') {
     facts.push({ label: 'Mountain', icon: 'triangle-outline', tone: '#2563eb' });
   } else {
-    facts.push({ label: 'Area', icon: 'navigate-outline', tone: '#2563eb' });
+    facts.push({ label: 'Details', icon: 'navigate-outline', tone: '#2563eb' });
   }
   facts.push({ label: getExploreBestSeason(place), icon: 'calendar-outline', tone: '#c4552d' });
   facts.push({ label: getExploreTrustBadge(place), icon: 'shield-checkmark-outline', tone: '#2563eb' });
@@ -651,7 +714,7 @@ export function getExplorePlanNotes(place: ExplorePlaceProfile): ExplorePlanNote
 
   if (key === 'waterfalls') {
     return [
-      { label: 'Drop', value: explicitFacts[0] || 'Verify height', icon: 'water-outline', tone: '#0284c7' },
+      { label: 'Drop', value: explicitFacts[0] || 'Check height', icon: 'water-outline', tone: '#0284c7' },
       { label: 'Access', value: explicitFacts[1] || compact([place.profile.access_notes, 'Open area']).join(' · ') || 'Check trailhead', icon: 'trail-sign-outline', tone: '#16a34a' },
       { label: 'Best Flow', value: explicitFacts[2] || getExploreBestSeason(place), icon: 'calendar-outline', tone: '#ca8a04' },
       { label: 'Safety', value: explicitFacts[3] || 'Wet rock, ice, closures', icon: 'alert-circle-outline', tone: '#dc2626' },
@@ -666,7 +729,7 @@ export function getExplorePlanNotes(place: ExplorePlaceProfile): ExplorePlanNote
     return [
       { label: 'Route Type', value: loopLikely ? 'Loop likely' : pointToPoint ? 'Point-to-point' : 'Loop / out-and-back options', icon: 'git-compare-outline', tone: '#f97316' },
       { label: 'Distance', value: distance ? `${distance[1]} ${distance[2].replace('mile', 'mi').replace('kilometer', 'km')}` : 'Choose trail', icon: 'walk-outline', tone: '#16a34a' },
-      { label: 'Difficulty', value: difficulty ? difficulty[1].replace(/^\w/, c => c.toUpperCase()) : 'Verify grade', icon: 'trending-up-outline', tone: '#7c3aed' },
+      { label: 'Difficulty', value: difficulty ? difficulty[1].replace(/^\w/, c => c.toUpperCase()) : 'Check grade', icon: 'trending-up-outline', tone: '#7c3aed' },
       { label: 'Trail Lines', value: 'Open segments', icon: 'map-outline', tone: '#2563eb' },
     ];
   }
@@ -725,11 +788,60 @@ export function getExploreSearchText(place: ExplorePlaceProfile) {
   ]).join(' '));
 }
 
+function exploreLooksLikeBlockedViewItem(place: ExplorePlaceProfile) {
+  const text = normalize(compact([
+    getExploreDisplayTitle(place),
+    getExploreDisplayCategory(place),
+    place.summary.hook,
+    place.summary.short_description,
+    place.profile.summary,
+    ...(place.summary.tags ?? []),
+  ]).join(' '));
+  return /\b(bus stop|shuttle|entrance station|restaurant|steakhouse|cafe|grill|market|store|bookstore|kennel|conservancy|clinic|medical|healthcare|visitor center|exhibit|talk|program|parking|restroom|trailhead|campground|campgrounds|campsite|cemetery|lodge|lodging|hotel|motel|appeared about|rocks are|geologically speaking)\b/.test(text);
+}
+
+function exploreLooksLikeViewItem(place: ExplorePlaceProfile) {
+  if (exploreLooksLikeBlockedViewItem(place)) return false;
+  const key = getExploreCategoryKey(place);
+  if (key === 'waterfalls' || key === 'peaks' || key === 'views') return true;
+  const text = normalize(compact([
+    getExploreDisplayTitle(place),
+    place.summary.hook,
+    place.summary.short_description,
+    place.profile.summary,
+    ...(place.summary.tags ?? []),
+  ]).join(' '));
+  return /\b(viewpoint|overlook|vista|scenic|window|rim|fault|fossil|canyon|mountain|summit|arch|bridge|falls|waterfall|loop)\b/.test(text);
+}
+
+function exploreLooksLikeWaterItem(place: ExplorePlaceProfile) {
+  const v3 = readV3(place);
+  const text = normalize(compact([
+    getExploreDisplayTitle(place),
+    getExploreDisplayCategory(place),
+    place.summary.category,
+    place.summary.explore_group,
+    place.summary.hook,
+    place.summary.short_description,
+    place.profile.summary,
+    ...(place.summary.tags ?? []),
+    ...(Array.isArray(v3.search_aliases) ? v3.search_aliases : []),
+  ]).join(' '));
+  return /\b(lake|lakes|river|rivers|creek|creeks|shore|shoreline|beach|beaches|marina|boat|boating|canoe|kayak|water|waterfall|falls|cascade|spring|springs|bay|sound|coast|coastal|ocean|sea|island|islands)\b/.test(text);
+}
+
 export function exploreCategoryMatches(place: ExplorePlaceProfile, selected: ExploreCategoryKey) {
   if (selected === 'all') return true;
   if (selected === 'guided' || selected === 'tours') return false;
   if (selected === 'nearby') return true;
   const key = getExploreCategoryKey(place);
+  if (selected === 'views') {
+    return ['views', 'scenic', 'waterfalls', 'peaks'].includes(key) && exploreLooksLikeViewItem(place);
+  }
+  if (selected === 'water') {
+    return ['water', 'waterfalls', 'springs'].includes(key)
+      || (['views', 'scenic', 'parks', 'land', 'trails', 'trailheads'].includes(key) && exploreLooksLikeWaterItem(place));
+  }
   if (selected === 'things') {
     const sourcePack = place.source_pack ?? {};
     if (Array.isArray(sourcePack.things_to_do) && sourcePack.things_to_do.length > 0) return true;
@@ -839,6 +951,10 @@ export function exploreContentQualityScore(place: ExplorePlaceProfile) {
 function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   const key = getExploreCategoryKey(place);
   const title = getExploreDisplayTitle(place);
+  const campHubCopy = `${title} has nearby campground options. Check access, fees, rules, and seasonal closures before picking a night.`;
+  if (looksLikeRawRecordText(raw)) {
+    return FALLBACK_COPY[key] || `${title} has current access notes to check before you go.`;
+  }
   let text = raw
     .replace(/\broute-ready\b/gi, 'ready')
     .replace(/\broute planner\b/gi, 'map')
@@ -856,21 +972,54 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     .replace(/\bUse it when a hike should decide the day, not just fill an hour\b/gi, 'Good when a hike should shape the day')
     .replace(/\bGood for staging the route before and after trail time\b/gi, 'Good before or after trail time')
     .replace(/\bUse it for a recovery night or a safer end to a hard day\b/gi, 'Good for a recovery night or a safer end to a hard day')
+    .replace(/\bYosemite\s+NP\b/gi, 'Yosemite National Park')
+    .replace(/\s+has area details around\s+/gi, ' covers access near ')
+    .replace(/\s+has area details\.\s*/gi, ' has current access notes. ')
+    .replace(/\bThis stop is a managed outdoor area\.?\s*/gi, '')
+    .replace(/\bis a managed outdoor area\.?\s*/gi, ' has access notes to check. ')
+    .replace(/\bmanaged outdoor area\b/gi, 'outdoor stop')
+    .replace(/\b(?:a|an)\s+0\.\d+\s+miles?\s+trail\b/gi, 'a short trail under 1 mile')
+    .replace(/\b(?:a|an)\s+0\.\d+\s+miles?\b/gi, 'under 1 mile')
+    .replace(/\b0\.\d+\s+miles?\b/gi, 'under 1 mile')
+    .replace(/\b0\.\d+\s+mi\b/gi, 'under 1 mi')
+    .replace(/\b(\d+)\.0\s+miles?\b/gi, '$1 mile')
+    .replace(/\b(\d+)\.0\s+mi\b/gi, '$1 mi')
+    .replace(/([a-z0-9])\.([A-Z])/g, '$1. $2')
     .replace(/\bsource pack\b/gi, 'details')
     .replace(/\bAI\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+  if (/^Use it as a day stop when the drive needs more than mileage/i.test(text)) {
+    return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
+  }
+  if (/^Use this as a protected-area anchor/i.test(text)) {
+    return `${title} covers protected-area planning. Confirm permits, guide requirements, road access, weather, and safety conditions before travel.`;
+  }
+  text = text.replace(/^Use\s+(.+?)\s+as\s+a\s+(.+?)\./i, (_match, name, role) => `${name} is a ${role}.`);
+  if (/^it is a day stop when the drive needs more than mileage/i.test(text)) {
+    return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
+  }
+  text = text.replace(/^under 1 mile\b/i, 'Under 1 mile');
+  text = text.replace(/\s+has access notes to check\.\s+near\s+[^.]+\.?\s*/i, ' has access notes to check before you go. ');
+  text = text.replace(/\b(has access notes to check before you go)\.\s+Check current access, fees, closures, permits, weather, and nearby services before you go\.?/gi, '$1.');
+  if (
+    key === 'camp'
+    && /\b(live results|live map results|blank (?:map|camp) search|legal overnight options|overnight search area|camp search a real center|place to start looking for legal stays|shows campground options|good for overnight planning)\b/i.test(text)
+  ) {
+    return campHubCopy;
+  }
   if (isExploreLocationMismatchCopy(text, place)) {
     if (key === 'peaks') return `${title} is a mountain target. Check route, weather, access, and current conditions before you go.`;
     if (key === 'trails' || key === 'trailheads' || key === 'climb') return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
     if (key === 'water') return `${title} has water access, views, and nearby stops to check before you go.`;
-    if (key === 'camp' || key === 'glamping' || key === 'huts') return `${title} shows stay options for the area. Check booking, access, rules, and closures.`;
-    return FALLBACK_COPY[key] || `${title} has area details and current access checks.`;
+    if (key === 'camp') return campHubCopy;
+    if (key === 'glamping' || key === 'huts') return `${title} has stay options nearby. Check booking, access, rules, and closures.`;
+    return FALLBACK_COPY[key] || `${title} has current access notes to check before you go.`;
   }
   if (/Use it to stage trail time, nearby stays, weather, and map context|Use this card for map context, nearby stops, weather, and access checks/i.test(text)) {
     if (key === 'peaks') return `${title} is a mountain target. Check route, weather, access, and current conditions before you go.`;
     if (key === 'trails' || key === 'trailheads' || key === 'climb') return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
-    return `${title} has area details to compare with weather, access, nearby stops, and current conditions.`;
+    return `${title} has access notes to compare with weather, nearby stops, and current conditions.`;
   }
   if (/safer overnight or weather-reset lead|Verify reservations, seasonal access, food, hut rules, and route approach/i.test(text)) {
     return `${title} is a hut or shelter option. Check reservations, seasonal access, route approach, and current conditions.`;
@@ -884,7 +1033,7 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   if (/Build extra time around this stop, especially if weather or crowds matter/i.test(text)) {
     return `${title} is worth extra time when weather or crowds matter. Check access, fees, closures, and overnight rules.`;
   }
-  if (/day anchor for nearby camps, trailheads, access notes, and weather/i.test(text)) {
+  if (/day (?:anchor|stop) for nearby camps, trailheads, access notes, and weather/i.test(text)) {
     return `${title} has nearby camps, trails, access notes, and weather to check before setting dates.`;
   }
   if (/Use it for photos, route timing, nearby trail context, and weather checks/i.test(text)) {
@@ -894,7 +1043,7 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     return `${title} is a history or landmark stop. Check hours, tickets, access, and local rules.`;
   }
   if (/Use it to start a camp search near a real destination/i.test(text)) {
-    return `${title} is an overnight-area lead. Check legal camping, fees, closures, road access, and booking rules.`;
+    return campHubCopy;
   }
   if (/Use this as .*K2\/Baltoro route area/i.test(text)) {
     return `${title} covers the K2/Baltoro trek area. Confirm permits, guides, road access, glacier conditions, and rescue logistics before travel.`;
@@ -905,13 +1054,26 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   if (/Use this as .*route area/i.test(text)) {
     return `${title} is a route area. Check permits, access, seasonal conditions, local support, and safety logistics before travel.`;
   }
+  if (/^(.+?)\s+is a\s+(fuel|gas|diesel|petrol)\.\s+Check\b/i.test(text)) {
+    return `${title} is a fuel stop. Check hours, access, current conditions, and payment options before you go.`;
+  }
+  if (/^(.+?)\s+is a\s+(resupply|grocery|market|shop|supplies|repair|service)\.\s+Check\b/i.test(text)) {
+    return `${title} is a supply stop. Check hours, access, and current services before you go.`;
+  }
   const waterfallFallback = text.match(/^(.+?)\s+is a waterfall or cascade near\s+([^.]+)\.\s+Check trail access, seasonal flow, closures, water levels, and slippery terrain before visiting\.?$/i);
   if (waterfallFallback) {
     return `Waterfall near ${waterfallFallback[2]}. Check trail access, seasonal flow, closures, and slippery terrain before visiting.`;
   }
   const mappedFallback = text.match(/^(.+?)\s+is mapped as\s+([a-z\s-]+)\s+in OpenStreetMap\.\s+Verify access, current conditions, and local rules before relying on it\.?$/i);
   if (mappedFallback) {
-    return `${title} is a ${mappedFallback[2].trim()}. Check access, current conditions, and local rules before you go.`;
+    const mappedType = mappedFallback[2].trim();
+    if (/\b(fuel|gas|diesel|petrol)\b/i.test(mappedType)) {
+      return `${title} is a fuel stop. Check hours, access, current conditions, and payment options before you go.`;
+    }
+    if (/\b(resupply|grocery|market|shop|supplies|repair|service)\b/i.test(mappedType)) {
+      return `${title} is a supply stop. Check hours, access, and current services before you go.`;
+    }
+    return `${title} is a ${mappedType}. Check access, current conditions, and local rules before you go.`;
   }
   const mappedTrailFallback = text.match(/^(.+?)\s+is a mapped trail area near\s+([^.]+)\.\s+Check distance, difficulty, route type, weather, daylight, permits, closures, and navigation before starting\.?$/i);
   if (mappedTrailFallback) {
@@ -922,13 +1084,13 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     return `${title} has trails and route options nearby. Check access, weather, permits, and current conditions before you go.`;
   }
   if (isWeakExploreCopy(text, place)) {
-    return FALLBACK_COPY[key] || `${title} has area details and current access checks.`;
+    return FALLBACK_COPY[key] || `${title} has current access notes to check before you go.`;
   }
   if (/Use .+ as the overnight search area|gives camp search a real center|Start camp planning around .+ then narrow it with live results/i.test(text)) {
-    return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
+    return campHubCopy;
   }
   if (/\b(campgrounds?|lodging|glamping|stays?)\b/i.test(title) && /Good for overnight planning|live map results|blank camp search|Search around .+ legal overnight options/i.test(text)) {
-    return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
+    return key === 'camp' ? campHubCopy : `${title} has stay options nearby. Check booking, access, rules, and closures.`;
   }
   if (/Trailhead groups .* records into one map-ready card list/i.test(text)) {
     return `${title} shows nearby trail access and overnight planning context. Check current access, closures, and conditions.`;
@@ -937,13 +1099,17 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     return `${title} is a comfort-focused stay option. Check booking, road access, and availability.`;
   }
   if (/Good for a reset night between camp days/i.test(text)) {
-    return `${title} is a comfortable stay option near the area. Check booking, access, rules, and closures.`;
+    const region = getExploreDisplayRegion(place);
+    const usableRegion = /^[A-Z]{2}$/.test(region) ? '' : region;
+    return `${title} is a comfortable stay option${usableRegion ? ` near ${usableRegion}` : ''}. Check booking, access, rules, and closures.`;
   }
   if (/Good before or after trail time|Good when a hike should shape the day/i.test(text)) {
     return `${title} has trail access, nearby stops, and conditions to check before you go.`;
   }
   if (/weather or mileage makes camping less appealing/i.test(text)) {
-    return `${title} gives you an indoor stay option near the area. Check booking and seasonal access.`;
+    const region = getExploreDisplayRegion(place);
+    const usableRegion = /^[A-Z]{2}$/.test(region) ? '' : region;
+    return `${title} gives you an indoor stay option${usableRegion ? ` near ${usableRegion}` : ''}. Check booking and seasonal access.`;
   }
   if (/gives the drive a specific story to stop for|best treated as a real stop, not a quick pin/i.test(text)) {
     return `${title} is a focused stop with views, history, or short walks to check before you go.`;
@@ -957,10 +1123,10 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   if (/works as a real day stop|not just a map label|when the route needs more than road miles|Put .+ on the route/i.test(text)) {
     if (key === 'parks') return `${title} has trails, viewpoints, access roads, and nearby stops to scout.`;
     if (key === 'water') return `${title} has water access, views, and nearby stops to check before you go.`;
-    return FALLBACK_COPY[key] || `${title} has area details and current access checks.`;
+    return FALLBACK_COPY[key] || `${title} has current access notes to check before you go.`;
   }
   if (/is the place to start looking for legal stays/i.test(text)) {
-    return `${title} shows campground options for the area. Check reservations, access, rules, and closures.`;
+    return campHubCopy;
   }
   return text;
 }

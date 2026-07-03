@@ -44,7 +44,7 @@ const PAGES: OnboardingPage[] = [
     cards: [
       { title: 'Daily plan', body: 'Turn a destination into days, stops, and overnight windows.', icon: 'navigate-outline', tone: '#22c55e' },
       { title: 'Vehicle fit', body: 'Fuel range, clearance, towing, and comfort help shape the route.', icon: 'car-sport-outline', tone: '#f97316' },
-      { title: 'Offline areas', body: 'Keep important regions and trip stops ready without signal.', icon: 'cloud-download-outline', tone: '#8b5cf6' },
+      { title: 'Saved areas', body: 'Keep important regions and trip stops ready without signal.', icon: 'cloud-download-outline', tone: '#8b5cf6' },
     ],
   },
   {
@@ -62,13 +62,13 @@ const PAGES: OnboardingPage[] = [
   {
     kicker: 'Saved',
     title: 'Keep the important pieces together.',
-    body: 'Saved places, trip history, downloads, reports, and profile choices stay close for the next drive.',
+    body: 'Saved places, trip history, reports, and profile choices stay close for the next drive.',
     icon: 'shield-checkmark-outline',
     tone: '#d4af37',
     cards: [
       { title: 'Saved places', body: 'Keep camps, places, trails, and trips close for the next planning session.', icon: 'bookmark-outline', tone: '#60a5fa' },
       { title: 'Reports', body: 'Add field notes, closures, photos, and confirmations from the route.', icon: 'pin-outline', tone: '#ef4444' },
-      { title: 'Profile', body: 'Manage your rig, downloads, saved trips, support, and account settings.', icon: 'person-circle-outline', tone: '#d4af37' },
+      { title: 'Profile', body: 'Manage your rig, saved areas, trips, support, and account settings.', icon: 'person-circle-outline', tone: '#d4af37' },
     ],
   },
 ];

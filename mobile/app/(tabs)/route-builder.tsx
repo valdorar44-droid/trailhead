@@ -42,6 +42,7 @@ import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore, type TripHistoryItem } from '@/lib/store';
+import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { storage } from '@/lib/storage';
 import { trackPhase0Once } from '@/lib/telemetry';
 import { buildRentalSuggestionFit } from '@/lib/outdoorRentals';
@@ -82,7 +83,7 @@ import {
   type RouteBuilderIntent,
 } from '@/lib/routeBuilder';
 
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const API_BASE_URL = TRAILHEAD_API_BASE;
 const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 const ROUTE_HERO_PHOTO = 'https://www.nps.gov/common/uploads/structured_data/473F5463-F0D2-261D-CEF5FCB39363590B.jpg';
 const ROUTE_BUILDER_RENTAL_DISMISSED_KEY = 'trailhead_route_builder_rental_dismissed_at';
@@ -808,21 +809,21 @@ function offlinePoiToCamp(point: OsmPoi): CampsitePin {
     subtype,
     point.address,
     anyPoint.source_freshness,
-    anyPoint.official_url ? 'Official link cached.' : '',
-    anyPoint.booking_url ? 'Booking link cached.' : '',
+    anyPoint.official_url ? 'Official listing.' : '',
+    anyPoint.booking_url ? 'Booking details.' : '',
   ].filter(Boolean).join(' ');
   return {
     id: point.id,
-    name: point.name || 'Offline camp',
+    name: point.name || 'Saved camp',
     lat: point.lat,
     lng: point.lng,
     tags: [
       ...(Array.isArray(anyPoint.tags) ? anyPoint.tags : []),
       ...(Array.isArray(anyPoint.site_types) ? anyPoint.site_types : []),
-      'downloaded',
+      'saved',
     ],
-    land_type: anyPoint.source_badge || subtype || 'Downloaded camp',
-    description: cachedNotes || 'Downloaded camp point.',
+    land_type: anyPoint.source_badge || subtype || 'Saved camp',
+    description: cachedNotes || 'Saved camp details.',
     reservable: Boolean(anyPoint.reservable),
     cost: anyPoint.reservable ? 'Reservable' : undefined,
     url: anyPoint.booking_url || anyPoint.official_url || point.website || '',
@@ -831,7 +832,7 @@ function offlinePoiToCamp(point: OsmPoi): CampsitePin {
     route_distance_mi: point.route_distance_mi,
     route_fit: point.route_fit,
     recommended_day: anyPoint.recommended_day,
-    verified_source: point.source_label || point.source || 'Offline pack',
+    verified_source: point.source_label || point.source || 'Saved places',
     amenities: Array.isArray(anyPoint.amenities) ? anyPoint.amenities : undefined,
     site_types: Array.isArray(anyPoint.site_types) ? anyPoint.site_types : undefined,
   } as CampsitePin;
@@ -1194,7 +1195,7 @@ function builderStopFromCopilotDraft(stop: string | TrailheadRouteBuilderDraftSt
     lat,
     lng,
     type,
-    description: stop.description || (type === 'camp' ? 'Scout-picked overnight option. Verify access, rules, and fit before you head out.' : 'Scout-added route stop. Review it before you lock the trip.'),
+    description: stop.description || (type === 'camp' ? 'Scout-picked overnight option. Check access, rules, and fit before you head out.' : 'Scout-added route stop. Review it before you lock the trip.'),
     land_type: stop.label || '',
     source: stop.source === 'camp' || stop.source === 'gas' || stop.source === 'poi' || stop.source === 'search' || stop.source === 'map'
       ? stop.source
@@ -1307,7 +1308,7 @@ function cleanCampFeeText(text?: string | null) {
     .replace(/;\s*verify current price on Recreation\.gov\.?/i, '')
     .replace(/;\s*check Recreation\.gov for current pricing\.?/i, '')
     .replace(/\bfee text\b/gi, 'fee')
-    .replace(/^verify\b/i, 'Verify')
+    .replace(/^verify\b/i, 'Check')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -1422,7 +1423,7 @@ async function searchMapContextNearby(query: string, center: { lat: number; lng:
     type,
     subtype: String(place.subtype || place.feature_type || category),
     source: 'mapbox_search',
-    source_label: 'Mapbox Search',
+    source_label: 'Place search',
     provider_place_id: place.provider_place_id || place.mapbox_id,
     place_id: place.place_id || place.mapbox_id,
     address: place.address,
@@ -3181,7 +3182,7 @@ function RouteBuilderScreenContent() {
       day: targetDay,
       tab,
       label: tab === 'camps'
-        ? `Choose an overnight near Day ${targetDay} endpoint`
+        ? `Choose an overnight near Day ${targetDay} finish`
         : `Add ${tab === 'gas' ? 'fuel' : tab === 'excursions' ? 'side trips' : tab === 'tours' ? 'tours' : 'places'} between ${from.name.split(',')[0]} and ${to.name.split(',')[0]}`,
     } : null);
     runDiscovery(tab, leg.center, leg, { focusMap: false });
@@ -3680,7 +3681,7 @@ function RouteBuilderScreenContent() {
         return { spine: coordsToStops(geometry.coords), geometry };
       }
       setRouteGeometry(null);
-      Alert.alert('Route unavailable', 'Trailhead could not build a road route for this outline. Add a road anchor, allow ferries, or save it as a draft after choosing real stops.');
+      Alert.alert('Route needs another stop', 'Trailhead could not build a road route for this outline. Add a real stop, allow ferries, or save it as a draft after choosing stops.');
       return null;
     } catch (e: any) {
       setRouteGeometry(null);
@@ -3689,7 +3690,7 @@ function RouteBuilderScreenContent() {
         Alert.alert('Route needs correction', detail?.reason || e.message || 'This route cannot be built safely.');
         return null;
       }
-      Alert.alert('Route unavailable', 'Trailhead could not build a road route right now. Try a shorter leg, add a road anchor, or check signal.');
+      Alert.alert('Route needs another stop', 'Trailhead could not build a road route right now. Try a shorter leg, add a real stop, or check signal.');
       return null;
     }
   }
@@ -4031,7 +4032,7 @@ function RouteBuilderScreenContent() {
         base = next;
       }
       if (base.length < 2) {
-        Alert.alert('Start and end needed', 'Add a start and destination first. Trailhead will split the route into camp-aware day areas from there.');
+        Alert.alert('Start and end needed', 'Add a start and destination first. Trailhead will split the route into practical day areas from there.');
         return;
       }
       const first = base[0];
@@ -4247,8 +4248,8 @@ function RouteBuilderScreenContent() {
         trails: routeOfflineReadiness.rows.find(row => row.key === 'trails')?.ready ?? false,
         trip_download: routeOfflineReadiness.ready,
         message: routeOfflineReadiness.ready
-          ? 'Trip downloads are ready.'
-          : 'Download the missing route area before leaving signal.',
+          ? 'Saved trip areas are ready.'
+          : 'Save the missing route area before leaving signal.',
       },
     };
   }
@@ -4359,7 +4360,7 @@ function RouteBuilderScreenContent() {
           fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(inputMiles, planningStats.mpg, weatherUnitMode)} / $${Math.round(tripFuelCost)}. Fuel stops are manually selected.`,
           water_strategy: 'Carry water for each day and add water stops where needed.',
           permits_needed: `${tripShapeMode === 'loop' ? 'Loop route. ' : tripShapeMode === 'there_and_back' ? 'There-and-back route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
-          best_season: `Verify seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
+          best_season: `Check seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
         },
       },
       campsites,
@@ -4622,7 +4623,7 @@ function RouteBuilderScreenContent() {
     }
     if (tripId.startsWith('manual_') || tripId.includes('_edited_')) {
       removeTripFromHistory(tripId);
-      Alert.alert('Route unavailable', 'This saved route was missing from local storage, so the stale shortcut was removed.');
+      Alert.alert('Route needs a refresh', 'This saved route was missing from local storage, so the stale shortcut was removed.');
       return;
     }
     const serverTrip = await api.getTrip(tripId).catch(() => null);
@@ -4633,7 +4634,7 @@ function RouteBuilderScreenContent() {
       router.replace('/(tabs)/map');
       return;
     }
-    Alert.alert('Route unavailable', 'Trailhead could not load this route from local storage or your account.');
+    Alert.alert('Route needs a refresh', 'Trailhead could not load this route from local storage or your account.');
   }
 
   function openSavedTrailRoute(trail: OfflineTrail) {
@@ -5055,13 +5056,13 @@ function RouteBuilderScreenContent() {
           ) : wizardStep === 2 ? (
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>Choose the route feel</Text>
-              <Text style={s.wizardHelp}>Plan Mode places camp options along the route. Build Mode gives you day areas to shape by hand.</Text>
+              <Text style={s.wizardTitle}>Choose how to build it</Text>
+              <Text style={s.wizardHelp}>Let Trailhead place camp options along the route, or shape each day by hand.</Text>
             </View>
             <View style={s.premiumModeControl}>
               {([
-                { id: 'recommended' as TripBuildMode, label: 'Plan Mode', icon: 'sparkles-outline' as const, sub: 'Camp-aware' },
-                { id: 'blank' as TripBuildMode, label: 'Build Mode', icon: 'construct-outline' as const, sub: 'Start from scratch' },
+                { id: 'recommended' as TripBuildMode, label: 'Camp planner', icon: 'sparkles-outline' as const, sub: 'Suggested stops' },
+                { id: 'blank' as TripBuildMode, label: 'Build by hand', icon: 'construct-outline' as const, sub: 'Manual days' },
               ]).map(mode => {
                 const active = tripBuildMode === mode.id;
                 return (
@@ -5868,14 +5869,14 @@ function RouteBuilderScreenContent() {
             <View style={s.filterSheetTop}>
               <View>
                 <Text style={s.kicker}>ROUTE BUILDER</Text>
-                <Text style={s.filterSheetTitle}>Downloaded Places</Text>
+                <Text style={s.filterSheetTitle}>Saved Places</Text>
               </View>
               <TouchableOpacity style={s.quickCardClose} onPress={() => setShowPlaceFilters(false)}>
                 <Ionicons name="close" size={17} color={C.text3} />
               </TouchableOpacity>
             </View>
             <Text style={s.filterHintText}>
-              These filters control which downloaded pack points appear on the map and in Places search while building routes offline.
+              Choose which saved stops appear while building routes without signal.
             </Text>
             <View style={s.filterToolbar}>
               <TouchableOpacity style={s.filterSmallBtn} onPress={() => setActivePlaceFilters(DEFAULT_PLACE_FILTERS)}>

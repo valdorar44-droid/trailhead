@@ -49,6 +49,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead } from '@/lib/api';
+import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -141,7 +142,7 @@ try {
 }
 const USE_IOS_NATIVE_NAV_ENGINE = Platform.OS === 'ios' && hasNativeNavigationEngine();
 const STADIA_API_KEY = process.env.EXPO_PUBLIC_STADIA_API_KEY ?? '4d2b6230-f506-42ca-b556-35f419510aa2';
-const API_BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const API_BASE_URL = TRAILHEAD_API_BASE;
 const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 const LIVE_CONDITION_SOURCE = 'pro' + 'vider';
 
@@ -349,7 +350,7 @@ interface SearchPlace {
   selection_confidence?: string | null; raw_feature?: Record<string, unknown> | null;
   country_code?: string | null; country?: string | null; region?: string | null; bbox?: number[] | null;
   geocode_status?: string; geocode_reason?: string; geocode_query?: string;
-  type?: string; subtype?: string; address?: string; phone?: string; website?: string; official_url?: string; booking_url?: string;
+  type?: string; subtype?: string; display_type?: string; address?: string; phone?: string; website?: string; official_url?: string; booking_url?: string;
   open_now?: boolean | null; rating?: number; rating_count?: number; photo_url?: string | null;
   photos?: TrailheadGalleryPhoto[];
   hours?: string[]; open_hours?: string[] | string | Record<string, unknown> | null; hours_label?: string | null;
@@ -745,7 +746,7 @@ function localRouteBrief(trip: TripResult, reports: Report[] = []): RouteBrief {
   ].filter(Boolean).slice(0, 3);
   const mustDo = [
     'Download this trip from the Download List before leaving service.',
-    camps.length ? 'Verify each saved camp is open, legal, and reachable for your rig.' : 'Choose overnight camps for each travel day before using GPS navigation.',
+    camps.length ? 'Check each saved camp is open, legal, and reachable for your rig.' : 'Choose overnight camps for each travel day before using GPS navigation.',
     fuelStops > 0 ? 'Confirm fuel range against the longest day and top off before remote legs.' : 'Add at least one fuel stop or bail-out town to the route.',
     'Carry extra water and check current fire restrictions before departure.',
   ];
@@ -876,7 +877,7 @@ function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | nu
     userFacingCampNote(camp?.source_freshness),
     (detail as any)?.access_note,
   ]
-    .map(cleanCampDescriptionText)
+    .map(value => userFacingCampNote(cleanCampDescriptionText(value)))
     .filter(Boolean)
     .filter(text => !addressKey || text.toLowerCase() !== addressKey)
     .filter(text => !/^[-\d.,\s]+$/.test(text));
@@ -884,7 +885,7 @@ function campSummaryText(camp?: CampsitePin | null, detail?: CampsiteDetail | nu
   if (useful) return useful;
   const type = cleanDisplayLabel(camp?.land_type || camp?.tags?.[0] || 'campground') || 'Campground';
   const where = (detail?.address || camp?.address) ? ` near ${detail?.address || camp?.address}` : '';
-  return `${type}${where}. Verify current access, rules, fees, road conditions, and availability before relying on it.`;
+  return `${type}${where}. Check current access, rules, fees, road conditions, and availability before you go.`;
 }
 
 function uniqueCleanLabels(values: Array<string | undefined | null>): string[] {
@@ -900,6 +901,9 @@ function uniqueCleanLabels(values: Array<string | undefined | null>): string[] {
       || key === 'recent dispersed spot'
       || key === 'source data'
       || key === 'map data'
+      || key === 'map contributors'
+      || key === 'community listing'
+      || key === 'camp listing'
       || key === 'available source data'
       || key === 'osm'
       || key === 'openstreetmap'
@@ -1042,7 +1046,7 @@ function routeProgressLabel(progress?: number | null) {
 function routeFitLabel(item?: { route_distance_mi?: number | null; route_progress?: number | null } | null) {
   if (!item) return '';
   const bits = [
-    item.route_distance_mi != null && Number.isFinite(item.route_distance_mi) ? `${item.route_distance_mi.toFixed(1)} mi off route` : '',
+    item.route_distance_mi != null && Number.isFinite(item.route_distance_mi) ? `${formatCleanMiles(item.route_distance_mi)} off route` : '',
     routeProgressLabel(item.route_progress),
   ].filter(Boolean);
   return bits.join(' · ');
@@ -2105,6 +2109,16 @@ function formatWaterMiles(mi?: number | null) {
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
 }
 
+function formatCleanMiles(mi?: number | null) {
+  if (mi == null || !Number.isFinite(Number(mi))) return '';
+  const value = Number(mi);
+  if (value <= 0) return '';
+  if (value < 1) return 'Under 1 mi';
+  if (value >= 10) return `${Math.round(value)} mi`;
+  const rounded = Number(value.toFixed(1));
+  return `${Number.isInteger(rounded) ? Math.round(rounded) : rounded} mi`;
+}
+
 function compactWaterSource(value?: string | null) {
   const raw = String(value || '').toLowerCase();
   if (!raw) return 'Open';
@@ -2966,7 +2980,7 @@ function normalizeScopedSearchPoi(place: Partial<OsmPoi>, index: number, session
     lng,
     type,
     source: place.source || 'trailhead_search',
-    source_label: place.source_label || place.source_badge || 'Map search',
+    source_label: place.source_label || place.source_badge || 'Place',
     distance_mi: Number.isFinite(distanceMi) ? Math.round(distanceMi * 10) / 10 : undefined,
   };
 }
@@ -2980,7 +2994,7 @@ function scopedPoiToSearchPlace(poi: OsmPoi, query: string): SearchPlace {
     lng: poi.lng,
     type: poi.type || 'poi',
     source: poi.source || 'trailhead_search',
-    source_label: poi.source_label || poi.source_badge || 'Map search',
+    source_label: poi.source_label || poi.source_badge || 'Place',
     geocode_query: query,
   };
 }
@@ -3037,7 +3051,7 @@ function waterChartContext(lat: number, lng: number, name?: string) {
       chart_source: 'CHS NONNA bathymetry (non-navigational) for Canadian waters; Lake of the Woods also has CHS chart 6201 official chart context.',
       chart_url: 'https://www.chs.gc.ca/data-gestion/nonna/index-eng.html',
       safety_url: 'https://tc.canada.ca/en/marine-transportation/marine-safety/boating-safety',
-      navigation_note: 'NONNA bathymetry is not for navigation. Verify with official CHS charts, local markers, water levels, weather, and required safety gear before boating.',
+      navigation_note: 'NONNA bathymetry is not for navigation. Check official CHS charts, local markers, water levels, weather, and required safety gear before boating.',
     };
   }
   return {
@@ -3505,19 +3519,69 @@ function tagEmoji(tag: string): string {
 }
 
 function cleanDisplayLabel(value: string): string {
-  const withoutEmoji = String(value || '')
+  const display = String(value || '')
     .replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, ' ')
+    .replace(/__+/g, ' ')
+    .replace(/_/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
-  const normalized = withoutEmoji.toLowerCase().replace(/_/g, ' ');
+  const normalized = display.toLowerCase();
   if (normalized === 'camp site') return 'Tent camp';
   if (normalized === 'caravan site') return 'RV/caravan site';
   if (normalized === 'primitive camp' || normalized === 'basic camp') return 'Primitive camp';
-  const words = withoutEmoji.split(' ');
+  if (/^monuments?\s+history$/.test(normalized)) return 'Historic sites';
+  if (/^water\s+scenic$/.test(normalized)) return 'Water and scenery';
+  if (/^outdoor\s+recreation$/.test(normalized)) return 'Outdoor recreation';
+  if (/^visitor\s+centers?$/.test(normalized)) return 'Visitor center';
+  const words = display.split(' ');
   if (words.length >= 2 && words[0].toLowerCase() === words[1].toLowerCase()) {
     return words.slice(1).join(' ');
   }
-  return withoutEmoji;
+  return display;
+}
+
+function cleanMapSourceLabel(value?: string | null, fallback = 'Place'): string {
+  const raw = String(value || '').trim();
+  const cleaned = /trailhead\s+landmark/i.test(raw)
+    ? 'Landmark'
+    : cleanExploreSourceLabel(value, fallback || 'Place');
+  if (/^[a-z][a-z\s/-]*$/.test(cleaned)) {
+    return cleaned.replace(/\b[a-z]/g, c => c.toUpperCase());
+  }
+  return cleaned;
+}
+
+function mapSearchDisplayLabel(place: { name?: string | null; source?: string | null; source_label?: string | null; feature_type?: string | null; category?: string | null; place_types?: string[] | null; bbox?: number[] | null; display_type?: string | null; subtype?: string | null; type?: string | null }, fallback = 'Place'): string {
+  const rawTypes = [
+    place.display_type,
+    place.subtype,
+    place.feature_type,
+    place.category,
+    place.type,
+    ...(Array.isArray(place.place_types) ? place.place_types : []),
+  ].map(value => String(value || '').toLowerCase().replace(/[\s-]+/g, '_')).filter(Boolean);
+  const tokens = new Set(rawTypes);
+  if (tokens.has('neighborhood') || tokens.has('suburb') || tokens.has('district')) return 'Neighborhood';
+  if (tokens.has('village') || tokens.has('hamlet')) return 'Town';
+  if (tokens.has('city') || tokens.has('town') || tokens.has('municipality') || tokens.has('locality')) return 'City';
+  if (tokens.has('administrative') || tokens.has('boundary')) {
+    const bbox = Array.isArray(place.bbox) ? place.bbox.map(Number).filter(Number.isFinite) : [];
+    if (bbox.length >= 4) {
+      const latSpan = Math.abs(bbox[1] - bbox[0]);
+      const lngSpan = Math.abs(bbox[3] - bbox[2]);
+      if (Math.max(latSpan, lngSpan) <= 0.35) return 'City';
+    }
+    return 'Region';
+  }
+  const clean = cleanDisplayLabel(String(place.display_type || place.subtype || place.type || place.feature_type || place.category || fallback)) || fallback;
+  return clean;
+}
+
+function cleanMapPlaceMeta(place: { source_label?: string | null; source?: string | null; display_type?: string | null; subtype?: string | null; type?: string | null }, fallback = 'Place'): string {
+  const typeFallback = cleanDisplayLabel(String(place.display_type || place.subtype || place.type || fallback)) || fallback;
+  const rawSourceLabel = String(place.source_label || '').trim();
+  const sourceLabel = rawSourceLabel && !/^places?$/i.test(rawSourceLabel) ? rawSourceLabel : place.source;
+  return cleanMapSourceLabel(sourceLabel, typeFallback);
 }
 
 function amenityIcon(name: string): keyof typeof Ionicons.glyphMap {
@@ -4082,6 +4146,7 @@ const buildMapHtml = (
         paint:{'fill-color':pal[6],'fill-opacity':sat?0.0:0.5}},
       // ── Water polygons + rivers ──────────────────────────────────────────────
       {id:'water-poly',type:'fill',source:'pm','source-layer':'water',
+        filter:['all',['!=',['get','kind'],'river'],['!=',['get','kind'],'stream'],['!=',['get','kind'],'canal']],
         paint:{'fill-color':sat?'rgba(12,30,53,0.0)':pal[2],'fill-opacity':hyb?0.45:1.0}},
       {id:'water-river',type:'line',source:'pm','source-layer':'water',
         filter:['in',['get','kind'],['literal',['river','stream','canal']]],
@@ -4398,7 +4463,7 @@ const buildMapHtml = (
       if(!isFinite(lat)||!isFinite(lng)){lat=lngLat.lat;lng=lngLat.lng;}
       var type=renderedPlaceType(p);
       var subtype=String(p.maki||p.poi_category||p.category||p.class||p.feature_type||p.icon||p.symbol||p.type||p.group||p.kind||'').replace(/[_-]+/g,' ').trim()||renderedPlaceLabel(type);
-      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:type,subtype:subtype,source:'rendered_mapbox_standard',selection_source:'rendered_mapbox_standard',source_label:renderedPlaceLabel(type),source_layer:lid,feature_id:p.mapbox_id||p.id,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,mapbox_id:p.mapbox_id||p.id,source_badge:'Map data',enrichment_source:'mapbox_standard',enrichment_status:'pending',raw_feature:{id:f&&f.id,layer:f&&f.layer,source:f&&f.source,sourceLayer:f&&f.sourceLayer,properties:p,geometry:f&&f.geometry}};
+      return{id:String(p.id||p.mapbox_id||('rendered:'+name+':'+lat.toFixed(5)+':'+lng.toFixed(5))).slice(0,180),name:name,lat:lat,lng:lng,type:type,subtype:subtype,source:'rendered_mapbox_standard',selection_source:'rendered_mapbox_standard',source_label:renderedPlaceLabel(type),source_layer:lid,feature_id:p.mapbox_id||p.id,provider_place_id:p.mapbox_id||p.id,place_id:p.mapbox_id||p.id,mapbox_id:p.mapbox_id||p.id,source_badge:renderedPlaceLabel(type)||'Place',enrichment_source:'mapbox_standard',enrichment_status:'pending',raw_feature:{id:f&&f.id,layer:f&&f.layer,source:f&&f.source,sourceLayer:f&&f.sourceLayer,properties:p,geometry:f&&f.geometry}};
     }
     function pickRenderedPlaceFeature(features,lngLat){
       if(!features||!features.length)return null;
@@ -4420,7 +4485,7 @@ const buildMapHtml = (
           var navFs=map.queryRenderedFeatures(e.point,{layers:['water-nav-aid','water-nav-code','water-nav-line']});
           if(navFs&&navFs.length){
             var nf=navFs[0], np=nf.properties||{}, nc=(nf.geometry&&nf.geometry.type==='Point'&&nf.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];
-            postRN({type:'poi_tapped',poi:Object.assign({},np,{id:np.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:nc[1]||e.lngLat.lat,lng:nc[0]||e.lngLat.lng,type:'water',category:'water',subtype:np.subtype||np.kind||'channel_marker',source:'openseamap',source_label:np.source||'Water markers',source_badge:'Water markers',navigation_feature:np.navigation_feature||np.label||np.seamark_type||np.kind,navigation_note:np.navigation_note||'Water marker data only. Verify against official charts, local markers, water levels, and weather.'})});
+            postRN({type:'poi_tapped',poi:Object.assign({},np,{id:np.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:nc[1]||e.lngLat.lat,lng:nc[0]||e.lngLat.lng,type:'water',category:'water',subtype:np.subtype||np.kind||'channel_marker',source:'openseamap',source_label:np.source||'Water markers',source_badge:'Water markers',navigation_feature:np.navigation_feature||np.label||np.seamark_type||np.kind,navigation_note:np.navigation_note||'Water marker data only. Check official charts, local markers, water levels, and weather.'})});
             return;
           }
           var safeWaterFs=map.queryRenderedFeatures(e.point,{layers:['water-poly','water-river']});
@@ -4469,7 +4534,7 @@ const buildMapHtml = (
         var genericPoi=pickRenderedPlaceFeature([].concat(ptFs||[],boxFs||[]),e.lngLat);
         if(genericPoi){
           if(genericPoi.type==='camp'){
-            var camp={id:genericPoi.id||('rendered_camp:'+genericPoi.lat.toFixed(5)+':'+genericPoi.lng.toFixed(5)),name:genericPoi.name||'Campground',lat:genericPoi.lat,lng:genericPoi.lng,tags:['camp','campground'],land_type:genericPoi.subtype||'Campground',description:'Check current access, rules, road conditions, and stay limits before relying on it.',reservable:false,cost:'',url:genericPoi.website||'',ada:false,source:'rendered_mapbox_standard',verified_source:'Campground',source_badge:'Campground',provider_place_id:genericPoi.provider_place_id||genericPoi.place_id||genericPoi.id,place_id:genericPoi.place_id||genericPoi.provider_place_id||genericPoi.id};
+            var camp={id:genericPoi.id||('rendered_camp:'+genericPoi.lat.toFixed(5)+':'+genericPoi.lng.toFixed(5)),name:genericPoi.name||'Campground',lat:genericPoi.lat,lng:genericPoi.lng,tags:['camp','campground'],land_type:genericPoi.subtype||'Campground',description:'Check current access, rules, road conditions, and stay limits before you go.',reservable:false,cost:'',url:genericPoi.website||'',ada:false,source:'rendered_mapbox_standard',verified_source:'Campground',source_badge:'Campground',provider_place_id:genericPoi.provider_place_id||genericPoi.place_id||genericPoi.id,place_id:genericPoi.place_id||genericPoi.provider_place_id||genericPoi.id};
             postRN({type:'campsite_tapped',id:camp.id,name:camp.name,camp:camp});
             return;
           }
@@ -4549,7 +4614,7 @@ const buildMapHtml = (
     _a('camp-cluster',{id:'camp-cluster',type:'circle',source:'camps',filter:['has','point_count'],paint:{'circle-color':['step',['get','point_count'],'#6b7280',10,'#52525b',50,'#3f3f46'],'circle-radius':['step',['get','point_count'],18,10,25,50,32],'circle-opacity':0.88,'circle-stroke-width':2,'circle-stroke-color':'#fff'}});
     _a('camp-count',{id:'camp-count',type:'symbol',source:'camps',filter:['has','point_count'],layout:{'text-field':'{point_count_abbreviated}','text-size':12,'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold']},paint:{'text-color':'#fff'}});
     _a('camp-circle',{id:'camp-circle',type:'circle',source:'camps',filter:['!',['has','point_count']],paint:{'circle-radius':['interpolate',['linear'],['zoom'],9,7,13,11],'circle-color':['match',['get','camp_kind'],'dispersed','#8b5a2b','primitive','#92400e','rv','#2563eb','tent','#16a34a','blm','#f97316','usfs','#22c55e','nps','#3b82f6','state','#8b5cf6','corps','#0284c7','reservable','#8b5cf6','#14b8a6'],'circle-opacity':0.9,'circle-stroke-width':['case',['==',['get','full'],1],3,2],'circle-stroke-color':['case',['==',['get','full'],1],'#ef4444','rgba(255,255,255,0.9)']}});
-    _a('camp-code',{id:'camp-code',type:'symbol',source:'camps',filter:['!',['has','point_count']],layout:{'text-field':['get','camp_code'],'text-size':['case',['==',['get','camp_kind'],'dispersed'],11,10],'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
+    _a('camp-code',{id:'camp-code',type:'symbol',source:'camps',minzoom:12,filter:['!',['has','point_count']],layout:{'text-field':['get','camp_code'],'text-size':['case',['==',['get','camp_kind'],'dispersed'],11,10],'text-font':['DIN Offc Pro Medium','Arial Unicode MS Bold'],'text-allow-overlap':true,'text-ignore-placement':true},paint:{'text-color':'#fff','text-halo-color':'rgba(0,0,0,0.35)','text-halo-width':0.8}});
     _a('camp-full-badge',{id:'camp-full-badge',type:'circle',source:'camps',filter:['all',['!',['has','point_count']],['==',['get','full'],1]],paint:{'circle-radius':5,'circle-color':'#ef4444','circle-stroke-width':1.5,'circle-stroke-color':'#fff','circle-translate':[7,-7],'circle-opacity':0.95}});
     _a('camp-label',{id:'camp-label',type:'symbol',source:'camps',filter:['all',['!',['has','point_count']],['>=',['zoom'],12]],layout:{'text-field':['get','name'],'text-size':10,'text-offset':[0,1.3],'text-anchor':'top','text-max-width':10},paint:{'text-color':'#f1f5f9','text-halo-color':'rgba(0,0,0,0.85)','text-halo-width':1.5}});
     // Guard: only register click handlers once per map instance, never on style reload
@@ -4559,7 +4624,7 @@ const buildMapHtml = (
     map.on('click','camp-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties;var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'campsite_tapped',id:raw.id||p.id,name:raw.name||p.name,camp:raw});e.preventDefault();});
     map.on('click','gas-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties||{};postRN({type:'poi_tapped',poi:{id:p.id||('fuel:'+e.lngLat.lat.toFixed(5)+':'+e.lngLat.lng.toFixed(5)),name:p.name||'Fuel',lat:e.lngLat.lat,lng:e.lngLat.lng,type:'fuel',subtype:'fuel station',source:'fuel',source_label:'Fuel'}});e.preventDefault();});
     map.on('click','poi-circle',function(e){if(!e.features||!e.features[0])return;var p=e.features[0].properties||{};var raw;try{raw=JSON.parse(p.raw||'{}');}catch(x){raw=p;}postRN({type:'poi_tapped',poi:Object.assign({},raw,{id:raw.id||p.id||((p.type||'poi')+':'+e.lngLat.lat.toFixed(5)+':'+e.lngLat.lng.toFixed(5)),lat:raw.lat||e.lngLat.lat,lng:raw.lng||e.lngLat.lng,name:raw.name||p.name||'Place',type:raw.type||p.type||'poi',subtype:raw.subtype||p.subtype||'',source:raw.source||'trailhead_poi',source_label:raw.source_label||raw.source_badge||'Trailhead place'})});e.preventDefault();});
-    function postWaterNavFeature(e){if(!e.features||!e.features[0])return;var f=e.features[0],p=f.properties||{},cc=(f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];postRN({type:'poi_tapped',poi:Object.assign({},p,{id:p.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:cc[1]||e.lngLat.lat,lng:cc[0]||e.lngLat.lng,type:'water',category:'water',subtype:p.subtype||p.kind||'channel_marker',source:'openseamap',source_label:p.source||'Water markers',source_badge:'Water markers',navigation_feature:p.navigation_feature||p.label||p.seamark_type||p.kind,navigation_note:p.navigation_note||'Water marker data only. Verify against official charts, local markers, water levels, and weather.'})});e.preventDefault();}
+    function postWaterNavFeature(e){if(!e.features||!e.features[0])return;var f=e.features[0],p=f.properties||{},cc=(f.geometry&&f.geometry.type==='Point'&&f.geometry.coordinates)||[e.lngLat.lng,e.lngLat.lat];postRN({type:'poi_tapped',poi:Object.assign({},p,{id:p.id||('water_nav_'+e.lngLat.lat.toFixed(5)+'_'+e.lngLat.lng.toFixed(5)),lat:cc[1]||e.lngLat.lat,lng:cc[0]||e.lngLat.lng,type:'water',category:'water',subtype:p.subtype||p.kind||'channel_marker',source:'openseamap',source_label:p.source||'Water markers',source_badge:'Water markers',navigation_feature:p.navigation_feature||p.label||p.seamark_type||p.kind,navigation_note:p.navigation_note||'Water marker data only. Check official charts, local markers, water levels, and weather.'})});e.preventDefault();}
     map.on('click','water-nav-line',postWaterNavFeature);
     map.on('click','water-nav-aid',postWaterNavFeature);
     map.on('click','water-nav-code',postWaterNavFeature);
@@ -4857,8 +4922,15 @@ const buildMapHtml = (
   function handleMsgData(msg){
     if(msg.type==='set_token'){
       if(msg.apiBase)apiBase=msg.apiBase;
-      if(msg.protomapsKey)protomapsKey=msg.protomapsKey;
-      initMap(msg.token,msg.style);
+      if(typeof msg.protomapsKey==='string')protomapsKey=msg.protomapsKey;
+      if(typeof msg.token==='string')mapboxToken=msg.token;
+      var nextStyle=msg.style||currentStyle||'satellite';
+      if(map){
+        currentStyle=nextStyle;
+        if(mapReady)map.setStyle(buildStyle(currentStyle));
+        return;
+      }
+      initMap(mapboxToken,nextStyle);
       return;
     }
     if(msg.type==='set_protomaps_key'&&msg.key){
@@ -5274,17 +5346,19 @@ function userFacingCampNote(text?: string | null) {
     .replace(/does not expose live checkout pricing(?: for this card)?\.?/gi, 'Check Recreation.gov for current pricing.')
     .replace(/Community-mapped OpenStreetMap camp data/gi, 'Community-mapped campsite.')
     .replace(/OpenStreetMap camp data/gi, 'Community-mapped campsite.')
-    .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, 'Community map listing. ')
+    .replace(/OpenStreetMap data packaged by Trailhead;?\s*/gi, 'Community listing. ')
     .replace(/data packaged by Trailhead;?\s*/gi, 'listing. ')
     .replace(/cached by Trailhead;?\s*/gi, '')
-    .replace(/\bOpenStreetMap data\b/gi, 'Community map listing')
+    .replace(/\bOpenStreetMap data\b/gi, 'Community listing')
     .replace(/\bRIDB\b/gi, 'Recreation.gov')
     .replace(/^(?:Recreation\.gov|Recreation gov)\s*[:;,-]?\s*Check Recreation\.gov/gi, 'Check Recreation.gov')
     .replace(/\bsource data\b/gi, 'listing')
     .replace(/\bfee text\b/gi, 'fee')
-    .replace(/Community-mapped campsite\.?\s+verify\b/gi, 'Community-mapped campsite. Verify')
-    .replace(/^verify\b/i, 'Verify')
-    .replace(/\.\s*verify\b/g, '. Verify')
+    .replace(/Community-mapped campsite\.?\s+verify\b/gi, 'Community-mapped campsite. Check')
+    .replace(/^verify\b/i, 'Check')
+    .replace(/\.\s*verify\b/g, '. Check')
+    .replace(/\bverify current\b/gi, 'Check current')
+    .replace(/\bverify\b/gi, 'Check')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -5305,13 +5379,25 @@ function campSourceDisplayLabel(text?: string | null, fallback = 'Details') {
   const key = label.toLowerCase();
   if (key.includes('recent dispersed spot')) return 'Recently checked';
   if (key === 'trailhead') return fallback;
-  if (key.includes('openstreetmap') || key === 'osm') return fallback === 'Camp profile' ? 'Campsite' : 'Map contributors';
+  if (key.includes('map contributor')) return 'Community listing';
+  if (key.includes('openstreetmap') || key === 'osm') return fallback === 'Camp profile' ? 'Campsite' : 'Community listing';
   if (key.includes('ridb') || key.includes('recreation.gov') || key.includes('recreation gov')) return 'Recreation.gov';
   if (key.includes('bureau of land management') || key === 'blm') return 'BLM';
   if (key.includes('forest service') || key === 'usfs') return 'US Forest Service';
   if (key.includes('national park service') || key === 'nps') return 'National Park Service';
   if (key.includes('source') || key.includes('data') || key.includes('cached')) return fallback;
   return label;
+}
+
+function shouldFetchCampDetail(camp?: Pick<CampsitePin, 'id' | 'source' | 'source_badge' | 'verified_source'> | null) {
+  const id = String(camp?.id || '').trim();
+  if (!id) return false;
+  if (id.startsWith('ridb_site:')) return true;
+  if (/^(blm_|thp_|dsl_|dispersed_lead:)/i.test(id)) return true;
+  const source = `${camp?.source || ''} ${camp?.source_badge || ''} ${camp?.verified_source || ''}`.toLowerCase();
+  if (/geoapify|mapbox|osm|openstreetmap/.test(source)) return false;
+  if (/^(geoapify:|mapbox:|osm_)/i.test(id)) return false;
+  return false;
 }
 
 function campBadgeLabel(text?: string | null, fallback = 'Camp') {
@@ -5334,6 +5420,10 @@ function campDisplayName(name?: string | null, fallback = 'Campground') {
       return part.replace(/^[a-z]/, char => char.toUpperCase());
     })
     .join('');
+}
+
+function campCountTitle(count: number) {
+  return `${count} Camp${count === 1 ? '' : 's'}`;
 }
 
 function campSiteMetaLabel(text?: string | null): string {
@@ -5575,6 +5665,7 @@ function MapScreen() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const [keyboardHeight, setKeyboardHeight] = useState(0);
   const inlineSearchInputRef = useRef<TextInput | null>(null);
+  const autoMapSearchRef = useRef('');
   const [copilotResults, setCopilotResults] = useState<SearchPlace[]>([]);
   const [copilotResultScope, setCopilotResultScope] = useState<CopilotResultScope | null>(null);
   const [copilotDebugTranscript, setCopilotDebugTranscript] = useState('');
@@ -6404,7 +6495,7 @@ function MapScreen() {
         webRef.current?.postMessage(JSON.stringify({
           type: 'set_token', token,
           style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
-          apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app',
+          apiBase: API_BASE_URL,
           protomapsKey: pmKey,
         }));
       }
@@ -7180,7 +7271,7 @@ function MapScreen() {
             photos: (selectedPlace as any).photos?.length ? (selectedPlace as any).photos : resolvedPhotos,
             summary: selectedPlace.summary || resolvedCard.summary,
             source: 'trailhead_explore',
-            source_label: selectedPlace.source_label || 'Trailhead Explore',
+            source_label: selectedPlace.source_label || 'Place',
             id: selectedPlace.id,
             place_id: selectedPlace.place_id,
             provider_place_id: selectedPlace.provider_place_id,
@@ -7240,7 +7331,7 @@ function MapScreen() {
           visitor_centers: resolvedVisitors,
           campgrounds_nearby: smartCamps,
           trip_services: resolvedServices,
-          error: !resolvedHasContext && !selectedPlaceIsExplore ? 'Nearby camps, trails, and useful places are still loading.' : undefined,
+          error: undefined,
         };
       });
     };
@@ -7302,7 +7393,7 @@ function MapScreen() {
       mergeResolvedCard(resolved);
     }).catch(() => {
       selectedPlaceResolveKeyRef.current = '';
-      if (!cancelled) setSelectedPlaceContext({ loading: false, places: [], camps: [], trails: [], things_to_do: [], things_to_see: [], visitor_centers: [], campgrounds_nearby: [], trip_services: [], error: 'Nearby context unavailable.' });
+      if (!cancelled) setSelectedPlaceContext({ loading: false, places: [], camps: [], trails: [], things_to_do: [], things_to_see: [], visitor_centers: [], campgrounds_nearby: [], trip_services: [] });
     });
     return () => { cancelled = true; };
   }, [selectedPlace?.id, selectedPlace?.name, selectedPlace?.lat, selectedPlace?.lng, navMode]);
@@ -7319,7 +7410,7 @@ function MapScreen() {
       subtype: cleanDisplayLabel(p.subtype || ''),
       elevation: p.elevation,
       source: p.source || 'offline',
-      source_label: p.source_badge || p.source || 'Offline place pack',
+      source_label: p.source_badge || p.source || 'Saved places',
       address: p.address,
       fuel_types: p.fuel_types,
       photo_url: p.photo_url || undefined,
@@ -7632,7 +7723,7 @@ function MapScreen() {
       lng,
       tags,
       land_type: String(landType),
-      description: String(source.description || source.summary || place.summary || place.address || 'Overnight option. Verify access, fees, stay limits, and booking rules.'),
+      description: String(source.description || source.summary || place.summary || place.address || 'Overnight option. Check access, fees, stay limits, and booking rules.'),
       amenities: Array.isArray(source.amenities) ? source.amenities : undefined,
       site_types: Array.isArray(source.site_types) ? source.site_types : undefined,
       photos: Array.isArray(source.photos) ? source.photos : resolved.photo_candidates?.length ? resolved.photo_candidates : resolved.photos,
@@ -7675,7 +7766,7 @@ function MapScreen() {
   function offlinePlaceToCampPin(place: OsmPoi): CampsitePin | null {
     if (!CAMP_PLACE_TYPES.has(String(place.type || '')) || place.lat == null || place.lng == null || !isFinite(place.lat) || !isFinite(place.lng)) return null;
     const anyPlace = place as any;
-    const source = anyPlace.source_badge || place.source_label || place.source || 'Offline place pack';
+    const source = anyPlace.source_badge || place.source_label || place.source || 'Saved places';
     const bookingUrl = anyPlace.booking_url || '';
     const officialUrl = anyPlace.official_url || place.website || '';
     const subtype = cleanDisplayLabel(place.subtype || '');
@@ -7683,24 +7774,24 @@ function MapScreen() {
       subtype,
       place.address,
       anyPlace.source_freshness,
-      officialUrl ? 'Official link cached.' : '',
-      bookingUrl ? 'Booking link cached.' : '',
+      officialUrl ? 'Official listing.' : '',
+      bookingUrl ? 'Booking details.' : '',
     ].filter(Boolean).join(' ');
     return {
       id: String(place.id || `offline:camp:${place.lat.toFixed(5)}:${place.lng.toFixed(5)}`),
-      name: place.name || 'Downloaded camp',
+      name: place.name || 'Saved camp',
       lat: place.lat,
       lng: place.lng,
       tags: [
         ...(Array.isArray(anyPlace.tags) ? anyPlace.tags : []),
         ...(Array.isArray(anyPlace.site_types) ? anyPlace.site_types : []),
-        'downloaded',
+        'saved',
       ],
       land_type: source,
-      description: cachedNotes || 'Downloaded camp point.',
+      description: cachedNotes || 'Saved camp details.',
       photo_url: place.photo_url || undefined,
       reservable: Boolean(anyPlace.reservable || bookingUrl),
-      cost: anyPlace.reservable || bookingUrl ? 'Reservable' : 'Downloaded',
+      cost: anyPlace.reservable || bookingUrl ? 'Reservable' : undefined,
       url: bookingUrl || officialUrl,
       official_url: officialUrl,
       booking_url: bookingUrl,
@@ -9055,7 +9146,7 @@ function MapScreen() {
             center: { lat: center.lat, lng: center.lng, name: center.name || intent.whereText },
             places,
             loading: false,
-            error: places.length ? undefined : `No ${intent.categoryLabel.toLowerCase()} found near ${center.name || intent.whereText}.`,
+            error: places.length ? undefined : `Try a wider ${intent.categoryLabel.toLowerCase()} search near ${center.name || intent.whereText}.`,
           }
         : current);
       setSearchResults(places.slice(0, 8).map(place => scopedPoiToSearchPlace(place, intent.query)));
@@ -9094,21 +9185,40 @@ function MapScreen() {
       const sorted = userLoc
         ? places.slice().sort((a, b) => haversineKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - haversineKm(userLoc.lat, userLoc.lng, b.lat, b.lng))
         : places;
-      setSearchResults(sorted.map(place => ({
-        ...place,
-        source: place.source || 'search',
-        source_label: place.source_label || (place.source === 'mapbox' ? 'Mapbox Search' : place.source === 'trailhead_landmark' ? 'Trailhead landmark' : 'Map search'),
-        type: place.feature_type || place.category || 'poi',
-        geocode_status: resolved?.status,
-        geocode_reason: resolved?.reason,
-        geocode_query: cleanQuery,
-      })));
+      setSearchResults(sorted.map(place => {
+        const displayLabel = mapSearchDisplayLabel(place, 'Place');
+        return {
+          ...place,
+          source: place.source || 'search',
+          source_label: place.source_label || (place.source === 'trailhead_landmark' ? 'Landmark' : displayLabel),
+          type: place.feature_type || place.category || 'poi',
+          subtype: (place as any).subtype || displayLabel,
+          display_type: (place as any).display_type || displayLabel,
+          geocode_status: resolved?.status,
+          geocode_reason: resolved?.reason,
+          geocode_query: cleanQuery,
+        };
+      }));
     } catch (e: any) {
       setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
     } finally {
       setIsSearching(false);
     }
   }
+
+  useEffect(() => {
+    const cleanQuery = searchQuery.trim();
+    if ((!inlineSearchOpen && !showFullMapSearch) || navMode || cleanQuery.length < 2) {
+      if (cleanQuery.length < 2) autoMapSearchRef.current = '';
+      return;
+    }
+    const timer = setTimeout(() => {
+      if (autoMapSearchRef.current === cleanQuery) return;
+      autoMapSearchRef.current = cleanQuery;
+      searchMap(cleanQuery);
+    }, cleanQuery.length <= 3 ? 260 : 380);
+    return () => clearTimeout(timer);
+  }, [inlineSearchOpen, navMode, searchQuery, showFullMapSearch]);
 
   function selectSearchResult(place: SearchPlace) {
     if (place.name === '__error__') return;
@@ -9127,7 +9237,7 @@ function MapScreen() {
     setSelectedPlace({
       ...basePlace,
       summary: basePlace.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
-      source_label: basePlace.source_label || 'Map search',
+      source_label: basePlace.source_label || 'Place',
     });
     addSearchHistory({ name: basePlace.name, lat: basePlace.lat, lng: basePlace.lng, searchedAt: Date.now() });
     setShowFullMapSearch(false);
@@ -9166,7 +9276,7 @@ function MapScreen() {
         type,
         subtype: String(place?.subtype || place?.mapbox_categories?.[0] || place?.feature_type || '').replace(/[_-]+/g, ' '),
         source: 'mapbox_search',
-        source_label: 'Mapbox Search',
+        source_label: 'Place',
         provider_place_id: (place?.provider_place_id || place?.mapbox_id) ?? undefined,
         place_id: (place?.place_id || place?.mapbox_id) ?? undefined,
         address: place?.address,
@@ -9523,7 +9633,7 @@ function MapScreen() {
           ...place,
           type: place.type || 'poi',
           source: place.source || 'map_search',
-          source_label: 'Map Search',
+          source_label: 'Place',
         } as SearchPlace;
       }
       return null;
@@ -9764,7 +9874,7 @@ function MapScreen() {
       camp,
       reason: win.reason_short || win.reason || null,
       description: locked
-        ? (camp?.description || win.reason || 'Corridor overnight option. Verify access, rules, and fit before you head out.')
+        ? (camp?.description || win.reason || 'Corridor overnight option. Check access, rules, and fit before you head out.')
         : (win.reason || 'Temporary overnight review area. Pick a camp before navigation.'),
       source: locked ? 'camp' : 'map',
       routePointType: locked ? 'break' as const : 'through' as const,
@@ -9832,7 +9942,7 @@ function MapScreen() {
         const campMeta = camp
           ? [
               camp.land_type || result.overnight_style || 'Camp',
-              Number.isFinite(routeDistance) ? `${routeDistance.toFixed(routeDistance < 10 ? 1 : 0)} mi off route` : '',
+              Number.isFinite(routeDistance) ? `${formatCleanMiles(routeDistance)} off route` : '',
               camp.cost || '',
               camp.source || '',
             ].filter(Boolean).join(' · ')
@@ -9873,7 +9983,7 @@ function MapScreen() {
           campMeta: 'Finding overnight options',
           fuelStops: [],
           poiStops: [],
-          reviewNotes: ['Searching legal overnight options near this part of the route.'],
+          reviewNotes: ['Searching campground options near this part of the route.'],
           spokenUpdate: `Checking day ${day}.`,
         };
       }
@@ -9953,7 +10063,7 @@ function MapScreen() {
     const dist = Number((camp as any).route_distance_mi);
     const meta = [
       camp.land_type || 'Camp',
-      Number.isFinite(dist) ? `${dist < 10 ? dist.toFixed(1) : Math.round(dist)} mi off route` : null,
+      Number.isFinite(dist) ? `${formatCleanMiles(dist)} off route` : null,
       camp.cost || null,
       camp.reservable ? 'Reservable' : null,
     ].filter(Boolean).join(' · ');
@@ -9973,7 +10083,7 @@ function MapScreen() {
   function routeScoutFuelActionItem(station: GasStation, idx: number): RouteScoutDayActionItem {
     const dist = Number((station as any).route_distance_mi);
     const meta = [
-      Number.isFinite(dist) ? `${dist < 10 ? dist.toFixed(1) : Math.round(dist)} mi off route` : null,
+      Number.isFinite(dist) ? `${formatCleanMiles(dist)} off route` : null,
       station.address || station.fuel_types || 'Fuel stop',
       station.price ? `$${station.price}` : null,
     ].filter(Boolean).join(' · ');
@@ -10302,7 +10412,7 @@ function MapScreen() {
       allowAmbiguous: true,
     });
     return place && Number.isFinite(place.lat) && Number.isFinite(place.lng)
-      ? { ...place, name: place.name || query, type: 'poi', source: place.source || 'map_search', source_label: 'Map Search' } as SearchPlace
+      ? { ...place, name: place.name || query, type: 'poi', source: place.source || 'map_search', source_label: 'Place' } as SearchPlace
       : null;
   }
 
@@ -11871,7 +11981,7 @@ function MapScreen() {
     const externalIds = mapboxObject(props.external_ids || metadata.external_ids || metadataData.external_ids);
     const categoryList = mapboxArrayStrings(props.poi_category, props.poi_category_ids, props.category, props.categories, metadata.poi_category, metadata.category, metadata.categories, metadataData.poi_category, metadataData.category);
     const categoryText = mapboxCategoryText(categoryList.length ? categoryList : props.poi_category || props.category || metadata.poi_category || metadata.category);
-    const name = mapboxFirstString(props.name, props.full_address, props.place_formatted, feature?.text, 'Mapbox place');
+    const name = mapboxFirstString(props.name, props.full_address, props.place_formatted, feature?.text, 'Selected place');
     const address = mapboxFirstString(
       props.full_address,
       props.place_formatted,
@@ -11907,7 +12017,7 @@ function MapScreen() {
       dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, lat, lng) : haversineKm(center.lat, center.lng, lat, lng),
       distance_mi: haversineKm(center.lat, center.lng, lat, lng) * 0.621371,
       source: 'mapbox_search',
-      source_label: 'Mapbox Search',
+      source_label: 'Place',
       place_id: mapboxId || undefined,
       provider_place_id: mapboxId || undefined,
       mapbox_id: mapboxId || undefined,
@@ -11951,7 +12061,7 @@ function MapScreen() {
     const lng = Number(raw.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     const metadata = mapboxObject(raw.metadata);
-    const name = mapboxFirstString(raw.name, metadata.name, 'Mapbox place');
+    const name = mapboxFirstString(raw.name, metadata.name, 'Selected place');
     const address = mapboxFirstString(raw.address, raw.description, metadata.address, metadata.formatted_address);
     const phone = mapboxFirstString(raw.phone, metadata.phone);
     const website = mapboxFirstString(raw.website, metadata.website);
@@ -11968,7 +12078,7 @@ function MapScreen() {
       dist: userLoc ? haversineKm(userLoc.lat, userLoc.lng, lat, lng) : haversineKm(center.lat, center.lng, lat, lng),
       distance_mi: haversineKm(center.lat, center.lng, lat, lng) * 0.621371,
       source: 'mapbox_search',
-      source_label: 'Mapbox Search SDK',
+      source_label: 'Place details',
       place_id: mapboxId || undefined,
       provider_place_id: mapboxId || undefined,
       mapbox_id: mapboxId || undefined,
@@ -12575,7 +12685,7 @@ function MapScreen() {
         type: base.type === 'poi' ? (enriched.type || base.type) : base.type,
         subtype: enriched.subtype || base.subtype,
         source: 'mapbox_search',
-        source_label: 'Mapbox Search',
+        source_label: 'Place',
         summary: enriched.summary || base.summary,
       };
     } catch {
@@ -12763,7 +12873,7 @@ function MapScreen() {
       name: place.name || query,
       type: place.feature_type || place.category || 'poi',
       source: place.source || 'map_search',
-      source_label: place.source_label || (place.source === 'trailhead_landmark' ? 'Trailhead landmark' : place.source === 'mapbox' ? 'Mapbox Search' : 'Map Search'),
+      source_label: place.source_label || (place.source === 'trailhead_landmark' ? 'Trailhead landmark' : 'Place'),
       provider_place_id: place.provider_place_id || place.place_id,
       selection_source: place.source === 'mapbox' ? 'mapbox_search' : 'map_point',
       selection_confidence: place.confidence || (status === 'resolved' ? 'high' : 'medium'),
@@ -13010,7 +13120,7 @@ function MapScreen() {
       ...place,
       dist,
       source: place.source || 'search',
-      source_label: place.source_label || 'Map search',
+      source_label: place.source_label || 'Place',
       type: place.type || 'poi',
       summary: place.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
     };
@@ -13544,7 +13654,7 @@ function MapScreen() {
             searched_near: searchedNear,
           });
         }
-        setQuickToast(camps.length ? spokenSummary : `No camps found near ${searchedNear}.`);
+        setQuickToast(camps.length ? spokenSummary : `Try a wider camp search near ${searchedNear}.`);
         setTimeout(() => setQuickToast(''), 3200);
         return {
           applied: true,
@@ -15539,11 +15649,13 @@ function MapScreen() {
     setCampDetail(minimal);
     if (opts.showModal) setShowCampDetail(true);
     setLoadingDetail(false);
-    let detail: CampsiteDetail;
-    try {
-      detail = await api.getCampsiteDetail(camp.id);
-    } catch {
-      detail = minimal;
+    let detail: CampsiteDetail = minimal;
+    if (shouldFetchCampDetail(camp)) {
+      try {
+        detail = await api.getCampsiteDetail(camp.id);
+      } catch {
+        detail = minimal;
+      }
     }
     detail = normalizeCampDetailArrays(detail);
     detail = await enrichCampDetailWithGoogle(detail, camp);
@@ -15578,7 +15690,7 @@ function MapScreen() {
       lat: camp.lat,
       lng: camp.lng,
       source: camp.source || 'camp',
-      source_label: camp.source_badge || camp.verified_source || camp.source || camp.land_type || 'Camp source',
+      source_label: camp.source_badge || camp.verified_source || camp.source || camp.land_type || 'Camp listing',
       provider_place_id: camp.provider_place_id,
       place_id: camp.place_id,
       type: 'camp',
@@ -16297,7 +16409,7 @@ function MapScreen() {
       `Day ${day}`,
       legLabel,
       routeProgressMi != null ? `${routeProgressMi.toFixed(routeProgressMi < 10 ? 1 : 0)} mi into leg` : '',
-      routeDistance != null ? `${routeDistance.toFixed(1)} mi off route` : '',
+      routeDistance != null ? `${formatCleanMiles(routeDistance)} off route` : '',
     ].filter(Boolean);
     return {
       day,
@@ -16317,7 +16429,7 @@ function MapScreen() {
     return [
       context?.label,
       place.type?.replace(/_/g, ' '),
-      !context?.route_distance_mi && (place as any).distance_mi != null ? `${Number((place as any).distance_mi).toFixed(1)} mi away` : '',
+      !context?.route_distance_mi && (place as any).distance_mi != null ? `${formatCleanMiles(Number((place as any).distance_mi))} away` : '',
       source,
     ].filter(Boolean).join(' · ');
   }
@@ -16915,7 +17027,7 @@ function MapScreen() {
           ...current,
           profile_id: match.id || current.profile_id,
           name: match.name || current.name,
-          subtitle: match.length_mi ? `${match.length_mi.toFixed(match.length_mi >= 10 ? 0 : 1)} mi trail` : current.subtitle,
+          subtitle: match.length_mi ? `${formatCleanMiles(match.length_mi)} trail` : current.subtitle,
           summary: match.summary || current.summary,
           photo_url: match.photos?.[0]?.url || current.photo_url,
         } : current);
@@ -17014,7 +17126,7 @@ function MapScreen() {
         dispersed ? 'dispersed' : shelter ? 'shelter' : 'campground',
       ].filter(Boolean),
       land_type: landType || (dispersed ? 'Dispersed' : shelter ? 'Shelter' : 'Campground'),
-      description: 'Verify current access, rules, road conditions, and stay limits before relying on it.',
+      description: 'Check current access, rules, road conditions, and stay limits before you go.',
       reservable: false,
       cost: '',
       url: '',
@@ -17333,7 +17445,7 @@ function MapScreen() {
         .map(p => ({
           ...p,
           source: p.source || 'offline',
-          source_label: p.source_label || 'Offline pack',
+          source_label: p.source_label || 'Saved places',
           distance_mi: typeof (p as any).distance_mi === 'number' ? (p as any).distance_mi : haversineKm(point.lat!, point.lng!, p.lat, p.lng) * 0.621371,
         }))
         .filter(p => (p.distance_mi ?? 999) <= Math.max(radius + 6, 14))
@@ -17346,7 +17458,7 @@ function MapScreen() {
       if (smartPlaces.length) {
         return {
           places: offlineFallbackPlaces.length ? merge([smartPlaces, offlineFallbackPlaces]) : smartPlaces,
-          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with downloaded place packs' : undefined,
+          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with saved places' : undefined,
         };
       }
       const nearbyResults = await Promise.allSettled(
@@ -17357,7 +17469,7 @@ function MapScreen() {
       if (nearby.length) {
         return {
           places: offlineFallbackPlaces.length ? merge([nearby, offlineFallbackPlaces]) : nearby,
-          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with downloaded place packs' : undefined,
+          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with saved places' : undefined,
         };
       }
       const osmPlaces = await api.getOsmPois(center.lat!, center.lng!, radius, 'trailhead,viewpoint,peak,hot_spring,water,fuel,parking')
@@ -17366,11 +17478,11 @@ function MapScreen() {
       if (osmPlaces.length) {
         return {
           places: offlineFallbackPlaces.length ? merge([osmPlaces, offlineFallbackPlaces]) : osmPlaces,
-          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with downloaded place packs' : undefined,
+          sourceLabel: offlineFallbackPlaces.length ? 'Expanded with saved places' : undefined,
         };
       }
       if (offlineFallbackPlaces.length) {
-        return { places: offlineFallbackPlaces, sourceLabel: 'Downloaded place packs' };
+        return { places: offlineFallbackPlaces, sourceLabel: 'Saved places' };
       }
       return { places: [] as OsmPoi[], sourceLabel: undefined as string | undefined };
     }).then(({ places, sourceLabel }) => {
@@ -19687,14 +19799,12 @@ function MapScreen() {
           onLoad={() => {
             webLoadedRef.current = true;
             setMapLoadFailed(false);
-            if (mapboxToken || protomapsKey) {
-              webRef.current?.postMessage(JSON.stringify({
-                type: 'set_token', token: mapboxToken,
-                style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
-                apiBase: process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app',
-                protomapsKey,
-              }));
-            }
+            webRef.current?.postMessage(JSON.stringify({
+              type: 'set_token', token: mapboxToken,
+              style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
+              apiBase: API_BASE_URL,
+              protomapsKey,
+            }));
             if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
           }}
           onError={() => setMapLoadFailed(true)}
@@ -19731,14 +19841,6 @@ function MapScreen() {
         <View />
       </TourTarget>
 
-      {/* Offline map load error banner */}
-      {mapLoadFailed && !mapSurfaceReady && !mapSearchChromeActive && !mapSheetOpen && (
-        <View style={[s.mapLoadFailBanner, topChromeLaneStyle]}>
-          <Ionicons name="cloud-offline-outline" size={14} color="#fbbf24" />
-          <Text style={s.mapLoadFailText}>Map is taking longer than expected.</Text>
-        </View>
-      )}
-
       {/* Select-on-map mode banner */}
       {selectOnMapMode && (
         <View style={[s.selectOnMapBanner, topChromeLaneStyle]}>
@@ -19774,8 +19876,8 @@ function MapScreen() {
           { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
           { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
           { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, onPress: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
-          { label: 'Offline maps', sub: 'Download and readiness', icon: 'cloud-download-outline', tone: '#a3e635', onPress: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
-          { label: 'Trail builder', sub: 'Pin and snap a trail route', icon: 'git-branch-outline', tone: '#22c55e', onPress: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
+          { label: 'Saved areas', sub: 'Maps, trails, places', icon: 'cloud-download-outline', tone: '#a3e635', onPress: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
+          { label: 'Trail builder', sub: 'Drop points along a trail', icon: 'git-branch-outline', tone: '#22c55e', onPress: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
           { label: nearbyLoading ? 'Loading audio' : 'Nearby audio', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, onPress: () => { handleNearbyAudio(); } },
         ]}
       />
@@ -19818,7 +19920,7 @@ function MapScreen() {
         <View style={s.offlineAreaOverlay} pointerEvents="box-none">
           <View style={s.offlineAreaTopPill} pointerEvents="auto">
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.offlineAreaTitle}>Offline area</Text>
+              <Text style={s.offlineAreaTitle}>Saved area</Text>
               <Text style={s.offlineAreaSub} numberOfLines={1}>
                 {offlineAreaSelection
                   ? `${offlineAreaDetail === 'high' ? 'High detail' : 'Standard'} · ${formatOfflineAreaSqMi(offlineAreaSelection.areaSqMi)} · ~${Math.max(1, Math.round(offlineAreaSelection.estimatedMb))} MB`
@@ -19875,7 +19977,7 @@ function MapScreen() {
                 onPress={confirmOfflineAreaPicker}
               >
                 <Ionicons name="checkmark-outline" size={14} color="#fff" />
-                <Text style={s.offlineAreaPrimaryText}>USE THIS AREA</Text>
+                <Text style={s.offlineAreaPrimaryText}>SAVE AREA</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -19994,7 +20096,7 @@ function MapScreen() {
                   {campDiscoveryRefreshing
                     ? 'Searching camps'
                     : currentDiscoveryCamps.length > 0
-                      ? `${currentDiscoveryCamps.length} Camps`
+                      ? campCountTitle(currentDiscoveryCamps.length)
                       : 'Camps nearby'}
                 </Text>
                 <Text style={s.campDiscoverySub} numberOfLines={1}>
@@ -20146,7 +20248,7 @@ function MapScreen() {
                   {place.rating != null ? ` · ${Number(place.rating).toFixed(1)}` : ''}
                 </Text>
                 <Text style={s.copilotResultMeta} numberOfLines={1}>
-                  {place.address || place.source_label || place.source || 'Map result'}
+                  {place.address || cleanMapPlaceMeta(place, 'Place')}
                 </Text>
                 <View style={s.copilotResultActions}>
                   <TouchableOpacity
@@ -20219,7 +20321,7 @@ function MapScreen() {
             )}
           </View>
 
-          {inlineSearchOpen && (searchResults.length > 0 || isSearching || searchQuery.trim().length >= 2) && (
+          {inlineSearchOpen && (searchResults.length > 0 || isSearching) && (
             <View style={[s.inlineMapSearchResults, mapChrome.toast, inlineSearchResultsMaxHeight ? { maxHeight: inlineSearchResultsMaxHeight } : null]}>
               {isSearching ? (
                 <View style={s.inlineMapSearchStateRow}>
@@ -20228,12 +20330,10 @@ function MapScreen() {
                 </View>
               ) : searchResults.some(place => place.name === '__error__') ? (
                 <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
-              ) : searchResults.length === 0 ? (
-                <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Try a wider place search</Text>
               ) : (
                 searchResults.slice(0, 4).map(place => {
                   const distMi = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) * 0.621371 : null;
-                  const sourceLabel = place.source_label || place.source || place.type || 'Place';
+                  const sourceLabel = cleanMapPlaceMeta(place, 'Place');
                   return (
                     <TouchableOpacity
                       key={`${place.name}:${place.lat}:${place.lng}:${place.place_id || place.provider_place_id || ''}`}
@@ -20309,7 +20409,7 @@ function MapScreen() {
                     {place.distance_mi != null ? <Text style={s.scopedSearchDistance}>{Number(place.distance_mi).toFixed(Number(place.distance_mi) >= 10 ? 0 : 1)} mi</Text> : null}
                   </View>
                   <Text style={s.scopedSearchName} numberOfLines={2}>{place.name}</Text>
-                  <Text style={s.scopedSearchMeta} numberOfLines={1}>{place.address || place.source_label || cleanDisplayLabel(place.type || 'Place')}</Text>
+                  <Text style={s.scopedSearchMeta} numberOfLines={1}>{place.address || cleanMapPlaceMeta(place, cleanDisplayLabel(place.type || 'Place') || 'Place')}</Text>
                   <View style={s.scopedSearchActions}>
                     <TouchableOpacity
                       style={s.scopedSearchIconBtn}
@@ -20522,7 +20622,7 @@ function MapScreen() {
         pointerEvents={mapControlsBlocked ? 'none' : 'auto'}
         style={[
           s.controls,
-          mapControlsBlocked && { opacity: 0 },
+          mapControlsBlocked && { opacity: 0, display: 'none' },
         ]}
         contentContainerStyle={s.controlsInner}
         showsVerticalScrollIndicator={false}
@@ -20569,7 +20669,7 @@ function MapScreen() {
           </TouchableOpacity>
         )}
 
-        {!mapControlsCollapsed && !waterFollowActive && <TourTarget id="map.search">
+        {!mapControlsCollapsed && !waterFollowActive && <TourTarget id="map.search" pointerEvents="box-none">
           <View style={s.campCoachWrap}>
             {showCampDiscoveryHint ? (
               <View style={s.campCoachBubble} pointerEvents="auto">
@@ -20592,7 +20692,7 @@ function MapScreen() {
         </TourTarget>}
 
         {!mapControlsCollapsed && !waterFollowActive && (
-          <TourTarget id="map.pinReport">
+          <TourTarget id="map.pinReport" pointerEvents="box-none">
             <TouchableOpacity
               style={[s.ctrlBtn, mapChrome.button, pinDropMode && mapChrome.buttonActive]}
               onPress={() => beginCommunityPinDrop(false)}
@@ -21390,7 +21490,7 @@ function MapScreen() {
                     ? isSearchingTrails
                       ? 'Searching trails'
                       : trailDiscoveries.length > 0 ? `${trailDiscoveries.length} Trails` : 'Trails nearby'
-                    : currentDiscoveryCamps.length > 0 ? `${currentDiscoveryCamps.length} Camps` : 'Camps nearby'}
+                    : currentDiscoveryCamps.length > 0 ? campCountTitle(currentDiscoveryCamps.length) : 'Camps nearby'}
                 </Text>
                 <Text style={s.campDiscoverySub} numberOfLines={1}>
                   {discoveryMode === 'trails'
@@ -22171,6 +22271,8 @@ function MapScreen() {
                   <View style={[s.quickCardHeroActions, { top: Math.max(insets.top + 8, 12) }]}>
                     <TouchableOpacity
                       style={s.quickCardHeroIcon}
+                      accessibilityRole="button"
+                      accessibilityLabel={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'Remove saved camp' : 'Save camp'}
                       onPress={() => saveCampPlace(selectedCamp)}
                     >
                       <Ionicons
@@ -22179,10 +22281,10 @@ function MapScreen() {
                         color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : '#fff'}
                       />
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.quickCardHeroIcon} onPress={() => shareCampPlace(selectedCamp)}>
+                    <TouchableOpacity style={s.quickCardHeroIcon} accessibilityRole="button" accessibilityLabel="Share camp" onPress={() => shareCampPlace(selectedCamp)}>
                       <Ionicons name="share-outline" size={17} color="#fff" />
                     </TouchableOpacity>
-                    <TouchableOpacity style={s.quickCardHeroIcon} onPress={closeSelectedCampProfile}>
+                    <TouchableOpacity style={s.quickCardHeroIcon} accessibilityRole="button" accessibilityLabel="Close camp" onPress={closeSelectedCampProfile}>
                       <Ionicons name="close" size={17} color="#fff" />
                     </TouchableOpacity>
                   </View>
@@ -22979,8 +23081,8 @@ function MapScreen() {
           { label: 'PM2.5', value: mapWeather?.air_quality?.current?.pm2_5 != null ? String(mapWeather.air_quality.current.pm2_5) : '--' },
           { label: 'Ozone', value: mapWeather?.air_quality?.current?.ozone != null ? String(mapWeather.air_quality.current.ozone) : '--' },
         ]}
-        disclaimer={mapWeather?.health_summary?.advisory || 'Weather and health data are modeled estimates. Verify severe weather with official alerts before travel.'}
-        sourceLabel={mapWeather?.source_label || 'Open-Meteo'}
+        disclaimer={mapWeather?.health_summary?.advisory || 'Weather and health data are modeled estimates. Check severe weather with official alerts before travel.'}
+        sourceLabel={mapWeather?.source_label || 'Weather'}
         hasData={!!mapWeather}
         onClose={() => setShowMapWeatherSheet(false)}
       />
@@ -24331,7 +24433,7 @@ function MapScreen() {
                         <Text style={s.campPickMeta} numberOfLines={1}>
                           {[
                             campBadgeLabel(camp.land_type || 'camp'),
-                            camp.route_distance_mi != null ? `${camp.route_distance_mi.toFixed(1)} mi off route` : '',
+                            camp.route_distance_mi != null ? `${formatCleanMiles(camp.route_distance_mi)} off route` : '',
                             routeProgressLabel(camp.route_progress),
                             camp.cost || '',
                           ].filter(Boolean).join(' · ')}

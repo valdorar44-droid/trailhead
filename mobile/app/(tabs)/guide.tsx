@@ -36,6 +36,7 @@ import {
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
 import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
+import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
@@ -56,7 +57,7 @@ const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 const EXPLORE_INITIAL_VISIBLE = 48;
 const EXPLORE_VISIBLE_STEP = 48;
-const API_BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const API_BASE = TRAILHEAD_API_BASE;
 const BOOKABLE_EXPERIENCES_ENABLED = true;
 
 type GuidedTourCategory = 'all' | 'outdoor' | 'water' | 'short' | 'private' | 'family';
@@ -164,7 +165,11 @@ function distMi(a: { lat: number; lng: number }, b: { lat: number; lng: number }
 
 function fmtMi(mi?: number | null) {
   if (mi == null || !Number.isFinite(mi)) return '';
-  return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
+  if (mi <= 0) return '';
+  if (mi < 1) return 'Under 1 mi';
+  if (mi >= 10) return `${Math.round(mi)} mi`;
+  const rounded = Number(mi.toFixed(1));
+  return `${Number.isInteger(rounded) ? Math.round(rounded) : rounded} mi`;
 }
 
 function groupForExplorePlace(place: ExplorePlaceProfile) {
@@ -394,6 +399,128 @@ function destinationRootFromTitle(title?: string | null) {
     .replace(/\s+/g, ' ')
     .trim();
   return clean;
+}
+
+const EXPLORE_US_STATE_NAMES: Record<string, string> = {
+  alabama: 'al',
+  alaska: 'ak',
+  arizona: 'az',
+  arkansas: 'ar',
+  california: 'ca',
+  colorado: 'co',
+  connecticut: 'ct',
+  delaware: 'de',
+  florida: 'fl',
+  georgia: 'ga',
+  hawaii: 'hi',
+  idaho: 'id',
+  illinois: 'il',
+  indiana: 'in',
+  iowa: 'ia',
+  kansas: 'ks',
+  kentucky: 'ky',
+  louisiana: 'la',
+  maine: 'me',
+  maryland: 'md',
+  massachusetts: 'ma',
+  michigan: 'mi',
+  minnesota: 'mn',
+  mississippi: 'ms',
+  missouri: 'mo',
+  montana: 'mt',
+  nebraska: 'ne',
+  nevada: 'nv',
+  newhampshire: 'nh',
+  newjersey: 'nj',
+  newmexico: 'nm',
+  newyork: 'ny',
+  northcarolina: 'nc',
+  northdakota: 'nd',
+  ohio: 'oh',
+  oklahoma: 'ok',
+  oregon: 'or',
+  pennsylvania: 'pa',
+  rhodeisland: 'ri',
+  southcarolina: 'sc',
+  southdakota: 'sd',
+  tennessee: 'tn',
+  texas: 'tx',
+  utah: 'ut',
+  vermont: 'vt',
+  virginia: 'va',
+  washington: 'wa',
+  westvirginia: 'wv',
+  wisconsin: 'wi',
+  wyoming: 'wy',
+};
+
+function exploreRegionDedupeKey(place: ExplorePlaceProfile) {
+  const raw = normalizeExploreText([
+    place.summary.state,
+    place.summary.region,
+  ].filter(Boolean).join(' '));
+  if (!raw) return '';
+  const firstToken = raw.split(/\s+/)[0] || '';
+  if (/^[a-z]{2}$/.test(firstToken)) return firstToken;
+  const compact = raw.replace(/\s+/g, '');
+  if (/^[a-z]{2}$/.test(compact)) return compact;
+  for (const [name, code] of Object.entries(EXPLORE_US_STATE_NAMES)) {
+    if (compact.includes(name)) return code;
+  }
+  return raw;
+}
+
+function exploreDisplayDedupeKey(place: ExplorePlaceProfile) {
+  const key = getExploreCategoryKey(place);
+  const group = key === 'land' ? 'parks' : key;
+  if (!['parks', 'camp', 'glamping', 'huts', 'trails', 'trailheads', 'views', 'waterfalls', 'peaks', 'scenic', 'things'].includes(group)) {
+    return '';
+  }
+  const root = destinationRootFromTitle(place.summary.title);
+  if (root.length < 4) return '';
+  const region = exploreRegionDedupeKey(place);
+  if (group === 'parks') return `${group}:${root}:${region || 'global'}`;
+  const lat = Number(place.summary.lat);
+  const lng = Number(place.summary.lng);
+  const area = Number.isFinite(lat) && Number.isFinite(lng) ? `${lat.toFixed(2)}:${lng.toFixed(2)}` : region;
+  return area ? `${group}:${root}:${area}` : '';
+}
+
+function exploreDedupePreference(place: ExplorePlaceProfile) {
+  const title = normalizeExploreText(place.summary.title || '');
+  const descriptionLength = String(place.summary.short_description || place.profile?.summary || '').length;
+  const designationBonus = /\bnational park and preserve\b/.test(title) ? 35
+    : /\bnational park\b/.test(title) ? 20
+      : /\bnational monument\b/.test(title) ? 16
+        : 0;
+  return designationBonus
+    + scoreExploreTrust(place)
+    + exploreContentQualityScore(place)
+    + Math.min(descriptionLength / 12, 28)
+    - Math.min(Number(place.summary.rank ?? 999999), 999999) / 100000;
+}
+
+function dedupeRankedExploreItems<T extends { place: ExplorePlaceProfile }>(items: T[]) {
+  const deduped: T[] = [];
+  const indexByKey = new Map<string, number>();
+  for (const item of items) {
+    const key = exploreDisplayDedupeKey(item.place);
+    if (!key) {
+      deduped.push(item);
+      continue;
+    }
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex == null) {
+      indexByKey.set(key, deduped.length);
+      deduped.push(item);
+      continue;
+    }
+    const current = deduped[existingIndex];
+    if (exploreDedupePreference(item.place) > exploreDedupePreference(current.place)) {
+      deduped[existingIndex] = item;
+    }
+  }
+  return deduped;
 }
 
 function explorePlaceSearchText(place: ExplorePlaceProfile) {
@@ -853,6 +980,18 @@ function explorePlaceIdentitySearchText(place: ExplorePlaceProfile) {
   ].filter(Boolean).join(' '));
 }
 
+const EXPLORE_EXACT_DESTINATION_PHRASES = [
+  'moab',
+  'grand canyon',
+  'grand teton',
+  'big sur',
+];
+
+function exactExploreDestinationPhraseFromQuery(query: string) {
+  const normalized = ` ${normalizeExploreText(query)} `;
+  return EXPLORE_EXACT_DESTINATION_PHRASES.find(phrase => normalized.includes(` ${phrase} `)) || '';
+}
+
 function explorePlaceIdentityMatchesDestination(place: ExplorePlaceProfile, phrase: string) {
   const normalized = normalizeExploreText(phrase);
   if (!normalized) return false;
@@ -862,6 +1001,16 @@ function explorePlaceIdentityMatchesDestination(place: ExplorePlaceProfile, phra
     .split(/\s+/)
     .filter(token => token.length >= 2 && !EXPLORE_QUERY_STOP_TOKENS.has(token));
   return tokens.length > 1 && tokens.every(token => exploreSearchTextIncludesToken(text, token));
+}
+
+function explorePlaceStrictlyMatchesDestination(place: ExplorePlaceProfile, phrase: string) {
+  const normalized = normalizeExploreText(phrase);
+  if (!normalized) return true;
+  const tokens = normalized
+    .split(/\s+/)
+    .filter(token => token.length >= 2 && !EXPLORE_QUERY_STOP_TOKENS.has(token));
+  if (tokens.length <= 1) return true;
+  return explorePlaceIdentityMatchesDestination(place, normalized);
 }
 
 function explorePlaceTitleMatchesDestination(place: ExplorePlaceProfile, phrase: string) {
@@ -978,6 +1127,29 @@ function explorePlaceMatchesThingsToDo(place: ExplorePlaceProfile, hubCategories
   if (blocked.has(primary)) return false;
   if (allowed.has(primary)) return true;
   return Array.from(hubCategories.get(place.id) ?? []).some(key => allowed.has(key) && !blocked.has(key));
+}
+
+function explorePlaceLooksLikeStandaloneThing(place: ExplorePlaceProfile) {
+  if (canonicalExploreModuleTarget(place) === 'do') return true;
+  const key = getExploreCategoryKey(place);
+  if (key === 'things') return true;
+  if (isDestinationExploreHub(place) || isLegacyExploreAreaWrapper(place)) return false;
+  if (['views', 'waterfalls', 'springs', 'water', 'scenic', 'climb'].includes(key)) return true;
+  const text = normalizeExploreText([
+    place.summary.title,
+    place.summary.category,
+    place.summary.explore_group,
+    place.category,
+    ...(place.summary.tags ?? []),
+    ...(place.subcategories ?? []),
+  ].filter(Boolean).join(' '));
+  if (/\b(day use|activities|things to do|what to do|see and do|attraction|historic site|historic district|history|museum|landmark|ranger program|visitor center|picnic|wildlife viewing|fishing|boating|paddling|kayak|scenic drive|overlook|viewpoint)\b/.test(text)) {
+    return !/\b(campgrounds?|campsites?|lodging|hotels?|cabins?|trails?|trailheads?)\b/.test(text);
+  }
+  if (['camp', 'glamping', 'huts', 'fuel', 'resupply', 'parks', 'land', 'trails', 'trailheads', 'guided', 'tours'].includes(key)) {
+    return false;
+  }
+  return false;
 }
 
 function scoreExploreBrowseIntent(
@@ -1152,6 +1324,18 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
   const region = item.region || '';
   const hook = item.hook || item.short_description || `Plan around ${title}.`;
   const short = item.short_description || item.hook || 'Check nearby stays, trails, weather, and directions.';
+  const sourceTitle = cleanExploreSourceLabel(item.source_title || '', '');
+  const cleanSources = (item.sources ?? []).map(source => {
+    const rawTitle = String((source as any)?.title || '').trim();
+    const rawPublisher = String((source as any)?.publisher || '').trim();
+    const publisher = cleanExploreSourceLabel(rawPublisher || rawTitle, '');
+    const sourceName = cleanExploreSourceLabel(rawTitle, rawTitle || publisher || 'Trailhead');
+    return {
+      ...(source as any),
+      title: sourceName || publisher || 'Trailhead',
+      publisher: publisher || sourceName || 'Trailhead',
+    };
+  });
   return {
     id: item.id,
     category: item.v3_category || item.category,
@@ -1161,7 +1345,7 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
     module_target: item.module_target || '',
     hidden_from_featured: Boolean((item as any).hidden_from_featured),
     subcategories: item.subcategories ?? [],
-    sources: item.sources ?? [],
+    sources: cleanSources,
     source_ids: item.source_ids ?? [],
     quality: item.quality || item.source_quality,
     quality_score: item.quality_score,
@@ -1195,7 +1379,7 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
       image_credit: item.image_credit || '',
       image_license: item.image_license || '',
       source_url: item.source_url || '',
-      source_title: item.source_title || '',
+      source_title: sourceTitle,
     },
     profile: {
       hook,
@@ -1211,22 +1395,22 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
     wiki_extract: '',
     source_pack: {
       quality: item.source_quality || 'open',
-      primary: item.source_title || '',
+      primary: sourceTitle,
       official_url: item.source_url || '',
-      sources: item.sources?.length ? item.sources : item.source_url ? [{
+      sources: cleanSources.length ? cleanSources : item.source_url ? [{
         title,
-        publisher: item.source_title || 'Open source',
+        publisher: sourceTitle || 'Trailhead',
         url: item.source_url,
         kind: item.source_quality || 'open',
       }] : [],
       photos: item.media?.length ? item.media.map(photo => ({
         url: photo.url,
         caption: photo.caption || title,
-        credit: photo.credit || item.image_credit || item.source_title || '',
+        credit: photo.credit || item.image_credit || sourceTitle || '',
       })) : (item.image_url || item.thumbnail_url) ? [{
         url: item.image_url || item.thumbnail_url,
         caption: title,
-        credit: item.image_credit || item.source_title || '',
+        credit: item.image_credit || sourceTitle || '',
       }] : [],
       topics: item.tags ?? [],
       source_note: 'Open the full card for more details.',
@@ -1234,11 +1418,11 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
     facts: {
       coordinates: item.lat != null && item.lng != null ? `${Number(item.lat).toFixed(5)}, ${Number(item.lng).toFixed(5)}` : '',
       source_url: item.source_url || '',
-      source_title: item.source_title || '',
+      source_title: sourceTitle,
       official_url: item.source_url || '',
       source_quality: item.source_quality || '',
     },
-    attribution: item.source_title || 'Open source details',
+    attribution: sourceTitle || 'Trailhead',
   };
 }
 
@@ -1280,11 +1464,36 @@ function campImageUrl(camp: CampsitePin) {
   return '';
 }
 
+function cleanCampTypeLabel(raw?: string | null) {
+  const clean = String(raw || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  if (/^(community listing|camp listing|map contributors|map data|source|recreation\.gov|ridb|geoapify|mapbox)$/i.test(clean)) return '';
+  if (/rv\s*\/?\s*caravan|caravan/i.test(clean)) return 'RV site';
+  if (/dispersed|primitive/i.test(clean)) return 'Dispersed camp';
+  if (/federal campground/i.test(clean)) return 'Federal campground';
+  if (/tent camp/i.test(clean)) return 'Tent camp';
+  if (/private/i.test(clean)) return 'Private campground';
+  return clean
+    .toLowerCase()
+    .replace(/\b\w/g, char => char.toUpperCase())
+    .replace(/\b(Rv|Ada|Blm|Usfs|Nps)\b/g, match => match.toUpperCase());
+}
+
+function campCostLabel(raw?: string | null) {
+  const clean = String(raw || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  if (/^see\s+(?:blm|usfs|nps|official|agency)\s+site$/i.test(clean)) return 'Check fees';
+  if (/^(official link|explore seed|explore)$/i.test(clean)) return '';
+  return clean
+    .replace(/Free\s*\/\s*Self[- ]Issued/gi, 'Free or self-issued')
+    .replace(/Verify fee/gi, 'Check fee');
+}
+
 function campMetaLine(camp: CampsitePin) {
   return [
-    camp.source_badge || camp.verified_source || camp.source,
-    camp.land_type,
+    cleanCampTypeLabel(camp.land_type),
     typeof (camp as any).distance_mi === 'number' ? fmtMi((camp as any).distance_mi) : '',
+    camp.reservable ? 'Reservable' : '',
   ].filter(Boolean).join(' · ');
 }
 
@@ -1292,12 +1501,42 @@ function campTagLabel(tag: string) {
   const clean = String(tag || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!clean || clean.length < 3) return '';
   if (/^[A-Z0-9]{2,5}$/.test(clean)) return '';
-  if (/^(campgrounds?|national park|glacier national park|nearby|area|official|nps|place)$/i.test(clean)) return '';
+  if (/^(camp|campgrounds?|national park|glacier national park|nearby|area|official|official link|explore seed|explore|nps|place|community listing|camp listing|map contributors|map data|source)$/i.test(clean)) return '';
   if (/^(glac|yose|seki|grca|romo|zion|grte|arch|cany|care|deva|jotr|olym|yell)$/i.test(clean)) return '';
+  if (/rv\s*\/?\s*caravan|caravan/i.test(clean)) return 'RV site';
+  if (/dispersed|primitive/i.test(clean)) return 'Dispersed camp';
+  if (/federal campground/i.test(clean)) return 'Federal campground';
+  if (/tent camp/i.test(clean)) return 'Tent camp';
   return clean
     .toLowerCase()
     .replace(/\b\w/g, char => char.toUpperCase())
     .replace(/\b(Rv|Ada|Blm|Usfs|Nps)\b/g, match => match.toUpperCase());
+}
+
+function campTagLabels(camp: CampsitePin) {
+  const type = cleanCampTypeLabel(camp.land_type).toLowerCase();
+  const seen = new Set<string>();
+  const labels: string[] = [];
+  for (const tag of camp.tags ?? []) {
+    const label = campTagLabel(tag);
+    const key = label.toLowerCase();
+    if (!label || key === type || seen.has(key)) continue;
+    seen.add(key);
+    labels.push(label);
+    if (labels.length >= 3) break;
+  }
+  return labels;
+}
+
+function isLowQualityExploreCampName(camp: CampsitePin) {
+  const name = String(camp.name || '').replace(/\s+/g, ' ').trim();
+  if (!name) return true;
+  const lower = name.toLowerCase();
+  if (/^[a-z]?\d+[a-z]?$/i.test(name)) return true;
+  if (/^(?:camping\s+area|camp\s+area|area|loop|site)\s*[a-z0-9-]{1,4}$/i.test(name)) return true;
+  if (/^(?:tent\s+)?camp(?:site)?\s*[a-z0-9-]{1,4}$/i.test(name)) return true;
+  if (/^camping\s+area\b/i.test(lower)) return true;
+  return false;
 }
 
 function campBadgeLabel(camp: CampsitePin) {
@@ -1307,7 +1546,7 @@ function campBadgeLabel(camp: CampsitePin) {
   if (/blm/i.test(raw)) return 'BLM';
   if (/usfs|forest/i.test(raw)) return 'USFS';
   if (/geoapify|mapbox|map data/i.test(raw)) return 'Camp';
-  return camp.land_type ? camp.land_type : 'Camp';
+  return cleanCampTypeLabel(camp.land_type) || 'Camp';
 }
 
 function explorePlaceAsCampPin(place: ExplorePlaceProfile): CampsitePin | null {
@@ -1530,6 +1769,19 @@ function shouldUseExploreDetailEndpoint(place: ExplorePlaceProfile) {
   return true;
 }
 
+function shouldPrefetchExploreDetail(place: ExplorePlaceProfile) {
+  if (!shouldUseExploreDetailEndpoint(place)) return false;
+  const text = [
+    place.summary.short_description,
+    place.profile?.story,
+    place.profile?.why_it_matters,
+    place.profile?.what_to_know,
+  ].filter(Boolean).join(' ');
+  return text.length < 260
+    || isExploreThinOpenReference(place)
+    || /\b(managed outdoor area near|blank map|blank camp|live results|legal overnight options)\b/i.test(text);
+}
+
 function exploreCampRailTitle(place: ExplorePlaceProfile) {
   const group = groupForExplorePlace(place);
   if (group === 'glamping') return 'Stays near this area';
@@ -1639,6 +1891,7 @@ function GuideScreenContent() {
   const exploreLocationPrompted = useRef(false);
   const exploreSearchRefinementKeys = useRef<Set<string>>(new Set());
   const exploreEnrichmentKeys = useRef<Set<string>>(new Set());
+  const exploreDetailPrefetchKeys = useRef<Set<string>>(new Set());
   const storyScrollRef = useRef<ScrollView | null>(null);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
@@ -1722,13 +1975,13 @@ function GuideScreenContent() {
     const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
       let nextCursor = cursor;
       let allPlaces = seededPlaces;
-      for (let page = 0; nextCursor != null && page < 8; page += 1) {
-        const catalog = await api.getExploreCatalogIndex({ limit: 500, cursor: nextCursor });
+      for (let page = 0; nextCursor != null && page < 2; page += 1) {
+        const catalog = await api.getExploreCatalogIndex({ limit: 180, cursor: nextCursor });
         const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
         allPlaces = mergeById(allPlaces, pagePlaces);
         nextCursor = catalog.next_cursor;
         if (cancelled) return;
-        await new Promise(resolve => setTimeout(resolve, 120));
+        await new Promise(resolve => setTimeout(resolve, 220));
       }
       if (!cancelled && allPlaces.length > seededPlaces.length) {
         storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
@@ -1745,7 +1998,7 @@ function GuideScreenContent() {
         setExploreLoading(false);
         backgroundTimer = setTimeout(() => {
           hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
-        }, 3200);
+        }, 5200);
       };
       const firstPageRequest = api.getExploreCatalogIndex({ limit: 120, cursor: 0 });
       try {
@@ -1895,7 +2148,7 @@ function GuideScreenContent() {
       if (cancelled) return;
       if (existing?.status !== 'granted' && alreadyPrompted) {
         setExploreHomeWeather(null);
-        setExploreHomeWeatherError('Location unavailable');
+        setExploreHomeWeatherError('Turn on location to show nearby weather.');
         setExploreHomeWeatherLoading(false);
         return;
       }
@@ -1906,7 +2159,7 @@ function GuideScreenContent() {
       if (permission?.status !== 'granted') {
         storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
         setExploreHomeWeather(null);
-        setExploreHomeWeatherError('Location unavailable');
+        setExploreHomeWeatherError('Turn on location to show nearby weather.');
         setExploreHomeWeatherLoading(false);
         return;
       }
@@ -1916,7 +2169,7 @@ function GuideScreenContent() {
         setUserLoc({ lat: fix.coords.latitude, lng: fix.coords.longitude });
       } else {
         setExploreHomeWeather(null);
-        setExploreHomeWeatherError('Location unavailable');
+        setExploreHomeWeatherError('Turn on location to show nearby weather.');
         setExploreHomeWeatherLoading(false);
       }
     })();
@@ -1938,7 +2191,7 @@ function GuideScreenContent() {
         if (!cancelled) setExploreHomeWeather(weather);
       })
       .catch(() => {
-        if (!cancelled) setExploreHomeWeatherError('Weather unavailable');
+        if (!cancelled) setExploreHomeWeatherError('Weather is not loading right now.');
       })
       .finally(() => {
         if (!cancelled) setExploreHomeWeatherLoading(false);
@@ -2029,7 +2282,7 @@ function GuideScreenContent() {
       loadFallbackCamps()
         .then(loaded => {
           if (!cancelled && !loaded) {
-            setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Open the area map to look wider.' }));
+            setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Search a wider area.' }));
           }
         })
         .finally(() => {
@@ -2068,7 +2321,7 @@ function GuideScreenContent() {
       .catch(async () => {
         if (cancelled) return;
         if (await loadFallbackCamps()) return;
-        setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Open the area map to look wider.' }));
+        setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Search a wider area.' }));
       })
       .finally(() => {
         if (!cancelled) setExploreCampLoadingId(current => current === placeId ? null : current);
@@ -2320,17 +2573,26 @@ function GuideScreenContent() {
       return { place, distance, day };
     });
     const query = exploreQuery.trim();
+    const normalizedActiveQuery = normalizeExploreText(query);
     const placeQuery = showExperienceSearch || isThingsToDoExploreQuery(query) ? placeQueryFromExploreQuery(query) : query;
     const queryCategory = exploreCategory === 'all' ? exploreCategoryFromQuery(query) : null;
     const queryHasDestinationTerms = exploreQueryHasDestinationTerms(placeQuery);
     const queryDestinationPhrase = exploreQueryDestinationPhrase(placeQuery);
+    const exactDestinationPhrase = exactExploreDestinationPhraseFromQuery(query);
     const queryHasBrowseIntent = exploreQueryHasBrowseIntent(placeQuery);
     const thingsToDoQuery = isThingsToDoExploreQuery(query);
     const stayDestinationQuery = isStayExploreQuery(query) && queryHasDestinationTerms && !!queryDestinationPhrase;
-    const browseIntentNeedsPrimaryMatch = queryHasBrowseIntent && queryHasDestinationTerms && !thingsToDoQuery;
+    const browseIntentNeedsPrimaryMatch = browseExploreCategory === 'all' && queryHasBrowseIntent && queryHasDestinationTerms && !thingsToDoQuery;
     const queryRequiresIdentityMatch = queryDestinationPhrase.split(/\s+/).filter(Boolean).length > 1
       || (thingsToDoQuery && queryHasDestinationTerms)
       || (queryHasBrowseIntent && queryHasDestinationTerms && !!queryDestinationPhrase);
+    const selectedCategoryDestinationSearch = browseExploreCategory !== 'all'
+      && queryHasBrowseIntent
+      && queryHasDestinationTerms
+      && !!queryDestinationPhrase;
+    const categorySearchQuery = selectedCategoryDestinationSearch ? queryDestinationPhrase : placeQuery;
+    const hasCurrentRemoteSearchMatches = !!normalizedActiveQuery
+      && enrichedExplorePlaces.some(place => normalizeExploreText(String((place as any).matched_explore_query || '')) === normalizedActiveQuery);
     const queryScoreForPlace = (place: ExplorePlaceProfile) => {
       const exactIdentityMatch = queryDestinationPhrase
         ? explorePlaceIdentitySearchText(place).includes(queryDestinationPhrase)
@@ -2342,13 +2604,16 @@ function GuideScreenContent() {
         ? explorePlaceTitleMatchesDestination(place, queryDestinationPhrase)
         : false;
       const identityScore = identityMatch ? (titleIdentityMatch ? 118 : exactIdentityMatch ? 85 : 72) : 0;
-      const activeSearchScore = explorePlaceActiveSearchCanSatisfyIdentity(place, query) ? 70 : 0;
+      const activeSearchScore = Math.max(
+        explorePlaceActiveSearchCanSatisfyIdentity(place, query) ? 70 : 0,
+        selectedCategoryDestinationSearch && explorePlaceActiveSearchCanSatisfyIdentity(place, categorySearchQuery) ? 55 : 0,
+      );
       const baseScore = Math.max(
         identityScore,
         activeSearchScore,
-        scoreExploreQuery(place, placeQuery),
-        scoreExploreRichText(place, placeQuery),
-        scoreExploreHubExtraText(place, placeQuery, exploreHubMeta.searchTextByHubId),
+        scoreExploreQuery(place, categorySearchQuery),
+        scoreExploreRichText(place, categorySearchQuery),
+        scoreExploreHubExtraText(place, categorySearchQuery, exploreHubMeta.searchTextByHubId),
       );
       const directStayDestinationHub = stayDestinationQuery
         && isDestinationExploreHub(place)
@@ -2358,7 +2623,7 @@ function GuideScreenContent() {
       if (queryHasDestinationTerms && queryRequiresIdentityMatch && identityScore <= 0 && activeSearchScore <= 0) return 0;
       const intentScore = scoreExploreBrowseIntent(place, placeQuery, exploreHubMeta.categoryKeysByHubId, false);
       if (queryHasDestinationTerms && baseScore <= 0) return 0;
-      if (queryHasBrowseIntent && intentScore < 35) return 0;
+      if (!selectedCategoryDestinationSearch && queryHasBrowseIntent && intentScore < 35) return 0;
       return baseScore + intentScore;
     };
     const concreteBrowseMatchesExist = browseIntentNeedsPrimaryMatch && places.some(({ place }) => (
@@ -2368,7 +2633,7 @@ function GuideScreenContent() {
     ));
     const filtered = places.filter(({ place }) => {
       if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
-      if (!exploreSavedOnly && !placeQuery && shouldHideExploreHomeWrapper(place)) return false;
+      if (!exploreSavedOnly && !placeQuery && exploreCategory === 'all' && shouldHideExploreHomeWrapper(place)) return false;
       if (!exploreSavedOnly && !placeQuery && exploreCategory === 'all' && exploreHubMeta.parentByChildId.has(place.id)) return false;
       if (!exploreSavedOnly && placeQuery && concreteBrowseMatchesExist && isLegacyExploreAreaWrapper(place)) return false;
       const directThingsToDoDestinationWrapper = thingsToDoQuery
@@ -2380,15 +2645,23 @@ function GuideScreenContent() {
         && explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase);
       const directQueryIdentityMatch = !!queryDestinationPhrase
         && explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase);
+      if (exactDestinationPhrase && !explorePlaceIdentitySearchText(place).includes(exactDestinationPhrase)) return false;
+      const matchedCurrentRemoteSearch = !!normalizedActiveQuery
+        && normalizeExploreText(String((place as any).matched_explore_query || '')) === normalizedActiveQuery;
+      if (queryRequiresIdentityMatch && hasCurrentRemoteSearchMatches && !matchedCurrentRemoteSearch && !directQueryIdentityMatch) return false;
+      if (queryRequiresIdentityMatch && !directQueryIdentityMatch && !explorePlaceStrictlyMatchesDestination(place, queryDestinationPhrase)) return false;
 	      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id) && !directThingsToDoDestinationWrapper && !directQueryIdentityMatch) return false;
-	      const categoryOk = browseExploreCategory === 'all'
-	        ? exploreCategoryMatchesWithHub(place, browseExploreCategory, exploreHubMeta.categoryKeysByHubId)
-	        : exploreCategoryMatches(place, browseExploreCategory);
+	      const standaloneThingsBrowse = !placeQuery && browseExploreCategory === 'things';
+	      const categoryOk = standaloneThingsBrowse
+	        ? explorePlaceLooksLikeStandaloneThing(place)
+	        : browseExploreCategory === 'all'
+	          ? exploreCategoryMatchesWithHub(place, browseExploreCategory, exploreHubMeta.categoryKeysByHubId)
+	          : exploreCategoryMatches(place, browseExploreCategory);
 	      if (!categoryOk && !directStayDestinationHub) return false;
 	      if (!queryHasDestinationTerms && isExactWaterfallBrowseQuery(placeQuery) && !explorePlaceStronglyMatchesWaterfall(place)) return false;
 	      if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;
       if (browseIntentNeedsPrimaryMatch && !directStayDestinationHub && !directQueryIdentityMatch && !explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery)) return false;
-      if (queryCategory && queryCategory !== 'guided' && queryCategory !== 'tours' && !directStayDestinationHub && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
+      if (browseExploreCategory === 'all' && queryCategory && queryCategory !== 'guided' && queryCategory !== 'tours' && !directStayDestinationHub && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
       if (!placeQuery) return true;
       return queryScoreForPlace(place) > 0;
     });
@@ -2435,7 +2708,7 @@ function GuideScreenContent() {
       return a.place.summary.rank - b.place.summary.rank;
     };
     if (exploreMode === 'featured') {
-      return decorated.sort((a, b) => {
+      const sorted = decorated.sort((a, b) => {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
         if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
@@ -2448,8 +2721,9 @@ function GuideScreenContent() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return a.place.summary.rank - b.place.summary.rank;
       });
+      return dedupeRankedExploreItems(sorted);
     }
-    return decorated
+    const sorted = decorated
       .filter(item => item.distance == null || item.distance < (exploreMode === 'trip' ? 250 : 1200))
       .sort((a, b) => {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
@@ -2465,6 +2739,7 @@ function GuideScreenContent() {
         if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
         return aDist - bDist;
       });
+    return dedupeRankedExploreItems(sorted);
   }, [browseExploreCategory, enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, guidedTourSearchRunId, guidedVisibleExperiences.length, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
@@ -2635,6 +2910,52 @@ function GuideScreenContent() {
     () => holdLegacySearchWrapper ? [] : rankedExplore.slice(0, exploreVisibleLimit),
     [holdLegacySearchWrapper, rankedExplore, exploreVisibleLimit],
   );
+  const visibleExplorePrefetchKey = visibleRankedExplore.slice(0, 6).map(({ place }) => place.id).join('|');
+
+  useEffect(() => {
+    if (tab !== 'explore' || exploreLoading || exploreSearchResolving || holdLegacySearchWrapper) return;
+    const candidates = visibleRankedExplore
+      .slice(0, 4)
+      .map(({ place }) => place)
+      .filter(place => {
+        if (!place?.id || !shouldPrefetchExploreDetail(place)) return false;
+        if (exploreDetailPrefetchKeys.current.has(place.id)) return false;
+        exploreDetailPrefetchKeys.current.add(place.id);
+        return true;
+      });
+    if (!candidates.length) return;
+    let cancelled = false;
+    Promise.allSettled(candidates.map(place => api.getExplorePlace(place.id))).then(results => {
+      if (cancelled) return;
+      const details = results
+        .filter((result): result is PromiseFulfilledResult<ExplorePlaceProfile> => result.status === 'fulfilled' && !!result.value?.id)
+        .map(result => result.value);
+      if (!details.length) return;
+      setExplorePlaces(current => {
+        let changed = false;
+        const byId = new Map(details.map(place => [place.id, place]));
+        const merged = current.map(place => {
+          const detail = byId.get(place.id);
+          if (!detail) return place;
+          changed = true;
+          return hasExploreTrailCards(place) && !hasExploreTrailCards(detail)
+            ? mergeDynamicTrailArea(detail, place)
+            : { ...place, ...detail } as ExplorePlaceProfile;
+        });
+        for (const detail of details) {
+          if (!merged.some(place => place.id === detail.id)) {
+            changed = true;
+            merged.push(detail);
+          }
+        }
+        return changed ? merged : current;
+      });
+    }).catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [exploreLoading, exploreSearchResolving, holdLegacySearchWrapper, tab, visibleExplorePrefetchKey]);
+
   const showExploreHome = !hasExploreQuery && !exploreSavedOnly && exploreCategory === 'all' && exploreMode === 'featured';
   const featuredLead = useMemo(() => {
     if (!showExploreHome) return null;
@@ -2760,16 +3081,16 @@ function GuideScreenContent() {
       if (showGuidedFallbackPlaces) return exploreCountLabel(guidedFallbackDisplayPlaces.length, 'place', 'places');
       if (guidedResultsError) {
         if (!experienceDestinationLabel) return 'Search destination';
-        return /unavailable|failed/i.test(guidedResultsError) ? 'Unavailable' : 'No matches';
+        return /unavailable|failed/i.test(guidedResultsError) ? 'Try again' : 'Try a new search';
       }
-      return experienceDestinationLabel ? 'No matches' : 'Search destination';
+      return experienceDestinationLabel ? 'Try a new search' : 'Search destination';
     }
     if (!showExploreHome) {
       if (rankedExplore.length <= 0) {
         if (exploreSavedOnly) return 'Save places here';
         if (exploreNearbyNeedsLocation) return 'Location needed';
         if (exploreTripNeedsRoute) return 'Open a trip first';
-        return 'No matches';
+        return 'Search places';
       }
       return exploreCountLabel(rankedExplore.length, 'place', 'places');
     }
@@ -2836,7 +3157,7 @@ function GuideScreenContent() {
         await storage.set(cacheKey, JSON.stringify({ area, fetched_at: Date.now() })).catch(() => {});
         return applyHydratedTrailArea(place.id, place, area);
       }
-      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'No nearby trails found yet.' }));
+      setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'Nearby trails will appear when this area has enough detail.' }));
       return place;
     } catch {
       setExploreTrailAreaErrors(prev => ({ ...prev, [place.id]: 'Could not load trails right now.' }));
@@ -3077,9 +3398,7 @@ function GuideScreenContent() {
       if (trail.source_url) Linking.openURL(trail.source_url).catch(() => {});
       return;
     }
-    const distance = Number.isFinite(trail.distance_mi) && trail.distance_mi > 0
-      ? `${trail.distance_mi.toFixed(trail.distance_mi >= 10 ? 0 : 1)} mi`
-      : 'Check distance';
+    const distance = fmtMi(trail.distance_mi) || 'Check distance';
     setPendingMapSelection({
       kind: 'trail',
       trail: {
@@ -3204,7 +3523,7 @@ function GuideScreenContent() {
       const weather = await api.getWeather(Number(lat), Number(lng), 3, weatherUnitMode);
       setExploreWeatherById(prev => ({ ...prev, [place.id]: weather }));
     } catch {
-      setExploreWeatherErrors(prev => ({ ...prev, [place.id]: 'Weather unavailable right now.' }));
+      setExploreWeatherErrors(prev => ({ ...prev, [place.id]: 'Weather is not loading right now.' }));
     } finally {
       setExploreWeatherLoadingId(current => current === place.id ? null : current);
     }
@@ -3324,7 +3643,7 @@ function GuideScreenContent() {
       return { loading: true, icon: 'partly-sunny-outline', temp: 'Loading', detail: 'Forecast' };
     }
     if (error) {
-      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Unavailable' };
+      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Not loading' };
     }
     if (!weather) {
       return place.summary.lat != null && place.summary.lng != null
@@ -3332,7 +3651,7 @@ function GuideScreenContent() {
         : null;
     }
     if (weather.available === false) {
-      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Unavailable' };
+      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Not loading' };
     }
     const daily = weather.daily;
     const code = Number(weather?.current?.weather_code ?? daily?.weathercode?.[0] ?? 3);
@@ -3379,7 +3698,7 @@ function GuideScreenContent() {
         {loading ? (
           <Text style={s.exploreWeatherText}>Loading forecast...</Text>
         ) : error || unavailable ? (
-          <Text style={s.exploreWeatherText}>{error || 'Weather unavailable right now.'}</Text>
+          <Text style={s.exploreWeatherText}>{error || 'Weather is not loading right now.'}</Text>
         ) : (
           <View style={s.exploreWeatherStats}>
             <View style={s.exploreWeatherStat}>
@@ -3458,7 +3777,8 @@ function GuideScreenContent() {
     if (!shouldLoadExploreCamps(place)) return null;
     const camps = exploreCampgroundsById[place.id] ?? [];
     const currentCamp = explorePlaceAsCampPin(place);
-    const displayCamps = currentCamp ? mergeCampPins([currentCamp], camps) : camps;
+    const displayCamps = (currentCamp ? mergeCampPins([currentCamp], camps) : camps)
+      .filter(camp => !isLowQualityExploreCampName(camp));
     const fetchedCount = camps.length;
     const sourceMode = exploreCampSourceById[place.id] || 'official';
     const loading = exploreCampLoadingId === place.id && displayCamps.length === 0;
@@ -3473,7 +3793,7 @@ function GuideScreenContent() {
                 ? fetchedCount === 0 && currentCamp
                   ? 'Current place'
                   : sourceMode === 'fallback'
-                    ? `${displayCamps.length} nearby options from a wider search`
+                    ? `${displayCamps.length} nearby options`
                     : `${displayCamps.length} nearby campgrounds`
                 : 'Photos, fees, reservations, and access can change by season.'}
             </Text>
@@ -3491,7 +3811,7 @@ function GuideScreenContent() {
               const image = campImageUrl(camp);
               const officialUrl = camp.booking_url || camp.official_url || camp.url;
               const areaFallback = camp.photo_status === 'area_fallback';
-              const tagLabels = (camp.tags ?? []).map(campTagLabel).filter(Boolean).slice(0, 3);
+              const tagLabels = campTagLabels(camp);
               return (
                 <TouchableOpacity
                   key={camp.id}
@@ -3520,7 +3840,7 @@ function GuideScreenContent() {
                   <View style={s.campgroundBody}>
                     <Text style={s.campgroundName} numberOfLines={2}>{camp.name}</Text>
                     <Text style={s.campgroundMeta} numberOfLines={1}>{campMetaLine(camp)}</Text>
-                    {!!camp.cost && <Text style={s.campgroundCost} numberOfLines={1}>{camp.cost}</Text>}
+                    {!!campCostLabel(camp.cost) && <Text style={s.campgroundCost} numberOfLines={1}>{campCostLabel(camp.cost)}</Text>}
                     <View style={s.campgroundTags}>
                       {tagLabels.map(tag => (
                         <View key={`${camp.id}-${tag}`} style={s.campgroundTag}>
@@ -3546,11 +3866,11 @@ function GuideScreenContent() {
           </ScrollView>
         ) : (
           <View style={s.campgroundEmpty}>
-            <Ionicons name="map-outline" size={22} color={C.text3} />
-            <Text style={s.campgroundEmptyText}>{error || 'Open the map to look wider.'}</Text>
+            <Ionicons name="compass-outline" size={22} color={C.text3} />
+            <Text style={s.campgroundEmptyText}>{error || 'Search a wider area.'}</Text>
             <TouchableOpacity style={s.campgroundAreaBtn} onPress={() => showExploreOnMap(place)}>
               <Ionicons name="compass-outline" size={14} color={C.orange} />
-              <Text style={s.campgroundAreaBtnText}>Open map</Text>
+              <Text style={s.campgroundAreaBtnText}>Wider area</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -3814,6 +4134,9 @@ function GuideScreenContent() {
 
 	  function selectExploreHomeCategory(key: ExploreCategoryKey) {
 	    setExploreSavedOnly(false);
+	    if (exploreQuery.trim()) {
+	      setExploreQuery('');
+	    }
 	    if (key === 'nearby') {
       setExploreCategory('all');
       setExploreMode('nearby');
@@ -4092,7 +4415,7 @@ function GuideScreenContent() {
                           ? 'Search fuel near a place'
                           : exploreCategory === 'resupply'
                             ? 'Search supplies near a place'
-                            : 'No matching places'}
+                            : 'Keep exploring'}
                 </Text>
                 <Text style={s.emptySub}>
                   {exploreSavedOnly
@@ -4102,10 +4425,10 @@ function GuideScreenContent() {
                       : exploreTripNeedsRoute
                         ? 'Open or build a route to rank Explore places around your trip stops.'
                         : exploreCategory === 'fuel'
-                          ? 'Use a destination or route to find nearby fuel stops.'
+                          ? 'Enter a destination or route to find nearby fuel stops.'
                           : exploreCategory === 'resupply'
-                            ? 'Use a destination or route to find groceries, repair, water, and services.'
-                            : 'Try a nearby town, park, trail, waterfall, or hot spring.'}
+                            ? 'Enter a destination or route to find groceries, repair, water, and services.'
+                            : 'Try a town, park, trail, waterfall, or hot spring nearby.'}
                 </Text>
               </View>
             ) : (
@@ -4198,7 +4521,7 @@ function GuideScreenContent() {
                   </View>
                   {narration
                     ? <Text style={s.narration}>{narration}</Text>
-                    : !guideLoading && <Text style={s.narrationMissing}>Narration unavailable</Text>
+                    : !guideLoading && <Text style={s.narrationMissing}>Narration will appear after a trip has stops.</Text>
                   }
                 </View>
               );
@@ -4241,7 +4564,7 @@ function GuideScreenContent() {
             {!!activeTrip && !weatherLoading && Object.keys(weatherByWp).length === 0 && (
               <View style={s.emptyState}>
                 <Ionicons name="globe-outline" size={44} color={C.text3} />
-                <Text style={s.emptySub}>Weather unavailable for this trip area</Text>
+                <Text style={s.emptySub}>Weather will appear when this trip area has a forecast.</Text>
               </View>
             )}
             {!!activeTrip && waypoints.map((wp, i) => {

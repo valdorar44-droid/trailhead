@@ -1,8 +1,9 @@
 import { storage } from './storage';
 import { Platform } from 'react-native';
+import { TRAILHEAD_API_BASE, TRAILHEAD_PRODUCTION_API_BASE } from './apiBase';
 import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } from './requestGuard';
 
-const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const BASE = TRAILHEAD_API_BASE;
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
 
 function isLocalWebProductionApi() {
@@ -10,7 +11,7 @@ function isLocalWebProductionApi() {
   const location = (globalThis as typeof globalThis & { location?: { hostname?: string } }).location;
   const hostname = String(location?.hostname || '').toLowerCase();
   const isLocalhost = hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost');
-  return isLocalhost && /^https:\/\/api\.gettrailhead\.app\b/i.test(BASE);
+  return isLocalhost && BASE === TRAILHEAD_PRODUCTION_API_BASE;
 }
 
 function isLocalManualTripId(tripId: string) {
@@ -26,6 +27,29 @@ function emptyRouteToursResponse(source = 'viator'): ExploreExperiencesResponse 
     live_status: 'disabled',
     live_message: '',
     route_anchor_count: 0,
+  };
+}
+
+function optionalStringId(value: unknown): string | undefined {
+  if (value == null) return undefined;
+  const clean = String(value).trim();
+  return clean || undefined;
+}
+
+function normalizePlaceIdPayload<T extends {
+  id?: unknown;
+  feature_id?: unknown;
+  source_place_id?: unknown;
+  provider_place_id?: unknown;
+  place_id?: unknown;
+}>(data: T): T {
+  return {
+    ...data,
+    id: optionalStringId(data.id) as T['id'],
+    feature_id: optionalStringId(data.feature_id) as T['feature_id'],
+    source_place_id: optionalStringId(data.source_place_id) as T['source_place_id'],
+    provider_place_id: optionalStringId(data.provider_place_id) as T['provider_place_id'],
+    place_id: optionalStringId(data.place_id) as T['place_id'],
   };
 }
 
@@ -621,12 +645,14 @@ export const api = {
       10 * 60_000,
       () => req<OsmPoi | null>(`/api/places/search-card?q=${encodeURIComponent(query)}&lat=${lat}&lng=${lng}`),
     ),
-  resolveMapCard: (data: MapCardResolveRequest) =>
-    guardedRequest(
-      `map-card:${data.kind || 'place'}:${data.source || ''}:${data.id || data.provider_place_id || data.place_id || ''}:${normalizeRequestText(data.name || '')}:${stableNumber(data.lat, 4)}:${stableNumber(data.lng, 4)}`,
+  resolveMapCard: (data: MapCardResolveRequest) => {
+    const payload = normalizePlaceIdPayload(data);
+    return guardedRequest(
+      `map-card:${payload.kind || 'place'}:${payload.source || ''}:${payload.id || payload.provider_place_id || payload.place_id || ''}:${normalizeRequestText(payload.name || '')}:${stableNumber(payload.lat, 4)}:${stableNumber(payload.lng, 4)}`,
       10 * 60_000,
-      () => req<MapCardResolveResponse>('/api/map-card/resolve', { method: 'POST', body: JSON.stringify(data) }),
-    ),
+      () => req<MapCardResolveResponse>('/api/map-card/resolve', { method: 'POST', body: JSON.stringify(payload) }),
+    );
+  },
   getCampsites: (lat: number, lng: number, radius = 25) =>
     req<Campsite[]>(`/api/campsites?lat=${lat}&lng=${lng}&radius=${radius}`),
   searchCampsites: (lat: number, lng: number, radius = 40, types: string[] = []) =>
@@ -1013,7 +1039,7 @@ export const api = {
     ),
   canonicalizePlace: (data: CanonicalPlacePayload) =>
     req<{ trailhead_place_id: string; place: TrailheadPlace }>('/api/places/canonicalize', {
-      method: 'POST', body: JSON.stringify(data),
+      method: 'POST', body: JSON.stringify(normalizePlaceIdPayload(data)),
     }),
   getCanonicalPlace: (trailheadPlaceId: string) =>
     req<TrailheadPlace>(`/api/places/${encodeURIComponent(trailheadPlaceId)}`),
@@ -2216,12 +2242,11 @@ function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): stri
   if (raw.includes('nps')) return 'NPS';
   if (raw.includes('blm')) return 'BLM';
   if (raw.includes('usfs') || raw.includes('forest')) return 'USFS';
-  if (raw.includes('mapbox')) return 'Mapbox';
-  if (raw.includes('geoapify')) return 'Map data';
-  if (raw.includes('mixed')) return 'Mixed source';
-  if (raw.includes('osm') || raw.includes('openstreetmap')) return 'OSM';
-  if (raw.includes('community')) return 'Community';
-  return camp.source_badge || camp.verified_source || 'Camp source';
+  if (raw.includes('mapbox') || raw.includes('geoapify') || raw.includes('mixed')) return 'Community listing';
+  if (raw.includes('osm') || raw.includes('openstreetmap')) return 'Community listing';
+  if (raw.includes('community')) return 'Community listing';
+  const label = String(camp.source_badge || camp.verified_source || '').trim();
+  return label || 'Camp listing';
 }
 
 function inferCampLandType(camp: Partial<CampsitePin> & Record<string, any>): string {

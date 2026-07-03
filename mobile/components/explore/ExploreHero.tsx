@@ -20,7 +20,6 @@ const HERO_CATEGORY_KEYS: ExploreCategoryKey[] = [
   'fuel',
   'resupply',
   'huts',
-  'glamping',
   'nearby',
 ];
 

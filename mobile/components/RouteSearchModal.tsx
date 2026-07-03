@@ -15,6 +15,7 @@ import { api, CampsitePin, Pin, type ExploreCatalogIndexItem } from '@/lib/api';
 import { getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
 import { useTheme, mono } from '@/lib/design';
 import { TrailheadSheet } from '@/components/TrailheadUI';
+import { cleanExploreSourceLabel } from '@/lib/exploreContextFilters';
 
 export interface SearchPlace {
   name: string;
@@ -155,7 +156,7 @@ function dedupePlaces<T extends SearchPlace>(items: T[]): T[] {
 }
 
 function isTemporaryMapboxPlace(place: SearchPlace | null | undefined) {
-  return place?.source === 'mapbox_search' || place?.source_label === 'Mapbox Search' || place?.attribution === 'Mapbox';
+  return place?.source === 'mapbox_search' || place?.source_label === 'Place search' || place?.source_label === 'Place details' || place?.source_label === 'Mapbox Search' || place?.attribution === 'Mapbox';
 }
 
 function categoryTypes(catId: string) {
@@ -206,6 +207,33 @@ function normalizeSearchText(raw: string) {
   return String(raw || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
 }
 
+function displayLabel(value?: string | null, fallback = 'Place') {
+  const clean = String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!clean) return fallback;
+  return clean.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function searchMetaLabel(place: SearchPlace, fallback = 'Place') {
+  const labelFallback = displayLabel(place.subtype || place.type, fallback);
+  return cleanExploreSourceLabel(place.source_label || place.source || place.attribution, labelFallback);
+}
+
+function resultSubtitle(place: SearchPlace) {
+  const nameRegion = place.name.split(',').slice(1, 3).join(',').trim();
+  const subtype = displayLabel(place.subtype || place.type, '');
+  const meta = searchMetaLabel(place, subtype || 'Place');
+  return place.address || subtype || meta || nameRegion || 'Place';
+}
+
+function joinedResultMeta(place: SearchPlace, fallback = 'Place') {
+  const type = displayLabel(place.type || place.subtype, '');
+  const meta = searchMetaLabel(place, fallback);
+  return [type, meta]
+    .filter(Boolean)
+    .filter((item, index, arr) => arr.indexOf(item) === index)
+    .join(' · ') || fallback;
+}
+
 function exploreItemToSearchPlace(item: ExploreCatalogIndexItem, userLoc: { lat: number; lng: number } | null): SearchPlace | null {
   const lat = Number(item.lat);
   const lng = Number(item.lng);
@@ -222,13 +250,13 @@ function exploreItemToSearchPlace(item: ExploreCatalogIndexItem, userLoc: { lat:
     lng,
     dist: userLoc ? haversineKm(userLoc, { lat, lng }) : null,
     source: 'trailhead_explore',
-    source_label: item.verified ? 'Trailhead verified' : 'Trailhead Explore',
+    source_label: item.verified ? 'Verified place' : 'Place',
     type,
     subtype: region || undefined,
     address: region || undefined,
     photo_url: item.thumbnail_url || item.image_url || item.media?.find(media => media.url)?.url || null,
     website: item.source_url || item.sources?.find(source => source.url)?.url,
-    attribution: item.source_title || item.quality || item.source_quality || 'Trailhead Explore',
+    attribution: item.source_title || item.quality || item.source_quality || 'Curated guide',
     icon: type.includes('trail') ? 'trail' : type.includes('camp') ? 'camp' : 'pin',
     summary: item.short_description || item.hook || item.card?.summary || item.card?.highlight,
   };
@@ -473,12 +501,12 @@ export default function RouteSearchModal({
     const lng = Number(place?.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
     return {
-      name: String(place.name || 'Mapbox place'),
+      name: String(place.name || 'Selected place'),
       lat,
       lng,
       dist: userLoc ? haversineKm(userLoc, { lat, lng }) : null,
       source: 'mapbox_search',
-      source_label: 'Mapbox Search',
+      source_label: 'Place',
       place_id: place.place_id || place.mapbox_id || place.id,
       provider_place_id: place.provider_place_id || place.mapbox_id || place.id,
       type: place.type || place.feature_type || place.mapbox_categories?.[0] || 'poi',
@@ -526,7 +554,7 @@ export default function RouteSearchModal({
       .map(place => {
         const sourceLabel = place.source_label && !/mapbox/i.test(place.source_label)
           ? place.source_label
-          : 'Map result';
+          : 'Place';
         return {
           name: place.name,
           lat: place.lat,
@@ -904,9 +932,7 @@ export default function RouteSearchModal({
                 <View style={s.resultIcon}><Ionicons name="location" size={14} color={C.orange} /></View>
                 <View style={{ flex: 1 }}>
                   <Text style={s.resultName} numberOfLines={1}>{r.name.split(',')[0]}</Text>
-                  <Text style={s.resultSub} numberOfLines={1}>
-                    {r.address || r.subtype || r.source_label || r.name.split(',').slice(1, 3).join(',').trim()}
-                  </Text>
+                  <Text style={s.resultSub} numberOfLines={1}>{resultSubtitle(r)}</Text>
                 </View>
                 {r.dist != null && <Text style={s.resultDist}>{fmtDist(r.dist)}</Text>}
                 {!isTemporaryMapboxPlace(r) && (
@@ -952,7 +978,7 @@ export default function RouteSearchModal({
                   {contextLoading && (
                     <View style={s.liveNearbyPill}>
                       <Ionicons name="search" size={11} color={C.orange} />
-                      <Text style={s.liveNearbyPillText}>SEARCHING LIVE PLACES</Text>
+                      <Text style={s.liveNearbyPillText}>CHECKING NEARBY</Text>
                     </View>
                   )}
                 </View>
@@ -967,7 +993,7 @@ export default function RouteSearchModal({
                     )}
                     <View style={{ flex: 1, minWidth: 0 }}>
                       <Text style={s.resultName} numberOfLines={1}>{p.name}</Text>
-                      <Text style={s.resultSub} numberOfLines={1}>{[p.type?.replace(/_/g, ' '), p.source_label || p.source].filter(Boolean).join(' · ')}</Text>
+                      <Text style={s.resultSub} numberOfLines={1}>{joinedResultMeta(p, 'Nearby')}</Text>
                     </View>
                     {p.dist != null && <Text style={s.resultDist}>{fmtDist(p.dist)}</Text>}
                   </TouchableOpacity>
@@ -1006,7 +1032,7 @@ export default function RouteSearchModal({
                       {catSearching && <ActivityIndicator size="small" color={C.orange} />}
                     </View>
                     {!catSearching && catResults.length === 0 && (
-                      <Text style={s.catEmpty}>None found within 25 miles</Text>
+                      <Text style={s.catEmpty}>Try a wider nearby search.</Text>
                     )}
                     {catResults.map((r: any, i: number) => {
                       const cat = CATEGORIES.find(c => c.id === activeCat);
@@ -1022,7 +1048,7 @@ export default function RouteSearchModal({
                           )}
                           <View style={{ flex: 1 }}>
                             <Text style={s.resultName} numberOfLines={1}>{r.name}</Text>
-                            <Text style={s.resultSub} numberOfLines={1}>{isCamp && r._camp?.land_type ? r._camp.land_type : [r.type?.replace(/_/g, ' '), r.source_label || r.source].filter(Boolean).join(' · ')}</Text>
+                            <Text style={s.resultSub} numberOfLines={1}>{isCamp && r._camp?.land_type ? r._camp.land_type : joinedResultMeta(r, 'Nearby')}</Text>
                           </View>
                           {r.dist != null && <Text style={s.resultDist}>{fmtDist(r.dist)}</Text>}
                           {isCamp && onCampTap && r._camp && (

@@ -130,6 +130,13 @@ function LegendGlyph({ item }: { item: MapLegendItem }) {
       </View>
     );
   }
+  if (item.glyph === 'badge') {
+    return (
+      <View style={[s.badgeGlyph, { backgroundColor: item.color }]}>
+        <Text style={s.badgeGlyphText}>{String(item.code || item.label.slice(0, 1)).slice(0, 2).toUpperCase()}</Text>
+      </View>
+    );
+  }
   if (item.glyph === 'dot') {
     return <View style={[s.dotGlyph, { backgroundColor: item.color }]} />;
   }
@@ -291,6 +298,26 @@ function makeStyles(C: ColorPalette) {
       alignItems: 'center',
       justifyContent: 'center',
       borderWidth: 1,
+    },
+    badgeGlyph: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 2,
+      borderColor: '#fff',
+      shadowColor: '#000',
+      shadowOpacity: 0.18,
+      shadowRadius: 8,
+      shadowOffset: { width: 0, height: 4 },
+      elevation: 2,
+    },
+    badgeGlyphText: {
+      color: '#fff',
+      fontSize: 10,
+      fontWeight: '900',
+      lineHeight: 12,
     },
     dotGlyph: {
       width: 18,

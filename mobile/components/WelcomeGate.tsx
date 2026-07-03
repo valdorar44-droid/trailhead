@@ -172,8 +172,8 @@ const NEED_OPTIONS: NeedOption[] = [
   {
     id: 'downloads',
     icon: 'cloud-download-outline',
-    title: 'Downloaded maps',
-    body: 'Remember to keep important areas on this phone.',
+    title: 'Saved maps',
+    body: 'Keep important areas on this phone.',
   },
 ];
 

@@ -44,7 +44,7 @@ export function ExploreHomeControls({
 }: Props) {
   const C = useTheme();
   const sortLabel = sortLabelForMode(sortMode);
-  const countLabel = countLabelOverride || ((category === 'guided' || category === 'tours') && shownCount === 0 ? (hasQuery ? 'No matches' : 'Search guided trips') : shownLabel(shownCount));
+  const countLabel = countLabelOverride || ((category === 'guided' || category === 'tours') && shownCount === 0 ? (hasQuery ? 'Try a new search' : 'Search trips') : shownLabel(shownCount));
   return (
     <View style={styles.shell}>
       <ExploreModeTabs value={mode} onChange={onModeChange} />
@@ -52,7 +52,7 @@ export function ExploreHomeControls({
       <ExploreFilterRow
         shownCount={shownCount}
         countLabel={countLabel}
-        sourceLabel="Trip-ready"
+        sourceLabel="Details"
         sortLabel={sortLabel}
         onCountPress={onShowMore}
         onSourcePress={onSourcePress}
@@ -102,7 +102,7 @@ function sortLabelForMode(sortMode: ExploreSortMode) {
 }
 
 function shownLabel(count: number) {
-  if (count <= 0) return 'No matches';
+  if (count <= 0) return 'Search places';
   if (count < 1000) return `${count} shown`;
   const compact = count / 1000;
   return `${compact.toFixed(compact >= 10 ? 0 : 1)}K shown`;

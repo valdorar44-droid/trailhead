@@ -130,7 +130,7 @@ function campMetaText(plan: RouteScoutDayPlan) {
   if (parts.length) return parts.join(' · ');
   if (campStatus === 'loading' || String(plan.status || '').toLowerCase() === 'loading') return 'Finding overnight options';
   if (campStatus === 'review' || campStatus === 'missing') return 'Choose an overnight before starting';
-  return 'Verify access, rules, and fit before you go';
+  return 'Check access, rules, and fit before you go';
 }
 
 function campPhotoUri(plan: RouteScoutDayPlan) {

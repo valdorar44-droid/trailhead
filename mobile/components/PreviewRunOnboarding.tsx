@@ -15,7 +15,7 @@ type TourItem = {
 const TOUR_ITEMS: TourItem[] = [
   {
     title: 'Search camps or trails in this view',
-    body: 'Use the Map search and filter controls to find camps, trails, and places in the area you are viewing.',
+    body: 'Search camps, trails, and places in the area you are viewing.',
     icon: 'trail-sign-outline',
   },
   {
@@ -25,7 +25,7 @@ const TOUR_ITEMS: TourItem[] = [
   },
   {
     title: 'Build a trail for free',
-    body: 'Use the map button to drop anchors along a trail, snap the route, then save or follow it.',
+    body: 'Use the trail button to drop points along a route, then save or follow it.',
     icon: 'git-branch-outline',
   },
   {
@@ -34,8 +34,8 @@ const TOUR_ITEMS: TourItem[] = [
     icon: 'compass-outline',
   },
   {
-    title: 'Check offline before you go',
-    body: 'Downloads are free for everyone. Offline readiness tells you what maps, trails, places, and routing data are loaded.',
+    title: 'Save areas before you go',
+    body: 'Keep key regions, trails, places, and routes ready before the signal drops.',
     icon: 'cloud-done-outline',
   },
 ];

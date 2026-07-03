@@ -2,9 +2,10 @@ import { useEffect, useRef, useCallback } from 'react';
 import { AppState, AppStateStatus } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import { api, TripResult, RouteWeatherResult } from './api';
+import { TRAILHEAD_API_BASE } from './apiBase';
 import { useStore } from './store';
 
-const BASE = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
+const BASE = TRAILHEAD_API_BASE;
 const POLL_MS = 45_000;
 const PROBE_TIMEOUT_MS = 5_000;
 

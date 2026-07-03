@@ -212,7 +212,7 @@ export function featureFromPoi(
     type,
     source,
     subtitle: poi.length_mi != null && Number.isFinite(poi.length_mi)
-      ? `${poi.length_mi.toFixed(poi.length_mi >= 10 ? 0 : 1)} mi · ${poi.source_label || titleFor(type)}`
+      ? `${formatTrailMiles(poi.length_mi)} · ${poi.source_label || titleFor(type)}`
       : poi.elevation ? `${titleFor(type)} · ${poi.elevation}` : (poi.source_label || titleFor(type)),
     score,
     support,
@@ -229,6 +229,16 @@ export function featureFromPoi(
     open_status: 'unknown',
     vehicle_fit: 'unknown',
   };
+}
+
+function formatTrailMiles(mi?: number | null) {
+  if (mi == null || !Number.isFinite(Number(mi))) return 'Check distance';
+  const value = Number(mi);
+  if (value <= 0) return 'Check distance';
+  if (value < 1) return 'Under 1 mi';
+  if (value >= 10) return `${Math.round(value)} mi`;
+  const rounded = Number(value.toFixed(1));
+  return `${Number.isInteger(rounded) ? Math.round(rounded) : rounded} mi`;
 }
 
 export function featureFromMapTrail(

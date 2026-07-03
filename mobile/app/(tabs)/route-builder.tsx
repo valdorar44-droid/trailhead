@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
-  ActivityIndicator, Animated, Keyboard, Modal, Alert, Image, Platform,
+  ActivityIndicator, Animated, Easing, Keyboard, Modal, Alert, Image, Platform,
   useWindowDimensions, KeyboardAvoidingView, Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -242,7 +242,7 @@ const WATER_PLACE_FILTER_IDS = new Set(['boat_ramp', 'paddle_launch', 'fishing_a
 const FUEL_POI_TYPES = 'fuel,propane';
 const ROUTE_POI_TYPES = 'water,trailhead,viewpoint,peak,pass,glacier,bridge,checkpost,settlement,hot_spring,dump,shower,laundromat,lodging,private_stay,farm_stay,ranch,winery,glamping,private_camp,food,grocery,mechanic,parking,attraction,medical';
 const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap; filters: string[] }> = [
-  { id: 'public', label: 'Public', sub: 'Public land first', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free', 'tent'] },
+  { id: 'public', label: 'Dispersed', sub: 'Primitive and public land', icon: 'trail-sign-outline', filters: ['blm', 'usfs', 'dispersed', 'free'] },
   { id: 'developed', label: 'Developed', sub: 'Parks and reservable', icon: 'bonfire-outline', filters: ['tent', 'reservable', 'state', 'nps', 'usfs'] },
   { id: 'rv', label: 'RV', sub: 'Hookups and parks', icon: 'car-sport-outline', filters: ['rv', 'reservable'] },
   { id: 'private', label: 'Private Stays', sub: 'Farms, ranches, glamping', icon: 'home-outline', filters: ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'] },
@@ -1032,29 +1032,43 @@ function campFilterTags(camp: CampsitePin) {
     ...(Array.isArray(camp.site_types) ? camp.site_types : []),
   ].filter(Boolean).join(' ').toLowerCase();
   const tags = new Set<string>();
-  if (camp.reservable || raw.includes('reserv') || raw.includes('recreation.gov')) tags.add('reservable');
-  if (raw.includes('rv') || raw.includes('hookup') || raw.includes('caravan')) tags.add('rv');
+  if (camp.reservable || raw.includes('reserv')) tags.add('reservable');
+  if (raw.includes('rv') || raw.includes('hookup') || raw.includes('caravan') || raw.includes('motorhome')) tags.add('rv');
   if (raw.includes('tent')) tags.add('tent');
   if (raw.includes('dispersed') || raw.includes('primitive') || raw.includes('boondock')) tags.add('dispersed');
-  if (raw.includes('free')) tags.add('free');
+  if (raw.includes('free') || raw.includes('self-issued') || raw.includes('self issued')) tags.add('free');
   if (raw.includes('ada') || raw.includes('accessible')) tags.add('ada');
   if (raw.includes('blm') || raw.includes('bureau of land management')) tags.add('blm');
   if (raw.includes('usfs') || raw.includes('forest service') || raw.includes('national forest')) tags.add('usfs');
   if (raw.includes('nps') || raw.includes('national park')) tags.add('nps');
   if (raw.includes('state park')) tags.add('state');
   if (raw.includes('corps')) tags.add('corps');
-  if (raw.includes('private')) tags.add('private');
+  if (raw.includes('private') || raw.includes('koa') || raw.includes('resort')) tags.add('private');
   if (raw.includes('farm')) tags.add('farm');
   if (raw.includes('ranch')) tags.add('ranch');
   if (raw.includes('winery') || raw.includes('vineyard')) tags.add('winery');
+  if (raw.includes('private camp')) tags.add('private_camp');
   if (raw.includes('glamping') || raw.includes('yurt') || raw.includes('cabin')) tags.add('glamping');
   return tags;
 }
 
-function campMatchesFilters(camp: CampsitePin, filters: string[]) {
-  if (!filters.length) return true;
+function campMatchesFilters(camp: CampsitePin, filters: string[], preference?: CampPreferenceMode) {
   const tags = campFilterTags(camp);
+  const isPrivate = tags.has('private') || tags.has('farm') || tags.has('ranch') || tags.has('winery') || tags.has('glamping') || tags.has('private_camp');
+  const isPrimitivePublic = tags.has('dispersed') || tags.has('free') || ((tags.has('blm') || tags.has('usfs')) && !tags.has('reservable') && !tags.has('rv') && !isPrivate);
+  const isDeveloped = tags.has('reservable') || tags.has('state') || tags.has('nps') || tags.has('tent') || tags.has('corps') || (tags.has('usfs') && !tags.has('free'));
+  if (preference === 'public') return isPrimitivePublic && !tags.has('rv') && !isPrivate;
+  if (preference === 'developed') return isDeveloped && !tags.has('rv') && !isPrivate && !tags.has('dispersed') && !tags.has('free');
+  if (preference === 'rv') return tags.has('rv');
+  if (preference === 'private') return isPrivate;
+  if (preference === 'any' || !filters.length) return true;
   return filters.some(filter => tags.has(filter));
+}
+
+function builderResultSummary(count: number, noun: string, context: string, prefix = '') {
+  const label = prefix ? `${prefix} ${noun}` : noun;
+  if (count <= 0) return `No ${label}${context}`;
+  return `${count} ${label}${count === 1 ? '' : 's'}${context}`;
 }
 
 function routeScopedOfflinePlaces(points: OsmPoi[], leg: LegSearchContext, types: string[], extraBuffer = 8) {
@@ -1249,7 +1263,7 @@ function isFrameworkTarget(stop: BuilderStop) {
 }
 
 function isFrameworkManagedStop(stop: BuilderStop) {
-  return isFrameworkTarget(stop) || /Picked for|Auto-picked by Trailhead/i.test(stop.description);
+  return isFrameworkTarget(stop);
 }
 
 function stopRouteOrderWeight(stop: BuilderStop) {
@@ -1586,6 +1600,7 @@ function RouteBuilderScreenContent() {
   const blurTint: 'dark' | 'light' = C.bg === '#050505' ? 'dark' : 'light';
   const wizardFade = useRef(new Animated.Value(1)).current;
   const wizardSlide = useRef(new Animated.Value(0)).current;
+  const buildPulse = useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
@@ -1666,16 +1681,36 @@ function RouteBuilderScreenContent() {
     setTargetMiles(value);
   }
 
+  function currentPlannedDaysValue() {
+    return parsePositiveNumber(plannedDays) ?? parsePositiveNumber(plannedDaysRef.current);
+  }
+
+  function currentDriveHoursValue() {
+    return parsePositiveNumber(driveHoursPerDay) ?? parsePositiveNumber(driveHoursPerDayRef.current);
+  }
+
   useEffect(() => {
     if (!buildingFramework) {
       deactivateKeepAwake('route-builder-build').catch(() => {});
+      buildPulse.stopAnimation();
+      buildPulse.setValue(0);
       return;
     }
     activateKeepAwakeAsync('route-builder-build').catch(() => {});
+    const loop = Animated.loop(
+      Animated.timing(buildPulse, {
+        toValue: 1,
+        duration: 1800,
+        easing: Easing.inOut(Easing.cubic),
+        useNativeDriver: true,
+      }),
+    );
+    loop.start();
     return () => {
+      loop.stop();
       deactivateKeepAwake('route-builder-build').catch(() => {});
     };
-  }, [buildingFramework]);
+  }, [buildPulse, buildingFramework]);
   const [fuelEstimate, setFuelEstimate] = useState<FuelEstimate | null>(null);
   const [routeGeometry, setRouteGeometry] = useState<ProviderRouteGeometry | null>(null);
   const [importedTripId, setImportedTripId] = useState<string | null>(null);
@@ -1744,7 +1779,7 @@ function RouteBuilderScreenContent() {
     routeStyle,
     campReusePolicy: effectiveCampReusePolicy,
     days: inputDays,
-    maxDriveHoursPerDay: parsePositiveNumber(driveHoursPerDayRef.current),
+    maxDriveHoursPerDay: currentDriveHoursValue(),
     targetMilesPerDay: parsePositiveNumber(targetMilesRef.current),
   });
 
@@ -2494,6 +2529,7 @@ function RouteBuilderScreenContent() {
       rating: tour.rating ?? undefined,
       review_count: tour.review_count ?? undefined,
     };
+    setReplaceStopId(null);
     addStop({
       day,
       name: tour.title,
@@ -2509,6 +2545,7 @@ function RouteBuilderScreenContent() {
   }
 
   function addPlace(place: SearchPlace, type = pendingType) {
+    setReplaceStopId(null);
     addStop(buildRouteBuilderSearchStop(place, type));
     setSearchResults([]);
     setQuery('');
@@ -2692,10 +2729,10 @@ function RouteBuilderScreenContent() {
           }
           const offlineCamps = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['camp'], 18)
             .map(point => offlinePoiToCamp(point))
-            .filter(camp => campMatchesFilters(camp, campTypeFilters));
+            .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode));
           const scopedRaw = filterCampsByPhotoMode(uniqueByGeo([...found, ...offlineCamps]), campPhotoOnly)
               .map(camp => withLegProjection(camp, searchLeg!))
-              .filter(camp => campMatchesFilters(camp, campTypeFilters))
+              .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode))
               .filter(camp => (camp.route_distance_mi ?? 999) <= routeBufferForMiles(searchLeg!.miles) + 14);
           let scoped = (searchLeg!.purpose === 'overnight' ? overnightEndpointCamps(scopedRaw, searchLeg!) : spreadAlongLeg(scopedRaw))
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
@@ -2712,7 +2749,7 @@ function RouteBuilderScreenContent() {
             fallbackText = ' using the day-end area';
             if (scoped.length === 0 && campPhotoOnly && endpointCamps.length > 0) {
               scoped = endpointCamps
-                .filter(camp => campMatchesFilters(camp, campTypeFilters))
+                .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode))
                 .map(camp => ({
                   ...withLegProjection(camp, searchLeg!),
                   photo_status: 'missing',
@@ -2724,11 +2761,19 @@ function RouteBuilderScreenContent() {
               fallbackText = ' near the day-end area';
             }
           }
-          storeDiscoveryResults(key, { camps: scoped, summary: `${scoped.length} ${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()} camp${scoped.length === 1 ? '' : 's'} ${searchLeg!.purpose === 'overnight' ? `near Day ${searchLeg!.targetDay ?? activeDay} stop${fallbackText}` : 'along this leg'}` });
+          storeDiscoveryResults(key, {
+            camps: scoped,
+            summary: builderResultSummary(
+              scoped.length,
+              'camp',
+              searchLeg!.purpose === 'overnight' ? ` near Day ${searchLeg!.targetDay ?? activeDay} stop${fallbackText}` : ' along this leg',
+              `${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()}`.trim(),
+            ),
+          });
         } else {
           const offlineCamps = areaScopedOfflinePlaces(offlinePlaces, target, ['camp'], 50)
             .map(point => offlinePoiToCamp(point))
-            .filter(camp => campMatchesFilters(camp, campTypeFilters));
+            .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode));
           let liveCamps = routeIntelligenceCamps(await api.getRouteIntelligence({
             center: target,
             radius: 45,
@@ -2748,9 +2793,12 @@ function RouteBuilderScreenContent() {
             }).catch(() => []);
           }
           const found = filterCampsByPhotoMode(uniqueByGeo([...liveCamps, ...offlineCamps]), campPhotoOnly)
-            .filter(camp => campMatchesFilters(camp, campTypeFilters))
+            .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode))
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
-          storeDiscoveryResults(key, { camps: found, summary: `${found.length} ${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()} camp${found.length === 1 ? '' : 's'} near this area` });
+          storeDiscoveryResults(key, {
+            camps: found,
+            summary: builderResultSummary(found.length, 'camp', ' near this area', `${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()}`.trim()),
+          });
         }
       } else if (tab === 'gas') {
         if (useLeg) {
@@ -2806,7 +2854,7 @@ function RouteBuilderScreenContent() {
             .map(st => withLegProjection(st, searchLeg!))
             .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(searchLeg!.miles) + 18)
           );
-          storeDiscoveryResults(key, { gas: scoped, summary: `${scoped.length} fuel stop${scoped.length === 1 ? '' : 's'} along this leg` });
+          storeDiscoveryResults(key, { gas: scoped, summary: builderResultSummary(scoped.length, 'fuel stop', ' along this leg') });
         } else {
           const intelFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
             center: target,
@@ -2850,7 +2898,7 @@ function RouteBuilderScreenContent() {
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           stations.sort((a, b) => (a.route_distance_mi ?? haversineMi(a, target)) - (b.route_distance_mi ?? haversineMi(b, target)));
-          storeDiscoveryResults(key, { gas: stations, summary: `${stations.length} fuel stop${stations.length === 1 ? '' : 's'} near this area` });
+          storeDiscoveryResults(key, { gas: stations, summary: builderResultSummary(stations.length, 'fuel stop', ' near this area') });
         }
       } else if (tab === 'tours') {
         const routeCoords = useLeg ? legRouteCoords(searchLeg!) : excursionRouteCoords();
@@ -2879,8 +2927,8 @@ function RouteBuilderScreenContent() {
         storeDiscoveryResults(key, {
           tours: found,
           summary: found.length
-            ? `${found.length} tour${found.length === 1 ? '' : 's'} near this ${useLeg ? 'leg' : 'area'}`
-            : response.live_message || 'Tour availability is still loading for this segment.',
+            ? builderResultSummary(found.length, 'tour', ` near this ${useLeg ? 'leg' : 'area'}`)
+            : response.live_message || 'Tours are still loading for this segment.',
         });
         if (!found.length && response.live_status === 'processing' && !opts.retryingLive) {
           setTimeout(() => {
@@ -2921,7 +2969,7 @@ function RouteBuilderScreenContent() {
           .map(smartPlaceToExcursion)
           .filter(item => !item.sensitive_location || item.source_confidence === 'high')
           .sort((a, b) => (a.distance_from_route_mi ?? 999) - (b.distance_from_route_mi ?? 999));
-        storeDiscoveryResults(key, { excursions: scoped, summary: `${scoped.length} excursion${scoped.length === 1 ? '' : 's'} near ${useLeg ? 'this leg' : 'this area'}` });
+        storeDiscoveryResults(key, { excursions: scoped, summary: builderResultSummary(scoped.length, 'stop', ` near ${useLeg ? 'this leg' : 'this area'}`) });
       } else {
         if (useLeg) {
           const radius = Math.max(24, Math.min(42, searchLeg!.miles / 5 + 12));
@@ -2971,7 +3019,7 @@ function RouteBuilderScreenContent() {
               .map(poi => withLegProjection(poi, searchLeg!))
               .filter(poi => poi.route_distance_mi <= routeBufferForMiles(searchLeg!.miles) + 5)
           );
-          storeDiscoveryResults(key, { pois: scoped, summary: `${scoped.length} place${scoped.length === 1 ? '' : 's'} along this leg` });
+          storeDiscoveryResults(key, { pois: scoped, summary: builderResultSummary(scoped.length, 'place', ' along this leg') });
         } else {
           let found = routeIntelligencePois(await api.getRouteIntelligence({
             route: excursionRouteCoords(),
@@ -3018,7 +3066,7 @@ function RouteBuilderScreenContent() {
           const scoped = routePlaces
             .map(poi => ({ ...poi, route_distance_mi: poi.route_distance_mi ?? haversineMi(poi, target) }))
             .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
-          storeDiscoveryResults(key, { pois: scoped, summary: `${scoped.length} place${scoped.length === 1 ? '' : 's'} near this area` });
+          storeDiscoveryResults(key, { pois: scoped, summary: builderResultSummary(scoped.length, 'place', ' near this area') });
         }
       }
     } catch {
@@ -3051,7 +3099,7 @@ function RouteBuilderScreenContent() {
       lat: camp.lat,
       lng: camp.lng,
       type: 'camp',
-      description: camp.description || 'Camp selected in Route Builder.',
+      description: camp.description || 'Camp selected for this route.',
       land_type: camp.land_type || 'camp',
       source: 'camp',
       camp,
@@ -3100,7 +3148,7 @@ function RouteBuilderScreenContent() {
       lat: camp.lat,
       lng: camp.lng,
       type: 'camp',
-      description: camp.description || 'Camp selected in Route Builder.',
+      description: camp.description || 'Camp selected for this route.',
       land_type: camp.land_type || 'camp',
       source: 'camp',
       camp,
@@ -3116,12 +3164,13 @@ function RouteBuilderScreenContent() {
 
   function addGas(station: GasStation) {
     const next = selectedNextStop;
+    setReplaceStopId(null);
     addStop({
       name: station.name,
       lat: station.lat,
       lng: station.lng,
       type: 'fuel',
-      description: station.address || 'Fuel stop selected in Route Builder.',
+      description: station.address || 'Fuel stop selected for this route.',
       land_type: 'town',
       source: 'gas',
       gas: station,
@@ -3132,12 +3181,13 @@ function RouteBuilderScreenContent() {
 
   function addPoi(poi: OsmPoi, routePointType: BuilderStop['routePointType'] = 'side_stop') {
     const type = builderTypeForPoi(poi.type);
+    setReplaceStopId(null);
     addStop({
       name: poi.name || poi.type,
       lat: poi.lat,
       lng: poi.lng,
       type,
-      description: `${poi.type.replace(/_/g, ' ')} stop selected in Route Builder.`,
+      description: `${poi.type.replace(/_/g, ' ')} stop selected for this route.`,
       land_type: type === 'fuel' || type === 'motel' ? 'town' : 'route',
       source: 'poi',
       poi,
@@ -3167,13 +3217,14 @@ function RouteBuilderScreenContent() {
       address: [excursion.day_fit, excursion.source_confidence ? `${excursion.source_confidence} confidence` : ''].filter(Boolean).join(' · '),
       route_distance_mi: excursion.distance_from_route_mi,
     };
+    setReplaceStopId(null);
     addStop({
       name: excursion.name,
       lat: excursion.lat,
       lng: excursion.lng,
       type: 'waypoint',
       description: [
-        excursion.summary || excursion.why_go || 'Excursion selected in Route Builder.',
+        excursion.summary || excursion.why_go || 'Stop selected for this route.',
         excursion.access_notes ? `Access: ${excursion.access_notes}` : '',
         excursion.risk_notes ? `Note: ${excursion.risk_notes}` : '',
       ].filter(Boolean).join(' '),
@@ -3303,6 +3354,7 @@ function RouteBuilderScreenContent() {
   function scanBetweenStops(from: BuilderStop, to: BuilderStop, tab: DiscoveryTab, targetDay = from.day, purpose: LegSearchContext['purpose'] = 'leg', inline = true) {
     const miles = haversineMi(from, to);
     const leg = { from, to, miles, center: midpoint(from, to), targetDay, purpose };
+    if (tab !== 'camps') setReplaceStopId(null);
     setInsertAfterId(stops.some(stop => stop.id === from.id) ? from.id : null);
     setInsertTargetDay(targetDay);
     setActiveDay(targetDay);
@@ -3318,6 +3370,7 @@ function RouteBuilderScreenContent() {
   }
 
   function scanDayPlan(plan: RouteDayPlan, tab: DiscoveryTab) {
+    if (tab !== 'camps') setReplaceStopId(null);
     if (tab === 'camps' && !plan.needsCamp && campCadenceMode === 'alternate') {
       const campPlan = routeDayPlans.find(dayPlan => dayPlan.day === plan.campWindowEnd) ?? plan;
       if (campPlan.day !== plan.day) {
@@ -3710,7 +3763,7 @@ function RouteBuilderScreenContent() {
       }
       const destination: BuilderStop = {
         id: `dest_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
-        day: Math.max(1, Math.round(parsePositiveNumber(plannedDaysRef.current) ?? DEFAULT_ROUTE_DAY_COUNT)),
+        day: Math.max(1, Math.round(currentPlannedDaysValue() ?? DEFAULT_ROUTE_DAY_COUNT)),
         name: place.name,
         lat: place.lat,
         lng: place.lng,
@@ -3878,7 +3931,7 @@ function RouteBuilderScreenContent() {
       max_samples: samples.length,
       include_stale: true,
       limit: 120,
-    }).catch(() => null)).filter(camp => campMatchesFilters(camp, campTypeFilters));
+    }).catch(() => null)).filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode));
     if (found.length === 0) {
       found = uniqueByGeo((await Promise.all(
         samples.map(point => api.getDiscoveryCamps(point.lat, point.lng, radius, campTypeFilters, {
@@ -3994,7 +4047,7 @@ function RouteBuilderScreenContent() {
           require_photos: campPhotoOnly,
           region_hint: routeStates.join(','),
           camp_reuse_policy: effectiveCampReusePolicy,
-          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDayRef.current) ?? undefined,
+          max_daily_drive_hours: currentDriveHoursValue() ?? undefined,
           max_radius: 90,
           response_deadline_s: ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S,
         }, { signal }),
@@ -4005,6 +4058,7 @@ function RouteBuilderScreenContent() {
         const win = originalWin;
         const candidatePool = [win.selected, win.camp, ...(win.candidates ?? [])]
           .filter((camp): camp is CampsitePin => !!camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
+          .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode))
           .filter((camp, idx, arr) => arr.findIndex(other => String(other.id ?? `${other.lat},${other.lng}`) === String(camp.id ?? `${camp.lat},${camp.lng}`)) === idx);
         const selectedCamp = candidatePool
           .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b))[0] ?? null;
@@ -4198,7 +4252,7 @@ function RouteBuilderScreenContent() {
       const first = base[0];
       const last = base[base.length - 1];
       const roughMiles = haversineMi(first, last) * (tripLoop ? 2 : 1);
-      const plannedCount = parsePositiveNumber(plannedDaysRef.current) ?? days.length ?? DEFAULT_ROUTE_DAY_COUNT;
+      const plannedCount = currentPlannedDaysValue() ?? days.length ?? DEFAULT_ROUTE_DAY_COUNT;
       const milesCount = Math.ceil(roughMiles / (parsePositiveNumber(targetMilesRef.current) ?? 180));
       const count = Math.max(1, Math.min(30, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
       const nextDays = Array.from({ length: count }, (_, i) => i + 1);
@@ -4515,7 +4569,7 @@ function RouteBuilderScreenContent() {
           require_photos: campPhotoOnly,
           camp_reuse_policy: effectiveCampReusePolicy,
           region_hint: routeStates.join(','),
-          max_daily_drive_hours: parsePositiveNumber(driveHoursPerDayRef.current),
+          max_daily_drive_hours: currentDriveHoursValue(),
           rental_interest: tripPreferenceContext?.rental_interest,
           trip_preferences: tripPreferenceContext,
         },
@@ -4578,8 +4632,8 @@ function RouteBuilderScreenContent() {
       routeStyle,
       tripShapeMode,
       tripLoop,
-      driveHoursPerDay: driveHoursPerDayRef.current,
-      plannedDays: plannedDaysRef.current,
+      driveHoursPerDay,
+      plannedDays,
       tripBuildMode,
       distanceMode,
       targetMiles: targetMilesRef.current,
@@ -4951,7 +5005,12 @@ function RouteBuilderScreenContent() {
         title={inlineSearch.label}
         subtitle={discoverySummary || 'Searching along this day segment'}
         loading={discoverLoading}
-        onClose={() => setInlineSearch(null)}
+        onClose={() => {
+          setInlineSearch(null);
+          setReplaceStopId(null);
+          setInsertAfterId(null);
+          setInsertTargetDay(null);
+        }}
       >
         {inlineTab === 'camps' ? (
           camps.length ? camps.slice(0, 6).map(camp => (
@@ -5269,7 +5328,7 @@ function RouteBuilderScreenContent() {
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Choose camp style</Text>
-              <Text style={s.wizardHelp}>Choose the kind of overnight stops you want. Public keeps private RV parks as a backup.</Text>
+              <Text style={s.wizardHelp}>Choose the kind of overnight stops you want for this route.</Text>
             </View>
             <View style={s.campPreferenceGrid}>
               {CAMP_PREFERENCE_OPTIONS.map(option => {
@@ -5403,54 +5462,74 @@ function RouteBuilderScreenContent() {
   }
 
   if (buildingFramework) {
-    const featuredTour = routeTours[0] ?? null;
+    const routeDotX = buildPulse.interpolate({ inputRange: [0, 1], outputRange: [-18, 268] });
+    const routeDotScale = buildPulse.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.86, 1.12, 0.86] });
+    const routeLineScale = buildPulse.interpolate({ inputRange: [0, 1], outputRange: [0.18, 1] });
+    const currentStatus = frameworkStatus || 'Planning your route';
+    const buildStages = [
+      { icon: 'navigate-outline' as const, label: 'Route', active: /route|setting|built|preparing/i.test(currentStatus) },
+      { icon: 'bonfire-outline' as const, label: 'Stays', active: /overnight|camp/i.test(currentStatus) },
+      { icon: 'flash-outline' as const, label: 'Fuel', active: /fuel|resupply/i.test(currentStatus) },
+    ];
     return (
       <SafeAreaView style={s.buildingVideoScreen}>
         <View style={[s.buildingVideoContent, { paddingTop: Math.max(insets.top, 12) + 18, paddingBottom: Math.max(insets.bottom, 18) + 22 }]}>
-          <View style={s.buildingVideoTop}>
-            <View style={s.buildingLivePill}>
-              <ActivityIndicator size="small" color="#101820" />
-              <Text style={s.buildingLiveText}>Planning route</Text>
+          <View style={s.buildingHeaderRow}>
+            <View style={s.buildingHeaderMark}>
+              <Ionicons name="trail-sign-outline" size={17} color="#101820" />
+            </View>
+            <Text style={s.buildingHeaderText}>Building route</Text>
+          </View>
+
+          <View style={s.buildingRoutePreview}>
+            <View style={s.buildingRoutePreviewGrid}>
+              <View style={[s.buildingMapLine, s.buildingMapLineOne]} />
+              <View style={[s.buildingMapLine, s.buildingMapLineTwo]} />
+              <View style={[s.buildingMapLine, s.buildingMapLineThree]} />
+            </View>
+            <View style={s.buildingRouteTrack}>
+              <Animated.View style={[s.buildingRouteTrackFill, { transform: [{ scaleX: routeLineScale }] }]} />
+              <View style={[s.buildingRouteNode, s.buildingRouteNodeStart]}>
+                <Ionicons name="navigate" size={11} color="#fff" />
+              </View>
+              <View style={[s.buildingRouteNode, s.buildingRouteNodeCamp]}>
+                <Ionicons name="bonfire" size={11} color="#fff" />
+              </View>
+              <View style={[s.buildingRouteNode, s.buildingRouteNodeEnd]}>
+                <Ionicons name="flag" size={11} color="#fff" />
+              </View>
+              <Animated.View style={[s.buildingRouteDot, { transform: [{ translateX: routeDotX }, { scale: routeDotScale }] }]} />
+            </View>
+            <View style={s.buildingLogoMark}>
+              <Ionicons name="trail-sign-outline" size={30} color="#101820" />
             </View>
           </View>
 
           <View style={s.buildingHeroCopy}>
-            <View style={s.buildingLogoMark}>
-              <Ionicons name="trail-sign-outline" size={28} color="#101820" />
-            </View>
-            <Text style={s.buildingEyebrow}>Plan your adventure</Text>
             <Text style={s.buildingHeadline}>Building your route</Text>
-            <Text style={s.buildingSubtitle}>
-              Checking camps, fuel, drive time, and route choices.
-            </Text>
+            <Text style={s.buildingSubtitle}>{currentStatus}</Text>
           </View>
 
-          <View style={s.buildingBottomPanel}>
-            <ActivityStatusCard
-              title={frameworkStatus}
-              fallbackLines={BUILD_STATUS_LINES}
-              helper={routeToursLoading ? 'Checking tours along this route.' : routeToursStatus || undefined}
-              tone={C.orange}
-            />
-            {featuredTour ? (
-              <TouchableOpacity style={s.routeTourCard} activeOpacity={0.88} onPress={() => addTourToRoute(featuredTour)}>
-                {featuredTour.hero_image_url || featuredTour.images?.[0]?.url ? (
-                  <Image source={{ uri: featuredTour.hero_image_url || featuredTour.images?.[0]?.url || '' }} style={s.routeTourImage} resizeMode="cover" />
-                ) : (
-                  <View style={s.routeTourPlaceholder}>
-                    <Ionicons name="ticket-outline" size={22} color="#0f766e" />
+          <View style={s.buildingProgressPanel}>
+            {buildStages.map((stage, idx) => {
+              const pulseScale = buildPulse.interpolate({
+                inputRange: [0, 0.35, 0.7, 1],
+                outputRange: idx === 0 ? [1.04, 1, 1, 1.04] : idx === 1 ? [1, 1.04, 1, 1] : [1, 1, 1.04, 1],
+              });
+              return (
+                <View key={stage.label} style={[s.buildingStageRow, stage.active && s.buildingStageRowActive]}>
+                  <Animated.View style={[s.buildingStageIcon, stage.active && s.buildingStageIconActive, { transform: [{ scale: pulseScale }] }]}>
+                    <Ionicons name={stage.icon} size={15} color={stage.active ? '#fff' : '#66706b'} />
+                  </Animated.View>
+                  <View style={s.flex}>
+                    <Text style={[s.buildingStageLabel, stage.active && s.buildingStageLabelActive]}>{stage.label}</Text>
+                    <View style={s.buildingStageSkeleton}>
+                      <Animated.View style={[s.buildingStageSkeletonFill, { transform: [{ scaleX: stage.active ? routeLineScale : 1 }] }]} />
+                    </View>
                   </View>
-                )}
-                <View style={s.routeTourBody}>
-                  <Text style={s.routeTourKicker}>Tour near your route</Text>
-                  <Text style={s.routeTourTitle} numberOfLines={2}>{featuredTour.title}</Text>
-                  <Text style={s.routeTourMeta} numberOfLines={1}>
-                    {[featuredTour.route_anchor?.name, featuredTour.duration_label, featuredTour.price_from ? `from ${featuredTour.currency || 'USD'} ${featuredTour.price_from}` : ''].filter(Boolean).join(' · ')}
-                  </Text>
                 </View>
-                <Ionicons name="add-circle-outline" size={22} color="#0f766e" />
-              </TouchableOpacity>
-            ) : null}
+              );
+            })}
           </View>
         </View>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
@@ -6305,8 +6384,33 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   buildingVideoContent: {
     flex: 1,
     paddingHorizontal: 18,
-    justifyContent: 'space-between',
-    gap: 18,
+    justifyContent: 'center',
+    gap: 22,
+  },
+  buildingHeaderRow: {
+    position: 'absolute',
+    top: 18,
+    left: 18,
+    right: 18,
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  buildingHeaderMark: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.10)',
+  },
+  buildingHeaderText: {
+    color: '#101820',
+    fontSize: 12,
+    fontWeight: '900',
   },
   buildingVideoTop: {
     alignItems: 'center',
@@ -6328,6 +6432,84 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 10,
   },
+  buildingRoutePreview: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 360,
+    minHeight: 250,
+    borderRadius: 30,
+    backgroundColor: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.10)',
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.08,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 14 },
+  },
+  buildingRoutePreviewGrid: {
+    ...StyleSheet.absoluteFillObject,
+    opacity: 0.5,
+  },
+  buildingMapLine: {
+    position: 'absolute',
+    height: 1,
+    left: -40,
+    right: -40,
+    backgroundColor: 'rgba(15,23,42,0.08)',
+  },
+  buildingMapLineOne: { top: 62, transform: [{ rotate: '-12deg' }] },
+  buildingMapLineTwo: { top: 132, transform: [{ rotate: '9deg' }] },
+  buildingMapLineThree: { bottom: 58, transform: [{ rotate: '-7deg' }] },
+  buildingRouteTrack: {
+    position: 'absolute',
+    left: 34,
+    right: 34,
+    top: 126,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,23,42,0.10)',
+  },
+  buildingRouteTrackFill: {
+    position: 'absolute',
+    left: 0,
+    top: 0,
+    bottom: 0,
+    width: '100%',
+    borderRadius: 999,
+    backgroundColor: '#f97316',
+  },
+  buildingRouteNode: {
+    position: 'absolute',
+    top: -13,
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+  },
+  buildingRouteNodeStart: { left: -2, backgroundColor: '#101820' },
+  buildingRouteNodeCamp: { left: '48%', backgroundColor: '#0f766e' },
+  buildingRouteNodeEnd: { right: -2, backgroundColor: '#f97316' },
+  buildingRouteDot: {
+    position: 'absolute',
+    top: -7,
+    left: 0,
+    width: 18,
+    height: 18,
+    borderRadius: 9,
+    borderWidth: 3,
+    borderColor: '#ffffff',
+    backgroundColor: '#f97316',
+  },
   buildingLogoMark: {
     width: 74,
     height: 74,
@@ -6345,6 +6527,61 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   buildingEyebrow: { color: '#0f766e', fontSize: 12, fontWeight: '900', letterSpacing: 0 },
   buildingHeadline: { color: '#101820', fontSize: 36, lineHeight: 40, fontWeight: '900', textAlign: 'center' },
   buildingSubtitle: { color: '#66706b', fontSize: 15, lineHeight: 21, maxWidth: 340, textAlign: 'center' },
+  buildingProgressPanel: {
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 360,
+    borderWidth: 1,
+    borderColor: 'rgba(15,23,42,0.10)',
+    borderRadius: 22,
+    backgroundColor: '#ffffff',
+    padding: 12,
+    gap: 10,
+  },
+  buildingStageRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    borderRadius: 15,
+    paddingHorizontal: 10,
+    backgroundColor: '#fbfaf7',
+  },
+  buildingStageRowActive: {
+    backgroundColor: '#fff7ed',
+  },
+  buildingStageIcon: {
+    width: 30,
+    height: 30,
+    borderRadius: 15,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#ece7df',
+  },
+  buildingStageIconActive: {
+    backgroundColor: '#f97316',
+  },
+  buildingStageLabel: {
+    color: '#66706b',
+    fontSize: 12,
+    fontWeight: '900',
+  },
+  buildingStageLabelActive: {
+    color: '#101820',
+  },
+  buildingStageSkeleton: {
+    marginTop: 6,
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(15,23,42,0.08)',
+    overflow: 'hidden',
+  },
+  buildingStageSkeletonFill: {
+    width: '100%',
+    height: 5,
+    borderRadius: 999,
+    backgroundColor: '#fed7aa',
+  },
   buildingBottomPanel: {
     borderWidth: 1,
     borderColor: 'rgba(15,23,42,0.10)',

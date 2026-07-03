@@ -16578,6 +16578,13 @@ NORTHEAST_PUBLIC_CAMP_FALLBACK_STATES = {
     "ct", "de", "ma", "md", "me", "nh", "nj", "ny", "pa", "ri", "vt",
 }
 
+ANY_LEGAL_ROUTE_CAMP_FILTER_SETS = [
+    ("any_public", ["blm", "usfs", "dispersed", "free"]),
+    ("any_developed", ["tent", "reservable", "state", "nps", "usfs"]),
+    ("any_rv", ["rv", "reservable"]),
+    ("any_private", ["private", "farm", "ranch", "winery", "glamping", "private_camp"]),
+]
+
 
 def _public_camp_supply_limited(region_hint: str = "") -> bool:
     hint = re.sub(r"[^a-z, ]+", " ", (region_hint or "").lower())
@@ -16816,16 +16823,23 @@ async def _select_camp_for_window(
     samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=3)
     base_radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
     filter_key = sorted(type_filters)
+    any_broad_preference = str(camp_preference or "").lower() == "any" and not type_filters
     pass_defs: list[dict] = []
-    if type_filters:
+    if any_broad_preference:
+        for name, filters in ANY_LEGAL_ROUTE_CAMP_FILTER_SETS:
+            pass_defs.append({"name": name, "filters": filters, "radius": min(max_radius, max(base_radius * 1.15, 44.0)), "strict": False})
+        pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.55, 58.0)), "strict": False})
+    elif type_filters:
         pass_defs.append({"name": "preferred", "filters": type_filters, "radius": base_radius, "strict": True})
         pass_defs.append({"name": "preferred_wide", "filters": [], "radius": min(max_radius, max(base_radius * 1.25, 45.0)), "strict": False})
-    pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.55, 58.0)), "strict": False})
+        pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.55, 58.0)), "strict": False})
+    else:
+        pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.55, 58.0)), "strict": False})
     if route_style == "wild" or str(camp_preference or "").lower() == "public":
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
     pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 12,
+        "v": 13,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -16918,7 +16932,7 @@ async def _select_camp_for_window(
                     by_key[key] = camp
                     kept += 1
             search_passes.append({"name": pass_def["name"], "radius_mi": round(radius, 1), "filters": filters, "found": len(found), "kept": kept, "target_only": bool(pass_def.get("target_only"))})
-            if len(by_key) >= 18 and (pass_def["name"] == "preferred" or not type_filters):
+            if len(by_key) >= 18 and (pass_def["name"] == "preferred" or (not type_filters and not any_broad_preference)):
                 break
         scored = sorted(by_key.values(), key=lambda c: float(c.get("_score", 999999)))
         candidates = [{k: v for k, v in camp.items() if k != "_score"} for camp in scored[:18]]

@@ -7,7 +7,7 @@ const FULL = process.env.TRAILHEAD_ROUTE_AUDIT_FULL === '1';
 const REQUEST_TIMEOUT_MS = Number(process.env.TRAILHEAD_ROUTE_AUDIT_TIMEOUT_MS || 120000);
 
 const CAMP_PREFS = {
-  public: ['blm', 'usfs', 'dispersed', 'free', 'tent'],
+  public: ['blm', 'usfs', 'dispersed', 'free'],
   developed: ['tent', 'reservable', 'state', 'nps', 'usfs'],
   rv: ['rv', 'reservable'],
   private: ['private', 'farm', 'ranch', 'winery', 'glamping', 'private_camp'],

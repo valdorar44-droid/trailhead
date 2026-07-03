@@ -89,6 +89,40 @@ class PagedViatorOpener:
         return JsonResponse({"products": products, "status": "ok"}, headers={"X-Unique-ID": f"trace-{start}"})
 
 
+class DestinationAwareViatorOpener:
+    def __init__(self):
+        self.requests = []
+        self.bodies = []
+
+    def __call__(self, request, *_args, **_kwargs):
+        self.requests.append(request)
+        url = getattr(request, "full_url", "")
+        if url.endswith("/destinations"):
+            return JsonResponse({
+                "destinations": [
+                    {"destinationId": 51603, "name": "Skardu", "type": "CITY", "center": {"latitude": 35.304519, "longitude": 75.635461}},
+                    {"destinationId": 22311, "name": "Pakistan", "type": "COUNTRY", "center": {"latitude": 29.902, "longitude": 69.386647}},
+                ],
+                "status": "ok",
+            }, headers={"X-Unique-ID": "trace-destinations"})
+        body = json.loads(request.data.decode("utf-8")) if request.data else {}
+        self.bodies.append(body)
+        destination = str((body.get("filtering") or {}).get("destination") or "")
+        products = []
+        if destination == "51603":
+            products.append({
+                "productCode": "K2-BASE-CAMP-001",
+                "title": "K2 Base Camp Gandogoro La Trek",
+                "description": "Guided K2 Base Camp trek from Skardu with local support and high mountain logistics.",
+                "reviews": {"totalReviews": 12, "combinedAverageRating": 4.9},
+                "pricing": {"summary": {"fromPrice": 2400}, "currency": "USD"},
+                "productUrl": "https://www.viator.com/tours/Skardu/K2-Base-Camp-Gandogoro-La-Trek/d51603-K2-BASE-CAMP-001",
+                "destinations": [{"ref": "51603", "name": "Skardu", "primary": True}],
+                "flags": ["FREE_CANCELLATION"],
+            })
+        return JsonResponse({"products": products, "status": "ok"}, headers={"X-Unique-ID": f"trace-products-{destination}"})
+
+
 class HttpErrorOpener:
     def __call__(self, request, *_args, **_kwargs):
         body = json.dumps({"code": "SERVER_ERROR", "message": "Viator failed", "trackingId": "track-500"}).encode("utf-8")
@@ -154,6 +188,29 @@ class ViatorSourcePackTests(unittest.TestCase):
         self.assertEqual([body["pagination"]["start"] for body in opener.bodies], [1, 7, 13])
         self.assertEqual([body["pagination"]["count"] for body in opener.bodies], [6, 6, 4])
         self.assertEqual(len(statuses), 3)
+
+    def test_live_route_suggestions_resolves_k2_to_skardu_destination(self):
+        opener = DestinationAwareViatorOpener()
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True, page_size=6), opener=opener)
+        old_destination_cache = dict(server._viator_destinations_cache)
+        try:
+            server._viator_destinations_cache.clear()
+            server._viator_destinations_cache.update({"fetched_at": 0, "items": []})
+            results, statuses = server._live_viator_route_suggestions(
+                client,
+                [{"lat": 35.8808, "lng": 76.5158, "name": "K2 Base Camp Trek", "leg_index": 0}],
+                limit=6,
+                q="K2 Base Camp Trek",
+                filters={},
+            )
+        finally:
+            server._viator_destinations_cache.clear()
+            server._viator_destinations_cache.update(old_destination_cache)
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["source_id"], "K2-BASE-CAMP-001")
+        self.assertIn("K2 Base Camp", results[0]["title"])
+        self.assertEqual((opener.bodies[0].get("filtering") or {}).get("destination"), "51603")
+        self.assertEqual(statuses[0]["destination_id"], "51603")
 
     def test_experience_detail_finds_live_cache_result(self):
         old_cache = dict(server._viator_route_live_cache)

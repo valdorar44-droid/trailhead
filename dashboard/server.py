@@ -22062,7 +22062,31 @@ async def explore_place_experiences(
     nearby = _experience_distance_filter(experiences, float(lat) if isinstance(lat, (int, float)) else None, float(lng) if isinstance(lng, (int, float)) else None, radius_mi)
     ranked = rank_experiences(nearby, place)
     ranked = _sort_experiences(ranked, sort, order)[:max(1, min(int(limit or 12), 24))]
-    return _experience_response(source, ranked, place_id=place_id, cache_status="fresh" if payload.get("generated_at") else "empty")
+    live_meta: dict = {}
+    if not ranked and source.lower() in {"", "all", "viator"} and isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
+        points = [{"lat": float(lat), "lng": float(lng), "name": summary.get("title") or place_id, "leg_index": 0}]
+        try:
+            live_ranked, live_meta = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _viator_live_results_for_points,
+                    points,
+                    source,
+                    str(summary.get("title") or ""),
+                    max(1, min(int(limit or 12), 24)),
+                    category=category,
+                    free_cancel=free_cancel,
+                    lowest_price=_clean_experience_price(lowest_price),
+                    highest_price=_clean_experience_price(highest_price),
+                    sort=sort,
+                    order=order,
+                    run_now=True,
+                ),
+                timeout=24.0,
+            )
+            ranked = _sort_experiences(live_ranked, sort, order)[:max(1, min(int(limit or 12), 24))]
+        except Exception:
+            live_meta = {"live_status": "processing", "live_message": "Checking guided trips for this area.", "provider_status": []}
+    return _experience_response(source, ranked, place_id=place_id, cache_status="fresh" if payload.get("generated_at") else "empty", **live_meta)
 
 
 @app.get("/api/explore/experiences")
@@ -22106,21 +22130,60 @@ async def explore_experiences(
             points.append({"lat": float(lat), "lng": float(lng), "name": q.strip() or "Explore search", "leg_index": 0})
         except Exception:
             points = []
-    live_ranked, live_meta = _viator_live_results_for_points(
-        points,
-        source,
-        q,
-        result_limit,
-        existing_count=len(ranked),
-        category=category,
-        free_cancel=free_cancel,
-        start_date=start_date,
-        end_date=end_date,
-        lowest_price=min_price,
-        highest_price=max_price,
-        sort=sort,
-        order=order,
-    )
+    if not ranked and (points or str(q or "").strip()):
+        try:
+            live_ranked, live_meta = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _viator_live_results_for_points,
+                    points,
+                    source,
+                    q,
+                    result_limit,
+                    existing_count=len(ranked),
+                    category=category,
+                    free_cancel=free_cancel,
+                    start_date=start_date,
+                    end_date=end_date,
+                    lowest_price=min_price,
+                    highest_price=max_price,
+                    sort=sort,
+                    order=order,
+                    run_now=True,
+                ),
+                timeout=24.0,
+            )
+        except Exception:
+            live_ranked, live_meta = _viator_live_results_for_points(
+                points,
+                source,
+                q,
+                result_limit,
+                existing_count=len(ranked),
+                category=category,
+                free_cancel=free_cancel,
+                start_date=start_date,
+                end_date=end_date,
+                lowest_price=min_price,
+                highest_price=max_price,
+                sort=sort,
+                order=order,
+            )
+    else:
+        live_ranked, live_meta = _viator_live_results_for_points(
+            points,
+            source,
+            q,
+            result_limit,
+            existing_count=len(ranked),
+            category=category,
+            free_cancel=free_cancel,
+            start_date=start_date,
+            end_date=end_date,
+            lowest_price=min_price,
+            highest_price=max_price,
+            sort=sort,
+            order=order,
+        )
     if live_ranked:
         existing = {str(item.get("id") or item.get("source_id") or item.get("title")) for item in ranked}
         for item in live_ranked:
@@ -22191,11 +22254,17 @@ VIATOR_DESTINATION_HINTS = [
     {"id": "5265", "name": "Yosemite National Park", "lat": 37.8499232, "lng": -119.5676663, "radius_mi": 95.0},
     {"id": "4837", "name": "Denver", "lat": 39.737567, "lng": -104.9847179, "radius_mi": 85.0},
     {"id": "785", "name": "Utah", "lat": 39.3209801, "lng": -111.0937311, "radius_mi": 190.0},
+    {"id": "51603", "name": "Skardu", "lat": 35.304519, "lng": 75.635461, "radius_mi": 115.0, "terms": ["k2", "k2 base camp", "baltoro", "gondogoro", "skardu"]},
+    {"id": "51672", "name": "Gilgit", "lat": 35.91868, "lng": 74.31245, "radius_mi": 95.0, "terms": ["gilgit", "hunza"]},
+    {"id": "22311", "name": "Pakistan", "lat": 29.902, "lng": 69.386647, "radius_mi": 420.0, "terms": ["pakistan"]},
+    {"id": "50280", "name": "Islamabad", "lat": 33.6844, "lng": 73.0479, "radius_mi": 120.0, "terms": ["islamabad"]},
 ]
 VIATOR_LIVE_CACHE_MAX_AGE_SECONDS = 3600
 VIATOR_LIVE_ERROR_RETRY_SECONDS = 300
+VIATOR_DESTINATION_CACHE_SECONDS = 24 * 3600
 _viator_route_live_cache: dict[str, dict] = {}
 _viator_route_live_jobs: dict[str, dict] = {}
+_viator_destinations_cache: dict[str, object] = {"fetched_at": 0, "items": []}
 
 def _route_tour_points(body: RouteTourRequest) -> list[dict]:
     points: list[dict] = []
@@ -22298,33 +22367,165 @@ def _viator_booking_update_from_provider(payload: dict, fallback_status: str) ->
     }
 
 
-def _viator_destination_for_point(point: dict, max_radius_mi: float = 95.0) -> dict | None:
-    name = str(point.get("name") or "").lower()
-    for destination in VIATOR_DESTINATION_HINTS:
-        if destination["name"].lower().split()[0] in name:
+def _viator_destination_text(value: object) -> str:
+    return re.sub(r"[^a-z0-9]+", " ", str(value or "").lower()).strip()
+
+
+def _viator_normalize_destination(raw: dict) -> dict | None:
+    if not isinstance(raw, dict):
+        return None
+    destination_id = str(raw.get("destinationId") or raw.get("id") or "").strip()
+    name = str(raw.get("name") or "").strip()
+    center = raw.get("center") if isinstance(raw.get("center"), dict) else {}
+    lat = raw.get("lat", center.get("latitude"))
+    lng = raw.get("lng", center.get("longitude"))
+    if not destination_id or not name:
+        return None
+    try:
+        lat_f = float(lat)
+        lng_f = float(lng)
+    except Exception:
+        lat_f = None
+        lng_f = None
+    destination_type = str(raw.get("type") or "").upper()
+    if destination_type == "COUNTRY":
+        radius = 420.0
+    elif destination_type in {"REGION", "STATE", "PROVINCE"}:
+        radius = 190.0
+    else:
+        radius = 95.0
+    return {
+        "id": destination_id,
+        "name": name,
+        "lat": lat_f,
+        "lng": lng_f,
+        "radius_mi": float(raw.get("radius_mi") or radius),
+        "type": destination_type,
+        "terms": raw.get("terms") or [],
+    }
+
+
+def _viator_dynamic_destinations(client: ViatorClient | None = None, *, allow_fetch: bool = True) -> list[dict]:
+    now = int(time.time())
+    cached_items = _viator_destinations_cache.get("items")
+    fetched_at = int(_viator_destinations_cache.get("fetched_at") or 0)
+    if isinstance(cached_items, list) and cached_items and now - fetched_at < VIATOR_DESTINATION_CACHE_SECONDS:
+        return cached_items
+    if not allow_fetch:
+        return cached_items if isinstance(cached_items, list) else []
+    provider = client or ViatorClient(viator_config_from_env())
+    if not provider.ready():
+        return cached_items if isinstance(cached_items, list) else []
+    payload = provider.get_destinations(timeout=15.0)
+    raw_items = payload.get("destinations") if isinstance(payload, dict) else []
+    if not isinstance(raw_items, list):
+        return cached_items if isinstance(cached_items, list) else []
+    normalized = [item for item in (_viator_normalize_destination(raw) for raw in raw_items) if item]
+    if normalized:
+        _viator_destinations_cache["items"] = normalized
+        _viator_destinations_cache["fetched_at"] = now
+        return normalized
+    return cached_items if isinstance(cached_items, list) else []
+
+
+def _viator_destination_by_id(destination_id: str, dynamic_destinations: list[dict]) -> dict | None:
+    wanted = str(destination_id or "")
+    for destination in [*VIATOR_DESTINATION_HINTS, *dynamic_destinations]:
+        if str(destination.get("id") or "") == wanted:
             return destination
-    best: tuple[float, dict] | None = None
-    for destination in VIATOR_DESTINATION_HINTS:
-        distance = _haversine_m(
-            float(point.get("lat")),
-            float(point.get("lng")),
-            float(destination["lat"]),
-            float(destination["lng"]),
-        ) / 1609.344
-        radius = max(float(destination.get("radius_mi") or max_radius_mi), max_radius_mi)
-        if distance <= radius and (best is None or distance < best[0]):
-            best = (distance, destination)
-    return best[1] if best else None
+    return None
+
+
+def _viator_destination_candidates_for_point(
+    point: dict,
+    client: ViatorClient | None = None,
+    *,
+    max_radius_mi: float = 95.0,
+    max_candidates: int = 3,
+    allow_fetch: bool = True,
+) -> list[dict]:
+    name_text = _viator_destination_text(point.get("name"))
+    dynamic_destinations: list[dict] = []
+    aliases = [
+        (("k2", "k2 base camp", "baltoro", "gondogoro", "concordia"), "51603"),
+        (("khaplu", "hushe", "laila peak", "masherbrum", "mashabrum", "k7"), "51603"),
+        (("hunza",), "51672"),
+        (("pakistan",), "22311"),
+    ]
+    ranked: list[tuple[float, dict]] = []
+    seen: set[str] = set()
+
+    def add_candidate(destination: dict, score: float) -> None:
+        destination_id = str(destination.get("id") or "")
+        if not destination_id or destination_id in seen:
+            return
+        seen.add(destination_id)
+        ranked.append((score, destination))
+
+    for terms, destination_id in aliases:
+        if name_text and any(term in name_text for term in terms):
+            destination = _viator_destination_by_id(destination_id, dynamic_destinations)
+            if destination:
+                add_candidate(destination, 0.0)
+
+    try:
+        point_lat = float(point.get("lat"))
+        point_lng = float(point.get("lng"))
+    except Exception:
+        point_lat = point_lng = None
+
+    def scan_destinations(destinations: list[dict]) -> None:
+        for destination in destinations:
+            destination_name = _viator_destination_text(destination.get("name"))
+            destination_terms = [_viator_destination_text(term) for term in destination.get("terms") or []]
+            if name_text and (
+                destination_name == name_text
+                or (destination_name and destination_name in name_text)
+                or any(term and term in name_text for term in destination_terms)
+            ):
+                add_candidate(destination, 1.0)
+        if point_lat is None or point_lng is None:
+            return
+        for destination in destinations:
+            if destination.get("lat") is None or destination.get("lng") is None:
+                continue
+            try:
+                distance = _haversine_m(point_lat, point_lng, float(destination["lat"]), float(destination["lng"])) / 1609.344
+            except Exception:
+                continue
+            radius = max(float(destination.get("radius_mi") or max_radius_mi), max_radius_mi)
+            if distance <= radius:
+                type_penalty = 0.0 if str(destination.get("type") or "").upper() == "CITY" else 20.0
+                add_candidate(destination, 10.0 + type_penalty + distance)
+
+    scan_destinations(VIATOR_DESTINATION_HINTS)
+    if allow_fetch and not ranked:
+        dynamic_destinations = _viator_dynamic_destinations(client, allow_fetch=True)
+        scan_destinations(dynamic_destinations)
+
+    ranked.sort(key=lambda pair: pair[0])
+    return [destination for _, destination in ranked[:max(1, min(int(max_candidates or 3), 6))]]
+
+
+def _viator_destination_for_point(point: dict, max_radius_mi: float = 95.0) -> dict | None:
+    candidates = _viator_destination_candidates_for_point(
+        point,
+        None,
+        max_radius_mi=max_radius_mi,
+        max_candidates=1,
+        allow_fetch=False,
+    )
+    return candidates[0] if candidates else None
 
 def _viator_route_cache_key(points: list[dict], q: str = "", filter_token: str = "") -> str:
     destination_ids: list[str] = []
     for point in points[:8]:
-        destination = _viator_destination_for_point(point)
-        if not destination:
-            continue
-        destination_id = str(destination.get("id") or "")
-        if destination_id and destination_id not in destination_ids:
-            destination_ids.append(destination_id)
+        for destination in _viator_destination_candidates_for_point(point, None, max_candidates=3, allow_fetch=False):
+            destination_id = str(destination.get("id") or "")
+            if destination_id and destination_id not in destination_ids:
+                destination_ids.append(destination_id)
+            if len(destination_ids) >= 4:
+                break
         if len(destination_ids) >= 4:
             break
     query = re.sub(r"\s+", " ", str(q or "").strip().lower())[:96]
@@ -22462,50 +22663,57 @@ def _live_viator_route_suggestions(
     page_count = max(1, min(int(getattr(config, "page_size", 24) or 24), 50))
     target_limit = max(1, min(int(limit or 8), 24))
     for point in points[:8]:
-        destination = _viator_destination_for_point(point)
-        if not destination:
-            continue
-        destination_id = str(destination["id"])
-        if destination_id in searched_destinations:
-            continue
-        searched_destinations.add(destination_id)
-        max_pages = max(1, min(int(math.ceil(target_limit / page_count)), 4))
-        for page_index in range(max_pages):
-            if len(ranked_by_key) >= target_limit:
-                break
-            request_count = max(1, min(page_count, target_limit - len(ranked_by_key)))
-            request_start = (page_index * page_count) + 1
-            payload = client.search_products(
-                destination_id=destination_id,
-                flags=flags,
-                start_date=start_date,
-                end_date=end_date,
-                lowest_price=lowest_price,
-                highest_price=highest_price,
-                sort=sort_value,
-                order=order_value,
-                count=request_count,
-                start=request_start,
-            )
-            products_payload = _viator_products_payload(payload)
-            product_count = len(products_payload.get("products") or [])
-            statuses.append({
-                "destination_id": destination_id,
-                "destination": destination.get("name"),
-                "page": page_index + 1,
-                **_viator_provider_status(payload),
-            })
-            for item in _normalize_live_viator_experiences(products_payload, point, destination, config.cache_ttl_hours):
-                key = str(item.get("id") or item.get("source_id") or item.get("title"))
-                current = ranked_by_key.get(key)
-                if not current or float(item.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
-                    ranked_by_key[key] = item
-            if product_count < request_count:
+        destinations = _viator_destination_candidates_for_point(point, client, max_radius_mi=120.0, max_candidates=3)
+        for destination in destinations:
+            destination_id = str(destination["id"])
+            if destination_id in searched_destinations:
+                continue
+            searched_destinations.add(destination_id)
+            max_pages = max(1, min(int(math.ceil(target_limit / page_count)), 4))
+            for page_index in range(max_pages):
+                if len(ranked_by_key) >= target_limit:
+                    break
+                request_count = max(1, min(page_count, target_limit - len(ranked_by_key)))
+                request_start = (page_index * page_count) + 1
+                payload = client.search_products(
+                    destination_id=destination_id,
+                    flags=flags,
+                    start_date=start_date,
+                    end_date=end_date,
+                    lowest_price=lowest_price,
+                    highest_price=highest_price,
+                    sort=sort_value,
+                    order=order_value,
+                    count=request_count,
+                    start=request_start,
+                    timeout=min(float(getattr(config, "request_timeout_seconds", 120.0) or 120.0), 20.0),
+                )
+                products_payload = _viator_products_payload(payload)
+                product_count = len(products_payload.get("products") or [])
+                statuses.append({
+                    "destination_id": destination_id,
+                    "destination": destination.get("name"),
+                    "page": page_index + 1,
+                    **_viator_provider_status(payload),
+                })
+                for item in _normalize_live_viator_experiences(products_payload, point, destination, config.cache_ttl_hours):
+                    key = str(item.get("id") or item.get("source_id") or item.get("title"))
+                    current = ranked_by_key.get(key)
+                    if not current or float(item.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
+                        ranked_by_key[key] = item
+                if product_count < request_count:
+                    break
+            if len(ranked_by_key) >= target_limit or len(searched_destinations) >= 4:
                 break
         if len(ranked_by_key) >= target_limit or len(searched_destinations) >= 4:
             break
     if not ranked_by_key and q.strip():
-        payload = client.search_freetext(search_term=q.strip(), count=max(1, min(target_limit, page_count)), start=1)
+        payload = client.search_freetext(
+            search_term=q.strip(),
+            count=max(1, min(target_limit, page_count)),
+            start=1,
+            timeout=min(float(getattr(config, "request_timeout_seconds", 120.0) or 120.0), 20.0),
+        )
         statuses.append({"query": q.strip(), **_viator_provider_status(payload)})
         anchor = points[0] if points else {"lat": 0, "lng": 0, "name": "Route"}
         for item in _normalize_live_viator_experiences(payload, anchor, None, config.cache_ttl_hours):
@@ -22545,6 +22753,7 @@ def _viator_live_results_for_points(
     highest_price: float | None = None,
     sort: str = "recommended",
     order: str = "descending",
+    run_now: bool = False,
 ) -> tuple[list[dict], dict]:
     client = ViatorClient(viator_config_from_env())
     source_key = str(source or "viator").lower()
@@ -22595,6 +22804,43 @@ def _viator_live_results_for_points(
             ],
         })
         return list(cached_live.get("results") or [])[:live_limit], meta
+
+    if run_now:
+        try:
+            results, statuses = _live_viator_route_suggestions(client, points, limit=max(live_limit, min(max_results, 12)), q=q or "", filters=filters)
+        except Exception as exc:
+            fetched_at = int(time.time())
+            meta.update({
+                "live_status": "provider_error",
+                "live_message": "Guided trips are not available right now.",
+                "provider_status": [{
+                    "status": "error",
+                    "endpoint": "viator_live_search",
+                    "provider_message": f"{type(exc).__name__}: {str(exc)[:180]}",
+                    "fetched_at": fetched_at,
+                }],
+            })
+            return [], meta
+        fetched_at = int(time.time())
+        provider_error = any(
+            str(status.get("status") or "").lower() in {"error", "timeout"}
+            or int(status.get("http_status") or 0) >= 500
+            for status in statuses
+        )
+        cache_status = "provider_error" if provider_error else "ok"
+        _viator_route_live_cache[cache_key] = {
+            "status": cache_status,
+            "results": results,
+            "provider_status": statuses,
+            "fetched_at": fetched_at,
+            "expires_at": fetched_at + (VIATOR_LIVE_ERROR_RETRY_SECONDS if provider_error else VIATOR_LIVE_CACHE_MAX_AGE_SECONDS),
+        }
+        meta.update({
+            "live_status": "provider_error" if provider_error else ("live" if results else "empty"),
+            "live_message": "Guided trips are ready." if results else "Try a nearby destination or a wider date.",
+            "provider_status": statuses,
+        })
+        return results[:live_limit], meta
 
     queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(max_results, 8)), q=q or "", filters=filters)
     job = _viator_route_live_jobs.get(cache_key) or {}

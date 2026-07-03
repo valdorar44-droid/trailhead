@@ -98,41 +98,6 @@ const NAV_GESTURE_HOLD_MS = Platform.OS === 'ios' ? 2600 : 1800;
 const NAV_GESTURE_NOTIFY_COOLDOWN_MS = Platform.OS === 'ios' ? 1400 : 900;
 const CAMP_CLUSTER_MAX_ZOOM = 10;
 const CAMP_CLUSTER_RADIUS = 34;
-const CAMP_CLUSTER_PROPERTIES = {
-  camp_cluster_c: ['+', ['case', ['==', ['get', 'camp_code'], 'C'], 1, 0]],
-  camp_cluster_d: ['+', ['case', ['==', ['get', 'camp_code'], 'D'], 1, 0]],
-  camp_cluster_rv: ['+', ['case', ['==', ['get', 'camp_code'], 'RV'], 1, 0]],
-  camp_cluster_p: ['+', ['case', ['==', ['get', 'camp_code'], 'P'], 1, 0]],
-} as const;
-const CAMP_CLUSTER_D_DOMINANT = ['all',
-  ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_c']],
-  ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_rv']],
-  ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_p']],
-] as const;
-const CAMP_CLUSTER_RV_DOMINANT = ['all',
-  ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_c']],
-  ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_d']],
-  ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_p']],
-] as const;
-const CAMP_CLUSTER_P_DOMINANT = ['all',
-  ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_c']],
-  ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_d']],
-  ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_rv']],
-] as const;
-const CAMP_CLUSTER_CODE_EXPR = [
-  'case',
-  CAMP_CLUSTER_D_DOMINANT, 'D',
-  CAMP_CLUSTER_RV_DOMINANT, 'RV',
-  CAMP_CLUSTER_P_DOMINANT, 'P',
-  'C',
-] as const;
-const CAMP_CLUSTER_COLOR_EXPR = [
-  'case',
-  CAMP_CLUSTER_D_DOMINANT, '#8b5a2b',
-  CAMP_CLUSTER_RV_DOMINANT, '#2563eb',
-  CAMP_CLUSTER_P_DOMINANT, '#d97706',
-  '#14b8a6',
-] as const;
 
 type CachedMapViewport = {
   at: number;
@@ -3122,9 +3087,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         cluster={shouldClusterCamps}
         clusterMaxZoomLevel={CAMP_CLUSTER_MAX_ZOOM}
         clusterRadius={CAMP_CLUSTER_RADIUS}
-        clusterProperties={CAMP_CLUSTER_PROPERTIES as any}
-        maxZoomLevel={22}
-        hitbox={{ width: 54, height: 54 }}
         onPress={handleCampPress}
       >
           <MapGL.CircleLayer
@@ -3133,7 +3095,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             filter={['has', 'point_count']}
             style={{
               circleRadius: ['step', ['get', 'point_count'], 22, 10, 27, 50, 32],
-              circleColor: CAMP_CLUSTER_COLOR_EXPR,
+              circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'],
               circleOpacity: 0.2,
               circleBlur: 0.55,
             } as any}
@@ -3143,26 +3105,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             {...mapboxTopSlotProps}
             filter={['has', 'point_count']}
             style={{
-              circleColor: CAMP_CLUSTER_COLOR_EXPR,
+              circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'],
               circleRadius: ['step', ['get', 'point_count'], 17, 10, 21, 50, 25],
               circleOpacity: 0.96,
               circleStrokeWidth: 3,
               circleStrokeColor: '#fff',
-            } as any}
-          />
-          <MapGL.SymbolLayer
-            id="camp-cluster-code"
-            {...mapboxTopSlotProps}
-            filter={['has', 'point_count']}
-            style={{
-              textField: CAMP_CLUSTER_CODE_EXPR,
-              textColor: '#fff',
-              textSize: ['case', CAMP_CLUSTER_RV_DOMINANT, 8.5, 10.5],
-              textFont: campCodeFont,
-              textAllowOverlap: true,
-              textIgnorePlacement: true,
-              textHaloColor: 'rgba(0,0,0,0.28)',
-              textHaloWidth: 0.8,
             } as any}
           />
           <MapGL.SymbolLayer

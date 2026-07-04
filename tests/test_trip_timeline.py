@@ -1,7 +1,7 @@
 import unittest
 
 from ai.planner import _normalize_plan
-from dashboard.server import _build_trip_timeline, _camp_matches_filters, _camp_pref_score, _camp_requires_review, _route_window_fit_notes
+from dashboard.server import _build_trip_timeline, _camp_is_primary_rv, _camp_matches_filters, _camp_pref_score, _camp_requires_review, _route_window_fit_notes
 
 
 def _base_plan(duration=3):
@@ -153,6 +153,31 @@ class PlannerTimelineTests(unittest.TestCase):
         )
         self.assertTrue(_camp_matches_filters(official, ["campground", "reservable", "state", "nps", "corps"]))
         self.assertFalse(_camp_matches_filters(dispersed, ["campground", "reservable", "state", "nps", "corps"]))
+
+    def test_mixed_tent_rv_campgrounds_are_not_primary_rv(self):
+        mixed_blm = {
+            "name": "King's Bottom Campground",
+            "land_type": "Federal Campground",
+            "source": "ridb",
+            "verified_source": "Recreation.gov",
+            "tags": ["blm", "rv", "tent", "walk_in"],
+            "site_types": ["RV", "Tent", "Walk-in"],
+            "amenities": ["Water", "Restrooms"],
+            "description": "Campsites along the Colorado River. Tents and small trailers are supported.",
+        }
+        rv_park = {
+            "name": "Portal RV Resort - Moab",
+            "land_type": "Glamping",
+            "source": "geoapify",
+            "tags": ["commercial", "campground", "private", "private_stay", "glamping", "tent"],
+            "site_types": ["Glamping"],
+        }
+
+        self.assertFalse(_camp_is_primary_rv(mixed_blm))
+        self.assertTrue(_camp_matches_filters(mixed_blm, ["campground"]))
+        self.assertFalse(_camp_matches_filters(mixed_blm, ["rv"]))
+        self.assertTrue(_camp_is_primary_rv(rv_park))
+        self.assertTrue(_camp_matches_filters(rv_park, ["rv"]))
 
     def test_route_photo_notes_do_not_surface_missing_photo_copy(self):
         camp = {"name": "Afton Canyon Campground", "land_type": "BLM Campground", "source": "Recreation.gov", "route_fit": "short_detour", "route_distance_mi": 8.4}

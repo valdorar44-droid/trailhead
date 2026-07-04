@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import math
+import re
 from typing import Iterable
 
 from ingestors.nrel import get_gas_along_route
@@ -190,9 +191,28 @@ def _camp_quality_score(camp: dict, route_mi: float, style: str = "balanced") ->
         " ".join(camp.get("amenities") or []),
         " ".join(camp.get("site_types") or []),
     ]).lower()
+    primary_text = " ".join(str(v or "") for v in [
+        camp.get("name"),
+        camp.get("land_type"),
+        camp.get("subtype"),
+        camp.get("type"),
+        camp.get("source_badge"),
+        camp.get("verified_source"),
+        " ".join(camp.get("tags") or []),
+        " ".join(camp.get("site_types") or []),
+    ]).lower()
+    rv_primary = re.search(
+        r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
+        r"(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|"
+        r"\b(?:park|resort|campground|camp)\s+(?:for\s+)?(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
+        r"\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|"
+        r"\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b",
+        primary_text,
+        re.I,
+    ) is not None
     public = any(term in text for term in ("blm", "usfs", "national forest", "forest service", "public", "dispersed", "primitive", "free"))
     official = any(term in text for term in ("ridb", "recreation.gov", "nps", "state park", "county park", "municipal"))
-    commercial = any(term in text for term in ("rv park", "koa", "resort", "hookup", "private"))
+    commercial = rv_primary or any(term in text for term in ("private stay", "farm stay", "ranch stay", "winery stay", "glamping", "private camp"))
     score = route_mi
     if style == "wild":
         score += -14 if public else 6

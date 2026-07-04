@@ -37,12 +37,38 @@ function campText(camp: Partial<CampsitePin> & Record<string, any>): string {
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
+function campFieldText(camp: Partial<CampsitePin> & Record<string, any>, fields: string[]): string {
+  const values: string[] = [];
+  fields.forEach(field => {
+    const value = camp[field];
+    if (Array.isArray(value)) {
+      values.push(...value.map(item => String(item || '')));
+    } else if (value !== undefined && value !== null) {
+      values.push(String(value));
+    }
+  });
+  return values.filter(Boolean).join(' ').toLowerCase();
+}
+
+const PRIMARY_RV_RE = /\b(?:rv|r\.v\.|caravan|motorhome|motor home|recreational vehicle)\s*(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|\b(?:park|resort|campground|camp)\s+(?:for\s+)?(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor homes?|recreational vehicles?)\b|\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b/i;
+
+export function isPrimaryRvCamp(camp: Partial<CampsitePin> & Record<string, any>): boolean {
+  const primaryText = campFieldText(camp, [
+    'name',
+    'land_type',
+    'subtype',
+    'type',
+    'source_badge',
+    'verified_source',
+    'feature_source',
+    'tags',
+    'site_types',
+  ]);
+  return PRIMARY_RV_RE.test(primaryText);
+}
+
 export function campMarkerVisual(camp: Partial<CampsitePin> & Record<string, any>): CampMarkerVisual {
   const raw = campText(camp);
-
-  if (/\b(rv|caravan|motorhome|hookups?|dump station|electric hookup|full hookup)\b/.test(raw)) {
-    return { kind: 'rv', code: 'RV', color: '#2563eb', label: 'RV' };
-  }
 
   if (/\b(overnight parking|truck stop|rest area|sleep in vehicle|vehicle overnight|vehicle camp|car camp)\b/.test(raw)) {
     return { kind: 'overnight_parking', code: 'P', color: '#d97706', label: 'Overnight parking' };
@@ -50,6 +76,10 @@ export function campMarkerVisual(camp: Partial<CampsitePin> & Record<string, any
 
   if (/\b(dispersed|primitive|boondock|wild camp|informal camp|roadside camp|undeveloped)\b/.test(raw)) {
     return { kind: 'dispersed', code: 'D', color: '#8b5a2b', label: 'Dispersed' };
+  }
+
+  if (isPrimaryRvCamp(camp)) {
+    return { kind: 'rv', code: 'RV', color: '#2563eb', label: 'RV' };
   }
 
   if (/\b(tent|walk-in|hike-in|backcountry)\b/.test(raw)) {

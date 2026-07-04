@@ -12,6 +12,19 @@ RIDB_BASE = "https://ridb.recreation.gov/api/v1"
 def _cache_key(lat: float, lng: float, radius: float) -> str:
     return f"ridb_{lat:.2f}_{lng:.2f}_{radius}"
 
+PRIMARY_RV_FACILITY_RE = re.compile(
+    r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
+    r"(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|"
+    r"\b(?:park|resort|campground|camp)\s+(?:for\s+)?"
+    r"(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
+    r"\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|"
+    r"\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b",
+    re.I,
+)
+
+def _is_primary_rv_facility(text: str) -> bool:
+    return bool(PRIMARY_RV_FACILITY_RE.search(text or ""))
+
 def _tag_facility(facility: dict) -> list[str]:
     tags: set[str] = set()
     name  = (facility.get("FacilityName") or "").lower()
@@ -32,7 +45,7 @@ def _tag_facility(facility: dict) -> list[str]:
         tags.add("corps")
 
     # ── Site / facility type ─────────────────────────────────────────────────
-    if any(k in combo for k in ["rv park", "rv hookup", "hookup", "full hookup", "electric hookup", "water and electric", "electrical site", "full service", "water/electric"]):
+    if _is_primary_rv_facility(combo):
         tags.add("rv")
     if any(k in combo for k in ["dispersed", "boondock", "primitive camping", "primitive site", "roadside camp", "dispersed camping"]):
         tags.add("dispersed")
@@ -52,11 +65,8 @@ def _tag_facility(facility: dict) -> list[str]:
         tags.add("ada")
 
     # ── Most developed campgrounds support tent camping ──────────────────────
-    if not {"dispersed", "parking"}.intersection(tags):
+    if "rv" not in tags and not {"dispersed", "parking"}.intersection(tags):
         tags.add("tent")
-    if "rv" not in tags and any(k in combo for k in ["rv", "recreational vehicle"]):
-        tags.add("rv")
-
     # ── Free / no-fee ────────────────────────────────────────────────────────
     if any(k in combo for k in ["no fee", "no charge", "fee free", "free camp", "no cost"]) and not facility.get("Reservable"):
         tags.add("free")
@@ -128,7 +138,6 @@ def _feature_lists_from_text(*values: str) -> tuple[list[str], list[str]]:
         if any(needle in combo for needle in needles) and label not in amenities:
             amenities.append(label)
     type_checks = [
-        (("rv", "recreational vehicle", "trailer"), "RV"),
         (("tent",), "Tent"),
         (("cabin",), "Cabin"),
         (("group",), "Group"),
@@ -139,6 +148,8 @@ def _feature_lists_from_text(*values: str) -> tuple[list[str], list[str]]:
     for needles, label in type_checks:
         if any(needle in combo for needle in needles) and label not in site_types:
             site_types.append(label)
+    if _is_primary_rv_facility(combo) and "RV" not in site_types:
+        site_types.insert(0, "RV")
     return amenities, site_types
 
 _FALSEY_ATTR_VALUES = {"", "false", "0", "n", "no", "none", "na", "n/a", "not applicable"}
@@ -524,7 +535,7 @@ async def get_campsites_near(lat: float, lng: float, radius_miles: float = 30) -
 async def get_campsites_search(lat: float, lng: float, radius_miles: float = 40,
                                 type_filters: list[str] | None = None) -> list[dict]:
     """Enhanced search with tagging and optional type filtering."""
-    cache_key = f"ridb_search_{lat:.2f}_{lng:.2f}_{radius_miles}"
+    cache_key = f"ridb_search_v2_{lat:.2f}_{lng:.2f}_{radius_miles}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 6)
     if cached is None:
         headers = {"apikey": settings.ridb_api_key} if settings.ridb_api_key else {}

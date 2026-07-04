@@ -17,6 +17,16 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from import_raw_records import DB_PATH, init_db
 
+PRIMARY_RV_FACILITY_RE = re.compile(
+    r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
+    r"(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|"
+    r"\b(?:park|resort|campground|camp)\s+(?:for\s+)?"
+    r"(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
+    r"\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|"
+    r"\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b",
+    re.I,
+)
+
 
 def compact(value: Any) -> str:
     text = re.sub(r"<[^>]+>", " ", str(value or ""))
@@ -365,7 +375,7 @@ def normalize_ridb(db: sqlite3.Connection, rows: Iterable[sqlite3.Row]) -> dict[
             if not facility_id or not name or lat is None or lng is None:
                 continue
             kind_text = compact(item.get("FacilityTypeDescription") or item.get("FacilityName")).lower()
-            category = "rv_park" if "rv" in kind_text else "campground" if "camp" in kind_text else "facility"
+            category = "rv_park" if PRIMARY_RV_FACILITY_RE.search(kind_text) else "campground" if "camp" in kind_text else "facility"
             place_id = f"place:ridb:{slugify(facility_id)}"
             reservation_url = compact(item.get("FacilityReservationURL"))
             insert_place(db, {

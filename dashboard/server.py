@@ -16744,7 +16744,7 @@ def _camp_pref_score(camp: dict, route_style: str = "balanced", camp_preference:
     developed_site = official_developed or any(term in combined for term in ("campground", "campsite", "camp site", "reservable", "reservation"))
     campground_named = bool(re.search(r"\bcampgrounds?\b", str(camp.get("name") or ""), re.I))
     lookout_named = bool(re.search(r"\blookout\b", str(camp.get("name") or ""), re.I))
-    rv_private = any(term in combined for term in ("rv park", "rv resort", "koa", "hookup", "electric", "private campground"))
+    rv_private = _camp_is_primary_rv(camp)
     private_stay = any(term in combined for term in ("private_stay", "private stay", "farm stay", "ranch stay", "winery stay", "vineyard", "glamping", "private camp"))
     score = 0.0
     if _camp_requires_review(camp):
@@ -16799,6 +16799,36 @@ def _camp_text(camp: dict) -> str:
         camp.get("description"),
     ]).lower()
 
+PRIMARY_RV_CAMP_RE = re.compile(
+    r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
+    r"(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|"
+    r"\b(?:park|resort|campground|camp)\s+(?:for\s+)?"
+    r"(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
+    r"\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|"
+    r"\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b",
+    re.I,
+)
+
+def _camp_primary_type_text(camp: dict | None) -> str:
+    if not isinstance(camp, dict):
+        return ""
+    values: list[str] = []
+    for key in (
+        "name", "land_type", "subtype", "type", "source_badge",
+        "verified_source", "feature_source",
+    ):
+        value = camp.get(key)
+        if value not in (None, "", []):
+            values.append(str(value))
+    for key in ("tags", "site_types"):
+        value = camp.get(key)
+        if isinstance(value, list):
+            values.extend(str(item) for item in value if str(item or "").strip())
+    return " ".join(values).lower()
+
+def _camp_is_primary_rv(camp: dict | None) -> bool:
+    return bool(PRIMARY_RV_CAMP_RE.search(_camp_primary_type_text(camp)))
+
 def _camp_requires_review(camp: dict | None) -> bool:
     if not isinstance(camp, dict) or not camp:
         return True
@@ -16845,6 +16875,10 @@ def _camp_matches_filters(camp: dict, type_filters: list[str]) -> bool:
     for raw in type_filters:
         f = str(raw or "").lower().strip()
         if not f:
+            continue
+        if f in {"rv", "rv_park"}:
+            if _camp_is_primary_rv(camp):
+                return True
             continue
         if f in tags:
             return True
@@ -16902,7 +16936,7 @@ def _camp_overnight_style(camp: dict | None) -> str:
     text = _camp_text(camp or {})
     if any(term in text for term in ("dispersed", "primitive", "boondock", "public land", "blm", "usfs", "forest service", "free")):
         return "dispersed"
-    if any(term in text for term in ("rv park", "rv resort", "koa", "hookup", "electric")):
+    if _camp_is_primary_rv(camp):
         return "rv"
     if any(term in text for term in ("private stay", "farm stay", "ranch stay", "winery stay", "glamping", "private camp")):
         return "private"
@@ -19706,7 +19740,7 @@ def _map_card_overnight_fallback(body: MapCardResolveRequest, card: dict) -> dic
     text = _map_card_search_text(body, card).lower()
     is_private = any(token in text for token in ("farm", "ranch", "winery", "glamping", "private", "hipcamp"))
     is_lodging = any(token in text for token in ("hotel", "motel", "lodging", "hostel", "inn", "cabin")) and "camp" not in text
-    is_rv = "rv" in text or "caravan" in text
+    is_rv = bool(PRIMARY_RV_CAMP_RE.search(text))
     if is_private:
         land_type = _private_stay_label(_smart_pack_type(card.get("type") or body.type or "private_stay"), text)
         tags = ["private", "private_stay", "stay"]

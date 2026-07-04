@@ -16301,7 +16301,8 @@ async def _load_route_window_camps(
 
     local_merged = _merge_camp_sources(pack_raw, *local_batches, type_filters=type_filters)
     private_requested = include_private or _private_stay_requested(type_filters)
-    if len(local_merged) >= 14 and not private_requested:
+    local_floor = 1 if not type_filters else 14
+    if len(local_merged) >= local_floor and not private_requested:
         return _camp_discovery_response(local_merged, mode="light", limit=100)
 
     active_filters = {
@@ -16811,7 +16812,8 @@ def _camp_requires_review(camp: dict | None) -> bool:
         r"\b("
         r"office|headquarters|visitor\s+cent(?:er|re)|information\s+cent(?:er|re)|"
         r"ranger\s+(?:station|district|office)|field\s+office|permit\s+office|"
-        r"administrative|day\s+use|picnic\s+area|parking|trailhead"
+        r"administrative|day\s+use|picnic\s+area|parking|trailhead|"
+        r"wilderness\s+area|wilderness\s+study\s+area|recreation\s+site|boat\s+launch|river\s+access|tracksite|\btrail\b|\barea\b"
         r")\b",
         name,
     )
@@ -16916,7 +16918,9 @@ def _camp_name_needs_review(name: str | None) -> bool:
         return True
     if re.fullmatch(r"[a-z]{1,4}[-\s]?\d+[a-z0-9-]*", clean):
         return True
-    return bool(re.search(r"\b(office|headquarters|visitor\s+cent(?:er|re)|ranger\s+(?:station|district|office)|field\s+office|permit\s+office|day\s+use|picnic\s+area|parking|trailhead)\b", clean))
+    if re.match(r"^\d+\s+[nsew]?\s*[a-z0-9 .'-]+\s+(?:street|st|road|rd|avenue|ave|center|centre|drive|dr|lane|ln|way|boulevard|blvd|highway|hwy)\b", clean):
+        return True
+    return bool(re.search(r"\b(office|headquarters|visitor\s+cent(?:er|re)|ranger\s+(?:station|district|office)|field\s+office|permit\s+office|day\s+use|picnic\s+area|parking|trailhead|wilderness\s+area|wilderness\s+study\s+area|recreation\s+site|boat\s+launch|river\s+access|tracksite|trail)\b", clean))
 
 def _camp_display_name(camp: dict | None, label: str) -> str:
     name = re.sub(r"\s+", " ", str((camp or {}).get("name") or "")).strip()
@@ -16973,7 +16977,7 @@ async def _select_camp_for_window(
     target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
     route_style_normalized = "wild" if str(route_style or "").lower() in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else str(route_style or "balanced").lower()
     camp_preference_normalized = str(camp_preference or "public").lower()
-    sample_count = 1 if camp_preference_normalized in {"any", "private"} else 2 if route_style_normalized == "wild" else 3
+    sample_count = 1 if camp_preference_normalized == "private" else 2 if camp_preference_normalized == "any" else 2 if route_style_normalized == "wild" else 3
     samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=sample_count)
     base_radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
     filter_key = sorted(type_filters)
@@ -16981,14 +16985,17 @@ async def _select_camp_for_window(
     private_route_preference = camp_preference_normalized == "private" and bool(type_filters)
     pass_defs: list[dict] = []
     if any_broad_preference:
-        pass_defs.append({"name": "any_legal", "filters": ANY_LEGAL_ROUTE_CAMP_FILTERS, "radius": min(max_radius, max(base_radius * 1.25, 50.0)), "strict": False})
+        pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.25, 50.0)), "strict": False})
+        pass_defs.append({"name": "any_review", "filters": [], "radius": min(155.0, max(max_radius, base_radius * 1.8, 105.0)), "strict": False})
     elif private_route_preference:
         private_radius = (
             min(165.0, max(max_radius, base_radius * 2.2, 150.0))
             if total_mi <= 700
             else min(max_radius, max(base_radius * 1.25, 50.0))
         )
-        pass_defs.append({"name": "private_or_legal", "filters": ANY_LEGAL_ROUTE_CAMP_FILTERS, "radius": private_radius, "strict": False, "target_only": True})
+        pass_defs.append({"name": "private_or_legal", "filters": [], "radius": private_radius, "strict": False})
+        pass_defs.append({"name": "private_source", "filters": sorted(PRIVATE_STAY_FILTERS), "radius": min(150.0, max(private_radius, 95.0)), "strict": False, "target_only": True})
+        pass_defs.append({"name": "any_review", "filters": [], "radius": min(165.0, max(private_radius, base_radius * 2.0, 115.0)), "strict": False})
     elif type_filters:
         pass_defs.append({"name": "preferred_target", "filters": type_filters, "radius": min(max_radius, max(base_radius * 1.1, 48.0)), "strict": True, "target_only": True})
         pass_defs.append({"name": "preferred", "filters": type_filters, "radius": base_radius, "strict": True})
@@ -17001,7 +17008,7 @@ async def _select_camp_for_window(
     if not private_route_preference and not any_broad_preference:
         pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 31,
+        "v": 39,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -17019,7 +17026,7 @@ async def _select_camp_for_window(
         return cached
 
     async def load_window_camps(sample: dict, radius: float, filters: list[str]) -> list[dict]:
-        include_private = str(camp_preference or "").lower() in {"any", "private", "rv"} or _private_stay_requested(filters)
+        include_private = _private_stay_requested(filters)
         try:
             return await _load_route_window_camps(
                 sample=sample,
@@ -17038,11 +17045,19 @@ async def _select_camp_for_window(
             radius = float(pass_def["radius"])
             filters = list(pass_def["filters"])
             pass_samples = [target] if pass_def.get("target_only") else samples
+            async def load_sample(sample: dict) -> list[dict] | Exception:
+                try:
+                    return await asyncio.wait_for(load_window_camps(sample, radius, filters), timeout=7.0)
+                except Exception as exc:
+                    return exc
             async with sem:
-                results = await asyncio.gather(*[
-                    asyncio.wait_for(load_window_camps(sample, radius, filters), timeout=7.0)
-                    for sample in pass_samples
-                ], return_exceptions=True)
+                sample_tasks = [asyncio.create_task(load_sample(sample)) for sample in pass_samples]
+                try:
+                    results = await asyncio.gather(*sample_tasks, return_exceptions=True)
+                finally:
+                    for task in sample_tasks:
+                        if not task.done():
+                            task.cancel()
             found = _merge_camp_sources(*[r for r in results if isinstance(r, list)], type_filters=filters or None)
             kept = 0
             for camp in found:
@@ -17083,7 +17098,7 @@ async def _select_camp_for_window(
                     kept += 1
             search_passes.append({"name": pass_def["name"], "radius_mi": round(radius, 1), "filters": filters, "found": len(found), "kept": kept, "target_only": bool(pass_def.get("target_only"))})
             if len(by_key) >= 18 and (
-                pass_def["name"] in {"preferred", "preferred_target", "any_legal"}
+                pass_def["name"] in {"preferred", "preferred_target", "any_legal", "private_or_legal"}
                 or (not type_filters and not any_broad_preference)
             ):
                 break

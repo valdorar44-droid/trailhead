@@ -231,7 +231,8 @@ function evaluateCampWindows(item, windows, base) {
   const issues = [];
   const warnings = [];
   const minimumUsable = Math.max(1, Math.ceil(required * 0.7));
-  if (base.strictCampCoverage && usable < minimumUsable) {
+  const privateReviewCovered = item.campPreference === 'private' && reviewable >= required;
+  if (base.strictCampCoverage && usable < minimumUsable && !privateReviewCovered) {
     issues.push(`${item.campPreference} usable ${usable}/${required}`);
   } else if (usable < required) {
     warnings.push(`${item.campPreference} review needed ${missing}/${required}`);

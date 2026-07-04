@@ -16238,6 +16238,130 @@ async def _load_camp_discovery_area(
         "source_errors": source_errors,
     }
 
+def _route_window_bounds(lat: float, lng: float, radius_miles: float) -> tuple[float, float, float, float]:
+    radius = max(1.0, min(float(radius_miles or 35), 180.0))
+    lat_delta = radius / 69.0
+    lng_delta = radius / (69.0 * max(0.25, math.cos(math.radians(lat))))
+    return lat + lat_delta, lat - lat_delta, lng + lng_delta, lng - lng_delta
+
+async def _route_window_source_result(name: str, factory: Any, timeout_s: float) -> tuple[str, list[dict], str]:
+    try:
+        result = await asyncio.wait_for(factory(), timeout=max(0.4, float(timeout_s or 1.2)))
+    except asyncio.TimeoutError:
+        return name, [], "slow"
+    except Exception as exc:
+        return name, [], str(exc)
+    return name, result if isinstance(result, list) else [], ""
+
+async def _load_route_window_camps(
+    *,
+    sample: dict,
+    radius: float,
+    filters: list[str],
+    include_private: bool,
+    user: dict | None,
+) -> list[dict]:
+    try:
+        lat = float(sample["lat"])
+        lng = float(sample["lng"])
+    except Exception:
+        return []
+    radius_miles = max(8.0, min(float(radius or 40), 140.0))
+    type_filters = filters or None
+    n, s, e, w = _route_window_bounds(lat, lng, radius_miles)
+
+    local_batches: list[list[dict]] = [
+        _private_review_dispersed_camps(lat, lng, radius_miles, user, limit=120, n=n, s=s, e=e, w=w),
+        _trailhead_dispersed_camps(lat, lng, radius_miles, limit=140),
+        _explore_catalog_fallback_camps(lat, lng, max(radius_miles, 75.0), limit=48),
+    ]
+    local_batches = [
+        [camp for camp in batch if isinstance(camp, dict) and _place_in_bounds(camp, n, s, e, w)]
+        for batch in local_batches
+    ]
+
+    pack_raw: list[dict] = []
+    try:
+        pack_result = await asyncio.wait_for(
+            _load_camp_pack_area(
+                n=n,
+                s=s,
+                e=e,
+                w=w,
+                radius_miles=radius_miles,
+                type_filters=type_filters,
+                limit=120,
+                mode="full",
+            ),
+            timeout=1.5,
+        )
+        pack_raw = [camp for camp in (pack_result.get("raw_camps") or []) if isinstance(camp, dict)]
+    except Exception:
+        pack_raw = []
+
+    local_merged = _merge_camp_sources(pack_raw, *local_batches, type_filters=type_filters)
+    private_requested = include_private or _private_stay_requested(type_filters)
+    if len(local_merged) >= 14 and not private_requested:
+        return _camp_discovery_response(local_merged, mode="light", limit=100)
+
+    active_filters = {
+        "group_site": bool(type_filters and "group" in type_filters),
+        "rv": bool(type_filters and "rv" in type_filters),
+        "tent": bool(type_filters and "tent" in type_filters),
+    }
+    private_stay_categories = _camp_private_stay_categories(type_filters, include_private=include_private)
+    radius_m = int(min(radius_miles, 95.0) * 1609.344)
+    source_tasks: list[tuple[str, Any, float]] = [
+        ("ridb", lambda: get_campsites_search(lat, lng, radius_miles=radius_miles, type_filters=type_filters), 2.4),
+        ("blm", lambda: get_blm_campsites(lat, lng, radius_miles=radius_miles), 2.0),
+        ("osm", lambda: get_osm_campsites(lat, lng, radius_m=min(radius_m, 115000)), 2.0),
+        ("active", lambda: get_active_campgrounds(lat, lng, radius_miles=radius_miles, filters=active_filters), 1.5),
+    ]
+    if private_stay_categories:
+        source_tasks.append((
+            "geoapify",
+            lambda: get_geoapify_places(
+                lat,
+                lng,
+                radius_m=int(min(radius_miles, 65.0) * 1609.344),
+                categories=private_stay_categories,
+                limit_per_category=12,
+            ),
+            2.0,
+        ))
+
+    results = await asyncio.gather(*[
+        _route_window_source_result(name, factory, timeout_s)
+        for name, factory, timeout_s in source_tasks
+    ], return_exceptions=True)
+    live_batches: list[list[dict]] = []
+    for result in results:
+        if not isinstance(result, tuple) or len(result) < 2:
+            continue
+        name, batch = result[0], result[1]
+        raw_batch = batch if isinstance(batch, list) else []
+        if name == "geoapify":
+            raw_batch = [_camp_from_live_place(place) for place in raw_batch if isinstance(place, dict)]
+            raw_batch = [camp for camp in raw_batch if camp]
+        live_batches.append([
+            camp for camp in raw_batch
+            if isinstance(camp, dict) and _place_in_bounds(camp, n, s, e, w)
+        ])
+
+    merged = _merge_camp_sources(local_merged, *live_batches, type_filters=type_filters)
+    if not merged and type_filters:
+        return await _load_route_window_camps(
+            sample=sample,
+            radius=min(140.0, max(radius_miles * 1.15, 90.0)),
+            filters=[],
+            include_private=False,
+            user=user,
+        )
+    if len(merged) < 8 and type_filters:
+        broad = _merge_camp_sources(pack_raw, *local_batches, *live_batches, type_filters=None)
+        merged = _merge_camp_sources(merged, broad, type_filters=None)
+    return _camp_discovery_response(merged, mode="light", limit=100)
+
 @app.post("/api/discovery/context")
 async def discovery_context(body: DiscoveryContextRequest, user: dict | None = Depends(_optional_user)):
     """Shared app discovery bridge for map, Explorer, route planning, and Copilot."""
@@ -16681,6 +16805,8 @@ def _camp_requires_review(camp: dict | None) -> bool:
     text = _camp_text(camp)
     if not name:
         return True
+    if _camp_name_needs_review(name):
+        return True
     review_name = re.search(
         r"\b("
         r"office|headquarters|visitor\s+cent(?:er|re)|information\s+cent(?:er|re)|"
@@ -16786,7 +16912,9 @@ def _camp_name_needs_review(name: str | None) -> bool:
     clean = re.sub(r"\s+", " ", str(name or "")).strip().lower()
     if not clean:
         return True
-    if clean in {"camp", "campground", "campsite", "site", "rv park", "park", "overnight option"}:
+    if clean in {"camp", "campground", "campsite", "camp site", "site", "rv park", "park", "overnight option", "primitive/dispersed camp"}:
+        return True
+    if re.fullmatch(r"[a-z]{1,4}[-\s]?\d+[a-z0-9-]*", clean):
         return True
     return bool(re.search(r"\b(office|headquarters|visitor\s+cent(?:er|re)|ranger\s+(?:station|district|office)|field\s+office|permit\s+office|day\s+use|picnic\s+area|parking|trailhead)\b", clean))
 
@@ -16843,13 +16971,24 @@ async def _select_camp_for_window(
 ) -> dict:
     label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
     target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
-    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=3)
+    route_style_normalized = "wild" if str(route_style or "").lower() in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else str(route_style or "balanced").lower()
+    camp_preference_normalized = str(camp_preference or "public").lower()
+    sample_count = 1 if camp_preference_normalized in {"any", "private"} else 2 if route_style_normalized == "wild" else 3
+    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=sample_count)
     base_radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
     filter_key = sorted(type_filters)
     any_broad_preference = str(camp_preference or "").lower() == "any" and not type_filters
+    private_route_preference = camp_preference_normalized == "private" and bool(type_filters)
     pass_defs: list[dict] = []
     if any_broad_preference:
         pass_defs.append({"name": "any_legal", "filters": ANY_LEGAL_ROUTE_CAMP_FILTERS, "radius": min(max_radius, max(base_radius * 1.25, 50.0)), "strict": False})
+    elif private_route_preference:
+        private_radius = (
+            min(165.0, max(max_radius, base_radius * 2.2, 150.0))
+            if total_mi <= 700
+            else min(max_radius, max(base_radius * 1.25, 50.0))
+        )
+        pass_defs.append({"name": "private_or_legal", "filters": ANY_LEGAL_ROUTE_CAMP_FILTERS, "radius": private_radius, "strict": False, "target_only": True})
     elif type_filters:
         pass_defs.append({"name": "preferred_target", "filters": type_filters, "radius": min(max_radius, max(base_radius * 1.1, 48.0)), "strict": True, "target_only": True})
         pass_defs.append({"name": "preferred", "filters": type_filters, "radius": base_radius, "strict": True})
@@ -16859,9 +16998,10 @@ async def _select_camp_for_window(
         pass_defs.append({"name": "any_legal", "filters": [], "radius": min(max_radius, max(base_radius * 1.55, 58.0)), "strict": False})
     if str(camp_preference or "").lower() == "public":
         pass_defs.append({"name": "wide_review", "filters": [], "radius": min(max(max_radius, 82.0), max(base_radius * 1.9, 72.0)), "strict": False})
-    pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
+    if not private_route_preference and not any_broad_preference:
+        pass_defs.append({"name": "target_review", "filters": [], "radius": min(120.0, max(max_radius, base_radius * 2.2, 105.0)), "strict": False, "target_only": True})
     key_payload = {
-        "v": 19,
+        "v": 31,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
         "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
@@ -16879,30 +17019,14 @@ async def _select_camp_for_window(
         return cached
 
     async def load_window_camps(sample: dict, radius: float, filters: list[str]) -> list[dict]:
+        include_private = str(camp_preference or "").lower() in {"any", "private", "rv"} or _private_stay_requested(filters)
         try:
-            bridge = await asyncio.wait_for(discovery_context(
-                DiscoveryContextRequest(
-                    center=PlannerPoint(lat=float(sample["lat"]), lng=float(sample["lng"])),
-                    radius=radius,
-                    categories=["camp", "camping", "private_stay", "glamping"],
-                    filters=filters,
-                    surface="route_camp_window",
-                    mode="light",
-                    limit=100,
-                    include_stays=True,
-                    stale_after_hours=12,
-                ),
+            return await _load_route_window_camps(
+                sample=sample,
+                radius=radius,
+                filters=filters,
+                include_private=include_private,
                 user=user,
-            ), timeout=3.2)
-            camps = (bridge or {}).get("camps") or (bridge or {}).get("pins") or []
-            if camps:
-                return camps
-        except Exception:
-            pass
-        try:
-            return await asyncio.wait_for(
-                nearby_camps(sample["lat"], sample["lng"], radius, ",".join(filters), limit=100, mode="light", stays=True, user=user),
-                timeout=3.5,
             )
         except Exception:
             return []
@@ -16958,7 +17082,10 @@ async def _select_camp_for_window(
                     by_key[key] = camp
                     kept += 1
             search_passes.append({"name": pass_def["name"], "radius_mi": round(radius, 1), "filters": filters, "found": len(found), "kept": kept, "target_only": bool(pass_def.get("target_only"))})
-            if len(by_key) >= 18 and (pass_def["name"] in {"preferred", "preferred_target"} or (not type_filters and not any_broad_preference)):
+            if len(by_key) >= 18 and (
+                pass_def["name"] in {"preferred", "preferred_target", "any_legal"}
+                or (not type_filters and not any_broad_preference)
+            ):
                 break
         scored = sorted(by_key.values(), key=lambda c: float(c.get("_score", 999999)))
         candidates = [{k: v for k, v in camp.items() if k != "_score"} for camp in scored[:18]]
@@ -17052,7 +17179,8 @@ async def _select_camp_for_window(
             "cache_status": "error",
             "error": str(exc),
         }
-    set_cached("campsite_cache", cache_key, response)
+    if response.get("found") or response.get("candidates") or response.get("selected") or response.get("camp"):
+        set_cached("campsite_cache", cache_key, response)
     return response
 
 def _route_camp_window_review_response(window: RouteCampWindow, points: list[dict], reason: str = "") -> dict:
@@ -17116,9 +17244,11 @@ async def route_camp_windows(body: RouteCampWindowsRequest, user: dict | None = 
     window_deadline_floor_s = 18.0
     if len(windows) >= 5:
         window_deadline_floor_s = 24.0
+    if len(windows) >= 5 and (camp_preference in {"any", "private"} or _private_stay_requested(type_filters)):
+        window_deadline_floor_s = 36.0
     if body.require_photos:
         window_deadline_floor_s = max(window_deadline_floor_s, 26.0)
-    deadline_s = max(4.0, min(max(requested_deadline_s, window_deadline_floor_s), 28.0))
+    deadline_s = max(4.0, min(max(requested_deadline_s, window_deadline_floor_s), 42.0))
     tasks = [
         asyncio.create_task(_select_camp_for_window(
             window,

@@ -4,6 +4,7 @@ import http from 'node:http';
 
 const API_BASE = process.env.TRAILHEAD_API_BASE || 'https://api.gettrailhead.app';
 const FULL = process.env.TRAILHEAD_ROUTE_AUDIT_FULL === '1';
+const CASE_FILTER = String(process.env.TRAILHEAD_ROUTE_AUDIT_CASE_FILTER || '').trim().toLowerCase();
 const REQUEST_TIMEOUT_MS = Number(process.env.TRAILHEAD_ROUTE_AUDIT_TIMEOUT_MS || 120000);
 
 const CAMP_PREFS = {
@@ -284,7 +285,7 @@ async function runCase(item) {
     camp_reuse_policy: item.reuse,
     max_daily_drive_hours: item.hours,
     max_radius: item.campPreference === 'any' || item.campPreference === 'private' ? 115 : 100,
-    response_deadline_s: item.campPreference === 'any' ? 23 : 18,
+    response_deadline_s: item.campPreference === 'any' || item.campPreference === 'private' ? 36 : 30,
   });
   const campEval = evaluateCampWindows(item, result.windows || [], base);
   report.camps = campEval;
@@ -303,7 +304,16 @@ async function runCase(item) {
   return report;
 }
 
-const cases = FULL ? fullCases() : SMOKE_CASES;
+const allCases = FULL ? fullCases() : SMOKE_CASES;
+const cases = CASE_FILTER
+  ? allCases.filter(item => [
+      item.route,
+      item.shape,
+      item.style,
+      item.campPreference,
+      `${item.route}:${item.shape}:${item.style}:${item.campPreference}`,
+    ].some(value => String(value).toLowerCase().includes(CASE_FILTER)))
+  : allCases;
 let failures = 0;
 for (const item of cases) {
   try {

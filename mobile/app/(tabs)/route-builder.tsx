@@ -15,6 +15,7 @@ import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderActiveDayControls, { RouteBuilderEmptyDayGuidance } from '@/components/routeBuilder/RouteBuilderActiveDayControls';
 import RouteBuilderActiveDayStopList from '@/components/routeBuilder/RouteBuilderActiveDayStopList';
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
+import RouteBuilderBuildLoader from '@/components/routeBuilder/RouteBuilderBuildLoader';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteBuilderInlineResults, {
   RouteBuilderInlineCampCard,
@@ -1705,7 +1706,7 @@ function RouteBuilderScreenContent() {
         toValue: 1,
         duration: 1800,
         easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: true,
+        useNativeDriver: Platform.OS !== 'web',
       }),
     );
     loop.start();
@@ -4064,10 +4065,10 @@ function RouteBuilderScreenContent() {
         const win = originalWin;
         const candidatePool = [win.selected, win.camp, ...(win.candidates ?? [])]
           .filter((camp): camp is CampsitePin => !!camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
-          .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode))
           .filter((camp, idx, arr) => arr.findIndex(other => String(other.id ?? `${other.lat},${other.lng}`) === String(camp.id ?? `${camp.lat},${camp.lng}`)) === idx);
-        const selectedCamp = candidatePool
-          .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b))[0] ?? null;
+        const backendSelected = [win.selected, win.camp]
+          .find((camp): camp is CampsitePin => !!camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng)) ?? null;
+        const selectedCamp = backendSelected ?? candidatePool[0] ?? null;
         if (selectedCamp) {
           const needsReview = (win.confidence !== 'strong' && !win.strong) || weakRouteCampNamePenalty(selectedCamp.name) > 0;
           const displayName = routeCampDisplayName(selectedCamp, win.fallback_label || `${win.label} camp area`);
@@ -4317,10 +4318,16 @@ function RouteBuilderScreenContent() {
       }
       const shapeLabel = tripShapeMode === 'loop' ? 'Loop' : tripShapeMode === 'there_and_back' ? 'There and Back' : '';
       const nextName = routeName.trim() || (tripLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} ${shapeLabel}` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
+      const campStatus = strongAnchors > 0
+        ? weakAnchors > 0
+          ? `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed; ${weakAnchors} day${weakAnchors === 1 ? '' : 's'} need review.`
+          : `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed.`
+        : weakAnchors > 0
+        ? `${weakAnchors} overnight stop${weakAnchors === 1 ? '' : 's'} need review.`
+        : 'Choose overnight stops before navigation.';
+      const fuelStatus = fuelStops.length ? ` ${fuelStops.length} fuel stop${fuelStops.length === 1 ? '' : 's'} added.` : '';
       const status = tripBuildMode === 'recommended'
-        ? weakAnchors
-          ? `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed; ${weakAnchors} day${weakAnchors === 1 ? '' : 's'} need review.${fuelStops.length ? ` ${fuelStops.length} fuel stop${fuelStops.length === 1 ? '' : 's'} added.` : ''}`
-          : `${strongAnchors} camp stop${strongAnchors === 1 ? '' : 's'} placed from route search.${fuelStops.length ? ` ${fuelStops.length} fuel stop${fuelStops.length === 1 ? '' : 's'} added.` : ''}`
+        ? `${campStatus}${fuelStatus}`
         : 'Route ready for hand-building.';
       setFrameworkStatus(status);
       setDays(nextDays);
@@ -5468,76 +5475,14 @@ function RouteBuilderScreenContent() {
   }
 
   if (buildingFramework) {
-    const routeDotX = buildPulse.interpolate({ inputRange: [0, 1], outputRange: [-18, 268] });
-    const routeDotScale = buildPulse.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.86, 1.12, 0.86] });
-    const routeLineScale = buildPulse.interpolate({ inputRange: [0, 1], outputRange: [0.18, 1] });
-    const currentStatus = frameworkStatus || 'Planning your route';
-    const buildStages = [
-      { icon: 'navigate-outline' as const, label: 'Route', active: /route|setting|built|preparing/i.test(currentStatus) },
-      { icon: 'bonfire-outline' as const, label: 'Stays', active: /overnight|camp/i.test(currentStatus) },
-      { icon: 'flash-outline' as const, label: 'Fuel', active: /fuel|resupply/i.test(currentStatus) },
-    ];
     return (
-      <SafeAreaView style={s.buildingVideoScreen}>
-        <View style={[s.buildingVideoContent, { paddingTop: Math.max(insets.top, 12) + 18, paddingBottom: Math.max(insets.bottom, 18) + 22 }]}>
-          <View style={s.buildingHeaderRow}>
-            <View style={s.buildingHeaderMark}>
-              <Ionicons name="trail-sign-outline" size={17} color="#101820" />
-            </View>
-            <Text style={s.buildingHeaderText}>Building route</Text>
-          </View>
-
-          <View style={s.buildingRoutePreview}>
-            <View style={s.buildingRoutePreviewGrid}>
-              <View style={[s.buildingMapLine, s.buildingMapLineOne]} />
-              <View style={[s.buildingMapLine, s.buildingMapLineTwo]} />
-              <View style={[s.buildingMapLine, s.buildingMapLineThree]} />
-            </View>
-            <View style={s.buildingRouteTrack}>
-              <Animated.View style={[s.buildingRouteTrackFill, { transform: [{ scaleX: routeLineScale }] }]} />
-              <View style={[s.buildingRouteNode, s.buildingRouteNodeStart]}>
-                <Ionicons name="navigate" size={11} color="#fff" />
-              </View>
-              <View style={[s.buildingRouteNode, s.buildingRouteNodeCamp]}>
-                <Ionicons name="bonfire" size={11} color="#fff" />
-              </View>
-              <View style={[s.buildingRouteNode, s.buildingRouteNodeEnd]}>
-                <Ionicons name="flag" size={11} color="#fff" />
-              </View>
-              <Animated.View style={[s.buildingRouteDot, { transform: [{ translateX: routeDotX }, { scale: routeDotScale }] }]} />
-            </View>
-            <View style={s.buildingLogoMark}>
-              <Ionicons name="trail-sign-outline" size={30} color="#101820" />
-            </View>
-          </View>
-
-          <View style={s.buildingHeroCopy}>
-            <Text style={s.buildingHeadline}>Building your route</Text>
-            <Text style={s.buildingSubtitle}>{currentStatus}</Text>
-          </View>
-
-          <View style={s.buildingProgressPanel}>
-            {buildStages.map((stage, idx) => {
-              const pulseScale = buildPulse.interpolate({
-                inputRange: [0, 0.35, 0.7, 1],
-                outputRange: idx === 0 ? [1.04, 1, 1, 1.04] : idx === 1 ? [1, 1.04, 1, 1] : [1, 1, 1.04, 1],
-              });
-              return (
-                <View key={stage.label} style={[s.buildingStageRow, stage.active && s.buildingStageRowActive]}>
-                  <Animated.View style={[s.buildingStageIcon, stage.active && s.buildingStageIconActive, { transform: [{ scale: pulseScale }] }]}>
-                    <Ionicons name={stage.icon} size={15} color={stage.active ? '#fff' : '#66706b'} />
-                  </Animated.View>
-                  <View style={s.flex}>
-                    <Text style={[s.buildingStageLabel, stage.active && s.buildingStageLabelActive]}>{stage.label}</Text>
-                    <View style={s.buildingStageSkeleton}>
-                      <Animated.View style={[s.buildingStageSkeletonFill, { transform: [{ scaleX: stage.active ? routeLineScale : 1 }] }]} />
-                    </View>
-                  </View>
-                </View>
-              );
-            })}
-          </View>
-        </View>
+      <SafeAreaView style={s.buildingLoaderScreen}>
+        <RouteBuilderBuildLoader
+          pulse={buildPulse}
+          status={frameworkStatus}
+          topInset={insets.top}
+          bottomInset={insets.bottom}
+        />
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
       </SafeAreaView>
     );
@@ -6293,309 +6238,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 8,
     paddingBottom: 8,
   },
-  buildingScreen: {
+  buildingLoaderScreen: {
     flex: 1,
-    justifyContent: 'center',
-    gap: 18,
-    paddingBottom: 76,
-  },
-  buildingVideoScreen: {
-    flex: 1,
-    backgroundColor: '#fbfaf7',
+    backgroundColor: '#07100f',
     overflow: 'hidden',
-  },
-  buildingVideo: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  buildingVideoFallback: {
-    ...StyleSheet.absoluteFillObject,
-    width: '100%',
-    height: '100%',
-  },
-  buildingTerrainBand: {
-    position: 'absolute',
-    left: '-10%',
-    right: '-10%',
-    height: 120,
-    borderRadius: 90,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    backgroundColor: 'rgba(255,255,255,0.035)',
-  },
-  buildingTerrainBandOne: {
-    top: '18%',
-    transform: [{ rotate: '-14deg' }],
-  },
-  buildingTerrainBandTwo: {
-    bottom: '22%',
-    transform: [{ rotate: '18deg' }],
-  },
-  buildingRouteLine: {
-    position: 'absolute',
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(249,115,22,0.82)',
-    shadowColor: '#f97316',
-    shadowOpacity: 0.36,
-    shadowRadius: 12,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  buildingRouteLineOne: {
-    left: '13%',
-    top: '37%',
-    width: '36%',
-    transform: [{ rotate: '21deg' }],
-  },
-  buildingRouteLineTwo: {
-    left: '38%',
-    top: '48%',
-    width: '34%',
-    backgroundColor: 'rgba(20,184,166,0.78)',
-    transform: [{ rotate: '-17deg' }],
-  },
-  buildingRouteLineThree: {
-    right: '10%',
-    top: '40%',
-    width: '29%',
-    backgroundColor: 'rgba(34,197,94,0.74)',
-    transform: [{ rotate: '26deg' }],
-  },
-  buildingRoutePoint: {
-    position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 3,
-    borderColor: '#ffffff',
-    backgroundColor: '#f97316',
-  },
-  buildingRoutePointStart: {
-    left: '12%',
-    top: '35%',
-  },
-  buildingRoutePointCamp: {
-    left: '54%',
-    top: '43%',
-    backgroundColor: '#14b8a6',
-  },
-  buildingRoutePointEnd: {
-    right: '11%',
-    top: '43%',
-    backgroundColor: '#22c55e',
-  },
-  buildingVideoShade: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.48)',
-  },
-  buildingVideoContent: {
-    flex: 1,
-    paddingHorizontal: 18,
-    justifyContent: 'center',
-    gap: 22,
-  },
-  buildingHeaderRow: {
-    position: 'absolute',
-    top: 18,
-    left: 18,
-    right: 18,
-    minHeight: 38,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-  },
-  buildingHeaderMark: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.10)',
-  },
-  buildingHeaderText: {
-    color: '#101820',
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  buildingVideoTop: {
-    alignItems: 'center',
-  },
-  buildingLivePill: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.12)',
-    borderRadius: 999,
-    backgroundColor: '#ffffff',
-    paddingHorizontal: 12,
-  },
-  buildingLiveText: { color: '#101820', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-  buildingHeroCopy: {
-    gap: 8,
-    alignItems: 'center',
-    paddingHorizontal: 10,
-  },
-  buildingRoutePreview: {
-    alignSelf: 'center',
-    width: '100%',
-    maxWidth: 360,
-    minHeight: 250,
-    borderRadius: 30,
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.10)',
-    overflow: 'hidden',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 14 },
-  },
-  buildingRoutePreviewGrid: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.5,
-  },
-  buildingMapLine: {
-    position: 'absolute',
-    height: 1,
-    left: -40,
-    right: -40,
-    backgroundColor: 'rgba(15,23,42,0.08)',
-  },
-  buildingMapLineOne: { top: 62, transform: [{ rotate: '-12deg' }] },
-  buildingMapLineTwo: { top: 132, transform: [{ rotate: '9deg' }] },
-  buildingMapLineThree: { bottom: 58, transform: [{ rotate: '-7deg' }] },
-  buildingRouteTrack: {
-    position: 'absolute',
-    left: 34,
-    right: 34,
-    top: 126,
-    height: 4,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.10)',
-  },
-  buildingRouteTrackFill: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: '100%',
-    borderRadius: 999,
-    backgroundColor: '#f97316',
-  },
-  buildingRouteNode: {
-    position: 'absolute',
-    top: -13,
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    borderWidth: 3,
-    borderColor: '#ffffff',
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.12,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
-  },
-  buildingRouteNodeStart: { left: -2, backgroundColor: '#101820' },
-  buildingRouteNodeCamp: { left: '48%', backgroundColor: '#0f766e' },
-  buildingRouteNodeEnd: { right: -2, backgroundColor: '#f97316' },
-  buildingRouteDot: {
-    position: 'absolute',
-    top: -7,
-    left: 0,
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    borderWidth: 3,
-    borderColor: '#ffffff',
-    backgroundColor: '#f97316',
-  },
-  buildingLogoMark: {
-    width: 74,
-    height: 74,
-    borderRadius: 24,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#ffffff',
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.10)',
-    shadowColor: '#000',
-    shadowOpacity: 0.08,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-  },
-  buildingEyebrow: { color: '#0f766e', fontSize: 12, fontWeight: '900', letterSpacing: 0 },
-  buildingHeadline: { color: '#101820', fontSize: 36, lineHeight: 40, fontWeight: '900', textAlign: 'center' },
-  buildingSubtitle: { color: '#66706b', fontSize: 15, lineHeight: 21, maxWidth: 340, textAlign: 'center' },
-  buildingProgressPanel: {
-    alignSelf: 'center',
-    width: '100%',
-    maxWidth: 360,
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.10)',
-    borderRadius: 22,
-    backgroundColor: '#ffffff',
-    padding: 12,
-    gap: 10,
-  },
-  buildingStageRow: {
-    minHeight: 48,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    borderRadius: 15,
-    paddingHorizontal: 10,
-    backgroundColor: '#fbfaf7',
-  },
-  buildingStageRowActive: {
-    backgroundColor: '#fff7ed',
-  },
-  buildingStageIcon: {
-    width: 30,
-    height: 30,
-    borderRadius: 15,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#ece7df',
-  },
-  buildingStageIconActive: {
-    backgroundColor: '#f97316',
-  },
-  buildingStageLabel: {
-    color: '#66706b',
-    fontSize: 12,
-    fontWeight: '900',
-  },
-  buildingStageLabelActive: {
-    color: '#101820',
-  },
-  buildingStageSkeleton: {
-    marginTop: 6,
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: 'rgba(15,23,42,0.08)',
-    overflow: 'hidden',
-  },
-  buildingStageSkeletonFill: {
-    width: '100%',
-    height: 5,
-    borderRadius: 999,
-    backgroundColor: '#fed7aa',
-  },
-  buildingBottomPanel: {
-    borderWidth: 1,
-    borderColor: 'rgba(15,23,42,0.10)',
-    borderRadius: 18,
-    backgroundColor: '#ffffff',
-    padding: 12,
-    alignSelf: 'stretch',
-    gap: 12,
   },
   routeTourCard: {
     minHeight: 104,

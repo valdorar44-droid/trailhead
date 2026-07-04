@@ -98,6 +98,8 @@ const NAV_GESTURE_HOLD_MS = Platform.OS === 'ios' ? 2600 : 1800;
 const NAV_GESTURE_NOTIFY_COOLDOWN_MS = Platform.OS === 'ios' ? 1400 : 900;
 const CAMP_CLUSTER_MAX_ZOOM = 10;
 const CAMP_CLUSTER_RADIUS = 34;
+const MAPBOX_CAMP_CLUSTER_MAX_ZOOM = 8;
+const MAPBOX_CAMP_CLUSTER_RADIUS = 28;
 
 type CachedMapViewport = {
   at: number;
@@ -2085,6 +2087,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   );
   const campFC = useMemo(() => pointFC(drawableCamps.map(campFeat)), [drawableCamps]);
   const shouldClusterCamps = drawableCamps.length > 80;
+  const campClusterMaxZoom = isExtremeMapbox ? MAPBOX_CAMP_CLUSTER_MAX_ZOOM : CAMP_CLUSTER_MAX_ZOOM;
+  const campClusterRadius = isExtremeMapbox ? MAPBOX_CAMP_CLUSTER_RADIUS : CAMP_CLUSTER_RADIUS;
   const gasFC  = useMemo(() => pointFC(gas.map(g => ({
     type: 'Feature' as const, geometry: { type: 'Point' as const, coordinates: [g.lng, g.lat] },
     properties: { name: g.name },
@@ -2461,10 +2465,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             : null;
           expansionZoom = Number(sourceZoom);
         } catch {}
-        const nextZoom = Math.min(14, Math.max(
-          shouldClusterCamps ? 9.8 : 11,
-          Number.isFinite(expansionZoom) ? expansionZoom + 0.35 : Number.NEGATIVE_INFINITY,
-          Number.isFinite(currentZoom) ? currentZoom + 1.8 : Number(freeCameraDefaultRef.current.zoomLevel || 10) + 1.8,
+        const nextZoom = Math.min(isExtremeMapbox ? 16 : 14, Math.max(
+          shouldClusterCamps ? (isExtremeMapbox ? campClusterMaxZoom + 1.6 : 9.8) : 11,
+          Number.isFinite(expansionZoom) ? expansionZoom + (isExtremeMapbox ? 1.15 : 0.35) : Number.NEGATIVE_INFINITY,
+          Number.isFinite(currentZoom) ? currentZoom + (isExtremeMapbox ? 2.4 : 1.8) : Number(freeCameraDefaultRef.current.zoomLevel || 10) + (isExtremeMapbox ? 2.4 : 1.8),
         ));
         programmaticCameraUntilRef.current = Date.now() + 1200;
         rememberFreeCamera(lat, lng, nextZoom, navMode ? freeCameraDefaultRef.current.pitch : showTerrain ? 62 : 0);
@@ -2486,7 +2490,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     try { raw = JSON.parse(p.raw || '{}'); } catch { raw = p as any; }
     if (!raw || !Number.isFinite(Number(raw.lat)) || !Number.isFinite(Number(raw.lng))) return;
     onCampTap(raw);
-  }, [drawableCamps, navMode, onCampTap, onMapTap, refreshMapSourcesForBounds, rememberFreeCamera, shouldClusterCamps, showTerrain, suppressFeatureTaps]);
+  }, [campClusterMaxZoom, drawableCamps, isExtremeMapbox, navMode, onCampTap, onMapTap, refreshMapSourcesForBounds, rememberFreeCamera, shouldClusterCamps, showTerrain, suppressFeatureTaps]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
   const userLocationShape = userLoc
@@ -3081,17 +3085,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       {/* ── Campsites (clustered) ──────────────────────────────────────── */}
       <MapGL.ShapeSource
         ref={campSourceRef}
-        key={`camps-${isExtremeMapbox ? mapboxStyleURL : effectiveMapLayer}-${shouldClusterCamps ? 'clustered' : 'flat'}-${drawableCamps.length}`}
+        key={`camps-${isExtremeMapbox ? mapboxStyleURL : effectiveMapLayer}-${shouldClusterCamps ? 'clustered' : 'flat'}-${campClusterMaxZoom}-${campClusterRadius}-${drawableCamps.length}`}
         id="camps"
         shape={campFC}
         cluster={shouldClusterCamps}
-        clusterMaxZoomLevel={CAMP_CLUSTER_MAX_ZOOM}
-        clusterRadius={CAMP_CLUSTER_RADIUS}
+        clusterMaxZoomLevel={campClusterMaxZoom}
+        clusterRadius={campClusterRadius}
         onPress={handleCampPress}
       >
           <MapGL.CircleLayer
             id="camp-cluster-halo"
             {...mapboxTopSlotProps}
+            maxZoomLevel={campClusterMaxZoom + 0.99}
             filter={['has', 'point_count']}
             style={{
               circleRadius: ['step', ['get', 'point_count'], 22, 10, 27, 50, 32],
@@ -3103,6 +3108,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           <MapGL.CircleLayer
             id="camp-cluster"
             {...mapboxTopSlotProps}
+            maxZoomLevel={campClusterMaxZoom + 0.99}
             filter={['has', 'point_count']}
             style={{
               circleColor: ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'],
@@ -3115,6 +3121,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           <MapGL.SymbolLayer
             id="camp-count"
             {...mapboxTopSlotProps}
+            maxZoomLevel={campClusterMaxZoom + 0.99}
             filter={['has', 'point_count']}
             style={{
               textField: '{point_count_abbreviated}',

@@ -1,7 +1,7 @@
 import unittest
 
 from ai.planner import _normalize_plan
-from dashboard.server import _build_trip_timeline, _camp_is_primary_rv, _camp_matches_filters, _camp_pref_score, _camp_requires_review, _route_window_fit_notes
+from dashboard.server import _build_trip_timeline, _camp_is_primary_rv, _camp_matches_filters, _camp_overnight_style, _camp_pref_score, _camp_requires_review, _route_window_fit_notes
 
 
 def _base_plan(duration=3):
@@ -174,6 +174,7 @@ class PlannerTimelineTests(unittest.TestCase):
         }
 
         self.assertFalse(_camp_is_primary_rv(mixed_blm))
+        self.assertEqual(_camp_overnight_style(mixed_blm), "developed")
         self.assertTrue(_camp_matches_filters(mixed_blm, ["campground"]))
         self.assertFalse(_camp_matches_filters(mixed_blm, ["rv"]))
         self.assertTrue(_camp_is_primary_rv(rv_park))

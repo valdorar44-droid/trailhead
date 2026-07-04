@@ -204,7 +204,7 @@ def _camp_quality_score(camp: dict, route_mi: float, style: str = "balanced") ->
     rv_primary = re.search(
         r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
         r"(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|"
-        r"\b(?:park|resort|campground|camp)\s+(?:for\s+)?(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
+        r"\b(?:park|resort|campground|camp)\s+for\s+(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
         r"\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|"
         r"\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b",
         primary_text,

@@ -33,6 +33,16 @@ const rvResort = {
   site_types: ['Glamping'],
 };
 
+const officialGroupCamp = {
+  name: 'Sand Flats Recreation Area Group Campsites',
+  land_type: 'BLM Land',
+  source: 'ridb',
+  verified_source: 'Recreation.gov',
+  tags: ['ada', 'blm', 'dispersed', 'equestrian', 'fee', 'group', 'rv', 'tent'],
+  site_types: ['Campground', 'RV', 'Group'],
+  reservable: true,
+};
+
 const dispersed = {
   name: 'Dispersed tent site',
   land_type: 'Dispersed',
@@ -47,6 +57,8 @@ assert.equal(isPrimaryRvCamp(mixedNps), false);
 assert.equal(campMarkerVisual(mixedNps).code, 'C');
 assert.equal(isPrimaryRvCamp(rvResort), true);
 assert.equal(campMarkerVisual(rvResort).code, 'RV');
+assert.equal(isPrimaryRvCamp(officialGroupCamp), false);
+assert.equal(campMarkerVisual(officialGroupCamp).code, 'C');
 assert.equal(campMarkerVisual(dispersed).code, 'D');
 
 console.log('camp marker visual audit passed');

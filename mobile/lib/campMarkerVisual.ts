@@ -50,7 +50,7 @@ function campFieldText(camp: Partial<CampsitePin> & Record<string, any>, fields:
   return values.filter(Boolean).join(' ').toLowerCase();
 }
 
-const PRIMARY_RV_RE = /\b(?:rv|r\.v\.|caravan|motorhome|motor home|recreational vehicle)\s*(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|\b(?:park|resort|campground|camp)\s+(?:for\s+)?(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor homes?|recreational vehicles?)\b|\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b/i;
+const PRIMARY_RV_RE = /\b(?:rv|r\.v\.|caravan|motorhome|motor home|recreational vehicle)\s*(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|\b(?:park|resort|campground|camp)\s+for\s+(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor homes?|recreational vehicles?)\b|\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b/i;
 
 export function isPrimaryRvCamp(camp: Partial<CampsitePin> & Record<string, any>): boolean {
   const primaryText = campFieldText(camp, [
@@ -67,6 +67,14 @@ export function isPrimaryRvCamp(camp: Partial<CampsitePin> & Record<string, any>
   return PRIMARY_RV_RE.test(primaryText);
 }
 
+function isPrimaryDispersedCamp(camp: Partial<CampsitePin> & Record<string, any>, raw: string): boolean {
+  if (!/\b(dispersed|primitive|boondock|wild camp|informal camp|roadside camp|undeveloped)\b/.test(raw)) {
+    return false;
+  }
+  const developed = Boolean(camp.reservable) || /\b(campgrounds?|group camp|group site|group campsites?|recreation\.gov|reservable|reservation)\b/.test(raw);
+  return !developed;
+}
+
 export function campMarkerVisual(camp: Partial<CampsitePin> & Record<string, any>): CampMarkerVisual {
   const raw = campText(camp);
 
@@ -74,7 +82,7 @@ export function campMarkerVisual(camp: Partial<CampsitePin> & Record<string, any
     return { kind: 'overnight_parking', code: 'P', color: '#d97706', label: 'Overnight parking' };
   }
 
-  if (/\b(dispersed|primitive|boondock|wild camp|informal camp|roadside camp|undeveloped)\b/.test(raw)) {
+  if (isPrimaryDispersedCamp(camp, raw)) {
     return { kind: 'dispersed', code: 'D', color: '#8b5a2b', label: 'Dispersed' };
   }
 

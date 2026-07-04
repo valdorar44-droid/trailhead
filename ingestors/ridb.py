@@ -15,7 +15,7 @@ def _cache_key(lat: float, lng: float, radius: float) -> str:
 PRIMARY_RV_FACILITY_RE = re.compile(
     r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
     r"(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|"
-    r"\b(?:park|resort|campground|camp)\s+(?:for\s+)?"
+    r"\b(?:park|resort|campground|camp)\s+for\s+"
     r"(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
     r"\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|"
     r"\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b",

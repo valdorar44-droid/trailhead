@@ -16802,7 +16802,7 @@ def _camp_text(camp: dict) -> str:
 PRIMARY_RV_CAMP_RE = re.compile(
     r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
     r"(?:park|parks|resort|resorts|camp|campground|campgrounds|site|sites|stay|stays|area|areas)\b|"
-    r"\b(?:park|resort|campground|camp)\s+(?:for\s+)?"
+    r"\b(?:park|resort|campground|camp)\s+for\s+"
     r"(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor\s+homes?|recreational\s+vehicles?)\b|"
     r"\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground|site|sites)\b|"
     r"\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b",
@@ -16934,14 +16934,14 @@ def _camp_has_media(camp: dict) -> bool:
 
 def _camp_overnight_style(camp: dict | None) -> str:
     text = _camp_text(camp or {})
-    if any(term in text for term in ("dispersed", "primitive", "boondock", "public land", "blm", "usfs", "forest service", "free")):
-        return "dispersed"
     if _camp_is_primary_rv(camp):
         return "rv"
     if any(term in text for term in ("private stay", "farm stay", "ranch stay", "winery stay", "glamping", "private camp")):
         return "private"
     if any(term in text for term in ("recreation.gov", "ridb", "state park", "national park", "county park", "campground")):
         return "developed"
+    if any(term in text for term in ("dispersed", "primitive", "boondock", "public land", "blm", "usfs", "forest service", "free")):
+        return "dispersed"
     return "unknown"
 
 def _camp_name_needs_review(name: str | None) -> bool:

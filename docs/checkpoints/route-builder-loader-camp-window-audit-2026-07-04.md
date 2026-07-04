@@ -22,3 +22,4 @@
 
 ## Notes
 - Remaining console messages in local web are framework/browser warnings from React Native Web, Expo web support, and Mapbox. The final hard reload had no failed asset responses.
+- The website app export was rebuilt after this pass so `/app/route-builder` uses the same loader and camp-window selection changes as the mobile OTA.

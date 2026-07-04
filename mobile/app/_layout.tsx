@@ -1,7 +1,7 @@
 import '@/lib/backgroundTasks'; // must be first — registers background location task
 import { useEffect, useRef, useState } from 'react';
 import { Alert, AppState, Linking, View, Text, TouchableOpacity } from 'react-native';
-import { Stack, useRouter } from 'expo-router';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { storage } from '@/lib/storage';
 import * as Location from 'expo-location';
@@ -43,6 +43,7 @@ export default function RootLayout() {
   const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
   const welcomeSetupRunId = useStore(s => s.welcomeSetupRunId);
   const router       = useRouter();
+  const pathname     = usePathname();
   const insets       = useSafeAreaInsets();
   const [updateBanner, setUpdateBanner] = useState(false);
   const [welcomeVisible, setWelcomeVisible] = useState(false);
@@ -159,6 +160,11 @@ export default function RootLayout() {
     markWelcomeGateSeen(choice).catch(() => {});
   }
 
+  function shouldRouteWelcomeToGuide() {
+    const path = String(pathname || '').toLowerCase();
+    return !/(route-builder|map|profile|plan|report)/.test(path);
+  }
+
   function createAccountFromWelcomeGate() {
     dismissWelcomeGate('create_account');
     storage.set(WELCOME_PENDING_ATTR_KEY, '1').catch(() => {});
@@ -177,7 +183,7 @@ export default function RootLayout() {
     markWelcomeSetupSkipped().catch(() => {});
     dismissWelcomeGate('continue');
     logWelcomeEvent('welcome_gate_cta', { action: 'continue', signed_in: !!user });
-    router.push('/(tabs)/guide' as any);
+    if (shouldRouteWelcomeToGuide()) router.push('/(tabs)/guide' as any);
   }
 
   function completeWelcomeSetup(preferences: WelcomeSetupPreferences) {
@@ -192,7 +198,7 @@ export default function RootLayout() {
     });
     if (welcomeGateSource === 'first_open') {
       dismissWelcomeGate('continue');
-      router.push('/(tabs)/guide' as any);
+      if (shouldRouteWelcomeToGuide()) router.push('/(tabs)/guide' as any);
       return;
     }
     setWelcomeGateVisible(false);
@@ -208,7 +214,7 @@ export default function RootLayout() {
     });
     if (welcomeGateSource === 'first_open') {
       dismissWelcomeGate('continue');
-      router.push('/(tabs)/guide' as any);
+      if (shouldRouteWelcomeToGuide()) router.push('/(tabs)/guide' as any);
       return;
     }
     setWelcomeGateVisible(false);

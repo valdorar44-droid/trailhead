@@ -321,6 +321,8 @@ Time: 2026-07-05
 
 - Updated the website app exporter so Expo Router strips the `/app` base path
   before matching internal routes.
+- Fingerprinted the rewritten web bundle after export so CDN caches cannot keep
+  serving an older post-processed app file under the same Expo filename.
 - Regenerated the embedded website app bundle through `npm run build`.
 - Preserved the existing public `/app/...` asset layout and direct route
   fallback pages.

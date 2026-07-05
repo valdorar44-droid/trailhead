@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { dirname, extname, join, resolve } from 'node:path';
+import { basename, dirname, extname, join, resolve } from 'node:path';
 
 const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const mobileDir = join(repoRoot, 'mobile');
@@ -82,6 +83,30 @@ function walk(dir, visit) {
   }
 }
 
+function fingerprintRewrittenWebEntry() {
+  const webJsDir = join(targetDir, '_expo', 'static', 'js', 'web');
+  if (!existsSync(webJsDir)) return;
+  const entries = readdirSync(webJsDir).filter(name => /^entry-[a-f0-9]+\.js$/.test(name));
+  if (entries.length !== 1) return;
+  const oldName = entries[0];
+  const oldPath = join(webJsDir, oldName);
+  const source = readFileSync(oldPath);
+  const hash = createHash('sha256').update(source).digest('hex').slice(0, 32);
+  const newName = `entry-${hash}.js`;
+  if (newName !== oldName) {
+    const newPath = join(webJsDir, newName);
+    cpSync(oldPath, newPath, { force: true });
+    rmSync(oldPath, { force: true });
+    log(`fingerprinted rewritten bundle ${basename(oldName)} -> ${basename(newName)}`);
+  }
+  walk(targetDir, file => {
+    if (extname(file) !== '.html') return;
+    const original = readFileSync(file, 'utf8');
+    const next = original.replaceAll(oldName, newName);
+    if (next !== original) writeFileSync(file, next);
+  });
+}
+
 if (!existsSync(expoBin)) {
   if (existsSync(existingEntry)) {
     log('mobile dependencies are not installed; keeping the existing static /app export.');
@@ -122,6 +147,7 @@ copyIfExists(join(rawDir, 'assets', 'assets'), join(targetDir, 'assets', 'app'))
 copyIfExists(join(rawDir, 'assets', 'node_modules'), join(targetDir, 'assets', 'vendor'));
 
 walk(targetDir, rewriteFile);
+fingerprintRewrittenWebEntry();
 
 for (const route of appRoutes) {
   const routeEntry = join(targetDir, route, 'index.html');

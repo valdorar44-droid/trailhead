@@ -2704,6 +2704,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             >
               <MapGL.CircleLayer
                 id="trail-preview-marker-halo"
+                {...mapboxTopSlotProps}
                 style={{
                   circleRadius: 15,
                   circleColor: trailPreviewVisual.accent,
@@ -2714,6 +2715,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
               <MapGL.CircleLayer
                 id="trail-preview-marker-dot"
+                {...mapboxTopSlotProps}
                 style={{
                   circleRadius: 6,
                   circleColor: trailPreviewVisual.accent,
@@ -2750,6 +2752,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         >
           <MapGL.CircleLayer
             id="trail-capture-pin-dot"
+            {...mapboxTopSlotProps}
             style={{
               circleRadius: 8,
               circleColor: '#38bdf8',
@@ -2760,6 +2763,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="trail-capture-pin-label"
+            {...mapboxTopSlotProps}
             style={{
               textField: ['to-string', ['get', 'idx']],
               textSize: 10,
@@ -2880,6 +2884,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             <>
               <MapGL.LineLayer
                 id="water-nav-line-casing"
+                {...mapboxTopSlotProps}
                 filter={['==', ['geometry-type'], 'LineString'] as any}
                 style={{
                   lineColor: '#04111f',
@@ -2891,6 +2896,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
               <MapGL.LineLayer
                 id="water-nav-line"
+                {...mapboxTopSlotProps}
                 filter={['==', ['geometry-type'], 'LineString'] as any}
                 style={{
                   lineColor: ['match', ['get', 'kind'],
@@ -2908,6 +2914,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               />
               <MapGL.LineLayer
                 id="water-nav-recommended-glow"
+                {...mapboxTopSlotProps}
                 filter={['all', ['==', ['geometry-type'], 'LineString'], ['==', ['get', 'kind'], 'recommended_track']] as any}
                 style={{
                   lineColor: '#67e8f9',
@@ -2922,6 +2929,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           )}
           <MapGL.CircleLayer
             id="water-nav-hazard-halo"
+            {...mapboxTopSlotProps}
             filter={['all', ['==', ['geometry-type'], 'Point'], ['==', ['get', 'kind'], 'water_hazard']] as any}
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 12, 13, 20, 16, 28],
@@ -2932,6 +2940,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.CircleLayer
             id="water-nav-aid"
+            {...mapboxTopSlotProps}
             filter={['==', ['geometry-type'], 'Point'] as any}
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 5, 13, 8, 16, 11],
@@ -2951,6 +2960,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="water-nav-code"
+            {...mapboxTopSlotProps}
             filter={['==', ['geometry-type'], 'Point'] as any}
             style={{
               textField: ['coalesce', ['get', 'code'], 'M'],
@@ -2970,6 +2980,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         <MapGL.ShapeSource id="safe-water-corridor" shape={waterCorridorFC}>
           <MapGL.LineLayer
             id="safe-water-corridor-band"
+            {...mapboxTopSlotProps}
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
               lineColor: '#67e8f9',
@@ -2982,6 +2993,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.LineLayer
             id="safe-water-corridor-casing"
+            {...mapboxTopSlotProps}
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
               lineColor: '#03131d',
@@ -2993,6 +3005,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.LineLayer
             id="safe-water-corridor-line"
+            {...mapboxTopSlotProps}
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
               lineColor: '#67e8f9',
@@ -3004,6 +3017,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="safe-water-corridor-arrows"
+            {...mapboxTopSlotProps}
             filter={['==', ['geometry-type'], 'LineString'] as any}
             style={{
               symbolPlacement: 'line',
@@ -3020,6 +3034,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.CircleLayer
             id="safe-water-corridor-knots"
+            {...mapboxTopSlotProps}
             filter={['==', ['geometry-type'], 'Point'] as any}
             style={{
               circleRadius: ['match', ['get', 'role'], 'next', 6.5, 5.5],
@@ -3053,6 +3068,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         >
           <MapGL.CircleLayer
             id="safe-water-spot-halo"
+            {...mapboxTopSlotProps}
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 12, 13, 19, 16, 26],
               circleColor: '#3bcf8e',
@@ -3062,6 +3078,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.CircleLayer
             id="safe-water-spot-dot"
+            {...mapboxTopSlotProps}
             style={{
               circleRadius: ['interpolate', ['linear'], ['zoom'], 8, 6, 13, 9, 16, 12],
               circleColor: ['match', ['get', 'kind'], 'access', '#67e8f9', 'structure', '#3bcf8e', '#d97745'],
@@ -3072,6 +3089,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="safe-water-spot-code"
+            {...mapboxTopSlotProps}
             style={{
               textField: ['match', ['get', 'kind'], 'access', 'A', 'structure', 'S', 'F'],
               textSize: 9,
@@ -3083,6 +3101,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="safe-water-spot-label"
+            {...mapboxTopSlotProps}
             minZoomLevel={11}
             style={{
               textField: ['get', 'name'],
@@ -3238,10 +3257,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         >
           <MapGL.CircleLayer
             id="gas-circle"
+            {...mapboxTopSlotProps}
             style={{ circleRadius: 9, circleColor: '#eab308', circleOpacity: 0.92, circleStrokeWidth: 2, circleStrokeColor: '#fff' }}
           />
           <MapGL.SymbolLayer
             id="gas-code"
+            {...mapboxTopSlotProps}
             style={{
               textField: 'F',
               textSize: 10,
@@ -3255,6 +3276,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="gas-label"
+            {...mapboxTopSlotProps}
             minZoomLevel={11}
             style={{
               textField: ['get', 'name'],
@@ -3302,6 +3324,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         >
           <MapGL.CircleLayer
             id="poi-circle"
+            {...mapboxTopSlotProps}
             style={{
               circleRadius: ['case', ['==', ['get', 'type'], 'peak'], 9.5, 8.5],
               circleColor: ['case', ['==', ['get', 'type'], 'water'],
@@ -3326,6 +3349,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="poi-code"
+            {...mapboxTopSlotProps}
             style={{
               textField: ['case', ['==', ['get', 'type'], 'water'],
                 ['match', ['get', 'subtype'],
@@ -3377,6 +3401,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
           <MapGL.SymbolLayer
             id="poi-label"
+            {...mapboxTopSlotProps}
             minZoomLevel={11}
             style={{
               textField: ['get', 'name'],

@@ -2571,6 +2571,8 @@ letting direct catalog matches stay ahead of broader regional trails.
   - No review-only or community lead rows.
 - `dashboard/server.py`
   - Loads the bundled trail artifact when the generated trail index is absent.
+  - Merges the bundled trail artifact when a generated trail index exists but
+    is too sparse to cover normal destination searches.
   - Adds trail destination fallback for nearby trail results.
   - Keeps direct catalog trail cards ahead of fallback rows.
   - Uses visible card fields when matching trail/trailhead categories.
@@ -2578,11 +2580,13 @@ letting direct catalog matches stay ahead of broader regional trails.
 - `tests/test_canonical_explore_serving.py`
   - Covers bundled trail fallback loading when the generated trail file is not
     available.
+  - Covers the Railway-shaped case where a small generated trail file exists
+    and should be filled by the bundled official trail index.
 
 ### Verification
 
 - `python3 -m unittest tests.test_canonical_explore_serving tests.test_trail_catalog tests.test_canonical_camp_serving tests.test_startup_prewarm`
-  - 78 tests passed.
+  - 79 tests passed.
 - `python3 -m py_compile dashboard/server.py`
   - Passed.
 - `git diff --check`

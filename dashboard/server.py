@@ -4443,7 +4443,9 @@ def _explore_place_to_camp(place: dict, center_lat: float, center_lng: float) ->
 
 _canonical_explore_index_cache: dict[str, Any] = {"path": "", "mtime": 0.0, "items": [], "generated_at": 0}
 _canonical_trail_index_cache: dict[str, Any] = {"path": "", "mtime": 0.0, "items": [], "generated_at": 0}
+_canonical_trail_bundled_index_cache: dict[str, Any] = {"path": "", "mtime": 0.0, "items": [], "generated_at": 0}
 _canonical_serving_index_lock = threading.RLock()
+_CANONICAL_TRAIL_BUNDLED_MIN_ITEMS = 10000
 
 def _canonical_serving_index_enabled(env_name: str) -> bool:
     value = str(os.getenv(env_name, "1")).strip().lower()
@@ -4496,13 +4498,32 @@ def _load_canonical_explore_index() -> tuple[list[dict], int]:
     )
 
 def _load_canonical_trail_index() -> tuple[list[dict], int]:
-    return _load_canonical_serving_index(
+    primary_items, primary_generated_at = _load_canonical_serving_index(
         CANONICAL_TRAIL_INDEX_PATH,
         _canonical_trail_index_cache,
         "TRAILHEAD_LOCAL_TRAIL_INDEX_ENABLED",
-        configured_env=CANONICAL_TRAIL_INDEX_ENV,
-        fallback_path=CANONICAL_TRAIL_INDEX_BUNDLED_PATH,
     )
+    if CANONICAL_TRAIL_INDEX_ENV or len(primary_items) >= _CANONICAL_TRAIL_BUNDLED_MIN_ITEMS:
+        return primary_items, primary_generated_at
+    bundled_items, bundled_generated_at = _load_canonical_serving_index(
+        CANONICAL_TRAIL_INDEX_BUNDLED_PATH,
+        _canonical_trail_bundled_index_cache,
+        "TRAILHEAD_LOCAL_TRAIL_INDEX_ENABLED",
+    )
+    if not bundled_items:
+        return primary_items, primary_generated_at
+    if not primary_items:
+        return bundled_items, bundled_generated_at
+    merged: list[dict] = []
+    seen: set[str] = set()
+    for item in [*primary_items, *bundled_items]:
+        item_id = str(item.get("id") or "").strip()
+        if item_id and item_id in seen:
+            continue
+        if item_id:
+            seen.add(item_id)
+        merged.append(item)
+    return merged, max(primary_generated_at, bundled_generated_at)
 
 def _canonical_public_text(value: object, max_chars: int = 420) -> str:
     text = _explore_clean_public_copy(value, max_chars)

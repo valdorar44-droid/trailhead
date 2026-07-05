@@ -135,6 +135,7 @@ class CanonicalExploreServingTests(unittest.TestCase):
         server.CANONICAL_TRAIL_INDEX_PATH = self._old_trail_path
         server._canonical_explore_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
         server._canonical_trail_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
+        server._canonical_trail_bundled_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
         if self._old_explore_env is None:
             os.environ.pop("TRAILHEAD_LOCAL_EXPLORE_INDEX_ENABLED", None)
         else:
@@ -164,6 +165,7 @@ class CanonicalExploreServingTests(unittest.TestCase):
     def test_bundled_official_trail_index_loads_when_processed_index_is_absent(self):
         server.CANONICAL_TRAIL_INDEX_PATH = Path(self._tmpdir.name) / "missing-trails.json"
         server._canonical_trail_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
+        server._canonical_trail_bundled_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
 
         items, generated_at = server._load_canonical_trail_index()
 
@@ -172,6 +174,16 @@ class CanonicalExploreServingTests(unittest.TestCase):
         self.assertTrue(all(not item.get("review_only") for item in items[:2000]))
         labels = {str(item.get("source_label") or "") for item in items[:2000]}
         self.assertTrue(labels.issubset({"USFS", "NPS", "Recreation.gov", "US Forest Service", "National Park Service"}))
+
+    def test_bundled_official_trail_index_merges_when_generated_index_is_sparse(self):
+        server._canonical_trail_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
+        server._canonical_trail_bundled_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
+
+        items, generated_at = server._load_canonical_trail_index()
+
+        self.assertGreater(len(items), 40000)
+        self.assertGreater(generated_at, 0)
+        self.assertTrue(any(item.get("id") == "trail:good" for item in items))
 
     def test_exact_timed_entry_search_surfaces_permit_record(self):
         self.assertEqual(server._explore_category_hint_from_query("Denali Park Road Timed Entry"), "things")

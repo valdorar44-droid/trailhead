@@ -1086,6 +1086,33 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertNotRegex(blocked, r"\b(Ranger Station|Picnic Shelter|Interpretive Site|Wilson Arch|Swaseys Cabin TH|Dark Canyon Wilderness Recreation Area)\b")
         self.assertNotRegex(blocked, r"\b(API|database|download|undefined|null|0 results|mixed-source)\b")
 
+    def test_explore_stay_search_keeps_yosemite_hub_cards_for_full_park_name(self):
+        stays = asyncio.run(server.explore_catalog_index(q="Yosemite National Park where to stay", category="lodging", limit=12))
+        titles = [item["title"] for item in stays["places"]]
+
+        self.assertGreater(stays["count"], 0)
+        self.assertEqual(titles[:4], [
+            "Yosemite Valley Lodging",
+            "Yosemite High Sierra Camps",
+            "Yosemite Campgrounds",
+            "Yosemite Airstream Stays",
+        ])
+        visible = " ".join(
+            " ".join(str(item.get(key) or "") for key in ("title", "category", "region", "hook", "short_description", "source_title"))
+            for item in stays["places"]
+        )
+        self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|mixed-source)\b")
+
+    def test_explore_index_suppresses_mismatched_local_photos(self):
+        big_south_fork = asyncio.run(server.explore_catalog_index(q="Big South Fork", limit=8))
+        boundary_waters = asyncio.run(server.explore_catalog_index(q="Boundary Waters Canoe Area Wilderness", limit=8))
+        deep_page = asyncio.run(server.explore_catalog_index(limit=24, cursor=96))
+
+        by_title = {item["title"]: item for item in big_south_fork["places"] + boundary_waters["places"] + deep_page["places"]}
+        self.assertEqual(by_title["Big South Fork"].get("image_url") or by_title["Big South Fork"].get("thumbnail_url") or "", "")
+        self.assertEqual(by_title["Boundary Waters Canoe Area Wilderness"].get("image_url") or by_title["Boundary Waters Canoe Area Wilderness"].get("thumbnail_url") or "", "")
+        self.assertNotIn("camping-acadia", by_title["Big South Fork"].get("search_blob", ""))
+
     def test_nearby_store_query_does_not_drop_exact_curated_match_before_sort(self):
         old_path = store.settings.db_path
         try:

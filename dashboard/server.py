@@ -4060,6 +4060,48 @@ def _safe_explore_image_url(value: object) -> str:
         return url
     return ""
 
+EXPLORE_LOCAL_IMAGE_CONTEXTS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("yosemite", ("yosemite", "half dome", "mist trail", "mirror lake", "mariposa grove", "glacier point", "vernal fall")),
+    ("zion", ("zion", "angels landing", "narrows")),
+    ("grand-canyon", ("grand canyon", "south rim", "north rim", "havasu")),
+    ("acadia", ("acadia",)),
+    ("olympic", ("olympic", "lake crescent", "kalaloch", "hoh rainforest")),
+    ("arches", ("arches", "moab", "canyonlands", "corona arch")),
+    ("glacier", ("glacier national", "many glacier", "lake mcdonald", "logan pass")),
+    ("great-smoky-mountains", ("great smoky", "smoky mountains", "leconte")),
+    ("rocky-mountain", ("rocky mountain", "10th mountain", "vail")),
+    ("big-bend", ("big bend", "chisos", "texas hill country", "el cosmico")),
+    ("denali", ("denali",)),
+    ("mount-rainier", ("mount rainier", "paradise inn")),
+    ("yellowstone", ("yellowstone", "old faithful")),
+    ("bryce-canyon", ("bryce canyon",)),
+    ("joshua-tree", ("joshua tree",)),
+)
+
+def _explore_contextual_image_url(place: dict, value: object) -> str:
+    url = _safe_explore_image_url(value)
+    if not url or not url.startswith("/assets/explore/"):
+        return url
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    hay = " ".join(str(part or "") for part in [
+        summary.get("title"),
+        summary.get("region"),
+        summary.get("state"),
+        summary.get("short_description"),
+        card.get("title"),
+        card.get("region"),
+        card.get("summary"),
+        source_pack.get("primary"),
+        place.get("attribution"),
+    ]).lower()
+    filename = url.rsplit("/", 1)[-1].lower()
+    for token, allowed_terms in EXPLORE_LOCAL_IMAGE_CONTEXTS:
+        if token in filename and not any(term in hay for term in allowed_terms):
+            return ""
+    return url
+
 def _explore_place_matches_categories(place_type: str, requested: set[str] | None) -> bool:
     if not requested:
         return True
@@ -4316,8 +4358,8 @@ def _explore_place_index_item(place: dict) -> dict:
         or next((item.get("url") for item in sources if isinstance(item, dict) and item.get("url")), "")
         or ""
     )
-    image_url = _safe_explore_image_url(summary.get("image_url") or summary.get("thumbnail_url"))
-    thumbnail_url = _safe_explore_image_url(summary.get("thumbnail_url") or summary.get("image_url"))
+    image_url = _explore_contextual_image_url(place, summary.get("image_url") or summary.get("thumbnail_url"))
+    thumbnail_url = _explore_contextual_image_url(place, summary.get("thumbnail_url") or summary.get("image_url"))
     category = _explore_index_display_category(place, category)
     return {
         "id": place.get("id") or summary.get("id") or "",
@@ -5106,6 +5148,14 @@ def _explore_stay_destination_search_queries(destination_query: str) -> list[str
     if not destination:
         return []
     queries = [destination]
+    simplified = re.sub(
+        r"\b(?:national|state|provincial)\s+(?:park|forest|monument|seashore|recreation\s+area|wilderness)\b",
+        "",
+        destination,
+    )
+    simplified = re.sub(r"\s+", " ", simplified).strip()
+    if simplified and simplified != destination:
+        queries.append(simplified)
     if destination == "glacier":
         queries.insert(0, "glacier national park")
     if destination == "yosemite":
@@ -5415,6 +5465,35 @@ def _explore_profile_matches_stay_result(profile: dict) -> bool:
         return True
     return False
 
+def _explore_catalog_stay_profiles_for_destination(destination_query: str, *, limit: int = 60) -> list[dict]:
+    safe_limit = max(1, min(int(limit or 60), 180))
+    queries = _explore_stay_destination_search_queries(destination_query)
+    if not queries:
+        return []
+    destination_anchors = _explore_stay_destination_hint_profiles(destination_query)
+    query_term_sets = [
+        _explore_query_terms_for_category(query, "camp")
+        for query in queries
+        if str(query or "").strip()
+    ]
+    matches: list[dict] = []
+    for profile in _load_explore_catalog().get("places") or []:
+        if not isinstance(profile, dict) or not _explore_profile_matches_stay_result(profile):
+            continue
+        if destination_anchors and not _explore_profile_near_destination(profile, destination_anchors, radius_mi=140):
+            continue
+        if any(
+            _explore_query_terms_match(profile, terms)
+            or _explore_terms_match_tokens(terms, _explore_query_tokens(_explore_identity_query_text(profile)))
+            for terms in query_term_sets
+            if terms
+        ):
+            matches.append(profile)
+    matches = _dedupe_ranked_explore_profiles(matches)
+    query_terms = query_term_sets[0] if query_term_sets else []
+    matches.sort(key=lambda place: _explore_stay_result_sort_key(place, query_terms))
+    return matches[:safe_limit]
+
 def _explore_stay_result_sort_key(profile: dict, query_terms: list[str] | None = None) -> tuple:
     summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
     card = profile.get("card") if isinstance(profile.get("card"), dict) else {}
@@ -5583,6 +5662,7 @@ def _explore_stay_fallback_profiles(q: str = "", limit: int = 120, *, include_lo
         return []
     safe_limit = max(1, min(int(limit or 120), 300))
     nearby_profiles: list[dict] = []
+    nearby_profiles.extend(_explore_catalog_stay_profiles_for_destination(destination_query, limit=min(safe_limit, 80)))
     destination_profiles = _explore_stay_destination_profiles(destination_query, limit=12)[:6]
     for destination in destination_profiles:
         summary = destination.get("summary") if isinstance(destination.get("summary"), dict) else {}
@@ -24429,6 +24509,7 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
             places = [
                 place for place in places
                 if str(place.get("id") or "") in trail_first_ids
+                or str(place.get("id") or "") in stay_first_ids
                 or _explore_query_terms_match(place, query_terms)
             ]
         if stay_request and stay_destination_terms:

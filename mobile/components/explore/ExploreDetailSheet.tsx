@@ -910,7 +910,7 @@ export function ExploreDetailSheet({
       onSourcePackItem(item);
       return;
     }
-    if (item.url) Linking.openURL(item.url);
+    onShowArea();
   }
 
   function formatEventDate(item: ExploreSourcePackItem) {

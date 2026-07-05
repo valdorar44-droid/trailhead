@@ -2734,3 +2734,64 @@ already has a better nearby match.
   need for deeper NPS/BLM trail import, especially line geometry, elevation,
   closures, and official trail detail pages.
 - This pass has no mobile code change. OTA is not needed.
+
+## Explorer Yosemite Stay And Deep Photo Pass
+
+### Timestamp
+
+2026-07-05T18:05:00-05:00
+
+### Scope
+
+Cleaned Explorer behavior found while checking deeper browse pages and the
+Yosemite National Park hub.
+
+### Files Touched
+
+- `dashboard/server.py`
+  - Keeps curated stay hub cards when the query includes the full park name,
+    such as `Yosemite National Park where to stay`.
+  - Limits those curated stay matches to the requested destination area so
+    Glacier stay searches do not pull Yosemite lodging.
+  - Suppresses bundled local photos when the asset clearly belongs to a
+    different destination, which prevents unrelated deep-list cards from sharing
+    the same Acadia/Grand Canyon/Zion-style image.
+- `mobile/components/explore/ExploreDetailSheet.tsx`
+  - Makes child `Show Area` actions stay inside Trailhead when a child row has
+    no exact coordinates. The separate website button still opens the official
+    page.
+- `tests/test_trail_catalog.py`
+  - Adds coverage for full-name Yosemite stay search ordering.
+  - Adds coverage for Big South Fork and Boundary Waters not inheriting the
+    unrelated Acadia image.
+
+### Verification
+
+- `python3 -m unittest tests.test_canonical_explore_serving tests.test_canonical_camp_serving tests.test_trail_catalog tests.test_startup_prewarm`
+  - 83 tests passed.
+- `python3 -m unittest tests.test_trail_catalog`
+  - 55 tests passed.
+- `npx tsc --noEmit --pretty false` from `mobile/`
+  - Passed.
+- `cd mobile && node scripts/user-facing-copy-audit.mjs`
+  - Passed for the touched file.
+- `python3 -m py_compile dashboard/server.py`
+  - Passed.
+- `git diff --check`
+  - Passed.
+- Local smoke:
+  - `Yosemite National Park where to stay` starts with Yosemite Valley Lodging,
+    Yosemite High Sierra Camps, Yosemite Campgrounds, and Yosemite Airstream
+    Stays.
+  - `Glacier where to stay` starts with Glacier-local stay cards and no
+    Yosemite lodging.
+  - Big South Fork and Boundary Waters no longer return the unrelated Acadia
+    image.
+
+### Remaining Notes
+
+- The old live nearby block is still only tied to Nearby mode. It was not
+  changed in this pass because normal destination search results are already
+  served by the Explorer list below.
+- This pass includes a mobile JavaScript change. OTA is needed after commit and
+  push.

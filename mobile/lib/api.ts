@@ -2250,11 +2250,17 @@ function campSourceBadge(camp: Partial<CampsitePin> & Record<string, any>): stri
   return label || 'Camp listing';
 }
 
+const PRIMARY_RV_LABEL_RE = /\b(?:rv|r\.v\.|caravan|motorhome|motor home|recreational vehicle)\s*(?:park|parks|resort|resorts|camp|campground|campgrounds|stay|stays)\b|\b(?:park|resort|campground|camp)\s+for\s+(?:rvs?|r\.v\.s?|caravans?|motorhomes?|motor homes?|recreational vehicles?)\b|\b(?:rv|r\.v\.)[-_\s]?(?:park|resort|campground)\b|\bcaravan[-_\s]?park\b|\bmotorhome[-_\s]?park\b/i;
+const OVERNIGHT_PARKING_LABEL_RE = /\b(?:overnight parking|truck stop|rest area|travel center|service plaza|sleep in (?:car|vehicle)|vehicle overnight|casino|walmart|cracker barrel)\b/i;
+
 function inferCampLandType(camp: Partial<CampsitePin> & Record<string, any>): string {
+  const primaryText = [camp.name, camp.land_type, camp.subtype, camp.type].filter(Boolean).join(' ');
   const haystack = [
     camp.land_type, camp.source_badge, camp.verified_source, camp.source, camp.feature_source,
     camp.description, ...(Array.isArray(camp.tags) ? camp.tags : []),
   ].join(' ').toLowerCase();
+  if (OVERNIGHT_PARKING_LABEL_RE.test(haystack)) return 'overnight_parking';
+  if (PRIMARY_RV_LABEL_RE.test(primaryText)) return 'RV Park';
   if (haystack.includes('private') || haystack.includes('farm') || haystack.includes('ranch') || haystack.includes('winery') || haystack.includes('glamping')) return 'private';
   if (haystack.includes('blm')) return 'BLM';
   if (haystack.includes('usfs') || haystack.includes('forest')) return 'USFS';

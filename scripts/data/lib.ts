@@ -15,6 +15,7 @@ export type CliOptions = {
   force: boolean;
   promote: boolean;
   skipExisting: boolean;
+  searchOnly: boolean;
   limit?: number;
   maxRecords?: number;
   bbox?: string;
@@ -30,6 +31,7 @@ export function parseCli(argv = process.argv.slice(2)): CliOptions {
     force: false,
     promote: false,
     skipExisting: false,
+    searchOnly: false,
     endpoint: [],
   };
   for (let i = 0; i < argv.length; i += 1) {
@@ -46,6 +48,7 @@ export function parseCli(argv = process.argv.slice(2)): CliOptions {
     if (arg === '--force') { opts.force = true; continue; }
     if (arg === '--promote') { opts.promote = true; continue; }
     if (arg === '--skip-existing') { opts.skipExisting = true; continue; }
+    if (arg === '--search-only') { opts.searchOnly = true; continue; }
   }
   return opts;
 }

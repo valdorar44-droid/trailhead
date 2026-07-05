@@ -10,6 +10,11 @@ def compact_text(value: Any) -> str:
     text = unescape(str(value or ""))
     text = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", " ", text)
     text = re.sub(r"(?s)<[^>]+>", " ", text)
+    text = re.sub(r"(?is)\bmake this page look\b.*$", " ", text)
+    text = re.sub(r"(?is)\bthis page is currently being developed\b.*$", " ", text)
+    text = re.sub(r"(?is)\bclick here\b.*$", " ", text)
+    text = re.sub(r"\s*…+\s*", " ", text)
+    text = re.sub(r"\.{2,}", ". ", text)
     return re.sub(r"\s+", " ", text).strip()
 
 

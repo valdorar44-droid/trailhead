@@ -1042,6 +1042,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   ].slice(0, 12);
   const hasRouteLine = props.waypoints.length > 1;
   const hasMapContent = pins.length > 0 || !!props.searchMarker || !!props.userLoc;
+  const darkStyleFallback = isMapboxWeb && /satellite|night/i.test(premiumStyle);
+  const mapFallbackColor = darkStyleFallback ? '#05070a' : '#f6f7f2';
   const footerParts = [
     props.waypoints.length > 0 ? `${props.waypoints.length} stop${props.waypoints.length === 1 ? '' : 's'}` : '',
     props.camps.length > 0 ? `${props.camps.length} camp${props.camps.length === 1 ? '' : 's'}` : '',
@@ -1052,7 +1054,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   if (isWebMap) {
     return (
-      <View style={[styles.wrap, styles.mapboxWrap, { backgroundColor: '#05070a' }]}>
+      <View style={[styles.wrap, styles.mapboxWrap, { backgroundColor: mapFallbackColor }]}>
         {React.createElement('div', { ref: mapElRef, style: mapboxContainerStyle })}
         {mapboxError ? (
           <View style={styles.emptyState}>

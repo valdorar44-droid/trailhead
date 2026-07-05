@@ -16,6 +16,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 from import_raw_records import DB_PATH, init_db
+from canonical_catalog_rules import normalize_official_search_category
 
 PRIMARY_RV_FACILITY_RE = re.compile(
     r"\b(?:rv|r\.v\.|caravan|motorhome|motor\s+home|recreational\s+vehicle)\s*"
@@ -563,8 +564,9 @@ def build_official_search(db: sqlite3.Connection) -> int:
             title = compact(item[1])
             if not title:
                 continue
+            category = normalize_official_search_category(canonical_type, item[2])
             terms = " ".join(compact(part).lower() for part in item[1:] if compact(part))
-            db.execute("INSERT OR REPLACE INTO official_search VALUES (?, ?, ?, ?, ?, ?)", (item[0], canonical_type, title, compact(item[2]), compact(item[3]), terms))
+            db.execute("INSERT OR REPLACE INTO official_search VALUES (?, ?, ?, ?, ?, ?)", (item[0], canonical_type, title, category, compact(item[3]), terms))
             rows += 1
     return rows
 
@@ -644,6 +646,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Normalize official raw records into Trailhead canonical tables.")
     parser.add_argument("--source", default="all")
     parser.add_argument("--limit", type=int, default=0)
+    parser.add_argument("--search-only", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
     if args.dry_run:
@@ -653,6 +656,13 @@ def main() -> int:
     db.row_factory = sqlite3.Row
     try:
         init_db(db)
+        if args.search_only:
+            summary = {"database": str(DB_PATH), "search_rows": build_official_search(db), "search_only": True}
+            db.commit()
+            out = DB_PATH.parent / "official-normalize-summary.json"
+            out.write_text(json.dumps(summary, indent=2) + "\n")
+            print(json.dumps(summary, indent=2))
+            return 0
         clear_canonical(db)
         db.commit()
         selected = args.source.strip().lower()

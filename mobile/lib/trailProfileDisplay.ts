@@ -146,7 +146,7 @@ export function normalizeTrailheadTrailProfile(profile?: TrailProfile | null, tr
 
 export function trailProfileStatRows(model: TrailheadTrailProfile): TrailDisplayRow[] {
   return [
-    { label: 'Distance', value: formatProfileMiles(model.distance_mi) || 'Check distance', icon: 'walk-outline', tone: '#22c55e' },
+    { label: 'Distance', value: formatProfileMiles(model.distance_mi) || 'Check route', icon: 'walk-outline', tone: '#22c55e' },
     { label: 'Difficulty', value: titleCase(model.difficulty_label), icon: 'speedometer-outline', tone: model.difficulty === 'hard' || model.difficulty === 'expert' ? '#ef4444' : '#f97316' },
     { label: 'Route', value: titleCase(model.route_type), icon: 'git-branch-outline', tone: '#38bdf8' },
     { label: 'Reports', value: model.stats.reports_recent ? `${model.stats.reports_recent} recent` : 'No recent reports', icon: 'radio-outline', tone: '#a855f7' },

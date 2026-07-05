@@ -185,7 +185,7 @@ def summary_from_record(record: SourceRecord) -> str:
     if description:
         return sentence_safe_preview(description, 520)
     readable = record.category.replace("_", " ")
-    return f"{record.name} is a Wikidata-linked {readable} landmark. Verify access, local conditions, restrictions, and route details before relying on it."
+    return f"{record.name} is a {readable} landmark. Verify access, local conditions, and restrictions before you go."
 
 
 def sentence_safe_preview(value: Any, max_chars: int) -> str:

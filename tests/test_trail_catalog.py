@@ -1,4 +1,5 @@
 import json
+import asyncio
 import unittest
 import tempfile
 from pathlib import Path
@@ -136,6 +137,345 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(item["parent_hub_id"], "place:nps:yose")
         self.assertEqual(item["parent_hub_title"], "Yosemite National Park")
         self.assertEqual(item["module_target"], "see")
+
+    def test_explore_public_copy_repairs_clipped_trail_fallbacks(self):
+        clipped = "3.0 mile trail. This stop is a park area. Check access, closures, permits, and."
+        profile = server._explore_v3_place_to_profile({
+            "id": "trail:usfs:2334484010602",
+            "name": "Little Moab",
+            "category": "trail",
+            "subcategories": ["trail"],
+            "lat": 39.1371295,
+            "lng": -105.1042032,
+            "region": "CO",
+            "summary": clipped,
+            "description": clipped,
+            "card": {
+                "headline": "Little Moab is a route-worthy trail or trek anchor in Colorado.",
+                "summary": clipped,
+                "highlight": clipped,
+            },
+        }, rank=700010)
+
+        cleaned = server._clean_explore_public_labels(profile)
+        item = server._explore_place_index_item(cleaned)
+        visible_text = json.dumps({"profile": cleaned, "item": item})
+
+        self.assertNotIn("This stop is a park area", visible_text)
+        self.assertNotRegex(visible_text, r"\band\.")
+        self.assertNotIn("anchor", visible_text.lower())
+        self.assertIn("weather before you go", item["short_description"])
+
+    def test_explore_public_copy_removes_broken_urls_and_unmatched_quotes(self):
+        cleaned = server._explore_clean_public_copy(
+            'Sites are available by reservation only. To make a reservation, online, use the Recreation. Visit www.recreation. John Muir called it "a glacier basin.',
+            360,
+        )
+        self.assertNotIn("www.", cleaned)
+        self.assertNotIn('"', cleaned)
+        self.assertNotIn("reservation,.", cleaned)
+        self.assertNotIn("use the Recreation", cleaned)
+        self.assertIn("Reserve online before you go.", cleaned)
+
+    def test_explore_public_copy_removes_route_detail_fallback(self):
+        cleaned = server._explore_clean_public_copy(
+            "Fins and Things OHV Route has route details to check before you go.",
+            240,
+        )
+        self.assertEqual(cleaned, "Fins and Things OHV Route. Check current access, seasonal closures, and local rules before you go.")
+        self.assertNotIn("route details", cleaned.lower())
+
+    def test_explore_places_response_cleans_full_profile_copy(self):
+        payload = asyncio.run(server.explore_places(q="Moab trails", category="trail", limit=8))
+        visible = json.dumps([
+            (item.get("summary") or {}).get("short_description") or ""
+            for item in payload.get("places") or []
+        ])
+        self.assertNotIn("route details", visible.lower())
+        self.assertIn("seasonal closures", visible.lower())
+
+    def test_explore_places_response_repairs_clipped_campground_titles(self):
+        payload = asyncio.run(server.explore_places(q="Glacier campgrounds", category="campground", limit=8))
+        titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
+
+        self.assertIn("Big Pine Canyon Group - Clyde Glacier Campground", titles)
+        for title in titles:
+            self.assertNotRegex(title, r"\b(?:Cam|Campgroun|Rec)$")
+
+    def test_explore_query_category_hint_uses_requested_section_words(self):
+        self.assertEqual(server._explore_category_hint_from_query("Moab trails"), "trail")
+        self.assertEqual(server._explore_category_hint_from_query("Glacier campgrounds"), "campground")
+        self.assertEqual(server._explore_query_terms_for_category("Glacier campgrounds", "campground"), ["glacier"])
+
+    def test_explore_section_filters_reject_mislabeled_activity_and_ticket_records(self):
+        self.assertFalse(server._explore_place_matches_category_request({
+            "id": "place:nps-child:yose:thingstodo:ride-a-bike",
+            "category": "trail",
+            "subcategories": ["activity"],
+            "summary": {
+                "title": "Ride a Bike in Yosemite Valley",
+                "category": "Trail",
+                "explore_group": "trails",
+            },
+        }, {"trail"}))
+        self.assertFalse(server._explore_place_matches_category_request({
+            "id": "place:ridb:ticket",
+            "category": "campground",
+            "subcategories": ["campground", "camping"],
+            "summary": {
+                "title": "Glacier National Park Logan Pass Shuttle Tickets",
+                "category": "Campground",
+                "explore_group": "camping",
+            },
+        }, {"campground"}))
+        self.assertFalse(server._explore_place_matches_category_request({
+            "id": "explore:huts_lodging:many-glacier-hotel",
+            "category": "huts_lodging",
+            "subcategories": [],
+            "summary": {
+                "title": "Many Glacier Hotel",
+                "category": "Lodging",
+                "explore_group": "huts_lodging",
+            },
+        }, {"campground"}))
+        for title in [
+            "Park Glacier Climbing Route",
+            "West Glacier River Access Boating Site",
+            "Glacier Creek Sno-Park",
+            "561-1 Near Glacier Creek Th",
+        ]:
+            self.assertFalse(server._explore_place_matches_category_request({
+                "id": f"place:bad:{title}",
+                "category": "campground",
+                "subcategories": ["campground", "camping"],
+                "summary": {
+                    "title": title,
+                    "category": "Campground",
+                    "explore_group": "camping",
+                    "short_description": f"{title} has overnight options around the area.",
+                },
+            }, {"campground"}))
+        self.assertTrue(server._explore_place_matches_category_request({
+            "id": "place:nps-child:glac:campgrounds:many-glacier-campground",
+            "category": "campground",
+            "subcategories": ["campground"],
+            "summary": {
+                "title": "Many Glacier Campground",
+                "category": "Campground",
+                "explore_group": "camping",
+                "short_description": "The campground at Many Glacier is one of the most popular campgrounds in Glacier National Park.",
+            },
+        }, {"campground"}))
+
+    def test_ranked_explore_dedupe_removes_nearby_same_title_cards(self):
+        places = server._dedupe_ranked_explore_profiles([
+            {"id": "a", "summary": {"title": "Little Moab", "lat": 39.1371295, "lng": -105.1042032}},
+            {"id": "b", "summary": {"title": "Little Moab", "lat": 39.1372, "lng": -105.1043}},
+            {"id": "c", "summary": {"title": "Little Moab", "lat": 38.57, "lng": -109.55}},
+        ])
+        self.assertEqual([place["id"] for place in places], ["a", "c"])
+
+    def test_ranked_explore_dedupe_collapses_nearby_same_title_trails(self):
+        places = server._dedupe_ranked_explore_profiles([
+            {"id": "trail-a", "category": "trail", "summary": {"title": "Lolo Forks", "category": "Trail", "explore_group": "trails", "lat": 46.3687221, "lng": -115.684367}},
+            {"id": "trail-b", "category": "trail", "summary": {"title": "Lolo Forks", "category": "Trail", "explore_group": "trails", "lat": 46.3915461, "lng": -115.6830299}},
+            {"id": "trail-c", "category": "trail", "summary": {"title": "Lolo Forks Loop", "category": "Trail", "explore_group": "trails", "lat": 46.3915461, "lng": -115.6830299}},
+        ])
+        self.assertEqual([place["id"] for place in places], ["trail-a", "trail-c"])
+
+    def test_explore_merge_uses_specific_category_from_duplicate(self):
+        places = server._merge_explore_profile_lists([
+            {
+                "id": "place:ridb:249513",
+                "category": "place",
+                "summary": {
+                    "title": "Lake Andrusia Boat Site",
+                    "category": "Place",
+                    "explore_group": "explore",
+                    "lat": 47.5,
+                    "lng": -94.7,
+                },
+            },
+        ], [
+            {
+                "id": "place:ridb:249513",
+                "category": "water",
+                "summary": {
+                    "title": "Lake Andrusia Boat Site",
+                    "category": "Water",
+                    "explore_group": "water",
+                    "lat": 47.5,
+                    "lng": -94.7,
+                },
+            },
+        ])
+        self.assertEqual(len(places), 1)
+        self.assertEqual(places[0]["category"], "water")
+        self.assertEqual(places[0]["summary"]["category"], "Water")
+        self.assertEqual(places[0]["summary"]["explore_group"], "water")
+
+    def test_moab_search_skips_far_little_moab_without_little_query(self):
+        self.assertTrue(server._explore_skip_for_broad_search({
+            "summary": {
+                "title": "Little Moab",
+                "category": "Trail",
+                "lat": 39.1371295,
+                "lng": -105.1042032,
+            },
+        }, ["moab"]))
+        self.assertFalse(server._explore_skip_for_broad_search({
+            "summary": {
+                "title": "Little Moab",
+                "category": "Trail",
+                "lat": 38.57,
+                "lng": -109.55,
+            },
+        }, ["moab"]))
+        self.assertFalse(server._explore_skip_for_broad_search({
+            "summary": {
+                "title": "Little Moab",
+                "category": "Trail",
+                "lat": 39.1371295,
+                "lng": -105.1042032,
+            },
+        }, ["little", "moab"]))
+
+    def test_exact_title_search_keeps_short_official_place_cards(self):
+        self.assertFalse(server._explore_skip_for_broad_search({
+            "category": "activity",
+            "summary": {
+                "title": "Bear Gulch Nature Center",
+                "category": "Things",
+                "explore_group": "things",
+                "short_description": "Bear Gulch Nature Center is an outdoor area. Check current access, closures, permits, and weather before you go.",
+            },
+        }, ["bear", "gulch", "nature", "center"]))
+
+    def test_explore_query_prefix_does_not_stretch_destination_words(self):
+        self.assertFalse(server._explore_token_matches_variant("switzer", "switzerland"))
+        self.assertTrue(server._explore_token_matches_variant("yosemit", "yosemite"))
+
+    def test_trail_title_query_keeps_singular_trail_term(self):
+        self.assertEqual(server._explore_query_terms_for_category("Arch Trail", "trail"), ["arch", "trail"])
+        self.assertEqual(server._explore_query_terms_for_category("Moab trails", "trail"), ["moab"])
+        self.assertEqual(server._explore_query_terms_for_category("trail near Moab", "trail"), ["moab"])
+
+    def test_explore_query_sort_prefers_exact_title_match(self):
+        terms = server._explore_query_terms_for_category("Arch Trail", "trail")
+        exact = {"id": "trail:exact", "category": "trail", "summary": {"title": "Arch Trail", "category": "Trail", "explore_group": "trails", "rank": 9999}}
+        partial = {"id": "trail:partial", "category": "trail", "summary": {"title": "La Verkin Creek Trail to Kolob Arch", "category": "Trail", "explore_group": "trails", "rank": 1}}
+        self.assertLess(server._explore_query_sort_key(exact, terms), server._explore_query_sort_key(partial, terms))
+
+    def test_visual_trail_names_remain_discoverable_from_inferred_sections(self):
+        self.assertTrue(server._canonical_raw_item_matches_category({
+            "name": "Middle Falls Overlook",
+            "summary": "Short trail access. Hiking trail.",
+        }, {"waterfall"}, trail=True))
+        self.assertFalse(server._canonical_raw_item_matches_category({
+            "name": "Easy Connector",
+            "summary": "Short trail access. Hiking trail.",
+        }, {"waterfall"}, trail=True))
+
+        payload = asyncio.run(server.explore_catalog_index(q="Middle Falls Overlook", limit=8))
+        titles = [item["title"] for item in payload["places"]]
+        descriptions = [item.get("short_description") or "" for item in payload["places"]]
+
+        self.assertEqual(titles[:1], ["Middle Falls Overlook"])
+        self.assertIn("Short trail access. Hiking trail.", descriptions)
+
+        springs_payload = asyncio.run(server.explore_catalog_index(q="Springs Connector", category="springs", limit=8))
+        springs_titles = [item["title"] for item in springs_payload["places"]]
+        self.assertEqual(springs_titles[:1], ["Springs Connector"])
+
+    def test_explore_places_moab_trails_filters_far_little_moab_matches(self):
+        payload = asyncio.run(server.explore_places(q="Moab trails", category="trail", limit=12))
+        titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
+
+        self.assertNotIn("Little Moab", titles)
+        self.assertNotIn("Moab", titles)
+        self.assertNotIn("Moab Rim Trail", titles)
+        self.assertIn("Moab Brands Trailhead", titles)
+        self.assertEqual(len(titles), len(set(titles)))
+
+    def test_explore_places_exact_trail_title_prefers_usable_location(self):
+        payload = asyncio.run(server.explore_places(q="Moab Rim Trail", category="trail", limit=12))
+        titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
+
+        self.assertIn("Moab Rim Trailhead", titles)
+        self.assertNotIn("Moab Rim Trail", titles)
+
+    def test_explore_places_switzerland_trails_rejects_switzer_prefix_match(self):
+        payload = asyncio.run(server.explore_places(q="Switzerland trails", category="trail", limit=12))
+        titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
+
+        self.assertNotIn("Trosi - Switzer", titles)
+
+    def test_global_seed_surfaces_clean_international_trail_searches(self):
+        payload = asyncio.run(server.explore_catalog_index(q="Swiss Alps trails", category="trail", limit=12))
+        titles = [item["title"] for item in payload["places"]]
+
+        self.assertGreater(payload["count"], 0)
+        self.assertTrue(any("Switzer" not in title for title in titles))
+        visible = " ".join(
+            " ".join(str(item.get(key) or "") for key in ("title", "category", "region", "hook", "short_description", "source_title"))
+            for item in payload["places"]
+        )
+        self.assertIn("Switzerland", visible)
+        self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|source-backed|Open global|Wikidata)\b")
+
+    def test_empty_category_search_relaxes_to_backed_destination_card(self):
+        payload = asyncio.run(server.explore_catalog_index(q="Dolomites trails", category="trail", limit=8))
+        titles = [item["title"] for item in payload["places"]]
+        visible_tags = " ".join(
+            str(tag)
+            for item in payload.get("places") or []
+            for tag in item.get("tags") or []
+        )
+
+        self.assertGreater(payload["count"], 0)
+        self.assertIn("World Heritage Dolomites", titles)
+        self.assertTrue(any(item["category"] in {"Historic Site", "Park", "Viewpoint", "Place"} for item in payload["places"]))
+        self.assertNotRegex(visible_tags, r"\bQ\d{3,}\b")
+
+    def test_global_seed_scenic_search_uses_clean_public_labels(self):
+        payload = asyncio.run(server.explore_places(q="Norway scenic", category="viewpoint", limit=8))
+        titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
+
+        self.assertGreater(payload["count"], 0)
+        self.assertTrue(any("National Park" in title for title in titles))
+        visible = " ".join(
+            " ".join(str((item.get("summary") or {}).get(key) or "") for key in ("title", "category", "region", "hook", "short_description", "source_title"))
+            for item in payload.get("places") or []
+        )
+        self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|source-backed|Open global|Wikidata)\b")
+
+    def test_explore_trail_index_keeps_public_tags_clean(self):
+        payload = asyncio.run(server.explore_catalog_index(q="Yosemite trails", category="trail", limit=12))
+        visible_tags = [
+            str(tag)
+            for item in payload.get("places") or []
+            for tag in item.get("tags") or []
+        ]
+
+        self.assertGreater(len(visible_tags), 0)
+        self.assertNotRegex(" ".join(visible_tags), r"\b(nps|official|place|yose|grca|api|database|download|source)\b")
+
+    def test_explore_trail_index_prioritizes_true_trail_cards(self):
+        payload = asyncio.run(server.explore_catalog_index(q="Grand Canyon trails", category="trail", limit=8))
+        titles = [item["title"] for item in payload["places"]]
+
+        self.assertIn("Bright Angel Trailhead", titles)
+        self.assertIn("Havasu Falls", titles)
+        self.assertLess(titles.index("Bright Angel Trailhead"), titles.index("Havasu Falls"))
+
+    def test_explore_public_copy_repairs_generic_outdoor_area_fallback(self):
+        cleaned = server._explore_clean_public_copy(
+            "0.4 mile trail. This stop is an outdoor area. Check access, closures, permits.",
+            240,
+        )
+
+        self.assertEqual(cleaned, "0.4 mile trail. Check current access, closures, permits, and trail conditions before you go.")
+        self.assertNotIn("This stop is an outdoor area", cleaned)
 
     def test_legacy_explore_area_wrappers_resolve_to_parent_hubs(self):
         old_catalog = server.EXPLORE_CATALOG
@@ -352,6 +692,88 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(manifest["keyframes"][0]["progress"], 0.0)
         self.assertEqual(manifest["keyframes"][-1]["progress"], 1.0)
 
+    def test_generated_official_trail_detail_and_preview_use_official_cache(self):
+        old_official_db = server.OFFICIAL_DATA_DB
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                db_path = Path(tmp) / "official.sqlite"
+                import sqlite3
+                db = sqlite3.connect(db_path)
+                db.execute("""
+                    CREATE TABLE trail (
+                        id TEXT PRIMARY KEY,
+                        name TEXT,
+                        slug TEXT,
+                        land_unit_id TEXT,
+                        managing_agency TEXT,
+                        route_geom TEXT,
+                        start_geom TEXT,
+                        distance_m REAL,
+                        elevation_gain_m REAL,
+                        difficulty TEXT,
+                        allowed_uses TEXT,
+                        surface TEXT,
+                        season_text TEXT,
+                        quality_score REAL,
+                        source_confidence REAL,
+                        attribution_text TEXT,
+                        last_verified_at INTEGER
+                    )
+                """)
+                route_geom = {
+                    "coordinates": [[
+                        [-109.5, 38.1],
+                        [-109.51, 38.11],
+                        [-109.52, 38.12],
+                        [-109.5, 38.1],
+                    ]]
+                }
+                db.execute(
+                    """INSERT INTO trail (
+                        id, name, managing_agency, route_geom, start_geom, distance_m,
+                        elevation_gain_m, difficulty, allowed_uses, surface, season_text,
+                        quality_score, source_confidence, attribution_text, last_verified_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                    (
+                        "trail:usfs:test-loop",
+                        "PCT: METHOW VALLEY N. TERMINUS",
+                        "USFS",
+                        json.dumps(route_geom),
+                        json.dumps({"type": "Point", "coordinates": [-109.5, 38.1]}),
+                        4200,
+                        180,
+                        "3",
+                        "Hiking",
+                        "NATIVE MATERIAL",
+                        "",
+                        88,
+                        1,
+                        "US Forest Service",
+                        123456,
+                    ),
+                )
+                db.commit()
+                db.close()
+                server.OFFICIAL_DATA_DB = db_path
+
+                profile = server._official_trail_profile_from_cache_id("trail:usfs:test-loop")
+                self.assertIsNotNone(profile)
+                self.assertEqual(profile["name"], "PCT: Methow Valley N. Terminus")
+                self.assertEqual(profile["source_label"], "US Forest Service")
+                self.assertEqual(profile["geometry"]["type"], "MultiLineString")
+
+                public = asyncio.run(server.trail_profile("trail:usfs:test-loop"))
+                manifest = asyncio.run(server.trail_preview("trail:usfs:test-loop"))
+
+                self.assertEqual(public["id"], "trail:usfs:test-loop")
+                self.assertEqual(public["geometry_ref"], "trail:usfs:test-loop")
+                self.assertTrue(public["preview_available"])
+                self.assertEqual(manifest["status"], "available")
+                self.assertEqual(manifest["trail_name"], "PCT: Methow Valley N. Terminus")
+                self.assertGreaterEqual(len(manifest["coordinates"]), 4)
+        finally:
+            server.OFFICIAL_DATA_DB = old_official_db
+
     def test_osm_way_trail_route_carries_geometry_into_profile(self):
         route = osm._normalize_trail_route({
             "type": "way",
@@ -536,6 +958,36 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertTrue(server._pakistan_trail_fallback_photos("K2 Base Camp Trek")[0]["url"].startswith("https://upload.wikimedia.org/"))
         self.assertIn("Baltoro", server._pakistan_trail_fallback_photos("Baltoro Glacier")[0]["caption"])
         self.assertIn("K2", server._pakistan_trail_fallback_photos("Godwin-Austen Glacier")[0]["caption"])
+
+    def test_explore_search_surfaces_pakistan_treks_without_exact_title_duplicates(self):
+        self.assertEqual(server._explore_category_hint_from_query("K2 Base Camp Trek"), "trail")
+
+        k2 = asyncio.run(server.explore_catalog_index(q="K2 Base Camp Trek", category="trail", limit=8))
+        titles = [item["title"] for item in k2["places"]]
+
+        self.assertIn("K2 Base Camp Trek", titles)
+        self.assertEqual(titles.count("K2 Base Camp Trek"), 1)
+        self.assertTrue(any("Gondogoro" in title or "Masherbrum" in title or "Laila" in title for title in titles))
+        detail = asyncio.run(server.explore_place_detail(k2["places"][0]["id"]))
+        self.assertEqual((detail.get("summary") or {}).get("title"), "K2 Base Camp Trek")
+
+    def test_explore_where_to_stay_falls_back_to_nearby_camps(self):
+        self.assertEqual(server._explore_stay_destination_query("Big Sur where to stay"), "big sur")
+
+        stays = asyncio.run(server.explore_catalog_index(q="Big Sur where to stay", category="lodging", limit=8))
+        titles = [item["title"] for item in stays["places"]]
+
+        self.assertGreater(stays["count"], 0)
+        self.assertIn("China Camp Campground", titles)
+        self.assertTrue(any("Camp" in title or "Campground" in item["category"] for title, item in zip(titles, stays["places"])))
+        detail = asyncio.run(server.explore_place_detail(stays["places"][0]["id"]))
+        self.assertEqual((detail.get("source_pack") or {}).get("primary"), stays["places"][0]["source_title"])
+        visible = " ".join(
+            " ".join(str(item.get(key) or "") for key in ("title", "category", "region", "hook", "short_description", "source_title"))
+            for item in stays["places"]
+        )
+        self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|mixed-source)\b")
+        self.assertNotRegex(visible, r"\b[A-Z]{4,}\s+\([A-Za-z ]+\)")
 
     def test_nearby_store_query_does_not_drop_exact_curated_match_before_sort(self):
         old_path = store.settings.db_path

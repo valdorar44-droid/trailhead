@@ -31,6 +31,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
     [filter, trails],
   );
   const areaPhoto = useMemo(() => primaryAreaPhoto(place), [place]);
+  const areaTitle = getExploreDisplayTitle(place).replace(/\s+Trails$/i, '');
 
   useEffect(() => {
     if (selectedId && !trails.some(trail => trail.id === selectedId)) {
@@ -50,10 +51,10 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.intro}>
         <Text style={[styles.introTitle, { color: C.text }]}>
-          Trails near {getExploreDisplayTitle(place).replace(/\s+Trails$/i, '')}
+          Trails near {areaTitle}
         </Text>
         <Text style={[styles.introText, { color: C.text2 }]}>
-          Distance, climb, and expected time.
+          Pick by distance, climb, grade, and current access.
         </Text>
       </View>
 
@@ -85,46 +86,82 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
           const featureLabel = cleanTrailLabel(trail.feature_label || trail.feature_type?.replace(/_/g, ' ') || 'Trail');
           const difficulty = cleanTrailDifficulty(trail.difficulty);
           const routeType = cleanTrailRouteType(trail.route_type);
+          const distance = formatMiles(trail.distance_mi);
+          const gain = formatGain(trail.elevation_gain_ft);
+          const time = trail.typical_time || estimateTrailTime(trail.distance_mi);
+          const details = trailPlanRows(trail, featureLabel, routeType);
+          const description = trailDescription(trail);
+          const metrics = [
+            { label: 'Distance', value: distance || 'Check route' },
+            { label: 'Gain', value: gain || 'Varies' },
+            { label: 'Grade', value: difficulty },
+            { label: 'Time', value: time },
+          ];
           return (
             <View key={trail.id} style={[styles.trailWrap, { borderColor: selected ? C.orange + '66' : C.border, backgroundColor: C.s2 }]}>
               <TouchableOpacity
-                style={styles.trailRow}
+                style={styles.trailCardTop}
                 activeOpacity={0.88}
                 onPress={() => setSelectedId(current => current === trail.id ? null : trail.id)}
               >
-                {photo ? (
-                  <Image source={{ uri: mediaUrl(photo) }} style={styles.trailImage} resizeMode="cover" />
-                ) : (
-                  <View style={styles.trailImageFallback}>
-                    <Ionicons name="trail-sign-outline" size={32} color="#64748b" />
-                  </View>
-                )}
-                <View style={styles.trailBody}>
-                  <View style={styles.trailTitleRow}>
-                    <Text style={[styles.trailTitle, { color: C.text }]} numberOfLines={2}>{trail.title}</Text>
-                    <Ionicons name={selected ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
-                  </View>
-                  <View style={[styles.difficultyPill, difficultyTone(trail.difficulty)]}>
+                <View style={styles.trailImageShell}>
+                  {photo ? (
+                    <Image source={{ uri: mediaUrl(photo) }} style={styles.trailImage} resizeMode="cover" />
+                  ) : (
+                    <View style={styles.trailImageFallback}>
+                      <Ionicons name="trail-sign-outline" size={32} color="#64748b" />
+                    </View>
+                  )}
+                  <View style={styles.trailImageShade} />
+                  <View style={[styles.difficultyBadge, difficultyTone(trail.difficulty)]}>
                     <Text style={[styles.difficultyText, { color: difficultyTextColor(trail.difficulty) }]}>
-                      {featureLabel} · {difficulty}
+                      {difficulty}
                     </Text>
                   </View>
-                  <Text style={[styles.trailMeta, { color: C.text2 }]} numberOfLines={1}>
-                    {[formatMiles(trail.distance_mi), formatGain(trail.elevation_gain_ft), routeType].filter(Boolean).join(' · ')}
+                  {!!routeType && (
+                    <View style={styles.routeBadge}>
+                      <Text style={styles.routeBadgeText}>{routeType}</Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.trailBody}>
+                  <View style={styles.trailTitleRow}>
+                    <Text style={[styles.trailTitle, { color: C.text }]}>{trail.title}</Text>
+                    <Ionicons name={selected ? 'chevron-up' : 'chevron-down'} size={18} color={C.text3} />
+                  </View>
+                  <Text style={[styles.trailMeta, { color: C.text2 }]}>
+                    {[featureLabel, trail.area].filter(Boolean).join(' · ')}
                   </Text>
-                  {!!trail.area && <Text style={[styles.trailArea, { color: C.text3 }]} numberOfLines={1}>{trail.area}</Text>}
+                  <View style={styles.metricGrid}>
+                    {metrics.map(metric => (
+                      <TrailMetric key={`${trail.id}-${metric.label}`} label={metric.label} value={metric.value} />
+                    ))}
+                  </View>
                 </View>
               </TouchableOpacity>
               {selected && (
                 <View style={[styles.detail, { borderTopColor: C.border }]}>
-                  <View style={styles.statGrid}>
-                    <TrailStat label="Distance" value={formatMiles(trail.distance_mi)} />
-                    <TrailStat label="Gain" value={formatGain(trail.elevation_gain_ft) || 'Check'} />
-                    <TrailStat label="Time" value={trail.typical_time || 'Check'} />
+                  <Text style={[styles.description, { color: C.text2 }]}>
+                    {description}
+                  </Text>
+                  <View style={[styles.previewPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
+                    <TrailMiniMap accent={C.orange} />
+                    <View style={styles.previewCopy}>
+                      <Text style={[styles.previewTitle, { color: C.text }]}>Route preview</Text>
+                      <Text style={[styles.previewText, { color: C.text2 }]}>
+                        {routePreviewText(trail, routeType)}
+                      </Text>
+                    </View>
                   </View>
-                  <Text style={[styles.description, { color: C.text2 }]}>{trail.description || trail.summary}</Text>
+                  {details.length > 0 && (
+                    <View style={[styles.planRows, { borderColor: C.border }]}>
+                      {details.map(row => (
+                        <TrailDetailRow key={`${trail.id}-${row.label}`} label={row.label} value={row.value} />
+                      ))}
+                    </View>
+                  )}
                   {!!photoCredit(trail) && (
-                    <Text style={[styles.photoCredit, { color: C.text3 }]} numberOfLines={2}>
+                    <Text style={[styles.photoCredit, { color: C.text3 }]}>
                       Photo: {photoCredit(trail)}
                     </Text>
                   )}
@@ -132,7 +169,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                     <View style={[styles.warningBox, { borderColor: C.orange + '55', backgroundColor: C.orange + '12' }]}>
                       <Ionicons name="warning-outline" size={17} color={C.orange} />
                       <Text style={[styles.warningText, { color: C.text2 }]}>
-                        {trail.permit_note || 'Check route, guide, weather, and local safety before heading out.'}
+                        {trail.permit_note || 'Review route, guide, weather, and local safety before heading out.'}
                       </Text>
                     </View>
                   )}
@@ -156,6 +193,25 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
   );
 }
 
+function TrailMetric({ label, value }: { label: string; value: string }) {
+  const C = useTheme();
+  return (
+    <View style={[styles.metric, { borderColor: C.border }]}>
+      <Text
+        style={[styles.metricValue, { color: C.text }]}
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.72}
+      >
+        {value}
+      </Text>
+      <Text style={[styles.metricLabel, { color: C.text3 }]} numberOfLines={1}>
+        {label}
+      </Text>
+    </View>
+  );
+}
+
 function nextTrailFilter(current: TrailFilter, available: TrailFilter[]): TrailFilter {
   if (!available.length) return 'all';
   if (current === 'all') return available[0] || 'all';
@@ -167,12 +223,24 @@ function titleCaseFilter(filter: TrailFilter) {
   return filter.replace(/^\w/, char => char.toUpperCase());
 }
 
-function TrailStat({ label, value }: { label: string; value: string }) {
+function TrailDetailRow({ label, value }: { label: string; value: string }) {
   const C = useTheme();
   return (
-    <View style={[styles.stat, { borderColor: C.border }]}>
-      <Text style={[styles.statValue, { color: C.text }]} numberOfLines={1}>{value}</Text>
-      <Text style={[styles.statLabel, { color: C.text3 }]} numberOfLines={1}>{label}</Text>
+    <View style={[styles.detailRow, { borderTopColor: C.border }]}>
+      <Text style={[styles.detailLabel, { color: C.text2 }]}>{label}</Text>
+      <Text style={[styles.detailValue, { color: C.text }]}>{value}</Text>
+    </View>
+  );
+}
+
+function TrailMiniMap({ accent }: { accent: string }) {
+  return (
+    <View style={styles.miniMap}>
+      <View style={styles.mapContourA} />
+      <View style={styles.mapContourB} />
+      <View style={[styles.mapRoute, { borderColor: accent, borderRightColor: 'transparent' }]} />
+      <View style={[styles.mapDot, styles.mapDotStart]} />
+      <View style={[styles.mapDot, styles.mapDotEnd, { backgroundColor: accent }]} />
     </View>
   );
 }
@@ -185,8 +253,8 @@ function cleanTrailLabel(value?: string | null) {
 
 function cleanTrailDifficulty(value?: string | null) {
   const clean = String(value || '').replace(/[_-]+/g, ' ').replace(/\s+/g, ' ').trim();
-  if (!clean || /^scout first$/i.test(clean)) return 'Check access';
-  if (/\b(undefined|null|nan)\b/i.test(clean)) return 'Check access';
+  if (!clean || /^scout first$/i.test(clean)) return 'Access varies';
+  if (/\b(undefined|null|nan)\b/i.test(clean)) return 'Access varies';
   return clean;
 }
 
@@ -198,6 +266,13 @@ function cleanTrailRouteType(value?: string | null) {
   return clean;
 }
 
+function cleanTrailCopy(value?: string | null) {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  if (/\b(undefined|null|nan|api|endpoint|feature|schema|database|dump|import|raw)\b/i.test(clean)) return '';
+  return clean;
+}
+
 function matchesTrailFilter(trail: ExploreTrailCard, filter: TrailFilter) {
   if (filter === 'all') return true;
   return cleanTrailDifficulty(trail.difficulty).toLowerCase().includes(filter);
@@ -205,7 +280,7 @@ function matchesTrailFilter(trail: ExploreTrailCard, filter: TrailFilter) {
 
 function formatMiles(mi?: number | null) {
   const value = typeof mi === 'number' ? mi : NaN;
-  if (!Number.isFinite(value) || value <= 0) return 'Check';
+  if (!Number.isFinite(value) || value <= 0) return '';
   if (value >= 10) return `${Math.round(value)} mi`;
   const rounded = Number(value.toFixed(1));
   return `${Number.isInteger(rounded) ? Math.round(rounded) : rounded} mi`;
@@ -214,6 +289,47 @@ function formatMiles(mi?: number | null) {
 function formatGain(value?: number | null) {
   if (!Number.isFinite(Number(value)) || Number(value) <= 0) return '';
   return `${Math.round(Number(value)).toLocaleString()} ft`;
+}
+
+function estimateTrailTime(mi?: number | null) {
+  const value = typeof mi === 'number' ? mi : NaN;
+  if (!Number.isFinite(value) || value <= 0) return 'Check pace';
+  const hours = Math.max(1, Math.round(value / 2));
+  if (hours <= 1) return 'About 1 hr';
+  return `${hours}-${hours + 1} hrs`;
+}
+
+function trailDescription(trail: ExploreTrailCard) {
+  return (
+    cleanTrailCopy(trail.description)
+    || cleanTrailCopy(trail.summary)
+    || `${trail.title}. Check current access, weather, daylight, and local rules before starting.`
+  );
+}
+
+function routePreviewText(trail: ExploreTrailCard, routeType: string) {
+  const area = cleanTrailCopy(trail.area);
+  const route = cleanTrailCopy(routeType);
+  if (area && route) return `${route} near ${area}. Check access and conditions before starting.`;
+  if (route) return `${route}. Check access and conditions before starting.`;
+  return 'Check access and conditions before starting.';
+}
+
+function trailPlanRows(trail: ExploreTrailCard, featureLabel: string, routeType: string) {
+  const rows: Array<{ label: string; value: string }> = [];
+  const route = cleanTrailCopy(routeType || featureLabel);
+  const season = cleanTrailCopy(trail.best_season || trail.season_window);
+  const dogs = cleanTrailCopy(trail.dogs);
+  const bikes = cleanTrailCopy(trail.bikes);
+  const permit = cleanTrailCopy(trail.permit_note);
+  const area = cleanTrailCopy(trail.area);
+  if (route) rows.push({ label: 'Route', value: route });
+  if (season) rows.push({ label: 'Season', value: season });
+  if (dogs) rows.push({ label: 'Dogs', value: dogs });
+  if (bikes) rows.push({ label: 'Bikes', value: bikes });
+  if (permit) rows.push({ label: 'Access', value: permit });
+  if (!permit && area) rows.push({ label: 'Area', value: area });
+  return rows.slice(0, 4);
 }
 
 function primaryTrailPhoto(trail: ExploreTrailCard) {
@@ -267,34 +383,49 @@ const styles = StyleSheet.create({
   filterButton: { minHeight: 42, borderRadius: 12, borderWidth: 1, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 6 },
   filterText: { fontSize: 11, fontFamily: mono, fontWeight: '900' },
   list: { gap: 10 },
-  trailWrap: { borderWidth: 1, borderRadius: 13, overflow: 'hidden' },
-  trailRow: { flexDirection: 'row', minHeight: 150 },
-  trailImage: { width: 126, minHeight: 150, backgroundColor: '#e2e8f0' },
-  trailImageFallback: { width: 126, minHeight: 150, alignItems: 'center', justifyContent: 'center', backgroundColor: '#e2e8f0' },
-  trailBody: { flex: 1, minWidth: 0, padding: 13, gap: 6 },
+  trailWrap: { borderWidth: 1, borderRadius: 15, overflow: 'hidden' },
+  trailCardTop: { minHeight: 244 },
+  trailImageShell: { height: 188, width: '100%', backgroundColor: '#e2e8f0' },
+  trailImage: { width: '100%', height: '100%', backgroundColor: '#e2e8f0' },
+  trailImageFallback: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center', backgroundColor: '#e2e8f0' },
+  trailImageShade: { position: 'absolute', left: 0, right: 0, bottom: 0, height: 74, backgroundColor: 'rgba(15,23,42,0.28)' },
+  trailBody: { flex: 1, minWidth: 0, padding: 13, gap: 10 },
   trailTitleRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  trailTitle: { flex: 1, minWidth: 0, fontSize: 18, lineHeight: 22, fontWeight: '900' },
-  difficultyPill: { alignSelf: 'flex-start', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
+  trailTitle: { flex: 1, minWidth: 0, fontSize: 20, lineHeight: 25, fontWeight: '900' },
+  difficultyBadge: { position: 'absolute', left: 12, bottom: 12, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5 },
   difficultyText: { fontSize: 11, fontWeight: '900' },
-  trailMeta: { fontSize: 13, fontWeight: '800' },
+  routeBadge: { position: 'absolute', right: 12, bottom: 12, maxWidth: 150, borderRadius: 999, paddingHorizontal: 9, paddingVertical: 5, backgroundColor: 'rgba(15,23,42,0.72)' },
+  routeBadgeText: { color: '#fff', fontSize: 11, lineHeight: 13, fontWeight: '900' },
+  trailMeta: { fontSize: 13, lineHeight: 18, fontWeight: '800' },
   trailArea: { fontSize: 12, fontWeight: '700' },
   trailSource: { fontSize: 11, lineHeight: 14, fontWeight: '700' },
   tagRail: { gap: 6, paddingRight: 8 },
   tag: { borderRadius: 999, paddingHorizontal: 8, paddingVertical: 4 },
   tagText: { fontSize: 9, fontFamily: mono, fontWeight: '900' },
   detail: { borderTopWidth: 1, padding: 12, gap: 12 },
-  statGrid: { flexDirection: 'row', gap: 0 },
-  stat: { flex: 1, minHeight: 64, borderRightWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 },
-  statValue: { fontSize: 13, lineHeight: 16, fontWeight: '900', textAlign: 'center' },
-  statLabel: { fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 5, textAlign: 'center' },
+  metricGrid: { flexDirection: 'row', borderWidth: 1, borderColor: 'rgba(148,163,184,0.32)', borderRadius: 13, overflow: 'hidden' },
+  metric: { flex: 1, minHeight: 58, borderRightWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 3 },
+  metricValue: { fontSize: 13, lineHeight: 16, fontWeight: '900', textAlign: 'center' },
+  metricLabel: { fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 5, textAlign: 'center' },
   description: { fontSize: 14, lineHeight: 21, fontWeight: '600' },
   photoCredit: { fontSize: 10.5, lineHeight: 15, fontWeight: '700' },
   warningBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10 },
   warningText: { flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
-  detailsTable: { gap: 0 },
-  detailRow: { borderTopWidth: 1, minHeight: 38, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
-  detailLabel: { fontSize: 13, fontWeight: '700' },
-  detailValue: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: 13, lineHeight: 17, fontWeight: '900' },
+  previewPanel: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
+  previewCopy: { padding: 12, gap: 4 },
+  previewTitle: { fontSize: 15, lineHeight: 19, fontWeight: '900' },
+  previewText: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  miniMap: { height: 134, overflow: 'hidden', backgroundColor: '#dfe9d8' },
+  mapContourA: { position: 'absolute', left: -20, top: 8, width: 220, height: 120, borderWidth: 1, borderColor: 'rgba(22,101,52,0.2)', borderRadius: 80, transform: [{ rotate: '-14deg' }] },
+  mapContourB: { position: 'absolute', right: -34, top: 28, width: 210, height: 118, borderWidth: 1, borderColor: 'rgba(37,99,235,0.18)', borderRadius: 90, transform: [{ rotate: '18deg' }] },
+  mapRoute: { position: 'absolute', left: 70, top: 42, width: 190, height: 58, borderWidth: 4, borderRightColor: 'transparent', borderRadius: 70, transform: [{ rotate: '-8deg' }], backgroundColor: 'transparent' },
+  mapDot: { position: 'absolute', width: 14, height: 14, borderRadius: 999, backgroundColor: '#166534', borderWidth: 3, borderColor: '#fff' },
+  mapDotStart: { left: 66, top: 88 },
+  mapDotEnd: { right: 82, top: 36 },
+  planRows: { borderWidth: 1, borderRadius: 13, overflow: 'hidden' },
+  detailRow: { borderTopWidth: 1, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 12, paddingVertical: 9 },
+  detailLabel: { fontSize: 12, fontWeight: '800' },
+  detailValue: { flex: 1, minWidth: 0, textAlign: 'right', fontSize: 12.5, lineHeight: 17, fontWeight: '900' },
   highlights: { flexDirection: 'row', gap: 8 },
   highlightItem: { flex: 1, alignItems: 'center', gap: 5 },
   highlightText: { fontSize: 11, lineHeight: 14, fontWeight: '700', textAlign: 'center' },

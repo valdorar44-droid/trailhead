@@ -12,10 +12,10 @@ export function getTrailheadApiBase() {
   if (Platform.OS === 'web') {
     const location = (globalThis as typeof globalThis & { location?: { hostname?: string; origin?: string } }).location;
     const hostname = String(location?.hostname || '').toLowerCase();
-    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost')) {
-      return TRAILHEAD_PRODUCTION_API_BASE;
-    }
     const origin = String(location?.origin || '');
+    if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname.endsWith('.localhost')) {
+      return /^https?:\/\//i.test(origin) ? stripTrailingSlash(origin) : TRAILHEAD_PRODUCTION_API_BASE;
+    }
     if (/^https?:\/\//i.test(origin)) return stripTrailingSlash(origin);
   }
   return TRAILHEAD_PRODUCTION_API_BASE;

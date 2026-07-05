@@ -419,7 +419,7 @@ const YOSEMITE_TRAILS: ExploreTrailCard[] = [
     image_url: GLACIER_POINT_IMAGE,
     summary: 'Short forest approach to cliff-edge views and deep granite fissures.',
     description: 'Taft Point is short but exposed. Stay back from cliff edges and check Glacier Point Road status before driving up.',
-    best_season: 'Road-open season',
+    best_season: 'Check roads',
     dogs: 'Not allowed',
     bikes: 'Not allowed',
     tags: ['Scenic', 'Cliff Views'],
@@ -1065,7 +1065,7 @@ const TRAIL_AREA_SEEDS: TrailAreaSeed[] = [
         image_url: SMOKIES_IMAGE,
         summary: 'Short, steep paved climb to the highest viewpoint in the park.',
         description: 'Road season, fog, storms, and temperature swings decide whether this is worth the drive.',
-        best_season: 'Road-open season',
+        best_season: 'Check roads',
         dogs: 'Not allowed',
         bikes: 'Not allowed',
         tags: ['Viewpoint', 'Short Hike'],
@@ -1668,9 +1668,9 @@ function trailSourcePackDescription(trail: ExploreTrailCard) {
 }
 
 function formatCuratedMiles(mi?: number | null) {
-  if (mi == null || !Number.isFinite(Number(mi))) return 'Check distance';
+  if (mi == null || !Number.isFinite(Number(mi))) return 'Check route';
   const value = Number(mi);
-  if (value <= 0) return 'Check distance';
+  if (value <= 0) return 'Check route';
   if (value < 1) return 'Under 1 mi';
   if (value >= 10) return `${Math.round(value)} mi`;
   const rounded = Number(value.toFixed(1));

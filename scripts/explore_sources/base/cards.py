@@ -5,29 +5,29 @@ from .schema import ExplorePlaceV3
 
 
 CATEGORY_FALLBACKS = {
-    "trail": "Mapped trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting.",
-    "trailhead": "Mapped trail access point; confirm parking, road conditions, closures, daylight, and route details before starting.",
-    "waterfall": "Mapped waterfall or cascade; check trail access, seasonal flow, closures, and slippery terrain.",
-    "campground": "Mapped camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions.",
+    "trail": "Trail or route; check current trail conditions, permits, weather, daylight, and navigation before starting.",
+    "trailhead": "Trail access point; confirm parking, road conditions, closures, and daylight before starting.",
+    "waterfall": "Waterfall or cascade; check trail access, seasonal flow, closures, and slippery terrain.",
+    "campground": "Camping location; check access, fees, fire restrictions, reservations, and seasonal road conditions.",
     "hut": "Backcountry shelter or hut; confirm condition, reservations, weather, and seasonal access.",
     "shelter": "Backcountry shelter or hut; confirm condition, reservations, weather, and seasonal access.",
     "climbing_area": "Mapped climbing area or crag; confirm access, closures, route information, land-manager rules, and current conditions.",
     "bouldering_area": "Mapped bouldering area; confirm access, closures, landing conditions, pads, route information, local ethics, and current conditions.",
     "fuel": "Mapped service stop; verify hours, availability, road access, and payment options.",
     "resupply": "Mapped resupply stop; verify hours, availability, road access, and payment options.",
-    "viewpoint": "Mapped viewpoint or overlook; check access, road conditions, weather, and daylight.",
+    "viewpoint": "Viewpoint or overlook; check access, road conditions, weather, and daylight.",
     "peak": "Mapped summit or high point; verify route, weather, exposure, and land-manager rules.",
     "hot_spring": "Mapped hot spring; verify legality, temperature, access, water safety, and local rules.",
     "lake": "Mapped lake or reservoir; verify access, water safety, seasonal conditions, local rules, and weather.",
     "water_source": "Mapped water source; verify access, potability, season, and reliability before depending on it.",
     "glacier": "Mapped glacier or ice feature; verify access, glacier conditions, permits, guide needs, and weather.",
     "park": "Official park or protected area; check current access, fees, closures, permits, weather, and local rules.",
-    "public_land": "Mapped public land or protected area; verify land rules, access, closures, and current restrictions.",
-    "dispersed_camp": "Mapped dispersed camping area; confirm overnight limits, road access, fire restrictions, human-waste rules, and current closures.",
+    "public_land": "Public land or protected area; verify land rules, access, closures, and current restrictions.",
+    "dispersed_camp": "Dispersed camping area; confirm overnight limits, road access, fire restrictions, human-waste rules, and current closures.",
     "forest": "Official forest or ranger-district context; verify road access, fire restrictions, seasonal closures, and land-use rules.",
     "forest_road": "Mapped forest road or access route; verify vehicle suitability, gates, seasonal closures, snow, and road condition.",
-    "offroad_route": "Mapped OHV or overland route; verify vehicle suitability, current route status, seasonal closures, permits, and land-manager rules.",
-    "scenic_drive": "Mapped scenic drive or byway; verify road condition, seasonal closures, fuel range, weather, and daylight.",
+    "offroad_route": "OHV or overland route; verify vehicle suitability, current conditions, seasonal closures, permits, and land rules.",
+    "scenic_drive": "Scenic drive or byway; verify road condition, seasonal closures, fuel range, weather, and daylight.",
 }
 
 PRIMARY_ACTIONS = {

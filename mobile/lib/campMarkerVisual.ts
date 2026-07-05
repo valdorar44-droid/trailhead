@@ -58,11 +58,6 @@ export function isPrimaryRvCamp(camp: Partial<CampsitePin> & Record<string, any>
     'land_type',
     'subtype',
     'type',
-    'source_badge',
-    'verified_source',
-    'feature_source',
-    'tags',
-    'site_types',
   ]);
   return PRIMARY_RV_RE.test(primaryText);
 }

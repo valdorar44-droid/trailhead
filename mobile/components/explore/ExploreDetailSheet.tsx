@@ -321,9 +321,9 @@ function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePl
   if (waterfallFallback) {
     return `Waterfall near ${waterfallFallback[2]}. Check trail access, seasonal flow, closures, and slippery terrain before visiting.`;
   }
-  const mappedTrailFallback = clean.match(/^(.+?)\s+is a mapped trail area near\s+([^.]+)\.\s+Check distance, difficulty, route type, weather, daylight, permits, closures, and navigation before starting\.?$/i);
+  const mappedTrailFallback = clean.match(/^(.+?)\s+is a mapped trail area near\s+([^.]+)\.\s+Check route conditions, daylight, permits, and closures before starting\.?$/i);
   if (mappedTrailFallback) {
-    return `Trail area near ${mappedTrailFallback[2]}. Check route distance, difficulty, weather, daylight, permits, closures, and navigation before starting.`;
+    return `Trail area near ${mappedTrailFallback[2]}. Check route conditions, daylight, permits, and closures before starting.`;
   }
   if (/^(.+?)\s+is a\s+(fuel|gas|diesel|petrol)\.\s+Check\b/i.test(clean)) {
     return `${title} is a fuel stop. Check hours, access, current conditions, and payment options before you go.`;

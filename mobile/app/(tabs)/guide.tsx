@@ -500,6 +500,11 @@ function exploreDedupePreference(place: ExplorePlaceProfile) {
     - Math.min(Number(place.summary.rank ?? 999999), 999999) / 100000;
 }
 
+function stableMatchedExploreRank(place: ExplorePlaceProfile) {
+  const rank = Number((place as any).matched_explore_rank);
+  return Number.isFinite(rank) ? rank : Number.POSITIVE_INFINITY;
+}
+
 function dedupeRankedExploreItems<T extends { place: ExplorePlaceProfile }>(items: T[]) {
   const deduped: T[] = [];
   const indexByKey = new Map<string, number>();
@@ -1511,21 +1516,6 @@ function campTagLabel(tag: string) {
     .toLowerCase()
     .replace(/\b\w/g, char => char.toUpperCase())
     .replace(/\b(Rv|Ada|Blm|Usfs|Nps)\b/g, match => match.toUpperCase());
-}
-
-function campTagLabels(camp: CampsitePin) {
-  const type = cleanCampTypeLabel(camp.land_type).toLowerCase();
-  const seen = new Set<string>();
-  const labels: string[] = [];
-  for (const tag of camp.tags ?? []) {
-    const label = campTagLabel(tag);
-    const key = label.toLowerCase();
-    if (!label || key === type || seen.has(key)) continue;
-    seen.add(key);
-    labels.push(label);
-    if (labels.length >= 3) break;
-  }
-  return labels;
 }
 
 function isLowQualityExploreCampName(camp: CampsitePin) {
@@ -2712,6 +2702,11 @@ function GuideScreenContent() {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
         if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        if (query) {
+          const aMatchedRank = stableMatchedExploreRank(a.place);
+          const bMatchedRank = stableMatchedExploreRank(b.place);
+          if (aMatchedRank !== bMatchedRank) return aMatchedRank - bMatchedRank;
+        }
         if (query && b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
         const categoryDiff = sortByCategoryAffinity(a, b);
         if (categoryDiff !== 0) return categoryDiff;
@@ -2729,6 +2724,11 @@ function GuideScreenContent() {
         if (exploreSortMode === 'nearest') return sortByNearest(a, b);
         if (exploreSortMode === 'source') return sortBySource(a, b);
         if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+        if (query) {
+          const aMatchedRank = stableMatchedExploreRank(a.place);
+          const bMatchedRank = stableMatchedExploreRank(b.place);
+          if (aMatchedRank !== bMatchedRank) return aMatchedRank - bMatchedRank;
+        }
         if (query && b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
         const categoryDiff = sortByCategoryAffinity(a, b);
         if (categoryDiff !== 0) return categoryDiff;
@@ -2942,12 +2942,6 @@ function GuideScreenContent() {
             ? mergeDynamicTrailArea(detail, place)
             : { ...place, ...detail } as ExplorePlaceProfile;
         });
-        for (const detail of details) {
-          if (!merged.some(place => place.id === detail.id)) {
-            changed = true;
-            merged.push(detail);
-          }
-        }
         return changed ? merged : current;
       });
     }).catch(() => {});
@@ -3398,7 +3392,7 @@ function GuideScreenContent() {
       if (trail.source_url) Linking.openURL(trail.source_url).catch(() => {});
       return;
     }
-    const distance = fmtMi(trail.distance_mi) || 'Check distance';
+    const distance = fmtMi(trail.distance_mi) || 'Check route';
     setPendingMapSelection({
       kind: 'trail',
       trail: {
@@ -3814,7 +3808,6 @@ function GuideScreenContent() {
               const image = campImageUrl(camp);
               const officialUrl = camp.booking_url || camp.official_url || camp.url;
               const areaFallback = camp.photo_status === 'area_fallback';
-              const tagLabels = campTagLabels(camp);
               return (
                 <TouchableOpacity
                   key={camp.id}
@@ -3844,15 +3837,6 @@ function GuideScreenContent() {
                     <Text style={s.campgroundName} numberOfLines={2}>{camp.name}</Text>
                     <Text style={s.campgroundMeta} numberOfLines={2}>{campMetaLine(camp)}</Text>
                     {!!campCostLabel(camp.cost) && <Text style={s.campgroundCost} numberOfLines={1}>{campCostLabel(camp.cost)}</Text>}
-                    {tagLabels.length ? (
-                      <View style={s.campgroundTags}>
-                      {tagLabels.slice(0, 2).map(tag => (
-                        <View key={`${camp.id}-${tag}`} style={s.campgroundTag}>
-                          <Text style={s.campgroundTagText}>{tag}</Text>
-                        </View>
-                      ))}
-                      </View>
-                    ) : null}
                     <View style={s.campgroundActions}>
                       <TouchableOpacity style={s.campgroundOpenBtn} onPress={() => showExploreCampOnMap(camp)}>
                         <Ionicons name="bonfire-outline" size={13} color="#fff" />
@@ -4675,13 +4659,13 @@ function GuideScreenContent() {
             weather={getExploreDetailWeather(selectedExplore)}
             weatherSlot={renderExploreWeather(selectedExplore)}
             relatedSlot={relatedExplore.length > 0 ? (
-              <TrailheadCard style={s.profileSection}>
+              <View style={s.relatedExploreSection}>
                 <Text style={s.profileLabel}>Near this stop</Text>
-                <Text style={s.profileTextMuted}>Nearby parks, camp areas, trails, and stops.</Text>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.relatedExploreRail}>
-                  {relatedExplore.map((item, idx) => renderExploreCard(item, idx, true))}
-                </ScrollView>
-              </TrailheadCard>
+                <Text style={s.profileTextMuted}>Nearby parks, camp areas, trails, and stops around this destination.</Text>
+                <View style={s.relatedExploreList}>
+                  {relatedExplore.slice(0, 4).map((item, idx) => renderExploreCard(item, idx, false))}
+                </View>
+              </View>
             ) : null}
             onClose={() => setSelectedExplore(null)}
             onPlayAudio={() => playExplore(selectedExplore)}
@@ -5339,9 +5323,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campgroundName: { color: C.text, fontSize: 18, lineHeight: 23, fontWeight: '900' },
   campgroundMeta: { color: C.text3, fontSize: 12, lineHeight: 17, fontWeight: '700' },
   campgroundCost: { color: C.orange, fontSize: 12, fontWeight: '900' },
-  campgroundTags: { minHeight: 24, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
-  campgroundTag: { borderWidth: 1, borderColor: C.border, backgroundColor: C.s2, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4 },
-  campgroundTagText: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   campgroundActions: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 2 },
   campgroundOpenBtn: { flex: 1, height: 40, borderRadius: 12, backgroundColor: C.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   campgroundOpenText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
@@ -5357,7 +5338,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   campgroundEmpty: { marginTop: 12, paddingVertical: 18, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1, alignItems: 'center', gap: 7 },
   campgroundEmptyText: { color: C.text3, fontSize: 12, fontWeight: '700', textAlign: 'center' },
   profileHook: { color: C.text, fontSize: 17, lineHeight: 25, fontWeight: '800' },
-  relatedExploreRail: { gap: 12, paddingTop: 12, paddingRight: 2 },
+  relatedExploreSection: { marginHorizontal: 14, marginTop: 10, gap: 10 },
+  relatedExploreList: { gap: 12 },
   storyReadBox: { maxHeight: 390, borderRadius: 12, backgroundColor: C.s1, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, paddingVertical: 10 },
   storySentence: { color: C.text2, fontSize: 17, lineHeight: 28, fontWeight: '600' },
   storySentenceActive: { color: C.text, backgroundColor: C.orange + '22', borderRadius: 8 },

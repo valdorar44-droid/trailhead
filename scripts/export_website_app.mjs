@@ -7,6 +7,7 @@ const repoRoot = resolve(dirname(new URL(import.meta.url).pathname), '..');
 const mobileDir = join(repoRoot, 'mobile');
 const publicDir = join(repoRoot, 'dashboard', 'site', 'public');
 const targetDir = join(publicDir, 'app');
+const distAppDir = join(repoRoot, 'dashboard', 'site', 'dist', 'app');
 const expoBin = join(mobileDir, 'node_modules', '.bin', 'expo');
 const existingEntry = join(targetDir, 'index.html');
 const appRoutes = ['guide', 'map', 'plan', 'route-builder', 'report', 'profile', 'extreme-explorer'];
@@ -130,3 +131,9 @@ for (const route of appRoutes) {
 rmSync(rawDir, { recursive: true, force: true });
 
 log('wrote dashboard/site/public/app');
+
+if (existsSync(dirname(distAppDir))) {
+  rmSync(distAppDir, { recursive: true, force: true });
+  cpSync(targetDir, distAppDir, { recursive: true, force: true });
+  log('synced dashboard/site/dist/app');
+}

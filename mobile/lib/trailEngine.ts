@@ -232,9 +232,9 @@ export function featureFromPoi(
 }
 
 function formatTrailMiles(mi?: number | null) {
-  if (mi == null || !Number.isFinite(Number(mi))) return 'Check distance';
+  if (mi == null || !Number.isFinite(Number(mi))) return 'Check route';
   const value = Number(mi);
-  if (value <= 0) return 'Check distance';
+  if (value <= 0) return 'Check route';
   if (value < 1) return 'Under 1 mi';
   if (value >= 10) return `${Math.round(value)} mi`;
   const rounded = Number(value.toFixed(1));

@@ -135,7 +135,7 @@ const FALLBACK_COPY: Record<string, string> = {
   camp: 'Camp options for the area. Check access, fees, closures, fire rules, and overnight limits.',
   glamping: 'Comfort-focused outdoor stay. Check booking rules, road conditions, and availability.',
   huts: 'Backcountry shelter or hut. Check reservations, condition, weather, and seasonal access.',
-  trails: 'Trail area with distance, difficulty, weather, daylight, permit, and closure checks.',
+  trails: 'Trail area. Check route conditions, daylight, permits, and closures before starting.',
   trailheads: 'Trail access point. Confirm parking, road conditions, closures, and daylight before starting.',
   views: 'Scenic viewpoint for photos, short stops, and nearby trails.',
   peaks: 'Mountain or summit landmark. Check route, weather, access, and difficulty.',
@@ -381,6 +381,7 @@ export function sentenceAwarePreviewText(value?: string | null, maxChars = 220) 
 
 function categoryFromText(text: string): ExploreCategoryKey | null {
   if (!text) return null;
+  if (/\b(things?|activities|activity|things to do|what to do|see and do|visitor center|visitor centre|nature center|nature centre|contact station|interpretive center|interpretive centre|environmental education|ranger station|shooting range|rifle range)\b/.test(text)) return 'things';
   if (/\bday use\b/.test(text)) return 'things';
   if (/waterfall|falls|cascade/.test(text)) return 'waterfalls';
   if (/hot spring|thermal|soak/.test(text)) return 'springs';
@@ -394,7 +395,6 @@ function categoryFromText(text: string): ExploreCategoryKey | null {
   if (/\b(climb|crag|boulder)\b/.test(text)) return 'climb';
   if (/\b(fuel|gas|diesel|petrol)\b/.test(text)) return 'fuel';
   if (/\b(resupply|grocery|gear|supplies|market)\b/.test(text)) return 'resupply';
-  if (/things to do|what to do|activities|activity|see and do/.test(text)) return 'things';
   if (/\b(tour|experience|ticket|guided|guide|booking|book)\b/.test(text)) return 'guided';
   if (/\b(hikes?|hiking)\b/.test(text)) return 'trails';
   if (/\b(lake|river|shore|beach|marina|boat|water)\b/.test(text)) return 'water';
@@ -421,6 +421,7 @@ function isNestedDestinationTitle(text: string) {
 
 function categoryFromGroup(text: string): ExploreCategoryKey | null {
   if (!text) return null;
+  if (/\b(things?|activities|activity)\b/.test(text)) return 'things';
   if (/camping/.test(text)) return 'camp';
   if (/glamping/.test(text)) return 'glamping';
   if (/huts|lodging|cabins/.test(text)) return 'huts';
@@ -623,10 +624,11 @@ export function getExploreCardSummary(place: ExplorePlaceProfile) {
   const key = getExploreCategoryKey(place);
   return cleanExploreCopy(String(
     v3.card?.summary ||
-    v3.card?.headline ||
-    place.summary.hook ||
     place.summary.short_description ||
     place.profile.summary ||
+    v3.card?.highlight ||
+    place.summary.hook ||
+    v3.card?.headline ||
     FALLBACK_COPY[key] ||
     'Check access before you go.',
   ), place).trim();
@@ -651,7 +653,7 @@ export function getExploreWhyCopy(place: ExplorePlaceProfile) {
     (key === 'waterfalls'
       ? 'Waterfalls make strong scenic stops, especially when nearby trails, viewpoints, and weather line up.'
       : key === 'trails'
-        ? 'Trail areas need clear distance, difficulty, route type, nearby stops, and current conditions.'
+        ? 'Trail areas work best with clear route type, nearby stops, and current conditions.'
         : key === 'camp'
           ? 'Named campground areas make it easier to compare access, rules, fees, and nearby trail options.'
           : FALLBACK_COPY[key] || 'This stop helps compare access, timing, and nearby options.'),
@@ -693,7 +695,6 @@ export function getExploreQuickFacts(place: ExplorePlaceProfile, context: Explor
   }
   facts.push({ label: getExploreBestSeason(place), icon: 'calendar-outline', tone: '#c4552d' });
   facts.push({ label: getExploreTrustBadge(place), icon: 'shield-checkmark-outline', tone: '#2563eb' });
-  facts.push({ label: 'Offline', value: 'Recommended', icon: 'cloud-download-outline', tone: '#7c3aed' });
   return facts.slice(0, 4);
 }
 
@@ -724,13 +725,17 @@ export function getExplorePlanNotes(place: ExplorePlaceProfile): ExplorePlanNote
   if (key === 'trails' || key === 'trailheads' || key === 'climb') {
     const distance = text.match(/\b(\d+(?:\.\d+)?)\s?(mi|mile|miles|km|kilometer|kilometers)\b/);
     const difficulty = text.match(/\b(easy|moderate|strenuous|hard|difficult|expert|beginner|advanced)\b/);
+    const distanceFact = explicitFacts.find((fact: string) => /\b\d+(?:\.\d+)?\s?mi\b/i.test(fact));
+    const difficultyFact = explicitFacts.find((fact: string) => /\b(easy|moderate|strenuous|hard|very hard|difficult|expert|beginner|advanced)\b/i.test(fact));
+    const activityFact = explicitFacts.find((fact: string) => /\b(hiking trail|ohv route|bike trail|snowmobile route|horse trail|water route|hiking|mountain biking|horseback riding|4x4)\b/i.test(fact));
+    const surfaceFact = explicitFacts.find((fact: string) => /\b(surface|paved|gravel|snow route|water route|boardwalk|natural surface|compacted)\b/i.test(fact));
     const loopLikely = /\b(loop|lollipop|circuit)\b/.test(text);
     const pointToPoint = /\b(point to point|point-to-point|through hike|thru hike)\b/.test(text);
     return [
-      { label: 'Route Type', value: loopLikely ? 'Loop likely' : pointToPoint ? 'Point-to-point' : 'Loop / out-and-back options', icon: 'git-compare-outline', tone: '#f97316' },
-      { label: 'Distance', value: distance ? `${distance[1]} ${distance[2].replace('mile', 'mi').replace('kilometer', 'km')}` : 'Choose trail', icon: 'walk-outline', tone: '#16a34a' },
-      { label: 'Difficulty', value: difficulty ? difficulty[1].replace(/^\w/, c => c.toUpperCase()) : 'Check grade', icon: 'trending-up-outline', tone: '#7c3aed' },
-      { label: 'Trail Lines', value: 'Open segments', icon: 'map-outline', tone: '#2563eb' },
+      { label: 'Route', value: activityFact || (loopLikely ? 'Loop likely' : pointToPoint ? 'Point-to-point' : 'Trail route'), icon: 'git-compare-outline', tone: '#f97316' },
+      { label: 'Distance', value: distanceFact || (distance ? `${distance[1]} ${distance[2].replace('mile', 'mi').replace('kilometer', 'km')}` : 'Check route'), icon: 'walk-outline', tone: '#16a34a' },
+      { label: 'Difficulty', value: difficultyFact || (difficulty ? difficulty[1].replace(/^\w/, c => c.toUpperCase()) : 'Check grade'), icon: 'trending-up-outline', tone: '#7c3aed' },
+      { label: 'Surface', value: surfaceFact || 'Check conditions', icon: 'trail-sign-outline', tone: '#2563eb' },
     ];
   }
 
@@ -982,7 +987,7 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     .replace(/\b(?:a|an)\s+0\.\d+\s+miles?\b/gi, 'under 1 mile')
     .replace(/\b0\.\d+\s+miles?\b/gi, 'under 1 mile')
     .replace(/\b0\.\d+\s+mi\b/gi, 'under 1 mi')
-    .replace(/\b(\d+)\.0\s+miles?\b/gi, '$1 mile')
+    .replace(/\b(\d+)\.0\s+miles?\b/gi, (_match, value) => `${value} ${Number(value) === 1 ? 'mile' : 'miles'}`)
     .replace(/\b(\d+)\.0\s+mi\b/gi, '$1 mi')
     .replace(/([a-z0-9])\.([A-Z])/g, '$1. $2')
     .replace(/\bsource pack\b/gi, 'details')
@@ -1075,9 +1080,9 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     }
     return `${title} is a ${mappedType}. Check access, current conditions, and local rules before you go.`;
   }
-  const mappedTrailFallback = text.match(/^(.+?)\s+is a mapped trail area near\s+([^.]+)\.\s+Check distance, difficulty, route type, weather, daylight, permits, closures, and navigation before starting\.?$/i);
+  const mappedTrailFallback = text.match(/^(.+?)\s+is a mapped trail area near\s+([^.]+)\.\s+Check route conditions, daylight, permits, and closures before starting\.?$/i);
   if (mappedTrailFallback) {
-    return `Trail area near ${mappedTrailFallback[2]}. Check route distance, difficulty, weather, daylight, permits, closures, and navigation before starting.`;
+    return `Trail area near ${mappedTrailFallback[2]}. Check route conditions, daylight, permits, and closures before starting.`;
   }
   const trailTargetFallback = text.match(/^(.+?)\s+is a trail target\.\s+Check route, access, weather, permits, and current conditions before you go\.?$/i);
   if (trailTargetFallback) {
@@ -1133,11 +1138,24 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
 
 function isWeakExploreCopy(text: string, place: ExplorePlaceProfile) {
   const clean = normalizeExploreCopyBlock(text);
-  if (!clean || clean.length < 42) return true;
+  if (!clean) return true;
+  if (looksLikeTrailFactSummary(clean, place)) return false;
+  if (clean.length < 42) return true;
   if (WEAK_COPY_PATTERNS.some(pattern => pattern.test(clean))) return true;
   const title = normalizeExploreCopyBlock(getExploreDisplayTitle(place));
   if (title && clean.toLowerCase() === title.toLowerCase()) return true;
   return false;
+}
+
+function looksLikeTrailFactSummary(text: string, place: ExplorePlaceProfile) {
+  const key = getExploreCategoryKey(place);
+  if (key !== 'trails' && key !== 'trailheads' && key !== 'climb') return false;
+  const clean = normalizeExploreCopyBlock(text);
+  if (!clean) return false;
+  const hasDistance = /\b\d+(?:\.\d+)?\s*(?:mi|mile|miles|km|kilometer|kilometers)\b/i.test(clean);
+  const hasShortAccess = /\bshort trail access\b/i.test(clean);
+  const hasTrailFact = /\b(loop|out-and-back|point-to-point|easy|moderate|hard|very hard|hiking trail|bike trail|horse trail|ohv route|snowmobile route|natural surface|paved|gravel|singletrack)\b/i.test(clean);
+  return (hasDistance || hasShortAccess) && hasTrailFact;
 }
 
 function shortSeasonLabel(value: string) {
@@ -1147,7 +1165,7 @@ function shortSeasonLabel(value: string) {
   if (/timed|hours?|entry/i.test(clean)) return 'Check hours';
   if (/weekend|holiday/i.test(clean)) return 'Book early';
   if (/permit/i.test(clean)) return 'Permit season';
-  if (/road/i.test(clean)) return 'Road-open season';
+  if (/road/i.test(clean)) return 'Check roads';
   if (/year.?round/i.test(clean)) return clean.length > 28 ? 'Year-round' : clean;
   if (/spring/i.test(clean) && /summer/i.test(clean)) return 'Spring-summer';
   if (/spring/i.test(clean)) return 'Spring';

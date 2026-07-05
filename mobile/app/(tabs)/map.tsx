@@ -4559,11 +4559,21 @@ const buildMapHtml = (
   }
 
   // ── GeoJSON helpers ───────────────────────────────────────────────────────────
+  function primaryRvCamp(c){
+    var primary=[c.name,c.land_type,c.subtype,c.type].filter(Boolean).join(' ').toLowerCase();
+    return primary.indexOf('rv park')>=0||primary.indexOf('rv resort')>=0||primary.indexOf('rv campground')>=0||primary.indexOf('rv camp')>=0||primary.indexOf('rv site')>=0||primary.indexOf('rv stay')>=0||primary.indexOf('caravan park')>=0||primary.indexOf('motorhome park')>=0||primary.indexOf('recreational vehicle park')>=0||primary.indexOf('park for rv')>=0||primary.indexOf('campground for rv')>=0;
+  }
+  function primaryDispersedCamp(c,raw){
+    var dispersed=raw.indexOf('dispersed')>=0||raw.indexOf('primitive')>=0||raw.indexOf('boondock')>=0||raw.indexOf('wild camp')>=0||raw.indexOf('informal camp')>=0||raw.indexOf('roadside camp')>=0||raw.indexOf('undeveloped')>=0;
+    if(!dispersed)return false;
+    var developed=!!c.reservable||raw.indexOf('campground')>=0||raw.indexOf('group camp')>=0||raw.indexOf('group site')>=0||raw.indexOf('recreation.gov')>=0||raw.indexOf('reservable')>=0||raw.indexOf('reservation')>=0;
+    return !developed;
+  }
   function campKind(c){
-    var raw=[].concat(c.tags||[],c.site_types||[],[c.land_type,c.source_badge,c.verified_source,c.source,c.cost,c.description]).filter(Boolean).join(' ').toLowerCase();
-    if(raw.indexOf('rv')>=0||raw.indexOf('hookup')>=0||raw.indexOf('caravan')>=0||raw.indexOf('motorhome')>=0)return'rv';
+    var raw=[].concat(c.tags||[],c.site_types||[],[c.name,c.land_type,c.subtype,c.type,c.source_badge,c.verified_source,c.source,c.cost,c.description]).filter(Boolean).join(' ').toLowerCase();
     if(raw.indexOf('overnight parking')>=0||raw.indexOf('truck stop')>=0||raw.indexOf('rest area')>=0||raw.indexOf('sleep in vehicle')>=0||raw.indexOf('vehicle overnight')>=0)return'overnight_parking';
-    if(raw.indexOf('dispersed')>=0||raw.indexOf('primitive')>=0||raw.indexOf('boondock')>=0)return'dispersed';
+    if(primaryDispersedCamp(c,raw))return'dispersed';
+    if(primaryRvCamp(c))return'rv';
     if(raw.indexOf('tent')>=0||raw.indexOf('walk-in')>=0||raw.indexOf('hike-in')>=0||raw.indexOf('backcountry')>=0)return'tent';
     if(raw.indexOf('blm')>=0||raw.indexOf('bureau of land management')>=0)return'blm';
     if(raw.indexOf('usfs')>=0||raw.indexOf('national forest')>=0||raw.indexOf('forest service')>=0)return'usfs';
@@ -9177,7 +9187,7 @@ function MapScreen() {
     }
   }
 
-  async function searchMap(queryOverride?: string) {
+  async function searchMap(queryOverride?: string, opts: { autoSelect?: boolean } = {}) {
     const cleanQuery = (queryOverride ?? searchQuery).trim();
     if (cleanQuery.length < 2) {
       setSearchResults([]);
@@ -9199,7 +9209,7 @@ function MapScreen() {
       const sorted = userLoc
         ? places.slice().sort((a, b) => haversineKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - haversineKm(userLoc.lat, userLoc.lng, b.lat, b.lng))
         : places;
-      setSearchResults(sorted.map(place => {
+      const mappedResults = sorted.map(place => {
         const displayLabel = mapSearchDisplayLabel(place, 'Place');
         return {
           ...place,
@@ -9212,7 +9222,11 @@ function MapScreen() {
           geocode_reason: resolved?.reason,
           geocode_query: cleanQuery,
         };
-      }));
+      });
+      setSearchResults(mappedResults);
+      if (opts.autoSelect && mappedResults.length) {
+        selectSearchResult(mappedResults[0], cleanQuery);
+      }
     } catch (e: any) {
       setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
     } finally {
@@ -9234,9 +9248,9 @@ function MapScreen() {
     return () => clearTimeout(timer);
   }, [inlineSearchOpen, navMode, searchQuery, showFullMapSearch]);
 
-  function selectSearchResult(place: SearchPlace) {
+  function selectSearchResult(place: SearchPlace, submittedQuery?: string) {
     if (place.name === '__error__') return;
-    const query = searchQuery.trim();
+    const query = (submittedQuery ?? searchQuery).trim();
     const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
     const basePlace = { ...place, dist, source: place.source || 'search', type: place.type || 'poi' };
     const isMapboxPlace = String(basePlace.source || '').toLowerCase().includes('mapbox');
@@ -9248,9 +9262,13 @@ function MapScreen() {
     setTappedPoi(null);
     setSelectedTrail(null);
     setSelectedCommunityPin(null);
+    const rawSummary = String(basePlace.summary || '').trim();
+    const summary = rawSummary && !/^selected\s+place\.?$/i.test(rawSummary)
+      ? rawSummary
+      : 'Search nearby camps, trails, stays, fuel, and services from here.';
     setSelectedPlace({
       ...basePlace,
-      summary: basePlace.summary || (isMapboxPlace ? undefined : 'Loading place details, nearby camps, trails, and useful stops...'),
+      summary: isMapboxPlace && !rawSummary ? undefined : summary,
       source_label: basePlace.source_label || 'Place',
     });
     addSearchHistory({ name: basePlace.name, lat: basePlace.lat, lng: basePlace.lng, searchedAt: Date.now() });
@@ -19411,7 +19429,7 @@ function MapScreen() {
               : 'Navigation active'}
           </Text>
           <Text style={s.turnRoad} numberOfLines={1}>
-            {displayStepRoad(nextStep) || navTarget?.name || 'Waiting for route details'}
+            {displayStepRoad(nextStep) || navTarget?.name || 'Preparing route'}
           </Text>
         </View>
       </View>
@@ -20319,13 +20337,17 @@ function MapScreen() {
               autoCorrect={false}
               autoCapitalize="none"
               blurOnSubmit={false}
-              onSubmitEditing={() => searchMap()}
+              onKeyPress={event => {
+                if (event.nativeEvent.key !== 'Enter') return;
+                searchMap(undefined, { autoSelect: true });
+              }}
+              onSubmitEditing={() => searchMap(undefined, { autoSelect: true })}
             />
             {isSearching ? (
               <ActivityIndicator size="small" color={mapChrome.toastText} />
             ) : searchQuery.trim().length > 0 ? (
-              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={() => closeInlineMapSearch(true)} hitSlop={8}>
-                <Ionicons name="close" size={15} color={mapChrome.textMuted} />
+              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={() => searchMap(undefined, { autoSelect: true })} hitSlop={8}>
+                <Ionicons name="arrow-forward" size={15} color={mapChrome.textMuted} />
               </TouchableOpacity>
             ) : (
               <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={focusInlineMapSearch} hitSlop={8}>
@@ -21672,7 +21694,7 @@ function MapScreen() {
           }}
           onSubmit={queryOverride => {
             if (queryOverride != null) setSearchQuery(queryOverride);
-            searchMap(queryOverride);
+            searchMap(queryOverride, { autoSelect: true });
           }}
           onSelect={place => selectSearchResult(place as SearchPlace)}
           onRoute={place => {
@@ -23692,7 +23714,7 @@ function MapScreen() {
             </View>
             <View style={s.navTargetInfo}>
               <Text style={s.navTargetName} numberOfLines={1}>Route active</Text>
-              <Text style={s.navTargetMeta}>Waiting for route details</Text>
+              <Text style={s.navTargetMeta}>Preparing route</Text>
             </View>
           </View>
         )}

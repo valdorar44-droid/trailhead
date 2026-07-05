@@ -78,7 +78,7 @@ export function ExploreHero({
         locations={[0, 1]}
         style={styles.bottomShade}
       />
-      <View style={styles.content}>
+      <View pointerEvents="box-none" style={styles.content}>
         <Text style={styles.greeting}>{displayName ? `${greeting}, ${displayName}` : greeting}</Text>
         <Text style={styles.title}>Find your next adventure</Text>
         {!hideSearch ? (
@@ -191,6 +191,7 @@ function heroCategoryIcon(key: ExploreCategoryKey, fallback: string) {
 
 function heroCategoryWidth(key: ExploreCategoryKey) {
   if (key === 'parks') return 96;
+  if (key === 'camp') return 82;
   if (key === 'waterfalls' || key === 'trailheads' || key === 'glamping' || key === 'peaks') return 84;
   if (key === 'resupply' || key === 'guided') return 74;
   if (key === 'things' || key === 'nearby') return 70;
@@ -231,8 +232,10 @@ const styles = StyleSheet.create({
     textShadowColor: 'rgba(0,0,0,0.28)',
     textShadowRadius: 12,
   },
-  searchRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
+  searchRow: { position: 'relative', zIndex: 10, flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 6 },
   search: {
+    position: 'relative',
+    zIndex: 10,
     flex: 1,
     minHeight: 56,
     borderRadius: 22,
@@ -248,7 +251,7 @@ const styles = StyleSheet.create({
     shadowOpacity: 0.18,
     shadowRadius: 22,
   },
-  input: { flex: 1, color: '#fff', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
+  input: { position: 'relative', zIndex: 11, flex: 1, minHeight: 44, color: '#fff', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
   iconButton: {
     width: 34,
     height: 34,

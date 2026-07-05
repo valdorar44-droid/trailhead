@@ -34,6 +34,7 @@ async function main() {
 async function normalizeOfficialCache(opts: ReturnType<typeof parseCli>) {
   const args = ['scripts/data/normalize_official_cache.py', '--source', opts.source];
   if (opts.limit) args.push('--limit', String(opts.limit));
+  if (opts.searchOnly) args.push('--search-only');
   if (opts.dryRun) args.push('--dry-run');
   await runCommand('python3', args, { dryRun: opts.dryRun });
 }

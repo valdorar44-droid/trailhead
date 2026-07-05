@@ -6,6 +6,7 @@ import { useTheme } from '@/lib/design';
 import {
   getExploreCardSummary,
   getExploreCardSourceLine,
+  getExploreCategoryKey,
   getExploreCategoryColor,
   getExploreDisplayCategory,
   getExploreDisplayRegion,
@@ -16,6 +17,9 @@ import {
   sentenceAwarePreview,
   type ExploreDisplayContext,
 } from './exploreDisplay';
+
+const SCENIC_FALLBACK_IMAGE = require('@/assets/explore-hero-moraine-lake.jpg');
+const TRAIL_FALLBACK_IMAGE = require('@/assets/trail-fallback-backpack-sign.jpg');
 
 type Props = {
   place: ExplorePlaceProfile;
@@ -54,6 +58,7 @@ export function ExplorePlaceCard({
   const title = getExploreDisplayTitle(place);
   const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
   const summary = cardSummaryPreview(getExploreCardSummary(place));
+  const imageSource = imageUrl ? { uri: imageUrl } : fallbackImageForPlace(place);
   if (compact) {
     return (
       <TouchableOpacity
@@ -62,13 +67,7 @@ export function ExplorePlaceCard({
         onPress={onOpen}
       >
         <View style={styles.railImageWrap}>
-          {imageUrl ? (
-            <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
-          ) : (
-            <View style={[styles.imageFallback, { backgroundColor: C.s2 }]}>
-              <Ionicons name={getExploreIcon(place) as any} size={28} color={categoryColor} />
-            </View>
-          )}
+          <Image source={imageSource} style={styles.image} resizeMode="cover" />
           <View style={styles.railShade} />
           <View style={[styles.badge, styles.railBadge]}>
             <Ionicons name={getExploreIcon(place) as any} size={11} color="#fff" />
@@ -96,13 +95,7 @@ export function ExplorePlaceCard({
       onPress={onOpen}
     >
       <View style={[styles.imageWrap, lead && styles.leadImageWrap]}>
-        {imageUrl ? (
-          <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
-        ) : (
-          <View style={[styles.imageFallback, { backgroundColor: C.s2 }]}>
-            <Ionicons name={getExploreIcon(place) as any} size={30} color={categoryColor} />
-          </View>
-        )}
+        <Image source={imageSource} style={styles.image} resizeMode="cover" />
         <View style={styles.imageShade} />
         <View style={styles.badge}>
           <Ionicons name={getExploreIcon(place) as any} size={12} color="#fff" />
@@ -166,6 +159,14 @@ function formatMiles(mi: number) {
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
 }
 
+function fallbackImageForPlace(place: ExplorePlaceProfile) {
+  const category = getExploreCategoryKey(place);
+  if (category === 'camp' || category === 'glamping' || category === 'huts' || category === 'trails' || category === 'trailheads') {
+    return TRAIL_FALLBACK_IMAGE;
+  }
+  return SCENIC_FALLBACK_IMAGE;
+}
+
 function cardSummaryPreview(value?: string | null) {
   const clean = normalizeExploreCopyBlock(value);
   if (!clean) return '';
@@ -206,7 +207,6 @@ const styles = StyleSheet.create({
   leadImageWrap: { height: 286 },
   railImageWrap: { flex: 1 },
   image: { width: '100%', height: '100%' },
-  imageFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   imageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)' },
   railShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
   badge: {

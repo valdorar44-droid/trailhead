@@ -241,7 +241,7 @@ function mediaUrl(url?: string | null) {
 }
 
 function cleanDetailText(value?: string | null) {
-  return String(value ?? '')
+  const clean = String(value ?? '')
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
@@ -253,6 +253,9 @@ function cleanDetailText(value?: string | null) {
     )
     .replace(/\s+/g, ' ')
     .trim();
+  return /^selected\s+place\.?$/i.test(clean)
+    ? 'Search nearby camps, trails, stays, fuel, and services from here.'
+    : clean;
 }
 
 function cleanSourceFreshnessText(value?: string | null) {
@@ -261,14 +264,21 @@ function cleanSourceFreshnessText(value?: string | null) {
     .replace(/Official BLM recreation layer cached by Trailhead;?\s*/gi, 'BLM recreation listing. ')
     .replace(/Official\/open source data cached by Trailhead;?\s*/gi, 'Check current details before you go. ')
     .replace(/Camp source data cached by Trailhead;?\s*/gi, 'Check current camp details before you go. ')
-    .replace(/OpenStreetMap\/Nominatim place identity cached by Trailhead;?\s*/gi, 'Community place listing. ')
+    .replace(/OpenStreetMap\/Nominatim place identity cached by Trailhead;?\s*/gi, 'Local place details. ')
     .replace(/Wikipedia\/Wikimedia context cached by Trailhead;?\s*/gi, 'Reference details. ')
     .replace(/GeoNames\/Wikipedia context cached by Trailhead;?\s*/gi, 'Reference details. ')
     .replace(/Open town profile data cached by Trailhead;?\s*/gi, 'Town profile. ')
+    .replace(/Check current local conditions with official sources\.?/gi, 'Check current access and conditions before you go.')
+    .replace(/Check current local conditions with current local updates\.?/gi, 'Check current access and conditions before you go.')
+    .replace(/Check current local conditions with local updates\.?/gi, 'Check current access and conditions before you go.')
+    .replace(/Verify current local conditions before you go\.?/gi, 'Check current access and conditions before you go.')
+    .replace(/Check current local conditions before you go\.?/gi, 'Check current access and conditions before you go.')
     .replace(/cached by Trailhead;?\s*/gi, '')
     .replace(/\bdownloaded source checked\b/gi, 'Checked')
     .replace(/\bsource data\b/gi, 'listing')
     .replace(/\bopen source data\b/gi, 'public information')
+    .replace(/\bofficial sources\b/gi, 'current local updates')
+    .replace(/Check current local conditions with current local updates\.?/gi, 'Check current access and conditions before you go.')
     .replace(/\bapi\b/gi, '')
     .replace(/\bendpoint\b/gi, '')
     .replace(/\bverify current\b/gi, 'Check current')
@@ -578,7 +588,8 @@ export default function PremiumPlaceSheet({
     visiblePhotos[0]?.credit ? `Photo: ${visiblePhotos[0].credit}` : '',
   ].filter(Boolean);
   const hours = detail?.hours?.length ? detail.hours : data.hours?.length ? data.hours : normalizeHours(data.open_hours, data.hours_label);
-  const sourceFreshness = cleanSourceFreshnessText(data.source_freshness || (data.last_checked ? `Checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Check current access before you go.` : ''));
+  const sourceFreshness = cleanSourceFreshnessText(data.source_freshness || (data.last_checked ? `Checked ${new Date(Number(data.last_checked) * 1000).toLocaleDateString()}. Check current access before you go.` : ''))
+    .replace(/Check current local conditions with current local updates\.?/gi, 'Check current access and conditions before you go.');
   const providerDetails = cleanDetailText(data.description || data.details);
   const summaryText = cleanDetailText(data.summary);
   const showProviderDetails = providerDetails && providerDetails !== summaryText;

@@ -39,7 +39,9 @@ function rewriteFile(file) {
   if (ext === '.js') {
     next = next
       .replace(/appendBaseUrl=function\((\w+),(\w+)=""\)\{if\(\2\)return/g, 'appendBaseUrl=function($1,$2="app"){if($2)return')
+      .replace(/appendBaseUrl=function\((\w+),(\w+)=""\)/g, 'appendBaseUrl=function($1,$2="app")')
       .replace(/getUrlWithReactNavigationConcessions=function\((\w+),(\w+)=""\)\{/g, 'getUrlWithReactNavigationConcessions=function($1,$2="app"){')
+      .replace(/getUrlWithReactNavigationConcessions=function\((\w+),(\w+)=""\)/g, 'getUrlWithReactNavigationConcessions=function($1,$2="app")')
       .replace(/function (\w+)\((\w+),(\w+)=""\)\{return \3\?\2\.replace/g, 'function $1($2,$3="app"){return $3?$2.replace');
   }
 

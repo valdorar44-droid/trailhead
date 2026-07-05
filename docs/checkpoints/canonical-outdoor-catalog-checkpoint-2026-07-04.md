@@ -313,6 +313,27 @@ Time: 2026-07-05
 - Chrome DOM smoke on `http://127.0.0.1:8096/app/map` loaded the bundle and
   found no map startup error strings or bad `/app/app` paths.
 
+## Website App Route Base Checkpoint
+
+Time: 2026-07-05
+
+### Scope
+
+- Updated the website app exporter so Expo Router strips the `/app` base path
+  before matching internal routes.
+- Regenerated the embedded website app bundle through `npm run build`.
+- Preserved the existing public `/app/...` asset layout and direct route
+  fallback pages.
+
+### Verification
+
+- `npm run build`
+- Local Chrome smoke on `http://127.0.0.1:8097/app`,
+  `http://127.0.0.1:8097/app/guide`, and
+  `http://127.0.0.1:8097/app/map` no longer showed Expo Router's not-found
+  screen.
+- Local `/app/map` smoke found no map startup banner.
+
 ## Verification
 
 - `python3 -m unittest tests.test_canonical_catalog_rules`

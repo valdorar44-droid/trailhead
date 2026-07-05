@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, useMemo, useCallback, Component, forwardRe
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, Keyboard, KeyboardAvoidingView, Platform, PanResponder, useWindowDimensions, InteractionManager, type ViewProps } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { NativeMapDebugEvent, NativeMapHandle, NativeMapProps } from '@/components/NativeMap';
+import NativeMap, { type NativeMapDebugEvent, type NativeMapHandle } from '@/components/NativeMap';
 import RouteSearchModal from '@/components/RouteSearchModal';
 import OfflineModal, { type OfflineAreaSelection } from '@/components/NativeMap/OfflineModal';
 import CampCommentsSection from '@/components/map/CampCommentsSection';
@@ -37,12 +37,10 @@ import {
   TrailheadSkeletonLine,
 } from '@/components/TrailheadUI';
 
-// ── Native MapLibre SDK guarded behind the WebView renderer.
-// The native bridge can terminate the app before React can show a fallback on
-// some installed binaries, so keep startup on the WebView map until the native
-// crash is diagnosed from device logs.
-const USE_NATIVE_MAP = false;
-const NativeMap = null as unknown as ForwardRefExoticComponent<NativeMapProps & RefAttributes<NativeMapHandle>>;
+// ── Native Mapbox/MapLibre SDK active. WebView remains as a runtime fallback if
+// map load fails. clusterProperties stay disabled on native — see
+// docs/checkpoints/map-tab-native-cluster-crash-2026-07-03.md.
+const USE_NATIVE_MAP = true;
 import * as Location from 'expo-location';
 import { storage } from '@/lib/storage';
 import * as Speech from 'expo-speech';

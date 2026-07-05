@@ -895,29 +895,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const campCountFont = isExtremeMapbox
     ? ['DIN Pro Medium', 'Arial Unicode MS Regular']
     : ['Noto Sans Medium'];
-  const campClusterProps = useMemo(() => ({
-    camp_cluster_c: ['+', ['case', ['==', ['get', 'camp_code'], 'C'], 1, 0]],
-    camp_cluster_d: ['+', ['case', ['==', ['get', 'camp_code'], 'D'], 1, 0]],
-    camp_cluster_rv: ['+', ['case', ['==', ['get', 'camp_code'], 'RV'], 1, 0]],
-    camp_cluster_p: ['+', ['case', ['==', ['get', 'camp_code'], 'P'], 1, 0]],
-  }), []);
-  const campClusterD = useMemo(() => ['all',
-    ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_c']],
-    ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_rv']],
-    ['>=', ['get', 'camp_cluster_d'], ['get', 'camp_cluster_p']],
-  ], []);
-  const campClusterRv = useMemo(() => ['all',
-    ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_c']],
-    ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_d']],
-    ['>=', ['get', 'camp_cluster_rv'], ['get', 'camp_cluster_p']],
-  ], []);
-  const campClusterP = useMemo(() => ['all',
-    ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_c']],
-    ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_d']],
-    ['>=', ['get', 'camp_cluster_p'], ['get', 'camp_cluster_rv']],
-  ], []);
-  const campClusterCode = useMemo(() => ['case', campClusterD, 'D', campClusterRv, 'RV', campClusterP, 'P', 'C'], [campClusterD, campClusterP, campClusterRv]);
-  const campClusterColor = useMemo(() => ['case', campClusterD, '#8b5a2b', campClusterRv, '#2563eb', campClusterP, '#d97706', '#14b8a6'], [campClusterD, campClusterP, campClusterRv]);
+  // Native @rnmapbox/maps and MapLibre crash on clusterProperties + derived
+  // cluster layers. Keep simple count clusters only; see map-tab-native-cluster-crash audit.
+  const campClusterColor = ['step', ['get', 'point_count'], '#14b8a6', 10, '#0f766e', 50, '#115e59'] as const;
   const [localTiles,   setLocalTiles]   = useState(false);
   const [localContours, setLocalContours] = useState(false);
   const [localTrails, setLocalTrails] = useState(false);
@@ -3129,7 +3109,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         cluster={shouldClusterCamps}
         clusterMaxZoomLevel={campClusterMaxZoom}
         clusterRadius={campClusterRadius}
-        {...({ clusterProperties: campClusterProps } as any)}
         onPress={handleCampPress}
       >
           <MapGL.CircleLayer
@@ -3155,22 +3134,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               circleOpacity: 0.96,
               circleStrokeWidth: 3,
               circleStrokeColor: '#fff',
-            } as any}
-          />
-          <MapGL.SymbolLayer
-            id="camp-cluster-code"
-            {...mapboxTopSlotProps}
-            maxZoomLevel={campClusterMaxZoom + 0.99}
-            filter={['has', 'point_count']}
-            style={{
-              textField: campClusterCode,
-              textColor: '#fff',
-              textSize: ['case', campClusterRv, 8.5, 10.5],
-              textFont: campCodeFont,
-              textAllowOverlap: true,
-              textIgnorePlacement: true,
-              textHaloColor: 'rgba(0,0,0,0.28)',
-              textHaloWidth: 0.8,
             } as any}
           />
           <MapGL.SymbolLayer

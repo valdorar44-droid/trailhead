@@ -106,4 +106,19 @@ Two compounding issues, both isolated to the web renderer
 
 ## Release
 
-- Pending commit / OTA — see follow-up commit for hash and update-group IDs.
+- Code commit: `913dc52` (`Cluster web camp pins, add name labels, fix park
+  misclassification`), pushed to `codex/production-catchup-20260626`.
+- Website `/app` bundle rebuilt via `node scripts/export_website_app.mjs` and
+  committed separately: `51d5f6e` (`Rebuild website /app bundle for camp pin
+  clustering fix`) — new fingerprinted entry bundle
+  `entry-a7d566eb1e856441c754384167409847.js`.
+- Production OTA update group: `8b5f6cc6-7fa1-4c39-a2c0-367ee625a103` (Android
+  `019f341a-023d-7856-94fd-f0927834ace5`, iOS `019f341a-023d-724c-98c2-e535385af4ef`).
+- Preview OTA update group: `92c8291d-519b-42df-b090-c774f7631daf` (Android
+  `019f341a-da0f-771d-b3b4-6dfbe4e2e2be`, iOS `019f341a-da0f-7a96-94a0-52a8881ae147`).
+- Runtime: `native-20260614-sdk54-1`.
+- Note: the OTA update itself only affects the native `NativeMap/index.tsx` bundle
+  that ships in the iOS/Android app binaries; since this specific fix lives in
+  `NativeMap/index.web.tsx` (web-only), the OTA push mainly keeps runtime
+  fingerprints in sync — the meaningful delivery surface for this fix is the
+  rebuilt website `/app` bundle and the Expo web dev/preview server.

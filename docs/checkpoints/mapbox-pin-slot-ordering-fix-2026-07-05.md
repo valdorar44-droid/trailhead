@@ -69,3 +69,16 @@ inconsistent — good camp pins next to degraded gas/POI/water/trail pins.
 - Confirm the fix on a physical iOS/Android binary in Mapbox mode: gas stations,
   OSM POIs, water nav aids, and trail preview pins should now render fully (not as
   bare dots) and stay stable during pitch/zoom, matching camp pins.
+
+## Release
+
+- Code commit: `8949b05` (`Fix inconsistent pin rendering in Mapbox Standard map
+  mode`), pushed to `codex/production-catchup-20260626`.
+- Website `/app` bundle checked — no diff, since the fix is isolated to
+  `NativeMap/index.tsx` (native-only; `index.web.tsx` is unchanged), so no rebuild
+  of `dashboard/site` was needed.
+- Production OTA update group: `8122d993-b5ae-49f8-8b98-0ec713877828` (Android
+  `019f33e6-bd1a-7024-acce-12491a152f97`, iOS `019f33e6-bd1a-7db8-9801-dc178ed811e7`).
+- Preview OTA update group: `aae008b8-6b6c-4e3e-baf5-e92b347f070b` (Android
+  `019f33e7-8c23-7739-bc56-d3805b6eddca`, iOS `019f33e7-8c23-7bcc-a5a2-4bd74f7f5d0b`).
+- Runtime: `native-20260614-sdk54-1`.

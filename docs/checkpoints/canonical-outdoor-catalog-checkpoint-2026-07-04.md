@@ -2616,3 +2616,60 @@ letting direct catalog matches stay ahead of broader regional trails.
   the first trail query. The app startup path prewarms Explore, camp, and trail
   serving indexes; production smoke should be run after that prewarm window.
 - This pass has no mobile code change. OTA is not needed.
+
+## Explorer Trail Locality Cleanup Pass
+
+### Timestamp
+
+2026-07-05T16:30:00-05:00
+
+### Scope
+
+Tightened trail fallback locality for city searches and cleaned broken
+mountain-bike trail titles. This keeps city trail searches closer to the
+requested place while still leaving national-park trail searches wide enough to
+avoid empty screens.
+
+### Files Touched
+
+- `dashboard/server.py`
+  - Adds destination-specific trail radii for Moab, Sedona, Asheville, Pisgah,
+    Big Sur, Grand Canyon, Glacier, and Yosemite.
+  - Uses the destination radius when filling trail searches from the official
+    trail serving index.
+  - Cleans broken `Mountain. Bike` trail-title punctuation.
+- `tests/test_canonical_explore_serving.py`
+  - Adds regression coverage for cleaned mountain-bike trail titles.
+- `tests/test_trail_catalog.py`
+  - Adds regression coverage so Sedona trail search does not lead with
+    Tusayan/Grand Canyon spillover.
+
+### Verification
+
+- `python3 -m unittest tests.test_canonical_explore_serving tests.test_trail_catalog tests.test_canonical_camp_serving tests.test_startup_prewarm`
+  - 80 tests passed.
+- `python3 -m py_compile dashboard/server.py`
+  - Passed.
+- `git diff --check`
+  - Passed.
+- Production-shape local smoke with
+  `TRAILHEAD_CANONICAL_SERVING_DIR=/tmp/trailhead-no-generated-index`:
+  - `Sedona trails`: 90 results, starts with Lime Kiln and Sunflower Flat
+    Mountain Bike.
+  - `Moab trails`: 96 results, starts with Fins and Things OHV Route, Corona
+    Arch Trailhead, Moab Brands Trailhead, and Moab Rim Trailhead.
+  - `Grand Canyon trails`: 90 results, starts with Bright Angel Trailhead and
+    Havasu Falls.
+  - `Yosemite trails`: 98 results, starts with Yosemite Valley Trails and
+    Yosemite trailheads.
+  - `Glacier National Park trails`: 96 results, starts with Apgar Lookout
+    Trailhead and Beaver Pond Loop Trailhead.
+  - No checked title or description contained internal/source placeholder
+    wording or broken `Mountain. Bike` punctuation.
+
+### Remaining Notes
+
+- This is still a locality/ranking cleanup, not a replacement for richer
+  NPS/BLM trail ingestion. The next data pass should add more official park
+  trail geometry/detail so broad trail fills rely less on USFS-only rows.
+- This pass has no mobile code change. OTA is not needed.

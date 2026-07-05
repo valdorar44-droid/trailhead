@@ -120,6 +120,19 @@ class CanonicalExploreServingTests(unittest.TestCase):
                     "verified": True,
                     "review_only": False,
                 },
+                {
+                    "id": "trail:mountain-bike-title",
+                    "name": "Sunflower Flat Mountain. Bike",
+                    "lat": 38.61,
+                    "lng": -109.63,
+                    "distance_mi": 2.4,
+                    "difficulty": "Moderate",
+                    "activity": "Bike trail",
+                    "source_label": "USFS",
+                    "summary": "2.4 miles. Moderate. Bike trail.",
+                    "verified": True,
+                    "review_only": False,
+                },
             ],
         }))
 
@@ -152,6 +165,8 @@ class CanonicalExploreServingTests(unittest.TestCase):
         self.assertIn("John Muir Cabin", titles)
         self.assertIn("Moab Rim Trail", titles)
         self.assertIn("Pine Ridge Trail", titles)
+        self.assertIn("Sunflower Flat Mountain Bike", titles)
+        self.assertNotIn("Sunflower Flat Mountain. Bike", titles)
         self.assertNotIn("Tar Camp Day Use and Dump Station", titles)
         self.assertNotIn("17DC454", titles)
         self.assertNotIn("Broken Copy", titles)

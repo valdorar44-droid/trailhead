@@ -477,6 +477,15 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertIn("Havasu Falls", titles)
         self.assertLess(titles.index("Bright Angel Trailhead"), titles.index("Havasu Falls"))
 
+    def test_explore_city_trail_fallback_stays_near_destination(self):
+        payload = asyncio.run(server.explore_catalog_index(q="Sedona trails", category="trail", limit=8))
+        titles = [item["title"] for item in payload["places"]]
+
+        self.assertGreater(payload["count"], 0)
+        self.assertNotIn("Tusayan Mountain Bike", titles[:6])
+        self.assertNotIn("Beale Wagon Road", titles[:6])
+        self.assertNotRegex(" ".join(titles), r"\bMountain\. Bike\b")
+
     def test_explore_public_copy_repairs_generic_outdoor_area_fallback(self):
         cleaned = server._explore_clean_public_copy(
             "0.4 mile trail. This stop is an outdoor area. Check access, closures, permits.",

@@ -4266,6 +4266,7 @@ def _explore_index_display_category(place: dict, category: str) -> str:
 def _explore_clean_display_title(value: object, *context_values: object, category: object = "") -> str:
     title = re.sub(r"\s+", " ", str(value or "").strip())
     title = re.sub(r"\bLIttle\b", "Little", title)
+    title = re.sub(r"\bM(?:oun)?t(?:ai)?n\.\s+Bike\b", "Mountain Bike", title, flags=re.I)
     letters = [char for char in title if char.isalpha()]
     if letters and len(letters) >= 4:
         upper_ratio = sum(1 for char in letters if char.isupper()) / len(letters)
@@ -5159,6 +5160,22 @@ EXPLORE_TRAIL_DESTINATION_HINTS: dict[str, tuple[str, float, float]] = {
     "canyonlands national park": ("Canyonlands National Park", 38.3269, -109.8783),
 }
 
+EXPLORE_TRAIL_DESTINATION_RADIUS_MILES: dict[str, int] = {
+    "moab": 55,
+    "sedona": 35,
+    "asheville": 45,
+    "pisgah": 70,
+    "big sur": 65,
+    "grand canyon": 95,
+    "grand canyon national park": 95,
+    "grand canyon village": 65,
+    "south rim": 65,
+    "glacier": 95,
+    "glacier national park": 95,
+    "yosemite": 95,
+    "yosemite national park": 95,
+}
+
 def _explore_stay_destination_hint_profiles(destination_query: str) -> list[dict]:
     profiles: list[dict] = []
     seen: set[str] = set()
@@ -5208,6 +5225,7 @@ def _explore_trail_destination_hint_profiles(destination_query: str) -> list[dic
             continue
         seen.add(key)
         slug = re.sub(r"[^a-z0-9]+", "-", key).strip("-")
+        radius_mi = EXPLORE_TRAIL_DESTINATION_RADIUS_MILES.get(query, 65)
         profiles.append({
             "id": f"explore:trail-destination:{slug}",
             "summary": {
@@ -5222,6 +5240,7 @@ def _explore_trail_destination_hint_profiles(destination_query: str) -> list[dic
                 "tags": ["trails"],
                 "hook": title,
                 "short_description": f"Trails around {title}.",
+                "trail_radius_mi": radius_mi,
             },
             "category": "parks",
             "subcategories": ["destination", "trails"],
@@ -5586,11 +5605,15 @@ def _explore_trail_fallback_profiles(q: str = "", limit: int = 120) -> list[dict
         except Exception:
             continue
         destination_name = _explore_clean_display_title(summary.get("title") or destination_query.title())
+        try:
+            radius_mi = float(summary.get("trail_radius_mi") or 65)
+        except Exception:
+            radius_mi = 65
         nearby = _canonical_serving_profiles(
             category="trail",
             lat=lat,
             lng=lng,
-            radius_mi=95,
+            radius_mi=radius_mi,
             limit=max(safe_limit, 80),
             include_trails=True,
         )

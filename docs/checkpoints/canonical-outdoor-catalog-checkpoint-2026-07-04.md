@@ -291,6 +291,28 @@ Time: 2026-07-05
 - Chrome DOM smoke on `http://127.0.0.1:8098/map` found no map startup error
   strings.
 
+## Website App Mapbox Bundle Checkpoint
+
+Time: 2026-07-05
+
+### Scope
+
+- Replaced the embedded website `/app` Expo bundle with the Mapbox raster layer
+  build.
+- Preserved the existing `/app`, `/app/map`, `/app/profile`, `/app/guide`,
+  `/app/report`, `/app/plan`, `/app/route-builder`, and
+  `/app/extreme-explorer` route fallback pages.
+- Rewrote exported asset paths to the website `/app/...` layout so the bundle
+  loads from `dashboard/site/public/app`.
+- Rebuilt `dashboard/site/dist` from the updated public bundle.
+
+### Verification
+
+- `cd dashboard/site && npm run build`
+- Built bundle contains `mapbox-style-raster`.
+- Chrome DOM smoke on `http://127.0.0.1:8096/app/map` loaded the bundle and
+  found no map startup error strings or bad `/app/app` paths.
+
 ## Verification
 
 - `python3 -m unittest tests.test_canonical_catalog_rules`

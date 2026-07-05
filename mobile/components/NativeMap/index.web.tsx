@@ -544,25 +544,40 @@ function webTrailHighlightFromFeatures(features: any[], lng: number, lat: number
   return { type: 'FeatureCollection', features: lineFeatures };
 }
 
-function markerElement(label: string, color: string, ariaLabel?: string, zIndex = 1) {
+function markerElement(
+  label: string,
+  color: string,
+  ariaLabel?: string,
+  zIndex = 1,
+  nameLabel?: string,
+): HTMLDivElement {
+  const cleanLabel = label.trim();
+  const accessibleLabel = String(ariaLabel || (cleanLabel ? `${cleanLabel} marker` : 'Place marker')).trim();
+  const markerCode = cleanLabel ? cleanLabel.slice(0, 3).toUpperCase() : '';
+  const size = markerCode.length > 2 ? 40 : markerCode.length > 1 ? 38 : markerCode ? 34 : 30;
+
+  const wrapper = document.createElement('div');
+  wrapper.style.position = 'relative';
+  wrapper.style.width = `${size}px`;
+  wrapper.style.height = `${size}px`;
+  wrapper.style.pointerEvents = 'none';
+  wrapper.style.zIndex = String(zIndex);
+
   const el = document.createElement('button');
   el.type = 'button';
-  const cleanLabel = label.trim();
   el.textContent = '';
-  const accessibleLabel = String(ariaLabel || (cleanLabel ? `${cleanLabel} marker` : 'Place marker')).trim();
-  const markerCode = cleanLabel ? cleanLabel.slice(0, 2).toUpperCase() : '';
-  const size = markerCode.length > 1 ? 38 : markerCode ? 34 : 30;
   const plate = document.createElement('span');
   plate.textContent = markerCode;
-  plate.style.width = markerCode.length > 1 ? '25px' : '22px';
+  plate.style.maxWidth = `${size - 9}px`;
   plate.style.height = markerCode.length > 1 ? '20px' : '22px';
+  plate.style.padding = markerCode.length > 2 ? '0 4px' : '0';
   plate.style.borderRadius = '999px';
   plate.style.background = 'rgba(15,23,42,0.38)';
   plate.style.color = 'white';
   plate.style.display = 'flex';
   plate.style.alignItems = 'center';
   plate.style.justifyContent = 'center';
-  plate.style.fontSize = markerCode.length > 1 ? '9px' : '10.5px';
+  plate.style.fontSize = markerCode.length > 2 ? '8.5px' : markerCode.length > 1 ? '9px' : '10.5px';
   plate.style.fontWeight = '900';
   plate.style.letterSpacing = '0';
   plate.style.lineHeight = '1';
@@ -571,6 +586,9 @@ function markerElement(label: string, color: string, ariaLabel?: string, zIndex 
   el.appendChild(plate);
   el.setAttribute('aria-label', accessibleLabel);
   el.title = accessibleLabel;
+  el.style.position = 'absolute';
+  el.style.top = '0';
+  el.style.left = '0';
   el.style.width = `${size}px`;
   el.style.height = `${size}px`;
   el.style.borderRadius = '999px';
@@ -580,7 +598,6 @@ function markerElement(label: string, color: string, ariaLabel?: string, zIndex 
   el.style.display = 'flex';
   el.style.alignItems = 'center';
   el.style.justifyContent = 'center';
-  el.style.fontSize = markerCode.length > 1 ? '9px' : '10px';
   el.style.fontWeight = '900';
   el.style.lineHeight = '1';
   el.style.padding = '0';
@@ -590,8 +607,32 @@ function markerElement(label: string, color: string, ariaLabel?: string, zIndex 
   el.style.pointerEvents = 'auto';
   el.style.touchAction = 'manipulation';
   el.style.setProperty('-webkit-tap-highlight-color', 'transparent');
-  el.style.zIndex = String(zIndex);
-  return el;
+  wrapper.appendChild(el);
+
+  const cleanName = String(nameLabel || '').trim();
+  if (cleanName) {
+    const nameTag = document.createElement('span');
+    nameTag.textContent = cleanName;
+    nameTag.style.position = 'absolute';
+    nameTag.style.left = `${size + 6}px`;
+    nameTag.style.top = '50%';
+    nameTag.style.transform = 'translateY(-50%)';
+    nameTag.style.maxWidth = '168px';
+    nameTag.style.overflow = 'hidden';
+    nameTag.style.textOverflow = 'ellipsis';
+    nameTag.style.whiteSpace = 'nowrap';
+    nameTag.style.background = 'rgba(15,23,42,0.82)';
+    nameTag.style.color = 'white';
+    nameTag.style.fontSize = '11px';
+    nameTag.style.fontWeight = '700';
+    nameTag.style.padding = '3px 8px';
+    nameTag.style.borderRadius = '999px';
+    nameTag.style.boxShadow = '0 2px 6px rgba(0,0,0,0.3)';
+    nameTag.style.pointerEvents = 'none';
+    wrapper.appendChild(nameTag);
+  }
+
+  return Object.assign(wrapper, { __clickEl: el, __accessibleLabel: accessibleLabel });
 }
 
 function poiMarkerCode(type?: string | null) {
@@ -604,6 +645,68 @@ function poiMarkerCode(type?: string | null) {
   if (/(food|restaurant|cafe)/.test(raw)) return 'F';
   if (/(camp|rv|caravan)/.test(raw)) return 'C';
   return 'P';
+}
+
+const GENERIC_CAMP_NAME_RE = /^(tent camp|site\s*\d+|primitive\s*\/?\s*dispersed camp|dispersed tent site|rv\s*\/\s*caravan site|campsite\s*\d*)$/i;
+
+function approxMetersBetween(lat1: number, lng1: number, lat2: number, lng2: number) {
+  const latRad = ((lat1 + lat2) / 2) * (Math.PI / 180);
+  const dLat = (lat2 - lat1) * 111320;
+  const dLng = (lng2 - lng1) * 111320 * Math.cos(latRad);
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+}
+
+function campClusterScore(camp: CampsitePin & Record<string, any>): number {
+  const source = String(camp.source || camp.verified_source || camp.source_badge || '').toLowerCase();
+  let score = 0;
+  if (source.includes('recreation.gov') || String(camp.id || '').includes('ridb')) score += 100;
+  if (camp.reservable) score += 20;
+  if (camp.photo_url || (Array.isArray(camp.photos) && camp.photos.length)) score += 10;
+  if (!GENERIC_CAMP_NAME_RE.test(String(camp.name || '').trim())) score += 8;
+  score += Math.min(String(camp.name || '').trim().length, 40) * 0.1;
+  return score;
+}
+
+export type WebCampCluster = {
+  lat: number;
+  lng: number;
+  count: number;
+  representative: CampsitePin;
+  members: CampsitePin[];
+};
+
+function clusterCampsForMap(camps: CampsitePin[], map: any): WebCampCluster[] {
+  const valid = camps.filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lng));
+  if (!valid.length) return [];
+  const zoom = Number(map?.getZoom?.());
+  const safeZoom = Number.isFinite(zoom) ? zoom : 10;
+  const lat0 = valid[0].lat;
+  const metersPerPixel = (156543.03392 * Math.cos((lat0 * Math.PI) / 180)) / Math.pow(2, safeZoom);
+  const thresholdMeters = Math.min(4000, Math.max(30, metersPerPixel * 42));
+  const assigned = new Array(valid.length).fill(false);
+  const clusters: WebCampCluster[] = [];
+  for (let i = 0; i < valid.length; i++) {
+    if (assigned[i]) continue;
+    assigned[i] = true;
+    const group: CampsitePin[] = [valid[i]];
+    for (let j = i + 1; j < valid.length; j++) {
+      if (assigned[j]) continue;
+      const closeToGroup = group.some(m => approxMetersBetween(m.lat, m.lng, valid[j].lat, valid[j].lng) <= thresholdMeters);
+      if (closeToGroup) {
+        assigned[j] = true;
+        group.push(valid[j]);
+      }
+    }
+    const representative = group.slice().sort((a, b) => campClusterScore(b as any) - campClusterScore(a as any))[0];
+    clusters.push({ lat: representative.lat, lng: representative.lng, count: group.length, representative, members: group });
+  }
+  return clusters;
+}
+
+function campClusterLabel(cluster: WebCampCluster): string {
+  const name = cluster.representative.name || 'Camp';
+  if (cluster.count <= 1) return name;
+  return `${name} · ${cluster.count} sites`;
 }
 
 function syncWebMarkers(
@@ -622,25 +725,40 @@ function syncWebMarkers(
     onPress?: () => void,
     ariaLabel?: string,
     zIndex = 1,
+    nameLabel?: string,
   ) => {
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
-    const el = markerElement(label, color, ariaLabel, zIndex);
-    const accessibleLabel = String(ariaLabel || el.title || 'Place marker').trim();
-    el.onclick = event => {
+    const wrapper = markerElement(label, color, ariaLabel, zIndex, nameLabel) as any;
+    const clickEl: HTMLButtonElement = wrapper.__clickEl;
+    const accessibleLabel: string = wrapper.__accessibleLabel;
+    clickEl.onclick = event => {
       event.stopPropagation();
       onPress?.();
     };
-    const marker = new mapboxgl.Marker({ element: el, anchor: 'center' }).setLngLat([lng, lat]).addTo(map);
-    marker.getElement?.()?.setAttribute('aria-label', accessibleLabel);
-    marker.getElement?.()?.setAttribute('title', accessibleLabel);
+    const marker = new mapboxgl.Marker({ element: wrapper, anchor: 'center' }).setLngLat([lng, lat]).addTo(map);
+    clickEl.setAttribute('aria-label', accessibleLabel);
+    clickEl.setAttribute('title', accessibleLabel);
     markerRefs.current.push(marker);
   };
   props.gas.slice(0, 60).forEach(g => add(g.lng, g.lat, 'G', '#eab308', () => props.suppressFeatureTaps ? props.onMapTap(g.lat, g.lng) : props.onGasTap?.(g), `${g.name || 'Fuel'} marker`, 10));
-  props.pois.slice(0, WEB_POI_MARKER_LIMIT).forEach(p => add(p.lng, p.lat, poiMarkerCode(p.type), '#38bdf8', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onPoiTap?.(p as any), `${p.name || 'Place'} marker`, 20));
+  // Camp-like places are rendered through the dedicated camp cluster pass below (with
+  // grouping + name labels); skip them here so a campground never draws twice with two
+  // different, inconsistent marker styles.
+  props.pois
+    .filter(p => poiMarkerCode(p.type) !== 'C')
+    .slice(0, WEB_POI_MARKER_LIMIT)
+    .forEach(p => add(p.lng, p.lat, poiMarkerCode(p.type), '#38bdf8', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onPoiTap?.(p as any), `${p.name || 'Place'} marker`, 20));
   props.communityPins.slice(0, WEB_COMMUNITY_MARKER_LIMIT).forEach(p => add(p.lng, p.lat, '!', '#a855f7', () => props.suppressFeatureTaps ? props.onMapTap(p.lat, p.lng) : props.onCommunityPinTap?.(p), `${(p as any).title || (p as any).name || p.description || 'Community pin'} marker`, 30));
-  props.camps.slice(0, WEB_CAMP_MARKER_LIMIT).forEach(c => {
-    const visual = campMarkerVisual(c as any);
-    add(c.lng, c.lat, visual.code, visual.color, () => props.onCampTap(c), `${c.name || visual.label} ${visual.label} marker`, 80);
+  const campClusters = clusterCampsForMap(props.camps.slice(0, WEB_CAMP_MARKER_LIMIT), map);
+  campClusters.forEach(cluster => {
+    const visual = campMarkerVisual(cluster.representative as any);
+    const isGroup = cluster.count > 1;
+    const code = isGroup ? String(cluster.count) : visual.code;
+    const color = isGroup ? '#0f766e' : visual.color;
+    const ariaLabel = isGroup
+      ? `${cluster.representative.name || visual.label}, ${cluster.count} campsites marker`
+      : `${cluster.representative.name || visual.label} ${visual.label} marker`;
+    add(cluster.lng, cluster.lat, code, color, () => props.onCampTap(cluster.representative), ariaLabel, 80, campClusterLabel(cluster));
   });
   props.waypoints.slice(0, 24).forEach((p, idx) => add(p.lng, p.lat, String(idx + 1), '#f97316', () => props.onWaypointTap(idx, p.name), `${p.name || `Stop ${idx + 1}`} marker`, 90));
   if (props.searchMarker) add(props.searchMarker.lng, props.searchMarker.lat, 'S', '#ef4444', undefined, `${props.searchMarker.name || 'Search result'} marker`, 95);
@@ -658,11 +776,13 @@ function mapWebMapboxFeatureToPlace(feature: any, fallbackLat: number, fallbackL
   const lat = Number(coords[1]);
   if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
   const rawType = String(props.maki || props.class || props.category || props.type || 'poi').toLowerCase();
-  const type = /(fuel|gas|charging)/.test(rawType) ? 'fuel'
-    : /(restaurant|cafe|food)/.test(rawType) ? 'food'
-      : /(camp|rv|caravan)/.test(rawType) ? 'camp'
-        : /(trail|park)/.test(rawType) ? 'trailhead'
-          : 'poi';
+  const type = /(trailhead|trail\s*head)/.test(rawType) ? 'trailhead'
+    : /(fuel|gas|charging)/.test(rawType) ? 'fuel'
+      : /(restaurant|cafe|food)/.test(rawType) ? 'food'
+        : /(camp|rv|caravan)/.test(rawType) ? 'camp'
+          : /(historic|museum|monument|landmark|attraction|tourist|gallery|visitor|\bpark\b|national_park|protected_area|wilderness)/.test(rawType) ? 'attraction'
+            : /(trail|hiking)/.test(rawType) ? 'trailhead'
+              : 'poi';
   return {
     id: `mapbox_feature:${String(props.mapbox_id || props.id || `${lat.toFixed(5)}:${lng.toFixed(5)}:${name}`).slice(0, 160)}`,
     name,
@@ -758,9 +878,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const suppressFeatureTapsRef = useRef(props.suppressFeatureTaps);
   const onMapTapRef = useRef(props.onMapTap);
   const onPoiTapRef = useRef(props.onPoiTap);
+  const latestPropsRef = useRef(props);
   const [mapboxError, setMapboxError] = useState('');
   const initialCenter = useMemo(() => firstUsableCenter(props), [props.userLoc, props.searchMarker, props.waypoints, props.camps]);
   const premiumStyle = (props.premiumMapStyle as PremiumMapStyle | undefined) ?? 'standard';
+
+  useEffect(() => {
+    latestPropsRef.current = props;
+  });
 
   useEffect(() => {
     suppressFeatureTapsRef.current = props.suppressFeatureTaps;
@@ -964,6 +1089,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           syncWebMarkers(mapgl, mapRef.current, props, markerRefs);
         });
         mapRef.current.on('moveend', () => props.onBoundsChange?.(currentBounds(mapRef.current)));
+        mapRef.current.on('zoomend', () => {
+          if (!mapboxGlRef.current || !mapRef.current) return;
+          syncWebMarkers(mapboxGlRef.current, mapRef.current, latestPropsRef.current, markerRefs);
+        });
         mapRef.current.on('click', (e: any) => {
           if (suppressFeatureTapsRef.current) {
             onMapTapRef.current?.(e.lngLat?.lat, e.lngLat?.lng);

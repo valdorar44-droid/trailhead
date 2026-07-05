@@ -256,6 +256,41 @@ Time: 2026-07-05
 - `cd mobile && node scripts/user-facing-copy-audit.mjs`
 - `cd mobile && npx expo export --platform web --output-dir /tmp/trailhead-web-export-map-layers`
 
+## Mapbox WebView Raster Layer Checkpoint
+
+Time: 2026-07-05
+
+### Scope
+
+- Kept native map loading disabled while the startup crash is isolated.
+- Made the existing WebView map render Mapbox style raster tiles for the
+  premium map choices instead of reducing them to the basic fallback.
+- Wired selected premium style through `set_token` and `set_style` messages so
+  layer taps immediately change the rendered base map.
+- Re-enabled premium style choices in the layer sheets while the WebView map is
+  active.
+- Validated the app token against the supported raster style IDs:
+  - Outdoors
+  - Light
+  - Streets
+  - Standard Satellite
+  - Satellite Streets
+  - Navigation Day
+  - Navigation Night
+- Mapped Standard and Dawn to the supported Mapbox Light raster style because
+  the current `mapbox/standard` raster endpoint returns HTTP 400.
+
+### Verification
+
+- `cd mobile && npx tsc --noEmit`
+- `git diff --check`
+- `cd mobile && node scripts/user-facing-copy-audit.mjs`
+- Mapbox raster tile probe against the production public token returned HTTP
+  200 for every style used by the fallback.
+- `cd mobile && npx expo export --platform web --output-dir /tmp/trailhead-web-export-mapbox-raster`
+- Chrome DOM smoke on `http://127.0.0.1:8098/map` found no map startup error
+  strings.
+
 ## Verification
 
 - `python3 -m unittest tests.test_canonical_catalog_rules`

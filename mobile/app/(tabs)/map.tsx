@@ -638,7 +638,7 @@ type PremiumMapStyle =
   | 'dusk'
   | 'night';
 function webSafeMapLayer(layer: MapLayer): MapLayer {
-  return !USE_NATIVE_MAP && layer === 'extreme' ? DEFAULT_MAP_LAYER : layer;
+  return layer;
 }
 
 function legacyLayerForPremiumStyle(style: PremiumMapStyle): MapLayer {
@@ -4037,7 +4037,7 @@ const buildMapHtml = (
   var initGas=${JSON.stringify(gasList.slice(0,20))};
   var initPins=${JSON.stringify(pins.slice(0,30))};
 
-  var map,mapboxToken='',apiBase='https://api.gettrailhead.app',currentStyle='satellite';
+  var map,mapboxToken='',apiBase='https://api.gettrailhead.app',currentStyle='satellite',currentPremiumStyle='outdoors';
   var tileBase='https://tiles.gettrailhead.app';
   // Protomaps API key — set via set_token from RN. When present we fetch tiles
   // directly from Protomaps' CDN (faster); otherwise fall back to our backend
@@ -4093,6 +4093,7 @@ const buildMapHtml = (
     var isTile=url&&(
       url.indexOf('api.mapbox.com/v4/')>=0||
       url.indexOf('api.mapbox.com/raster/')>=0||
+      url.indexOf('api.mapbox.com/styles/v1/')>=0||
       url.indexOf('api.mapbox.com/fonts/')>=0||
       url.indexOf('api.mapbox.com/sprites/')>=0||
       url.indexOf('api.protomaps.com/tiles/')>=0||
@@ -4128,22 +4129,41 @@ const buildMapHtml = (
   function _glyphUrl(){
     return tileBase+'/api/fonts/{fontstack}/{range}.pbf';
   }
+  function _mapboxStyleId(style){
+    switch(style){
+      case 'standard_satellite': return 'standard-satellite';
+      case 'satellite_streets': return 'satellite-streets-v12';
+      case 'streets': return 'streets-v12';
+      case 'navigation_day': return 'navigation-day-v1';
+      case 'navigation_night': return 'navigation-night-v1';
+      case 'dusk':
+      case 'night': return 'navigation-night-v1';
+      case 'standard':
+      case 'dawn': return 'light-v11';
+      case 'outdoors':
+      default: return 'outdoors-v12';
+    }
+  }
   function buildStyle(mode){
     var sources={
       pm:{type:'vector',tiles:[_tileUrl()],maxzoom:15,attribution:'© OpenStreetMap'}
     };
+    var mapboxStyleBase=(mode==='extreme'||mode==='mapbox')&&mapboxToken;
     if((mode==='satellite'||mode==='hybrid')&&mapboxToken){
       sources['sat']={type:'raster',tiles:['https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token='+mapboxToken],tileSize:512,maxzoom:19};
+    }
+    if(mapboxStyleBase){
+      sources['mbstyle']={type:'raster',tiles:['https://api.mapbox.com/styles/v1/mapbox/'+_mapboxStyleId(currentPremiumStyle)+'/tiles/512/{z}/{x}/{y}@2x?access_token='+mapboxToken],tileSize:512,maxzoom:22};
     }
     var labelOpacity=mode==='satellite'?0.0:1.0; // pure satellite hides vector labels
     // Polished dark outdoor palette — modeled on Protomaps' official dark theme
     // but tuned warmer for an overlanding feel. All filters use the real
     // Protomaps tiles v4 property "kind" (not pmap:kind).
-    var hidden=mode==='satellite';
+    var hidden=mode==='satellite'||mapboxStyleBase;
     var sat=mode==='satellite', hyb=mode==='hybrid';
-    var roadOpacity=sat?0.0:1.0;
-    var labelOpacity=sat?0.0:1.0;
-    var fillOpacity=sat?0.0:(hyb?0.40:1.0);
+    var roadOpacity=(sat||mapboxStyleBase)?0.0:1.0;
+    var labelOpacity=(sat||mapboxStyleBase)?0.0:1.0;
+    var fillOpacity=(sat||mapboxStyleBase)?0.0:(hyb?0.40:1.0);
     var palettes={
       topo:['#1c1f26','#272a30','#1a2940','#2a3f2c','#243325','#2c3327','#2b2e34','#6e7079','#a8896a','#d8a23a','#1c1f26'],
       light:['#f6f7f2','#f0f2ea','#b9d8ed','#dbeed4','#d4ead0','#e4efd5','#eceff3','#9ca3af','#d18a2d','#f97316','#ffffff'],
@@ -4154,13 +4174,16 @@ const buildMapHtml = (
       dark:['#0b1020','#101827','#08233d','#102719','#0f2117','#1d2615','#1c2433','#818cf8','#d6a143','#fbbf24','#020617'],
       red:['#12090b','#180d10','#1e1b4b','#251112','#211011','#2a1610','#201013','#fca5a5','#ef4444','#f97316','#060202']
     };
-    var pal=palettes[(sat||hyb)?'topo':mode]||palettes.topo;
+    var pal=palettes[(sat||hyb||mapboxStyleBase)?'topo':mode]||palettes.topo;
     var lwHalo=sat?'rgba(0,0,0,0.85)':pal[10];
     var layers=[
       {id:'bg',type:'background',paint:{'background-color':sat?'#000':pal[0]}},
     ];
     if(sources.sat){
       layers.push({id:'satellite',type:'raster',source:'sat',paint:{'raster-opacity':1.0,'raster-fade-duration':200}});
+    }
+    if(sources.mbstyle){
+      layers.push({id:'mapbox-style-raster',type:'raster',source:'mbstyle',paint:{'raster-opacity':1.0,'raster-fade-duration':180}});
     }
     layers=layers.concat([
       // ── Earth + landcover (low-zoom continents, then refined inland) ─────────
@@ -4990,6 +5013,7 @@ const buildMapHtml = (
       if(msg.apiBase)apiBase=msg.apiBase;
       if(typeof msg.protomapsKey==='string')protomapsKey=msg.protomapsKey;
       if(typeof msg.token==='string')mapboxToken=msg.token;
+      if(typeof msg.premiumStyle==='string')currentPremiumStyle=msg.premiumStyle;
       var nextStyle=msg.style||currentStyle||'satellite';
       if(map){
         currentStyle=nextStyle;
@@ -5075,7 +5099,11 @@ const buildMapHtml = (
     }
     if(msg.type==='set_reports'){allReports=msg.reports||[];updateReportMarkers();}
     if(msg.type==='add_report'){allReports=allReports.filter(function(r){return r.id!==msg.report.id;});allReports.push(msg.report);updateReportMarkers();}
-    if(msg.type==='set_style'&&msg.style){currentStyle=msg.style;map.setStyle(buildStyle(msg.style));}
+    if(msg.type==='set_style'&&msg.style){
+      currentStyle=msg.style;
+      if(typeof msg.premiumStyle==='string')currentPremiumStyle=msg.premiumStyle;
+      map.setStyle(buildStyle(msg.style));
+    }
     if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
     if(msg.type==='set_usgs_overlay')setUsgsOverlay(!!msg.show);
     if(msg.type==='set_water_nav_lines'&&map.getSource('water-nav-lines')){map.getSource('water-nav-lines').setData(msg.data||{type:'FeatureCollection',features:[]});}
@@ -6562,6 +6590,7 @@ function MapScreen() {
         webRef.current?.postMessage(JSON.stringify({
           type: 'set_token', token,
           style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
+          premiumStyle: premiumMapStyle,
           apiBase: API_BASE_URL,
           protomapsKey: pmKey,
         }));
@@ -15135,12 +15164,13 @@ function MapScreen() {
     applyMapLayer(next);
   }
 
-  function applyMapLayer(next: MapLayer) {
+  function applyMapLayer(next: MapLayer, premiumStyleOverride?: PremiumMapStyle) {
     const safeLayer = webSafeMapLayer(next);
     setMapLayerState(safeLayer);
     webRef.current?.postMessage(JSON.stringify({
       type: 'set_style',
       style: MAP_MODES[safeLayer] ?? MAP_MODES[DEFAULT_MAP_LAYER],
+      premiumStyle: premiumStyleOverride ?? premiumMapStyle,
     }));
   }
 
@@ -18916,12 +18946,10 @@ function MapScreen() {
   ] as const;
   const mapboxStyleItems = mapboxStyleOptions.map(option => ({
     ...option,
-    active: USE_NATIVE_MAP
-      ? option.id === premiumMapStyle
-      : legacyLayerForPremiumStyle(option.id) === mapLayer,
+    active: option.id === premiumMapStyle && mapLayer === 'extreme',
     onPress: () => {
       setPremiumMapStyle(option.id);
-      applyMapLayer(USE_NATIVE_MAP ? 'extreme' : legacyLayerForPremiumStyle(option.id));
+      applyMapLayer('extreme', option.id);
       if (user?.id) {
         api.logExtremeLedger({
           event_type: 'mapbox_style_selected',
@@ -19879,6 +19907,7 @@ function MapScreen() {
             webRef.current?.postMessage(JSON.stringify({
               type: 'set_token', token: mapboxToken,
               style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
+              premiumStyle: premiumMapStyle,
               apiBase: API_BASE_URL,
               protomapsKey,
             }));
@@ -23351,9 +23380,9 @@ function MapScreen() {
         bottomInset={bottomInset}
         activeMapLayer={mapLayer}
         options={mapStyleOptions}
-        premiumMapVisible={USE_NATIVE_MAP && extremeMapboxSupported && !!mapboxToken}
+        premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
         premiumMapItems={mapboxStyleItems}
-        extremeActive={USE_NATIVE_MAP && extremeMapLayerActive}
+        extremeActive={extremeMapLayerActive}
         onClose={() => setShowMapStyleSheet(false)}
         onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
       />
@@ -23576,9 +23605,9 @@ function MapScreen() {
             mapStyleOptions={mapStyleOptions}
             activeMapLayer={mapLayer}
             onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
-            extremeMapLayerActive={USE_NATIVE_MAP && extremeMapLayerActive}
+            extremeMapLayerActive={extremeMapLayerActive}
             layerItems={layerSheetItems}
-            mapboxStylesVisible={USE_NATIVE_MAP && extremeMapboxSupported && !!mapboxToken}
+            mapboxStylesVisible={extremeMapboxSupported && !!mapboxToken}
             mapboxStyleItems={mapboxStyleItems}
             mapToolItems={extremeFeatureItems}
             safeWaterLegendVisible={layerNautical}

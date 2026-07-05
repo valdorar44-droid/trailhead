@@ -3391,9 +3391,9 @@ def _catalog_serving_prewarm_delay_seconds() -> float:
     if _catalog_prewarm_blocks_startup():
         return 0.0
     try:
-        return max(0.0, float(os.getenv("TRAILHEAD_SERVING_INDEX_PREWARM_DELAY_SECONDS", "10")))
+        return max(0.0, float(os.getenv("TRAILHEAD_SERVING_INDEX_PREWARM_DELAY_SECONDS", "0")))
     except Exception:
-        return 10.0
+        return 0.0
 
 
 def _set_catalog_prewarm_status(state: str, *, error: str = "") -> None:
@@ -3450,12 +3450,12 @@ async def _prewarm_explore_catalog():
 
 
 def _prewarm_canonical_serving_indexes() -> None:
-    _load_canonical_explore_index()
-    _load_canonical_trail_index()
     try:
         _load_canonical_camp_index()
     except NameError:
         pass
+    _load_canonical_explore_index()
+    _load_canonical_trail_index()
 
 
 def _apply_explore_story_overrides(catalog: dict) -> dict:

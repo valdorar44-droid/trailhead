@@ -2546,4 +2546,6 @@ and lodging cards appear before bare recreation-area names.
   `TRAILHEAD_CANONICAL_SERVING_DIR=/tmp/trailhead-no-generated-index` returned
   real stay results for Big Sur, Moab, Yosemite, and Glacier with no blocked
   title wording.
+- Serving-index prewarm now starts immediately and loads the camp index first
+  so the first real camp/stay search is less likely to pay the cold index load.
 - This pass still has no mobile code change. OTA is not needed.

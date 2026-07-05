@@ -2613,7 +2613,7 @@ function GuideScreenContent() {
       if (queryHasDestinationTerms && queryRequiresIdentityMatch && identityScore <= 0 && activeSearchScore <= 0) return 0;
       const intentScore = scoreExploreBrowseIntent(place, placeQuery, exploreHubMeta.categoryKeysByHubId, false);
       if (queryHasDestinationTerms && baseScore <= 0) return 0;
-      if (!selectedCategoryDestinationSearch && queryHasBrowseIntent && intentScore < 35) return 0;
+      if (!selectedCategoryDestinationSearch && queryHasBrowseIntent && intentScore < 35 && !(stayDestinationQuery && explorePlaceActiveSearchCanSatisfyIdentity(place, query))) return 0;
       return baseScore + intentScore;
     };
     const concreteBrowseMatchesExist = browseIntentNeedsPrimaryMatch && places.some(({ place }) => (
@@ -2635,11 +2635,14 @@ function GuideScreenContent() {
         && explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase);
       const directQueryIdentityMatch = !!queryDestinationPhrase
         && explorePlaceIdentityMatchesDestination(place, queryDestinationPhrase);
-      if (exactDestinationPhrase && !explorePlaceIdentitySearchText(place).includes(exactDestinationPhrase)) return false;
       const matchedCurrentRemoteSearch = !!normalizedActiveQuery
         && normalizeExploreText(String((place as any).matched_explore_query || '')) === normalizedActiveQuery;
+      const matchedCurrentStayRemoteSearch = stayDestinationQuery
+        && matchedCurrentRemoteSearch
+        && explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery);
+      if (exactDestinationPhrase && !matchedCurrentStayRemoteSearch && !explorePlaceIdentitySearchText(place).includes(exactDestinationPhrase)) return false;
       if (queryRequiresIdentityMatch && hasCurrentRemoteSearchMatches && !matchedCurrentRemoteSearch && !directQueryIdentityMatch) return false;
-      if (queryRequiresIdentityMatch && !directQueryIdentityMatch && !explorePlaceStrictlyMatchesDestination(place, queryDestinationPhrase)) return false;
+      if (queryRequiresIdentityMatch && !directQueryIdentityMatch && !matchedCurrentStayRemoteSearch && !explorePlaceStrictlyMatchesDestination(place, queryDestinationPhrase)) return false;
 	      if (!exploreSavedOnly && placeQuery && isLegacyExploreAreaWrapper(place) && exploreHubMeta.parentByChildId.has(place.id) && !directThingsToDoDestinationWrapper && !directQueryIdentityMatch) return false;
 	      const standaloneThingsBrowse = !placeQuery && browseExploreCategory === 'things';
 	      const categoryOk = standaloneThingsBrowse
@@ -2650,8 +2653,8 @@ function GuideScreenContent() {
 	      if (!categoryOk && !directStayDestinationHub) return false;
 	      if (!queryHasDestinationTerms && isExactWaterfallBrowseQuery(placeQuery) && !explorePlaceStronglyMatchesWaterfall(place)) return false;
 	      if (thingsToDoQuery && !explorePlaceMatchesThingsToDo(place, exploreHubMeta.categoryKeysByHubId)) return false;
-      if (browseIntentNeedsPrimaryMatch && !directStayDestinationHub && !directQueryIdentityMatch && !explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery)) return false;
-      if (browseExploreCategory === 'all' && queryCategory && queryCategory !== 'guided' && queryCategory !== 'tours' && !directStayDestinationHub && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
+      if (browseIntentNeedsPrimaryMatch && !directStayDestinationHub && !directQueryIdentityMatch && !matchedCurrentStayRemoteSearch && !explorePlacePrimaryCategoryMatchesBrowseIntent(place, placeQuery)) return false;
+      if (browseExploreCategory === 'all' && queryCategory && queryCategory !== 'guided' && queryCategory !== 'tours' && !directStayDestinationHub && !matchedCurrentStayRemoteSearch && !exploreCategoryMatchesWithHub(place, queryCategory, exploreHubMeta.categoryKeysByHubId)) return false;
       if (!placeQuery) return true;
       return queryScoreForPlace(place) > 0;
     });
@@ -2755,6 +2758,7 @@ function GuideScreenContent() {
       || exploreSearchResolving
       || query.length < 2
       || !exploreQueryHasBrowseIntent(query)
+      || isStayExploreQuery(query)
       || rankedExplore.length !== 1
     ) {
       return;

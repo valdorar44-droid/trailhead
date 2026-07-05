@@ -2408,3 +2408,74 @@ presentation issues after the media fix:
 - The broad catalog goal remains active. This pass is ready to ship, but the
   wider app audit still has follow-up areas around Explorer depth, map pins,
   route builder, and guided tours.
+
+## Explorer Stay Search Destination Pass
+
+### Timestamp
+
+2026-07-05T00:53:07-05:00
+
+### Scope
+
+Live Explorer searches exposed a gap where the backend returned useful stay
+and camp results, but the mobile/web Explorer client filtered them into an
+empty state. This pass focused on destination stay searches and campground
+searches around Big Sur and Glacier.
+
+### Files Touched
+
+- `dashboard/server.py`
+  - Adds fast stay-search destination anchors for common outdoor regions such
+    as Big Sur, Glacier, Yosemite, Moab, Yellowstone, Zion, Grand Canyon, Grand
+    Teton, Acadia, and Great Smoky Mountains.
+  - Uses the destination stay fallback before the slower generic source sweep
+    when it already has real stay cards.
+  - Preserves curated catalog matches such as Many Glacier Hotel while keeping
+    Big Sur stay search fast.
+  - Cleans duplicated `before you go` sentence fragments from mixed source
+    descriptions.
+- `mobile/app/(tabs)/guide.tsx`
+  - Lets current remote stay-search results pass destination identity, inferred
+    category, and intent-score gates when the backend already matched the
+    active query.
+  - Stops the legacy wrapper refinement from redirecting stay searches like
+    `Glacier where to stay` toward Glacier Bay.
+- `tests/test_trail_catalog.py`
+  - Adds regression coverage for Glacier stay/camp destination search and the
+    duplicated condition-copy cleanup.
+- `dashboard/site/public/app/*`
+  - Re-exported the web app bundle after the Explorer client patch.
+
+### Verification
+
+- `python3 -m unittest tests.test_trail_catalog.TrailCatalogTests.test_explore_where_to_stay_falls_back_to_nearby_camps tests.test_trail_catalog.TrailCatalogTests.test_explore_stay_search_uses_destination_before_generic_text_matches tests.test_trail_catalog.TrailCatalogTests.test_explore_public_copy_repairs_generic_outdoor_area_fallback tests.test_canonical_explore_serving tests.test_canonical_camp_serving`
+  - 26 tests passed.
+- `cd mobile && npx tsc --noEmit --pretty false`
+  - Passed.
+- `git diff --check`
+  - Passed.
+- `npm run export:webapp`
+  - Passed and re-exported `/app`.
+- Backend timing smoke:
+  - `Big Sur where to stay` returned real cards in about 1.8s.
+  - `Glacier where to stay` returned real cards in about 2.3s.
+  - `Glacier campgrounds` returned real cards in about 1.6s.
+- Live Chromium mobile pass on `http://127.0.0.1:8099/app/guide`
+  - `Big Sur where to stay` showed China Camp Campground and Arroyo Seco cards.
+  - `Glacier campgrounds` showed Many Glacier Campground cards.
+  - `Glacier where to stay` showed Many Glacier Hotel and no Glacier Bay cabin
+    drift.
+  - No checked page text contained empty-state copy, forbidden internal wording,
+    or the duplicated `before you go` sentence.
+
+### Screenshots
+
+- `/tmp/trailhead-explorer-big-sur-stays-final.png`
+- `/tmp/trailhead-explorer-glacier-camps-final.png`
+- `/tmp/trailhead-explorer-glacier-stays-final.png`
+
+### Remaining Notes
+
+- Yosemite stay search is now fast, but some lower-quality facility cards still
+  appear after the top results. Leave that as a targeted stay-quality cleanup
+  instead of reworking the fixed Big Sur/Glacier path.

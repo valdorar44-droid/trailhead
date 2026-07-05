@@ -482,8 +482,13 @@ class TrailCatalogTests(unittest.TestCase):
             "0.4 mile trail. This stop is an outdoor area. Check access, closures, permits.",
             240,
         )
+        duplicated_condition = server._explore_clean_public_copy(
+            "Check current access, closures, permits, and trail conditions before you go., and weather before you go.",
+            240,
+        )
 
         self.assertEqual(cleaned, "0.4 mile trail. Check current access, closures, permits, and trail conditions before you go.")
+        self.assertEqual(duplicated_condition, "Check current access, closures, permits, trail conditions, and weather before you go.")
         self.assertNotIn("This stop is an outdoor area", cleaned)
 
     def test_explore_public_copy_removes_agency_as_place_fallback(self):
@@ -1026,6 +1031,24 @@ class TrailCatalogTests(unittest.TestCase):
         )
         self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|mixed-source)\b")
         self.assertNotRegex(visible, r"\b[A-Z]{4,}\s+\([A-Za-z ]+\)")
+
+    def test_explore_stay_search_uses_destination_before_generic_text_matches(self):
+        glacier_camps = asyncio.run(server.explore_catalog_index(q="Glacier campgrounds", category="campground", limit=12))
+        camp_titles = [item["title"] for item in glacier_camps["places"]]
+
+        self.assertGreater(glacier_camps["count"], 0)
+        self.assertIn("Many Glacier Campground", camp_titles)
+        self.assertTrue(any(title in camp_titles for title in ("Avalanche Campground", "Fish Creek", "Apgar Campground")))
+
+        glacier_stays = asyncio.run(server.explore_catalog_index(q="Glacier where to stay", category="lodging", limit=12))
+        stay_titles = [item["title"] for item in glacier_stays["places"]]
+        visible = " ".join(stay_titles)
+
+        self.assertGreater(glacier_stays["count"], 0)
+        self.assertIn("Many Glacier Hotel", stay_titles)
+        self.assertNotIn("Yosemite High Sierra Camps", stay_titles)
+        self.assertNotIn("Coleman Glacier Climbing Route", stay_titles)
+        self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|mixed-source)\b")
 
     def test_nearby_store_query_does_not_drop_exact_curated_match_before_sort(self):
         old_path = store.settings.db_path

@@ -1629,6 +1629,13 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     text = re.sub(r"\bscenic-route anchor\b", "scenic stop", text, flags=re.I)
     text = re.sub(r"\b(?:day|overnight|route|planning)\s+anchor\b", "stop", text, flags=re.I)
     text = re.sub(r"\banchor\b", "stop", text, flags=re.I)
+    text = re.sub(
+        r"Check current access,\s*closures,\s*permits,\s*and trail conditions before you go\.?,?\s*and weather before you go\.?",
+        "Check current access, closures, permits, trail conditions, and weather before you go.",
+        text,
+        flags=re.I,
+    )
+    text = re.sub(r"\bbefore you go\.?,?\s*and weather before you go\.?", "before you go.", text, flags=re.I)
     text = re.sub(r"(?<=[.!?])\s+(?:area|nearby)\.$", "", text, flags=re.I)
     text = re.sub(r"\b(?:and|or|with|for|to|of|near|around)\.$", ".", text, flags=re.I)
     if text.count('"') % 2:
@@ -5010,6 +5017,146 @@ def _explore_stay_destination_query(q: str) -> str:
     cleaned = [term for term in terms if term not in intent]
     return " ".join(cleaned) or re.sub(r"\s+", " ", str(q or "").strip())
 
+def _explore_stay_destination_search_queries(destination_query: str) -> list[str]:
+    destination = re.sub(r"\s+", " ", str(destination_query or "").strip().lower())
+    if not destination:
+        return []
+    queries = [destination]
+    if destination == "glacier":
+        queries.insert(0, "glacier national park")
+    if destination == "yosemite":
+        queries.insert(0, "yosemite national park")
+    if destination == "yellowstone":
+        queries.insert(0, "yellowstone national park")
+    if destination == "zion":
+        queries.insert(0, "zion national park")
+    if destination == "grand canyon":
+        queries.insert(0, "grand canyon national park")
+    seen: set[str] = set()
+    unique: list[str] = []
+    for query in queries:
+        if query and query not in seen:
+            seen.add(query)
+            unique.append(query)
+    return unique
+
+EXPLORE_STAY_DESTINATION_HINTS: dict[str, tuple[str, float, float]] = {
+    "moab": ("Moab", 38.5733, -109.5498),
+    "big sur": ("Big Sur", 36.2704, -121.8081),
+    "glacier": ("Glacier National Park", 48.6841, -113.8009),
+    "glacier national park": ("Glacier National Park", 48.6841, -113.8009),
+    "yosemite": ("Yosemite National Park", 37.8651, -119.5383),
+    "yosemite national park": ("Yosemite National Park", 37.8651, -119.5383),
+    "yellowstone": ("Yellowstone National Park", 44.4280, -110.5885),
+    "yellowstone national park": ("Yellowstone National Park", 44.4280, -110.5885),
+    "zion": ("Zion National Park", 37.2982, -113.0263),
+    "zion national park": ("Zion National Park", 37.2982, -113.0263),
+    "grand canyon": ("Grand Canyon National Park", 36.2679, -112.3535),
+    "grand canyon national park": ("Grand Canyon National Park", 36.2679, -112.3535),
+    "grand teton": ("Grand Teton National Park", 43.7904, -110.6818),
+    "grand teton national park": ("Grand Teton National Park", 43.7904, -110.6818),
+    "acadia": ("Acadia National Park", 44.3386, -68.2733),
+    "acadia national park": ("Acadia National Park", 44.3386, -68.2733),
+    "great smoky mountains": ("Great Smoky Mountains National Park", 35.6118, -83.4895),
+    "great smoky mountains national park": ("Great Smoky Mountains National Park", 35.6118, -83.4895),
+}
+
+def _explore_stay_destination_hint_profiles(destination_query: str) -> list[dict]:
+    profiles: list[dict] = []
+    seen: set[str] = set()
+    for query in _explore_stay_destination_search_queries(destination_query):
+        hint = EXPLORE_STAY_DESTINATION_HINTS.get(query)
+        if not hint:
+            continue
+        title, lat, lng = hint
+        key = title.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        slug = re.sub(r"[^a-z0-9]+", "-", key).strip("-")
+        profiles.append({
+            "id": f"explore:destination:{slug}",
+            "summary": {
+                "title": title,
+                "category": "Destination",
+                "explore_group": "parks",
+                "region": title,
+                "lat": lat,
+                "lng": lng,
+                "rank": 700000,
+                "hero_rank": 700000,
+                "tags": ["stays", "campgrounds"],
+                "hook": title,
+                "short_description": f"Places to stay around {title}.",
+            },
+            "category": "parks",
+            "subcategories": ["destination", "stays"],
+            "search_aliases": [title, query],
+        })
+    return profiles
+
+def _explore_stay_destination_profiles(destination_query: str, *, limit: int = 12) -> list[dict]:
+    safe_limit = max(1, min(int(limit or 12), 40))
+    hint_profiles = _explore_stay_destination_hint_profiles(destination_query)
+    if hint_profiles:
+        return hint_profiles[:safe_limit]
+    destination_profiles: list[dict] = []
+    for search_query in _explore_stay_destination_search_queries(destination_query):
+        destination_profiles.extend(_canonical_serving_profiles(q=search_query, category="", limit=safe_limit))
+        destination_profiles.extend(_official_cache_search_profiles(q=search_query, category="", limit=safe_limit))
+    query_terms = _explore_query_terms_for_category(destination_query, "")
+    if query_terms:
+        destination_profiles = [
+            place for place in destination_profiles
+            if _explore_query_terms_match(place, query_terms)
+            or any(_explore_query_terms_match(place, _explore_query_terms_for_category(query, "")) for query in _explore_stay_destination_search_queries(destination_query))
+        ]
+    destination_profiles = _dedupe_ranked_explore_profiles(_merge_explore_profile_lists([], destination_profiles))
+    search_queries = _explore_stay_destination_search_queries(destination_query)
+    def destination_sort_key(place: dict) -> tuple[int, int, float, float]:
+        summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+        title_phrase = " ".join(re.findall(r"[a-z0-9]+", str(summary.get("title") or "").lower()))
+        exact_title = any(title_phrase == query for query in search_queries)
+        contains_title = any(f" {query} " in f" {title_phrase} " for query in search_queries)
+        return (
+            0 if exact_title else 1,
+            0 if contains_title else 1,
+            *_explore_query_sort_key(place, query_terms),
+        )
+    destination_profiles.sort(key=lambda place: (
+        0 if _explore_is_destination_hub(place) else 1,
+        *destination_sort_key(place),
+    ))
+    return destination_profiles[:safe_limit]
+
+def _explore_profile_with_stay_destination(profile: dict, destination_name: str) -> dict:
+    if not destination_name:
+        return profile
+    enriched = dict(profile)
+    aliases = [*list(enriched.get("search_aliases") or []), destination_name]
+    enriched["search_aliases"] = list(dict.fromkeys(str(alias) for alias in aliases if str(alias or "").strip()))
+    summary = dict(enriched.get("summary") or {})
+    if not summary.get("region"):
+        summary["region"] = destination_name
+    enriched["summary"] = summary
+    card = dict(enriched.get("card") or {})
+    if not card.get("region"):
+        card["region"] = destination_name
+    enriched["card"] = card
+    return enriched
+
+def _explore_profile_near_destination(profile: dict, destinations: list[dict], *, radius_mi: float = 120.0) -> bool:
+    point = _explore_profile_point(profile)
+    if point == (None, None):
+        return False
+    for destination in destinations:
+        dest_point = _explore_profile_point(destination)
+        if dest_point == (None, None):
+            continue
+        if _haversine_m(point[0], point[1], dest_point[0], dest_point[1]) <= radius_mi * 1609.344:
+            return True
+    return False
+
 def _camp_record_to_explore_profile(camp: dict, *, rank: int = 736000, destination: str = "") -> dict | None:
     try:
         lat = float(camp.get("lat"))
@@ -5106,13 +5253,37 @@ def _camp_record_to_explore_profile(camp: dict, *, rank: int = 736000, destinati
         "media": [{"url": photo_url}] if photo_url else [],
     })
 
-def _explore_stay_fallback_profiles(q: str = "", limit: int = 120) -> list[dict]:
+def _explore_stay_fallback_profiles(q: str = "", limit: int = 120, *, include_lodging: bool = False) -> list[dict]:
     if not q:
         return []
     destination_query = _explore_stay_destination_query(q)
     if not destination_query:
         return []
     safe_limit = max(1, min(int(limit or 120), 300))
+    nearby_profiles: list[dict] = []
+    for destination in _explore_stay_destination_profiles(destination_query, limit=12)[:6]:
+        summary = destination.get("summary") if isinstance(destination.get("summary"), dict) else {}
+        try:
+            lat = float(summary.get("lat"))
+            lng = float(summary.get("lng"))
+        except Exception:
+            continue
+        destination_name = _explore_clean_display_title(summary.get("title") or destination_query.title())
+        if include_lodging:
+            nearby_profiles.extend(
+                _explore_profile_with_stay_destination(profile, destination_name)
+                for profile in [
+                    *_canonical_serving_profiles(category="lodging", lat=lat, lng=lng, radius_mi=80, limit=max(safe_limit, 40), include_trails=False),
+                    *_official_cache_nearby_profiles(lat, lng, category="lodging", limit=max(safe_limit, 40), radius_mi=80),
+                ]
+            )
+        camps = _canonical_camps_near(lat, lng, 80, limit=max(safe_limit, 40))
+        nearby_profiles.extend(
+            profile for idx, camp in enumerate(camps, start=1)
+            if (profile := _camp_record_to_explore_profile(camp, rank=736000 + idx, destination=destination_name))
+        )
+        if len(nearby_profiles) >= safe_limit:
+            break
     candidates = [
         *_official_cache_search_profiles(q=destination_query, category="camp", limit=min(safe_limit, 120)),
         *_canonical_serving_profiles(q=destination_query, category="camp", limit=safe_limit),
@@ -5122,27 +5293,9 @@ def _explore_stay_fallback_profiles(q: str = "", limit: int = 120) -> list[dict]
     query_terms = _explore_query_terms_for_category(destination_query, "camp")
     if query_terms:
         candidates = [place for place in candidates if _explore_query_terms_match(place, query_terms)]
-    candidates = _dedupe_ranked_explore_profiles(_merge_explore_profile_lists([], candidates))
+    candidates = _dedupe_ranked_explore_profiles(_merge_explore_profile_lists(nearby_profiles, candidates))
     if candidates:
         return candidates[:safe_limit]
-    destinations = _canonical_serving_profiles(q=destination_query, category="", limit=12)
-    destinations.extend(_official_cache_search_profiles(q=destination_query, category="", limit=12))
-    destinations = [place for place in _dedupe_ranked_explore_profiles(_merge_explore_profile_lists([], destinations)) if _explore_query_terms_match(place, query_terms)]
-    for destination in destinations[:6]:
-        summary = destination.get("summary") if isinstance(destination.get("summary"), dict) else {}
-        try:
-            lat = float(summary.get("lat"))
-            lng = float(summary.get("lng"))
-        except Exception:
-            continue
-        destination_name = _explore_clean_display_title(summary.get("title") or destination_query.title())
-        camps = _canonical_camps_near(lat, lng, 80, limit=max(safe_limit, 40))
-        profiles = [
-            profile for idx, camp in enumerate(camps, start=1)
-            if (profile := _camp_record_to_explore_profile(camp, rank=736000 + idx, destination=destination_name))
-        ]
-        if profiles:
-            return _dedupe_ranked_explore_profiles(_merge_explore_profile_lists([], profiles))[:safe_limit]
     return []
 
 def _explore_can_relax_empty_category(category: str = "") -> bool:
@@ -23821,22 +23974,51 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
     places = list(catalog.get("places") or [])
     effective_category = category or _explore_category_hint_from_query(q)
     query_terms = _explore_query_terms_for_category(q, effective_category)
+    stay_request = _explore_stay_request(effective_category, q)
+    stay_destination_query = _explore_stay_destination_query(q) if stay_request else ""
+    stay_destination_terms = _explore_query_terms_for_category(stay_destination_query, "camp") if stay_destination_query else []
+    stay_destination_anchors = _explore_stay_destination_profiles(stay_destination_query, limit=1) if stay_destination_query else []
+    stay_first_ids: set[str] = set()
     if query_terms:
         places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if effective_category:
         requested = {_normalize_place_category(effective_category)}
         places = [place for place in places if _explore_place_matches_category_request(place, requested)]
     if q or category:
-        places = _merge_explore_profile_lists(
-            places,
-            [
-                *_official_cache_search_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 120)),
-                *_canonical_serving_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 80, 80), 240)),
-                *_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 20, 20), 80)),
-            ],
+        stay_include_lodging = _normalize_place_category(effective_category) in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"}
+        stay_first_profiles = (
+            _explore_stay_fallback_profiles(
+                q=q,
+                limit=min(max(limit + cursor + 80, 80), 240),
+                include_lodging=stay_include_lodging,
+            )
+            if stay_request
+            else []
         )
+        stay_first_ids = {str(place.get("id") or "") for place in stay_first_profiles}
+        if stay_request and stay_first_profiles:
+            places = _merge_explore_profile_lists(stay_first_profiles, places)
+        else:
+            places = _merge_explore_profile_lists(stay_first_profiles, places)
+            places = _merge_explore_profile_lists(
+                places,
+                [
+                    *_official_cache_search_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 120)),
+                    *_canonical_serving_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 80, 80), 240)),
+                    *_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 20, 20), 80)),
+                ],
+            )
         if query_terms:
             places = [place for place in places if _explore_query_terms_match(place, query_terms)]
+        if stay_request and stay_destination_terms:
+            places = [
+                place for place in places
+                if str(place.get("id") or "") in stay_first_ids
+                or (
+                    _explore_terms_match_tokens(stay_destination_terms, _explore_query_tokens(_explore_identity_query_text(place)))
+                    and _explore_profile_near_destination(place, stay_destination_anchors)
+                )
+            ]
         if effective_category:
             places = [place for place in places if _explore_place_matches_category_request(place, requested)]
     if query_terms:
@@ -23849,8 +24031,12 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
         ),
     )
     places = _dedupe_ranked_explore_profiles(places)
-    if not places and _explore_stay_request(effective_category, q):
-        places = _explore_stay_fallback_profiles(q=q, limit=min(max(limit + cursor + 80, 80), 240))
+    if not places and stay_request:
+        places = _explore_stay_fallback_profiles(
+            q=q,
+            limit=min(max(limit + cursor + 80, 80), 240),
+            include_lodging=_normalize_place_category(effective_category) in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"},
+        )
         query_terms = _explore_query_terms_for_category(_explore_stay_destination_query(q), "camp")
         places = _dedupe_ranked_explore_profiles(places)
     if not places and q and not _explore_stay_request(effective_category, q):

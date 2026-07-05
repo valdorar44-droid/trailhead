@@ -370,7 +370,7 @@ export function sentenceAwarePreview(value?: string | null, maxChars = 220) {
 export function withPreviewEllipsis(value?: string | null) {
   const clean = normalizeExploreCopyBlock(value);
   if (!clean) return '';
-  return `${clean.replace(/[.!?]+$/, '')}...`;
+  return clean;
 }
 
 export function sentenceAwarePreviewText(value?: string | null, maxChars = 220) {

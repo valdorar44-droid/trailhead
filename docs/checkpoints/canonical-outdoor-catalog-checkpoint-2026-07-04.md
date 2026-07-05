@@ -2182,3 +2182,44 @@ not show a cropped category label.
   The changed component is TypeScript-clean and included in the exported bundle;
   a manual or Playwright inner-scroll pass should revisit lower sheet content in
   the next visual sweep.
+
+## Explorer Copy Guard Follow-Up
+
+### Timestamp
+
+2026-07-04T23:43:13-05:00
+
+### Scope
+
+This follow-up tightened the Explorer copy guardrail after the live pass exposed
+how easy it was to miss Explorer files with the previous single-file audit. It
+also removed the intentional `...` suffix from Explorer preview copy so card and
+sheet previews do not look clipped when the user can open or expand the full
+text.
+
+### Files Touched
+
+- `mobile/scripts/user-facing-copy-audit.mjs`
+  - Added `--preset explore` and `--preset map`.
+  - Added missing-target reporting so a bad path fails clearly instead of
+    crashing with a raw stack trace.
+  - Added blocked checks for visible `zero`, `0 results`, `rig ready`, and
+    `offline ready` wording.
+- `mobile/components/explore/exploreDisplay.ts`
+  - Kept sentence-aware preview trimming, but stopped appending artificial
+    trailing ellipses.
+
+### Verification
+
+- `cd mobile && npm run audit:copy -- --preset explore`
+  - Passed across 12 Explorer files.
+- `cd mobile && npm run audit:copy -- --preset map`
+  - Passed across 5 map files.
+- `cd mobile && npx tsc --noEmit --pretty false`
+  - Passed.
+
+### Remaining Notes
+
+- This is a guardrail and small polish fix, not the full catalog completion.
+  The broader goal still needs continued live visual passes through Explorer,
+  map camps, route builder, and deeper detail sheets.

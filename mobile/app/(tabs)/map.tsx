@@ -619,7 +619,7 @@ type TripPlaceContext = {
   source?: string;
 };
 type MapLayer = 'satellite' | 'topo' | 'hybrid' | 'light' | 'city' | 'contrast' | 'desert' | 'snow' | 'dark' | 'red' | 'extreme';
-const DEFAULT_MAP_LAYER: MapLayer = 'topo';
+const DEFAULT_MAP_LAYER: MapLayer = 'extreme';
 type CopilotChatMessage = {
   id: string;
   role: 'user' | 'assistant';
@@ -3948,8 +3948,7 @@ function rigCompatibility(camp: CampsitePin, rig: import('@/lib/store').RigProfi
 
 // ─── Map HTML ─────────────────────────────────────────────────────────────────
 
-// Map mode names sent to the WebView. The WebView builds its own MapLibre style
-// from these — no external style URLs (Mapbox tiles are now satellite-only).
+// Map mode names sent to the WebView.
 const MAP_MODES: Record<string, string> = {
   satellite: 'satellite',
   topo:      'topo',
@@ -3975,15 +3974,17 @@ const buildMapHtml = (
 <html>
 <head>
 <meta name="viewport" content="width=device-width,initial-scale=1.0,maximum-scale=1.0,user-scalable=no">
+<script src='https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.js'></script>
+<link href='https://api.mapbox.com/mapbox-gl-js/v3.10.0/mapbox-gl.css' rel='stylesheet'/>
 <script src='https://tiles.gettrailhead.app/assets/maplibre-gl.js'></script>
 <link href='https://tiles.gettrailhead.app/assets/maplibre-gl.css' rel='stylesheet'/>
 <style>
   body,html{margin:0;padding:0;height:100%;background:#080c12;overflow:hidden;}
   #map{height:100vh;width:100vw;}
-  .maplibregl-popup-content{background:#0f1319!important;border:1px solid #252d3d!important;color:#f1f5f9!important;border-radius:10px!important;padding:12px 14px!important;box-shadow:0 4px 20px rgba(0,0,0,0.7)!important;min-width:160px;}
-  .maplibregl-popup-tip{border-top-color:#252d3d!important;border-bottom-color:#252d3d!important;}
-  .maplibregl-popup-close-button{color:#6b7280!important;font-size:16px!important;right:4px!important;top:2px!important;}
-  .maplibregl-ctrl-logo,.maplibregl-ctrl-attrib{display:none!important;}
+  .maplibregl-popup-content,.mapboxgl-popup-content{background:#0f1319!important;border:1px solid #252d3d!important;color:#f1f5f9!important;border-radius:10px!important;padding:12px 14px!important;box-shadow:0 4px 20px rgba(0,0,0,0.7)!important;min-width:160px;}
+  .maplibregl-popup-tip,.mapboxgl-popup-tip{border-top-color:#252d3d!important;border-bottom-color:#252d3d!important;}
+  .maplibregl-popup-close-button,.mapboxgl-popup-close-button{color:#6b7280!important;font-size:16px!important;right:4px!important;top:2px!important;}
+  .maplibregl-ctrl-logo,.maplibregl-ctrl-attrib,.mapboxgl-ctrl-logo,.mapboxgl-ctrl-attrib{display:none!important;}
   .mk-wp{background:#f97316;border:2.5px solid #fff;border-radius:50%;width:30px;height:30px;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:12px;font-family:monospace;box-shadow:0 2px 10px rgba(249,115,22,0.6);cursor:pointer;user-select:none;}
   .mk-wp.nav-target{background:#fff;color:#f97316;animation:pulse 1.4s ease-in-out infinite;}
   .mk-wp.wp-start{background:#22c55e;box-shadow:0 2px 10px rgba(34,197,94,0.6);}
@@ -4037,7 +4038,7 @@ const buildMapHtml = (
   var initGas=${JSON.stringify(gasList.slice(0,20))};
   var initPins=${JSON.stringify(pins.slice(0,30))};
 
-  var map,mapboxToken='',apiBase='https://api.gettrailhead.app',currentStyle='satellite',currentPremiumStyle='outdoors';
+  var map,GL=null,mapboxToken='',apiBase='https://api.gettrailhead.app',currentStyle='extreme',currentPremiumStyle='standard';
   var tileBase='https://tiles.gettrailhead.app';
   // Protomaps API key — set via set_token from RN. When present we fetch tiles
   // directly from Protomaps' CDN (faster); otherwise fall back to our backend
@@ -4138,22 +4139,46 @@ const buildMapHtml = (
       case 'navigation_night': return 'navigation-night-v1';
       case 'dusk':
       case 'night': return 'navigation-night-v1';
+      case 'standard': return 'standard';
+      case 'dawn': return 'light-v11';
+      case 'outdoors': return 'outdoors-v12';
+      default: return 'standard';
+    }
+  }
+  function _mapboxRasterStyleId(style){
+    switch(style){
+      case 'standard_satellite': return 'standard-satellite';
+      case 'satellite_streets': return 'satellite-streets-v12';
+      case 'streets': return 'streets-v12';
+      case 'navigation_day': return 'navigation-day-v1';
+      case 'navigation_night': return 'navigation-night-v1';
+      case 'dusk':
+      case 'night': return 'navigation-night-v1';
       case 'standard':
       case 'dawn': return 'light-v11';
       case 'outdoors':
       default: return 'outdoors-v12';
     }
   }
+  function _mapboxStyleUrl(style){
+    return 'mapbox://styles/mapbox/'+_mapboxStyleId(style);
+  }
+  function _useMapboxBase(mode){
+    return !!(mapboxToken&&window.mapboxgl&&(mode==='extreme'||mode==='mapbox'));
+  }
+  function _styleForMode(mode){
+    return _useMapboxBase(mode)?_mapboxStyleUrl(currentPremiumStyle):buildStyle(mode);
+  }
   function buildStyle(mode){
     var sources={
       pm:{type:'vector',tiles:[_tileUrl()],maxzoom:15,attribution:'© OpenStreetMap'}
     };
-    var mapboxStyleBase=(mode==='extreme'||mode==='mapbox')&&mapboxToken;
+    var mapboxStyleBase=(mode==='extreme'||mode==='mapbox')&&mapboxToken&&!window.mapboxgl;
     if((mode==='satellite'||mode==='hybrid')&&mapboxToken){
       sources['sat']={type:'raster',tiles:['https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg90?access_token='+mapboxToken],tileSize:512,maxzoom:19};
     }
     if(mapboxStyleBase){
-      sources['mbstyle']={type:'raster',tiles:['https://api.mapbox.com/styles/v1/mapbox/'+_mapboxStyleId(currentPremiumStyle)+'/tiles/512/{z}/{x}/{y}@2x?access_token='+mapboxToken],tileSize:512,maxzoom:22};
+      sources['mbstyle']={type:'raster',tiles:['https://api.mapbox.com/styles/v1/mapbox/'+_mapboxRasterStyleId(currentPremiumStyle)+'/tiles/512/{z}/{x}/{y}@2x?access_token='+mapboxToken],tileSize:512,maxzoom:22};
     }
     var labelOpacity=mode==='satellite'?0.0:1.0; // pure satellite hides vector labels
     // Polished dark outdoor palette — modeled on Protomaps' official dark theme
@@ -4413,11 +4438,13 @@ const buildMapHtml = (
   // ── Map init ──────────────────────────────────────────────────────────────────
   function initMap(token,style){
     mapboxToken=token;
-    currentStyle=style||'satellite';
-    // Match MapLibre's parallel request limit to WKWebView's actual HTTP/2 cap.
-    // Default 16 creates a URLSession backlog — tiles wait for each other.
-    maplibregl.config.MAX_PARALLEL_IMAGE_REQUESTS=6;
-    map=new maplibregl.Map({container:'map',style:buildStyle(currentStyle),
+    currentStyle=style||'extreme';
+    GL=(mapboxToken&&window.mapboxgl)?window.mapboxgl:window.maplibregl;
+    if(GL===window.mapboxgl)window.mapboxgl.accessToken=mapboxToken;
+    // Match the WebView's practical HTTP/2 request cap so tiles do not queue
+    // behind each other on cold starts.
+    if(GL&&GL.config)GL.config.MAX_PARALLEL_IMAGE_REQUESTS=6;
+    map=new GL.Map({container:'map',style:_styleForMode(currentStyle),
       center:[${centerLng},${centerLat}],zoom:${waypoints.length === 0 ? 3.7 : waypoints.length > 1 ? 7 : 10},
       attributionControl:false,pitchWithRotate:false,
       fadeDuration:0,
@@ -4730,13 +4757,13 @@ const buildMapHtml = (
       el.className='mk-wp'+(tc?' '+tc:'');
       el.textContent=typeIcon[w.type]||(w.day||i+1);
       var label=typeLabel[w.type]||w.type;
-      var popup=new maplibregl.Popup({offset:20,closeButton:true,maxWidth:'220px'})
+      var popup=new GL.Popup({offset:20,closeButton:true,maxWidth:'220px'})
         .setHTML('<div class="pt">'+w.name+'</div><div class="pm">Day '+w.day+' &middot; '+label+'</div>');
-      var m=new maplibregl.Marker({element:el}).setLngLat([w.lng,w.lat]).setPopup(popup).addTo(map);
+      var m=new GL.Marker({element:el}).setLngLat([w.lng,w.lat]).setPopup(popup).addTo(map);
       el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'wp_tapped',idx:i,name:w.name});});
       wpMarkers.push(m);
     });
-    if(wps.length>=2){var bounds=new maplibregl.LngLatBounds();wps.forEach(function(w){bounds.extend([w.lng,w.lat]);});map.fitBounds(bounds,{padding:60,maxZoom:12,duration:800});}
+    if(wps.length>=2){var bounds=new GL.LngLatBounds();wps.forEach(function(w){bounds.extend([w.lng,w.lat]);});map.fitBounds(bounds,{padding:60,maxZoom:12,duration:800});}
   }
 
   function loadInitialData(){
@@ -4813,8 +4840,8 @@ const buildMapHtml = (
       var providerLabel=r.provider==='nws'?'WEATHER ALERT · NWS':r.provider==='airnow'?'AIR QUALITY · AIRNOW':r.provider==='wfigs'?'WILDFIRE · WFIGS':r.provider==='firms'?'FIRE DETECTION · NASA FIRMS':r.provider==='tomtom'?'LIVE TRAFFIC · TOMTOM':(unknownProvider?'LIVE CONDITION · '+unknownProvider:'LIVE CONDITION');
       var confLine=r.source==='provider'?'<div class="pm" style="color:#6DA8FF;margin-top:2px">'+escHTML(providerLabel)+'</div>':(r.confirmations?'<div class="pm" style="color:#22c55e;margin-top:2px">✓ '+r.confirmations+' confirmed</div>':'');
       var ageLine=age?'<div class="pm" style="opacity:0.5;margin-top:2px">'+escHTML(age)+'</div>':'';
-      var popup=new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||(r.source==='provider'?'Live condition alert':'Community report'))+'</div>'+confLine+ageLine);
-      var m=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([r.lng,r.lat]).setPopup(popup).addTo(map);
+      var popup=new GL.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+escHTML(r.subtype||r.type)+'</div><div class="pm">'+escHTML(r.description||(r.source==='provider'?'Live condition alert':'Community report'))+'</div>'+confLine+ageLine);
+      var m=new GL.Marker({element:el,anchor:'center'}).setLngLat([r.lng,r.lat]).setPopup(popup).addTo(map);
       el.addEventListener('click',function(ev){ev.stopPropagation();m.togglePopup();postRN({type:'report_tapped',report:r});});
       reportMarkers.push(m);
     });
@@ -4869,7 +4896,7 @@ const buildMapHtml = (
     if(!userMarker){
       var el=document.createElement('div');el.className='mk-me';
       el.innerHTML='<div class="mk-me-ring"></div><svg class="mk-me-arrow" width="24" height="32" viewBox="0 0 24 32" style="transition:transform 0.6s ease"><path d="M12 1 L23 29 L12 22 L1 29 Z" fill="#f97316" stroke="white" stroke-width="1.5" stroke-linejoin="round"/></svg>';
-      userMarker=new maplibregl.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
+      userMarker=new GL.Marker({element:el,anchor:'center'}).setLngLat([lng,lat]).addTo(map);
     }else{userMarker.setLngLat([lng,lat]);}
     // Rotate the arrow to face the true heading, compensating for map bearing
     if(heading!=null&&heading>=0){
@@ -5014,10 +5041,10 @@ const buildMapHtml = (
       if(typeof msg.protomapsKey==='string')protomapsKey=msg.protomapsKey;
       if(typeof msg.token==='string')mapboxToken=msg.token;
       if(typeof msg.premiumStyle==='string')currentPremiumStyle=msg.premiumStyle;
-      var nextStyle=msg.style||currentStyle||'satellite';
+      var nextStyle=msg.style||currentStyle||'extreme';
       if(map){
         currentStyle=nextStyle;
-        if(mapReady)map.setStyle(buildStyle(currentStyle));
+        if(mapReady)map.setStyle(_styleForMode(currentStyle));
         return;
       }
       initMap(mapboxToken,nextStyle);
@@ -5027,7 +5054,7 @@ const buildMapHtml = (
       // Allows updating the Protomaps key after map init (e.g. config arrives
       // late on cold launch). Rebuild the style so tiles re-fetch from CDN.
       protomapsKey=msg.key;
-      if(map&&mapReady)map.setStyle(buildStyle(currentStyle));
+      if(map&&mapReady)map.setStyle(_styleForMode(currentStyle));
     }
     if(!mapReady){pendingMsgs.push(msg);return;}
     if(msg.type==='nav_active'){
@@ -5072,7 +5099,7 @@ const buildMapHtml = (
       if(msg.zoom&&msg.zoom<=5)return;
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el=document.createElement('div');el.className='mk-search';el.textContent='PIN';
-      searchMarker=new maplibregl.Marker({element:el}).setLngLat([msg.lng,msg.lat]).setPopup(new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Location')+'</div>')).addTo(map);
+      searchMarker=new GL.Marker({element:el}).setLngLat([msg.lng,msg.lat]).setPopup(new GL.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Location')+'</div>')).addTo(map);
       searchMarker.togglePopup();
     }
     if(msg.type==='track_point'&&msg.lat){breadcrumbPts.push([msg.lng,msg.lat]);updateBreadcrumb();}
@@ -5092,7 +5119,7 @@ const buildMapHtml = (
     if(msg.type==='route_to_search'&&msg.lat){
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el2=document.createElement('div');el2.className='mk-search';el2.textContent='PIN';
-      searchMarker=new maplibregl.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new maplibregl.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
+      searchMarker=new GL.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new GL.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
       searchMarker.togglePopup();
       _searchDest={lat:msg.lat,lng:msg.lng};
       _fetchRoute([msg.userLng+','+msg.userLat,msg.lng+','+msg.lat],0);
@@ -5102,7 +5129,7 @@ const buildMapHtml = (
     if(msg.type==='set_style'&&msg.style){
       currentStyle=msg.style;
       if(typeof msg.premiumStyle==='string')currentPremiumStyle=msg.premiumStyle;
-      map.setStyle(buildStyle(msg.style));
+      map.setStyle(_styleForMode(msg.style));
     }
     if(msg.type==='set_land_overlay')setLandOverlay(!!msg.show);
     if(msg.type==='set_usgs_overlay')setUsgsOverlay(!!msg.show);

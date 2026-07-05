@@ -336,6 +336,26 @@ Time: 2026-07-05
   screen.
 - Local `/app/map` smoke found no map startup banner.
 
+## Mapbox WebView Standard Restore Checkpoint
+
+Time: 2026-07-05
+
+### Scope
+
+- Kept the native map SDK path disabled while the crash is investigated.
+- Restored the mobile WebView map default to the Mapbox-style mode.
+- Updated the WebView map renderer to prefer Mapbox GL JS with Mapbox Standard
+  when a token is available.
+- Kept the existing Trailhead/MapLibre vector style as the fallback path.
+- Rebuilt the website app export so the web app uses the same mobile map source.
+
+### Verification
+
+- `cd mobile && npx tsc --noEmit`
+- `npm run build`
+- Local Chrome smoke on `http://127.0.0.1:8097/app/map` found no not-found
+  screen and no map startup banner.
+
 ## Verification
 
 - `python3 -m unittest tests.test_canonical_catalog_rules`

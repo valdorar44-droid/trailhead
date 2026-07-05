@@ -1150,10 +1150,10 @@ export default function PremiumPlaceSheet({
                 </ScrollView>
               )}
 
-              {stage === 'full' && !!reviews.length && (
+              {stage === 'full' && !!detail && (
                 <View style={s.section}>
                   <Text style={s.sectionLabel}>Notes</Text>
-                  {reviews.slice(0, 3).map((review, idx) => (
+                  {reviews.length ? reviews.slice(0, 3).map((review, idx) => (
                     <View key={`${review.authorName}-${idx}`} style={s.reviewCard}>
                       <View style={s.reviewTop}>
                         <Text style={s.reviewAuthor} numberOfLines={1}>{review.authorName || 'Trailhead user'}</Text>
@@ -1162,7 +1162,7 @@ export default function PremiumPlaceSheet({
                       {!!review.relativeTime && <Text style={s.reviewMeta}>{review.relativeTime}</Text>}
                       {!!review.text && <Text style={s.reviewText}>{review.text}</Text>}
                     </View>
-                  ))}
+                  )) : <Text style={s.sectionText}>No notes yet — be the first to add one.</Text>}
                 </View>
               )}
 

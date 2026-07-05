@@ -183,10 +183,10 @@ export default function AiReportModal({
           <View style={s.contextCard}>
             <Text style={s.contextTitle}>RECENT NOTES</Text>
             <ScrollView style={s.contextScroll} nestedScrollEnabled showsVerticalScrollIndicator={false}>
-              {messages.slice(-4).map((msg, idx) => (
+              {messages.slice(-4).filter(msg => String(msg.text || '').trim()).map((msg, idx) => (
                 <Text key={`${msg.role}-${idx}`} style={s.contextLine}>
                   <Text style={s.contextRole}>{msg.role === 'assistant' ? surfaceLabel : 'You'}: </Text>
-                  {String(msg.text || '').trim() || '—'}
+                  {String(msg.text || '').trim()}
                 </Text>
               ))}
             </ScrollView>

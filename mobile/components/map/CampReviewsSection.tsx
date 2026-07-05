@@ -23,11 +23,10 @@ export default function CampReviewsSection({
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
 
-  if (!reviews.length) return null;
-
   return (
     <View style={s.section}>
       <Text style={s.sectionTitle}>Reviews</Text>
+      {!reviews.length ? <Text style={s.reviewText}>No reviews yet — be the first to add one.</Text> : null}
       {reviews.slice(0, limit).map((review, idx) => (
         <View key={`${review.authorName || 'review'}-${idx}`} style={s.reviewCard}>
           <View style={s.reviewTop}>

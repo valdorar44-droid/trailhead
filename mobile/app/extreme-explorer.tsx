@@ -288,7 +288,7 @@ function fallbackPlaces(route: [number, number][], checkpoints: ExplorerCheckpoi
   if (!source.length) return [];
   const pick = (ratio: number) => source[Math.max(0, Math.min(source.length - 1, Math.floor((source.length - 1) * ratio)))];
   const defs = [
-    { id: 'extreme-fuel-check', type: 'fuel', title: 'Fuel before remote stretch', note: 'Staged for range review before the next low-service section.', ratio: 0.28 },
+    { id: 'extreme-fuel-check', type: 'fuel', title: 'Fuel before remote stretch', note: 'Check your range before the next low-service section.', ratio: 0.28 },
     { id: 'extreme-stay-check', type: 'private_stay', title: 'Stay options near tonight', note: 'Review camps and private stays that fit the current day window.', ratio: 0.62 },
     { id: 'extreme-repair-check', type: 'repair', title: 'Repair and parts check', note: 'Useful stop to keep in the plan before leaving larger towns.', ratio: 0.42 },
     { id: 'extreme-weather-check', type: 'weather_risk', title: 'Weather watch point', note: 'Check wind, heat, and precipitation timing before this segment.', ratio: 0.78 },
@@ -372,9 +372,12 @@ function coPilotSummary(places: DemoPlace[]) {
   const fuel = places.filter(p => p.type.includes('fuel')).length;
   const stays = places.filter(p => p.type.includes('camp') || p.type.includes('stay')).length;
   const risks = places.filter(p => p.type.includes('weather') || p.type.includes('risk')).length;
-  if (fuel || stays) return `I found ${fuel || 'a'} fuel ${fuel === 1 ? 'stop' : 'stops'} and ${stays || 'several'} stay options near the route.`;
+  const parts: string[] = [];
+  if (fuel > 0) parts.push(`${fuel} fuel ${fuel === 1 ? 'stop' : 'stops'}`);
+  if (stays > 0) parts.push(`${stays} stay ${stays === 1 ? 'option' : 'options'}`);
+  if (parts.length) return `I found ${parts.join(' and ')} near the route.`;
   if (risks) return 'I marked route checks to review before leaving signal.';
-  return 'I staged the route with checkpoints and nearby options.';
+  return 'I added checkpoints and nearby options along the route.';
 }
 
 function routeForRisk(route: [number, number][]) {
@@ -885,13 +888,13 @@ export default function ExplorerExplorerScreen() {
           : action.action_type === 'showMissionControl'
             ? 'Show Mission Control.'
             : action.reason || action.label;
-    const message = await stageCopilotCommand(fallbackCommand).catch((error: any) => error?.message || 'Action staged for review.');
+    const message = await stageCopilotCommand(fallbackCommand).catch((error: any) => error?.message || 'Added for review.');
     Alert.alert(action.requires_confirmation ? 'Confirm in Co-Pilot' : 'Mission Control', message || action.reason);
   }
 
   async function previewWeather() {
     if (!config?.feature_flags?.weather) {
-      return 'Weather Watch is not enabled for this beta.';
+      return 'Weather Watch is not available yet for your account.';
     }
     const risk = await api.extremeWeatherRouteRisk({
       trip_id: activeTrip?.trip_id ?? null,
@@ -971,14 +974,14 @@ export default function ExplorerExplorerScreen() {
       type: 'poi',
       source: 'trailhead',
       source_label: 'Map selection',
-      summary: 'Tap nearby options below, or stage this point as a route checkpoint.',
+      summary: 'Tap nearby options below, or add this point as a route checkpoint.',
       confidence: 'selected',
     });
   }
 
   function confirmGuidance() {
     if (!config?.navigation?.enabled || !config.allowed_surfaces.includes('navigation')) {
-      Alert.alert('Guidance', 'Guided navigation is not enabled for this beta.');
+      Alert.alert('Guidance', "Guided navigation isn't available for your account yet.");
       return;
     }
     Alert.alert(
@@ -1007,7 +1010,7 @@ export default function ExplorerExplorerScreen() {
                 navigation_mode: 'route_guidance',
               });
               navigationSessionIdRef.current = nav.session_id;
-              Alert.alert('Guidance ready', 'Premium guidance is authorized. Native turn-by-turn opens in the next build slice.');
+              Alert.alert('Guidance ready', "Premium guidance is authorized. We'll notify you when native turn-by-turn is ready on this route.");
             } catch (error: any) {
               Alert.alert('Guidance', error?.message ?? 'Guidance could not start.');
             }
@@ -1034,11 +1037,11 @@ export default function ExplorerExplorerScreen() {
         event_data: { action: data.action },
       }).catch(() => {});
       Promise.all([
-        stageCopilotCommand(data.action).catch((error: any) => error?.message ?? 'Action staged for review.'),
+        stageCopilotCommand(data.action).catch((error: any) => error?.message ?? 'Added for review.'),
         data.action === 'show_weather' ? previewWeather().catch((error: any) => error?.message ?? '') : Promise.resolve(''),
       ]).then(([message, weather]) => {
-        const text = weather || message || 'Action staged for review.';
-        Alert.alert('Map Styles', text);
+        const text = weather || message || 'Added for review.';
+        Alert.alert(data.action === 'show_weather' ? 'Weather' : 'Explorer', text);
       });
     }
     if (data.type === 'style') {
@@ -1124,22 +1127,22 @@ export default function ExplorerExplorerScreen() {
         initialStage="half"
         related={{ loading: relatedLoading, places: relatedPlaces, camps: [], trails: [] }}
         routeContextLabel="Explorer"
-        addToRouteLabel="Stage checkpoint"
+        addToRouteLabel="Add checkpoint"
         promoteToRouteLabel="Route through"
         onClose={() => setSelectedPlace(null)}
         onNavigate={place => {
           showPlaceCard({ ...place, type: 'poi', source: 'trailhead', source_label: 'Map selection' });
         }}
         onSave={place => {
-          Alert.alert('Map Styles', `${place.name} staged for review.`);
+          Alert.alert('Saved', `${place.name} saved.`);
         }}
         onAddToRoute={place => {
-          Alert.alert('Map Styles', `${place.name} staged as a checkpoint.`);
+          Alert.alert('Added to route', `${place.name} added as a checkpoint.`);
         }}
         onPromoteToRoute={place => {
-          Alert.alert('Map Styles', `${place.name} staged for route review.`);
+          Alert.alert('Routed through', `${place.name} added to the route.`);
         }}
-        onReport={() => Alert.alert('Report', 'Field reports stay in Trailhead mode for this beta slice.')}
+        onReport={() => Alert.alert('Report', "Field reports aren't available in Explorer yet. Submit them from the Report tab.")}
         onNearbyCamps={place => {
           showPlaceCard({ ...place, type: 'camp', source: 'trailhead', source_label: 'Camp search' });
         }}

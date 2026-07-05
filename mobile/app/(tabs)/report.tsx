@@ -677,7 +677,7 @@ function ReportScreenContent() {
             : 'The report will retry when the app has signal.',
         );
       } else {
-        Alert.alert('Error', e.message);
+        Alert.alert('Report not submitted', e?.message ?? 'Something interrupted the submission. Try again in a moment.');
       }
     } finally {
       setSubmitting(false);

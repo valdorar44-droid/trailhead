@@ -141,6 +141,10 @@ export default function RouteBuilderSearchSurface({
             </TouchableOpacity>
           ))}
         </View>
+      ) : !searching && query.trim().length > 0 ? (
+        <View style={s.resultsBox}>
+          <Text style={s.resultMeta}>No results found. Try a different search.</Text>
+        </View>
       ) : null}
     </>
   );

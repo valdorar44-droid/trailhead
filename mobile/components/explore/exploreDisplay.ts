@@ -994,14 +994,18 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
     .replace(/\bAI\b/g, '')
     .replace(/\s+/g, ' ')
     .trim();
-  if (/^Use it as a day stop when the drive needs more than mileage/i.test(text)) {
+  if (/^Use it as an? (?:real\s+|day\s+)?(?:anchor|stop) when the drive needs more than mileage/i.test(text)) {
     return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
   }
   if (/^Use this as a protected-area anchor/i.test(text)) {
     return `${title} covers protected-area planning. Confirm permits, guide requirements, road access, weather, and safety conditions before travel.`;
   }
+  text = text.replace(
+    /\bUse this as an? protected-area (?:anchor|stop)\b/gi,
+    `${title} is a protected-area anchor`,
+  );
   text = text.replace(/^Use\s+(.+?)\s+as\s+a\s+(.+?)\./i, (_match, name, role) => `${name} is a ${role}.`);
-  if (/^it is a day stop when the drive needs more than mileage/i.test(text)) {
+  if (/^it is an? (?:real\s+|day\s+)?(?:anchor|stop) when the drive needs more than mileage/i.test(text)) {
     return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
   }
   text = text.replace(/^under 1 mile\b/i, 'Under 1 mile');
@@ -1032,7 +1036,7 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   if (/Build around this only if the reservation and access details work/i.test(text)) {
     return `${title} is a lodging option. Check reservation timing, access, food, shuttles, and operating dates.`;
   }
-  if (/Use it as a day stop when the drive needs more than mileage/i.test(text)) {
+  if (/Use it as an? (?:real\s+|day\s+)?(?:anchor|stop) when the drive needs more than mileage/i.test(text)) {
     return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
   }
   if (/Build extra time around this stop, especially if weather or crowds matter/i.test(text)) {
@@ -1132,6 +1136,9 @@ function cleanExploreCopy(raw: string, place: ExplorePlaceProfile) {
   }
   if (/is the place to start looking for legal stays/i.test(text)) {
     return campHubCopy;
+  }
+  if (/^it is a\b/i.test(text)) {
+    return text.replace(/^it is a\b/i, `${title} is a`);
   }
   return text;
 }

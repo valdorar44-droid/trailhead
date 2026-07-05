@@ -1008,9 +1008,10 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
   if (landTypes.has('NPS')  || landTypes.has('National Park'))  tags.push({ label: 'NPS',  style: 'nps'  });
 
   function shareTrip() {
+    const milesPart = p.total_est_miles ? `${p.total_est_miles} miles · ` : '';
     Share.share({
       title: p.trip_name,
-      message: `${p.trip_name}\n${p.duration_days} days · ${p.total_est_miles ?? '?'} miles · ${(p.states ?? []).join(', ')}\n\n${p.overview}\n\nPlanned with Trailhead: ${BASE_URL}`,
+      message: `${p.trip_name}\n${p.duration_days} days · ${milesPart}${(p.states ?? []).join(', ')}\n\n${p.overview}\n\nPlanned with Trailhead: ${BASE_URL}`,
     });
   }
 

@@ -1070,9 +1070,10 @@ function campMatchesFilters(camp: CampsitePin, filters: string[], preference?: C
 }
 
 function builderResultSummary(count: number, noun: string, context: string, prefix = '') {
-  const label = prefix ? `${prefix} ${noun}` : noun;
+  const plural = count === 1 ? noun : `${noun}s`;
+  const label = prefix ? `${prefix} ${plural}` : plural;
   if (count <= 0) return `No ${label}${context}`;
-  return `${count} ${label}${count === 1 ? '' : 's'}${context}`;
+  return `${count} ${label}${context}`;
 }
 
 function routeScopedOfflinePlaces(points: OsmPoi[], leg: LegSearchContext, types: string[], extraBuffer = 8) {
@@ -1259,7 +1260,7 @@ function tripCardData(route: TripHistoryItem, trip?: TripResult | null, catalogP
     poi ? `${poi} place${poi === 1 ? '' : 's'}` : '',
     stateCount ? `${stateCount} state${stateCount === 1 ? '' : 's'}` : '',
   ].filter(Boolean);
-  return { coverUrl, stats: parts.join('  •  ') };
+  return { coverUrl, stats: parts.join('  •  ') || 'Saved route' };
 }
 
 function isFrameworkTarget(stop: BuilderStop) {
@@ -2770,8 +2771,8 @@ function RouteBuilderScreenContent() {
             summary: builderResultSummary(
               scoped.length,
               'camp',
-              searchLeg!.purpose === 'overnight' ? ` near Day ${searchLeg!.targetDay ?? activeDay} stop${fallbackText}` : ' along this leg',
-              `${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()}`.trim(),
+              `${campPhotoOnly ? ' with photos' : ''}${searchLeg!.purpose === 'overnight' ? ` near Day ${searchLeg!.targetDay ?? activeDay} stop${fallbackText}` : ' along this leg'}`,
+              campPreferenceLabel.toLowerCase(),
             ),
           });
         } else {
@@ -2801,7 +2802,7 @@ function RouteBuilderScreenContent() {
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
           storeDiscoveryResults(key, {
             camps: found,
-            summary: builderResultSummary(found.length, 'camp', ' near this area', `${campPhotoOnly ? 'with photos ' : ''}${campPreferenceLabel.toLowerCase()}`.trim()),
+            summary: builderResultSummary(found.length, 'camp', `${campPhotoOnly ? ' with photos' : ''} near this area`, campPreferenceLabel.toLowerCase()),
           });
         }
       } else if (tab === 'gas') {
@@ -3472,14 +3473,14 @@ function RouteBuilderScreenContent() {
 
   function renderInlineEmptyState(day: number, tab: DiscoveryTab) {
     const title = tab === 'camps'
-      ? 'Camp cards are ready for a wider scan.'
+      ? 'No camps found here yet'
       : tab === 'gas'
-        ? 'Fuel stops are ready for a wider scan.'
+        ? 'No fuel stops found here yet'
         : tab === 'excursions'
-          ? 'Side trips are ready for a wider scan.'
+          ? 'No side trips found here yet'
           : tab === 'tours'
-            ? 'Tours are ready for a wider scan.'
-            : 'Place cards are ready for a wider scan.';
+            ? 'No tours found here yet'
+            : 'No places found here yet';
     const hint = tab === 'camps'
       ? campPhotoOnly
         ? 'Photo-only is still on. Open the search to no-photo camp backups or rerun the segment scan.'
@@ -4993,7 +4994,7 @@ function RouteBuilderScreenContent() {
                 placesLabel={`Day ${plan.day} Places`}
                 campPreview={camp ? renderCampPreview(camp, plan.rest ? 'OVERNIGHT / REST CAMP' : 'OVERNIGHT CAMP') : undefined}
                 needsOvernight={plan.needsOvernight}
-                travelText={`${plan.campWindowLabel} shares the next camp window.`}
+                travelText={plan.campWindowEnd > plan.day ? `Overnight is combined with Day ${plan.campWindowEnd}.` : `Part of the ${plan.campWindowLabel} camp window.`}
                 onSelect={() => setActiveDay(plan.day)}
                 onChooseOvernight={() => scanDayPlan(plan, 'camps')}
                 onFindCamp={() => scanDayPlan(plan, 'camps')}

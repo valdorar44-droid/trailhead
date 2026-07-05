@@ -201,7 +201,7 @@ function readinessSummaryForReports(readiness: MissionStatusItem['readiness']): 
 }
 
 function formatStatusValue(value: string | undefined): string {
-  return String(value || 'unknown').replace(/_/g, ' ');
+  return String(value || 'not checked').replace(/_/g, ' ');
 }
 
 function colorForStatus(item: MissionStatusItem): string {

@@ -3317,7 +3317,7 @@ function GuideScreenContent() {
         category: mapCategory,
         region: place.card?.region,
         summary: place.profile.summary || place.profile.hook || place.summary.short_description || place.summary.hook,
-        note: place.summary.short_description || place.summary.hook || 'Explore area',
+        note: place.summary.short_description || place.summary.hook || 'Suggested explore stop near this area.',
         imageUrl: mediaUrl(place.summary.image_url || place.summary.thumbnail_url),
         photos,
         sourceLabel: cleanExploreSourceLabel(place.source_quality?.primary_name || place.source_pack?.primary || place.attribution, 'Explore Area'),
@@ -3644,18 +3644,18 @@ function GuideScreenContent() {
     const error = exploreWeatherErrors[place.id];
     const loading = exploreWeatherLoadingId === place.id;
     if (loading) {
-      return { loading: true, icon: 'partly-sunny-outline', temp: 'Loading', detail: 'Forecast' };
+      return { loading: true, icon: 'partly-sunny-outline', temp: '--', detail: 'Loading forecast' };
     }
     if (error) {
-      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Not loading' };
+      return { unavailable: true, icon: 'cloud-offline-outline', temp: '--', detail: 'Forecast unavailable' };
     }
     if (!weather) {
       return place.summary.lat != null && place.summary.lng != null
-        ? { icon: 'partly-sunny-outline', temp: 'Weather', detail: 'Forecast' }
+        ? { icon: 'partly-sunny-outline', temp: '--', detail: 'Forecast' }
         : null;
     }
     if (weather.available === false) {
-      return { unavailable: true, icon: 'cloud-offline-outline', temp: 'Weather', detail: 'Not loading' };
+      return { unavailable: true, icon: 'cloud-offline-outline', temp: '--', detail: 'Forecast unavailable' };
     }
     const daily = weather.daily;
     const code = Number(weather?.current?.weather_code ?? daily?.weathercode?.[0] ?? 3);
@@ -3797,8 +3797,8 @@ function GuideScreenContent() {
                 ? fetchedCount === 0 && currentCamp
                   ? 'Current place'
                   : sourceMode === 'fallback'
-                    ? `${displayCamps.length} nearby options`
-                    : `${displayCamps.length} nearby campgrounds`
+                    ? exploreCountLabel(displayCamps.length, 'nearby option', 'nearby options')
+                    : exploreCountLabel(displayCamps.length, 'nearby campground', 'nearby campgrounds')
                 : 'Photos, fees, reservations, and access can change by season.'}
             </Text>
           </View>
@@ -4454,7 +4454,7 @@ function GuideScreenContent() {
               <View style={s.narrationToolbar}>
                 <View>
                   <Text style={s.exploreSectionTitle}>Trip Audio</Text>
-                  <Text style={s.exploreSectionSub}>{Object.keys(guide).length} narrations ready</Text>
+                  <Text style={s.exploreSectionSub}>{exploreCountLabel(Object.keys(guide).length, 'narration', 'narrations')} ready</Text>
                 </View>
                 <TouchableOpacity
                   style={[s.autoBtn, autoPlay && s.autoBtnOn]}

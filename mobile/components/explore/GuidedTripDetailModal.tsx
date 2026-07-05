@@ -178,6 +178,7 @@ export function GuidedTripDetailModal({
           <View style={styles.emptyState}>
             <Ionicons name="ticket-outline" size={30} color={C.orange} />
             <Text style={[styles.emptyTitle, { color: C.text }]}>Trip unavailable</Text>
+            <Text style={[styles.emptyText, { color: C.text2 }]}>This guided trip isn't available right now. Check back later or browse other trips.</Text>
           </View>
         )}
       </SafeAreaView>
@@ -394,4 +395,5 @@ const styles = StyleSheet.create({
   primaryButtonText: { color: '#fff', fontSize: 14, lineHeight: 18, fontWeight: '900' },
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', padding: 24, gap: 12 },
   emptyTitle: { fontSize: 20, lineHeight: 25, fontWeight: '900' },
+  emptyText: { fontSize: 13, lineHeight: 19, textAlign: 'center' },
 });

@@ -143,6 +143,7 @@ export default function RouteBuilderHub({
           <TrailheadCard style={s.emptyCard}>
             <Ionicons name="map-outline" size={20} color={C.text3} />
             <Text style={s.emptyTitle}>Start your first route</Text>
+            <Text style={s.emptyText}>Tap Build New Route above to get started.</Text>
           </TrailheadCard>
         )}
 

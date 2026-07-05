@@ -853,7 +853,7 @@ export default function ProfileScreen() {
         Alert.alert('Sign in again', 'Your session expired. Sign out, then sign back in to refresh credits and purchases.');
         return;
       }
-      Alert.alert('Error', e.message);
+      Alert.alert('Could not load credit history', e?.message ?? 'Check your connection and try again.');
     }
   }
 
@@ -929,7 +929,7 @@ export default function ProfileScreen() {
       setActiveTrip(trip, true);
       router.push('/(tabs)/map');
     } catch (e: any) {
-      setGpxResult(`Could not open GPX route: ${e?.message ?? 'unknown error'}`);
+      setGpxResult('Could not open this GPX route. Try re-importing the file.');
     }
   }
 
@@ -1485,6 +1485,7 @@ export default function ProfileScreen() {
             {!bookedToursLoaded ? (
               <TrailheadCard style={s.bookedEmptyCard}>
                 <ActivityIndicator color={C.orange} />
+                <Text style={s.contestMuted}>Loading your tours...</Text>
               </TrailheadCard>
             ) : bookedTours.length > 0 ? (
               <>
@@ -2544,7 +2545,7 @@ export default function ProfileScreen() {
                     contest.rules.sponsor,
                     contest.rules.contact,
                   ].map((line, idx) => <Text key={idx} style={s.contestRuleLine}>{line}</Text>) : (
-                    <Text style={s.contestRuleLine}>Rules are loading.</Text>
+                    <Text style={s.contestRuleLine}>Official rules are not available right now.</Text>
                   )}
                 </TrailheadCard>
               </ScrollView>
@@ -2626,7 +2627,7 @@ export default function ProfileScreen() {
             Share your code — +{CREDIT_REWARDS.referral} credits when a friend signs up.
           </Text>
           <View style={s.codeBox}>
-            <Text style={s.codeText}>{user?.referral_code ?? '...'}</Text>
+            <Text style={s.codeText}>{user?.referral_code ?? 'Generating...'}</Text>
           </View>
           <TouchableOpacity style={s.shareBtn} onPress={shareReferral}>
             <Ionicons name="share-outline" size={16} color="#fff" />

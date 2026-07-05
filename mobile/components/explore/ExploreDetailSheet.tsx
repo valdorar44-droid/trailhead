@@ -301,14 +301,21 @@ function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePl
     .replace(/\s+/g, ' ')
     .trim();
   if (!clean) return '';
-  if (/^Use it as a day stop when the drive needs more than mileage/i.test(clean)) {
+  clean = clean.replace(
+    /\bUse it as an? (?:real\s+|day\s+)?(?:anchor|stop) when the drive needs more than mileage\.(?:\s*Check access, fees, closures, and overnight rules\.?)?/gi,
+    "It's worth a proper stop, not just a drive-through. Check access, fees, closures, and overnight rules before you go.",
+  ).replace(
+    /\bUse this as an? protected-area (?:anchor|stop)\b/gi,
+    `${title} is a protected-area anchor`,
+  ).trim();
+  if (/^Use it as an? (?:real\s+|day\s+)?(?:anchor|stop) when the drive needs more than mileage/i.test(clean)) {
     return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
   }
   if (/^Use this as a protected-area anchor/i.test(clean)) {
     return `${title} covers protected-area planning. Confirm permits, guide requirements, road access, weather, and safety conditions before travel.`;
   }
   clean = clean.replace(/^Use\s+(.+?)\s+as\s+a\s+(.+?)\./i, (_match, name, role) => `${name} is a ${role}.`);
-  if (/^it is a day stop when the drive needs more than mileage/i.test(clean)) {
+  if (/^it is an? (?:real\s+|day\s+)?(?:anchor|stop) when the drive needs more than mileage/i.test(clean)) {
     return `${title} is a worthwhile stop. Check access, fees, closures, and overnight rules before you go.`;
   }
   if (isExploreLocationMismatchCopy(clean, place)) {
@@ -356,6 +363,9 @@ function cleanDetailStoryCopy(value: string | null | undefined, place: ExplorePl
   if (/\b(undefined|null|nan|wikidata|source pack|search blob)\b/i.test(clean)) return '';
   if (/destination\.?\s*$/i.test(clean) && clean.length < 80) {
     return `${title}. Check access, timing, closures, and local rules before you go.`;
+  }
+  if (/^it is a\b/i.test(clean)) {
+    return clean.replace(/^it is a\b/i, `${title} is a`);
   }
   return clean;
 }
@@ -1095,7 +1105,7 @@ export function ExploreDetailSheet({
               <ExpandableText value={place.profile.why_it_matters} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={420} />
             </View>
           )}
-          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
+          {seeItems.length === 0 && !place.profile?.why_it_matters ? renderItemList([], 'No sights listed yet. Check back closer to your trip.') : null}
         </>
       );
     }
@@ -1104,7 +1114,7 @@ export function ExploreDetailSheet({
       return (
         <>
           {doItems.length > 0 ? renderItemList(doItems, EMPTY_DETAIL_MESSAGE) : null}
-          {doItems.length === 0 ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
+          {doItems.length === 0 ? renderItemList([], 'No activities listed yet for this area.') : null}
         </>
       );
     }
@@ -1114,7 +1124,7 @@ export function ExploreDetailSheet({
         <>
           {stayItems.length > 0 ? renderItemList(stayItems, EMPTY_DETAIL_MESSAGE) : null}
           {stayItems.length === 0 ? campgroundsSlot : null}
-          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], EMPTY_DETAIL_MESSAGE) : null}
+          {stayItems.length === 0 && !campgroundsSlot ? renderItemList([], 'No stays listed yet for this area.') : null}
         </>
       );
     }
@@ -1190,7 +1200,7 @@ export function ExploreDetailSheet({
       return weatherSlot ?? (
         <View style={[styles.emptyModule, { borderColor: C.border, backgroundColor: C.s1 }]}>
           <Ionicons name="partly-sunny-outline" size={24} color={accent} />
-          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>Forecast will appear when this area has weather.</Text>
+          <Text style={[styles.emptyModuleText, { color: C.text2 }]}>No weather forecast available for this area yet.</Text>
         </View>
       );
     }

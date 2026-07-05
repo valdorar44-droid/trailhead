@@ -8480,7 +8480,7 @@ function MapScreen() {
         subtype: explore.category || 'Explore area',
         source: 'trailhead_explore',
         source_label: sourceLabel,
-        summary: explore.summary || explore.note || 'Explore area',
+        summary: explore.summary || explore.note || 'Suggested explore stop near this area.',
         photo_url: photoUrl,
         photos,
         website: explore.officialUrl || explore.sourceUrl,
@@ -8529,7 +8529,7 @@ function MapScreen() {
         score: 100,
         profile_id: place.trailId,
         source_label: place.sourceLabel || 'Explore trail',
-        summary: place.note || 'Trailhead trail card',
+        summary: place.note || 'Trail selected from the map.',
         support: {
           campsNearby: 0,
           fuelNearby: 0,
@@ -8556,7 +8556,7 @@ function MapScreen() {
       type: isExploreTrail ? 'trail' : place.icon === 'fuel' ? 'fuel' : place.icon === 'water' ? 'water' : place.icon === 'camp' ? 'camp' : 'poi',
       source: isExploreArea || isExploreTrail ? 'explore' : 'saved',
       source_label: isExploreTrail ? (place.sourceLabel || 'Explore trail') : isExploreArea ? 'Explore area' : 'Saved location',
-      summary: place.note || 'Saved location',
+      summary: place.note || undefined,
       profile_id: isExploreTrail ? place.trailId : undefined,
       geometry_ref: isExploreTrail ? place.geometryRef : undefined,
     });
@@ -9678,7 +9678,7 @@ function MapScreen() {
           source_label: resultTrail.profile_id ? 'Trailhead trail' : 'Map trail',
           provider_place_id: resultTrail.profile_id,
           photo_url: resultTrail.photo_url || null,
-          summary: resultTrail.summary || 'Mapped trail route with nearby support context from Trailhead.',
+          summary: resultTrail.summary || 'Trail selected from the map.',
         } as SearchPlace;
       }
     }
@@ -17652,7 +17652,7 @@ function MapScreen() {
         [key]: {
           loading: false,
           places,
-          error: places.length ? undefined : 'Nearby place cards are ready for a wider map search.',
+          error: places.length ? undefined : 'No nearby places found. Try a wider search area.',
           loadedAt: Date.now(),
           sourceLabel,
         },
@@ -21711,7 +21711,7 @@ function MapScreen() {
               {!isSearchingTrails && trailDiscoveries.length === 0 ? (
                 <View style={s.campDiscoveryState}>
                   <Ionicons name="trail-sign-outline" size={22} color="#0f766e" />
-                  <Text style={s.campDiscoveryStateTitle}>Trails are ready for a scan</Text>
+                  <Text style={s.campDiscoveryStateTitle}>No trails found here yet</Text>
                   <Text style={s.campDiscoveryStateText}>Move the map over trail lines, then search this area again.</Text>
                 </View>
               ) : null}
@@ -23632,7 +23632,7 @@ function MapScreen() {
               {trailDiscoveries.length === 0 ? (
                 <View style={s.trailEmptyState}>
                   <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
-                  <Text style={s.trailEmptyTitle}>Trail places are ready for a scan</Text>
+                  <Text style={s.trailEmptyTitle}>No trail places loaded yet</Text>
                   <Text style={s.trailEmptyText}>Use the trail button to scan the visible map area.</Text>
                 </View>
               ) : trailDiscoveries.map(trail => (
@@ -24644,7 +24644,7 @@ function MapScreen() {
             {trailDiscoveries.length === 0 ? (
               <View style={s.trailEmptyState}>
                 <Ionicons name="trail-sign-outline" size={26} color="#16a34a" />
-                <Text style={s.trailEmptyTitle}>Trail places are ready for a scan</Text>
+                <Text style={s.trailEmptyTitle}>No trail places loaded yet</Text>
                 <Text style={s.trailEmptyText}>Use the trail button to scan the visible map area.</Text>
               </View>
             ) : trailDiscoveries.map(trail => (

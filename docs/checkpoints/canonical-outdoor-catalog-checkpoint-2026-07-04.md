@@ -2839,3 +2839,47 @@ Fixed a crash path reported when selecting the Map tab.
 - Playwright is not installed in this repo, so the Map tab click smoke used
   headless Chrome route loading instead of a Playwright click journey.
 - This pass changes mobile code. OTA is needed after commit and push.
+
+## Checkpoint: Map Startup WebView Fallback
+
+### Timestamp
+
+2026-07-05T02:44:00-05:00
+
+### Scope
+
+The first Map crash guard did not stop the installed app from closing
+immediately when selecting Map. This checkpoint removes the native map bridge
+from the Map route startup path and keeps the app on the existing WebView map
+renderer while the native bridge crash is investigated from device logs.
+
+### Files Touched
+
+- `mobile/app/(tabs)/map.tsx`
+  - Converts the native map component import to erased type-only imports.
+  - Disables the native map runtime path for now.
+  - Avoids loading the optional Mapbox native enrichment module while disabled.
+  - Adds a web placeholder with a no-op `postMessage` so browser smoke tests do
+    not trip the fallback map route.
+
+### Verification
+
+- `npx tsc --noEmit` from `mobile/`
+  - Passed.
+- `npx expo export --platform web --output-dir /tmp/trailhead-web-export-map-webview-fallback`
+  - Passed.
+- Headless Chrome direct Map route load:
+  - `http://localhost:8082/map` mounted with no `MAP ERROR`,
+    `postMessage is not a function`, `removeSubscription`, `TypeError`,
+    `ReferenceError`, or `Cannot read` markers in the page output or Chrome
+    stderr.
+- `cd mobile && node scripts/user-facing-copy-audit.mjs`
+  - Passed for the touched file.
+- `git diff --check`
+  - Passed.
+
+### Remaining Notes
+
+- This intentionally prioritizes app stability over the native renderer. The
+  WebView map is the safer renderer for the current installed binary.
+- This pass changes mobile code. OTA is needed after commit and push.

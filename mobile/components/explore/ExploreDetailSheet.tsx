@@ -1342,7 +1342,7 @@ export function ExploreDetailSheet({
           </View>
           <View style={styles.heroText}>
             <Text style={[styles.kicker, { color: '#fed7aa' }]} numberOfLines={1}>
-              {getExploreDisplayCategory(place)} · {place.summary.state || getExploreDisplayRegion(place)}
+              {detailKickerForPlace(place)}
             </Text>
             <Text style={styles.title} numberOfLines={3}>{getExploreDisplayTitle(place)}</Text>
             <View style={styles.heroMetaRow}>
@@ -1516,13 +1516,20 @@ function sourceBodyForPlace(place: ExplorePlaceProfile) {
   const body = raw || fallback;
   const officialSource = body.match(/^official\s+(.+?)\s+data\.?$/i);
   if (officialSource?.[1]) return cleanSourcePublisherLabel(officialSource[1]);
-  if (/^(recreation\.gov|ridb|national park service|nps|us forest service|usfs|bureau of land management|blm)$/i.test(body)) {
+  if (/^(trailhead|recreation\.gov|ridb|national park service|nps|us forest service|usfs|bureau of land management|blm)$/i.test(body)) {
     return 'Check current access, fees, closures, and rules before you go.';
   }
   if (/wiki|source pack|open map|openstreetmap|generated from|open the full card|open image references|verify media license/i.test(body)) {
     return 'Check current access, fees, closures, and rules before you go.';
   }
   return body || 'Check current access before you go.';
+}
+
+function detailKickerForPlace(place: ExplorePlaceProfile) {
+  return [
+    getExploreDisplayCategory(place),
+    place.summary.state || getExploreDisplayRegion(place),
+  ].map(value => String(value || '').trim()).filter(Boolean).join(' · ');
 }
 
 function sourceButtonLabelForPlace(place: ExplorePlaceProfile) {

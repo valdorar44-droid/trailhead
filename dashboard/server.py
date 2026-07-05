@@ -1634,6 +1634,7 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     if text.count('"') % 2:
         text = text.replace('"', "")
     text = re.sub(r"\s+\.", ".", text)
+    text = re.sub(r"\b([A-Za-z]{2,})\s+-\s+([A-Za-z]{2,})\b", r"\1-\2", text)
     text = re.sub(r"\s+", " ", text).strip()
     if max_chars and len(text) > max_chars:
         text = text[:max_chars].rsplit(" ", 1)[0].strip()

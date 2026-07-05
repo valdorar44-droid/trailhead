@@ -177,6 +177,15 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertNotIn("use the Recreation", cleaned)
         self.assertIn("Reserve online before you go.", cleaned)
 
+    def test_explore_public_copy_repairs_spaced_hyphen_words(self):
+        cleaned = server._explore_clean_public_copy(
+            "Rivers carve temple - like canyons in ancient limestone.",
+            160,
+        )
+
+        self.assertEqual(cleaned, "Rivers carve temple-like canyons in ancient limestone.")
+        self.assertNotIn(" - ", cleaned)
+
     def test_explore_public_copy_removes_route_detail_fallback(self):
         cleaned = server._explore_clean_public_copy(
             "Fins and Things OHV Route has route details to check before you go.",

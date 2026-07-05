@@ -2345,3 +2345,66 @@ polish gaps:
 - The broad catalog goal remains active. This pass removes one visible copy
   failure and one official-detail media failure; it does not complete the full
   Explorer, trails, map, route builder, and guided tours audit.
+
+## Explorer Detail Copy Polish Pass
+
+### Timestamp
+
+2026-07-05T00:18:24-05:00
+
+### Scope
+
+Follow-up live testing on the Big Bend official detail sheet found small
+presentation issues after the media fix:
+
+- The hero label could render a dangling separator when no region/state was
+  available.
+- Public copy could preserve spaced hyphen wording from official text.
+- The `Before You Go` body could fall back to a source name instead of useful
+  trip-check wording.
+
+### Files Touched
+
+- `dashboard/server.py`
+  - Repairs spaced hyphen words during public-copy cleanup.
+- `mobile/components/explore/ExploreDetailSheet.tsx`
+  - Builds the hero label from non-empty parts only.
+  - Treats `Trailhead` as a source-only body value and falls back to travel
+    check copy.
+- `tests/test_trail_catalog.py`
+  - Adds regression coverage for spaced hyphen repair.
+
+### Live Visual Evidence
+
+- `/tmp/trailhead-explorer-bigend-detail-copy-polish-pass-2.png`
+  - Opened the Big Bend detail sheet from `/app/guide`.
+  - Confirmed the NPS hero image still renders.
+  - Confirmed no dangling `Parks` separator, spaced hyphen copy, source-name
+    body, agency-as-location fallback, placeholder text, or result-count dead
+    state appeared in the checked page text.
+
+### Verification
+
+- `python3 -m unittest tests.test_trail_catalog.TrailCatalogTests.test_explore_public_copy_repairs_spaced_hyphen_words tests.test_trail_catalog.TrailCatalogTests.test_explore_detail_keeps_catalog_media_when_serving_profile_is_first`
+  - Passed.
+- `cd mobile && npx tsc --noEmit --pretty false`
+  - Passed.
+- `npm run export:webapp`
+  - Passed and re-exported `/app`.
+- `python3 -m unittest tests.test_trail_catalog tests.test_canonical_catalog_rules tests.test_canonical_catalog_audit tests.test_canonical_explore_serving`
+  - 106 tests passed.
+- `cd mobile && npm run audit:copy -- --preset explore`
+  - Passed across 12 Explorer files.
+- `cd mobile && npm run audit:copy -- --preset map`
+  - Passed across 5 map files.
+- `npm run data:audit-catalog -- --fail-on-findings`
+  - Passed with the current official database and serving indexes.
+- Live Chromium pass on `http://127.0.0.1:8099/app/guide`
+  - Searched `Big Bend National Park`, opened the detail sheet, confirmed clean
+    copy, and confirmed NPS images loaded.
+
+### Remaining Notes
+
+- The broad catalog goal remains active. This pass is ready to ship, but the
+  wider app audit still has follow-up areas around Explorer depth, map pins,
+  route builder, and guided tours.

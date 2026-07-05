@@ -230,6 +230,32 @@ rig aware, or offline ready.
    and same-name trail segment duplicates, without merging different trailheads
    or legitimate route segments.
 
+## Map WebView Layer Restore Checkpoint
+
+Time: 2026-07-05
+
+### Scope
+
+- Kept the Map tab on the WebView renderer while the native map startup crash is
+  isolated from device logs.
+- Changed the fallback default from Light to Topo so startup does not look like
+  a basic road-only map.
+- Sanitized saved map-layer preferences so old native-only `extreme` settings
+  reopen as Topo while native rendering is disabled.
+- Hid native-only premium Mapbox style choices from both layer sheets while the
+  WebView fallback is active.
+- Kept WebView-supported Topo, Satellite, Hybrid, Light, City, High Contrast,
+  Desert, Snow, Dark Road, and Red / Night layer choices available.
+- Left satellite and hybrid on the existing WebView Mapbox raster path when a
+  token is available.
+
+### Verification
+
+- `cd mobile && npx tsc --noEmit`
+- `git diff --check`
+- `cd mobile && node scripts/user-facing-copy-audit.mjs`
+- `cd mobile && npx expo export --platform web --output-dir /tmp/trailhead-web-export-map-layers`
+
 ## Verification
 
 - `python3 -m unittest tests.test_canonical_catalog_rules`

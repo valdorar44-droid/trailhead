@@ -619,6 +619,7 @@ type TripPlaceContext = {
   source?: string;
 };
 type MapLayer = 'satellite' | 'topo' | 'hybrid' | 'light' | 'city' | 'contrast' | 'desert' | 'snow' | 'dark' | 'red' | 'extreme';
+const DEFAULT_MAP_LAYER: MapLayer = 'topo';
 type CopilotChatMessage = {
   id: string;
   role: 'user' | 'assistant';
@@ -636,6 +637,30 @@ type PremiumMapStyle =
   | 'dawn'
   | 'dusk'
   | 'night';
+function webSafeMapLayer(layer: MapLayer): MapLayer {
+  return !USE_NATIVE_MAP && layer === 'extreme' ? DEFAULT_MAP_LAYER : layer;
+}
+
+function legacyLayerForPremiumStyle(style: PremiumMapStyle): MapLayer {
+  switch (style) {
+    case 'standard_satellite':
+    case 'satellite_streets':
+      return 'hybrid';
+    case 'navigation_night':
+    case 'dusk':
+    case 'night':
+      return 'dark';
+    case 'streets':
+    case 'navigation_day':
+      return 'city';
+    case 'dawn':
+    case 'standard':
+      return 'light';
+    case 'outdoors':
+    default:
+      return DEFAULT_MAP_LAYER;
+  }
+}
 type WaterCorridorPickMode = 'start' | 'end' | null;
 type WaterCorridorPoint = { lat: number; lng: number; name: string };
 type SafeWaterHubTab = 'route' | 'spots' | 'catch' | 'conditions' | 'offline';
@@ -5632,7 +5657,7 @@ function MapScreen() {
   const [routeFromCache, setRouteFromCache] = useState(false);
   const [routeDebug, setRouteDebug] = useState('');
   const [routeSourceDebug, setRouteSourceDebug] = useState('');
-  const [mapLayer,    setMapLayerState] = useState<MapLayer>('light');
+  const [mapLayer,    setMapLayerState] = useState<MapLayer>(DEFAULT_MAP_LAYER);
   const [premiumMapStyle, setPremiumMapStyle] = useState<PremiumMapStyle>('standard');
   const [extremeTrafficEnabled, setExtremeTrafficEnabled] = useState(false);
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
@@ -6432,7 +6457,7 @@ function MapScreen() {
           const nextPlaceFilters = savedPlaceFilters && savedPlaceFilters.length === LEGACY_DEFAULT_PLACE_FILTERS.length && LEGACY_DEFAULT_PLACE_FILTERS.every(id => savedPlaceFilters.includes(id))
             ? DEFAULT_PLACE_FILTERS
             : savedPlaceFilters;
-          if (savedLayer) setMapLayerState(savedLayer);
+          if (savedLayer) setMapLayerState(webSafeMapLayer(savedLayer));
           if (savedMapModePreset) setActiveMapModePreset(savedMapModePreset);
           if (nextCampFilters) setActiveFilters(nextCampFilters);
           if (savedPinFilters) setActivePinFilters(savedPinFilters);
@@ -15111,10 +15136,11 @@ function MapScreen() {
   }
 
   function applyMapLayer(next: MapLayer) {
-    setMapLayerState(next);
+    const safeLayer = webSafeMapLayer(next);
+    setMapLayerState(safeLayer);
     webRef.current?.postMessage(JSON.stringify({
       type: 'set_style',
-      style: MAP_MODES[next] ?? MAP_MODES.satellite,
+      style: MAP_MODES[safeLayer] ?? MAP_MODES[DEFAULT_MAP_LAYER],
     }));
   }
 
@@ -15131,7 +15157,7 @@ function MapScreen() {
 
   function resetMapFilterPreferences() {
     setActiveMapModePreset('default');
-    setMapLayerState('light');
+    applyMapLayer(DEFAULT_MAP_LAYER);
     setPremiumMapStyle('standard');
     setMap3dEnabled(false);
     setActiveFilters(DEFAULT_CAMP_FILTERS);
@@ -18890,10 +18916,12 @@ function MapScreen() {
   ] as const;
   const mapboxStyleItems = mapboxStyleOptions.map(option => ({
     ...option,
-    active: option.id === premiumMapStyle,
+    active: USE_NATIVE_MAP
+      ? option.id === premiumMapStyle
+      : legacyLayerForPremiumStyle(option.id) === mapLayer,
     onPress: () => {
-      applyMapLayer('extreme');
       setPremiumMapStyle(option.id);
+      applyMapLayer(USE_NATIVE_MAP ? 'extreme' : legacyLayerForPremiumStyle(option.id));
       if (user?.id) {
         api.logExtremeLedger({
           event_type: 'mapbox_style_selected',
@@ -23323,9 +23351,9 @@ function MapScreen() {
         bottomInset={bottomInset}
         activeMapLayer={mapLayer}
         options={mapStyleOptions}
-        premiumMapVisible={extremeMapboxSupported && !!mapboxToken}
+        premiumMapVisible={USE_NATIVE_MAP && extremeMapboxSupported && !!mapboxToken}
         premiumMapItems={mapboxStyleItems}
-        extremeActive={extremeMapLayerActive}
+        extremeActive={USE_NATIVE_MAP && extremeMapLayerActive}
         onClose={() => setShowMapStyleSheet(false)}
         onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
       />
@@ -23548,9 +23576,9 @@ function MapScreen() {
             mapStyleOptions={mapStyleOptions}
             activeMapLayer={mapLayer}
             onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
-            extremeMapLayerActive={extremeMapLayerActive}
+            extremeMapLayerActive={USE_NATIVE_MAP && extremeMapLayerActive}
             layerItems={layerSheetItems}
-            mapboxStylesVisible={extremeMapboxSupported && !!mapboxToken}
+            mapboxStylesVisible={USE_NATIVE_MAP && extremeMapboxSupported && !!mapboxToken}
             mapboxStyleItems={mapboxStyleItems}
             mapToolItems={extremeFeatureItems}
             safeWaterLegendVisible={layerNautical}

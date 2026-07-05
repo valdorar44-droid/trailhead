@@ -1050,6 +1050,20 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertNotIn("Coleman Glacier Climbing Route", stay_titles)
         self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|mixed-source)\b")
 
+    def test_explore_stay_search_filters_false_lodging_records(self):
+        yosemite = asyncio.run(server.explore_catalog_index(q="Yosemite where to stay", category="lodging", limit=40))
+        yosemite_titles = [item["title"] for item in yosemite["places"]]
+        moab = asyncio.run(server.explore_catalog_index(q="Moab where to stay", category="lodging", limit=40))
+        moab_titles = [item["title"] for item in moab["places"]]
+
+        self.assertIn("Yosemite Creek Campground", yosemite_titles)
+        self.assertIn("Upper Pines Campground", yosemite_titles)
+        self.assertIn("Goose Island Group Sites", moab_titles)
+        self.assertIn("Devils Garden Campground", moab_titles)
+        blocked = " ".join(yosemite_titles + moab_titles)
+        self.assertNotRegex(blocked, r"\b(Ranger Station|Picnic Shelter|Interpretive Site|Wilson Arch|Swaseys Cabin TH|Dark Canyon Wilderness Recreation Area)\b")
+        self.assertNotRegex(blocked, r"\b(API|database|download|undefined|null|0 results|mixed-source)\b")
+
     def test_nearby_store_query_does_not_drop_exact_curated_match_before_sort(self):
         old_path = store.settings.db_path
         try:

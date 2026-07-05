@@ -2479,3 +2479,62 @@ searches around Big Sur and Glacier.
 - Yosemite stay search is now fast, but some lower-quality facility cards still
   appear after the top results. Leave that as a targeted stay-quality cleanup
   instead of reworking the fixed Big Sur/Glacier path.
+
+## Explorer Stay Result Quality Pass
+
+### Timestamp
+
+2026-07-05T02:06:00-05:00
+
+### Scope
+
+Tightened the Explorer `where to stay` backend so lodging searches no longer
+surface offices, trailheads, arches, picnic shelters, raw road labels, or other
+non-overnight records. Added a stay-specific ranking pass so richer campground
+and lodging cards appear before bare recreation-area names.
+
+### Files Touched
+
+- `dashboard/server.py`
+  - Adds `_explore_profile_matches_stay_result` to filter false lodging and
+    campground matches.
+  - Adds `_explore_stay_result_sort_key` to prioritize destination guide,
+    National Park Service, Recreation.gov, BLM, and Forest Service stay cards
+    with real overnight wording.
+  - Keeps fallback stay records near the requested destination before they are
+    returned to Explorer.
+- `tests/test_trail_catalog.py`
+  - Adds regression coverage for Yosemite and Moab stay searches so false
+    lodging records do not return.
+
+### Verification
+
+- `python3 -m unittest tests.test_trail_catalog.TrailCatalogTests.test_explore_where_to_stay_falls_back_to_nearby_camps tests.test_trail_catalog.TrailCatalogTests.test_explore_stay_search_uses_destination_before_generic_text_matches tests.test_trail_catalog.TrailCatalogTests.test_explore_stay_search_filters_false_lodging_records tests.test_canonical_explore_serving tests.test_canonical_camp_serving`
+  - 26 tests passed.
+- `python3 -m py_compile dashboard/server.py`
+  - Passed.
+- `cd mobile && npx tsc --noEmit --pretty false`
+  - Passed.
+- `git diff --check`
+  - Passed.
+- Local API Playwright pass against `http://127.0.0.1:8097/api/explore/catalog/index`
+  - `Big Sur where to stay`: first page starts with China Camp Campground,
+    White Oaks Campground, Arroyo Seco Group Campground, Escondido Campground,
+    and Memorial Campground.
+  - `Moab where to stay`: first page starts with Goose Island Group Sites,
+    Gold Bar Group Sites, Hunter Canyon Group Site, and Big Bend Group Sites.
+  - `Yosemite where to stay`: first page includes Yosemite Valley Lodging,
+    Yosemite High Sierra Camps, Yosemite Creek Campground, and Upper Pines
+    Campground.
+  - `Glacier where to stay`: first page includes Many Glacier Hotel, Many
+    Glacier Campground, Avalanche Campground, and Sprague Creek Campground.
+  - No checked title list contained office/trail/arch/picnic/internal wording.
+
+### Screenshots
+
+- `output/playwright/explorer-stay-search-ranking-430x932.png`
+
+### Remaining Notes
+
+- This was backend-only. No mobile bundle change was required, so OTA is not
+  needed for this pass.

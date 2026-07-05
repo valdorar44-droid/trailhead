@@ -288,7 +288,9 @@ EXPLORE_TOURS_VIATOR = Path(__file__).parent / "explore_tours_viator_v1.json"
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
 OFFICIAL_DATA_DB = Path(__file__).resolve().parents[1] / "data" / "processed" / "trailhead_official_data.sqlite"
 CANONICAL_SERVING_DIR = Path(os.getenv("TRAILHEAD_CANONICAL_SERVING_DIR") or (Path(__file__).resolve().parents[1] / "data" / "processed" / "canonical_serving"))
-CANONICAL_CAMP_INDEX_PATH = Path(os.getenv("TRAILHEAD_CANONICAL_CAMP_INDEX") or (CANONICAL_SERVING_DIR / "camps.candidate.json"))
+CANONICAL_CAMP_INDEX_ENV = os.getenv("TRAILHEAD_CANONICAL_CAMP_INDEX")
+CANONICAL_CAMP_INDEX_PATH = Path(CANONICAL_CAMP_INDEX_ENV or (CANONICAL_SERVING_DIR / "camps.candidate.json"))
+CANONICAL_CAMP_INDEX_BUNDLED_PATH = Path(__file__).parent / "canonical_camp_index_v1.json"
 CANONICAL_EXPLORE_INDEX_PATH = Path(os.getenv("TRAILHEAD_CANONICAL_EXPLORE_INDEX") or (CANONICAL_SERVING_DIR / "explore.candidate.json"))
 CANONICAL_TRAIL_INDEX_PATH = Path(os.getenv("TRAILHEAD_CANONICAL_TRAIL_INDEX") or (CANONICAL_SERVING_DIR / "trails.candidate.json"))
 APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
@@ -5250,16 +5252,18 @@ def _explore_stay_result_sort_key(profile: dict, query_terms: list[str] | None =
     lodging_title = bool(re.search(r"\b(hotels?|inn|lodges?|lodging|cabins?|huts?|lookout rental|yurt|glamping)\b", title_text))
     campground_title = bool(re.search(r"\b(camps?|campgrounds?|campsites?|camping|horse camp|group sites?)\b", title_text))
     rv_title = bool(re.search(r"\brv\b", title_text))
-    if lodging_title:
+    if lodging_title and source_priority == 0:
         type_priority = 0
     elif campground_title:
         type_priority = 1
-    elif rv_title:
+    elif lodging_title:
         type_priority = 2
-    elif re.search(r"\b(camps?|campgrounds?|campsites?|camping)\b", category_text):
+    elif rv_title:
         type_priority = 3
-    else:
+    elif re.search(r"\b(camps?|campgrounds?|campsites?|camping)\b", category_text):
         type_priority = 4
+    else:
+        type_priority = 5
     generic_copy = bool(
         re.search(r"\bis an? (?:campground|lodging|rv park|dispersed camp)(?: near\b|\.)", body_text)
         or re.search(r"\bcheck current access, fees, closures, and availability before you go\b", body_text)
@@ -18351,7 +18355,13 @@ def _load_canonical_camp_index() -> tuple[list[dict], int]:
         try:
             stat = path.stat()
         except OSError:
-            return [], 0
+            if CANONICAL_CAMP_INDEX_ENV:
+                return [], 0
+            path = CANONICAL_CAMP_INDEX_BUNDLED_PATH
+            try:
+                stat = path.stat()
+            except OSError:
+                return [], 0
         cache_path = str(path)
         if (
             _canonical_camp_index_cache.get("path") == cache_path

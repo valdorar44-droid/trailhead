@@ -2536,5 +2536,14 @@ and lodging cards appear before bare recreation-area names.
 
 ### Remaining Notes
 
-- This was backend-only. No mobile bundle change was required, so OTA is not
-  needed for this pass.
+- Follow-up production smoke showed the generated local camp index is not
+  available in deploys. Added a bundled official-only camp serving index as the
+  production fallback:
+  - `dashboard/canonical_camp_index_v1.json`
+  - 20,384 official NPS, Recreation.gov, and USFS camp rows.
+  - No community/dispersed lead rows.
+- Production-shape local smoke with
+  `TRAILHEAD_CANONICAL_SERVING_DIR=/tmp/trailhead-no-generated-index` returned
+  real stay results for Big Sur, Moab, Yosemite, and Glacier with no blocked
+  title wording.
+- This pass still has no mobile code change. OTA is not needed.

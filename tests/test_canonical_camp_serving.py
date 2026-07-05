@@ -112,6 +112,17 @@ class CanonicalCampServingTests(unittest.TestCase):
         self.assertEqual(labels["Dispersed tent site"], "Dispersed")
         self.assertTrue(all("download" not in json.dumps(camp).lower() for camp in light))
 
+    def test_bundled_official_camp_index_loads_when_processed_index_is_absent(self):
+        server.CANONICAL_CAMP_INDEX_PATH = Path(self._tmpdir.name) / "missing-camps.json"
+        server._canonical_camp_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
+
+        items, generated_at = server._load_canonical_camp_index()
+
+        self.assertGreater(len(items), 10000)
+        self.assertGreater(generated_at, 0)
+        labels = {str(item.get("source_label") or item.get("source") or "") for item in items[:2000]}
+        self.assertTrue(labels.issubset({"USFS", "Recreation.gov", "NPS"}))
+
     def test_rv_filter_does_not_pull_mixed_campgrounds(self):
         camps = server._canonical_camps_in_bounds(
             38.70,

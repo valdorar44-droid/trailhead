@@ -1567,14 +1567,15 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     )
     text = re.sub(r"\blive results show actual sites\b", "compare nearby options", text, flags=re.I)
     text = re.sub(r"\blive map results\b", "nearby options", text, flags=re.I)
+    source_only_area_labels = r"(?:the area|National Park Service|NPS|US Forest Service|USFS|Recreation\.gov|RIDB|FWS|US Fish and Wildlife Service|Bureau of Land Management|BLM|USACE|SDC|Trailhead)"
     text = re.sub(
-        r"^(.+?) is a managed outdoor area near (?:the area|US Forest Service|Recreation\.gov|FWS|SDC|Trailhead)\.?\s*Check official access,\s*fees(?:,\s*closures,\s*permits,\s*weather,\s*and nearby services before committing dates)?\.?$",
+        rf"^(.+?) is a managed outdoor area near {source_only_area_labels}\.?\s*Check official access,\s*fees(?:,\s*closures,\s*permits,\s*weather,\s*and nearby services before committing dates)?\.?$",
         r"\1 has access notes to check before you go. Confirm fees, closures, permits, and weather.",
         text,
         flags=re.I,
     )
     text = re.sub(
-        r"^This stop is a managed outdoor area near (?:the area|US Forest Service|Recreation\.gov|FWS|SDC|Trailhead)\.?\s*Check official access,\s*fees(?:,\s*closures,\s*permits,\s*weather,\s*and nearby services before committing dates)?\.?$",
+        rf"^This stop is a managed outdoor area near {source_only_area_labels}\.?\s*Check official access,\s*fees(?:,\s*closures,\s*permits,\s*weather,\s*and nearby services before committing dates)?\.?$",
         "Check current access, fees, closures, permits, and weather before you go.",
         text,
         flags=re.I,
@@ -1598,7 +1599,7 @@ def _explore_clean_public_copy(value: object, max_chars: int | None = None) -> s
     text = re.sub(r"\bofficial\s+[A-Za-z ]+\s+record\b", "official listing", text, flags=re.I)
     text = re.sub(r"\bOpen the source link and map before committing to the stop\.?\s*", "Check current access before you go. ", text, flags=re.I)
     text = re.sub(r"\bUse nearby camps, trails, services, weather, and map context from this stop\.?\s*", "", text, flags=re.I)
-    text = re.sub(r"\bnear (?:the area|US Forest Service|Recreation\.gov|FWS|SDC|Trailhead)\b", "", text, flags=re.I)
+    text = re.sub(rf"\bnear {source_only_area_labels}\b", "", text, flags=re.I)
     text = re.sub(r"\bback-drop\b", "backdrop", text, flags=re.I)
     text = re.sub(r"\bCheck official access,\s*fees,?\s*$", "Check current access, fees, closures, permits, and weather before you go.", text, flags=re.I)
     text = re.sub(r"\bCheck access,\s*closures,\s*permits,\s*and\.?", "Check current access, closures, permits, and weather before you go.", text, flags=re.I)
@@ -24085,7 +24086,14 @@ def _find_explore_place(place_id: str) -> dict | None:
         return camp_profile
     generated = _canonical_serving_profile_by_id(decoded)
     if generated:
-        return generated
+        catalog_match = next(
+            (
+                item for item in _load_explore_catalog().get("places") or []
+                if str(item.get("id") or "") == decoded
+            ),
+            None,
+        )
+        return _merge_explore_sidecar_enrichment(generated, catalog_match) if catalog_match else generated
     pakistan_trek = _pakistan_trek_explore_profile_by_id(decoded)
     if pakistan_trek:
         return pakistan_trek

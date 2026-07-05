@@ -477,6 +477,35 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(cleaned, "0.4 mile trail. Check current access, closures, permits, and trail conditions before you go.")
         self.assertNotIn("This stop is an outdoor area", cleaned)
 
+    def test_explore_public_copy_removes_agency_as_place_fallback(self):
+        samples = [
+            "Big Bend National Park is a managed outdoor area near National Park Service. Check official access, fees, closures, permits, weather, and nearby services before committing dates.",
+            "Bienville National Forest is a managed outdoor area near US Forest Service. Check official access, fees, closures, permits, weather, and nearby services before committing dates.",
+            "Big Bend National Park is a managed outdoor area near Recreation.gov. Check official access, fees, closures, permits, weather, and nearby services before committing dates.",
+            "This stop is a managed outdoor area near Bureau of Land Management. Check official access, fees, closures, permits, weather, and nearby services before committing dates.",
+        ]
+
+        for sample in samples:
+            with self.subTest(sample=sample):
+                cleaned = server._explore_clean_public_copy(sample, 360)
+                self.assertNotIn("managed outdoor area", cleaned)
+                self.assertNotIn("near National Park Service", cleaned)
+                self.assertNotIn("near US Forest Service", cleaned)
+                self.assertNotIn("near Recreation.gov", cleaned)
+                self.assertNotIn("near Bureau of Land Management", cleaned)
+                self.assertNotIn("Check official access", cleaned)
+                self.assertIn("before you go", cleaned)
+
+    def test_explore_detail_keeps_catalog_media_when_serving_profile_is_first(self):
+        profile = asyncio.run(server.explore_place_detail("place:nps:bibe"))
+        summary = profile.get("summary") or {}
+        source_pack = profile.get("source_pack") or {}
+        photos = source_pack.get("photos") if isinstance(source_pack, dict) else []
+
+        self.assertEqual(summary.get("title"), "Big Bend National Park")
+        self.assertIn("nps.gov/common/uploads", summary.get("image_url") or summary.get("thumbnail_url") or "")
+        self.assertTrue(any("nps.gov/common/uploads" in str(photo.get("url") or "") for photo in photos if isinstance(photo, dict)))
+
     def test_legacy_explore_area_wrappers_resolve_to_parent_hubs(self):
         old_catalog = server.EXPLORE_CATALOG
         old_catalog_v3 = server.EXPLORE_CATALOG_V3

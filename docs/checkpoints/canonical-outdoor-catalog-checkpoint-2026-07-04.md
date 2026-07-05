@@ -2284,3 +2284,64 @@ Explorer cards and detail sheets render like a finished catalog surface.
 - The broader catalog goal remains active. This was one concrete visual/data
   enrichment fix found by live Explorer testing, not full completion of the app
   audit.
+
+## Explorer Official Detail Media And Copy Pass
+
+### Timestamp
+
+2026-07-05T00:09:34-05:00
+
+### Scope
+
+Live Explorer testing around `Big Bend National Park` exposed two official-data
+polish gaps:
+
+- Some low-ranked generated records could still show agency names as if they
+  were locations, such as a park being described as near an agency instead of a
+  real place.
+- Search cards had NPS media, but opening the matching official detail profile
+  could fall back to the gray hero because the detail lookup returned the
+  canonical serving profile before merging the richer Explore catalog profile.
+
+### Files Touched
+
+- `dashboard/server.py`
+  - Expanded public-copy cleanup for agency-as-location fallback sentences.
+  - Merged matching Explore catalog media/source-pack data into canonical
+    serving profiles when opening detail pages by the same ID.
+- `tests/test_trail_catalog.py`
+  - Added regression coverage for agency-as-location fallback copy.
+  - Added regression coverage for Big Bend detail media preservation.
+
+### Live Visual Evidence
+
+- `/tmp/trailhead-explorer-bigend-results-pass.png`
+  - Big Bend search results rendered without the rough agency fallback copy.
+- `/tmp/trailhead-explorer-bigend-detail-pass.png`
+  - Before media merge fix, Big Bend detail used the gray fallback hero.
+- `/tmp/trailhead-explorer-bigend-parks-detail-media-pass.png`
+  - After fix, selecting `National Parks`, searching `Big Bend National Park`,
+    and opening the result rendered the NPS hero image and clean detail copy.
+
+### Verification
+
+- `python3 -m unittest tests.test_trail_catalog tests.test_canonical_catalog_rules tests.test_canonical_catalog_audit tests.test_canonical_explore_serving`
+  - 105 tests passed.
+- `cd mobile && npm run audit:copy -- --preset explore`
+  - Passed across 12 Explorer files.
+- `cd mobile && npm run audit:copy -- --preset map`
+  - Passed across 5 map files.
+- `npm run data:audit-catalog -- --fail-on-findings`
+  - Passed with the current official database and serving indexes.
+- Live Chromium pass on `http://127.0.0.1:8099/app/guide`
+  - Opened welcome gate through `Continue for now`.
+  - Selected `National Parks`.
+  - Searched `Big Bend National Park`.
+  - Opened the Big Bend detail sheet.
+  - Confirmed no bad fallback phrases and confirmed NPS image URLs were loaded.
+
+### Remaining Notes
+
+- The broad catalog goal remains active. This pass removes one visible copy
+  failure and one official-detail media failure; it does not complete the full
+  Explorer, trails, map, route builder, and guided tours audit.

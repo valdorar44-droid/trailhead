@@ -140,6 +140,13 @@ try {
 } catch {
   LottieView = null;
 }
+
+function safelyRemoveSubscription(subscription: { remove?: () => unknown } | null | undefined) {
+  try {
+    subscription?.remove?.();
+  } catch {}
+}
+
 const USE_IOS_NATIVE_NAV_ENGINE = Platform.OS === 'ios' && hasNativeNavigationEngine();
 const STADIA_API_KEY = process.env.EXPO_PUBLIC_STADIA_API_KEY ?? '4d2b6230-f506-42ca-b556-35f419510aa2';
 const API_BASE_URL = TRAILHEAD_API_BASE;
@@ -6703,7 +6710,7 @@ function MapScreen() {
   useEffect(() => {
     if (!USE_IOS_NATIVE_NAV_ENGINE) return;
     const sub = addNavigationStateListener(applyNativeNavigationState);
-    return () => { sub?.remove(); };
+    return () => { safelyRemoveSubscription(sub); };
   }, [applyNativeNavigationState]);
 
   useEffect(() => {
@@ -7096,8 +7103,8 @@ function MapScreen() {
         }
     ).then(s => { sub = s; }).catch(() => {});
     return () => {
-      try { sub?.remove(); } catch {}
-      try { headingSub?.remove(); } catch {}
+      safelyRemoveSubscription(sub);
+      safelyRemoveSubscription(headingSub);
     };
   }, [locGranted]);
 
@@ -7243,7 +7250,7 @@ function MapScreen() {
     const sub = AppState.addEventListener('change', state => {
       if (state === 'active') refreshCommunityPins(null, 3.0, true);
     });
-    return () => sub.remove();
+    return () => safelyRemoveSubscription(sub);
   }, [refreshCommunityPins]);
 
   // POI layer

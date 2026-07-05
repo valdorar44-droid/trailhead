@@ -52,6 +52,21 @@ try {
   mapboxStandardInteractionEvents = new EventEmitter(mapboxStandardInteractions as any);
 } catch {}
 
+function safelyRemoveSubscription(subscription: { remove?: () => unknown } | null | undefined) {
+  try {
+    subscription?.remove?.();
+  } catch {}
+}
+
+function safelySetMapboxToken(token: string) {
+  try {
+    const result = MapboxGL.setAccessToken(token);
+    if (result && typeof (result as Promise<unknown>).catch === 'function') {
+      (result as Promise<unknown>).catch(() => {});
+    }
+  } catch {}
+}
+
 const TILE_BASE_URL = 'https://tiles.gettrailhead.app';
 const API_BASE_URL = TRAILHEAD_API_BASE;
 const BASE_DL_URL   = `${TILE_BASE_URL}/api/download/base.pmtiles`;
@@ -1424,7 +1439,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useEffect(() => {
     if (!mapboxToken) return;
-    MapboxGL.setAccessToken(mapboxToken).catch(() => {});
+    safelySetMapboxToken(mapboxToken);
   }, [mapboxToken]);
 
   useEffect(() => {
@@ -1455,7 +1470,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     return () => {
       mounted = false;
       if (retry) clearTimeout(retry);
-      sub.remove();
+      safelyRemoveSubscription(sub);
       mapboxStandardInteractions?.disable?.().catch(() => {});
     };
   }, [isExtremeMapbox]);

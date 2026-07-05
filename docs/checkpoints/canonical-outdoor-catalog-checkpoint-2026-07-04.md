@@ -2795,3 +2795,47 @@ Yosemite National Park hub.
   served by the Explorer list below.
 - This pass includes a mobile JavaScript change. OTA is needed after commit and
   push.
+
+## Checkpoint: Map Tab Crash Guard
+
+### Timestamp
+
+2026-07-05T02:34:00-05:00
+
+### Scope
+
+Fixed a crash path reported when selecting the Map tab.
+
+### Files Touched
+
+- `mobile/components/NativeMap/index.tsx`
+  - Guards Mapbox token setup so RNMapbox builds that return `void` from
+    `setAccessToken` do not throw during Map mount.
+  - Guards standard-map interaction listener cleanup.
+- `mobile/app/(tabs)/map.tsx`
+  - Guards Map, location, navigation, and app-state subscription cleanup.
+- `mobile/app/(tabs)/guide.tsx`
+  - Guards Explore guide location watcher cleanup during tab transitions.
+
+### Verification
+
+- `npx tsc --noEmit` from `mobile/`
+  - Passed.
+- `npx expo export --platform web --output-dir /tmp/trailhead-web-export-map-crash-check`
+  - Passed.
+- Headless Chrome direct Map route load:
+  - `http://localhost:8082/map` mounted with no `MAP ERROR`,
+    `removeSubscription`, `TypeError`, `ReferenceError`, or `Cannot read`
+    markers in the page output or Chrome stderr.
+- `python3 -m py_compile dashboard/server.py`
+  - Passed.
+- `cd mobile && node scripts/user-facing-copy-audit.mjs`
+  - Passed for the touched file.
+- `git diff --check`
+  - Passed.
+
+### Remaining Notes
+
+- Playwright is not installed in this repo, so the Map tab click smoke used
+  headless Chrome route loading instead of a Playwright click journey.
+- This pass changes mobile code. OTA is needed after commit and push.

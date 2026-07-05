@@ -60,6 +60,12 @@ const EXPLORE_VISIBLE_STEP = 48;
 const API_BASE = TRAILHEAD_API_BASE;
 const BOOKABLE_EXPERIENCES_ENABLED = true;
 
+function safelyRemoveSubscription(subscription: { remove?: () => unknown } | null | undefined) {
+  try {
+    subscription?.remove?.();
+  } catch {}
+}
+
 type GuidedTourCategory = 'all' | 'outdoor' | 'water' | 'short' | 'private' | 'family';
 type GuidedTourSort = 'top_rated' | 'price';
 type GuidedTourDate = 'any' | 'today' | 'weekend' | 'custom';
@@ -3192,7 +3198,7 @@ function GuideScreenContent() {
 
   useEffect(() => {
     if (!autoPlay || !activeTrip) {
-      locationSub.current?.remove();
+      safelyRemoveSubscription(locationSub.current);
       locationSub.current = null;
       return;
     }
@@ -3215,7 +3221,7 @@ function GuideScreenContent() {
         }
       ).then(sub => { locationSub.current = sub; });
     });
-    return () => { locationSub.current?.remove(); locationSub.current = null; };
+    return () => { safelyRemoveSubscription(locationSub.current); locationSub.current = null; };
   }, [autoPlay, activeTrip?.trip_id, guide]);
 
   function playNarration(name: string, text: string, highlightText = false) {

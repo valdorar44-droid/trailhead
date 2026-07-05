@@ -161,6 +161,18 @@ class CanonicalExploreServingTests(unittest.TestCase):
         self.assertEqual(pine["sources"][0]["title"], "US Forest Service")
         self.assertEqual(pine["trails"][0]["difficulty"], "Moderate")
 
+    def test_bundled_official_trail_index_loads_when_processed_index_is_absent(self):
+        server.CANONICAL_TRAIL_INDEX_PATH = Path(self._tmpdir.name) / "missing-trails.json"
+        server._canonical_trail_index_cache.update({"path": "", "mtime": 0.0, "items": [], "generated_at": 0})
+
+        items, generated_at = server._load_canonical_trail_index()
+
+        self.assertGreater(len(items), 40000)
+        self.assertGreater(generated_at, 0)
+        self.assertTrue(all(not item.get("review_only") for item in items[:2000]))
+        labels = {str(item.get("source_label") or "") for item in items[:2000]}
+        self.assertTrue(labels.issubset({"USFS", "NPS", "Recreation.gov", "US Forest Service", "National Park Service"}))
+
     def test_exact_timed_entry_search_surfaces_permit_record(self):
         self.assertEqual(server._explore_category_hint_from_query("Denali Park Road Timed Entry"), "things")
         self.assertEqual(server._explore_category_hint_from_query("PCT"), "trail")

@@ -292,7 +292,9 @@ CANONICAL_CAMP_INDEX_ENV = os.getenv("TRAILHEAD_CANONICAL_CAMP_INDEX")
 CANONICAL_CAMP_INDEX_PATH = Path(CANONICAL_CAMP_INDEX_ENV or (CANONICAL_SERVING_DIR / "camps.candidate.json"))
 CANONICAL_CAMP_INDEX_BUNDLED_PATH = Path(__file__).parent / "canonical_camp_index_v1.json"
 CANONICAL_EXPLORE_INDEX_PATH = Path(os.getenv("TRAILHEAD_CANONICAL_EXPLORE_INDEX") or (CANONICAL_SERVING_DIR / "explore.candidate.json"))
-CANONICAL_TRAIL_INDEX_PATH = Path(os.getenv("TRAILHEAD_CANONICAL_TRAIL_INDEX") or (CANONICAL_SERVING_DIR / "trails.candidate.json"))
+CANONICAL_TRAIL_INDEX_ENV = os.getenv("TRAILHEAD_CANONICAL_TRAIL_INDEX")
+CANONICAL_TRAIL_INDEX_PATH = Path(CANONICAL_TRAIL_INDEX_ENV or (CANONICAL_SERVING_DIR / "trails.candidate.json"))
+CANONICAL_TRAIL_INDEX_BUNDLED_PATH = Path(__file__).parent / "canonical_trail_index_v1.json"
 APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
 
 app = FastAPI(title="Trailhead API")
@@ -4447,14 +4449,27 @@ def _canonical_serving_index_enabled(env_name: str) -> bool:
     value = str(os.getenv(env_name, "1")).strip().lower()
     return value not in {"0", "false", "no", "off"}
 
-def _load_canonical_serving_index(path: Path, cache: dict[str, Any], env_name: str) -> tuple[list[dict], int]:
+def _load_canonical_serving_index(
+    path: Path,
+    cache: dict[str, Any],
+    env_name: str,
+    *,
+    configured_env: str | None = None,
+    fallback_path: Path | None = None,
+) -> tuple[list[dict], int]:
     if not _canonical_serving_index_enabled(env_name):
         return [], 0
     with _canonical_serving_index_lock:
         try:
             stat = path.stat()
         except OSError:
-            return [], 0
+            if configured_env or fallback_path is None:
+                return [], 0
+            path = fallback_path
+            try:
+                stat = path.stat()
+            except OSError:
+                return [], 0
         cache_path = str(path)
         if (
             cache.get("path") == cache_path
@@ -4485,6 +4500,8 @@ def _load_canonical_trail_index() -> tuple[list[dict], int]:
         CANONICAL_TRAIL_INDEX_PATH,
         _canonical_trail_index_cache,
         "TRAILHEAD_LOCAL_TRAIL_INDEX_ENABLED",
+        configured_env=CANONICAL_TRAIL_INDEX_ENV,
+        fallback_path=CANONICAL_TRAIL_INDEX_BUNDLED_PATH,
     )
 
 def _canonical_public_text(value: object, max_chars: int = 420) -> str:
@@ -4847,8 +4864,34 @@ def _canonical_raw_item_matches_category(item: dict, requested: set[str], *, tra
             "name", "title", "summary", "activity", "allowed_uses", "surface",
         ))
         return bool(_CANONICAL_TRAIL_VISUAL_RE.search(hay))
-    title = str(item.get("title") or item.get("name") or "").lower()
-    raw = {_normalize_place_category(item.get("category")), _normalize_place_category(item.get("group"))}
+    summary = item.get("summary") if isinstance(item.get("summary"), dict) else {}
+    card = item.get("card") if isinstance(item.get("card"), dict) else {}
+    title = " ".join(
+        str(value or "")
+        for value in (
+            item.get("title"),
+            item.get("name"),
+            summary.get("title"),
+            card.get("title"),
+            card.get("headline"),
+        )
+    ).lower()
+    raw_values: list[object] = [
+        item.get("category"),
+        item.get("group"),
+        item.get("module_target"),
+        summary.get("category"),
+        summary.get("explore_group"),
+    ]
+    for key in ("subcategories", "tags"):
+        value = item.get(key)
+        if isinstance(value, list):
+            raw_values.extend(value)
+    for key in ("tags", "badges"):
+        value = summary.get(key)
+        if isinstance(value, list):
+            raw_values.extend(value)
+    raw = {_normalize_place_category(value) for value in raw_values if str(value or "").strip()}
     hay = " ".join([title, *raw])
     camp_categories = {"camp", "camping", "campground", "rv", "rv_park", "private_stay"}
     if requested.issubset(camp_categories):
@@ -5009,12 +5052,29 @@ def _explore_stay_request(category: str = "", q: str = "") -> bool:
     terms = set(_explore_query_terms(q))
     return bool(terms.intersection({"stay", "stays", "lodging", "lodge", "lodges", "cabin", "cabins", "hotel", "hotels", "sleep"}))
 
+def _explore_trail_request(category: str = "", q: str = "") -> bool:
+    normalized = _normalize_place_category(category)
+    if normalized in {"trail", "trails", "trailhead"}:
+        return True
+    terms = set(_explore_query_terms(q))
+    return bool(terms.intersection({"trail", "trails", "trailhead", "trailheads", "hike", "hikes", "hiking", "trek", "treks"}))
+
 def _explore_stay_destination_query(q: str) -> str:
     terms = _explore_query_terms(q)
     intent = {
         "where", "stay", "stays", "lodging", "lodge", "lodges", "cabin", "cabins",
         "hotel", "hotels", "sleep", "near", "nearby", "around", "in", "at", "the",
         "to", "best", "top", "camp", "camps", "camping", "campground", "campgrounds",
+    }
+    cleaned = [term for term in terms if term not in intent]
+    return " ".join(cleaned) or re.sub(r"\s+", " ", str(q or "").strip())
+
+def _explore_trail_destination_query(q: str) -> str:
+    terms = _explore_query_terms(q)
+    intent = {
+        "trail", "trails", "trailhead", "trailheads", "hike", "hikes", "hiking",
+        "trek", "treks", "route", "routes", "near", "nearby", "around", "in",
+        "at", "the", "to", "best", "top", "open", "find", "show",
     }
     cleaned = [term for term in terms if term not in intent]
     return " ".join(cleaned) or re.sub(r"\s+", " ", str(q or "").strip())
@@ -5045,6 +5105,9 @@ def _explore_stay_destination_search_queries(destination_query: str) -> list[str
 EXPLORE_STAY_DESTINATION_HINTS: dict[str, tuple[str, float, float]] = {
     "moab": ("Moab", 38.5733, -109.5498),
     "big sur": ("Big Sur", 36.2704, -121.8081),
+    "sedona": ("Sedona", 34.8697, -111.7609),
+    "asheville": ("Asheville", 35.5951, -82.5515),
+    "pisgah": ("Pisgah National Forest", 35.3617, -82.7779),
     "glacier": ("Glacier National Park", 48.6841, -113.8009),
     "glacier national park": ("Glacier National Park", 48.6841, -113.8009),
     "yosemite": ("Yosemite National Park", 37.8651, -119.5383),
@@ -5061,6 +5124,18 @@ EXPLORE_STAY_DESTINATION_HINTS: dict[str, tuple[str, float, float]] = {
     "acadia national park": ("Acadia National Park", 44.3386, -68.2733),
     "great smoky mountains": ("Great Smoky Mountains National Park", 35.6118, -83.4895),
     "great smoky mountains national park": ("Great Smoky Mountains National Park", 35.6118, -83.4895),
+}
+
+EXPLORE_TRAIL_DESTINATION_HINTS: dict[str, tuple[str, float, float]] = {
+    **EXPLORE_STAY_DESTINATION_HINTS,
+    "grand canyon village": ("Grand Canyon Village", 36.0544, -112.1401),
+    "south rim": ("Grand Canyon South Rim", 36.0570, -112.1431),
+    "bryce canyon": ("Bryce Canyon National Park", 37.5930, -112.1871),
+    "bryce canyon national park": ("Bryce Canyon National Park", 37.5930, -112.1871),
+    "arches": ("Arches National Park", 38.7331, -109.5925),
+    "arches national park": ("Arches National Park", 38.7331, -109.5925),
+    "canyonlands": ("Canyonlands National Park", 38.3269, -109.8783),
+    "canyonlands national park": ("Canyonlands National Park", 38.3269, -109.8783),
 }
 
 def _explore_stay_destination_hint_profiles(destination_query: str) -> list[dict]:
@@ -5093,6 +5168,42 @@ def _explore_stay_destination_hint_profiles(destination_query: str) -> list[dict
             },
             "category": "parks",
             "subcategories": ["destination", "stays"],
+            "search_aliases": [title, query],
+        })
+    return profiles
+
+def _explore_trail_destination_hint_profiles(destination_query: str) -> list[dict]:
+    profiles: list[dict] = []
+    seen: set[str] = set()
+    search_queries = _explore_stay_destination_search_queries(destination_query)
+    search_queries.extend([re.sub(r"\s+", " ", str(destination_query or "").strip().lower())])
+    for query in search_queries:
+        hint = EXPLORE_TRAIL_DESTINATION_HINTS.get(query)
+        if not hint:
+            continue
+        title, lat, lng = hint
+        key = title.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        slug = re.sub(r"[^a-z0-9]+", "-", key).strip("-")
+        profiles.append({
+            "id": f"explore:trail-destination:{slug}",
+            "summary": {
+                "title": title,
+                "category": "Destination",
+                "explore_group": "parks",
+                "region": title,
+                "lat": lat,
+                "lng": lng,
+                "rank": 699500,
+                "hero_rank": 699500,
+                "tags": ["trails"],
+                "hook": title,
+                "short_description": f"Trails around {title}.",
+            },
+            "category": "parks",
+            "subcategories": ["destination", "trails"],
             "search_aliases": [title, query],
         })
     return profiles
@@ -5130,6 +5241,13 @@ def _explore_stay_destination_profiles(destination_query: str, *, limit: int = 1
         *destination_sort_key(place),
     ))
     return destination_profiles[:safe_limit]
+
+def _explore_trail_destination_profiles(destination_query: str, *, limit: int = 12) -> list[dict]:
+    safe_limit = max(1, min(int(limit or 12), 40))
+    hint_profiles = _explore_trail_destination_hint_profiles(destination_query)
+    if hint_profiles:
+        return hint_profiles[:safe_limit]
+    return _explore_stay_destination_profiles(destination_query, limit=safe_limit)
 
 def _explore_profile_with_stay_destination(profile: dict, destination_name: str) -> dict:
     if not destination_name:
@@ -5428,6 +5546,48 @@ def _explore_stay_fallback_profiles(q: str = "", limit: int = 120, *, include_lo
     if candidates:
         return candidates[:safe_limit]
     return []
+
+def _explore_trail_fallback_profiles(q: str = "", limit: int = 120) -> list[dict]:
+    if not q:
+        return []
+    destination_query = _explore_trail_destination_query(q)
+    if not destination_query:
+        return []
+    safe_limit = max(1, min(int(limit or 120), 300))
+    destination_profiles = _explore_trail_destination_profiles(destination_query, limit=8)[:4]
+    requested = {"trail"}
+    candidates: list[dict] = []
+    for destination in destination_profiles:
+        summary = destination.get("summary") if isinstance(destination.get("summary"), dict) else {}
+        try:
+            lat = float(summary.get("lat"))
+            lng = float(summary.get("lng"))
+        except Exception:
+            continue
+        destination_name = _explore_clean_display_title(summary.get("title") or destination_query.title())
+        nearby = _canonical_serving_profiles(
+            category="trail",
+            lat=lat,
+            lng=lng,
+            radius_mi=95,
+            limit=max(safe_limit, 80),
+            include_trails=True,
+        )
+        for profile in nearby:
+            if not _explore_place_matches_category_request(profile, requested):
+                continue
+            candidates.append(_explore_profile_with_stay_destination(profile, destination_name))
+        if len(candidates) >= safe_limit:
+            break
+    if not candidates:
+        return []
+    candidates = _dedupe_ranked_explore_profiles(_merge_explore_profile_lists([], candidates))
+    candidates = [place for place in candidates if _explore_place_matches_category_request(place, requested)]
+    candidates.sort(key=lambda place: (
+        (place.get("summary") or {}).get("distance_m", 999999999),
+        *_explore_query_sort_key(place, []),
+    ))
+    return candidates[:safe_limit]
 
 def _explore_can_relax_empty_category(category: str = "") -> bool:
     normalized = _normalize_place_category(category)
@@ -24112,15 +24272,19 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
     effective_category = category or _explore_category_hint_from_query(q)
     query_terms = _explore_query_terms_for_category(q, effective_category)
     stay_request = _explore_stay_request(effective_category, q)
+    trail_request = _explore_trail_request(effective_category, q)
     stay_destination_query = _explore_stay_destination_query(q) if stay_request else ""
     stay_destination_terms = _explore_query_terms_for_category(stay_destination_query, "camp") if stay_destination_query else []
     stay_destination_anchors = _explore_stay_destination_profiles(stay_destination_query, limit=1) if stay_destination_query else []
     stay_first_ids: set[str] = set()
+    trail_first_ids: set[str] = set()
+    direct_catalog_ids: set[str] = set()
     if query_terms:
         places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if effective_category:
         requested = {_normalize_place_category(effective_category)}
         places = [place for place in places if _explore_place_matches_category_request(place, requested)]
+    direct_catalog_ids = {str(place.get("id") or "") for place in places}
     if q or category:
         stay_include_lodging = _normalize_place_category(effective_category) in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"}
         stay_first_profiles = (
@@ -24133,10 +24297,29 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
             else []
         )
         stay_first_ids = {str(place.get("id") or "") for place in stay_first_profiles}
+        trail_first_profiles = (
+            _explore_trail_fallback_profiles(
+                q=q,
+                limit=min(max(limit + cursor + 80, 80), 240),
+            )
+            if trail_request
+            else []
+        )
+        trail_first_ids = {str(place.get("id") or "") for place in trail_first_profiles}
         if stay_request and stay_first_profiles:
             places = _merge_explore_profile_lists(stay_first_profiles, places)
+        elif trail_request:
+            places = _merge_explore_profile_lists(
+                places,
+                [
+                    *_official_cache_search_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 120)),
+                    *_canonical_serving_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 80, 80), 240)),
+                    *_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 20, 20), 80)),
+                ],
+            )
+            places = _merge_explore_profile_lists(places, trail_first_profiles)
         else:
-            places = _merge_explore_profile_lists(stay_first_profiles, places)
+            places = _merge_explore_profile_lists([*stay_first_profiles, *trail_first_profiles], places)
             places = _merge_explore_profile_lists(
                 places,
                 [
@@ -24146,7 +24329,11 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
                 ],
             )
         if query_terms:
-            places = [place for place in places if _explore_query_terms_match(place, query_terms)]
+            places = [
+                place for place in places
+                if str(place.get("id") or "") in trail_first_ids
+                or _explore_query_terms_match(place, query_terms)
+            ]
         if stay_request and stay_destination_terms:
             places = [
                 place for place in places
@@ -24158,6 +24345,8 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
             ]
         if stay_request:
             places = [place for place in places if _explore_profile_matches_stay_result(place)]
+        elif trail_request:
+            places = [place for place in places if _explore_place_matches_category_request(place, {"trail"})]
         elif effective_category:
             places = [place for place in places if _explore_place_matches_category_request(place, requested)]
     if query_terms:
@@ -24174,6 +24363,7 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
         places = sorted(
             places,
             key=lambda p: (
+                0 if trail_request and str(p.get("id") or "") in direct_catalog_ids else 1,
                 _explore_requested_category_priority(p, effective_category),
                 *_explore_query_sort_key(p, query_terms),
             ),
@@ -24187,6 +24377,10 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
         )
         query_terms = _explore_query_terms_for_category(_explore_stay_destination_query(q), "camp")
         places = [place for place in places if _explore_profile_matches_stay_result(place)]
+        places = _dedupe_ranked_explore_profiles(places)
+    if not places and trail_request:
+        places = _explore_trail_fallback_profiles(q=q, limit=min(max(limit + cursor + 80, 80), 240))
+        query_terms = []
         places = _dedupe_ranked_explore_profiles(places)
     if not places and q and not _explore_stay_request(effective_category, q):
         places = _explore_relaxed_destination_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 160))

@@ -2549,3 +2549,66 @@ and lodging cards appear before bare recreation-area names.
 - Serving-index prewarm now starts immediately and loads the camp index first
   so the first real camp/stay search is less likely to pay the cold index load.
 - This pass still has no mobile code change. OTA is not needed.
+
+## Explorer Trail Serving Fallback Pass
+
+### Timestamp
+
+2026-07-05T15:35:00-05:00
+
+### Scope
+
+Added a production-safe official trail fallback so Explorer trail searches do
+not depend on the large generated local data folder being present in deploys.
+The fallback fills trail result lists from the official serving index while
+letting direct catalog matches stay ahead of broader regional trails.
+
+### Files Touched
+
+- `dashboard/canonical_trail_index_v1.json`
+  - Bundled official-only trail serving artifact.
+  - 43,296 USFS trail rows.
+  - No review-only or community lead rows.
+- `dashboard/server.py`
+  - Loads the bundled trail artifact when the generated trail index is absent.
+  - Adds trail destination fallback for nearby trail results.
+  - Keeps direct catalog trail cards ahead of fallback rows.
+  - Uses visible card fields when matching trail/trailhead categories.
+  - Keeps clean destination fallback cards for places without trail rows.
+- `tests/test_canonical_explore_serving.py`
+  - Covers bundled trail fallback loading when the generated trail file is not
+    available.
+
+### Verification
+
+- `python3 -m unittest tests.test_canonical_explore_serving tests.test_trail_catalog tests.test_canonical_camp_serving tests.test_startup_prewarm`
+  - 78 tests passed.
+- `python3 -m py_compile dashboard/server.py`
+  - Passed.
+- `git diff --check`
+  - Passed.
+- Production-shape local smoke with
+  `TRAILHEAD_CANONICAL_SERVING_DIR=/tmp/trailhead-no-generated-index`:
+  - `Moab trails`: 12 results, starts with Fins and Things OHV Route, Corona
+    Arch Trailhead, Moab Brands Trailhead, and Moab Rim Trailhead.
+  - `Yosemite trails`: 12 results, starts with Yosemite Valley Trails and
+    Yosemite trailheads.
+  - `Glacier National Park trails`: 12 results, starts with Apgar Lookout
+    Trailhead, Beaver Pond Loop Trailhead, and Forest and Fire Nature Trail.
+  - `Grand Canyon trails`: 12 results, starts with Bright Angel Trailhead and
+    Havasu Falls.
+  - `Sedona trails`: 12 trail results.
+  - `Asheville trails`: 12 trail results.
+  - `Dolomites trails`: clean destination fallback card.
+  - No checked title or description contained internal/source placeholder
+    wording.
+
+### Remaining Notes
+
+- The bundled trail index is official but currently USFS-heavy. NPS and BLM
+  trail coverage should be added through the canonical outdoor import pipeline
+  before treating every national park trail list as complete.
+- A fresh process without startup prewarm still pays the catalog/index load on
+  the first trail query. The app startup path prewarms Explore, camp, and trail
+  serving indexes; production smoke should be run after that prewarm window.
+- This pass has no mobile code change. OTA is not needed.

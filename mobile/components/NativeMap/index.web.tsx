@@ -794,7 +794,6 @@ function mapWebMapboxFeatureToPlace(feature: any, fallbackLat: number, fallbackL
     place_id: props.mapbox_id || props.id,
     provider_place_id: props.mapbox_id || props.id,
     attribution: 'Map data',
-    summary: 'Selected place from the map.',
   };
 }
 

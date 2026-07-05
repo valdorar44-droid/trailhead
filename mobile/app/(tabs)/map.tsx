@@ -17379,6 +17379,37 @@ function MapScreen() {
         return;
       }
     }
+    // Camps/stays/dispersed/RV/wild sites tapped as built-in Mapbox basemap
+    // icons already carry an overnight-place type from classification, so we
+    // can open the camp sheet directly instead of flashing a generic place
+    // sheet first and swapping to camp once async enrichment resolves.
+    if (isOvernightPlaceLike(poi)) {
+      const camp = smartPlaceToCampPin(poi);
+      if (camp) {
+        cancelRenderedMapboxEnrichment();
+        setTappedPoi(null);
+        setShowSearch(false);
+        setShowDiscoveryPanel(false);
+        setCopilotResults([]);
+        setCopilotResultScope(null);
+        setSearchResults([]);
+        setSearchRouteCard(null);
+        setSelectedPlace(null);
+        setSelectedPlaceContext(null);
+        setSelectedPlaceTripContext(tripPlaceContextFor(poi, day));
+        setTappedTrail(null);
+        setTappedTileSpot(null);
+        setTappedGas(null);
+        setSelectedCommunityPin(null);
+        setSelectedTrail(null);
+        setSelectedCamp(camp);
+        setCampDetail(null); setCampInsight(null); setWikiArticles([]);
+        setCampFullness(null); setCampWeather(null);
+        if (camp.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
+        if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+        return;
+      }
+    }
     const place = poi as SearchPlace;
     const source = String(poi.source || '').toLowerCase();
     const renderedMapbox = isRenderedMapboxPlaceSource(source);
@@ -21226,6 +21257,8 @@ function MapScreen() {
         const heroUri = selectedTrailProfile?.photos?.[0]?.url || selectedTrail.photo_url || '';
         const photoCredit = selectedTrailProfile?.photos?.[0]?.credit || selectedTrailProfile?.photos?.[0]?.source || '';
         const elevation = trailElevationDisplay(selectedTrailProfile, selectedTrail);
+        const distanceLabel = trailDistanceLabel(selectedTrailProfile, selectedTrail);
+        const hasMeasuredRoute = distanceLabel !== '--' || elevation.value !== '--';
         const weather = trailWeatherDisplay(trailWeather);
         const difficulty = model.difficulty_label && model.difficulty_label !== 'Unrated'
           ? model.difficulty_label
@@ -21305,14 +21338,18 @@ function MapScreen() {
 
               <View style={s.trailDetailBody}>
                 <View style={s.trailFactGrid}>
-                  <View style={s.trailFactItem}>
-                    <Text style={s.trailFactValue}>{trailDistanceLabel(selectedTrailProfile, selectedTrail)}</Text>
-                    <Text style={s.trailFactLabel}>Length</Text>
-                  </View>
-                  <View style={s.trailFactItem}>
-                    <Text style={s.trailFactValue}>{elevation.value}</Text>
-                    <Text style={s.trailFactLabel}>{elevation.label}</Text>
-                  </View>
+                  {hasMeasuredRoute && (
+                    <View style={s.trailFactItem}>
+                      <Text style={s.trailFactValue}>{distanceLabel}</Text>
+                      <Text style={s.trailFactLabel}>Length</Text>
+                    </View>
+                  )}
+                  {hasMeasuredRoute && (
+                    <View style={s.trailFactItem}>
+                      <Text style={s.trailFactValue}>{elevation.value}</Text>
+                      <Text style={s.trailFactLabel}>{elevation.label}</Text>
+                    </View>
+                  )}
                   <View style={s.trailFactItem}>
                     <Text style={s.trailFactValue}>{weather.temp}</Text>
                     <View style={s.trailFactIconLabel}>
@@ -21321,8 +21358,8 @@ function MapScreen() {
                     </View>
                   </View>
                   <View style={s.trailFactItem}>
-                    <Text style={s.trailFactValue}>{trailRouteTypeLabel(selectedTrailProfile, selectedTrail)}</Text>
-                    <Text style={s.trailFactLabel}>Route type</Text>
+                    <Text style={s.trailFactValue}>{hasMeasuredRoute ? trailRouteTypeLabel(selectedTrailProfile, selectedTrail) : 'Access point'}</Text>
+                    <Text style={s.trailFactLabel}>{hasMeasuredRoute ? 'Route type' : 'Place type'}</Text>
                   </View>
                 </View>
 

@@ -45,5 +45,18 @@
 - Script: `node mobile/scripts/map-smoke-playwright.mjs --url http://127.0.0.1:8082/map`
 
 ### Remaining
-- Ship OTA and confirm on a physical iOS/Android binary that the Map tab no
-  longer terminates when camp clusters load.
+- Confirm on a physical iOS/Android binary that the Map tab no longer
+  terminates when camp clusters load.
+
+### Release
+- Code commit: `2f6285d` (`Restore native Mapbox map SDK after cluster crash
+  fix`), pushed to `codex/production-catchup-20260626`.
+- Website `/app` bundle rebuilt via `node scripts/export_website_app.mjs` and
+  `dashboard/site` Astro build, included in the same commit.
+- Production OTA update group: `412801e7-40fe-430b-8ea3-54e43f241f12`
+  (Android `019f33c3-f490-7fd6-8c61-bec213f78cdb`, iOS
+  `019f33c3-f490-7dd9-813a-b90edd93bd2d`).
+- Preview OTA update group: `8fad42d8-d860-4458-9e50-d4aeb6ea92b5`
+  (Android `019f33c4-f23c-76b5-9ac7-740540b25890`, iOS
+  `019f33c4-f23c-7a21-b057-d3e3c04d127b`).
+- Runtime: `native-20260614-sdk54-1`.

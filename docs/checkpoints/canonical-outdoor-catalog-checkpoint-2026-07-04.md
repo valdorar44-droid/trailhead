@@ -2223,3 +2223,64 @@ text.
 - This is a guardrail and small polish fix, not the full catalog completion.
   The broader goal still needs continued live visual passes through Explorer,
   map camps, route builder, and deeper detail sheets.
+
+## Pakistan Trail Hub Media Pass
+
+### Timestamp
+
+2026-07-04T23:53:48-05:00
+
+### Scope
+
+Live Explorer testing opened `K2 and Baltoro Trek Area` successfully, but the
+detail hero used the gray fallback instead of destination media. This pass added
+real media to the curated Pakistan trail and mountain records so the existing
+Explorer cards and detail sheets render like a finished catalog surface.
+
+### References
+
+- K2 image: https://commons.wikimedia.org/wiki/File:K2_8611.jpg
+- Baltoro Glacier image: https://commons.wikimedia.org/wiki/File:Baltoro_glacier_from_air.jpg
+- Laila Peak image: https://commons.wikimedia.org/wiki/File:Laila_Peak.jpg
+- Masherbrum image: https://commons.wikimedia.org/wiki/File:Masherbrum_k1.jpg
+- Hushe Valley image: https://commons.wikimedia.org/wiki/File:Hushe_Valley.jpg
+
+### Files Touched
+
+- `mobile/components/explore/curatedExplorePlaces.ts`
+  - Added optional image fields to official curated seeds.
+  - Added media for K2/Baltoro, Khaplu/Hushe, Laila Peak, Masherbrum, and K7 /
+    Charakusa records.
+  - Wired official seed images into summary hero fields and source-pack photos.
+  - Added image URLs to related Pakistan things-to-do items where useful.
+- `dashboard/site/public/app`
+  - Re-exported the web app bundle after the media change.
+
+### Live Visual Evidence
+
+- Before fix: `/tmp/trailhead-explorer-live-k2.png`
+  - K2 detail sheet rendered a gray fallback hero.
+- After fix and web export: `/tmp/trailhead-explorer-live-k2-media-exported.png`
+  - K2 detail sheet rendered a full-width mountain hero with the existing
+    title, status, weather, search, and action controls intact.
+
+### Verification
+
+- `cd mobile && npx tsc --noEmit --pretty false`
+  - Passed.
+- `cd mobile && npm run audit:copy -- --preset explore`
+  - Passed across 12 Explorer files.
+- `cd mobile && npm run audit:copy -- --preset map`
+  - Passed across 5 map files.
+- `npm run data:audit-catalog -- --fail-on-findings`
+  - Passed.
+- `npm run export:webapp`
+  - Passed and re-exported `/app`.
+- `git diff --check`
+  - Passed.
+
+### Remaining Notes
+
+- The broader catalog goal remains active. This was one concrete visual/data
+  enrichment fix found by live Explorer testing, not full completion of the app
+  audit.

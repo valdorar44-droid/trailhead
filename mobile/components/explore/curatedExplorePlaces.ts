@@ -45,6 +45,8 @@ type OfficialPlaceSeed = {
   group: string;
   state: string;
   region: string;
+  image?: string;
+  imageCredit?: string;
   lat: number;
   lng: number;
   rank: number;
@@ -84,6 +86,11 @@ const ACADIA_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/e/e9/Acadia
 const CDA_ADVENTURE_URL = 'https://www.cda.gov.pk/adventure#gsc.tab=0';
 const PUNJAB_WILDLIFE_PARKS_URL = 'https://fw.punjab.gov.pk/parks';
 const GB_TOURISM_URL = 'https://visitgilgitbaltistan.gov.pk/';
+const K2_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/c/ce/K2_8611.jpg';
+const BALTORO_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/9/91/Baltoro_glacier_from_air.jpg/1280px-Baltoro_glacier_from_air.jpg';
+const LAILA_PEAK_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/8/85/Laila_Peak.jpg';
+const MASHERBRUM_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/thumb/a/a7/Masherbrum_k1.jpg/1280px-Masherbrum_k1.jpg';
+const HUSHE_VALLEY_IMAGE = 'https://upload.wikimedia.org/wikipedia/commons/f/fd/Hushe_Valley.jpg';
 
 const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
   {
@@ -143,6 +150,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     group: 'trails',
     state: 'Gilgit-Baltistan',
     region: 'Shigar / Central Karakoram',
+    image: K2_IMAGE,
+    imageCredit: 'Kogo / Wikimedia Commons',
     lat: 35.7455,
     lng: 76.5142,
     rank: 120,
@@ -156,9 +165,9 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     aliases: ['k2 base camp', 'baltoro glacier', 'concordia', 'askole', 'karakoram trek', 'central karakoram'],
     tags: ['trails', 'trek', 'glacier', 'k2', 'karakoram', 'guide required'],
     thingsToDo: [
-      { title: 'Askole Staging', description: 'Last practical staging area before the Baltoro approach; verify transport, permits, and local support.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging' },
-      { title: 'Baltoro Glacier', description: 'Glacier trek corridor for planning context only; guide and permit checks are essential.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
-      { title: 'Concordia', description: 'High mountain camp area near K2 views; weather, altitude, and support plans decide feasibility.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'High camp' },
+      { title: 'Askole Staging', description: 'Last practical staging area before the Baltoro approach; verify transport, permits, and local support.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging', image_url: K2_IMAGE },
+      { title: 'Baltoro Glacier', description: 'Glacier trek corridor for planning context only; guide and permit checks are essential.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek', image_url: BALTORO_IMAGE },
+      { title: 'Concordia', description: 'High mountain camp area near K2 views; weather, altitude, and support plans decide feasibility.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'High camp', image_url: BALTORO_IMAGE },
     ],
   },
   {
@@ -168,6 +177,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     group: 'trails',
     state: 'Gilgit-Baltistan',
     region: 'Khaplu / Hushe Valley',
+    image: HUSHE_VALLEY_IMAGE,
+    imageCredit: 'Wikimedia Commons',
     lat: 35.4519,
     lng: 76.3582,
     rank: 123,
@@ -181,10 +192,10 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     aliases: ['khaplu treks', 'hushe valley', 'hushe trek', 'khaplu hushe', 'charakusa valley', 'mashabrum', 'masherbrum', 'k7', 'laila peak'],
     tags: ['trails', 'trek', 'glacier', 'khaplu', 'hushe', 'karakoram'],
     thingsToDo: [
-      { title: 'Hushe Staging', description: 'Hushe is the route-planning base for Khaplu-side treks and climber approaches.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging' },
-      { title: 'Laila Peak View Trek', description: 'High-alpine objective near Gondogoro; plan as guided mountain terrain, not a casual hike.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Peak view' },
-      { title: 'Masherbrum Base Camp Trek', description: 'Hushe-side approach toward Masherbrum Base Camp; verify guide, permits, and conditions locally.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
-      { title: 'K7 / Charakusa Approach', description: 'Remote Charakusa-area mountain approach for experienced teams with local support.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
+      { title: 'Hushe Staging', description: 'Hushe is the route-planning base for Khaplu-side treks and climber approaches.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging', image_url: HUSHE_VALLEY_IMAGE },
+      { title: 'Laila Peak View Trek', description: 'High-alpine objective near Gondogoro; plan as guided mountain terrain, not a casual hike.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Peak view', image_url: LAILA_PEAK_IMAGE },
+      { title: 'Masherbrum Base Camp Trek', description: 'Hushe-side approach toward Masherbrum Base Camp; verify guide, permits, and conditions locally.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek', image_url: MASHERBRUM_IMAGE },
+      { title: 'K7 / Charakusa Approach', description: 'Remote Charakusa-area mountain approach for experienced teams with local support.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek', image_url: HUSHE_VALLEY_IMAGE },
     ],
     extraSources: [
       { title: 'Hushe Valley', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Hushe_Valley', kind: 'open_reference' },
@@ -197,6 +208,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     group: 'peaks',
     state: 'Gilgit-Baltistan',
     region: 'Hushe / Gondogoro Glacier',
+    image: LAILA_PEAK_IMAGE,
+    imageCredit: 'Kogo / Wikimedia Commons',
     lat: 35.5911,
     lng: 76.4056,
     rank: 124,
@@ -210,8 +223,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     aliases: ['laila peak', 'laila peak hushe', 'gondogoro glacier', 'hushe laila', 'khaplu laila peak'],
     tags: ['peaks', 'mountain', 'glacier', 'trek', 'hushe', 'khaplu'],
     thingsToDo: [
-      { title: 'Hushe Approach Check', description: 'Confirm road status, local guide support, permits, and weather before leaving Khaplu/Hushe.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Access' },
-      { title: 'Gondogoro Glacier Context', description: 'Use the area card for orientation around Gondogoro and nearby high-alpine terrain.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Area context' },
+      { title: 'Hushe Approach Check', description: 'Confirm road status, local guide support, permits, and weather before leaving Khaplu/Hushe.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Access', image_url: HUSHE_VALLEY_IMAGE },
+      { title: 'Gondogoro Glacier Context', description: 'Use the area card for orientation around Gondogoro and nearby high-alpine terrain.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Area context', image_url: LAILA_PEAK_IMAGE },
     ],
     extraSources: [
       { title: 'Laila Peak, Hushe Valley', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Laila_Peak_(Hushe_Valley)', kind: 'open_reference' },
@@ -224,6 +237,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     group: 'trails',
     state: 'Gilgit-Baltistan',
     region: 'Hushe Valley',
+    image: MASHERBRUM_IMAGE,
+    imageCredit: 'Tariqsulemani / Wikimedia Commons',
     lat: 35.5609,
     lng: 76.2997,
     rank: 125,
@@ -237,8 +252,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     aliases: ['masherbrum', 'mashabrum', 'masherbrum base camp', 'mashabrum trek', 'k1 peak', 'hushe masherbrum'],
     tags: ['trails', 'trek', 'mountain', 'glacier', 'hushe', 'masherbrum'],
     thingsToDo: [
-      { title: 'Hushe Trailhead', description: 'Hushe is the practical staging point; verify local route advice before travel.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging' },
-      { title: 'Base Camp Planning', description: 'Check guide support, altitude, weather, bridge status, and overnight plans before committing.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek' },
+      { title: 'Hushe Trailhead', description: 'Hushe is the practical staging point; verify local route advice before travel.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Staging', image_url: HUSHE_VALLEY_IMAGE },
+      { title: 'Base Camp Planning', description: 'Check guide support, altitude, weather, bridge status, and overnight plans before committing.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Trek', image_url: MASHERBRUM_IMAGE },
     ],
     extraSources: [
       { title: 'Masherbrum', publisher: 'Open reference', url: 'https://en.wikipedia.org/wiki/Masherbrum', kind: 'open_reference' },
@@ -251,6 +266,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     group: 'peaks',
     state: 'Gilgit-Baltistan',
     region: 'Hushe / Charakusa',
+    image: HUSHE_VALLEY_IMAGE,
+    imageCredit: 'Wikimedia Commons',
     lat: 35.4642,
     lng: 76.5767,
     rank: 126,
@@ -264,8 +281,8 @@ const PAKISTAN_OFFICIAL_SEEDS: OfficialPlaceSeed[] = [
     aliases: ['k7', 'k7 peak', 'charakusa valley', 'charkusa', 'khaplu k7', 'hushe k7', 'mashab k7'],
     tags: ['peaks', 'mountain', 'glacier', 'trek', 'charakusa', 'hushe'],
     thingsToDo: [
-      { title: 'Charakusa Valley Approach', description: 'Orientation point for Charakusa-area treks; confirm local conditions and support before travel.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Area context' },
-      { title: 'K7 View / Climber Context', description: 'K7 is a serious mountaineering objective; keep this as a planning reference, not a casual trail.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Peak context' },
+      { title: 'Charakusa Valley Approach', description: 'Orientation point for Charakusa-area treks; confirm local conditions and support before travel.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Area context', image_url: HUSHE_VALLEY_IMAGE },
+      { title: 'K7 View / Climber Context', description: 'K7 is a serious mountaineering objective; keep this as a planning reference, not a casual trail.', url: GB_TOURISM_URL, source_label: 'Government of Gilgit-Baltistan', category: 'Peak context', image_url: HUSHE_VALLEY_IMAGE },
     ],
     extraSources: [
       { title: 'K7', publisher: 'Open reference', url: 'https://fr.wikipedia.org/wiki/K7_(montagne)', kind: 'open_reference' },
@@ -1792,6 +1809,8 @@ function buildWaterfallPlace(seed: WaterfallSeed, index: number): ExplorePlacePr
 
 function buildOfficialPlace(seed: OfficialPlaceSeed): ExplorePlaceProfile {
   const story = `${seed.title} sits in ${seed.region}. ${seed.summary} ${seed.safety}`;
+  const imageUrl = String(seed.image || '').trim();
+  const imageCredit = String(seed.imageCredit || '').trim();
   const sources = [
     { title: seed.title, publisher: seed.publisher, url: seed.officialUrl, kind: 'official' },
     ...(seed.extraSources ?? []),
@@ -1839,10 +1858,10 @@ function buildOfficialPlace(seed: OfficialPlaceSeed): ExplorePlaceProfile {
       badges: [seed.category, 'Official'],
       hook: seed.highlight,
       short_description: seed.summary,
-      thumbnail_url: '',
-      image_url: '',
-      image_credit: '',
-      image_license: '',
+      thumbnail_url: imageUrl,
+      image_url: imageUrl,
+      image_credit: imageCredit,
+      image_license: imageCredit ? 'Wikimedia Commons' : '',
       source_url: seed.officialUrl,
       source_title: seed.publisher,
     },
@@ -1863,6 +1882,7 @@ function buildOfficialPlace(seed: OfficialPlaceSeed): ExplorePlaceProfile {
       primary: seed.publisher,
       official_url: seed.officialUrl,
       sources,
+      photos: imageUrl ? [{ url: imageUrl, caption: seed.title, credit: imageCredit || seed.publisher }] : [],
       activities: seed.tags,
       things_to_do: seed.thingsToDo.map(item => ({
         ...item,

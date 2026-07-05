@@ -5317,6 +5317,49 @@ def _explore_profile_near_destination(profile: dict, destinations: list[dict], *
             return True
     return False
 
+def _explore_profile_matches_trail_result(profile: dict) -> bool:
+    if not _explore_place_matches_category_request(profile, {"trail"}):
+        return False
+    summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+    card = profile.get("card") if isinstance(profile.get("card"), dict) else {}
+    title = str(summary.get("title") or card.get("title") or profile.get("title") or profile.get("name") or "").lower()
+    if re.search(r"\b(bus stop|shuttle stop|restaurant|steakhouse|cafe|grill|market|store|bookstore|visitor center)\b", title) and not re.search(r"\btrailheads?\b", title):
+        return False
+    return True
+
+def _explore_catalog_nearby_trail_profiles(
+    lat: float,
+    lng: float,
+    *,
+    destination_name: str = "",
+    radius_mi: float = 65.0,
+    limit: int = 80,
+) -> list[dict]:
+    safe_limit = max(1, min(int(limit or 80), 240))
+    radius_m = max(1.0, float(radius_mi or 65.0)) * 1609.344
+    candidates: list[dict] = []
+    for profile in _load_explore_catalog().get("places") or []:
+        if not isinstance(profile, dict) or not _explore_profile_matches_trail_result(profile):
+            continue
+        point = _explore_profile_point(profile)
+        if point == (None, None):
+            continue
+        distance_m = _haversine_m(float(lat), float(lng), point[0], point[1])
+        if distance_m > radius_m:
+            continue
+        enriched = _explore_profile_with_stay_destination(profile, destination_name)
+        summary = dict(enriched.get("summary") or {})
+        summary["distance_m"] = round(distance_m)
+        summary["nearby_catalog_trail"] = True
+        enriched["summary"] = summary
+        candidates.append(enriched)
+    candidates.sort(key=lambda place: (
+        _explore_requested_category_priority(place, "trail"),
+        (place.get("summary") or {}).get("distance_m", 999999999),
+        *_explore_query_sort_key(place, []),
+    ))
+    return _dedupe_ranked_explore_profiles(candidates)[:safe_limit]
+
 def _explore_profile_matches_stay_result(profile: dict) -> bool:
     summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
     card = profile.get("card") if isinstance(profile.get("card"), dict) else {}
@@ -5609,6 +5652,14 @@ def _explore_trail_fallback_profiles(q: str = "", limit: int = 120) -> list[dict
             radius_mi = float(summary.get("trail_radius_mi") or 65)
         except Exception:
             radius_mi = 65
+        nearby_catalog = _explore_catalog_nearby_trail_profiles(
+            lat,
+            lng,
+            destination_name=destination_name,
+            radius_mi=radius_mi,
+            limit=max(safe_limit, 80),
+        )
+        candidates.extend(nearby_catalog)
         nearby = _canonical_serving_profiles(
             category="trail",
             lat=lat,
@@ -5626,8 +5677,10 @@ def _explore_trail_fallback_profiles(q: str = "", limit: int = 120) -> list[dict
     if not candidates:
         return []
     candidates = _dedupe_ranked_explore_profiles(_merge_explore_profile_lists([], candidates))
-    candidates = [place for place in candidates if _explore_place_matches_category_request(place, requested)]
+    candidates = [place for place in candidates if _explore_profile_matches_trail_result(place)]
     candidates.sort(key=lambda place: (
+        0 if (place.get("summary") or {}).get("nearby_catalog_trail") else 1,
+        _explore_requested_category_priority(place, "trail"),
         (place.get("summary") or {}).get("distance_m", 999999999),
         *_explore_query_sort_key(place, []),
     ))

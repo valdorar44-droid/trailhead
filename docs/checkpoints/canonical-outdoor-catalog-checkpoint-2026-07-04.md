@@ -2673,3 +2673,64 @@ avoid empty screens.
   NPS/BLM trail ingestion. The next data pass should add more official park
   trail geometry/detail so broad trail fills rely less on USFS-only rows.
 - This pass has no mobile code change. OTA is not needed.
+
+## Explorer Nearby Catalog Trail Fill Pass
+
+### Timestamp
+
+2026-07-05T17:05:00-05:00
+
+### Scope
+
+Improved trail fallback ordering by using nearby full-catalog trail cards before
+the broad official trail serving index. This lets richer park trailheads and
+known local trail cards appear before generic regional rows when the catalog
+already has a better nearby match.
+
+### Files Touched
+
+- `dashboard/server.py`
+  - Adds `_explore_profile_matches_trail_result` to keep trail fallback from
+    admitting transit, food, store, or visitor-center records.
+  - Adds `_explore_catalog_nearby_trail_profiles` to scan the full Explorer
+    catalog near the requested destination.
+  - Merges nearby catalog trails before broad official trail rows.
+  - Sorts nearby catalog trail cards ahead of broad fallback rows while keeping
+    category and distance ranking intact.
+- `tests/test_trail_catalog.py`
+  - Adds regression coverage so Yosemite keeps Lower and Upper Yosemite Fall
+    trailheads ahead of generic trail rows.
+
+### Verification
+
+- `python3 -m unittest tests.test_canonical_explore_serving tests.test_trail_catalog tests.test_canonical_camp_serving tests.test_startup_prewarm`
+  - 81 tests passed.
+- `python3 -m py_compile dashboard/server.py`
+  - Passed.
+- `git diff --check`
+  - Passed.
+- Production-shape local smoke with
+  `TRAILHEAD_CANONICAL_SERVING_DIR=/tmp/trailhead-no-generated-index`:
+  - `Yosemite trails`: 95 results, starts with Yosemite Valley Trails,
+    Bridalveil Fall Trailhead, Cathedral Lakes Trailhead, Chilnualna Falls
+    Trailhead, Lower Yosemite Fall Trailhead, Upper Yosemite Fall Trailhead,
+    and Yosemite Creek and Ten Lakes Trailhead.
+  - `Grand Canyon trails`: 91 results, starts with Bright Angel Trailhead,
+    Havasu Falls, Antelope House Ranger - Led Hike, and Old Spanish National
+    Historic Trail.
+  - `Sedona trails`: 91 results, starts with Lime Kiln and Sunflower Flat
+    Mountain Bike.
+  - `Moab trails`: 94 results, starts with Fins and Things OHV Route, Corona
+    Arch Trailhead, Moab Brands Trailhead, and Moab Rim Trailhead.
+  - `Glacier National Park trails`: 91 results, starts with Apgar Lookout
+    Trailhead, Beaver Pond Loop Trailhead, and Forest and Fire Nature Trail.
+  - No checked title or description contained internal/source placeholder
+    wording, broken `Mountain. Bike` punctuation, transit stops, food/store
+    records, or visitor-center records.
+
+### Remaining Notes
+
+- This improves ranking from data already in the app. It does not replace the
+  need for deeper NPS/BLM trail import, especially line geometry, elevation,
+  closures, and official trail detail pages.
+- This pass has no mobile code change. OTA is not needed.

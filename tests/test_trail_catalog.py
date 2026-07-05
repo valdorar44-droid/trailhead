@@ -486,6 +486,19 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertNotIn("Beale Wagon Road", titles[:6])
         self.assertNotRegex(" ".join(titles), r"\bMountain\. Bike\b")
 
+    def test_explore_trail_fallback_prefers_nearby_catalog_trailheads(self):
+        payload = asyncio.run(server.explore_catalog_index(q="Yosemite trails", category="trail", limit=12))
+        titles = [item["title"] for item in payload["places"]]
+        visible = " ".join(
+            " ".join(str(item.get(key) or "") for key in ("title", "category", "region", "short_description"))
+            for item in payload["places"]
+        )
+
+        self.assertIn("Lower Yosemite Fall Trailhead", titles[:8])
+        self.assertIn("Upper Yosemite Fall Trailhead", titles[:8])
+        self.assertLess(titles.index("Lower Yosemite Fall Trailhead"), titles.index("Long Valley Creek Route"))
+        self.assertNotRegex(visible, r"\b(bus stop|shuttle stop|steakhouse|restaurant|cafe|bookstore|visitor center|Mountain\. Bike)\b")
+
     def test_explore_public_copy_repairs_generic_outdoor_area_fallback(self):
         cleaned = server._explore_clean_public_copy(
             "0.4 mile trail. This stop is an outdoor area. Check access, closures, permits.",

@@ -3,6 +3,8 @@ import { disableRealtimeSpeakerphone, enableRealtimeSpeakerphone } from '@/lib/a
 
 type RealtimeCopilotHandle = {
   stop: () => void;
+  /** Have the co-pilot speak a specific line (used to narrate the cinematic in real time). */
+  say: (text: string) => void;
 };
 
 type StartRealtimeCopilotOptions = {
@@ -11,6 +13,8 @@ type StartRealtimeCopilotOptions = {
   onMessage?: (message: string) => void;
   onUserTranscript?: (message: string) => void;
   onToolCall?: (action: MapActionRequest) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
+  /** Narrator mode: mute the mic + disable turn detection so it only speaks lines we send via say(). */
+  narrationOnly?: boolean;
 };
 
 function clientSecretValue(response: RealtimeCopilotSessionResponse): string {
@@ -229,6 +233,18 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
     enableRealtimeSpeakerphone().catch(() => {});
     setTimeout(() => enableRealtimeSpeakerphone().catch(() => {}), 350);
     setTimeout(() => enableRealtimeSpeakerphone().catch(() => {}), 1000);
+    if (options.narrationOnly) {
+      // Narrator mode: mute the mic and stop auto-responding so the co-pilot only
+      // speaks the exact cinematic lines we push via say().
+      try { stream.getTracks().forEach((track: any) => { if (track.kind === 'audio') track.enabled = false; }); } catch {}
+      sendRealtimeEvent(dc, {
+        type: 'session.update',
+        session: {
+          turn_detection: null,
+          instructions: 'You are the cinematic trip narrator for an overland route flythrough. When given a line, speak it once, warmly and unhurried, like a nature-documentary narrator. Do not add words, questions, or commentary.',
+        },
+      });
+    }
   };
   dc.onmessage = async (message: { data: string }) => {
     try {
@@ -297,6 +313,19 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       pc.close();
       disableRealtimeSpeakerphone().catch(() => {});
       options.onStatus?.('stopped');
+    },
+    say: (text: string) => {
+      const clean = (text || '').trim();
+      if (!clean) return;
+      // Interrupt any in-progress line, then speak the new one.
+      sendRealtimeEvent(dc, { type: 'response.cancel' });
+      sendRealtimeEvent(dc, {
+        type: 'response.create',
+        response: {
+          modalities: ['audio', 'text'],
+          instructions: `Narrate this line, once, warmly and unhurried: "${clean}"`,
+        },
+      });
     },
   };
 }

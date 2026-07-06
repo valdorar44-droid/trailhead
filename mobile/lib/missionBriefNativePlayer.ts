@@ -17,8 +17,10 @@ type Point = { lat: number; lng: number };
  * per-frame chase.
  */
 
-// Throttle camera + progress updates to ~8fps (game-cutscene cadence).
+// Throttle camera updates to ~8fps (game-cutscene cadence).
 const FRAME_MS = 120;
+// Throttle React overlay/marker state pushes to ~3fps so re-renders don't jank the 3D fly.
+const PROGRESS_MS = 320;
 // How strongly the camera bearing eases toward the route heading each tick (0..1).
 const BEARING_EASE = 0.16;
 // Minimum per-scene wall-clock before speed scaling (kept generous for a slow feel).
@@ -212,6 +214,7 @@ export function startNativeMissionBriefPlayer(opts: {
   let speed = Number.isFinite(initialSpeed) && initialSpeed > 0 ? initialSpeed : 1;
   let sceneDuration = SCENE_FLOOR_MS;
   let lastFrameTs = 0;
+  let lastProgressTs = 0;
   let smoothedBearing: number | null = null;
   let noticedNo3d = false;
 
@@ -355,6 +358,7 @@ export function startNativeMissionBriefPlayer(opts: {
     const followZoom = Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 13.4);
     const lookaheadM = Math.max(180, Math.min(1200, (endDist - startDist) * 0.05));
     lastFrameTs = 0;
+    lastProgressTs = 0;
 
     const frame = (now: number) => {
       if (stopped || failed || paused) {
@@ -373,7 +377,10 @@ export function startNativeMissionBriefPlayer(opts: {
             const targetBearing = bearingLngLat([center.lng, center.lat], [ahead.lng, ahead.lat]);
             smoothedBearing = smoothAngle(smoothedBearing, targetBearing, BEARING_EASE);
             followCamera(scene, center, smoothedBearing, followZoom);
-            emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
+            if (now - lastProgressTs >= PROGRESS_MS) {
+              lastProgressTs = now;
+              emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
+            }
           }
         } else if (cam.mode === 'orbit' && scene.focus && elapsed(now) > 2200) {
           if (!throttled) {

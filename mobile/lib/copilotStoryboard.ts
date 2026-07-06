@@ -222,28 +222,11 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     durationMs: 9000,
     camera: { mode: 'fit', pitch: 52, zoom: 9.8 },
     layers: {},
-    narration: `I built the plan for ${legLabel}. I'll fly it for you — the full route first, then the parts that matter.`,
+    narration: `I built the plan for ${legLabel}. Let's fly it — start to finish.`,
     callouts: [],
   });
-  scenes.push({
-    id: 'scene-whole-route',
-    type: 'whole_route',
-    title: 'The full route',
-    subtitle: `${validCheckpoints.length || 'Route'} checkpoints plotted`,
-    durationMs: 15000,
-    routeSlice: [0, 1],
-    camera: { mode: 'follow', pitch: 64, zoom: 11.4 },
-    layers: {},
-    narration: "Here's the full route. I'll fly the plan by day, then show the stops and risks that need review.",
-    callouts: validCheckpoints.slice(0, 8).map(cp => ({
-      id: cp.id,
-      title: cp.title,
-      note: cp.note,
-      lat: cp.lat,
-      lng: cp.lng,
-      kind: 'checkpoint',
-    })),
-  });
+  // No standalone whole-route re-fly — the intro establishes the whole route, then
+  // we fly it once, forward, in contiguous legs (assembled below).
 
   const middle: WeightedScene[] = [];
 
@@ -434,8 +417,12 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     if (riskCount >= MAX_RISK_SCENES) break;
     const type = riskSceneType(risk);
     if (type === 'offline_readiness' && offlineSeen.done) continue;
+    // Located risks become forward-ordered beats; coordinate-less risks stay as
+    // Mission Control warnings only (no redundant mid-route zoom-out cuts).
+    const hasCoords = finite(risk.lat, risk.lng);
+    if (!hasCoords && type !== 'offline_readiness') continue;
     if (type === 'offline_readiness') offlineSeen.done = true;
-    const focus = finite(risk.lat, risk.lng)
+    const focus = hasCoords
       ? { lat: Number(risk.lat), lng: Number(risk.lng) }
       : midpoint;
     riskCount += 1;
@@ -478,20 +465,71 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     .slice(0, middleBudget)
     .map(entry => entry.scene);
 
-  // Play order: days first (chronological), then focus stops by day/route position, risks near the end.
-  const orderRank = (scene: MissionScene) => {
-    if (scene.type === 'day_flyover') return 0;
-    if (scene.type === 'camp_arrival' || scene.type === 'fuel_stop' || scene.type === 'trail_flythrough' || scene.type === 'monument_orbit') return 1;
-    if (scene.type === 'risk_focus' || scene.type === 'weather_focus') return 2;
-    if (scene.type === 'offline_readiness') return 3;
-    return 1;
+  // --- Assemble as ONE forward pass ---------------------------------------
+  // Fly the route start→finish in contiguous legs, pausing at highlight beats
+  // (camps, monuments, fuel, risks) in route order. No full-route re-fly, no
+  // category back-jumps — this is what makes it feel like a single cinematic
+  // flythrough instead of "replaying the route" over and over.
+  const ratioOfScene = (s: MissionScene): number => {
+    if (s.focus) return routeRatioFor(cleanRoute, s.focus.lat, s.focus.lng);
+    if (s.routeSlice) return (s.routeSlice[0] + s.routeSlice[1]) / 2;
+    return 0.5;
   };
-  chosen.sort((a, b) => {
-    const rank = orderRank(a) - orderRank(b);
-    if (rank !== 0) return rank;
-    return (a.day ?? 99) - (b.day ?? 99);
-  });
-  scenes.push(...chosen);
+  const beatOrder = (t: MissionSceneType) =>
+    t === 'camp_arrival' ? 0 : t === 'monument_orbit' ? 1 : 2; // prefer camp over duplicate monument at same spot
+  const beatsRaw = chosen
+    .filter(s => s.type !== 'day_flyover' && s.type !== 'whole_route') // legs are regenerated contiguously
+    .map(s => ({ ratio: clampRatio(ratioOfScene(s)), scene: s }))
+    .sort((a, b) => (a.ratio - b.ratio) || (beatOrder(a.scene.type) - beatOrder(b.scene.type)));
+  // Drop beats that land on top of an earlier one (within ~2% of the route) so the
+  // camera doesn't stop twice at the same place.
+  const beats: typeof beatsRaw = [];
+  for (const b of beatsRaw) {
+    if (beats.length && Math.abs(b.ratio - beats[beats.length - 1].ratio) < 0.02) continue;
+    beats.push(b);
+  }
+
+  const cpRatios = validCheckpoints.map(cp => ({ r: routeRatioFor(cleanRoute, cp.lat, cp.lng), cp }));
+  const segMeta = (a: number, b: number) => {
+    const inSeg = cpRatios.filter(x => x.r >= a - 0.001 && x.r <= b + 0.001).map(x => x.cp);
+    const days = Array.from(new Set(inSeg.map(cp => Number(cp.day || 0)).filter(d => d > 0)));
+    const names = inSeg.map(cp => cp.title).filter(Boolean);
+    if (days.length === 1) return { title: `Day ${days[0]}`, day: days[0] as number | undefined, names };
+    if (names.length) return { title: names[0], day: undefined, names };
+    return { title: 'On the route', day: undefined, names };
+  };
+  const followLeg = (a: number, b: number, first: boolean): MissionScene | null => {
+    if (b - a < 0.05) return null;
+    const meta = segMeta(a, b);
+    const near = meta.names.slice(0, 3).join(' · ');
+    const toward = meta.names.length ? meta.names[meta.names.length - 1] : 'the next stretch';
+    return {
+      id: `scene-leg-${a.toFixed(2)}-${b.toFixed(2)}`,
+      type: 'day_flyover',
+      title: meta.title,
+      subtitle: near || 'Flying the plan',
+      day: meta.day,
+      durationMs: Math.round(9000 + (b - a) * 9000),
+      routeSlice: [a, b],
+      camera: { mode: 'follow', pitch: 64 },
+      layers: {},
+      narration: first
+        ? `Leaving ${startTitle || 'the start'} — we'll trace the route toward ${toward}.`
+        : `Continuing toward ${toward}.`,
+      callouts: [],
+    };
+  };
+
+  let cursor = 0;
+  let firstLeg = true;
+  for (const b of beats) {
+    const leg = followLeg(cursor, b.ratio, firstLeg);
+    if (leg) { scenes.push(leg); firstLeg = false; }
+    scenes.push(b.scene);
+    cursor = Math.max(cursor, b.ratio);
+  }
+  const tail = followLeg(cursor, 1, firstLeg);
+  if (tail) scenes.push(tail);
 
   // --- Always: mission_recap ---
   scenes.push({

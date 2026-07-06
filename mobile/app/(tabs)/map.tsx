@@ -5795,6 +5795,12 @@ function MapScreen() {
   const mapMission3dSnapshotRef = useRef<boolean | null>(null);
   const mapMissionStyleSnapshotRef = useRef<{ mapLayer: MapLayer; premiumMapStyle: PremiumMapStyle } | null>(null);
   const realtimeCopilotRef = useRef<{ stop: () => void } | null>(null);
+  // Realtime Co-Pilot narrator for the cinematic (low-latency ChatGPT voice, not slow TTS).
+  const missionNarratorRef = useRef<{ stop: () => void; say: (t: string) => void } | null>(null);
+  const missionNarratorReadyRef = useRef(false);
+  const missionNarratorPendingRef = useRef(false);
+  const pendingNarrationRef = useRef<string | null>(null);
+  const missionRunningRef = useRef(false);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
     available: extremeCopilotAvailable,
@@ -13636,6 +13642,8 @@ function MapScreen() {
   }
 
   function stopMapMissionBrief() {
+    missionRunningRef.current = false;
+    stopMissionNarrator();
     stopTrailheadVoice();
     mapMissionPlayerRef.current?.stop();
     mapMissionPlayerRef.current = null;
@@ -13688,6 +13696,83 @@ function MapScreen() {
     return true;
   }
 
+  // Narrate a cinematic line — realtime Co-Pilot voice when available (buffered until
+  // the session connects), otherwise instant device/TTS narration. The Co-Pilot drives.
+  function narrateMissionScene(text: string) {
+    const clean = (text || '').trim();
+    if (!clean) return;
+    const narrator = missionNarratorRef.current;
+    if (narrator && missionNarratorReadyRef.current) {
+      setCopilotBriefPresence('speaking');
+      narrator.say(clean);
+      return;
+    }
+    if (missionNarratorPendingRef.current) {
+      pendingNarrationRef.current = clean; // realtime session still connecting — hold the latest line
+      setCopilotBriefPresence('speaking');
+      return;
+    }
+    speakCopilotNarration(clean, {
+      onStart: () => setCopilotBriefPresence('speaking'),
+      onFinish: () => setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current),
+    }).catch(() => {});
+  }
+
+  // Spin up a realtime Co-Pilot narrator session for the flythrough (best-effort).
+  function startMissionNarrator() {
+    missionNarratorReadyRef.current = false;
+    pendingNarrationRef.current = null;
+    missionNarratorPendingRef.current = !!extremeConfig?.copilot?.voice_enabled;
+    if (!missionNarratorPendingRef.current) return;
+    (async () => {
+      try {
+        const sessionId = await ensureCopilotSession();
+        const tokenResponse = await api.createRealtimeCopilotSession({
+          session_id: sessionId,
+          voice: String(extremeConfig?.copilot?.voice || ''),
+          mode: 'push_to_talk',
+          wake_phrase: false,
+          context: buildCopilotContext(),
+        });
+        const handle = await startRealtimeCopilotSession({
+          tokenResponse,
+          narrationOnly: true,
+          onToolCall: () => ({ applied: true }),
+          onStatus: status => {
+            if (status === 'connected') {
+              missionNarratorReadyRef.current = true;
+              if (pendingNarrationRef.current) {
+                handle.say(pendingNarrationRef.current);
+                pendingNarrationRef.current = null;
+              }
+            }
+          },
+        });
+        if (!missionRunningRef.current) { handle.stop(); return; }
+        missionNarratorRef.current = handle;
+      } catch {
+        // Realtime unavailable — fall back to instant device/TTS narration.
+        missionNarratorPendingRef.current = false;
+        const buffered = pendingNarrationRef.current;
+        pendingNarrationRef.current = null;
+        if (buffered && missionRunningRef.current) {
+          speakCopilotNarration(buffered, {
+            onStart: () => setCopilotBriefPresence('speaking'),
+            onFinish: () => setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current),
+          }).catch(() => {});
+        }
+      }
+    })();
+  }
+
+  function stopMissionNarrator() {
+    missionNarratorPendingRef.current = false;
+    missionNarratorReadyRef.current = false;
+    pendingNarrationRef.current = null;
+    missionNarratorRef.current?.stop();
+    missionNarratorRef.current = null;
+  }
+
   function cycleMapMissionSpeed() {
     const next = nextPreviewSpeed(mapMissionSpeedRef.current);
     mapMissionSpeedRef.current = next;
@@ -13727,6 +13812,9 @@ function MapScreen() {
       setMapMissionNotice('3D terrain unavailable — flying in map mode.');
       setTimeout(() => setMapMissionNotice(null), 4200);
     }
+    // The Co-Pilot narrates the flythrough in real time (low-latency ChatGPT voice).
+    missionRunningRef.current = true;
+    startMissionNarrator();
     setMissionBriefOverlay(prev => ({
       ...prev,
       active: true,
@@ -13818,10 +13906,7 @@ function MapScreen() {
         mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
         setCopilotBriefPresence(presence);
         if (scene.narration && shouldSpeakScene(scene)) {
-          speakCopilotNarration(scene.narration, {
-            onStart: () => setCopilotBriefPresence('speaking'),
-            onFinish: () => setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current),
-          }).catch(() => {});
+          narrateMissionScene(scene.narration);
         }
       },
       onSceneFinished: () => {},

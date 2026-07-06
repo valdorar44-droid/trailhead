@@ -54,8 +54,23 @@ assert(mapSource.includes('shouldSpeakMissionScene'), 'scene narration gated for
 assert(mapSource.includes('speakCopilotNarration'), 'map falls back to Trailhead guide voice');
 assert(mapSource.includes('patchMissionBriefOverlay'), 'map batches mission overlay updates');
 assert(mapSource.includes('captionText={mapMissionCaptionText}'), 'map passes runtime caption text to TripPreviewCaption');
-assert(!mapSource.includes('createMissionStoryboard'), 'map fly uses scout-live storyboard not pre-generated API');
+assert(mapSource.includes('fetchDirectedCinematic') && mapSource.includes('startDirectedCinematicFetch'),
+  'map races the AI-director storyboard against the deterministic builders');
+assert(mapSource.includes('missionDirectedPromiseRef.current = startDirectedCinematicFetch'),
+  'scout handoff prefetches the AI storyboard so its budget overlaps existing waits');
+assert(mapSource.includes('directedCinematic ?? localCinematic'),
+  'deterministic cinematic remains the fallback when the AI storyboard misses its budget');
 assert(mapSource.includes('waitForRouteRenderReady'), 'map waits for route overlay before fly');
+
+const storyboardClientSource = readFileSync(join(root, 'lib/missionStoryboardClient.ts'), 'utf8');
+assert(storyboardClientSource.includes('assembleForwardPass'),
+  'AI beats are re-woven locally into a guaranteed forward pass');
+assert(storyboardClientSource.includes("generated_by !== 'ai'"),
+  'backend-fallback storyboards are skipped in favor of the richer local builder');
+assert(/poi_flyover/.test(storyboardSource) && /route_rejoin/.test(storyboardSource),
+  'storyboard vocabulary includes poi_flyover + route_rejoin');
+assert(mapBriefSource.includes("scene.type !== 'route_rejoin'"),
+  'route_rejoin transitions are silent and never wait on voice');
 assert(mapSource.includes('useNativeOverlays: USE_NATIVE_MAP'), 'native player uses NativeMap overlays on main map');
 
 const voiceSource = readFileSync(join(root, 'lib/voice.ts'), 'utf8');
@@ -90,6 +105,10 @@ assert(playerSource.includes('estimateSpeechMs'), 'speaking scenes stretch to th
 assert(mapSource.includes('if (narrationBeatOpenRef.current) finishMissionNarrationBeat()'),
   'resume releases a narration beat orphaned by pause');
 assert(mapSource.includes('|| mapMissionVisible'), 'tab bar hides during the cinematic so controls are reachable');
+assert(playerSource.includes('destinationPoint') && playerSource.includes('low_pass'),
+  'player renders low_pass POI framing');
+assert(playerSource.includes("cam.orbit?.direction === 'ccw'"),
+  'player honors AI orbit direction/sweep');
 assert(playerSource.includes('setSpeed'), 'player exposes setSpeed');
 assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('onCallouts?.([])'),
   'player clears overlays on stop');

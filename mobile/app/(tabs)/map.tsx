@@ -125,6 +125,7 @@ import {
   buildMapMissionCinematic,
   buildScoutLiveCinematic,
   checkpointsFromScout,
+  checkpointsFromTrip,
   getCurrentMissionRoute,
   liveMissionBeatBrief,
   missionBeatCaption,
@@ -139,6 +140,7 @@ import {
   type MissionBriefCallout,
 } from '@/lib/mapMissionBrief';
 import { startNativeMissionBriefPlayer, estimateSpeechMs, type NativeMissionBriefPlayer } from '@/lib/missionBriefNativePlayer';
+import { fetchDirectedCinematic } from '@/lib/missionStoryboardClient';
 import { getMissionBriefMapPlayerScript } from '@/lib/missionBriefMapPlayerScript';
 import { speakCopilotNarration, speakCinematicNarration } from '@/lib/voice';
 import {
@@ -5808,6 +5810,8 @@ function MapScreen() {
   const realtimeCopilotRef = useRef<RealtimeCopilotHandle | null>(null);
   const missionDirectorActiveRef = useRef(false);
   const missionVoicePathRef = useRef<'realtime' | 'degraded'>('realtime');
+  // Which storyboard authored the playing cinematic (QA breadcrumb).
+  const missionStoryboardPathRef = useRef<'ai_director' | 'scout_live' | 'deterministic'>('deterministic');
   const pendingNarrationRef = useRef<string | null>(null);
   const narrationWaitTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const missionRunningRef = useRef(false);
@@ -5818,6 +5822,9 @@ function MapScreen() {
   // True while a speaking beat is awaiting its narration-done signal — used to
   // release the camera if the voice was killed (e.g. by pause) before finishing.
   const narrationBeatOpenRef = useRef(false);
+  // In-flight AI storyboard fetch (prefetched during the scout handoff so its
+  // budget overlaps the route-render/voice waits).
+  const missionDirectedPromiseRef = useRef<Promise<MissionCinematic | null> | null>(null);
   const narrationRealtimeStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const missionOverlayPendingRef = useRef<Partial<{
     progressRoute: [number, number][];
@@ -13846,11 +13853,62 @@ function MapScreen() {
     return handle;
   }
 
+  // Kick the AI-director storyboard fetch (which stops deserve beats + framing).
+  // Camera geometry stays local — the client re-weaves beats into a forward
+  // pass — and any failure/timeout returns null so the deterministic builders
+  // take over. Never throws.
+  function startDirectedCinematicFetch(route: [number, number][], budgetMs: number): Promise<MissionCinematic | null> {
+    if (!extremeConfig?.copilot) return Promise.resolve(null);
+    try {
+      // Downsample evenly to the backend's 400-point cap (a plain slice would
+      // truncate the route geographically).
+      const step = Math.max(1, Math.ceil(route.length / 400));
+      const routeForApi = route.filter((_, i) => i % step === 0 || i === route.length - 1);
+      const tripName = activeTrip?.plan.trip_name ?? tripNameFromScout(routeScout, 'Your route');
+      const checkpoints = checkpointsFromTrip(activeTrip, routeScout, mapMissionBrief).slice(0, 80);
+      const places = placesFromTrip({
+        activeTrip,
+        routeScout,
+        selectedTrail: selectedTrail ? {
+          id: selectedTrail.id,
+          name: selectedTrail.name,
+          lat: selectedTrail.lat,
+          lng: selectedTrail.lng,
+        } : null,
+      }).slice(0, 120);
+      const days = checkpoints.reduce((max, cp) => Math.max(max, Number(cp.day) || 0), 0) || null;
+      return fetchDirectedCinematic({
+        request: {
+          session_id: extremeCopilotSessionId || null,
+          trip_id: activeTrip?.trip_id ?? null,
+          trip_name: tripName,
+          route: routeForApi,
+          days,
+          checkpoints: checkpoints as unknown as Array<Record<string, unknown>>,
+          places: places as unknown as Array<Record<string, unknown>>,
+          mission_brief: (mapMissionBrief ?? undefined) as Record<string, unknown> | undefined,
+        },
+        route,
+        tripId: activeTrip?.trip_id ?? null,
+        tripName,
+        startTitle: checkpoints[0]?.title,
+        endTitle: checkpoints.length > 1 ? checkpoints[checkpoints.length - 1]?.title : undefined,
+        checkpoints,
+        budgetMs,
+      });
+    } catch {
+      return Promise.resolve(null);
+    }
+  }
+
   async function handoffScoutToCinematic(coords: [number, number][]) {
     if (missionRunningRef.current || navMode || scoutHandoffRunningRef.current) return;
     scoutHandoffRunningRef.current = true;
     try {
       missionRouteOverrideRef.current = coords;
+      // Prefetch the AI storyboard so its short budget overlaps the route-render
+      // and voice waits below instead of delaying the flythrough start.
+      missionDirectedPromiseRef.current = startDirectedCinematicFetch(coords, 2500);
       await waitForRouteRenderReady({
         coords,
         lastRouteCoordsRef,
@@ -13869,6 +13927,9 @@ function MapScreen() {
       if (missionRunningRef.current || navMode) return;
       await startMapMissionBrief({ source: 'auto_scout' });
     } finally {
+      // Don't let an unconsumed prefetch (aborted handoff) leak into a later
+      // fly of a different route.
+      missionDirectedPromiseRef.current = null;
       scoutHandoffRunningRef.current = false;
     }
   }
@@ -14057,6 +14118,15 @@ function MapScreen() {
       });
     }
 
+    // AI-directed storyboard: reuse the scout-handoff prefetch, else start one
+    // now (its budget hides inside the voice-connect wait below).
+    const directedPromise = missionDirectedPromiseRef.current
+      ?? startDirectedCinematicFetch(route, options.source === 'auto_scout' ? 2500 : 6000);
+    missionDirectedPromiseRef.current = null;
+    if (options.source !== 'auto_scout' && extremeConfig?.copilot) {
+      setMapMissionNotice('Co-Pilot is directing the flyover…');
+    }
+
     const directorVoicePromise = ensureMissionDirectorVoice(options.source === 'auto_scout');
 
     setMissionBriefOverlay(prev => ({
@@ -14078,7 +14148,7 @@ function MapScreen() {
       routeScout,
       missionBrief: mapMissionBrief,
     });
-    const cinematic = scoutLiveCinematic ?? buildMapMissionCinematic({
+    const localCinematic = scoutLiveCinematic ?? buildMapMissionCinematic({
       tripId: activeTrip?.trip_id ?? null,
       tripName,
       route,
@@ -14096,7 +14166,13 @@ function MapScreen() {
       missionBrief: mapMissionBrief,
     });
     const briefPromise = refreshMapMissionControl(route, activeTrip?.trip_id ?? null).catch(() => mapMissionBrief);
-    await directorVoicePromise;
+    const [directedCinematic] = await Promise.all([
+      directedPromise.catch(() => null),
+      directorVoicePromise,
+    ]);
+    if (options.source !== 'auto_scout') setMapMissionNotice(null);
+    const cinematic = directedCinematic ?? localCinematic;
+    missionStoryboardPathRef.current = directedCinematic ? 'ai_director' : (scoutLiveCinematic ? 'scout_live' : 'deterministic');
     if (!cinematic || cinematic.scenes.length < 2) {
       missionRunningRef.current = false;
       setMapMissionError(true);

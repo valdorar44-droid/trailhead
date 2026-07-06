@@ -345,7 +345,8 @@ export function tripNameFromScout(routeScout: RouteScoutState | null | undefined
 }
 
 export function shouldSpeakScene(scene: MissionScene): boolean {
-  return scene.type !== 'whole_route';
+  // route_rejoin is a silent camera transition — it must never wait on voice.
+  return scene.type !== 'whole_route' && scene.type !== 'route_rejoin';
 }
 
 export function isLiveScoutCinematic(cinematic: MissionCinematic | null | undefined): boolean {

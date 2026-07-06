@@ -114,6 +114,23 @@ function smoothAngle(prev: number | null, target: number, factor: number) {
   return prev + diff * factor;
 }
 
+/** Point `distM` metres from `p` along compass bearing `bearingDeg` (spherical). */
+function destinationPoint(p: Point, bearingDeg: number, distM: number): Point {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const toDeg = (r: number) => (r * 180) / Math.PI;
+  const br = toRad(bearingDeg);
+  const lat1 = toRad(p.lat);
+  const lng1 = toRad(p.lng);
+  const dr = distM / R;
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(dr) + Math.cos(lat1) * Math.sin(dr) * Math.cos(br));
+  const lng2 = lng1 + Math.atan2(
+    Math.sin(br) * Math.sin(dr) * Math.cos(lat1),
+    Math.cos(dr) - Math.sin(lat1) * Math.sin(lat2),
+  );
+  return { lat: toDeg(lat2), lng: ((toDeg(lng2) + 540) % 360) - 180 };
+}
+
 /** Follow zoom picked from the length of the flown slice — kept close enough that
  *  terrain relief reads cinematically (the camera tracks the marker, so it need not
  *  frame the whole slice at once). */
@@ -258,6 +275,8 @@ export function startNativeMissionBriefPlayer(opts: {
   let lastCamPoint: Point | null = null;
   let sceneEstablishMs = 0;
   let lastOverlayTs = 0;
+  // low_pass framing computed at scene start (A → focus → B along the approach).
+  let lowPassPath: { a: Point; b: Point; bearing: number } | null = null;
   let narrationDone = true;   // false while a scene waits for its narration to finish
   // Max extra time a scene will hold for narration beyond its camera move.
   const NARRATION_CAP_MS = 11000;
@@ -344,6 +363,54 @@ export function startNativeMissionBriefPlayer(opts: {
     const cam = scene.camera || { mode: 'fit' };
     const coords = sliceRoute(route, scene.routeSlice ?? [0, 1]);
     smoothedBearing = null;
+    lowPassPath = null;
+
+    // Rejoin transition: glide from the POI back onto the route at rejoinRatio,
+    // pre-positioning the camera so the next follow leg's continuity-skip fires.
+    if (scene.type === 'route_rejoin' && routeTotal > 0) {
+      const rejoinDist = Math.max(0, Math.min(1, scene.rejoinRatio ?? 0)) * routeTotal;
+      const leadDist = Math.min(routeTotal, rejoinDist + 400);
+      const target = pointAtDistance(route, routeCum, leadDist);
+      const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, leadDist + 400));
+      const bearing = bearingLngLat([target.lng, target.lat], [ahead.lng, ahead.lat]);
+      const kmToTarget = lastCamPoint
+        ? haversine([lastCamPoint.lng, lastCamPoint.lat], [target.lng, target.lat]) / 1000
+        : 3;
+      const establishMs = Math.round(Math.max(1600, Math.min(2600, kmToTarget * 550)));
+      nativeMapRef.current?.flyToCamera?.({
+        lat: target.lat, lng: target.lng, zoom: cam.zoom ?? 13.2, pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)), bearing, duration: establishMs, mode: 'flyTo',
+      });
+      postWeb({ type: 'fly_to', lat: target.lat, lng: target.lng, zoom: cam.zoom ?? 13.2, pitch: cam.pitch ?? 64, bearing, duration: establishMs });
+      lastCamDist = leadDist;
+      lastCamPoint = target;
+      lastCamBearing = bearing;
+      emitProgress(rejoinDist / routeTotal, null);
+      return establishMs;
+    }
+
+    // Low pass: establish at a point 1.8km before the focus along the approach
+    // heading, then glide straight through to 1.2km past it.
+    if (cam.preset === 'low_pass' && scene.focus) {
+      const focus = { lat: scene.focus.lat, lng: scene.focus.lng };
+      const approach = Number.isFinite(cam.bearing as number)
+        ? (cam.bearing as number)
+        : (lastCamPoint ? bearingLngLat([lastCamPoint.lng, lastCamPoint.lat], [focus.lng, focus.lat]) : 0);
+      const a = destinationPoint(focus, approach + 180, 1800);
+      const b = destinationPoint(focus, approach, 1200);
+      lowPassPath = { a, b, bearing: approach };
+      const kmToTarget = lastCamPoint
+        ? haversine([lastCamPoint.lng, lastCamPoint.lat], [a.lng, a.lat]) / 1000
+        : 4;
+      const establishMs = Math.round(Math.max(1600, Math.min(3200, kmToTarget * 550)));
+      nativeMapRef.current?.flyToCamera?.({
+        lat: a.lat, lng: a.lng, zoom: cam.zoom ?? 13.6, pitch: Math.max(60, Math.min(72, cam.pitch ?? 70)), bearing: approach, duration: establishMs, mode: 'flyTo',
+      });
+      postWeb({ type: 'fly_to', lat: a.lat, lng: a.lng, zoom: cam.zoom ?? 13.6, pitch: cam.pitch ?? 70, bearing: approach, duration: establishMs });
+      lastCamDist = null;
+      lastCamPoint = a;
+      lastCamBearing = approach;
+      return establishMs;
+    }
 
     // Overview / fit shots (intro, whole-route, recap, offline) — single slow flyTo.
     if (cam.mode === 'fit' || (!scene.focus && coords.length < 2)) {
@@ -416,18 +483,22 @@ export function startNativeMissionBriefPlayer(opts: {
       return establishMs;
     }
 
-    // Fly / orbit toward a focus point.
+    // Fly / orbit toward a focus point (duration scales with camera travel).
     if (scene.focus) {
       const zoom = Math.min(cam.zoom ?? (cam.mode === 'orbit' ? 13 : 12.5), 14);
       const bearing = Number.isFinite(cam.bearing as number) ? (cam.bearing as number) : undefined;
+      const kmToTarget = lastCamPoint
+        ? haversine([lastCamPoint.lng, lastCamPoint.lat], [scene.focus.lng, scene.focus.lat]) / 1000
+        : 4.5;
+      const establishMs = Math.round(Math.max(1600, Math.min(3200, kmToTarget * 550)));
       nativeMapRef.current?.flyToCamera?.({
-        lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: Math.max(52, Math.min(68, cam.pitch ?? 62)), bearing, duration: 2400, mode: 'flyTo',
+        lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: Math.max(52, Math.min(68, cam.pitch ?? 62)), bearing, duration: establishMs, mode: 'flyTo',
       });
-      postWeb({ type: 'fly_to', lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: cam.pitch ?? 62, duration: 2400 });
+      postWeb({ type: 'fly_to', lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: cam.pitch ?? 62, duration: establishMs });
       lastCamDist = null;
       lastCamPoint = { lat: scene.focus.lat, lng: scene.focus.lng };
       if (bearing != null) lastCamBearing = bearing;
-      return 2400;
+      return establishMs;
     }
     return 0;
   }
@@ -437,7 +508,10 @@ export function startNativeMissionBriefPlayer(opts: {
     onSceneRoute?.(coords);
     onCallouts?.(sceneCallouts(scene));
     onWarningChange?.(isWarningScene(scene));
-    if (scene.focus) {
+    if (scene.type === 'route_rejoin' && Number.isFinite(scene.rejoinRatio) && routeTotal > 0) {
+      const p = pointAtDistance(route, routeCum, Math.max(0, Math.min(1, scene.rejoinRatio ?? 0)) * routeTotal);
+      onMarkerMove?.({ lat: p.lat, lng: p.lng });
+    } else if (scene.focus) {
       onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
     } else if (coords.length >= 2) {
       const start = pointAtDistance(route, routeCum, routeTotal * (scene.routeSlice?.[0] ?? 0));
@@ -461,7 +535,10 @@ export function startNativeMissionBriefPlayer(opts: {
     const orbitStartBearing = Number.isFinite(cam.bearing as number)
       ? (cam.bearing as number)
       : (lastCamBearing ?? 0);
-    const orbitSweepDeg = 80;
+    const orbitSweepRaw = Number(cam.orbit?.sweepDeg);
+    const orbitSweepDeg = (Number.isFinite(orbitSweepRaw) ? Math.max(30, Math.min(180, orbitSweepRaw)) : 80)
+      * (cam.orbit?.direction === 'ccw' ? -1 : 1);
+    const scenePass = lowPassPath;
     // Follow legs must land exactly on their final lead point before the scene
     // can finish — the glide's last tick fires just short of t=1, and without a
     // settle frame the camera (and the next leg's continuity check) would sit
@@ -521,6 +598,33 @@ export function startNativeMissionBriefPlayer(opts: {
               // point instead of freezing the frame.
               smoothedBearing = (smoothedBearing ?? lastCamBearing ?? 0) + HOLD_DRIFT_DEG_PER_S * (FRAME_MS / 1000);
               followCamera(scene, lastCamPoint, smoothedBearing, followZoom);
+            }
+          }
+        } else if (scenePass) {
+          if (!throttled && camReady) {
+            lastFrameTs = now;
+            // Low pass: glide A→focus→B on the fixed approach heading; during a
+            // narration hold keep flying past B at the same rate (capped).
+            const pt = Math.min(1.35, Math.max(0, (elapsed(now) - sceneEstablishMs) / glideMs));
+            const center = {
+              lat: scenePass.a.lat + (scenePass.b.lat - scenePass.a.lat) * pt,
+              lng: scenePass.a.lng + (scenePass.b.lng - scenePass.a.lng) * pt,
+            };
+            nativeMapRef.current?.flyToCamera?.({
+              lat: center.lat,
+              lng: center.lng,
+              zoom: Math.min(cam.zoom ?? 13.6, 14),
+              pitch: Math.max(60, Math.min(72, cam.pitch ?? 70)),
+              bearing: scenePass.bearing,
+              duration: CAMERA_TWEEN_MS,
+              mode: 'linearTo',
+            });
+            lastCamBearing = scenePass.bearing;
+            lastCamDist = null;
+            lastCamPoint = center;
+            if (overlayDue && scene.focus) {
+              lastOverlayTs = now;
+              onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
             }
           }
         } else if (cam.mode === 'orbit' && scene.focus) {

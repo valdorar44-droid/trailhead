@@ -12,7 +12,9 @@ export type MissionSceneType =
   | 'risk_focus'
   | 'weather_focus'
   | 'offline_readiness'
-  | 'mission_recap';
+  | 'mission_recap'
+  | 'poi_flyover'
+  | 'route_rejoin';
 
 export type MissionSceneCameraMode = 'fit' | 'fly' | 'orbit' | 'follow';
 
@@ -21,6 +23,10 @@ export interface MissionSceneCamera {
   zoom?: number;
   pitch?: number;
   bearing?: number;
+  /** Orbit framing for poi_flyover/orbit beats (direction + sweep in degrees). */
+  orbit?: { direction?: 'cw' | 'ccw'; sweepDeg?: number };
+  /** Named framing preset — low_pass glides through the focus along `bearing`. */
+  preset?: 'low_pass';
 }
 
 export interface MissionSceneLayers {
@@ -47,6 +53,8 @@ export interface MissionScene {
   /** Fractional [start, end] positions along the route (0..1). */
   routeSlice?: [number, number];
   focus?: { lat: number; lng: number };
+  /** For poi_flyover/route_rejoin: route fraction where the tour resumes. */
+  rejoinRatio?: number;
   camera: MissionSceneCamera;
   layers: MissionSceneLayers;
   narration: string;
@@ -193,6 +201,106 @@ function recapSubtitle(brief: MissionControlBrief | null) {
   if (brief.readiness === 'ready') return 'Ready — confirm conditions before departure';
   if (brief.readiness === 'blocked') return 'Blocked — resolve flagged items first';
   return 'Needs review before departure';
+}
+
+export interface ForwardPassInput {
+  route: [number, number][];
+  /** Highlight beats in any order; legs/rejoins are woven around them. */
+  beats: MissionScene[];
+  startTitle?: string;
+  endTitle?: string;
+  checkpoints?: Array<{ lat: number; lng: number; day?: number }>;
+}
+
+/**
+ * Weave highlight beats into ONE forward pass over the route: contiguous
+ * follow legs between beats in route order, no full-route re-fly, no
+ * category back-jumps — and after every poi_flyover a silent route_rejoin
+ * that carries the camera back to the route. This keeps "no teleporting"
+ * structural regardless of who authored the beats (deterministic builder or
+ * the AI storyboard).
+ */
+export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
+  const { route, startTitle = '', endTitle = '' } = input;
+  const validCheckpoints = (input.checkpoints ?? []).filter(cp => finite(cp.lat, cp.lng));
+  const out: MissionScene[] = [];
+  const ratioOfScene = (s: MissionScene): number => {
+    if (s.focus) return routeRatioFor(route, s.focus.lat, s.focus.lng);
+    if (s.routeSlice) return (s.routeSlice[0] + s.routeSlice[1]) / 2;
+    return 0.5;
+  };
+  const beatOrder = (t: MissionSceneType) =>
+    t === 'camp_arrival' ? 0 : t === 'monument_orbit' || t === 'poi_flyover' ? 1 : 2; // prefer camp over duplicate monument at same spot
+  const NON_BEATS: MissionSceneType[] = ['day_flyover', 'whole_route', 'drive_leg', 'intro', 'mission_recap', 'route_rejoin'];
+  const beatsRaw = input.beats
+    .filter(s => !NON_BEATS.includes(s.type)) // legs are regenerated contiguously
+    .map(s => ({ ratio: clampRatio(ratioOfScene(s)), scene: s }))
+    .sort((a, b) => (a.ratio - b.ratio) || (beatOrder(a.scene.type) - beatOrder(b.scene.type)));
+  // Drop beats that land on top of an earlier one (within ~2% of the route) so the
+  // camera doesn't stop twice at the same place.
+  const beats: typeof beatsRaw = [];
+  for (const b of beatsRaw) {
+    if (beats.length && Math.abs(b.ratio - beats[beats.length - 1].ratio) < 0.02) continue;
+    beats.push(b);
+  }
+
+  const cpRatios = validCheckpoints.map(cp => ({ r: routeRatioFor(route, cp.lat, cp.lng), cp }));
+  const dayForRange = (a: number, b: number): number | undefined => {
+    const inSeg = cpRatios.filter(x => x.r >= a - 0.001 && x.r <= b + 0.001);
+    const days = Array.from(new Set(inSeg.map(x => Number(x.cp.day || 0)).filter(d => d > 0)));
+    return days.length === 1 ? days[0] : undefined;
+  };
+  // followLeg titles/narrates by where it's HEADING (dest), not by a checkpoint inside it.
+  const followLeg = (a: number, b: number, first: boolean, dest: string): MissionScene | null => {
+    if (b - a < 0.05) return null;
+    const day = dayForRange(a, b);
+    const target = dest || 'the next stop';
+    return {
+      id: `scene-leg-${a.toFixed(2)}-${b.toFixed(2)}`,
+      type: 'day_flyover',
+      title: first ? `Leaving ${startTitle || 'the start'}` : `Toward ${target}`,
+      subtitle: first ? `Heading for ${target}` : target,
+      day,
+      durationMs: Math.round(9000 + (b - a) * 9000),
+      routeSlice: [a, b],
+      camera: { mode: 'follow', pitch: 64 },
+      layers: {},
+      narration: first
+        ? `Leaving ${startTitle || 'the start'} — we'll trace the route toward ${target}.`
+        : `Continuing toward ${target}.`,
+      callouts: [],
+    };
+  };
+
+  let cursor = 0;
+  let firstLeg = true;
+  for (const b of beats) {
+    const leg = followLeg(cursor, b.ratio, firstLeg, b.scene.title);
+    if (leg) { out.push(leg); firstLeg = false; }
+    out.push(b.scene);
+    cursor = Math.max(cursor, b.ratio);
+    // Off-route excursions glide back to the route through a silent rejoin
+    // transition; the next leg starts exactly where the rejoin lands.
+    if (b.scene.type === 'poi_flyover') {
+      const rejoin = clampRatio(Math.max(cursor, b.scene.rejoinRatio ?? b.ratio));
+      out.push({
+        id: `scene-rejoin-${rejoin.toFixed(3)}`,
+        type: 'route_rejoin',
+        title: 'Back on route',
+        subtitle: '',
+        durationMs: 4500,
+        rejoinRatio: rejoin,
+        camera: { mode: 'fly' },
+        layers: {},
+        narration: '',
+        callouts: [],
+      });
+      cursor = rejoin;
+    }
+  }
+  const tail = followLeg(cursor, 1, firstLeg, endTitle || 'the finish');
+  if (tail) out.push(tail);
+  return out;
 }
 
 export function buildMissionCinematic(input: BuildMissionCinematicInput): MissionCinematic {
@@ -467,67 +575,13 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     .map(entry => entry.scene);
 
   // --- Assemble as ONE forward pass ---------------------------------------
-  // Fly the route start→finish in contiguous legs, pausing at highlight beats
-  // (camps, monuments, fuel, risks) in route order. No full-route re-fly, no
-  // category back-jumps — this is what makes it feel like a single cinematic
-  // flythrough instead of "replaying the route" over and over.
-  const ratioOfScene = (s: MissionScene): number => {
-    if (s.focus) return routeRatioFor(cleanRoute, s.focus.lat, s.focus.lng);
-    if (s.routeSlice) return (s.routeSlice[0] + s.routeSlice[1]) / 2;
-    return 0.5;
-  };
-  const beatOrder = (t: MissionSceneType) =>
-    t === 'camp_arrival' ? 0 : t === 'monument_orbit' ? 1 : 2; // prefer camp over duplicate monument at same spot
-  const beatsRaw = chosen
-    .filter(s => s.type !== 'day_flyover' && s.type !== 'whole_route') // legs are regenerated contiguously
-    .map(s => ({ ratio: clampRatio(ratioOfScene(s)), scene: s }))
-    .sort((a, b) => (a.ratio - b.ratio) || (beatOrder(a.scene.type) - beatOrder(b.scene.type)));
-  // Drop beats that land on top of an earlier one (within ~2% of the route) so the
-  // camera doesn't stop twice at the same place.
-  const beats: typeof beatsRaw = [];
-  for (const b of beatsRaw) {
-    if (beats.length && Math.abs(b.ratio - beats[beats.length - 1].ratio) < 0.02) continue;
-    beats.push(b);
-  }
-
-  const cpRatios = validCheckpoints.map(cp => ({ r: routeRatioFor(cleanRoute, cp.lat, cp.lng), cp }));
-  const dayForRange = (a: number, b: number): number | undefined => {
-    const inSeg = cpRatios.filter(x => x.r >= a - 0.001 && x.r <= b + 0.001);
-    const days = Array.from(new Set(inSeg.map(x => Number(x.cp.day || 0)).filter(d => d > 0)));
-    return days.length === 1 ? days[0] : undefined;
-  };
-  // followLeg titles/narrates by where it's HEADING (dest), not by a checkpoint inside it.
-  const followLeg = (a: number, b: number, first: boolean, dest: string): MissionScene | null => {
-    if (b - a < 0.05) return null;
-    const day = dayForRange(a, b);
-    const target = dest || 'the next stop';
-    return {
-      id: `scene-leg-${a.toFixed(2)}-${b.toFixed(2)}`,
-      type: 'day_flyover',
-      title: first ? `Leaving ${startTitle || 'the start'}` : `Toward ${target}`,
-      subtitle: first ? `Heading for ${target}` : target,
-      day,
-      durationMs: Math.round(9000 + (b - a) * 9000),
-      routeSlice: [a, b],
-      camera: { mode: 'follow', pitch: 64 },
-      layers: {},
-      narration: first
-        ? `Leaving ${startTitle || 'the start'} — we'll trace the route toward ${target}.`
-        : `Continuing toward ${target}.`,
-      callouts: [],
-    };
-  };
-
-  let cursor = 0;
-  let firstLeg = true;
-  for (const b of beats) {
-    const leg = followLeg(cursor, b.ratio, firstLeg, b.scene.title);
-    if (leg) { scenes.push(leg); firstLeg = false; }
-    scenes.push(b.scene);
-    cursor = Math.max(cursor, b.ratio);
-  }
-  const tail = followLeg(cursor, 1, firstLeg, endTitle || 'the finish');
-  if (tail) scenes.push(tail);
+  scenes.push(...assembleForwardPass({
+    route: cleanRoute,
+    beats: chosen,
+    startTitle,
+    endTitle,
+    checkpoints: validCheckpoints,
+  }));
 
   // --- Always: mission_recap ---
   scenes.push({

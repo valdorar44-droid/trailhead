@@ -12,20 +12,22 @@ function assert(condition, message) {
 }
 
 function shouldSpeakScene(type) {
-  return ['intro', 'whole_route', 'day_flyover', 'risk_focus', 'weather_focus', 'offline_readiness', 'mission_recap'].includes(type);
+  return type !== 'whole_route';
 }
 
 assert(shouldSpeakScene('intro'), 'shouldSpeakScene accepts intro');
+assert(shouldSpeakScene('drive_leg'), 'shouldSpeakScene accepts drive_leg');
+assert(shouldSpeakScene('camp_arrival'), 'shouldSpeakScene accepts camp_arrival');
 assert(shouldSpeakScene('mission_recap'), 'shouldSpeakScene accepts mission_recap');
-assert(!shouldSpeakScene('fuel_stop'), 'shouldSpeakScene rejects fuel_stop');
-assert(!shouldSpeakScene('camp_arrival'), 'shouldSpeakScene rejects camp_arrival');
+assert(!shouldSpeakScene('whole_route'), 'shouldSpeakScene rejects whole_route');
 
 const storyboardSource = readFileSync(join(root, 'lib/copilotStoryboard.ts'), 'utf8');
 assert(!/command center/i.test(storyboardSource), 'copilotStoryboard avoids command center wording');
 
 const mapBriefSource = readFileSync(join(root, 'lib/mapMissionBrief.ts'), 'utf8');
 assert(mapBriefSource.includes('getCurrentMissionRoute'), 'mapMissionBrief exports getCurrentMissionRoute');
-assert(mapBriefSource.includes('shouldSpeakScene'), 'mapMissionBrief exports shouldSpeakScene');
+assert(mapBriefSource.includes('buildScoutLiveCinematic'), 'mapMissionBrief exports scout live cinematic builder');
+assert(mapBriefSource.includes('liveMissionBeatBrief'), 'mapMissionBrief exports live beat brief helper');
 
 const nativeMapSource = readFileSync(join(root, 'components/NativeMap/index.tsx'), 'utf8');
 assert(nativeMapSource.includes('mission-brief-progress-line'), 'NativeMap renders mission briefing progress layer');
@@ -35,7 +37,8 @@ assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT') && mapSource.includes('handoff
   'cinematic auto-starts after the scout builds via director handoff');
 assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMissionDirectorVoice'),
   'map uses unified realtime director voice');
-assert(mapSource.includes('createMissionStoryboard'), 'map fetches AI mission storyboard');
+assert(mapSource.includes('liveMissionBeatBrief'), 'map uses live beat briefs for narration');
+assert(!mapSource.includes('createMissionStoryboard'), 'map fly uses scout-live storyboard not pre-generated API');
 assert(mapSource.includes('waitForRouteRenderReady'), 'map waits for route overlay before fly');
 assert(mapSource.includes('useNativeOverlays: USE_NATIVE_MAP'), 'native player uses NativeMap overlays on main map');
 assert(mapSource.includes('shouldSpeakScene(scene)'), 'scene narration gated to major scenes');

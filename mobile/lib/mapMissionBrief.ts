@@ -345,15 +345,189 @@ export function tripNameFromScout(routeScout: RouteScoutState | null | undefined
 }
 
 export function shouldSpeakScene(scene: MissionScene): boolean {
-  return [
-    'intro',
-    'whole_route',
-    'day_flyover',
-    'risk_focus',
-    'weather_focus',
-    'offline_readiness',
-    'mission_recap',
-  ].includes(scene.type);
+  return scene.type !== 'whole_route';
+}
+
+function routeRatioAlong(route: [number, number][], lat: number, lng: number): number {
+  if (route.length < 2) return 0.5;
+  let bestIdx = 0;
+  let bestDist = Infinity;
+  for (let i = 0; i < route.length; i += 1) {
+    const dLng = route[i][0] - lng;
+    const dLat = route[i][1] - lat;
+    const dist = dLng * dLng + dLat * dLat;
+    if (dist < bestDist) {
+      bestDist = dist;
+      bestIdx = i;
+    }
+  }
+  return bestIdx / (route.length - 1);
+}
+
+function clampRouteRatio(value: number) {
+  return Math.max(0, Math.min(1, value));
+}
+
+/** Live flythrough storyboard built from the route scout the user just watched build. */
+export function buildScoutLiveCinematic(input: {
+  tripId?: string | null;
+  tripName: string;
+  route: [number, number][];
+  routeScout?: RouteScoutState | null;
+  missionBrief?: MissionControlBrief | null;
+}): MissionCinematic | null {
+  const route = routeCoordsFromLngLat(input.route);
+  const dayPlans = input.routeScout?.dayPlans ?? [];
+  if (route.length < 2 || dayPlans.length < 1) return null;
+
+  const scout = input.routeScout;
+  const startName = String(scout?.startName || 'the start').trim();
+  const destName = String(scout?.destinationName || 'the finish').trim();
+  const stops = scout?.stops ?? scout?.previewStops ?? [];
+  const scenes: MissionScene[] = [];
+
+  scenes.push({
+    id: 'scene-intro',
+    type: 'intro',
+    title: `Starting in ${startName}`,
+    subtitle: `Heading toward ${destName}`,
+    durationMs: 10000,
+    routeSlice: [0, Math.min(0.1, 12 / route.length)],
+    camera: { mode: 'follow', zoom: 13.6, pitch: 66 },
+    layers: { terrain: true },
+    narration: '',
+    callouts: [],
+  });
+
+  let cursor = 0;
+  for (const plan of dayPlans) {
+    const day = Number(plan.day) || 1;
+    const campStop = stops.find(stop => Number(stop.day) === day);
+    const campLat = campStop?.lat ?? plan.camp?.lat;
+    const campLng = campStop?.lng ?? plan.camp?.lng;
+    let endRatio = finiteCoord(campLat, campLng)
+      ? clampRouteRatio(routeRatioAlong(route, Number(campLat), Number(campLng)))
+      : clampRouteRatio(day / dayPlans.length);
+    endRatio = Math.max(cursor + 0.05, endRatio);
+
+    const legTarget = String(plan.endName || plan.campName || destName).trim();
+    scenes.push({
+      id: `scene-leg-day-${day}`,
+      type: 'drive_leg',
+      title: String(plan.startName || startName).trim(),
+      subtitle: legTarget,
+      day,
+      durationMs: Math.round(10000 + (endRatio - cursor) * 14000),
+      routeSlice: [cursor, endRatio],
+      camera: { mode: 'follow', zoom: 13.8, pitch: 66 },
+      layers: { terrain: true },
+      narration: '',
+      callouts: [],
+    });
+    cursor = endRatio;
+
+    if (finiteCoord(campLat, campLng) && plan.campStatus !== 'missing') {
+      const campName = String(plan.campName || campStop?.name || `Day ${day} camp`).trim();
+      scenes.push({
+        id: `scene-camp-day-${day}`,
+        type: 'camp_arrival',
+        title: campName,
+        subtitle: String(plan.campMeta || plan.driveSummary || '').trim(),
+        day,
+        durationMs: 12000,
+        routeSlice: [endRatio, clampRouteRatio(endRatio + 0.02)],
+        focus: { lat: Number(campLat), lng: Number(campLng) },
+        camera: { mode: 'orbit', zoom: 14, pitch: 62 },
+        layers: { terrain: true },
+        narration: '',
+        callouts: [{
+          id: `camp-${day}`,
+          title: campName,
+          note: plan.reviewNotes?.[0] || campStop?.description,
+          lat: Number(campLat),
+          lng: Number(campLng),
+          kind: 'camp',
+        }],
+      });
+    }
+  }
+
+  if (cursor < 0.94) {
+    scenes.push({
+      id: 'scene-leg-finish',
+      type: 'drive_leg',
+      title: `Toward ${destName}`,
+      subtitle: destName,
+      durationMs: 11000,
+      routeSlice: [cursor, 1],
+      camera: { mode: 'follow', zoom: 13.6, pitch: 66 },
+      layers: { terrain: true },
+      narration: '',
+      callouts: [],
+    });
+  }
+
+  scenes.push({
+    id: 'scene-recap',
+    type: 'mission_recap',
+    title: 'Trip recap',
+    subtitle: `Finish near ${destName}`,
+    durationMs: 9000,
+    routeSlice: [Math.max(0, cursor), 1],
+    camera: { mode: 'follow', zoom: 13.2, pitch: 64 },
+    layers: {},
+    narration: '',
+    callouts: [],
+  });
+
+  return {
+    id: `cinematic-scout-live-${Date.now()}`,
+    tripId: input.tripId ?? null,
+    title: input.tripName,
+    route,
+    scenes,
+    generatedAt: Date.now(),
+    sources: ['trailhead', 'route_scout_live'],
+  };
+}
+
+export function liveMissionBeatBrief(
+  scene: MissionScene,
+  routeScout?: RouteScoutState | null,
+): string {
+  const scout = routeScout;
+  const day = scene.day;
+  const plan = scout?.dayPlans?.find(entry => Number(entry.day) === Number(day));
+  const startName = String(scout?.startName || '').trim();
+  const destName = String(scout?.destinationName || '').trim();
+
+  if (scene.type === 'intro') {
+    return `We are starting in ${startName || scene.title}. Fly this route toward ${destName || 'the finish'}, day by day, close to the ground.`;
+  }
+  if (scene.type === 'camp_arrival') {
+    const campName = String(plan?.campName || scene.title).trim();
+    const meta = String(plan?.campMeta || scene.subtitle || '').trim();
+    const note = String(plan?.reviewNotes?.[0] || '').trim();
+    const dayLabel = day ? `Day ${day}` : 'Tonight';
+    return `${dayLabel} camp: ${campName}. ${meta}. ${note}`.replace(/\s+/g, ' ').trim();
+  }
+  if (scene.type === 'drive_leg' || scene.type === 'day_flyover') {
+    const from = String(plan?.startName || scene.title).trim();
+    const to = String(plan?.endName || scene.subtitle || plan?.campName || destName).trim();
+    const miles = String(plan?.driveSummary || '').trim();
+    const dayLabel = day ? `Day ${day}` : 'This leg';
+    return `${dayLabel}: driving from ${from} toward ${to}. ${miles}. Name the country and road type in plain words.`;
+  }
+  if (scene.type === 'fuel_stop') {
+    return `Fuel stop at ${scene.title}. ${scene.subtitle || ''}`.trim();
+  }
+  if (scene.type === 'mission_recap') {
+    return `That covers the plan from ${startName || 'the start'} to ${destName || 'the finish'}. Check road, weather, and camp rules before you leave.`;
+  }
+  if (['risk_focus', 'weather_focus', 'offline_readiness'].includes(scene.type)) {
+    return `${scene.title}. ${scene.subtitle || scene.narration || ''}`.trim();
+  }
+  return [scene.title, scene.subtitle].filter(Boolean).join('. ');
 }
 
 export function buildMapMissionCinematic(input: {

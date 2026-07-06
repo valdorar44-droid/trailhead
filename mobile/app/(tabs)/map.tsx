@@ -123,9 +123,10 @@ import { TripPreviewControls, DEFAULT_PREVIEW_SPEED, nextPreviewSpeed } from '@/
 import type { MissionCinematic, MissionScene } from '@/lib/copilotStoryboard';
 import {
   buildMapMissionCinematic,
+  buildScoutLiveCinematic,
   checkpointsFromScout,
-  checkpointsFromTrip,
   getCurrentMissionRoute,
+  liveMissionBeatBrief,
   placesFromScout,
   placesFromTrip,
   routeCoordsFromLngLat,
@@ -13831,10 +13832,13 @@ function MapScreen() {
 
   // Narrate a cinematic beat on the same realtime Co-Pilot session used to build the route.
   function narrateMissionScene(scene: MissionScene) {
-    const line = (scene.narration || '').trim();
-    if (!line) { finishMissionNarrationBeat(); return; }
+    if (!shouldSpeakScene(scene)) {
+      finishMissionNarrationBeat();
+      return;
+    }
 
-    const beatBrief = [scene.title, scene.subtitle, line].filter(Boolean).join('. ');
+    const beatBrief = liveMissionBeatBrief(scene, routeScout).trim();
+    if (!beatBrief) { finishMissionNarrationBeat(); return; }
     const handle = realtimeCopilotRef.current;
     const canUseRealtime = ENABLE_REALTIME_NARRATOR
       && missionDirectorActiveRef.current
@@ -13874,7 +13878,7 @@ function MapScreen() {
           if (Date.now() - started >= waitMs) {
             clearNarrationWaitTimer();
             pendingNarrationRef.current = null;
-            if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(line);
+            if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(beatBrief);
           }
         })();
       }, 220);
@@ -13882,7 +13886,7 @@ function MapScreen() {
       return;
     }
 
-    if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(line);
+    if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(beatBrief);
     else finishMissionNarrationBeat();
   }
 
@@ -13953,7 +13957,14 @@ function MapScreen() {
     if (!map3dEnabled) toggleMap3d();
 
     const tripName = activeTrip?.plan.trip_name ?? tripNameFromScout(routeScout, 'Your route');
-    const storyboardInput = {
+    const scoutLiveCinematic = buildScoutLiveCinematic({
+      tripId: activeTrip?.trip_id ?? null,
+      tripName,
+      route,
+      routeScout,
+      missionBrief: mapMissionBrief,
+    });
+    const cinematic = scoutLiveCinematic ?? buildMapMissionCinematic({
       tripId: activeTrip?.trip_id ?? null,
       tripName,
       route,
@@ -13969,48 +13980,9 @@ function MapScreen() {
         lng: selectedTrail.lng,
       } : null,
       missionBrief: mapMissionBrief,
-    };
-    const deterministicCinematic = buildMapMissionCinematic(storyboardInput);
-    const checkpoints = checkpointsFromTrip(activeTrip, routeScout, mapMissionBrief);
-    const places = placesFromTrip({
-      activeTrip,
-      routeScout,
-      gasStations: activeTrip?.gas_stations,
-      campsites: activeTrip?.campsites,
-      routePois: activeTrip?.route_pois,
-      selectedTrail: selectedTrail ? {
-        id: selectedTrail.id,
-        name: selectedTrail.name,
-        lat: selectedTrail.lat,
-        lng: selectedTrail.lng,
-      } : null,
     });
     const briefPromise = refreshMapMissionControl(route, activeTrip?.trip_id ?? null).catch(() => mapMissionBrief);
-    void (async () => {
-      try {
-        const sessionId = await ensureCopilotSession();
-        const response = await api.createMissionStoryboard({
-          session_id: sessionId,
-          trip_id: activeTrip?.trip_id ?? null,
-          trip_name: tripName,
-          route,
-          days: routeScout?.days ?? null,
-          checkpoints: checkpoints as unknown as Array<Record<string, unknown>>,
-          places: places as unknown as Array<Record<string, unknown>>,
-          mission_brief: (mapMissionBrief ?? {}) as unknown as Record<string, unknown>,
-        });
-        if (!missionRunningRef.current) return;
-        if (response?.cinematic?.scenes?.length >= 2 && mapMissionSceneIndex <= 0) {
-          const aiCinematic = response.cinematic as unknown as MissionCinematic;
-          mapMissionCinematicRef.current = aiCinematic;
-          setMapMissionCinematic(aiCinematic);
-        }
-      } catch {
-        // deterministic storyboard already running
-      }
-    })();
     await directorVoicePromise;
-    const cinematic = deterministicCinematic;
     if (!cinematic || cinematic.scenes.length < 2) {
       missionRunningRef.current = false;
       setMapMissionError(true);
@@ -14073,7 +14045,7 @@ function MapScreen() {
         const presence: CopilotPresenceState = scene.layers?.warning ? 'warning' : 'flying';
         mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
         setCopilotBriefPresence(presence);
-        if (scene.narration && shouldSpeakScene(scene)) {
+        if (shouldSpeakScene(scene)) {
           narrateMissionScene(scene);
         } else {
           mapMissionPlayerRef.current?.markNarrationDone(); // non-speaking beat advances on camera time

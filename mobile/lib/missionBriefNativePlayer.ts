@@ -98,11 +98,11 @@ function smoothAngle(prev: number | null, target: number, factor: number) {
  *  terrain relief reads cinematically (the camera tracks the marker, so it need not
  *  frame the whole slice at once). */
 function zoomForSliceLengthKm(km: number) {
-  if (km > 140) return 9.6;
-  if (km > 70) return 10.4;
-  if (km > 35) return 11.1;
-  if (km > 15) return 11.8;
-  return 12.6;
+  if (km > 140) return 11.4;
+  if (km > 70) return 12.2;
+  if (km > 35) return 12.9;
+  if (km > 15) return 13.4;
+  return 14;
 }
 
 function boundsFromCoords(coords: [number, number][], extra: Point[] = []) {
@@ -334,7 +334,7 @@ export function startNativeMissionBriefPlayer(opts: {
       const bearing = bearingLngLat([start.lng, start.lat], [ahead.lng, ahead.lat]);
       smoothedBearing = bearing;
       const sliceLenKm = (routeTotal * ((scene.routeSlice?.[1] ?? 1) - (scene.routeSlice?.[0] ?? 0))) / 1000;
-      const zoom = Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 13.4);
+      const zoom = Math.max(12.8, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 14.2));
       nativeMapRef.current?.flyToCamera?.({
         lat: start.lat, lng: start.lng, zoom, pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)), bearing, duration: 2200, mode: 'flyTo',
       });
@@ -374,7 +374,7 @@ export function startNativeMissionBriefPlayer(opts: {
     const startDist = routeTotal * (scene.routeSlice?.[0] ?? 0);
     const endDist = routeTotal * (scene.routeSlice?.[1] ?? 1);
     const sliceLenKm = Math.max(0, (endDist - startDist)) / 1000;
-    const followZoom = Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 13.4);
+    const followZoom = Math.max(12.8, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 14.2));
     const lookaheadM = Math.max(180, Math.min(1200, (endDist - startDist) * 0.05));
     lastFrameTs = 0;
 

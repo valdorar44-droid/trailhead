@@ -1,6 +1,8 @@
 import {
   buildMapMissionCinematic,
+  buildScoutLiveCinematic,
   getCurrentMissionRoute,
+  liveMissionBeatBrief,
   shouldSpeakScene,
   showFlyPlanAction,
 } from '@/lib/mapMissionBrief';
@@ -61,15 +63,15 @@ const cinematic = buildMapMissionCinematic({
 
 assert(!!cinematic && cinematic.scenes.length >= 4, 'Moab → Big Sur cinematic has multiple scenes');
 assert(cinematic!.scenes[0]?.type === 'intro', 'scene order starts with intro');
-assert(cinematic!.scenes.some(scene => scene.type === 'whole_route'), 'includes whole_route scene');
+assert(cinematic!.scenes.some(scene => scene.type === 'drive_leg' || scene.type === 'day_flyover'), 'includes route leg scenes');
 assert(cinematic!.scenes.some(scene => scene.type === 'mission_recap'), 'includes mission_recap');
 assert(
   cinematic!.scenes.every(scene => !String(scene.narration || '').toLowerCase().includes('command center')),
   'narration avoids generic command center wording',
 );
 assert(
-  cinematic!.scenes.some(scene => String(scene.narration || '').includes('Moab')),
-  'narration references actual route names',
+  cinematic!.scenes.some(scene => scene.title.includes('Moab') || String(scene.subtitle || '').includes('Moab')),
+  'scenes reference actual route names',
 );
 
 const routePick = getCurrentMissionRoute({
@@ -80,9 +82,39 @@ const routePick = getCurrentMissionRoute({
 assert(routePick?.source === 'visible_route', 'prefers visible route when it matches trip');
 
 const majorScene: MissionScene = { id: 's1', type: 'day_flyover', title: 'Day 1', subtitle: '', durationMs: 10000, camera: { mode: 'follow' }, layers: {}, narration: '', callouts: [] };
-const minorScene: MissionScene = { id: 's2', type: 'fuel_stop', title: 'Fuel', subtitle: '', durationMs: 8000, camera: { mode: 'orbit' }, layers: {}, narration: '', callouts: [] };
+const campScene: MissionScene = { id: 's2', type: 'camp_arrival', title: 'Camp', subtitle: '', durationMs: 8000, camera: { mode: 'orbit' }, layers: {}, narration: '', callouts: [] };
 assert(shouldSpeakScene(majorScene), 'shouldSpeakScene includes day_flyover');
-assert(!shouldSpeakScene(minorScene), 'shouldSpeakScene skips fuel_stop');
+assert(shouldSpeakScene(campScene), 'shouldSpeakScene includes camp_arrival');
+
+const scoutLive = buildScoutLiveCinematic({
+  tripName: 'Moab to Flagstaff',
+  route: moabBigSurRoute,
+  routeScout: {
+    status: 'ready',
+    message: 'ready',
+    startName: 'Moab',
+    destinationName: 'Flagstaff',
+    dayPlans: [
+      { day: 1, startName: 'Moab', endName: 'Desert camp', campName: 'Desert camp', campStatus: 'locked', driveSummary: '~180 mi', campMeta: 'BLM · dispersed' },
+      { day: 2, startName: 'Desert camp', endName: 'Flagstaff', campName: 'Pines camp', campStatus: 'locked', driveSummary: '~200 mi', campMeta: 'NF campground' },
+    ],
+    stops: [
+      { day: 1, type: 'camp', name: 'Desert camp', lat: 37.2, lng: -113.5 },
+      { day: 2, type: 'camp', name: 'Pines camp', lat: 35.2, lng: -111.6 },
+    ],
+  },
+});
+assert(!!scoutLive && scoutLive.scenes.length >= 4, 'scout live cinematic has leg and camp beats');
+assert(scoutLive!.scenes.some(scene => scene.type === 'drive_leg'), 'scout live includes drive legs');
+assert(scoutLive!.scenes.some(scene => scene.type === 'camp_arrival'), 'scout live includes camp arrivals');
+assert(
+  liveMissionBeatBrief(scoutLive!.scenes.find(scene => scene.type === 'camp_arrival')!, scoutLive ? {
+    startName: 'Moab',
+    destinationName: 'Flagstaff',
+    dayPlans: [{ day: 1, campName: 'Desert camp', campMeta: 'BLM', driveSummary: '~180 mi' }],
+  } as any : null).includes('Desert camp'),
+  'live beat brief uses scout camp facts',
+);
 
 assert(!showFlyPlanAction({ lastRouteCoords: [], activeTrip: null, routeScout: null }), 'Fly the Plan hidden without route');
 assert(showFlyPlanAction({ lastRouteCoords: moabBigSurRoute, activeTrip, routeScout: null }), 'Fly the Plan visible with trip route');

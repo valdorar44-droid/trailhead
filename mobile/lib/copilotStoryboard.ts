@@ -218,11 +218,12 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     id: 'scene-intro',
     type: 'intro',
     title: tripName,
-    subtitle: 'Mission briefing',
-    durationMs: 9000,
-    camera: { mode: 'fit', pitch: 52, zoom: 9.8 },
-    layers: {},
-    narration: `I built the plan for ${legLabel}. Let's fly it — start to finish.`,
+    subtitle: startTitle ? `From ${startTitle}` : 'Trip overview',
+    durationMs: 10000,
+    routeSlice: [0, Math.min(0.1, 12 / Math.max(cleanRoute.length, 2))],
+    camera: { mode: 'follow', zoom: 13.4, pitch: 66 },
+    layers: { terrain: true },
+    narration: '',
     callouts: [],
   });
   // No standalone whole-route re-fly — the intro establishes the whole route, then

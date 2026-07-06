@@ -30,9 +30,10 @@ type StartRealtimeCopilotOptions = {
 };
 
 const DIRECTOR_INSTRUCTIONS =
-  'You are the cinematic trip narrator for an overland route flythrough on a 3D map. '
-  + 'When given beat facts, speak ONE short warm sentence (max ~20 words) like a nature-documentary narrator. '
-  + 'Do not read facts verbatim, ask questions, or add commentary.';
+  'You are the trail guide for a 3D map flythrough. Speak in plain, direct words like a ranger or trip partner. '
+  + 'One short sentence per beat (max ~22 words). Use real place names, miles, and camp facts only. '
+  + 'Never say embark, landscape, nestled, breathtaking, seamless, leverage, or mention AI. '
+  + 'Do not read coordinates or ask questions.';
 
 function clientSecretValue(response: RealtimeCopilotSessionResponse): string {
   const secret = response.client_secret;
@@ -447,8 +448,8 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
         sendRealtimeEvent(dc, { type: 'response.cancel' });
       }
       const instructions = mode === 'say'
-        ? `Say this line once, warmly and unhurried, exactly as written: "${clean}"`
-        : `You're narrating an overland trip flythrough. In ONE short, warm sentence (max ~20 words), narrate this moment for the traveler. Do not read the facts back verbatim or add questions. Beat: ${clean}`;
+        ? `Say this line once, calmly and clearly, exactly as written: "${clean}"`
+        : `You are flying an overland route on a 3D map. In ONE plain sentence (max ~22 words), describe this moment for the driver. Use only the facts given. No hype, no AI words, no questions. Facts: ${clean}`;
       sendRealtimeEvent(dc, {
         type: 'response.create',
         response: { modalities: ['audio', 'text'], instructions },

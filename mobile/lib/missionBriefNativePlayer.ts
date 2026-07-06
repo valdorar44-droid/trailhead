@@ -221,6 +221,8 @@ export function startNativeMissionBriefPlayer(opts: {
   onCallouts?: (callouts: MissionBriefCallout[]) => void;
   onWarningChange?: (active: boolean) => void;
   onSceneRoute?: (coords: [number, number][]) => void;
+  /** Optional debug hook for device QA (camera vs overlay tick counts). */
+  onDebugTick?: (kind: 'camera' | 'overlay') => void;
 }): NativeMissionBriefPlayer {
   const {
     cinematic,
@@ -248,6 +250,7 @@ export function startNativeMissionBriefPlayer(opts: {
     onCallouts,
     onWarningChange,
     onSceneRoute,
+    onDebugTick,
   } = opts;
 
   // Precompute distance geometry once for the full route.
@@ -577,8 +580,10 @@ export function startNativeMissionBriefPlayer(opts: {
               smoothedBearing = smoothAngle(smoothedBearing, targetBearing, BEARING_EASE);
               // Camera leads on the lookahead point; marker/progress stay on current route distance.
               followCamera(scene, camPt, smoothedBearing, followZoom);
+              onDebugTick?.('camera');
               if (overlayDue) {
                 lastOverlayTs = now;
+                onDebugTick?.('overlay');
                 emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
               }
             } else if (!holdSettled) {

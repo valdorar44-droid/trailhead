@@ -1,0 +1,10 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "podspecPath": "MissionAnimator.podspec",
+    "modules": ["TrailheadMissionAnimatorModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.missionanimator.TrailheadMissionAnimatorModule"]
+  }
+}

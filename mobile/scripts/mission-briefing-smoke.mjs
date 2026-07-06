@@ -102,7 +102,7 @@ assert(playerSource.includes('camBusyUntil'), 'establishing flyTo is never inter
 assert(playerSource.includes('Math.max(lastCamDist, nominal)'), 'contiguous legs use monotonic camera distance (no backward snap)');
 assert(playerSource.includes('HOLD_DRIFT_DEG_PER_S'), 'narration holds drift the bearing instead of freezing');
 assert(playerSource.includes('estimateSpeechMs'), 'speaking scenes stretch to the narration estimate');
-assert(mapSource.includes('if (narrationBeatOpenRef.current) finishMissionNarrationBeat()'),
+assert(mapSource.includes("finishMissionNarrationBeat('pause_release')"),
   'resume releases a narration beat orphaned by pause');
 assert(mapSource.includes('|| mapMissionVisible'), 'tab bar hides during the cinematic so controls are reachable');
 assert(playerSource.includes('destinationPoint') && playerSource.includes('low_pass'),
@@ -112,7 +112,7 @@ assert(playerSource.includes("cam.orbit?.direction === 'ccw'"),
 assert(playerSource.includes('setSpeed'), 'player exposes setSpeed');
 assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('onCallouts?.([])'),
   'player clears overlays on stop');
-assert(playerSource.includes('onNotice'), 'player surfaces non-fatal notices (3D fallback)');
+assert(playerSource.includes('onDebugTick'), 'player exposes debug tick hook for QA counters');
 
 // --- Speed control UI ---
 const controlsSource = readFileSync(join(root, 'components/copilot/TripPreviewControls.tsx'), 'utf8');
@@ -125,6 +125,21 @@ assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map pass
 assert(mapSource.includes('cycleMapMissionSpeed'), 'map wires speed cycling');
 assert(mapSource.includes('mapMissionBriefTop'), 'map renders the top cinematic caption');
 assert(mapSource.includes('showCompactMissionChrome'), 'map compacts Mission Control during active playback');
+
+const playbackSource = readFileSync(join(root, 'lib/missionPlayback.ts'), 'utf8');
+assert(playbackSource.includes('resolveMissionPlaybackMode'), 'missionPlayback exports playback mode resolver');
+assert(playbackSource.includes('speakLiveMissionBeatInput'), 'missionPlayback exports live beat input helper');
+assert(playbackSource.includes('createMissionPlaybackDebug'), 'missionPlayback exports device debug counters');
+assert(mapSource.includes('ensureMissionPlaybackDebug'), 'map wires mission playback debug telemetry');
+assert(mapSource.includes('speakLiveMissionBeatInput'), 'map uses speakLiveMissionBeatInput at scene start');
+assert(mapSource.includes('onDebugTick'), 'map tracks camera vs overlay tick counts');
+assert(mapSource.includes('resolveMissionPlaybackMode'), 'map resolves js vs native playback mode');
+assert(mapSource.includes('isMissionAnimatorAvailable'), 'map probes native animator availability');
+
+const animatorSource = readFileSync(join(root, 'modules/mission-animator/src/index.ts'), 'utf8');
+assert(animatorSource.includes('startMissionAnimation'), 'native animator module exposes startMissionAnimation');
+assert(animatorSource.includes('isMissionAnimatorAvailable'), 'native animator module exposes availability probe');
+
 assert(mapSource.includes('mapMissionNotice'), 'map surfaces the 3D-fallback notice');
 assert(!/headline: 'Trip needs review'/.test(mapSource), 'map avoids debug hero copy in the fallback brief');
 

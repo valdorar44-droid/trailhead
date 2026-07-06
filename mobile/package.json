@@ -44,6 +44,7 @@
     "expo-linking": "~8.0.12",
     "expo-location": "~19.0.8",
     "expo-mapbox-standard-interactions": "file:./modules/mapbox-standard-interactions",
+    "expo-mission-animator": "file:./modules/mission-animator",
     "expo-modules-core": "~3.0.30",
     "expo-notifications": "~0.32.17",
     "expo-router": "~6.0.24",

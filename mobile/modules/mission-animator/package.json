@@ -1,0 +1,16 @@
+{
+  "name": "expo-mission-animator",
+  "version": "1.0.0",
+  "description": "Native mission flythrough animator (Phase B — requires new binary)",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "."
+    }
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

@@ -138,7 +138,7 @@ import {
   tripNameFromScout,
   type MissionBriefCallout,
 } from '@/lib/mapMissionBrief';
-import { startNativeMissionBriefPlayer, type NativeMissionBriefPlayer } from '@/lib/missionBriefNativePlayer';
+import { startNativeMissionBriefPlayer, estimateSpeechMs, type NativeMissionBriefPlayer } from '@/lib/missionBriefNativePlayer';
 import { getMissionBriefMapPlayerScript } from '@/lib/missionBriefMapPlayerScript';
 import { speakCopilotNarration, speakCinematicNarration } from '@/lib/voice';
 import {
@@ -5815,6 +5815,9 @@ function MapScreen() {
   const routeOverlayReadyRef = useRef(false);
   const narrationFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const narrationBeatNonceRef = useRef(0);
+  // True while a speaking beat is awaiting its narration-done signal — used to
+  // release the camera if the voice was killed (e.g. by pause) before finishing.
+  const narrationBeatOpenRef = useRef(false);
   const narrationRealtimeStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const missionOverlayPendingRef = useRef<Partial<{
     progressRoute: [number, number][];
@@ -6758,6 +6761,7 @@ function MapScreen() {
   useEffect(() => {
     setTabBarHidden(
       navMode
+      || mapMissionVisible
       || waterFollowActive
       || safeWaterSheetOwnsPage
       || offlineAreaPicker
@@ -6785,7 +6789,7 @@ function MapScreen() {
     );
     return () => setTabBarHidden(false);
   }, [
-    navMode, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, mapWeatherEnabled, showMapWeatherSheet, inlineSearchOpen, keyboardVisible, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
+    navMode, mapMissionVisible, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, mapWeatherEnabled, showMapWeatherSheet, inlineSearchOpen, keyboardVisible, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
     selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
     tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
   ]);
@@ -13778,6 +13782,7 @@ function MapScreen() {
 
   function finishMissionNarrationBeat() {
     narrationBeatNonceRef.current += 1;
+    narrationBeatOpenRef.current = false;
     clearNarrationFallbackTimer();
     mapMissionPlayerRef.current?.markNarrationDone();
     setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current);
@@ -13880,10 +13885,16 @@ function MapScreen() {
       onStart: () => setCopilotBriefPresence('speaking'),
       onFinish: () => finishMissionNarrationBeat(),
     }).catch(() => {
-      speakCinematicNarration(clean, {
-        onStart: () => setCopilotBriefPresence('speaking'),
-        onFinish: () => finishMissionNarrationBeat(),
-      });
+      // Last-resort voice: if even device TTS throws, release the beat so the
+      // camera never hangs waiting on narration that will never finish.
+      try {
+        speakCinematicNarration(clean, {
+          onStart: () => setCopilotBriefPresence('speaking'),
+          onFinish: () => finishMissionNarrationBeat(),
+        });
+      } catch {
+        finishMissionNarrationBeat();
+      }
     });
   }
 
@@ -13914,7 +13925,13 @@ function MapScreen() {
 
     const beatNonce = narrationBeatNonceRef.current + 1;
     narrationBeatNonceRef.current = beatNonce;
-    const watchdogMs = sceneNarrationWatchdogMs(scene, mapMissionSpeedRef.current);
+    narrationBeatOpenRef.current = true;
+    // The watchdog must outlast the estimated speech time — scenes now stretch
+    // to narration pace, so a duration-only watchdog could cut long lines short.
+    const watchdogMs = Math.max(
+      sceneNarrationWatchdogMs(scene, mapMissionSpeedRef.current),
+      estimateSpeechMs(beatText) + 4000,
+    );
     scheduleNarrationFallback(watchdogMs);
 
     const handle = realtimeCopilotRef.current;
@@ -14103,6 +14120,14 @@ function MapScreen() {
       useNativeOverlays: USE_NATIVE_MAP,
       initialSpeed: mapMissionSpeedRef.current,
       waitForNarration: true, // pace each speaking beat to the narration so voice + camera stay inline
+      // The actual line each scene will speak ('' when silent) — the player
+      // stretches speaking scenes so the camera glides at narration pace.
+      speechTextFor: scene => {
+        const cin = mapMissionCinematicRef.current;
+        if (!shouldSpeakMissionScene(cin, scene)) return '';
+        return missionBeatCaption(cin, scene, routeScout)
+          || String(scene.subtitle || scene.title || '').trim();
+      },
       onNotice: message => {
         setMapMissionNotice(message);
         setTimeout(() => setMapMissionNotice(null), 4200);
@@ -14151,6 +14176,9 @@ function MapScreen() {
         setMapMissionPaused(false);
         const scene = mapMissionCinematicRef.current?.scenes[mapMissionSceneIndex] ?? null;
         setCopilotBriefPresence(scene?.layers?.warning ? 'warning' : 'flying');
+        // Pause killed the voice and its fallback timer; if the beat never got
+        // its narration-done signal, release it now so the scene can't hang.
+        if (narrationBeatOpenRef.current) finishMissionNarrationBeat();
       },
       onComplete: () => {
         setMapMissionPlaying(false);
@@ -21051,6 +21079,11 @@ function MapScreen() {
                 speed={mapMissionSpeed}
                 onCycleSpeed={cycleMapMissionSpeed}
                 onReplay={() => {
+                  // Invalidate any in-flight narration from the previous run so a
+                  // stale completion can't release the new run's first beat early.
+                  narrationBeatNonceRef.current += 1;
+                  narrationBeatOpenRef.current = false;
+                  clearNarrationFallbackTimer();
                   mapMissionPlayerRef.current?.replay();
                   if (!USE_NATIVE_MAP) {
                     webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'replay' }));

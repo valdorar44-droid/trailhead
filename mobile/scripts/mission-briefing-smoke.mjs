@@ -79,9 +79,17 @@ assert(playerSource.includes('cumulativeDistances') && playerSource.includes('po
   'player uses distance-based route interpolation');
 assert(playerSource.includes('bearingLngLat') && playerSource.includes('smoothAngle'),
   'player uses lookahead bearing + bearing smoothing');
-assert(playerSource.includes('followCamera(scene, ahead'), 'camera center uses lookahead ahead of marker');
-assert(/FRAME_MS\s*=\s*250/.test(playerSource), 'camera updates use 250ms cadence');
-assert(playerSource.includes('CAMERA_TWEEN_MS'), 'camera tween duration is tuned separately from frame cadence');
+assert(playerSource.includes('followCamera(scene, camPt'), 'camera center uses monotonic lookahead point ahead of marker');
+assert(/FRAME_MS\s*=\s*80/.test(playerSource), 'camera retargets at ~12.5Hz');
+assert(/CAMERA_TWEEN_MS\s*=\s*120/.test(playerSource) && playerSource.includes("mode: 'linearTo'"),
+  'camera glides via overlapping constant-velocity linearTo tweens');
+assert(playerSource.includes('camBusyUntil'), 'establishing flyTo is never interrupted by follow ticks');
+assert(playerSource.includes('Math.max(lastCamDist, nominal)'), 'contiguous legs use monotonic camera distance (no backward snap)');
+assert(playerSource.includes('HOLD_DRIFT_DEG_PER_S'), 'narration holds drift the bearing instead of freezing');
+assert(playerSource.includes('estimateSpeechMs'), 'speaking scenes stretch to the narration estimate');
+assert(mapSource.includes('if (narrationBeatOpenRef.current) finishMissionNarrationBeat()'),
+  'resume releases a narration beat orphaned by pause');
+assert(mapSource.includes('|| mapMissionVisible'), 'tab bar hides during the cinematic so controls are reachable');
 assert(playerSource.includes('setSpeed'), 'player exposes setSpeed');
 assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('onCallouts?.([])'),
   'player clears overlays on stop');

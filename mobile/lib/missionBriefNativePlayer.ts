@@ -11,22 +11,41 @@ type Point = { lat: number; lng: number };
  *
  * Motion is distance-based, not index-based: we precompute cumulative metric
  * distances along the route once, then sample the camera position by distance so
- * pacing stays even regardless of how densely the route is sampled. Camera
- * updates are throttled to ~8fps with short easeTo tweens and smoothed bearings
- * so the flythrough reads like a slow game/movie preview instead of a jittery
- * per-frame chase.
+ * pacing stays even regardless of how densely the route is sampled.
+ *
+ * Smoothness model: the camera retargets ~12.5x/s with constant-velocity
+ * linearTo tweens that deliberately outlast the retarget interval, so each new
+ * tween interrupts the previous one mid-flight at matched velocity — continuous
+ * motion with no dead gap between hops. Establishing flyTos are never
+ * interrupted (camBusyUntil), contiguous follow legs hand the camera off
+ * without a re-frame (continuity skip + monotonic camera distance), and
+ * narration holds drift the bearing instead of freezing the frame.
  */
 
-// Camera update interval. easeTo duration is matched to this so each tween finishes
-// right as the next begins — continuous motion with no mid-ease interruption (no skip).
-const FRAME_MS = 250;
-const CAMERA_TWEEN_MS = 100;
-// Keep the drawn progress line light so it can update every tick without lag/jank.
+// Camera retarget interval (~12.5Hz) and tween length. The tween is 1.5x the
+// interval on purpose: a linearTo interrupted by the next linearTo along the
+// same path reads as one continuous glide.
+const FRAME_MS = 80;
+const CAMERA_TWEEN_MS = 120;
+// Progress line / marker React emits stay on their own slower clock — the
+// ShapeSource re-render is the expensive part and must not ride the camera cadence.
+const OVERLAY_MS = 250;
+// Keep the drawn progress line light so it can update every emit without lag/jank.
 const PROGRESS_MAX_POINTS = 140;
 // How strongly the camera bearing eases toward the route heading each tick (0..1).
 const BEARING_EASE = 0.16;
 // Minimum per-scene wall-clock before speed scaling (kept generous for a slow feel).
 const SCENE_FLOOR_MS = 7000;
+// Gentle bearing drift while the camera holds for narration (reads as a held shot).
+const HOLD_DRIFT_DEG_PER_S = 2.4;
+// ~155wpm speech estimate; speaking scenes stretch so the glide paces the narration.
+const SPEECH_MS_PER_WORD = 390;
+
+/** Estimated speech time for a narration line (0 for empty/non-speaking). */
+export function estimateSpeechMs(text: string | null | undefined): number {
+  const words = String(text || '').trim().split(/\s+/).filter(Boolean).length;
+  return words > 0 ? 1500 + words * SPEECH_MS_PER_WORD : 0;
+}
 
 function sliceRoute(route: [number, number][], slice: [number, number] = [0, 1]): [number, number][] {
   if (route.length < 2) return route;
@@ -162,6 +181,12 @@ export function startNativeMissionBriefPlayer(opts: {
   initialSpeed?: number;
   /** When true, a scene holds after its camera move until markNarrationDone() (capped). */
   waitForNarration?: boolean;
+  /**
+   * The line that will actually be spoken for a scene ('' when the scene is
+   * silent). Used to stretch speaking scenes so the camera glides at narration
+   * pace instead of finishing early and holding.
+   */
+  speechTextFor?: (scene: MissionScene) => string;
   ensure3d: () => void;
   onReady: () => void;
   onStarted: () => void;
@@ -189,6 +214,7 @@ export function startNativeMissionBriefPlayer(opts: {
     useNativeOverlays = true,
     initialSpeed = 1,
     waitForNarration = false,
+    speechTextFor,
     ensure3d,
     onReady,
     onStarted,
@@ -224,6 +250,14 @@ export function startNativeMissionBriefPlayer(opts: {
   let sceneDuration = SCENE_FLOOR_MS;
   let lastFrameTs = 0;
   let smoothedBearing: number | null = null;
+  // Cross-scene camera continuity state: where the camera last was, so scene
+  // boundaries can hand off without a cut and holds can drift from the current heading.
+  let camBusyUntil = 0;              // wall-clock until the establishing shot lands
+  let lastCamDist: number | null = null;   // route distance (m) of the last follow target
+  let lastCamBearing: number | null = null;
+  let lastCamPoint: Point | null = null;
+  let sceneEstablishMs = 0;
+  let lastOverlayTs = 0;
   let narrationDone = true;   // false while a scene waits for its narration to finish
   // Max extra time a scene will hold for narration beyond its camera move.
   const NARRATION_CAP_MS = 11000;
@@ -289,12 +323,24 @@ export function startNativeMissionBriefPlayer(opts: {
       pitch,
       bearing,
       duration: CAMERA_TWEEN_MS,
-      mode: 'easeTo',
+      mode: 'linearTo',
     });
+    lastCamBearing = bearing;
+    lastCamPoint = center;
     postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: CAMERA_TWEEN_MS });
   }
 
-  function applySceneCamera(scene: MissionScene) {
+  /** Lookahead distance for a follow slice (same formula the tick loop uses). */
+  function lookaheadForSlice(startDist: number, endDist: number) {
+    return Math.max(180, Math.min(1200, (endDist - startDist) * 0.05));
+  }
+
+  /**
+   * Frame the scene's establishing shot. Returns the establishing duration in ms
+   * (0 when the camera is already in position and the shot is skipped) so the
+   * tick loop can wait for it instead of interrupting it mid-flight.
+   */
+  function applySceneCamera(scene: MissionScene): number {
     const cam = scene.camera || { mode: 'fit' };
     const coords = sliceRoute(route, scene.routeSlice ?? [0, 1]);
     smoothedBearing = null;
@@ -319,38 +365,71 @@ export function startNativeMissionBriefPlayer(opts: {
           mode: 'flyTo',
         });
         postWeb({ type: 'fly_to', lat: bounds.center.lat, lng: bounds.center.lng, zoom, pitch: cam.pitch ?? 54, duration: 2600 });
-      } else if (scene.focus) {
+        lastCamDist = null;
+        lastCamPoint = bounds.center;
+        return 2600;
+      }
+      if (scene.focus) {
         nativeMapRef.current?.flyToCamera?.({
           lat: scene.focus.lat, lng: scene.focus.lng, zoom: cam.zoom ?? 12, pitch: cam.pitch ?? 58, duration: 2400, mode: 'flyTo',
         });
+        lastCamDist = null;
+        lastCamPoint = { lat: scene.focus.lat, lng: scene.focus.lng };
+        return 2400;
       }
-      return;
+      return 0;
     }
 
-    // Follow / drive shots — glide the camera onto the start of the slice.
+    // Follow / drive shots — glide the camera onto the LEAD point of the slice
+    // (the same point the tick loop targets), so the handoff from establishing
+    // shot to follow motion is seamless and contiguous legs never snap backward.
     if (cam.mode === 'follow' && coords.length > 1) {
       const sliceStartDist = routeTotal * (scene.routeSlice?.[0] ?? 0);
-      const start = pointAtDistance(route, routeCum, sliceStartDist);
-      const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, sliceStartDist + 250));
+      const sliceEndDist = routeTotal * (scene.routeSlice?.[1] ?? 1);
+      const lookaheadM = lookaheadForSlice(sliceStartDist, sliceEndDist);
+      const leadDist = Math.min(routeTotal, sliceStartDist + lookaheadM);
+      const start = pointAtDistance(route, routeCum, leadDist);
+      const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, leadDist + lookaheadM));
       const bearing = bearingLngLat([start.lng, start.lat], [ahead.lng, ahead.lat]);
+      // Continuity skip: the camera is already essentially at the lead point
+      // (normal case for back-to-back legs around a beat) — no re-frame at all;
+      // the follow ticks take over on the next frame.
+      if (lastCamDist != null && Math.abs(leadDist - lastCamDist) < Math.max(400, lookaheadM)) {
+        smoothedBearing = lastCamBearing ?? bearing;
+        return 0;
+      }
       smoothedBearing = bearing;
-      const sliceLenKm = (routeTotal * ((scene.routeSlice?.[1] ?? 1) - (scene.routeSlice?.[0] ?? 0))) / 1000;
+      const sliceLenKm = (sliceEndDist - sliceStartDist) / 1000;
       const zoom = Math.max(12.8, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 14.2));
+      // Establishing duration scales with how far the camera has to travel.
+      const kmToTarget = lastCamPoint
+        ? haversine([lastCamPoint.lng, lastCamPoint.lat], [start.lng, start.lat]) / 1000
+        : Number.POSITIVE_INFINITY;
+      const establishMs = Math.round(Math.max(1400, Math.min(2600, kmToTarget * 600)));
       nativeMapRef.current?.flyToCamera?.({
-        lat: start.lat, lng: start.lng, zoom, pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)), bearing, duration: 2200, mode: 'flyTo',
+        lat: start.lat, lng: start.lng, zoom, pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)), bearing, duration: establishMs, mode: 'flyTo',
       });
-      postWeb({ type: 'fly_to', lat: start.lat, lng: start.lng, zoom, pitch: cam.pitch ?? 64, bearing, duration: 2200 });
-      return;
+      postWeb({ type: 'fly_to', lat: start.lat, lng: start.lng, zoom, pitch: cam.pitch ?? 64, bearing, duration: establishMs });
+      lastCamDist = leadDist;
+      lastCamPoint = start;
+      lastCamBearing = bearing;
+      return establishMs;
     }
 
     // Fly / orbit toward a focus point.
     if (scene.focus) {
       const zoom = Math.min(cam.zoom ?? (cam.mode === 'orbit' ? 13 : 12.5), 14);
+      const bearing = Number.isFinite(cam.bearing as number) ? (cam.bearing as number) : undefined;
       nativeMapRef.current?.flyToCamera?.({
-        lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: Math.max(52, Math.min(68, cam.pitch ?? 62)), duration: 2400, mode: 'flyTo',
+        lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: Math.max(52, Math.min(68, cam.pitch ?? 62)), bearing, duration: 2400, mode: 'flyTo',
       });
       postWeb({ type: 'fly_to', lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: cam.pitch ?? 62, duration: 2400 });
+      lastCamDist = null;
+      lastCamPoint = { lat: scene.focus.lat, lng: scene.focus.lng };
+      if (bearing != null) lastCamBearing = bearing;
+      return 2400;
     }
+    return 0;
   }
 
   function applySceneOverlays(scene: MissionScene) {
@@ -376,7 +455,19 @@ export function startNativeMissionBriefPlayer(opts: {
     const endDist = routeTotal * (scene.routeSlice?.[1] ?? 1);
     const sliceLenKm = Math.max(0, (endDist - startDist)) / 1000;
     const followZoom = Math.max(12.8, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 14.2));
-    const lookaheadM = Math.max(180, Math.min(1200, (endDist - startDist) * 0.05));
+    const lookaheadM = lookaheadForSlice(startDist, endDist);
+    // Orbit starts from the storyboard's bearing, else the camera's current
+    // heading — never from a fixed north, so there's no rotational jump.
+    const orbitStartBearing = Number.isFinite(cam.bearing as number)
+      ? (cam.bearing as number)
+      : (lastCamBearing ?? 0);
+    const orbitSweepDeg = 80;
+    // Follow legs must land exactly on their final lead point before the scene
+    // can finish — the glide's last tick fires just short of t=1, and without a
+    // settle frame the camera (and the next leg's continuity check) would sit
+    // one frame behind the slice end.
+    const needsSettle = cam.mode === 'follow' && hasSlice && routeTotal > 0;
+    let holdSettled = false;
     lastFrameTs = 0;
 
     const frame = (now: number) => {
@@ -384,39 +475,82 @@ export function startNativeMissionBriefPlayer(opts: {
         raf = null;
         return;
       }
-      const t = Math.max(0, Math.min(1, elapsed(now) / sceneDuration));
+      // Glide progress is measured over the scene time REMAINING after the
+      // establishing shot, so the ground speed isn't compressed by the fly-in.
+      const glideMs = Math.max(1, sceneDuration - sceneEstablishMs);
+      const t = Math.max(0, Math.min(1, (elapsed(now) - sceneEstablishMs) / glideMs));
+      const camReady = now >= camBusyUntil; // never interrupt the establishing flyTo
       const throttled = now - lastFrameTs < FRAME_MS;
+      const overlayDue = now - lastOverlayTs >= OVERLAY_MS;
+      const cameraDone = elapsed(now) >= sceneDuration;
       try {
         if (cam.mode === 'follow' && hasSlice && routeTotal > 0) {
-          if (!throttled && elapsed(now) > 180) {
+          if (!throttled && camReady) {
             lastFrameTs = now;
-            const d = startDist + (endDist - startDist) * t;
-            const marker = pointAtDistance(route, routeCum, d);
-            const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, d + lookaheadM));
-            const targetBearing = bearingLngLat([marker.lng, marker.lat], [ahead.lng, ahead.lat]);
-            smoothedBearing = smoothAngle(smoothedBearing, targetBearing, BEARING_EASE);
-            // Camera leads on the lookahead point; marker/progress stay on current route distance.
-            followCamera(scene, ahead, smoothedBearing, followZoom);
-            emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
+            if (!cameraDone) {
+              const d = startDist + (endDist - startDist) * t;
+              // Monotonic camera distance: on contiguous legs the camera never
+              // targets a point behind where it already is (no backward snap).
+              const nominal = Math.min(routeTotal, d + lookaheadM);
+              const camDist = lastCamDist != null ? Math.max(lastCamDist, nominal) : nominal;
+              lastCamDist = camDist;
+              const camPt = pointAtDistance(route, routeCum, camDist);
+              const aheadPt = pointAtDistance(route, routeCum, Math.min(routeTotal, camDist + lookaheadM));
+              const targetBearing = bearingLngLat([camPt.lng, camPt.lat], [aheadPt.lng, aheadPt.lat]);
+              smoothedBearing = smoothAngle(smoothedBearing, targetBearing, BEARING_EASE);
+              // Camera leads on the lookahead point; marker/progress stay on current route distance.
+              followCamera(scene, camPt, smoothedBearing, followZoom);
+              if (overlayDue) {
+                lastOverlayTs = now;
+                emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
+              }
+            } else if (!holdSettled) {
+              // Settle frame: glide onto the exact final lead point and finish
+              // the progress line — the throttled loop never quite reaches t=1.
+              holdSettled = true;
+              const finalDist = Math.min(routeTotal, endDist + lookaheadM);
+              lastCamDist = lastCamDist != null ? Math.max(lastCamDist, finalDist) : finalDist;
+              const finalPt = pointAtDistance(route, routeCum, lastCamDist);
+              const aheadPt = pointAtDistance(route, routeCum, Math.min(routeTotal, lastCamDist + lookaheadM));
+              smoothedBearing = smoothAngle(smoothedBearing, bearingLngLat([finalPt.lng, finalPt.lat], [aheadPt.lng, aheadPt.lat]), BEARING_EASE);
+              followCamera(scene, finalPt, smoothedBearing, followZoom);
+              lastOverlayTs = now;
+              emitProgress(routeTotal > 0 ? endDist / routeTotal : 1, sliceRoute(route, scene.routeSlice));
+            } else if (lastCamPoint) {
+              // Narration hold: drift the bearing gently around the final lead
+              // point instead of freezing the frame.
+              smoothedBearing = (smoothedBearing ?? lastCamBearing ?? 0) + HOLD_DRIFT_DEG_PER_S * (FRAME_MS / 1000);
+              followCamera(scene, lastCamPoint, smoothedBearing, followZoom);
+            }
           }
-        } else if (cam.mode === 'orbit' && scene.focus && elapsed(now) > 2200) {
-          if (!throttled) {
+        } else if (cam.mode === 'orbit' && scene.focus) {
+          if (!throttled && camReady) {
             lastFrameTs = now;
-            const ot = Math.max(0, Math.min(1, (elapsed(now) - 2200) / Math.max(1, sceneDuration - 2200)));
+            // Sweep at a constant angular rate; during a narration hold (ot > 1)
+            // the orbit simply keeps turning instead of freezing.
+            const ot = Math.max(0, (elapsed(now) - sceneEstablishMs) / glideMs);
+            const bearing = orbitStartBearing + orbitSweepDeg * ot;
             nativeMapRef.current?.flyToCamera?.({
               lat: scene.focus.lat,
               lng: scene.focus.lng,
               zoom: Math.min(cam.zoom ?? 13, 14),
               pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)),
-              bearing: 70 * ot,
-              duration: 150,
-              mode: 'easeTo',
+              bearing,
+              duration: CAMERA_TWEEN_MS,
+              mode: 'linearTo',
             });
-            onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
+            lastCamBearing = bearing;
+            lastCamDist = null;
+            lastCamPoint = { lat: scene.focus.lat, lng: scene.focus.lng };
+            if (overlayDue) {
+              lastOverlayTs = now;
+              onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
+            }
           }
         } else if (scene.type === 'whole_route') {
-          if (!throttled) {
+          if (!throttled && overlayDue) {
             lastFrameTs = now;
+            lastOverlayTs = now;
             emitProgress(t, route);
           }
         }
@@ -427,9 +561,9 @@ export function startNativeMissionBriefPlayer(opts: {
       }
       // Camera finishes its move at t>=1; when voice-paced, hold there until the
       // narration is done (capped) so the camera and the Co-Pilot stay inline.
-      const cameraDone = elapsed(now) >= sceneDuration;
+      // Follow legs also wait for their settle frame so the handoff point is exact.
       const capReached = elapsed(now) >= sceneDuration + NARRATION_CAP_MS;
-      if ((cameraDone && (!waitForNarration || narrationDone)) || capReached) {
+      if ((cameraDone && (!needsSettle || holdSettled) && (!waitForNarration || narrationDone)) || capReached) {
         finishScene();
         return;
       }
@@ -454,10 +588,15 @@ export function startNativeMissionBriefPlayer(opts: {
     pausedTotal = 0;
     pausedAt = 0;
     paused = false;
-    sceneDuration = effectiveDuration(scene);
     narrationDone = false; // set true by markNarrationDone() (voice done / non-speaking scene)
     tryEnsure3d();
-    applySceneCamera(scene);
+    sceneEstablishMs = applySceneCamera(scene);
+    camBusyUntil = performance.now() + sceneEstablishMs;
+    // Speaking scenes stretch to the narration estimate so the camera glides at
+    // voice pace instead of finishing early and holding. Speech doesn't speed up
+    // with playback speed, so the estimate is not divided by it.
+    const speechText = waitForNarration ? (speechTextFor ? speechTextFor(scene) : scene.narration) : '';
+    sceneDuration = Math.max(effectiveDuration(scene), sceneEstablishMs + estimateSpeechMs(speechText));
     applySceneOverlays(scene);
     onSceneStarted(scene, i);
     runSceneLoop(scene);
@@ -479,6 +618,13 @@ export function startNativeMissionBriefPlayer(opts: {
     playing = true;
     paused = false;
     stopAnim();
+    // Reset cross-scene camera continuity so scene 0 re-establishes cleanly.
+    camBusyUntil = 0;
+    lastCamDist = null;
+    lastCamBearing = null;
+    lastCamPoint = null;
+    smoothedBearing = null;
+    lastOverlayTs = 0;
     onFullRoute?.(route);
     onProgressRoute?.([route[0]]);
     onWarningChange?.(false);

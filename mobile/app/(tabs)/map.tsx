@@ -41,8 +41,9 @@ import {
 // map load fails. clusterProperties stay disabled on native — see
 // docs/checkpoints/map-tab-native-cluster-crash-2026-07-03.md.
 const USE_NATIVE_MAP = true;
-// Realtime Co-Pilot narration (WebRTC) — off until verified on-device; device TTS drives narration meanwhile.
-const ENABLE_REALTIME_NARRATOR = false;
+// Realtime Co-Pilot narration (WebRTC) — the Co-Pilot's own ChatGPT voice narrates the
+// cinematic. Verified working on-device in voice mode. Device TTS is the instant fallback.
+const ENABLE_REALTIME_NARRATOR = true;
 // After the Co-Pilot finishes building the route + camps, flow straight into the cinematic flythrough.
 const AUTO_FLY_AFTER_SCOUT = true;
 import * as Location from 'expo-location';
@@ -13951,6 +13952,16 @@ function MapScreen() {
         setTimeout(() => setQuickToast(''), 2800);
       },
     });
+
+    // Give the realtime Co-Pilot voice a moment to connect so the opening line is in
+    // its voice (not the device fallback). Best-effort — never blocks longer than ~2.4s.
+    if (ENABLE_REALTIME_NARRATOR && !missionNarratorReadyRef.current) {
+      const started = Date.now();
+      while (!missionNarratorReadyRef.current && missionRunningRef.current && Date.now() - started < 2400) {
+        await new Promise(resolve => setTimeout(resolve, 120));
+      }
+    }
+    if (!missionRunningRef.current) return false;
 
     if (!USE_NATIVE_MAP) {
       webRef.current?.postMessage(JSON.stringify({

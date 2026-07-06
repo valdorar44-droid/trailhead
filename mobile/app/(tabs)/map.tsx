@@ -118,10 +118,15 @@ import type { MissionCinematic, MissionScene } from '@/lib/copilotStoryboard';
 import {
   buildMapMissionCinematic,
   checkpointsFromScout,
+  getCurrentMissionRoute,
   placesFromScout,
+  placesFromTrip,
   routeCoordsFromLngLat,
   routeCoordsFromScout,
+  shouldSpeakScene,
+  showFlyPlanAction,
   tripNameFromScout,
+  type MissionBriefCallout,
 } from '@/lib/mapMissionBrief';
 import { startNativeMissionBriefPlayer, type NativeMissionBriefPlayer } from '@/lib/missionBriefNativePlayer';
 import { getMissionBriefMapPlayerScript } from '@/lib/missionBriefMapPlayerScript';
@@ -5764,10 +5769,26 @@ function MapScreen() {
   const [mapMissionComplete, setMapMissionComplete] = useState(false);
   const [mapMissionError, setMapMissionError] = useState(false);
   const [mapMissionVisible, setMapMissionVisible] = useState(false);
+  const [missionBriefOverlay, setMissionBriefOverlay] = useState<{
+    active: boolean;
+    fullRoute: [number, number][];
+    progressRoute: [number, number][];
+    marker: { lat: number; lng: number } | null;
+    callouts: MissionBriefCallout[];
+    warning: boolean;
+  }>({
+    active: false,
+    fullRoute: [],
+    progressRoute: [],
+    marker: null,
+    callouts: [],
+    warning: false,
+  });
   const [copilotBriefPresence, setCopilotBriefPresence] = useState<CopilotPresenceState>('idle');
   const mapMissionCinematicRef = useRef<MissionCinematic | null>(null);
   const mapMissionPlayerRef = useRef<NativeMissionBriefPlayer | null>(null);
   const mapMissionPresenceAfterSpeechRef = useRef<CopilotPresenceState>('flying');
+  const mapMission3dSnapshotRef = useRef<boolean | null>(null);
   const realtimeCopilotRef = useRef<{ stop: () => void } | null>(null);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
@@ -10951,7 +10972,6 @@ function MapScreen() {
     recentRouteScoutActionRef.current = { at: Date.now(), action: 'start' };
     const focusStop = stops.find(stop => stop.type === 'camp') ?? stops[Math.min(1, stops.length - 1)] ?? null;
     if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, focusStop.type === 'camp' ? 10.5 : 8.5, focusStop.name), 350);
-    setTimeout(() => { startMapMissionBrief().catch(() => null); }, 1200);
     return {
       applied: true,
       status: nextStatus,
@@ -13524,7 +13544,16 @@ function MapScreen() {
     setMapMissionLoading(true);
     try {
       const cps = checkpointsFromScout(routeScout);
-      const places = placesFromScout(routeScout);
+      const places = placesFromTrip({
+        activeTrip,
+        routeScout,
+        selectedTrail: selectedTrail ? {
+          id: selectedTrail.id,
+          name: selectedTrail.name,
+          lat: selectedTrail.lat,
+          lng: selectedTrail.lng,
+        } : null,
+      });
       const brief = await api.extremeMissionControl({
         session_id: sessionId,
         trip_id: tripId,
@@ -13582,6 +13611,7 @@ function MapScreen() {
   }
 
   function stopMapMissionBrief() {
+    stopTrailheadVoice();
     mapMissionPlayerRef.current?.stop();
     mapMissionPlayerRef.current = null;
     mapMissionCinematicRef.current = null;
@@ -13593,20 +13623,54 @@ function MapScreen() {
     setMapMissionScene(null);
     setMapMissionSceneIndex(0);
     setCopilotBriefPresence('idle');
-    webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_stop' }));
+    setMissionBriefOverlay({
+      active: false,
+      fullRoute: [],
+      progressRoute: [],
+      marker: null,
+      callouts: [],
+      warning: false,
+    });
+    if (mapMission3dSnapshotRef.current != null && mapMission3dSnapshotRef.current !== map3dEnabled) {
+      toggleMap3d();
+    }
+    mapMission3dSnapshotRef.current = null;
+    if (!USE_NATIVE_MAP) {
+      webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_stop' }));
+    }
   }
 
   async function startMapMissionBrief() {
-    const route = lastRouteCoords.length >= 2
-      ? lastRouteCoords
-      : routeCoordsFromScout(routeScout);
+    realtimeCopilotRef.current?.stop();
+    realtimeCopilotRef.current = null;
+    setExtremeCopilotVoiceActive(false);
+    setExtremeCopilotVoiceMode(null);
+    await stopTrailheadVoice();
+
+    const missionRoute = getCurrentMissionRoute({
+      lastRouteCoords,
+      activeTrip,
+      routeScout,
+    });
+    const route = missionRoute?.coords ?? [];
     if (route.length < 2) {
       setQuickToast('Build or load a route first.');
       setTimeout(() => setQuickToast(''), 2400);
       return false;
     }
+
+    mapMission3dSnapshotRef.current = map3dEnabled;
     setMapMissionVisible(true);
     setShowExtremeCopilot(false);
+    setMissionBriefOverlay(prev => ({
+      ...prev,
+      active: true,
+      fullRoute: routeCoordsFromLngLat(route),
+      progressRoute: [routeCoordsFromLngLat(route)[0]].filter(Boolean) as [number, number][],
+      marker: null,
+      callouts: [],
+      warning: false,
+    }));
     if (!map3dEnabled) toggleMap3d();
 
     const tripName = activeTrip?.plan.trip_name ?? tripNameFromScout(routeScout, 'Your route');
@@ -13616,6 +13680,16 @@ function MapScreen() {
       tripName,
       route,
       routeScout,
+      activeTrip,
+      gasStations: activeTrip?.gas_stations,
+      campsites: activeTrip?.campsites,
+      routePois: activeTrip?.route_pois,
+      selectedTrail: selectedTrail ? {
+        id: selectedTrail.id,
+        name: selectedTrail.name,
+        lat: selectedTrail.lat,
+        lng: selectedTrail.lng,
+      } : null,
       missionBrief: brief,
     });
     if (!cinematic || cinematic.scenes.length < 2) {
@@ -13637,9 +13711,27 @@ function MapScreen() {
       checkpoints: checkpointsFromScout(routeScout).map(cp => ({ lat: cp.lat, lng: cp.lng })),
       nativeMapRef,
       webRef,
+      useNativeOverlays: USE_NATIVE_MAP,
       ensure3d: () => {
         if (!map3dEnabled) toggleMap3d();
-        webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: true }));
+        if (!USE_NATIVE_MAP) {
+          webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: true }));
+        }
+      },
+      onFullRoute: fullRoute => {
+        setMissionBriefOverlay(prev => ({ ...prev, active: true, fullRoute }));
+      },
+      onProgressRoute: progressRoute => {
+        setMissionBriefOverlay(prev => ({ ...prev, progressRoute }));
+      },
+      onMarkerMove: marker => {
+        setMissionBriefOverlay(prev => ({ ...prev, marker }));
+      },
+      onCallouts: callouts => {
+        setMissionBriefOverlay(prev => ({ ...prev, callouts }));
+      },
+      onWarningChange: warning => {
+        setMissionBriefOverlay(prev => ({ ...prev, warning }));
       },
       onReady: () => setCopilotBriefPresence('building'),
       onStarted: () => {
@@ -13655,7 +13747,7 @@ function MapScreen() {
         const presence: CopilotPresenceState = scene.layers?.warning ? 'warning' : 'flying';
         mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
         setCopilotBriefPresence(presence);
-        if (scene.narration) {
+        if (scene.narration && shouldSpeakScene(scene)) {
           speakCopilotNarration(scene.narration, {
             onStart: () => setCopilotBriefPresence('speaking'),
             onFinish: () => setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current),
@@ -13664,6 +13756,7 @@ function MapScreen() {
       },
       onSceneFinished: () => {},
       onPaused: () => {
+        stopTrailheadVoice();
         setMapMissionPaused(true);
         setCopilotBriefPresence('paused');
       },
@@ -16433,6 +16526,11 @@ function MapScreen() {
     (activeTrip?.gas_stations ?? []).filter(g => g.lat != null && g.lng != null && isFinite(g.lat) && isFinite(g.lng)).map(g => ({ lat: g.lat, lng: g.lng, name: g.name })),
     [activeTrip?.trip_id]
   );
+  const missionFlyPlanReady = useMemo(() => showFlyPlanAction({
+    lastRouteCoords,
+    activeTrip,
+    routeScout,
+  }), [lastRouteCoords, activeTrip, routeScout]);
   const trailSupportCamps = useMemo(() => [
     ...(activeTrip?.campsites ?? []).filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
     ...areaCamps.filter(c => c.lat != null && c.lng != null && isFinite(c.lat) && isFinite(c.lng)),
@@ -19957,6 +20055,12 @@ function MapScreen() {
           showRadar={layerRadar}
           showNautical={layerNautical}
           hideMapStatusBadge={scopedMapSearchActive}
+          missionBriefActive={missionBriefOverlay.active}
+          missionBriefFullRoute={missionBriefOverlay.fullRoute}
+          missionBriefProgressRoute={missionBriefOverlay.progressRoute}
+          missionBriefMarker={missionBriefOverlay.marker}
+          missionBriefCallouts={missionBriefOverlay.callouts}
+          missionBriefWarning={missionBriefOverlay.warning}
           onMapReady={() => {
             webLoadedRef.current = true;
             setMapSurfaceReady(true);
@@ -20522,6 +20626,8 @@ function MapScreen() {
         routeScout={routeScout}
         dayActionState={routeScoutDayAction}
         onClose={closeRouteScout}
+        showFlyPlan={missionFlyPlanReady}
+        onFlyPlan={() => { startMapMissionBrief().catch(() => null); }}
         onRescout={() => {
           if (!routeScout?.draftArgs) return;
           startCopilotRouteScout(routeScout.draftArgs);
@@ -24514,10 +24620,10 @@ function MapScreen() {
             <TouchableOpacity
               style={s.tripPanelEdit}
               onPress={() => { startMapMissionBrief(); }}
-              accessibilityLabel="Open 3D mission briefing"
+              accessibilityLabel="Fly the Plan"
             >
-              <Ionicons name="airplane-outline" size={13} color={C.orange} />
-              <Text style={s.tripPanelEditText}>BRIEFING</Text>
+              <Ionicons name="sparkles-outline" size={13} color={C.orange} />
+              <Text style={s.tripPanelEditText}>FLY PLAN</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.tripPanelClose, routeClosing && { opacity: 0.55 }]}

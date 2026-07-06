@@ -255,6 +255,21 @@ export interface NativeMapProps {
   showNautical?:   boolean;
   hideMapStatusBadge?: boolean;
 
+  // Mission briefing overlays (NativeMap cinematic player)
+  missionBriefActive?: boolean;
+  missionBriefFullRoute?: [number, number][];
+  missionBriefProgressRoute?: [number, number][];
+  missionBriefMarker?: { lat: number; lng: number } | null;
+  missionBriefCallouts?: Array<{
+    id: string;
+    title: string;
+    note?: string;
+    lat: number;
+    lng: number;
+    kind: string;
+  }>;
+  missionBriefWarning?: boolean;
+
   // Callbacks → replaces onWebMessage
   onMapReady:       () => void;
   onBoundsChange:   (bounds: MapBounds) => void;
@@ -777,6 +792,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
     suppressFeatureTaps = false,
     showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
+    missionBriefActive = false, missionBriefFullRoute = [], missionBriefProgressRoute = [],
+    missionBriefMarker = null, missionBriefCallouts = [], missionBriefWarning = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
@@ -2187,6 +2204,40 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     };
   }, [trailPreviewCoords, trailPreviewProgress, trailPreviewTone]);
 
+  const missionBriefCalloutFC = useMemo(() => {
+    if (!missionBriefActive || !missionBriefCallouts.length) return emptyFC();
+    const labelForKind = (kind: string, idx: number) => {
+      const k = String(kind || '').toLowerCase();
+      if (k.includes('fuel')) return 'F';
+      if (k.includes('camp') || k.includes('stay') || k.includes('overnight') || k.includes('lodging')) return 'S';
+      if (k.includes('trail')) return 'T';
+      if (k.includes('monument') || k.includes('view') || k.includes('scenic') || k.includes('poi')) return 'M';
+      if (k.includes('risk') || k.includes('warning') || k.includes('weather') || k.includes('offline')) return '!';
+      if (k.includes('checkpoint')) return String(idx + 1);
+      return '•';
+    };
+    return pointFC(missionBriefCallouts.map((callout, idx) => ({
+      type: 'Feature' as const,
+      geometry: { type: 'Point' as const, coordinates: [callout.lng, callout.lat] },
+      properties: {
+        id: callout.id,
+        title: callout.title,
+        label: labelForKind(callout.kind, idx),
+        kind: callout.kind,
+        warning: missionBriefWarning ? 1 : 0,
+      },
+    })));
+  }, [missionBriefActive, missionBriefCallouts, missionBriefWarning]);
+
+  const missionBriefMarkerFC = useMemo(() => {
+    if (!missionBriefActive || !missionBriefMarker) return emptyFC();
+    return pointFC([{
+      type: 'Feature',
+      geometry: { type: 'Point', coordinates: [missionBriefMarker.lng, missionBriefMarker.lat] },
+      properties: { role: 'marker' },
+    }]);
+  }, [missionBriefActive, missionBriefMarker]);
+
   // ── Map event handlers ───────────────────────────────────────────────────────
   const handleMapReady = useCallback(() => {
     mapReadyRef.current = true;
@@ -2821,6 +2872,83 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
               textPitchAlignment: 'map',
               textKeepUpright: false,
               textLetterSpacing: 0,
+            } as any}
+          />
+        </MapGL.ShapeSource>
+      )}
+
+      {/* ── Mission briefing overlays ─────────────────────────────────── */}
+      {missionBriefActive && missionBriefFullRoute.length > 1 && (
+        <MapGL.ShapeSource id="mission-brief-full-route" shape={lineFC(missionBriefFullRoute)}>
+          <MapGL.LineLayer
+            id="mission-brief-full-route-line"
+            style={{ lineColor: 'rgba(55,65,81,0.55)', lineWidth: 7, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.72 }}
+          />
+        </MapGL.ShapeSource>
+      )}
+      {missionBriefActive && missionBriefProgressRoute.length > 1 && (
+        <MapGL.ShapeSource id="mission-brief-progress-route" shape={lineFC(missionBriefProgressRoute)}>
+          <MapGL.LineLayer
+            id="mission-brief-progress-shadow"
+            style={{ lineColor: 'rgba(0,0,0,0.35)', lineWidth: 9, lineBlur: 4, lineTranslate: [0, 2] }}
+          />
+          <MapGL.LineLayer
+            id="mission-brief-progress-line"
+            style={{ lineColor: '#00a7ff', lineWidth: 6, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.98 }}
+          />
+        </MapGL.ShapeSource>
+      )}
+      {missionBriefActive && missionBriefMarkerFC.features.length > 0 && (
+        <MapGL.ShapeSource id="mission-brief-marker" shape={missionBriefMarkerFC}>
+          <MapGL.CircleLayer
+            id="mission-brief-marker-glow"
+            style={{
+              circleRadius: missionBriefWarning ? 16 : 12,
+              circleColor: missionBriefWarning ? 'rgba(245,158,11,0.28)' : 'rgba(0,167,255,0.22)',
+              circleStrokeWidth: 0,
+            }}
+          />
+          <MapGL.CircleLayer
+            id="mission-brief-marker-dot"
+            style={{
+              circleRadius: 7,
+              circleColor: missionBriefWarning ? '#f59e0b' : '#00a7ff',
+              circleStrokeColor: '#ffffff',
+              circleStrokeWidth: 2.5,
+            }}
+          />
+        </MapGL.ShapeSource>
+      )}
+      {missionBriefActive && missionBriefCalloutFC.features.length > 0 && (
+        <MapGL.ShapeSource id="mission-brief-callouts" shape={missionBriefCalloutFC}>
+          <MapGL.CircleLayer
+            id="mission-brief-callout-glow"
+            style={{
+              circleRadius: ['case', ['==', ['get', 'warning'], 1], 18, 12],
+              circleColor: ['case', ['==', ['get', 'warning'], 1], 'rgba(239,68,68,0.24)', 'rgba(0,167,255,0.18)'],
+              circleStrokeWidth: 0,
+            }}
+          />
+          <MapGL.CircleLayer
+            id="mission-brief-callout-dot"
+            style={{
+              circleRadius: 8,
+              circleColor: ['case', ['==', ['get', 'warning'], 1], '#ef4444', '#111827'],
+              circleStrokeColor: '#ffffff',
+              circleStrokeWidth: 2,
+            }}
+          />
+          <MapGL.SymbolLayer
+            id="mission-brief-callout-label"
+            style={{
+              textField: ['get', 'label'],
+              textSize: 11,
+              textColor: '#ffffff',
+              textHaloColor: 'rgba(2,6,23,0.82)',
+              textHaloWidth: 1.4,
+              textFont: routeTurnFont,
+              textIgnorePlacement: true,
+              textAllowOverlap: true,
             } as any}
           />
         </MapGL.ShapeSource>

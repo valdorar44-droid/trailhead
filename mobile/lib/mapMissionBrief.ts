@@ -1,4 +1,11 @@
-import type { ExplorerCheckpoint, MissionControlBrief, RouteScoutState } from './api';
+import type {
+  ExplorerCheckpoint,
+  GasStation,
+  MissionControlBrief,
+  OsmPoi,
+  RouteScoutState,
+  TripResult,
+} from './api';
 import {
   buildMissionCinematic,
   type MissionCinematic,
@@ -15,6 +22,22 @@ export type MapMissionBriefState = {
   missionBrief: MissionControlBrief | null;
   error: string | null;
 };
+
+export type MissionBriefCallout = {
+  id: string;
+  title: string;
+  note?: string;
+  lat: number;
+  lng: number;
+  kind: string;
+};
+
+export type MissionRouteResult = {
+  coords: [number, number][];
+  source: string;
+};
+
+const SCOUT_READY_STATUSES = new Set(['ready', 'review', 'locked', 'finish']);
 
 export function initialMapMissionBriefState(): MapMissionBriefState {
   return {
@@ -40,10 +63,94 @@ export function routeCoordsFromLngLat(coords: [number, number][]): [number, numb
     .filter(coord => Number.isFinite(coord[0]) && Number.isFinite(coord[1]));
 }
 
+function coordKey(lat: number, lng: number, id?: string) {
+  const roundedLat = Math.round(lat * 10000) / 10000;
+  const roundedLng = Math.round(lng * 10000) / 10000;
+  return `${id || ''}:${roundedLat},${roundedLng}`;
+}
+
+function finiteCoord(lat: unknown, lng: unknown): lat is number {
+  return Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
+}
+
+function routeEndpoints(coords: [number, number][]) {
+  if (coords.length < 2) return null;
+  return { start: coords[0], end: coords[coords.length - 1] };
+}
+
+function endpointsNear(
+  a: { start: [number, number]; end: [number, number] },
+  b: { start: [number, number]; end: [number, number] },
+  tolerance = 0.08,
+) {
+  const near = (p: [number, number], q: [number, number]) =>
+    Math.abs(p[0] - q[0]) <= tolerance && Math.abs(p[1] - q[1]) <= tolerance;
+  return (near(a.start, b.start) && near(a.end, b.end))
+    || (near(a.start, b.end) && near(a.end, b.start));
+}
+
+function routeMatchesContext(
+  coords: [number, number][],
+  activeTrip?: TripResult | null,
+  routeScout?: RouteScoutState | null,
+) {
+  const endpoints = routeEndpoints(coords);
+  if (!endpoints) return false;
+  const tripCoords = routeCoordsFromLngLat(activeTrip?.route_geometry?.coords ?? []);
+  const scoutCoords = routeCoordsFromScout(routeScout);
+  const tripEndpoints = routeEndpoints(tripCoords);
+  const scoutEndpoints = routeEndpoints(scoutCoords);
+  if (tripEndpoints && endpointsNear(endpoints, tripEndpoints)) return true;
+  if (scoutEndpoints && endpointsNear(endpoints, scoutEndpoints)) return true;
+  if (!tripEndpoints && !scoutEndpoints) return true;
+  return false;
+}
+
+export function getCurrentMissionRoute(input: {
+  lastRouteCoords?: [number, number][];
+  activeTrip?: TripResult | null;
+  routeScout?: RouteScoutState | null;
+  routeBuilderCoords?: [number, number][];
+}): MissionRouteResult | null {
+  const lastRoute = routeCoordsFromLngLat(input.lastRouteCoords ?? []);
+  const tripRoute = routeCoordsFromLngLat(input.activeTrip?.route_geometry?.coords ?? []);
+  const scoutRoute = routeCoordsFromScout(input.routeScout);
+  const builderRoute = routeCoordsFromLngLat(input.routeBuilderCoords ?? []);
+  const scoutReady = SCOUT_READY_STATUSES.has(String(input.routeScout?.status || '').toLowerCase());
+
+  if (lastRoute.length >= 2 && routeMatchesContext(lastRoute, input.activeTrip, input.routeScout)) {
+    return { coords: lastRoute, source: 'visible_route' };
+  }
+  if (tripRoute.length >= 2) {
+    return { coords: tripRoute, source: 'active_trip' };
+  }
+  if (scoutRoute.length >= 2 && scoutReady) {
+    return { coords: scoutRoute, source: 'route_scout' };
+  }
+  if (builderRoute.length >= 2) {
+    return { coords: builderRoute, source: 'route_builder' };
+  }
+  if (lastRoute.length >= 2) {
+    return { coords: lastRoute, source: 'visible_route_unverified' };
+  }
+  return null;
+}
+
+export function showFlyPlanAction(input: Parameters<typeof getCurrentMissionRoute>[0]): boolean {
+  const route = getCurrentMissionRoute(input);
+  if (!route) return false;
+  if (route.source === 'visible_route_unverified') return false;
+  const scoutReady = SCOUT_READY_STATUSES.has(String(input.routeScout?.status || '').toLowerCase());
+  if (input.activeTrip?.route_geometry?.coords?.length) return true;
+  if (scoutReady && routeCoordsFromScout(input.routeScout).length >= 2) return true;
+  if (route.source === 'visible_route' || route.source === 'route_builder') return true;
+  return false;
+}
+
 export function checkpointsFromScout(routeScout: RouteScoutState | null | undefined): ExplorerCheckpoint[] {
   const stops = routeScout?.stops ?? routeScout?.previewStops ?? [];
   return stops
-    .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
+    .filter(stop => finiteCoord(stop.lat, stop.lng))
     .map((stop, idx) => ({
       id: `scout-stop-${stop.day}-${idx}`,
       type: String(stop.type || 'camp'),
@@ -62,7 +169,7 @@ export function checkpointsFromScout(routeScout: RouteScoutState | null | undefi
 export function placesFromScout(routeScout: RouteScoutState | null | undefined): StoryboardPlace[] {
   const stops = routeScout?.stops ?? routeScout?.previewStops ?? [];
   return stops
-    .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
+    .filter(stop => finiteCoord(stop.lat, stop.lng))
     .map((stop, idx) => ({
       id: `scout-place-${stop.day}-${idx}`,
       type: String(stop.type || 'stop'),
@@ -76,6 +183,160 @@ export function placesFromScout(routeScout: RouteScoutState | null | undefined):
     }));
 }
 
+function checkpointsFromTripWaypoints(activeTrip?: TripResult | null): ExplorerCheckpoint[] {
+  const waypoints = activeTrip?.plan?.waypoints ?? [];
+  return waypoints
+    .filter(wp => finiteCoord(wp.lat, wp.lng))
+    .map((wp, idx) => ({
+      id: `trip-wp-${idx}`,
+      type: String(wp.type || 'waypoint'),
+      title: String(wp.name || `Waypoint ${idx + 1}`),
+      note: String(wp.notes || wp.description || ''),
+      lat: Number(wp.lat),
+      lng: Number(wp.lng),
+      day: Number(wp.day) || 1,
+      sequence: idx,
+      status: 'planned',
+      source: 'trailhead',
+      confidence: 'medium',
+    }));
+}
+
+function placesFromTripGas(gasStations: GasStation[] = []): StoryboardPlace[] {
+  return gasStations
+    .filter(g => finiteCoord(g.lat, g.lng))
+    .map((g, idx) => ({
+      id: `trip-gas-${g.id ?? idx}`,
+      type: 'fuel',
+      title: String(g.name || 'Fuel stop'),
+      note: String(g.address || g.fuel_types || ''),
+      lat: Number(g.lat),
+      lng: Number(g.lng),
+      day: Number((g as { recommended_day?: number }).recommended_day) || undefined,
+      source: 'trip_gas',
+      confidence: 'medium' as const,
+    }));
+}
+
+function placesFromTripCamps(campsites: TripResult['campsites'] = []): StoryboardPlace[] {
+  return campsites
+    .filter(c => finiteCoord(c.lat, c.lng))
+    .map((c, idx) => ({
+      id: `trip-camp-${c.id ?? idx}`,
+      type: 'camp',
+      title: String(c.name || 'Camp'),
+      note: String(c.description || ''),
+      lat: Number(c.lat),
+      lng: Number(c.lng),
+      day: Number((c as { recommended_day?: number }).recommended_day) || undefined,
+      source: 'trip_camp',
+      confidence: 'high' as const,
+    }));
+}
+
+function placesFromRoutePois(routePois: OsmPoi[] = []): StoryboardPlace[] {
+  return routePois
+    .filter(p => finiteCoord(p.lat, p.lng))
+    .map((p, idx) => ({
+      id: `trip-poi-${p.id ?? idx}`,
+      type: String(p.type || 'poi'),
+      title: String(p.name || 'Point of interest'),
+      note: String(p.address || p.description || ''),
+      lat: Number(p.lat),
+      lng: Number(p.lng),
+      day: Number((p as { recommended_day?: number }).recommended_day) || undefined,
+      source: String(p.source || 'route_poi'),
+      confidence: 'medium' as const,
+    }));
+}
+
+function checkpointsFromMissionBrief(missionBrief?: MissionControlBrief | null): ExplorerCheckpoint[] {
+  return (missionBrief?.overnights ?? [])
+    .filter(o => finiteCoord(o.lat, o.lng))
+    .map((o, idx) => ({
+      id: `mc-overnight-${idx}`,
+      type: 'camp',
+      title: String(o.name || `Overnight ${idx + 1}`),
+      note: String(o.reason || ''),
+      lat: Number(o.lat),
+      lng: Number(o.lng),
+      day: Number(o.day) || 1,
+      sequence: idx,
+      status: o.status === 'confirmed' ? 'confirmed' : o.status === 'review_area' ? 'review' : 'planned',
+      source: 'mission_control',
+      confidence: o.confidence === 'high' ? 'high' : 'medium',
+    }));
+}
+
+export function dedupeCheckpoints(items: ExplorerCheckpoint[]): ExplorerCheckpoint[] {
+  const seen = new Set<string>();
+  const out: ExplorerCheckpoint[] = [];
+  for (const item of items) {
+    const key = coordKey(item.lat, item.lng, item.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+export function dedupePlaces(items: StoryboardPlace[]): StoryboardPlace[] {
+  const seen = new Set<string>();
+  const out: StoryboardPlace[] = [];
+  for (const item of items) {
+    const key = coordKey(item.lat, item.lng, item.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(item);
+  }
+  return out;
+}
+
+export function checkpointsFromTrip(
+  activeTrip?: TripResult | null,
+  routeScout?: RouteScoutState | null,
+  missionBrief?: MissionControlBrief | null,
+): ExplorerCheckpoint[] {
+  return dedupeCheckpoints([
+    ...checkpointsFromScout(routeScout),
+    ...checkpointsFromTripWaypoints(activeTrip),
+    ...checkpointsFromMissionBrief(missionBrief),
+  ]);
+}
+
+export function placesFromTrip(input: {
+  activeTrip?: TripResult | null;
+  routeScout?: RouteScoutState | null;
+  gasStations?: GasStation[];
+  campsites?: TripResult['campsites'];
+  routePois?: OsmPoi[];
+  selectedTrail?: { id?: string; name?: string; lat?: number; lng?: number } | null;
+  exploreRouteRankPlaces?: StoryboardPlace[];
+}): StoryboardPlace[] {
+  const gas = input.gasStations ?? input.activeTrip?.gas_stations ?? [];
+  const camps = input.campsites ?? input.activeTrip?.campsites ?? [];
+  const pois = input.routePois ?? input.activeTrip?.route_pois ?? [];
+  const trailPlaces: StoryboardPlace[] = input.selectedTrail && finiteCoord(input.selectedTrail.lat, input.selectedTrail.lng)
+    ? [{
+      id: `selected-trail-${input.selectedTrail.id ?? input.selectedTrail.name ?? 'trail'}`,
+      type: 'trail',
+      title: String(input.selectedTrail.name || 'Trail'),
+      lat: Number(input.selectedTrail.lat),
+      lng: Number(input.selectedTrail.lng),
+      source: 'selected_trail',
+      confidence: 'high',
+    }]
+    : [];
+  return dedupePlaces([
+    ...placesFromScout(input.routeScout),
+    ...placesFromTripGas(gas),
+    ...placesFromTripCamps(camps),
+    ...placesFromRoutePois(pois),
+    ...trailPlaces,
+    ...(input.exploreRouteRankPlaces ?? []),
+  ]);
+}
+
 export function tripNameFromScout(routeScout: RouteScoutState | null | undefined, fallback = 'Your route') {
   const start = String(routeScout?.startName || '').trim();
   const end = String(routeScout?.destinationName || '').trim();
@@ -83,11 +344,29 @@ export function tripNameFromScout(routeScout: RouteScoutState | null | undefined
   return fallback;
 }
 
+export function shouldSpeakScene(scene: MissionScene): boolean {
+  return [
+    'intro',
+    'whole_route',
+    'day_flyover',
+    'risk_focus',
+    'weather_focus',
+    'offline_readiness',
+    'mission_recap',
+  ].includes(scene.type);
+}
+
 export function buildMapMissionCinematic(input: {
   tripId?: string | null;
   tripName: string;
   route: [number, number][];
   routeScout?: RouteScoutState | null;
+  activeTrip?: TripResult | null;
+  gasStations?: GasStation[];
+  campsites?: TripResult['campsites'];
+  routePois?: OsmPoi[];
+  selectedTrail?: { id?: string; name?: string; lat?: number; lng?: number } | null;
+  exploreRouteRankPlaces?: StoryboardPlace[];
   missionBrief?: MissionControlBrief | null;
 }): MissionCinematic | null {
   const route = routeCoordsFromLngLat(input.route);
@@ -96,8 +375,16 @@ export function buildMapMissionCinematic(input: {
     tripId: input.tripId ?? null,
     tripName: input.tripName,
     route,
-    checkpoints: checkpointsFromScout(input.routeScout),
-    places: placesFromScout(input.routeScout),
+    checkpoints: checkpointsFromTrip(input.activeTrip, input.routeScout, input.missionBrief),
+    places: placesFromTrip({
+      activeTrip: input.activeTrip,
+      routeScout: input.routeScout,
+      gasStations: input.gasStations,
+      campsites: input.campsites,
+      routePois: input.routePois,
+      selectedTrail: input.selectedTrail,
+      exploreRouteRankPlaces: input.exploreRouteRankPlaces,
+    }),
     missionBrief: input.missionBrief ?? null,
   });
 }
@@ -124,4 +411,11 @@ export function postMissionBriefMapMessage(
   payload: Record<string, unknown> = {},
 ) {
   post({ type, ...payload });
+}
+
+export function progressRouteFromRatio(route: [number, number][], ratio: number): [number, number][] {
+  if (route.length < 2) return route;
+  const t = Math.max(0, Math.min(1, ratio));
+  const endIdx = Math.max(1, Math.ceil(t * (route.length - 1)));
+  return route.slice(0, endIdx + 1);
 }

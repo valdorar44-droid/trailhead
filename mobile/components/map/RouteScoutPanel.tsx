@@ -38,6 +38,8 @@ type Props = {
   onClose: () => void;
   onRescout: () => void;
   onOpenBuilder: () => void;
+  onFlyPlan?: () => void;
+  showFlyPlan?: boolean;
   onStopPress: (stop: RouteScoutStop) => void;
   onDayAction: (plan: RouteScoutDayPlan, kind: RouteScoutDayActionKind) => void;
   onDayActionItemPress: (item: RouteScoutDayActionItem) => void;
@@ -204,6 +206,8 @@ export default function RouteScoutPanel({
   onClose,
   onRescout,
   onOpenBuilder,
+  onFlyPlan,
+  showFlyPlan = false,
   onStopPress,
   onDayAction,
   onDayActionItemPress,
@@ -457,6 +461,15 @@ export default function RouteScoutPanel({
           <Ionicons name="refresh-outline" size={13} color={C.text2} />
           <Text style={s.actionText}>Refresh</Text>
         </TouchableOpacity>
+        {showFlyPlan && onFlyPlan ? (
+          <TouchableOpacity style={[s.action, s.actionFlyPlan]} onPress={onFlyPlan}>
+            <Ionicons name="sparkles-outline" size={13} color={C.orange} />
+            <View style={s.flyPlanCopy}>
+              <Text style={[s.actionText, s.actionFlyPlanText]}>Fly the Plan</Text>
+              <Text style={s.actionFlyPlanSub}>Co-Pilot briefing</Text>
+            </View>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity style={[s.action, s.actionPrimary]} onPress={onOpenBuilder}>
           <Ionicons name="create-outline" size={13} color={primaryActionTextColor} />
           <Text style={[s.actionText, s.actionPrimaryText]}>Full editor</Text>
@@ -910,6 +923,24 @@ const makeStyles = (C: ColorPalette) => {
       flex: 1,
       backgroundColor: C.orange,
       borderColor: C.orange,
+    },
+    actionFlyPlan: {
+      flex: 1.2,
+      borderColor: C.orange + '88',
+      backgroundColor: C.orange + '14',
+    },
+    flyPlanCopy: {
+      flexShrink: 1,
+    },
+    actionFlyPlanText: {
+      color: C.orange,
+      fontSize: 10,
+    },
+    actionFlyPlanSub: {
+      color: C.text3,
+      fontSize: 8,
+      fontFamily: mono,
+      marginTop: 1,
     },
     actionText: {
       color: C.text2,

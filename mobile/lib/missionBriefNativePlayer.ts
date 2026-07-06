@@ -1,6 +1,8 @@
 import type { MutableRefObject } from 'react';
 import type { NativeMapHandle } from '@/components/NativeMap';
 import type { MissionCinematic, MissionScene } from './copilotStoryboard';
+import { progressRouteFromRatio } from './mapMissionBrief';
+import type { MissionBriefCallout } from './mapMissionBrief';
 
 type Point = { lat: number; lng: number };
 
@@ -50,6 +52,24 @@ function boundsFromCoords(coords: [number, number][], extra: Point[] = []) {
   };
 }
 
+function sceneCallouts(scene: MissionScene): MissionBriefCallout[] {
+  return (scene.callouts ?? [])
+    .filter(c => Number.isFinite(c.lat) && Number.isFinite(c.lng))
+    .map(c => ({
+      id: c.id,
+      title: c.title,
+      note: c.note,
+      lat: c.lat,
+      lng: c.lng,
+      kind: c.kind || scene.type,
+    }));
+}
+
+function isWarningScene(scene: MissionScene) {
+  return scene.layers?.warning
+    || ['risk_focus', 'weather_focus', 'offline_readiness'].includes(scene.type);
+}
+
 export type NativeMissionBriefPlayer = {
   replay: () => void;
   pause: () => void;
@@ -64,6 +84,7 @@ export function startNativeMissionBriefPlayer(opts: {
   checkpoints?: Array<{ lat: number; lng: number }>;
   nativeMapRef: MutableRefObject<NativeMapHandle | null>;
   webRef: MutableRefObject<{ postMessage: (msg: string) => void } | null>;
+  useNativeOverlays?: boolean;
   ensure3d: () => void;
   onReady: () => void;
   onStarted: () => void;
@@ -73,6 +94,12 @@ export function startNativeMissionBriefPlayer(opts: {
   onResumed: (index: number) => void;
   onComplete: () => void;
   onError: (message: string) => void;
+  onFullRoute?: (route: [number, number][]) => void;
+  onProgressRoute?: (coords: [number, number][]) => void;
+  onMarkerMove?: (point: Point | null) => void;
+  onCallouts?: (callouts: MissionBriefCallout[]) => void;
+  onWarningChange?: (active: boolean) => void;
+  onSceneRoute?: (coords: [number, number][]) => void;
 }): NativeMissionBriefPlayer {
   const {
     cinematic,
@@ -80,6 +107,7 @@ export function startNativeMissionBriefPlayer(opts: {
     checkpoints = [],
     nativeMapRef,
     webRef,
+    useNativeOverlays = true,
     ensure3d,
     onReady,
     onStarted,
@@ -89,6 +117,12 @@ export function startNativeMissionBriefPlayer(opts: {
     onResumed,
     onComplete,
     onError,
+    onFullRoute,
+    onProgressRoute,
+    onMarkerMove,
+    onCallouts,
+    onWarningChange,
+    onSceneRoute,
   } = opts;
 
   let index = -1;
@@ -103,8 +137,20 @@ export function startNativeMissionBriefPlayer(opts: {
   let stopped = false;
 
   const postWeb = (payload: Record<string, unknown>) => {
+    if (useNativeOverlays) return;
     webRef.current?.postMessage(JSON.stringify(payload));
   };
+
+  function emitProgress(ratio: number, sceneCoords?: [number, number][] | null) {
+    const progressCoords = progressRouteFromRatio(route, ratio);
+    onProgressRoute?.(progressCoords);
+    if (sceneCoords && sceneCoords.length >= 2) {
+      onSceneRoute?.(sceneCoords);
+    }
+    const marker = pointAlong(route, ratio);
+    onMarkerMove?.({ lat: marker.lat, lng: marker.lng });
+    postWeb({ type: 'mission_brief_progress', ratio });
+  }
 
   function stopAnim() {
     if (raf) cancelAnimationFrame(raf);
@@ -184,6 +230,22 @@ export function startNativeMissionBriefPlayer(opts: {
     }
   }
 
+  function applySceneOverlays(scene: MissionScene) {
+    const coords = scene.routeSlice ? sliceRoute(route, scene.routeSlice) : route;
+    onSceneRoute?.(coords);
+    onCallouts?.(sceneCallouts(scene));
+    onWarningChange?.(isWarningScene(scene));
+    if (scene.focus) {
+      onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
+    } else if (coords.length >= 2) {
+      const start = pointAlong(coords, 0);
+      onMarkerMove?.({ lat: start.lat, lng: start.lng });
+    }
+    if (scene.type === 'whole_route') {
+      onProgressRoute?.([route[0]]);
+    }
+  }
+
   function runSceneLoop(scene: MissionScene) {
     const duration = Math.max(9000, Number(scene.durationMs) || 12000);
     const cam = scene.camera || {};
@@ -204,10 +266,7 @@ export function startNativeMissionBriefPlayer(opts: {
             const point = pointAlong(coords, t);
             flyCamera(scene, coords, point);
           }
-          postWeb({
-            type: 'mission_brief_progress',
-            ratio: progress,
-          });
+          emitProgress(progress, coords);
         } else if (cam.mode === 'orbit' && elapsed(now) > 2400) {
           if (orbitBase == null) orbitBase = 0;
           const ot = Math.max(0, Math.min(1, (elapsed(now) - 2400) / Math.max(1, duration - 2400)));
@@ -221,9 +280,10 @@ export function startNativeMissionBriefPlayer(opts: {
               duration: 0,
               mode: 'easeTo',
             });
+            onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
           }
         } else if (scene.type === 'whole_route') {
-          postWeb({ type: 'mission_brief_progress', ratio: t });
+          emitProgress(t, route);
         }
       } catch (err: any) {
         failed = true;
@@ -244,6 +304,8 @@ export function startNativeMissionBriefPlayer(opts: {
     if (i >= cinematic.scenes.length) {
       playing = false;
       stopAnim();
+      onWarningChange?.(false);
+      onProgressRoute?.(route);
       onComplete();
       return;
     }
@@ -255,6 +317,7 @@ export function startNativeMissionBriefPlayer(opts: {
     paused = false;
     ensure3d();
     applySceneCamera(scene);
+    applySceneOverlays(scene);
     onSceneStarted(scene, i);
     runSceneLoop(scene);
   }
@@ -275,6 +338,9 @@ export function startNativeMissionBriefPlayer(opts: {
     playing = true;
     paused = false;
     stopAnim();
+    onFullRoute?.(route);
+    onProgressRoute?.([route[0]]);
+    onWarningChange?.(false);
     onReady();
     onStarted();
     startScene(0);
@@ -311,6 +377,11 @@ export function startNativeMissionBriefPlayer(opts: {
     playing = false;
     paused = false;
     stopAnim();
+    onWarningChange?.(false);
+    onMarkerMove?.(null);
+    onCallouts?.([]);
+    onProgressRoute?.([]);
+    onFullRoute?.([]);
     postWeb({ type: 'mission_brief_stop' });
   }
 

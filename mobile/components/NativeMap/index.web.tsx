@@ -103,6 +103,12 @@ export interface NativeMapProps {
   onTraceMove?:     (coord: [number, number]) => void;
   onTraceEnd?:      () => void;
   onError?:         (msg: string) => void;
+  missionBriefActive?: boolean;
+  missionBriefFullRoute?: [number, number][];
+  missionBriefProgressRoute?: [number, number][];
+  missionBriefMarker?: { lat: number; lng: number } | null;
+  missionBriefCallouts?: Array<{ id: string; title: string; note?: string; lat: number; lng: number; kind: string }>;
+  missionBriefWarning?: boolean;
   children?:         React.ReactNode;
 }
 

@@ -1,4 +1,4 @@
-import { requireOptionalNativeModule } from 'expo-modules-core';
+import { EventEmitter, requireOptionalNativeModule } from 'expo-modules-core';
 import type { MissionScene } from '@/lib/copilotStoryboard';
 
 export type MissionAnimationCamera = {
@@ -16,29 +16,41 @@ export type MissionAnimationPayload = {
   camera: MissionAnimationCamera;
 };
 
-export type MissionSceneProgressEvent = {
-  sceneId: string;
-  progress: number;
-};
-
 export type MissionSceneLifecycleEvent = {
   sceneId: string;
   index: number;
-  type: string;
+  type?: string;
+};
+
+export type MissionSceneProgressEvent = MissionSceneLifecycleEvent & {
+  progress: number;
+};
+
+export type MissionErrorEvent = {
+  message: string;
+  code?: string;
+};
+
+export type MissionDebugEvent = {
+  kind: string;
+  details?: Record<string, unknown>;
 };
 
 type NativeMissionAnimator = {
   isAvailable?: () => boolean | Promise<boolean>;
-  startMissionAnimation?: (payload: MissionAnimationPayload) => boolean | Promise<boolean>;
+  prepareMissionAnimation?: (payload: MissionAnimationPayload) => boolean | Promise<boolean>;
+  startMissionAnimation?: (payload?: MissionAnimationPayload) => boolean | Promise<boolean>;
   pauseMissionAnimation?: () => boolean | Promise<boolean>;
   resumeMissionAnimation?: () => boolean | Promise<boolean>;
   stopMissionAnimation?: () => boolean | Promise<boolean>;
+  clearMissionAnimation?: () => boolean | Promise<boolean>;
   setMissionAnimationSpeed?: (speed: number) => boolean | Promise<boolean>;
 };
 
 const Native = requireOptionalNativeModule<NativeMissionAnimator>('TrailheadMissionAnimator');
+const emitter = Native ? new EventEmitter(Native as any) : null;
 
-/** True only after a native binary ships the animator (Phase B). OTA alone cannot enable this. */
+/** True when the native binary ships TrailheadMissionAnimator and a MapView is mounted. */
 export async function isMissionAnimatorAvailable(): Promise<boolean> {
   if (!Native?.isAvailable) return false;
   try {
@@ -48,7 +60,16 @@ export async function isMissionAnimatorAvailable(): Promise<boolean> {
   }
 }
 
-export async function startMissionAnimation(payload: MissionAnimationPayload): Promise<boolean> {
+export async function prepareMissionAnimation(payload: MissionAnimationPayload): Promise<boolean> {
+  if (!Native?.prepareMissionAnimation) return false;
+  try {
+    return !!(await Native.prepareMissionAnimation(payload));
+  } catch {
+    return false;
+  }
+}
+
+export async function startMissionAnimation(payload?: MissionAnimationPayload): Promise<boolean> {
   if (!Native?.startMissionAnimation) return false;
   try {
     return !!(await Native.startMissionAnimation(payload));
@@ -84,6 +105,15 @@ export async function stopMissionAnimation(): Promise<boolean> {
   }
 }
 
+export async function clearMissionAnimation(): Promise<boolean> {
+  if (!Native?.clearMissionAnimation) return false;
+  try {
+    return !!(await Native.clearMissionAnimation());
+  } catch {
+    return false;
+  }
+}
+
 export async function setMissionAnimationSpeed(speed: number): Promise<boolean> {
   if (!Native?.setMissionAnimationSpeed) return false;
   try {
@@ -91,4 +121,28 @@ export async function setMissionAnimationSpeed(speed: number): Promise<boolean> 
   } catch {
     return false;
   }
+}
+
+export function addMissionSceneStartListener(listener: (event: MissionSceneLifecycleEvent) => void) {
+  return (emitter as any)?.addListener('onMissionSceneStart', listener) ?? { remove() {} };
+}
+
+export function addMissionSceneProgressListener(listener: (event: MissionSceneProgressEvent) => void) {
+  return (emitter as any)?.addListener('onMissionSceneProgress', listener) ?? { remove() {} };
+}
+
+export function addMissionSceneEndListener(listener: (event: MissionSceneLifecycleEvent) => void) {
+  return (emitter as any)?.addListener('onMissionSceneEnd', listener) ?? { remove() {} };
+}
+
+export function addMissionCompleteListener(listener: () => void) {
+  return (emitter as any)?.addListener('onMissionComplete', listener) ?? { remove() {} };
+}
+
+export function addMissionErrorListener(listener: (event: MissionErrorEvent) => void) {
+  return (emitter as any)?.addListener('onMissionError', listener) ?? { remove() {} };
+}
+
+export function addMissionDebugListener(listener: (event: MissionDebugEvent) => void) {
+  return (emitter as any)?.addListener('onMissionDebug', listener) ?? { remove() {} };
 }

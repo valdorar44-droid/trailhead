@@ -19,4 +19,6 @@ android {
 
 dependencies {
   implementation project(':expo-modules-core')
+  def mapboxVersion = rootProject.ext.has('RNMapboxMapsVersion') ? rootProject.ext.RNMapboxMapsVersion : '11.16.0'
+  implementation "com.mapbox.maps:android:${mapboxVersion}"
 }

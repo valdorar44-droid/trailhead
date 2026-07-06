@@ -139,6 +139,11 @@ assert(mapSource.includes('isMissionAnimatorAvailable'), 'map probes native anim
 const animatorSource = readFileSync(join(root, 'modules/mission-animator/src/index.ts'), 'utf8');
 assert(animatorSource.includes('startMissionAnimation'), 'native animator module exposes startMissionAnimation');
 assert(animatorSource.includes('isMissionAnimatorAvailable'), 'native animator module exposes availability probe');
+assert(animatorSource.includes('prepareMissionAnimation'), 'native animator module exposes prepareMissionAnimation');
+assert(animatorSource.includes('clearMissionAnimation'), 'native animator module exposes clearMissionAnimation');
+assert(animatorSource.includes('addMissionSceneStartListener'), 'native animator module exposes scene lifecycle events');
+assert(mapSource.includes('startMissionAnimation(nativePayload)'), 'map starts native animator when available');
+assert(mapSource.includes('clearMissionNativeListeners'), 'map cleans up native event listeners');
 
 assert(mapSource.includes('mapMissionNotice'), 'map surfaces the 3D-fallback notice');
 assert(!/headline: 'Trip needs review'/.test(mapSource), 'map avoids debug hero copy in the fallback brief');

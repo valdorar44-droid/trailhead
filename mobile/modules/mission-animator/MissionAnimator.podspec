@@ -13,4 +13,5 @@ Pod::Spec.new do |s|
   s.source         = { :path => '.' }
   s.source_files   = 'ios/**/*.{swift,h,m}'
   s.dependency 'ExpoModulesCore'
+  s.dependency 'MapboxMaps'
 end

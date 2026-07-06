@@ -147,7 +147,20 @@ import {
   type MissionPlaybackDebug,
   type NarrationDoneSource,
 } from '@/lib/missionPlayback';
-import { isMissionAnimatorAvailable } from 'expo-mission-animator';
+import {
+  addMissionCompleteListener,
+  addMissionDebugListener,
+  addMissionErrorListener,
+  addMissionSceneEndListener,
+  addMissionSceneStartListener,
+  clearMissionAnimation,
+  isMissionAnimatorAvailable,
+  pauseMissionAnimation,
+  resumeMissionAnimation,
+  setMissionAnimationSpeed,
+  startMissionAnimation,
+  stopMissionAnimation,
+} from 'expo-mission-animator';
 import { fetchDirectedCinematic } from '@/lib/missionStoryboardClient';
 import { getMissionBriefMapPlayerScript } from '@/lib/missionBriefMapPlayerScript';
 import { speakCopilotNarration, speakCinematicNarration } from '@/lib/voice';
@@ -5812,6 +5825,8 @@ function MapScreen() {
   const [mapMissionNotice, setMapMissionNotice] = useState<string | null>(null);
   const mapMissionCinematicRef = useRef<MissionCinematic | null>(null);
   const mapMissionPlayerRef = useRef<NativeMissionBriefPlayer | null>(null);
+  const mapMissionNativeSubsRef = useRef<Array<{ remove: () => void }>>([]);
+  const mapMissionPlaybackModeRef = useRef<'js' | 'native'>('js');
   const mapMissionPresenceAfterSpeechRef = useRef<CopilotPresenceState>('flying');
   const mapMission3dSnapshotRef = useRef<boolean | null>(null);
   const mapMissionStyleSnapshotRef = useRef<{ mapLayer: MapLayer; premiumMapStyle: PremiumMapStyle } | null>(null);
@@ -13699,6 +13714,11 @@ function MapScreen() {
     }
   }
 
+  function clearMissionNativeListeners() {
+    mapMissionNativeSubsRef.current.forEach(sub => sub.remove());
+    mapMissionNativeSubsRef.current = [];
+  }
+
   function stopMapMissionBrief() {
     missionRunningRef.current = false;
     missionRouteOverrideRef.current = null;
@@ -13706,6 +13726,12 @@ function MapScreen() {
     stopTrailheadVoice();
     mapMissionPlayerRef.current?.stop();
     mapMissionPlayerRef.current = null;
+    if (mapMissionPlaybackModeRef.current === 'native') {
+      void stopMissionAnimation();
+      void clearMissionAnimation();
+    }
+    clearMissionNativeListeners();
+    mapMissionPlaybackModeRef.current = 'js';
     mapMissionCinematicRef.current = null;
     setMapMissionVisible(false);
     setMapMissionPlaying(false);
@@ -14120,13 +14146,15 @@ function MapScreen() {
     await stopTrailheadVoice();
     missionVoicePathRef.current = 'realtime';
 
-    const playbackMode = resolveMissionPlaybackMode();
+    const nativeAvailable = await isMissionAnimatorAvailable();
+    const playbackMode = resolveMissionPlaybackMode(undefined, nativeAvailable && USE_NATIVE_MAP);
+    mapMissionPlaybackModeRef.current = playbackMode;
     const playbackDebug = ensureMissionPlaybackDebug();
     playbackDebug.reset();
     playbackDebug.sessionStart({
       playback_mode: playbackMode,
       source: options.source ?? 'manual',
-      native_animator_available: await isMissionAnimatorAvailable(),
+      native_animator_available: nativeAvailable,
     });
 
     const overrideRoute = missionRouteOverrideRef.current;
@@ -14240,12 +14268,117 @@ function MapScreen() {
     setMapMissionComplete(false);
 
     mapMissionPlayerRef.current?.stop();
+    clearMissionNativeListeners();
 
-    // Phase B: native animator takes over when the binary ships it. Until then,
-    // playbackMode stays 'js' and the OTA player below handles the flythrough.
-    if (playbackMode === 'native' && await isMissionAnimatorAvailable()) {
+    const nativePayload = {
+      route: routeCoordsFromLngLat(route),
+      scenes: cinematic.scenes,
+      speed: mapMissionSpeedRef.current,
+      terrain: map3dEnabled || terrainReady,
+      camera: {
+        pitch: 64,
+        minZoom: 8.5,
+        maxZoom: 14.2,
+        lookaheadM: 600,
+      },
+    };
+
+    if (playbackMode === 'native') {
       playbackDebug.sessionStart({ playback_mode: 'native', native_handoff: true });
-      // Native startMissionAnimation wiring lands with the next binary build.
+      setMissionBriefOverlay({
+        active: false,
+        fullRoute: [],
+        progressRoute: [],
+        marker: null,
+        callouts: [],
+        warning: false,
+      });
+      mapMissionNativeSubsRef.current = [
+        addMissionSceneStartListener(({ index }) => {
+          const scene = mapMissionCinematicRef.current?.scenes[index];
+          if (scene) beginMissionSceneBeat(scene, index);
+        }),
+        addMissionSceneEndListener(({ index }) => {
+          const scene = mapMissionCinematicRef.current?.scenes[index] ?? null;
+          playbackDebug.sceneEnd({
+            scene_id: scene?.id ?? null,
+            scene_type: scene?.type ?? null,
+            scene_index: index,
+          });
+        }),
+        addMissionDebugListener(({ kind }) => {
+          if (kind === 'camera') playbackDebug.cameraTick();
+          else if (kind === 'overlay') playbackDebug.overlayTick();
+        }),
+        addMissionCompleteListener(() => {
+          clearMissionNativeListeners();
+          setMapMissionPlaying(false);
+          setMapMissionPaused(false);
+          setMapMissionComplete(true);
+          setCopilotBriefPresence('complete');
+          mapMissionPresenceAfterSpeechRef.current = 'complete';
+          logCopilotMapTelemetry('mission_playback_complete', {
+            playback_mode: 'native',
+            storyboard_path: missionStoryboardPathRef.current,
+            counters: playbackDebug.snapshot(),
+          });
+        }),
+        addMissionErrorListener(({ message }) => {
+          clearMissionNativeListeners();
+          setMapMissionPlaying(false);
+          setMapMissionError(true);
+          setCopilotBriefPresence('idle');
+          setQuickToast(message || 'Mission briefing failed');
+          setTimeout(() => setQuickToast(''), 2800);
+        }),
+      ];
+      mapMissionPlayerRef.current = {
+        replay: () => { void startMissionAnimation(nativePayload); },
+        pause: () => {
+          clearNarrationFallbackTimer();
+          stopTrailheadVoice();
+          try { Speech.stop(); } catch {}
+          setMapMissionPaused(true);
+          setCopilotBriefPresence('paused');
+          void pauseMissionAnimation();
+        },
+        resume: () => {
+          setMapMissionPaused(false);
+          void resumeMissionAnimation();
+          const scene = mapMissionCinematicRef.current?.scenes[mapMissionSceneIndex] ?? null;
+          setCopilotBriefPresence(scene?.layers?.warning ? 'warning' : 'flying');
+          if (narrationBeatOpenRef.current) finishMissionNarrationBeat('pause_release');
+        },
+        skip: () => {
+          finishMissionNarrationBeat('skip');
+          void resumeMissionAnimation();
+        },
+        stop: () => {
+          void stopMissionAnimation();
+          void clearMissionAnimation();
+          clearMissionNativeListeners();
+        },
+        setSpeed: (next: number) => { void setMissionAnimationSpeed(next); },
+        markNarrationDone: () => {},
+      };
+      const nativeStarted = await startMissionAnimation(nativePayload);
+      if (nativeStarted) {
+        setCopilotBriefPresence('building');
+        setMapMissionPlaying(true);
+        setMapMissionPaused(false);
+        setMapMissionComplete(false);
+        setPanelCollapsed(true);
+        setCopilotBriefPresence('flying');
+        mapMissionPresenceAfterSpeechRef.current = 'flying';
+        briefPromise.then(brief => {
+          if (!brief || !missionRunningRef.current) return;
+          setMapMissionBrief(brief);
+        }).catch(() => null);
+        return true;
+      }
+      clearMissionNativeListeners();
+      mapMissionPlaybackModeRef.current = 'js';
+      playbackDebug.sessionStart({ playback_mode: 'js', native_handoff_failed: true });
     }
 
     mapMissionPlayerRef.current = startNativeMissionBriefPlayer({

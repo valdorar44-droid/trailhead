@@ -3,7 +3,7 @@ module.exports = {
     name: 'Trailhead',
     slug: 'trailhead',
     version: '1.0.5',
-    runtimeVersion: 'native-20260614-sdk54-1',
+    runtimeVersion: 'native-202607-mission-animator-1',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',
@@ -17,7 +17,7 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
-      buildNumber: '6',
+      buildNumber: '7',
       usesAppleSignIn: true,
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',

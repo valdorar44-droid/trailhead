@@ -12,6 +12,8 @@ function assert(condition: boolean, message: string) {
 }
 
 assert(resolveMissionPlaybackMode() === 'js', 'default playback mode is js OTA player');
+assert(resolveMissionPlaybackMode('js', true) === 'native', 'native mode when animator available');
+assert(resolveMissionPlaybackMode('native', false) === 'js', 'falls back to js when native unavailable');
 
 const liveCinematic: MissionCinematic = {
   id: 'c1',

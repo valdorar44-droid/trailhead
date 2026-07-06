@@ -3,33 +3,55 @@ package expo.modules.missionanimator
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 
-/** Phase B stub — enable when native animator ships in a new binary. */
 class TrailheadMissionAnimatorModule : Module() {
-    override fun definition() = ModuleDefinition {
-        Name("TrailheadMissionAnimator")
-
-        AsyncFunction("isAvailable") {
-            false
-        }
-
-        AsyncFunction("startMissionAnimation") { _: Map<String, Any?> ->
-            false
-        }
-
-        AsyncFunction("pauseMissionAnimation") {
-            false
-        }
-
-        AsyncFunction("resumeMissionAnimation") {
-            false
-        }
-
-        AsyncFunction("stopMissionAnimation") {
-            false
-        }
-
-        AsyncFunction("setMissionAnimationSpeed") { _: Double ->
-            false
-        }
+  private val animator by lazy {
+    TrailheadMissionAnimator { event, payload ->
+      sendEvent(event, payload)
     }
+  }
+
+  override fun definition() = ModuleDefinition {
+    Name("TrailheadMissionAnimator")
+
+    Events(
+      "onMissionSceneStart",
+      "onMissionSceneProgress",
+      "onMissionSceneEnd",
+      "onMissionComplete",
+      "onMissionError",
+      "onMissionDebug",
+    )
+
+    AsyncFunction("isAvailable") {
+      animator.findMapView() != null
+    }
+
+    AsyncFunction("prepareMissionAnimation") { payload: Map<String, Any?> ->
+      animator.prepare(payload)
+    }
+
+    AsyncFunction("startMissionAnimation") { payload: Map<String, Any?>? ->
+      animator.start(payload)
+    }
+
+    AsyncFunction("pauseMissionAnimation") {
+      animator.pause()
+    }
+
+    AsyncFunction("resumeMissionAnimation") {
+      animator.resume()
+    }
+
+    AsyncFunction("stopMissionAnimation") {
+      animator.stop()
+    }
+
+    AsyncFunction("clearMissionAnimation") {
+      animator.clear()
+    }
+
+    AsyncFunction("setMissionAnimationSpeed") { speed: Double ->
+      animator.setSpeed(speed)
+    }
+  }
 }

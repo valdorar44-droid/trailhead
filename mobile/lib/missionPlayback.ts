@@ -24,11 +24,12 @@ export type NarrationDoneSource =
 
 export const DEFAULT_MISSION_PLAYBACK_MODE: MissionPlaybackMode = 'js';
 
-/** Resolve playback engine. Native mode activates only when the binary ships the animator. */
+/** Resolve playback engine. Native mode activates when the binary ships the animator. */
 export function resolveMissionPlaybackMode(
-  preferred: MissionPlaybackMode = DEFAULT_MISSION_PLAYBACK_MODE,
+  _preferred: MissionPlaybackMode = DEFAULT_MISSION_PLAYBACK_MODE,
+  nativeAvailable = false,
 ): MissionPlaybackMode {
-  return preferred === 'native' ? 'native' : 'js';
+  return nativeAvailable ? 'native' : 'js';
 }
 
 export type LiveMissionBeatInput = {

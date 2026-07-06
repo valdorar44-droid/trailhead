@@ -5801,7 +5801,7 @@ function MapScreen() {
   const mapMissionStyleSnapshotRef = useRef<{ mapLayer: MapLayer; premiumMapStyle: PremiumMapStyle } | null>(null);
   const realtimeCopilotRef = useRef<{ stop: () => void } | null>(null);
   // Realtime Co-Pilot narrator for the cinematic (low-latency ChatGPT voice, not slow TTS).
-  const missionNarratorRef = useRef<{ stop: () => void; say: (t: string) => void } | null>(null);
+  const missionNarratorRef = useRef<{ stop: () => void; say: (t: string, mode?: 'say' | 'narrate') => void } | null>(null);
   const missionNarratorReadyRef = useRef(false);
   const missionNarratorPendingRef = useRef(false);
   const pendingNarrationRef = useRef<string | null>(null);
@@ -13716,20 +13716,25 @@ function MapScreen() {
 
   // Narrate a cinematic line — realtime Co-Pilot voice when available (buffered until
   // the session connects), otherwise instant device/TTS narration. The Co-Pilot drives.
-  function narrateMissionScene(text: string) {
-    const clean = (text || '').trim();
-    if (!clean) return;
-    // Prefer the realtime Co-Pilot voice ONLY when the session is actually connected;
-    // otherwise speak instantly on-device so narration never lags or goes silent.
+  function narrateMissionScene(scene: MissionScene) {
+    const line = (scene.narration || '').trim();
+    if (!line) { mapMissionPlayerRef.current?.markNarrationDone(); return; }
+    // Hybrid director: when the realtime Co-Pilot is connected, hand it the beat facts
+    // and let it write + speak its own line; onNarrationDone paces beat advancement.
+    // Otherwise speak the pre-written line instantly on-device and pace on its finish.
     const narrator = missionNarratorRef.current;
     if (narrator && missionNarratorReadyRef.current) {
       setCopilotBriefPresence('speaking');
-      narrator.say(clean);
+      const brief = [scene.title, scene.subtitle, line].filter(Boolean).join('. ');
+      narrator.say(brief, 'narrate');
       return;
     }
-    speakCinematicNarration(clean, {
+    speakCinematicNarration(line, {
       onStart: () => setCopilotBriefPresence('speaking'),
-      onFinish: () => setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current),
+      onFinish: () => {
+        setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current);
+        mapMissionPlayerRef.current?.markNarrationDone();
+      },
     });
   }
 
@@ -13753,6 +13758,11 @@ function MapScreen() {
           tokenResponse,
           narrationOnly: true,
           onToolCall: () => ({ applied: true }),
+          onNarrationDone: () => {
+            // Co-Pilot finished the line — let the paced player advance this beat.
+            mapMissionPlayerRef.current?.markNarrationDone();
+            setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current);
+          },
           onStatus: status => {
             if (status === 'connected') {
               missionNarratorReadyRef.current = true;
@@ -13883,6 +13893,7 @@ function MapScreen() {
       webRef,
       useNativeOverlays: USE_NATIVE_MAP,
       initialSpeed: mapMissionSpeedRef.current,
+      waitForNarration: true, // pace each speaking beat to the narration so voice + camera stay inline
       onNotice: message => {
         setMapMissionNotice(message);
         setTimeout(() => setMapMissionNotice(null), 4200);
@@ -13923,7 +13934,9 @@ function MapScreen() {
         mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
         setCopilotBriefPresence(presence);
         if (scene.narration && shouldSpeakScene(scene)) {
-          narrateMissionScene(scene.narration);
+          narrateMissionScene(scene);
+        } else {
+          mapMissionPlayerRef.current?.markNarrationDone(); // non-speaking beat advances on camera time
         }
       },
       onSceneFinished: () => {},

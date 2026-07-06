@@ -146,6 +146,8 @@ export type NativeMissionBriefPlayer = {
   skip: () => void;
   stop: () => void;
   setSpeed: (speed: number) => void;
+  /** Signal that the current scene's narration has finished (paces beat advancement to the voice). */
+  markNarrationDone: () => void;
 };
 
 export function startNativeMissionBriefPlayer(opts: {
@@ -157,6 +159,8 @@ export function startNativeMissionBriefPlayer(opts: {
   useNativeOverlays?: boolean;
   /** Playback speed multiplier. Effective duration = baseDuration / speed. */
   initialSpeed?: number;
+  /** When true, a scene holds after its camera move until markNarrationDone() (capped). */
+  waitForNarration?: boolean;
   ensure3d: () => void;
   onReady: () => void;
   onStarted: () => void;
@@ -183,6 +187,7 @@ export function startNativeMissionBriefPlayer(opts: {
     webRef,
     useNativeOverlays = true,
     initialSpeed = 1,
+    waitForNarration = false,
     ensure3d,
     onReady,
     onStarted,
@@ -218,6 +223,9 @@ export function startNativeMissionBriefPlayer(opts: {
   let sceneDuration = SCENE_FLOOR_MS;
   let lastFrameTs = 0;
   let smoothedBearing: number | null = null;
+  let narrationDone = true;   // false while a scene waits for its narration to finish
+  // Max extra time a scene will hold for narration beyond its camera move.
+  const NARRATION_CAP_MS = 11000;
   let noticedNo3d = false;
 
   const postWeb = (payload: Record<string, unknown>) => {
@@ -416,7 +424,11 @@ export function startNativeMissionBriefPlayer(opts: {
         onError(err?.message || 'cinematic playback failed');
         return;
       }
-      if (t >= 1) {
+      // Camera finishes its move at t>=1; when voice-paced, hold there until the
+      // narration is done (capped) so the camera and the Co-Pilot stay inline.
+      const cameraDone = elapsed(now) >= sceneDuration;
+      const capReached = elapsed(now) >= sceneDuration + NARRATION_CAP_MS;
+      if ((cameraDone && (!waitForNarration || narrationDone)) || capReached) {
         finishScene();
         return;
       }
@@ -442,6 +454,7 @@ export function startNativeMissionBriefPlayer(opts: {
     pausedAt = 0;
     paused = false;
     sceneDuration = effectiveDuration(scene);
+    narrationDone = false; // set true by markNarrationDone() (voice done / non-speaking scene)
     tryEnsure3d();
     applySceneCamera(scene);
     applySceneOverlays(scene);
@@ -517,5 +530,9 @@ export function startNativeMissionBriefPlayer(opts: {
     if (Number.isFinite(next) && next > 0) speed = next;
   }
 
-  return { replay, pause, resume, skip, stop, setSpeed };
+  function markNarrationDone() {
+    narrationDone = true;
+  }
+
+  return { replay, pause, resume, skip, stop, setSpeed, markNarrationDone };
 }

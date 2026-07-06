@@ -3,8 +3,11 @@ import { disableRealtimeSpeakerphone, enableRealtimeSpeakerphone } from '@/lib/a
 
 type RealtimeCopilotHandle = {
   stop: () => void;
-  /** Have the co-pilot speak a specific line (used to narrate the cinematic in real time). */
-  say: (text: string) => void;
+  /**
+   * Narrate a cinematic beat. mode 'say' speaks the text verbatim; mode 'narrate'
+   * (default) hands the co-pilot the beat facts and lets it generate its own line.
+   */
+  say: (text: string, mode?: 'say' | 'narrate') => void;
 };
 
 type StartRealtimeCopilotOptions = {
@@ -15,6 +18,8 @@ type StartRealtimeCopilotOptions = {
   onToolCall?: (action: MapActionRequest) => Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
   /** Narrator mode: mute the mic + disable turn detection so it only speaks lines we send via say(). */
   narrationOnly?: boolean;
+  /** Fires when a narration response finishes (used to pace the cinematic to the voice). */
+  onNarrationDone?: () => void;
 };
 
 function clientSecretValue(response: RealtimeCopilotSessionResponse): string {
@@ -249,6 +254,9 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   dc.onmessage = async (message: { data: string }) => {
     try {
       const event = JSON.parse(message.data);
+      if (event?.type === 'response.done' || event?.type === 'response.audio.done') {
+        options.onNarrationDone?.();
+      }
       const userText = userTranscriptFromEvent(event);
       if (userText) options.onUserTranscript?.(userText);
       const text = transcriptFromEvent(event);
@@ -314,17 +322,18 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       disableRealtimeSpeakerphone().catch(() => {});
       options.onStatus?.('stopped');
     },
-    say: (text: string) => {
+    say: (text: string, mode: 'say' | 'narrate' = 'narrate') => {
       const clean = (text || '').trim();
       if (!clean) return;
       // Interrupt any in-progress line, then speak the new one.
       sendRealtimeEvent(dc, { type: 'response.cancel' });
+      const instructions = mode === 'say'
+        ? `Say this line once, warmly and unhurried, exactly as written: "${clean}"`
+        // 'narrate': hand it the beat facts and let it write + speak its own one-liner.
+        : `You're narrating an overland trip flythrough. In ONE short, warm sentence (max ~20 words), narrate this moment for the traveler. Do not read the facts back verbatim or add questions. Beat: ${clean}`;
       sendRealtimeEvent(dc, {
         type: 'response.create',
-        response: {
-          modalities: ['audio', 'text'],
-          instructions: `Narrate this line, once, warmly and unhurried: "${clean}"`,
-        },
+        response: { modalities: ['audio', 'text'], instructions },
       });
     },
   };

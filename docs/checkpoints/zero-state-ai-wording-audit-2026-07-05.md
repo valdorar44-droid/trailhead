@@ -134,3 +134,19 @@ similar leaks are spotted.
 - `mobile/components/map/CampReviewsSection.tsx`
 - `mobile/components/routeBuilder/RouteBuilderHub.tsx`
 - `mobile/components/routeBuilder/RouteBuilderSearchSurface.tsx`
+
+## Release
+
+- Code commit: `a26e873` (`Fix zero states and raw AI wording across map,
+  guide, route builder, and profile tabs`), pushed to
+  `codex/production-catchup-20260626`.
+- Website `/app` bundle rebuilt and committed: `9bd902b` (`Export web app
+  bundle with zero-state and AI-wording audit fixes`), pushed to the same
+  branch.
+- Production OTA update group: `346c08ee-8159-40fe-8f06-7f0972b56956`
+  (Android `019f34b7-3dd3-7a40-9a79-f0c992517d87`, iOS
+  `019f34b7-3dd3-7638-8db6-850652af1496`).
+- Preview OTA update group: `b736a7c8-5ce9-46e3-886a-dc1df6018871` (Android
+  `019f34b8-359d-78a6-b7fd-f570890e6042`, iOS
+  `019f34b8-359d-7ceb-95b4-4b49c669d0ba`).
+- Runtime: `native-20260614-sdk54-1`.

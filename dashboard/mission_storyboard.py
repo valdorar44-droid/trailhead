@@ -25,8 +25,12 @@ SCENE_TYPES = {
     "weather_focus",
     "offline_readiness",
     "mission_recap",
+    "poi_flyover",
+    "route_rejoin",
 }
 CAMERA_MODES = {"fit", "fly", "orbit", "follow"}
+CAMERA_PRESETS = {"low_pass"}
+ORBIT_DIRECTIONS = {"cw", "ccw"}
 
 
 def _finite_coord(lat: Any, lng: Any) -> bool:
@@ -107,6 +111,39 @@ def _sanitize_scene(raw: dict, idx: int) -> dict | None:
     layers = raw.get("layers") if isinstance(raw.get("layers"), dict) else {}
     day = raw.get("day")
     clean_day = int(day) if isinstance(day, (int, float)) and day > 0 else None
+
+    def _clamped(value: Any, low: float, high: float) -> float | None:
+        try:
+            if value is None:
+                return None
+            return max(low, min(high, float(value)))
+        except (TypeError, ValueError):
+            return None
+
+    clean_camera: dict[str, Any] = {
+        "mode": mode,
+        "zoom": _clamped(camera.get("zoom"), 4.0, 15.0),
+        "pitch": _clamped(camera.get("pitch"), 0.0, 72.0),
+        "bearing": float(camera["bearing"]) if camera.get("bearing") is not None else None,
+    }
+    orbit = camera.get("orbit") if isinstance(camera.get("orbit"), dict) else None
+    if orbit:
+        direction = str(orbit.get("direction") or "cw")
+        clean_camera["orbit"] = {
+            "direction": direction if direction in ORBIT_DIRECTIONS else "cw",
+            "sweepDeg": _clamped(orbit.get("sweepDeg"), 30.0, 180.0) or 90.0,
+        }
+    preset = str(camera.get("preset") or "")
+    if preset in CAMERA_PRESETS:
+        clean_camera["preset"] = preset
+    rejoin_ratio = raw.get("rejoinRatio")
+    clean_rejoin = None
+    if rejoin_ratio is not None:
+        try:
+            clean_rejoin = _clamp_ratio(float(rejoin_ratio))
+        except (TypeError, ValueError):
+            clean_rejoin = None
+
     return {
         "id": str(raw.get("id") or f"scene-{idx}")[:80],
         "type": scene_type,
@@ -116,12 +153,8 @@ def _sanitize_scene(raw: dict, idx: int) -> dict | None:
         "durationMs": duration,
         "routeSlice": clean_slice,
         "focus": clean_focus,
-        "camera": {
-            "mode": mode,
-            "zoom": float(camera["zoom"]) if camera.get("zoom") is not None else None,
-            "pitch": float(camera["pitch"]) if camera.get("pitch") is not None else None,
-            "bearing": float(camera["bearing"]) if camera.get("bearing") is not None else None,
-        },
+        "rejoinRatio": clean_rejoin,
+        "camera": clean_camera,
         "layers": {
             "terrain": bool(layers.get("terrain")),
             "warning": bool(layers.get("warning")),
@@ -255,8 +288,8 @@ def fallback_mission_storyboard(payload: dict) -> dict:
             scene_type = "fuel_stop"
             camera = {"mode": "fly", "pitch": 48, "zoom": 10.5}
         elif any(token in ptype for token in ("monument", "park", "view", "scenic")):
-            scene_type = "monument_orbit"
-            camera = {"mode": "orbit", "pitch": 50, "zoom": 11.2}
+            scene_type = "poi_flyover"
+            camera = {"mode": "orbit", "pitch": 50, "zoom": 11.2, "orbit": {"direction": "cw", "sweepDeg": 90.0}}
         else:
             scene_type = "drive_leg"
             camera = {"mode": "follow", "pitch": 55, "zoom": 10.0}
@@ -272,6 +305,7 @@ def fallback_mission_storyboard(payload: dict) -> dict:
             "durationMs": 9000,
             "routeSlice": [_clamp_ratio(ratio - 0.04), _clamp_ratio(ratio + 0.04)],
             "focus": {"lat": lat, "lng": lng},
+            "rejoinRatio": _clamp_ratio(ratio + 0.01) if scene_type == "poi_flyover" else None,
             "camera": camera,
             "layers": {"terrain": True},
             "narration": str(place.get("note") or place.get("title") or "A planned stop along the route.")[:320],
@@ -333,7 +367,13 @@ def _storyboard_prompt(payload: dict, route_preview: dict) -> str:
         f"Trip: {trip_name}. Days: {days}. Route preview: {json.dumps(route_preview)[:1200]}. "
         f"Checkpoints: {json.dumps(checkpoints)[:1800]}. Places: {json.dumps(places)[:1800]}. "
         f"Risks: {json.dumps(risks)[:800]}. "
-        "Pick 8-14 scenes in play order: intro, day_flyover legs, camp_arrival, fuel_stop, monument_orbit, drive_leg, risk_focus when warranted, mission_recap. "
+        "Pick 8-14 scenes in play order: intro, camp_arrival, fuel_stop, poi_flyover, risk_focus when warranted, mission_recap. "
+        "Connective drive legs are optional - the client weaves follow legs between your beats, so spend your scenes on the stops that matter. "
+        "From the places list, pick 1-3 that genuinely deserve a cinematic detour (scenic viewpoints, monuments, canyons, waterfalls - not fuel stops or generic towns). "
+        "For each, emit a poi_flyover scene with focus {lat,lng}, narration grounded in that place's note (never invent facts; if unsure describe what is visible: red-rock canyon country, desert corridor, high plateau), "
+        "and camera framing: mode orbit with camera.orbit {direction: cw|ccw, sweepDeg: 30-180} for standalone landmarks, or camera.preset 'low_pass' with camera.bearing for canyons and valleys. "
+        "Set rejoinRatio on each poi_flyover to the route fraction where the tour resumes (>= the POI's position along the route). "
+        "Keep all scenes in strictly increasing route order. "
         "Assign camera.mode per scene: orbit for monuments/parks, follow for canyon or road legs, fit for overview/recap, fly for transitions. "
         "Each scene needs id, type, title, subtitle, durationMs (6000-12000), routeSlice [start,end] fractions 0-1, optional focus {lat,lng}, camera, layers, narration, callouts. "
         "Narration must be plain spoken English, one short sentence, no hype, no AI jargon, no em dashes. "

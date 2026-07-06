@@ -490,32 +490,29 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
   }
 
   const cpRatios = validCheckpoints.map(cp => ({ r: routeRatioFor(cleanRoute, cp.lat, cp.lng), cp }));
-  const segMeta = (a: number, b: number) => {
-    const inSeg = cpRatios.filter(x => x.r >= a - 0.001 && x.r <= b + 0.001).map(x => x.cp);
-    const days = Array.from(new Set(inSeg.map(cp => Number(cp.day || 0)).filter(d => d > 0)));
-    const names = inSeg.map(cp => cp.title).filter(Boolean);
-    if (days.length === 1) return { title: `Day ${days[0]}`, day: days[0] as number | undefined, names };
-    if (names.length) return { title: names[0], day: undefined, names };
-    return { title: 'On the route', day: undefined, names };
+  const dayForRange = (a: number, b: number): number | undefined => {
+    const inSeg = cpRatios.filter(x => x.r >= a - 0.001 && x.r <= b + 0.001);
+    const days = Array.from(new Set(inSeg.map(x => Number(x.cp.day || 0)).filter(d => d > 0)));
+    return days.length === 1 ? days[0] : undefined;
   };
-  const followLeg = (a: number, b: number, first: boolean): MissionScene | null => {
+  // followLeg titles/narrates by where it's HEADING (dest), not by a checkpoint inside it.
+  const followLeg = (a: number, b: number, first: boolean, dest: string): MissionScene | null => {
     if (b - a < 0.05) return null;
-    const meta = segMeta(a, b);
-    const near = meta.names.slice(0, 3).join(' · ');
-    const toward = meta.names.length ? meta.names[meta.names.length - 1] : 'the next stretch';
+    const day = dayForRange(a, b);
+    const target = dest || 'the next stop';
     return {
       id: `scene-leg-${a.toFixed(2)}-${b.toFixed(2)}`,
       type: 'day_flyover',
-      title: meta.title,
-      subtitle: near || 'Flying the plan',
-      day: meta.day,
+      title: first ? `Leaving ${startTitle || 'the start'}` : `Toward ${target}`,
+      subtitle: first ? `Heading for ${target}` : target,
+      day,
       durationMs: Math.round(9000 + (b - a) * 9000),
       routeSlice: [a, b],
       camera: { mode: 'follow', pitch: 64 },
       layers: {},
       narration: first
-        ? `Leaving ${startTitle || 'the start'} — we'll trace the route toward ${toward}.`
-        : `Continuing toward ${toward}.`,
+        ? `Leaving ${startTitle || 'the start'} — we'll trace the route toward ${target}.`
+        : `Continuing toward ${target}.`,
       callouts: [],
     };
   };
@@ -523,12 +520,12 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
   let cursor = 0;
   let firstLeg = true;
   for (const b of beats) {
-    const leg = followLeg(cursor, b.ratio, firstLeg);
+    const leg = followLeg(cursor, b.ratio, firstLeg, b.scene.title);
     if (leg) { scenes.push(leg); firstLeg = false; }
     scenes.push(b.scene);
     cursor = Math.max(cursor, b.ratio);
   }
-  const tail = followLeg(cursor, 1, firstLeg);
+  const tail = followLeg(cursor, 1, firstLeg, endTitle || 'the finish');
   if (tail) scenes.push(tail);
 
   // --- Always: mission_recap ---

@@ -93,13 +93,15 @@ function smoothAngle(prev: number | null, target: number, factor: number) {
   return prev + diff * factor;
 }
 
-/** Conservative follow zoom picked from the length of the flown slice. */
+/** Follow zoom picked from the length of the flown slice — kept close enough that
+ *  terrain relief reads cinematically (the camera tracks the marker, so it need not
+ *  frame the whole slice at once). */
 function zoomForSliceLengthKm(km: number) {
-  if (km > 90) return 8.8;
-  if (km > 55) return 9.6;
-  if (km > 30) return 10.6;
-  if (km > 14) return 11.6;
-  return 12.4;
+  if (km > 140) return 9.6;
+  if (km > 70) return 10.4;
+  if (km > 35) return 11.1;
+  if (km > 15) return 11.8;
+  return 12.6;
 }
 
 function boundsFromCoords(coords: [number, number][], extra: Point[] = []) {

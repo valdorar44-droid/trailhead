@@ -31,7 +31,8 @@ const nativeMapSource = readFileSync(join(root, 'components/NativeMap/index.tsx'
 assert(nativeMapSource.includes('mission-brief-progress-line'), 'NativeMap renders mission briefing progress layer');
 
 const mapSource = readFileSync(join(root, 'app/(tabs)/map.tsx'), 'utf8');
-assert(!mapSource.includes('setTimeout(() => { startMapMissionBrief'), 'map tab no longer auto-starts mission briefing');
+assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT') && mapSource.includes('autoFlownScoutKeyRef'),
+  'cinematic auto-starts after the scout builds (guarded, once per route)');
 assert(mapSource.includes('useNativeOverlays: USE_NATIVE_MAP'), 'native player uses NativeMap overlays on main map');
 assert(mapSource.includes('shouldSpeakScene(scene)'), 'scene narration gated to major scenes');
 
@@ -46,7 +47,7 @@ assert(playerSource.includes('cumulativeDistances') && playerSource.includes('po
   'player uses distance-based route interpolation');
 assert(playerSource.includes('bearingLngLat') && playerSource.includes('smoothAngle'),
   'player uses lookahead bearing + bearing smoothing');
-assert(/FRAME_MS\s*=\s*1[0-9][0-9]/.test(playerSource), 'camera updates are throttled (~6-10fps)');
+assert(/FRAME_MS\s*=\s*[12][0-9][0-9]/.test(playerSource), 'camera updates are throttled to a steady cadence');
 assert(playerSource.includes('setSpeed'), 'player exposes setSpeed');
 assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('onCallouts?.([])'),
   'player clears overlays on stop');

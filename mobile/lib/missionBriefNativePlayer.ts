@@ -17,10 +17,11 @@ type Point = { lat: number; lng: number };
  * per-frame chase.
  */
 
-// Throttle camera updates to ~8fps (game-cutscene cadence).
-const FRAME_MS = 120;
-// Throttle React overlay/marker state pushes to ~3fps so re-renders don't jank the 3D fly.
-const PROGRESS_MS = 320;
+// Camera update interval. easeTo duration is matched to this so each tween finishes
+// right as the next begins — continuous motion with no mid-ease interruption (no skip).
+const FRAME_MS = 200;
+// Keep the drawn progress line light so it can update every tick without lag/jank.
+const PROGRESS_MAX_POINTS = 140;
 // How strongly the camera bearing eases toward the route heading each tick (0..1).
 const BEARING_EASE = 0.16;
 // Minimum per-scene wall-clock before speed scaling (kept generous for a slow feel).
@@ -216,7 +217,6 @@ export function startNativeMissionBriefPlayer(opts: {
   let speed = Number.isFinite(initialSpeed) && initialSpeed > 0 ? initialSpeed : 1;
   let sceneDuration = SCENE_FLOOR_MS;
   let lastFrameTs = 0;
-  let lastProgressTs = 0;
   let smoothedBearing: number | null = null;
   let noticedNo3d = false;
 
@@ -241,8 +241,17 @@ export function startNativeMissionBriefPlayer(opts: {
     return Math.max(1500, base / Math.max(0.25, speed));
   }
 
+  function downsample(coords: [number, number][], max: number): [number, number][] {
+    if (coords.length <= max) return coords;
+    const step = Math.ceil(coords.length / max);
+    const out: [number, number][] = [];
+    for (let i = 0; i < coords.length; i += step) out.push(coords[i]);
+    if (out[out.length - 1] !== coords[coords.length - 1]) out.push(coords[coords.length - 1]);
+    return out;
+  }
+
   function emitProgress(ratio: number, sceneCoords?: [number, number][] | null) {
-    const progressCoords = progressRouteFromRatio(route, ratio);
+    const progressCoords = downsample(progressRouteFromRatio(route, ratio), PROGRESS_MAX_POINTS);
     onProgressRoute?.(progressCoords);
     if (sceneCoords && sceneCoords.length >= 2) {
       onSceneRoute?.(sceneCoords);
@@ -270,10 +279,10 @@ export function startNativeMissionBriefPlayer(opts: {
       zoom,
       pitch,
       bearing,
-      duration: 150,
+      duration: FRAME_MS,
       mode: 'easeTo',
     });
-    postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: 150 });
+    postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: FRAME_MS });
   }
 
   function applySceneCamera(scene: MissionScene) {
@@ -360,7 +369,6 @@ export function startNativeMissionBriefPlayer(opts: {
     const followZoom = Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 13.4);
     const lookaheadM = Math.max(180, Math.min(1200, (endDist - startDist) * 0.05));
     lastFrameTs = 0;
-    lastProgressTs = 0;
 
     const frame = (now: number) => {
       if (stopped || failed || paused) {
@@ -379,10 +387,8 @@ export function startNativeMissionBriefPlayer(opts: {
             const targetBearing = bearingLngLat([center.lng, center.lat], [ahead.lng, ahead.lat]);
             smoothedBearing = smoothAngle(smoothedBearing, targetBearing, BEARING_EASE);
             followCamera(scene, center, smoothedBearing, followZoom);
-            if (now - lastProgressTs >= PROGRESS_MS) {
-              lastProgressTs = now;
-              emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
-            }
+            // Marker + progress line advance on the same tick as the camera → no lag behind.
+            emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
           }
         } else if (cam.mode === 'orbit' && scene.focus && elapsed(now) > 2200) {
           if (!throttled) {

@@ -90,6 +90,25 @@ export async function playTrailheadCue(name: 'copilotListening') {
   } catch {}
 }
 
+/** Cinematic narration — instant on-device speech (zero network latency, always plays).
+ *  Used for the flythrough so narration never lags or goes silent. */
+export function speakCinematicNarration(text: string, callbacks?: VoiceCallbacks) {
+  const clean = (text || '').trim();
+  if (!clean) return;
+  voiceRequestId += 1;
+  ensureVoiceAudioMode().catch(() => {});
+  try { Speech.stop(); } catch {}
+  Speech.speak(clean, {
+    rate: 0.92,
+    pitch: 1.02,
+    language: 'en-US',
+    onStart: callbacks?.onStart,
+    onDone: callbacks?.onFinish,
+    onStopped: callbacks?.onFinish,
+    onError: callbacks?.onFinish,
+  });
+}
+
 /** Co-Pilot cinematic narration — Trailhead TTS first, device speech fallback. */
 export async function speakCopilotNarration(text: string, callbacks?: VoiceCallbacks) {
   return playTrailheadVoice(

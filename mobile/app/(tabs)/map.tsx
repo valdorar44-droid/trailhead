@@ -41,6 +41,10 @@ import {
 // map load fails. clusterProperties stay disabled on native — see
 // docs/checkpoints/map-tab-native-cluster-crash-2026-07-03.md.
 const USE_NATIVE_MAP = true;
+// Realtime Co-Pilot narration (WebRTC) — off until verified on-device; device TTS drives narration meanwhile.
+const ENABLE_REALTIME_NARRATOR = false;
+// After the Co-Pilot finishes building the route + camps, flow straight into the cinematic flythrough.
+const AUTO_FLY_AFTER_SCOUT = true;
 import * as Location from 'expo-location';
 import { storage } from '@/lib/storage';
 import * as Speech from 'expo-speech';
@@ -130,7 +134,7 @@ import {
 } from '@/lib/mapMissionBrief';
 import { startNativeMissionBriefPlayer, type NativeMissionBriefPlayer } from '@/lib/missionBriefNativePlayer';
 import { getMissionBriefMapPlayerScript } from '@/lib/missionBriefMapPlayerScript';
-import { speakCopilotNarration } from '@/lib/voice';
+import { speakCopilotNarration, speakCinematicNarration } from '@/lib/voice';
 import {
   loadTrailheadRouteBuilderDraft,
   mergeTrailheadRouteBuilderDraft,
@@ -5801,6 +5805,7 @@ function MapScreen() {
   const missionNarratorPendingRef = useRef(false);
   const pendingNarrationRef = useRef<string | null>(null);
   const missionRunningRef = useRef(false);
+  const autoFlownScoutKeyRef = useRef<string | null>(null);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
     available: extremeCopilotAvailable,
@@ -10983,6 +10988,18 @@ function MapScreen() {
     recentRouteScoutActionRef.current = { at: Date.now(), action: 'start' };
     const focusStop = stops.find(stop => stop.type === 'camp') ?? stops[Math.min(1, stops.length - 1)] ?? null;
     if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, focusStop.type === 'camp' ? 10.5 : 8.5, focusStop.name), 350);
+    // Seamless transition: once the Co-Pilot has built the full route + camps, flow
+    // straight into the cinematic flythrough (once per built route, if not already flying).
+    const scoutBuilt = !missingDays.length && coords.length >= 2 && stops.length > 0;
+    if (AUTO_FLY_AFTER_SCOUT && scoutBuilt) {
+      const scoutKey = `${start.name}|${destination.name}|${operationId}`;
+      if (autoFlownScoutKeyRef.current !== scoutKey) {
+        autoFlownScoutKeyRef.current = scoutKey;
+        setTimeout(() => {
+          if (!missionRunningRef.current && !navMode) startMapMissionBrief().catch(() => {});
+        }, 1100);
+      }
+    }
     return {
       applied: true,
       status: nextStatus,
@@ -13701,21 +13718,18 @@ function MapScreen() {
   function narrateMissionScene(text: string) {
     const clean = (text || '').trim();
     if (!clean) return;
+    // Prefer the realtime Co-Pilot voice ONLY when the session is actually connected;
+    // otherwise speak instantly on-device so narration never lags or goes silent.
     const narrator = missionNarratorRef.current;
     if (narrator && missionNarratorReadyRef.current) {
       setCopilotBriefPresence('speaking');
       narrator.say(clean);
       return;
     }
-    if (missionNarratorPendingRef.current) {
-      pendingNarrationRef.current = clean; // realtime session still connecting — hold the latest line
-      setCopilotBriefPresence('speaking');
-      return;
-    }
-    speakCopilotNarration(clean, {
+    speakCinematicNarration(clean, {
       onStart: () => setCopilotBriefPresence('speaking'),
       onFinish: () => setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current),
-    }).catch(() => {});
+    });
   }
 
   // Spin up a realtime Co-Pilot narrator session for the flythrough (best-effort).
@@ -13812,9 +13826,11 @@ function MapScreen() {
       setMapMissionNotice('3D terrain unavailable — flying in map mode.');
       setTimeout(() => setMapMissionNotice(null), 4200);
     }
-    // The Co-Pilot narrates the flythrough in real time (low-latency ChatGPT voice).
+    // Narration: instant on-device voice by default (reliable, zero-latency). The realtime
+    // Co-Pilot voice is wired but gated until on-device WebRTC/mic is verified — device
+    // voice guarantees the cinematic always talks.
     missionRunningRef.current = true;
-    startMissionNarrator();
+    if (ENABLE_REALTIME_NARRATOR) startMissionNarrator();
     setMissionBriefOverlay(prev => ({
       ...prev,
       active: true,

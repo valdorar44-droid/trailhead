@@ -1,13 +1,19 @@
 import type { MapActionRequest, RealtimeCopilotSessionResponse } from '@/lib/api';
 import { disableRealtimeSpeakerphone, enableRealtimeSpeakerphone } from '@/lib/audioRoute';
 
-type RealtimeCopilotHandle = {
+export type RealtimeCopilotHandle = {
   stop: () => void;
   /**
    * Narrate a cinematic beat. mode 'say' speaks the text verbatim; mode 'narrate'
    * (default) hands the co-pilot the beat facts and lets it generate its own line.
    */
   say: (text: string, mode?: 'say' | 'narrate') => void;
+  isConnected: () => boolean;
+  /** Mute mic and switch to cinematic narrator instructions on the live session. */
+  enterDirectorMode: (onNarrationDone: () => void) => void;
+  /** Restore interactive voice mode after a cinematic flythrough. */
+  exitDirectorMode: () => void;
+  setOnNarrationDone: (cb: (() => void) | null) => void;
 };
 
 type StartRealtimeCopilotOptions = {
@@ -21,6 +27,11 @@ type StartRealtimeCopilotOptions = {
   /** Fires when a narration response finishes (used to pace the cinematic to the voice). */
   onNarrationDone?: () => void;
 };
+
+const DIRECTOR_INSTRUCTIONS =
+  'You are the cinematic trip narrator for an overland route flythrough on a 3D map. '
+  + 'When given beat facts, speak ONE short warm sentence (max ~20 words) like a nature-documentary narrator. '
+  + 'Do not read facts verbatim, ask questions, or add commentary.';
 
 function clientSecretValue(response: RealtimeCopilotSessionResponse): string {
   const secret = response.client_secret;
@@ -206,6 +217,46 @@ function userTranscriptFromEvent(event: any): string {
   return typeof event?.transcript === 'string' ? event.transcript : '';
 }
 
+function setMicEnabled(stream: any, enabled: boolean) {
+  try {
+    stream.getTracks().forEach((track: any) => {
+      if (track.kind === 'audio') track.enabled = enabled;
+    });
+  } catch {
+    // ignore
+  }
+}
+
+function applyDirectorSession(dc: any) {
+  sendRealtimeEvent(dc, {
+    type: 'session.update',
+    session: {
+      turn_detection: null,
+      instructions: DIRECTOR_INSTRUCTIONS,
+    },
+  });
+}
+
+function applyInteractiveSession(dc: any, narrationOnly: boolean) {
+  if (narrationOnly) {
+    applyDirectorSession(dc);
+    return;
+  }
+  sendRealtimeEvent(dc, {
+    type: 'session.update',
+    session: {
+      turn_detection: {
+        type: 'server_vad',
+        threshold: 0.9,
+        prefix_padding_ms: 250,
+        silence_duration_ms: 1400,
+        create_response: true,
+        interrupt_response: false,
+      },
+    },
+  });
+}
+
 export async function startRealtimeCopilotSession(options: StartRealtimeCopilotOptions): Promise<RealtimeCopilotHandle> {
   const ephemeralKey = clientSecretValue(options.tokenResponse);
   if (!ephemeralKey) throw new Error('Realtime client secret missing');
@@ -233,34 +284,37 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
 
   const dc = pc.createDataChannel('oai-events');
   const handledToolCalls = new Set<string>();
+  let connected = false;
+  let directorMode = !!options.narrationOnly;
+  let onNarrationDone: (() => void) | null = options.onNarrationDone ?? null;
+
+  const handleNarrationDone = () => {
+    onNarrationDone?.();
+    options.onNarrationDone?.();
+  };
+
   dc.onopen = () => {
+    connected = true;
     options.onStatus?.('connected');
     enableRealtimeSpeakerphone().catch(() => {});
     setTimeout(() => enableRealtimeSpeakerphone().catch(() => {}), 350);
     setTimeout(() => enableRealtimeSpeakerphone().catch(() => {}), 1000);
-    if (options.narrationOnly) {
-      // Narrator mode: mute the mic and stop auto-responding so the co-pilot only
-      // speaks the exact cinematic lines we push via say().
-      try { stream.getTracks().forEach((track: any) => { if (track.kind === 'audio') track.enabled = false; }); } catch {}
-      sendRealtimeEvent(dc, {
-        type: 'session.update',
-        session: {
-          turn_detection: null,
-          instructions: 'You are the cinematic trip narrator for an overland route flythrough. When given a line, speak it once, warmly and unhurried, like a nature-documentary narrator. Do not add words, questions, or commentary.',
-        },
-      });
+    if (directorMode || options.narrationOnly) {
+      setMicEnabled(stream, false);
+      applyDirectorSession(dc);
     }
   };
   dc.onmessage = async (message: { data: string }) => {
     try {
       const event = JSON.parse(message.data);
-      if (event?.type === 'response.done' || event?.type === 'response.audio.done') {
-        options.onNarrationDone?.();
+      if (event?.type === 'response.audio.done' || event?.type === 'response.output_audio.done') {
+        handleNarrationDone();
       }
       const userText = userTranscriptFromEvent(event);
       if (userText) options.onUserTranscript?.(userText);
       const text = transcriptFromEvent(event);
       if (text && !shouldIgnoreAssistantTranscript(text)) options.onMessage?.(text);
+      if (directorMode) return;
       if (isCompletedToolCallEvent(event)) {
         const toolCall = actionFromToolEvent(event);
         if (!toolCall || handledToolCalls.has(toolCall.callId)) return;
@@ -320,16 +374,33 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       stream.getTracks().forEach((track: any) => track.stop());
       pc.close();
       disableRealtimeSpeakerphone().catch(() => {});
+      connected = false;
       options.onStatus?.('stopped');
+    },
+    isConnected: () => connected && dc?.readyState === 'open',
+    setOnNarrationDone: cb => {
+      onNarrationDone = cb;
+    },
+    enterDirectorMode: cb => {
+      directorMode = true;
+      onNarrationDone = cb;
+      setMicEnabled(stream, false);
+      if (dc?.readyState === 'open') applyDirectorSession(dc);
+    },
+    exitDirectorMode: () => {
+      directorMode = false;
+      onNarrationDone = null;
+      if (options.narrationOnly) return;
+      setMicEnabled(stream, true);
+      if (dc?.readyState === 'open') applyInteractiveSession(dc, false);
     },
     say: (text: string, mode: 'say' | 'narrate' = 'narrate') => {
       const clean = (text || '').trim();
       if (!clean) return;
-      // Interrupt any in-progress line, then speak the new one.
+      if (dc?.readyState !== 'open') return;
       sendRealtimeEvent(dc, { type: 'response.cancel' });
       const instructions = mode === 'say'
         ? `Say this line once, warmly and unhurried, exactly as written: "${clean}"`
-        // 'narrate': hand it the beat facts and let it write + speak its own one-liner.
         : `You're narrating an overland trip flythrough. In ONE short, warm sentence (max ~20 words), narrate this moment for the traveler. Do not read the facts back verbatim or add questions. Beat: ${clean}`;
       sendRealtimeEvent(dc, {
         type: 'response.create',

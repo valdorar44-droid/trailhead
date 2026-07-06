@@ -469,6 +469,11 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
+  createMissionStoryboard: (data: MissionStoryboardRequest) =>
+    req<MissionStoryboardResponse>('/api/extreme/copilot/mission-storyboard', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   extremeCopilotSession: (data: ExtremeCopilotSessionRequest) =>
     req<ExtremeCopilotSessionResponse>('/api/extreme/copilot/session', {
       method: 'POST',
@@ -1544,6 +1549,32 @@ export interface MissionControlRequest {
   trip_memory?: TripMemory;
   context?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
+}
+export interface MissionStoryboardRequest {
+  session_id?: string | null;
+  trip_id?: string | null;
+  trip_name: string;
+  route?: Array<[number, number]>;
+  days?: number | null;
+  checkpoints?: Array<Record<string, unknown>>;
+  places?: Array<Record<string, unknown>>;
+  mission_brief?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+export interface MissionStoryboardResponse {
+  ok: boolean;
+  cinematic: {
+    id: string;
+    tripId: string | null;
+    title: string;
+    route: [number, number][];
+    scenes: Array<Record<string, unknown>>;
+    generatedAt: number;
+    sources: string[];
+  };
+  generated_by: 'ai' | 'fallback' | string;
+  sources?: string[];
+  ledger_id?: number;
 }
 export interface ExtremeCopilotCommandRequest {
   session_id?: string | null;

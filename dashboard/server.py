@@ -21,6 +21,7 @@ from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from dashboard.adventure_intelligence import build_mission_control
+from dashboard.mission_storyboard import generate_mission_storyboard
 from dashboard.provider_registry import list_provider_metadata
 from dashboard.marine_chart_provider import (
     MarineBounds,
@@ -6584,6 +6585,17 @@ class MissionControlRequest(BaseModel):
     context: dict = Field(default_factory=dict)
     metadata: dict = Field(default_factory=dict)
 
+class MissionStoryboardRequest(BaseModel):
+    session_id: Optional[str] = None
+    trip_id: Optional[str] = None
+    trip_name: str = "Your route"
+    route: list = Field(default_factory=list)
+    days: Optional[int] = None
+    checkpoints: list[dict] = Field(default_factory=list)
+    places: list[dict] = Field(default_factory=list)
+    mission_brief: dict = Field(default_factory=dict)
+    metadata: dict = Field(default_factory=dict)
+
 class RouteScoutWindowPlanRequest(BaseModel):
     session_id: Optional[str] = None
     trip_id: Optional[str] = None
@@ -12738,6 +12750,54 @@ async def extreme_copilot_mission_control(body: MissionControlRequest, user: dic
     )
     brief["ledger_id"] = ledger_id
     return brief
+
+@app.post("/api/explorer/copilot/mission-storyboard")
+@app.post("/api/extreme/copilot/mission-storyboard")
+async def extreme_copilot_mission_storyboard(body: MissionStoryboardRequest, user: dict = Depends(_current_user)):
+    config = _require_extreme_copilot(user)
+    if not config["feature_flags"].get("copilot"):
+        raise HTTPException(403, {"code": "mission_storyboard_disabled", "message": "Co-Pilot is not enabled for this beta."})
+    clean_session = _clean_extreme_session_id(body.session_id)
+    trip_id = (body.trip_id or "").strip()[:120] or None
+    route_points = _route_points_from_any(body.route, limit=400)
+    if len(route_points) < 2:
+        raise HTTPException(400, {"code": "route_too_short", "message": "Route must include at least two points."})
+
+    async def route_preview_fetcher(coords: list):
+        if len(coords) < 2:
+            return {}
+        coord_strings = [f"{float(p[0])},{float(p[1])}" for p in coords[:25]]
+        return await _execute_trailhead_tool(
+            "trailhead.route_preview",
+            {"coordinates": coord_strings, "profile": "driving"},
+            user,
+        )
+
+    payload = {
+        "trip_id": trip_id,
+        "trip_name": body.trip_name,
+        "route": [[p["lng"], p["lat"]] for p in route_points],
+        "days": body.days,
+        "checkpoints": body.checkpoints[:80],
+        "places": body.places[:120],
+        "mission_brief": body.mission_brief or {},
+        "metadata": body.metadata or {},
+    }
+    result = await generate_mission_storyboard(payload, route_preview_fetcher)
+    ledger_id = log_extreme_ledger_event(
+        user["id"],
+        "mission_storyboard_generated",
+        clean_session,
+        "copilot",
+        trip_id,
+        {
+            "generated_by": result.get("generated_by"),
+            "scene_count": len((result.get("cinematic") or {}).get("scenes") or []),
+            "route_points": len(route_points),
+        },
+    )
+    result["ledger_id"] = ledger_id
+    return result
 
 @app.post("/api/explorer/route-scout/windows")
 @app.post("/api/extreme/route-scout/windows")

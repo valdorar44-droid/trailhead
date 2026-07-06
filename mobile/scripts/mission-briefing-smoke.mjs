@@ -31,13 +31,24 @@ const nativeMapSource = readFileSync(join(root, 'components/NativeMap/index.tsx'
 assert(nativeMapSource.includes('mission-brief-progress-line'), 'NativeMap renders mission briefing progress layer');
 
 const mapSource = readFileSync(join(root, 'app/(tabs)/map.tsx'), 'utf8');
-assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT') && mapSource.includes('autoFlownScoutKeyRef'),
-  'cinematic auto-starts after the scout builds (guarded, once per route)');
+assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT') && mapSource.includes('handoffScoutToCinematic'),
+  'cinematic auto-starts after the scout builds via director handoff');
+assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMissionDirectorVoice'),
+  'map uses unified realtime director voice');
+assert(mapSource.includes('createMissionStoryboard'), 'map fetches AI mission storyboard');
+assert(mapSource.includes('waitForRouteRenderReady'), 'map waits for route overlay before fly');
 assert(mapSource.includes('useNativeOverlays: USE_NATIVE_MAP'), 'native player uses NativeMap overlays on main map');
 assert(mapSource.includes('shouldSpeakScene(scene)'), 'scene narration gated to major scenes');
 
 const voiceSource = readFileSync(join(root, 'lib/voice.ts'), 'utf8');
 assert(voiceSource.includes('playTrailheadVoice'), 'speakCopilotNarration uses Trailhead voice');
+
+const realtimeSource = readFileSync(join(root, 'lib/realtimeCopilot.ts'), 'utf8');
+assert(realtimeSource.includes('enterDirectorMode'), 'realtime copilot supports director mode on live session');
+assert(realtimeSource.includes('exitDirectorMode'), 'realtime copilot can restore interactive voice after fly');
+
+const directorSource = readFileSync(join(root, 'lib/cinematicDirector.ts'), 'utf8');
+assert(directorSource.includes('waitForRouteRenderReady'), 'cinematic director waits for route render');
 
 // --- Cinematic camera engine ---
 const playerSource = readFileSync(join(root, 'lib/missionBriefNativePlayer.ts'), 'utf8');

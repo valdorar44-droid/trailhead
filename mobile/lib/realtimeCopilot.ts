@@ -15,6 +15,8 @@ export type RealtimeCopilotHandle = {
   exitDirectorMode: () => void;
   /** Wait until the model finishes speaking (tool confirmations included). */
   waitUntilSpeechIdle: (timeoutMs?: number) => Promise<boolean>;
+  /** Fires when audio output begins for the current director say(). */
+  setDirectorSpeechStartHandler: (handler: (() => void) | null) => void;
 };
 
 type StartRealtimeCopilotOptions = {
@@ -292,6 +294,7 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   let speechActive = false;
   let speechIdleResolvers: Array<() => void> = [];
   let directorSayNonce = 0;
+  let onDirectorSpeechStart: (() => void) | null = null;
 
   const resolveSpeechIdle = () => {
     if (speechActive) return;
@@ -300,7 +303,9 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   };
 
   const markSpeechActive = () => {
+    const wasInactive = !speechActive;
     speechActive = true;
+    if (wasInactive && directorSayNonce > 0) onDirectorSpeechStart?.();
   };
 
   const markSpeechDone = () => {
@@ -323,7 +328,9 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
 
   const isSpeechEndEvent = (type: string) =>
     type === 'response.audio.done'
-    || type === 'response.output_audio.done';
+    || type === 'response.output_audio.done'
+    || type === 'response.done'
+    || type === 'response.output_item.done';
 
   dc.onopen = () => {
     connected = true;
@@ -440,8 +447,14 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
     },
     say: (text: string, mode: 'say' | 'narrate' = 'narrate') => {
       const clean = (text || '').trim();
-      if (!clean) return;
-      if (dc?.readyState !== 'open') return;
+      if (!clean) {
+        handleNarrationDone(directorSayNonce);
+        return;
+      }
+      if (dc?.readyState !== 'open') {
+        handleNarrationDone(directorSayNonce);
+        return;
+      }
       directorSayNonce += 1;
       const nonce = directorSayNonce;
       if (speechActive) {
@@ -457,6 +470,9 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       setTimeout(() => {
         if (nonce === directorSayNonce) handleNarrationDone(nonce);
       }, 14000);
+    },
+    setDirectorSpeechStartHandler: handler => {
+      onDirectorSpeechStart = handler;
     },
   };
 }

@@ -348,6 +348,51 @@ export function shouldSpeakScene(scene: MissionScene): boolean {
   return scene.type !== 'whole_route';
 }
 
+export function isLiveScoutCinematic(cinematic: MissionCinematic | null | undefined): boolean {
+  return !!cinematic?.sources?.includes('route_scout_live');
+}
+
+export function shouldSpeakLiveScoutScene(scene: MissionScene): boolean {
+  return ['intro', 'drive_leg', 'camp_arrival', 'mission_recap'].includes(scene.type);
+}
+
+export function shouldSpeakMissionScene(
+  cinematic: MissionCinematic | null | undefined,
+  scene: MissionScene,
+): boolean {
+  if (isLiveScoutCinematic(cinematic)) return shouldSpeakLiveScoutScene(scene);
+  return shouldSpeakScene(scene);
+}
+
+export function missionBeatCaption(
+  cinematic: MissionCinematic | null | undefined,
+  scene: MissionScene,
+  routeScout?: RouteScoutState | null,
+): string {
+  if (isLiveScoutCinematic(cinematic)) {
+    return liveMissionBeatBrief(scene, routeScout).trim();
+  }
+  return String(scene.narration || scene.subtitle || scene.title || '').trim();
+}
+
+export function sceneNarrationWatchdogMs(scene: MissionScene, speed = 1): number {
+  const base = Math.max(7000, Number(scene.durationMs) || 12000);
+  const effective = Math.max(1500, base / Math.max(0.25, speed));
+  return Math.max(7000, effective + 3000);
+}
+
+function parseDriveMiles(summary?: string | null): number | null {
+  const match = String(summary || '').match(/([\d.]+)\s*mi/i);
+  if (!match) return null;
+  const miles = Number(match[1]);
+  return Number.isFinite(miles) ? miles : null;
+}
+
+function isDispersedCamp(meta?: string | null) {
+  const lower = String(meta || '').toLowerCase();
+  return lower.includes('dispersed') || lower.includes('blm') || lower.includes('boondock');
+}
+
 function routeRatioAlong(route: [number, number][], lat: number, lng: number): number {
   if (route.length < 2) return 0.5;
   let bestIdx = 0;
@@ -500,32 +545,45 @@ export function liveMissionBeatBrief(
   const plan = scout?.dayPlans?.find(entry => Number(entry.day) === Number(day));
   const startName = String(scout?.startName || '').trim();
   const destName = String(scout?.destinationName || '').trim();
+  const tripLabel = startName && destName ? `${startName} to ${destName}` : String(scene.title || 'Your route').trim();
 
   if (scene.type === 'intro') {
-    return `We are starting in ${startName || scene.title}. Fly this route toward ${destName || 'the finish'}, day by day, close to the ground.`;
+    return `${tripLabel} is built. I'll fly it camp by camp, close to the ground.`;
   }
   if (scene.type === 'camp_arrival') {
     const campName = String(plan?.campName || scene.title).trim();
-    const meta = String(plan?.campMeta || scene.subtitle || '').trim();
-    const note = String(plan?.reviewNotes?.[0] || '').trim();
-    const dayLabel = day ? `Day ${day}` : 'Tonight';
-    return `${dayLabel} camp: ${campName}. ${meta}. ${note}`.replace(/\s+/g, ' ').trim();
+    const meta = String(plan?.campMeta || '').trim();
+    if (isDispersedCamp(meta)) {
+      return `Here's tonight's camp at ${campName}. Confirm the site before dark because dispersed spots can change quickly.`;
+    }
+    return `Here's tonight's camp at ${campName}. Lock in water and firewood before sundown.`;
   }
   if (scene.type === 'drive_leg' || scene.type === 'day_flyover') {
-    const from = String(plan?.startName || scene.title).trim();
+    const from = String(plan?.startName || scene.title || startName).trim();
     const to = String(plan?.endName || scene.subtitle || plan?.campName || destName).trim();
-    const miles = String(plan?.driveSummary || '').trim();
-    const dayLabel = day ? `Day ${day}` : 'This leg';
-    return `${dayLabel}: driving from ${from} toward ${to}. ${miles}. Name the country and road type in plain words.`;
+    const dayNum = day || 1;
+    const miles = parseDriveMiles(plan?.driveSummary);
+    if (dayNum === 1) {
+      return `Day ${dayNum} leaves ${from} and runs through the planned corridor before the first camp window.`;
+    }
+    if (miles != null && miles >= 120) {
+      return `This stretch gets remote. Download the route pack before leaving strong signal on the way to ${to}.`;
+    }
+    return `Day ${dayNum} runs from ${from} toward ${to} along the planned corridor.`;
   }
   if (scene.type === 'fuel_stop') {
-    return `Fuel stop at ${scene.title}. ${scene.subtitle || ''}`.trim();
+    return `Fuel stop at ${scene.title}. Top off here before the next long stretch.`;
   }
   if (scene.type === 'mission_recap') {
-    return `That covers the plan from ${startName || 'the start'} to ${destName || 'the finish'}. Check road, weather, and camp rules before you leave.`;
+    const finish = destName || 'the finish';
+    return `That's the route to ${finish}. Camps are placed, but offline maps and rig profile still need review.`;
   }
   if (['risk_focus', 'weather_focus', 'offline_readiness'].includes(scene.type)) {
-    return `${scene.title}. ${scene.subtitle || scene.narration || ''}`.trim();
+    const note = String(scene.subtitle || scene.narration || '').trim();
+    if (scene.type === 'offline_readiness') {
+      return 'This stretch gets remote. Download the route pack before leaving strong signal.';
+    }
+    return note || String(scene.title || '').trim();
   }
   return [scene.title, scene.subtitle].filter(Boolean).join('. ');
 }

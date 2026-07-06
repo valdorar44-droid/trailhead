@@ -19,7 +19,8 @@ type Point = { lat: number; lng: number };
 
 // Camera update interval. easeTo duration is matched to this so each tween finishes
 // right as the next begins — continuous motion with no mid-ease interruption (no skip).
-const FRAME_MS = 200;
+const FRAME_MS = 250;
+const CAMERA_TWEEN_MS = 100;
 // Keep the drawn progress line light so it can update every tick without lag/jank.
 const PROGRESS_MAX_POINTS = 140;
 // How strongly the camera bearing eases toward the route heading each tick (0..1).
@@ -287,10 +288,10 @@ export function startNativeMissionBriefPlayer(opts: {
       zoom,
       pitch,
       bearing,
-      duration: FRAME_MS,
+      duration: CAMERA_TWEEN_MS,
       mode: 'easeTo',
     });
-    postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: FRAME_MS });
+    postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: CAMERA_TWEEN_MS });
   }
 
   function applySceneCamera(scene: MissionScene) {
@@ -387,15 +388,15 @@ export function startNativeMissionBriefPlayer(opts: {
       const throttled = now - lastFrameTs < FRAME_MS;
       try {
         if (cam.mode === 'follow' && hasSlice && routeTotal > 0) {
-          if (!throttled && elapsed(now) > 600) {
+          if (!throttled && elapsed(now) > 180) {
             lastFrameTs = now;
             const d = startDist + (endDist - startDist) * t;
-            const center = pointAtDistance(route, routeCum, d);
+            const marker = pointAtDistance(route, routeCum, d);
             const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, d + lookaheadM));
-            const targetBearing = bearingLngLat([center.lng, center.lat], [ahead.lng, ahead.lat]);
+            const targetBearing = bearingLngLat([marker.lng, marker.lat], [ahead.lng, ahead.lat]);
             smoothedBearing = smoothAngle(smoothedBearing, targetBearing, BEARING_EASE);
-            followCamera(scene, center, smoothedBearing, followZoom);
-            // Marker + progress line advance on the same tick as the camera → no lag behind.
+            // Camera leads on the lookahead point; marker/progress stay on current route distance.
+            followCamera(scene, ahead, smoothedBearing, followZoom);
             emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
           }
         } else if (cam.mode === 'orbit' && scene.focus && elapsed(now) > 2200) {

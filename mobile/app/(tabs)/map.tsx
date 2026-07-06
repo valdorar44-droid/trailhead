@@ -127,11 +127,13 @@ import {
   checkpointsFromScout,
   getCurrentMissionRoute,
   liveMissionBeatBrief,
+  missionBeatCaption,
   placesFromScout,
   placesFromTrip,
   routeCoordsFromLngLat,
   routeCoordsFromScout,
-  shouldSpeakScene,
+  sceneNarrationWatchdogMs,
+  shouldSpeakMissionScene,
   showFlyPlanAction,
   tripNameFromScout,
   type MissionBriefCallout,
@@ -5772,6 +5774,7 @@ function MapScreen() {
   const [mapMissionCinematic, setMapMissionCinematic] = useState<MissionCinematic | null>(null);
   const [mapMissionScene, setMapMissionScene] = useState<MissionScene | null>(null);
   const [mapMissionSceneIndex, setMapMissionSceneIndex] = useState(0);
+  const [mapMissionCaptionText, setMapMissionCaptionText] = useState('');
   const [mapMissionPlaying, setMapMissionPlaying] = useState(false);
   const [mapMissionPaused, setMapMissionPaused] = useState(false);
   const [mapMissionComplete, setMapMissionComplete] = useState(false);
@@ -5811,6 +5814,15 @@ function MapScreen() {
   const missionRouteOverrideRef = useRef<[number, number][] | null>(null);
   const routeOverlayReadyRef = useRef(false);
   const narrationFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const narrationBeatNonceRef = useRef(0);
+  const narrationRealtimeStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const missionOverlayPendingRef = useRef<Partial<{
+    progressRoute: [number, number][];
+    marker: { lat: number; lng: number } | null;
+    callouts: MissionBriefCallout[];
+    warning: boolean;
+  }>>({});
+  const missionOverlayFlushRef = useRef<number | null>(null);
   const autoFlownScoutKeyRef = useRef<string | null>(null);
   const scoutHandoffRunningRef = useRef(false);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
@@ -13682,6 +13694,7 @@ function MapScreen() {
     setMapMissionError(false);
     setMapMissionScene(null);
     setMapMissionSceneIndex(0);
+    setMapMissionCaptionText('');
     setMapMissionPanelExpanded(false);
     setMapMissionNotice(null);
     setCopilotBriefPresence('idle');
@@ -13723,14 +13736,48 @@ function MapScreen() {
     return true;
   }
 
+  function clearNarrationRealtimeStartTimer() {
+    if (narrationRealtimeStartTimerRef.current) {
+      clearTimeout(narrationRealtimeStartTimerRef.current);
+      narrationRealtimeStartTimerRef.current = null;
+    }
+  }
+
   function clearNarrationFallbackTimer() {
+    clearNarrationRealtimeStartTimer();
     if (narrationFallbackTimerRef.current) {
       clearTimeout(narrationFallbackTimerRef.current);
       narrationFallbackTimerRef.current = null;
     }
   }
 
+  function flushMissionBriefOverlay() {
+    missionOverlayFlushRef.current = null;
+    const patch = missionOverlayPendingRef.current;
+    missionOverlayPendingRef.current = {};
+    if (!Object.keys(patch).length) return;
+    setMissionBriefOverlay(prev => ({ ...prev, ...patch }));
+  }
+
+  function patchMissionBriefOverlay(patch: Partial<{
+    progressRoute: [number, number][];
+    marker: { lat: number; lng: number } | null;
+    callouts: MissionBriefCallout[];
+    warning: boolean;
+    fullRoute: [number, number][];
+    active: boolean;
+  }>) {
+    if ('fullRoute' in patch || 'active' in patch) {
+      setMissionBriefOverlay(prev => ({ ...prev, ...patch }));
+      return;
+    }
+    missionOverlayPendingRef.current = { ...missionOverlayPendingRef.current, ...patch };
+    if (missionOverlayFlushRef.current != null) return;
+    missionOverlayFlushRef.current = requestAnimationFrame(flushMissionBriefOverlay);
+  }
+
   function finishMissionNarrationBeat() {
+    narrationBeatNonceRef.current += 1;
     clearNarrationFallbackTimer();
     mapMissionPlayerRef.current?.markNarrationDone();
     setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current);
@@ -13822,39 +13869,91 @@ function MapScreen() {
   }
 
   function fallbackMissionNarration(line: string) {
-    if (missionVoicePathRef.current === 'degraded') return;
+    const clean = line.trim();
+    if (!clean) {
+      finishMissionNarrationBeat();
+      return;
+    }
     missionVoicePathRef.current = 'degraded';
-    speakCinematicNarration(line, {
+    setCopilotBriefPresence('speaking');
+    void speakCopilotNarration(clean, {
       onStart: () => setCopilotBriefPresence('speaking'),
       onFinish: () => finishMissionNarrationBeat(),
+    }).catch(() => {
+      speakCinematicNarration(clean, {
+        onStart: () => setCopilotBriefPresence('speaking'),
+        onFinish: () => finishMissionNarrationBeat(),
+      });
     });
   }
 
+  function beginMissionSceneBeat(scene: MissionScene, index: number) {
+    const cinematic = mapMissionCinematicRef.current;
+    const beatText = missionBeatCaption(cinematic, scene, routeScout)
+      || String(scene.subtitle || scene.title || '').trim();
+    setMapMissionCaptionText(beatText);
+    setMapMissionScene(scene);
+    setMapMissionSceneIndex(index);
+    const presence: CopilotPresenceState = scene.layers?.warning ? 'warning' : 'flying';
+    mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
+    setCopilotBriefPresence(presence);
+    if (shouldSpeakMissionScene(cinematic, scene) && beatText) {
+      narrateMissionScene(scene, beatText);
+    } else {
+      mapMissionPlayerRef.current?.markNarrationDone();
+    }
+  }
+
   // Narrate a cinematic beat on the same realtime Co-Pilot session used to build the route.
-  function narrateMissionScene(scene: MissionScene) {
-    if (!shouldSpeakScene(scene)) {
+  function narrateMissionScene(scene: MissionScene, beatText: string) {
+    const cinematic = mapMissionCinematicRef.current;
+    if (!shouldSpeakMissionScene(cinematic, scene) || !beatText.trim()) {
       finishMissionNarrationBeat();
       return;
     }
 
-    const beatBrief = liveMissionBeatBrief(scene, routeScout).trim();
-    if (!beatBrief) { finishMissionNarrationBeat(); return; }
+    const beatNonce = narrationBeatNonceRef.current + 1;
+    narrationBeatNonceRef.current = beatNonce;
+    const watchdogMs = sceneNarrationWatchdogMs(scene, mapMissionSpeedRef.current);
+    scheduleNarrationFallback(watchdogMs);
+
     const handle = realtimeCopilotRef.current;
     const canUseRealtime = ENABLE_REALTIME_NARRATOR
       && missionDirectorActiveRef.current
       && !!handle;
 
     const trySpeakRealtime = async () => {
-      if (!handle?.isConnected()) return false;
-      await handle.waitUntilSpeechIdle(1200);
       if (!handle?.isConnected() || !missionRunningRef.current) return false;
+      await handle.waitUntilSpeechIdle(1200);
+      if (!handle?.isConnected() || !missionRunningRef.current || beatNonce !== narrationBeatNonceRef.current) {
+        return false;
+      }
       missionVoicePathRef.current = 'realtime';
       setCopilotBriefPresence('speaking');
-      scheduleNarrationFallback();
+      let speechStarted = false;
+      handle.setDirectorSpeechStartHandler(() => {
+        speechStarted = true;
+        clearNarrationRealtimeStartTimer();
+      });
+      clearNarrationRealtimeStartTimer();
+      narrationRealtimeStartTimerRef.current = setTimeout(() => {
+        narrationRealtimeStartTimerRef.current = null;
+        handle.setDirectorSpeechStartHandler(null);
+        if (
+          !speechStarted
+          && beatNonce === narrationBeatNonceRef.current
+          && missionRunningRef.current
+          && missionVoicePathRef.current !== 'degraded'
+        ) {
+          fallbackMissionNarration(beatText);
+        }
+      }, 2000);
       try {
-        handle.say(beatBrief, 'narrate');
+        handle.say(beatText, 'say');
         return true;
       } catch {
+        handle.setDirectorSpeechStartHandler(null);
+        clearNarrationRealtimeStartTimer();
         return false;
       }
     };
@@ -13862,32 +13961,30 @@ function MapScreen() {
     if (canUseRealtime) {
       void (async () => {
         if (await trySpeakRealtime()) return;
-
-      clearNarrationWaitTimer();
-      pendingNarrationRef.current = beatBrief;
-      const isFirstBeat = mapMissionSceneIndex <= 0;
-      const waitMs = isFirstBeat ? 8000 : 3000;
-      const started = Date.now();
-      narrationWaitTimerRef.current = setInterval(() => {
-        void (async () => {
-          if (await trySpeakRealtime()) {
-            clearNarrationWaitTimer();
-            pendingNarrationRef.current = null;
-            return;
-          }
-          if (Date.now() - started >= waitMs) {
-            clearNarrationWaitTimer();
-            pendingNarrationRef.current = null;
-            if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(beatBrief);
-          }
-        })();
-      }, 220);
+        clearNarrationWaitTimer();
+        pendingNarrationRef.current = beatText;
+        const started = Date.now();
+        narrationWaitTimerRef.current = setInterval(() => {
+          void (async () => {
+            if (await trySpeakRealtime()) {
+              clearNarrationWaitTimer();
+              pendingNarrationRef.current = null;
+              return;
+            }
+            if (Date.now() - started >= 3000) {
+              clearNarrationWaitTimer();
+              pendingNarrationRef.current = null;
+              if (beatNonce === narrationBeatNonceRef.current && missionVoicePathRef.current !== 'degraded') {
+                fallbackMissionNarration(beatText);
+              }
+            }
+          })();
+        }, 220);
       })();
       return;
     }
 
-    if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(beatBrief);
-    else finishMissionNarrationBeat();
+    fallbackMissionNarration(beatText);
   }
 
   function cycleMapMissionSpeed() {
@@ -14017,19 +14114,19 @@ function MapScreen() {
         }
       },
       onFullRoute: fullRoute => {
-        setMissionBriefOverlay(prev => ({ ...prev, active: true, fullRoute }));
+        patchMissionBriefOverlay({ active: true, fullRoute });
       },
       onProgressRoute: progressRoute => {
-        setMissionBriefOverlay(prev => ({ ...prev, progressRoute }));
+        patchMissionBriefOverlay({ progressRoute });
       },
       onMarkerMove: marker => {
-        setMissionBriefOverlay(prev => ({ ...prev, marker }));
+        patchMissionBriefOverlay({ marker });
       },
       onCallouts: callouts => {
-        setMissionBriefOverlay(prev => ({ ...prev, callouts }));
+        patchMissionBriefOverlay({ callouts });
       },
       onWarningChange: warning => {
-        setMissionBriefOverlay(prev => ({ ...prev, warning }));
+        patchMissionBriefOverlay({ warning });
       },
       onReady: () => setCopilotBriefPresence('building'),
       onStarted: () => {
@@ -14040,16 +14137,7 @@ function MapScreen() {
         mapMissionPresenceAfterSpeechRef.current = 'flying';
       },
       onSceneStarted: (scene, index) => {
-        setMapMissionScene(scene);
-        setMapMissionSceneIndex(index);
-        const presence: CopilotPresenceState = scene.layers?.warning ? 'warning' : 'flying';
-        mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
-        setCopilotBriefPresence(presence);
-        if (shouldSpeakScene(scene)) {
-          narrateMissionScene(scene);
-        } else {
-          mapMissionPlayerRef.current?.markNarrationDone(); // non-speaking beat advances on camera time
-        }
+        beginMissionSceneBeat(scene, index);
       },
       onSceneFinished: () => {},
       onPaused: () => {
@@ -14090,6 +14178,8 @@ function MapScreen() {
         checkpoints: checkpointsFromScout(routeScout),
       }));
     } else {
+      setMapMissionPlaying(true);
+      setMapMissionPaused(false);
       mapMissionPlayerRef.current.replay();
     }
 
@@ -20882,19 +20972,21 @@ function MapScreen() {
         const warnCount = mapMissionBrief?.risks?.length ?? 0;
         // Map is the hero: full Mission Control only before/after playback, on the
         // recap scene, or when the user expands it. Otherwise a compact pill.
-        const showFullMissionPanel = !mapMissionPlaying
-          || mapMissionComplete
-          || mapMissionPanelExpanded
-          || mapMissionScene?.type === 'mission_recap';
+        const showCompactMissionChrome = mapMissionPlaying
+          && !mapMissionComplete
+          && !mapMissionPanelExpanded
+          && mapMissionScene?.type !== 'mission_recap';
+        const showFullMissionPanel = !showCompactMissionChrome;
         return (
         <>
           {/* Top cinematic caption — keeps the route visible underneath */}
-          <View pointerEvents="box-none" style={[s.mapMissionBriefTop, { top: insets.top + 12 }]}>
+          <View pointerEvents="box-none" style={[s.mapMissionBriefTop, { top: insets.top + 8 }]}>
             <View pointerEvents="none">
               <TripPreviewCaption
                 scene={mapMissionScene}
                 sceneIndex={mapMissionSceneIndex}
                 sceneCount={mapMissionCinematic.scenes.length}
+                captionText={mapMissionCaptionText}
               />
             </View>
             {mapMissionNotice ? (
@@ -20906,7 +20998,7 @@ function MapScreen() {
           </View>
 
           {/* Bottom control dock */}
-          <View pointerEvents="box-none" style={[s.mapMissionBriefWrap, { bottom: bottomInset + 14 }]}>
+          <View pointerEvents="box-none" style={[s.mapMissionBriefWrap, { bottom: bottomInset + 10 }]}>
             {missionControlOn && showFullMissionPanel ? (
               <View pointerEvents="box-none">
                 {mapMissionPlaying && !mapMissionComplete && mapMissionScene?.type !== 'mission_recap' ? (
@@ -30154,11 +30246,11 @@ const makeStyles = (C: ColorPalette) => {
   },
   mapMissionBriefTop: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 10,
+    right: 10,
     zIndex: 141,
     elevation: 47,
-    gap: 6,
+    gap: 4,
   },
   mapMissionNotice: {
     flexDirection: 'row',
@@ -30179,11 +30271,11 @@ const makeStyles = (C: ColorPalette) => {
   },
   mapMissionBriefWrap: {
     position: 'absolute',
-    left: 12,
-    right: 12,
+    left: 10,
+    right: 10,
     zIndex: 140,
     elevation: 46,
-    gap: 10,
+    gap: 8,
   },
   mapMissionBriefControls: {
     flexDirection: 'row',

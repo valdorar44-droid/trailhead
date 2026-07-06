@@ -3,6 +3,10 @@ import {
   buildScoutLiveCinematic,
   getCurrentMissionRoute,
   liveMissionBeatBrief,
+  missionBeatCaption,
+  sceneNarrationWatchdogMs,
+  shouldSpeakLiveScoutScene,
+  shouldSpeakMissionScene,
   shouldSpeakScene,
   showFlyPlanAction,
 } from '@/lib/mapMissionBrief';
@@ -107,14 +111,28 @@ const scoutLive = buildScoutLiveCinematic({
 assert(!!scoutLive && scoutLive.scenes.length >= 4, 'scout live cinematic has leg and camp beats');
 assert(scoutLive!.scenes.some(scene => scene.type === 'drive_leg'), 'scout live includes drive legs');
 assert(scoutLive!.scenes.some(scene => scene.type === 'camp_arrival'), 'scout live includes camp arrivals');
+const introBeat = liveMissionBeatBrief(scoutLive!.scenes.find(scene => scene.type === 'intro')!, {
+  startName: 'Moab',
+  destinationName: 'Flagstaff',
+} as any);
+assert(introBeat.includes('Moab') && introBeat.includes('Flagstaff'), 'live intro beat names the route');
 assert(
-  liveMissionBeatBrief(scoutLive!.scenes.find(scene => scene.type === 'camp_arrival')!, scoutLive ? {
+  shouldSpeakLiveScoutScene(scoutLive!.scenes.find(scene => scene.type === 'drive_leg')!),
+  'live scout drive legs are speaking scenes',
+);
+assert(
+  shouldSpeakLiveScoutScene(scoutLive!.scenes.find(scene => scene.type === 'camp_arrival')!),
+  'live scout camp arrivals are speaking scenes',
+);
+assert(
+  missionBeatCaption(scoutLive, scoutLive!.scenes.find(scene => scene.type === 'camp_arrival')!, {
     startName: 'Moab',
     destinationName: 'Flagstaff',
-    dayPlans: [{ day: 1, campName: 'Desert camp', campMeta: 'BLM', driveSummary: '~180 mi' }],
-  } as any : null).includes('Desert camp'),
-  'live beat brief uses scout camp facts',
+    dayPlans: [{ day: 1, campName: 'Desert camp', campMeta: 'BLM · dispersed' }],
+  } as any).includes('Desert camp'),
+  'mission beat caption uses live scout facts',
 );
+assert(sceneNarrationWatchdogMs({ durationMs: 10000 } as MissionScene) >= 13000, 'narration watchdog exceeds scene duration');
 
 assert(!showFlyPlanAction({ lastRouteCoords: [], activeTrip: null, routeScout: null }), 'Fly the Plan hidden without route');
 assert(showFlyPlanAction({ lastRouteCoords: moabBigSurRoute, activeTrip, routeScout: null }), 'Fly the Plan visible with trip route');

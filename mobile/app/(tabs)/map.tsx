@@ -5811,7 +5811,6 @@ function MapScreen() {
   const routeOverlayReadyRef = useRef(false);
   const narrationFallbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const autoFlownScoutKeyRef = useRef<string | null>(null);
-  const scoutPhaseSpokenRef = useRef<string | null>(null);
   const scoutHandoffRunningRef = useRef(false);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
@@ -9931,15 +9930,6 @@ function MapScreen() {
         name: focusTarget.name,
       });
     }
-    const phaseKey = `${operationId}:${phase}`;
-    const shouldSpeakPhase = ['windows', 'finalizing'].includes(phase)
-      && scoutPhaseSpokenRef.current !== phaseKey
-      && !missionDirectorActiveRef.current
-      && extremeCopilotVoiceActive;
-    if (shouldSpeakPhase) {
-      scoutPhaseSpokenRef.current = phaseKey;
-      realtimeCopilotRef.current?.say(message, 'say');
-    }
   }
 
   function scheduleRouteScoutPhase(
@@ -13768,8 +13758,12 @@ function MapScreen() {
     realtimeCopilotRef.current?.exitDirectorMode();
   }
 
-  async function ensureMissionDirectorVoice(): Promise<RealtimeCopilotHandle | null> {
+  async function ensureMissionDirectorVoice(force = false): Promise<RealtimeCopilotHandle | null> {
     if (!ENABLE_REALTIME_NARRATOR || !extremeConfig?.copilot?.voice_enabled) return null;
+    if (!force && missionDirectorActiveRef.current && realtimeCopilotRef.current?.isConnected()) {
+      realtimeCopilotRef.current.enterDirectorMode(() => finishMissionNarrationBeat());
+      return realtimeCopilotRef.current;
+    }
     let handle = realtimeCopilotRef.current;
     if (!handle) {
       try {
@@ -13799,20 +13793,6 @@ function MapScreen() {
     return handle;
   }
 
-  async function speakDirectorTransition(line: string): Promise<void> {
-    if (!ENABLE_REALTIME_NARRATOR) return;
-    const handle = await ensureMissionDirectorVoice();
-    if (!handle?.isConnected()) return;
-    await new Promise<void>(resolve => {
-      const timeout = setTimeout(() => resolve(), 12000);
-      handle.setOnNarrationDone(() => {
-        clearTimeout(timeout);
-        resolve();
-      });
-      handle.say(line, 'say');
-    });
-  }
-
   async function handoffScoutToCinematic(coords: [number, number][]) {
     if (missionRunningRef.current || navMode || scoutHandoffRunningRef.current) return;
     scoutHandoffRunningRef.current = true;
@@ -13826,7 +13806,13 @@ function MapScreen() {
         settleMs: 400,
       });
       if (missionRunningRef.current || navMode) return;
-      await speakDirectorTransition("Route's built — I'll fly the plan for you.");
+      const voiceHandle = realtimeCopilotRef.current;
+      if (voiceHandle) {
+        await voiceHandle.waitUntilSpeechIdle(18000);
+        voiceHandle.enterDirectorMode(() => finishMissionNarrationBeat());
+        missionDirectorActiveRef.current = true;
+        missionVoicePathRef.current = 'realtime';
+      }
       if (missionRunningRef.current || navMode) return;
       await startMapMissionBrief({ source: 'auto_scout' });
     } finally {
@@ -13854,8 +13840,10 @@ function MapScreen() {
       && missionDirectorActiveRef.current
       && !!handle;
 
-    const trySpeakRealtime = () => {
+    const trySpeakRealtime = async () => {
       if (!handle?.isConnected()) return false;
+      await handle.waitUntilSpeechIdle(1200);
+      if (!handle?.isConnected() || !missionRunningRef.current) return false;
       missionVoicePathRef.current = 'realtime';
       setCopilotBriefPresence('speaking');
       scheduleNarrationFallback();
@@ -13868,25 +13856,29 @@ function MapScreen() {
     };
 
     if (canUseRealtime) {
-      if (trySpeakRealtime()) return;
+      void (async () => {
+        if (await trySpeakRealtime()) return;
 
       clearNarrationWaitTimer();
       pendingNarrationRef.current = beatBrief;
       const isFirstBeat = mapMissionSceneIndex <= 0;
-      const waitMs = isFirstBeat ? 6000 : 2000;
+      const waitMs = isFirstBeat ? 8000 : 3000;
       const started = Date.now();
       narrationWaitTimerRef.current = setInterval(() => {
-        if (trySpeakRealtime()) {
-          clearNarrationWaitTimer();
-          pendingNarrationRef.current = null;
-          return;
-        }
-        if (Date.now() - started >= waitMs) {
-          clearNarrationWaitTimer();
-          pendingNarrationRef.current = null;
-          if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(line);
-        }
-      }, 180);
+        void (async () => {
+          if (await trySpeakRealtime()) {
+            clearNarrationWaitTimer();
+            pendingNarrationRef.current = null;
+            return;
+          }
+          if (Date.now() - started >= waitMs) {
+            clearNarrationWaitTimer();
+            pendingNarrationRef.current = null;
+            if (missionVoicePathRef.current !== 'degraded') fallbackMissionNarration(line);
+          }
+        })();
+      }, 220);
+      })();
       return;
     }
 
@@ -13947,7 +13939,7 @@ function MapScreen() {
       });
     }
 
-    const directorVoicePromise = ensureMissionDirectorVoice();
+    const directorVoicePromise = ensureMissionDirectorVoice(options.source === 'auto_scout');
 
     setMissionBriefOverlay(prev => ({
       ...prev,
@@ -13994,7 +13986,7 @@ function MapScreen() {
       } : null,
     });
     const briefPromise = refreshMapMissionControl(route, activeTrip?.trip_id ?? null).catch(() => mapMissionBrief);
-    const storyboardPromise = (async () => {
+    void (async () => {
       try {
         const sessionId = await ensureCopilotSession();
         const response = await api.createMissionStoryboard({
@@ -14007,22 +13999,18 @@ function MapScreen() {
           places: places as unknown as Array<Record<string, unknown>>,
           mission_brief: (mapMissionBrief ?? {}) as unknown as Record<string, unknown>,
         });
-        if (response?.cinematic?.scenes?.length >= 2) {
-          return response.cinematic as unknown as MissionCinematic;
+        if (!missionRunningRef.current) return;
+        if (response?.cinematic?.scenes?.length >= 2 && mapMissionSceneIndex <= 0) {
+          const aiCinematic = response.cinematic as unknown as MissionCinematic;
+          mapMissionCinematicRef.current = aiCinematic;
+          setMapMissionCinematic(aiCinematic);
         }
       } catch {
-        // fall through to deterministic storyboard
+        // deterministic storyboard already running
       }
-      return null;
     })();
-    const storyboardTimeout = new Promise<MissionCinematic | null>(resolve => {
-      setTimeout(() => resolve(null), 4000);
-    });
-    const [aiCinematic] = await Promise.all([
-      Promise.race([storyboardPromise, storyboardTimeout]),
-      directorVoicePromise,
-    ]);
-    const cinematic = aiCinematic ?? deterministicCinematic;
+    await directorVoicePromise;
+    const cinematic = deterministicCinematic;
     if (!cinematic || cinematic.scenes.length < 2) {
       missionRunningRef.current = false;
       setMapMissionError(true);

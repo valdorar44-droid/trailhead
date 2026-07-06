@@ -46,6 +46,7 @@ assert(voiceSource.includes('playTrailheadVoice'), 'speakCopilotNarration uses T
 const realtimeSource = readFileSync(join(root, 'lib/realtimeCopilot.ts'), 'utf8');
 assert(realtimeSource.includes('enterDirectorMode'), 'realtime copilot supports director mode on live session');
 assert(realtimeSource.includes('exitDirectorMode'), 'realtime copilot can restore interactive voice after fly');
+assert(realtimeSource.includes('waitUntilSpeechIdle'), 'realtime copilot waits for speech idle before handoff');
 
 const directorSource = readFileSync(join(root, 'lib/cinematicDirector.ts'), 'utf8');
 assert(directorSource.includes('waitForRouteRenderReady'), 'cinematic director waits for route render');

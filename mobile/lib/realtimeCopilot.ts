@@ -13,7 +13,8 @@ export type RealtimeCopilotHandle = {
   enterDirectorMode: (onNarrationDone: () => void) => void;
   /** Restore interactive voice mode after a cinematic flythrough. */
   exitDirectorMode: () => void;
-  setOnNarrationDone: (cb: (() => void) | null) => void;
+  /** Wait until the model finishes speaking (tool confirmations included). */
+  waitUntilSpeechIdle: (timeoutMs?: number) => Promise<boolean>;
 };
 
 type StartRealtimeCopilotOptions = {
@@ -287,11 +288,41 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   let connected = false;
   let directorMode = !!options.narrationOnly;
   let onNarrationDone: (() => void) | null = options.onNarrationDone ?? null;
+  let speechActive = false;
+  let speechIdleResolvers: Array<() => void> = [];
+  let directorSayNonce = 0;
 
-  const handleNarrationDone = () => {
-    onNarrationDone?.();
-    options.onNarrationDone?.();
+  const resolveSpeechIdle = () => {
+    if (speechActive) return;
+    const resolvers = speechIdleResolvers.splice(0);
+    resolvers.forEach(resolve => resolve());
   };
+
+  const markSpeechActive = () => {
+    speechActive = true;
+  };
+
+  const markSpeechDone = () => {
+    if (!speechActive) return;
+    speechActive = false;
+    resolveSpeechIdle();
+  };
+
+  const handleNarrationDone = (nonce: number) => {
+    if (nonce <= 0 || nonce !== directorSayNonce) return;
+    onNarrationDone?.();
+  };
+
+  const isSpeechStartEvent = (type: string) =>
+    type === 'response.audio.delta'
+    || type === 'response.output_audio.delta'
+    || type === 'response.audio_transcript.delta'
+    || type === 'response.output_audio_transcript.delta'
+    || type === 'response.created';
+
+  const isSpeechEndEvent = (type: string) =>
+    type === 'response.audio.done'
+    || type === 'response.output_audio.done';
 
   dc.onopen = () => {
     connected = true;
@@ -307,8 +338,11 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   dc.onmessage = async (message: { data: string }) => {
     try {
       const event = JSON.parse(message.data);
-      if (event?.type === 'response.audio.done' || event?.type === 'response.output_audio.done') {
-        handleNarrationDone();
+      const eventType = String(event?.type || '');
+      if (isSpeechStartEvent(eventType)) markSpeechActive();
+      if (isSpeechEndEvent(eventType)) {
+        markSpeechDone();
+        if (directorSayNonce > 0) handleNarrationDone(directorSayNonce);
       }
       const userText = userTranscriptFromEvent(event);
       if (userText) options.onUserTranscript?.(userText);
@@ -378,27 +412,40 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       options.onStatus?.('stopped');
     },
     isConnected: () => connected && dc?.readyState === 'open',
-    setOnNarrationDone: cb => {
-      onNarrationDone = cb;
-    },
     enterDirectorMode: cb => {
       directorMode = true;
       onNarrationDone = cb;
+      directorSayNonce = 0;
       setMicEnabled(stream, false);
       if (dc?.readyState === 'open') applyDirectorSession(dc);
     },
     exitDirectorMode: () => {
       directorMode = false;
       onNarrationDone = null;
+      directorSayNonce = 0;
       if (options.narrationOnly) return;
       setMicEnabled(stream, true);
       if (dc?.readyState === 'open') applyInteractiveSession(dc, false);
+    },
+    waitUntilSpeechIdle: (timeoutMs = 15000) => {
+      if (!speechActive) return Promise.resolve(true);
+      return new Promise<boolean>(resolve => {
+        const timer = setTimeout(() => resolve(false), timeoutMs);
+        speechIdleResolvers.push(() => {
+          clearTimeout(timer);
+          resolve(true);
+        });
+      });
     },
     say: (text: string, mode: 'say' | 'narrate' = 'narrate') => {
       const clean = (text || '').trim();
       if (!clean) return;
       if (dc?.readyState !== 'open') return;
-      sendRealtimeEvent(dc, { type: 'response.cancel' });
+      directorSayNonce += 1;
+      const nonce = directorSayNonce;
+      if (speechActive) {
+        sendRealtimeEvent(dc, { type: 'response.cancel' });
+      }
       const instructions = mode === 'say'
         ? `Say this line once, warmly and unhurried, exactly as written: "${clean}"`
         : `You're narrating an overland trip flythrough. In ONE short, warm sentence (max ~20 words), narrate this moment for the traveler. Do not read the facts back verbatim or add questions. Beat: ${clean}`;
@@ -406,6 +453,9 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
         type: 'response.create',
         response: { modalities: ['audio', 'text'], instructions },
       });
+      setTimeout(() => {
+        if (nonce === directorSayNonce) handleNarrationDone(nonce);
+      }, 14000);
     },
   };
 }

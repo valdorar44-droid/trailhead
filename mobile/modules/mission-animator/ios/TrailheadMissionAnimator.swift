@@ -284,7 +284,7 @@ final class TrailheadMissionAnimator: NSObject {
 
     private func installMissionLayers() {
         guard let mapView else { return }
-        let style = mapView.mapboxMap
+        let style = mapView.mapboxMap.style
         let sources = [
             "mission-full-route-source",
             "mission-progress-route-source",
@@ -296,37 +296,27 @@ final class TrailheadMissionAnimator: NSObject {
             source.data = .featureCollection(FeatureCollection(features: []))
             try? style.addSource(source)
         }
-        addLineLayer(id: "th-mission-full-casing", source: "mission-full-route-source", color: UIColor(red: 0.01, green: 0.02, blue: 0.09, alpha: 0.85), width: 9)
-        addLineLayer(id: "th-mission-full-line", source: "mission-full-route-source", color: UIColor(red: 0.89, green: 0.91, blue: 0.94, alpha: 0.9), width: 4.5)
-        addLineLayer(id: "th-mission-progress-shadow", source: "mission-progress-route-source", color: UIColor(red: 0.01, green: 0.02, blue: 0.09, alpha: 0.7), width: 10)
-        addLineLayer(id: "th-mission-progress-line", source: "mission-progress-route-source", color: UIColor(red: 0.22, green: 0.88, blue: 1, alpha: 1), width: 6.5)
-        addCircleLayer(id: "th-mission-marker-glow", source: "mission-marker-source", radius: 12, color: UIColor(red: 0, green: 0.65, blue: 1, alpha: 0.22), stroke: 0)
-        addCircleLayer(id: "th-mission-marker-dot", source: "mission-marker-source", radius: 7, color: UIColor(red: 0, green: 0.65, blue: 1, alpha: 1), stroke: 2.5, strokeColor: .white)
-        addCircleLayer(id: "th-mission-callout-glow", source: "mission-callouts-source", radius: 12, color: UIColor(red: 0, green: 0.65, blue: 1, alpha: 0.18), stroke: 0)
-        addCircleLayer(id: "th-mission-callout-dot", source: "mission-callouts-source", radius: 8, color: UIColor(red: 0.07, green: 0.09, blue: 0.15, alpha: 1), stroke: 2, strokeColor: .white)
-        if !style.layerExists(withId: "th-mission-callout-label") {
-            var layer = SymbolLayer(id: "th-mission-callout-label", source: "mission-callouts-source")
-            layer.textField = .expression(Exp(.get) { "label" })
-            layer.textSize = .constant(11)
-            layer.textColor = .constant(StyleColor(.white))
-            layer.textHaloColor = .constant(StyleColor(UIColor(red: 0.01, green: 0.02, blue: 0.09, alpha: 0.82)))
-            layer.textHaloWidth = .constant(1.4)
-            try? style.addLayer(layer)
-        }
+        addLineLayer(style: style, id: "th-mission-full-casing", source: "mission-full-route-source", color: UIColor(red: 0.01, green: 0.02, blue: 0.09, alpha: 0.85), width: 9)
+        addLineLayer(style: style, id: "th-mission-full-line", source: "mission-full-route-source", color: UIColor(red: 0.89, green: 0.91, blue: 0.94, alpha: 0.9), width: 4.5)
+        addLineLayer(style: style, id: "th-mission-progress-shadow", source: "mission-progress-route-source", color: UIColor(red: 0.01, green: 0.02, blue: 0.09, alpha: 0.7), width: 10)
+        addLineLayer(style: style, id: "th-mission-progress-line", source: "mission-progress-route-source", color: UIColor(red: 0.22, green: 0.88, blue: 1, alpha: 1), width: 6.5)
+        addCircleLayer(style: style, id: "th-mission-marker-glow", source: "mission-marker-source", radius: 12, color: UIColor(red: 0, green: 0.65, blue: 1, alpha: 0.22), stroke: 0)
+        addCircleLayer(style: style, id: "th-mission-marker-dot", source: "mission-marker-source", radius: 7, color: UIColor(red: 0, green: 0.65, blue: 1, alpha: 1), stroke: 2.5, strokeColor: .white)
+        addCircleLayer(style: style, id: "th-mission-callout-dot", source: "mission-callouts-source", radius: 8, color: UIColor(red: 0.07, green: 0.09, blue: 0.15, alpha: 1), stroke: 2, strokeColor: .white)
     }
 
-    private func addLineLayer(id: String, source: String, color: UIColor, width: Double) {
-        guard let mapView, !mapView.mapboxMap.layerExists(withId: id) else { return }
+    private func addLineLayer(style: Style, id: String, source: String, color: UIColor, width: Double) {
+        guard !style.layerExists(withId: id) else { return }
         var layer = LineLayer(id: id, source: source)
         layer.lineColor = .constant(StyleColor(color))
         layer.lineWidth = .constant(width)
         layer.lineCap = .constant(.round)
         layer.lineJoin = .constant(.round)
-        try? mapView.mapboxMap.addLayer(layer)
+        try? style.addLayer(layer)
     }
 
-    private func addCircleLayer(id: String, source: String, radius: Double, color: UIColor, stroke: Double, strokeColor: UIColor = .clear) {
-        guard let mapView, !mapView.mapboxMap.layerExists(withId: id) else { return }
+    private func addCircleLayer(style: Style, id: String, source: String, radius: Double, color: UIColor, stroke: Double, strokeColor: UIColor = .clear) {
+        guard !style.layerExists(withId: id) else { return }
         var layer = CircleLayer(id: id, source: source)
         layer.circleRadius = .constant(radius)
         layer.circleColor = .constant(StyleColor(color))
@@ -334,20 +324,22 @@ final class TrailheadMissionAnimator: NSObject {
         if stroke > 0 {
             layer.circleStrokeColor = .constant(StyleColor(strokeColor))
         }
-        try? mapView.mapboxMap.addLayer(layer)
+        try? style.addLayer(layer)
     }
 
     private func updateFullRoute() {
-        guard route.count >= 2 else { return }
+        guard route.count >= 2, let mapView else { return }
         let coords = route.map { LocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
         let feature = Feature(geometry: .lineString(LineString(coords)))
-        try? mapView?.mapboxMap.updateGeoJSONSource(withId: "mission-full-route-source", geoJSON: .feature(feature))
+        try? mapView.mapboxMap.style.updateGeoJSONSource(withId: "mission-full-route-source", geoJSON: .feature(feature))
     }
 
     private func clearOverlaySources() {
+        guard let mapView else { return }
         let empty = GeoJSONObject.featureCollection(FeatureCollection(features: []))
+        let style = mapView.mapboxMap.style
         for id in ["mission-progress-route-source", "mission-marker-source", "mission-callouts-source"] {
-            try? mapView?.mapboxMap.updateGeoJSONSource(withId: id, geoJSON: empty)
+            try? style.updateGeoJSONSource(withId: id, geoJSON: empty)
         }
     }
 
@@ -508,9 +500,9 @@ final class TrailheadMissionAnimator: NSObject {
             ]
                 return f
             }
-            try? mapView?.mapboxMap.updateGeoJSONSource(withId: "mission-callouts-source", geoJSON: .featureCollection(FeatureCollection(features: features)))
+            try? mapView?.mapboxMap.style.updateGeoJSONSource(withId: "mission-callouts-source", geoJSON: .featureCollection(FeatureCollection(features: features)))
         } else {
-            try? mapView?.mapboxMap.updateGeoJSONSource(withId: "mission-callouts-source", geoJSON: .featureCollection(FeatureCollection(features: [])))
+            try? mapView?.mapboxMap.style.updateGeoJSONSource(withId: "mission-callouts-source", geoJSON: .featureCollection(FeatureCollection(features: [])))
         }
     }
 
@@ -519,12 +511,12 @@ final class TrailheadMissionAnimator: NSObject {
         if progressCoords.count >= 2 {
             let coords = progressCoords.map { LocationCoordinate2D(latitude: $0[1], longitude: $0[0]) }
             let feature = Feature(geometry: .lineString(LineString(coords)))
-            try? mapView?.mapboxMap.updateGeoJSONSource(withId: "mission-progress-route-source", geoJSON: .feature(feature))
+            try? mapView?.mapboxMap.style.updateGeoJSONSource(withId: "mission-progress-route-source", geoJSON: .feature(feature))
         }
         let marker = pointAtDistance(dist: markerDist)
         var feature = Feature(geometry: .point(Point(LocationCoordinate2D(latitude: marker.lat, longitude: marker.lng))))
         feature.properties = ["warning": .number(warningActive ? 1 : 0)]
-        try? mapView?.mapboxMap.updateGeoJSONSource(withId: "mission-marker-source", geoJSON: .feature(feature))
+        try? mapView?.mapboxMap.style.updateGeoJSONSource(withId: "mission-marker-source", geoJSON: .feature(feature))
         delegate?.missionAnimator(self, debug: "overlay", details: ["scene_id": scene.id])
     }
 
@@ -546,9 +538,9 @@ final class TrailheadMissionAnimator: NSObject {
     }
 
     private func updateProgressLineColor(warning: Bool) {
-        guard let mapView, mapView.mapboxMap.layerExists(withId: "th-mission-progress-line") else { return }
+        guard let mapView, mapView.mapboxMap.style.layerExists(withId: "th-mission-progress-line") else { return }
         let color = warning ? UIColor(red: 0.96, green: 0.62, blue: 0.04, alpha: 1) : UIColor(red: 0.22, green: 0.88, blue: 1, alpha: 1)
-        try? mapView.mapboxMap.updateLayer(withId: "th-mission-progress-line", type: LineLayer.self) { layer in
+        try? mapView.mapboxMap.style.updateLayer(withId: "th-mission-progress-line", type: LineLayer.self) { layer in
             layer.lineColor = .constant(StyleColor(color))
         }
     }

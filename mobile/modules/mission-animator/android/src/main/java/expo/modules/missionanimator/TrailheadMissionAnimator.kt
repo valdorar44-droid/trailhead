@@ -315,17 +315,18 @@ internal class TrailheadMissionAnimator(
   private fun updateFullRoute() {
     if (route.size < 2) return
     val points = route.map { Point.fromLngLat(it.first, it.second) }
-    val feature = Feature.fromGeometry(LineString.fromLngLats(points))
-    mapView?.getMapboxMap()?.style?.getSourceAs<GeoJsonSource>("mission-full-route-source")
-      ?.featureCollection(FeatureCollection.fromFeature(feature))
+    val json = FeatureCollection.fromFeature(Feature.fromGeometry(LineString.fromLngLats(points))).toJson()
+    mapView?.getMapboxMap()?.getStyle { style ->
+      style.getSourceAs<GeoJsonSource>("mission-full-route-source")?.data(json)
+    }
   }
 
   private fun clearOverlaySources() {
-    val empty = FeatureCollection.fromFeatures(emptyList())
-    mapView?.getMapboxMap()?.style?.getSourceAs<GeoJsonSource>("mission-progress-route-source")
-      ?.featureCollection(empty)
-    mapView?.getMapboxMap()?.style?.getSourceAs<GeoJsonSource>("mission-marker-source")
-      ?.featureCollection(empty)
+    val empty = FeatureCollection.fromFeatures(emptyList()).toJson()
+    mapView?.getMapboxMap()?.getStyle { style ->
+      style.getSourceAs<GeoJsonSource>("mission-progress-route-source")?.data(empty)
+      style.getSourceAs<GeoJsonSource>("mission-marker-source")?.data(empty)
+    }
   }
 
   private fun tick(nowNs: Long) {
@@ -445,14 +446,20 @@ internal class TrailheadMissionAnimator(
     val progressCoords = downsample(progressRoute(ratio), 140)
     if (progressCoords.size >= 2) {
       val points = progressCoords.map { Point.fromLngLat(it.first, it.second) }
-      val feature = Feature.fromGeometry(LineString.fromLngLats(points))
-      mapView?.getMapboxMap()?.style?.getSourceAs<GeoJsonSource>("mission-progress-route-source")
-        ?.featureCollection(FeatureCollection.fromFeature(feature))
+      val progressJson = FeatureCollection.fromFeature(
+        Feature.fromGeometry(LineString.fromLngLats(points)),
+      ).toJson()
+      mapView?.getMapboxMap()?.getStyle { style ->
+        style.getSourceAs<GeoJsonSource>("mission-progress-route-source")?.data(progressJson)
+      }
     }
     val marker = pointAtDistance(markerDist)
-    val markerFeature = Feature.fromGeometry(Point.fromLngLat(marker.lng, marker.lat))
-    mapView?.getMapboxMap()?.style?.getSourceAs<GeoJsonSource>("mission-marker-source")
-      ?.featureCollection(FeatureCollection.fromFeature(markerFeature))
+    val markerJson = FeatureCollection.fromFeature(
+      Feature.fromGeometry(Point.fromLngLat(marker.lng, marker.lat)),
+    ).toJson()
+    mapView?.getMapboxMap()?.getStyle { style ->
+      style.getSourceAs<GeoJsonSource>("mission-marker-source")?.data(markerJson)
+    }
     emit("onMissionDebug", mapOf("kind" to "overlay", "details" to mapOf("scene_id" to scene.id)))
   }
 
@@ -472,7 +479,8 @@ internal class TrailheadMissionAnimator(
       .apply { if (bearing != null) bearing(bearing) }
       .build()
     if (animated) {
-      map.getMapboxMap().easeTo(options, MapAnimationOptions.mapAnimationOptions { duration(durationMs) })
+      val animationOptions = MapAnimationOptions.Builder().duration(durationMs).build()
+      map.getMapboxMap().easeTo(options, animationOptions)
     } else {
       map.getMapboxMap().setCamera(options)
     }

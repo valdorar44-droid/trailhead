@@ -7182,7 +7182,8 @@ def _require_extreme_copilot(user: dict, voice: bool = False) -> dict:
         raise HTTPException(403, {"code": "extreme_hidden_beta", "message": "Explorer is in hidden beta for selected accounts."})
     if not config.get("explorer_entitled"):
         raise HTTPException(403, {"code": "explorer_required", "message": "Co-Pilot is included with Explorer."})
-    if "copilot" not in config["allowed_surfaces"] and "map_layers" not in config["allowed_surfaces"]:
+    copilot_surfaces = {"copilot", "map_layers", "map", "route_builder", "navigation", "weather"}
+    if not copilot_surfaces.intersection(config.get("allowed_surfaces") or []):
         raise HTTPException(403, {"code": "extreme_copilot_unavailable", "message": "EXTREME Copilot is not available on this surface."})
     if not config["feature_flags"]["copilot"]:
         raise HTTPException(403, {"code": "extreme_copilot_disabled", "message": "Co-Pilot is not enabled for this beta."})

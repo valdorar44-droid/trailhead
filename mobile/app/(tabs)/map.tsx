@@ -14600,6 +14600,24 @@ function MapScreen() {
     if (!text || extremeCopilotBusy) return;
     setExtremeCopilotInput('');
     appendCopilotMessage({ id: `copilot-user-${Date.now()}`, role: 'user', text });
+
+    const localMission = (() => {
+      const clean = text.toLowerCase();
+      if (/\b(mission control|mission briefing|3d preview|route preview|fly (the|my) route|open explorer|open briefing)\b/.test(clean)) {
+        return 'Opening the 3D mission briefing.';
+      }
+      if (/\b(is this trip ready|trip ready|readiness check|check readiness)\b/.test(clean)) {
+        return 'Opening Mission Control to check readiness.';
+      }
+      return null;
+    })();
+    if (localMission) {
+      appendCopilotMessage({ id: `copilot-assistant-${Date.now()}`, role: 'assistant', text: localMission });
+      setShowExtremeCopilot(false);
+      router.push('/extreme-explorer');
+      return;
+    }
+
     setExtremeCopilotBusy(true);
     try {
       const sessionId = await ensureCopilotSession();
@@ -21989,6 +22007,7 @@ function MapScreen() {
                 </TouchableOpacity>
               )}
               {[
+                'open mission briefing',
                 'what can you do?',
                 'plan 5 days with public camps and photos',
                 'show camps near my route',
@@ -24212,6 +24231,14 @@ function MapScreen() {
             <TouchableOpacity style={s.tripPanelEdit} onPress={() => router.push('/(tabs)/route-builder')}>
               <Ionicons name="albums-outline" size={13} color={C.orange} />
               <Text style={s.tripPanelEditText}>ROUTES</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.tripPanelEdit}
+              onPress={() => router.push('/extreme-explorer')}
+              accessibilityLabel="Open 3D mission briefing"
+            >
+              <Ionicons name="airplane-outline" size={13} color={C.orange} />
+              <Text style={s.tripPanelEditText}>BRIEFING</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={[s.tripPanelClose, routeClosing && { opacity: 0.55 }]}

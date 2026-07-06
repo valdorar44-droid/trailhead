@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -11,10 +11,13 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import * as Speech from 'expo-speech';
-import { WebView } from 'react-native-webview';
+import { CopilotPresenceOrb, type CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
 import { MissionControlPanel } from '@/components/copilot/MissionControlPanel';
+import { TripPreviewCaption } from '@/components/copilot/TripPreviewCaption';
+import { TripPreviewControls } from '@/components/copilot/TripPreviewControls';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
+import { buildMissionCinematic, type MissionCinematic, type MissionScene } from '@/lib/copilotStoryboard';
+import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 import {
   api,
   ExplorerCheckpoint,
@@ -30,6 +33,36 @@ import { useTheme, mono } from '@/lib/design';
 import { useStore } from '@/lib/store';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
+
+type ExplorerWebViewHandle = { injectJavaScript: (js: string) => void };
+
+// Web build: react-native-webview has no web implementation, so render the same
+// HTML in an iframe with a postMessage bridge (dev/Playwright verification path).
+const ExplorerWebFrame = forwardRef<ExplorerWebViewHandle, any>(function ExplorerWebFrame({ source, onMessage }, ref) {
+  const frameRef = useRef<any>(null);
+  useImperativeHandle(ref, () => ({
+    injectJavaScript: (js: string) => {
+      try { frameRef.current?.contentWindow?.eval(js); } catch {}
+    },
+  }), []);
+  useEffect(() => {
+    const handler = (event: any) => {
+      const payload = event?.data;
+      if (payload && payload.__explorer && typeof payload.data === 'string') {
+        onMessage?.({ nativeEvent: { data: payload.data } });
+      }
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [onMessage]);
+  return React.createElement('iframe', {
+    ref: frameRef,
+    srcDoc: source?.html ?? '',
+    style: { border: 0, width: '100%', height: '100%', position: 'absolute', inset: 0 },
+  });
+});
+
+const WebView: any = Platform.OS === 'web' ? ExplorerWebFrame : require('react-native-webview').WebView;
 
 type DemoPlace = {
   id: string;
@@ -66,6 +99,8 @@ type DemoPayload = {
   navigationEnabled: boolean;
   safeTop: number;
   safeBottom: number;
+  cinematic: MissionCinematic | null;
+  previewMode: 'cinematic' | 'static';
 };
 
 type ExplorerPlaceCard = {
@@ -418,6 +453,10 @@ function makeHtml(payload: DemoPayload) {
     .viewpoint { background: #8b5cf6; }
     .weather_risk { background: #ef4444; }
     .checkpoint { width: 34px; height: 34px; border-radius: 12px; background: #111827; color: #f8fafc; border-color: #f97316; }
+    .trail_stop { background: #22d3ee; }
+    .monument_stop { background: #8b5cf6; }
+    .callout-warning { animation: warnpulse 1s infinite alternate; }
+    @keyframes warnpulse { from { box-shadow: 0 0 0 0 rgba(239,68,68,.55); } to { box-shadow: 0 0 0 14px rgba(239,68,68,0); } }
     .popup { max-width: 220px; font: 12px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
     .popup b { display:block; margin-bottom: 3px; }
     .stylebar { position: absolute; top: ${stylebarTop}px; left: 12px; right: 12px; display: flex; gap: 8px; overflow-x: auto; z-index: 3; padding-bottom: 4px; }
@@ -441,6 +480,9 @@ function makeHtml(payload: DemoPayload) {
   <div id="loading" class="loading"><div class="load-card"><div class="pulse"></div><div class="load-title">EXPLORER</div><div class="load-sub">Loading route preview</div></div></div>
   <div class="stylebar" id="stylebar"></div>
   <script>
+    if (!window.ReactNativeWebView && window.parent !== window) {
+      window.ReactNativeWebView = { postMessage: msg => window.parent.postMessage({ __explorer: true, data: msg }, '*') };
+    }
     const demo = ${data};
     mapboxgl.accessToken = demo.token || '';
     const fallbackCenter = demo.route[0] || [-109.55, 38.57];
@@ -467,7 +509,9 @@ function makeHtml(payload: DemoPayload) {
         Array.from(stylebar.children).forEach(child => child.classList.remove('active'));
         btn.classList.add('active');
         map.setStyle(demo.styles[key] || demo.styles.standard);
-        map.once('style.load', renderRoute);
+        map.once('style.load', () => {
+          if (cine.playing && !cine.failed) { restoreAfterStyleSwitch(); } else { renderRoute(); }
+        });
         window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'style', key }));
       };
       stylebar.appendChild(btn);
@@ -561,7 +605,295 @@ function makeHtml(payload: DemoPayload) {
         window.ReactNativeWebView?.postMessage(JSON.stringify({ type: 'ready' }));
       }, 900);
     }
-    map.on('load', renderRoute);
+    // ---- Cinematic storyboard player ----
+    const cine = {
+      scenes: (demo.previewMode === 'cinematic' && demo.cinematic && Array.isArray(demo.cinematic.scenes)) ? demo.cinematic.scenes : [],
+      index: -1,
+      playing: false,
+      paused: false,
+      failed: false,
+      raf: null,
+      sceneStart: 0,
+      pausedAt: 0,
+      pausedTotal: 0,
+      markers: []
+    };
+    function post(type, extra) {
+      const msg = extra || {};
+      msg.type = type;
+      window.ReactNativeWebView?.postMessage(JSON.stringify(msg));
+    }
+    function cineStopAnim() {
+      if (cine.raf) { cancelAnimationFrame(cine.raf); cine.raf = null; }
+      try { map.stop(); } catch (err) {}
+    }
+    function cineClearMarkers() {
+      cine.markers.forEach(marker => marker.remove());
+      cine.markers = [];
+    }
+    function cineFail(err) {
+      if (cine.failed) return;
+      cine.failed = true;
+      cine.playing = false;
+      cineStopAnim();
+      cineClearMarkers();
+      post('cinematic_error', { message: String((err && err.message) || err || 'cinematic playback failed') });
+      try { renderRoute(); } catch (fallbackErr) {}
+    }
+    function sliceCoords(slice) {
+      const coords = demo.route || [];
+      if (coords.length < 2) return coords;
+      const s = Math.max(0, Math.min(1, (slice && slice[0]) || 0));
+      const rawEnd = slice && slice[1] != null ? slice[1] : 1;
+      const e = Math.max(s, Math.min(1, rawEnd));
+      const si = Math.floor(s * (coords.length - 1));
+      const ei = Math.max(si + 1, Math.ceil(e * (coords.length - 1)));
+      return coords.slice(si, ei + 1);
+    }
+    function ensureRouteLayers() {
+      if (demo.route.length < 2) return;
+      if (!map.getSource('route-full')) {
+        map.addSource('route-full', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: demo.route } } });
+        map.addLayer({ id: 'route-casing', type: 'line', source: 'route-full', paint: { 'line-color': '#0f172a', 'line-width': 9, 'line-opacity': .72 } });
+      }
+      if (!map.getSource('route-anim')) {
+        map.addSource('route-anim', { type: 'geojson', data: { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } } });
+        map.addLayer({ id: 'route-anim-line', type: 'line', source: 'route-anim', paint: { 'line-color': '#00a7ff', 'line-width': 5, 'line-opacity': .96 } });
+      }
+    }
+    function setProgressLine(ratio) {
+      if (demo.route.length < 2) return;
+      const clamped = Math.max(0, Math.min(1, ratio));
+      const count = Math.max(2, Math.ceil(clamped * demo.route.length));
+      map.getSource('route-anim')?.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: demo.route.slice(0, count) } });
+    }
+    function ensureTerrain(scene) {
+      const wants = (scene.layers && scene.layers.terrain) || demo.activeStyle === '3d_terrain';
+      if (!wants) return;
+      try {
+        if (!map.getSource('mapbox-dem')) {
+          map.addSource('mapbox-dem', { type: 'raster-dem', url: 'mapbox://mapbox.mapbox-terrain-dem-v1', tileSize: 512, maxzoom: 14 });
+        }
+        map.setTerrain({ source: 'mapbox-dem', exaggeration: 1.25 });
+      } catch (err) {}
+    }
+    function cineMarkerClass(kind) {
+      const k = String(kind || '');
+      if (k === 'checkpoint') return 'checkpoint';
+      if (k === 'fuel') return 'fuel';
+      if (k === 'camp') return 'camp';
+      if (k === 'trail') return 'trail_stop';
+      if (k === 'monument') return 'monument_stop';
+      if (k === 'risk') return 'weather_risk';
+      return 'place';
+    }
+    function cineLabel(kind, idx) {
+      const k = String(kind || '');
+      if (k === 'checkpoint') return String(idx + 1);
+      if (k === 'fuel') return 'F';
+      if (k === 'camp') return 'S';
+      if (k === 'trail') return 'T';
+      if (k === 'monument') return 'M';
+      if (k === 'risk') return '!';
+      return '•';
+    }
+    function showCallouts(scene) {
+      cineClearMarkers();
+      (scene.callouts || []).forEach((callout, i) => {
+        if (!isFinite(callout.lat) || !isFinite(callout.lng)) return;
+        const el = document.createElement('div');
+        let cls = 'marker ' + cineMarkerClass(callout.kind);
+        if (scene.layers && scene.layers.warning) cls += ' callout-warning';
+        el.className = cls;
+        el.textContent = cineLabel(callout.kind, i);
+        const popup = new mapboxgl.Popup({ offset: 18, closeButton: false, className: 'popup' })
+          .setHTML('<b>' + String(callout.title || 'Stop').replace(/[<>&]/g, '') + '</b>' + String(callout.note || '').replace(/[<>&]/g, ''));
+        el.addEventListener('click', event => {
+          event.stopPropagation();
+          selectPlace({ id: callout.id, type: callout.kind, title: callout.title, note: callout.note, lat: callout.lat, lng: callout.lng }, 'place');
+        });
+        const marker = new mapboxgl.Marker({ element: el, anchor: 'center' })
+          .setLngLat([callout.lng, callout.lat])
+          .setPopup(popup)
+          .addTo(map);
+        cine.markers.push(marker);
+        setTimeout(() => el.classList.add('show'), 260 + i * 120);
+      });
+    }
+    function cineElapsed(now) {
+      return now - cine.sceneStart - cine.pausedTotal;
+    }
+    function cineApplyCamera(scene) {
+      const cam = scene.camera || { mode: 'fit' };
+      const pitch = Math.max(0, Math.min(70, cam.pitch != null ? cam.pitch : 45));
+      if (cam.mode === 'fit' || !scene.focus) {
+        const coords = sliceCoords(scene.routeSlice || [0, 1]);
+        if (coords.length > 1) {
+          const b = new mapboxgl.LngLatBounds();
+          coords.forEach(c => b.extend(c));
+          if (scene.type === 'intro' || scene.type === 'whole_route' || scene.type === 'mission_recap') {
+            demo.checkpoints.forEach(p => b.extend([p.lng, p.lat]));
+          }
+          if (!b.isEmpty()) {
+            map.fitBounds(b, { padding: { top: ${mapTopPadding}, bottom: ${mapBottomPadding}, left: 48, right: 48 }, duration: 1500, pitch, maxZoom: 12 });
+          }
+        } else if (scene.focus) {
+          map.flyTo({ center: [scene.focus.lng, scene.focus.lat], zoom: Math.min(cam.zoom || 10, 13.5), pitch, duration: 1900, essential: true });
+        }
+        return;
+      }
+      if (cam.mode === 'follow') {
+        const coords = sliceCoords(scene.routeSlice || [0, 1]);
+        const start = coords[0] || [scene.focus.lng, scene.focus.lat];
+        map.easeTo({ center: start, zoom: Math.min(cam.zoom || 9.5, 12), pitch, duration: 1200, essential: true });
+        return;
+      }
+      map.flyTo({
+        center: [scene.focus.lng, scene.focus.lat],
+        zoom: Math.min(cam.zoom || 11.5, 13.5),
+        pitch,
+        bearing: cam.bearing != null ? cam.bearing : map.getBearing(),
+        duration: 2100,
+        essential: true
+      });
+    }
+    function cineRunLoop(scene) {
+      const duration = Math.max(2400, Number(scene.durationMs) || 5000);
+      const cam = scene.camera || {};
+      const slice = scene.routeSlice;
+      const coords = slice ? sliceCoords(slice) : null;
+      let orbitBase = null;
+      function frame(now) {
+        if (cine.failed || cine.paused) { cine.raf = null; return; }
+        const elapsed = cineElapsed(now);
+        const t = Math.max(0, Math.min(1, elapsed / duration));
+        try {
+          if (scene.type === 'whole_route') {
+            setProgressLine(t);
+          } else if (scene.type === 'mission_recap') {
+            setProgressLine(1);
+          } else if (cam.mode === 'follow' && coords && coords.length > 1 && slice) {
+            setProgressLine(slice[0] + (slice[1] - slice[0]) * t);
+            if (elapsed > 1300) {
+              const fpos = t * (coords.length - 1);
+              const fi = Math.floor(fpos);
+              const frac = fpos - fi;
+              const c0 = coords[Math.min(fi, coords.length - 1)];
+              const c1 = coords[Math.min(fi + 1, coords.length - 1)];
+              map.jumpTo({ center: [c0[0] + (c1[0] - c0[0]) * frac, c0[1] + (c1[1] - c0[1]) * frac] });
+            }
+          } else if (cam.mode === 'orbit' && elapsed > 2200) {
+            if (orbitBase === null) orbitBase = map.getBearing();
+            const ot = Math.max(0, Math.min(1, (elapsed - 2200) / Math.max(1, duration - 2200)));
+            map.setBearing(orbitBase + 70 * ot);
+          }
+        } catch (err) { cineFail(err); return; }
+        if (t >= 1) { cineFinishScene(); return; }
+        cine.raf = requestAnimationFrame(frame);
+      }
+      cine.raf = requestAnimationFrame(frame);
+    }
+    function cineStartScene(i) {
+      if (cine.failed) return;
+      if (i >= cine.scenes.length) { cineComplete(); return; }
+      const scene = cine.scenes[i];
+      cine.index = i;
+      cine.sceneStart = performance.now();
+      cine.pausedTotal = 0;
+      cine.paused = false;
+      post('cinematic_scene_started', { sceneId: scene.id, sceneType: scene.type, index: i });
+      try {
+        ensureRouteLayers();
+        ensureTerrain(scene);
+        showCallouts(scene);
+        cineApplyCamera(scene);
+      } catch (err) { cineFail(err); return; }
+      cineRunLoop(scene);
+    }
+    function cineFinishScene() {
+      cineStopAnim();
+      const scene = cine.scenes[cine.index];
+      post('cinematic_scene_finished', { sceneId: scene && scene.id, index: cine.index });
+      cineStartScene(cine.index + 1);
+    }
+    function cineComplete() {
+      cine.playing = false;
+      cine.paused = false;
+      cineStopAnim();
+      cineClearMarkers();
+      setProgressLine(1);
+      demo.places.forEach((p, i) => addMarker(p, i, false));
+      demo.checkpoints.forEach((p, i) => addMarker(p, i, true));
+      post('cinematic_complete', { scenes: cine.scenes.length });
+    }
+    window.__cinematic = {
+      replay() {
+        if (!cine.scenes.length) return;
+        cine.failed = false;
+        cine.playing = true;
+        cine.paused = false;
+        cineStopAnim();
+        clearMarkers();
+        cineClearMarkers();
+        setProgressLine(0.001);
+        post('cinematic_started', {});
+        cineStartScene(0);
+      },
+      pause() {
+        if (!cine.playing || cine.paused) return;
+        cine.paused = true;
+        cine.pausedAt = performance.now();
+        cineStopAnim();
+        post('cinematic_paused', { index: cine.index });
+      },
+      resume() {
+        if (!cine.playing || !cine.paused) return;
+        cine.pausedTotal += performance.now() - cine.pausedAt;
+        cine.paused = false;
+        post('cinematic_resumed', { index: cine.index });
+        const scene = cine.scenes[cine.index];
+        if (scene) cineRunLoop(scene);
+      },
+      skip() {
+        if (!cine.playing || cine.failed) return;
+        if (cine.paused) {
+          cine.pausedTotal += performance.now() - cine.pausedAt;
+          cine.paused = false;
+        }
+        cineFinishScene();
+      }
+    };
+    function startCinematic() {
+      try {
+        ensureRouteLayers();
+        setProgressLine(0.001);
+        document.getElementById('loading')?.classList.add('hide');
+        post('ready', {});
+        post('cinematic_ready', { scenes: cine.scenes.length });
+        cine.playing = true;
+        post('cinematic_started', {});
+        cineStartScene(0);
+      } catch (err) { cineFail(err); }
+    }
+    function restoreAfterStyleSwitch() {
+      try {
+        ensureRouteLayers();
+        const scene = cine.scenes[cine.index];
+        if (scene) {
+          ensureTerrain(scene);
+          if (scene.routeSlice) setProgressLine(scene.routeSlice[1]);
+        } else {
+          setProgressLine(1);
+        }
+      } catch (err) { cineFail(err); }
+    }
+    map.on('load', () => {
+      if (!cine.failed && cine.scenes.length > 1 && demo.route.length > 1) {
+        startCinematic();
+      } else {
+        renderRoute();
+      }
+    });
     map.on('click', event => {
       window.ReactNativeWebView?.postMessage(JSON.stringify({
         type: 'map_tap',
@@ -597,6 +929,15 @@ export default function ExplorerExplorerScreen() {
   const [missionBrief, setMissionBrief] = useState<MissionControlBrief | null>(null);
   const [missionLoading, setMissionLoading] = useState(false);
   const [welcomeSetupPreferences, setWelcomeSetupPreferences] = useState<WelcomeSetupPreferences | null>(null);
+  const webViewRef = useRef<ExplorerWebViewHandle | null>(null);
+  const [copilotPresence, setCopilotPresence] = useState<CopilotPresenceState>('building');
+  const [activeScene, setActiveScene] = useState<MissionScene | null>(null);
+  const [activeSceneIndex, setActiveSceneIndex] = useState(0);
+  const [cinematicPlaying, setCinematicPlaying] = useState(false);
+  const [cinematicPaused, setCinematicPaused] = useState(false);
+  const [cinematicComplete, setCinematicComplete] = useState(false);
+  const [cinematicError, setCinematicError] = useState(false);
+  const presenceAfterSpeechRef = useRef<CopilotPresenceState>('flying');
   const surface: ExplorerSurface = params.surface === 'route_builder' ? 'route_builder' : 'map';
 
   const route = useMemo(() => routeFromTrip(activeTrip), [activeTrip?.trip_id, activeTrip?.route_geometry?.ts]);
@@ -613,6 +954,21 @@ export default function ExplorerExplorerScreen() {
   );
   const summary = useMemo(() => missionBrief?.summary || coPilotSummary(places), [missionBrief?.summary, places]);
   const missionEnabled = config?.feature_flags?.mission_control !== false && config?.feature_flags?.adventure_scores !== false;
+  const cinematic = useMemo<MissionCinematic | null>(() => {
+    if (route.length < 2) return null;
+    try {
+      return buildMissionCinematic({
+        tripId: activeTrip?.trip_id ?? null,
+        tripName: activeTrip?.plan.trip_name ?? 'Explorer route',
+        route,
+        checkpoints,
+        places,
+        missionBrief,
+      });
+    } catch {
+      return null;
+    }
+  }, [activeTrip?.plan.trip_name, activeTrip?.trip_id, checkpoints, missionBrief, places, route]);
 
   useEffect(() => {
     let cancelled = false;
@@ -754,16 +1110,31 @@ export default function ExplorerExplorerScreen() {
       tripName: activeTrip?.plan.trip_name ?? 'Explorer',
       features: config.feature_flags,
       weatherLayers: config.weather?.enabled ? (config.weather.layers ?? []) : [],
-      copilotVoice: false,
+      copilotVoice: true,
       navigationEnabled: !!config.navigation?.enabled && config.allowed_surfaces.includes('navigation'),
       safeTop: insets.top,
       safeBottom: insets.bottom,
+      cinematic,
+      previewMode: cinematic && cinematic.scenes.length > 0 ? 'cinematic' : 'static',
     };
-  }, [activeTrip?.plan.trip_name, checkpoints, config, insets.bottom, insets.top, places, route, summary]);
+  }, [activeTrip?.plan.trip_name, checkpoints, cinematic, config, insets.bottom, insets.top, places, route, summary]);
 
-  function speak(message: string) {
-    return;
-  }
+  const showCinematicUi = payload?.previewMode === 'cinematic' && !cinematicError;
+
+  const speak = useCallback((message: string) => {
+    const text = safeText(message);
+    if (!text) return;
+    playTrailheadVoice(text, 'guide', undefined, {
+      onStart: () => setCopilotPresence('speaking'),
+      onFinish: () => setCopilotPresence(presenceAfterSpeechRef.current),
+    }).catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      stopTrailheadVoice().catch(() => {});
+    };
+  }, []);
 
   async function stageCopilotCommand(action: string) {
     if (!sessionIdRef.current) return;
@@ -1020,10 +1391,124 @@ export default function ExplorerExplorerScreen() {
     );
   }
 
+  function logCinematicEvent(eventType: string, eventData: Record<string, unknown> = {}) {
+    if (!sessionIdRef.current) return;
+    api.logExplorerLedger({
+      session_id: sessionIdRef.current,
+      event_type: eventType,
+      surface,
+      trip_id: activeTrip?.trip_id ?? null,
+      event_data: eventData,
+    }).catch(() => {});
+  }
+
+  function sendCinematicCommand(command: 'replay' | 'pause' | 'resume' | 'skip') {
+    try {
+      webViewRef.current?.injectJavaScript(
+        `window.__cinematic && typeof window.__cinematic.${command} === 'function' && window.__cinematic.${command}(); true;`,
+      );
+    } catch {}
+  }
+
+  function handleCinematicReplay() {
+    stopTrailheadVoice().catch(() => {});
+    setCinematicComplete(false);
+    setCinematicError(false);
+    setCinematicPaused(false);
+    presenceAfterSpeechRef.current = 'flying';
+    sendCinematicCommand('replay');
+    logCinematicEvent('cinematic_replay');
+  }
+
+  function handleCinematicPauseResume() {
+    if (cinematicPaused) {
+      sendCinematicCommand('resume');
+    } else {
+      stopTrailheadVoice().catch(() => {});
+      sendCinematicCommand('pause');
+    }
+  }
+
+  function handleCinematicSkip() {
+    stopTrailheadVoice().catch(() => {});
+    sendCinematicCommand('skip');
+  }
+
+  function handleCinematicMessage(data: any) {
+    if (data.type === 'cinematic_ready') {
+      setCinematicError(false);
+      setCopilotPresence('building');
+      logCinematicEvent('cinematic_opened', { scenes: cinematic?.scenes.length ?? 0 });
+      return;
+    }
+    if (data.type === 'cinematic_started') {
+      setCinematicPlaying(true);
+      setCinematicPaused(false);
+      setCinematicComplete(false);
+      setCinematicError(false);
+      presenceAfterSpeechRef.current = 'flying';
+      setCopilotPresence('flying');
+      return;
+    }
+    if (data.type === 'cinematic_scene_started') {
+      const index = Number(data.index ?? 0);
+      const scene = cinematic?.scenes.find(item => item.id === data.sceneId) ?? cinematic?.scenes[index] ?? null;
+      setActiveSceneIndex(index);
+      setActiveScene(scene);
+      setCinematicPlaying(true);
+      setCinematicPaused(false);
+      const basePresence: CopilotPresenceState = scene?.layers?.warning ? 'warning' : 'flying';
+      presenceAfterSpeechRef.current = scene?.type === 'mission_recap' ? 'complete' : basePresence;
+      setCopilotPresence(basePresence);
+      if (scene?.narration) speak(scene.narration);
+      logCinematicEvent('cinematic_scene_started', { scene_id: scene?.id ?? data.sceneId, scene_type: scene?.type, index });
+      return;
+    }
+    if (data.type === 'cinematic_scene_finished') {
+      return;
+    }
+    if (data.type === 'cinematic_paused') {
+      setCinematicPaused(true);
+      setCopilotPresence('paused');
+      logCinematicEvent('cinematic_pause', { index: activeSceneIndex });
+      return;
+    }
+    if (data.type === 'cinematic_resumed') {
+      setCinematicPaused(false);
+      const scene = activeScene;
+      setCopilotPresence(scene?.layers?.warning ? 'warning' : 'flying');
+      logCinematicEvent('cinematic_resume', { index: activeSceneIndex });
+      return;
+    }
+    if (data.type === 'cinematic_complete') {
+      setCinematicPlaying(false);
+      setCinematicPaused(false);
+      setCinematicComplete(true);
+      presenceAfterSpeechRef.current = 'complete';
+      setCopilotPresence('complete');
+      logCinematicEvent('cinematic_complete', { scenes: cinematic?.scenes.length ?? 0 });
+      return;
+    }
+    if (data.type === 'cinematic_error') {
+      setCinematicPlaying(false);
+      setCinematicPaused(false);
+      setCinematicError(true);
+      setActiveScene(null);
+      presenceAfterSpeechRef.current = 'idle';
+      setCopilotPresence('idle');
+      stopTrailheadVoice().catch(() => {});
+      logCinematicEvent('cinematic_error', { message: safeText(data.message).slice(0, 200) });
+    }
+  }
+
   function handleMessage(event: any) {
     let data: any = null;
     try { data = JSON.parse(event.nativeEvent.data); } catch {}
     if (!data || !sessionIdRef.current) return;
+    if (typeof data.type === 'string' && data.type.startsWith('cinematic_')) {
+      handleCinematicMessage(data);
+      return;
+    }
     if (data.type === 'chip') {
       if (data.action === 'start_guidance') {
         confirmGuidance();
@@ -1094,6 +1579,7 @@ export default function ExplorerExplorerScreen() {
   return (
     <View style={styles.screen}>
       <WebView
+        ref={webViewRef}
         originWhitelist={['*']}
         source={{ html: makeHtml(payload) }}
         onMessage={handleMessage}
@@ -1111,14 +1597,40 @@ export default function ExplorerExplorerScreen() {
           <Text style={styles.titleText} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Route preview'}</Text>
         </View>
       </View>
-      {!selectedPlace && missionEnabled && (
+      {!selectedPlace && (missionEnabled || showCinematicUi) && (
         <View pointerEvents="box-none" style={[styles.missionWrap, { bottom: insets.bottom + 16 }]}>
-          <MissionControlPanel
-            brief={missionBrief}
-            loading={missionLoading}
-            onRefresh={refreshMissionControl}
-            onRecommendation={runMissionRecommendation}
-          />
+          {showCinematicUi && (
+            <View pointerEvents="box-none" style={styles.cinematicBlock}>
+              <View pointerEvents="box-none" style={styles.cinematicRow}>
+                <CopilotPresenceOrb state={copilotPresence} />
+                <View style={styles.cinematicCaption} pointerEvents="none">
+                  <TripPreviewCaption
+                    scene={activeScene}
+                    sceneIndex={activeSceneIndex}
+                    sceneCount={cinematic?.scenes.length ?? 0}
+                  />
+                </View>
+              </View>
+              <View style={styles.cinematicControls}>
+                <TripPreviewControls
+                  playing={cinematicPlaying}
+                  paused={cinematicPaused}
+                  complete={cinematicComplete}
+                  onReplay={handleCinematicReplay}
+                  onPauseResume={handleCinematicPauseResume}
+                  onSkip={handleCinematicSkip}
+                />
+              </View>
+            </View>
+          )}
+          {missionEnabled && (
+            <MissionControlPanel
+              brief={missionBrief}
+              loading={missionLoading}
+              onRefresh={refreshMissionControl}
+              onRecommendation={runMissionRecommendation}
+            />
+          )}
         </View>
       )}
       <PremiumPlaceSheet
@@ -1221,7 +1733,12 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     zIndex: 4,
+    gap: 10,
   },
+  cinematicBlock: { gap: 8 },
+  cinematicRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
+  cinematicCaption: { flex: 1 },
+  cinematicControls: { flexDirection: 'row', justifyContent: 'flex-end' },
   titleKicker: { color: '#fb923c', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 },
   titleText: { color: '#f8fafc', fontSize: 12, fontWeight: '800', marginTop: 2 },
   blocked: { flex: 1 },

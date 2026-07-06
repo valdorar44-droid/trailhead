@@ -6,6 +6,24 @@ import type { MissionBriefCallout } from './mapMissionBrief';
 
 type Point = { lat: number; lng: number };
 
+/**
+ * Cinematic mission-brief camera engine.
+ *
+ * Motion is distance-based, not index-based: we precompute cumulative metric
+ * distances along the route once, then sample the camera position by distance so
+ * pacing stays even regardless of how densely the route is sampled. Camera
+ * updates are throttled to ~8fps with short easeTo tweens and smoothed bearings
+ * so the flythrough reads like a slow game/movie preview instead of a jittery
+ * per-frame chase.
+ */
+
+// Throttle camera + progress updates to ~8fps (game-cutscene cadence).
+const FRAME_MS = 120;
+// How strongly the camera bearing eases toward the route heading each tick (0..1).
+const BEARING_EASE = 0.16;
+// Minimum per-scene wall-clock before speed scaling (kept generous for a slow feel).
+const SCENE_FLOOR_MS = 7000;
+
 function sliceRoute(route: [number, number][], slice: [number, number] = [0, 1]): [number, number][] {
   if (route.length < 2) return route;
   const s = Math.max(0, Math.min(1, slice[0] ?? 0));
@@ -15,25 +33,71 @@ function sliceRoute(route: [number, number][], slice: [number, number] = [0, 1])
   return route.slice(si, ei + 1);
 }
 
-function bearingBetween(a: [number, number], b: [number, number]) {
-  const dx = b[0] - a[0];
-  const dy = b[1] - a[1];
-  return (Math.atan2(dx, dy) * 180) / Math.PI;
+/** Great-circle distance in metres between two [lng, lat] points. */
+function haversine(a: [number, number], b: [number, number]) {
+  const R = 6371000;
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const dLat = toRad(b[1] - a[1]);
+  const dLng = toRad(b[0] - a[0]);
+  const lat1 = toRad(a[1]);
+  const lat2 = toRad(b[1]);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
 }
 
-function pointAlong(coords: [number, number][], t: number): Point & { bearing: number } {
-  if (!coords.length) return { lat: 0, lng: 0, bearing: 0 };
-  if (coords.length === 1) return { lat: coords[0][1], lng: coords[0][0], bearing: 0 };
-  const pos = Math.max(0, Math.min(1, t)) * (coords.length - 1);
-  const i = Math.floor(pos);
-  const frac = pos - i;
-  const a = coords[Math.min(i, coords.length - 1)];
-  const b = coords[Math.min(i + 1, coords.length - 1)];
+/** Cumulative distance (metres) at each vertex; cum[0] === 0. */
+function cumulativeDistances(route: [number, number][]): number[] {
+  const cum = [0];
+  for (let i = 1; i < route.length; i += 1) {
+    cum[i] = cum[i - 1] + haversine(route[i - 1], route[i]);
+  }
+  return cum;
+}
+
+/** Interpolate a point at a given metric distance along the route. */
+function pointAtDistance(route: [number, number][], cum: number[], dist: number): Point {
+  if (route.length === 0) return { lat: 0, lng: 0 };
+  if (route.length === 1) return { lat: route[0][1], lng: route[0][0] };
+  const total = cum[cum.length - 1];
+  if (total <= 0) return { lat: route[0][1], lng: route[0][0] };
+  const d = Math.max(0, Math.min(total, dist));
+  let i = 1;
+  while (i < cum.length && cum[i] < d) i += 1;
+  const i0 = Math.max(0, i - 1);
+  const i1 = Math.min(route.length - 1, i);
+  const seg = cum[i1] - cum[i0];
+  const f = seg > 0 ? (d - cum[i0]) / seg : 0;
   return {
-    lng: a[0] + (b[0] - a[0]) * frac,
-    lat: a[1] + (b[1] - a[1]) * frac,
-    bearing: bearingBetween(a, b),
+    lng: route[i0][0] + (route[i1][0] - route[i0][0]) * f,
+    lat: route[i0][1] + (route[i1][1] - route[i0][1]) * f,
   };
+}
+
+/** Compass bearing (deg, 0..360) from a to b, both [lng, lat]. */
+function bearingLngLat(a: [number, number], b: [number, number]) {
+  const toRad = (d: number) => (d * Math.PI) / 180;
+  const lat1 = toRad(a[1]);
+  const lat2 = toRad(b[1]);
+  const dLng = toRad(b[0] - a[0]);
+  const y = Math.sin(dLng) * Math.cos(lat2);
+  const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(dLng);
+  return (Math.atan2(y, x) * 180) / Math.PI;
+}
+
+/** Ease an angle toward a target along the shortest arc. */
+function smoothAngle(prev: number | null, target: number, factor: number) {
+  if (prev == null || !Number.isFinite(prev)) return target;
+  const diff = ((target - prev + 540) % 360) - 180;
+  return prev + diff * factor;
+}
+
+/** Conservative follow zoom picked from the length of the flown slice. */
+function zoomForSliceLengthKm(km: number) {
+  if (km > 90) return 8.8;
+  if (km > 55) return 9.6;
+  if (km > 30) return 10.6;
+  if (km > 14) return 11.6;
+  return 12.4;
 }
 
 function boundsFromCoords(coords: [number, number][], extra: Point[] = []) {
@@ -76,6 +140,7 @@ export type NativeMissionBriefPlayer = {
   resume: () => void;
   skip: () => void;
   stop: () => void;
+  setSpeed: (speed: number) => void;
 };
 
 export function startNativeMissionBriefPlayer(opts: {
@@ -85,6 +150,8 @@ export function startNativeMissionBriefPlayer(opts: {
   nativeMapRef: MutableRefObject<NativeMapHandle | null>;
   webRef: MutableRefObject<{ postMessage: (msg: string) => void } | null>;
   useNativeOverlays?: boolean;
+  /** Playback speed multiplier. Effective duration = baseDuration / speed. */
+  initialSpeed?: number;
   ensure3d: () => void;
   onReady: () => void;
   onStarted: () => void;
@@ -94,6 +161,8 @@ export function startNativeMissionBriefPlayer(opts: {
   onResumed: (index: number) => void;
   onComplete: () => void;
   onError: (message: string) => void;
+  /** Non-fatal notice (e.g. 3D terrain unavailable — flying in map mode). */
+  onNotice?: (message: string) => void;
   onFullRoute?: (route: [number, number][]) => void;
   onProgressRoute?: (coords: [number, number][]) => void;
   onMarkerMove?: (point: Point | null) => void;
@@ -108,6 +177,7 @@ export function startNativeMissionBriefPlayer(opts: {
     nativeMapRef,
     webRef,
     useNativeOverlays = true,
+    initialSpeed = 1,
     ensure3d,
     onReady,
     onStarted,
@@ -117,6 +187,7 @@ export function startNativeMissionBriefPlayer(opts: {
     onResumed,
     onComplete,
     onError,
+    onNotice,
     onFullRoute,
     onProgressRoute,
     onMarkerMove,
@@ -124,6 +195,10 @@ export function startNativeMissionBriefPlayer(opts: {
     onWarningChange,
     onSceneRoute,
   } = opts;
+
+  // Precompute distance geometry once for the full route.
+  const routeCum = cumulativeDistances(route);
+  const routeTotal = routeCum[routeCum.length - 1] || 0;
 
   let index = -1;
   let playing = false;
@@ -133,13 +208,33 @@ export function startNativeMissionBriefPlayer(opts: {
   let sceneStart = 0;
   let pausedAt = 0;
   let pausedTotal = 0;
-  let orbitBase: number | null = null;
   let stopped = false;
+  let speed = Number.isFinite(initialSpeed) && initialSpeed > 0 ? initialSpeed : 1;
+  let sceneDuration = SCENE_FLOOR_MS;
+  let lastFrameTs = 0;
+  let smoothedBearing: number | null = null;
+  let noticedNo3d = false;
 
   const postWeb = (payload: Record<string, unknown>) => {
     if (useNativeOverlays) return;
     webRef.current?.postMessage(JSON.stringify(payload));
   };
+
+  const tryEnsure3d = () => {
+    try {
+      ensure3d();
+    } catch {
+      if (!noticedNo3d) {
+        noticedNo3d = true;
+        onNotice?.('3D terrain unavailable — flying in map mode.');
+      }
+    }
+  };
+
+  function effectiveDuration(scene: MissionScene) {
+    const base = Math.max(SCENE_FLOOR_MS, Number(scene.durationMs) || 12000);
+    return Math.max(1500, base / Math.max(0.25, speed));
+  }
 
   function emitProgress(ratio: number, sceneCoords?: [number, number][] | null) {
     const progressCoords = progressRouteFromRatio(route, ratio);
@@ -147,7 +242,7 @@ export function startNativeMissionBriefPlayer(opts: {
     if (sceneCoords && sceneCoords.length >= 2) {
       onSceneRoute?.(sceneCoords);
     }
-    const marker = pointAlong(route, ratio);
+    const marker = pointAtDistance(route, routeCum, ratio * routeTotal);
     onMarkerMove?.({ lat: marker.lat, lng: marker.lng });
     postWeb({ type: 'mission_brief_progress', ratio });
   }
@@ -161,72 +256,77 @@ export function startNativeMissionBriefPlayer(opts: {
     return now - sceneStart - pausedTotal;
   }
 
-  function flyCamera(scene: MissionScene, coords: [number, number][], point?: Point & { bearing?: number }) {
-    const cam = scene.camera || { mode: 'fit' };
-    const pitch = Math.max(48, Math.min(72, cam.pitch ?? (cam.mode === 'follow' ? 66 : 58)));
-    const zoom = Math.min(cam.zoom ?? (cam.mode === 'follow' ? 12.4 : cam.mode === 'orbit' ? 13.2 : 11), 14.5);
-    const target = point ?? (scene.focus ? { lat: scene.focus.lat, lng: scene.focus.lng } : null);
-    if (!target) return;
+  function followCamera(scene: MissionScene, center: Point, bearing: number, zoom: number) {
+    const cam = scene.camera || { mode: 'follow' };
+    const pitch = Math.max(58, Math.min(68, cam.pitch ?? 64));
     nativeMapRef.current?.flyToCamera?.({
-      lat: target.lat,
-      lng: target.lng,
+      lat: center.lat,
+      lng: center.lng,
       zoom,
       pitch,
-      bearing: point?.bearing ?? cam.bearing,
-      duration: cam.mode === 'follow' ? 0 : 2400,
-      mode: cam.mode === 'follow' ? 'easeTo' : 'flyTo',
+      bearing,
+      duration: 150,
+      mode: 'easeTo',
     });
-    postWeb({
-      type: 'fly_to',
-      lat: target.lat,
-      lng: target.lng,
-      zoom,
-      pitch,
-      bearing: point?.bearing ?? cam.bearing,
-      duration: cam.mode === 'follow' ? 0 : 2400,
-    });
+    postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: 150 });
   }
 
   function applySceneCamera(scene: MissionScene) {
     const cam = scene.camera || { mode: 'fit' };
     const coords = sliceRoute(route, scene.routeSlice ?? [0, 1]);
+    smoothedBearing = null;
+
+    // Overview / fit shots (intro, whole-route, recap, offline) — single slow flyTo.
     if (cam.mode === 'fit' || (!scene.focus && coords.length < 2)) {
       const extra = ['intro', 'whole_route', 'mission_recap'].includes(scene.type)
         ? checkpoints.filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng))
         : [];
       const bounds = boundsFromCoords(coords, extra);
       if (bounds) {
-        const zoom = scene.type === 'whole_route'
-          ? Math.max(8.8, 11.2 - bounds.span * 1.8)
-          : Math.max(9.2, 12 - bounds.span * 2.2);
+        // Fit-to-span: derive zoom from the geographic span so the whole route is
+        // actually visible, from a tight canyon loop to a multi-state corridor.
+        const spanDeg = Math.max(bounds.span, 0.02);
+        const zoom = Math.max(4.5, Math.min(12.5, Math.log2(190 / spanDeg)));
         nativeMapRef.current?.flyToCamera?.({
           lat: bounds.center.lat,
           lng: bounds.center.lng,
           zoom,
-          pitch: cam.pitch ?? 58,
-          duration: 2200,
+          pitch: cam.pitch ?? 54,
+          duration: 2600,
           mode: 'flyTo',
         });
-        postWeb({
-          type: 'fly_to',
-          lat: bounds.center.lat,
-          lng: bounds.center.lng,
-          zoom,
-          pitch: cam.pitch ?? 58,
-          duration: 2200,
-        });
+        postWeb({ type: 'fly_to', lat: bounds.center.lat, lng: bounds.center.lng, zoom, pitch: cam.pitch ?? 54, duration: 2600 });
       } else if (scene.focus) {
-        flyCamera(scene, coords, { lat: scene.focus.lat, lng: scene.focus.lng });
+        nativeMapRef.current?.flyToCamera?.({
+          lat: scene.focus.lat, lng: scene.focus.lng, zoom: cam.zoom ?? 12, pitch: cam.pitch ?? 58, duration: 2400, mode: 'flyTo',
+        });
       }
       return;
     }
+
+    // Follow / drive shots — glide the camera onto the start of the slice.
     if (cam.mode === 'follow' && coords.length > 1) {
-      const start = pointAlong(coords, 0);
-      flyCamera(scene, coords, start);
+      const sliceStartDist = routeTotal * (scene.routeSlice?.[0] ?? 0);
+      const start = pointAtDistance(route, routeCum, sliceStartDist);
+      const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, sliceStartDist + 250));
+      const bearing = bearingLngLat([start.lng, start.lat], [ahead.lng, ahead.lat]);
+      smoothedBearing = bearing;
+      const sliceLenKm = (routeTotal * ((scene.routeSlice?.[1] ?? 1) - (scene.routeSlice?.[0] ?? 0))) / 1000;
+      const zoom = Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 13.4);
+      nativeMapRef.current?.flyToCamera?.({
+        lat: start.lat, lng: start.lng, zoom, pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)), bearing, duration: 2200, mode: 'flyTo',
+      });
+      postWeb({ type: 'fly_to', lat: start.lat, lng: start.lng, zoom, pitch: cam.pitch ?? 64, bearing, duration: 2200 });
       return;
     }
+
+    // Fly / orbit toward a focus point.
     if (scene.focus) {
-      flyCamera(scene, coords, { lat: scene.focus.lat, lng: scene.focus.lng });
+      const zoom = Math.min(cam.zoom ?? (cam.mode === 'orbit' ? 13 : 12.5), 14);
+      nativeMapRef.current?.flyToCamera?.({
+        lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: Math.max(52, Math.min(68, cam.pitch ?? 62)), duration: 2400, mode: 'flyTo',
+      });
+      postWeb({ type: 'fly_to', lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: cam.pitch ?? 62, duration: 2400 });
     }
   }
 
@@ -238,7 +338,7 @@ export function startNativeMissionBriefPlayer(opts: {
     if (scene.focus) {
       onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
     } else if (coords.length >= 2) {
-      const start = pointAlong(coords, 0);
+      const start = pointAtDistance(route, routeCum, routeTotal * (scene.routeSlice?.[0] ?? 0));
       onMarkerMove?.({ lat: start.lat, lng: start.lng });
     }
     if (scene.type === 'whole_route') {
@@ -247,43 +347,54 @@ export function startNativeMissionBriefPlayer(opts: {
   }
 
   function runSceneLoop(scene: MissionScene) {
-    const duration = Math.max(9000, Number(scene.durationMs) || 12000);
     const cam = scene.camera || {};
-    const coords = scene.routeSlice ? sliceRoute(route, scene.routeSlice) : null;
-    orbitBase = null;
+    const hasSlice = !!scene.routeSlice && Array.isArray(scene.routeSlice);
+    const startDist = routeTotal * (scene.routeSlice?.[0] ?? 0);
+    const endDist = routeTotal * (scene.routeSlice?.[1] ?? 1);
+    const sliceLenKm = Math.max(0, (endDist - startDist)) / 1000;
+    const followZoom = Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 13.4);
+    const lookaheadM = Math.max(180, Math.min(1200, (endDist - startDist) * 0.05));
+    lastFrameTs = 0;
 
     const frame = (now: number) => {
       if (stopped || failed || paused) {
         raf = null;
         return;
       }
-      const t = Math.max(0, Math.min(1, elapsed(now) / duration));
+      const t = Math.max(0, Math.min(1, elapsed(now) / sceneDuration));
+      const throttled = now - lastFrameTs < FRAME_MS;
       try {
-        if (cam.mode === 'follow' && coords && coords.length > 1 && scene.routeSlice) {
-          const slice = scene.routeSlice;
-          const progress = slice[0] + (slice[1] - slice[0]) * t;
-          if (elapsed(now) > 700) {
-            const point = pointAlong(coords, t);
-            flyCamera(scene, coords, point);
+        if (cam.mode === 'follow' && hasSlice && routeTotal > 0) {
+          if (!throttled && elapsed(now) > 600) {
+            lastFrameTs = now;
+            const d = startDist + (endDist - startDist) * t;
+            const center = pointAtDistance(route, routeCum, d);
+            const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, d + lookaheadM));
+            const targetBearing = bearingLngLat([center.lng, center.lat], [ahead.lng, ahead.lat]);
+            smoothedBearing = smoothAngle(smoothedBearing, targetBearing, BEARING_EASE);
+            followCamera(scene, center, smoothedBearing, followZoom);
+            emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
           }
-          emitProgress(progress, coords);
-        } else if (cam.mode === 'orbit' && elapsed(now) > 2400) {
-          if (orbitBase == null) orbitBase = 0;
-          const ot = Math.max(0, Math.min(1, (elapsed(now) - 2400) / Math.max(1, duration - 2400)));
-          if (scene.focus) {
+        } else if (cam.mode === 'orbit' && scene.focus && elapsed(now) > 2200) {
+          if (!throttled) {
+            lastFrameTs = now;
+            const ot = Math.max(0, Math.min(1, (elapsed(now) - 2200) / Math.max(1, sceneDuration - 2200)));
             nativeMapRef.current?.flyToCamera?.({
               lat: scene.focus.lat,
               lng: scene.focus.lng,
-              zoom: cam.zoom ?? 13.2,
-              pitch: cam.pitch ?? 66,
-              bearing: orbitBase + 85 * ot,
-              duration: 0,
+              zoom: Math.min(cam.zoom ?? 13, 14),
+              pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)),
+              bearing: 70 * ot,
+              duration: 150,
               mode: 'easeTo',
             });
             onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
           }
         } else if (scene.type === 'whole_route') {
-          emitProgress(t, route);
+          if (!throttled) {
+            lastFrameTs = now;
+            emitProgress(t, route);
+          }
         }
       } catch (err: any) {
         failed = true;
@@ -315,7 +426,8 @@ export function startNativeMissionBriefPlayer(opts: {
     pausedTotal = 0;
     pausedAt = 0;
     paused = false;
-    ensure3d();
+    sceneDuration = effectiveDuration(scene);
+    tryEnsure3d();
     applySceneCamera(scene);
     applySceneOverlays(scene);
     onSceneStarted(scene, i);
@@ -385,5 +497,10 @@ export function startNativeMissionBriefPlayer(opts: {
     postWeb({ type: 'mission_brief_stop' });
   }
 
-  return { replay, pause, resume, skip, stop };
+  function setSpeed(next: number) {
+    // Applies to the next scene (current scene keeps its computed duration).
+    if (Number.isFinite(next) && next > 0) speed = next;
+  }
+
+  return { replay, pause, resume, skip, stop, setSpeed };
 }

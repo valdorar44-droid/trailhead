@@ -2880,9 +2880,14 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       {/* ── Mission briefing overlays ─────────────────────────────────── */}
       {missionBriefActive && missionBriefFullRoute.length > 1 && (
         <MapGL.ShapeSource id="mission-brief-full-route" shape={lineFC(missionBriefFullRoute)}>
+          {/* Dark casing keeps the line readable on satellite/topo */}
+          <MapGL.LineLayer
+            id="mission-brief-full-route-casing"
+            style={{ lineColor: 'rgba(2,6,23,0.85)', lineWidth: 9, lineCap: 'round', lineJoin: 'round' }}
+          />
           <MapGL.LineLayer
             id="mission-brief-full-route-line"
-            style={{ lineColor: 'rgba(55,65,81,0.55)', lineWidth: 7, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.72 }}
+            style={{ lineColor: 'rgba(226,232,240,0.9)', lineWidth: 4.5, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.85 }}
           />
         </MapGL.ShapeSource>
       )}
@@ -2890,11 +2895,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         <MapGL.ShapeSource id="mission-brief-progress-route" shape={lineFC(missionBriefProgressRoute)}>
           <MapGL.LineLayer
             id="mission-brief-progress-shadow"
-            style={{ lineColor: 'rgba(0,0,0,0.35)', lineWidth: 9, lineBlur: 4, lineTranslate: [0, 2] }}
+            style={{ lineColor: 'rgba(2,6,23,0.7)', lineWidth: 10, lineBlur: 3, lineTranslate: [0, 2] }}
           />
           <MapGL.LineLayer
             id="mission-brief-progress-line"
-            style={{ lineColor: '#00a7ff', lineWidth: 6, lineCap: 'round', lineJoin: 'round', lineOpacity: 0.98 }}
+            style={{ lineColor: missionBriefWarning ? '#f59e0b' : '#38e1ff', lineWidth: 6.5, lineCap: 'round', lineJoin: 'round', lineOpacity: 1 }}
           />
         </MapGL.ShapeSource>
       )}

@@ -113,7 +113,7 @@ import { startRealtimeCopilotSession } from '@/lib/realtimeCopilot';
 import { CopilotPresenceOrb, type CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
 import { MissionControlPanel } from '@/components/copilot/MissionControlPanel';
 import { TripPreviewCaption } from '@/components/copilot/TripPreviewCaption';
-import { TripPreviewControls } from '@/components/copilot/TripPreviewControls';
+import { TripPreviewControls, DEFAULT_PREVIEW_SPEED, nextPreviewSpeed } from '@/components/copilot/TripPreviewControls';
 import type { MissionCinematic, MissionScene } from '@/lib/copilotStoryboard';
 import {
   buildMapMissionCinematic,
@@ -5785,10 +5785,15 @@ function MapScreen() {
     warning: false,
   });
   const [copilotBriefPresence, setCopilotBriefPresence] = useState<CopilotPresenceState>('idle');
+  const [mapMissionSpeed, setMapMissionSpeed] = useState<number>(DEFAULT_PREVIEW_SPEED);
+  const mapMissionSpeedRef = useRef<number>(DEFAULT_PREVIEW_SPEED);
+  const [mapMissionPanelExpanded, setMapMissionPanelExpanded] = useState(false);
+  const [mapMissionNotice, setMapMissionNotice] = useState<string | null>(null);
   const mapMissionCinematicRef = useRef<MissionCinematic | null>(null);
   const mapMissionPlayerRef = useRef<NativeMissionBriefPlayer | null>(null);
   const mapMissionPresenceAfterSpeechRef = useRef<CopilotPresenceState>('flying');
   const mapMission3dSnapshotRef = useRef<boolean | null>(null);
+  const mapMissionStyleSnapshotRef = useRef<{ mapLayer: MapLayer; premiumMapStyle: PremiumMapStyle } | null>(null);
   const realtimeCopilotRef = useRef<{ stop: () => void } | null>(null);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
@@ -13580,11 +13585,31 @@ function MapScreen() {
           },
         } : undefined,
         context: {
-          route: { active_route: true, route_ready: route.length > 1 },
-          map: { current_screen: 'map' },
+          route: {
+            active_route: true,
+            route_ready: route.length > 1,
+            point_count: route.length,
+            start: route.length ? { lat: route[0][1], lng: route[0][0] } : undefined,
+            end: route.length ? { lat: route[route.length - 1][1], lng: route[route.length - 1][0] } : undefined,
+          },
+          // Live map awareness: what the user is actually looking at (Mapbox basemap + terrain + region).
+          map: {
+            current_screen: 'map',
+            base_layer: mapLayer,
+            style: premiumMapStyle,
+            terrain_3d: map3dEnabled,
+            center: route.length
+              ? { lat: route[Math.floor(route.length / 2)][1], lng: route[Math.floor(route.length / 2)][0] }
+              : undefined,
+            start_name: routeScout?.startName || activeTrip?.plan?.waypoints?.[0]?.name || undefined,
+            destination_name: routeScout?.destinationName
+              || activeTrip?.plan?.waypoints?.[activeTrip.plan.waypoints.length - 1]?.name
+              || undefined,
+            states: activeTrip?.plan?.states,
+          },
           trip: { active_trip: tripId },
         },
-        metadata: { source: Platform.OS },
+        metadata: { source: Platform.OS, surface: 'cinematic_mission_brief' },
       });
       setMapMissionBrief(brief);
       return brief;
@@ -13594,7 +13619,7 @@ function MapScreen() {
           ok: false,
           generated_at: Math.floor(Date.now() / 1000),
           readiness: 'needs_review',
-          headline: 'Trip needs review',
+          headline: 'Finishing route check',
           summary: error?.message || 'Mission Control could not check this trip yet.',
           scores: [],
           overnights: [],
@@ -13622,6 +13647,8 @@ function MapScreen() {
     setMapMissionError(false);
     setMapMissionScene(null);
     setMapMissionSceneIndex(0);
+    setMapMissionPanelExpanded(false);
+    setMapMissionNotice(null);
     setCopilotBriefPresence('idle');
     setMissionBriefOverlay({
       active: false,
@@ -13635,9 +13662,38 @@ function MapScreen() {
       toggleMap3d();
     }
     mapMission3dSnapshotRef.current = null;
+    // Restore the basemap the user had before Fly the Plan switched to terrain mode.
+    const styleSnap = mapMissionStyleSnapshotRef.current;
+    if (styleSnap && styleSnap.mapLayer !== mapLayer) {
+      if (styleSnap.premiumMapStyle !== premiumMapStyle) setPremiumMapStyle(styleSnap.premiumMapStyle);
+      applyMapLayer(styleSnap.mapLayer, styleSnap.premiumMapStyle);
+    }
+    mapMissionStyleSnapshotRef.current = null;
     if (!USE_NATIVE_MAP) {
       webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_stop' }));
     }
+  }
+
+  // Guarantee a terrain-capable Mapbox mode for the cinematic 3D flythrough.
+  // Returns true if raised 3D terrain is available, false when we fall back to flat map mode.
+  function ensureMissionTerrainMode(): boolean {
+    if (!mapboxToken) return false;
+    if (mapLayer !== 'extreme') {
+      const satellitey = mapLayer === 'satellite' || mapLayer === 'hybrid'
+        || premiumMapStyle === 'standard_satellite' || premiumMapStyle === 'satellite_streets';
+      const nextStyle: PremiumMapStyle = satellitey ? 'standard_satellite' : premiumMapStyle;
+      if (nextStyle !== premiumMapStyle) setPremiumMapStyle(nextStyle);
+      applyMapLayer('extreme', nextStyle);
+    }
+    return true;
+  }
+
+  function cycleMapMissionSpeed() {
+    const next = nextPreviewSpeed(mapMissionSpeedRef.current);
+    mapMissionSpeedRef.current = next;
+    setMapMissionSpeed(next);
+    mapMissionPlayerRef.current?.setSpeed(next);
+    Haptics.selectionAsync().catch(() => {});
   }
 
   async function startMapMissionBrief() {
@@ -13660,8 +13716,17 @@ function MapScreen() {
     }
 
     mapMission3dSnapshotRef.current = map3dEnabled;
+    mapMissionStyleSnapshotRef.current = { mapLayer, premiumMapStyle };
     setMapMissionVisible(true);
+    setMapMissionPanelExpanded(false);
+    setMapMissionNotice(null);
     setShowExtremeCopilot(false);
+    // Put the map in a terrain-capable mode so the flythrough gets real 3D relief.
+    const terrainReady = ensureMissionTerrainMode();
+    if (!terrainReady) {
+      setMapMissionNotice('3D terrain unavailable — flying in map mode.');
+      setTimeout(() => setMapMissionNotice(null), 4200);
+    }
     setMissionBriefOverlay(prev => ({
       ...prev,
       active: true,
@@ -13712,6 +13777,11 @@ function MapScreen() {
       nativeMapRef,
       webRef,
       useNativeOverlays: USE_NATIVE_MAP,
+      initialSpeed: mapMissionSpeedRef.current,
+      onNotice: message => {
+        setMapMissionNotice(message);
+        setTimeout(() => setMapMissionNotice(null), 4200);
+      },
       ensure3d: () => {
         if (!map3dEnabled) toggleMap3d();
         if (!USE_NATIVE_MAP) {
@@ -20566,63 +20636,121 @@ function MapScreen() {
         </View>
       )}
 
-      {mapMissionVisible && mapMissionCinematic && !mapMissionError && (
-        <View pointerEvents="box-none" style={[s.mapMissionBriefWrap, { bottom: bottomInset + (routeScout ? 280 : 120) }]}>
-          <View pointerEvents="box-none" style={s.mapMissionBriefCinematicRow}>
-            <CopilotPresenceOrb state={copilotBriefPresence} />
-            <View style={s.mapMissionBriefCaption} pointerEvents="none">
+      {mapMissionVisible && mapMissionCinematic && !mapMissionError && (() => {
+        const missionControlOn = extremeConfig?.feature_flags?.mission_control !== false;
+        const readiness = mapMissionBrief?.readiness ?? 'needs_review';
+        const readinessColor = readiness === 'ready' ? C.green : readiness === 'blocked' ? C.red : C.orange;
+        const readinessLabel = readiness === 'ready' ? 'READY' : readiness === 'blocked' ? 'BLOCKED' : 'REVIEW';
+        const warnCount = mapMissionBrief?.risks?.length ?? 0;
+        // Map is the hero: full Mission Control only before/after playback, on the
+        // recap scene, or when the user expands it. Otherwise a compact pill.
+        const showFullMissionPanel = !mapMissionPlaying
+          || mapMissionComplete
+          || mapMissionPanelExpanded
+          || mapMissionScene?.type === 'mission_recap';
+        return (
+        <>
+          {/* Top cinematic caption — keeps the route visible underneath */}
+          <View pointerEvents="box-none" style={[s.mapMissionBriefTop, { top: insets.top + 12 }]}>
+            <View pointerEvents="none">
               <TripPreviewCaption
                 scene={mapMissionScene}
                 sceneIndex={mapMissionSceneIndex}
                 sceneCount={mapMissionCinematic.scenes.length}
               />
             </View>
+            {mapMissionNotice ? (
+              <View style={s.mapMissionNotice} pointerEvents="none">
+                <Ionicons name="information-circle-outline" size={13} color="#fbbf24" />
+                <Text style={s.mapMissionNoticeText} numberOfLines={1}>{mapMissionNotice}</Text>
+              </View>
+            ) : null}
           </View>
-          <View style={s.mapMissionBriefControls}>
-            <TripPreviewControls
-              playing={mapMissionPlaying}
-              paused={mapMissionPaused}
-              complete={mapMissionComplete}
-              onReplay={() => {
-                mapMissionPlayerRef.current?.replay();
-                if (!USE_NATIVE_MAP) {
-                  webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'replay' }));
-                }
-              }}
-              onPauseResume={() => {
-                if (mapMissionPaused) {
-                  mapMissionPlayerRef.current?.resume();
-                  if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'resume' }));
-                } else {
-                  mapMissionPlayerRef.current?.pause();
-                  if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
-                }
-              }}
-              onSkip={() => {
-                mapMissionPlayerRef.current?.skip();
-                if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'skip' }));
-              }}
-            />
-            <TouchableOpacity style={s.mapMissionBriefClose} onPress={stopMapMissionBrief}>
-              <Ionicons name="close" size={16} color={C.text2} />
-            </TouchableOpacity>
+
+          {/* Bottom control dock */}
+          <View pointerEvents="box-none" style={[s.mapMissionBriefWrap, { bottom: bottomInset + 14 }]}>
+            {missionControlOn && showFullMissionPanel ? (
+              <View pointerEvents="box-none">
+                {mapMissionPlaying && !mapMissionComplete && mapMissionScene?.type !== 'mission_recap' ? (
+                  <TouchableOpacity
+                    style={s.mapMissionPanelCollapse}
+                    onPress={() => setMapMissionPanelExpanded(false)}
+                    accessibilityLabel="Hide Mission Control"
+                  >
+                    <Ionicons name="chevron-down" size={14} color={C.text2} />
+                    <Text style={s.mapMissionPillLabel}>Hide details</Text>
+                  </TouchableOpacity>
+                ) : null}
+                <MissionControlPanel
+                  brief={mapMissionBrief}
+                  loading={mapMissionLoading}
+                  onRefresh={() => refreshMapMissionControl(
+                    lastRouteCoords.length >= 2 ? lastRouteCoords : routeCoordsFromScout(routeScout),
+                    activeTrip?.trip_id ?? null,
+                  )}
+                  onRecommendation={() => {}}
+                />
+              </View>
+            ) : missionControlOn ? (
+              <TouchableOpacity
+                style={s.mapMissionPill}
+                activeOpacity={0.85}
+                onPress={() => setMapMissionPanelExpanded(true)}
+                accessibilityLabel="Expand Mission Control review"
+              >
+                <View style={[s.mapMissionPillDot, { backgroundColor: readinessColor }]} />
+                <Text style={s.mapMissionPillLabel} numberOfLines={1}>Mission review</Text>
+                <Text style={[s.mapMissionPillStatus, { color: readinessColor }]} numberOfLines={1}>{readinessLabel}</Text>
+                {warnCount > 0 ? (
+                  <View style={[s.mapMissionPillWarn, { borderColor: readinessColor }]}>
+                    <Ionicons name="warning" size={10} color={readinessColor} />
+                    <Text style={[s.mapMissionPillWarnText, { color: readinessColor }]}>{warnCount}</Text>
+                  </View>
+                ) : null}
+                <Ionicons name="chevron-up" size={14} color={C.text2} />
+              </TouchableOpacity>
+            ) : null}
+
+            <View pointerEvents="box-none" style={s.mapMissionBriefControls}>
+              <CopilotPresenceOrb state={copilotBriefPresence} />
+              <View style={{ flex: 1 }} pointerEvents="none" />
+              <TripPreviewControls
+                playing={mapMissionPlaying}
+                paused={mapMissionPaused}
+                complete={mapMissionComplete}
+                speed={mapMissionSpeed}
+                onCycleSpeed={cycleMapMissionSpeed}
+                onReplay={() => {
+                  mapMissionPlayerRef.current?.replay();
+                  if (!USE_NATIVE_MAP) {
+                    webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'replay' }));
+                  }
+                }}
+                onPauseResume={() => {
+                  if (mapMissionPaused) {
+                    mapMissionPlayerRef.current?.resume();
+                    if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'resume' }));
+                  } else {
+                    mapMissionPlayerRef.current?.pause();
+                    if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
+                  }
+                }}
+                onSkip={() => {
+                  mapMissionPlayerRef.current?.skip();
+                  if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'skip' }));
+                }}
+              />
+              <TouchableOpacity style={s.mapMissionBriefClose} onPress={stopMapMissionBrief}>
+                <Ionicons name="close" size={16} color={C.text2} />
+              </TouchableOpacity>
+            </View>
           </View>
-          {extremeConfig?.feature_flags?.mission_control !== false && (
-            <MissionControlPanel
-              brief={mapMissionBrief}
-              loading={mapMissionLoading}
-              onRefresh={() => refreshMapMissionControl(
-                lastRouteCoords.length >= 2 ? lastRouteCoords : routeCoordsFromScout(routeScout),
-                activeTrip?.trip_id ?? null,
-              )}
-              onRecommendation={() => {}}
-            />
-          )}
-        </View>
-      )}
+        </>
+        );
+      })()}
 
       <RouteScoutPanel
-        visible={!!routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch}
+        visible={!!routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && !mapMissionVisible}
         routeScout={routeScout}
         dayActionState={routeScoutDayAction}
         onClose={closeRouteScout}
@@ -24563,7 +24691,7 @@ function MapScreen() {
       )}
 
       {/* Bottom itinerary panel */}
-      {showPanel && panelCollapsed && !navMode && activeTrip && (
+      {showPanel && panelCollapsed && !navMode && activeTrip && !mapMissionVisible && (
         <View style={s.panelPeek} {...collapsedPanelPan.panHandlers}>
           <TouchableOpacity activeOpacity={0.9} onPress={expandTripPanel}>
             <View style={s.tripSheetGrabber}>
@@ -24587,7 +24715,7 @@ function MapScreen() {
         </View>
       )}
 
-      {showPanel && !panelCollapsed && !navMode && activeTrip && (
+      {showPanel && !panelCollapsed && !navMode && activeTrip && !mapMissionVisible && (
         <View style={s.panel}>
           <View style={s.tripSheetGrabber} {...expandedPanelPan.panHandlers}>
             <TouchableOpacity activeOpacity={0.85} onPress={collapseTripPanel} style={s.tripSheetTapTarget}>
@@ -29786,30 +29914,102 @@ const makeStyles = (C: ColorPalette) => {
     shadowOpacity: 0.3,
     shadowRadius: 8,
   },
+  mapMissionBriefTop: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    zIndex: 141,
+    elevation: 47,
+    gap: 6,
+  },
+  mapMissionNotice: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 999,
+    backgroundColor: 'rgba(8,12,18,.86)',
+    borderWidth: 1,
+    borderColor: 'rgba(251,191,36,.4)',
+  },
+  mapMissionNoticeText: {
+    color: '#fde68a',
+    fontSize: 11,
+    fontWeight: '700',
+  },
   mapMissionBriefWrap: {
     position: 'absolute',
-    left: 14,
-    right: 14,
+    left: 12,
+    right: 12,
     zIndex: 140,
     elevation: 46,
     gap: 10,
   },
-  mapMissionBriefCinematicRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-end',
-    gap: 10,
-  },
-  mapMissionBriefCaption: { flex: 1 },
   mapMissionBriefControls: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
+    gap: 8,
+  },
+  mapMissionPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-start',
+    gap: 8,
+    paddingLeft: 12,
+    paddingRight: 10,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: C.s1 ?? 'rgba(15,19,25,0.92)',
+    borderWidth: 1,
+    borderColor: OVR.border,
+  },
+  mapMissionPillDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 5,
+  },
+  mapMissionPillLabel: {
+    color: C.text,
+    fontSize: 12,
+    fontWeight: '800',
+  },
+  mapMissionPillStatus: {
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  mapMissionPillWarn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 999,
+    borderWidth: 1,
+  },
+  mapMissionPillWarnText: {
+    fontSize: 11,
+    fontWeight: '900',
+  },
+  mapMissionPanelCollapse: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'flex-end',
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginBottom: 6,
+    borderRadius: 999,
+    backgroundColor: C.s1 ?? 'rgba(15,19,25,0.92)',
+    borderWidth: 1,
+    borderColor: OVR.border,
   },
   mapMissionBriefClose: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
+    width: 38,
+    height: 38,
+    borderRadius: 13,
     borderWidth: 1,
     borderColor: OVR.border,
     backgroundColor: C.s1 ?? 'rgba(15,19,25,0.92)',

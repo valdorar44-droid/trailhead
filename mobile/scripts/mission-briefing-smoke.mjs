@@ -38,6 +38,37 @@ assert(mapSource.includes('shouldSpeakScene(scene)'), 'scene narration gated to 
 const voiceSource = readFileSync(join(root, 'lib/voice.ts'), 'utf8');
 assert(voiceSource.includes('playTrailheadVoice'), 'speakCopilotNarration uses Trailhead voice');
 
+// --- Cinematic camera engine ---
+const playerSource = readFileSync(join(root, 'lib/missionBriefNativePlayer.ts'), 'utf8');
+assert(playerSource.includes('effectiveDuration'), 'player computes an effective scene duration');
+assert(playerSource.includes('/ Math.max(0.25, speed)'), 'speed divides base scene duration');
+assert(playerSource.includes('cumulativeDistances') && playerSource.includes('pointAtDistance'),
+  'player uses distance-based route interpolation');
+assert(playerSource.includes('bearingLngLat') && playerSource.includes('smoothAngle'),
+  'player uses lookahead bearing + bearing smoothing');
+assert(/FRAME_MS\s*=\s*1[0-9][0-9]/.test(playerSource), 'camera updates are throttled (~6-10fps)');
+assert(playerSource.includes('setSpeed'), 'player exposes setSpeed');
+assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('onCallouts?.([])'),
+  'player clears overlays on stop');
+assert(playerSource.includes('onNotice'), 'player surfaces non-fatal notices (3D fallback)');
+
+// --- Speed control UI ---
+const controlsSource = readFileSync(join(root, 'components/copilot/TripPreviewControls.tsx'), 'utf8');
+assert(/PREVIEW_SPEEDS\s*=\s*\[0\.5, 1, 2\]/.test(controlsSource), 'controls expose 0.5x / 1x / 2x speeds');
+assert(controlsSource.includes('onCycleSpeed'), 'controls expose a speed cycle action');
+assert(/DEFAULT_PREVIEW_SPEED[^\n]*=\s*0\.5/.test(controlsSource), 'default playback speed is slow/cinematic');
+
+// --- Map-first layout wiring ---
+assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map passes playback speed into the player');
+assert(mapSource.includes('cycleMapMissionSpeed'), 'map wires speed cycling');
+assert(mapSource.includes('mapMissionBriefTop'), 'map renders the top cinematic caption');
+assert(mapSource.includes('showFullMissionPanel'), 'map compacts Mission Control during playback');
+assert(mapSource.includes('mapMissionNotice'), 'map surfaces the 3D-fallback notice');
+assert(!/headline: 'Trip needs review'/.test(mapSource), 'map avoids debug hero copy in the fallback brief');
+
+const nativeMapContrast = nativeMapSource.includes('mission-brief-full-route-casing');
+assert(nativeMapContrast, 'NativeMap draws a high-contrast route casing');
+
 const tsc = spawnSync('npx', ['tsc', '--noEmit'], {
   cwd: root,
   env: { ...process.env, NODE_OPTIONS: '--max-old-space-size=4096' },

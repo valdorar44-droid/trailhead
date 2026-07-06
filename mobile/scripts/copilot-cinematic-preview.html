@@ -1,0 +1,144 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=390, initial-scale=1" />
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 390px; height: 844px; overflow: hidden; font-family: -apple-system, "Segoe UI", Roboto, sans-serif; }
+  /* Phone frame */
+  .phone { position: relative; width: 390px; height: 844px; background: #0b1016; overflow: hidden; }
+  /* Faux map (map is the hero) */
+  .map {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(120% 90% at 30% 20%, #5b4636 0%, #3d2f24 40%, #241a13 100%),
+      linear-gradient(160deg, #4a3a2b, #2a2018);
+  }
+  .map .ridge { position:absolute; opacity:.35; filter: blur(1px); }
+  .safe-top { position:absolute; top:0; left:0; right:0; height:59px; } /* iPhone status bar / notch inset */
+  /* Route overlays (SVG) */
+  svg.overlay { position:absolute; inset:0; width:100%; height:100%; }
+
+  /* ---- Top cinematic caption (top = insets.top + 12) ---- */
+  .topWrap { position:absolute; left:12px; right:12px; top:71px; display:flex; flex-direction:column; gap:6px; }
+  .captionCard {
+    background: rgba(8,12,18,.88); border:1px solid rgba(255,255,255,.16);
+    border-radius:18px; padding:11px 14px;
+  }
+  .capTop { display:flex; align-items:center; gap:8px; }
+  .kicker { flex:1; font-size:10px; font-weight:900; letter-spacing:1.1px; color:#fb923c; font-family: Menlo, monospace; }
+  .dayChip { border:1px solid rgba(255,255,255,.2); border-radius:999px; padding:2px 7px; color:#cbd5e1; font-size:8px; font-weight:900; letter-spacing:.8px; font-family: Menlo, monospace; }
+  .prog { color:#94a3b8; font-size:10px; font-weight:800; font-family: Menlo, monospace; }
+  .caption { color:#f8fafc; font-size:13px; line-height:18px; font-weight:700; margin-top:5px;
+             display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+  .notice { align-self:flex-start; display:flex; align-items:center; gap:6px; padding:5px 10px; border-radius:999px;
+            background: rgba(8,12,18,.86); border:1px solid rgba(251,191,36,.4); }
+  .notice span { color:#fde68a; font-size:11px; font-weight:700; }
+
+  /* ---- Bottom control dock (bottom = inset + 14) ---- */
+  .dock { position:absolute; left:12px; right:12px; bottom:48px; display:flex; flex-direction:column; gap:10px; }
+  .pill {
+    align-self:flex-start; display:flex; align-items:center; gap:8px; height:36px; padding:0 10px 0 12px;
+    border-radius:18px; background: rgba(15,19,25,.95); border:1px solid rgba(255,255,255,.14);
+  }
+  .pillDot { width:9px; height:9px; border-radius:5px; background:#f97316; }
+  .pillLabel { color:#f1f5f9; font-size:12px; font-weight:800; }
+  .pillStatus { color:#f97316; font-size:11px; font-weight:900; letter-spacing:.6px; }
+  .pillWarn { display:flex; align-items:center; gap:3px; padding:2px 6px; border-radius:999px; border:1px solid #f97316; }
+  .pillWarn span { color:#f97316; font-size:11px; font-weight:900; }
+  .chev { color:#94a3b8; font-size:13px; font-weight:900; }
+
+  .controls { display:flex; align-items:center; gap:8px; }
+  .orbStack { width:52px; height:52px; position:relative; display:flex; align-items:center; justify-content:center; }
+  .halo { position:absolute; width:52px; height:52px; border-radius:20px; background:#f97316; opacity:.22; }
+  .core { width:38px; height:38px; border-radius:14px; background:#f97316; display:flex; align-items:center; justify-content:center;
+          border:1.5px solid rgba(255,255,255,.55); box-shadow:0 0 12px #f97316; color:#fff; font-size:17px; }
+  .orbLabel { position:absolute; bottom:-8px; background:rgba(8,12,18,.82); border:1px solid rgba(255,255,255,.14); border-radius:999px;
+              padding:2px 7px; color:#f97316; font-size:8px; font-weight:900; letter-spacing:1px; font-family:Menlo, monospace; }
+  .spacer { flex:1; }
+  .btn { min-width:38px; height:38px; padding:0 11px; border-radius:13px; display:flex; align-items:center; justify-content:center; gap:5px;
+         background: rgba(8,12,18,.85); border:1px solid rgba(255,255,255,.16); color:#f8fafc; font-size:15px; }
+  .speedBtn { border-color: rgba(251,146,60,.45); }
+  .speedBtn .lbl { color:#fdba74; font-size:11px; font-weight:900; letter-spacing:.5px; }
+  .speedBtn .ico { color:#fdba74; font-size:13px; }
+  .homebar { position:absolute; bottom:9px; left:50%; transform:translateX(-50%); width:134px; height:5px; border-radius:3px; background:rgba(255,255,255,.5); }
+</style>
+</head>
+<body>
+<div class="phone">
+  <div class="map">
+    <!-- faux terrain ridges -->
+    <svg class="overlay" viewBox="0 0 390 844" preserveAspectRatio="none">
+      <!-- full route: dark casing + light inner -->
+      <path d="M70,150 C120,260 90,360 150,430 C210,500 180,600 250,660 C300,705 280,770 330,820"
+            fill="none" stroke="rgba(2,6,23,0.85)" stroke-width="9" stroke-linecap="round"/>
+      <path d="M70,150 C120,260 90,360 150,430 C210,500 180,600 250,660 C300,705 280,770 330,820"
+            fill="none" stroke="rgba(226,232,240,0.9)" stroke-width="4.5" stroke-linecap="round" opacity="0.85"/>
+      <!-- progress line (traveled) bright cyan with dark shadow -->
+      <path d="M70,150 C120,260 90,360 150,430 C210,500 190,560 205,600"
+            fill="none" stroke="rgba(2,6,23,0.7)" stroke-width="10" stroke-linecap="round"/>
+      <path d="M70,150 C120,260 90,360 150,430 C210,500 190,560 205,600"
+            fill="none" stroke="#38e1ff" stroke-width="6.5" stroke-linecap="round"/>
+      <!-- callouts -->
+      <g>
+        <circle cx="150" cy="430" r="12" fill="rgba(0,167,255,0.18)"/>
+        <circle cx="150" cy="430" r="8" fill="#111827" stroke="#fff" stroke-width="2"/>
+        <text x="150" y="434" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">S</text>
+      </g>
+      <g>
+        <circle cx="250" cy="660" r="18" fill="rgba(239,68,68,0.24)"/>
+        <circle cx="250" cy="660" r="8" fill="#ef4444" stroke="#fff" stroke-width="2"/>
+        <text x="250" y="664" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">!</text>
+      </g>
+      <g>
+        <circle cx="90" cy="360" r="12" fill="rgba(0,167,255,0.18)"/>
+        <circle cx="90" cy="360" r="8" fill="#111827" stroke="#fff" stroke-width="2"/>
+        <text x="90" y="364" text-anchor="middle" fill="#fff" font-size="11" font-weight="700">M</text>
+      </g>
+      <!-- moving marker -->
+      <circle cx="205" cy="600" r="12" fill="rgba(0,167,255,0.22)"/>
+      <circle cx="205" cy="600" r="7" fill="#00a7ff" stroke="#fff" stroke-width="2.5"/>
+    </svg>
+  </div>
+
+  <!-- Top caption -->
+  <div class="topWrap">
+    <div class="captionCard">
+      <div class="capTop">
+        <div class="kicker">DAY 1 · MOAB TO FLAGSTAFF</div>
+        <div class="dayChip">DAY 1</div>
+        <div class="prog">3/11</div>
+      </div>
+      <div class="caption">Day 1 is the approach — leaving Moab south through red rock country toward tonight's camp at Monument Valley.</div>
+    </div>
+  </div>
+
+  <!-- Bottom dock -->
+  <div class="dock">
+    <div class="pill">
+      <div class="pillDot"></div>
+      <div class="pillLabel">Mission review</div>
+      <div class="pillStatus">REVIEW</div>
+      <div class="pillWarn">⚠ <span>4</span></div>
+      <div class="chev">▲</div>
+    </div>
+    <div class="controls">
+      <div class="orbStack">
+        <div class="halo"></div>
+        <div class="core">➤</div>
+        <div class="orbLabel">FLYING</div>
+      </div>
+      <div class="spacer"></div>
+      <div class="btn">⟳</div>
+      <div class="btn">❚❚</div>
+      <div class="btn">⏭</div>
+      <div class="btn speedBtn"><span class="ico">◔</span><span class="lbl">SLOW</span></div>
+      <div class="btn">✕</div>
+    </div>
+  </div>
+
+  <div class="homebar"></div>
+</div>
+</body>
+</html>

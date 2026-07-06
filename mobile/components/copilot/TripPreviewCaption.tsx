@@ -33,7 +33,7 @@ export function TripPreviewCaption({ scene, sceneIndex, sceneCount }: Props) {
         </Text>
       </View>
       {caption ? (
-        <Text style={styles.caption} numberOfLines={3}>{caption}</Text>
+        <Text style={styles.caption} numberOfLines={2}>{caption}</Text>
       ) : null}
       {scene.subtitle && caption !== scene.subtitle ? (
         <Text style={styles.subtitle} numberOfLines={1}>{scene.subtitle}</Text>

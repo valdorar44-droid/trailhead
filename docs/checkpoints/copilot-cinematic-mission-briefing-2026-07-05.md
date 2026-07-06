@@ -153,5 +153,15 @@ Pure, side-effect-free storyboard generator.
 
 ## Release
 
-- Code commit: (filled in below after commit).
-- OTA update groups: (filled in below after `npm run ota`).
+- Code commit: `7d4386a` (`Add Co-Pilot Cinematic Mission Briefing prototype
+  to Explorer`), pushed to `codex/production-catchup-20260626`.
+- Website `/app` bundle rebuilt and committed: `c9dd903` (`Export web app
+  bundle with Co-Pilot cinematic mission briefing`), pushed to the same
+  branch.
+- Production OTA update group: `f7f18692-c98b-4cb5-80ad-d9dd2505d47d`
+  (Android `019f353a-3c17-7b74-80a6-453135debb37`, iOS
+  `019f353a-3c17-7118-b777-fe6fe3be1c84`).
+- Preview OTA update group: `654b1196-84d3-48bb-9c08-8dbdec283eaf` (Android
+  `019f353b-35bd-7730-b947-0b107e2771af`, iOS
+  `019f353b-35bd-7b51-917b-26ecdfc4c3e5`).
+- Runtime: `native-20260614-sdk54-1`.

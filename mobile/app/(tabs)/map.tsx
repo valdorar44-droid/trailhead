@@ -50,7 +50,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -110,6 +110,22 @@ import { playTrailheadCue, playTrailheadVoice, stopTrailheadVoice } from '@/lib/
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 import { startRealtimeCopilotSession } from '@/lib/realtimeCopilot';
+import { CopilotPresenceOrb, type CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
+import { MissionControlPanel } from '@/components/copilot/MissionControlPanel';
+import { TripPreviewCaption } from '@/components/copilot/TripPreviewCaption';
+import { TripPreviewControls } from '@/components/copilot/TripPreviewControls';
+import type { MissionCinematic, MissionScene } from '@/lib/copilotStoryboard';
+import {
+  buildMapMissionCinematic,
+  checkpointsFromScout,
+  placesFromScout,
+  routeCoordsFromLngLat,
+  routeCoordsFromScout,
+  tripNameFromScout,
+} from '@/lib/mapMissionBrief';
+import { startNativeMissionBriefPlayer, type NativeMissionBriefPlayer } from '@/lib/missionBriefNativePlayer';
+import { getMissionBriefMapPlayerScript } from '@/lib/missionBriefMapPlayerScript';
+import { speakCopilotNarration } from '@/lib/voice';
 import {
   loadTrailheadRouteBuilderDraft,
   mergeTrailheadRouteBuilderDraft,
@@ -4807,6 +4823,7 @@ const buildMapHtml = (
   function clearRouteScoutPreview(){
     if(map&&map.getSource('route-scout-preview'))map.getSource('route-scout-preview').setData({type:'FeatureCollection',features:[]});
   }
+  ${getMissionBriefMapPlayerScript(180, 320)}
 
   var _passedRouteIdx=0,_passedRouteProgress=0,_passedRouteCoords=[];
   function resetPassedRoute(){_passedRouteIdx=0;_passedRouteProgress=0;_passedRouteCoords=[];if(map&&map.getSource('route-passed'))map.getSource('route-passed').setData({type:'Feature',geometry:{type:'LineString',coordinates:[]}});}
@@ -5034,6 +5051,9 @@ const buildMapHtml = (
 
   // ── Message handler ───────────────────────────────────────────────────────────
   function handleMsgData(msg){
+    if(msg.type==='mission_brief_start'){startMissionBriefFromMsg(msg);return;}
+    if(msg.type==='mission_brief_cmd'&&window.__cinematic){var _cmd=msg.command;if(typeof window.__cinematic[_cmd]==='function')window.__cinematic[_cmd]();return;}
+    if(msg.type==='mission_brief_stop'&&window.__cinematic){window.__cinematic.stop();return;}
     if(msg.type==='set_token'){
       if(msg.apiBase)apiBase=msg.apiBase;
       if(typeof msg.protomapsKey==='string')protomapsKey=msg.protomapsKey;
@@ -5734,6 +5754,20 @@ function MapScreen() {
   const [extremeCopilotVoiceBusy, setExtremeCopilotVoiceBusy] = useState(false);
   const [extremeCopilotVoiceStatus, setExtremeCopilotVoiceStatus] = useState('');
   const [extremeCopilotVoiceMode, setExtremeCopilotVoiceMode] = useState<'push_to_talk' | 'wake_phrase' | null>(null);
+  const [mapMissionBrief, setMapMissionBrief] = useState<MissionControlBrief | null>(null);
+  const [mapMissionLoading, setMapMissionLoading] = useState(false);
+  const [mapMissionCinematic, setMapMissionCinematic] = useState<MissionCinematic | null>(null);
+  const [mapMissionScene, setMapMissionScene] = useState<MissionScene | null>(null);
+  const [mapMissionSceneIndex, setMapMissionSceneIndex] = useState(0);
+  const [mapMissionPlaying, setMapMissionPlaying] = useState(false);
+  const [mapMissionPaused, setMapMissionPaused] = useState(false);
+  const [mapMissionComplete, setMapMissionComplete] = useState(false);
+  const [mapMissionError, setMapMissionError] = useState(false);
+  const [mapMissionVisible, setMapMissionVisible] = useState(false);
+  const [copilotBriefPresence, setCopilotBriefPresence] = useState<CopilotPresenceState>('idle');
+  const mapMissionCinematicRef = useRef<MissionCinematic | null>(null);
+  const mapMissionPlayerRef = useRef<NativeMissionBriefPlayer | null>(null);
+  const mapMissionPresenceAfterSpeechRef = useRef<CopilotPresenceState>('flying');
   const realtimeCopilotRef = useRef<{ stop: () => void } | null>(null);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
@@ -10917,6 +10951,7 @@ function MapScreen() {
     recentRouteScoutActionRef.current = { at: Date.now(), action: 'start' };
     const focusStop = stops.find(stop => stop.type === 'camp') ?? stops[Math.min(1, stops.length - 1)] ?? null;
     if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, focusStop.type === 'camp' ? 10.5 : 8.5, focusStop.name), 350);
+    setTimeout(() => { startMapMissionBrief().catch(() => null); }, 1200);
     return {
       applied: true,
       status: nextStatus,
@@ -13479,6 +13514,193 @@ function MapScreen() {
     };
   }
 
+  useEffect(() => () => {
+    mapMissionPlayerRef.current?.stop();
+  }, []);
+
+  async function refreshMapMissionControl(route: [number, number][], tripId: string | null) {
+    const sessionId = await ensureCopilotSession();
+    if (!sessionId || route.length < 2) return null;
+    setMapMissionLoading(true);
+    try {
+      const cps = checkpointsFromScout(routeScout);
+      const places = placesFromScout(routeScout);
+      const brief = await api.extremeMissionControl({
+        session_id: sessionId,
+        trip_id: tripId,
+        route,
+        checkpoints: cps,
+        places: places.map(place => ({
+          id: place.id,
+          type: place.type,
+          title: place.title,
+          note: place.note,
+          lat: place.lat,
+          lng: place.lng,
+          day: place.day,
+          source: place.source,
+          source_label: place.source === 'copilot_route_scout' ? 'Co-Pilot scout' : place.source,
+          confidence: place.confidence,
+        })),
+        trip_memory: rigProfile ? {
+          vehicle: {
+            type: rigProfile.vehicle_type,
+            make: rigProfile.make,
+            model: rigProfile.model,
+            year: rigProfile.year,
+          },
+        } : undefined,
+        context: {
+          route: { active_route: true, route_ready: route.length > 1 },
+          map: { current_screen: 'map' },
+          trip: { active_trip: tripId },
+        },
+        metadata: { source: Platform.OS },
+      });
+      setMapMissionBrief(brief);
+      return brief;
+    } catch (error: any) {
+      if (!mapMissionBrief) {
+        setMapMissionBrief({
+          ok: false,
+          generated_at: Math.floor(Date.now() / 1000),
+          readiness: 'needs_review',
+          headline: 'Trip needs review',
+          summary: error?.message || 'Mission Control could not check this trip yet.',
+          scores: [],
+          overnights: [],
+          risks: [],
+          recommendations: [],
+          map_filters: [],
+          source_summary: [],
+        });
+      }
+      return mapMissionBrief;
+    } finally {
+      setMapMissionLoading(false);
+    }
+  }
+
+  function stopMapMissionBrief() {
+    mapMissionPlayerRef.current?.stop();
+    mapMissionPlayerRef.current = null;
+    mapMissionCinematicRef.current = null;
+    setMapMissionVisible(false);
+    setMapMissionPlaying(false);
+    setMapMissionPaused(false);
+    setMapMissionComplete(false);
+    setMapMissionError(false);
+    setMapMissionScene(null);
+    setMapMissionSceneIndex(0);
+    setCopilotBriefPresence('idle');
+    webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_stop' }));
+  }
+
+  async function startMapMissionBrief() {
+    const route = lastRouteCoords.length >= 2
+      ? lastRouteCoords
+      : routeCoordsFromScout(routeScout);
+    if (route.length < 2) {
+      setQuickToast('Build or load a route first.');
+      setTimeout(() => setQuickToast(''), 2400);
+      return false;
+    }
+    setMapMissionVisible(true);
+    setShowExtremeCopilot(false);
+    if (!map3dEnabled) toggleMap3d();
+
+    const tripName = activeTrip?.plan.trip_name ?? tripNameFromScout(routeScout, 'Your route');
+    const brief = await refreshMapMissionControl(route, activeTrip?.trip_id ?? null);
+    const cinematic = buildMapMissionCinematic({
+      tripId: activeTrip?.trip_id ?? null,
+      tripName,
+      route,
+      routeScout,
+      missionBrief: brief,
+    });
+    if (!cinematic || cinematic.scenes.length < 2) {
+      setMapMissionError(true);
+      setQuickToast('Route is too short for a mission briefing.');
+      setTimeout(() => setQuickToast(''), 2600);
+      return false;
+    }
+
+    mapMissionCinematicRef.current = cinematic;
+    setMapMissionCinematic(cinematic);
+    setMapMissionError(false);
+    setMapMissionComplete(false);
+
+    mapMissionPlayerRef.current?.stop();
+    mapMissionPlayerRef.current = startNativeMissionBriefPlayer({
+      cinematic,
+      route: routeCoordsFromLngLat(route),
+      checkpoints: checkpointsFromScout(routeScout).map(cp => ({ lat: cp.lat, lng: cp.lng })),
+      nativeMapRef,
+      webRef,
+      ensure3d: () => {
+        if (!map3dEnabled) toggleMap3d();
+        webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: true }));
+      },
+      onReady: () => setCopilotBriefPresence('building'),
+      onStarted: () => {
+        setMapMissionPlaying(true);
+        setMapMissionPaused(false);
+        setMapMissionComplete(false);
+        setCopilotBriefPresence('flying');
+        mapMissionPresenceAfterSpeechRef.current = 'flying';
+      },
+      onSceneStarted: (scene, index) => {
+        setMapMissionScene(scene);
+        setMapMissionSceneIndex(index);
+        const presence: CopilotPresenceState = scene.layers?.warning ? 'warning' : 'flying';
+        mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
+        setCopilotBriefPresence(presence);
+        if (scene.narration) {
+          speakCopilotNarration(scene.narration, {
+            onStart: () => setCopilotBriefPresence('speaking'),
+            onFinish: () => setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current),
+          }).catch(() => {});
+        }
+      },
+      onSceneFinished: () => {},
+      onPaused: () => {
+        setMapMissionPaused(true);
+        setCopilotBriefPresence('paused');
+      },
+      onResumed: () => {
+        setMapMissionPaused(false);
+        const scene = mapMissionCinematicRef.current?.scenes[mapMissionSceneIndex] ?? null;
+        setCopilotBriefPresence(scene?.layers?.warning ? 'warning' : 'flying');
+      },
+      onComplete: () => {
+        setMapMissionPlaying(false);
+        setMapMissionPaused(false);
+        setMapMissionComplete(true);
+        setCopilotBriefPresence('complete');
+        mapMissionPresenceAfterSpeechRef.current = 'complete';
+      },
+      onError: message => {
+        setMapMissionPlaying(false);
+        setMapMissionError(true);
+        setCopilotBriefPresence('idle');
+        setQuickToast(message || 'Mission briefing failed');
+        setTimeout(() => setQuickToast(''), 2800);
+      },
+    });
+
+    if (!USE_NATIVE_MAP) {
+      webRef.current?.postMessage(JSON.stringify({
+        type: 'mission_brief_start',
+        scenes: cinematic.scenes,
+        route,
+        checkpoints: checkpointsFromScout(routeScout),
+      }));
+    } else {
+      mapMissionPlayerRef.current.replay();
+    }
+    return true;
+  }
+
   async function executeCopilotAction(action: MapActionRequest): Promise<Record<string, unknown>> {
     const type = action.action_type;
     const args = action.args || {};
@@ -14211,12 +14433,14 @@ function MapScreen() {
     }
     if (type === 'showMissionControl') {
       setShowExtremeCopilot(false);
-      router.push('/extreme-explorer');
+      const started = await startMapMissionBrief();
       return {
-        applied: true,
-        status: 'applied',
-        opened: 'mission_control',
-        spoken_summary: 'Mission Control is opening.',
+        applied: !!started,
+        status: started ? 'applied' : 'failed',
+        opened: 'mission_briefing',
+        spoken_summary: started
+          ? 'Playing the mission briefing on your map now.'
+          : 'I need an active route before I can fly the briefing.',
       };
     }
     if (type === 'openRigProfile') {
@@ -14614,7 +14838,7 @@ function MapScreen() {
     if (localMission) {
       appendCopilotMessage({ id: `copilot-assistant-${Date.now()}`, role: 'assistant', text: localMission });
       setShowExtremeCopilot(false);
-      router.push('/extreme-explorer');
+      await startMapMissionBrief();
       return;
     }
 
@@ -20238,6 +20462,61 @@ function MapScreen() {
         </View>
       )}
 
+      {mapMissionVisible && mapMissionCinematic && !mapMissionError && (
+        <View pointerEvents="box-none" style={[s.mapMissionBriefWrap, { bottom: bottomInset + (routeScout ? 280 : 120) }]}>
+          <View pointerEvents="box-none" style={s.mapMissionBriefCinematicRow}>
+            <CopilotPresenceOrb state={copilotBriefPresence} />
+            <View style={s.mapMissionBriefCaption} pointerEvents="none">
+              <TripPreviewCaption
+                scene={mapMissionScene}
+                sceneIndex={mapMissionSceneIndex}
+                sceneCount={mapMissionCinematic.scenes.length}
+              />
+            </View>
+          </View>
+          <View style={s.mapMissionBriefControls}>
+            <TripPreviewControls
+              playing={mapMissionPlaying}
+              paused={mapMissionPaused}
+              complete={mapMissionComplete}
+              onReplay={() => {
+                mapMissionPlayerRef.current?.replay();
+                if (!USE_NATIVE_MAP) {
+                  webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'replay' }));
+                }
+              }}
+              onPauseResume={() => {
+                if (mapMissionPaused) {
+                  mapMissionPlayerRef.current?.resume();
+                  if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'resume' }));
+                } else {
+                  mapMissionPlayerRef.current?.pause();
+                  if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
+                }
+              }}
+              onSkip={() => {
+                mapMissionPlayerRef.current?.skip();
+                if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'skip' }));
+              }}
+            />
+            <TouchableOpacity style={s.mapMissionBriefClose} onPress={stopMapMissionBrief}>
+              <Ionicons name="close" size={16} color={C.text2} />
+            </TouchableOpacity>
+          </View>
+          {extremeConfig?.feature_flags?.mission_control !== false && (
+            <MissionControlPanel
+              brief={mapMissionBrief}
+              loading={mapMissionLoading}
+              onRefresh={() => refreshMapMissionControl(
+                lastRouteCoords.length >= 2 ? lastRouteCoords : routeCoordsFromScout(routeScout),
+                activeTrip?.trip_id ?? null,
+              )}
+              onRecommendation={() => {}}
+            />
+          )}
+        </View>
+      )}
+
       <RouteScoutPanel
         visible={!!routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch}
         routeScout={routeScout}
@@ -24234,7 +24513,7 @@ function MapScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               style={s.tripPanelEdit}
-              onPress={() => router.push('/extreme-explorer')}
+              onPress={() => { startMapMissionBrief(); }}
               accessibilityLabel="Open 3D mission briefing"
             >
               <Ionicons name="airplane-outline" size={13} color={C.orange} />
@@ -29400,6 +29679,36 @@ const makeStyles = (C: ColorPalette) => {
     shadowColor: '#000',
     shadowOpacity: 0.3,
     shadowRadius: 8,
+  },
+  mapMissionBriefWrap: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    zIndex: 140,
+    elevation: 46,
+    gap: 10,
+  },
+  mapMissionBriefCinematicRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+  },
+  mapMissionBriefCaption: { flex: 1 },
+  mapMissionBriefControls: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  mapMissionBriefClose: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    borderWidth: 1,
+    borderColor: OVR.border,
+    backgroundColor: C.s1 ?? 'rgba(15,19,25,0.92)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   });
 };

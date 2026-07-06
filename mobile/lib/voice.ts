@@ -90,6 +90,31 @@ export async function playTrailheadCue(name: 'copilotListening') {
   } catch {}
 }
 
+/** Co-Pilot cinematic captions — device speech only, never ElevenLabs. */
+export async function speakCopilotNarration(text: string, callbacks?: VoiceCallbacks) {
+  const clean = text.trim();
+  if (!clean) return;
+  const requestId = voiceRequestId + 1;
+  voiceRequestId = requestId;
+  await stopTrailheadVoice();
+  voiceRequestId = requestId;
+  try {
+    await ensureVoiceAudioMode();
+    if (requestId !== voiceRequestId) return;
+    Speech.speak(clean, {
+      rate: 0.88,
+      pitch: 1,
+      language: 'en-US',
+      onStart: callbacks?.onStart,
+      onDone: callbacks?.onFinish,
+      onStopped: callbacks?.onFinish,
+      onError: callbacks?.onFinish,
+    });
+  } catch {
+    callbacks?.onFinish?.();
+  }
+}
+
 export async function playTrailheadVoice(text: string, mode: VoiceMode, fallbackOptions?: SpeechOptions, callbacks?: VoiceCallbacks) {
   const clean = text.trim();
   if (!clean) return;

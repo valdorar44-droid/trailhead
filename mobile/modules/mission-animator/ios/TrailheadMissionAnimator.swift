@@ -52,19 +52,16 @@ private struct MissionPoint {
 
 // MARK: - Event bridge
 
-protocol TrailheadMissionAnimatorDelegate: AnyObject {
-    func missionAnimator(_ animator: TrailheadMissionAnimator, sceneStart sceneId: String, index: Int, type: String)
-    func missionAnimator(_ animator: TrailheadMissionAnimator, sceneProgress sceneId: String, index: Int, progress: Double)
-    func missionAnimator(_ animator: TrailheadMissionAnimator, sceneEnd sceneId: String, index: Int)
-    func missionAnimatorComplete(_ animator: TrailheadMissionAnimator)
-    func missionAnimator(_ animator: TrailheadMissionAnimator, error message: String, code: String?)
-    func missionAnimator(_ animator: TrailheadMissionAnimator, debug kind: String, details: [String: Any])
-}
+typealias MissionAnimatorEmit = (_ event: String, _ payload: [String: Any]) -> Void
 
 // MARK: - Animator
 
 final class TrailheadMissionAnimator: NSObject {
-    weak var delegate: TrailheadMissionAnimatorDelegate?
+    private let emit: MissionAnimatorEmit
+
+    init(emit: @escaping MissionAnimatorEmit) {
+        self.emit = emit
+    }
 
     private weak var mapView: MapView?
     private var styleCancelables = Set<AnyCancelable>()
@@ -129,17 +126,17 @@ final class TrailheadMissionAnimator: NSObject {
     func start(payload: [String: Any]?) -> Bool {
         if let payload {
             guard parsePayload(payload) else {
-                delegate?.missionAnimator(self, error: "Invalid mission payload", code: "invalid_payload")
+                emit("onMissionError", ["message": "Invalid mission payload", "code": "invalid_payload"])
                 return false
             }
             preparedPayload = payload
         } else if preparedPayload == nil {
-            delegate?.missionAnimator(self, error: "No prepared mission animation", code: "not_prepared")
+            emit("onMissionError", ["message": "No prepared mission animation", "code": "not_prepared"])
             return false
         }
         attachMapIfNeeded()
         guard let mapView else {
-            delegate?.missionAnimator(self, error: "MapView not found", code: "no_map")
+            emit("onMissionError", ["message": "MapView not found", "code": "no_map"])
             return false
         }
         installMissionLayers()
@@ -305,7 +302,7 @@ final class TrailheadMissionAnimator: NSObject {
         addCircleLayer(style: style, id: "th-mission-callout-dot", source: "mission-callouts-source", radius: 8, color: UIColor(red: 0.07, green: 0.09, blue: 0.15, alpha: 1), stroke: 2, strokeColor: .white)
     }
 
-    private func addLineLayer(style: Style, id: String, source: String, color: UIColor, width: Double) {
+    private func addLineLayer(style: MapboxMaps.Style, id: String, source: String, color: UIColor, width: Double) {
         guard !style.layerExists(withId: id) else { return }
         var layer = LineLayer(id: id, source: source)
         layer.lineColor = .constant(StyleColor(color))
@@ -315,7 +312,7 @@ final class TrailheadMissionAnimator: NSObject {
         try? style.addLayer(layer)
     }
 
-    private func addCircleLayer(style: Style, id: String, source: String, radius: Double, color: UIColor, stroke: Double, strokeColor: UIColor = .clear) {
+    private func addCircleLayer(style: MapboxMaps.Style, id: String, source: String, radius: Double, color: UIColor, stroke: Double, strokeColor: UIColor = .clear) {
         guard !style.layerExists(withId: id) else { return }
         var layer = CircleLayer(id: id, source: source)
         layer.circleRadius = .constant(radius)
@@ -383,7 +380,7 @@ final class TrailheadMissionAnimator: NSObject {
 
         if now - lastProgressEmit >= 0.5 {
             lastProgressEmit = now
-            delegate?.missionAnimator(self, sceneProgress: scene.id, index: sceneIndex, progress: t)
+            emit("onMissionSceneProgress", ["sceneId": scene.id, "index": sceneIndex, "progress": t])
         }
     }
 
@@ -392,7 +389,7 @@ final class TrailheadMissionAnimator: NSObject {
         guard sceneIndex < scenes.count else {
             playing = false
             stopDisplayLink()
-            delegate?.missionAnimatorComplete(self)
+            emit("onMissionComplete", [:])
             return
         }
         let scene = scenes[sceneIndex]
@@ -404,12 +401,12 @@ final class TrailheadMissionAnimator: NSObject {
         updateProgressLineColor(warning: warningActive)
         applySceneOverlays(scene)
         sceneEstablishMs = applyEstablishingCamera(scene, on: mapView) / 1000
-        delegate?.missionAnimator(self, sceneStart: scene.id, index: sceneIndex, type: scene.type)
-        delegate?.missionAnimator(self, debug: "scene_start", details: ["scene_id": scene.id, "index": sceneIndex])
+        emit("onMissionSceneStart", ["sceneId": scene.id, "index": sceneIndex, "type": scene.type])
+        emit("onMissionDebug", ["kind": "scene_start", "details": ["scene_id": scene.id, "index": sceneIndex]])
     }
 
     private func finishScene(_ scene: MissionSceneModel, on mapView: MapView) {
-        delegate?.missionAnimator(self, sceneEnd: scene.id, index: sceneIndex)
+        emit("onMissionSceneEnd", ["sceneId": scene.id, "index": sceneIndex])
         advanceScene(on: mapView)
     }
 
@@ -432,7 +429,7 @@ final class TrailheadMissionAnimator: NSObject {
         let zoom = zoomForSliceLengthKm(sliceLenKm, requested: scene.camera.zoom)
         setCamera(center: camPt, zoom: zoom, pitch: clampPitch(scene.camera.pitch), bearing: smoothedBearing ?? targetBearing, on: mapView)
         emitProgress(scene: scene, ratio: routeTotal > 0 ? d / routeTotal : t, markerDist: d)
-        delegate?.missionAnimator(self, debug: "camera", details: ["scene_id": scene.id])
+        emit("onMissionDebug", ["kind": "camera", "details": ["scene_id": scene.id]])
     }
 
     private func tickOrbit(scene: MissionSceneModel, t: Double, on mapView: MapView) {
@@ -496,7 +493,7 @@ final class TrailheadMissionAnimator: NSObject {
             var f = Feature(geometry: .point(Point(LocationCoordinate2D(latitude: c.lat, longitude: c.lng))))
             f.properties = [
                 "label": .string(calloutLabel(for: c)),
-                "warning": .number(warningActive ? 1 : 0),
+                "warning": .number(warningActive ? 1.0 : 0.0),
             ]
                 return f
             }
@@ -515,9 +512,9 @@ final class TrailheadMissionAnimator: NSObject {
         }
         let marker = pointAtDistance(dist: markerDist)
         var feature = Feature(geometry: .point(Point(LocationCoordinate2D(latitude: marker.lat, longitude: marker.lng))))
-        feature.properties = ["warning": .number(warningActive ? 1 : 0)]
+        feature.properties = ["warning": .number(warningActive ? 1.0 : 0.0)]
         try? mapView?.mapboxMap.style.updateGeoJSONSource(withId: "mission-marker-source", geoJSON: .feature(feature))
-        delegate?.missionAnimator(self, debug: "overlay", details: ["scene_id": scene.id])
+        emit("onMissionDebug", ["kind": "overlay", "details": ["scene_id": scene.id]])
     }
 
     private func setCamera(center: MissionPoint, zoom: Double, pitch: Double, bearing: Double?, on mapView: MapView, animated: Bool = false, duration: Double = 0.05) {

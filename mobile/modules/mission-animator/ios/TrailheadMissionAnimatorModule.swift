@@ -1,7 +1,11 @@
 import ExpoModulesCore
 
 public class TrailheadMissionAnimatorModule: Module {
-    private let animator = TrailheadMissionAnimator()
+    private lazy var animator: TrailheadMissionAnimator = {
+        TrailheadMissionAnimator { [weak self] event, payload in
+            self?.sendEvent(event, payload)
+        }
+    }()
 
     public func definition() -> ModuleDefinition {
         Name("TrailheadMissionAnimator")
@@ -14,10 +18,6 @@ public class TrailheadMissionAnimatorModule: Module {
             "onMissionError",
             "onMissionDebug"
         )
-
-        OnCreate {
-            self.animator.delegate = self
-        }
 
         AsyncFunction("isAvailable") { () -> Bool in
             TrailheadMissionAnimator.canImportMapbox() && TrailheadMissionAnimator.findMapView() != nil
@@ -56,47 +56,5 @@ public class TrailheadMissionAnimatorModule: Module {
         AsyncFunction("setMissionAnimationSpeed") { (speed: Double) -> Bool in
             DispatchQueue.main.sync { self.animator.setSpeed(speed) }
         }
-    }
-}
-
-extension TrailheadMissionAnimatorModule: TrailheadMissionAnimatorDelegate {
-    func missionAnimator(_ animator: TrailheadMissionAnimator, sceneStart sceneId: String, index: Int, type: String) {
-        sendEvent("onMissionSceneStart", [
-            "sceneId": sceneId,
-            "index": index,
-            "type": type,
-        ])
-    }
-
-    func missionAnimator(_ animator: TrailheadMissionAnimator, sceneProgress sceneId: String, index: Int, progress: Double) {
-        sendEvent("onMissionSceneProgress", [
-            "sceneId": sceneId,
-            "index": index,
-            "progress": progress,
-        ])
-    }
-
-    func missionAnimator(_ animator: TrailheadMissionAnimator, sceneEnd sceneId: String, index: Int) {
-        sendEvent("onMissionSceneEnd", [
-            "sceneId": sceneId,
-            "index": index,
-        ])
-    }
-
-    func missionAnimatorComplete(_ animator: TrailheadMissionAnimator) {
-        sendEvent("onMissionComplete", [:])
-    }
-
-    func missionAnimator(_ animator: TrailheadMissionAnimator, error message: String, code: String?) {
-        var payload: [String: Any] = ["message": message]
-        if let code { payload["code"] = code }
-        sendEvent("onMissionError", payload)
-    }
-
-    func missionAnimator(_ animator: TrailheadMissionAnimator, debug kind: String, details: [String: Any]) {
-        sendEvent("onMissionDebug", [
-            "kind": kind,
-            "details": details,
-        ])
     }
 }

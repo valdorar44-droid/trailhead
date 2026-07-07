@@ -18,6 +18,7 @@ import com.mapbox.maps.extension.style.layers.generated.CircleLayer
 import com.mapbox.maps.extension.style.layers.generated.LineLayer
 import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
 import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
+import com.mapbox.maps.extension.style.layers.styleLayerExists
 import com.mapbox.maps.extension.style.sources.addSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.getSourceAs
@@ -264,13 +265,13 @@ internal class TrailheadMissionAnimator(
 
   private fun installMissionLayers(style: Style) {
     if (layersInstalled) return
-    if (!style.styleSourceExists("mission-full-route-source")) {
+    if (style.getSource("mission-full-route-source") == null) {
       style.addSource(GeoJsonSource.Builder("mission-full-route-source").build())
     }
-    if (!style.styleSourceExists("mission-progress-route-source")) {
+    if (style.getSource("mission-progress-route-source") == null) {
       style.addSource(GeoJsonSource.Builder("mission-progress-route-source").build())
     }
-    if (!style.styleSourceExists("mission-marker-source")) {
+    if (style.getSource("mission-marker-source") == null) {
       style.addSource(GeoJsonSource.Builder("mission-marker-source").build())
     }
     if (!style.styleLayerExists("th-mission-full-casing")) {

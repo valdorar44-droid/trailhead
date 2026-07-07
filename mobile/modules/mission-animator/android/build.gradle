@@ -14,6 +14,15 @@ android {
 }
 
 dependencies {
-  def mapboxVersion = rootProject.ext.has('RNMapboxMapsVersion') ? rootProject.ext.RNMapboxMapsVersion : '11.16.0'
-  implementation "com.mapbox.maps:android:${mapboxVersion}"
+  def mapboxVersion = rootProject.ext.has('RNMapboxMapsVersion')
+    ? rootProject.ext.RNMapboxMapsVersion
+    : '11.16.0'
+  def targetSdk = rootProject.ext.has('targetSdkVersion')
+    ? rootProject.ext.targetSdkVersion as Integer
+    : 28
+  if (targetSdk >= 35) {
+    implementation "com.mapbox.maps:android-ndk27:${mapboxVersion}"
+  } else {
+    implementation "com.mapbox.maps:android:${mapboxVersion}"
+  }
 }

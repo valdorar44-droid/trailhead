@@ -20,7 +20,7 @@ import com.mapbox.maps.extension.style.layers.properties.generated.LineCap
 import com.mapbox.maps.extension.style.layers.properties.generated.LineJoin
 import com.mapbox.maps.extension.style.sources.addSource
 import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
-import com.mapbox.maps.extension.style.sources.getSourceAs
+import com.mapbox.maps.extension.style.sources.getSource
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.easeTo
 import kotlin.math.*
@@ -273,7 +273,7 @@ internal class TrailheadMissionAnimator(
     if (style.getSource("mission-marker-source") == null) {
       style.addSource(GeoJsonSource.Builder("mission-marker-source").build())
     }
-    if (!style.styleLayerExists("th-mission-full-casing")) {
+    if (style.getLayer("th-mission-full-casing") == null) {
       style.addLayer(
         LineLayer("th-mission-full-casing", "mission-full-route-source")
           .lineColor("#020617")
@@ -282,7 +282,7 @@ internal class TrailheadMissionAnimator(
           .lineJoin(LineJoin.ROUND),
       )
     }
-    if (!style.styleLayerExists("th-mission-full-line")) {
+    if (style.getLayer("th-mission-full-line") == null) {
       style.addLayer(
         LineLayer("th-mission-full-line", "mission-full-route-source")
           .lineColor("#e2e8f0")
@@ -291,7 +291,7 @@ internal class TrailheadMissionAnimator(
           .lineJoin(LineJoin.ROUND),
       )
     }
-    if (!style.styleLayerExists("th-mission-progress-line")) {
+    if (style.getLayer("th-mission-progress-line") == null) {
       style.addLayer(
         LineLayer("th-mission-progress-line", "mission-progress-route-source")
           .lineColor("#38e1ff")
@@ -300,7 +300,7 @@ internal class TrailheadMissionAnimator(
           .lineJoin(LineJoin.ROUND),
       )
     }
-    if (!style.styleLayerExists("th-mission-marker-dot")) {
+    if (style.getLayer("th-mission-marker-dot") == null) {
       style.addLayer(
         CircleLayer("th-mission-marker-dot", "mission-marker-source")
           .circleRadius(7.0)
@@ -317,15 +317,15 @@ internal class TrailheadMissionAnimator(
     val points = route.map { Point.fromLngLat(it.first, it.second) }
     val json = FeatureCollection.fromFeature(Feature.fromGeometry(LineString.fromLngLats(points))).toJson()
     mapView?.getMapboxMap()?.getStyle { style ->
-      style.getSourceAs<GeoJsonSource>("mission-full-route-source")?.data(json)
+      geoJsonSource(style, "mission-full-route-source")?.data(json)
     }
   }
 
   private fun clearOverlaySources() {
     val empty = FeatureCollection.fromFeatures(emptyList()).toJson()
     mapView?.getMapboxMap()?.getStyle { style ->
-      style.getSourceAs<GeoJsonSource>("mission-progress-route-source")?.data(empty)
-      style.getSourceAs<GeoJsonSource>("mission-marker-source")?.data(empty)
+      geoJsonSource(style, "mission-progress-route-source")?.data(empty)
+      geoJsonSource(style, "mission-marker-source")?.data(empty)
     }
   }
 
@@ -450,7 +450,7 @@ internal class TrailheadMissionAnimator(
         Feature.fromGeometry(LineString.fromLngLats(points)),
       ).toJson()
       mapView?.getMapboxMap()?.getStyle { style ->
-        style.getSourceAs<GeoJsonSource>("mission-progress-route-source")?.data(progressJson)
+        geoJsonSource(style, "mission-progress-route-source")?.data(progressJson)
       }
     }
     val marker = pointAtDistance(markerDist)
@@ -458,7 +458,7 @@ internal class TrailheadMissionAnimator(
       Feature.fromGeometry(Point.fromLngLat(marker.lng, marker.lat)),
     ).toJson()
     mapView?.getMapboxMap()?.getStyle { style ->
-      style.getSourceAs<GeoJsonSource>("mission-marker-source")?.data(markerJson)
+      geoJsonSource(style, "mission-marker-source")?.data(markerJson)
     }
     emit("onMissionDebug", mapOf("kind" to "overlay", "details" to mapOf("scene_id" to scene.id)))
   }
@@ -591,6 +591,14 @@ internal class TrailheadMissionAnimator(
   }
 
   private fun clampPitch(pitch: Double?): Double = max(58.0, min(68.0, pitch ?: cameraPitch))
+
+  private fun geoJsonSource(style: Style, id: String): GeoJsonSource? {
+    return try {
+      style.getSource(id) as? GeoJsonSource
+    } catch (_: ClassCastException) {
+      null
+    }
+  }
 
   private fun doubleValue(value: Any?): Double? = when (value) {
     is Double -> value

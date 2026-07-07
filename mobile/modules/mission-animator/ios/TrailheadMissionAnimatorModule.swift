@@ -322,7 +322,7 @@ private final class NativeMissionAnimator: NSObject {
     private func setCamera(_ center: MissionPoint, zoom: Double, pitch: Double, bearing: Double?, animated: Bool) {
         guard let mapView else { return }
         let options = CameraOptions(center: CLLocationCoordinate2D(latitude: center.lat, longitude: center.lng), zoom: zoom, bearing: bearing, pitch: pitch)
-        if animated { mapView.camera.ease(to: options, duration: 1.8) }
+        if animated { mapView.camera.ease(to: options, duration: 1.8, curve: .easeInOut, completion: nil) }
         else { try? mapView.mapboxMap.setCamera(to: options) }
     }
 

@@ -1,5 +1,4 @@
 apply plugin: 'com.android.library'
-apply plugin: 'kotlin-android'
 
 group = 'expo.modules.missionanimator'
 version = '1.0.0'
@@ -7,18 +6,14 @@ version = '1.0.0'
 def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
 apply from: expoModulesCorePlugin
 applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
 
 android {
   namespace "expo.modules.missionanimator"
-  compileSdkVersion safeExtGet("compileSdkVersion", 35)
-  defaultConfig {
-    minSdkVersion safeExtGet("minSdkVersion", 24)
-    targetSdkVersion safeExtGet("targetSdkVersion", 35)
-  }
 }
 
 dependencies {
-  implementation project(':expo-modules-core')
   def mapboxVersion = rootProject.ext.has('RNMapboxMapsVersion') ? rootProject.ext.RNMapboxMapsVersion : '11.16.0'
   implementation "com.mapbox.maps:android:${mapboxVersion}"
 }

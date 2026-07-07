@@ -5,7 +5,7 @@ module.exports = (config) => {
     const existing = props.modResults.findIndex(
       item => item.key === 'android.kotlinVersion'
     );
-    const entry = { type: 'property', key: 'android.kotlinVersion', value: '1.9.24' };
+    const entry = { type: 'property', key: 'android.kotlinVersion', value: '2.1.20' };
     if (existing >= 0) {
       props.modResults[existing] = entry;
     } else {

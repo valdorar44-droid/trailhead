@@ -81,7 +81,10 @@ assert(realtimeSource.includes('waitUntilSpeechIdle'), 'realtime copilot waits f
 assert(realtimeSource.includes('enterDirectorMode'), 'realtime copilot supports director mode on live session');
 assert(realtimeSource.includes('exitDirectorMode'), 'realtime copilot can restore interactive voice after fly');
 assert(realtimeSource.includes('setDirectorSpeechStartHandler'), 'realtime copilot exposes speech-start hook for fallback');
-assert(realtimeSource.includes('response.output_item.done'), 'realtime copilot treats output item done as speech end');
+assert(mapSource.includes('ensureMissionDirectorVoice(true)'), 'mission always forces realtime director voice');
+assert(mapSource.includes('primeFirstMissionBeat'), 'mission primes intro narration during building');
+assert(mapSource.includes('missionPrimedSceneIndexRef'), 'mission skips duplicate intro narration on native scene start');
+assert(realtimeSource.includes('awaitingSayDoneNonce'), 'realtime copilot tracks per-say narration completion');
 
 const directorSource = readFileSync(join(root, 'lib/cinematicDirector.ts'), 'utf8');
 assert(directorSource.includes('waitForRouteRenderReady'), 'cinematic director waits for route render');

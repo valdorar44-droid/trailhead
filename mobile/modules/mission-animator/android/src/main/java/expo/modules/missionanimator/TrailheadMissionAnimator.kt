@@ -189,6 +189,14 @@ internal class TrailheadMissionAnimator(
 
   fun setSpeed(next: Double): Boolean {
     speed = next.coerceIn(0.25, 3.0)
+    if (sceneIndex in scenes.indices) {
+      val scene = scenes[sceneIndex]
+      val elapsedSec = (System.nanoTime() - sceneStartNs - pausedTotalNs) / 1_000_000_000.0
+      val oldDuration = max(0.001, sceneDurationSec)
+      val progress = (elapsedSec / oldDuration).coerceIn(0.0, 1.0)
+      sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.25, speed))
+      sceneStartNs = System.nanoTime() - ((progress * sceneDurationSec) * 1_000_000_000.0).toLong() - pausedTotalNs
+    }
     return true
   }
 

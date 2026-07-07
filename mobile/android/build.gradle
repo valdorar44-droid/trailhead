@@ -23,6 +23,12 @@ buildscript {
     }
 }
 
+// Project-wide ext values (expo-updates reads rootProject.kotlinVersion for KSP).
+ext {
+    kotlinVersion = findProperty('android.kotlinVersion') ?: '2.1.20'
+    kspVersion = '2.1.20-2.0.1'
+}
+
 apply plugin: "com.facebook.react.rootproject"
 
 allprojects {

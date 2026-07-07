@@ -5849,6 +5849,7 @@ function MapScreen() {
   // budget overlaps the route-render/voice waits).
   const missionDirectedPromiseRef = useRef<Promise<MissionCinematic | null> | null>(null);
   const narrationRealtimeStartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const missionPrimedSceneIndexRef = useRef(-1);
   const missionOverlayPendingRef = useRef<Partial<{
     progressRoute: [number, number][];
     marker: { lat: number; lng: number } | null;
@@ -13722,6 +13723,7 @@ function MapScreen() {
   function stopMapMissionBrief() {
     missionRunningRef.current = false;
     missionRouteOverrideRef.current = null;
+    missionPrimedSceneIndexRef.current = -1;
     exitMissionDirectorVoice();
     stopTrailheadVoice();
     mapMissionPlayerRef.current?.stop();
@@ -13832,6 +13834,9 @@ function MapScreen() {
   }
 
   function finishMissionNarrationBeat(source: NarrationDoneSource = 'realtime') {
+    if (mapMissionSceneIndex === missionPrimedSceneIndexRef.current) {
+      missionPrimedSceneIndexRef.current = -1;
+    }
     narrationBeatNonceRef.current += 1;
     narrationBeatOpenRef.current = false;
     clearNarrationFallbackTimer();
@@ -13874,13 +13879,18 @@ function MapScreen() {
     realtimeCopilotRef.current?.exitDirectorMode();
   }
 
-  async function ensureMissionDirectorVoice(force = false): Promise<RealtimeCopilotHandle | null> {
+  async function ensureMissionDirectorVoice(force = true): Promise<RealtimeCopilotHandle | null> {
     if (!ENABLE_REALTIME_NARRATOR || !extremeConfig?.copilot?.voice_enabled) return null;
     if (!force && missionDirectorActiveRef.current && realtimeCopilotRef.current?.isConnected()) {
       realtimeCopilotRef.current.enterDirectorMode(() => finishMissionNarrationBeat('realtime'));
       return realtimeCopilotRef.current;
     }
     let handle = realtimeCopilotRef.current;
+    if (handle && !handle.isConnected()) {
+      handle.stop();
+      realtimeCopilotRef.current = null;
+      handle = null;
+    }
     if (!handle) {
       try {
         const sessionId = await ensureCopilotSession();
@@ -13905,7 +13915,12 @@ function MapScreen() {
     }
     missionDirectorActiveRef.current = true;
     handle.enterDirectorMode(() => finishMissionNarrationBeat('realtime'));
-    await waitForRealtimeConnected(() => handle!.isConnected(), 6000);
+    const connected = await waitForRealtimeConnected(() => handle!.isConnected(), 8000);
+    if (!connected) {
+      logCopilotMapTelemetry('mission_director_voice_connect_timeout', {
+        had_existing_handle: !!realtimeCopilotRef.current,
+      });
+    }
     return handle;
   }
 
@@ -14020,13 +14035,27 @@ function MapScreen() {
     });
   }
 
-  function beginMissionSceneBeat(scene: MissionScene, index: number) {
+  function beginMissionSceneBeat(
+    scene: MissionScene,
+    index: number,
+    options?: { presence?: CopilotPresenceState },
+  ) {
+    if (
+      index === missionPrimedSceneIndexRef.current
+      && narrationBeatOpenRef.current
+      && !options?.presence
+    ) {
+      setMapMissionScene(scene);
+      setMapMissionSceneIndex(index);
+      return;
+    }
     const cinematic = mapMissionCinematicRef.current;
     const { beatText, speak, isLiveScout } = speakLiveMissionBeatInput(cinematic, scene, routeScout);
     setMapMissionCaptionText(beatText);
     setMapMissionScene(scene);
     setMapMissionSceneIndex(index);
-    const presence: CopilotPresenceState = scene.layers?.warning ? 'warning' : 'flying';
+    const presence: CopilotPresenceState = options?.presence
+      ?? (scene.layers?.warning ? 'warning' : 'flying');
     mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : presence;
     setCopilotBriefPresence(presence);
     ensureMissionPlaybackDebug().sceneStart({
@@ -14066,7 +14095,18 @@ function MapScreen() {
     const handle = realtimeCopilotRef.current;
     const canUseRealtime = ENABLE_REALTIME_NARRATOR
       && missionDirectorActiveRef.current
-      && !!handle;
+      && !!handle
+      && handle.isConnected();
+
+    if (ENABLE_REALTIME_NARRATOR && !canUseRealtime) {
+      logCopilotMapTelemetry('mission_narration_realtime_unavailable', {
+        director_active: missionDirectorActiveRef.current,
+        has_handle: !!handle,
+        connected: handle?.isConnected() ?? false,
+        scene_id: scene.id,
+        scene_type: scene.type,
+      });
+    }
 
     const trySpeakRealtime = async () => {
       if (!handle?.isConnected() || !missionRunningRef.current) return false;
@@ -14132,6 +14172,22 @@ function MapScreen() {
     }
 
     fallbackMissionNarration(beatText);
+  }
+
+  async function primeFirstMissionBeat(cinematic: MissionCinematic) {
+    missionPrimedSceneIndexRef.current = -1;
+    const idx = cinematic.scenes.findIndex(scene => {
+      const { speak, beatText } = speakLiveMissionBeatInput(cinematic, scene, routeScout);
+      return speak && !!beatText.trim();
+    });
+    if (idx < 0) return;
+
+    const handle = await ensureMissionDirectorVoice(true);
+    if (!handle?.isConnected()) return;
+
+    missionPrimedSceneIndexRef.current = idx;
+    const scene = cinematic.scenes[idx];
+    beginMissionSceneBeat(scene, idx, { presence: 'building' });
   }
 
   function cycleMapMissionSpeed() {
@@ -14208,7 +14264,7 @@ function MapScreen() {
       setMapMissionNotice('Co-Pilot is directing the flyover…');
     }
 
-    const directorVoicePromise = ensureMissionDirectorVoice(options.source === 'auto_scout');
+    const directorVoicePromise = ensureMissionDirectorVoice(true);
 
     setMissionBriefOverlay(prev => ({
       ...prev,
@@ -14269,6 +14325,9 @@ function MapScreen() {
 
     mapMissionPlayerRef.current?.stop();
     clearMissionNativeListeners();
+
+    setCopilotBriefPresence('building');
+    await primeFirstMissionBeat(cinematic);
 
     const nativePayload = {
       route: routeCoordsFromLngLat(route),
@@ -14363,13 +14422,14 @@ function MapScreen() {
       };
       const nativeStarted = await startMissionAnimation(nativePayload);
       if (nativeStarted) {
-        setCopilotBriefPresence('building');
         setMapMissionPlaying(true);
         setMapMissionPaused(false);
         setMapMissionComplete(false);
         setPanelCollapsed(true);
-        setCopilotBriefPresence('flying');
-        mapMissionPresenceAfterSpeechRef.current = 'flying';
+        if (missionPrimedSceneIndexRef.current < 0 && !narrationBeatOpenRef.current) {
+          setCopilotBriefPresence('flying');
+          mapMissionPresenceAfterSpeechRef.current = 'flying';
+        }
         briefPromise.then(brief => {
           if (!brief || !missionRunningRef.current) return;
           setMapMissionBrief(brief);
@@ -14433,8 +14493,10 @@ function MapScreen() {
         setMapMissionPaused(false);
         setMapMissionComplete(false);
         setPanelCollapsed(true);
-        setCopilotBriefPresence('flying');
-        mapMissionPresenceAfterSpeechRef.current = 'flying';
+        if (missionPrimedSceneIndexRef.current < 0 && !narrationBeatOpenRef.current) {
+          setCopilotBriefPresence('flying');
+          mapMissionPresenceAfterSpeechRef.current = 'flying';
+        }
       },
       onSceneStarted: (scene, index) => {
         beginMissionSceneBeat(scene, index);

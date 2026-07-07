@@ -294,6 +294,8 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   let speechActive = false;
   let speechIdleResolvers: Array<() => void> = [];
   let directorSayNonce = 0;
+  let awaitingSayDoneNonce = 0;
+  let speechStartedForNonce = 0;
   let onDirectorSpeechStart: (() => void) | null = null;
 
   const resolveSpeechIdle = () => {
@@ -305,7 +307,10 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
   const markSpeechActive = () => {
     const wasInactive = !speechActive;
     speechActive = true;
-    if (wasInactive && directorSayNonce > 0) onDirectorSpeechStart?.();
+    if (wasInactive && directorSayNonce > 0) {
+      speechStartedForNonce = directorSayNonce;
+      onDirectorSpeechStart?.();
+    }
   };
 
   const markSpeechDone = () => {
@@ -350,7 +355,16 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       if (isSpeechStartEvent(eventType)) markSpeechActive();
       if (isSpeechEndEvent(eventType)) {
         markSpeechDone();
-        if (directorSayNonce > 0) handleNarrationDone(directorSayNonce);
+        if (
+          awaitingSayDoneNonce > 0
+          && speechStartedForNonce === awaitingSayDoneNonce
+          && speechStartedForNonce === directorSayNonce
+        ) {
+          const doneNonce = awaitingSayDoneNonce;
+          awaitingSayDoneNonce = 0;
+          speechStartedForNonce = 0;
+          handleNarrationDone(doneNonce);
+        }
       }
       const userText = userTranscriptFromEvent(event);
       if (userText) options.onUserTranscript?.(userText);
@@ -424,6 +438,8 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       directorMode = true;
       onNarrationDone = cb;
       directorSayNonce = 0;
+      awaitingSayDoneNonce = 0;
+      speechStartedForNonce = 0;
       setMicEnabled(stream, false);
       if (dc?.readyState === 'open') applyDirectorSession(dc);
     },
@@ -431,6 +447,8 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       directorMode = false;
       onNarrationDone = null;
       directorSayNonce = 0;
+      awaitingSayDoneNonce = 0;
+      speechStartedForNonce = 0;
       if (options.narrationOnly) return;
       setMicEnabled(stream, true);
       if (dc?.readyState === 'open') applyInteractiveSession(dc, false);
@@ -457,7 +475,10 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
       }
       directorSayNonce += 1;
       const nonce = directorSayNonce;
+      awaitingSayDoneNonce = nonce;
       if (speechActive) {
+        awaitingSayDoneNonce = 0;
+        speechStartedForNonce = 0;
         sendRealtimeEvent(dc, { type: 'response.cancel' });
       }
       const instructions = mode === 'say'
@@ -468,7 +489,11 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
         response: { modalities: ['audio', 'text'], instructions },
       });
       setTimeout(() => {
-        if (nonce === directorSayNonce) handleNarrationDone(nonce);
+        if (nonce === awaitingSayDoneNonce) {
+          awaitingSayDoneNonce = 0;
+          speechStartedForNonce = 0;
+          handleNarrationDone(nonce);
+        }
       }, 14000);
     },
     setDirectorSpeechStartHandler: handler => {

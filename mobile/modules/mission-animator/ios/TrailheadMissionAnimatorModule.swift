@@ -91,6 +91,7 @@ private final class NativeMissionAnimator: NSObject {
     private var sceneIndex = -1
     private var sceneStartTs: CFTimeInterval = 0
     private var pausedTotal: CFTimeInterval = 0
+    private var pauseStartedTs: CFTimeInterval = 0
     private var sceneDuration: CFTimeInterval = 7
     private var smoothedBearing: Double?
     private var lastCamDist: Double?
@@ -143,11 +144,33 @@ private final class NativeMissionAnimator: NSObject {
         return true
     }
 
-    func pause() -> Bool { guard playing, !paused else { return false }; paused = true; displayLink?.isPaused = true; return true }
-    func resume() -> Bool { guard playing, paused else { return false }; paused = false; displayLink?.isPaused = false; return true }
+    func pause() -> Bool {
+        guard playing, !paused else { return false }
+        paused = true
+        pauseStartedTs = CACurrentMediaTime()
+        displayLink?.isPaused = true
+        return true
+    }
+    func resume() -> Bool {
+        guard playing, paused else { return false }
+        paused = false
+        pausedTotal += CACurrentMediaTime() - pauseStartedTs
+        displayLink?.isPaused = false
+        return true
+    }
     func stop() -> Bool { playing = false; paused = false; stopDisplayLink(); clearOverlays(); return true }
     func clear() -> Bool { _ = stop(); route = []; scenes = []; return true }
-    func setSpeed(_ next: Double) -> Bool { speed = max(0.25, min(3, next)); return true }
+    func setSpeed(_ next: Double) -> Bool {
+        speed = max(0.25, min(3, next))
+        guard sceneIndex >= 0, sceneIndex < scenes.count else { return true }
+        let scene = scenes[sceneIndex]
+        let elapsed = CACurrentMediaTime() - sceneStartTs - pausedTotal
+        let oldDuration = max(0.001, sceneDuration)
+        let progress = max(0, min(1, elapsed / oldDuration))
+        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.25, speed))
+        sceneStartTs = CACurrentMediaTime() - (progress * sceneDuration) - pausedTotal
+        return true
+    }
 
     private func attachMapIfNeeded() {
         guard mapView == nil, let found = Self.findMapView() else { return }

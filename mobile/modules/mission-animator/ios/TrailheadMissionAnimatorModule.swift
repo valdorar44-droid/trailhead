@@ -256,7 +256,7 @@ private final class NativeMissionAnimator: NSObject {
         let t = max(0, min(1, elapsed / max(0.001, sceneDuration)))
         if elapsed >= sceneDuration { finishScene(scene); return }
         if scene.cameraMode == "follow", routeTotal > 0 {
-            tickFollow(scene, t: t)
+            tickFollow(scene: scene, t: t)
         }
         if CACurrentMediaTime() - lastProgressEmit >= 0.5 {
             lastProgressEmit = CACurrentMediaTime()

@@ -198,29 +198,30 @@ private final class NativeMissionAnimator: NSObject {
             source.data = .featureCollection(FeatureCollection(features: []))
             try? style.addSource(source)
         }
-        addLine(style: style, id: "th-mission-full-line", source: "mission-full-route-source", color: UIColor(white: 0.9, alpha: 0.85), width: 4.5)
-        addLine(style: style, id: "th-mission-progress-line", source: "mission-progress-route-source", color: UIColor(red: 0.22, green: 0.88, blue: 1, alpha: 1), width: 6.5)
-        addCircle(style: style, id: "th-mission-marker-dot", source: "mission-marker-source")
-    }
-
-    private func addLine(style: MapboxMaps.Style, id: String, source: String, color: UIColor, width: Double) {
-        guard !style.layerExists(withId: id) else { return }
-        var layer = LineLayer(id: id, source: source)
-        layer.lineColor = .constant(StyleColor(color))
-        layer.lineWidth = .constant(width)
-        layer.lineCap = .constant(.round)
-        layer.lineJoin = .constant(.round)
-        try? style.addLayer(layer)
-    }
-
-    private func addCircle(style: MapboxMaps.Style, id: String, source: String) {
-        guard !style.layerExists(withId: id) else { return }
-        var layer = CircleLayer(id: id, source: source)
-        layer.circleRadius = .constant(7)
-        layer.circleColor = .constant(StyleColor(UIColor(red: 0, green: 0.65, blue: 1, alpha: 1)))
-        layer.circleStrokeColor = .constant(StyleColor(.white))
-        layer.circleStrokeWidth = .constant(2.5)
-        try? style.addLayer(layer)
+        if !style.layerExists(withId: "th-mission-full-line") {
+            var layer = LineLayer(id: "th-mission-full-line", source: "mission-full-route-source")
+            layer.lineColor = .constant(StyleColor(UIColor(white: 0.9, alpha: 0.85)))
+            layer.lineWidth = .constant(4.5)
+            layer.lineCap = .constant(.round)
+            layer.lineJoin = .constant(.round)
+            try? style.addLayer(layer)
+        }
+        if !style.layerExists(withId: "th-mission-progress-line") {
+            var layer = LineLayer(id: "th-mission-progress-line", source: "mission-progress-route-source")
+            layer.lineColor = .constant(StyleColor(UIColor(red: 0.22, green: 0.88, blue: 1, alpha: 1)))
+            layer.lineWidth = .constant(6.5)
+            layer.lineCap = .constant(.round)
+            layer.lineJoin = .constant(.round)
+            try? style.addLayer(layer)
+        }
+        if !style.layerExists(withId: "th-mission-marker-dot") {
+            var layer = CircleLayer(id: "th-mission-marker-dot", source: "mission-marker-source")
+            layer.circleRadius = .constant(7)
+            layer.circleColor = .constant(StyleColor(UIColor(red: 0, green: 0.65, blue: 1, alpha: 1)))
+            layer.circleStrokeColor = .constant(StyleColor(.white))
+            layer.circleStrokeWidth = .constant(2.5)
+            try? style.addLayer(layer)
+        }
     }
 
     private func updateFullRoute() {
@@ -322,8 +323,9 @@ private final class NativeMissionAnimator: NSObject {
     private func setCamera(_ center: MissionPoint, zoom: Double, pitch: Double, bearing: Double?, animated: Bool) {
         guard let mapView else { return }
         let options = CameraOptions(center: CLLocationCoordinate2D(latitude: center.lat, longitude: center.lng), zoom: zoom, bearing: bearing, pitch: pitch)
-        if animated { mapView.camera.ease(to: options, duration: 1.8, curve: .easeInOut, completion: nil) }
-        else { try? mapView.mapboxMap.setCamera(to: options) }
+        if animated {
+            mapView.camera.ease(to: options, duration: 1.8, curve: .easeInOut) { _ in }
+        } else { try? mapView.mapboxMap.setCamera(to: options) }
     }
 
     private func cumulativeDistances(_ route: [[Double]]) -> [Double] {

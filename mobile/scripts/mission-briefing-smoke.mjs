@@ -148,6 +148,21 @@ assert(animatorSource.includes('isMissionAnimatorAvailable'), 'native animator m
 assert(animatorSource.includes('prepareMissionAnimation'), 'native animator module exposes prepareMissionAnimation');
 assert(animatorSource.includes('clearMissionAnimation'), 'native animator module exposes clearMissionAnimation');
 assert(animatorSource.includes('addMissionSceneStartListener'), 'native animator module exposes scene lifecycle events');
+const animatorConfigSource = readFileSync(join(root, 'modules/mission-animator/expo-module.config.json'), 'utf8');
+const androidAnimatorModuleSource = readFileSync(join(root, 'modules/mission-animator/android/src/main/java/expo/modules/missionanimator/TrailheadMissionAnimatorModule.kt'), 'utf8');
+const androidAnimatorSource = readFileSync(join(root, 'modules/mission-animator/android/src/main/java/expo/modules/missionanimator/TrailheadMissionAnimator.kt'), 'utf8');
+const iosAnimatorSource = readFileSync(join(root, 'modules/mission-animator/ios/TrailheadMissionAnimatorModule.swift'), 'utf8');
+assert(animatorConfigSource.includes('TrailheadMissionAnimatorModule'), 'native animator autolink config names the platform module');
+assert(androidAnimatorModuleSource.includes('Name("TrailheadMissionAnimator")') && androidAnimatorSource.includes('internal class TrailheadMissionAnimator'),
+  'Android native animator module and implementation are present');
+assert(androidAnimatorSource.includes('Choreographer.FrameCallback') && androidAnimatorSource.includes('MapView'),
+  'Android native animator owns frame timing and MapView updates');
+assert(iosAnimatorSource.includes('Name("TrailheadMissionAnimator")') && iosAnimatorSource.includes('private final class NativeMissionAnimator'),
+  'iOS native animator module and implementation are present');
+assert(iosAnimatorSource.includes('private func runOnMain') && iosAnimatorSource.includes('Thread.isMainThread'),
+  'iOS native animator avoids main-thread sync deadlocks');
+assert((iosAnimatorSource.match(/DispatchQueue\.main\.sync/g) ?? []).length === 1,
+  'iOS native animator confines DispatchQueue.main.sync to the guarded helper');
 assert(mapSource.includes('startMissionAnimation(nativePayload)'), 'map starts native animator when available');
 assert(mapSource.includes('clearMissionNativeListeners'), 'map cleans up native event listeners');
 

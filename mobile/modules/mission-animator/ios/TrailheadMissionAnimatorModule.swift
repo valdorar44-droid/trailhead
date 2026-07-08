@@ -10,6 +10,17 @@ public class TrailheadMissionAnimatorModule: Module {
         self?.sendEvent(event, payload)
     }
 
+    private func runOnMain<T>(_ block: () -> T) -> T {
+        if Thread.isMainThread {
+            return block()
+        }
+        var result: T!
+        DispatchQueue.main.sync {
+            result = block()
+        }
+        return result
+    }
+
     public func definition() -> ModuleDefinition {
         Name("TrailheadMissionAnimator")
 
@@ -23,37 +34,35 @@ public class TrailheadMissionAnimatorModule: Module {
         )
 
         AsyncFunction("isAvailable") { () -> Bool in
-            NativeMissionAnimator.findMapView() != nil
+            self.runOnMain { NativeMissionAnimator.findMapView() != nil }
         }
 
         AsyncFunction("prepareMissionAnimation") { (payload: [String: Any]) -> Bool in
-            DispatchQueue.main.sync { self.animator.prepare(payload: payload) }
+            self.runOnMain { self.animator.prepare(payload: payload) }
         }
 
         AsyncFunction("startMissionAnimation") { (payload: [String: Any]?) -> Bool in
-            var ok = false
-            DispatchQueue.main.sync { ok = self.animator.start(payload: payload) }
-            return ok
+            self.runOnMain { self.animator.start(payload: payload) }
         }
 
         AsyncFunction("pauseMissionAnimation") { () -> Bool in
-            DispatchQueue.main.sync { self.animator.pause() }
+            self.runOnMain { self.animator.pause() }
         }
 
         AsyncFunction("resumeMissionAnimation") { () -> Bool in
-            DispatchQueue.main.sync { self.animator.resume() }
+            self.runOnMain { self.animator.resume() }
         }
 
         AsyncFunction("stopMissionAnimation") { () -> Bool in
-            DispatchQueue.main.sync { self.animator.stop() }
+            self.runOnMain { self.animator.stop() }
         }
 
         AsyncFunction("clearMissionAnimation") { () -> Bool in
-            DispatchQueue.main.sync { self.animator.clear() }
+            self.runOnMain { self.animator.clear() }
         }
 
         AsyncFunction("setMissionAnimationSpeed") { (speed: Double) -> Bool in
-            DispatchQueue.main.sync { self.animator.setSpeed(speed) }
+            self.runOnMain { self.animator.setSpeed(speed) }
         }
     }
 }

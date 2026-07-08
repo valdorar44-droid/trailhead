@@ -7250,7 +7250,7 @@ def _copilot_realtime_tools() -> list[dict]:
                             "getMapContext", "getVisibleMapCandidates", "searchPlaces", "searchTrails", "selectPlace",
                             "selectRenderedFeature", "selectVisiblePlace", "searchAndSelectPlace", "openSelectedPlaceCard",
                             "routeToSelectedPlace", "flyToPlace", "zoomMap", "setMapZoom",
-                            "toggleLayer", "setMapStyle", "buildRoute", "startRouteScout", "saveScoutToRouteBuilder", "startNavigation", "modifyRoute", "dropPin",
+                            "toggleLayer", "setMapStyle", "buildRoute", "startRouteScout", "startMissionBrief", "saveScoutToRouteBuilder", "startNavigation", "modifyRoute", "dropPin",
                             "saveTrip", "downloadOfflineArea", "openRouteBuilderDraft", "updateRouteBuilderDraft",
                             "buildRouteBuilderFramework", "readRouteBuilderContext", "openGuide", "playTripGuide",
                             "openReports", "stageReport", "openOfflineDownloads", "openRigProfile",
@@ -7302,6 +7302,7 @@ def _copilot_realtime_instructions(wake_phrase: bool) -> str:
         "For \"start navigation\" or \"navigate there\" use startNavigation with confirmation. "
         "For full multi-day planning such as \"plan/build/create a 5-day dispersed route from Moab to Big Sur\", call startRouteScout with start, destination, days, driveHours when known, routeStyle, campPreference, campPhotoOnly when they ask for camps with photos/pictures only, fuelStrategy, poiPreferences, and rig profile context. "
         "Before staging a multi-day scout, ask one short follow-up when camp style, route style, daily drive window, or rough-road vehicle fit is ambiguous. "
+        "When Route Scout has just finished and the user says yes, fly it, fly the plan, preview it, or show me the flyover, call startMissionBrief with no confirmation. "
         "Treat driveHours as the user's maximum drive time per day across the requested days, not a required exact daily duration. "
         "If the user gives a follow-up drive time such as \"5 hours\" while a route scout is active, call startRouteScout again with the prior scout context plus driveHours. "
         "Interpret requests for dangerous, gnarly, rough, or high-clearance roads as wild but safe scouting. Use the saved rig profile when available and do not silently push low-clearance or towing rigs onto rough roads. "
@@ -7702,6 +7703,11 @@ def _build_extreme_map_action(command: str, context: dict, provider: str = "trai
         route_builder_draft = draft
         map_updates = {"route_scout": True, "route_scout_tune": True}
         message = "Route Scout is tuning the daily drive window."
+    elif route_scout_active and route_scout_ctx.get("status") != "needs_input" and re.search(r"\b(yes|yeah|yep|sure|fly it|fly the plan|show (?:me )?the flyover|start (?:the )?flyover|preview it)\b", text):
+        action_type = "startMissionBrief"
+        args = {"source": "route_scout"}
+        map_updates = {"route_scout": True, "mission_brief": True}
+        message = "Starting the flyover."
     elif route_scout_ctx.get("status") == "needs_input" and not re.search(r"\b(save|send|export|open)\b.*\b(route builder|builder|draft)\b|\broute builder\b.*\b(save|send|open)\b", text):
         draft = dict(route_scout_ctx.get("draftArgs") if isinstance(route_scout_ctx.get("draftArgs"), dict) else {})
         draft.update(_route_builder_draft_from_text(command, context))

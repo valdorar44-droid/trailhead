@@ -183,6 +183,8 @@ export type NativeMissionBriefPlayer = {
   skip: () => void;
   stop: () => void;
   setSpeed: (speed: number) => void;
+  seekTo: (ratio: number) => void;
+  setFreeCamera: (enabled: boolean) => void;
   /** Signal that the current scene's narration has finished (paces beat advancement to the voice). */
   markNarrationDone: () => void;
 };
@@ -209,6 +211,7 @@ export function startNativeMissionBriefPlayer(opts: {
   onStarted: () => void;
   onSceneStarted: (scene: MissionScene, index: number) => void;
   onSceneFinished: (index: number) => void;
+  onSeekScene?: (scene: MissionScene, index: number, ratio: number) => void;
   onPaused: (index: number) => void;
   onResumed: (index: number) => void;
   onComplete: () => void;
@@ -221,6 +224,7 @@ export function startNativeMissionBriefPlayer(opts: {
   onCallouts?: (callouts: MissionBriefCallout[]) => void;
   onWarningChange?: (active: boolean) => void;
   onSceneRoute?: (coords: [number, number][]) => void;
+  onProgressRatio?: (ratio: number) => void;
   /** Optional debug hook for device QA (camera vs overlay tick counts). */
   onDebugTick?: (kind: 'camera' | 'overlay') => void;
 }): NativeMissionBriefPlayer {
@@ -239,6 +243,7 @@ export function startNativeMissionBriefPlayer(opts: {
     onStarted,
     onSceneStarted,
     onSceneFinished,
+    onSeekScene,
     onPaused,
     onResumed,
     onComplete,
@@ -250,6 +255,7 @@ export function startNativeMissionBriefPlayer(opts: {
     onCallouts,
     onWarningChange,
     onSceneRoute,
+    onProgressRatio,
     onDebugTick,
   } = opts;
 
@@ -267,6 +273,7 @@ export function startNativeMissionBriefPlayer(opts: {
   let pausedTotal = 0;
   let stopped = false;
   let speed = Number.isFinite(initialSpeed) && initialSpeed > 0 ? initialSpeed : 1;
+  let freeCamera = false;
   let sceneDuration = SCENE_FLOOR_MS;
   let lastFrameTs = 0;
   let smoothedBearing: number | null = null;
@@ -296,7 +303,7 @@ export function startNativeMissionBriefPlayer(opts: {
     } catch {
       if (!noticedNo3d) {
         noticedNo3d = true;
-        onNotice?.('3D terrain unavailable — flying in map mode.');
+        onNotice?.('Flying in map view.');
       }
     }
   };
@@ -316,14 +323,33 @@ export function startNativeMissionBriefPlayer(opts: {
   }
 
   function emitProgress(ratio: number, sceneCoords?: [number, number][] | null) {
-    const progressCoords = downsample(progressRouteFromRatio(route, ratio), PROGRESS_MAX_POINTS);
+    const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    onProgressRatio?.(clamped);
+    const progressCoords = downsample(progressRouteFromRatio(route, clamped), PROGRESS_MAX_POINTS);
     onProgressRoute?.(progressCoords);
     if (sceneCoords && sceneCoords.length >= 2) {
       onSceneRoute?.(sceneCoords);
     }
-    const marker = pointAtDistance(route, routeCum, ratio * routeTotal);
+    const marker = pointAtDistance(route, routeCum, clamped * routeTotal);
     onMarkerMove?.({ lat: marker.lat, lng: marker.lng });
-    postWeb({ type: 'mission_brief_progress', ratio });
+    postWeb({ type: 'mission_brief_progress', ratio: clamped });
+  }
+
+  function sceneIndexForRatio(ratio: number) {
+    if (!cinematic.scenes.length) return -1;
+    const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    const candidates = cinematic.scenes
+      .map((scene, i) => ({ scene, i }))
+      .filter(({ scene }) => Array.isArray(scene.routeSlice) && scene.routeSlice.length >= 2)
+      .filter(({ scene }) => clamped >= Math.min(scene.routeSlice![0], scene.routeSlice![1]) - 0.001
+        && clamped <= Math.max(scene.routeSlice![0], scene.routeSlice![1]) + 0.001);
+    const follow = candidates.find(({ scene }) => scene.camera?.mode === 'follow' || scene.type.includes('day') || scene.type.includes('drive'));
+    if (follow) return follow.i;
+    if (candidates.length) return candidates[0].i;
+    if (clamped >= 0.97) return Math.max(0, cinematic.scenes.length - 1);
+    if (clamped <= 0.03) return 0;
+    const wholeRoute = cinematic.scenes.findIndex(scene => scene.type === 'whole_route');
+    return wholeRoute >= 0 ? wholeRoute : 0;
   }
 
   function stopAnim() {
@@ -338,6 +364,9 @@ export function startNativeMissionBriefPlayer(opts: {
   function followCamera(scene: MissionScene, center: Point, bearing: number, zoom: number) {
     const cam = scene.camera || { mode: 'follow' };
     const pitch = Math.max(58, Math.min(68, cam.pitch ?? 64));
+    lastCamBearing = bearing;
+    lastCamPoint = center;
+    if (freeCamera) return;
     nativeMapRef.current?.flyToCamera?.({
       lat: center.lat,
       lng: center.lng,
@@ -347,8 +376,6 @@ export function startNativeMissionBriefPlayer(opts: {
       duration: CAMERA_TWEEN_MS,
       mode: 'linearTo',
     });
-    lastCamBearing = bearing;
-    lastCamPoint = center;
     postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: CAMERA_TWEEN_MS });
   }
 
@@ -367,6 +394,7 @@ export function startNativeMissionBriefPlayer(opts: {
     const coords = sliceRoute(route, scene.routeSlice ?? [0, 1]);
     smoothedBearing = null;
     lowPassPath = null;
+    if (freeCamera) return 0;
 
     // Rejoin transition: glide from the POI back onto the route at rejoinRatio,
     // pre-positioning the camera so the next follow leg's continuity-skip fires.
@@ -615,18 +643,20 @@ export function startNativeMissionBriefPlayer(opts: {
               lat: scenePass.a.lat + (scenePass.b.lat - scenePass.a.lat) * pt,
               lng: scenePass.a.lng + (scenePass.b.lng - scenePass.a.lng) * pt,
             };
-            nativeMapRef.current?.flyToCamera?.({
-              lat: center.lat,
-              lng: center.lng,
-              zoom: Math.min(cam.zoom ?? 13.6, 14),
-              pitch: Math.max(60, Math.min(72, cam.pitch ?? 70)),
-              bearing: scenePass.bearing,
-              duration: CAMERA_TWEEN_MS,
-              mode: 'linearTo',
-            });
             lastCamBearing = scenePass.bearing;
             lastCamDist = null;
             lastCamPoint = center;
+            if (!freeCamera) {
+              nativeMapRef.current?.flyToCamera?.({
+                lat: center.lat,
+                lng: center.lng,
+                zoom: Math.min(cam.zoom ?? 13.6, 14),
+                pitch: Math.max(60, Math.min(72, cam.pitch ?? 70)),
+                bearing: scenePass.bearing,
+                duration: CAMERA_TWEEN_MS,
+                mode: 'linearTo',
+              });
+            }
             if (overlayDue && scene.focus) {
               lastOverlayTs = now;
               onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
@@ -639,18 +669,20 @@ export function startNativeMissionBriefPlayer(opts: {
             // the orbit simply keeps turning instead of freezing.
             const ot = Math.max(0, (elapsed(now) - sceneEstablishMs) / glideMs);
             const bearing = orbitStartBearing + orbitSweepDeg * ot;
-            nativeMapRef.current?.flyToCamera?.({
-              lat: scene.focus.lat,
-              lng: scene.focus.lng,
-              zoom: Math.min(cam.zoom ?? 13, 14),
-              pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)),
-              bearing,
-              duration: CAMERA_TWEEN_MS,
-              mode: 'linearTo',
-            });
             lastCamBearing = bearing;
             lastCamDist = null;
             lastCamPoint = { lat: scene.focus.lat, lng: scene.focus.lng };
+            if (!freeCamera) {
+              nativeMapRef.current?.flyToCamera?.({
+                lat: scene.focus.lat,
+                lng: scene.focus.lng,
+                zoom: Math.min(cam.zoom ?? 13, 14),
+                pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)),
+                bearing,
+                duration: CAMERA_TWEEN_MS,
+                mode: 'linearTo',
+              });
+            }
             if (overlayDue) {
               lastOverlayTs = now;
               onMarkerMove?.({ lat: scene.focus.lat, lng: scene.focus.lng });
@@ -786,9 +818,63 @@ export function startNativeMissionBriefPlayer(opts: {
     if (Number.isFinite(next) && next > 0) speed = next;
   }
 
+  function setFreeCamera(enabled: boolean) {
+    freeCamera = !!enabled;
+  }
+
+  function seekTo(ratio: number) {
+    if (!cinematic.scenes.length || route.length < 2) return;
+    const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    stopAnim();
+    playing = true;
+    paused = true;
+    stopped = false;
+    failed = false;
+    pausedAt = performance.now();
+    pausedTotal = 0;
+    const nextIndex = sceneIndexForRatio(clamped);
+    const scene = cinematic.scenes[nextIndex] ?? cinematic.scenes[0];
+    index = Math.max(0, nextIndex);
+    sceneStart = performance.now();
+    narrationDone = true;
+    sceneEstablishMs = 0;
+    camBusyUntil = 0;
+    lastOverlayTs = 0;
+    applySceneOverlays(scene);
+    emitProgress(clamped, scene.routeSlice ? sliceRoute(route, scene.routeSlice) : null);
+    const point = pointAtDistance(route, routeCum, clamped * routeTotal);
+    const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, clamped * routeTotal + 500));
+    const bearing = bearingLngLat([point.lng, point.lat], [ahead.lng, ahead.lat]);
+    lastCamPoint = point;
+    lastCamBearing = bearing;
+    lastCamDist = clamped * routeTotal;
+    if (!freeCamera) {
+      nativeMapRef.current?.flyToCamera?.({
+        lat: point.lat,
+        lng: point.lng,
+        zoom: Math.min(scene.camera?.zoom ?? 13.2, 14.2),
+        pitch: Math.max(54, Math.min(68, scene.camera?.pitch ?? 62)),
+        bearing,
+        duration: 350,
+        mode: 'linearTo',
+      });
+      postWeb({
+        type: 'fly_to',
+        lat: point.lat,
+        lng: point.lng,
+        zoom: Math.min(scene.camera?.zoom ?? 13.2, 14.2),
+        pitch: Math.max(54, Math.min(68, scene.camera?.pitch ?? 62)),
+        bearing,
+        duration: 350,
+      });
+    }
+    onSeekScene?.(scene, index, clamped);
+    onPaused(index);
+  }
+
   function markNarrationDone() {
     narrationDone = true;
   }
 
-  return { replay, pause, resume, skip, stop, setSpeed, markNarrationDone };
+  return { replay, pause, resume, skip, stop, setSpeed, seekTo, setFreeCamera, markNarrationDone };
 }

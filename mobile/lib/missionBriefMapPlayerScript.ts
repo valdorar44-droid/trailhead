@@ -13,6 +13,8 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     sceneStart: 0,
     pausedAt: 0,
     pausedTotal: 0,
+    speed: 1,
+    freeCamera: false,
     markers: []
   };
   function cinePost(type, extra) {
@@ -71,6 +73,36 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     var clamped = Math.max(0, Math.min(1, ratio));
     var count = Math.max(2, Math.ceil(clamped * coords.length));
     map.getSource('route-anim')?.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice(0, count) } });
+    cinePost('cinematic_progress', { ratio: clamped });
+  }
+  function pointAtRatio(ratio) {
+    var coords = cineRoute();
+    if (!coords.length) return null;
+    if (coords.length === 1) return coords[0];
+    var clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    var pos = clamped * (coords.length - 1);
+    var i = Math.floor(pos);
+    var frac = pos - i;
+    var c0 = coords[Math.min(i, coords.length - 1)];
+    var c1 = coords[Math.min(i + 1, coords.length - 1)];
+    return [c0[0] + (c1[0] - c0[0]) * frac, c0[1] + (c1[1] - c0[1]) * frac];
+  }
+  function sceneForRatio(ratio) {
+    var clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    var fallback = 0;
+    for (var i = 0; i < cine.scenes.length; i++) {
+      var s = cine.scenes[i];
+      if (s.type === 'whole_route') fallback = i;
+      if (!s.routeSlice || s.routeSlice.length < 2) continue;
+      var a = Math.min(s.routeSlice[0], s.routeSlice[1]);
+      var b = Math.max(s.routeSlice[0], s.routeSlice[1]);
+      if (clamped >= a - 0.001 && clamped <= b + 0.001) {
+        if ((s.camera && s.camera.mode === 'follow') || String(s.type || '').indexOf('day') >= 0 || String(s.type || '').indexOf('drive') >= 0) return i;
+        fallback = i;
+      }
+    }
+    if (clamped >= 0.97) return Math.max(0, cine.scenes.length - 1);
+    return fallback;
   }
   function ensureCineTerrain(scene) {
     if (!(scene.layers && scene.layers.terrain)) return;
@@ -111,6 +143,7 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     return now - cine.sceneStart - cine.pausedTotal;
   }
   function cineApplyCamera(scene) {
+    if (cine.freeCamera) return;
     var cam = scene.camera || { mode: 'fit' };
     var pitch = Math.max(48, Math.min(72, cam.pitch != null ? cam.pitch : 58));
     if (cam.mode === 'fit' || (!scene.focus && !(scene.routeSlice && scene.routeSlice.length))) {
@@ -148,7 +181,7 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     }
   }
   function cineRunLoop(scene) {
-    var duration = Math.max(9000, Number(scene.durationMs) || 12000);
+    var duration = Math.max(1500, Math.max(9000, Number(scene.durationMs) || 12000) / Math.max(.25, Number(cine.speed) || 1));
     var cam = scene.camera || {};
     var slice = scene.routeSlice;
     var coords = slice ? sliceCoords(slice) : null;
@@ -177,12 +210,14 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
               var dx = c1[0] - c0[0], dy = c1[1] - c0[1];
               bearing = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
             }
-            map.easeTo({ center: [lng, lat], bearing: bearing, zoom: Math.min(cam.zoom || 12.4, 13.8), pitch: Math.max(58, Math.min(72, cam.pitch || 66)), duration: 0 });
+            if (!cine.freeCamera) {
+              map.easeTo({ center: [lng, lat], bearing: bearing, zoom: Math.min(cam.zoom || 12.4, 13.8), pitch: Math.max(58, Math.min(72, cam.pitch || 66)), duration: 0 });
+            }
           }
         } else if (cam.mode === 'orbit' && elapsed > 2400) {
           if (orbitBase === null) orbitBase = map.getBearing();
           var ot = Math.max(0, Math.min(1, (elapsed - 2400) / Math.max(1, duration - 2400)));
-          map.setBearing(orbitBase + 85 * ot);
+          if (!cine.freeCamera) map.setBearing(orbitBase + 85 * ot);
         }
       } catch (err) { cineFail(err); return; }
       if (t >= 1) { cineFinishScene(); return; }
@@ -256,6 +291,50 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
       }
       cineFinishScene();
     },
+    setSpeed: function(msg) {
+      var next = Number(msg && msg.speed);
+      if (isFinite(next) && next > 0) cine.speed = next;
+    },
+    setFreeCamera: function(msg) {
+      cine.freeCamera = !!(msg && msg.enabled);
+    },
+    seekTo: function(msg) {
+      if (!cine.scenes.length) return;
+      var ratio = Math.max(0, Math.min(1, Number(msg && msg.ratio) || 0));
+      cineStopAnim();
+      cine.playing = true;
+      cine.paused = true;
+      cine.pausedAt = performance.now();
+      cine.pausedTotal = 0;
+      var sceneIndex = sceneForRatio(ratio);
+      var scene = cine.scenes[sceneIndex] || cine.scenes[0];
+      cine.index = Math.max(0, sceneIndex);
+      cine.sceneStart = performance.now();
+      setProgressLine(ratio);
+      showCineCallouts(scene);
+      if (!cine.freeCamera) {
+        var point = pointAtRatio(ratio);
+        var ahead = pointAtRatio(Math.min(1, ratio + 0.01));
+        if (point) {
+          var bearing = map.getBearing();
+          if (ahead) {
+            var dx = ahead[0] - point[0], dy = ahead[1] - point[1];
+            bearing = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
+          }
+          var cam = scene.camera || {};
+          map.easeTo({
+            center: point,
+            bearing: bearing,
+            zoom: Math.min(cam.zoom || 13.2, 14.2),
+            pitch: Math.max(54, Math.min(68, cam.pitch || 62)),
+            duration: 350,
+            essential: true
+          });
+        }
+      }
+      cinePost('cinematic_seek', { ratio: ratio, sceneId: scene && scene.id, sceneType: scene && scene.type, index: cine.index });
+      cinePost('cinematic_paused', { index: cine.index });
+    },
     stop: function() {
       cine.playing = false;
       cine.paused = false;
@@ -273,6 +352,7 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
       checkpoints: msg.checkpoints || []
     };
     cine.scenes = window.__missionBriefData.scenes;
+    cine.speed = Number(msg.speed) > 0 ? Number(msg.speed) : cine.speed;
     if (msg.route && msg.route.length > 1) {
       _routeCoords = msg.route;
       rebuildRouteCum();

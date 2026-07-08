@@ -37,10 +37,10 @@ import {
   TrailheadSkeletonLine,
 } from '@/components/TrailheadUI';
 
-// ── Native Mapbox/MapLibre SDK active. WebView remains as a runtime fallback if
-// map load fails. clusterProperties stay disabled on native — see
-// docs/checkpoints/map-tab-native-cluster-crash-2026-07-03.md.
-const USE_NATIVE_MAP = true;
+// ── WebView renderer is the production map surface. The native Mapbox SDK stays
+// compiled for preview testing, but it is not mounted at runtime until the
+// mobile tab crash path is fully cleared on-device.
+const USE_NATIVE_MAP = false;
 // Realtime Co-Pilot narration (WebRTC) — the Co-Pilot's own ChatGPT voice narrates the
 // cinematic. Verified working on-device in voice mode. Device TTS is the instant fallback.
 const ENABLE_REALTIME_NARRATOR = true;

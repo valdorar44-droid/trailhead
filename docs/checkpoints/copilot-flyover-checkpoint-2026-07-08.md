@@ -23,7 +23,8 @@
 - `node scripts/user-facing-copy-audit.mjs`
 - `node scripts/route-builder-audit.mjs`
 - `git diff --check`
+- `cd mobile/android && JAVA_HOME="$HOME/.local/share/jdks/temurin-17" ./gradlew :app:assembleDebug`
 
 ## Build Gate
 
-No new EAS preview build was started in this pass. Preview builds should wait until local checks stay clean and the next live visual pass confirms the route overview -> flyover -> route overview flow.
+No new EAS preview build was started in this pass. The local Android debug package build passed. Preview builds should wait until the next live visual pass confirms the route overview -> flyover -> route overview flow.

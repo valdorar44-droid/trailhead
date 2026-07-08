@@ -549,7 +549,7 @@ export function liveMissionBeatBrief(
   const tripLabel = startName && destName ? `${startName} to ${destName}` : String(scene.title || 'Your route').trim();
 
   if (scene.type === 'intro') {
-    return `${tripLabel} is built. I'll fly it camp by camp, close to the ground.`;
+    return `${tripLabel} is built. I'll fly the route and stop at the key camps.`;
   }
   if (scene.type === 'camp_arrival') {
     const campName = String(plan?.campName || scene.title).trim();
@@ -565,24 +565,24 @@ export function liveMissionBeatBrief(
     const dayNum = day || 1;
     const miles = parseDriveMiles(plan?.driveSummary);
     if (dayNum === 1) {
-      return `Day ${dayNum} leaves ${from} and runs through the planned corridor before the first camp window.`;
+      return `Day ${dayNum} leaves ${from} and follows the route toward the first camp.`;
     }
     if (miles != null && miles >= 120) {
-      return `This stretch gets remote. Download the route pack before leaving strong signal on the way to ${to}.`;
+      return `This stretch gets remote on the way to ${to}. Save the route before leaving strong signal.`;
     }
-    return `Day ${dayNum} runs from ${from} toward ${to} along the planned corridor.`;
+    return `Day ${dayNum} runs from ${from} toward ${to}.`;
   }
   if (scene.type === 'fuel_stop') {
     return `Fuel stop at ${scene.title}. Top off here before the next long stretch.`;
   }
   if (scene.type === 'mission_recap') {
     const finish = destName || 'the finish';
-    return `That's the route to ${finish}. Camps are placed, but offline maps and rig profile still need review.`;
+    return `That's the route to ${finish}. Review camps, fuel, and current conditions before you go.`;
   }
   if (['risk_focus', 'weather_focus', 'offline_readiness'].includes(scene.type)) {
     const note = String(scene.subtitle || scene.narration || '').trim();
     if (scene.type === 'offline_readiness') {
-      return 'This stretch gets remote. Download the route pack before leaving strong signal.';
+      return 'This stretch gets remote. Save the route before leaving strong signal.';
     }
     return note || String(scene.title || '').trim();
   }

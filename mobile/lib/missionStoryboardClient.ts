@@ -38,6 +38,18 @@ function num(value: unknown): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function cleanCinematicCopy(value: unknown, fallback = ''): string {
+  return String(value || fallback)
+    .replace(/[—–]/g, ', ')
+    .replace(/\bmission briefing\b/gi, 'flyover')
+    .replace(/\bmission recap\b/gi, 'trip recap')
+    .replace(/\bmission control\b/gi, 'trip overview')
+    .replace(/\bAI\b/g, '')
+    .replace(/\bartificial intelligence\b/gi, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
@@ -89,8 +101,8 @@ function cleanScene(raw: Record<string, unknown>, idx: number): MissionScene | n
   const scene: MissionScene = {
     id: String(raw.id || `ai-scene-${idx}`).slice(0, 80),
     type,
-    title: String(raw.title || '').slice(0, 120),
-    subtitle: String(raw.subtitle || '').slice(0, 160),
+    title: cleanCinematicCopy(raw.title).slice(0, 120),
+    subtitle: cleanCinematicCopy(raw.subtitle).slice(0, 160),
     day: num(raw.day) && Number(raw.day) > 0 ? Math.round(Number(raw.day)) : undefined,
     durationMs: duration != null ? Math.max(4000, Math.min(14000, duration)) : 8000,
     routeSlice,
@@ -98,7 +110,7 @@ function cleanScene(raw: Record<string, unknown>, idx: number): MissionScene | n
     rejoinRatio: rejoin != null ? clamp01(rejoin) : undefined,
     camera: cleanCamera(raw.camera),
     layers: { terrain: !!layersRaw.terrain, warning: !!layersRaw.warning },
-    narration: String(raw.narration || '').slice(0, 320),
+    narration: cleanCinematicCopy(raw.narration).slice(0, 320),
     callouts: Array.isArray(raw.callouts)
       ? (raw.callouts as Array<Record<string, unknown>>).slice(0, 6).flatMap((c, ci) => {
         const lat = num(c?.lat);
@@ -106,8 +118,8 @@ function cleanScene(raw: Record<string, unknown>, idx: number): MissionScene | n
         if (lat == null || lng == null) return [];
         return [{
           id: String(c.id || `ai-callout-${idx}-${ci}`).slice(0, 80),
-          title: String(c.title || 'Stop').slice(0, 120),
-          note: String(c.note || '').slice(0, 200) || undefined,
+          title: cleanCinematicCopy(c.title, 'Stop').slice(0, 120),
+          note: cleanCinematicCopy(c.note).slice(0, 200) || undefined,
           lat,
           lng,
           kind: String(c.kind || 'poi').slice(0, 40),
@@ -185,7 +197,7 @@ export function directedCinematicFromStoryboard(input: {
   scenes.push({
     id: 'scene-recap',
     type: 'mission_recap',
-    title: aiRecap?.title || 'Mission recap',
+    title: 'Trip recap',
     subtitle: aiRecap?.subtitle || 'Review before departure',
     durationMs: aiRecap?.durationMs ?? 6000,
     routeSlice: [0, 1],

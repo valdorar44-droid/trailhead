@@ -117,7 +117,6 @@ import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferenc
 import { startRealtimeCopilotSession, type RealtimeCopilotHandle } from '@/lib/realtimeCopilot';
 import { waitForRouteRenderReady, waitForRealtimeConnected } from '@/lib/cinematicDirector';
 import { CopilotPresenceOrb, type CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
-import { MissionControlPanel } from '@/components/copilot/MissionControlPanel';
 import { TripPreviewCaption } from '@/components/copilot/TripPreviewCaption';
 import { TripPreviewControls, DEFAULT_PREVIEW_SPEED, nextPreviewSpeed } from '@/components/copilot/TripPreviewControls';
 import type { MissionCinematic, MissionScene } from '@/lib/copilotStoryboard';
@@ -841,7 +840,7 @@ function localRouteBrief(trip: TripResult, reports: Report[] = []): RouteBrief {
     reports.length ? `${reports.length} recent route alert${reports.length === 1 ? '' : 's'} should be reviewed before departure.` : '',
   ].filter(Boolean).slice(0, 3);
   const mustDo = [
-    'Download this trip from the Download List before leaving service.',
+    'Save this trip before leaving service.',
     camps.length ? 'Check each saved camp is open, legal, and reachable for your rig.' : 'Choose overnight camps for each travel day before using GPS navigation.',
     fuelStops > 0 ? 'Confirm fuel range against the longest day and top off before remote legs.' : 'Add at least one fuel stop or bail-out town to the route.',
     'Carry extra water and check current fire restrictions before departure.',
@@ -857,7 +856,7 @@ function localRouteBrief(trip: TripResult, reports: Report[] = []): RouteBrief {
     daily_highlights: dailyHighlights,
     estimated_fuel_stops: fuelStops,
     water_carry_gallons: Math.max(3, Math.min(10, Math.ceil(days * 1.5))),
-    signal_dead_zones: miles > 80 ? [`${routeName}: expect weak service away from towns; keep offline maps and the route pack downloaded.`] : [],
+    signal_dead_zones: miles > 80 ? [`${routeName}: expect weak service away from towns; save the route before departure.`] : [],
     fire_restriction_likelihood: 'possible - check current land manager rules and posted restrictions before lighting any fire.',
     emergency_bailout: wps.length >= 2 ? `Use the nearest mapped town, highway, or saved fuel stop from the active day if conditions turn.` : 'Add at least one named town or fuel stop as a bail-out point.',
     briefing_summary: `${routeName} is usable, but confirm camps, fuel, offline maps, and current closures before you roll.`,
@@ -5794,7 +5793,7 @@ function MapScreen() {
   const [extremeCopilotVoiceStatus, setExtremeCopilotVoiceStatus] = useState('');
   const [extremeCopilotVoiceMode, setExtremeCopilotVoiceMode] = useState<'push_to_talk' | 'wake_phrase' | null>(null);
   const [mapMissionBrief, setMapMissionBrief] = useState<MissionControlBrief | null>(null);
-  const [mapMissionLoading, setMapMissionLoading] = useState(false);
+  const [, setMapMissionLoading] = useState(false);
   const [mapMissionCinematic, setMapMissionCinematic] = useState<MissionCinematic | null>(null);
   const [mapMissionScene, setMapMissionScene] = useState<MissionScene | null>(null);
   const [mapMissionSceneIndex, setMapMissionSceneIndex] = useState(0);
@@ -5824,7 +5823,6 @@ function MapScreen() {
   const [copilotBriefPresence, setCopilotBriefPresence] = useState<CopilotPresenceState>('idle');
   const [mapMissionSpeed, setMapMissionSpeed] = useState<number>(DEFAULT_PREVIEW_SPEED);
   const mapMissionSpeedRef = useRef<number>(DEFAULT_PREVIEW_SPEED);
-  const [mapMissionPanelExpanded, setMapMissionPanelExpanded] = useState(false);
   const [mapMissionNotice, setMapMissionNotice] = useState<string | null>(null);
   const mapMissionCinematicRef = useRef<MissionCinematic | null>(null);
   const mapMissionPlayerRef = useRef<NativeMissionBriefPlayer | null>(null);
@@ -13753,7 +13751,6 @@ function MapScreen() {
     setMapMissionCaptionText('');
     setMapMissionProgress(0);
     setMapMissionFreeCamera(false);
-    setMapMissionPanelExpanded(false);
     setMapMissionNotice(null);
     setCopilotBriefPresence('idle');
     setMissionBriefOverlay({
@@ -14311,7 +14308,6 @@ function MapScreen() {
     mapMission3dSnapshotRef.current = map3dEnabled;
     mapMissionStyleSnapshotRef.current = { mapLayer, premiumMapStyle };
     setMapMissionVisible(true);
-    setMapMissionPanelExpanded(false);
     setPanelCollapsed(true);
     setMapMissionNotice(null);
     setMapMissionProgress(0);
@@ -14396,7 +14392,7 @@ function MapScreen() {
     if (!cinematic || cinematic.scenes.length < 2) {
       missionRunningRef.current = false;
       setMapMissionError(true);
-      setQuickToast('Route is too short for a mission briefing.');
+      setQuickToast('Route is too short for a flyover.');
       setTimeout(() => setQuickToast(''), 2600);
       return false;
     }
@@ -14475,7 +14471,7 @@ function MapScreen() {
           setMapMissionPlaying(false);
           setMapMissionError(true);
           setCopilotBriefPresence('idle');
-          setQuickToast(message || 'Mission briefing failed');
+          setQuickToast(message || 'Flyover failed');
           setTimeout(() => setQuickToast(''), 2800);
         }),
       ];
@@ -14639,7 +14635,7 @@ function MapScreen() {
         setMapMissionPlaying(false);
         setMapMissionError(true);
         setCopilotBriefPresence('idle');
-        setQuickToast(message || 'Mission briefing failed');
+        setQuickToast(message || 'Flyover failed');
         setTimeout(() => setQuickToast(''), 2800);
       },
     });
@@ -15413,8 +15409,8 @@ function MapScreen() {
         status: started ? 'applied' : 'failed',
         opened: 'mission_briefing',
         spoken_summary: started
-          ? 'Playing the mission briefing on your map now.'
-          : 'I need an active route before I can fly the briefing.',
+          ? 'Playing the flyover on your map now.'
+          : 'I need an active route before I can start the flyover.',
       };
     }
     if (type === 'openRigProfile') {
@@ -15802,8 +15798,8 @@ function MapScreen() {
 
     const localMission = (() => {
       const clean = text.toLowerCase();
-      if (/\b(mission control|mission briefing|3d preview|route preview|fly (the|my) route|open explorer|open briefing)\b/.test(clean)) {
-        return 'Opening the 3D mission briefing.';
+      if (/\b(mission control|mission briefing|3d preview|route preview|fly (the|my) route|open explorer|open briefing|flyover)\b/.test(clean)) {
+        return 'Opening the flyover.';
       }
       if (/\b(is this trip ready|trip ready|readiness check|check readiness)\b/.test(clean)) {
         return 'Opening Mission Control to check readiness.';
@@ -16833,7 +16829,7 @@ function MapScreen() {
         setMapMissionPlaying(false);
         setMapMissionError(true);
         setCopilotBriefPresence('idle');
-        setQuickToast(msg.message || 'Mission briefing failed');
+        setQuickToast(msg.message || 'Flyover failed');
         setTimeout(() => setQuickToast(''), 2800);
       }
       if (msg.type === 'map_ready') {
@@ -21543,20 +21539,7 @@ function MapScreen() {
         </View>
       )}
 
-      {mapMissionVisible && mapMissionCinematic && !mapMissionError && (() => {
-        const missionControlOn = extremeConfig?.feature_flags?.mission_control !== false;
-        const readiness = mapMissionBrief?.readiness ?? 'needs_review';
-        const readinessColor = readiness === 'ready' ? C.green : readiness === 'blocked' ? C.red : C.orange;
-        const readinessLabel = readiness === 'ready' ? 'READY' : readiness === 'blocked' ? 'BLOCKED' : 'REVIEW';
-        const warnCount = mapMissionBrief?.risks?.length ?? 0;
-        // Map is the hero: full Mission Control only before/after playback, on the
-        // recap scene, or when the user expands it. Otherwise a compact pill.
-        const showCompactMissionChrome = mapMissionPlaying
-          && !mapMissionComplete
-          && !mapMissionPanelExpanded
-          && mapMissionScene?.type !== 'mission_recap';
-        const showFullMissionPanel = !showCompactMissionChrome;
-        return (
+      {mapMissionVisible && mapMissionCinematic && !mapMissionError && (
         <>
           {/* Top cinematic caption — keeps the route visible underneath */}
           <View pointerEvents="box-none" style={[s.mapMissionBriefTop, { top: insets.top + 8 }]}>
@@ -21578,48 +21561,6 @@ function MapScreen() {
 
           {/* Bottom control dock */}
           <View pointerEvents="box-none" style={[s.mapMissionBriefWrap, { bottom: bottomInset + 10 }]}>
-            {missionControlOn && showFullMissionPanel ? (
-              <View pointerEvents="box-none">
-                {mapMissionPlaying && !mapMissionComplete && mapMissionScene?.type !== 'mission_recap' ? (
-                  <TouchableOpacity
-                    style={s.mapMissionPanelCollapse}
-                    onPress={() => setMapMissionPanelExpanded(false)}
-                    accessibilityLabel="Hide Mission Control"
-                  >
-                    <Ionicons name="chevron-down" size={14} color={C.text2} />
-                    <Text style={s.mapMissionPillLabel}>Hide details</Text>
-                  </TouchableOpacity>
-                ) : null}
-                <MissionControlPanel
-                  brief={mapMissionBrief}
-                  loading={mapMissionLoading}
-                  onRefresh={() => refreshMapMissionControl(
-                    lastRouteCoords.length >= 2 ? lastRouteCoords : routeCoordsFromScout(routeScout),
-                    activeTrip?.trip_id ?? null,
-                  )}
-                  onRecommendation={() => {}}
-                />
-              </View>
-            ) : missionControlOn ? (
-              <TouchableOpacity
-                style={s.mapMissionPill}
-                activeOpacity={0.85}
-                onPress={() => setMapMissionPanelExpanded(true)}
-                accessibilityLabel="Expand Mission Control review"
-              >
-                <View style={[s.mapMissionPillDot, { backgroundColor: readinessColor }]} />
-                <Text style={s.mapMissionPillLabel} numberOfLines={1}>Mission review</Text>
-                <Text style={[s.mapMissionPillStatus, { color: readinessColor }]} numberOfLines={1}>{readinessLabel}</Text>
-                {warnCount > 0 ? (
-                  <View style={[s.mapMissionPillWarn, { borderColor: readinessColor }]}>
-                    <Ionicons name="warning" size={10} color={readinessColor} />
-                    <Text style={[s.mapMissionPillWarnText, { color: readinessColor }]}>{warnCount}</Text>
-                  </View>
-                ) : null}
-                <Ionicons name="chevron-up" size={14} color={C.text2} />
-              </TouchableOpacity>
-            ) : null}
-
             <View pointerEvents="box-none" style={s.mapMissionBriefControls}>
               <CopilotPresenceOrb state={copilotBriefPresence} />
               <View style={{ flex: 1 }} pointerEvents="none" />
@@ -21668,8 +21609,7 @@ function MapScreen() {
             </View>
           </View>
         </>
-        );
-      })()}
+      )}
 
       <RouteScoutPanel
         visible={!!routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && !mapMissionVisible}

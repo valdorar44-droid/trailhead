@@ -751,7 +751,7 @@ export function startNativeMissionBriefPlayer(opts: {
 
   function replay() {
     if (!cinematic.scenes.length || route.length < 2) {
-      onError('Route too short for mission briefing.');
+      onError('Route is too short for a flyover.');
       return;
     }
     stopped = false;

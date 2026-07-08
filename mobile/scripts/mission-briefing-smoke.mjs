@@ -127,7 +127,8 @@ assert(/DEFAULT_PREVIEW_SPEED[^\n]*=\s*0\.5/.test(controlsSource), 'default play
 assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map passes playback speed into the player');
 assert(mapSource.includes('cycleMapMissionSpeed'), 'map wires speed cycling');
 assert(mapSource.includes('mapMissionBriefTop'), 'map renders the top cinematic caption');
-assert(mapSource.includes('showCompactMissionChrome'), 'map compacts Mission Control during active playback');
+assert(!mapSource.includes('<MissionControlPanel'), 'flyover does not show the Mission Control sheet after playback');
+assert(mapSource.includes('TripPreviewControls'), 'flyover keeps the simple playback controls');
 
 const playbackSource = readFileSync(join(root, 'lib/missionPlayback.ts'), 'utf8');
 assert(playbackSource.includes('resolveMissionPlaybackMode'), 'missionPlayback exports playback mode resolver');

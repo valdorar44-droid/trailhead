@@ -363,7 +363,7 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     if (cine.scenes.length > 1 && cineRoute().length > 1) {
       window.__cinematic.replay();
     } else {
-      cinePost('cinematic_error', { message: 'Route too short for mission briefing.' });
+      cinePost('cinematic_error', { message: 'Route is too short for a flyover.' });
     }
   }
 `;

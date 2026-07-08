@@ -73,7 +73,7 @@ export function TripPreviewControls({
   return (
     <View style={styles.wrap}>
       <View style={styles.row}>
-        <TouchableOpacity style={styles.btn} onPress={onReplay} accessibilityLabel="Replay briefing">
+        <TouchableOpacity style={styles.btn} onPress={onReplay} accessibilityLabel="Replay flyover">
           <Ionicons name="refresh" size={15} color="#f8fafc" />
           {complete ? <Text style={styles.btnText}>Replay</Text> : null}
         </TouchableOpacity>
@@ -81,7 +81,7 @@ export function TripPreviewControls({
           <TouchableOpacity
             style={styles.btn}
             onPress={onPauseResume}
-            accessibilityLabel={paused ? 'Resume briefing' : 'Pause briefing'}
+            accessibilityLabel={paused ? 'Resume flyover' : 'Pause flyover'}
           >
             <Ionicons name={paused ? 'play' : 'pause'} size={15} color="#f8fafc" />
           </TouchableOpacity>

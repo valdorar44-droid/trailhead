@@ -184,23 +184,27 @@ function riskSceneType(risk: MissionControlRisk): MissionSceneType {
 
 function recapNarration(brief: MissionControlBrief | null, tripName: string) {
   if (!brief) {
-    return `Mission recap: the ${tripName} plan is drafted. This preview is planning visualization, not proof the route is safe — review conditions before departure.`;
+    return `${tripName} is mapped. Review camps, fuel, and current conditions before departure.`;
   }
   const reviewCount = brief.risks?.length ?? 0;
   if (brief.readiness === 'ready') {
-    return `Mission recap: the plan checks out. ${reviewCount > 0 ? `Keep an eye on ${reviewCount} watch ${reviewCount === 1 ? 'item' : 'items'}, and confirm` : 'Confirm'} conditions on departure day.`;
+    return reviewCount > 0
+      ? `The route is set. Keep an eye on ${reviewCount} watch ${reviewCount === 1 ? 'item' : 'items'} and confirm conditions before you go.`
+      : 'The route is set. Confirm current conditions before you go.';
   }
   if (brief.readiness === 'blocked') {
-    return `Mission recap: this route is blocked as planned. Resolve the flagged items before committing to it — this preview is a planning visualization, not a green light.`;
+    return 'This route needs changes before departure. Check the flagged items in the trip overview.';
   }
-  return `Mission recap: the route is close, but ${reviewCount > 0 ? `${reviewCount} ${reviewCount === 1 ? 'item needs' : 'items need'}` : 'a few items need'} review before departure.`;
+  return reviewCount > 0
+    ? `The route is close, but ${reviewCount} ${reviewCount === 1 ? 'item needs' : 'items need'} review before departure.`
+    : 'The route is close. Review the trip overview before departure.';
 }
 
 function recapSubtitle(brief: MissionControlBrief | null) {
-  if (!brief) return 'Readiness not checked yet';
-  if (brief.readiness === 'ready') return 'Ready — confirm conditions before departure';
-  if (brief.readiness === 'blocked') return 'Blocked — resolve flagged items first';
-  return 'Needs review before departure';
+  if (!brief) return 'Review before departure';
+  if (brief.readiness === 'ready') return 'Looks ready; confirm conditions before departure';
+  if (brief.readiness === 'blocked') return 'Needs changes before departure';
+  return 'Review before departure';
 }
 
 export interface ForwardPassInput {
@@ -266,7 +270,7 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
       camera: { mode: 'follow', pitch: 64 },
       layers: {},
       narration: first
-        ? `Leaving ${startTitle || 'the start'} — we'll trace the route toward ${target}.`
+        ? `Leaving ${startTitle || 'the start'}, we follow the route toward ${target}.`
         : `Continuing toward ${target}.`,
       callouts: [],
     };
@@ -545,7 +549,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         subtitle: type === 'weather_focus'
           ? 'Weather watch'
           : type === 'offline_readiness'
-            ? 'Offline readiness'
+            ? 'Signal check'
             : 'Risk check',
         day: risk.day,
         durationMs: 5400,
@@ -587,7 +591,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
   scenes.push({
     id: 'scene-recap',
     type: 'mission_recap',
-    title: 'Mission recap',
+    title: 'Trip recap',
     subtitle: recapSubtitle(missionBrief),
     durationMs: 6000,
     routeSlice: [0, 1],

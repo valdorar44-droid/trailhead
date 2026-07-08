@@ -175,6 +175,16 @@ assert(footerDockSource.includes('secondaryActionLabel') && footerDockSource.inc
   'Route Builder footer supports a compact secondary action');
 assert(mapSource.includes('pendingRouteFlyover') && mapSource.includes("source: 'trail_builder'") && mapSource.includes('skipDirected: true'),
   'Map consumes Route Builder flyover requests through deterministic playback');
+assert(mapSource.includes('flyTrailRoutePlan') && mapSource.includes('missionRouteOverrideRef.current = plan.coords'),
+  'Trail Builder flyover uses the selected trail route');
+assert(mapSource.includes("routeName: trail.name || plan.title || 'Trail route'") && mapSource.includes('skipDirected: true'),
+  'Trail Builder flyover uses deterministic playback without directed storyboard');
+assert(mapSource.includes('label="Flyover"') && mapSource.includes('play-circle-outline'),
+  'Trail Builder exposes a Flyover action after route build');
+assert(mapSource.includes("previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : 'Set route'"),
+  'Trail Builder capture panel avoids dead distance placeholders');
+assert(mapSource.includes("trailCapturePins.length ? String(trailCapturePins.length) : 'Start'"),
+  'Trail Builder capture panel avoids zero-value point copy');
 
 const tsc = spawnSync('npx', ['tsc', '--noEmit'], {
   cwd: root,

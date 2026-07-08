@@ -22166,9 +22166,9 @@ function MapScreen() {
             </View>
             <TrailheadMetricRow
               metrics={[
-                { label: 'Distance', value: previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : '--', icon: 'map-outline', tone: C.silverBright },
-                { label: 'Time', value: previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : '--', icon: 'time-outline', tone: C.silverBright },
-                { label: 'Points', value: String(trailCapturePins.length), icon: 'radio-button-on-outline', tone: '#22c55e' },
+                { label: 'Distance', value: previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : 'Set route', icon: 'map-outline', tone: C.silverBright },
+                { label: 'Time', value: previewTrailDistanceM > 0 ? fmtTrailRouteTime(previewTrailDistanceM) : 'Pending', icon: 'time-outline', tone: C.silverBright },
+                { label: 'Points', value: trailCapturePins.length ? String(trailCapturePins.length) : 'Start', icon: 'radio-button-on-outline', tone: '#22c55e' },
                 { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
               ]}
             />
@@ -23041,8 +23041,8 @@ function MapScreen() {
             <TrailheadMetricRow
               style={{ marginBottom: 10 }}
               metrics={[
-                { label: 'Distance', value: selectedTrailRoutePlan ? fmtTrailRouteDistance(selectedTrailRoutePlan.distanceM) : '--', icon: 'map-outline', tone: C.silverBright },
-                { label: 'Time', value: selectedTrailRoutePlan ? fmtTrailRouteTime(selectedTrailRoutePlan.distanceM) : '--', icon: 'time-outline', tone: C.silverBright },
+                { label: 'Distance', value: selectedTrailRoutePlan ? fmtTrailRouteDistance(selectedTrailRoutePlan.distanceM) : 'Set route', icon: 'map-outline', tone: C.silverBright },
+                { label: 'Time', value: selectedTrailRoutePlan ? fmtTrailRouteTime(selectedTrailRoutePlan.distanceM) : 'Pending', icon: 'time-outline', tone: C.silverBright },
                 { label: trailElevationLabel(selectedTrailRoutePlan), value: fmtTrailElevation(selectedTrailRoutePlan), icon: 'trending-up-outline', tone: C.orange },
               ]}
             />

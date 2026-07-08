@@ -1622,6 +1622,7 @@ function RouteBuilderScreenContent() {
   const weatherUnitMode = useStore(st => st.weatherUnitMode);
   const sessionId = useStore(st => st.sessionId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
+  const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
   const {
     getState: getOfflineMapState,
     getRoutingState: getOfflineRoutingState,
@@ -2249,6 +2250,13 @@ function RouteBuilderScreenContent() {
       driveHours: estimateMovingHours(totals.miles),
     };
   }, [driveHoursPerDay, fuelEstimate, gasPrice, rigProfile, totals.miles]);
+  const footerDistanceLabel = totals.miles > 0 ? fmtRouteDistance(totals.miles) : 'Route draft';
+  const footerFuelLabel = totals.miles > 0
+    ? `${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / $${Math.max(1, Math.round(planningStats.fuelCost))}`
+    : 'Fuel pending';
+  const footerStopLabel = totals.stops > 0 ? `${totals.stops} stops` : 'Add stops';
+  const footerCampLabel = totals.camps > 0 ? `${totals.camps} camps` : 'Add camp';
+  const footerSummaryLabel = `${footerStopLabel} · ${footerCampLabel} · ${footerFuelLabel} · ${fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg))}`;
 
   useEffect(() => {
     if (!totals.miles) {
@@ -4715,6 +4723,38 @@ function RouteBuilderScreenContent() {
     await commitTrip(buildTrip(), openMap);
   }
 
+  async function saveRouteAndFlyover() {
+    if (routeSaving) return;
+    if (orderedStops.length < 2) {
+      Alert.alert('Add more stops', 'Add at least a start and one destination before starting the flyover.');
+      return;
+    }
+    const draftWarnings = routeBuildSession.issues.filter(issue =>
+      issue.code === 'temporary_anchor'
+      || issue.code === 'missing_overnight'
+      || issue.code === 'over_daily_max'
+      || issue.code === 'fuel_range'
+    );
+    const startFlyover = () => {
+      setPendingRouteFlyover({ runId: Date.now(), source: 'route_builder' });
+      commitTrip(buildTrip(), true).catch(() => {
+        setPendingRouteFlyover(null);
+      });
+    };
+    if (draftWarnings.length) {
+      Alert.alert(
+        'Review this route?',
+        `${draftWarnings[0].message} You can still preview it, but check the route before navigation.`,
+        [
+          { text: 'Keep editing', style: 'cancel' },
+          { text: 'Preview route', onPress: startFlyover },
+        ],
+      );
+      return;
+    }
+    startFlyover();
+  }
+
   function resetRouteDraft() {
     setActiveDay(1);
     setDays(defaultRouteDays());
@@ -4807,6 +4847,11 @@ function RouteBuilderScreenContent() {
   async function saveRouteFromActions(openMap = false) {
     setRouteActionSheet(null);
     await saveRoute(openMap);
+  }
+
+  async function flyRouteFromActions() {
+    setRouteActionSheet(null);
+    await saveRouteAndFlyover();
   }
 
   async function saveCloseRouteFromActions() {
@@ -5640,11 +5685,14 @@ function RouteBuilderScreenContent() {
       {!keyboardVisible ? (
         <RouteBuilderFooterDock
           bottom={18 + bottomInset}
-          distanceLabel={fmtRouteDistance(totals.miles)}
-          summaryLabel={`${totals.stops} stops · ${totals.camps} camps · ${fmtFuelVolumeFromMiles(totals.miles, planningStats.mpg, weatherUnitMode)} / $${totals.miles > 0 ? Math.max(1, Math.round(planningStats.fuelCost)) : 0} · ${fuelSourceLabel(fuelEstimate, !!parsePositiveNumber(rigProfile?.fuel_mpg))}`}
-          actionLabel="Open on map"
+          distanceLabel={footerDistanceLabel}
+          summaryLabel={footerSummaryLabel}
+          actionLabel="Map"
+          secondaryActionLabel="Flyover"
+          secondaryActionIcon="play-outline"
           saving={routeSaving}
           onPressAction={() => saveRoute(true)}
+          onPressSecondaryAction={saveRouteAndFlyover}
         />
       ) : null}
 
@@ -6165,6 +6213,13 @@ function RouteBuilderScreenContent() {
                   <View style={s.routeActionRowText}>
                     <Text style={s.routeActionTitle}>Save & close</Text>
                     <Text style={s.routeActionSub}>Save this route and start a new one</Text>
+                  </View>
+                </TouchableOpacity>
+                <TouchableOpacity style={s.routeActionRow} onPress={flyRouteFromActions} disabled={routeSaving} activeOpacity={0.84}>
+                  <Ionicons name="play-outline" size={18} color={C.orange} />
+                  <View style={s.routeActionRowText}>
+                    <Text style={s.routeActionTitle}>Flyover</Text>
+                    <Text style={s.routeActionSub}>Preview the route on the map</Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.routeActionRow} onPress={() => { setRouteActionSheet(null); exitRouteBuilder(); }} disabled={routeSaving} activeOpacity={0.84}>

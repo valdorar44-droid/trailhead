@@ -5720,6 +5720,8 @@ function MapScreen() {
   const activeTripFromCache = useStore(st => st.activeTripFromCache);
   const pendingSavedTrailId = useStore(st => st.pendingSavedTrailId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
+  const pendingRouteFlyover = useStore(st => st.pendingRouteFlyover);
+  const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
   const pendingNavigatePlace = useStore(st => st.pendingNavigatePlace);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const pendingMapSelection = useStore(st => st.pendingMapSelection);
@@ -14734,6 +14736,29 @@ function MapScreen() {
     return true;
   }
 
+  useEffect(() => {
+    if (!pendingRouteFlyover || mapMissionVisible || missionRunningRef.current) return;
+    const hasTripRoute = (activeTrip?.route_geometry?.coords?.length ?? 0) >= 2;
+    const hasVisibleRoute = lastRouteCoords.length >= 2 || lastRouteCoordsRef.current.length >= 2;
+    if (!hasTripRoute && !hasVisibleRoute) return;
+    const timer = setTimeout(() => {
+      setPendingRouteFlyover(null);
+      startMapMissionBrief({
+        source: 'trail_builder',
+        skipDirected: true,
+        routeName: activeTrip?.plan?.trip_name || 'Route',
+      }).catch(() => null);
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [
+    activeTrip?.plan?.trip_name,
+    activeTrip?.route_geometry?.coords?.length,
+    activeTrip?.trip_id,
+    lastRouteCoords.length,
+    mapMissionVisible,
+    pendingRouteFlyover?.runId,
+  ]);
+
   async function executeCopilotAction(action: MapActionRequest): Promise<Record<string, unknown>> {
     const type = action.action_type;
     const args = action.args || {};
@@ -15476,7 +15501,7 @@ function MapScreen() {
       return {
         applied: !!started,
         status: started ? 'applied' : 'failed',
-        opened: 'mission_briefing',
+        opened: 'flyover',
         spoken_summary: started
           ? 'Playing the flyover on your map now.'
           : 'I need an active route before I can start the flyover.',
@@ -15867,7 +15892,7 @@ function MapScreen() {
 
     const localMission = (() => {
       const clean = text.toLowerCase();
-      if (/\b(mission control|mission briefing|3d preview|route preview|fly (the|my) route|open explorer|open briefing|flyover)\b/.test(clean)) {
+      if (/\b(route preview|fly (the|my) route|open explorer|open briefing|flyover)\b/.test(clean)) {
         return 'Opening the flyover.';
       }
       if (/\b(is this trip ready|trip ready|readiness check|check readiness)\b/.test(clean)) {

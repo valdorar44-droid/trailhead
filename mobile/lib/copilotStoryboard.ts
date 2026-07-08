@@ -520,7 +520,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     });
   }
 
-  // --- risk / weather / offline scenes from Mission Control ---
+  // --- risk / weather / offline scenes from route checks ---
   const risks = (missionBrief?.risks ?? [])
     .slice()
     .sort((a, b) => severityRank(b.severity) - severityRank(a.severity));
@@ -531,7 +531,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     const type = riskSceneType(risk);
     if (type === 'offline_readiness' && offlineSeen.done) continue;
     // Located risks become forward-ordered beats; coordinate-less risks stay as
-    // Mission Control warnings only (no redundant mid-route zoom-out cuts).
+    // Route-check warnings only (no redundant mid-route zoom-out cuts).
     const hasCoords = finite(risk.lat, risk.lng);
     if (!hasCoords && type !== 'offline_readiness') continue;
     if (type === 'offline_readiness') offlineSeen.done = true;

@@ -217,6 +217,7 @@ interface AppState {
   offlineTripIds: string[];
   activeTripFromCache: boolean;
   pendingSavedTrailId: string | null;
+  pendingRouteFlyover: { runId: number; source: 'route_builder' } | null;
   pendingNavigatePlace: { lat: number; lng: number; name: string } | null;
   pendingMapSelection:
     | { kind: 'camp'; camp: CampsitePin }
@@ -266,6 +267,7 @@ interface AppState {
   clearSearchHistory: () => void;
   setOfflineTripIds: (ids: string[]) => void;
   setPendingSavedTrailId: (id: string | null) => void;
+  setPendingRouteFlyover: (request: AppState['pendingRouteFlyover']) => void;
   setPendingNavigatePlace: (place: { lat: number; lng: number; name: string } | null) => void;
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
   setPendingStartCopilotVoice: (start: boolean) => void;
@@ -302,6 +304,7 @@ export const useStore = create<AppState>((set) => ({
   offlineTripIds: [],
   activeTripFromCache: false,
   pendingSavedTrailId: null,
+  pendingRouteFlyover: null,
   pendingNavigatePlace: null,
   pendingMapSelection: null,
   pendingStartCopilotVoice: false,
@@ -428,6 +431,7 @@ export const useStore = create<AppState>((set) => ({
 
   setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
   setPendingSavedTrailId: (id) => set({ pendingSavedTrailId: id }),
+  setPendingRouteFlyover: (request) => set({ pendingRouteFlyover: request }),
   setPendingNavigatePlace: (place) => set({ pendingNavigatePlace: place }),
   setPendingMapSelection: (selection) => set({ pendingMapSelection: selection }),
   setPendingStartCopilotVoice: (start) => set({ pendingStartCopilotVoice: start }),

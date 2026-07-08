@@ -46,7 +46,9 @@ assert(nativeMapSource.includes('mission-brief-progress-line'), 'NativeMap rende
 
 const mapSource = readFileSync(join(root, 'app/(tabs)/map.tsx'), 'utf8');
 assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT') && mapSource.includes('handoffScoutToCinematic'),
-  'cinematic auto-starts after the scout builds via director handoff');
+  'cinematic has an internal-only auto-start hook for QA');
+assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT = false'), 'production asks before starting the flyover');
+assert(mapSource.includes('Route is built. Want me to fly the plan?'), 'Co-Pilot asks before flyover after route build');
 assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMissionDirectorVoice'),
   'map uses unified realtime director voice');
 assert(mapSource.includes('missionBeatCaption'), 'map uses runtime beat text for caption and voice');
@@ -151,9 +153,28 @@ assert(mapSource.includes('clearMissionNativeListeners'), 'map cleans up native 
 
 assert(mapSource.includes('mapMissionNotice'), 'map surfaces the 3D-fallback notice');
 assert(!/headline: 'Trip needs review'/.test(mapSource), 'map avoids debug hero copy in the fallback brief');
+assert(!mapSource.includes("opened: 'mission_briefing'"), 'Co-Pilot reports flyover, not a briefing sheet');
+assert(!/(mission control|mission briefing)/i.test(mapSource), 'local flyover trigger avoids old Mission Control wording');
 
 const nativeMapContrast = nativeMapSource.includes('mission-brief-full-route-casing');
 assert(nativeMapContrast, 'NativeMap draws a high-contrast route casing');
+
+const routeBuilderSource = readFileSync(join(root, 'app/(tabs)/route-builder.tsx'), 'utf8');
+const footerDockSource = readFileSync(join(root, 'components/routeBuilder/RouteBuilderFooterDock.tsx'), 'utf8');
+const storeSource = readFileSync(join(root, 'lib/store.ts'), 'utf8');
+assert(storeSource.includes('pendingRouteFlyover') && storeSource.includes('setPendingRouteFlyover'),
+  'store carries pending route-builder flyover handoff');
+assert(routeBuilderSource.includes('saveRouteAndFlyover'), 'Route Builder can save and open a flyover');
+assert(routeBuilderSource.includes("setPendingRouteFlyover({ runId: Date.now(), source: 'route_builder' })"),
+  'Route Builder marks the map to auto-start a deterministic flyover');
+assert(routeBuilderSource.includes('secondaryActionLabel="Flyover"'), 'Route Builder footer exposes Flyover action');
+assert(routeBuilderSource.includes('Preview the route on the map'), 'Route Builder action sheet explains flyover without AI wording');
+assert(routeBuilderSource.includes('Route draft') && routeBuilderSource.includes('Fuel pending'),
+  'Route Builder footer avoids zero-value draft copy');
+assert(footerDockSource.includes('secondaryActionLabel') && footerDockSource.includes('secondaryActionIcon'),
+  'Route Builder footer supports a compact secondary action');
+assert(mapSource.includes('pendingRouteFlyover') && mapSource.includes("source: 'trail_builder'") && mapSource.includes('skipDirected: true'),
+  'Map consumes Route Builder flyover requests through deterministic playback');
 
 const tsc = spawnSync('npx', ['tsc', '--noEmit'], {
   cwd: root,

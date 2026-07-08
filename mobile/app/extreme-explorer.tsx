@@ -12,7 +12,6 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { CopilotPresenceOrb, type CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
-import { MissionControlPanel } from '@/components/copilot/MissionControlPanel';
 import { TripPreviewCaption } from '@/components/copilot/TripPreviewCaption';
 import { TripPreviewControls } from '@/components/copilot/TripPreviewControls';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -1203,7 +1202,7 @@ export default function ExplorerExplorerScreen() {
           generated_at: Math.floor(Date.now() / 1000),
           readiness: 'needs_review',
           headline: 'Trip needs review',
-          summary: error?.message || 'Mission Control could not check this trip yet.',
+          summary: error?.message || 'Route check could not finish yet.',
           scores: [],
           overnights: [],
           risks: [],
@@ -1219,7 +1218,7 @@ export default function ExplorerExplorerScreen() {
 
   async function runMissionRecommendation(action: MissionControlRecommendation) {
     if (action.action_type === 'applyMissionFilter') {
-      Alert.alert('Mission Control', action.reason || 'Map focus is ready for route review.');
+      Alert.alert('Route check', action.reason || 'Map focus is ready for route review.');
       api.logExplorerLedger({
         session_id: sessionIdRef.current,
         event_type: 'mission_filter_selected',
@@ -1238,9 +1237,9 @@ export default function ExplorerExplorerScreen() {
         const nearby = await api.getNearbyPlaces(anchor.lat, anchor.lng, 45, query, 'auto');
         const mapped = nearby.map(placeFromPoi).filter(Boolean) as DemoPlace[];
         setDiscoveredPlaces(prev => mergePlaces([...mapped, ...prev]));
-        Alert.alert('Mission Control', action.reason || `Showing ${category} options near this route.`);
+        Alert.alert('Route check', action.reason || `Showing ${category} options near this route.`);
       } catch (error: any) {
-        Alert.alert('Mission Control', error?.message || 'Nearby search could not load.');
+        Alert.alert('Route check', error?.message || 'Nearby search could not load.');
       } finally {
         setRelatedLoading(false);
       }
@@ -1248,7 +1247,7 @@ export default function ExplorerExplorerScreen() {
     }
     if (action.action_type === 'toggleLayer') {
       const text = await previewWeather().catch((error: any) => error?.message || action.reason);
-      Alert.alert('Mission Control', text || action.reason);
+      Alert.alert('Route check', text || action.reason);
       return;
     }
     const fallbackCommand =
@@ -1257,10 +1256,10 @@ export default function ExplorerExplorerScreen() {
         : action.action_type === 'openOfflineDownloads'
           ? 'Show offline downloads for this route.'
           : action.action_type === 'showMissionControl'
-            ? 'Show Mission Control.'
+            ? 'Show route check.'
             : action.reason || action.label;
     const message = await stageCopilotCommand(fallbackCommand).catch((error: any) => error?.message || 'Added for review.');
-    Alert.alert(action.requires_confirmation ? 'Confirm in Co-Pilot' : 'Mission Control', message || action.reason);
+    Alert.alert(action.requires_confirmation ? 'Confirm in Co-Pilot' : 'Route check', message || action.reason);
   }
 
   async function previewWeather() {
@@ -1597,7 +1596,7 @@ export default function ExplorerExplorerScreen() {
           <Text style={styles.titleText} numberOfLines={1}>{activeTrip?.plan.trip_name ?? 'Route preview'}</Text>
         </View>
       </View>
-      {!selectedPlace && (missionEnabled || showCinematicUi) && (
+      {!selectedPlace && showCinematicUi && (
         <View pointerEvents="box-none" style={[styles.missionWrap, { bottom: insets.bottom + 16 }]}>
           {showCinematicUi && (
             <View pointerEvents="box-none" style={styles.cinematicBlock}>
@@ -1622,14 +1621,6 @@ export default function ExplorerExplorerScreen() {
                 />
               </View>
             </View>
-          )}
-          {missionEnabled && (
-            <MissionControlPanel
-              brief={missionBrief}
-              loading={missionLoading}
-              onRefresh={refreshMissionControl}
-              onRecommendation={runMissionRecommendation}
-            />
           )}
         </View>
       )}

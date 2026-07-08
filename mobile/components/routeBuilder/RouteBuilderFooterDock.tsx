@@ -7,8 +7,11 @@ type RouteBuilderFooterDockProps = {
   distanceLabel: string;
   summaryLabel: string;
   actionLabel: string;
+  secondaryActionLabel?: string;
+  secondaryActionIcon?: keyof typeof Ionicons.glyphMap;
   saving: boolean;
   onPressAction: () => void;
+  onPressSecondaryAction?: () => void;
 };
 
 export default function RouteBuilderFooterDock({
@@ -16,8 +19,11 @@ export default function RouteBuilderFooterDock({
   distanceLabel,
   summaryLabel,
   actionLabel,
+  secondaryActionLabel,
+  secondaryActionIcon = 'play-outline',
   saving,
   onPressAction,
+  onPressSecondaryAction,
 }: RouteBuilderFooterDockProps) {
   const C = useTheme();
   const s = styles(C);
@@ -28,15 +34,28 @@ export default function RouteBuilderFooterDock({
         <Text style={s.distance} numberOfLines={1}>{distanceLabel}</Text>
         <Text style={s.summary} numberOfLines={1}>{summaryLabel}</Text>
       </View>
-      <TouchableOpacity
-        style={[s.action, saving && s.actionDisabled]}
-        onPress={onPressAction}
-        disabled={saving}
-        activeOpacity={0.84}
-      >
-        <Ionicons name="map-outline" size={16} color="#fff" />
-        <Text style={s.actionText}>{actionLabel}</Text>
-      </TouchableOpacity>
+      <View style={s.actionGroup}>
+        {secondaryActionLabel && onPressSecondaryAction ? (
+          <TouchableOpacity
+            style={[s.secondaryAction, saving && s.actionDisabled]}
+            onPress={onPressSecondaryAction}
+            disabled={saving}
+            activeOpacity={0.84}
+          >
+            <Ionicons name={secondaryActionIcon} size={15} color={C.orange} />
+            <Text style={s.secondaryActionText}>{secondaryActionLabel}</Text>
+          </TouchableOpacity>
+        ) : null}
+        <TouchableOpacity
+          style={[s.action, saving && s.actionDisabled]}
+          onPress={onPressAction}
+          disabled={saving}
+          activeOpacity={0.84}
+        >
+          <Ionicons name="map-outline" size={16} color="#fff" />
+          <Text style={s.actionText}>{actionLabel}</Text>
+        </TouchableOpacity>
+      </View>
     </View>
   );
 }
@@ -78,7 +97,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   action: {
     minHeight: 44,
-    minWidth: 134,
+    minWidth: 92,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -88,11 +107,36 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
+  actionGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  secondaryAction: {
+    minHeight: 44,
+    minWidth: 92,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    borderWidth: 1,
+    borderColor: C.orange + '66',
+    backgroundColor: C.orange + '12',
+  },
   actionDisabled: {
     opacity: 0.65,
   },
   actionText: {
     color: '#fff',
+    fontSize: 11,
+    fontFamily: mono,
+    fontWeight: '900',
+  },
+  secondaryActionText: {
+    color: C.orange,
     fontSize: 11,
     fontFamily: mono,
     fontWeight: '900',

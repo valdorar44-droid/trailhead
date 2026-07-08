@@ -13,6 +13,7 @@
     "audit:copy": "node scripts/user-facing-copy-audit.mjs",
     "audit:mission": "node scripts/mission-briefing-smoke.mjs",
     "audit:map-smoke": "node scripts/map-smoke-playwright.mjs",
+    "audit:prepreview": "node scripts/pre-preview-check.mjs",
     "ota": "eas update --channel production --auto && eas update --channel preview --auto",
     "postinstall": "node scripts/patch-expo-modules.js && patch-package"
   },

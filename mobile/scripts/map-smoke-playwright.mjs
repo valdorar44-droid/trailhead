@@ -32,8 +32,16 @@ const BLOCKED_COPY = [
 ];
 
 async function main() {
-  const browser = await chromium.launch({ headless: true });
-  const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+  const browser = await chromium.launch({
+    headless: true,
+    channel: process.env.PLAYWRIGHT_BROWSER_CHANNEL || 'chrome',
+  });
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    geolocation: { latitude: 38.5733, longitude: -109.5498 },
+    permissions: ['geolocation'],
+  });
+  const page = await context.newPage();
   const consoleErrors = [];
   const pageErrors = [];
 
@@ -50,10 +58,35 @@ async function main() {
 
   await page.waitForTimeout(6000);
 
-  const bodyText = await page.locator('body').innerText().catch(() => '');
-  const html = await page.content();
-  const hasMapCanvas = await page.locator('.mapboxgl-canvas, canvas.mapboxgl-canvas, .maplibregl-canvas, canvas').count() > 0;
-  const hasLoadingOnly = /LOADING MAP/i.test(bodyText) && !hasMapCanvas;
+  for (let i = 0; i < 4; i += 1) {
+    const gate = page.getByText(/continue for now|continue/i).first();
+    if (!(await gate.isVisible({ timeout: 1500 }).catch(() => false))) break;
+    await gate.click();
+    await page.waitForTimeout(3500);
+  }
+
+  await page.waitForTimeout(10000);
+
+  const frameReports = [];
+  for (const frame of page.frames()) {
+    const text = await frame.locator('body').innerText().catch(() => '');
+    const htmlText = await frame.content().catch(() => '');
+    const canvasCount = await frame.locator('.mapboxgl-canvas, canvas.mapboxgl-canvas, .maplibregl-canvas, canvas').count().catch(() => 0);
+    const loadingVisible = await frame.locator('text=/LOADING MAP/i').isVisible({ timeout: 250 }).catch(() => false);
+    frameReports.push({
+      url: frame.url(),
+      text,
+      html: htmlText,
+      canvasCount,
+      loadingVisible,
+    });
+  }
+  const bodyText = frameReports.map((frame) => frame.text).join('\n');
+  const html = frameReports.map((frame) => frame.html).join('\n');
+  const hasMapCanvas = frameReports.some((frame) => frame.canvasCount > 0);
+  const loadingFrames = frameReports.filter((frame) => /LOADING MAP/i.test(frame.text) || frame.loadingVisible);
+  const hasLoadingOnly = loadingFrames.length > 0 && !hasMapCanvas;
+  const hasStuckLoadingOverlay = loadingFrames.some((frame) => frame.loadingVisible);
 
   const hits = [...CRASH_MARKERS, ...BLOCKED_COPY].filter((marker) =>
     bodyText.includes(marker) || html.includes(marker) ||
@@ -71,6 +104,9 @@ async function main() {
     httpStatus: response.status(),
     hasMapCanvas,
     hasLoadingOnly,
+    hasStuckLoadingOverlay,
+    frameCount: frameReports.length,
+    frameCanvases: frameReports.map((frame) => ({ url: frame.url, canvasCount: frame.canvasCount, loadingVisible: frame.loadingVisible })),
     consoleErrorCount: consoleErrors.length,
     pageErrorCount: pageErrors.length,
     hits,
@@ -81,6 +117,10 @@ async function main() {
 
   if (hasLoadingOnly) {
     console.error('FAIL: map stuck on loading screen');
+    process.exit(1);
+  }
+  if (hasStuckLoadingOverlay) {
+    console.error('FAIL: map loading overlay is still visible');
     process.exit(1);
   }
   if (!hasMapCanvas) {

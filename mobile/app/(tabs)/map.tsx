@@ -191,10 +191,79 @@ const mapboxNativeEnrichment = ENABLE_NATIVE_MAPBOX_SEARCH_ENRICHMENT
   : null;
 import { AUDIO_LOCATION_TASK } from '@/lib/backgroundTasks';
 
-const WebMapPlaceholder = forwardRef<any, ViewProps & { onLoad?: () => void }>(function WebMapPlaceholder({ onLoad, ...props }, ref) {
-  useImperativeHandle(ref, () => ({ postMessage: () => {} }), []);
-  useEffect(() => { onLoad?.(); }, [onLoad]);
-  return <View {...props} />;
+type WebMapPlaceholderProps = ViewProps & {
+  source?: { html?: string };
+  onLoad?: () => void;
+  onMessage?: (event: { nativeEvent: { data: string } }) => void;
+};
+
+const WEBVIEW_BRIDGE_SCRIPT = `
+<script>
+  window.ReactNativeWebView = {
+    postMessage: function(data) {
+      window.parent.postMessage({ __trailheadWebView: true, data: data }, '*');
+    }
+  };
+</script>
+`;
+
+function webSrcDoc(html?: string) {
+  const source = String(html || '');
+  if (!source) return '';
+  if (source.includes('window.ReactNativeWebView')) return source.replace(/<head([^>]*)>/i, `<head$1>${WEBVIEW_BRIDGE_SCRIPT}`);
+  return `${WEBVIEW_BRIDGE_SCRIPT}${source}`;
+}
+
+const WebMapPlaceholder = forwardRef<any, WebMapPlaceholderProps>(function WebMapPlaceholder({
+  onLoad,
+  onMessage,
+  source,
+  children,
+  ...props
+}, ref) {
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const onLoadRef = useRef(onLoad);
+  const html = webSrcDoc(source?.html);
+  useEffect(() => {
+    onLoadRef.current = onLoad;
+  }, [onLoad]);
+  useImperativeHandle(ref, () => ({
+    postMessage: (message: string) => {
+      iframeRef.current?.contentWindow?.postMessage(message, '*');
+    },
+  }), []);
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe || !html) return;
+    const doc = iframe.contentDocument;
+    if (!doc) return;
+    doc.open();
+    doc.write(html);
+    doc.close();
+    const timer = window.setTimeout(() => onLoadRef.current?.(), 120);
+    return () => window.clearTimeout(timer);
+  }, [html]);
+  useEffect(() => {
+    const handler = (event: MessageEvent) => {
+      const payload = event.data;
+      if (!payload || payload.__trailheadWebView !== true) return;
+      onMessage?.({ nativeEvent: { data: String(payload.data ?? '') } });
+    };
+    window.addEventListener('message', handler);
+    return () => window.removeEventListener('message', handler);
+  }, [onMessage]);
+  return (
+    <View {...props}>
+      <iframe
+        ref={iframeRef}
+        title="Trailhead map"
+        src="about:blank"
+        style={{ border: 0, width: '100%', height: '100%', display: 'block' }}
+        sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+      />
+      {children}
+    </View>
+  );
 });
 const WebView: any = Platform.OS === 'web' ? WebMapPlaceholder : require('react-native-webview').WebView;
 let LottieView: any = null;
@@ -13706,7 +13775,7 @@ function MapScreen() {
           generated_at: Math.floor(Date.now() / 1000),
           readiness: 'needs_review',
           headline: 'Finishing route check',
-          summary: error?.message || 'Mission Control could not check this trip yet.',
+          summary: error?.message || 'Route check could not finish yet.',
           scores: [],
           overnights: [],
           risks: [],
@@ -14656,7 +14725,7 @@ function MapScreen() {
       mapMissionPlayerRef.current.replay();
     }
 
-    // Enrich Mission Control data for the panel without blocking the fly.
+    // Enrich the trip overview without blocking the flyover.
     briefPromise.then(brief => {
       if (!brief || !missionRunningRef.current) return;
       setMapMissionBrief(brief);
@@ -15802,7 +15871,7 @@ function MapScreen() {
         return 'Opening the flyover.';
       }
       if (/\b(is this trip ready|trip ready|readiness check|check readiness)\b/.test(clean)) {
-        return 'Opening Mission Control to check readiness.';
+        return 'Opening the route check.';
       }
       return null;
     })();
@@ -18153,6 +18222,22 @@ function MapScreen() {
     buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred),
     [centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred]
   );
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const configMessage = JSON.stringify({
+      type: 'set_token',
+      token: mapboxToken,
+      style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
+      premiumStyle: premiumMapStyle,
+      apiBase: API_BASE_URL,
+      protomapsKey,
+    });
+    const timers = [250, 900, 1800, 3200].map(delay => setTimeout(() => {
+      webRef.current?.postMessage(configMessage);
+    }, delay));
+    return () => timers.forEach(timer => clearTimeout(timer));
+  }, [mapboxToken, mapLayer, premiumMapStyle, protomapsKey, mapHtml]);
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
 
@@ -21279,14 +21364,24 @@ function MapScreen() {
           onLoad={() => {
             webLoadedRef.current = true;
             setMapLoadFailed(false);
-            webRef.current?.postMessage(JSON.stringify({
+            const configMessage = JSON.stringify({
               type: 'set_token', token: mapboxToken,
               style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
               premiumStyle: premiumMapStyle,
               apiBase: API_BASE_URL,
               protomapsKey,
-            }));
-            if (userLoc) webRef.current?.postMessage(JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng }));
+            });
+            webRef.current?.postMessage(configMessage);
+            if (Platform.OS === 'web') {
+              [80, 300, 900].forEach(delay => {
+                setTimeout(() => webRef.current?.postMessage(configMessage), delay);
+              });
+            }
+            if (userLoc) {
+              const userMessage = JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng });
+              webRef.current?.postMessage(userMessage);
+              if (Platform.OS === 'web') setTimeout(() => webRef.current?.postMessage(userMessage), 350);
+            }
           }}
           onError={() => setMapLoadFailed(true)}
         />
@@ -23401,7 +23496,7 @@ function MapScreen() {
                 </TouchableOpacity>
               )}
               {[
-                'open mission briefing',
+                'open flyover',
                 'what can you do?',
                 'plan 5 days with public camps and photos',
                 'show camps near my route',

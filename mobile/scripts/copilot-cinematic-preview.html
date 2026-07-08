@@ -38,17 +38,6 @@
 
   /* ---- Bottom control dock (bottom = inset + 14) ---- */
   .dock { position:absolute; left:12px; right:12px; bottom:48px; display:flex; flex-direction:column; gap:10px; }
-  .pill {
-    align-self:flex-start; display:flex; align-items:center; gap:8px; height:36px; padding:0 10px 0 12px;
-    border-radius:18px; background: rgba(15,19,25,.95); border:1px solid rgba(255,255,255,.14);
-  }
-  .pillDot { width:9px; height:9px; border-radius:5px; background:#f97316; }
-  .pillLabel { color:#f1f5f9; font-size:12px; font-weight:800; }
-  .pillStatus { color:#f97316; font-size:11px; font-weight:900; letter-spacing:.6px; }
-  .pillWarn { display:flex; align-items:center; gap:3px; padding:2px 6px; border-radius:999px; border:1px solid #f97316; }
-  .pillWarn span { color:#f97316; font-size:11px; font-weight:900; }
-  .chev { color:#94a3b8; font-size:13px; font-weight:900; }
-
   .controls { display:flex; align-items:center; gap:8px; }
   .orbStack { width:52px; height:52px; position:relative; display:flex; align-items:center; justify-content:center; }
   .halo { position:absolute; width:52px; height:52px; border-radius:20px; background:#f97316; opacity:.22; }
@@ -116,13 +105,6 @@
 
   <!-- Bottom dock -->
   <div class="dock">
-    <div class="pill">
-      <div class="pillDot"></div>
-      <div class="pillLabel">Mission review</div>
-      <div class="pillStatus">REVIEW</div>
-      <div class="pillWarn">⚠ <span>4</span></div>
-      <div class="chev">▲</div>
-    </div>
     <div class="controls">
       <div class="orbStack">
         <div class="halo"></div>

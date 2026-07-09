@@ -46,6 +46,7 @@ type NativeMissionAnimator = {
   stopMissionAnimation?: () => boolean | Promise<boolean>;
   clearMissionAnimation?: () => boolean | Promise<boolean>;
   setMissionAnimationSpeed?: (speed: number) => boolean | Promise<boolean>;
+  setMissionAnimationCamera?: (camera: MissionAnimationCamera) => boolean | Promise<boolean>;
   seekMissionAnimation?: (ratio: number) => boolean | Promise<boolean>;
   setMissionAnimationFreeCamera?: (enabled: boolean) => boolean | Promise<boolean>;
   skipMissionAnimationScene?: () => boolean | Promise<boolean>;
@@ -123,6 +124,15 @@ export async function setMissionAnimationSpeed(speed: number): Promise<boolean> 
   if (!Native?.setMissionAnimationSpeed) return false;
   try {
     return !!(await Native.setMissionAnimationSpeed(speed));
+  } catch {
+    return false;
+  }
+}
+
+export async function setMissionAnimationCamera(camera: MissionAnimationCamera): Promise<boolean> {
+  if (!Native?.setMissionAnimationCamera) return false;
+  try {
+    return !!(await Native.setMissionAnimationCamera(camera));
   } catch {
     return false;
   }

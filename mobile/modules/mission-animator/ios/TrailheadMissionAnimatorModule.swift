@@ -65,6 +65,10 @@ public class TrailheadMissionAnimatorModule: Module {
             self.runOnMain { self.animator.setSpeed(speed) }
         }
 
+        AsyncFunction("setMissionAnimationCamera") { (camera: [String: Any]) -> Bool in
+            self.runOnMain { self.animator.setCameraOptions(camera) }
+        }
+
         AsyncFunction("seekMissionAnimation") { (ratio: Double) -> Bool in
             self.runOnMain { self.animator.seekTo(ratio) }
         }
@@ -125,6 +129,10 @@ private final class NativeMissionAnimator: NSObject {
     private var freeCamera = false
     private var narrationDone = true
     private let narrationCap: CFTimeInterval = 11
+    private var cameraPitch: Double = 58
+    private var minZoom: Double = 10.3
+    private var maxZoom: Double = 15.2
+    private var lookaheadM: Double = 280
 
     init(emit: @escaping MissionEmit) { self.emit = emit }
 
@@ -200,6 +208,14 @@ private final class NativeMissionAnimator: NSObject {
         return true
     }
 
+    func setCameraOptions(_ camera: [String: Any]) -> Bool {
+        cameraPitch = max(42, min(70, doubleValue(camera["pitch"]) ?? cameraPitch))
+        minZoom = max(4, min(16, doubleValue(camera["minZoom"]) ?? minZoom))
+        maxZoom = max(5, min(17, doubleValue(camera["maxZoom"]) ?? maxZoom))
+        lookaheadM = max(120, min(1200, doubleValue(camera["lookaheadM"]) ?? lookaheadM))
+        return true
+    }
+
     func setFreeCamera(_ enabled: Bool) -> Bool {
         freeCamera = enabled
         return true
@@ -270,6 +286,9 @@ private final class NativeMissionAnimator: NSObject {
         routeCum = cumulativeDistances(route)
         routeTotal = routeCum.last ?? 0
         speed = max(0.1, min(3, doubleValue(payload["speed"]) ?? 1))
+        if let camera = payload["camera"] as? [String: Any] {
+            _ = setCameraOptions(camera)
+        }
         guard let rawScenes = payload["scenes"] as? [[String: Any]], !rawScenes.isEmpty else { return false }
         scenes = rawScenes.compactMap { raw in
             guard let id = raw["id"] as? String, let type = raw["type"] as? String else { return nil }
@@ -402,7 +421,7 @@ private final class NativeMissionAnimator: NSObject {
     private func tickFollow(scene: MissionSceneModel, t: Double) {
         let startDist = routeTotal * scene.routeSliceStart
         let endDist = routeTotal * scene.routeSliceEnd
-        let lookahead = max(180, min(600, (endDist - startDist) * 0.05))
+        let lookahead = max(120, min(lookaheadM, (endDist - startDist) * 0.05))
         let d = startDist + (endDist - startDist) * t
         let camDist = lastCamDist.map { max($0, min(routeTotal, d + lookahead)) } ?? min(routeTotal, d + lookahead)
         lastCamDist = camDist
@@ -410,7 +429,8 @@ private final class NativeMissionAnimator: NSObject {
         let aheadPt = pointAtDistance(min(routeTotal, camDist + lookahead))
         let targetBearing = bearing(from: camPt, to: aheadPt)
         smoothedBearing = smoothAngle(smoothedBearing, target: targetBearing, factor: 0.16)
-        setCamera(camPt, zoom: scene.cameraZoom ?? 13.2, pitch: scene.cameraPitch ?? 64, bearing: smoothedBearing, animated: false)
+        let zoom = max(minZoom, min(scene.cameraZoom ?? maxZoom - 0.45, maxZoom))
+        setCamera(camPt, zoom: zoom, pitch: scene.cameraPitch ?? cameraPitch, bearing: smoothedBearing, animated: false)
         updateProgress(d / max(routeTotal, 1), markerDist: d)
         emit("onMissionDebug", ["kind": "camera", "details": ["scene_id": scene.id]])
     }

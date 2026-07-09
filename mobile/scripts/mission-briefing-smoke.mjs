@@ -145,7 +145,7 @@ assert(/CAMERA_TWEEN_MS\s*=\s*120/.test(playerSource) && playerSource.includes("
 assert(playerSource.includes('camBusyUntil'), 'establishing flyTo is never interrupted by follow ticks');
 assert(playerSource.includes('Math.max(lastCamDist, nominal)'), 'contiguous legs use monotonic camera distance (no backward snap)');
 assert(playerSource.includes('HOLD_DRIFT_DEG_PER_S'), 'narration holds drift the bearing instead of freezing');
-assert(playerSource.includes('estimateSpeechMs'), 'speaking scenes stretch to the narration estimate');
+assert(playerSource.includes('minNarrationSettleMs'), 'speaking scenes keep a short settle without slowing the route crawl');
 assert(mapSource.includes("finishMissionNarrationBeat('pause_release')"),
   'resume releases a narration beat orphaned by pause');
 assert(mapSource.includes('|| mapMissionVisible'), 'tab bar hides during the cinematic so controls are reachable');
@@ -174,15 +174,19 @@ assert(/PREVIEW_SPEEDS\s*=\s*\[0\.1, 0\.25, 0\.5, 1, 1\.5, 2\]/.test(controlsSou
   'controls expose slow, normal, and faster flyover speeds');
 assert(controlsSource.includes('onSpeedChange') && controlsSource.includes('TextInput'),
   'controls expose preset and custom speed actions');
-assert(/DEFAULT_PREVIEW_SPEED[^\n]*=\s*0\.5/.test(controlsSource), 'default playback speed is slow/cinematic');
+assert(/DEFAULT_PREVIEW_SPEED[^\n]*=\s*1/.test(controlsSource), 'default playback speed is steady');
 assert(controlsSource.includes('PanResponder.create') && controlsSource.includes('accessibilityRole="adjustable"'),
   'controls expose a draggable flyover progress slider');
+assert(controlsSource.includes('onCameraPresetChange') && controlsSource.includes('Tilt') && controlsSource.includes('View'),
+  'controls expose camera view and tilt presets');
 
 // --- Map-first layout wiring ---
 assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map passes playback speed into the player');
 assert(mapSource.includes('applyMapMissionSpeed'), 'map wires preset and custom speed changes');
-assert(mapSource.includes("options.source !== 'trail_builder'") && mapSource.includes('beginSilentFlyoverScene'),
+assert(mapSource.includes("flyoverMode === 'copilot'") && mapSource.includes("mapMissionFlyoverModeRef.current === 'trail_builder'"),
   'Trail Builder flyover stays visual-only');
+assert(mapSource.includes('consumePendingFlyoverAffirmation') && mapSource.includes("Preparing flyover."),
+  'Co-Pilot can start the flyover from a voice/text yes');
 assert(mapSource.includes('mapMissionBriefTop'), 'map renders the top cinematic caption');
 assert(!mapSource.includes('<MissionControlPanel'), 'flyover does not show the Mission Control sheet after playback');
 assert(mapSource.includes('TripPreviewControls'), 'flyover keeps the simple playback controls');

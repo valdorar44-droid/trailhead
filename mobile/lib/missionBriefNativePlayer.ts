@@ -183,6 +183,7 @@ export type NativeMissionBriefPlayer = {
   skip: () => void;
   stop: () => void;
   setSpeed: (speed: number) => void;
+  setCameraOptions?: (camera: { pitch: number; minZoom: number; maxZoom: number; lookaheadM: number }) => void;
   seekTo: (ratio: number) => void;
   setFreeCamera: (enabled: boolean) => void;
   /** Signal that the current scene's narration has finished (paces beat advancement to the voice). */
@@ -198,6 +199,7 @@ export function startNativeMissionBriefPlayer(opts: {
   useNativeOverlays?: boolean;
   /** Playback speed multiplier. Effective duration = baseDuration / speed. */
   initialSpeed?: number;
+  cameraOptions?: { pitch: number; minZoom: number; maxZoom: number; lookaheadM: number };
   /** When true, a scene holds after its camera move until markNarrationDone() (capped). */
   waitForNarration?: boolean;
   /**
@@ -236,6 +238,7 @@ export function startNativeMissionBriefPlayer(opts: {
     webRef,
     useNativeOverlays = true,
     initialSpeed = 1,
+    cameraOptions,
     waitForNarration = false,
     speechTextFor,
     ensure3d,
@@ -273,6 +276,12 @@ export function startNativeMissionBriefPlayer(opts: {
   let pausedTotal = 0;
   let stopped = false;
   let speed = Number.isFinite(initialSpeed) && initialSpeed > 0 ? Math.max(0.1, Math.min(3, initialSpeed)) : 1;
+  let cameraSettings = {
+    pitch: Math.max(42, Math.min(68, Number(cameraOptions?.pitch) || 58)),
+    minZoom: Math.max(4, Math.min(16, Number(cameraOptions?.minZoom) || 10.3)),
+    maxZoom: Math.max(5, Math.min(17, Number(cameraOptions?.maxZoom) || 15.2)),
+    lookaheadM: Math.max(120, Math.min(1200, Number(cameraOptions?.lookaheadM) || 280)),
+  };
   let freeCamera = false;
   let sceneDuration = SCENE_FLOOR_MS;
   let lastFrameTs = 0;
@@ -374,7 +383,7 @@ export function startNativeMissionBriefPlayer(opts: {
 
   function followCamera(scene: MissionScene, center: Point, bearing: number, zoom: number) {
     const cam = scene.camera || { mode: 'follow' };
-    const pitch = Math.max(58, Math.min(68, cam.pitch ?? 64));
+    const pitch = Math.max(42, Math.min(70, cam.pitch ?? cameraSettings.pitch));
     lastCamBearing = bearing;
     lastCamPoint = center;
     if (freeCamera) return;
@@ -392,7 +401,7 @@ export function startNativeMissionBriefPlayer(opts: {
 
   /** Lookahead distance for a follow slice (same formula the tick loop uses). */
   function lookaheadForSlice(startDist: number, endDist: number) {
-    return Math.max(180, Math.min(1200, (endDist - startDist) * 0.05));
+    return Math.max(120, Math.min(cameraSettings.lookaheadM, (endDist - startDist) * 0.05));
   }
 
   /**
@@ -509,7 +518,7 @@ export function startNativeMissionBriefPlayer(opts: {
       }
       smoothedBearing = bearing;
       const sliceLenKm = (sliceEndDist - sliceStartDist) / 1000;
-      const zoom = Math.max(12.8, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 14.2));
+      const zoom = Math.max(cameraSettings.minZoom, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), cameraSettings.maxZoom));
       // Establishing duration scales with how far the camera has to travel.
       const kmToTarget = lastCamPoint
         ? haversine([lastCamPoint.lng, lastCamPoint.lat], [start.lng, start.lat]) / 1000
@@ -570,7 +579,7 @@ export function startNativeMissionBriefPlayer(opts: {
     const startDist = routeTotal * (scene.routeSlice?.[0] ?? 0);
     const endDist = routeTotal * (scene.routeSlice?.[1] ?? 1);
     const sliceLenKm = Math.max(0, (endDist - startDist)) / 1000;
-    const followZoom = Math.max(12.8, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), 14.2));
+    const followZoom = Math.max(cameraSettings.minZoom, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), cameraSettings.maxZoom));
     const lookaheadM = lookaheadForSlice(startDist, endDist);
     // Orbit starts from the storyboard's bearing, else the camera's current
     // heading — never from a fixed north, so there's no rotational jump.
@@ -765,8 +774,10 @@ export function startNativeMissionBriefPlayer(opts: {
     // Speaking scenes stretch to the narration estimate so the camera glides at
     // voice pace instead of finishing early and holding. Speech doesn't speed up
     // with playback speed, so the estimate is not divided by it.
-    const speechText = waitForNarration ? (speechTextFor ? speechTextFor(scene) : scene.narration) : '';
-    sceneDuration = Math.max(effectiveDuration(scene), sceneEstablishMs + estimateSpeechMs(speechText));
+    const minNarrationSettleMs = waitForNarration && (speechTextFor ? speechTextFor(scene) : scene.narration || '').trim()
+      ? 1400
+      : 0;
+    sceneDuration = Math.max(effectiveDuration(scene), sceneEstablishMs + minNarrationSettleMs);
     applySceneOverlays(scene);
     onSceneStarted(scene, i);
     runSceneLoop(scene);
@@ -843,8 +854,27 @@ export function startNativeMissionBriefPlayer(opts: {
   }
 
   function setSpeed(next: number) {
-    // Applies to the next scene (current scene keeps its computed duration).
-    if (Number.isFinite(next) && next > 0) speed = Math.max(0.1, Math.min(3, next));
+    if (!Number.isFinite(next) || next <= 0) return;
+    const now = performance.now();
+    const oldDuration = Math.max(1, sceneDuration);
+    const progress = playing && index >= 0
+      ? Math.max(0, Math.min(1, elapsed(now) / oldDuration))
+      : 0;
+    speed = Math.max(0.1, Math.min(3, next));
+    const scene = cinematic.scenes[index];
+    if (scene) {
+      sceneDuration = Math.max(effectiveDuration(scene), sceneEstablishMs);
+      sceneStart = now - (progress * sceneDuration) - pausedTotal;
+    }
+  }
+
+  function setCameraOptions(next: { pitch: number; minZoom: number; maxZoom: number; lookaheadM: number }) {
+    cameraSettings = {
+      pitch: Math.max(42, Math.min(70, Number(next.pitch) || cameraSettings.pitch)),
+      minZoom: Math.max(4, Math.min(16, Number(next.minZoom) || cameraSettings.minZoom)),
+      maxZoom: Math.max(5, Math.min(17, Number(next.maxZoom) || cameraSettings.maxZoom)),
+      lookaheadM: Math.max(120, Math.min(1200, Number(next.lookaheadM) || cameraSettings.lookaheadM)),
+    };
   }
 
   function setFreeCamera(enabled: boolean) {
@@ -881,19 +911,19 @@ export function startNativeMissionBriefPlayer(opts: {
       nativeMapRef.current?.flyToCamera?.({
         lat: point.lat,
         lng: point.lng,
-        zoom: Math.min(scene.camera?.zoom ?? 13.2, 14.2),
-        pitch: Math.max(54, Math.min(68, scene.camera?.pitch ?? 62)),
+        zoom: Math.max(cameraSettings.minZoom, Math.min(scene.camera?.zoom ?? cameraSettings.maxZoom - 0.5, cameraSettings.maxZoom)),
+        pitch: Math.max(42, Math.min(70, scene.camera?.pitch ?? cameraSettings.pitch)),
         bearing,
-        duration: 350,
+        duration: 90,
         mode: 'linearTo',
       });
       postWebCamera({
         lat: point.lat,
         lng: point.lng,
-        zoom: Math.min(scene.camera?.zoom ?? 13.2, 14.2),
-        pitch: Math.max(54, Math.min(68, scene.camera?.pitch ?? 62)),
+        zoom: Math.max(cameraSettings.minZoom, Math.min(scene.camera?.zoom ?? cameraSettings.maxZoom - 0.5, cameraSettings.maxZoom)),
+        pitch: Math.max(42, Math.min(70, scene.camera?.pitch ?? cameraSettings.pitch)),
         bearing,
-        duration: 350,
+        duration: 90,
         mode: 'linearTo',
       });
     }
@@ -905,5 +935,5 @@ export function startNativeMissionBriefPlayer(opts: {
     narrationDone = true;
   }
 
-  return { replay, pause, resume, skip, stop, setSpeed, seekTo, setFreeCamera, markNarrationDone };
+  return { replay, pause, resume, skip, stop, setSpeed, setCameraOptions, seekTo, setFreeCamera, markNarrationDone };
 }

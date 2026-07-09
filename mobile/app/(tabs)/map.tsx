@@ -156,6 +156,7 @@ import {
   pauseMissionAnimation,
   resumeMissionAnimation,
   seekMissionAnimation,
+  setMissionAnimationCamera,
   setMissionAnimationFreeCamera,
   setMissionAnimationSpeed,
   skipMissionAnimationScene,
@@ -175,6 +176,22 @@ import {
 import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
 
 const TRAIL_FALLBACK_IMAGE = require('@/assets/trail-fallback-backpack-sign.jpg');
+
+type MapMissionFlyoverMode = 'copilot' | 'trail_builder';
+type MapMissionViewPreset = 'close' | 'standard' | 'wide';
+type MapMissionTiltPreset = 'low' | 'trail' | 'high';
+
+const MISSION_CAMERA_VIEW: Record<MapMissionViewPreset, { minZoom: number; maxZoom: number; lookaheadM: number }> = {
+  close: { minZoom: 10.3, maxZoom: 15.2, lookaheadM: 280 },
+  standard: { minZoom: 9.4, maxZoom: 14.4, lookaheadM: 460 },
+  wide: { minZoom: 8.4, maxZoom: 13.4, lookaheadM: 760 },
+};
+
+const MISSION_CAMERA_TILT: Record<MapMissionTiltPreset, number> = {
+  low: 44,
+  trail: 58,
+  high: 66,
+};
 
 type MapboxNativeEnrichmentModule = {
   enrichPlace?: (data: {
@@ -1952,6 +1969,60 @@ function routeCumulativeDistances(coords: [number, number][]): number[] {
   const out = new Array(coords.length).fill(0);
   for (let i = 1; i < coords.length; i++) out[i] = out[i - 1] + coordDistanceM(coords[i - 1], coords[i]);
   return out;
+}
+
+function missionCameraSettings(view: MapMissionViewPreset, tilt: MapMissionTiltPreset) {
+  return {
+    ...MISSION_CAMERA_VIEW[view],
+    pitch: MISSION_CAMERA_TILT[tilt],
+  };
+}
+
+function normalizeCinematicForPlayback(
+  cinematic: MissionCinematic,
+  route: [number, number][],
+  mode: MapMissionFlyoverMode,
+  camera: ReturnType<typeof missionCameraSettings>,
+): MissionCinematic {
+  const cumulative = routeCumulativeDistances(route);
+  const totalM = cumulative[cumulative.length - 1] || 0;
+  const baseRouteMs = Math.max(
+    mode === 'trail_builder' ? 28_000 : 65_000,
+    Math.min(mode === 'trail_builder' ? 90_000 : 150_000, (totalM / 16_000) * 1000),
+  );
+  const minFollowMs = mode === 'trail_builder' ? 7_500 : 8_500;
+  const maxFollowMs = mode === 'trail_builder' ? 26_000 : 32_000;
+  const sceneCount = Math.max(1, cinematic.scenes.length);
+  return {
+    ...cinematic,
+    scenes: cinematic.scenes.map(scene => {
+      const routeSlice = Array.isArray(scene.routeSlice) && scene.routeSlice.length >= 2
+        ? scene.routeSlice
+        : null;
+      const isFollow = scene.camera?.mode === 'follow'
+        || scene.type.includes('drive')
+        || scene.type.includes('day')
+        || scene.type === 'whole_route';
+      const sliceFraction = routeSlice
+        ? Math.max(0.025, Math.min(1, Math.abs(routeSlice[1] - routeSlice[0])))
+        : Math.max(0.06, 1 / sceneCount);
+      const baseDuration = isFollow
+        ? Math.max(minFollowMs, Math.min(maxFollowMs, baseRouteMs * sliceFraction))
+        : Math.max(4_500, Math.min(12_000, Number(scene.durationMs) || 8_000));
+      const nextCamera = {
+        ...(scene.camera || {}),
+        pitch: scene.camera?.pitch ?? camera.pitch,
+        zoom: isFollow
+          ? Math.min(camera.maxZoom, Math.max(camera.maxZoom - 0.75, Number(scene.camera?.zoom) || camera.maxZoom - 0.45))
+          : scene.camera?.zoom,
+      };
+      return {
+        ...scene,
+        durationMs: Math.round(baseDuration),
+        camera: nextCamera,
+      };
+    }),
+  };
 }
 
 function projectPointToRouteProgress(point: { lat: number; lng: number }, coords: [number, number][], cumulative?: number[]) {
@@ -5887,6 +5958,9 @@ function MapScreen() {
   const [mapMissionVisible, setMapMissionVisible] = useState(false);
   const [mapMissionProgress, setMapMissionProgress] = useState(0);
   const [mapMissionFreeCamera, setMapMissionFreeCamera] = useState(false);
+  const [mapMissionFlyoverMode, setMapMissionFlyoverMode] = useState<MapMissionFlyoverMode>('copilot');
+  const [mapMissionViewPreset, setMapMissionViewPreset] = useState<MapMissionViewPreset>('close');
+  const [mapMissionTiltPreset, setMapMissionTiltPreset] = useState<MapMissionTiltPreset>('trail');
   const [missionBriefOverlay, setMissionBriefOverlay] = useState<{
     active: boolean;
     fullRoute: [number, number][];
@@ -5910,6 +5984,9 @@ function MapScreen() {
   const mapMissionPlayerRef = useRef<NativeMissionBriefPlayer | null>(null);
   const mapMissionNativeSubsRef = useRef<Array<{ remove: () => void }>>([]);
   const mapMissionPlaybackModeRef = useRef<'js' | 'native'>('js');
+  const mapMissionFlyoverModeRef = useRef<MapMissionFlyoverMode>('copilot');
+  const mapMissionCameraRef = useRef(missionCameraSettings('close', 'trail'));
+  const mapMissionSeekingRef = useRef(false);
   const mapMissionPresenceAfterSpeechRef = useRef<CopilotPresenceState>('flying');
   const mapMission3dSnapshotRef = useRef<boolean | null>(null);
   const mapMissionStyleSnapshotRef = useRef<{ mapLayer: MapLayer; premiumMapStyle: PremiumMapStyle } | null>(null);
@@ -5942,6 +6019,7 @@ function MapScreen() {
   const missionOverlayFlushRef = useRef<number | null>(null);
   const missionPlaybackDebugRef = useRef<MissionPlaybackDebug | null>(null);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
+  const pendingFlyoverPromptRef = useRef<{ at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
     available: extremeCopilotAvailable,
     voiceEnabled: !!extremeConfig?.copilot?.voice_enabled,
@@ -11136,9 +11214,11 @@ function MapScreen() {
     const focusStop = stops.find(stop => stop.type === 'camp') ?? stops[Math.min(1, stops.length - 1)] ?? null;
     if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, focusStop.type === 'camp' ? 10.5 : 8.5, focusStop.name), 350);
     if (scoutBuilt) {
+      pendingFlyoverPromptRef.current = { at: Date.now() };
       missionRouteOverrideRef.current = coords;
       missionDirectedPromiseRef.current = startDirectedCinematicFetch(coords, 5000);
     } else {
+      pendingFlyoverPromptRef.current = null;
       missionDirectedPromiseRef.current = null;
     }
     return {
@@ -13808,6 +13888,7 @@ function MapScreen() {
     missionRunningRef.current = false;
     missionRouteOverrideRef.current = null;
     missionPrimedSceneIndexRef.current = -1;
+    mapMissionSeekingRef.current = false;
     exitMissionDirectorVoice();
     stopTrailheadVoice();
     mapMissionPlayerRef.current?.stop();
@@ -13830,6 +13911,7 @@ function MapScreen() {
     setMapMissionProgress(0);
     setMapMissionFreeCamera(false);
     setMapMissionNotice(null);
+    pendingFlyoverPromptRef.current = null;
     setCopilotBriefPresence('idle');
     setMissionBriefOverlay({
       active: false,
@@ -14139,6 +14221,26 @@ function MapScreen() {
   }
 
   function beginSilentFlyoverScene(scene: MissionScene, index: number) {
+    if (mapMissionFlyoverModeRef.current === 'trail_builder') {
+      setMapMissionCaptionText('');
+      setMapMissionScene(scene);
+      setMapMissionSceneIndex(index);
+      setCopilotBriefPresence('flying');
+      mapMissionPresenceAfterSpeechRef.current = 'flying';
+      ensureMissionPlaybackDebug().sceneStart({
+        scene_id: scene.id,
+        scene_type: scene.type,
+        scene_index: index,
+        beat_text_present: false,
+        speak: false,
+        storyboard_path: missionStoryboardPathRef.current,
+      });
+      mapMissionPlayerRef.current?.markNarrationDone();
+      if (!useNativeMapSurface) {
+        postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'markNarrationDone' }));
+      }
+      return;
+    }
     const cinematic = mapMissionCinematicRef.current;
     const caption = missionBeatCaption(cinematic, scene, routeScout)
       || String(scene.subtitle || scene.title || '').trim();
@@ -14215,7 +14317,8 @@ function MapScreen() {
           && missionRunningRef.current
           && missionVoicePathRef.current !== 'degraded'
         ) {
-          fallbackMissionNarration(beatText);
+          ensureMissionPlaybackDebug().voicePath('realtime', { scene_id: scene.id, scene_type: scene.type, no_start: true });
+          finishMissionNarrationBeat('watchdog');
         }
       }, 1200);
       try {
@@ -14269,6 +14372,20 @@ function MapScreen() {
     Haptics.selectionAsync().catch(() => {});
   }
 
+  function applyMapMissionCameraPreset(view: MapMissionViewPreset, tilt: MapMissionTiltPreset) {
+    const camera = missionCameraSettings(view, tilt);
+    mapMissionCameraRef.current = camera;
+    setMapMissionViewPreset(view);
+    setMapMissionTiltPreset(tilt);
+    mapMissionPlayerRef.current?.setCameraOptions?.(camera);
+    if (useNativeMapSurface) {
+      void setMissionAnimationCamera(camera);
+    } else {
+      postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setCameraOptions', camera }));
+    }
+    Haptics.selectionAsync().catch(() => {});
+  }
+
   function missionSceneAtProgress(cinematic: MissionCinematic | null, ratio: number) {
     if (!cinematic?.scenes.length) return { scene: null as MissionScene | null, index: -1 };
     const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
@@ -14292,6 +14409,13 @@ function MapScreen() {
 
   function updateMissionScenePreview(scene: MissionScene | null, index: number) {
     if (!scene || index < 0) return;
+    if (mapMissionFlyoverModeRef.current === 'trail_builder') {
+      setMapMissionScene(scene);
+      setMapMissionSceneIndex(index);
+      setMapMissionCaptionText('');
+      setCopilotBriefPresence('paused');
+      return;
+    }
     const cinematic = mapMissionCinematicRef.current;
     const caption = missionBeatCaption(cinematic, scene, routeScout)
       || String(scene.subtitle || scene.title || '').trim();
@@ -14307,10 +14431,11 @@ function MapScreen() {
     try { Speech.stop(); } catch {}
     narrationBeatNonceRef.current += 1;
     narrationBeatOpenRef.current = false;
-    if (!mapMissionPaused) {
+    if (!mapMissionSeekingRef.current && !mapMissionPaused) {
       mapMissionPlayerRef.current?.pause();
       if (!useNativeMapSurface) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
     }
+    mapMissionSeekingRef.current = true;
     setMapMissionPaused(true);
     setCopilotBriefPresence('paused');
   }
@@ -14328,7 +14453,10 @@ function MapScreen() {
     } else {
       postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'seekTo', ratio: clamped }));
     }
-    if (options?.haptic !== false) Haptics.selectionAsync().catch(() => {});
+    if (options?.haptic !== false) {
+      mapMissionSeekingRef.current = false;
+      Haptics.selectionAsync().catch(() => {});
+    }
   }
 
   function toggleMapMissionFreeCamera() {
@@ -14344,9 +14472,13 @@ function MapScreen() {
     Haptics.selectionAsync().catch(() => {});
   }
 
-  async function startMapMissionBrief(options: { source?: 'manual' | 'auto_scout' | 'trail_builder'; skipDirected?: boolean; routeName?: string } = {}) {
+  async function startMapMissionBrief(options: { source?: 'manual' | 'auto_scout' | 'trail_builder'; skipDirected?: boolean; routeName?: string; flyoverMode?: MapMissionFlyoverMode } = {}) {
+    if (missionRunningRef.current || mapMissionVisible) return true;
     await stopTrailheadVoice();
-    const shouldNarrateFlyover = options.source !== 'trail_builder';
+    const flyoverMode: MapMissionFlyoverMode = options.flyoverMode ?? (options.source === 'trail_builder' ? 'trail_builder' : 'copilot');
+    const shouldNarrateFlyover = flyoverMode === 'copilot';
+    mapMissionFlyoverModeRef.current = flyoverMode;
+    setMapMissionFlyoverMode(flyoverMode);
     missionVoicePathRef.current = shouldNarrateFlyover ? 'realtime' : 'silent';
 
     const nativeAvailable = await isMissionAnimatorAvailable();
@@ -14358,6 +14490,7 @@ function MapScreen() {
     playbackDebug.sessionStart({
       playback_mode: playbackMode,
       source: options.source ?? 'manual',
+      flyover_mode: flyoverMode,
       native_animator_available: nativeAvailable,
       native_animator_allowed: nativeAnimatorAllowed,
       narrating: shouldNarrateFlyover,
@@ -14457,21 +14590,25 @@ function MapScreen() {
       } : null,
       missionBrief: mapMissionBrief,
     });
-    const briefPromise = refreshMapMissionControl(route, activeTrip?.trip_id ?? null).catch(() => mapMissionBrief);
+    const briefPromise = shouldNarrateFlyover
+      ? refreshMapMissionControl(route, activeTrip?.trip_id ?? null).catch(() => mapMissionBrief)
+      : Promise.resolve(mapMissionBrief);
     const [directedCinematic] = await Promise.all([
       directedPromise.catch(() => null),
       directorVoicePromise,
     ]);
     if (options.source !== 'auto_scout') setMapMissionNotice(null);
-    const cinematic = directedCinematic ?? localCinematic;
+    const camera = mapMissionCameraRef.current;
+    const rawCinematic = directedCinematic ?? localCinematic;
     missionStoryboardPathRef.current = directedCinematic ? 'ai_director' : (scoutLiveCinematic ? 'scout_live' : 'deterministic');
-    if (!cinematic || cinematic.scenes.length < 2) {
+    if (!rawCinematic || rawCinematic.scenes.length < 2) {
       missionRunningRef.current = false;
       setMapMissionError(true);
       setQuickToast('Route is too short for a flyover.');
       setTimeout(() => setQuickToast(''), 2600);
       return false;
     }
+    const cinematic = normalizeCinematicForPlayback(rawCinematic, route, flyoverMode, camera);
 
     mapMissionCinematicRef.current = cinematic;
     setMapMissionCinematic(cinematic);
@@ -14494,10 +14631,10 @@ function MapScreen() {
       speed: mapMissionSpeedRef.current,
       terrain: map3dEnabled || terrainReady,
       camera: {
-        pitch: 64,
-        minZoom: 8.5,
-        maxZoom: 14.2,
-        lookaheadM: 600,
+        pitch: camera.pitch,
+        minZoom: camera.minZoom,
+        maxZoom: camera.maxZoom,
+        lookaheadM: camera.lookaheadM,
       },
     };
 
@@ -14584,6 +14721,7 @@ function MapScreen() {
           clearMissionNativeListeners();
         },
         setSpeed: (next: number) => { void setMissionAnimationSpeed(next); },
+        setCameraOptions: (next) => { void setMissionAnimationCamera(next); },
         seekTo: (ratio: number) => { void seekMissionAnimation(ratio); },
         setFreeCamera: (enabled: boolean) => { void setMissionAnimationFreeCamera(enabled); },
         markNarrationDone: () => { void markMissionAnimationNarrationDone(); },
@@ -14618,6 +14756,7 @@ function MapScreen() {
       webRef,
       useNativeOverlays: useNativeMapSurface,
       initialSpeed: mapMissionSpeedRef.current,
+      cameraOptions: camera,
       waitForNarration: shouldNarrateFlyover, // pace Co-Pilot beats to narration; Trail Builder is visual only.
       // The actual line each scene will speak ('' when silent) — the player
       // stretches speaking scenes so the camera glides at narration pace.
@@ -15730,6 +15869,25 @@ function MapScreen() {
     }
   }
 
+  function isFlyoverAffirmation(text: string) {
+    return /\b(yes|yeah|yep|sure|start|start it|fly it|show me|go ahead|play it|let'?s do it|do it)\b/i.test(text);
+  }
+
+  async function consumePendingFlyoverAffirmation(text: string): Promise<boolean> {
+    const pending = pendingFlyoverPromptRef.current;
+    if (!pending || Date.now() - pending.at > 120_000) return false;
+    if (!missionFlyPlanReady || !isFlyoverAffirmation(text)) return false;
+    pendingFlyoverPromptRef.current = null;
+    appendCopilotMessage({
+      id: `copilot-flyover-confirm-${Date.now()}`,
+      role: 'assistant',
+      text: 'Preparing flyover.',
+    });
+    setShowExtremeCopilot(false);
+    await startMapMissionBrief({ source: 'auto_scout', flyoverMode: 'copilot' });
+    return true;
+  }
+
   async function startCopilotVoice(mode: 'push_to_talk' | 'wake_phrase') {
     if (extremeCopilotVoiceActive && extremeCopilotVoiceMode === mode) {
       realtimeCopilotRef.current?.stop();
@@ -15787,6 +15945,7 @@ function MapScreen() {
           if (last?.text === clean && Date.now() - last.at < 4000) return;
           lastRealtimeUserTranscriptRef.current = { text: clean, at: Date.now() };
           appendCopilotMessage({ id: `copilot-voice-user-${Date.now()}`, role: 'user', text: clean });
+          void consumePendingFlyoverAffirmation(clean);
         },
         onToolCall: action => handleRealtimeCopilotAction(action),
       });
@@ -15900,6 +16059,8 @@ function MapScreen() {
     if (!text || extremeCopilotBusy) return;
     setExtremeCopilotInput('');
     appendCopilotMessage({ id: `copilot-user-${Date.now()}`, role: 'user', text });
+
+    if (await consumePendingFlyoverAffirmation(text)) return;
 
     const localMission = (() => {
       const clean = text.toLowerCase();
@@ -21686,27 +21847,31 @@ function MapScreen() {
       {mapMissionVisible && mapMissionCinematic && !mapMissionError && (
         <>
           {/* Top cinematic caption — keeps the route visible underneath */}
-          <View pointerEvents="box-none" style={[s.mapMissionBriefTop, { top: insets.top + 8 }]}>
-            <View pointerEvents="none">
-              <TripPreviewCaption
-                scene={mapMissionScene}
-                sceneIndex={mapMissionSceneIndex}
-                sceneCount={mapMissionCinematic.scenes.length}
-                captionText={mapMissionCaptionText}
-              />
+          {mapMissionFlyoverMode === 'copilot' || mapMissionNotice ? (
+            <View pointerEvents="box-none" style={[s.mapMissionBriefTop, { top: insets.top + 8 }]}>
+              {mapMissionFlyoverMode === 'copilot' ? (
+                <View pointerEvents="none">
+                  <TripPreviewCaption
+                    scene={mapMissionScene}
+                    sceneIndex={mapMissionSceneIndex}
+                    sceneCount={mapMissionCinematic.scenes.length}
+                    captionText={mapMissionCaptionText}
+                  />
+                </View>
+              ) : null}
+              {mapMissionNotice ? (
+                <View style={s.mapMissionNotice} pointerEvents="none">
+                  <Ionicons name="information-circle-outline" size={13} color="#fbbf24" />
+                  <Text style={s.mapMissionNoticeText} numberOfLines={1}>{mapMissionNotice}</Text>
+                </View>
+              ) : null}
             </View>
-            {mapMissionNotice ? (
-              <View style={s.mapMissionNotice} pointerEvents="none">
-                <Ionicons name="information-circle-outline" size={13} color="#fbbf24" />
-                <Text style={s.mapMissionNoticeText} numberOfLines={1}>{mapMissionNotice}</Text>
-              </View>
-            ) : null}
-          </View>
+          ) : null}
 
           {/* Bottom control dock */}
           <View pointerEvents="box-none" style={[s.mapMissionBriefWrap, { bottom: bottomInset + 10 }]}>
             <View pointerEvents="box-none" style={s.mapMissionBriefControls}>
-              <CopilotPresenceOrb state={copilotBriefPresence} />
+              {mapMissionFlyoverMode === 'copilot' ? <CopilotPresenceOrb state={copilotBriefPresence} /> : null}
               <View style={{ flex: 1 }} pointerEvents="none" />
               <TripPreviewControls
                 playing={mapMissionPlaying}
@@ -21715,11 +21880,15 @@ function MapScreen() {
                 speed={mapMissionSpeed}
                 progress={mapMissionProgress}
                 freeCamera={mapMissionFreeCamera}
+                showSkip={mapMissionFlyoverMode === 'copilot'}
+                viewPreset={mapMissionViewPreset}
+                tiltPreset={mapMissionTiltPreset}
                 onSpeedChange={applyMapMissionSpeed}
                 onSeekStart={ratio => seekMapMission(ratio, { haptic: false })}
                 onSeekMove={ratio => seekMapMission(ratio, { haptic: false })}
                 onSeekEnd={ratio => seekMapMission(ratio)}
                 onToggleFreeCamera={toggleMapMissionFreeCamera}
+                onCameraPresetChange={applyMapMissionCameraPreset}
                 onReplay={() => {
                   // Invalidate any in-flight narration from the previous run so a
                   // stale completion can't release the new run's first beat early.

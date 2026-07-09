@@ -54,6 +54,10 @@ class TrailheadMissionAnimatorModule : Module() {
       animator.setSpeed(speed)
     }
 
+    AsyncFunction("setMissionAnimationCamera") { camera: Map<String, Any?> ->
+      animator.setCameraOptions(camera)
+    }
+
     AsyncFunction("seekMissionAnimation") { ratio: Double ->
       animator.seekTo(ratio)
     }

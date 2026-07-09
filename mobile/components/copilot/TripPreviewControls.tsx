@@ -5,8 +5,8 @@ import { Ionicons } from '@expo/vector-icons';
 /** Cinematic playback speeds. Effective scene duration = baseDuration / speed. */
 export const PREVIEW_SPEEDS = [0.1, 0.25, 0.5, 1, 1.5, 2] as const;
 export type PreviewSpeed = number;
-/** Default to a slow, cinematic pace. */
-export const DEFAULT_PREVIEW_SPEED: PreviewSpeed = 0.5;
+/** Default to a steady route-preview pace. */
+export const DEFAULT_PREVIEW_SPEED: PreviewSpeed = 1;
 export const MIN_PREVIEW_SPEED = 0.1;
 export const MAX_PREVIEW_SPEED = 3;
 
@@ -34,9 +34,12 @@ type Props = {
   speed?: number;
   progress?: number;
   freeCamera?: boolean;
+  viewPreset?: 'close' | 'standard' | 'wide';
+  tiltPreset?: 'low' | 'trail' | 'high';
+  showSkip?: boolean;
   onReplay: () => void;
   onPauseResume: () => void;
-  onSkip: () => void;
+  onSkip?: () => void;
   onCycleSpeed?: () => void;
   onSeek?: (ratio: number) => void;
   onSeekStart?: (ratio: number) => void;
@@ -44,6 +47,7 @@ type Props = {
   onSeekEnd?: (ratio: number) => void;
   onSpeedChange?: (speed: number) => void;
   onToggleFreeCamera?: () => void;
+  onCameraPresetChange?: (view: 'close' | 'standard' | 'wide', tilt: 'low' | 'trail' | 'high') => void;
 };
 
 export function TripPreviewControls({
@@ -53,6 +57,9 @@ export function TripPreviewControls({
   speed = DEFAULT_PREVIEW_SPEED,
   progress = 0,
   freeCamera = false,
+  viewPreset = 'close',
+  tiltPreset = 'trail',
+  showSkip = true,
   onReplay,
   onPauseResume,
   onSkip,
@@ -63,10 +70,12 @@ export function TripPreviewControls({
   onSeekEnd,
   onSpeedChange,
   onToggleFreeCamera,
+  onCameraPresetChange,
 }: Props) {
   const speedLabel = formatPreviewSpeed(speed);
   const [trackWidth, setTrackWidth] = useState(1);
   const [speedOpen, setSpeedOpen] = useState(false);
+  const [viewOpen, setViewOpen] = useState(false);
   const [customSpeedText, setCustomSpeedText] = useState(() => String(clampPreviewSpeed(speed)));
   const trackWidthRef = useRef(1);
   const lastSeekRatioRef = useRef(0);
@@ -111,6 +120,8 @@ export function TripPreviewControls({
     applySpeed(parsed);
     Keyboard.dismiss();
   };
+  const applyView = (view: 'close' | 'standard' | 'wide') => onCameraPresetChange?.(view, tiltPreset);
+  const applyTilt = (tilt: 'low' | 'trail' | 'high') => onCameraPresetChange?.(viewPreset, tilt);
 
   return (
     <View style={styles.wrap}>
@@ -149,6 +160,48 @@ export function TripPreviewControls({
           </View>
         </View>
       ) : null}
+      {viewOpen && onCameraPresetChange ? (
+        <View style={styles.speedPanel}>
+          <View style={styles.panelGroup}>
+            <Text style={styles.customSpeedLabel}>View</Text>
+            <View style={styles.speedGrid}>
+              {(['close', 'standard', 'wide'] as const).map(item => {
+                const active = viewPreset === item;
+                return (
+                  <TouchableOpacity
+                    key={item}
+                    style={[styles.speedChoice, active && styles.speedChoiceActive]}
+                    onPress={() => applyView(item)}
+                  >
+                    <Text style={[styles.speedChoiceText, active && styles.speedChoiceTextActive]}>
+                      {item === 'close' ? 'Close' : item === 'standard' ? 'Mid' : 'Wide'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+          <View style={styles.panelGroup}>
+            <Text style={styles.customSpeedLabel}>Tilt</Text>
+            <View style={styles.speedGrid}>
+              {(['low', 'trail', 'high'] as const).map(item => {
+                const active = tiltPreset === item;
+                return (
+                  <TouchableOpacity
+                    key={item}
+                    style={[styles.speedChoice, active && styles.speedChoiceActive]}
+                    onPress={() => applyTilt(item)}
+                  >
+                    <Text style={[styles.speedChoiceText, active && styles.speedChoiceTextActive]}>
+                      {item === 'low' ? 'Low' : item === 'trail' ? 'Trail' : 'High'}
+                    </Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+        </View>
+      ) : null}
       <View style={styles.row}>
         <TouchableOpacity style={styles.btn} onPress={onReplay} accessibilityLabel="Replay flyover">
           <Ionicons name="refresh" size={15} color="#f8fafc" />
@@ -163,7 +216,7 @@ export function TripPreviewControls({
             <Ionicons name={paused ? 'play' : 'pause'} size={15} color="#f8fafc" />
           </TouchableOpacity>
         ) : null}
-        {playing && !complete ? (
+        {showSkip && onSkip && playing && !complete ? (
           <TouchableOpacity style={styles.btn} onPress={onSkip} accessibilityLabel="Skip scene">
             <Ionicons name="play-skip-forward" size={15} color="#f8fafc" />
           </TouchableOpacity>
@@ -175,7 +228,19 @@ export function TripPreviewControls({
             accessibilityLabel={freeCamera ? 'Follow route camera' : 'Free camera'}
           >
             <Ionicons name={freeCamera ? 'lock-open-outline' : 'locate-outline'} size={14} color={freeCamera ? '#101820' : '#f8fafc'} />
-            <Text style={[styles.freeText, freeCamera && styles.freeTextActive]}>{freeCamera ? 'Free' : 'Follow'}</Text>
+            <Text style={[styles.freeText, freeCamera && styles.freeTextActive]}>{freeCamera ? 'Free' : 'Route'}</Text>
+          </TouchableOpacity>
+        ) : null}
+        {onCameraPresetChange ? (
+          <TouchableOpacity
+            style={[styles.btn, styles.freeBtn]}
+            onPress={() => {
+              setViewOpen(open => !open);
+              if (speedOpen) setSpeedOpen(false);
+            }}
+            accessibilityLabel="Camera view"
+          >
+            <Ionicons name="eye-outline" size={14} color="#f8fafc" />
           </TouchableOpacity>
         ) : null}
         {onSpeedChange || onCycleSpeed ? (
@@ -184,6 +249,7 @@ export function TripPreviewControls({
             onPress={() => {
               if (onSpeedChange) {
                 setSpeedOpen(open => !open);
+                if (viewOpen) setViewOpen(false);
                 setCustomSpeedText(String(clampPreviewSpeed(speed)));
                 return;
               }
@@ -234,6 +300,9 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 6,
+  },
+  panelGroup: {
+    gap: 7,
   },
   speedChoice: {
     width: 66,

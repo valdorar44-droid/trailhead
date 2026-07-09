@@ -203,6 +203,14 @@ internal class TrailheadMissionAnimator(
     return true
   }
 
+  fun setCameraOptions(camera: Map<String, Any?>): Boolean {
+    cameraPitch = (doubleValue(camera["pitch"]) ?: cameraPitch).coerceIn(42.0, 70.0)
+    minZoom = (doubleValue(camera["minZoom"]) ?: minZoom).coerceIn(4.0, 16.0)
+    maxZoom = (doubleValue(camera["maxZoom"]) ?: maxZoom).coerceIn(5.0, 17.0)
+    lookaheadM = (doubleValue(camera["lookaheadM"]) ?: lookaheadM).coerceIn(120.0, 1200.0)
+    return true
+  }
+
   fun setFreeCamera(enabled: Boolean): Boolean {
     freeCamera = enabled
     return true
@@ -284,10 +292,7 @@ internal class TrailheadMissionAnimator(
     @Suppress("UNCHECKED_CAST")
     val cam = payload["camera"] as? Map<String, Any?>
     if (cam != null) {
-      cameraPitch = doubleValue(cam["pitch"]) ?: 64.0
-      minZoom = doubleValue(cam["minZoom"]) ?: 8.5
-      maxZoom = doubleValue(cam["maxZoom"]) ?: 14.2
-      lookaheadM = doubleValue(cam["lookaheadM"]) ?: 600.0
+      setCameraOptions(cam)
     }
     speed = (doubleValue(payload["speed"]) ?: 1.0).coerceIn(0.1, 3.0)
 
@@ -680,7 +685,7 @@ internal class TrailheadMissionAnimator(
     return max(12.8, min(zoom, maxZoom))
   }
 
-  private fun clampPitch(pitch: Double?): Double = max(58.0, min(68.0, pitch ?: cameraPitch))
+  private fun clampPitch(pitch: Double?): Double = max(42.0, min(70.0, pitch ?: cameraPitch))
 
   private fun geoJsonSource(style: Style, id: String): GeoJsonSource? {
     return try {

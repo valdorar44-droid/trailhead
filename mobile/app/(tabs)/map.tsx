@@ -5745,6 +5745,17 @@ function MapScreen() {
     }
   }
 
+  const syncTrailCaptureModeToWeb = useCallback((active: boolean) => {
+    if (USE_NATIVE_MAP) return;
+    const message = JSON.stringify({ type: 'set_trail_capture_mode', active });
+    const delays = active ? [0, 120, 420, 900, 1800] : [0, 180];
+    delays.forEach(delay => {
+      setTimeout(() => {
+        postWebMessage(message);
+      }, delay);
+    });
+  }, []);
+
   const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const [extremeMapboxCapabilities, setExtremeMapboxCapabilities] = useState<ExtremeMapboxCapabilities | null>(
     Platform.OS === 'ios' ? { supported: true, renderer: 'metal', reason: 'supported' } : null
@@ -18195,8 +18206,8 @@ function MapScreen() {
 
   useEffect(() => {
     if (USE_NATIVE_MAP) return;
-    postWebMessage(JSON.stringify({ type: 'set_trail_capture_mode', active: trailPinCaptureMode }));
-  }, [trailPinCaptureMode]);
+    syncTrailCaptureModeToWeb(trailPinCaptureMode);
+  }, [syncTrailCaptureModeToWeb, trailPinCaptureMode, mapHtml]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -21350,9 +21361,11 @@ function MapScreen() {
               protomapsKey,
             });
             postWebMessage(configMessage);
+            syncTrailCaptureModeToWeb(trailPinCaptureMode);
             if (Platform.OS === 'web') {
               [80, 300, 900].forEach(delay => {
                 setTimeout(() => postWebMessage(configMessage), delay);
+                setTimeout(() => syncTrailCaptureModeToWeb(trailPinCaptureMode), delay + 40);
               });
             }
             if (userLoc) {

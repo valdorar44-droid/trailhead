@@ -36,6 +36,8 @@ assert(!/\b(anchor|coverage|switching to terrain|boots leave the vehicle|low-ser
   'copilotStoryboard avoids generic flyover narration');
 assert(!/we follow the route toward|Continuing toward/i.test(storyboardSource),
   'copilotStoryboard avoids generic connective-leg narration');
+assert(!/Offline maps and fuel planning matter here/i.test(storyboardSource),
+  'copilotStoryboard avoids old offline-map narration');
 assert(storyboardSource.includes('the line heads toward') && storyboardSource.includes('Next stretch heads toward'),
   'copilotStoryboard uses cleaner connective-leg narration');
 assert(storyboardSource.includes('overnight stop') && storyboardSource.includes('Fuel stop at'),
@@ -53,8 +55,10 @@ assert(mapBriefSource.includes("'fuel_stop', 'monument_orbit', 'poi_flyover'"),
 assert(mapBriefSource.includes('dayStopsForPlan') && mapBriefSource.includes('sweepDeg: 180'),
   'live scout flyover can add fuel/scenic stops before camp');
 assert(mapBriefSource.includes('The highlighted line heads toward') &&
-  mapBriefSource.includes("We'll circle it once, then pick the route back up."),
+  mapBriefSource.includes("We'll circle once, then pick up the route again."),
   'live scout flyover narration describes line movement and scenic return');
+assert(!/key camps|quick stop|strong signal|scenic pause/i.test(mapBriefSource),
+  'live scout flyover avoids generic app-like narration');
 
 const captionSource = readFileSync(join(root, 'components/copilot/TripPreviewCaption.tsx'), 'utf8');
 assert(captionSource.includes('captionText'), 'TripPreviewCaption accepts runtime caption override');
@@ -255,6 +259,10 @@ assert(mapSource.includes("postRN({type:'map_tapped',lat:e.lngLat.lat,lng:e.lngL
   mapSource.includes('trailPinCaptureMode &&') &&
   mapSource.includes('addTrailCaptureAnchor(webTapCoord)'),
   'WebView Trail Builder taps create route points while capture mode is active');
+assert(mapSource.includes('syncTrailCaptureModeToWeb') &&
+  mapSource.includes('[0, 120, 420, 900, 1800]') &&
+  mapSource.includes('set_trail_capture_mode'),
+  'WebView Trail Builder capture mode is retried across cold WebView load');
 assert(mapSource.includes("engineLabel = usedManualFallback ? 'Manual line' : 'Trail route'") &&
   mapSource.includes('Review the line before saving. Add points around bends and forks.'),
   'WebView Trail Builder falls back to a reviewable manual route');

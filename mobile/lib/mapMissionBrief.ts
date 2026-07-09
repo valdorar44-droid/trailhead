@@ -632,7 +632,7 @@ export function liveMissionBeatBrief(
   const tripLabel = startName && destName ? `${startName} to ${destName}` : String(scene.title || 'Your route').trim();
 
   if (scene.type === 'intro') {
-    return `${tripLabel} is built. I'll fly the route and stop at the key camps.`;
+    return `${tripLabel} is built. I'll fly it day by day, with camps, fuel, and scenic stops.`;
   }
   if (scene.type === 'camp_arrival') {
     const campName = String(plan?.campName || scene.title).trim();
@@ -651,7 +651,7 @@ export function liveMissionBeatBrief(
       return `Day ${dayNum} leaves ${from}. The highlighted line heads toward ${to || 'the first camp'}.`;
     }
     if (miles != null && miles >= 120) {
-      return `This stretch gets remote on the way to ${to}. Save the route before leaving strong signal.`;
+      return `This stretch gets remote on the way to ${to}. Keep the route saved before service fades.`;
     }
     return `Day ${dayNum} runs from ${from} toward ${to}.`;
   }
@@ -659,10 +659,10 @@ export function liveMissionBeatBrief(
     return `Fuel stop at ${scene.title}. Top off here before the next long stretch.`;
   }
   if (scene.type === 'monument_orbit') {
-    return `${scene.title} is the scenic pause on this leg. We'll circle it once, then pick the route back up.`;
+    return `${scene.title} is the scenic stop on this leg. We'll circle once, then pick up the route again.`;
   }
   if (scene.type === 'poi_flyover') {
-    return `${scene.title} is a quick stop on this leg. We'll look around, then return to the route.`;
+    return `${scene.title} is a stop on this leg. We'll look around, then pick up the route again.`;
   }
   if (scene.type === 'mission_recap') {
     const finish = destName || 'the finish';
@@ -671,7 +671,7 @@ export function liveMissionBeatBrief(
   if (['risk_focus', 'weather_focus', 'offline_readiness'].includes(scene.type)) {
     const note = String(scene.subtitle || scene.narration || '').trim();
     if (scene.type === 'offline_readiness') {
-      return 'This stretch gets remote. Save the route before leaving strong signal.';
+      return 'This stretch gets remote. Keep the route saved before service fades.';
     }
     return note || String(scene.title || '').trim();
   }

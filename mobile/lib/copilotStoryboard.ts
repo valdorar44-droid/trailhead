@@ -582,7 +582,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         narration: type === 'weather_focus'
           ? `Weather watch: ${firstSentence(risk.summary) || risk.title}. Check timing before this segment.`
           : type === 'offline_readiness'
-            ? `This is the remote stretch. ${firstSentence(risk.summary) || 'Offline maps and fuel planning matter here.'}`
+            ? `This is the remote stretch. ${firstSentence(risk.summary) || 'Keep the route saved and fuel topped off here.'}`
             : `${severityHigh ? 'This section deserves a closer look. ' : ''}${firstSentence(risk.summary) || risk.title}`,
         callouts: focus
           ? [{ id: risk.id, title: risk.title, note: firstSentence(risk.summary), lat: focus.lat, lng: focus.lng, kind: 'risk' }]

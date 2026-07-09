@@ -37,10 +37,9 @@ import {
   TrailheadSkeletonLine,
 } from '@/components/TrailheadUI';
 
-// ── WebView renderer is the production map surface. The native Mapbox SDK stays
-// compiled for preview testing, but it is not mounted at runtime until the
-// mobile tab crash path is fully cleared on-device.
-const USE_NATIVE_MAP = false;
+// ── Native Mapbox/MapLibre renderer is the primary map surface. WebView remains
+// mounted only as a recovery fallback if native loading fails before ready.
+const USE_NATIVE_MAP = true;
 // Realtime Co-Pilot narration (WebRTC) — the Co-Pilot's own ChatGPT voice narrates the
 // cinematic. Verified working on-device in voice mode. Device TTS is the instant fallback.
 const ENABLE_REALTIME_NARRATOR = true;
@@ -5739,6 +5738,7 @@ function MapScreen() {
   const webRef       = useRef<any>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
   const navVoiceRef  = useRef<string | undefined>(undefined);
+  const nativeMapSurfaceActiveRef = useRef(USE_NATIVE_MAP);
 
   function postWebMessage(message: string) {
     const target = webRef.current;
@@ -5753,7 +5753,7 @@ function MapScreen() {
   }
 
   const syncTrailCaptureModeToWeb = useCallback((active: boolean) => {
-    if (USE_NATIVE_MAP) return;
+    if (nativeMapSurfaceActiveRef.current) return;
     const message = JSON.stringify({ type: 'set_trail_capture_mode', active });
     const delays = active ? [0, 120, 420, 900, 1800] : [0, 180];
     delays.forEach(delay => {
@@ -6476,7 +6476,12 @@ function MapScreen() {
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
   const [mapSurfaceReady, setMapSurfaceReady] = useState(false);
   const [mapLoadFailed, setMapLoadFailed] = useState(false);
+  const useNativeMapSurface = USE_NATIVE_MAP && !mapLoadFailed;
   const [showLocDisclosure, setShowLocDisclosure] = useState(false);
+
+  useEffect(() => {
+    nativeMapSurfaceActiveRef.current = useNativeMapSurface;
+  }, [useNativeMapSurface]);
 
   const [nearbyLoading,   setNearbyLoading]   = useState(false);
   const [nearbyNarration, setNearbyNarration] = useState<string | null>(null);
@@ -13845,7 +13850,7 @@ function MapScreen() {
       applyMapLayer(styleSnap.mapLayer, styleSnap.premiumMapStyle);
     }
     mapMissionStyleSnapshotRef.current = null;
-    if (!USE_NATIVE_MAP) {
+    if (!useNativeMapSurface) {
       postWebMessage(JSON.stringify({ type: 'mission_brief_stop' }));
     }
   }
@@ -13926,7 +13931,7 @@ function MapScreen() {
       voice_path: missionVoicePathRef.current,
     });
     mapMissionPlayerRef.current?.markNarrationDone();
-    if (!USE_NATIVE_MAP) {
+    if (!useNativeMapSurface) {
       postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'markNarrationDone' }));
     }
     setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current);
@@ -14224,27 +14229,11 @@ function MapScreen() {
     fallbackMissionNarration(beatText);
   }
 
-  async function primeFirstMissionBeat(cinematic: MissionCinematic) {
-    missionPrimedSceneIndexRef.current = -1;
-    const idx = cinematic.scenes.findIndex(scene => {
-      const { speak, beatText } = speakLiveMissionBeatInput(cinematic, scene, routeScout);
-      return speak && !!beatText.trim();
-    });
-    if (idx < 0) return;
-
-    const handle = await ensureMissionDirectorVoice(true);
-    if (!handle?.isConnected()) return;
-
-    missionPrimedSceneIndexRef.current = idx;
-    const scene = cinematic.scenes[idx];
-    beginMissionSceneBeat(scene, idx, { presence: 'building' });
-  }
-
   function cycleMapMissionSpeed() {
     const next = nextPreviewSpeed(mapMissionSpeedRef.current);
     mapMissionSpeedRef.current = next;
     setMapMissionSpeed(next);
-    if (USE_NATIVE_MAP) {
+    if (useNativeMapSurface) {
       mapMissionPlayerRef.current?.setSpeed(next);
     } else {
       postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setSpeed', speed: next }));
@@ -14296,7 +14285,7 @@ function MapScreen() {
     setMapMissionComplete(false);
     const { scene, index } = missionSceneAtProgress(mapMissionCinematicRef.current, clamped);
     updateMissionScenePreview(scene, index);
-    if (USE_NATIVE_MAP) {
+    if (useNativeMapSurface) {
       mapMissionPlayerRef.current?.seekTo(clamped);
     } else {
       postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'seekTo', ratio: clamped }));
@@ -14307,7 +14296,7 @@ function MapScreen() {
   function toggleMapMissionFreeCamera() {
     const next = !mapMissionFreeCamera;
     setMapMissionFreeCamera(next);
-    if (USE_NATIVE_MAP) {
+    if (useNativeMapSurface) {
       mapMissionPlayerRef.current?.setFreeCamera(next);
     } else {
       postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setFreeCamera', enabled: next }));
@@ -14322,7 +14311,7 @@ function MapScreen() {
     missionVoicePathRef.current = 'realtime';
 
     const nativeAvailable = await isMissionAnimatorAvailable();
-    const playbackMode = resolveMissionPlaybackMode(undefined, nativeAvailable && USE_NATIVE_MAP);
+    const playbackMode = resolveMissionPlaybackMode(undefined, nativeAvailable && useNativeMapSurface);
     mapMissionPlaybackModeRef.current = playbackMode;
     const playbackDebug = ensureMissionPlaybackDebug();
     playbackDebug.reset();
@@ -14448,9 +14437,12 @@ function MapScreen() {
 
     mapMissionPlayerRef.current?.stop();
     clearMissionNativeListeners();
+    missionPrimedSceneIndexRef.current = -1;
+    narrationBeatNonceRef.current += 1;
+    narrationBeatOpenRef.current = false;
+    clearNarrationFallbackTimer();
 
     setCopilotBriefPresence('building');
-    await primeFirstMissionBeat(cinematic);
 
     const nativePayload = {
       route: routeCoordsFromLngLat(route),
@@ -14577,7 +14569,7 @@ function MapScreen() {
       checkpoints: checkpointsFromScout(routeScout).map(cp => ({ lat: cp.lat, lng: cp.lng })),
       nativeMapRef,
       webRef,
-      useNativeOverlays: USE_NATIVE_MAP,
+      useNativeOverlays: useNativeMapSurface,
       initialSpeed: mapMissionSpeedRef.current,
       waitForNarration: true, // pace each speaking beat to the narration so voice + camera stay inline
       // The actual line each scene will speak ('' when silent) — the player
@@ -14594,7 +14586,7 @@ function MapScreen() {
       },
       ensure3d: () => {
         if (!map3dEnabled) toggleMap3d();
-        if (!USE_NATIVE_MAP) {
+        if (!useNativeMapSurface) {
           postWebMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: true }));
         }
       },
@@ -14685,7 +14677,7 @@ function MapScreen() {
 
     if (!missionRunningRef.current) return false;
 
-    if (!USE_NATIVE_MAP) {
+    if (!useNativeMapSurface) {
       postWebMessage(JSON.stringify({
         type: 'mission_brief_start',
         scenes: cinematic.scenes,
@@ -15862,6 +15854,12 @@ function MapScreen() {
 
     const localMission = (() => {
       const clean = text.toLowerCase();
+      if (
+        missionFlyPlanReady &&
+        /\b(yes|yeah|yep|start|start it|fly it|show me|go ahead|play it)\b/.test(clean)
+      ) {
+        return 'Opening the flyover.';
+      }
       if (/\b(route preview|fly (the|my) route|open explorer|open briefing|flyover)\b/.test(clean)) {
         return 'Opening the flyover.';
       }
@@ -15928,7 +15926,7 @@ function MapScreen() {
 
   function centerMapOnUser() {
     if (!userLoc) return;
-    if (USE_NATIVE_MAP) {
+    if (useNativeMapSurface) {
       nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
     } else {
       postWebMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
@@ -18212,9 +18210,9 @@ function MapScreen() {
   );
 
   useEffect(() => {
-    if (USE_NATIVE_MAP) return;
+    if (useNativeMapSurface) return;
     syncTrailCaptureModeToWeb(trailPinCaptureMode);
-  }, [syncTrailCaptureModeToWeb, trailPinCaptureMode, mapHtml]);
+  }, [syncTrailCaptureModeToWeb, trailPinCaptureMode, mapHtml, useNativeMapSurface]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -21071,7 +21069,7 @@ function MapScreen() {
 
   return (
     <View style={s.container}>
-      {USE_NATIVE_MAP ? (
+      {useNativeMapSurface ? (
         // ── Native MapLibre SDK (new binary required) ───────────────────────
         <NativeMap
           ref={nativeMapRef}
@@ -21388,7 +21386,7 @@ function MapScreen() {
           onError={() => setMapLoadFailed(true)}
         />
       )}
-      {USE_NATIVE_MAP && !mapSurfaceReady && !mapLoadFailed && (
+      {useNativeMapSurface && !mapSurfaceReady && (
         <View style={s.mapWarmupOverlay} pointerEvents="none">
           <View style={s.mapWarmupCard}>
             <View style={s.mapWarmupIcon}>
@@ -21681,7 +21679,7 @@ function MapScreen() {
                   setMapMissionFreeCamera(false);
                   mapMissionPlayerRef.current?.setFreeCamera(false);
                   mapMissionPlayerRef.current?.replay();
-                  if (!USE_NATIVE_MAP) {
+                  if (!useNativeMapSurface) {
                     postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setFreeCamera', enabled: false }));
                     postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'replay' }));
                   }
@@ -21689,15 +21687,15 @@ function MapScreen() {
                 onPauseResume={() => {
                   if (mapMissionPaused) {
                     mapMissionPlayerRef.current?.resume();
-                    if (!USE_NATIVE_MAP) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'resume' }));
+                    if (!useNativeMapSurface) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'resume' }));
                   } else {
                     mapMissionPlayerRef.current?.pause();
-                    if (!USE_NATIVE_MAP) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
+                    if (!useNativeMapSurface) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
                   }
                 }}
                 onSkip={() => {
                   mapMissionPlayerRef.current?.skip();
-                  if (!USE_NATIVE_MAP) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'skip' }));
+                  if (!useNativeMapSurface) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'skip' }));
                 }}
               />
               <TouchableOpacity style={s.mapMissionBriefClose} onPress={stopMapMissionBrief}>
@@ -24859,7 +24857,7 @@ function MapScreen() {
         routeCoords={lastRouteCoords}
         tripId={activeTrip?.trip_id ?? null}
         tripName={activeTrip?.plan?.trip_name ?? null}
-        useNativeMap={USE_NATIVE_MAP}
+        useNativeMap={useNativeMapSurface}
         onOfflinePlacesChanged={reloadOfflinePlacePois}
         selectedArea={selectedOfflineArea}
         savedAreas={savedOfflineAreas}
@@ -25149,7 +25147,7 @@ function MapScreen() {
       </Modal>
 
       {/* ── Navigation HUD ── */}
-      {!USE_NATIVE_MAP && navMode && (
+      {!useNativeMapSurface && navMode && (
         <View style={s.navHud} pointerEvents="auto">
 
         {/* Turn instruction strip — arriving / rerouting / proceed-to-route / normal */}

@@ -106,7 +106,7 @@ assert(/poi_flyover/.test(storyboardSource) && /route_rejoin/.test(storyboardSou
   'storyboard vocabulary includes poi_flyover + route_rejoin');
 assert(mapBriefSource.includes("scene.type !== 'route_rejoin'"),
   'route_rejoin transitions are silent and never wait on voice');
-assert(mapSource.includes('useNativeOverlays: USE_NATIVE_MAP'), 'native player uses NativeMap overlays on main map');
+assert(mapSource.includes('useNativeOverlays: useNativeMapSurface'), 'native player uses NativeMap overlays on main map');
 const webMissionPlayerSource = readFileSync(join(root, 'lib/missionBriefMapPlayerScript.ts'), 'utf8');
 assert(webMissionPlayerSource.includes('markNarrationDone') && webMissionPlayerSource.includes('narrationCapMs'),
   'WebView flyover waits for narration with a cap');
@@ -123,8 +123,8 @@ assert(realtimeSource.includes('enterDirectorMode'), 'realtime copilot supports 
 assert(realtimeSource.includes('exitDirectorMode'), 'realtime copilot can restore interactive voice after fly');
 assert(realtimeSource.includes('setDirectorSpeechStartHandler'), 'realtime copilot exposes speech-start hook for fallback');
 assert(mapSource.includes('ensureMissionDirectorVoice(true)'), 'mission always forces realtime director voice');
-assert(mapSource.includes('primeFirstMissionBeat'), 'mission primes intro narration during building');
-assert(mapSource.includes('missionPrimedSceneIndexRef'), 'mission skips duplicate intro narration on native scene start');
+assert(mapSource.includes('beginMissionSceneBeat(scene, index)'), 'mission narrates from player scene-start events');
+assert(mapSource.includes('missionPrimedSceneIndexRef.current = -1'), 'mission clears stale primed narration state before each run');
 assert(realtimeSource.includes('awaitingSayDoneNonce'), 'realtime copilot tracks per-say narration completion');
 
 const directorSource = readFileSync(join(root, 'lib/cinematicDirector.ts'), 'utf8');

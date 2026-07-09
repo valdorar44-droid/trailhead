@@ -15,6 +15,8 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     pausedTotal: 0,
     speed: 1,
     freeCamera: false,
+    narrationDone: true,
+    lastCameraTs: 0,
     markers: []
   };
   function cinePost(type, extra) {
@@ -186,6 +188,7 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     var slice = scene.routeSlice;
     var coords = slice ? sliceCoords(slice) : null;
     var orbitBase = null;
+    var narrationCapMs = 11000;
     function frame(now) {
       if (cine.failed || cine.paused) { cine.raf = null; return; }
       var elapsed = cineElapsed(now);
@@ -197,7 +200,8 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
           setProgressLine(1);
         } else if (cam.mode === 'follow' && coords && coords.length > 1 && slice) {
           setProgressLine(slice[0] + (slice[1] - slice[0]) * t);
-          if (elapsed > 700) {
+          if (elapsed > 700 && now - cine.lastCameraTs >= 80) {
+            cine.lastCameraTs = now;
             var fpos = t * (coords.length - 1);
             var fi = Math.floor(fpos);
             var frac = fpos - fi;
@@ -211,16 +215,37 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
               bearing = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
             }
             if (!cine.freeCamera) {
-              map.easeTo({ center: [lng, lat], bearing: bearing, zoom: Math.min(cam.zoom || 12.4, 13.8), pitch: Math.max(58, Math.min(72, cam.pitch || 66)), duration: 0 });
+              map.easeTo({
+                center: [lng, lat],
+                bearing: bearing,
+                zoom: Math.min(cam.zoom || 12.4, 13.8),
+                pitch: Math.max(58, Math.min(72, cam.pitch || 66)),
+                duration: 120,
+                easing: function(x){ return x; },
+                essential: true
+              });
             }
           }
         } else if (cam.mode === 'orbit' && elapsed > 2400) {
           if (orbitBase === null) orbitBase = map.getBearing();
           var ot = Math.max(0, Math.min(1, (elapsed - 2400) / Math.max(1, duration - 2400)));
-          if (!cine.freeCamera) map.setBearing(orbitBase + 85 * ot);
+          var sweep = cam.orbit && isFinite(cam.orbit.sweepDeg) ? Math.max(30, Math.min(360, Number(cam.orbit.sweepDeg))) : 180;
+          if (cam.orbit && cam.orbit.direction === 'ccw') sweep = -sweep;
+          if (!cine.freeCamera) map.setBearing(orbitBase + sweep * ot);
         }
       } catch (err) { cineFail(err); return; }
-      if (t >= 1) { cineFinishScene(); return; }
+      if (t >= 1) {
+        if (!cine.narrationDone && elapsed < duration + narrationCapMs) {
+          if (!cine.freeCamera && cam.mode === 'orbit') {
+            var driftBase = orbitBase === null ? map.getBearing() : orbitBase;
+            map.setBearing(driftBase + 2.4 * ((elapsed - duration) / 1000));
+          }
+          cine.raf = requestAnimationFrame(frame);
+          return;
+        }
+        cineFinishScene();
+        return;
+      }
       cine.raf = requestAnimationFrame(frame);
     }
     cine.raf = requestAnimationFrame(frame);
@@ -233,6 +258,8 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     cine.sceneStart = performance.now();
     cine.pausedTotal = 0;
     cine.paused = false;
+    cine.narrationDone = false;
+    cine.lastCameraTs = 0;
     cinePost('cinematic_scene_started', { sceneId: scene.id, sceneType: scene.type, index: i });
     try {
       ensureCineRouteLayers();
@@ -298,12 +325,16 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     setFreeCamera: function(msg) {
       cine.freeCamera = !!(msg && msg.enabled);
     },
+    markNarrationDone: function() {
+      cine.narrationDone = true;
+    },
     seekTo: function(msg) {
       if (!cine.scenes.length) return;
       var ratio = Math.max(0, Math.min(1, Number(msg && msg.ratio) || 0));
       cineStopAnim();
       cine.playing = true;
       cine.paused = true;
+      cine.narrationDone = true;
       cine.pausedAt = performance.now();
       cine.pausedTotal = 0;
       var sceneIndex = sceneForRatio(ratio);

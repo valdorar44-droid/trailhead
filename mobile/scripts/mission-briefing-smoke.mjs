@@ -57,6 +57,7 @@ assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMiss
 assert(mapSource.includes('missionBeatCaption'), 'map uses runtime beat text for caption and voice');
 assert(mapSource.includes('shouldSpeakMissionScene'), 'scene narration gated for live scout beats');
 assert(mapSource.includes('speakCopilotNarration'), 'map falls back to Trailhead guide voice');
+assert(mapSource.includes("command: 'markNarrationDone'"), 'WebView flyover receives narration completion');
 assert(mapSource.includes('patchMissionBriefOverlay'), 'map batches mission overlay updates');
 assert(mapSource.includes('captionText={mapMissionCaptionText}'), 'map passes runtime caption text to TripPreviewCaption');
 assert(mapSource.includes('fetchDirectedCinematic') && mapSource.includes('startDirectedCinematicFetch'),
@@ -77,6 +78,13 @@ assert(/poi_flyover/.test(storyboardSource) && /route_rejoin/.test(storyboardSou
 assert(mapBriefSource.includes("scene.type !== 'route_rejoin'"),
   'route_rejoin transitions are silent and never wait on voice');
 assert(mapSource.includes('useNativeOverlays: USE_NATIVE_MAP'), 'native player uses NativeMap overlays on main map');
+const webMissionPlayerSource = readFileSync(join(root, 'lib/missionBriefMapPlayerScript.ts'), 'utf8');
+assert(webMissionPlayerSource.includes('markNarrationDone') && webMissionPlayerSource.includes('narrationCapMs'),
+  'WebView flyover waits for narration with a cap');
+assert(webMissionPlayerSource.includes('duration: 120') && webMissionPlayerSource.includes('now - cine.lastCameraTs >= 80'),
+  'WebView follow camera uses throttled smooth retargets');
+assert(webMissionPlayerSource.includes('sweepDeg') && webMissionPlayerSource.includes('Math.min(360'),
+  'WebView orbit scenes honor storyboard sweep');
 
 const voiceSource = readFileSync(join(root, 'lib/voice.ts'), 'utf8');
 assert(voiceSource.includes('playTrailheadVoice'), 'speakCopilotNarration uses Trailhead voice');

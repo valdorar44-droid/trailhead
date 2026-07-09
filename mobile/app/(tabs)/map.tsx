@@ -13885,6 +13885,9 @@ function MapScreen() {
       voice_path: missionVoicePathRef.current,
     });
     mapMissionPlayerRef.current?.markNarrationDone();
+    if (!USE_NATIVE_MAP) {
+      webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'markNarrationDone' }));
+    }
     setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current);
   }
 

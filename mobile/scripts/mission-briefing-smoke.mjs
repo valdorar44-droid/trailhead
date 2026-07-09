@@ -12,12 +12,15 @@ function assert(condition, message) {
 }
 
 function shouldSpeakLiveScoutScene(type) {
-  return ['intro', 'drive_leg', 'camp_arrival', 'mission_recap'].includes(type);
+  return ['intro', 'drive_leg', 'camp_arrival', 'fuel_stop', 'monument_orbit', 'poi_flyover', 'mission_recap'].includes(type);
 }
 
 assert(shouldSpeakLiveScoutScene('intro'), 'live scout accepts intro');
 assert(shouldSpeakLiveScoutScene('drive_leg'), 'live scout accepts drive_leg');
 assert(shouldSpeakLiveScoutScene('camp_arrival'), 'live scout accepts camp_arrival');
+assert(shouldSpeakLiveScoutScene('fuel_stop'), 'live scout accepts fuel_stop');
+assert(shouldSpeakLiveScoutScene('monument_orbit'), 'live scout accepts scenic orbit');
+assert(shouldSpeakLiveScoutScene('poi_flyover'), 'live scout accepts poi_flyover');
 assert(shouldSpeakLiveScoutScene('mission_recap'), 'live scout accepts mission_recap');
 assert(!shouldSpeakLiveScoutScene('whole_route'), 'live scout rejects whole_route');
 
@@ -31,6 +34,10 @@ const storyboardSource = readFileSync(join(root, 'lib/copilotStoryboard.ts'), 'u
 assert(!/command center/i.test(storyboardSource), 'copilotStoryboard avoids command center wording');
 assert(!/\b(anchor|coverage|switching to terrain|boots leave the vehicle|low-service)\b/i.test(storyboardSource),
   'copilotStoryboard avoids generic flyover narration');
+assert(!/we follow the route toward|Continuing toward/i.test(storyboardSource),
+  'copilotStoryboard avoids generic connective-leg narration');
+assert(storyboardSource.includes('the line heads toward') && storyboardSource.includes('Next stretch heads toward'),
+  'copilotStoryboard uses cleaner connective-leg narration');
 assert(storyboardSource.includes('overnight stop') && storyboardSource.includes('Fuel stop at'),
   'copilotStoryboard uses plain camp and fuel narration');
 
@@ -41,6 +48,13 @@ assert(mapBriefSource.includes('liveMissionBeatBrief'), 'mapMissionBrief exports
 assert(mapBriefSource.includes('shouldSpeakLiveScoutScene'), 'mapMissionBrief exports live scout speech gate');
 assert(mapBriefSource.includes('missionBeatCaption'), 'mapMissionBrief exports runtime beat caption helper');
 assert(mapBriefSource.includes('sceneNarrationWatchdogMs'), 'mapMissionBrief exports narration watchdog helper');
+assert(mapBriefSource.includes("'fuel_stop', 'monument_orbit', 'poi_flyover'"),
+  'live scout flyover speaks fuel and scenic stop beats');
+assert(mapBriefSource.includes('dayStopsForPlan') && mapBriefSource.includes('sweepDeg: 180'),
+  'live scout flyover can add fuel/scenic stops before camp');
+assert(mapBriefSource.includes('The highlighted line heads toward') &&
+  mapBriefSource.includes("We'll circle it once, then pick the route back up."),
+  'live scout flyover narration describes line movement and scenic return');
 
 const captionSource = readFileSync(join(root, 'components/copilot/TripPreviewCaption.tsx'), 'utf8');
 assert(captionSource.includes('captionText'), 'TripPreviewCaption accepts runtime caption override');

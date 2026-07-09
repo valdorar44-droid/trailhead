@@ -3,6 +3,7 @@ import type {
   GasStation,
   MissionControlBrief,
   OsmPoi,
+  RouteScoutDayPlan,
   RouteScoutState,
   TripResult,
 } from './api';
@@ -354,7 +355,7 @@ export function isLiveScoutCinematic(cinematic: MissionCinematic | null | undefi
 }
 
 export function shouldSpeakLiveScoutScene(scene: MissionScene): boolean {
-  return ['intro', 'drive_leg', 'camp_arrival', 'mission_recap'].includes(scene.type);
+  return ['intro', 'drive_leg', 'camp_arrival', 'fuel_stop', 'monument_orbit', 'poi_flyover', 'mission_recap'].includes(scene.type);
 }
 
 export function shouldSpeakMissionScene(
@@ -431,6 +432,43 @@ export function buildScoutLiveCinematic(input: {
   const destName = String(scout?.destinationName || 'the finish').trim();
   const stops = scout?.stops ?? scout?.previewStops ?? [];
   const scenes: MissionScene[] = [];
+  const stopKey = (stop: { lat?: number; lng?: number; name?: string }) =>
+    `${String(stop.name || '').toLowerCase()}:${Number(stop.lat).toFixed(4)},${Number(stop.lng).toFixed(4)}`;
+  const stopSceneType = (stop: { type?: string; name?: string }): 'fuel_stop' | 'monument_orbit' | 'poi_flyover' => {
+    const raw = `${stop.type || ''} ${stop.name || ''}`.toLowerCase();
+    if (/\b(fuel|gas|diesel|propane|charge|ev)\b/.test(raw)) return 'fuel_stop';
+    if (/\b(arch|monument|overlook|view|vista|scenic|park|canyon|waterfall|glacier|landmark)\b/.test(raw)) return 'monument_orbit';
+    return 'poi_flyover';
+  };
+  const stopLabel = (stop: { name?: string; label?: string }, fallback: string) =>
+    String(stop.name || stop.label || fallback).trim();
+  const dayStopsForPlan = (plan: RouteScoutDayPlan, day: number) => {
+    const fromPlan = [
+      ...(plan.fuelStops ?? []),
+      ...(plan.poiStops ?? []),
+    ];
+    const fromScout = stops.filter(stop => {
+      const type = String(stop.type || '').toLowerCase();
+      if (Number(stop.day) !== Number(day)) return false;
+      if (['start', 'camp', 'destination', 'review'].includes(type)) return false;
+      return true;
+    });
+    const seen = new Set<string>();
+    return [...fromPlan, ...fromScout]
+      .filter(stop => finiteCoord(stop.lat, stop.lng))
+      .filter(stop => {
+        const key = stopKey(stop);
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      })
+      .map(stop => ({
+        stop,
+        ratio: clampRouteRatio(routeRatioAlong(route, Number(stop.lat), Number(stop.lng))),
+        type: stopSceneType(stop),
+      }))
+      .sort((a, b) => a.ratio - b.ratio);
+  };
 
   scenes.push({
     id: 'scene-intro',
@@ -455,6 +493,51 @@ export function buildScoutLiveCinematic(input: {
       ? clampRouteRatio(routeRatioAlong(route, Number(campLat), Number(campLng)))
       : clampRouteRatio(day / dayPlans.length);
     endRatio = Math.max(cursor + 0.05, endRatio);
+
+    const dayStopBeats = dayStopsForPlan(plan, day)
+      .filter(item => item.ratio > cursor + 0.025 && item.ratio < endRatio - 0.015)
+      .slice(0, 3);
+    for (const item of dayStopBeats) {
+      const name = stopLabel(item.stop, item.type === 'fuel_stop' ? 'Fuel stop' : 'Scenic stop');
+      scenes.push({
+        id: `scene-leg-day-${day}-${item.type}-${scenes.length}`,
+        type: 'drive_leg',
+        title: String(plan.startName || startName).trim(),
+        subtitle: name,
+        day,
+        durationMs: Math.round(8000 + (item.ratio - cursor) * 11000),
+        routeSlice: [cursor, item.ratio],
+        camera: { mode: 'follow', zoom: 13.8, pitch: 66 },
+        layers: { terrain: true },
+        narration: '',
+        callouts: [],
+      });
+      scenes.push({
+        id: `scene-stop-day-${day}-${item.type}-${scenes.length}`,
+        type: item.type,
+        title: name,
+        subtitle: String(item.stop.description || item.stop.reason || '').trim(),
+        day,
+        durationMs: item.type === 'fuel_stop' ? 5200 : 7200,
+        routeSlice: [item.ratio, clampRouteRatio(item.ratio + 0.015)],
+        focus: { lat: Number(item.stop.lat), lng: Number(item.stop.lng) },
+        rejoinRatio: item.ratio,
+        camera: item.type === 'fuel_stop'
+          ? { mode: 'fly', zoom: 12, pitch: 55 }
+          : { mode: 'orbit', zoom: 12.4, pitch: 62, orbit: { direction: 'cw', sweepDeg: 180 } },
+        layers: { terrain: item.type !== 'fuel_stop' },
+        narration: '',
+        callouts: [{
+          id: `stop-${day}-${item.type}-${name}`,
+          title: name,
+          note: item.stop.description || item.stop.reason || undefined,
+          lat: Number(item.stop.lat),
+          lng: Number(item.stop.lng),
+          kind: item.type === 'fuel_stop' ? 'fuel' : 'poi',
+        }],
+      });
+      cursor = item.ratio;
+    }
 
     const legTarget = String(plan.endName || plan.campName || destName).trim();
     scenes.push({
@@ -565,7 +648,7 @@ export function liveMissionBeatBrief(
     const dayNum = day || 1;
     const miles = parseDriveMiles(plan?.driveSummary);
     if (dayNum === 1) {
-      return `Day ${dayNum} leaves ${from} and follows the route toward the first camp.`;
+      return `Day ${dayNum} leaves ${from}. The highlighted line heads toward ${to || 'the first camp'}.`;
     }
     if (miles != null && miles >= 120) {
       return `This stretch gets remote on the way to ${to}. Save the route before leaving strong signal.`;
@@ -574,6 +657,12 @@ export function liveMissionBeatBrief(
   }
   if (scene.type === 'fuel_stop') {
     return `Fuel stop at ${scene.title}. Top off here before the next long stretch.`;
+  }
+  if (scene.type === 'monument_orbit') {
+    return `${scene.title} is the scenic pause on this leg. We'll circle it once, then pick the route back up.`;
+  }
+  if (scene.type === 'poi_flyover') {
+    return `${scene.title} is a quick stop on this leg. We'll look around, then return to the route.`;
   }
   if (scene.type === 'mission_recap') {
     const finish = destName || 'the finish';

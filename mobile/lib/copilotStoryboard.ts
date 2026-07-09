@@ -254,11 +254,21 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
     const days = Array.from(new Set(inSeg.map(x => Number(x.cp.day || 0)).filter(d => d > 0)));
     return days.length === 1 ? days[0] : undefined;
   };
-  // followLeg titles/narrates by where it's HEADING (dest), not by a checkpoint inside it.
-  const followLeg = (a: number, b: number, first: boolean, dest: string): MissionScene | null => {
+  const stopPhrase = (scene?: MissionScene): string => {
+    if (!scene) return 'the next stop';
+    if (scene.type === 'camp_arrival') return `tonight's camp at ${scene.title}`;
+    if (scene.type === 'fuel_stop') return `fuel at ${scene.title}`;
+    if (scene.type === 'monument_orbit' || scene.type === 'poi_flyover') return `the scenic stop at ${scene.title}`;
+    if (scene.type === 'trail_flythrough') return `the trail stop at ${scene.title}`;
+    if (scene.type === 'weather_focus' || scene.type === 'risk_focus' || scene.type === 'offline_readiness') return `the route check near ${scene.title}`;
+    return scene.title || 'the next stop';
+  };
+  // Follow-leg titles/narration describe the next stop type; the camera still
+  // owns the exact route line.
+  const followLeg = (a: number, b: number, first: boolean, destScene?: MissionScene): MissionScene | null => {
     if (b - a < 0.05) return null;
     const day = dayForRange(a, b);
-    const target = dest || 'the next stop';
+    const target = stopPhrase(destScene);
     return {
       id: `scene-leg-${a.toFixed(2)}-${b.toFixed(2)}`,
       type: 'day_flyover',
@@ -270,8 +280,8 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
       camera: { mode: 'follow', pitch: 64 },
       layers: {},
       narration: first
-        ? `Leaving ${startTitle || 'the start'}, we follow the route toward ${target}.`
-        : `Continuing toward ${target}.`,
+        ? `Leaving ${startTitle || 'the start'}, the line heads toward ${target}.`
+        : `Next stretch heads toward ${target}.`,
       callouts: [],
     };
   };
@@ -279,7 +289,7 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
   let cursor = 0;
   let firstLeg = true;
   for (const b of beats) {
-    const leg = followLeg(cursor, b.ratio, firstLeg, b.scene.title);
+    const leg = followLeg(cursor, b.ratio, firstLeg, b.scene);
     if (leg) { out.push(leg); firstLeg = false; }
     out.push(b.scene);
     cursor = Math.max(cursor, b.ratio);
@@ -302,7 +312,17 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
       cursor = rejoin;
     }
   }
-  const tail = followLeg(cursor, 1, firstLeg, endTitle || 'the finish');
+  const tail = followLeg(cursor, 1, firstLeg, endTitle ? {
+    id: 'scene-finish-target',
+    type: 'day_flyover',
+    title: endTitle,
+    subtitle: '',
+    durationMs: 0,
+    camera: { mode: 'follow' },
+    layers: {},
+    narration: '',
+    callouts: [],
+  } : undefined);
   if (tail) out.push(tail);
   return out;
 }

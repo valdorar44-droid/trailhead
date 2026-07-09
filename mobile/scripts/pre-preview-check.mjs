@@ -14,10 +14,16 @@ const checks = [
     args: ['scripts/mission-briefing-smoke.mjs'],
   },
   {
-    label: 'Visible copy audit',
+    label: 'Plan copy audit',
     cwd: mobileRoot,
     cmd: 'node',
     args: ['scripts/user-facing-copy-audit.mjs'],
+  },
+  {
+    label: 'Map copy audit',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/user-facing-copy-audit.mjs', '--preset', 'map'],
   },
   {
     label: 'TypeScript',

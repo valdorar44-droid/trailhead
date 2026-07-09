@@ -73,7 +73,6 @@ export interface NativeMapProps {
   traceRouteCoords?: [number, number][];
   tracePinCoords?: [number, number][];
   suppressFeatureTaps?: boolean;
-  showLandOverlay: boolean;
   showUsgsOverlay: boolean;
   showTrailOverlay?: boolean;
   showTerrain:     boolean;
@@ -84,7 +83,7 @@ export interface NativeMapProps {
   onMapReady:       () => void;
   onBoundsChange:   (bounds: MapBounds) => void;
   onMapTap:         (lat?: number, lng?: number) => void;
-  onMapLongPress:   (lat: number, lng: number) => void;
+  onMapLongPress?:  (lat: number, lng: number) => void;
   onCampTap:        (camp: CampsitePin) => void;
   onGasTap?:        (station: { name: string; lat: number; lng: number }) => void;
   onPoiTap?:        (poi: { name: string; type: string; lat: number; lng: number }) => void;

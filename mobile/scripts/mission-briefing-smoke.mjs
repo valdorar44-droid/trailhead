@@ -29,6 +29,10 @@ assert(shouldSpeakScene('intro'), 'shouldSpeakScene accepts intro');
 
 const storyboardSource = readFileSync(join(root, 'lib/copilotStoryboard.ts'), 'utf8');
 assert(!/command center/i.test(storyboardSource), 'copilotStoryboard avoids command center wording');
+assert(!/\b(anchor|coverage|switching to terrain|boots leave the vehicle|low-service)\b/i.test(storyboardSource),
+  'copilotStoryboard avoids generic flyover narration');
+assert(storyboardSource.includes('overnight stop') && storyboardSource.includes('Fuel stop at'),
+  'copilotStoryboard uses plain camp and fuel narration');
 
 const mapBriefSource = readFileSync(join(root, 'lib/mapMissionBrief.ts'), 'utf8');
 assert(mapBriefSource.includes('getCurrentMissionRoute'), 'mapMissionBrief exports getCurrentMissionRoute');
@@ -124,6 +128,8 @@ const controlsSource = readFileSync(join(root, 'components/copilot/TripPreviewCo
 assert(/PREVIEW_SPEEDS\s*=\s*\[0\.5, 1, 2\]/.test(controlsSource), 'controls expose 0.5x / 1x / 2x speeds');
 assert(controlsSource.includes('onCycleSpeed'), 'controls expose a speed cycle action');
 assert(/DEFAULT_PREVIEW_SPEED[^\n]*=\s*0\.5/.test(controlsSource), 'default playback speed is slow/cinematic');
+assert(controlsSource.includes('PanResponder.create') && controlsSource.includes('accessibilityRole="adjustable"'),
+  'controls expose a draggable flyover progress slider');
 
 // --- Map-first layout wiring ---
 assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map passes playback speed into the player');

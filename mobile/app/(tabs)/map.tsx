@@ -55,7 +55,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, LandCheck, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief } from '@/lib/api';
+import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -4171,7 +4171,7 @@ const buildMapHtml = (
   var lastSpeed=null;
   var _routeLoading=false;
   var routeIsProper=false;
-  var showLandOverlay=false,showUsgsOverlay=false;
+  var showUsgsOverlay=false;
   var showTerrainLayer=false,showNaipLayer=false,showFireLayer=false,showAvaLayer=false,showRadarLayer=false,showMvumLayer=false,showRoadsLayer=false,showNauticalLayer=false;
   var radarFrames=[],radarFrameIdx=0,radarTimer=null;
   var _mvumTimer=null,_roadsTimer=null;
@@ -4582,7 +4582,6 @@ const buildMapHtml = (
     map.on('style.load',function(){
       setupSources();setupLayers();renderWaypoints();
       updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();updateReportMarkers();
-      if(showLandOverlay)setLandOverlay(true);
       if(showUsgsOverlay)setUsgsOverlay(true);
       if(showTerrainLayer)setTerrainLayer(true);
       if(showNaipLayer)setNaipLayer(true);
@@ -4758,18 +4757,7 @@ const buildMapHtml = (
       }catch(x){}
       postRN({type:'map_tapped'});
     });
-    // ── Long-press to check camping legality ──────────────────────────────────
-    map.on('contextmenu',function(e){
-      postRN({type:'map_long_press',lat:e.lngLat.lat,lng:e.lngLat.lng});
-    });
-    var _longPressTimer;
-    map.on('touchstart',function(e){
-      _longPressTimer=setTimeout(function(){
-        if(e.lngLat)postRN({type:'map_long_press',lat:e.lngLat.lat,lng:e.lngLat.lng});
-      },600);
-    });
-    map.on('touchend',function(){clearTimeout(_longPressTimer);});
-    map.on('touchmove',function(){clearTimeout(_longPressTimer);});
+    map.on('contextmenu',function(e){ if(e&&e.preventDefault)e.preventDefault(); });
   }
 
   // ── GeoJSON helpers ───────────────────────────────────────────────────────────
@@ -4969,26 +4957,10 @@ const buildMapHtml = (
     });
   }
 
-  // ── Land ownership overlay (BLM/USFS/NPS via backend proxy) ─────────────────
-  // Uses our FastAPI proxy so the WebView never hits BLM ArcGIS directly.
-  // The proxy caches tiles 7 days and adds CORS headers.
   function setLandOverlay(show){
-    showLandOverlay=show;
     if(!map||!mapReady)return;
-    if(show){
-      var tileUrl=apiBase+'/api/land-tile/{z}/{y}/{x}';
-      if(!map.getSource('blm-sma')){
-        map.addSource('blm-sma',{type:'raster',tiles:[tileUrl],tileSize:256,minzoom:4,maxzoom:15,attribution:'BLM/USGS'});
-      }
-      if(!map.getLayer('blm-sma')){
-        // Insert below route layers so route is always visible on top
-        var beforeLayer=map.getLayer('route-shadow')?'route-shadow':undefined;
-        map.addLayer({id:'blm-sma',type:'raster',source:'blm-sma',paint:{'raster-opacity':0.5}},beforeLayer);
-      }
-    }else{
-      if(map.getLayer('blm-sma'))map.removeLayer('blm-sma');
-      if(map.getSource('blm-sma'))map.removeSource('blm-sma');
-    }
+    if(map.getLayer('blm-sma'))map.removeLayer('blm-sma');
+    if(map.getSource('blm-sma'))map.removeSource('blm-sma');
   }
 
   // ── USGS National Map topo overlay (full trail + contour detail) ──────────────
@@ -6418,11 +6390,6 @@ function MapScreen() {
     });
     return () => { cancelled = true; };
   }, [activeTrip?.trip_id, activeTrip?.version]);
-
-  // Land check card
-  const [landCheck,        setLandCheck]        = useState<LandCheck | null>(null);
-  const [landCheckLoading, setLandCheckLoading] = useState(false);
-  const landCheckDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const navAnim      = useRef(new Animated.Value(0)).current;
   const navRef       = useRef({ active: false, idx: 0, wps: [] as WP[] });
@@ -14932,10 +14899,8 @@ function MapScreen() {
         return { applied: true, layer, show };
       }
       if (layer === 'lands') {
-        toggleLandOverlay(show);
-        setQuickToast(show ? 'Public lands on.' : 'Public lands off.');
-        setTimeout(() => setQuickToast(''), 2200);
-        return { applied: true, layer, show };
+        toggleLandOverlay(false);
+        return { applied: true, layer, show: false };
       }
       if (layer === 'trails') {
         setLayerTrails(show);
@@ -16832,24 +16797,6 @@ function MapScreen() {
     }).catch(() => {});
   }
 
-  const runLandCheck = useCallback((lat: number, lng: number) => {
-    setLandCheck(null);
-    setLandCheckLoading(true);
-    if (landCheckDismissTimer.current) clearTimeout(landCheckDismissTimer.current);
-    api.getLandCheck(lat, lng)
-      .then(result => {
-        setLandCheck(result);
-        setLandCheckLoading(false);
-        landCheckDismissTimer.current = setTimeout(() => {
-          setLandCheck(null);
-          setLandCheckLoading(false);
-        }, 8000);
-      })
-      .catch(() => {
-        setLandCheckLoading(false);
-      });
-  }, []);
-
   // ── WebView message handler ──────────────────────────────────────────────────
 
   function onWebMessage(e: any) {
@@ -17101,9 +17048,6 @@ function MapScreen() {
       }
       if (msg.type === 'base_camp_tapped') {
         openMapTileCamp(msg.name || 'Campground', String(msg.landType || 'camp_site'), msg.lat, msg.lng, msg.landType);
-      }
-      if (msg.type === 'map_long_press') {
-        runLandCheck(msg.lat, msg.lng);
       }
     } catch {}
   }
@@ -18330,8 +18274,8 @@ function MapScreen() {
   }
 
   function toggleLandOverlay(val: boolean) {
-    setShowLands(val);
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: val }));
+    setShowLands(false);
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: false }));
   }
 
   function toggleUsgsOverlay(val: boolean) {
@@ -20413,7 +20357,6 @@ function MapScreen() {
   ];
   const layerSheetItems = [
     { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat view' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
-    { key: 'lands', label: 'Public Land', sub: 'Boundaries and public areas', icon: 'map-outline', val: showLands, color: '#22c55e', onPress: () => toggleLandOverlay(!showLands) },
     { key: 'usgs', label: 'Topo Lines', sub: 'Contours and trail context', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
     { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', onPress: () => togglePoiOverlay(!showPois) },
     { key: 'trails', label: 'Trails & Dirt', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
@@ -21128,7 +21071,6 @@ function MapScreen() {
           trailPreviewProgress={trailPreviewProgress}
           trailPreviewTone={trailPreviewTone}
           suppressFeatureTaps={mapTapToolOwnsFeatureSelection}
-          showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
           showTerrain={map3dEnabled && !navMode}
           showTrailOverlay={layerTrails}
@@ -21294,7 +21236,6 @@ function MapScreen() {
             setTrailCardCollapsed(false);
               setSelectedCamp(null); setSelectedPlace(null); setTappedTrail(null); setTappedTileSpot(null); setTappedGas(null); setTappedPoi(null); setSelectedCommunityPin(null); setSelectedTrail(null);
           }}
-          onMapLongPress={runLandCheck}
           onCampTap={camp => {
             if (mapTapToolOwnsFeatureSelection) return;
             setSelectedCamp(camp);
@@ -22248,53 +22189,6 @@ function MapScreen() {
             </TrailheadButtonDock>
           </TrailheadSheet>
         </View>
-      )}
-
-      {/* Land check card — appears on long-press, auto-dismisses after 8s */}
-      {!mapSearchChromeActive && !safeWaterPlanningActive && !waterFollowActive && (landCheckLoading || landCheck) && (
-        <TouchableOpacity
-          activeOpacity={0.92}
-          style={[s.landCheckCard, topChromeLaneStyle]}
-          onPress={() => { setLandCheck(null); setLandCheckLoading(false); if (landCheckDismissTimer.current) clearTimeout(landCheckDismissTimer.current); }}
-        >
-          {landCheckLoading ? (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-              <ActivityIndicator size="small" color="#f97316" />
-              <Text style={s.landCheckTitle}>Checking land status...</Text>
-            </View>
-          ) : landCheck ? (
-            <>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                <View style={[s.landCheckBadge, {
-                  backgroundColor: landCheck.camping_status === 'allowed' ? '#16a34a33'
-                    : landCheck.camping_status === 'restricted' ? '#dc262633'
-                    : landCheck.camping_status === 'check-rules' ? '#d9770633'
-                    : '#37415133',
-                  borderColor: landCheck.camping_status === 'allowed' ? '#22c55e'
-                    : landCheck.camping_status === 'restricted' ? '#ef4444'
-                    : landCheck.camping_status === 'check-rules' ? '#f97316'
-                    : '#6b7280',
-                }]}>
-                  <Text style={[s.landCheckBadgeText, {
-                    color: landCheck.camping_status === 'allowed' ? '#22c55e'
-                      : landCheck.camping_status === 'restricted' ? '#ef4444'
-                      : landCheck.camping_status === 'check-rules' ? '#f97316'
-                      : '#9ca3af',
-                  }]}>
-                    {landCheck.camping_status === 'allowed' ? 'CAMPING OK'
-                      : landCheck.camping_status === 'restricted' ? 'RESTRICTED'
-                      : landCheck.camping_status === 'check-rules' ? 'CHECK RULES'
-                      : 'UNKNOWN'}
-                  </Text>
-                </View>
-                <Text style={s.landCheckType}>{landCheck.land_type}</Text>
-                {landCheck.admin_name ? <Text style={s.landCheckAdmin} numberOfLines={1}>{landCheck.admin_name}</Text> : null}
-              </View>
-              <Text style={s.landCheckNote}>{landCheck.camping_note}</Text>
-              <Text style={s.landCheckSource}>Source: {landCheck.source} · tap to dismiss</Text>
-            </>
-          ) : null}
-        </TouchableOpacity>
       )}
 
       {/* Offline download progress bar */}
@@ -23711,14 +23605,6 @@ function MapScreen() {
               toggleDataLayer('nautical', true);
               setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS])));
             },
-          },
-          {
-            key: 'public-land',
-            title: 'Public Land',
-            sub: 'Public land boundaries',
-            enabled: showLands,
-            icon: 'map-outline',
-            onPress: () => toggleLandOverlay(!showLands),
           },
           {
             key: 'usgs',
@@ -28135,26 +28021,6 @@ const makeStyles = (C: ColorPalette) => {
   },
   dlFill: { height: 3, backgroundColor: C.orange, borderRadius: 1.5 },
 
-  // ── Land check card
-  landCheckCard: {
-    position: 'absolute', top: 102, left: 16, right: 70,
-    backgroundColor: OVR.bg2, borderRadius: 14,
-    borderWidth: 1, borderColor: OVR.border,
-    paddingHorizontal: 14, paddingVertical: 10,
-    shadowColor: '#000', shadowOpacity: 0.4, shadowRadius: 8, shadowOffset: { width: 0, height: 2 },
-    zIndex: 118,
-    elevation: 34,
-  },
-  landCheckBadge: {
-    borderRadius: 6, paddingHorizontal: 7, paddingVertical: 3,
-    borderWidth: 1,
-  },
-  landCheckBadgeText: { fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.5 },
-  landCheckType: { color: OVR.text, fontSize: 11, fontFamily: mono, fontWeight: '700' },
-  landCheckAdmin: { color: OVR.text2, fontSize: 10, fontFamily: mono, flex: 1 },
-  landCheckTitle: { color: OVR.text, fontSize: 12, fontFamily: mono },
-  landCheckNote: { color: OVR.text2, fontSize: 11, lineHeight: 16, marginBottom: 4 },
-  landCheckSource: { color: OVR.text3, fontSize: 9, fontFamily: mono },
   // ── Search This Area (native)
   searchAreaWrap: {
     position: 'absolute', bottom: 102, left: 0, right: 0,

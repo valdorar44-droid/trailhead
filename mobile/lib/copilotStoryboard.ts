@@ -184,7 +184,7 @@ function riskSceneType(risk: MissionControlRisk): MissionSceneType {
 
 function recapNarration(brief: MissionControlBrief | null, tripName: string) {
   if (!brief) {
-    return `${tripName} is mapped. Review camps, fuel, and current conditions before departure.`;
+    return `${tripName} is ready to review. Check camps, fuel, and current conditions before departure.`;
   }
   const reviewCount = brief.risks?.length ?? 0;
   if (brief.readiness === 'ready') {
@@ -354,7 +354,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     const ratios = dayCheckpoints.map(cp => routeRatioFor(cleanRoute, cp.lat, cp.lng)).sort((a, b) => a - b);
     const start = clampRatio(day === dayNumbers[0] ? 0 : ratios[0] - 0.02);
     const end = clampRatio(day === maxDay ? 1 : ratios[ratios.length - 1] + 0.02);
-    const anchor = dayCheckpoints[Math.floor(dayCheckpoints.length / 2)];
+    const dayFocus = dayCheckpoints[Math.floor(dayCheckpoints.length / 2)];
     const dayNote = firstSentence(dayCheckpoints.map(cp => cp.note).find(Boolean));
     middle.push({
       priority: 90 - day,
@@ -366,11 +366,11 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         day,
         durationMs: 14000,
         routeSlice: [start, Math.max(end, start + 0.02)],
-        focus: { lat: anchor.lat, lng: anchor.lng },
+        focus: { lat: dayFocus.lat, lng: dayFocus.lng },
         camera: { mode: 'follow', zoom: 12.4, pitch: 66 },
         layers: {},
         narration: day === 1
-          ? `Day 1 is the approach. ${dayNote || 'The plan keeps the first leg clean before the terrain gets interesting.'}`
+          ? `Day 1 rolls out toward the first planned stop. ${dayNote || 'Keep the first leg simple and confirm the next camp window before dark.'}`
           : `Day ${day}. ${dayNote || `This leg runs through ${dayCheckpoints[0].title}.`}`,
         callouts: dayCheckpoints.slice(0, 4).map(cp => ({
           id: cp.id, title: cp.title, note: cp.note, lat: cp.lat, lng: cp.lng, kind: 'checkpoint',
@@ -414,7 +414,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         focus: { lat: camp.lat, lng: camp.lng },
         camera: { mode: 'fly', zoom: 13.2, pitch: 68 },
         layers: { terrain: true },
-        narration: `${camp.title} is the ${camp.day ? `day ${camp.day} ` : ''}overnight anchor. ${firstSentence(camp.note) || 'It stays close to the route and gives the day a clean landing.'}`,
+        narration: `${camp.title} is the ${camp.day ? `day ${camp.day} ` : ''}overnight stop. ${firstSentence(camp.note) || 'It stays close to the route and keeps the day easy to finish.'}`,
         callouts: [calloutFromPlace(camp, 'camp')],
       },
     });
@@ -460,7 +460,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         focus: { lat: fuel.lat, lng: fuel.lng },
         camera: { mode: 'fly', zoom: 11.5, pitch: 55 },
         layers: {},
-        narration: `Fuel coverage runs through ${fuel.title}. ${firstSentence(fuel.note) || 'Top off here before the next low-service stretch.'}`,
+        narration: `Fuel stop at ${fuel.title}. ${firstSentence(fuel.note) || 'Top off here before the next remote stretch.'}`,
         callouts: [calloutFromPlace(fuel, 'fuel')],
       },
     });
@@ -486,7 +486,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         focus: { lat: trail.lat, lng: trail.lng },
         camera: { mode: 'fly', zoom: 12.5, pitch: 62 },
         layers: { terrain: true },
-        narration: `I'm switching to terrain for ${trail.title} — this is where boots leave the vehicle. ${firstSentence(trail.note) || 'Check access and conditions before committing the day to it.'}`,
+        narration: `${trail.title} is the trail stop on this leg. ${firstSentence(trail.note) || 'Check access and conditions before setting aside time for it.'}`,
         callouts: [calloutFromPlace(trail, 'trail')],
       },
     });
@@ -514,7 +514,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         focus: { lat: monument.lat, lng: monument.lng },
         camera: { mode: 'orbit', zoom: 12, pitch: 62 },
         layers: { terrain: true },
-        narration: `${monument.title} stays close to the route and gives the day a scenic anchor. ${firstSentence(monument.note) || 'Worth the stop if daylight holds.'}`,
+        narration: `${monument.title} stays close to the route. ${firstSentence(monument.note) || 'Worth the stop if daylight holds.'}`,
         callouts: [calloutFromPlace(monument, 'monument')],
       },
     });

@@ -244,7 +244,6 @@ export interface NativeMapProps {
   suppressFeatureTaps?: boolean;
 
   // Overlay visibility
-  showLandOverlay: boolean;
   showUsgsOverlay: boolean;
   showTerrain:     boolean;
   showTrailOverlay?: boolean;
@@ -275,7 +274,7 @@ export interface NativeMapProps {
   onBoundsChange:   (bounds: MapBounds) => void;
   onMapGesture?:    () => void;
   onMapTap:         (lat?: number, lng?: number) => void;
-  onMapLongPress:   (lat: number, lng: number) => void;
+  onMapLongPress?:  (lat: number, lng: number) => void;
   onCampTap:        (camp: CampsitePin) => void;
   onGasTap?:        (station: { name: string; lat: number; lng: number }) => void;
   onPoiTap?:        (poi: OsmPoi) => void;
@@ -791,10 +790,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
     suppressFeatureTaps = false,
-    showLandOverlay, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
+    showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
     missionBriefActive = false, missionBriefFullRoute = [], missionBriefProgressRoute = [],
     missionBriefMarker = null, missionBriefCallouts = [], missionBriefWarning = false,
-    onMapReady, onBoundsChange, onMapGesture, onMapTap, onMapLongPress,
+    onMapReady, onBoundsChange, onMapGesture, onMapTap,
     onCampTap, onGasTap, onPoiTap, onWaterSpotTap, onCommunityPinTap, onTileCampTap, onBaseCampTap, onTrailTap, onWaypointTap,
     onRouteReady, onRoutePersist, onOffRoute, onOffRouteWarn, onBackOnRoute, onRouteProgress,
     onTraceStart, onTraceMove, onTraceEnd, onDebugEvent, onError,
@@ -2390,13 +2389,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     }
   }, [coordinateFromPress, isExtremeMapbox, onMapTap, onPoiTap, onTileCampTap, onTrailTap, showNautical, suppressFeatureTaps]);
 
-  const handleLongPress = useCallback(async (feat: any) => {
-    const lngLat = await coordinateFromPress(feat);
-    if (!lngLat) return;
-    const [lng, lat] = lngLat;
-    onMapLongPress(lat, lng);
-  }, [coordinateFromPress, onMapLongPress]);
-
   const refreshMapSourcesForBounds = useCallback((n: number, s: number, e: number, w: number) => {
     emitDebugEvent('source:refresh:requested', { center: { lat: (n + s) / 2, lng: (e + w) / 2 }, bounds: { n, s, e, w } });
     loadBestContourFile((n + s) / 2, (e + w) / 2).catch(() => {});
@@ -2581,7 +2573,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         {...(isExtremeMapbox ? { styleURL: mapboxStyleURL } : { mapStyle: mapStyleObj })}
         projection={isExtremeMapbox ? 'mercator' : undefined}
         onPress={handlePress}
-        onLongPress={handleLongPress}
         onTouchStart={() => markUserCameraGesture('touch-start', {}, false)}
         onRegionWillChange={(feature: any) => {
           if (isUserCameraEvent(feature)) {
@@ -3641,22 +3632,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             style={{ lineColor: '#a855f7', lineWidth: 1.5, lineOpacity: 0.8, lineDasharray: [3, 2] }}
           />
         </MapGL.ShapeSource>
-      )}
-
-      {/* ── BLM / Land ownership overlay ─────────────────────────────── */}
-      {showLandOverlay && (
-        <MapGL.RasterSource
-          id="land-overlay"
-          tileUrlTemplates={[`${API_BASE_URL}/api/land-tile/{z}/{y}/{x}`]}
-          tileSize={256}
-          minZoomLevel={4}
-          maxZoomLevel={15}
-        >
-          <MapGL.RasterLayer
-            id="land-overlay-layer"
-            style={{ rasterOpacity: 0.45 }}
-          />
-        </MapGL.RasterSource>
       )}
 
       {/* ── USGS Topo overlay ─────────────────────────────────────────── */}

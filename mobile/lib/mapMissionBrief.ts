@@ -632,7 +632,7 @@ export function liveMissionBeatBrief(
   const tripLabel = startName && destName ? `${startName} to ${destName}` : String(scene.title || 'Your route').trim();
 
   if (scene.type === 'intro') {
-    return `${tripLabel} is built. I'll fly it day by day, with camps, fuel, and scenic stops.`;
+    return `Here's the flyover for ${tripLabel}. I'll take it day by day, with camps, fuel, and scenic stops.`;
   }
   if (scene.type === 'camp_arrival') {
     const campName = String(plan?.campName || scene.title).trim();

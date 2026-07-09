@@ -57,6 +57,9 @@ assert(mapBriefSource.includes('dayStopsForPlan') && mapBriefSource.includes('sw
 assert(mapBriefSource.includes('The highlighted line heads toward') &&
   mapBriefSource.includes("We'll circle once, then pick up the route again."),
   'live scout flyover narration describes line movement and scenic return');
+assert(mapBriefSource.includes("Here's the flyover for") &&
+  !mapBriefSource.includes("is built. I'll fly it day by day"),
+  'flyover intro accepts the handoff without repeating the build prompt');
 assert(!/key camps|quick stop|strong signal|scenic pause/i.test(mapBriefSource),
   'live scout flyover avoids generic app-like narration');
 
@@ -268,6 +271,11 @@ assert(mapSource.includes('syncTrailCaptureModeToWeb') &&
   mapSource.includes('[0, 120, 420, 900, 1800]') &&
   mapSource.includes('set_trail_capture_mode'),
   'WebView Trail Builder capture mode is retried across cold WebView load');
+assert(mapSource.includes('syncTrailCaptureModeToWeb(true)') &&
+  mapSource.includes('syncTrailCaptureModeToWeb(false)'),
+  'Trail Builder directly syncs WebView capture mode on start and stop');
+assert(!mapSource.includes("Styles, 3D, land, weather"),
+  'map drawer does not advertise the removed land overlay');
 assert(mapSource.includes("engineLabel = usedManualFallback ? 'Manual line' : 'Trail route'") &&
   mapSource.includes('Review the line before saving. Add points around bends and forks.'),
   'WebView Trail Builder falls back to a reviewable manual route');

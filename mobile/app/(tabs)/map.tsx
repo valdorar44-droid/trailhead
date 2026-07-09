@@ -19684,6 +19684,7 @@ function MapScreen() {
     setTrailCapturePins([]);
     setTrailCaptureAnchors([]);
     setTrailPinCaptureMode(false);
+    syncTrailCaptureModeToWeb(false);
     setTrailPinCaptureSeedName('');
     trailAutoBuildCountRef.current = 0;
     if (!navMode) {
@@ -19849,6 +19850,7 @@ function MapScreen() {
     nativeMapRef.current?.clearTrailHighlight();
     closeTrailPreview();
     setTrailPinCaptureMode(false);
+    syncTrailCaptureModeToWeb(false);
     setTrailPinCaptureSeedName('');
     setTrailCapturePins([]);
     setTrailCaptureAnchors([]);
@@ -19893,6 +19895,7 @@ function MapScreen() {
     setTrailTraceDraft([]);
     trailTraceDraftRef.current = [];
     setTrailPinCaptureMode(true);
+    syncTrailCaptureModeToWeb(true);
     setQuickToast('Tap the trail start, then tap the next bend or finish');
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     setTimeout(() => setQuickToast(''), 2600);
@@ -19936,6 +19939,7 @@ function MapScreen() {
     setTrailTraceDraft([seed]);
     trailTraceDraftRef.current = [seed];
     setTrailPinCaptureMode(true);
+    syncTrailCaptureModeToWeb(true);
     setQuickToast(snap && snap.distanceM <= 240
       ? 'Start snapped. Tap bends, forks, and finish.'
       : 'Start set. Tap bends, forks, and finish.');
@@ -21447,7 +21451,7 @@ function MapScreen() {
         items={[
           { label: 'Search places', sub: 'Find camps, trails, fuel, and stops', icon: 'search-outline', tone: '#60a5fa', onPress: openFullMapSearch },
           { label: 'Trails', sub: 'Trails in this view', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
-          { label: 'Layers', sub: 'Styles, 3D, land, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
+          { label: 'Layers', sub: 'Styles, 3D, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
           { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
           { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, onPress: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
           { label: 'Saved areas', sub: 'Maps, trails, places', icon: 'cloud-download-outline', tone: '#a3e635', onPress: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },

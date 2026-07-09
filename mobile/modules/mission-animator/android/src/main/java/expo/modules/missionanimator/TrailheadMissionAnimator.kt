@@ -74,6 +74,7 @@ internal class TrailheadMissionAnimator(
   private var lastProgressEmitNs = 0L
   private var warningActive = false
   private var layersInstalled = false
+  private var freeCamera = false
 
   private val frameCallback = object : Choreographer.FrameCallback {
     override fun doFrame(frameTimeNanos: Long) {
@@ -196,6 +197,53 @@ internal class TrailheadMissionAnimator(
       val progress = (elapsedSec / oldDuration).coerceIn(0.0, 1.0)
       sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.25, speed))
       sceneStartNs = System.nanoTime() - ((progress * sceneDurationSec) * 1_000_000_000.0).toLong() - pausedTotalNs
+    }
+    return true
+  }
+
+  fun setFreeCamera(enabled: Boolean): Boolean {
+    freeCamera = enabled
+    return true
+  }
+
+  fun seekTo(ratio: Double): Boolean {
+    if (route.size < 2 || scenes.isEmpty()) return false
+    attachMapIfNeeded()
+    val map = mapView ?: return false
+    val clamped = ratio.coerceIn(0.0, 1.0)
+    val nextIndex = sceneIndexForProgress(clamped)
+    if (nextIndex !in scenes.indices) return false
+    val scene = scenes[nextIndex]
+    val span = (scene.routeSliceEnd - scene.routeSliceStart).coerceAtLeast(0.001)
+    val localT = ((clamped - scene.routeSliceStart) / span).coerceIn(0.0, 1.0)
+    sceneIndex = nextIndex
+    sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.25, speed))
+    val now = System.nanoTime()
+    sceneStartNs = now - (localT * sceneDurationSec * 1_000_000_000.0).toLong()
+    pausedTotalNs = 0L
+    pausedAtNs = now
+    paused = true
+    stopped = false
+    playing = true
+    lastProgressEmitNs = 0L
+    warningActive = scene.warning
+    if (scene.cameraMode == "follow") {
+      tickFollow(scene, localT)
+    } else {
+      applyEstablishingCamera(scene, map)
+      emitProgress(scene, clamped, routeTotal * clamped)
+    }
+    emit("onMissionSceneStart", mapOf("sceneId" to scene.id, "index" to sceneIndex, "type" to scene.type))
+    emit("onMissionSceneProgress", mapOf("sceneId" to scene.id, "index" to sceneIndex, "progress" to localT))
+    emit("onMissionDebug", mapOf("kind" to "seek", "details" to mapOf("ratio" to clamped, "scene_id" to scene.id)))
+    return true
+  }
+
+  fun skipScene(): Boolean {
+    if (!playing || sceneIndex !in scenes.indices) return false
+    finishScene(scenes[sceneIndex])
+    if (!paused && playing && !stopped) {
+      Choreographer.getInstance().postFrameCallback(frameCallback)
     }
     return true
   }
@@ -401,7 +449,9 @@ internal class TrailheadMissionAnimator(
     val targetBearing = bearing(camPt, aheadPt)
     smoothedBearing = smoothAngle(smoothedBearing, targetBearing, 0.16)
     val zoom = zoomForSliceLengthKm(max(0.0, endDist - startDist) / 1000.0, scene.cameraZoom)
-    setCamera(camPt, zoom, clampPitch(scene.cameraPitch), smoothedBearing ?: targetBearing, animated = false)
+    if (!freeCamera) {
+      setCamera(camPt, zoom, clampPitch(scene.cameraPitch), smoothedBearing ?: targetBearing, animated = false)
+    }
     emitProgress(scene, t, d)
     emit("onMissionDebug", mapOf("kind" to "camera", "details" to mapOf("scene_id" to scene.id)))
   }
@@ -413,7 +463,7 @@ internal class TrailheadMissionAnimator(
       val bounds = boundsFromCoords(coords) ?: return 0.0
       val spanDeg = max(bounds.second, 0.02)
       val zoom = max(4.5, min(12.5, log2(190.0 / spanDeg)))
-      setCamera(bounds.first, zoom, scene.cameraPitch ?: 54.0, null, animated = true, durationMs = 2600)
+      if (!freeCamera) setCamera(bounds.first, zoom, scene.cameraPitch ?: 54.0, null, animated = true, durationMs = 2600)
       lastCamPoint = bounds.first
       lastCamDist = null
       return 2600.0
@@ -432,7 +482,7 @@ internal class TrailheadMissionAnimator(
       val br = bearing(start, ahead)
       smoothedBearing = br
       val zoom = zoomForSliceLengthKm(max(0.0, endDist - startDist) / 1000.0, scene.cameraZoom)
-      setCamera(start, zoom, clampPitch(scene.cameraPitch), br, animated = true, durationMs = 1800)
+      if (!freeCamera) setCamera(start, zoom, clampPitch(scene.cameraPitch), br, animated = true, durationMs = 1800)
       lastCamDist = leadDist
       lastCamPoint = start
       lastCamBearing = br
@@ -443,7 +493,7 @@ internal class TrailheadMissionAnimator(
     if (lat != null && lng != null) {
       val pt = MissionPoint(lat, lng)
       val zoom = min(scene.cameraZoom ?: 12.5, maxZoom)
-      setCamera(pt, zoom, clampPitch(scene.cameraPitch ?: 62.0), scene.cameraBearing, animated = true, durationMs = 2000)
+      if (!freeCamera) setCamera(pt, zoom, clampPitch(scene.cameraPitch ?: 62.0), scene.cameraBearing, animated = true, durationMs = 2000)
       lastCamPoint = pt
       lastCamDist = null
       return 2000.0
@@ -560,6 +610,21 @@ internal class TrailheadMissionAnimator(
     val r = ratio.coerceIn(0.0, 1.0)
     val endIdx = max(1, ceil(r * (route.size - 1)).toInt())
     return route.subList(0, min(route.size - 1, endIdx) + 1)
+  }
+
+  private fun sceneIndexForProgress(ratio: Double): Int {
+    val clamped = ratio.coerceIn(0.0, 1.0)
+    var fallback = 0
+    for (i in scenes.indices) {
+      val scene = scenes[i]
+      val a = min(scene.routeSliceStart, scene.routeSliceEnd)
+      val b = max(scene.routeSliceStart, scene.routeSliceEnd)
+      if (clamped >= a - 0.001 && clamped <= b + 0.001) {
+        if (scene.cameraMode == "follow" || scene.type.contains("day") || scene.type.contains("drive")) return i
+        fallback = i
+      }
+    }
+    return if (clamped >= 0.97) scenes.lastIndex else fallback
   }
 
   private fun downsample(coords: List<Pair<Double, Double>>, max: Int): List<Pair<Double, Double>> {

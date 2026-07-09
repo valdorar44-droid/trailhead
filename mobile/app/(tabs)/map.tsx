@@ -155,7 +155,10 @@ import {
   isMissionAnimatorAvailable,
   pauseMissionAnimation,
   resumeMissionAnimation,
+  seekMissionAnimation,
+  setMissionAnimationFreeCamera,
   setMissionAnimationSpeed,
+  skipMissionAnimationScene,
   startMissionAnimation,
   stopMissionAnimation,
 } from 'expo-mission-animator';
@@ -14496,7 +14499,7 @@ function MapScreen() {
         },
         skip: () => {
           finishMissionNarrationBeat('skip');
-          void resumeMissionAnimation();
+          void skipMissionAnimationScene();
         },
         stop: () => {
           void stopMissionAnimation();
@@ -14504,8 +14507,8 @@ function MapScreen() {
           clearMissionNativeListeners();
         },
         setSpeed: (next: number) => { void setMissionAnimationSpeed(next); },
-        seekTo: (_ratio: number) => false,
-        setFreeCamera: (_enabled: boolean) => false,
+        seekTo: (ratio: number) => { void seekMissionAnimation(ratio); },
+        setFreeCamera: (enabled: boolean) => { void setMissionAnimationFreeCamera(enabled); },
         markNarrationDone: () => {},
       };
       const nativeStarted = await startMissionAnimation(nativePayload);

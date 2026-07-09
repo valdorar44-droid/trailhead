@@ -64,6 +64,18 @@ public class TrailheadMissionAnimatorModule: Module {
         AsyncFunction("setMissionAnimationSpeed") { (speed: Double) -> Bool in
             self.runOnMain { self.animator.setSpeed(speed) }
         }
+
+        AsyncFunction("seekMissionAnimation") { (ratio: Double) -> Bool in
+            self.runOnMain { self.animator.seekTo(ratio) }
+        }
+
+        AsyncFunction("setMissionAnimationFreeCamera") { (enabled: Bool) -> Bool in
+            self.runOnMain { self.animator.setFreeCamera(enabled) }
+        }
+
+        AsyncFunction("skipMissionAnimationScene") { () -> Bool in
+            self.runOnMain { self.animator.skipScene() }
+        }
     }
 }
 
@@ -106,6 +118,7 @@ private final class NativeMissionAnimator: NSObject {
     private var lastCamDist: Double?
     private var lastProgressEmit: CFTimeInterval = 0
     private var warningActive = false
+    private var freeCamera = false
 
     init(emit: @escaping MissionEmit) { self.emit = emit }
 
@@ -178,6 +191,50 @@ private final class NativeMissionAnimator: NSObject {
         let progress = max(0, min(1, elapsed / oldDuration))
         sceneDuration = max(7, (scene.durationMs / 1000) / max(0.25, speed))
         sceneStartTs = CACurrentMediaTime() - (progress * sceneDuration) - pausedTotal
+        return true
+    }
+
+    func setFreeCamera(_ enabled: Bool) -> Bool {
+        freeCamera = enabled
+        return true
+    }
+
+    func seekTo(_ ratio: Double) -> Bool {
+        guard route.count >= 2, !scenes.isEmpty else { return false }
+        attachMapIfNeeded()
+        guard mapView != nil else { return false }
+        let clamped = max(0, min(1, ratio))
+        let nextIndex = sceneIndexForProgress(clamped)
+        guard nextIndex >= 0, nextIndex < scenes.count else { return false }
+        let scene = scenes[nextIndex]
+        let span = max(0.001, scene.routeSliceEnd - scene.routeSliceStart)
+        let localT = max(0, min(1, (clamped - scene.routeSliceStart) / span))
+        sceneIndex = nextIndex
+        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.25, speed))
+        sceneStartTs = CACurrentMediaTime() - (localT * sceneDuration)
+        pausedTotal = 0
+        pauseStartedTs = CACurrentMediaTime()
+        paused = true
+        playing = true
+        displayLink?.isPaused = true
+        warningActive = scene.warning
+        if scene.cameraMode == "follow" {
+            tickFollow(scene: scene, t: localT)
+        } else if scene.cameraMode == "fit", let lat = scene.focusLat, let lng = scene.focusLng {
+            setCamera(MissionPoint(lat: lat, lng: lng), zoom: scene.cameraZoom ?? 12, pitch: scene.cameraPitch ?? 54, bearing: nil, animated: true)
+            updateProgress(clamped, markerDist: routeTotal * clamped)
+        } else {
+            updateProgress(clamped, markerDist: routeTotal * clamped)
+        }
+        emit("onMissionSceneStart", ["sceneId": scene.id, "index": sceneIndex, "type": scene.type])
+        emit("onMissionSceneProgress", ["sceneId": scene.id, "index": sceneIndex, "progress": localT])
+        emit("onMissionDebug", ["kind": "seek", "details": ["ratio": clamped, "scene_id": scene.id]])
+        return true
+    }
+
+    func skipScene() -> Bool {
+        guard playing, sceneIndex >= 0, sceneIndex < scenes.count else { return false }
+        finishScene(scenes[sceneIndex])
         return true
     }
 
@@ -354,6 +411,7 @@ private final class NativeMissionAnimator: NSObject {
 
     private func setCamera(_ center: MissionPoint, zoom: Double, pitch: Double, bearing: Double?, animated: Bool) {
         guard let mapView else { return }
+        if freeCamera { return }
         let options = CameraOptions(center: CLLocationCoordinate2D(latitude: center.lat, longitude: center.lng), zoom: zoom, bearing: bearing, pitch: pitch)
         if animated {
             mapView.camera.ease(to: options, duration: 1.8, curve: .easeInOut) { _ in }
@@ -393,6 +451,23 @@ private final class NativeMissionAnimator: NSObject {
         guard let prev else { return target }
         let diff = ((target - prev + 540).truncatingRemainder(dividingBy: 360)) - 180
         return prev + diff * factor
+    }
+
+    private func sceneIndexForProgress(_ ratio: Double) -> Int {
+        let clamped = max(0, min(1, ratio))
+        var fallback = 0
+        for i in scenes.indices {
+            let scene = scenes[i]
+            let a = min(scene.routeSliceStart, scene.routeSliceEnd)
+            let b = max(scene.routeSliceStart, scene.routeSliceEnd)
+            if clamped >= a - 0.001 && clamped <= b + 0.001 {
+                if scene.cameraMode == "follow" || scene.type.contains("day") || scene.type.contains("drive") {
+                    return i
+                }
+                fallback = i
+            }
+        }
+        return clamped >= 0.97 ? max(0, scenes.count - 1) : fallback
     }
 
     private func doubleValue(_ value: Any?) -> Double? {

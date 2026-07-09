@@ -45,6 +45,9 @@ type NativeMissionAnimator = {
   stopMissionAnimation?: () => boolean | Promise<boolean>;
   clearMissionAnimation?: () => boolean | Promise<boolean>;
   setMissionAnimationSpeed?: (speed: number) => boolean | Promise<boolean>;
+  seekMissionAnimation?: (ratio: number) => boolean | Promise<boolean>;
+  setMissionAnimationFreeCamera?: (enabled: boolean) => boolean | Promise<boolean>;
+  skipMissionAnimationScene?: () => boolean | Promise<boolean>;
 };
 
 const Native = requireOptionalNativeModule<NativeMissionAnimator>('TrailheadMissionAnimator');
@@ -118,6 +121,33 @@ export async function setMissionAnimationSpeed(speed: number): Promise<boolean> 
   if (!Native?.setMissionAnimationSpeed) return false;
   try {
     return !!(await Native.setMissionAnimationSpeed(speed));
+  } catch {
+    return false;
+  }
+}
+
+export async function seekMissionAnimation(ratio: number): Promise<boolean> {
+  if (!Native?.seekMissionAnimation) return false;
+  try {
+    return !!(await Native.seekMissionAnimation(ratio));
+  } catch {
+    return false;
+  }
+}
+
+export async function setMissionAnimationFreeCamera(enabled: boolean): Promise<boolean> {
+  if (!Native?.setMissionAnimationFreeCamera) return false;
+  try {
+    return !!(await Native.setMissionAnimationFreeCamera(enabled));
+  } catch {
+    return false;
+  }
+}
+
+export async function skipMissionAnimationScene(): Promise<boolean> {
+  if (!Native?.skipMissionAnimationScene) return false;
+  try {
+    return !!(await Native.skipMissionAnimationScene());
   } catch {
     return false;
   }

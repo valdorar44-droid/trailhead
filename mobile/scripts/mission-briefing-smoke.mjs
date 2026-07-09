@@ -161,6 +161,10 @@ assert(animatorSource.includes('isMissionAnimatorAvailable'), 'native animator m
 assert(animatorSource.includes('prepareMissionAnimation'), 'native animator module exposes prepareMissionAnimation');
 assert(animatorSource.includes('clearMissionAnimation'), 'native animator module exposes clearMissionAnimation');
 assert(animatorSource.includes('addMissionSceneStartListener'), 'native animator module exposes scene lifecycle events');
+assert(animatorSource.includes('seekMissionAnimation') &&
+  animatorSource.includes('setMissionAnimationFreeCamera') &&
+  animatorSource.includes('skipMissionAnimationScene'),
+  'native animator module exposes seek, free-camera, and skip controls');
 const animatorConfigSource = readFileSync(join(root, 'modules/mission-animator/expo-module.config.json'), 'utf8');
 const androidAnimatorModuleSource = readFileSync(join(root, 'modules/mission-animator/android/src/main/java/expo/modules/missionanimator/TrailheadMissionAnimatorModule.kt'), 'utf8');
 const androidAnimatorSource = readFileSync(join(root, 'modules/mission-animator/android/src/main/java/expo/modules/missionanimator/TrailheadMissionAnimator.kt'), 'utf8');
@@ -170,13 +174,27 @@ assert(androidAnimatorModuleSource.includes('Name("TrailheadMissionAnimator")') 
   'Android native animator module and implementation are present');
 assert(androidAnimatorSource.includes('Choreographer.FrameCallback') && androidAnimatorSource.includes('MapView'),
   'Android native animator owns frame timing and MapView updates');
+assert(androidAnimatorModuleSource.includes('seekMissionAnimation') &&
+  androidAnimatorSource.includes('fun seekTo') &&
+  androidAnimatorSource.includes('fun setFreeCamera') &&
+  androidAnimatorSource.includes('fun skipScene'),
+  'Android native animator supports seek, free-camera, and scene skip');
 assert(iosAnimatorSource.includes('Name("TrailheadMissionAnimator")') && iosAnimatorSource.includes('private final class NativeMissionAnimator'),
   'iOS native animator module and implementation are present');
 assert(iosAnimatorSource.includes('private func runOnMain') && iosAnimatorSource.includes('Thread.isMainThread'),
   'iOS native animator avoids main-thread sync deadlocks');
+assert(iosAnimatorSource.includes('seekMissionAnimation') &&
+  iosAnimatorSource.includes('func seekTo') &&
+  iosAnimatorSource.includes('func setFreeCamera') &&
+  iosAnimatorSource.includes('func skipScene'),
+  'iOS native animator supports seek, free-camera, and scene skip');
 assert((iosAnimatorSource.match(/DispatchQueue\.main\.sync/g) ?? []).length === 1,
   'iOS native animator confines DispatchQueue.main.sync to the guarded helper');
 assert(mapSource.includes('startMissionAnimation(nativePayload)'), 'map starts native animator when available');
+assert(mapSource.includes('seekMissionAnimation(ratio)') &&
+  mapSource.includes('setMissionAnimationFreeCamera(enabled)') &&
+  mapSource.includes('skipMissionAnimationScene()'),
+  'map wires native flyover controls to the native animator');
 assert(mapSource.includes('clearMissionNativeListeners'), 'map cleans up native event listeners');
 
 assert(mapSource.includes('mapMissionNotice'), 'map surfaces the 3D-fallback notice');

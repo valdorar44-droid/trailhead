@@ -53,5 +53,17 @@ class TrailheadMissionAnimatorModule : Module() {
     AsyncFunction("setMissionAnimationSpeed") { speed: Double ->
       animator.setSpeed(speed)
     }
+
+    AsyncFunction("seekMissionAnimation") { ratio: Double ->
+      animator.seekTo(ratio)
+    }
+
+    AsyncFunction("setMissionAnimationFreeCamera") { enabled: Boolean ->
+      animator.setFreeCamera(enabled)
+    }
+
+    AsyncFunction("skipMissionAnimationScene") {
+      animator.skipScene()
+    }
   }
 }

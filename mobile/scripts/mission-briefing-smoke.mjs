@@ -70,9 +70,14 @@ const nativeMapSource = readFileSync(join(root, 'components/NativeMap/index.tsx'
 assert(nativeMapSource.includes('mission-brief-progress-line'), 'NativeMap renders mission briefing progress layer');
 
 const mapSource = readFileSync(join(root, 'app/(tabs)/map.tsx'), 'utf8');
+const realtimeSource = readFileSync(join(root, 'lib/realtimeCopilot.ts'), 'utf8');
 assert(!mapSource.includes('handoffScoutToCinematic') && !mapSource.includes('AUTO_FLY_AFTER_SCOUT'),
   'route scout does not auto-start the flyover');
-assert(mapSource.includes('Route is built. Want me to fly the plan?'), 'Co-Pilot asks before flyover after route build');
+assert(mapSource.includes('Route is built. Would you like a flyover?'), 'Co-Pilot asks before flyover after route build');
+assert(realtimeSource.includes('Would you like a flyover?') &&
+  !mapSource.includes('Want me to fly the plan?') &&
+  !realtimeSource.includes('Want me to fly the plan?'),
+  'route scout handoff uses clean flyover wording');
 assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMissionDirectorVoice'),
   'map uses unified realtime director voice');
 assert(mapSource.includes('missionBeatCaption'), 'map uses runtime beat text for caption and voice');
@@ -113,7 +118,6 @@ assert(webMissionPlayerSource.includes('sweepDeg') && webMissionPlayerSource.inc
 const voiceSource = readFileSync(join(root, 'lib/voice.ts'), 'utf8');
 assert(voiceSource.includes('playTrailheadVoice'), 'speakCopilotNarration uses Trailhead voice');
 
-const realtimeSource = readFileSync(join(root, 'lib/realtimeCopilot.ts'), 'utf8');
 assert(realtimeSource.includes('waitUntilSpeechIdle'), 'realtime copilot waits for speech idle before handoff');
 assert(realtimeSource.includes('enterDirectorMode'), 'realtime copilot supports director mode on live session');
 assert(realtimeSource.includes('exitDirectorMode'), 'realtime copilot can restore interactive voice after fly');

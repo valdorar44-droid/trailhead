@@ -11087,7 +11087,7 @@ function MapScreen() {
     clearRouteScoutPreview();
     drawScoutRoute(coords, totalDistanceM, totalDuration);
     const scoutBuilt = !missingDays.length && coords.length >= 2 && stops.length > 0;
-    const flyPrompt = 'Route is built. Want me to fly the plan?';
+    const flyPrompt = 'Route is built. Would you like a flyover?';
     const spokenSummary = !missingDays.length && !scoutArgs.driveHours
       ? `${nextMessage} Tell me the daily drive limit if you want me to tighten the overnight windows.`
       : scoutBuilt
@@ -15617,7 +15617,7 @@ function MapScreen() {
           review ? `${review} to review` : null,
         ].filter(Boolean).join(' · ');
         const base = details ? `Route is built: ${routeName} · ${details}.` : `Route is built: ${routeName}.`;
-        return locked || preview.active ? `${base} Want me to fly the plan?` : base;
+        return locked || preview.active ? `${base} Would you like a flyover?` : base;
       }
       const spoken = typeof result.spoken_summary === 'string' ? result.spoken_summary.trim() : '';
       if (spoken) return spoken;

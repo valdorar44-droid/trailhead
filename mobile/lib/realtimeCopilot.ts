@@ -170,7 +170,7 @@ function compactRouteScoutSummary(output: Record<string, unknown> | void): strin
   const details = locked || review
     ? ` ${locked} camp${locked === 1 ? '' : 's'} set${review ? `, ${review} day${review === 1 ? '' : 's'} to review` : ''}.`
     : ' Review the day plan before navigation.';
-  return `${head}${details} Want me to fly the plan?`;
+  return `${head}${details} Would you like a flyover?`;
 }
 
 function shouldIgnoreAssistantTranscript(text: string): boolean {

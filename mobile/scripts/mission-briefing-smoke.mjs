@@ -207,6 +207,10 @@ assert(mapSource.includes('flyTrailRoutePlan') && mapSource.includes('missionRou
   'Trail Builder flyover uses the selected trail route');
 assert(mapSource.includes("routeName: trail.name || plan.title || 'Trail route'") && mapSource.includes('skipDirected: true'),
   'Trail Builder flyover uses deterministic playback without directed storyboard');
+assert(mapSource.includes("postRN({type:'map_tapped',lat:e.lngLat.lat,lng:e.lngLat.lng})") &&
+  mapSource.includes('trailPinCaptureMode &&') &&
+  mapSource.includes('addTrailCaptureAnchor(webTapCoord)'),
+  'WebView Trail Builder taps create route points while capture mode is active');
 assert(mapSource.includes('label="Flyover"') && mapSource.includes('play-circle-outline'),
   'Trail Builder exposes a Flyover action after route build');
 assert(mapSource.includes("previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : 'Set route'"),

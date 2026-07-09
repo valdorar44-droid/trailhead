@@ -4753,7 +4753,7 @@ const buildMapHtml = (
           return;
         }
       }catch(x){}
-      postRN({type:'map_tapped'});
+      postRN({type:'map_tapped',lat:e.lngLat.lat,lng:e.lngLat.lng});
     });
     map.on('contextmenu',function(e){ if(e&&e.preventDefault)e.preventDefault(); });
   }
@@ -16766,6 +16766,20 @@ function MapScreen() {
   function onWebMessage(e: any) {
     try {
       const msg = JSON.parse(e.nativeEvent.data);
+      const webTapCoord = (() => {
+        const source = msg?.camp ?? msg?.poi ?? msg;
+        const lat = Number(source?.lat);
+        const lng = Number(source?.lng);
+        return Number.isFinite(lat) && Number.isFinite(lng) ? [lng, lat] as [number, number] : null;
+      })();
+      if (
+        trailPinCaptureMode &&
+        webTapCoord &&
+        ['map_tapped', 'campsite_tapped', 'poi_tapped', 'map_feature_selected', 'waterbody_tapped', 'trail_tapped', 'base_camp_tapped'].includes(String(msg.type))
+      ) {
+        addTrailCaptureAnchor(webTapCoord);
+        return;
+      }
       if (msg.type === 'cinematic_started') {
         setMapMissionPlaying(true);
         setMapMissionPaused(false);

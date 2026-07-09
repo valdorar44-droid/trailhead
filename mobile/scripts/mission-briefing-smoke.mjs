@@ -76,6 +76,9 @@ assert(mapSource.includes('missionBeatCaption'), 'map uses runtime beat text for
 assert(mapSource.includes('shouldSpeakMissionScene'), 'scene narration gated for live scout beats');
 assert(mapSource.includes('speakCopilotNarration'), 'map falls back to Trailhead guide voice');
 assert(mapSource.includes("command: 'markNarrationDone'"), 'WebView flyover receives narration completion');
+assert(!mapSource.includes('startMissionBriefFromMsg(msg)'), 'WebView flyover does not call removed inline player');
+assert(mapSource.includes("msg.type==='cinematic_camera'") && mapSource.includes('map.easeTo(camOpts)'),
+  'WebView flyover camera moves without creating search pins');
 assert(mapSource.includes('patchMissionBriefOverlay'), 'map batches mission overlay updates');
 assert(mapSource.includes('captionText={mapMissionCaptionText}'), 'map passes runtime caption text to TripPreviewCaption');
 assert(mapSource.includes('fetchDirectedCinematic') && mapSource.includes('startDirectedCinematicFetch'),
@@ -147,6 +150,8 @@ assert(playerSource.includes('setSpeed'), 'player exposes setSpeed');
 assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('onCallouts?.([])'),
   'player clears overlays on stop');
 assert(playerSource.includes('onDebugTick'), 'player exposes debug tick hook for QA counters');
+assert(playerSource.includes('cinematic_camera') && !playerSource.includes("postWeb({ type: 'fly_to'"),
+  'JS flyover player separates camera motion from normal map fly-to pins');
 
 // --- Speed control UI ---
 const controlsSource = readFileSync(join(root, 'components/copilot/TripPreviewControls.tsx'), 'utf8');

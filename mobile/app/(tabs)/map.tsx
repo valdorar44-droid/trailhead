@@ -5137,7 +5137,7 @@ const buildMapHtml = (
 
   // ── Message handler ───────────────────────────────────────────────────────────
   function handleMsgData(msg){
-    if(msg.type==='mission_brief_start'){startMissionBriefFromMsg(msg);return;}
+    if(msg.type==='mission_brief_start'){return;}
     if(msg.type==='mission_brief_cmd'&&window.__cinematic){var _cmd=msg.command;if(typeof window.__cinematic[_cmd]==='function')window.__cinematic[_cmd](msg);return;}
     if(msg.type==='mission_brief_stop'&&window.__cinematic){window.__cinematic.stop();return;}
     if(msg.type==='set_token'){
@@ -5194,6 +5194,13 @@ const buildMapHtml = (
     if(msg.type==='route_scout_focus'&&msg.lat){
       map.flyTo({center:[msg.lng,msg.lat],zoom:msg.zoom||9,duration:850});
       updateRouteScoutPreview([], [{lat:msg.lat,lng:msg.lng,name:msg.name||'Checking area',role:'focus'}]);
+    }
+    if(msg.type==='cinematic_camera'&&msg.lat){
+      var camOpts={center:[msg.lng,msg.lat],zoom:msg.zoom||13,duration:msg.duration||120};
+      if(typeof msg.pitch==='number')camOpts.pitch=msg.pitch;
+      if(typeof msg.bearing==='number')camOpts.bearing=msg.bearing;
+      if(msg.mode==='linearTo')map.easeTo(camOpts);else map.flyTo(camOpts);
+      return;
     }
     if(msg.type==='fly_to'&&msg.lat){
       var flyOpts={center:[msg.lng,msg.lat],zoom:msg.zoom||14,duration:msg.duration||600};

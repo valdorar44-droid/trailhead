@@ -297,6 +297,10 @@ export function startNativeMissionBriefPlayer(opts: {
     webRef.current?.postMessage(JSON.stringify(payload));
   };
 
+  const postWebCamera = (payload: Record<string, unknown>) => {
+    postWeb({ type: 'cinematic_camera', ...payload });
+  };
+
   const tryEnsure3d = () => {
     try {
       ensure3d();
@@ -376,7 +380,7 @@ export function startNativeMissionBriefPlayer(opts: {
       duration: CAMERA_TWEEN_MS,
       mode: 'linearTo',
     });
-    postWeb({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: CAMERA_TWEEN_MS });
+    postWebCamera({ lat: center.lat, lng: center.lng, zoom, pitch, bearing, duration: CAMERA_TWEEN_MS, mode: 'linearTo' });
   }
 
   /** Lookahead distance for a follow slice (same formula the tick loop uses). */
@@ -411,7 +415,7 @@ export function startNativeMissionBriefPlayer(opts: {
       nativeMapRef.current?.flyToCamera?.({
         lat: target.lat, lng: target.lng, zoom: cam.zoom ?? 13.2, pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)), bearing, duration: establishMs, mode: 'flyTo',
       });
-      postWeb({ type: 'fly_to', lat: target.lat, lng: target.lng, zoom: cam.zoom ?? 13.2, pitch: cam.pitch ?? 64, bearing, duration: establishMs });
+      postWebCamera({ lat: target.lat, lng: target.lng, zoom: cam.zoom ?? 13.2, pitch: cam.pitch ?? 64, bearing, duration: establishMs, mode: 'flyTo' });
       lastCamDist = leadDist;
       lastCamPoint = target;
       lastCamBearing = bearing;
@@ -436,7 +440,7 @@ export function startNativeMissionBriefPlayer(opts: {
       nativeMapRef.current?.flyToCamera?.({
         lat: a.lat, lng: a.lng, zoom: cam.zoom ?? 13.6, pitch: Math.max(60, Math.min(72, cam.pitch ?? 70)), bearing: approach, duration: establishMs, mode: 'flyTo',
       });
-      postWeb({ type: 'fly_to', lat: a.lat, lng: a.lng, zoom: cam.zoom ?? 13.6, pitch: cam.pitch ?? 70, bearing: approach, duration: establishMs });
+      postWebCamera({ lat: a.lat, lng: a.lng, zoom: cam.zoom ?? 13.6, pitch: cam.pitch ?? 70, bearing: approach, duration: establishMs, mode: 'flyTo' });
       lastCamDist = null;
       lastCamPoint = a;
       lastCamBearing = approach;
@@ -462,7 +466,7 @@ export function startNativeMissionBriefPlayer(opts: {
           duration: 2600,
           mode: 'flyTo',
         });
-        postWeb({ type: 'fly_to', lat: bounds.center.lat, lng: bounds.center.lng, zoom, pitch: cam.pitch ?? 54, duration: 2600 });
+        postWebCamera({ lat: bounds.center.lat, lng: bounds.center.lng, zoom, pitch: cam.pitch ?? 54, duration: 2600, mode: 'flyTo' });
         lastCamDist = null;
         lastCamPoint = bounds.center;
         return 2600;
@@ -507,7 +511,7 @@ export function startNativeMissionBriefPlayer(opts: {
       nativeMapRef.current?.flyToCamera?.({
         lat: start.lat, lng: start.lng, zoom, pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)), bearing, duration: establishMs, mode: 'flyTo',
       });
-      postWeb({ type: 'fly_to', lat: start.lat, lng: start.lng, zoom, pitch: cam.pitch ?? 64, bearing, duration: establishMs });
+      postWebCamera({ lat: start.lat, lng: start.lng, zoom, pitch: cam.pitch ?? 64, bearing, duration: establishMs, mode: 'flyTo' });
       lastCamDist = leadDist;
       lastCamPoint = start;
       lastCamBearing = bearing;
@@ -525,7 +529,7 @@ export function startNativeMissionBriefPlayer(opts: {
       nativeMapRef.current?.flyToCamera?.({
         lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: Math.max(52, Math.min(68, cam.pitch ?? 62)), bearing, duration: establishMs, mode: 'flyTo',
       });
-      postWeb({ type: 'fly_to', lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: cam.pitch ?? 62, duration: establishMs });
+      postWebCamera({ lat: scene.focus.lat, lng: scene.focus.lng, zoom, pitch: cam.pitch ?? 62, bearing, duration: establishMs, mode: 'flyTo' });
       lastCamDist = null;
       lastCamPoint = { lat: scene.focus.lat, lng: scene.focus.lng };
       if (bearing != null) lastCamBearing = bearing;
@@ -656,6 +660,15 @@ export function startNativeMissionBriefPlayer(opts: {
                 duration: CAMERA_TWEEN_MS,
                 mode: 'linearTo',
               });
+              postWebCamera({
+                lat: center.lat,
+                lng: center.lng,
+                zoom: Math.min(cam.zoom ?? 13.6, 14),
+                pitch: Math.max(60, Math.min(72, cam.pitch ?? 70)),
+                bearing: scenePass.bearing,
+                duration: CAMERA_TWEEN_MS,
+                mode: 'linearTo',
+              });
             }
             if (overlayDue && scene.focus) {
               lastOverlayTs = now;
@@ -674,6 +687,15 @@ export function startNativeMissionBriefPlayer(opts: {
             lastCamPoint = { lat: scene.focus.lat, lng: scene.focus.lng };
             if (!freeCamera) {
               nativeMapRef.current?.flyToCamera?.({
+                lat: scene.focus.lat,
+                lng: scene.focus.lng,
+                zoom: Math.min(cam.zoom ?? 13, 14),
+                pitch: Math.max(58, Math.min(68, cam.pitch ?? 64)),
+                bearing,
+                duration: CAMERA_TWEEN_MS,
+                mode: 'linearTo',
+              });
+              postWebCamera({
                 lat: scene.focus.lat,
                 lng: scene.focus.lng,
                 zoom: Math.min(cam.zoom ?? 13, 14),
@@ -858,14 +880,14 @@ export function startNativeMissionBriefPlayer(opts: {
         duration: 350,
         mode: 'linearTo',
       });
-      postWeb({
-        type: 'fly_to',
+      postWebCamera({
         lat: point.lat,
         lng: point.lng,
         zoom: Math.min(scene.camera?.zoom ?? 13.2, 14.2),
         pitch: Math.max(54, Math.min(68, scene.camera?.pitch ?? 62)),
         bearing,
         duration: 350,
+        mode: 'linearTo',
       });
     }
     onSeekScene?.(scene, index, clamped);

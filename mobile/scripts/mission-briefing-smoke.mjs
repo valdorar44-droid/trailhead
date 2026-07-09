@@ -82,7 +82,7 @@ assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMiss
   'map uses unified realtime director voice');
 assert(mapSource.includes('missionBeatCaption'), 'map uses runtime beat text for caption and voice');
 assert(mapSource.includes('shouldSpeakMissionScene'), 'scene narration gated for live scout beats');
-assert(mapSource.includes('speakCopilotNarration'), 'map falls back to Trailhead guide voice');
+assert(mapSource.includes('speakFlyoverBeat'), 'map uses flyover voice with device fallback');
 assert(mapSource.includes("command: 'markNarrationDone'"), 'WebView flyover receives narration completion');
 assert(!mapSource.includes('startMissionBriefFromMsg(msg)'), 'WebView flyover does not call removed inline player');
 assert(mapSource.includes("msg.type==='cinematic_camera'") && mapSource.includes('map.easeTo(camOpts)'),
@@ -133,7 +133,7 @@ assert(directorSource.includes('waitForRouteRenderReady'), 'cinematic director w
 // --- Cinematic camera engine ---
 const playerSource = readFileSync(join(root, 'lib/missionBriefNativePlayer.ts'), 'utf8');
 assert(playerSource.includes('effectiveDuration'), 'player computes an effective scene duration');
-assert(playerSource.includes('/ Math.max(0.25, speed)'), 'speed divides base scene duration');
+assert(playerSource.includes('/ Math.max(0.1, speed)'), 'speed divides base scene duration down to 0.1x');
 assert(playerSource.includes('cumulativeDistances') && playerSource.includes('pointAtDistance'),
   'player uses distance-based route interpolation');
 assert(playerSource.includes('bearingLngLat') && playerSource.includes('smoothAngle'),
@@ -170,15 +170,19 @@ assert(!missionPlaybackSource.includes('webRef.current?.postMessage(') &&
 
 // --- Speed control UI ---
 const controlsSource = readFileSync(join(root, 'components/copilot/TripPreviewControls.tsx'), 'utf8');
-assert(/PREVIEW_SPEEDS\s*=\s*\[0\.5, 1, 2\]/.test(controlsSource), 'controls expose 0.5x / 1x / 2x speeds');
-assert(controlsSource.includes('onCycleSpeed'), 'controls expose a speed cycle action');
+assert(/PREVIEW_SPEEDS\s*=\s*\[0\.1, 0\.25, 0\.5, 1, 1\.5, 2\]/.test(controlsSource),
+  'controls expose slow, normal, and faster flyover speeds');
+assert(controlsSource.includes('onSpeedChange') && controlsSource.includes('TextInput'),
+  'controls expose preset and custom speed actions');
 assert(/DEFAULT_PREVIEW_SPEED[^\n]*=\s*0\.5/.test(controlsSource), 'default playback speed is slow/cinematic');
 assert(controlsSource.includes('PanResponder.create') && controlsSource.includes('accessibilityRole="adjustable"'),
   'controls expose a draggable flyover progress slider');
 
 // --- Map-first layout wiring ---
 assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map passes playback speed into the player');
-assert(mapSource.includes('cycleMapMissionSpeed'), 'map wires speed cycling');
+assert(mapSource.includes('applyMapMissionSpeed'), 'map wires preset and custom speed changes');
+assert(mapSource.includes("options.source !== 'trail_builder'") && mapSource.includes('beginSilentFlyoverScene'),
+  'Trail Builder flyover stays visual-only');
 assert(mapSource.includes('mapMissionBriefTop'), 'map renders the top cinematic caption');
 assert(!mapSource.includes('<MissionControlPanel'), 'flyover does not show the Mission Control sheet after playback');
 assert(mapSource.includes('TripPreviewControls'), 'flyover keeps the simple playback controls');

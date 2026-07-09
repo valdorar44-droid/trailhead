@@ -24,6 +24,7 @@ export type MissionSceneLifecycleEvent = {
 
 export type MissionSceneProgressEvent = MissionSceneLifecycleEvent & {
   progress: number;
+  localProgress?: number;
 };
 
 export type MissionErrorEvent = {

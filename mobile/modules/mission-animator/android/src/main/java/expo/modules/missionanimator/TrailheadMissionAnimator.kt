@@ -191,13 +191,13 @@ internal class TrailheadMissionAnimator(
   }
 
   fun setSpeed(next: Double): Boolean {
-    speed = next.coerceIn(0.25, 3.0)
+    speed = next.coerceIn(0.1, 3.0)
     if (sceneIndex in scenes.indices) {
       val scene = scenes[sceneIndex]
       val elapsedSec = (System.nanoTime() - sceneStartNs - pausedTotalNs) / 1_000_000_000.0
       val oldDuration = max(0.001, sceneDurationSec)
       val progress = (elapsedSec / oldDuration).coerceIn(0.0, 1.0)
-      sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.25, speed))
+      sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.1, speed))
       sceneStartNs = System.nanoTime() - ((progress * sceneDurationSec) * 1_000_000_000.0).toLong() - pausedTotalNs
     }
     return true
@@ -219,7 +219,7 @@ internal class TrailheadMissionAnimator(
     val span = (scene.routeSliceEnd - scene.routeSliceStart).coerceAtLeast(0.001)
     val localT = ((clamped - scene.routeSliceStart) / span).coerceIn(0.0, 1.0)
     sceneIndex = nextIndex
-    sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.25, speed))
+    sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.1, speed))
     val now = System.nanoTime()
     sceneStartNs = now - (localT * sceneDurationSec * 1_000_000_000.0).toLong()
     pausedTotalNs = 0L
@@ -237,7 +237,7 @@ internal class TrailheadMissionAnimator(
       emitProgress(scene, clamped, routeTotal * clamped)
     }
     emit("onMissionSceneStart", mapOf("sceneId" to scene.id, "index" to sceneIndex, "type" to scene.type))
-    emit("onMissionSceneProgress", mapOf("sceneId" to scene.id, "index" to sceneIndex, "progress" to localT))
+    emit("onMissionSceneProgress", mapOf("sceneId" to scene.id, "index" to sceneIndex, "progress" to clamped, "localProgress" to localT))
     emit("onMissionDebug", mapOf("kind" to "seek", "details" to mapOf("ratio" to clamped, "scene_id" to scene.id)))
     return true
   }
@@ -289,7 +289,7 @@ internal class TrailheadMissionAnimator(
       maxZoom = doubleValue(cam["maxZoom"]) ?: 14.2
       lookaheadM = doubleValue(cam["lookaheadM"]) ?: 600.0
     }
-    speed = (doubleValue(payload["speed"]) ?: 1.0).coerceIn(0.25, 3.0)
+    speed = (doubleValue(payload["speed"]) ?: 1.0).coerceIn(0.1, 3.0)
 
     @Suppress("UNCHECKED_CAST")
     val rawScenes = payload["scenes"] as? List<Map<String, Any?>> ?: return false
@@ -420,7 +420,8 @@ internal class TrailheadMissionAnimator(
 
     if (nowNs - lastProgressEmitNs >= 500_000_000L) {
       lastProgressEmitNs = nowNs
-      emit("onMissionSceneProgress", mapOf("sceneId" to scene.id, "index" to sceneIndex, "progress" to t))
+      val routeProgress = (scene.routeSliceStart + (scene.routeSliceEnd - scene.routeSliceStart) * t).coerceIn(0.0, 1.0)
+      emit("onMissionSceneProgress", mapOf("sceneId" to scene.id, "index" to sceneIndex, "progress" to routeProgress, "localProgress" to t))
     }
   }
 
@@ -437,7 +438,7 @@ internal class TrailheadMissionAnimator(
     sceneStartNs = System.nanoTime()
     pausedTotalNs = 0L
     lastProgressEmitNs = 0L
-    sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.25, speed))
+    sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.1, speed))
     warningActive = scene.warning
     sceneEstablishSec = applyEstablishingCamera(scene, map) / 1000.0
     emit("onMissionSceneStart", mapOf("sceneId" to scene.id, "index" to sceneIndex, "type" to scene.type))
@@ -516,7 +517,8 @@ internal class TrailheadMissionAnimator(
   }
 
   private fun emitProgress(scene: MissionSceneModel, ratio: Double, markerDist: Double) {
-    val progressCoords = downsample(progressRoute(ratio), 140)
+    val routeProgress = if (routeTotal > 0.0) (markerDist / routeTotal).coerceIn(0.0, 1.0) else ratio.coerceIn(0.0, 1.0)
+    val progressCoords = downsample(progressRoute(routeProgress), 140)
     if (progressCoords.size >= 2) {
       val points = progressCoords.map { Point.fromLngLat(it.first, it.second) }
       val progressJson = FeatureCollection.fromFeature(

@@ -272,7 +272,7 @@ export function startNativeMissionBriefPlayer(opts: {
   let pausedAt = 0;
   let pausedTotal = 0;
   let stopped = false;
-  let speed = Number.isFinite(initialSpeed) && initialSpeed > 0 ? initialSpeed : 1;
+  let speed = Number.isFinite(initialSpeed) && initialSpeed > 0 ? Math.max(0.1, Math.min(3, initialSpeed)) : 1;
   let freeCamera = false;
   let sceneDuration = SCENE_FLOOR_MS;
   let lastFrameTs = 0;
@@ -321,7 +321,7 @@ export function startNativeMissionBriefPlayer(opts: {
 
   function effectiveDuration(scene: MissionScene) {
     const base = Math.max(SCENE_FLOOR_MS, Number(scene.durationMs) || 12000);
-    return Math.max(1500, base / Math.max(0.25, speed));
+    return Math.max(1500, base / Math.max(0.1, speed));
   }
 
   function downsample(coords: [number, number][], max: number): [number, number][] {
@@ -844,7 +844,7 @@ export function startNativeMissionBriefPlayer(opts: {
 
   function setSpeed(next: number) {
     // Applies to the next scene (current scene keeps its computed duration).
-    if (Number.isFinite(next) && next > 0) speed = next;
+    if (Number.isFinite(next) && next > 0) speed = Math.max(0.1, Math.min(3, next));
   }
 
   function setFreeCamera(enabled: boolean) {

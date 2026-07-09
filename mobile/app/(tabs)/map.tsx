@@ -115,7 +115,7 @@ import { startRealtimeCopilotSession, type RealtimeCopilotHandle } from '@/lib/r
 import { waitForRouteRenderReady, waitForRealtimeConnected } from '@/lib/cinematicDirector';
 import { CopilotPresenceOrb, type CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
 import { TripPreviewCaption } from '@/components/copilot/TripPreviewCaption';
-import { TripPreviewControls, DEFAULT_PREVIEW_SPEED, nextPreviewSpeed } from '@/components/copilot/TripPreviewControls';
+import { TripPreviewControls, DEFAULT_PREVIEW_SPEED, clampPreviewSpeed } from '@/components/copilot/TripPreviewControls';
 import type { MissionCinematic, MissionScene } from '@/lib/copilotStoryboard';
 import {
   buildMapMissionCinematic,
@@ -164,7 +164,7 @@ import {
 } from 'expo-mission-animator';
 import { fetchDirectedCinematic } from '@/lib/missionStoryboardClient';
 import { getMissionBriefMapPlayerScript } from '@/lib/missionBriefMapPlayerScript';
-import { speakCopilotNarration, speakCinematicNarration } from '@/lib/voice';
+import { speakCinematicNarration, speakFlyoverBeat } from '@/lib/voice';
 import {
   loadTrailheadRouteBuilderDraft,
   mergeTrailheadRouteBuilderDraft,
@@ -5915,7 +5915,7 @@ function MapScreen() {
   const mapMissionStyleSnapshotRef = useRef<{ mapLayer: MapLayer; premiumMapStyle: PremiumMapStyle } | null>(null);
   const realtimeCopilotRef = useRef<RealtimeCopilotHandle | null>(null);
   const missionDirectorActiveRef = useRef(false);
-  const missionVoicePathRef = useRef<'realtime' | 'degraded'>('realtime');
+  const missionVoicePathRef = useRef<'realtime' | 'degraded' | 'silent'>('realtime');
   // Which storyboard authored the playing cinematic (QA breadcrumb).
   const missionStoryboardPathRef = useRef<'ai_director' | 'scout_live' | 'deterministic'>('deterministic');
   const pendingNarrationRef = useRef<string | null>(null);
@@ -14072,8 +14072,13 @@ function MapScreen() {
       beat_chars: clean.length,
     });
     setCopilotBriefPresence('speaking');
-    void speakCopilotNarration(clean, {
+    void speakFlyoverBeat(clean, {
       onStart: () => setCopilotBriefPresence('speaking'),
+      onFallback: () => {
+        ensureMissionPlaybackDebug().voicePath('device_tts', {
+          scene_id: mapMissionScene?.id ?? null,
+        });
+      },
       onFinish: () => finishMissionNarrationBeat('trailhead_tts'),
     }).catch(() => {
       ensureMissionPlaybackDebug().voicePath('device_tts', {
@@ -14133,6 +14138,29 @@ function MapScreen() {
     }
   }
 
+  function beginSilentFlyoverScene(scene: MissionScene, index: number) {
+    const cinematic = mapMissionCinematicRef.current;
+    const caption = missionBeatCaption(cinematic, scene, routeScout)
+      || String(scene.subtitle || scene.title || '').trim();
+    setMapMissionCaptionText(caption);
+    setMapMissionScene(scene);
+    setMapMissionSceneIndex(index);
+    setCopilotBriefPresence(scene.layers?.warning ? 'warning' : 'flying');
+    mapMissionPresenceAfterSpeechRef.current = scene.type === 'mission_recap' ? 'complete' : 'flying';
+    ensureMissionPlaybackDebug().sceneStart({
+      scene_id: scene.id,
+      scene_type: scene.type,
+      scene_index: index,
+      beat_text_present: !!caption.trim(),
+      speak: false,
+      storyboard_path: missionStoryboardPathRef.current,
+    });
+    mapMissionPlayerRef.current?.markNarrationDone();
+    if (!useNativeMapSurface) {
+      postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'markNarrationDone' }));
+    }
+  }
+
   // Narrate a cinematic beat on the same realtime Co-Pilot session used to build the route.
   function narrateMissionScene(scene: MissionScene, beatText: string) {
     const cinematic = mapMissionCinematicRef.current;
@@ -14189,7 +14217,7 @@ function MapScreen() {
         ) {
           fallbackMissionNarration(beatText);
         }
-      }, 2000);
+      }, 1200);
       try {
         handle.say(beatText, 'say');
         return true;
@@ -14229,8 +14257,8 @@ function MapScreen() {
     fallbackMissionNarration(beatText);
   }
 
-  function cycleMapMissionSpeed() {
-    const next = nextPreviewSpeed(mapMissionSpeedRef.current);
+  function applyMapMissionSpeed(nextSpeed: number) {
+    const next = clampPreviewSpeed(nextSpeed);
     mapMissionSpeedRef.current = next;
     setMapMissionSpeed(next);
     if (useNativeMapSurface) {
@@ -14273,13 +14301,23 @@ function MapScreen() {
     setCopilotBriefPresence(scene.layers?.warning ? 'warning' : 'paused');
   }
 
-  function seekMapMission(ratio: number) {
-    const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+  function pauseMapMissionForSeek() {
     clearNarrationFallbackTimer();
     stopTrailheadVoice();
     try { Speech.stop(); } catch {}
     narrationBeatNonceRef.current += 1;
     narrationBeatOpenRef.current = false;
+    if (!mapMissionPaused) {
+      mapMissionPlayerRef.current?.pause();
+      if (!useNativeMapSurface) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
+    }
+    setMapMissionPaused(true);
+    setCopilotBriefPresence('paused');
+  }
+
+  function seekMapMission(ratio: number, options?: { haptic?: boolean }) {
+    const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
+    pauseMapMissionForSeek();
     setMapMissionProgress(clamped);
     setMapMissionPaused(true);
     setMapMissionComplete(false);
@@ -14290,7 +14328,7 @@ function MapScreen() {
     } else {
       postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'seekTo', ratio: clamped }));
     }
-    Haptics.selectionAsync().catch(() => {});
+    if (options?.haptic !== false) Haptics.selectionAsync().catch(() => {});
   }
 
   function toggleMapMissionFreeCamera() {
@@ -14308,10 +14346,12 @@ function MapScreen() {
 
   async function startMapMissionBrief(options: { source?: 'manual' | 'auto_scout' | 'trail_builder'; skipDirected?: boolean; routeName?: string } = {}) {
     await stopTrailheadVoice();
-    missionVoicePathRef.current = 'realtime';
+    const shouldNarrateFlyover = options.source !== 'trail_builder';
+    missionVoicePathRef.current = shouldNarrateFlyover ? 'realtime' : 'silent';
 
     const nativeAvailable = await isMissionAnimatorAvailable();
-    const playbackMode = resolveMissionPlaybackMode(undefined, nativeAvailable && useNativeMapSurface);
+    const nativeAnimatorAllowed = Platform.OS === 'ios' && nativeAvailable && useNativeMapSurface;
+    const playbackMode = resolveMissionPlaybackMode(undefined, nativeAnimatorAllowed);
     mapMissionPlaybackModeRef.current = playbackMode;
     const playbackDebug = ensureMissionPlaybackDebug();
     playbackDebug.reset();
@@ -14319,6 +14359,8 @@ function MapScreen() {
       playback_mode: playbackMode,
       source: options.source ?? 'manual',
       native_animator_available: nativeAvailable,
+      native_animator_allowed: nativeAnimatorAllowed,
+      narrating: shouldNarrateFlyover,
     });
 
     const overrideRoute = missionRouteOverrideRef.current;
@@ -14375,7 +14417,9 @@ function MapScreen() {
       setMapMissionNotice('Preparing flyover.');
     }
 
-    const directorVoicePromise = ensureMissionDirectorVoice(true);
+    const directorVoicePromise = shouldNarrateFlyover
+      ? ensureMissionDirectorVoice(true)
+      : Promise.resolve(null);
 
     setMissionBriefOverlay(prev => ({
       ...prev,
@@ -14470,7 +14514,10 @@ function MapScreen() {
       mapMissionNativeSubsRef.current = [
         addMissionSceneStartListener(({ index }) => {
           const scene = mapMissionCinematicRef.current?.scenes[index];
-          if (scene) beginMissionSceneBeat(scene, index);
+          if (scene) {
+            if (shouldNarrateFlyover) beginMissionSceneBeat(scene, index);
+            else beginSilentFlyoverScene(scene, index);
+          }
         }),
         addMissionSceneEndListener(({ index }) => {
           const scene = mapMissionCinematicRef.current?.scenes[index] ?? null;
@@ -14571,10 +14618,11 @@ function MapScreen() {
       webRef,
       useNativeOverlays: useNativeMapSurface,
       initialSpeed: mapMissionSpeedRef.current,
-      waitForNarration: true, // pace each speaking beat to the narration so voice + camera stay inline
+      waitForNarration: shouldNarrateFlyover, // pace Co-Pilot beats to narration; Trail Builder is visual only.
       // The actual line each scene will speak ('' when silent) — the player
       // stretches speaking scenes so the camera glides at narration pace.
       speechTextFor: scene => {
+        if (!shouldNarrateFlyover) return '';
         const cin = mapMissionCinematicRef.current;
         if (!shouldSpeakMissionScene(cin, scene)) return '';
         return missionBeatCaption(cin, scene, routeScout)
@@ -14622,7 +14670,8 @@ function MapScreen() {
         }
       },
       onSceneStarted: (scene, index) => {
-        beginMissionSceneBeat(scene, index);
+        if (shouldNarrateFlyover) beginMissionSceneBeat(scene, index);
+        else beginSilentFlyoverScene(scene, index);
       },
       onSceneFinished: index => {
         const scene = mapMissionCinematicRef.current?.scenes[index] ?? null;
@@ -21666,8 +21715,10 @@ function MapScreen() {
                 speed={mapMissionSpeed}
                 progress={mapMissionProgress}
                 freeCamera={mapMissionFreeCamera}
-                onCycleSpeed={cycleMapMissionSpeed}
-                onSeek={seekMapMission}
+                onSpeedChange={applyMapMissionSpeed}
+                onSeekStart={ratio => seekMapMission(ratio, { haptic: false })}
+                onSeekMove={ratio => seekMapMission(ratio, { haptic: false })}
+                onSeekEnd={ratio => seekMapMission(ratio)}
                 onToggleFreeCamera={toggleMapMissionFreeCamera}
                 onReplay={() => {
                   // Invalidate any in-flight narration from the previous run so a
@@ -22099,7 +22150,7 @@ function MapScreen() {
         </View>
       )}
 
-      {trailTraceMode && !navMode && !waterFollowActive && (
+      {trailTraceMode && !navMode && !waterFollowActive && !mapMissionVisible && (
         <View style={s.traceHud} pointerEvents="auto">
           <View style={s.traceHudIcon}>
             <Ionicons name="analytics-outline" size={18} color="#22c55e" />
@@ -22116,7 +22167,7 @@ function MapScreen() {
         </View>
       )}
 
-      {trailPinCaptureMode && !navMode && !waterFollowActive && (
+      {trailPinCaptureMode && !navMode && !waterFollowActive && !mapMissionVisible && (
         <View style={s.trailRouteBuilderWrap} pointerEvents="auto">
           <TrailheadSheet contentStyle={s.trailCaptureSheetContent}>
             <View style={s.trailCompactMessage}>
@@ -22947,7 +22998,7 @@ function MapScreen() {
         );
       })()}
 
-      {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && (
+      {selectedTrail && !navMode && !trailPinCaptureMode && trailRouteBuilderOpen && !mapMissionVisible && (
         <View style={s.trailRouteBuilderWrap}>
           <TrailheadSheet contentStyle={s.trailRouteBuilderBlur}>
             <View style={s.trailRouteBuilderHeader}>

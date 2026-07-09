@@ -189,13 +189,13 @@ private final class NativeMissionAnimator: NSObject {
     func stop() -> Bool { playing = false; paused = false; stopDisplayLink(); clearOverlays(); return true }
     func clear() -> Bool { _ = stop(); route = []; scenes = []; return true }
     func setSpeed(_ next: Double) -> Bool {
-        speed = max(0.25, min(3, next))
+        speed = max(0.1, min(3, next))
         guard sceneIndex >= 0, sceneIndex < scenes.count else { return true }
         let scene = scenes[sceneIndex]
         let elapsed = CACurrentMediaTime() - sceneStartTs - pausedTotal
         let oldDuration = max(0.001, sceneDuration)
         let progress = max(0, min(1, elapsed / oldDuration))
-        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.25, speed))
+        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.1, speed))
         sceneStartTs = CACurrentMediaTime() - (progress * sceneDuration) - pausedTotal
         return true
     }
@@ -216,7 +216,7 @@ private final class NativeMissionAnimator: NSObject {
         let span = max(0.001, scene.routeSliceEnd - scene.routeSliceStart)
         let localT = max(0, min(1, (clamped - scene.routeSliceStart) / span))
         sceneIndex = nextIndex
-        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.25, speed))
+        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.1, speed))
         sceneStartTs = CACurrentMediaTime() - (localT * sceneDuration)
         pausedTotal = 0
         pauseStartedTs = CACurrentMediaTime()
@@ -234,7 +234,7 @@ private final class NativeMissionAnimator: NSObject {
             updateProgress(clamped, markerDist: routeTotal * clamped)
         }
         emit("onMissionSceneStart", ["sceneId": scene.id, "index": sceneIndex, "type": scene.type])
-        emit("onMissionSceneProgress", ["sceneId": scene.id, "index": sceneIndex, "progress": localT])
+        emit("onMissionSceneProgress", ["sceneId": scene.id, "index": sceneIndex, "progress": clamped, "localProgress": localT])
         emit("onMissionDebug", ["kind": "seek", "details": ["ratio": clamped, "scene_id": scene.id]])
         return true
     }
@@ -269,7 +269,7 @@ private final class NativeMissionAnimator: NSObject {
         guard route.count >= 2 else { return false }
         routeCum = cumulativeDistances(route)
         routeTotal = routeCum.last ?? 0
-        speed = max(0.25, min(3, doubleValue(payload["speed"]) ?? 1))
+        speed = max(0.1, min(3, doubleValue(payload["speed"]) ?? 1))
         guard let rawScenes = payload["scenes"] as? [[String: Any]], !rawScenes.isEmpty else { return false }
         scenes = rawScenes.compactMap { raw in
             guard let id = raw["id"] as? String, let type = raw["type"] as? String else { return nil }
@@ -369,7 +369,8 @@ private final class NativeMissionAnimator: NSObject {
         }
         if CACurrentMediaTime() - lastProgressEmit >= 0.5 {
             lastProgressEmit = CACurrentMediaTime()
-            emit("onMissionSceneProgress", ["sceneId": scene.id, "index": sceneIndex, "progress": t])
+            let routeProgress = max(0, min(1, scene.routeSliceStart + (scene.routeSliceEnd - scene.routeSliceStart) * t))
+            emit("onMissionSceneProgress", ["sceneId": scene.id, "index": sceneIndex, "progress": routeProgress, "localProgress": t])
         }
     }
 
@@ -385,7 +386,7 @@ private final class NativeMissionAnimator: NSObject {
         narrationDone = false
         sceneStartTs = CACurrentMediaTime()
         pausedTotal = 0
-        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.25, speed))
+        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.1, speed))
         warningActive = scene.warning
         emit("onMissionSceneStart", ["sceneId": scene.id, "index": sceneIndex, "type": scene.type])
         if scene.cameraMode == "fit", let lat = scene.focusLat, let lng = scene.focusLng {

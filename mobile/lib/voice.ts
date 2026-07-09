@@ -7,6 +7,7 @@ type VoiceMode = 'direction' | 'guide';
 type VoiceCallbacks = {
   onStart?: () => void;
   onFinish?: () => void;
+  onFallback?: () => void;
 };
 
 const COPILOT_LISTENING_CUE = require('../assets/trail-guide/copilot-listening.wav');
@@ -117,6 +118,53 @@ export async function speakCopilotNarration(text: string, callbacks?: VoiceCallb
     { rate: 0.9, pitch: 1, language: 'en-US' },
     callbacks,
   );
+}
+
+/** Flyover narration with a fast local fallback so the camera never waits on a silent voice path. */
+export async function speakFlyoverBeat(text: string, callbacks?: VoiceCallbacks) {
+  const clean = text.trim();
+  if (!clean) return;
+  let started = false;
+  let finished = false;
+  let fallbackStarted = false;
+  const startDeviceSpeech = () => {
+    if (finished || fallbackStarted) return;
+    fallbackStarted = true;
+    callbacks?.onFallback?.();
+    stopTrailheadVoice().catch(() => {});
+    speakCinematicNarration(clean, {
+      onStart: () => {
+        started = true;
+        callbacks?.onStart?.();
+      },
+      onFinish: () => {
+        finished = true;
+        callbacks?.onFinish?.();
+      },
+    });
+  };
+  const startTimer = setTimeout(() => {
+    if (!started && !finished) startDeviceSpeech();
+  }, 1200);
+  try {
+    await playTrailheadVoice(clean, 'guide', { rate: 0.9, pitch: 1, language: 'en-US' }, {
+      onStart: () => {
+        if (fallbackStarted || finished) return;
+        started = true;
+        clearTimeout(startTimer);
+        callbacks?.onStart?.();
+      },
+      onFinish: () => {
+        if (finished) return;
+        finished = true;
+        clearTimeout(startTimer);
+        callbacks?.onFinish?.();
+      },
+    });
+  } catch {
+    clearTimeout(startTimer);
+    startDeviceSpeech();
+  }
 }
 
 export async function playTrailheadVoice(text: string, mode: VoiceMode, fallbackOptions?: SpeechOptions, callbacks?: VoiceCallbacks) {

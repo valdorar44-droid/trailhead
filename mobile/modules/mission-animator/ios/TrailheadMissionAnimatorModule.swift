@@ -76,6 +76,10 @@ public class TrailheadMissionAnimatorModule: Module {
         AsyncFunction("skipMissionAnimationScene") { () -> Bool in
             self.runOnMain { self.animator.skipScene() }
         }
+
+        AsyncFunction("markMissionAnimationNarrationDone") { () -> Bool in
+            self.runOnMain { self.animator.markNarrationDone() }
+        }
     }
 }
 
@@ -119,6 +123,8 @@ private final class NativeMissionAnimator: NSObject {
     private var lastProgressEmit: CFTimeInterval = 0
     private var warningActive = false
     private var freeCamera = false
+    private var narrationDone = true
+    private let narrationCap: CFTimeInterval = 11
 
     init(emit: @escaping MissionEmit) { self.emit = emit }
 
@@ -216,6 +222,7 @@ private final class NativeMissionAnimator: NSObject {
         pauseStartedTs = CACurrentMediaTime()
         paused = true
         playing = true
+        narrationDone = true
         displayLink?.isPaused = true
         warningActive = scene.warning
         if scene.cameraMode == "follow" {
@@ -234,7 +241,13 @@ private final class NativeMissionAnimator: NSObject {
 
     func skipScene() -> Bool {
         guard playing, sceneIndex >= 0, sceneIndex < scenes.count else { return false }
+        narrationDone = true
         finishScene(scenes[sceneIndex])
+        return true
+    }
+
+    func markNarrationDone() -> Bool {
+        narrationDone = true
         return true
     }
 
@@ -343,7 +356,14 @@ private final class NativeMissionAnimator: NSObject {
         let scene = scenes[sceneIndex]
         let elapsed = CACurrentMediaTime() - sceneStartTs - pausedTotal
         let t = max(0, min(1, elapsed / max(0.001, sceneDuration)))
-        if elapsed >= sceneDuration { finishScene(scene); return }
+        if elapsed >= sceneDuration {
+            if !narrationDone && elapsed < sceneDuration + narrationCap {
+                updateProgress(1, markerDist: routeTotal * scene.routeSliceEnd)
+                return
+            }
+            finishScene(scene)
+            return
+        }
         if scene.cameraMode == "follow", routeTotal > 0 {
             tickFollow(scene: scene, t: t)
         }
@@ -362,6 +382,7 @@ private final class NativeMissionAnimator: NSObject {
             return
         }
         let scene = scenes[sceneIndex]
+        narrationDone = false
         sceneStartTs = CACurrentMediaTime()
         pausedTotal = 0
         sceneDuration = max(7, (scene.durationMs / 1000) / max(0.25, speed))

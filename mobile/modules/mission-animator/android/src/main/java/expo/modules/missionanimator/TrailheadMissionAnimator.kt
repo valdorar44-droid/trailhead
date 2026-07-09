@@ -75,6 +75,8 @@ internal class TrailheadMissionAnimator(
   private var warningActive = false
   private var layersInstalled = false
   private var freeCamera = false
+  private var narrationDone = true
+  private val narrationCapSec = 11.0
 
   private val frameCallback = object : Choreographer.FrameCallback {
     override fun doFrame(frameTimeNanos: Long) {
@@ -225,6 +227,7 @@ internal class TrailheadMissionAnimator(
     paused = true
     stopped = false
     playing = true
+    narrationDone = true
     lastProgressEmitNs = 0L
     warningActive = scene.warning
     if (scene.cameraMode == "follow") {
@@ -241,10 +244,16 @@ internal class TrailheadMissionAnimator(
 
   fun skipScene(): Boolean {
     if (!playing || sceneIndex !in scenes.indices) return false
+    narrationDone = true
     finishScene(scenes[sceneIndex])
     if (!paused && playing && !stopped) {
       Choreographer.getInstance().postFrameCallback(frameCallback)
     }
+    return true
+  }
+
+  fun markNarrationDone(): Boolean {
+    narrationDone = true
     return true
   }
 
@@ -394,6 +403,10 @@ internal class TrailheadMissionAnimator(
     val t = ((elapsedSec - sceneEstablishSec) / glideSec).coerceIn(0.0, 1.0)
 
     if (elapsedSec >= sceneDurationSec) {
+      if (!narrationDone && elapsedSec < sceneDurationSec + narrationCapSec) {
+        emitProgress(scene, 1.0, routeTotal * scene.routeSliceEnd)
+        return
+      }
       finishScene(scene)
       return
     }
@@ -420,6 +433,7 @@ internal class TrailheadMissionAnimator(
       return
     }
     val scene = scenes[sceneIndex]
+    narrationDone = false
     sceneStartNs = System.nanoTime()
     pausedTotalNs = 0L
     lastProgressEmitNs = 0L

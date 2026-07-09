@@ -153,6 +153,7 @@ import {
   addMissionSceneStartListener,
   clearMissionAnimation,
   isMissionAnimatorAvailable,
+  markMissionAnimationNarrationDone,
   pauseMissionAnimation,
   resumeMissionAnimation,
   seekMissionAnimation,
@@ -14509,7 +14510,7 @@ function MapScreen() {
         setSpeed: (next: number) => { void setMissionAnimationSpeed(next); },
         seekTo: (ratio: number) => { void seekMissionAnimation(ratio); },
         setFreeCamera: (enabled: boolean) => { void setMissionAnimationFreeCamera(enabled); },
-        markNarrationDone: () => {},
+        markNarrationDone: () => { void markMissionAnimationNarrationDone(); },
       };
       const nativeStarted = await startMissionAnimation(nativePayload);
       if (nativeStarted) {

@@ -65,5 +65,9 @@ class TrailheadMissionAnimatorModule : Module() {
     AsyncFunction("skipMissionAnimationScene") {
       animator.skipScene()
     }
+
+    AsyncFunction("markMissionAnimationNarrationDone") {
+      animator.markNarrationDone()
+    }
   }
 }

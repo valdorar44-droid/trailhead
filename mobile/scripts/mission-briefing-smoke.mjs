@@ -159,6 +159,14 @@ assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('
 assert(playerSource.includes('onDebugTick'), 'player exposes debug tick hook for QA counters');
 assert(playerSource.includes('cinematic_camera') && !playerSource.includes("postWeb({ type: 'fly_to'"),
   'JS flyover player separates camera motion from normal map fly-to pins');
+assert(!playerSource.includes('webRef.current?.postMessage(') &&
+  playerSource.includes("typeof postMessage !== 'function'"),
+  'JS flyover player guards stale WebView postMessage refs');
+
+const missionPlaybackSource = readFileSync(join(root, 'lib/missionBriefPlayback.ts'), 'utf8');
+assert(!missionPlaybackSource.includes('webRef.current?.postMessage(') &&
+  missionPlaybackSource.includes("typeof postMessage !== 'function'"),
+  'mission playback commands guard stale WebView postMessage refs');
 
 // --- Speed control UI ---
 const controlsSource = readFileSync(join(root, 'components/copilot/TripPreviewControls.tsx'), 'utf8');

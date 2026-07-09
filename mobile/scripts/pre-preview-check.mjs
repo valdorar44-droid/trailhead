@@ -67,6 +67,19 @@ runInlineCheck('Map WebView bridge guard', () => {
   if (mapSource.includes('webRef.current?.postMessage(')) {
     throw new Error('Use postWebMessage(...) instead of calling webRef.current?.postMessage(...) directly.');
   }
+  const bridgeFiles = [
+    'lib/missionBriefNativePlayer.ts',
+    'lib/missionBriefPlayback.ts',
+  ];
+  for (const file of bridgeFiles) {
+    const source = readFileSync(join(mobileRoot, file), 'utf8');
+    if (source.includes('webRef.current?.postMessage(')) {
+      throw new Error(`${file} calls webRef.current?.postMessage directly.`);
+    }
+    if (!source.includes("typeof postMessage !== 'function'")) {
+      throw new Error(`${file} is missing a WebView postMessage function guard.`);
+    }
+  }
 });
 
 for (const check of checks) {

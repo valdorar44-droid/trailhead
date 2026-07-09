@@ -294,7 +294,14 @@ export function startNativeMissionBriefPlayer(opts: {
 
   const postWeb = (payload: Record<string, unknown>) => {
     if (useNativeOverlays) return;
-    webRef.current?.postMessage(JSON.stringify(payload));
+    const target = webRef.current;
+    const postMessage = target?.postMessage;
+    if (typeof postMessage !== 'function') return;
+    try {
+      postMessage.call(target, JSON.stringify(payload));
+    } catch {
+      // WebView refs can briefly be stale during tab swaps or reloads.
+    }
   };
 
   const postWebCamera = (payload: Record<string, unknown>) => {

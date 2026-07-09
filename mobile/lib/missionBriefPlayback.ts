@@ -27,7 +27,14 @@ export function createMissionBriefPlaybackHandlers(opts: {
   const { webRef, cinematicRef, presenceAfterSpeechRef, setState, logEvent } = opts;
 
   function sendCinematicCommand(command: 'replay' | 'pause' | 'resume' | 'skip' | 'stop') {
-    webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command }));
+    const target = webRef.current;
+    const postMessage = target?.postMessage;
+    if (typeof postMessage !== 'function') return;
+    try {
+      postMessage.call(target, JSON.stringify({ type: 'mission_brief_cmd', command }));
+    } catch {
+      // Ignore stale WebView refs while the map remounts.
+    }
   }
 
   function speakNarration(message: string, onPresence: CopilotPresenceState) {

@@ -241,6 +241,11 @@ assert(mapSource.includes("postRN({type:'map_tapped',lat:e.lngLat.lat,lng:e.lngL
   mapSource.includes('trailPinCaptureMode &&') &&
   mapSource.includes('addTrailCaptureAnchor(webTapCoord)'),
   'WebView Trail Builder taps create route points while capture mode is active');
+assert(mapSource.includes("engineLabel = usedManualFallback ? 'Manual line' : 'Trail route'") &&
+  mapSource.includes('Review the line before saving. Add points around bends and forks.'),
+  'WebView Trail Builder falls back to a reviewable manual route');
+assert(!mapSource.includes('Trail graph did not match'),
+  'Trail Builder avoids technical route-copy in visible messages');
 assert(mapSource.includes('label="Flyover"') && mapSource.includes('play-circle-outline'),
   'Trail Builder exposes a Flyover action after route build');
 assert(mapSource.includes("previewTrailDistanceM > 0 ? fmtTrailRouteDistance(previewTrailDistanceM) : 'Set route'"),

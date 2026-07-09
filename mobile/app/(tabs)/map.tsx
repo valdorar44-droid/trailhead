@@ -827,7 +827,7 @@ type TrailRouteSegmentStatus = {
   message?: string;
 };
 const TRAIL_SNAP_MODE_OPTIONS: Array<{ id: TrailSnapMode; label: string; icon: keyof typeof Ionicons.glyphMap; sub: string }> = [
-  { id: 'trail', label: 'Trail', icon: 'git-branch-outline', sub: 'Trail graph first' },
+  { id: 'trail', label: 'Trail', icon: 'git-branch-outline', sub: 'Best trail line' },
   { id: 'road', label: 'Road', icon: 'car-outline', sub: 'Connector routing' },
   { id: 'dirt', label: '4WD', icon: 'trail-sign-outline', sub: 'Track-style review' },
   { id: 'hybrid', label: 'Hybrid', icon: 'git-compare-outline', sub: 'Road + trail' },
@@ -837,7 +837,7 @@ const TRAIL_SNAP_MODE_OPTIONS: Array<{ id: TrailSnapMode; label: string; icon: k
 function trailSnapModeHelp(mode: TrailSnapMode) {
   switch (mode) {
     case 'straight':
-      return 'Straight line mode only connects your pins. It does not follow trails or roads.';
+      return 'Line mode connects your pins. Add points around bends before saving.';
     case 'road':
       return 'Road mode is for connectors. Review the handoff before saving a trail route.';
     case 'dirt':
@@ -845,7 +845,7 @@ function trailSnapModeHelp(mode: TrailSnapMode) {
     case 'hybrid':
       return 'Hybrid mode uses the best trail or connector line available, then asks you to review gaps.';
     default:
-      return 'Trail mode snaps to trail data when graph coverage is available.';
+      return 'Trail mode follows the best available trail line.';
   }
 }
 
@@ -853,13 +853,13 @@ function normalizeTrailSnapFailure(err: unknown, mode: TrailSnapMode) {
   const raw = String((err as any)?.message ?? err ?? '').trim();
   const lower = raw.toLowerCase();
   if (lower.includes('not ready') || lower.includes('not downloaded') || lower.includes('missing trail graph')) {
-    return 'Trail follow is not ready for this area. Save the region or use straight line for this segment.';
+    return 'Trail follow is not ready for this area. Save the region or use line mode for this segment.';
   }
   if (lower.includes('could not be identified') || lower.includes('no trail graph here')) {
-    return 'Trail graph is not ready here yet. Use straight line, add manual points, or report a missing trail.';
+    return 'Trail follow is not ready here yet. Use line mode, add points, or report a missing trail.';
   }
   if (lower.includes('no visible trail connection') || lower.includes('could not connect pins')) {
-    return 'Gap between trail segments. Add a pin on the trail between those points or switch to straight line.';
+    return 'Gap between trail segments. Add a point between those pins or switch to line mode.';
   }
   if (lower.includes('snapped one point')) {
     return raw;
@@ -868,7 +868,7 @@ function normalizeTrailSnapFailure(err: unknown, mode: TrailSnapMode) {
     return raw;
   }
   if (mode === 'straight') {
-    return 'Straight line mode is active. The route follows your pins only.';
+    return 'Line mode is active. The route follows your pins only.';
   }
   return raw || 'Could not build that route. Add pins around forks or switch snap mode.';
 }
@@ -19749,7 +19749,7 @@ function MapScreen() {
         captured = graphRoute;
         graphSnapped = true;
       } else if (trailSnapMode !== 'straight') {
-        setTrailSnapFailureReason('Trail graph did not match that trace. Keeping the drawn line.');
+        setTrailSnapFailureReason('Trail follow did not match that trace. Keeping the drawn line.');
       }
     } catch (err: any) {
       const message = normalizeTrailSnapFailure(err, trailSnapMode);
@@ -20052,22 +20052,28 @@ function MapScreen() {
           } catch (mapboxErr: any) {
             const captured: [number, number][] = [];
             const localStatuses: TrailRouteSegmentStatus[] = [];
+            let usedManualFallback = false;
             for (let i = 0; i < anchors.length - 1; i += 1) {
               const segment = captureLegFromVisibleGeometry(anchors[i], anchors[i + 1]);
               if (!segment?.length) {
-                localStatuses.push({ label: `${i + 1}-${i + 2}`, status: 'failed', engine: 'Needs pins', message: 'Visible trail connection unavailable' });
+                const manualSegment = [anchors[i].coord, anchors[i + 1].coord];
+                captured.push(...(captured.length ? manualSegment.slice(1) : manualSegment));
+                localStatuses.push({ label: `${i + 1}-${i + 2}`, status: 'fallback', engine: 'Manual line', message: 'Review this segment' });
                 setTrailRouteSegmentStatus(localStatuses);
-                throw new Error(`Could not connect pins ${i + 1} and ${i + 2}. Add another pin on the trail between them.`);
+                usedManualFallback = true;
+                continue;
               }
               captured.push(...(captured.length ? segment.slice(1) : segment));
               localStatuses.push({ label: `${i + 1}-${i + 2}`, status: 'fallback', engine: 'Map line' });
             }
             clean = dedupeTrailCoords(captured);
             routedDistanceM = trailCoordsDistanceM(clean);
-            engineLabel = 'Trail route';
+            engineLabel = usedManualFallback ? 'Manual line' : 'Trail route';
             engineConfidence = 'low';
             segmentStatuses = localStatuses;
-            engineWarning = 'Add pins around curves if the line cuts corners.';
+            engineWarning = usedManualFallback
+              ? 'Review the line before saving. Add points around bends and forks.'
+              : 'Add pins around curves if the line cuts corners.';
           }
         }
       }

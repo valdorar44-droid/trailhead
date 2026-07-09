@@ -4173,6 +4173,7 @@ const buildMapHtml = (
   var lastSpeed=null;
   var _routeLoading=false;
   var routeIsProper=false;
+  var trailCaptureMode=false;
   var showUsgsOverlay=false;
   var showTerrainLayer=false,showNaipLayer=false,showFireLayer=false,showAvaLayer=false,showRadarLayer=false,showMvumLayer=false,showRoadsLayer=false,showNauticalLayer=false;
   var radarFrames=[],radarFrameIdx=0,radarTimer=null;
@@ -4693,6 +4694,10 @@ const buildMapHtml = (
     }
     map.on('click',function(e){
       if(e.defaultPrevented)return;
+      if(trailCaptureMode){
+        postRN({type:'map_tapped',lat:e.lngLat.lat,lng:e.lngLat.lng});
+        return;
+      }
       try{
         // Detection uses Protomaps schema - "kind" prop on pois/roads source layers.
         // In Safe Water mode, water/chart context wins over base-map campsite POIs.
@@ -5155,6 +5160,7 @@ const buildMapHtml = (
       protomapsKey=msg.key;
       if(map&&mapReady)map.setStyle(_styleForMode(currentStyle));
     }
+    if(msg.type==='set_trail_capture_mode'){trailCaptureMode=!!msg.active;return;}
     if(!mapReady){pendingMsgs.push(msg);return;}
     if(msg.type==='nav_active'){
       navActive=msg.active;
@@ -18173,6 +18179,11 @@ function MapScreen() {
     buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred),
     [centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred]
   );
+
+  useEffect(() => {
+    if (USE_NATIVE_MAP) return;
+    webRef.current?.postMessage(JSON.stringify({ type: 'set_trail_capture_mode', active: trailPinCaptureMode }));
+  }, [trailPinCaptureMode]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;

@@ -49,9 +49,8 @@ const nativeMapSource = readFileSync(join(root, 'components/NativeMap/index.tsx'
 assert(nativeMapSource.includes('mission-brief-progress-line'), 'NativeMap renders mission briefing progress layer');
 
 const mapSource = readFileSync(join(root, 'app/(tabs)/map.tsx'), 'utf8');
-assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT') && mapSource.includes('handoffScoutToCinematic'),
-  'cinematic has an internal-only auto-start hook for QA');
-assert(mapSource.includes('AUTO_FLY_AFTER_SCOUT = false'), 'production asks before starting the flyover');
+assert(!mapSource.includes('handoffScoutToCinematic') && !mapSource.includes('AUTO_FLY_AFTER_SCOUT'),
+  'route scout does not auto-start the flyover');
 assert(mapSource.includes('Route is built. Want me to fly the plan?'), 'Co-Pilot asks before flyover after route build');
 assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMissionDirectorVoice'),
   'map uses unified realtime director voice');
@@ -62,8 +61,8 @@ assert(mapSource.includes('patchMissionBriefOverlay'), 'map batches mission over
 assert(mapSource.includes('captionText={mapMissionCaptionText}'), 'map passes runtime caption text to TripPreviewCaption');
 assert(mapSource.includes('fetchDirectedCinematic') && mapSource.includes('startDirectedCinematicFetch'),
   'map races the AI-director storyboard against the deterministic builders');
-assert(mapSource.includes('missionDirectedPromiseRef.current = startDirectedCinematicFetch'),
-  'scout handoff prefetches the AI storyboard so its budget overlaps existing waits');
+assert(mapSource.includes('missionRouteOverrideRef.current = coords') && mapSource.includes('missionDirectedPromiseRef.current = startDirectedCinematicFetch'),
+  'route scout prefetches the storyboard while waiting for Fly the Plan');
 assert(mapSource.includes('directedCinematic ?? localCinematic'),
   'deterministic cinematic remains the fallback when the AI storyboard misses its budget');
 assert(mapSource.includes('waitForRouteRenderReady'), 'map waits for route overlay before fly');

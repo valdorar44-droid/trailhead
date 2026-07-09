@@ -44,8 +44,6 @@ const USE_NATIVE_MAP = false;
 // Realtime Co-Pilot narration (WebRTC) — the Co-Pilot's own ChatGPT voice narrates the
 // cinematic. Verified working on-device in voice mode. Device TTS is the instant fallback.
 const ENABLE_REALTIME_NARRATOR = true;
-// Internal QA switch only. Production asks before starting the flyover.
-const AUTO_FLY_AFTER_SCOUT = false;
 import * as Location from 'expo-location';
 import { storage } from '@/lib/storage';
 import * as Speech from 'expo-speech';
@@ -5902,8 +5900,6 @@ function MapScreen() {
   }>>({});
   const missionOverlayFlushRef = useRef<number | null>(null);
   const missionPlaybackDebugRef = useRef<MissionPlaybackDebug | null>(null);
-  const autoFlownScoutKeyRef = useRef<string | null>(null);
-  const scoutHandoffRunningRef = useRef(false);
   const lastRealtimeUserTranscriptRef = useRef<{ text: string; at: number } | null>(null);
   const trailGuideAvatarState = useMemo(() => trailGuideStateFromVoice({
     available: extremeCopilotAvailable,
@@ -11093,13 +11089,11 @@ function MapScreen() {
     recentRouteScoutActionRef.current = { at: Date.now(), action: 'start' };
     const focusStop = stops.find(stop => stop.type === 'camp') ?? stops[Math.min(1, stops.length - 1)] ?? null;
     if (focusStop) setTimeout(() => nativeMapRef.current?.flyTo(focusStop.lat, focusStop.lng, focusStop.type === 'camp' ? 10.5 : 8.5, focusStop.name), 350);
-    // Internal QA can still auto-start, but production asks before flying.
-    if (AUTO_FLY_AFTER_SCOUT && scoutBuilt) {
-      const scoutKey = `${start.name}|${destination.name}|${operationId}`;
-      if (autoFlownScoutKeyRef.current !== scoutKey) {
-        autoFlownScoutKeyRef.current = scoutKey;
-        handoffScoutToCinematic(coords).catch(() => null);
-      }
+    if (scoutBuilt) {
+      missionRouteOverrideRef.current = coords;
+      missionDirectedPromiseRef.current = startDirectedCinematicFetch(coords, 5000);
+    } else {
+      missionDirectedPromiseRef.current = null;
     }
     return {
       applied: true,
@@ -14017,39 +14011,6 @@ function MapScreen() {
     }
   }
 
-  async function handoffScoutToCinematic(coords: [number, number][]) {
-    if (missionRunningRef.current || navMode || scoutHandoffRunningRef.current) return;
-    scoutHandoffRunningRef.current = true;
-    try {
-      missionRouteOverrideRef.current = coords;
-      // Prefetch the AI storyboard so its short budget overlaps the route-render
-      // and voice waits below instead of delaying the flythrough start.
-      missionDirectedPromiseRef.current = startDirectedCinematicFetch(coords, 2500);
-      await waitForRouteRenderReady({
-        coords,
-        lastRouteCoordsRef,
-        routeOverlayReadyRef,
-        timeoutMs: 2500,
-        settleMs: 400,
-      });
-      if (missionRunningRef.current || navMode) return;
-      const voiceHandle = realtimeCopilotRef.current;
-      if (voiceHandle) {
-        await voiceHandle.waitUntilSpeechIdle(18000);
-        voiceHandle.enterDirectorMode(() => finishMissionNarrationBeat('realtime'));
-        missionDirectorActiveRef.current = true;
-        missionVoicePathRef.current = 'realtime';
-      }
-      if (missionRunningRef.current || navMode) return;
-      await startMapMissionBrief({ source: 'auto_scout' });
-    } finally {
-      // Don't let an unconsumed prefetch (aborted handoff) leak into a later
-      // fly of a different route.
-      missionDirectedPromiseRef.current = null;
-      scoutHandoffRunningRef.current = false;
-    }
-  }
-
   function fallbackMissionNarration(line: string) {
     const clean = line.trim();
     if (!clean) {
@@ -15611,7 +15572,7 @@ function MapScreen() {
           locked ? `${locked} camps set` : null,
           review ? `${review} to review` : null,
         ].filter(Boolean).join(' · ');
-        const base = details ? `Route ready: ${routeName} · ${details}.` : `Route ready: ${routeName}.`;
+        const base = details ? `Route is built: ${routeName} · ${details}.` : `Route is built: ${routeName}.`;
         return locked || preview.active ? `${base} Want me to fly the plan?` : base;
       }
       const spoken = typeof result.spoken_summary === 'string' ? result.spoken_summary.trim() : '';
@@ -25637,7 +25598,7 @@ function MapScreen() {
               onPress={() => { startMapMissionBrief(); }}
               accessibilityLabel="Fly the Plan"
             >
-              <Ionicons name="sparkles-outline" size={13} color={C.orange} />
+              <Ionicons name="play-circle-outline" size={13} color={C.orange} />
               <Text style={s.tripPanelEditText}>FLY PLAN</Text>
             </TouchableOpacity>
             <TouchableOpacity

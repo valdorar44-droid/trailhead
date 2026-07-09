@@ -463,10 +463,10 @@ export default function RouteScoutPanel({
         </TouchableOpacity>
         {showFlyPlan && onFlyPlan ? (
           <TouchableOpacity style={[s.action, s.actionFlyPlan]} onPress={onFlyPlan}>
-            <Ionicons name="sparkles-outline" size={13} color={C.orange} />
+            <Ionicons name="play-circle-outline" size={13} color={C.orange} />
             <View style={s.flyPlanCopy}>
               <Text style={[s.actionText, s.actionFlyPlanText]}>Fly the Plan</Text>
-              <Text style={s.actionFlyPlanSub}>Co-Pilot briefing</Text>
+              <Text style={s.actionFlyPlanSub}>Map flyover</Text>
             </View>
           </TouchableOpacity>
         ) : null}

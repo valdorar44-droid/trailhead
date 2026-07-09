@@ -163,14 +163,14 @@ function compactRouteScoutSummary(output: Record<string, unknown> | void): strin
   const locked = plans.filter((plan: any) => String(plan?.campStatus || plan?.status || '').toLowerCase() === 'locked').length;
   const review = plans.filter((plan: any) => ['review', 'missing'].includes(String(plan?.campStatus || plan?.status || '').toLowerCase())).length;
   const head = Number.isFinite(days) && destination
-    ? `Route scout ready: ${days} days to ${destination}.`
+    ? `Route is built: ${days} days to ${destination}.`
     : destination
-      ? `Route scout ready for ${destination}.`
-      : 'Route scout ready.';
+      ? `Route is built for ${destination}.`
+      : 'Route is built.';
   const details = locked || review
-    ? ` ${locked} camp${locked === 1 ? '' : 's'} locked${review ? `, ${review} day${review === 1 ? '' : 's'} need review` : ''}.`
+    ? ` ${locked} camp${locked === 1 ? '' : 's'} set${review ? `, ${review} day${review === 1 ? '' : 's'} to review` : ''}.`
     : ' Review the day plan before navigation.';
-  return `${head}${details}`;
+  return `${head}${details} Want me to fly the plan?`;
 }
 
 function shouldIgnoreAssistantTranscript(text: string): boolean {

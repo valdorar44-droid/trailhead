@@ -5732,6 +5732,19 @@ function MapScreen() {
   const webRef       = useRef<any>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
   const navVoiceRef  = useRef<string | undefined>(undefined);
+
+  function postWebMessage(message: string) {
+    const target = webRef.current;
+    const postMessage = target?.postMessage;
+    if (typeof postMessage !== 'function') return false;
+    try {
+      postMessage.call(target, message);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
   const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const [extremeMapboxCapabilities, setExtremeMapboxCapabilities] = useState<ExtremeMapboxCapabilities | null>(
     Platform.OS === 'ios' ? { supported: true, renderer: 'metal', reason: 'supported' } : null
@@ -6782,7 +6795,7 @@ function MapScreen() {
       if (token) { setMapboxToken(token); setStoreToken(token); }
       if (pmKey) setProtomapsKey(pmKey);
       if (webLoadedRef.current) {
-        webRef.current?.postMessage(JSON.stringify({
+        postWebMessage(JSON.stringify({
           type: 'set_token', token,
           style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
           premiumStyle: premiumMapStyle,
@@ -6905,17 +6918,17 @@ function MapScreen() {
   useEffect(() => {
     liveReportsRef.current = liveReports;
     const all = [...liveReports, ...routeAlertsRef.current];
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_reports', reports: all }));
+    postWebMessage(JSON.stringify({ type: 'set_reports', reports: all }));
     // Push just the new live report individually too (in case map isn't ready yet the set_reports will catch it)
     if (liveReports.length > 0) {
-      webRef.current?.postMessage(JSON.stringify({ type: 'add_report', report: liveReports[0] }));
+      postWebMessage(JSON.stringify({ type: 'add_report', report: liveReports[0] }));
     }
   }, [liveReports]);
 
   useEffect(() => {
     routeAlertsRef.current = routeAlerts;
     const all = [...liveReportsRef.current, ...routeAlerts];
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_reports', reports: all }));
+    postWebMessage(JSON.stringify({ type: 'set_reports', reports: all }));
   }, [routeAlerts]);
 
   const mapReports = useMemo(() => {
@@ -7161,14 +7174,14 @@ function MapScreen() {
               .then(applyNativeNavigationState)
               .catch(() => {});
           }
-          webRef.current?.postMessage(JSON.stringify({
+          postWebMessage(JSON.stringify({
             type: active ? 'nav_center' : 'user_pos',
             lat: pos.lat, lng: pos.lng, heading: hdg, speed: rawSpeed,
             zoom: active ? navZoom(rawSpeed) : undefined,
           }));
 
           if (active) {
-            webRef.current?.postMessage(JSON.stringify({ type: 'track_point', lat: pos.lat, lng: pos.lng }));
+            postWebMessage(JSON.stringify({ type: 'track_point', lat: pos.lat, lng: pos.lng }));
           }
 
           if (!active) return;
@@ -7351,8 +7364,8 @@ function MapScreen() {
             setNavIdx(next);
             navRef.current.idx = next;
             setIsApproaching(false);
-            webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: next }));
-            webRef.current?.postMessage(JSON.stringify({
+            postWebMessage(JSON.stringify({ type: 'nav_target', idx: next }));
+            postWebMessage(JSON.stringify({
               type: 'start_route_from',
               lat: pos.lat, lng: pos.lng, fromIdx: next,
             }));
@@ -7446,7 +7459,7 @@ function MapScreen() {
     if (USE_IOS_NATIVE_NAV_ENGINE) stopNavigationSession().catch(() => {});
     const fromIdx = navRef.current.idx;
     const dest = navDestRef.current;
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'route_refresh_from',
       lat: userLoc.lat,
       lng: userLoc.lng,
@@ -8119,7 +8132,7 @@ function MapScreen() {
       })
       .slice(0, MAX_ALL_MAP_POIS);
     setPois(merged);
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: merged }));
+    postWebMessage(JSON.stringify({ type: 'set_pois', pois: merged }));
   }
 
   function poiRadiusForBounds(bounds: { n: number; s: number; e: number; w: number; zoom: number }) {
@@ -8133,7 +8146,7 @@ function MapScreen() {
     if (extremeMapLayerActive && !!extremeConfig?.feature_flags?.search) {
       setPlacesLoading(false);
       setPois([]);
-      webRef.current?.postMessage(JSON.stringify({ type: 'clear_pois' }));
+      postWebMessage(JSON.stringify({ type: 'clear_pois' }));
       return;
     }
     lastPoiFetchRef.current = center;
@@ -8232,7 +8245,7 @@ function MapScreen() {
 
   function setWaterNavLineData(data: WaterNavigationLinesResponse | null) {
     setWaterNavLines(data);
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'set_water_nav_lines',
       data: data ?? { type: 'FeatureCollection', features: [] },
     }));
@@ -8369,7 +8382,7 @@ function MapScreen() {
     setSelectedWaterSpot(card);
     setSafeWaterPanelCollapsed(false);
     nativeMapRef.current?.flyTo(card.lat, card.lng, 12.5, card.name);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly', lat: card.lat, lng: card.lng, zoom: 12.5 }));
+    postWebMessage(JSON.stringify({ type: 'fly', lat: card.lat, lng: card.lng, zoom: 12.5 }));
   }
 
   async function buildWaterCorridor() {
@@ -9153,7 +9166,7 @@ function MapScreen() {
 
   useEffect(() => {
     if (!showPois) {
-      webRef.current?.postMessage(JSON.stringify({ type: 'clear_pois' }));
+      postWebMessage(JSON.stringify({ type: 'clear_pois' }));
       setPois([]);
       poiCacheRef.current.clear();
       lastPoiFetchRef.current = null;
@@ -9169,7 +9182,7 @@ function MapScreen() {
 
   // Sync route options to WebView
   useEffect(() => {
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_route_opts', opts: {
+    postWebMessage(JSON.stringify({ type: 'set_route_opts', opts: {
       avoidTolls: routeOpts.avoidTolls,
       avoidHighways: routeOpts.avoidHighways,
       backRoads: routeOpts.backRoads,
@@ -9189,7 +9202,7 @@ function MapScreen() {
 
   useEffect(() => {
     Animated.spring(navAnim, { toValue: navMode ? 1 : 0, tension: 80, friction: 10, useNativeDriver: true }).start();
-    webRef.current?.postMessage(JSON.stringify({ type: 'nav_active', active: navMode }));
+    postWebMessage(JSON.stringify({ type: 'nav_active', active: navMode }));
     if (navMode) {
       navSpeechHoldUntilRef.current = Date.now() + 7000;
       setShowPanel(false);
@@ -9208,12 +9221,12 @@ function MapScreen() {
         setNavIdx(startIdx);
         navRef.current.idx = startIdx;
         setRouteLegOffset(startIdx);
-        webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: startIdx }));
+        postWebMessage(JSON.stringify({ type: 'nav_target', idx: startIdx }));
         nativeMapRef.current?.setNavTarget(startIdx);
         // Route only the active day/segment first. Longer trips continue segment-by-segment.
         const routeStart = userLoc ?? (waypoints[startIdx] ? { lat: waypoints[startIdx].lat, lng: waypoints[startIdx].lng } : null);
         if (routeStart) {
-          webRef.current?.postMessage(JSON.stringify({
+          postWebMessage(JSON.stringify({
             type: 'start_route_from',
             lat: routeStart.lat, lng: routeStart.lng, fromIdx: startIdx,
           }));
@@ -9249,10 +9262,10 @@ function MapScreen() {
       }
       navDestRef.current = null;
       setNavDest(null);
-      webRef.current?.postMessage(JSON.stringify({ type: 'nav_target', idx: -1 }));
-      webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
+      postWebMessage(JSON.stringify({ type: 'nav_target', idx: -1 }));
+      postWebMessage(JSON.stringify({ type: 'clear_track' }));
       if (waypoints.length === 0) {
-        webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
+        postWebMessage(JSON.stringify({ type: 'nav_reset' }));
         nativeMapRef.current?.resetRoute();
       } else {
         nativeMapRef.current?.stopNavigation();
@@ -9610,7 +9623,7 @@ function MapScreen() {
     setNavDest(dest);
     setShowSearch(false);
     setSearchRouteCard(null);
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'route_to_search',
       lat: dest.lat, lng: dest.lng,
       name: dest.name,
@@ -9636,7 +9649,7 @@ function MapScreen() {
     setSelectedPlace(null);
     navDestRef.current = { lat: dest.lat, lng: dest.lng, name: dest.name, day: 0, type: 'waypoint' };
     setNavDest(navDestRef.current);
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'route_to_search',
       lat: dest.lat, lng: dest.lng,
       name: dest.name,
@@ -9958,7 +9971,7 @@ function MapScreen() {
     routeCumulativeRef.current = routeCumulativeDistances(coords);
     nativeMapRef.current?.restoreRoute(coords, [], [], totalDistance, totalDuration);
     routeOverlayReadyRef.current = true;
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'restore_route',
       coords,
       steps: [],
@@ -9974,7 +9987,7 @@ function MapScreen() {
   }
 
   function postRouteScoutMapMessage(payload: Record<string, unknown>) {
-    webRef.current?.postMessage(JSON.stringify(payload));
+    postWebMessage(JSON.stringify(payload));
   }
 
   function clearRouteScoutPreview() {
@@ -10824,7 +10837,7 @@ function MapScreen() {
     }
 
     nativeMapRef.current?.flyTo(start.lat, start.lng, 9, start.name);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: start.lat, lng: start.lng, zoom: 9, name: start.name }));
+    postWebMessage(JSON.stringify({ type: 'fly_to', lat: start.lat, lng: start.lng, zoom: 9, name: start.name }));
     routeScoutPhase(operationId, 'plotting', `Plotting ${start.name} to ${destination.name}...`, 22, { name: start.name, lat: start.lat, lng: start.lng, zoom: 8.6 });
     scheduleRouteScoutPhase(operationId, 1100, 'plotting', `Checking the destination near ${destination.name}...`, 30, { name: destination.name, lat: destination.lat, lng: destination.lng, zoom: 8.4 });
     postRouteScoutMapMessage({
@@ -11025,7 +11038,7 @@ function MapScreen() {
         }
         return merged;
       });
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: selectedCamps }));
+      postWebMessage(JSON.stringify({ type: 'set_camps', pins: selectedCamps }));
     }
     const stops = [
       { day: 0, name: start.name, lat: start.lat, lng: start.lng, type: 'start', label: 'Start', routePointType: 'break' as const, routeShapeRole: 'start' as const, source: 'copilot' },
@@ -12866,12 +12879,12 @@ function MapScreen() {
     const appliedZoom = await (nativeMapRef.current?.setZoom?.(nextZoom, focus) ?? Promise.resolve(null)).catch(() => null);
     const finalZoom = Number.isFinite(Number(appliedZoom)) ? Number(appliedZoom) : nextZoom;
     if (focus) {
-      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: focus.lat, lng: focus.lng, zoom: finalZoom, name: focus.name }));
+      postWebMessage(JSON.stringify({ type: 'fly_to', lat: focus.lat, lng: focus.lng, zoom: finalZoom, name: focus.name }));
     } else {
       const nativeCenter = await (nativeMapRef.current?.getVisibleCenter?.() ?? Promise.resolve(null)).catch(() => null);
       const center = nativeCenter ? { lng: Number(nativeCenter[0]), lat: Number(nativeCenter[1]) } : currentCopilotMapPoint();
       if (center && Number.isFinite(center.lat) && Number.isFinite(center.lng)) {
-        webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: finalZoom, name: 'current map view' }));
+        postWebMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: finalZoom, name: 'current map view' }));
       }
     }
     if (viewportRef.current) viewportRef.current = { ...viewportRef.current, zoom: finalZoom };
@@ -13353,7 +13366,7 @@ function MapScreen() {
     if (camp?.lat && camp?.lng) {
       api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
       nativeMapRef.current?.flyTo(camp.lat, camp.lng, 11, camp.name);
-      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, zoom: 11, name: camp.name }));
+      postWebMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, zoom: 11, name: camp.name }));
     }
   }
 
@@ -13382,11 +13395,11 @@ function MapScreen() {
         duration: 760,
         mode: 'flyTo',
       });
-      webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom: scenicZoom, pitch: 64, bearing: -28, name: place.name }));
+      postWebMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom: scenicZoom, pitch: 64, bearing: -28, name: place.name }));
       return;
     }
     nativeMapRef.current?.flyTo(place.lat, place.lng, zoom, place.name);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
+    postWebMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, zoom, name: place.name }));
   }
 
   function map3dFocusOptions(zoom: number, kind: 'place' | 'trail' = 'place') {
@@ -13418,7 +13431,7 @@ function MapScreen() {
     } else {
       nativeMapRef.current?.flyTo(point.lat, point.lng, camera.zoom, point.name);
     }
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'fly_to',
       lat: point.lat,
       lng: point.lng,
@@ -13815,7 +13828,7 @@ function MapScreen() {
     }
     mapMissionStyleSnapshotRef.current = null;
     if (!USE_NATIVE_MAP) {
-      webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_stop' }));
+      postWebMessage(JSON.stringify({ type: 'mission_brief_stop' }));
     }
   }
 
@@ -13896,7 +13909,7 @@ function MapScreen() {
     });
     mapMissionPlayerRef.current?.markNarrationDone();
     if (!USE_NATIVE_MAP) {
-      webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'markNarrationDone' }));
+      postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'markNarrationDone' }));
     }
     setCopilotBriefPresence(mapMissionPresenceAfterSpeechRef.current);
   }
@@ -14216,7 +14229,7 @@ function MapScreen() {
     if (USE_NATIVE_MAP) {
       mapMissionPlayerRef.current?.setSpeed(next);
     } else {
-      webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setSpeed', speed: next }));
+      postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setSpeed', speed: next }));
     }
     Haptics.selectionAsync().catch(() => {});
   }
@@ -14268,7 +14281,7 @@ function MapScreen() {
     if (USE_NATIVE_MAP) {
       mapMissionPlayerRef.current?.seekTo(clamped);
     } else {
-      webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'seekTo', ratio: clamped }));
+      postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'seekTo', ratio: clamped }));
     }
     Haptics.selectionAsync().catch(() => {});
   }
@@ -14279,7 +14292,7 @@ function MapScreen() {
     if (USE_NATIVE_MAP) {
       mapMissionPlayerRef.current?.setFreeCamera(next);
     } else {
-      webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setFreeCamera', enabled: next }));
+      postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setFreeCamera', enabled: next }));
     }
     setMapMissionNotice(next ? 'Camera released' : 'Camera following route');
     setTimeout(() => setMapMissionNotice(null), 1800);
@@ -14564,7 +14577,7 @@ function MapScreen() {
       ensure3d: () => {
         if (!map3dEnabled) toggleMap3d();
         if (!USE_NATIVE_MAP) {
-          webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: true }));
+          postWebMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: true }));
         }
       },
       onFullRoute: fullRoute => {
@@ -14655,7 +14668,7 @@ function MapScreen() {
     if (!missionRunningRef.current) return false;
 
     if (!USE_NATIVE_MAP) {
-      webRef.current?.postMessage(JSON.stringify({
+      postWebMessage(JSON.stringify({
         type: 'mission_brief_start',
         scenes: cinematic.scenes,
         route,
@@ -14937,7 +14950,7 @@ function MapScreen() {
         const bounds = copilotBoundsAround(center, 11, query ? 0.45 : 0.35);
         viewportRef.current = bounds;
         nativeMapRef.current?.flyTo(center.lat, center.lng, 11, searchedNear);
-        webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: 11, name: searchedNear }));
+        postWebMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: 11, name: searchedNear }));
         const copilotCampFilters = campLookupFilters(activeFilters) === null ? DEFAULT_CAMP_FILTERS : activeFilters;
         const copilotCampLoadOpts = {
           force: true,
@@ -14965,7 +14978,7 @@ function MapScreen() {
             campSearchSource = 'copilot_camp_search_wide_retry';
             viewportRef.current = wideBounds;
             nativeMapRef.current?.flyTo(center.lat, center.lng, 10, searchedNear);
-            webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: 10, name: searchedNear }));
+            postWebMessage(JSON.stringify({ type: 'fly_to', lat: center.lat, lng: center.lng, zoom: 10, name: searchedNear }));
           }
         }
         const { resultSetId, queryContext } = storeCopilotCampResults(camps, 'camp', {
@@ -15900,7 +15913,7 @@ function MapScreen() {
     if (USE_NATIVE_MAP) {
       nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
     } else {
-      webRef.current?.postMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+      postWebMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
     }
   }
 
@@ -16303,8 +16316,8 @@ function MapScreen() {
     setSearchRouteCard(null);
     navDestRef.current = null;
     setNavDest(null);
-    webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
-    webRef.current?.postMessage(JSON.stringify({ type: 'clear_track' }));
+    postWebMessage(JSON.stringify({ type: 'nav_reset' }));
+    postWebMessage(JSON.stringify({ type: 'clear_track' }));
     nativeMapRef.current?.resetRoute();
     nativeMapRef.current?.stopNavigation();
     stopTrailheadVoice();
@@ -16438,7 +16451,7 @@ function MapScreen() {
   function applyMapLayer(next: MapLayer, premiumStyleOverride?: PremiumMapStyle) {
     const safeLayer = webSafeMapLayer(next);
     setMapLayerState(safeLayer);
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'set_style',
       style: MAP_MODES[safeLayer] ?? MAP_MODES[DEFAULT_MAP_LAYER],
       premiumStyle: premiumStyleOverride ?? premiumMapStyle,
@@ -16448,7 +16461,7 @@ function MapScreen() {
   function toggleMap3d() {
     const next = !map3dEnabled;
     setMap3dEnabled(next);
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: next }));
+    postWebMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: next }));
     if (next && !mapboxToken) {
       setQuickToast('3D view on. Terrain detail loads where available.');
       setTimeout(() => setQuickToast(''), 3200);
@@ -16505,7 +16518,7 @@ function MapScreen() {
       setAreaCamps([]);
       setCampDiscoveryResultKey(boundsKey);
       setCampDiscoveryLoadingKey('');
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: [] }));
+      postWebMessage(JSON.stringify({ type: 'set_camps', pins: [] }));
       if (opts.openSheet) setCampDiscoverySheetDismissed(false);
       setSearchResult(null);
       return [];
@@ -16644,7 +16657,7 @@ function MapScreen() {
         .filter(p => (p.name && p.name.trim()) || UTILITY_PLACE_TYPES.has(String(p.type || ''))) as OsmPoi[];
       if (!opts.campOnly && smartNonCampPois.length > 0) mergePoiBatch(smartNonCampPois, { lat: centerLat, lng: centerLng });
       // Feed results to WebView (legacy path) AND native map
-      webRef.current?.postMessage(JSON.stringify({ type: 'set_camps', pins: tagged }));
+      postWebMessage(JSON.stringify({ type: 'set_camps', pins: tagged }));
       setAreaCamps(tagged);
       campPinsLockUntilRef.current = Date.now() + 12_000;
       setCampDiscoveryResultKey(boundsKey);
@@ -16698,7 +16711,7 @@ function MapScreen() {
         nativeMapRef.current?.restoreRoute(serverRoute.coords, steps, legs, totalDistance, totalDuration);
         setLastRouteCoords(serverRoute.coords);
       } else {
-        webRef.current?.postMessage(JSON.stringify({
+        postWebMessage(JSON.stringify({
           type: 'restore_route',
           coords: serverRoute.coords,
           steps,
@@ -16730,7 +16743,7 @@ function MapScreen() {
         return;
       }
 
-      webRef.current?.postMessage(JSON.stringify({
+      postWebMessage(JSON.stringify({
         type: 'restore_route',
         coords: saved.coords,
         steps,
@@ -16759,7 +16772,7 @@ function MapScreen() {
           return;
         }
 
-        webRef.current?.postMessage(JSON.stringify({
+        postWebMessage(JSON.stringify({
           type: 'restore_route',
           coords: cached.coords,
           steps,
@@ -16958,7 +16971,7 @@ function MapScreen() {
           setNavIdx(bestIdx);
           navRef.current.idx = bestIdx;
         }
-        webRef.current?.postMessage(JSON.stringify({
+        postWebMessage(JSON.stringify({
           type: 'reroute_from',
           lat: msg.lat, lng: msg.lng,
           fromIdx: bestIdx,
@@ -18182,7 +18195,7 @@ function MapScreen() {
 
   useEffect(() => {
     if (USE_NATIVE_MAP) return;
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_trail_capture_mode', active: trailPinCaptureMode }));
+    postWebMessage(JSON.stringify({ type: 'set_trail_capture_mode', active: trailPinCaptureMode }));
   }, [trailPinCaptureMode]);
 
   useEffect(() => {
@@ -18196,7 +18209,7 @@ function MapScreen() {
       protomapsKey,
     });
     const timers = [250, 900, 1800, 3200].map(delay => setTimeout(() => {
-      webRef.current?.postMessage(configMessage);
+      postWebMessage(configMessage);
     }, delay));
     return () => timers.forEach(timer => clearTimeout(timer));
   }, [mapboxToken, mapLayer, premiumMapStyle, protomapsKey, mapHtml]);
@@ -18263,17 +18276,17 @@ function MapScreen() {
   }, [activeRouteProgress, navMode, navIdx, distKm, userLoc, waypoints]);
 
   function toggleDataLayer(key: string, val: boolean) {
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_layer', layer: key, show: val }));
+    postWebMessage(JSON.stringify({ type: 'set_layer', layer: key, show: val }));
   }
 
   function toggleLandOverlay(val: boolean) {
     setShowLands(false);
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_land_overlay', show: false }));
+    postWebMessage(JSON.stringify({ type: 'set_land_overlay', show: false }));
   }
 
   function toggleUsgsOverlay(val: boolean) {
     setShowUsgs(val);
-    webRef.current?.postMessage(JSON.stringify({ type: 'set_usgs_overlay', show: val }));
+    postWebMessage(JSON.stringify({ type: 'set_usgs_overlay', show: val }));
   }
 
   function togglePoiOverlay(val: boolean) {
@@ -18296,7 +18309,7 @@ function MapScreen() {
     isReroutingRef.current = true;
     setRouteProgress(null);
     if (USE_IOS_NATIVE_NAV_ENGINE) stopNavigationSession().catch(() => {});
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'reroute_from',
       lat: userLoc.lat, lng: userLoc.lng,
       fromIdx: navRef.current.idx,
@@ -18310,7 +18323,7 @@ function MapScreen() {
     if (!loc) return;
     setNavCameraFollow(true);
     const hdg = smoothedHdgRef.current ?? userHeading ?? -1;
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'nav_center',
       lat: loc.lat,
       lng: loc.lng,
@@ -18801,7 +18814,7 @@ function MapScreen() {
     setSearchRouteCard(null);
     openPoiFeature(place, day);
     nativeMapRef.current?.flyTo(place.lat, place.lng, 12);
-    webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
+    postWebMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
   }
 
   function openTripPlacesSearch(day?: number) {
@@ -19077,7 +19090,7 @@ function MapScreen() {
         if (bounded.length === 0 && live.length > 0) setQuickToast('Showing nearest live trail places');
         if (visible.length === 0 && visibleTrailPois.length > 0) setQuickToast('Showing visible map trails');
         setPois(mapPois);
-        webRef.current?.postMessage(JSON.stringify({ type: 'set_pois', pois: mapPois }));
+        postWebMessage(JSON.stringify({ type: 'set_pois', pois: mapPois }));
         setSearchResult({ count: Math.max(visible.length, visibleTrailPois.length) });
       } catch {
         setSearchResult({ count: trailDiscoveries.length || -1 });
@@ -19664,7 +19677,7 @@ function MapScreen() {
       setIsRouted(false);
       setRouteProgress(null);
       nativeMapRef.current?.resetRoute();
-      webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
+      postWebMessage(JSON.stringify({ type: 'nav_reset' }));
     }
   }
 
@@ -20170,7 +20183,7 @@ function MapScreen() {
     setLastRouteCoords(plan.coords);
     setIsRouted(true);
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, duration);
-    webRef.current?.postMessage(JSON.stringify({
+    postWebMessage(JSON.stringify({
       type: 'restore_route',
       coords: plan.coords,
       steps,
@@ -21199,7 +21212,7 @@ function MapScreen() {
                 });
                 setShowSearch(false);
                 nativeMapRef.current?.flyTo(lat, lng, 12, name);
-                webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat, lng, name }));
+                postWebMessage(JSON.stringify({ type: 'fly_to', lat, lng, name }));
                 return;
               }
               setSearchRouteCard({ name, lat, lng, dist });
@@ -21209,7 +21222,7 @@ function MapScreen() {
                 const dest = { lat, lng, name, day: 0, type: 'waypoint' as const };
                 navDestRef.current = dest; setNavDest(dest);
                 nativeMapRef.current?.routeToSearch(lat, lng, name, userLoc.lat, userLoc.lng);
-                webRef.current?.postMessage(JSON.stringify({ type: 'route_to_search', lat, lng, name, userLat: userLoc.lat, userLng: userLoc.lng }));
+                postWebMessage(JSON.stringify({ type: 'route_to_search', lat, lng, name, userLat: userLoc.lat, userLng: userLoc.lng }));
               }
               return;
             }
@@ -21292,7 +21305,7 @@ function MapScreen() {
                 setNavDest(null);
                 navDestRef.current = null;
                 nativeMapRef.current?.resetRoute();
-                webRef.current?.postMessage(JSON.stringify({ type: 'nav_reset' }));
+                postWebMessage(JSON.stringify({ type: 'nav_reset' }));
               }
               return;
             }
@@ -21336,16 +21349,16 @@ function MapScreen() {
               apiBase: API_BASE_URL,
               protomapsKey,
             });
-            webRef.current?.postMessage(configMessage);
+            postWebMessage(configMessage);
             if (Platform.OS === 'web') {
               [80, 300, 900].forEach(delay => {
-                setTimeout(() => webRef.current?.postMessage(configMessage), delay);
+                setTimeout(() => postWebMessage(configMessage), delay);
               });
             }
             if (userLoc) {
               const userMessage = JSON.stringify({ type: 'user_pos', lat: userLoc.lat, lng: userLoc.lng });
-              webRef.current?.postMessage(userMessage);
-              if (Platform.OS === 'web') setTimeout(() => webRef.current?.postMessage(userMessage), 350);
+              postWebMessage(userMessage);
+              if (Platform.OS === 'web') setTimeout(() => postWebMessage(userMessage), 350);
             }
           }}
           onError={() => setMapLoadFailed(true)}
@@ -21645,22 +21658,22 @@ function MapScreen() {
                   mapMissionPlayerRef.current?.setFreeCamera(false);
                   mapMissionPlayerRef.current?.replay();
                   if (!USE_NATIVE_MAP) {
-                    webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setFreeCamera', enabled: false }));
-                    webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'replay' }));
+                    postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'setFreeCamera', enabled: false }));
+                    postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'replay' }));
                   }
                 }}
                 onPauseResume={() => {
                   if (mapMissionPaused) {
                     mapMissionPlayerRef.current?.resume();
-                    if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'resume' }));
+                    if (!USE_NATIVE_MAP) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'resume' }));
                   } else {
                     mapMissionPlayerRef.current?.pause();
-                    if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
+                    if (!USE_NATIVE_MAP) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'pause' }));
                   }
                 }}
                 onSkip={() => {
                   mapMissionPlayerRef.current?.skip();
-                  if (!USE_NATIVE_MAP) webRef.current?.postMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'skip' }));
+                  if (!USE_NATIVE_MAP) postWebMessage(JSON.stringify({ type: 'mission_brief_cmd', command: 'skip' }));
                 }}
               />
               <TouchableOpacity style={s.mapMissionBriefClose} onPress={stopMapMissionBrief}>
@@ -23328,7 +23341,7 @@ function MapScreen() {
               setSelectedPlace(richPlace);
               setShowSearch(false);
               nativeMapRef.current?.flyTo(place.lat, place.lng);
-              webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
+              postWebMessage(JSON.stringify({ type: 'fly_to', lat: place.lat, lng: place.lng, name: place.name }));
             }}
             onPreviewRoute={previewSearchRoute}
             onStartNav={() => { setShowSearch(false); navigateToSearch(); }}
@@ -23732,7 +23745,7 @@ function MapScreen() {
           setCampDetail(null); setCampInsight(null); setWikiArticles([]);
           setCampFullness(null); setCampWeather(null);
           nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12, camp.name);
-          webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, name: camp.name }));
+          postWebMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, name: camp.name }));
         }}
         onOpenRelatedTrail={place => {
           cancelRenderedMapboxEnrichment();
@@ -23751,7 +23764,7 @@ function MapScreen() {
           const feature = featureFromPoi(trailPoi, support, 'trailhead');
           if (feature) {
             nativeMapRef.current?.flyTo(feature.lat, feature.lng, 12, feature.name);
-            webRef.current?.postMessage(JSON.stringify({ type: 'fly_to', lat: feature.lat, lng: feature.lng, name: feature.name }));
+            postWebMessage(JSON.stringify({ type: 'fly_to', lat: feature.lat, lng: feature.lng, name: feature.name }));
             openTrailFeature(feature);
           }
         }}
@@ -24831,20 +24844,20 @@ function MapScreen() {
         onRenameArea={renameSavedOfflineArea}
         onDeleteArea={deleteSavedOfflineArea}
         onWebDownloadBbox={opts => {
-          webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_bbox', ...opts }));
+          postWebMessage(JSON.stringify({ type: 'download_tiles_bbox', ...opts }));
           setIsDownloading(true); setDownloadLabel(opts.label);
         }}
         onWebDownloadRoute={opts => {
-          webRef.current?.postMessage(JSON.stringify({ type: 'download_tiles_route', ...opts }));
+          postWebMessage(JSON.stringify({ type: 'download_tiles_route', ...opts }));
           setIsDownloading(true); setDownloadLabel(opts.label);
         }}
         onWebCancelDownload={() => {
-          webRef.current?.postMessage(JSON.stringify({ type: 'cancel_download' }));
+          postWebMessage(JSON.stringify({ type: 'cancel_download' }));
           setIsDownloading(false);
         }}
         onWebClearRegion={label => {
           removeCachedRegion(label);
-          webRef.current?.postMessage(JSON.stringify({ type: 'clear_cached_region', label }));
+          postWebMessage(JSON.stringify({ type: 'clear_cached_region', label }));
         }}
         webIsDownloading={isDownloading}
         webDownloadProgress={downloadProgress}

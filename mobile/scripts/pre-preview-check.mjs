@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -47,6 +48,26 @@ const checks = [
 ];
 
 const failures = [];
+
+function runInlineCheck(label, fn) {
+  console.log(`\n== ${label} ==`);
+  try {
+    fn();
+  } catch (error) {
+    console.error(error?.message ?? String(error));
+    failures.push(label);
+  }
+}
+
+runInlineCheck('Map WebView bridge guard', () => {
+  const mapSource = readFileSync(join(mobileRoot, 'app/(tabs)/map.tsx'), 'utf8');
+  if (!mapSource.includes('function postWebMessage(message: string)')) {
+    throw new Error('Map screen is missing the safe WebView message bridge.');
+  }
+  if (mapSource.includes('webRef.current?.postMessage(')) {
+    throw new Error('Use postWebMessage(...) instead of calling webRef.current?.postMessage(...) directly.');
+  }
+});
 
 for (const check of checks) {
   console.log(`\n== ${check.label} ==`);

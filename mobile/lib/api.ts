@@ -738,6 +738,11 @@ export const api = {
     ),
   getExplorePlace: (placeId: string) =>
     req<ExplorePlaceProfile>(`/api/explore/places/${encodeURIComponent(placeId)}`),
+  getExplorePlacesBulk: (placeIds: string[], forceRefresh = false) =>
+    req<{ schema_version: number; count: number; places: ExplorePlaceProfile[]; missing?: string[]; cache?: { status?: string; ttl_hours?: number } }>('/api/explore/places/bulk', {
+      method: 'POST',
+      body: JSON.stringify({ ids: placeIds, force_refresh: forceRefresh }),
+    }),
   getExploreEnrichment: (params: { q?: string; category?: string; place_id?: string; limit?: number; force_refresh?: boolean } = {}) => {
     const qs = new URLSearchParams({
       limit: String(params.limit ?? 6),
@@ -855,7 +860,7 @@ export const api = {
     req<{ authorized: boolean; charged: number; already_unlocked?: boolean; plan?: boolean; credits: number }>('/api/places/detail/authorize', {
       method: 'POST', body: JSON.stringify({ source, place_id, category }),
     }),
-  ttsSource: async (text: string, mode: 'direction' | 'guide' = 'direction') => ({
+  ttsSource: async (text: string, mode: 'direction' | 'guide' | 'flyover' = 'direction') => ({
     ...(mode === 'guide' && text.length > 1600
       ? { uri: `${BASE}${(await req<{ uri: string }>('/api/audio/tts-session', {
           method: 'POST',

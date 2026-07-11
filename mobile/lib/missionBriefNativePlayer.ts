@@ -47,6 +47,39 @@ export function estimateSpeechMs(text: string | null | undefined): number {
   return words > 0 ? 1500 + words * SPEECH_MS_PER_WORD : 0;
 }
 
+const DEFAULT_PACING: Record<NonNullable<MissionScene['pacing']>['kind'], Required<Pick<NonNullable<MissionScene['pacing']>, 'minDurationMs' | 'maxDurationMs'>> & { groundSpeedMpsCap?: number }> = {
+  scenic_orbit: { minDurationMs: 14000, maxDurationMs: 24000 },
+  scenic_low_pass: { minDurationMs: 10000, maxDurationMs: 18000 },
+  route_leg: { minDurationMs: 10000, maxDurationMs: 30000, groundSpeedMpsCap: 12000 },
+  rejoin: { minDurationMs: 3600, maxDurationMs: 6500 },
+  context: { minDurationMs: 6000, maxDurationMs: 14000 },
+};
+
+function pacingKindForScene(scene: MissionScene): NonNullable<MissionScene['pacing']>['kind'] {
+  if (scene.pacing?.kind) return scene.pacing.kind;
+  if (scene.type === 'route_rejoin') return 'rejoin';
+  if (scene.camera?.mode === 'orbit') return 'scenic_orbit';
+  if (scene.camera?.preset === 'low_pass') return 'scenic_low_pass';
+  if (scene.camera?.mode === 'follow' || scene.type === 'drive_leg' || scene.type === 'day_flyover') return 'route_leg';
+  return 'context';
+}
+
+export function scenePacingDurationMs(scene: MissionScene, speed = 1, routeDistanceM = 0): number {
+  const kind = pacingKindForScene(scene);
+  const defaults = DEFAULT_PACING[kind];
+  const pacing = scene.pacing ?? { kind };
+  const minDurationMs = Math.max(1500, Number(pacing.minDurationMs ?? defaults.minDurationMs));
+  const maxDurationMs = Math.max(minDurationMs, Number(pacing.maxDurationMs ?? defaults.maxDurationMs));
+  let base = Math.max(Number(scene.durationMs) || 12000, minDurationMs);
+  const cap = Number(pacing.groundSpeedMpsCap ?? defaults.groundSpeedMpsCap);
+  let groundSpeedFloorMs = 0;
+  if (Number.isFinite(routeDistanceM) && routeDistanceM > 0 && Number.isFinite(cap) && cap > 0) {
+    groundSpeedFloorMs = (routeDistanceM / cap) * 1000;
+  }
+  const clampedBase = Math.max(minDurationMs, Math.min(maxDurationMs, base));
+  return Math.max(1500, Math.max(clampedBase, groundSpeedFloorMs) / Math.max(0.1, speed));
+}
+
 function sliceRoute(route: [number, number][], slice: [number, number] = [0, 1]): [number, number][] {
   if (route.length < 2) return route;
   const s = Math.max(0, Math.min(1, slice[0] ?? 0));
@@ -328,9 +361,15 @@ export function startNativeMissionBriefPlayer(opts: {
     }
   };
 
+  function sceneRouteDistanceM(scene: MissionScene) {
+    if (!scene.routeSlice || routeTotal <= 0) return 0;
+    const start = Math.max(0, Math.min(1, scene.routeSlice[0] ?? 0));
+    const end = Math.max(start, Math.min(1, scene.routeSlice[1] ?? 1));
+    return Math.max(0, (end - start) * routeTotal);
+  }
+
   function effectiveDuration(scene: MissionScene) {
-    const base = Math.max(SCENE_FLOOR_MS, Number(scene.durationMs) || 12000);
-    return Math.max(1500, base / Math.max(0.1, speed));
+    return scenePacingDurationMs(scene, speed, sceneRouteDistanceM(scene));
   }
 
   function downsample(coords: [number, number][], max: number): [number, number][] {
@@ -587,7 +626,7 @@ export function startNativeMissionBriefPlayer(opts: {
       ? (cam.bearing as number)
       : (lastCamBearing ?? 0);
     const orbitSweepRaw = Number(cam.orbit?.sweepDeg);
-    const orbitSweepDeg = (Number.isFinite(orbitSweepRaw) ? Math.max(30, Math.min(180, orbitSweepRaw)) : 80)
+    const orbitSweepDeg = (Number.isFinite(orbitSweepRaw) ? Math.max(30, Math.min(360, orbitSweepRaw)) : 80)
       * (cam.orbit?.direction === 'ccw' ? -1 : 1);
     const scenePass = lowPassPath;
     // Follow legs must land exactly on their final lead point before the scene

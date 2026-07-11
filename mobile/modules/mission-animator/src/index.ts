@@ -39,6 +39,7 @@ export type MissionDebugEvent = {
 
 type NativeMissionAnimator = {
   isAvailable?: () => boolean | Promise<boolean>;
+  getMissionAnimatorFeatureVersion?: () => number | Promise<number>;
   prepareMissionAnimation?: (payload: MissionAnimationPayload) => boolean | Promise<boolean>;
   startMissionAnimation?: (payload?: MissionAnimationPayload) => boolean | Promise<boolean>;
   pauseMissionAnimation?: () => boolean | Promise<boolean>;
@@ -61,6 +62,24 @@ export async function isMissionAnimatorAvailable(): Promise<boolean> {
   if (!Native?.isAvailable) return false;
   try {
     return !!(await Native.isAvailable());
+  } catch {
+    return false;
+  }
+}
+
+export async function isMissionAnimatorCinematicOrbitAvailable(): Promise<boolean> {
+  if (!Native?.getMissionAnimatorFeatureVersion) return false;
+  try {
+    return Number(await Native.getMissionAnimatorFeatureVersion()) >= 2;
+  } catch {
+    return false;
+  }
+}
+
+export async function isMissionAnimatorScenePacingAvailable(): Promise<boolean> {
+  if (!Native?.getMissionAnimatorFeatureVersion) return false;
+  try {
+    return Number(await Native.getMissionAnimatorFeatureVersion()) >= 3;
   } catch {
     return false;
   }

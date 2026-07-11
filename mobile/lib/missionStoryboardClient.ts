@@ -71,7 +71,7 @@ function cleanCamera(raw: unknown): MissionSceneCamera {
     const sweep = num(orbit.sweepDeg);
     out.orbit = {
       direction: orbit.direction === 'ccw' ? 'ccw' : 'cw',
-      sweepDeg: sweep != null ? Math.max(30, Math.min(180, sweep)) : 90,
+      sweepDeg: sweep != null ? Math.max(30, Math.min(360, sweep)) : 90,
     };
   }
   if (cam.preset === 'low_pass') out.preset = 'low_pass';

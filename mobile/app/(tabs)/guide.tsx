@@ -1766,16 +1766,7 @@ function shouldUseExploreDetailEndpoint(place: ExplorePlaceProfile) {
 }
 
 function shouldPrefetchExploreDetail(place: ExplorePlaceProfile) {
-  if (!shouldUseExploreDetailEndpoint(place)) return false;
-  const text = [
-    place.summary.short_description,
-    place.profile?.story,
-    place.profile?.why_it_matters,
-    place.profile?.what_to_know,
-  ].filter(Boolean).join(' ');
-  return text.length < 260
-    || isExploreThinOpenReference(place)
-    || /\b(managed outdoor area near|blank map|blank camp|live results|legal overnight options)\b/i.test(text);
+  return shouldUseExploreDetailEndpoint(place);
 }
 
 function exploreCampRailTitle(place: ExplorePlaceProfile) {
@@ -2354,7 +2345,7 @@ function GuideScreenContent() {
     }).catch(() => {});
     setExploreExperienceLoadingId(placeId);
     setExploreExperienceErrors(prev => ({ ...prev, [placeId]: '' }));
-    api.getExplorePlaceExperiences(placeId, 12)
+    api.getExplorePlaceExperiences(placeId, 24)
       .then(res => {
         if (cancelled) return;
         const experiences = res.results ?? [];
@@ -2411,7 +2402,7 @@ function GuideScreenContent() {
         }
       }
       const tourOptions = guidedTourQueryOptions(guidedTourCategory, guidedTourSort, guidedTourDate, guidedTourCustomDate, guidedTourFreeCancel);
-      withExploreTimeout(api.getExploreExperiences(center?.lat, center?.lng, center ? 60 : 100, 'viator', 24, effectiveQuery, tourOptions), 30000)
+      withExploreTimeout(api.getExploreExperiences(center?.lat, center?.lng, center ? 60 : 100, 'viator', 48, effectiveQuery, tourOptions), 30000)
         .then(res => {
           if (cancelled) return;
           const results = res.results ?? [];
@@ -2920,12 +2911,15 @@ function GuideScreenContent() {
     () => holdLegacySearchWrapper ? [] : rankedExplore.slice(0, exploreVisibleLimit),
     [holdLegacySearchWrapper, rankedExplore, exploreVisibleLimit],
   );
-  const visibleExplorePrefetchKey = visibleRankedExplore.slice(0, 6).map(({ place }) => place.id).join('|');
+  const detailHydrationWindow = useMemo(
+    () => rankedExplore.slice(0, Math.min(rankedExplore.length, exploreVisibleLimit + EXPLORE_VISIBLE_STEP)),
+    [exploreVisibleLimit, rankedExplore],
+  );
+  const visibleExplorePrefetchKey = detailHydrationWindow.map(({ place }) => place.id).join('|');
 
   useEffect(() => {
     if (tab !== 'explore' || exploreLoading || exploreSearchResolving || holdLegacySearchWrapper) return;
-    const candidates = visibleRankedExplore
-      .slice(0, 4)
+    const candidates = detailHydrationWindow
       .map(({ place }) => place)
       .filter(place => {
         if (!place?.id || !shouldPrefetchExploreDetail(place)) return false;
@@ -2935,11 +2929,16 @@ function GuideScreenContent() {
       });
     if (!candidates.length) return;
     let cancelled = false;
-    Promise.allSettled(candidates.map(place => api.getExplorePlace(place.id))).then(results => {
+    const chunks: string[][] = [];
+    for (let index = 0; index < candidates.length; index += 24) {
+      chunks.push(candidates.slice(index, index + 24).map(place => place.id));
+    }
+    Promise.allSettled(chunks.map(ids => api.getExplorePlacesBulk(ids))).then(results => {
       if (cancelled) return;
       const details = results
-        .filter((result): result is PromiseFulfilledResult<ExplorePlaceProfile> => result.status === 'fulfilled' && !!result.value?.id)
-        .map(result => result.value);
+        .filter((result): result is PromiseFulfilledResult<Awaited<ReturnType<typeof api.getExplorePlacesBulk>>> => result.status === 'fulfilled' && Array.isArray(result.value?.places))
+        .flatMap(result => result.value.places)
+        .filter((place): place is ExplorePlaceProfile => !!place?.id);
       if (!details.length) return;
       setExplorePlaces(current => {
         let changed = false;
@@ -3892,6 +3891,8 @@ function GuideScreenContent() {
         onOpen={openExperienceDetail}
         onSave={saveExperienceToPlanner}
         onShowArea={showExperienceOnMap}
+        initialVisible={12}
+        showMoreStep={12}
       />
     );
   }
@@ -4269,6 +4270,8 @@ function GuideScreenContent() {
                   onOpen={openExperienceDetail}
                   onSave={saveExperienceToPlanner}
                   onShowArea={showExperienceOnMap}
+                  initialVisible={12}
+                  showMoreStep={12}
                 />
               </>
             )}

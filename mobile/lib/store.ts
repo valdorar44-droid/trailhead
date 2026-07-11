@@ -160,24 +160,47 @@ export interface TourTargetRect {
 }
 
 export interface RigProfile {
+  nickname?: string;
   vehicle_type: string;
   year: string;
   make: string;
   model: string;
   trim?: string;
   drive: string;
+  has_low_range?: boolean;
   lift_in: string;
   suspension?: string;
   tire_size?: string;
+  tire_diameter_in?: string;
+  tire_type?: string;
+  full_size_spare?: boolean;
+  spare_count?: string;
   ground_clearance_in: string;
   length_ft: string;
+  width_in?: string;
+  height_ft?: string;
+  wheelbase_in?: string;
+  approach_angle_deg?: string;
+  departure_angle_deg?: string;
+  breakover_angle_deg?: string;
   fuel_range_miles?: string;
   fuel_mpg?: string;
+  tank_capacity_gal?: string;
+  water_capacity_gal?: string;
+  payload_lbs?: string;
   has_winch?: boolean;
   winch_lbs?: string;
   locking_diffs?: string;
   has_skids?: boolean;
   has_rack?: boolean;
+  has_recovery_points?: boolean;
+  has_traction_boards?: boolean;
+  has_air_compressor?: boolean;
+  has_rock_sliders?: boolean;
+  max_trail_difficulty?: string;
+  max_water_depth_in?: string;
+  avoid_narrow_trails?: boolean;
+  avoid_body_damage?: boolean;
   is_towing?: boolean;
   trailer_length_ft?: string;
   tow_capacity_lbs?: string;

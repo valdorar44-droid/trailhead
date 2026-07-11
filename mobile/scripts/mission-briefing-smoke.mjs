@@ -38,7 +38,7 @@ assert(!/we follow the route toward|Continuing toward/i.test(storyboardSource),
   'copilotStoryboard avoids generic connective-leg narration');
 assert(!/Offline maps and fuel planning matter here/i.test(storyboardSource),
   'copilotStoryboard avoids old offline-map narration');
-assert(storyboardSource.includes('the line heads toward') && storyboardSource.includes('Next stretch heads toward'),
+assert(storyboardSource.includes('the line heads toward') && storyboardSource.includes('Then we continue toward'),
   'copilotStoryboard uses cleaner connective-leg narration');
 assert(storyboardSource.includes('overnight stop') && storyboardSource.includes('Fuel stop at'),
   'copilotStoryboard uses plain camp and fuel narration');
@@ -52,10 +52,10 @@ assert(mapBriefSource.includes('missionBeatCaption'), 'mapMissionBrief exports r
 assert(mapBriefSource.includes('sceneNarrationWatchdogMs'), 'mapMissionBrief exports narration watchdog helper');
 assert(mapBriefSource.includes("'fuel_stop', 'monument_orbit', 'poi_flyover'"),
   'live scout flyover speaks fuel and scenic stop beats');
-assert(mapBriefSource.includes('dayStopsForPlan') && mapBriefSource.includes('sweepDeg: 180'),
+assert(mapBriefSource.includes('dayStopsForPlan') && mapBriefSource.includes('sweepDeg: 360'),
   'live scout flyover can add fuel/scenic stops before camp');
 assert(mapBriefSource.includes('The highlighted line heads toward') &&
-  mapBriefSource.includes("We'll circle once, then pick up the route again."),
+  mapBriefSource.includes("We'll circle it, then continue onward."),
   'live scout flyover narration describes line movement and scenic return');
 assert(mapBriefSource.includes("Here's the flyover for") &&
   !mapBriefSource.includes("is built. I'll fly it day by day"),
@@ -100,6 +100,8 @@ assert(mapSource.includes('waitForRouteRenderReady'), 'map waits for route overl
 const storyboardClientSource = readFileSync(join(root, 'lib/missionStoryboardClient.ts'), 'utf8');
 assert(storyboardClientSource.includes('assembleForwardPass'),
   'AI beats are re-woven locally into a guaranteed forward pass');
+assert(storyboardClientSource.includes('Math.min(360, sweep)'),
+  'AI storyboard sanitizer preserves true 360 scenic orbits');
 assert(storyboardClientSource.includes("generated_by !== 'ai'"),
   'backend-fallback storyboards are skipped in favor of the richer local builder');
 assert(/poi_flyover/.test(storyboardSource) && /route_rejoin/.test(storyboardSource),
@@ -117,18 +119,27 @@ assert(webMissionPlayerSource.includes('sweepDeg') && webMissionPlayerSource.inc
 
 const voiceSource = readFileSync(join(root, 'lib/voice.ts'), 'utf8');
 assert(voiceSource.includes('playTrailheadVoice'), 'speakCopilotNarration uses Trailhead voice');
+assert(voiceSource.includes("'flyover'") && voiceSource.includes('cartesia_sonic'),
+  'flyover voice uses dedicated Cartesia Sonic mode');
 
 assert(realtimeSource.includes('waitUntilSpeechIdle'), 'realtime copilot waits for speech idle before handoff');
 assert(realtimeSource.includes('enterDirectorMode'), 'realtime copilot supports director mode on live session');
 assert(realtimeSource.includes('exitDirectorMode'), 'realtime copilot can restore interactive voice after fly');
 assert(realtimeSource.includes('setDirectorSpeechStartHandler'), 'realtime copilot exposes speech-start hook for fallback');
-assert(mapSource.includes('ensureMissionDirectorVoice(true)'), 'mission always forces realtime director voice');
+assert(!mapSource.includes('ensureMissionDirectorVoice(true)'), 'mission flyover no longer forces realtime director voice');
+assert(mapSource.includes('preloadTrailheadVoice'), 'mission prewarms flyover voice clips');
 assert(mapSource.includes('beginMissionSceneBeat(scene, index)'), 'mission narrates from player scene-start events');
 assert(mapSource.includes('missionPrimedSceneIndexRef.current = -1'), 'mission clears stale primed narration state before each run');
 assert(realtimeSource.includes('awaitingSayDoneNonce'), 'realtime copilot tracks per-say narration completion');
 
 const directorSource = readFileSync(join(root, 'lib/cinematicDirector.ts'), 'utf8');
 assert(directorSource.includes('waitForRouteRenderReady'), 'cinematic director waits for route render');
+
+const serverSource = readFileSync(join(root, '../dashboard/server.py'), 'utf8');
+assert(serverSource.includes('CARTESIA_TTS_ENDPOINT'),
+  'backend flyover TTS uses Cartesia Sonic');
+assert(serverSource.includes('if clean == "flyover"'),
+  'backend accepts flyover TTS mode');
 
 // --- Cinematic camera engine ---
 const playerSource = readFileSync(join(root, 'lib/missionBriefNativePlayer.ts'), 'utf8');
@@ -153,6 +164,8 @@ assert(playerSource.includes('destinationPoint') && playerSource.includes('low_p
   'player renders low_pass POI framing');
 assert(playerSource.includes("cam.orbit?.direction === 'ccw'"),
   'player honors AI orbit direction/sweep');
+assert(playerSource.includes('Math.min(360, orbitSweepRaw)'),
+  'JS native player preserves true 360 scenic orbits');
 assert(playerSource.includes('setSpeed'), 'player exposes setSpeed');
 assert(playerSource.includes('onProgressRoute?.([])') && playerSource.includes('onCallouts?.([])'),
   'player clears overlays on stop');
@@ -170,19 +183,26 @@ assert(!missionPlaybackSource.includes('webRef.current?.postMessage(') &&
 
 // --- Speed control UI ---
 const controlsSource = readFileSync(join(root, 'components/copilot/TripPreviewControls.tsx'), 'utf8');
-assert(/PREVIEW_SPEEDS\s*=\s*\[0\.1, 0\.25, 0\.5, 1, 1\.5, 2\]/.test(controlsSource),
+assert(controlsSource.includes('PREVIEW_SPEED_PRESETS') &&
+  controlsSource.includes("label: 'Slow'") &&
+  controlsSource.includes("label: 'Normal'") &&
+  controlsSource.includes("label: 'Fast'"),
   'controls expose slow, normal, and faster flyover speeds');
 assert(controlsSource.includes('onSpeedChange') && controlsSource.includes('TextInput'),
   'controls expose preset and custom speed actions');
 assert(/DEFAULT_PREVIEW_SPEED[^\n]*=\s*1/.test(controlsSource), 'default playback speed is steady');
 assert(controlsSource.includes('PanResponder.create') && controlsSource.includes('accessibilityRole="adjustable"'),
   'controls expose a draggable flyover progress slider');
-assert(controlsSource.includes('onCameraPresetChange') && controlsSource.includes('Tilt') && controlsSource.includes('View'),
-  'controls expose camera view and tilt presets');
+assert(controlsSource.includes('onCameraPresetChange') && controlsSource.includes('Tilt') && controlsSource.includes('Zoom'),
+  'controls expose camera zoom and tilt presets');
+assert(controlsSource.includes('onExitToOverview') && controlsSource.includes('Back to trip overview'),
+  'controls expose a trip overview exit from flyover playback');
 
 // --- Map-first layout wiring ---
 assert(mapSource.includes('initialSpeed: mapMissionSpeedRef.current'), 'map passes playback speed into the player');
 assert(mapSource.includes('applyMapMissionSpeed'), 'map wires preset and custom speed changes');
+assert(mapSource.includes('returnFromMissionToTripOverview') && mapSource.includes('focusTripOverviewCamera'),
+  'map can leave flyover and reframe the trip overview camera');
 assert(mapSource.includes("flyoverMode === 'copilot'") && mapSource.includes("mapMissionFlyoverModeRef.current === 'trail_builder'"),
   'Trail Builder flyover stays visual-only');
 assert(mapSource.includes('consumePendingFlyoverAffirmation') && mapSource.includes("Preparing flyover."),
@@ -192,6 +212,7 @@ assert(!mapSource.includes('<MissionControlPanel'), 'flyover does not show the M
 assert(mapSource.includes('TripPreviewControls'), 'flyover keeps the simple playback controls');
 
 const playbackSource = readFileSync(join(root, 'lib/missionPlayback.ts'), 'utf8');
+assert(playbackSource.includes('cartesia_sonic'), 'mission playback tracks Cartesia Sonic voice path');
 assert(playbackSource.includes('resolveMissionPlaybackMode'), 'missionPlayback exports playback mode resolver');
 assert(playbackSource.includes('speakLiveMissionBeatInput'), 'missionPlayback exports live beat input helper');
 assert(playbackSource.includes('createMissionPlaybackDebug'), 'missionPlayback exports device debug counters');
@@ -200,10 +221,15 @@ assert(mapSource.includes('speakLiveMissionBeatInput'), 'map uses speakLiveMissi
 assert(mapSource.includes('onDebugTick'), 'map tracks camera vs overlay tick counts');
 assert(mapSource.includes('resolveMissionPlaybackMode'), 'map resolves js vs native playback mode');
 assert(mapSource.includes('isMissionAnimatorAvailable'), 'map probes native animator availability');
+assert(mapSource.includes('isMissionAnimatorCinematicOrbitAvailable') && mapSource.includes('native_animator_orbit_available'),
+  'map requires native orbit support before using native cinematic playback');
 
 const animatorSource = readFileSync(join(root, 'modules/mission-animator/src/index.ts'), 'utf8');
 assert(animatorSource.includes('startMissionAnimation'), 'native animator module exposes startMissionAnimation');
 assert(animatorSource.includes('isMissionAnimatorAvailable'), 'native animator module exposes availability probe');
+assert(animatorSource.includes('isMissionAnimatorCinematicOrbitAvailable') &&
+  animatorSource.includes('getMissionAnimatorFeatureVersion'),
+  'native animator JS wrapper exposes cinematic orbit feature detection');
 assert(animatorSource.includes('prepareMissionAnimation'), 'native animator module exposes prepareMissionAnimation');
 assert(animatorSource.includes('clearMissionAnimation'), 'native animator module exposes clearMissionAnimation');
 assert(animatorSource.includes('addMissionSceneStartListener'), 'native animator module exposes scene lifecycle events');
@@ -220,6 +246,8 @@ const iosAnimatorSource = readFileSync(join(root, 'modules/mission-animator/ios/
 assert(animatorConfigSource.includes('TrailheadMissionAnimatorModule'), 'native animator autolink config names the platform module');
 assert(androidAnimatorModuleSource.includes('Name("TrailheadMissionAnimator")') && androidAnimatorSource.includes('internal class TrailheadMissionAnimator'),
   'Android native animator module and implementation are present');
+assert(androidAnimatorModuleSource.includes('getMissionAnimatorFeatureVersion') && androidAnimatorModuleSource.includes('3'),
+  'Android native animator reports cinematic feature version');
 assert(androidAnimatorSource.includes('Choreographer.FrameCallback') && androidAnimatorSource.includes('MapView'),
   'Android native animator owns frame timing and MapView updates');
 assert(androidAnimatorModuleSource.includes('seekMissionAnimation') &&
@@ -231,8 +259,14 @@ assert(androidAnimatorModuleSource.includes('markMissionAnimationNarrationDone')
   androidAnimatorSource.includes('fun markNarrationDone') &&
   androidAnimatorSource.includes('narrationCapSec'),
   'Android native animator waits for narration with a cap');
+assert(androidAnimatorSource.includes('cameraOrbitSweep') &&
+  androidAnimatorSource.includes('tickOrbit') &&
+  androidAnimatorSource.includes('coerceIn(30.0, 360.0)'),
+  'Android native animator supports 360 scenic orbit beats');
 assert(iosAnimatorSource.includes('Name("TrailheadMissionAnimator")') && iosAnimatorSource.includes('private final class NativeMissionAnimator'),
   'iOS native animator module and implementation are present');
+assert(iosAnimatorSource.includes('getMissionAnimatorFeatureVersion') && iosAnimatorSource.includes('3'),
+  'iOS native animator reports cinematic feature version');
 assert(iosAnimatorSource.includes('private func runOnMain') && iosAnimatorSource.includes('Thread.isMainThread'),
   'iOS native animator avoids main-thread sync deadlocks');
 assert(iosAnimatorSource.includes('seekMissionAnimation') &&
@@ -244,6 +278,10 @@ assert(iosAnimatorSource.includes('markMissionAnimationNarrationDone') &&
   iosAnimatorSource.includes('func markNarrationDone') &&
   iosAnimatorSource.includes('narrationCap'),
   'iOS native animator waits for narration with a cap');
+assert(iosAnimatorSource.includes('cameraOrbitSweep') &&
+  iosAnimatorSource.includes('tickOrbit') &&
+  iosAnimatorSource.includes('max(30, min(360'),
+  'iOS native animator supports 360 scenic orbit beats');
 assert((iosAnimatorSource.match(/DispatchQueue\.main\.sync/g) ?? []).length === 1,
   'iOS native animator confines DispatchQueue.main.sync to the guarded helper');
 assert(mapSource.includes('startMissionAnimation(nativePayload)'), 'map starts native animator when available');

@@ -30,6 +30,16 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_CHECK_ON_LAUNCH" android:value="ALWAYS"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATES_LAUNCH_WAIT_MS" android:value="0"/>
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5"/>
+    <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1"/>
+    <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
+    <service android:name=".car.TrailheadCarAppService" android:exported="true">
+      <intent-filter>
+        <action android:name="androidx.car.app.CarAppService"/>
+        <category android:name="androidx.car.app.category.POI"/>
+      </intent-filter>
+    </service>
+    <service android:name="expo.modules.location.services.LocationTaskService" tools:node="remove"/>
+    <service android:name="com.oney.WebRTCModule.MediaProjectionService" tools:node="remove"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true">
       <intent-filter>
         <action android:name="android.intent.action.MAIN"/>
@@ -43,8 +53,6 @@
         <data android:scheme="com.trailhead.app"/>
       </intent-filter>
     </activity>
-    <service android:name="expo.modules.location.services.LocationTaskService" tools:node="remove"/>
-    <service android:name="com.oney.WebRTCModule.MediaProjectionService" tools:node="remove"/>
     <uses-library android:name="org.apache.http.legacy" android:required="false"/>
   </application>
 </manifest>

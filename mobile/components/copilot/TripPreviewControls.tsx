@@ -1,11 +1,16 @@
 import { useMemo, useRef, useState } from 'react';
-import { Keyboard, LayoutChangeEvent, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Keyboard, LayoutChangeEvent, PanResponder, StyleSheet, Text, TextInput, TouchableOpacity, useWindowDimensions, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 
 /** Cinematic playback speeds. Effective scene duration = baseDuration / speed. */
-export const PREVIEW_SPEEDS = [0.1, 0.25, 0.5, 1, 1.5, 2] as const;
+export const PREVIEW_SPEED_PRESETS = [
+  { label: 'Slow', value: 0.65 },
+  { label: 'Normal', value: 1 },
+  { label: 'Fast', value: 1.6 },
+] as const;
+export const PREVIEW_SPEEDS = PREVIEW_SPEED_PRESETS.map(preset => preset.value);
 export type PreviewSpeed = number;
-/** Default to a steady route-preview pace. */
+/** Default to cinematic normal, not raw route-distance playback. */
 export const DEFAULT_PREVIEW_SPEED: PreviewSpeed = 1;
 export const MIN_PREVIEW_SPEED = 0.1;
 export const MAX_PREVIEW_SPEED = 3;
@@ -17,7 +22,13 @@ export function clampPreviewSpeed(speed: number): PreviewSpeed {
 
 export function formatPreviewSpeed(speed: number): string {
   const clamped = clampPreviewSpeed(speed);
-  return `${Number.isInteger(clamped) ? clamped.toFixed(0) : clamped.toFixed(clamped < 1 ? 2 : 1).replace(/0$/, '')}×`;
+  return `${Number.isInteger(clamped) ? clamped.toFixed(0) : clamped.toFixed(clamped < 1 ? 2 : 1).replace(/0$/, '')}x`;
+}
+
+export function labelPreviewSpeed(speed: number): string {
+  const clamped = clampPreviewSpeed(speed);
+  const preset = PREVIEW_SPEED_PRESETS.find(item => Math.abs(item.value - clamped) < 0.001);
+  return preset?.label ?? formatPreviewSpeed(clamped);
 }
 
 export function nextPreviewSpeed(speed: number): PreviewSpeed {
@@ -27,6 +38,7 @@ export function nextPreviewSpeed(speed: number): PreviewSpeed {
 }
 
 type Props = {
+  layoutMode?: 'default' | 'compactFlyover';
   playing: boolean;
   paused: boolean;
   complete: boolean;
@@ -46,11 +58,13 @@ type Props = {
   onSeekMove?: (ratio: number) => void;
   onSeekEnd?: (ratio: number) => void;
   onSpeedChange?: (speed: number) => void;
+  onExitToOverview?: () => void;
   onToggleFreeCamera?: () => void;
   onCameraPresetChange?: (view: 'close' | 'standard' | 'wide', tilt: 'low' | 'trail' | 'high') => void;
 };
 
 export function TripPreviewControls({
+  layoutMode = 'default',
   playing,
   paused,
   complete,
@@ -69,13 +83,18 @@ export function TripPreviewControls({
   onSeekMove,
   onSeekEnd,
   onSpeedChange,
+  onExitToOverview,
   onToggleFreeCamera,
   onCameraPresetChange,
 }: Props) {
-  const speedLabel = formatPreviewSpeed(speed);
+  const { width: viewportWidth } = useWindowDimensions();
+  const compactFlyover = layoutMode === 'compactFlyover';
+  const smallCompact = compactFlyover && viewportWidth < 360;
+  const speedLabel = compactFlyover ? labelPreviewSpeed(speed) : formatPreviewSpeed(speed);
   const [trackWidth, setTrackWidth] = useState(1);
   const [speedOpen, setSpeedOpen] = useState(false);
   const [viewOpen, setViewOpen] = useState(false);
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const [customSpeedText, setCustomSpeedText] = useState(() => String(clampPreviewSpeed(speed)));
   const trackWidthRef = useRef(1);
   const lastSeekRatioRef = useRef(0);
@@ -122,21 +141,232 @@ export function TripPreviewControls({
   };
   const applyView = (view: 'close' | 'standard' | 'wide') => onCameraPresetChange?.(view, tiltPreset);
   const applyTilt = (tilt: 'low' | 'trail' | 'high') => onCameraPresetChange?.(viewPreset, tilt);
+  const showCameraPanel = viewOpen && onCameraPresetChange;
+  const showSpeedPanel = speedOpen && onSpeedChange;
+  const openSpeedPanel = () => {
+    if (onSpeedChange) {
+      setSpeedOpen(open => !open);
+      setViewOpen(false);
+      setOverflowOpen(false);
+      setCustomSpeedText(String(clampPreviewSpeed(speed)));
+      return;
+    }
+    onCycleSpeed?.();
+  };
+  const openCameraPanel = () => {
+    setViewOpen(open => !open);
+    setSpeedOpen(false);
+    setOverflowOpen(false);
+  };
+
+  if (compactFlyover) {
+    const railButtons = [
+      {
+        key: 'replay',
+        icon: 'refresh' as const,
+        label: 'Replay flyover',
+        onPress: onReplay,
+        visible: true,
+      },
+      {
+        key: 'pause',
+        icon: (paused ? 'play' : 'pause') as keyof typeof Ionicons.glyphMap,
+        label: paused ? 'Resume flyover' : 'Pause flyover',
+        onPress: onPauseResume,
+        visible: playing && !complete,
+        active: playing && !paused,
+      },
+      {
+        key: 'skip',
+        icon: 'play-skip-forward' as const,
+        label: 'Skip scene',
+        onPress: onSkip,
+        visible: showSkip && !!onSkip && playing && !complete,
+      },
+      {
+        key: 'overview',
+        icon: 'map-outline' as const,
+        label: 'Back to trip overview',
+        onPress: onExitToOverview,
+        visible: !!onExitToOverview,
+      },
+      {
+        key: 'route',
+        icon: (freeCamera ? 'lock-open-outline' : 'locate-outline') as keyof typeof Ionicons.glyphMap,
+        label: freeCamera ? 'Follow route camera' : 'Free camera',
+        onPress: onToggleFreeCamera,
+        visible: !!onToggleFreeCamera,
+        active: freeCamera,
+      },
+      {
+        key: 'camera',
+        icon: 'camera-outline' as const,
+        label: 'Camera view',
+        onPress: openCameraPanel,
+        visible: !!onCameraPresetChange && !smallCompact,
+        active: viewOpen,
+      },
+      {
+        key: 'speed',
+        icon: 'speedometer-outline' as const,
+        label: `Playback speed ${speedLabel}`,
+        onPress: openSpeedPanel,
+        visible: !!(onSpeedChange || onCycleSpeed) && !smallCompact,
+        active: speedOpen,
+      },
+      {
+        key: 'more',
+        icon: 'ellipsis-horizontal' as const,
+        label: 'More flyover controls',
+        onPress: () => {
+          setOverflowOpen(open => !open);
+          setSpeedOpen(false);
+          setViewOpen(false);
+        },
+        visible: smallCompact,
+        active: overflowOpen,
+      },
+    ].filter(button => button.visible);
+
+    return (
+      <View style={[styles.wrap, styles.compactWrap]}>
+        {showCameraPanel && !smallCompact ? (
+          <View style={styles.compactCameraPanel}>
+            <Text style={styles.compactPanelTitle}>Camera</Text>
+            {(['close', 'standard', 'wide'] as const).map(item => {
+              const active = viewPreset === item;
+              return (
+                <TouchableOpacity key={item} style={[styles.compactMenuRow, active && styles.compactMenuRowActive]} onPress={() => applyView(item)}>
+                  <Text style={[styles.compactMenuText, active && styles.compactMenuTextActive]}>
+                    {item === 'close' ? 'Near' : item === 'standard' ? 'Mid' : 'Wide'}
+                  </Text>
+                  {active ? <Ionicons name="checkmark" size={15} color="#101820" /> : null}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
+        {showSpeedPanel && !smallCompact ? (
+          <View style={styles.compactSpeedSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.compactPanelTitle}>Speed</Text>
+            {PREVIEW_SPEED_PRESETS.map(item => {
+              const active = Math.abs(clampPreviewSpeed(speed) - item.value) < 0.001;
+              return (
+                <TouchableOpacity key={item.label} style={[styles.compactMenuRow, active && styles.compactMenuRowActive]} onPress={() => applySpeed(item.value)}>
+                  <Text style={[styles.compactMenuText, active && styles.compactMenuTextActive]}>{item.label}</Text>
+                  {active ? <Ionicons name="checkmark" size={15} color="#101820" /> : null}
+                </TouchableOpacity>
+              );
+            })}
+            <View style={styles.compactCustomRow}>
+              <Text style={styles.compactMenuText}>Custom</Text>
+              <TextInput
+                style={styles.compactSpeedInput}
+                value={customSpeedText}
+                onChangeText={setCustomSpeedText}
+                onSubmitEditing={submitCustomSpeed}
+                onBlur={submitCustomSpeed}
+                keyboardType="decimal-pad"
+                returnKeyType="done"
+                selectTextOnFocus
+                maxLength={4}
+              />
+            </View>
+          </View>
+        ) : null}
+        {overflowOpen && smallCompact ? (
+          <View style={styles.compactOverflowSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.compactPanelTitle}>Controls</Text>
+            {onCameraPresetChange ? (
+              <TouchableOpacity style={styles.compactMenuRow} onPress={openCameraPanel}>
+                <Text style={styles.compactMenuText}>Camera</Text>
+                <Text style={styles.compactMenuMeta}>{viewPreset === 'close' ? 'Near' : viewPreset === 'standard' ? 'Mid' : 'Wide'}</Text>
+              </TouchableOpacity>
+            ) : null}
+            {onSpeedChange || onCycleSpeed ? (
+              <TouchableOpacity style={styles.compactMenuRow} onPress={openSpeedPanel}>
+                <Text style={styles.compactMenuText}>Speed</Text>
+                <Text style={styles.compactMenuMeta}>{speedLabel}</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+        {showCameraPanel && smallCompact ? (
+          <View style={styles.compactOverflowSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.compactPanelTitle}>Camera</Text>
+            {(['close', 'standard', 'wide'] as const).map(item => {
+              const active = viewPreset === item;
+              return (
+                <TouchableOpacity key={item} style={[styles.compactMenuRow, active && styles.compactMenuRowActive]} onPress={() => applyView(item)}>
+                  <Text style={[styles.compactMenuText, active && styles.compactMenuTextActive]}>
+                    {item === 'close' ? 'Near' : item === 'standard' ? 'Mid' : 'Wide'}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
+        {showSpeedPanel && smallCompact ? (
+          <View style={styles.compactOverflowSheet}>
+            <View style={styles.sheetHandle} />
+            <Text style={styles.compactPanelTitle}>Speed</Text>
+            {PREVIEW_SPEED_PRESETS.map(item => {
+              const active = Math.abs(clampPreviewSpeed(speed) - item.value) < 0.001;
+              return (
+                <TouchableOpacity key={item.label} style={[styles.compactMenuRow, active && styles.compactMenuRowActive]} onPress={() => applySpeed(item.value)}>
+                  <Text style={[styles.compactMenuText, active && styles.compactMenuTextActive]}>{item.label}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : null}
+        <View style={styles.compactRail}>
+          {railButtons.map(button => (
+            <TouchableOpacity
+              key={button.key}
+              style={[styles.compactBtn, button.active && styles.compactBtnActive]}
+              onPress={button.onPress}
+              accessibilityLabel={button.label}
+            >
+              <Ionicons name={button.icon} size={18} color={button.active ? '#101820' : '#f8fafc'} />
+            </TouchableOpacity>
+          ))}
+        </View>
+        {canSeek ? (
+          <View
+            style={styles.compactTrackHit}
+            onLayout={onTrackLayout}
+            {...panResponder.panHandlers}
+            accessibilityRole="adjustable"
+            accessibilityLabel="Flyover progress"
+          >
+            <View style={styles.compactTrack}>
+              <View style={[styles.trackFill, { width: Math.max(8, clampedProgress * trackWidth) }]} />
+              <View style={[styles.thumb, { left: Math.max(0, Math.min(trackWidth - 14, clampedProgress * trackWidth - 7)) }]} />
+            </View>
+          </View>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View style={styles.wrap}>
       {speedOpen && onSpeedChange ? (
         <View style={styles.speedPanel}>
           <View style={styles.speedGrid}>
-            {PREVIEW_SPEEDS.map(item => {
-              const active = Math.abs(clampPreviewSpeed(speed) - item) < 0.001;
+            {PREVIEW_SPEED_PRESETS.map(item => {
+              const active = Math.abs(clampPreviewSpeed(speed) - item.value) < 0.001;
               return (
                 <TouchableOpacity
-                  key={item}
+                  key={item.label}
                   style={[styles.speedChoice, active && styles.speedChoiceActive]}
-                  onPress={() => applySpeed(item)}
+                  onPress={() => applySpeed(item.value)}
                 >
-                  <Text style={[styles.speedChoiceText, active && styles.speedChoiceTextActive]}>{formatPreviewSpeed(item)}</Text>
+                  <Text style={[styles.speedChoiceText, active && styles.speedChoiceTextActive]}>{item.label}</Text>
                 </TouchableOpacity>
               );
             })}
@@ -163,7 +393,7 @@ export function TripPreviewControls({
       {viewOpen && onCameraPresetChange ? (
         <View style={styles.speedPanel}>
           <View style={styles.panelGroup}>
-            <Text style={styles.customSpeedLabel}>View</Text>
+            <Text style={styles.customSpeedLabel}>Zoom</Text>
             <View style={styles.speedGrid}>
               {(['close', 'standard', 'wide'] as const).map(item => {
                 const active = viewPreset === item;
@@ -174,7 +404,7 @@ export function TripPreviewControls({
                     onPress={() => applyView(item)}
                   >
                     <Text style={[styles.speedChoiceText, active && styles.speedChoiceTextActive]}>
-                      {item === 'close' ? 'Close' : item === 'standard' ? 'Mid' : 'Wide'}
+                      {item === 'close' ? 'Near' : item === 'standard' ? 'Mid' : 'Wide'}
                     </Text>
                   </TouchableOpacity>
                 );
@@ -221,6 +451,16 @@ export function TripPreviewControls({
             <Ionicons name="play-skip-forward" size={15} color="#f8fafc" />
           </TouchableOpacity>
         ) : null}
+        {onExitToOverview ? (
+          <TouchableOpacity
+            style={[styles.btn, styles.overviewBtn]}
+            onPress={onExitToOverview}
+            accessibilityLabel="Back to trip overview"
+          >
+            <Ionicons name="return-up-back-outline" size={14} color="#fdba74" />
+            <Text style={styles.overviewText}>Overview</Text>
+          </TouchableOpacity>
+        ) : null}
         {onToggleFreeCamera ? (
           <TouchableOpacity
             style={[styles.btn, styles.freeBtn, freeCamera && styles.freeBtnActive]}
@@ -241,20 +481,13 @@ export function TripPreviewControls({
             accessibilityLabel="Camera view"
           >
             <Ionicons name="eye-outline" size={14} color="#f8fafc" />
+            <Text style={styles.freeText}>{viewPreset === 'close' ? 'Near' : viewPreset === 'standard' ? 'Mid' : 'Wide'}</Text>
           </TouchableOpacity>
         ) : null}
         {onSpeedChange || onCycleSpeed ? (
           <TouchableOpacity
             style={[styles.btn, styles.speedBtn]}
-            onPress={() => {
-              if (onSpeedChange) {
-                setSpeedOpen(open => !open);
-                if (viewOpen) setViewOpen(false);
-                setCustomSpeedText(String(clampPreviewSpeed(speed)));
-                return;
-              }
-              onCycleSpeed?.();
-            }}
+            onPress={openSpeedPanel}
             accessibilityLabel={`Playback speed ${speedLabel}. Tap to change.`}
           >
             <Ionicons name="speedometer-outline" size={14} color="#fdba74" />
@@ -285,7 +518,180 @@ const styles = StyleSheet.create({
     minWidth: 210,
     gap: 7,
   },
-  row: { flexDirection: 'row', gap: 8 },
+  compactWrap: {
+    width: '100%',
+    minWidth: 0,
+    alignItems: 'center',
+  },
+  compactRail: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    alignSelf: 'stretch',
+    gap: 6,
+    minHeight: 62,
+    paddingHorizontal: 10,
+    paddingVertical: 9,
+    borderRadius: 28,
+    backgroundColor: 'rgba(8,12,18,.93)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.14)',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 10,
+  },
+  compactBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.08)',
+  },
+  compactBtnActive: {
+    backgroundColor: '#bef995',
+    borderColor: '#dcfce7',
+  },
+  compactCameraPanel: {
+    position: 'absolute',
+    right: 16,
+    bottom: 78,
+    width: 182,
+    gap: 7,
+    padding: 12,
+    borderRadius: 18,
+    backgroundColor: 'rgba(8,12,18,.95)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.14)',
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 11,
+  },
+  compactSpeedSheet: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 78,
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingTop: 13,
+    paddingBottom: 14,
+    borderRadius: 22,
+    backgroundColor: 'rgba(8,12,18,.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.14)',
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 11,
+  },
+  compactOverflowSheet: {
+    position: 'absolute',
+    left: 14,
+    right: 14,
+    bottom: 78,
+    gap: 7,
+    paddingHorizontal: 14,
+    paddingTop: 13,
+    paddingBottom: 14,
+    borderRadius: 22,
+    backgroundColor: 'rgba(8,12,18,.96)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.14)',
+    shadowColor: '#000',
+    shadowOpacity: 0.32,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 11,
+  },
+  sheetHandle: {
+    alignSelf: 'center',
+    width: 42,
+    height: 4,
+    borderRadius: 2,
+    marginBottom: 4,
+    backgroundColor: 'rgba(255,255,255,.38)',
+  },
+  compactPanelTitle: {
+    color: '#f8fafc',
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  compactMenuRow: {
+    minHeight: 34,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,.045)',
+  },
+  compactMenuRowActive: {
+    backgroundColor: '#bef995',
+  },
+  compactMenuText: {
+    color: '#f8fafc',
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  compactMenuTextActive: {
+    color: '#101820',
+  },
+  compactMenuMeta: {
+    color: 'rgba(248,250,252,.66)',
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  compactCustomRow: {
+    minHeight: 38,
+    borderRadius: 16,
+    paddingLeft: 12,
+    paddingRight: 6,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    backgroundColor: 'rgba(255,255,255,.045)',
+  },
+  compactSpeedInput: {
+    width: 72,
+    height: 30,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    color: '#f8fafc',
+    fontSize: 13,
+    fontWeight: '900',
+    backgroundColor: 'rgba(255,255,255,.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,.12)',
+  },
+  compactTrackHit: {
+    alignSelf: 'stretch',
+    height: 22,
+    justifyContent: 'center',
+    paddingHorizontal: 14,
+  },
+  compactTrack: {
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(248,250,252,.20)',
+    overflow: 'visible',
+  },
+  row: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 8 },
   speedPanel: {
     alignSelf: 'flex-end',
     width: 244,
@@ -385,6 +791,11 @@ const styles = StyleSheet.create({
   freeBtn: {
     gap: 5,
   },
+  overviewBtn: {
+    borderColor: 'rgba(251,146,60,.45)',
+    backgroundColor: 'rgba(8,12,18,.9)',
+  },
+  overviewText: { color: '#fdba74', fontSize: 11, fontWeight: '900' },
   freeBtnActive: {
     backgroundColor: '#fdba74',
     borderColor: '#fed7aa',

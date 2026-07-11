@@ -26,6 +26,10 @@ class TrailheadMissionAnimatorModule : Module() {
       animator.findMapView() != null
     }
 
+    AsyncFunction("getMissionAnimatorFeatureVersion") {
+      3
+    }
+
     AsyncFunction("prepareMissionAnimation") { payload: Map<String, Any?> ->
       animator.prepare(payload)
     }

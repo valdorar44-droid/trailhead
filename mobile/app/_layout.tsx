@@ -194,6 +194,7 @@ export default function RootLayout() {
       signed_in: !!user,
       rental_interest: preferences.vehicle,
       camping: preferences.camping,
+      camping_styles: preferences.campingStyles,
       party: preferences.party,
     });
     if (welcomeGateSource === 'first_open') {
@@ -368,7 +369,7 @@ export default function RootLayout() {
   useEffect(() => {
     if (welcomeSetupRunId <= 0) return;
     setWelcomeGateSource('profile');
-    setWelcomeGateMode('setup');
+    setWelcomeGateMode('welcome');
     setWelcomeGateVisible(true);
     logWelcomeEvent('welcome_gate_seen', { source: 'profile_setup' });
   }, [welcomeSetupRunId]);

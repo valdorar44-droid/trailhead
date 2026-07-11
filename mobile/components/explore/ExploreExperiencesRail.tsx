@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, Animated, Easing, Image, Linking, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { BookableExperience } from '@/lib/api';
@@ -16,16 +16,25 @@ type Props = {
   onOpen?: (experience: BookableExperience) => void;
   onSave?: (experience: BookableExperience) => void;
   onShowArea?: (experience: BookableExperience) => void;
+  initialVisible?: number;
+  showMoreStep?: number;
 };
 
-export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', variant = 'rail', mediaUrl, onOpen, onSave, onShowArea }: Props) {
+export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', variant = 'rail', mediaUrl, onOpen, onSave, onShowArea, initialVisible, showMoreStep }: Props) {
   const C = useTheme();
+  const listMode = variant === 'list';
+  const defaultVisible = initialVisible ?? (listMode ? 12 : 12);
+  const step = showMoreStep ?? (listMode ? 12 : 12);
+  const [visibleCount, setVisibleCount] = useState(defaultVisible);
+  useEffect(() => {
+    setVisibleCount(defaultVisible);
+  }, [defaultVisible, experiences.length, variant]);
   if (!loading && !error && !experiences.length) return null;
   const subtitle = experiences.length
     ? `${experiences.length} guided trip${experiences.length === 1 ? '' : 's'} nearby`
     : emptySubtitle || (loading ? 'Checking current options' : 'Search a destination to compare options');
-  const listMode = variant === 'list';
-  const visibleExperiences = listMode ? experiences.slice(0, 24) : experiences.slice(0, 12);
+  const visibleExperiences = experiences.slice(0, Math.max(1, visibleCount));
+  const remainingCount = Math.max(0, experiences.length - visibleExperiences.length);
   return (
     <View style={[listMode ? styles.listShell : styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
       <View style={styles.top}>
@@ -73,6 +82,18 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
         )
       ) : loading ? (
         listMode ? <GuidedExperienceListSkeleton /> : <TrailheadRailSkeleton count={3} cardWidth={224} />
+      ) : null}
+      {remainingCount > 0 ? (
+        <TouchableOpacity
+          style={[styles.showMoreButton, { borderColor: C.border, backgroundColor: C.s2 }]}
+          activeOpacity={0.84}
+          onPress={() => setVisibleCount(count => Math.min(experiences.length, count + step))}
+        >
+          <Ionicons name="chevron-down-outline" size={16} color={C.orange} />
+          <Text style={[styles.showMoreText, { color: C.orange }]}>
+            Show {Math.min(step, remainingCount)} more
+          </Text>
+        </TouchableOpacity>
       ) : null}
       {experiences.length ? (
         <Text style={[styles.attribution, { color: C.text3 }]}>Times and prices can change.</Text>
@@ -242,6 +263,8 @@ const styles = StyleSheet.create({
   iconButton: { width: 40, minHeight: 40, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { minHeight: 48, borderWidth: 1, borderRadius: 12, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
   emptyText: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  showMoreButton: { minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
+  showMoreText: { fontSize: 12, fontWeight: '900' },
   attribution: { fontSize: 10.5, lineHeight: 14, fontWeight: '700' },
   skeletonCard: { borderWidth: 1, borderRadius: 16, overflow: 'hidden' },
   skeletonImage: { height: 160 },

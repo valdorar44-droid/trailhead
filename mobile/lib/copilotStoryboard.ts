@@ -1,4 +1,5 @@
 import type { ExplorerCheckpoint, MissionControlBrief, MissionControlRisk } from './api';
+import { buildCinematicHighlights, isCinematicScenicPlace, routeRatioForCinematic } from './cinematicHighlights';
 
 export type MissionSceneType =
   | 'intro'
@@ -34,6 +35,21 @@ export interface MissionSceneLayers {
   warning?: boolean;
 }
 
+export type MissionScenePacingKind =
+  | 'scenic_orbit'
+  | 'scenic_low_pass'
+  | 'route_leg'
+  | 'rejoin'
+  | 'context';
+
+export interface MissionScenePacing {
+  kind: MissionScenePacingKind;
+  minDurationMs?: number;
+  maxDurationMs?: number;
+  /** Cinematic cap for compressed route-leg ground speed. */
+  groundSpeedMpsCap?: number;
+}
+
 export interface MissionSceneCallout {
   id: string;
   title: string;
@@ -41,6 +57,8 @@ export interface MissionSceneCallout {
   lat: number;
   lng: number;
   kind: string;
+  source?: string;
+  source_label?: string;
 }
 
 export interface MissionScene {
@@ -57,6 +75,7 @@ export interface MissionScene {
   rejoinRatio?: number;
   camera: MissionSceneCamera;
   layers: MissionSceneLayers;
+  pacing?: MissionScenePacing;
   narration: string;
   callouts: MissionSceneCallout[];
 }
@@ -99,6 +118,7 @@ const MAX_CAMP_SCENES = 3;
 const MAX_FUEL_SCENES = 2;
 const MAX_TRAIL_SCENES = 2;
 const MAX_MONUMENT_SCENES = 2;
+const MAX_SCENIC_SCENES = 5;
 const MAX_RISK_SCENES = 3;
 const MAX_DAY_SCENES = 5;
 
@@ -163,6 +183,8 @@ function calloutFromPlace(place: StoryboardPlace, kind: string): MissionSceneCal
     lat: place.lat,
     lng: place.lng,
     kind,
+    source: place.source,
+    source_label: place.source_label,
   };
 }
 
@@ -279,9 +301,10 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
       routeSlice: [a, b],
       camera: { mode: 'follow', pitch: 64 },
       layers: {},
+      pacing: { kind: 'route_leg', minDurationMs: 10000, maxDurationMs: 30000, groundSpeedMpsCap: 12000 },
       narration: first
         ? `Leaving ${startTitle || 'the start'}, the line heads toward ${target}.`
-        : `Next stretch heads toward ${target}.`,
+        : `Then we continue toward ${target}.`,
       callouts: [],
     };
   };
@@ -306,6 +329,7 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
         rejoinRatio: rejoin,
         camera: { mode: 'fly' },
         layers: {},
+        pacing: { kind: 'rejoin', minDurationMs: 3600, maxDurationMs: 6500 },
         narration: '',
         callouts: [],
       });
@@ -340,6 +364,13 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
   const validPlaces = (places || []).filter(p => finite(p.lat, p.lng));
   validPlaces.forEach(p => { if (p.source) sources.add(p.source); });
   if (missionBrief) sources.add('mission_control');
+  const scenicPlaces = buildCinematicHighlights({
+    route: cleanRoute,
+    places: validPlaces,
+    max: MAX_SCENIC_SCENES,
+  });
+  if (scenicPlaces.length) sources.add('cinematic_highlights');
+  const scenicKeys = new Set(scenicPlaces.map(place => `${place.lat.toFixed(4)}:${place.lng.toFixed(4)}`));
 
   const startTitle = validCheckpoints[0]?.title || '';
   const endTitle = validCheckpoints.length > 1 ? validCheckpoints[validCheckpoints.length - 1]?.title || '' : '';
@@ -355,6 +386,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     routeSlice: [0, Math.min(0.1, 12 / Math.max(cleanRoute.length, 2))],
     camera: { mode: 'follow', zoom: 13.4, pitch: 66 },
     layers: { terrain: true },
+    pacing: { kind: 'context', minDurationMs: 8000, maxDurationMs: 14000 },
     narration: '',
     callouts: [],
   });
@@ -389,8 +421,9 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         focus: { lat: dayFocus.lat, lng: dayFocus.lng },
         camera: { mode: 'follow', zoom: 12.4, pitch: 66 },
         layers: {},
+        pacing: { kind: 'route_leg', minDurationMs: 12000, maxDurationMs: 28000, groundSpeedMpsCap: 12000 },
         narration: day === 1
-          ? `Day 1 rolls out toward the first planned stop. ${dayNote || 'Keep the first leg simple and confirm the next camp window before dark.'}`
+          ? `Day 1 rolls out toward the first planned stop. ${dayNote || 'Confirm the next camp window before dark.'}`
           : `Day ${day}. ${dayNote || `This leg runs through ${dayCheckpoints[0].title}.`}`,
         callouts: dayCheckpoints.slice(0, 4).map(cp => ({
           id: cp.id, title: cp.title, note: cp.note, lat: cp.lat, lng: cp.lng, kind: 'checkpoint',
@@ -430,11 +463,12 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         title: camp.title,
         subtitle: camp.day ? `Tonight's camp · Day ${camp.day}` : "Tonight's camp",
         day: camp.day,
-        durationMs: 11000,
+        durationMs: 6200,
         focus: { lat: camp.lat, lng: camp.lng },
-        camera: { mode: 'fly', zoom: 13.2, pitch: 68 },
+        camera: { mode: 'fly', zoom: 12.8, pitch: 60 },
         layers: { terrain: true },
-        narration: `${camp.title} is the ${camp.day ? `day ${camp.day} ` : ''}overnight stop. ${firstSentence(camp.note) || 'It stays close to the route and keeps the day easy to finish.'}`,
+        pacing: { kind: 'context', minDurationMs: 5200, maxDurationMs: 9000 },
+        narration: `${camp.title} is the ${camp.day ? `day ${camp.day} ` : ''}overnight stop. ${firstSentence(camp.note) || 'Confirm the stay before departure.'}`,
         callouts: [calloutFromPlace(camp, 'camp')],
       },
     });
@@ -448,10 +482,11 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
           type: 'camp_arrival',
           title: night.title,
           day: night.day,
-          durationMs: 11000,
+          durationMs: 6200,
           focus: { lat: night.lat, lng: night.lng },
-          camera: { mode: 'fly', zoom: 13.2, pitch: 68 },
+          camera: { mode: 'fly', zoom: 12.8, pitch: 60 },
           layers: { terrain: true },
+          pacing: { kind: 'context', minDurationMs: 5200, maxDurationMs: 9000 },
           subtitle: `Tonight's camp · Day ${night.day}`,
           narration: `${night.title} covers night ${night.day}. ${firstSentence(night.note) || 'Confirm the stay before departure.'}`,
           callouts: [{ id: night.id, title: night.title, note: night.note, lat: night.lat, lng: night.lng, kind: 'camp' }],
@@ -476,18 +511,51 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         title: fuel.title,
         subtitle: fuel.day ? `Fuel · Day ${fuel.day}` : 'Fuel checkpoint',
         day: fuel.day,
-        durationMs: 4600,
+        durationMs: 4200,
         focus: { lat: fuel.lat, lng: fuel.lng },
         camera: { mode: 'fly', zoom: 11.5, pitch: 55 },
         layers: {},
+        pacing: { kind: 'context', minDurationMs: 4200, maxDurationMs: 7200 },
         narration: `Fuel stop at ${fuel.title}. ${firstSentence(fuel.note) || 'Top off here before the next remote stretch.'}`,
         callouts: [calloutFromPlace(fuel, 'fuel')],
       },
     });
   }
 
+  // --- cinematic scenic highlights ---
+  for (const scenic of scenicPlaces) {
+    const kind = String(scenic.type || '').toLowerCase();
+    const ratio = routeRatioForCinematic(cleanRoute, scenic.lat, scenic.lng);
+    const isDriveBy = /\b(scenic_drive|trail)\b/.test(kind);
+    const summary = firstSentence(scenic.note) || 'A real scenic highlight close to this route.';
+    middle.push({
+      priority: 96 + confidenceRank(scenic.confidence),
+      scene: {
+        id: `scene-scenic-${scenic.id}`,
+        type: isDriveBy ? 'poi_flyover' : 'monument_orbit',
+        title: scenic.title,
+        subtitle: 'Scenic stop',
+        day: scenic.day,
+        durationMs: isDriveBy ? 8800 : 11000,
+        routeSlice: [ratio, clampRatio(ratio + 0.015)],
+        focus: { lat: scenic.lat, lng: scenic.lng },
+        rejoinRatio: ratio,
+        camera: isDriveBy
+          ? { mode: 'fly', zoom: 13.5, pitch: 70, preset: 'low_pass' }
+          : { mode: 'orbit', zoom: 12.8, pitch: 66, orbit: { direction: 'cw', sweepDeg: 360 } },
+        layers: { terrain: true },
+        pacing: isDriveBy
+          ? { kind: 'scenic_low_pass', minDurationMs: 10500, maxDurationMs: 18000 }
+          : { kind: 'scenic_orbit', minDurationMs: 14000, maxDurationMs: 24000 },
+        narration: `${scenic.title}. ${summary} Then we continue onward.`,
+        callouts: [calloutFromPlace(scenic, 'scenic')],
+      },
+    });
+  }
+
   // --- trail_flythrough scenes ---
   const trailPlaces = validPlaces
+    .filter(p => !scenicKeys.has(`${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`))
     .filter(p => placeMatches(p.type, ['trail', 'trailhead', 'hike', 'trek', 'climb']))
     .sort((a, b) => confidenceRank(b.confidence) - confidenceRank(a.confidence));
   let trailCount = 0;
@@ -502,11 +570,12 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         title: trail.title,
         subtitle: 'Trail time',
         day: trail.day,
-        durationMs: 5600,
+        durationMs: 6200,
         focus: { lat: trail.lat, lng: trail.lng },
-        camera: { mode: 'fly', zoom: 12.5, pitch: 62 },
+        camera: { mode: 'fly', zoom: 13.2, pitch: 66, preset: 'low_pass' },
         layers: { terrain: true },
-        narration: `${trail.title} is the trail stop on this leg. ${firstSentence(trail.note) || 'Check access and conditions before setting aside time for it.'}`,
+        pacing: { kind: 'scenic_low_pass', minDurationMs: 9000, maxDurationMs: 15000 },
+        narration: `${trail.title}. ${firstSentence(trail.note) || 'Check access and conditions before setting aside time for it.'} Then we continue onward.`,
         callouts: [calloutFromPlace(trail, 'trail')],
       },
     });
@@ -514,9 +583,10 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
 
   // --- monument_orbit scenes ---
   const monumentPlaces = validPlaces
+    .filter(p => !scenicKeys.has(`${p.lat.toFixed(4)}:${p.lng.toFixed(4)}`))
     .filter(p => placeMatches(p.type, [
       'monument', 'historic', 'park', 'viewpoint', 'view', 'scenic', 'waterfall', 'glacier', 'tourism', 'landmark', 'water',
-    ]) && !placeMatches(p.type, ['weather', 'risk', 'trail', 'camp', 'stay', 'fuel']))
+    ]) && isCinematicScenicPlace(p) && !placeMatches(p.type, ['weather', 'risk', 'trail', 'camp', 'stay', 'fuel']))
     .sort((a, b) => confidenceRank(b.confidence) - confidenceRank(a.confidence));
   let monumentCount = 0;
   for (const monument of monumentPlaces) {
@@ -530,11 +600,13 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         title: monument.title,
         subtitle: 'Scenic stop',
         day: monument.day,
-        durationMs: 6200,
+        durationMs: 9800,
         focus: { lat: monument.lat, lng: monument.lng },
-        camera: { mode: 'orbit', zoom: 12, pitch: 62 },
+        rejoinRatio: routeRatioForCinematic(cleanRoute, monument.lat, monument.lng),
+        camera: { mode: 'orbit', zoom: 12.6, pitch: 66, orbit: { direction: 'cw', sweepDeg: 360 } },
         layers: { terrain: true },
-        narration: `${monument.title} stays close to the route. ${firstSentence(monument.note) || 'Worth the stop if daylight holds.'}`,
+        pacing: { kind: 'scenic_orbit', minDurationMs: 14000, maxDurationMs: 24000 },
+        narration: `${monument.title}. ${firstSentence(monument.note) || 'A real scenic stop close to the route.'} Then we continue onward.`,
         callouts: [calloutFromPlace(monument, 'monument')],
       },
     });
@@ -579,6 +651,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
           ? { mode: 'fit', pitch: 45 }
           : { mode: 'fly', zoom: 10.5, pitch: 55 },
         layers: { warning: true },
+        pacing: { kind: 'context', minDurationMs: 5000, maxDurationMs: 9000 },
         narration: type === 'weather_focus'
           ? `Weather watch: ${firstSentence(risk.summary) || risk.title}. Check timing before this segment.`
           : type === 'offline_readiness'
@@ -617,6 +690,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
     routeSlice: [0, 1],
     camera: { mode: 'fit', pitch: 45 },
     layers: { warning: missionBrief?.readiness === 'blocked' },
+    pacing: { kind: 'context', minDurationMs: 6000, maxDurationMs: 11000 },
     narration: recapNarration(missionBrief, tripName),
     callouts: [],
   });

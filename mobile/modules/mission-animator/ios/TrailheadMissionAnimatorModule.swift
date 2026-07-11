@@ -37,6 +37,10 @@ public class TrailheadMissionAnimatorModule: Module {
             self.runOnMain { NativeMissionAnimator.findMapView() != nil }
         }
 
+        AsyncFunction("getMissionAnimatorFeatureVersion") { () -> Int in
+            3
+        }
+
         AsyncFunction("prepareMissionAnimation") { (payload: [String: Any]) -> Bool in
             self.runOnMain { self.animator.prepare(payload: payload) }
         }
@@ -100,7 +104,14 @@ private struct MissionSceneModel {
     let cameraMode: String
     let cameraZoom: Double?
     let cameraPitch: Double?
+    let cameraBearing: Double?
+    let cameraOrbitSweep: Double?
+    let cameraOrbitDirection: String?
     let warning: Bool
+    let pacingKind: String?
+    let pacingMinDurationMs: Double?
+    let pacingMaxDurationMs: Double?
+    let pacingGroundSpeedMpsCap: Double?
 }
 
 private struct MissionPoint { var lat: Double; var lng: Double }
@@ -124,6 +135,8 @@ private final class NativeMissionAnimator: NSObject {
     private var sceneDuration: CFTimeInterval = 7
     private var smoothedBearing: Double?
     private var lastCamDist: Double?
+    private var lastCamBearing: Double?
+    private var orbitBaseBearing: Double = 0
     private var lastProgressEmit: CFTimeInterval = 0
     private var warningActive = false
     private var freeCamera = false
@@ -203,7 +216,7 @@ private final class NativeMissionAnimator: NSObject {
         let elapsed = CACurrentMediaTime() - sceneStartTs - pausedTotal
         let oldDuration = max(0.001, sceneDuration)
         let progress = max(0, min(1, elapsed / oldDuration))
-        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.1, speed))
+        sceneDuration = computeSceneDuration(scene)
         sceneStartTs = CACurrentMediaTime() - (progress * sceneDuration) - pausedTotal
         return true
     }
@@ -232,7 +245,7 @@ private final class NativeMissionAnimator: NSObject {
         let span = max(0.001, scene.routeSliceEnd - scene.routeSliceStart)
         let localT = max(0, min(1, (clamped - scene.routeSliceStart) / span))
         sceneIndex = nextIndex
-        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.1, speed))
+        sceneDuration = computeSceneDuration(scene)
         sceneStartTs = CACurrentMediaTime() - (localT * sceneDuration)
         pausedTotal = 0
         pauseStartedTs = CACurrentMediaTime()
@@ -297,18 +310,66 @@ private final class NativeMissionAnimator: NSObject {
             let end = slice.flatMap { $0.count > 1 ? doubleValue($0[1]) : nil } ?? 1
             let focus = raw["focus"] as? [String: Any]
             let cam = raw["camera"] as? [String: Any] ?? [:]
+            let orbit = cam["orbit"] as? [String: Any]
             let layers = raw["layers"] as? [String: Any] ?? [:]
+            let pacing = raw["pacing"] as? [String: Any] ?? [:]
             let warning = (layers["warning"] as? Bool) == true
+            let sweep = doubleValue(orbit?["sweepDeg"]).map { max(30, min(360, $0)) }
             return MissionSceneModel(
                 id: id, type: type, durationMs: doubleValue(raw["durationMs"]) ?? 12000,
                 routeSliceStart: start, routeSliceEnd: max(start, end),
                 focusLat: doubleValue(focus?["lat"]), focusLng: doubleValue(focus?["lng"]),
                 cameraMode: cam["mode"] as? String ?? "follow",
                 cameraZoom: doubleValue(cam["zoom"]), cameraPitch: doubleValue(cam["pitch"]),
-                warning: warning
+                cameraBearing: doubleValue(cam["bearing"]),
+                cameraOrbitSweep: sweep,
+                cameraOrbitDirection: orbit?["direction"] as? String,
+                warning: warning,
+                pacingKind: pacing["kind"] as? String,
+                pacingMinDurationMs: doubleValue(pacing["minDurationMs"]),
+                pacingMaxDurationMs: doubleValue(pacing["maxDurationMs"]),
+                pacingGroundSpeedMpsCap: doubleValue(pacing["groundSpeedMpsCap"])
             )
         }
         return !scenes.isEmpty
+    }
+
+    private func scenePacingKind(_ scene: MissionSceneModel) -> String {
+        if let kind = scene.pacingKind, !kind.isEmpty { return kind }
+        if scene.type == "route_rejoin" { return "rejoin" }
+        if scene.cameraMode == "orbit" { return "scenic_orbit" }
+        if scene.cameraMode == "follow" || scene.type == "drive_leg" || scene.type == "day_flyover" { return "route_leg" }
+        return "context"
+    }
+
+    private func pacingDefaults(_ kind: String) -> (minMs: Double, maxMs: Double, groundSpeedMpsCap: Double?) {
+        switch kind {
+        case "scenic_orbit": return (14_000, 24_000, nil)
+        case "scenic_low_pass": return (10_000, 18_000, nil)
+        case "route_leg": return (10_000, 30_000, 12_000)
+        case "rejoin": return (3_600, 6_500, nil)
+        default: return (6_000, 14_000, nil)
+        }
+    }
+
+    private func sceneRouteDistanceM(_ scene: MissionSceneModel) -> Double {
+        let start = max(0, min(1, scene.routeSliceStart))
+        let end = max(start, min(1, scene.routeSliceEnd))
+        return max(0, (end - start) * routeTotal)
+    }
+
+    private func computeSceneDuration(_ scene: MissionSceneModel) -> Double {
+        let defaults = pacingDefaults(scenePacingKind(scene))
+        let minMs = max(1500, scene.pacingMinDurationMs ?? defaults.minMs)
+        let maxMs = max(minMs, scene.pacingMaxDurationMs ?? defaults.maxMs)
+        var base = max(scene.durationMs, minMs)
+        let cap = scene.pacingGroundSpeedMpsCap ?? defaults.groundSpeedMpsCap
+        var groundSpeedFloorMs = 0.0
+        if let cap, cap > 0, routeTotal > 0 {
+            groundSpeedFloorMs = (sceneRouteDistanceM(scene) / cap) * 1000
+        }
+        let clamped = max(minMs, min(maxMs, base))
+        return max(1.5, max(clamped, groundSpeedFloorMs) / 1000 / max(0.1, speed))
     }
 
     private func installLayers() {
@@ -385,6 +446,8 @@ private final class NativeMissionAnimator: NSObject {
         }
         if scene.cameraMode == "follow", routeTotal > 0 {
             tickFollow(scene: scene, t: t)
+        } else if scene.cameraMode == "orbit" {
+            tickOrbit(scene: scene, t: t)
         }
         if CACurrentMediaTime() - lastProgressEmit >= 0.5 {
             lastProgressEmit = CACurrentMediaTime()
@@ -405,11 +468,14 @@ private final class NativeMissionAnimator: NSObject {
         narrationDone = false
         sceneStartTs = CACurrentMediaTime()
         pausedTotal = 0
-        sceneDuration = max(7, (scene.durationMs / 1000) / max(0.1, speed))
+        sceneDuration = computeSceneDuration(scene)
         warningActive = scene.warning
         emit("onMissionSceneStart", ["sceneId": scene.id, "index": sceneIndex, "type": scene.type])
+        orbitBaseBearing = scene.cameraBearing ?? lastCamBearing ?? 0
         if scene.cameraMode == "fit", let lat = scene.focusLat, let lng = scene.focusLng {
             setCamera(MissionPoint(lat: lat, lng: lng), zoom: scene.cameraZoom ?? 12, pitch: scene.cameraPitch ?? 54, bearing: nil, animated: true)
+        } else if scene.cameraMode == "orbit", let lat = scene.focusLat, let lng = scene.focusLng {
+            setCamera(MissionPoint(lat: lat, lng: lng), zoom: scene.cameraZoom ?? 12.8, pitch: scene.cameraPitch ?? 66, bearing: orbitBaseBearing, animated: true)
         }
     }
 
@@ -431,7 +497,25 @@ private final class NativeMissionAnimator: NSObject {
         smoothedBearing = smoothAngle(smoothedBearing, target: targetBearing, factor: 0.16)
         let zoom = max(minZoom, min(scene.cameraZoom ?? maxZoom - 0.45, maxZoom))
         setCamera(camPt, zoom: zoom, pitch: scene.cameraPitch ?? cameraPitch, bearing: smoothedBearing, animated: false)
+        lastCamBearing = smoothedBearing ?? targetBearing
         updateProgress(d / max(routeTotal, 1), markerDist: d)
+        emit("onMissionDebug", ["kind": "camera", "details": ["scene_id": scene.id]])
+    }
+
+    private func tickOrbit(scene: MissionSceneModel, t: Double) {
+        guard let lat = scene.focusLat, let lng = scene.focusLng else { return }
+        let direction = scene.cameraOrbitDirection == "ccw" ? -1.0 : 1.0
+        let bearing = orbitBaseBearing + (scene.cameraOrbitSweep ?? 120) * direction * t
+        setCamera(
+            MissionPoint(lat: lat, lng: lng),
+            zoom: min(scene.cameraZoom ?? 12.8, maxZoom),
+            pitch: scene.cameraPitch ?? 66,
+            bearing: bearing,
+            animated: false
+        )
+        lastCamDist = nil
+        lastCamBearing = bearing
+        updateProgress(scene.routeSliceStart, markerDist: routeTotal * scene.routeSliceStart)
         emit("onMissionDebug", ["kind": "camera", "details": ["scene_id": scene.id]])
     }
 
@@ -458,6 +542,7 @@ private final class NativeMissionAnimator: NSObject {
         if animated {
             mapView.camera.ease(to: options, duration: 1.8, curve: .easeInOut) { _ in }
         } else { try? mapView.mapboxMap.setCamera(to: options) }
+        if let bearing { lastCamBearing = bearing }
     }
 
     private func cumulativeDistances(_ route: [[Double]]) -> [Double] {

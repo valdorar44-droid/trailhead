@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile } from '@/lib/api';
 import { useTheme } from '@/lib/design';
@@ -19,7 +19,9 @@ import {
 } from './exploreDisplay';
 
 const SCENIC_FALLBACK_IMAGE = require('@/assets/explore-hero-moraine-lake.jpg');
+const MOUNTAIN_FALLBACK_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
 const TRAIL_FALLBACK_IMAGE = require('@/assets/trail-fallback-backpack-sign.jpg');
+const OVERLAND_FALLBACK_IMAGE = require('@/assets/onboarding-hero-overland.png');
 
 type Props = {
   place: ExplorePlaceProfile;
@@ -159,12 +161,38 @@ function formatMiles(mi: number) {
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
 }
 
-function fallbackImageForPlace(place: ExplorePlaceProfile) {
+function fallbackImageForPlace(place: ExplorePlaceProfile): ImageSourcePropType {
   const category = getExploreCategoryKey(place);
-  if (category === 'camp' || category === 'glamping' || category === 'huts' || category === 'trails' || category === 'trailheads') {
+  if (category === 'trails' || category === 'trailheads' || category === 'climb') {
     return TRAIL_FALLBACK_IMAGE;
   }
-  return SCENIC_FALLBACK_IMAGE;
+  if (category === 'camp' || category === 'glamping' || category === 'huts' || category === 'land') {
+    return seededFallback(place, [OVERLAND_FALLBACK_IMAGE, TRAIL_FALLBACK_IMAGE, MOUNTAIN_FALLBACK_IMAGE]);
+  }
+  if (category === 'peaks' || category === 'views' || category === 'scenic' || category === 'parks') {
+    return seededFallback(place, [MOUNTAIN_FALLBACK_IMAGE, SCENIC_FALLBACK_IMAGE, OVERLAND_FALLBACK_IMAGE]);
+  }
+  if (category === 'water' || category === 'waterfalls' || category === 'springs') {
+    return seededFallback(place, [SCENIC_FALLBACK_IMAGE, MOUNTAIN_FALLBACK_IMAGE, TRAIL_FALLBACK_IMAGE]);
+  }
+  return seededFallback(place, [SCENIC_FALLBACK_IMAGE, MOUNTAIN_FALLBACK_IMAGE, OVERLAND_FALLBACK_IMAGE, TRAIL_FALLBACK_IMAGE]);
+}
+
+function seededFallback(place: ExplorePlaceProfile, images: ImageSourcePropType[]) {
+  const seed = [
+    place.id,
+    place.summary?.title,
+    place.summary?.region,
+    place.summary?.state,
+    place.summary?.lat != null ? Number(place.summary.lat).toFixed(1) : '',
+    place.summary?.lng != null ? Number(place.summary.lng).toFixed(1) : '',
+  ].join('|');
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
+  }
+  const slot = Math.abs(hash) % Math.max(1, images.length);
+  return images[slot] ?? SCENIC_FALLBACK_IMAGE;
 }
 
 function cardSummaryPreview(value?: string | null) {

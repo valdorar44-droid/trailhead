@@ -40,7 +40,13 @@ internal data class MissionSceneModel(
   val cameraZoom: Double?,
   val cameraPitch: Double?,
   val cameraBearing: Double?,
+  val cameraOrbitSweep: Double?,
+  val cameraOrbitDirection: String?,
   val warning: Boolean,
+  val pacingKind: String?,
+  val pacingMinDurationMs: Double?,
+  val pacingMaxDurationMs: Double?,
+  val pacingGroundSpeedMpsCap: Double?,
 )
 
 internal class TrailheadMissionAnimator(
@@ -71,6 +77,7 @@ internal class TrailheadMissionAnimator(
   private var lastCamDist: Double? = null
   private var lastCamPoint: MissionPoint? = null
   private var lastCamBearing: Double? = null
+  private var orbitBaseBearing = 0.0
   private var lastProgressEmitNs = 0L
   private var warningActive = false
   private var layersInstalled = false
@@ -197,7 +204,7 @@ internal class TrailheadMissionAnimator(
       val elapsedSec = (System.nanoTime() - sceneStartNs - pausedTotalNs) / 1_000_000_000.0
       val oldDuration = max(0.001, sceneDurationSec)
       val progress = (elapsedSec / oldDuration).coerceIn(0.0, 1.0)
-      sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.1, speed))
+      sceneDurationSec = computeSceneDurationSec(scene)
       sceneStartNs = System.nanoTime() - ((progress * sceneDurationSec) * 1_000_000_000.0).toLong() - pausedTotalNs
     }
     return true
@@ -227,7 +234,7 @@ internal class TrailheadMissionAnimator(
     val span = (scene.routeSliceEnd - scene.routeSliceStart).coerceAtLeast(0.001)
     val localT = ((clamped - scene.routeSliceStart) / span).coerceIn(0.0, 1.0)
     sceneIndex = nextIndex
-    sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.1, speed))
+    sceneDurationSec = computeSceneDurationSec(scene)
     val now = System.nanoTime()
     sceneStartNs = now - (localT * sceneDurationSec * 1_000_000_000.0).toLong()
     pausedTotalNs = 0L
@@ -314,7 +321,11 @@ internal class TrailheadMissionAnimator(
     @Suppress("UNCHECKED_CAST")
     val camRaw = raw["camera"] as? Map<String, Any?> ?: emptyMap()
     @Suppress("UNCHECKED_CAST")
+    val orbitRaw = camRaw["orbit"] as? Map<String, Any?>
+    @Suppress("UNCHECKED_CAST")
     val layers = raw["layers"] as? Map<String, Any?> ?: emptyMap()
+    @Suppress("UNCHECKED_CAST")
+    val pacing = raw["pacing"] as? Map<String, Any?> ?: emptyMap()
     val warning = layers["warning"] == true ||
       type in listOf("risk_focus", "weather_focus", "offline_readiness")
     return MissionSceneModel(
@@ -329,8 +340,51 @@ internal class TrailheadMissionAnimator(
       cameraZoom = doubleValue(camRaw["zoom"]),
       cameraPitch = doubleValue(camRaw["pitch"]),
       cameraBearing = doubleValue(camRaw["bearing"]),
+      cameraOrbitSweep = doubleValue(orbitRaw?.get("sweepDeg"))?.coerceIn(30.0, 360.0),
+      cameraOrbitDirection = orbitRaw?.get("direction") as? String,
       warning = warning,
+      pacingKind = pacing["kind"] as? String,
+      pacingMinDurationMs = doubleValue(pacing["minDurationMs"]),
+      pacingMaxDurationMs = doubleValue(pacing["maxDurationMs"]),
+      pacingGroundSpeedMpsCap = doubleValue(pacing["groundSpeedMpsCap"]),
     )
+  }
+
+  private fun scenePacingKind(scene: MissionSceneModel): String {
+    scene.pacingKind?.takeIf { it.isNotBlank() }?.let { return it }
+    if (scene.type == "route_rejoin") return "rejoin"
+    if (scene.cameraMode == "orbit") return "scenic_orbit"
+    if (scene.cameraMode == "follow" || scene.type == "drive_leg" || scene.type == "day_flyover") return "route_leg"
+    return "context"
+  }
+
+  private fun pacingDefaults(kind: String): Triple<Double, Double, Double?> = when (kind) {
+    "scenic_orbit" -> Triple(14_000.0, 24_000.0, null)
+    "scenic_low_pass" -> Triple(10_000.0, 18_000.0, null)
+    "route_leg" -> Triple(10_000.0, 30_000.0, 12_000.0)
+    "rejoin" -> Triple(3_600.0, 6_500.0, null)
+    else -> Triple(6_000.0, 14_000.0, null)
+  }
+
+  private fun sceneRouteDistanceM(scene: MissionSceneModel): Double {
+    val start = scene.routeSliceStart.coerceIn(0.0, 1.0)
+    val end = scene.routeSliceEnd.coerceIn(start, 1.0)
+    return max(0.0, (end - start) * routeTotal)
+  }
+
+  private fun computeSceneDurationSec(scene: MissionSceneModel): Double {
+    val kind = scenePacingKind(scene)
+    val defaults = pacingDefaults(kind)
+    val minMs = max(1500.0, scene.pacingMinDurationMs ?: defaults.first)
+    val maxMs = max(minMs, scene.pacingMaxDurationMs ?: defaults.second)
+    var base = max(scene.durationMs, minMs)
+    val cap = scene.pacingGroundSpeedMpsCap ?: defaults.third
+    var groundSpeedFloorMs = 0.0
+    if (cap != null && cap > 0 && routeTotal > 0) {
+      groundSpeedFloorMs = (sceneRouteDistanceM(scene) / cap) * 1000.0
+    }
+    val clamped = base.coerceIn(minMs, maxMs)
+    return max(1.5, max(clamped, groundSpeedFloorMs) / 1000.0 / max(0.1, speed))
   }
 
   private fun installMissionLayers(style: Style) {
@@ -418,6 +472,7 @@ internal class TrailheadMissionAnimator(
 
     when (scene.cameraMode) {
       "follow" -> tickFollow(scene, t)
+      "orbit" -> tickOrbit(scene, t)
       else -> if (scene.type == "whole_route" || scene.cameraMode == "fit") {
         emitProgress(scene, t, routeTotal * (scene.routeSliceStart + (scene.routeSliceEnd - scene.routeSliceStart) * t))
       }
@@ -443,7 +498,7 @@ internal class TrailheadMissionAnimator(
     sceneStartNs = System.nanoTime()
     pausedTotalNs = 0L
     lastProgressEmitNs = 0L
-    sceneDurationSec = max(7.0, (scene.durationMs / 1000.0) / max(0.1, speed))
+    sceneDurationSec = computeSceneDurationSec(scene)
     warningActive = scene.warning
     sceneEstablishSec = applyEstablishingCamera(scene, map) / 1000.0
     emit("onMissionSceneStart", mapOf("sceneId" to scene.id, "index" to sceneIndex, "type" to scene.type))
@@ -476,8 +531,26 @@ internal class TrailheadMissionAnimator(
     emit("onMissionDebug", mapOf("kind" to "camera", "details" to mapOf("scene_id" to scene.id)))
   }
 
+  private fun tickOrbit(scene: MissionSceneModel, t: Double) {
+    val lat = scene.focusLat ?: return
+    val lng = scene.focusLng ?: return
+    val sweep = (scene.cameraOrbitSweep ?: 120.0) * if (scene.cameraOrbitDirection == "ccw") -1.0 else 1.0
+    val bearing = orbitBaseBearing + sweep * t
+    val pt = MissionPoint(lat, lng)
+    if (!freeCamera) {
+      setCamera(pt, min(scene.cameraZoom ?: 12.8, maxZoom), clampPitch(scene.cameraPitch ?: 66.0), bearing, animated = false)
+    }
+    lastCamPoint = pt
+    lastCamDist = null
+    lastCamBearing = bearing
+    val markerDist = routeTotal * scene.routeSliceStart
+    emitProgress(scene, t, markerDist)
+    emit("onMissionDebug", mapOf("kind" to "camera", "details" to mapOf("scene_id" to scene.id)))
+  }
+
   private fun applyEstablishingCamera(scene: MissionSceneModel, map: MapView): Double {
     smoothedBearing = null
+    orbitBaseBearing = scene.cameraBearing ?: lastCamBearing ?: 0.0
     if (scene.cameraMode == "fit" || scene.type in listOf("intro", "whole_route", "mission_recap")) {
       val coords = sliceRoute(scene.routeSliceStart, scene.routeSliceEnd)
       val bounds = boundsFromCoords(coords) ?: return 0.0
@@ -513,7 +586,8 @@ internal class TrailheadMissionAnimator(
     if (lat != null && lng != null) {
       val pt = MissionPoint(lat, lng)
       val zoom = min(scene.cameraZoom ?: 12.5, maxZoom)
-      if (!freeCamera) setCamera(pt, zoom, clampPitch(scene.cameraPitch ?: 62.0), scene.cameraBearing, animated = true, durationMs = 2000)
+      val bearing = if (scene.cameraMode == "orbit") orbitBaseBearing else scene.cameraBearing
+      if (!freeCamera) setCamera(pt, zoom, clampPitch(scene.cameraPitch ?: 62.0), bearing, animated = true, durationMs = 2000)
       lastCamPoint = pt
       lastCamDist = null
       return 2000.0

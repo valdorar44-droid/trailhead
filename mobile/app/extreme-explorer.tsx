@@ -26,12 +26,11 @@ import {
   MissionControlBrief,
   MissionControlRecommendation,
   OsmPoi,
-  TripMemory,
 } from '@/lib/api';
 import { useTheme, mono } from '@/lib/design';
 import { useStore } from '@/lib/store';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
-import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
+import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
 
 type ExplorerWebViewHandle = { injectJavaScript: (js: string) => void };
 
@@ -377,28 +376,6 @@ function placeCardFromDemo(place: DemoPlace): ExplorerPlaceCard {
     access_note: place.day ? `Suggested for day ${place.day}` : undefined,
     route_distance_mi: place.route_distance_mi,
     confidence: place.confidence,
-  };
-}
-
-function tripMemoryFromState(rigProfile: ReturnType<typeof useStore.getState>['rigProfile']): TripMemory {
-  const rangeMiles = Number((rigProfile as any)?.fuel_range_miles || 0);
-  return {
-    vehicle: rigProfile ? {
-      type: rigProfile.vehicle_type,
-      make: rigProfile.make,
-      model: rigProfile.model,
-      year: rigProfile.year,
-    } : undefined,
-    range: rangeMiles ? { miles: rangeMiles } : undefined,
-    clearance: rigProfile?.ground_clearance_in ? { inches: rigProfile.ground_clearance_in } : undefined,
-    trailer: rigProfile?.is_towing ? { length_ft: rigProfile.trailer_length_ft } : undefined,
-    comfort_level: 'remote-ready',
-    preferred_stays: ['public land', 'quiet stays'],
-    avoid_rules: ['uncertain access', 'long fuel gaps'],
-    public_private_preference: 'public first',
-    offline_readiness: {},
-    risk_notes: [],
-    recent_user_edits: [],
   };
 }
 
@@ -946,11 +923,12 @@ export default function ExplorerExplorerScreen() {
     const seed = tripPlaces.length + discoveredPlaces.length + routeExplorePlaces.length > 0 ? [] : fallbackPlaces(route, checkpoints);
     return mergePlaces([...tripPlaces, ...routeExplorePlaces, ...discoveredPlaces, ...seed]);
   }, [checkpoints, discoveredPlaces, route, routeExplorePlaces, tripPlaces]);
-  const tripMemory = useMemo(() => tripMemoryFromState(rigProfile), [rigProfile]);
-  const tripPreferenceContext = useMemo(
-    () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
-    [welcomeSetupPreferences],
+  const trailheadContext = useMemo(
+    () => buildTrailheadUserContext({ preferences: welcomeSetupPreferences, rigProfile, activeTrip }),
+    [welcomeSetupPreferences, rigProfile, activeTrip],
   );
+  const tripPreferenceContext = trailheadContext.tripPreferences;
+  const tripMemory = trailheadContext.tripMemory;
   const summary = useMemo(() => missionBrief?.summary || coPilotSummary(places), [missionBrief?.summary, places]);
   const missionEnabled = config?.feature_flags?.mission_control !== false && config?.feature_flags?.adventure_scores !== false;
   const cinematic = useMemo<MissionCinematic | null>(() => {
@@ -1190,7 +1168,7 @@ export default function ExplorerExplorerScreen() {
           route: { active_route: route.length > 1, route_ready: route.length > 1 },
           user: { trip_preferences: tripPreferenceContext },
           map: { current_screen: 'extreme_explorer' },
-          trip: { active_trip: activeTrip?.trip_id ?? null, route_builder_defaults: tripPreferenceContext?.route_builder ?? null },
+          trip: { active_trip: activeTrip?.trip_id ?? null, route_builder_defaults: trailheadContext.routeBuilderDefaults },
         },
         metadata: { source: Platform.OS, days },
       });

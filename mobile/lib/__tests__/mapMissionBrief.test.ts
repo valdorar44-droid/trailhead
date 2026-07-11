@@ -12,6 +12,8 @@ import {
 } from '@/lib/mapMissionBrief';
 import type { MissionScene } from '@/lib/copilotStoryboard';
 import type { TripResult } from '@/lib/api';
+import { isCinematicScenicPlace, rankCinematicPlaces } from '@/lib/cinematicHighlights';
+import { scenePacingDurationMs } from '@/lib/missionBriefNativePlayer';
 
 function assert(condition: boolean, message: string) {
   if (!condition) throw new Error(`mapMissionBrief contract failed: ${message}`);
@@ -41,7 +43,10 @@ const activeTrip = {
   },
   campsites: [{ id: 'camp-1', name: 'Desert camp', lat: 37.2, lng: -113.5 }],
   gas_stations: [{ id: 'fuel-1', name: 'Chevron Vernal', lat: 40.45, lng: -109.53 }],
-  route_pois: [{ id: 'poi-1', name: 'Scenic overlook', lat: 37.8, lng: -114.2, type: 'viewpoint' }],
+  route_pois: [
+    { id: 'poi-1', name: 'Scenic overlook', lat: 37.8, lng: -114.2, type: 'viewpoint', description: 'Wide canyon views near the route.' },
+    { id: 'poi-2', name: 'Fuel only', lat: 37.9, lng: -114.4, type: 'fuel' },
+  ],
   route_geometry: { coords: moabBigSurRoute },
 } as unknown as TripResult;
 
@@ -77,6 +82,25 @@ assert(
   cinematic!.scenes.some(scene => scene.title.includes('Moab') || String(scene.subtitle || '').includes('Moab')),
   'scenes reference actual route names',
 );
+const scenicScene = cinematic!.scenes.find(scene => scene.type === 'monument_orbit' && scene.title.includes('Scenic overlook'));
+assert(!!scenicScene, 'deterministic cinematic includes real scenic route POIs');
+assert(scenicScene!.camera.orbit?.sweepDeg === 360, 'scenic route POIs get a 360 orbit');
+assert(!cinematic!.scenes.some(scene => scene.title === 'Fuel only' && scene.type === 'monument_orbit'), 'fuel-only stops are not scenic cinematic beats');
+
+const rankedHighlights = rankCinematicPlaces({
+  route: moabBigSurRoute,
+  places: [
+    { id: 'boring-fuel', type: 'fuel', title: 'Gas stop', note: 'Fuel only, not a scenic stop.', lat: 37.1, lng: -113.4, source: 'osm', confidence: 'medium' },
+    { id: 'boring-road', type: 'road', title: 'County Road 12', note: 'Generic county road label.', lat: 37.3, lng: -113.7, source: 'osm', confidence: 'medium' },
+    { id: 'boring-camp', type: 'camp', title: 'Canyon Camp', note: 'Camp logistics only.', lat: 37.4, lng: -113.8, source: 'trip_camp', confidence: 'high' },
+    { id: 'random-desert', type: 'locality', title: 'Dry Desert', note: 'Generic desert label near the route.', lat: 37.5, lng: -113.9, source: 'osm', confidence: 'medium' },
+    { id: 'summary-missing', type: 'viewpoint', title: 'Source Only View', lat: 37.6, lng: -114.0, source: 'nps', confidence: 'high' },
+    { id: 'real-view', type: 'viewpoint', title: 'Canyon Overlook', note: 'Wide view over the canyon.', lat: 37.8, lng: -114.2, source: 'nps', confidence: 'high' },
+  ],
+});
+assert(rankedHighlights.length === 1 && rankedHighlights[0].title === 'Canyon Overlook', 'cinematic highlight scorer keeps scenic places and rejects fuel/roads');
+assert(isCinematicScenicPlace({ type: 'waterfall', title: 'Falls viewpoint', note: 'Waterfall overlook with a clear source.', source: 'nps' }), 'source-backed waterfall viewpoints are scenic');
+assert(!isCinematicScenicPlace({ type: 'viewpoint', title: 'Unnamed View', note: 'Short', source: 'osm' }), 'scenic places require a real summary');
 
 const routePick = getCurrentMissionRoute({
   lastRouteCoords: moabBigSurRoute,
@@ -89,6 +113,10 @@ const majorScene: MissionScene = { id: 's1', type: 'day_flyover', title: 'Day 1'
 const campScene: MissionScene = { id: 's2', type: 'camp_arrival', title: 'Camp', subtitle: '', durationMs: 8000, camera: { mode: 'orbit' }, layers: {}, narration: '', callouts: [] };
 assert(shouldSpeakScene(majorScene), 'shouldSpeakScene includes day_flyover');
 assert(shouldSpeakScene(campScene), 'shouldSpeakScene includes camp_arrival');
+const orbitDuration = scenePacingDurationMs({ ...campScene, pacing: { kind: 'scenic_orbit' } }, 1);
+const routeDuration = scenePacingDurationMs({ ...majorScene, pacing: { kind: 'route_leg', groundSpeedMpsCap: 1000 } }, 1, 60_000);
+assert(orbitDuration >= 14000, '360 orbit pacing has a slow cinematic floor');
+assert(routeDuration >= 60000, 'route leg pacing respects ground-speed caps');
 
 const scoutLive = buildScoutLiveCinematic({
   tripName: 'Moab to Flagstaff',
@@ -104,6 +132,7 @@ const scoutLive = buildScoutLiveCinematic({
     ],
     stops: [
       { day: 1, type: 'camp', name: 'Desert camp', lat: 37.2, lng: -113.5 },
+      { day: 1, type: 'viewpoint', name: 'Canyon overlook', description: 'Wide canyon view.', lat: 37.8, lng: -114.2 },
       { day: 2, type: 'camp', name: 'Pines camp', lat: 35.2, lng: -111.6 },
     ],
   },
@@ -111,6 +140,7 @@ const scoutLive = buildScoutLiveCinematic({
 assert(!!scoutLive && scoutLive.scenes.length >= 4, 'scout live cinematic has leg and camp beats');
 assert(scoutLive!.scenes.some(scene => scene.type === 'drive_leg'), 'scout live includes drive legs');
 assert(scoutLive!.scenes.some(scene => scene.type === 'camp_arrival'), 'scout live includes camp arrivals');
+assert(scoutLive!.scenes.some(scene => scene.type === 'monument_orbit' && scene.camera.orbit?.sweepDeg === 360), 'scout live scenic stops get 360 orbits');
 const introBeat = liveMissionBeatBrief(scoutLive!.scenes.find(scene => scene.type === 'intro')!, {
   startName: 'Moab',
   destinationName: 'Flagstaff',

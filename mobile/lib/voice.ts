@@ -3,11 +3,15 @@ import * as Speech from 'expo-speech';
 import { api } from './api';
 
 type SpeechOptions = Parameters<typeof Speech.speak>[1];
-type VoiceMode = 'direction' | 'guide';
+type VoiceMode = 'direction' | 'guide' | 'flyover';
+type VoiceStartSource = 'cartesia_sonic' | 'device_tts';
 type VoiceCallbacks = {
-  onStart?: () => void;
-  onFinish?: () => void;
-  onFallback?: () => void;
+  onStart?: (source?: VoiceStartSource) => void;
+  onFinish?: (source?: VoiceStartSource) => void;
+  onFallback?: (reason?: string) => void;
+  onUnavailable?: () => void;
+  allowDeviceFallback?: boolean;
+  startTimeoutMs?: number;
 };
 
 const COPILOT_LISTENING_CUE = require('../assets/trail-guide/copilot-listening.wav');
@@ -17,6 +21,45 @@ let activeCueSound: Audio.Sound | null = null;
 let voiceRequestId = 0;
 let audioModeReady: Promise<void> | null = null;
 let cueAudioModeReady: Promise<void> | null = null;
+let deviceVoicePromise: Promise<string | undefined> | null = null;
+const preloadedSounds = new Map<string, { sound: Audio.Sound; createdAt: number }>();
+
+function voiceCacheKey(text: string, mode: VoiceMode) {
+  return `${mode}:${text.trim()}`;
+}
+
+function generatedVoiceSource(_mode: VoiceMode): VoiceStartSource {
+  return 'cartesia_sonic';
+}
+
+function trimPreloadedVoiceCache(limit = 4) {
+  const entries = [...preloadedSounds.entries()].sort((a, b) => a[1].createdAt - b[1].createdAt);
+  while (entries.length > limit) {
+    const [key, item] = entries.shift()!;
+    preloadedSounds.delete(key);
+    item.sound.unloadAsync().catch(() => {});
+  }
+}
+
+async function bestDeviceVoiceId(): Promise<string | undefined> {
+  if (!deviceVoicePromise) {
+    deviceVoicePromise = Speech.getAvailableVoicesAsync()
+      .then(voices => {
+        const en = voices.filter(voice => voice.language === 'en-US' || voice.language?.startsWith('en-US') || voice.language?.startsWith('en-'));
+        const score = (voice: any) => {
+          const haystack = `${voice.identifier || ''} ${voice.name || ''} ${voice.quality || ''}`.toLowerCase();
+          let value = 0;
+          if (/siri|enhanced|premium|neural|natural|google|samsung/.test(haystack)) value += 8;
+          if (/compact|default/.test(haystack)) value -= 3;
+          if (voice.language === 'en-US') value += 2;
+          return value;
+        };
+        return en.sort((a, b) => score(b) - score(a))[0]?.identifier;
+      })
+      .catch(() => undefined);
+  }
+  return deviceVoicePromise;
+}
 
 function ensureVoiceAudioMode() {
   if (!audioModeReady) {
@@ -67,6 +110,23 @@ export async function stopTrailheadVoice() {
   } catch {}
 }
 
+export async function preloadTrailheadVoice(text: string, mode: VoiceMode = 'flyover'): Promise<boolean> {
+  const clean = text.trim();
+  if (!clean) return false;
+  const key = voiceCacheKey(clean, mode);
+  if (preloadedSounds.has(key)) return true;
+  try {
+    await ensureVoiceAudioMode();
+    const source = await api.ttsSource(clean, mode);
+    const { sound } = await Audio.Sound.createAsync(source, { shouldPlay: false });
+    preloadedSounds.set(key, { sound, createdAt: Date.now() });
+    trimPreloadedVoiceCache();
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 export async function playTrailheadCue(name: 'copilotListening') {
   try {
     await ensureCueAudioMode();
@@ -99,18 +159,31 @@ export function speakCinematicNarration(text: string, callbacks?: VoiceCallbacks
   voiceRequestId += 1;
   ensureVoiceAudioMode().catch(() => {});
   try { Speech.stop(); } catch {}
-  Speech.speak(clean, {
-    rate: 0.92,
-    pitch: 1.02,
-    language: 'en-US',
-    onStart: callbacks?.onStart,
-    onDone: callbacks?.onFinish,
-    onStopped: callbacks?.onFinish,
-    onError: callbacks?.onFinish,
+  bestDeviceVoiceId().then(voice => {
+    Speech.speak(clean, {
+      rate: 0.92,
+      pitch: 1.02,
+      language: 'en-US',
+      ...(voice ? { voice } : {}),
+      onStart: () => callbacks?.onStart?.('device_tts'),
+      onDone: () => callbacks?.onFinish?.('device_tts'),
+      onStopped: () => callbacks?.onFinish?.('device_tts'),
+      onError: () => callbacks?.onFinish?.('device_tts'),
+    });
+  }).catch(() => {
+    Speech.speak(clean, {
+      rate: 0.92,
+      pitch: 1.02,
+      language: 'en-US',
+      onStart: () => callbacks?.onStart?.('device_tts'),
+      onDone: () => callbacks?.onFinish?.('device_tts'),
+      onStopped: () => callbacks?.onFinish?.('device_tts'),
+      onError: () => callbacks?.onFinish?.('device_tts'),
+    });
   });
 }
 
-/** Co-Pilot cinematic narration — Trailhead TTS first, device speech fallback. */
+/** Co-Pilot cinematic narration — Cartesia via Trailhead's server-side TTS. */
 export async function speakCopilotNarration(text: string, callbacks?: VoiceCallbacks) {
   return playTrailheadVoice(
     text,
@@ -120,17 +193,28 @@ export async function speakCopilotNarration(text: string, callbacks?: VoiceCallb
   );
 }
 
-/** Flyover narration with a fast local fallback so the camera never waits on a silent voice path. */
+/** Flyover narration: Cartesia Sonic first; no device fallback unless explicitly allowed. */
 export async function speakFlyoverBeat(text: string, callbacks?: VoiceCallbacks) {
   const clean = text.trim();
   if (!clean) return;
+  const allowDeviceFallback = callbacks?.allowDeviceFallback === true;
   let started = false;
   let finished = false;
   let fallbackStarted = false;
-  const startDeviceSpeech = () => {
+  const finishUnavailable = () => {
     if (finished || fallbackStarted) return;
     fallbackStarted = true;
-    callbacks?.onFallback?.();
+    finished = true;
+    callbacks?.onUnavailable?.();
+  };
+  const startDeviceSpeech = () => {
+    if (finished || fallbackStarted) return;
+    if (!allowDeviceFallback) {
+      finishUnavailable();
+      return;
+    }
+    fallbackStarted = true;
+    callbacks?.onFallback?.('cartesia_voice_unavailable');
     stopTrailheadVoice().catch(() => {});
     speakCinematicNarration(clean, {
       onStart: () => {
@@ -145,20 +229,24 @@ export async function speakFlyoverBeat(text: string, callbacks?: VoiceCallbacks)
   };
   const startTimer = setTimeout(() => {
     if (!started && !finished) startDeviceSpeech();
-  }, 1200);
+  }, callbacks?.startTimeoutMs ?? 2400);
   try {
-    await playTrailheadVoice(clean, 'guide', { rate: 0.9, pitch: 1, language: 'en-US' }, {
-      onStart: () => {
+    await playTrailheadVoice(clean, 'flyover', allowDeviceFallback ? { rate: 0.9, pitch: 1, language: 'en-US' } : false, {
+      onStart: source => {
         if (fallbackStarted || finished) return;
         started = true;
         clearTimeout(startTimer);
-        callbacks?.onStart?.();
+        callbacks?.onStart?.(source);
       },
-      onFinish: () => {
+      onFinish: source => {
         if (finished) return;
         finished = true;
         clearTimeout(startTimer);
-        callbacks?.onFinish?.();
+        callbacks?.onFinish?.(source);
+      },
+      onFallback: () => {
+        clearTimeout(startTimer);
+        startDeviceSpeech();
       },
     });
   } catch {
@@ -167,7 +255,7 @@ export async function speakFlyoverBeat(text: string, callbacks?: VoiceCallbacks)
   }
 }
 
-export async function playTrailheadVoice(text: string, mode: VoiceMode, fallbackOptions?: SpeechOptions, callbacks?: VoiceCallbacks) {
+export async function playTrailheadVoice(text: string, mode: VoiceMode, fallbackOptions?: SpeechOptions | false, callbacks?: VoiceCallbacks) {
   const clean = text.trim();
   if (!clean) return;
   const requestId = voiceRequestId + 1;
@@ -177,39 +265,51 @@ export async function playTrailheadVoice(text: string, mode: VoiceMode, fallback
   try {
     await ensureVoiceAudioMode();
     if (requestId !== voiceRequestId) return;
-    const source = await api.ttsSource(clean, mode);
-    if (requestId !== voiceRequestId) return;
-    const { sound } = await Audio.Sound.createAsync(
-      source,
-      { shouldPlay: true },
-      status => {
-        if ('didJustFinish' in status && status.didJustFinish) {
-          sound.unloadAsync().catch(() => {});
-          if (activeSound === sound) activeSound = null;
-          callbacks?.onFinish?.();
-        }
-      },
-    );
+    const key = voiceCacheKey(clean, mode);
+    const cached = preloadedSounds.get(key);
+    let sound = cached?.sound ?? null;
+    if (cached) preloadedSounds.delete(key);
+    if (!sound) {
+      const source = await api.ttsSource(clean, mode);
+      if (requestId !== voiceRequestId) return;
+      const created = await Audio.Sound.createAsync(source, { shouldPlay: false });
+      sound = created.sound;
+    }
     if (requestId !== voiceRequestId) {
       await sound.stopAsync().catch(() => {});
       await sound.unloadAsync().catch(() => {});
       return;
     }
     activeSound = sound;
-    callbacks?.onStart?.();
+    sound.setOnPlaybackStatusUpdate(status => {
+      if ('didJustFinish' in status && status.didJustFinish) {
+        sound?.unloadAsync().catch(() => {});
+        if (activeSound === sound) activeSound = null;
+        callbacks?.onFinish?.(generatedVoiceSource(mode));
+      }
+    });
+    await sound.setPositionAsync(0).catch(() => {});
+    await sound.playAsync();
+    callbacks?.onStart?.(generatedVoiceSource(mode));
   } catch (err) {
-    console.warn('Trailhead voice MP3 failed; falling back to device speech.', err);
+    console.warn('Trailhead voice MP3 failed.', err);
     if (requestId !== voiceRequestId) return;
+    if (fallbackOptions === false) {
+      callbacks?.onFallback?.('generated_voice_error');
+      return;
+    }
     ensureVoiceAudioMode().catch(() => {});
+    const voice = await bestDeviceVoiceId();
     Speech.speak(clean, {
       rate: 0.9,
       pitch: 1,
       language: 'en-US',
+      ...(voice ? { voice } : {}),
       ...(fallbackOptions ?? {}),
-      onStart: callbacks?.onStart,
-      onDone: callbacks?.onFinish,
-      onStopped: callbacks?.onFinish,
-      onError: callbacks?.onFinish,
+      onStart: () => callbacks?.onStart?.('device_tts'),
+      onDone: () => callbacks?.onFinish?.('device_tts'),
+      onStopped: () => callbacks?.onFinish?.('device_tts'),
+      onError: () => callbacks?.onFinish?.('device_tts'),
     });
   }
 }

@@ -1,6 +1,7 @@
 import type { CampReusePolicy, RouteStyleMode } from '@/lib/api';
 import {
   loadWelcomeSetupPreferences,
+  type WelcomeCampType,
   type WelcomeSetupPreferences,
   type WelcomeTravelNeed,
 } from '@/lib/welcomeGate';
@@ -9,6 +10,7 @@ export type TripPreferenceContext = {
   vehicle?: WelcomeSetupPreferences['vehicle'];
   rental_interest: 'none' | 'consider' | 'needed' | 'unknown';
   camping_style?: WelcomeSetupPreferences['camping'];
+  camping_styles: WelcomeCampType[];
   party?: WelcomeSetupPreferences['party'];
   needs: Record<WelcomeTravelNeed, boolean>;
   route_builder: {
@@ -31,6 +33,17 @@ function hasNeed(preferences: WelcomeSetupPreferences | null | undefined, need: 
   return Array.isArray(preferences?.needs) && preferences.needs.includes(need);
 }
 
+function campTypesFromWelcomePreferences(preferences: WelcomeSetupPreferences | null | undefined): WelcomeCampType[] {
+  if (Array.isArray(preferences?.campingStyles) && preferences.campingStyles.length) {
+    return Array.from(new Set(preferences.campingStyles));
+  }
+  if (preferences?.camping === 'campgrounds') return ['developed'];
+  if (preferences?.camping === 'dispersed') return ['dispersed'];
+  if (preferences?.camping === 'rv_parks') return ['rv_parks'];
+  if (preferences?.camping === 'mixed') return ['any'];
+  return [];
+}
+
 export function rentalInterestFromWelcomePreferences(preferences: WelcomeSetupPreferences | null | undefined): TripPreferenceContext['rental_interest'] {
   if (!preferences?.vehicle) return 'unknown';
   if (preferences.vehicle === 'need_rental') return 'needed';
@@ -40,14 +53,18 @@ export function rentalInterestFromWelcomePreferences(preferences: WelcomeSetupPr
 }
 
 export function campPreferenceFromWelcomePreferences(preferences: WelcomeSetupPreferences | null | undefined): TripPreferenceContext['route_builder']['camp_preference'] {
-  if (preferences?.camping === 'rv_parks') return 'rv';
-  if (preferences?.camping === 'campgrounds') return 'developed';
-  if (preferences?.camping === 'mixed') return 'any';
+  const campTypes = campTypesFromWelcomePreferences(preferences);
+  if (campTypes.includes('any')) return 'any';
+  if (campTypes.length > 1) return 'any';
+  if (campTypes.includes('private')) return 'private';
+  if (campTypes.includes('rv_parks')) return 'rv';
+  if (campTypes.includes('developed')) return 'developed';
   return 'public';
 }
 
 export function routeStyleFromWelcomePreferences(preferences: WelcomeSetupPreferences | null | undefined): RouteStyleMode {
-  if (preferences?.camping === 'dispersed') return 'wild';
+  const campTypes = campTypesFromWelcomePreferences(preferences);
+  if (campTypes.length === 1 && campTypes.includes('dispersed')) return 'wild';
   if (preferences?.party === 'family' || hasNeed(preferences, 'kids') || hasNeed(preferences, 'towing')) return 'balanced';
   return 'balanced';
 }
@@ -73,7 +90,12 @@ export function placeFiltersFromWelcomePreferences(preferences: WelcomeSetupPref
     filters.add('private_stay');
     filters.add('lodging');
   }
-  if (preferences?.camping === 'rv_parks') {
+  const campTypes = campTypesFromWelcomePreferences(preferences);
+  if (campTypes.includes('private')) {
+    filters.add('private_stay');
+    filters.add('lodging');
+  }
+  if (campTypes.includes('rv_parks')) {
     filters.add('propane');
     filters.add('water');
     filters.add('dump');
@@ -86,10 +108,12 @@ export function placeFiltersFromWelcomePreferences(preferences: WelcomeSetupPref
 export function tripPreferenceContextFromWelcomePreferences(preferences: WelcomeSetupPreferences | null | undefined): TripPreferenceContext | null {
   if (!preferences) return null;
   const rentalInterest = rentalInterestFromWelcomePreferences(preferences);
+  const campingStyles = campTypesFromWelcomePreferences(preferences);
   return {
     vehicle: preferences.vehicle ?? undefined,
     rental_interest: rentalInterest,
     camping_style: preferences.camping ?? undefined,
+    camping_styles: campingStyles,
     party: preferences.party ?? undefined,
     needs: {
       ...DEFAULT_NEEDS,

@@ -326,10 +326,7 @@ export async function startRealtimeCopilotSession(options: StartRealtimeCopilotO
 
   const isSpeechStartEvent = (type: string) =>
     type === 'response.audio.delta'
-    || type === 'response.output_audio.delta'
-    || type === 'response.audio_transcript.delta'
-    || type === 'response.output_audio_transcript.delta'
-    || type === 'response.created';
+    || type === 'response.output_audio.delta';
 
   const isSpeechEndEvent = (type: string) =>
     type === 'response.audio.done'

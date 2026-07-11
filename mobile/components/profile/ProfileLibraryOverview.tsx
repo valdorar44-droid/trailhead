@@ -37,9 +37,9 @@ export default function ProfileLibraryOverview({
     <View style={s.root}>
       <TrailheadMetricRow
         metrics={[
-          { label: 'Trips', value: savedTripCount > 0 ? String(savedTripCount) : 'Plan', icon: 'map-outline', tone: C.silverBright },
-          { label: 'Saved', value: savedNearbyCount > 0 ? String(savedNearbyCount) : 'Save', icon: 'bookmark-outline', tone: C.orange },
-          { label: 'GPX', value: importedTotal > 0 ? String(importedTotal) : 'Import', icon: 'git-branch-outline', tone: '#38bdf8' },
+          { label: 'Trips', value: savedTripCount > 0 ? String(savedTripCount) : '0', icon: 'map-outline', tone: C.silverBright },
+          { label: 'Saved', value: savedNearbyCount > 0 ? String(savedNearbyCount) : '0', icon: 'bookmark-outline', tone: C.orange },
+          { label: 'GPX', value: importedTotal > 0 ? String(importedTotal) : '0', icon: 'git-branch-outline', tone: '#38bdf8' },
         ]}
       />
 
@@ -49,11 +49,9 @@ export default function ProfileLibraryOverview({
             <Ionicons name="albums-outline" size={18} color={C.orange} />
           </View>
           <View style={s.summaryCopy}>
-            <Text style={s.kicker}>LIBRARY</Text>
-            <Text style={s.summaryTitle}>Your saved trips stay close.</Text>
-            <Text style={s.summaryText}>
-              Open saved areas, route files, camps, places, trails, and GPX folders.
-            </Text>
+            <Text style={s.kicker}>TRIPS & SAVED</Text>
+            <Text style={s.summaryTitle}>Trips, saved areas, GPX.</Text>
+            <Text style={s.summaryText}>Routes, camps, places, trails, and offline areas.</Text>
           </View>
         </View>
         <View style={s.actionRow}>
@@ -76,7 +74,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     gap: 12,
   },
   summaryCard: {
-    gap: 14,
+    gap: 12,
   },
   summaryTop: {
     flexDirection: 'row',
@@ -84,9 +82,9 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     gap: 12,
   },
   summaryIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
+    width: 36,
+    height: 36,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -102,13 +100,13 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     fontSize: 9,
     fontFamily: mono,
     fontWeight: '900',
-    letterSpacing: 0.8,
+    letterSpacing: 0,
   },
   summaryTitle: {
     color: C.text,
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '900',
-    lineHeight: 21,
+    lineHeight: 22,
     letterSpacing: 0,
   },
   summaryText: {
@@ -122,12 +120,12 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   primaryAction: {
     flex: 1,
-    minHeight: 42,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
-    borderRadius: 14,
+    borderRadius: 12,
     backgroundColor: C.orange,
   },
   primaryActionText: {
@@ -138,12 +136,12 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     letterSpacing: 0,
   },
   secondaryAction: {
-    minHeight: 42,
+    minHeight: 40,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    borderRadius: 14,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: C.orange + '44',
     backgroundColor: C.orangeGlow,

@@ -13,6 +13,7 @@ import {
   type MissionScene,
   type StoryboardPlace,
 } from './copilotStoryboard';
+import { buildCinematicHighlights } from './cinematicHighlights';
 
 export type MapMissionBriefPhase = 'idle' | 'loading' | 'playing' | 'paused' | 'done';
 
@@ -395,6 +396,13 @@ function isDispersedCamp(meta?: string | null) {
   return lower.includes('dispersed') || lower.includes('blm') || lower.includes('boondock');
 }
 
+function firstSentence(text?: string | null) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim();
+  if (!clean) return '';
+  const match = clean.match(/^[^.!?]{10,180}[.!?]/);
+  return match ? match[0].trim() : clean.slice(0, 180);
+}
+
 function routeRatioAlong(route: [number, number][], lat: number, lng: number): number {
   if (route.length < 2) return 0.5;
   let bestIdx = 0;
@@ -421,6 +429,7 @@ export function buildScoutLiveCinematic(input: {
   tripName: string;
   route: [number, number][];
   routeScout?: RouteScoutState | null;
+  exploreRouteRankPlaces?: StoryboardPlace[];
   missionBrief?: MissionControlBrief | null;
 }): MissionCinematic | null {
   const route = routeCoordsFromLngLat(input.route);
@@ -431,6 +440,11 @@ export function buildScoutLiveCinematic(input: {
   const startName = String(scout?.startName || 'the start').trim();
   const destName = String(scout?.destinationName || 'the finish').trim();
   const stops = scout?.stops ?? scout?.previewStops ?? [];
+  const scenicStops = buildCinematicHighlights({
+    route,
+    places: input.exploreRouteRankPlaces ?? [],
+    max: 5,
+  });
   const scenes: MissionScene[] = [];
   const stopKey = (stop: { lat?: number; lng?: number; name?: string }) =>
     `${String(stop.name || '').toLowerCase()}:${Number(stop.lat).toFixed(4)},${Number(stop.lng).toFixed(4)}`;
@@ -447,6 +461,18 @@ export function buildScoutLiveCinematic(input: {
       ...(plan.fuelStops ?? []),
       ...(plan.poiStops ?? []),
     ];
+    const fromScenic = scenicStops
+      .filter(place => !place.day || Number(place.day) === Number(day))
+      .map(place => ({
+        day: place.day,
+        type: place.type,
+        name: place.title,
+        description: place.note,
+        reason: place.note,
+        lat: place.lat,
+        lng: place.lng,
+        source: place.source,
+      }));
     const fromScout = stops.filter(stop => {
       const type = String(stop.type || '').toLowerCase();
       if (Number(stop.day) !== Number(day)) return false;
@@ -454,7 +480,7 @@ export function buildScoutLiveCinematic(input: {
       return true;
     });
     const seen = new Set<string>();
-    return [...fromPlan, ...fromScout]
+    return [...fromPlan, ...fromScout, ...fromScenic]
       .filter(stop => finiteCoord(stop.lat, stop.lng))
       .filter(stop => {
         const key = stopKey(stop);
@@ -479,6 +505,7 @@ export function buildScoutLiveCinematic(input: {
     routeSlice: [0, Math.min(0.1, 12 / route.length)],
     camera: { mode: 'follow', zoom: 13.6, pitch: 66 },
     layers: { terrain: true },
+    pacing: { kind: 'context', minDurationMs: 8000, maxDurationMs: 14000 },
     narration: '',
     callouts: [],
   });
@@ -509,6 +536,7 @@ export function buildScoutLiveCinematic(input: {
         routeSlice: [cursor, item.ratio],
         camera: { mode: 'follow', zoom: 13.8, pitch: 66 },
         layers: { terrain: true },
+        pacing: { kind: 'route_leg', minDurationMs: 9000, maxDurationMs: 26000, groundSpeedMpsCap: 12000 },
         narration: '',
         callouts: [],
       });
@@ -518,14 +546,17 @@ export function buildScoutLiveCinematic(input: {
         title: name,
         subtitle: String(item.stop.description || item.stop.reason || '').trim(),
         day,
-        durationMs: item.type === 'fuel_stop' ? 5200 : 7200,
+        durationMs: item.type === 'fuel_stop' ? 5200 : 9800,
         routeSlice: [item.ratio, clampRouteRatio(item.ratio + 0.015)],
         focus: { lat: Number(item.stop.lat), lng: Number(item.stop.lng) },
         rejoinRatio: item.ratio,
         camera: item.type === 'fuel_stop'
           ? { mode: 'fly', zoom: 12, pitch: 55 }
-          : { mode: 'orbit', zoom: 12.4, pitch: 62, orbit: { direction: 'cw', sweepDeg: 180 } },
+          : { mode: 'orbit', zoom: 12.8, pitch: 66, orbit: { direction: 'cw', sweepDeg: 360 } },
         layers: { terrain: item.type !== 'fuel_stop' },
+        pacing: item.type === 'fuel_stop'
+          ? { kind: 'context', minDurationMs: 4200, maxDurationMs: 7200 }
+          : { kind: 'scenic_orbit', minDurationMs: 14000, maxDurationMs: 24000 },
         narration: '',
         callouts: [{
           id: `stop-${day}-${item.type}-${name}`,
@@ -550,6 +581,7 @@ export function buildScoutLiveCinematic(input: {
       routeSlice: [cursor, endRatio],
       camera: { mode: 'follow', zoom: 13.8, pitch: 66 },
       layers: { terrain: true },
+      pacing: { kind: 'route_leg', minDurationMs: 10000, maxDurationMs: 30000, groundSpeedMpsCap: 12000 },
       narration: '',
       callouts: [],
     });
@@ -568,6 +600,7 @@ export function buildScoutLiveCinematic(input: {
         focus: { lat: Number(campLat), lng: Number(campLng) },
         camera: { mode: 'orbit', zoom: 14, pitch: 62 },
         layers: { terrain: true },
+        pacing: { kind: 'context', minDurationMs: 8000, maxDurationMs: 13000 },
         narration: '',
         callouts: [{
           id: `camp-${day}`,
@@ -591,6 +624,7 @@ export function buildScoutLiveCinematic(input: {
       routeSlice: [cursor, 1],
       camera: { mode: 'follow', zoom: 13.6, pitch: 66 },
       layers: { terrain: true },
+      pacing: { kind: 'route_leg', minDurationMs: 10000, maxDurationMs: 30000, groundSpeedMpsCap: 12000 },
       narration: '',
       callouts: [],
     });
@@ -605,6 +639,7 @@ export function buildScoutLiveCinematic(input: {
     routeSlice: [Math.max(0, cursor), 1],
     camera: { mode: 'follow', zoom: 13.2, pitch: 64 },
     layers: {},
+    pacing: { kind: 'context', minDurationMs: 7000, maxDurationMs: 12000 },
     narration: '',
     callouts: [],
   });
@@ -632,7 +667,7 @@ export function liveMissionBeatBrief(
   const tripLabel = startName && destName ? `${startName} to ${destName}` : String(scene.title || 'Your route').trim();
 
   if (scene.type === 'intro') {
-    return `Here's the flyover for ${tripLabel}. I'll take it day by day, with camps, fuel, and scenic stops.`;
+    return `Here's the flyover for ${tripLabel}. We'll keep camps and fuel quick, then spend time on the scenic stops.`;
   }
   if (scene.type === 'camp_arrival') {
     const campName = String(plan?.campName || scene.title).trim();
@@ -659,10 +694,12 @@ export function liveMissionBeatBrief(
     return `Fuel stop at ${scene.title}. Top off here before the next long stretch.`;
   }
   if (scene.type === 'monument_orbit') {
-    return `${scene.title} is the scenic stop on this leg. We'll circle once, then pick up the route again.`;
+    const note = firstSentence(scene.subtitle || scene.callouts[0]?.note);
+    return `${scene.title}. ${note || 'This is the scenic stop on this leg.'} We'll circle it, then continue onward.`;
   }
   if (scene.type === 'poi_flyover') {
-    return `${scene.title} is a stop on this leg. We'll look around, then pick up the route again.`;
+    const note = firstSentence(scene.subtitle || scene.callouts[0]?.note);
+    return `${scene.title}. ${note || 'This is a stop on this leg.'} We'll look around, then continue onward.`;
   }
   if (scene.type === 'mission_recap') {
     const finish = destName || 'the finish';

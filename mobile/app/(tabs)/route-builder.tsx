@@ -58,7 +58,7 @@ import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
-import { tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
+import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
   buildRouteBuilderSearchStop,
@@ -669,7 +669,8 @@ function estimateMpg(rig: ReturnType<typeof useStore.getState>['rigProfile']) {
   const type = (rig?.vehicle_type || '').toLowerCase();
   let mpg = type.includes('rv') ? 10 : type.includes('truck') ? 15 : type.includes('van') ? 17 : type.includes('suv') ? 18 : 20;
   if (rig?.is_towing) mpg *= 0.72;
-  if (parsePositiveNumber(rig?.lift_in) || parsePositiveNumber(rig?.tire_size)) mpg *= 0.9;
+  if (parsePositiveNumber(rig?.lift_in) || parsePositiveNumber(rig?.tire_size) || (parsePositiveNumber(rig?.tire_diameter_in) ?? 0) >= 33) mpg *= 0.9;
+  if (rig?.has_rack) mpg *= 0.95;
   return Math.max(8, Math.round(mpg));
 }
 
@@ -1637,6 +1638,7 @@ function RouteBuilderScreenContent() {
   const [routeToursLoadedFor, setRouteToursLoadedFor] = useState('');
   const [routeToursStatus, setRouteToursStatus] = useState('');
   const consumedRouteBuilderDraftRef = useRef('');
+  const [routeBuilderDraftLoading, setRouteBuilderDraftLoading] = useState(true);
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
   const [days, setDays] = useState(defaultRouteDays);
@@ -1767,10 +1769,11 @@ function RouteBuilderScreenContent() {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
-  const tripPreferenceContext = useMemo(
-    () => tripPreferenceContextFromWelcomePreferences(welcomeSetupPreferences),
-    [welcomeSetupPreferences],
+  const trailheadContext = useMemo(
+    () => buildTrailheadUserContext({ preferences: welcomeSetupPreferences, rigProfile, activeTrip }),
+    [welcomeSetupPreferences, rigProfile, activeTrip],
   );
+  const tripPreferenceContext = trailheadContext.tripPreferences;
   const routeBuilderMapboxBridgeEnabled = useMemo(() => {
     const allowed = extremeConfig?.allowed_surfaces ?? [];
     return Platform.OS !== 'web'
@@ -1868,6 +1871,7 @@ function RouteBuilderScreenContent() {
 
   const consumeCopilotRouteBuilderDraft = useCallback(() => {
     let cancelled = false;
+    setRouteBuilderDraftLoading(true);
     loadTrailheadRouteBuilderDraft().then(draft => {
       if (cancelled || !draft) return;
       const key = `${draft.id || 'draft'}:${draft.updatedAt || 0}`;
@@ -1875,7 +1879,9 @@ function RouteBuilderScreenContent() {
       consumedRouteBuilderDraftRef.current = key;
       applyCopilotDraft(draft);
       clearTrailheadRouteBuilderDraft().catch(() => {});
-    }).catch(() => {});
+    }).catch(() => {}).finally(() => {
+      if (!cancelled) setRouteBuilderDraftLoading(false);
+    });
     return () => { cancelled = true; };
   }, []);
 
@@ -2307,6 +2313,7 @@ function RouteBuilderScreenContent() {
     const specs = [
       rigProfile.vehicle_type,
       rigProfile.drive,
+      rigProfile.max_trail_difficulty ? `${rigProfile.max_trail_difficulty} trails` : null,
       rigProfile.fuel_range_miles ? `${fmtRouteDistance(parsePositiveNumber(rigProfile.fuel_range_miles) ?? 0)} range` : null,
       weatherUnitMode === 'metric' ? `${(235.214583 / Math.max(1, planningStats.mpg)).toFixed(1)} L/100km` : `${planningStats.mpg} MPG`,
       rigProfile.is_towing ? 'towing' : null,
@@ -5516,6 +5523,19 @@ function RouteBuilderScreenContent() {
     );
   }
 
+  if (routeBuilderDraftLoading) {
+    return (
+      <SafeAreaView style={s.draftLoadingScreen}>
+        <View style={s.draftLoadingCard}>
+          <ActivityIndicator size="small" color={C.orange} />
+          <Text style={s.draftLoadingTitle}>Opening route</Text>
+          <Text style={s.draftLoadingText}>Loading your Co-Pilot draft.</Text>
+        </View>
+        <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
+      </SafeAreaView>
+    );
+  }
+
   if (routeTabMode === 'hub') {
     return renderRouteHub();
   }
@@ -6298,6 +6318,41 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     flex: 1,
     backgroundColor: '#07100f',
     overflow: 'hidden',
+  },
+  draftLoadingScreen: {
+    flex: 1,
+    backgroundColor: C.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+  },
+  draftLoadingCard: {
+    width: '100%',
+    maxWidth: 320,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    paddingHorizontal: 18,
+    paddingVertical: 20,
+    alignItems: 'center',
+    gap: 8,
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+  },
+  draftLoadingTitle: {
+    color: C.text,
+    fontSize: 16,
+    fontWeight: '900',
+    marginTop: 4,
+  },
+  draftLoadingText: {
+    color: C.text2,
+    fontSize: 12,
+    fontWeight: '700',
+    textAlign: 'center',
   },
   routeTourCard: {
     minHeight: 104,

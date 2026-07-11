@@ -21,6 +21,30 @@ const checks = [
     args: ['scripts/user-facing-copy-audit.mjs'],
   },
   {
+    label: 'Explore feed audit',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/explore-feed-audit.mjs'],
+  },
+  {
+    label: 'Explore live API audit',
+    cwd: mobileRoot,
+    cmd: 'python',
+    args: ['../scripts/audit_explore_live.py'],
+  },
+  {
+    label: 'Viator experiences audit',
+    cwd: mobileRoot,
+    cmd: 'python',
+    args: ['../scripts/audit_viator_experiences.py'],
+  },
+  {
+    label: 'Explore copy audit',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/user-facing-copy-audit.mjs', '--preset', 'explore'],
+  },
+  {
     label: 'Map copy audit',
     cwd: mobileRoot,
     cmd: 'node',

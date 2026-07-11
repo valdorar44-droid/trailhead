@@ -10,17 +10,42 @@ export type WelcomeGateChoice = 'create_account' | 'sign_in' | 'continue';
 export type WelcomeSetupStatus = 'completed' | 'skipped';
 export type WelcomeVehicleChoice = 'own_vehicle' | 'rent_sometimes' | 'need_rental' | 'not_sure';
 export type WelcomeCampingStyle = 'campgrounds' | 'dispersed' | 'rv_parks' | 'mixed';
+export type WelcomeCampType = 'dispersed' | 'developed' | 'private' | 'rv_parks' | 'any';
 export type WelcomeTravelParty = 'solo' | 'two_people' | 'family' | 'group';
 export type WelcomeTravelNeed = 'pets' | 'kids' | 'towing' | 'downloads';
 
 export type WelcomeSetupPreferences = {
   vehicle: WelcomeVehicleChoice | null;
   camping: WelcomeCampingStyle | null;
+  campingStyles?: WelcomeCampType[];
   party: WelcomeTravelParty | null;
   needs: WelcomeTravelNeed[];
   completedAt?: number;
   skippedAt?: number;
 };
+
+function normalizeCampingStyles(preferences: Partial<WelcomeSetupPreferences>): WelcomeCampType[] {
+  if (Array.isArray(preferences.campingStyles) && preferences.campingStyles.length) {
+    return Array.from(new Set(preferences.campingStyles.filter(Boolean)));
+  }
+  if (preferences.camping === 'campgrounds') return ['developed'];
+  if (preferences.camping === 'dispersed') return ['dispersed'];
+  if (preferences.camping === 'rv_parks') return ['rv_parks'];
+  if (preferences.camping === 'mixed') return ['any'];
+  return [];
+}
+
+function normalizeWelcomeSetupPreferences(preferences: Partial<WelcomeSetupPreferences>): WelcomeSetupPreferences {
+  return {
+    vehicle: preferences.vehicle ?? null,
+    camping: preferences.camping ?? null,
+    campingStyles: normalizeCampingStyles(preferences),
+    party: preferences.party ?? null,
+    needs: Array.isArray(preferences.needs) ? preferences.needs : [],
+    completedAt: preferences.completedAt,
+    skippedAt: preferences.skippedAt,
+  };
+}
 
 export async function shouldShowWelcomeGate(isSignedIn: boolean) {
   if (isSignedIn) return false;
@@ -35,7 +60,7 @@ export async function markWelcomeGateSeen(choice: WelcomeGateChoice) {
 
 export async function saveWelcomeSetupPreferences(preferences: WelcomeSetupPreferences) {
   const saved: WelcomeSetupPreferences = {
-    ...preferences,
+    ...normalizeWelcomeSetupPreferences(preferences),
     completedAt: preferences.completedAt ?? Date.now(),
     skippedAt: undefined,
   };
@@ -46,10 +71,7 @@ export async function saveWelcomeSetupPreferences(preferences: WelcomeSetupPrefe
 export async function markWelcomeSetupSkipped(preferences?: Partial<WelcomeSetupPreferences>) {
   if (preferences) {
     const saved: WelcomeSetupPreferences = {
-      vehicle: preferences.vehicle ?? null,
-      camping: preferences.camping ?? null,
-      party: preferences.party ?? null,
-      needs: preferences.needs ?? [],
+      ...normalizeWelcomeSetupPreferences(preferences),
       skippedAt: Date.now(),
     };
     await storage.set(WELCOME_SETUP_PREFS_KEY, JSON.stringify(saved));
@@ -61,7 +83,7 @@ export async function loadWelcomeSetupPreferences() {
   const raw = await storage.get(WELCOME_SETUP_PREFS_KEY).catch(() => null);
   if (!raw) return null;
   try {
-    return JSON.parse(raw) as WelcomeSetupPreferences;
+    return normalizeWelcomeSetupPreferences(JSON.parse(raw) as WelcomeSetupPreferences);
   } catch {
     return null;
   }

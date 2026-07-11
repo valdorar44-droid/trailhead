@@ -1,30 +1,36 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  Image,
   ImageBackground,
+  KeyboardAvoidingView,
   Modal,
   Platform,
   ScrollView,
   StyleSheet,
   Text,
+  TextInput,
   TouchableOpacity,
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { mono, useTheme } from '@/lib/design';
-import type { ColorPalette } from '@/lib/design';
+import { mono } from '@/lib/design';
 import type {
-  WelcomeCampingStyle,
+  WelcomeCampType,
   WelcomeSetupPreferences,
   WelcomeTravelNeed,
   WelcomeTravelParty,
   WelcomeVehicleChoice,
 } from '@/lib/welcomeGate';
+import { RigProfile, useStore } from '@/lib/store';
 
-const HERO_IMAGE = require('../assets/explore-hero-welcome-mountains.jpg');
+const HERO_IMAGE = require('../assets/onboarding-hero-overland.png');
+const TRAILHEAD_MARK = require('../assets/trailhead-mark.png');
+const SETUP_BLUE = '#1f6f9f';
 
 type WelcomeGateMode = 'welcome' | 'setup';
+type SetupStep = 'camp' | 'party' | 'vehicle' | 'rig' | 'needs';
 
 type WelcomeGateProps = {
   visible: boolean;
@@ -36,215 +42,206 @@ type WelcomeGateProps = {
   onSetupSkip?: (preferences: Partial<WelcomeSetupPreferences>) => void;
 };
 
-type Feature = {
-  icon: keyof typeof Ionicons.glyphMap;
-  title: string;
-  body: string;
-};
-
-type SingleChoiceOption<T extends string> = {
+type Choice<T extends string> = {
   id: T;
-  icon: keyof typeof Ionicons.glyphMap;
   title: string;
-  body: string;
+  icon: keyof typeof Ionicons.glyphMap;
 };
 
-type NeedOption = SingleChoiceOption<WelcomeTravelNeed>;
-
-const FEATURES: Feature[] = [
-  {
-    icon: 'map-outline',
-    title: 'Route days',
-    body: 'Shape drive time, camps, fuel, weather, and stops in one place.',
-  },
-  {
-    icon: 'car-sport-outline',
-    title: 'Vehicle fit',
-    body: 'Use your own vehicle, rent when it helps, or keep it flexible.',
-  },
-  {
-    icon: 'compass-outline',
-    title: 'Nearby places',
-    body: 'Compare camps, trails, places to stay, and stops around the route.',
-  },
+const CAMP_OPTIONS: Array<Choice<WelcomeCampType>> = [
+  { id: 'dispersed', title: 'Dispersed', icon: 'bonfire-outline' },
+  { id: 'developed', title: 'Developed', icon: 'trail-sign-outline' },
+  { id: 'private', title: 'Private', icon: 'home-outline' },
+  { id: 'rv_parks', title: 'RV parks', icon: 'business-outline' },
+  { id: 'any', title: 'Any', icon: 'layers-outline' },
 ];
 
-const VEHICLE_OPTIONS: Array<SingleChoiceOption<WelcomeVehicleChoice>> = [
-  {
-    id: 'own_vehicle',
-    icon: 'car-sport-outline',
-    title: 'My own vehicle',
-    body: 'Tune routes and stops around what you already drive.',
-  },
-  {
-    id: 'rent_sometimes',
-    icon: 'calendar-outline',
-    title: 'I rent sometimes',
-    body: 'Show rentals only when they fit the trip.',
-  },
-  {
-    id: 'need_rental',
-    icon: 'key-outline',
-    title: 'I need a rental',
-    body: 'Start with campervans, RVs, or adventure vehicles near the route.',
-  },
-  {
-    id: 'not_sure',
-    icon: 'compass-outline',
-    title: 'Not sure yet',
-    body: 'Keep planning flexible for now.',
-  },
+const PARTY_OPTIONS: Array<Choice<WelcomeTravelParty>> = [
+  { id: 'solo', title: 'Solo', icon: 'person-outline' },
+  { id: 'two_people', title: 'Couple', icon: 'people-outline' },
+  { id: 'family', title: 'Family', icon: 'happy-outline' },
+  { id: 'group', title: 'Group', icon: 'people-circle-outline' },
 ];
 
-const CAMPING_OPTIONS: Array<SingleChoiceOption<WelcomeCampingStyle>> = [
-  {
-    id: 'campgrounds',
-    icon: 'trail-sign-outline',
-    title: 'Campgrounds',
-    body: 'Established sites, facilities, and easy arrival.',
-  },
-  {
-    id: 'dispersed',
-    icon: 'bonfire-outline',
-    title: 'Dispersed sites',
-    body: 'Quiet public-land spots and fewer services.',
-  },
-  {
-    id: 'rv_parks',
-    icon: 'business-outline',
-    title: 'RV parks',
-    body: 'Hookups, services, and longer stays.',
-  },
-  {
-    id: 'mixed',
-    icon: 'layers-outline',
-    title: 'A mix',
-    body: 'Keep all stay types in the plan.',
-  },
+const VEHICLE_OPTIONS: Array<Choice<WelcomeVehicleChoice>> = [
+  { id: 'own_vehicle', title: 'I own', icon: 'car-sport-outline' },
+  { id: 'need_rental', title: 'I rent', icon: 'key-outline' },
+  { id: 'rent_sometimes', title: 'Sometimes rent', icon: 'calendar-outline' },
+  { id: 'not_sure', title: 'Not sure', icon: 'compass-outline' },
 ];
 
-const PARTY_OPTIONS: Array<SingleChoiceOption<WelcomeTravelParty>> = [
-  {
-    id: 'solo',
-    icon: 'person-outline',
-    title: 'Solo',
-    body: 'Fast planning with fewer constraints.',
-  },
-  {
-    id: 'two_people',
-    icon: 'people-outline',
-    title: 'Two people',
-    body: 'Balance drive time, stays, and shared stops.',
-  },
-  {
-    id: 'family',
-    icon: 'happy-outline',
-    title: 'Family',
-    body: 'Prioritize room, services, and easier arrivals.',
-  },
-  {
-    id: 'group',
-    icon: 'people-circle-outline',
-    title: 'Group',
-    body: 'Keep plans practical for multiple vehicles or friends.',
-  },
+const NEED_OPTIONS: Array<Choice<WelcomeTravelNeed>> = [
+  { id: 'pets', title: 'Pets', icon: 'paw-outline' },
+  { id: 'kids', title: 'Kids', icon: 'happy-outline' },
+  { id: 'towing', title: 'Towing', icon: 'swap-horizontal-outline' },
+  { id: 'downloads', title: 'Offline maps', icon: 'cloud-download-outline' },
 ];
 
-const NEED_OPTIONS: NeedOption[] = [
-  {
-    id: 'pets',
-    icon: 'paw-outline',
-    title: 'Pets',
-    body: 'Favor places and rentals that work for animal companions.',
-  },
-  {
-    id: 'kids',
-    icon: 'happy-outline',
-    title: 'Kids',
-    body: 'Lean toward easier stops and practical stays.',
-  },
-  {
-    id: 'towing',
-    icon: 'swap-horizontal-outline',
-    title: 'Towing',
-    body: 'Keep length and access in mind.',
-  },
-  {
-    id: 'downloads',
-    icon: 'cloud-download-outline',
-    title: 'Saved maps',
-    body: 'Keep important areas on this phone.',
-  },
-];
+const VEHICLE_TYPES = ['Truck', 'Jeep', 'SUV', 'Van/Camper', 'Moto', 'Other'];
+const DRIVE_TYPES = ['2WD', 'AWD', '4x4 PT', '4x4 FT'];
+const DIFF_LOCK = ['None', 'Rear Locker', 'Front + Rear'];
+const TIRE_TYPES = ['All-terrain', 'Mud-terrain', 'Highway', 'Winter'];
+const TRAIL_DIFFICULTY = ['Easy', 'Moderate', 'Hard', 'Extreme'];
+
+const DEFAULT_RIG: RigProfile = {
+  nickname: '',
+  vehicle_type: '',
+  year: '',
+  make: '',
+  model: '',
+  trim: '',
+  drive: '4x4 PT',
+  has_low_range: false,
+  lift_in: '',
+  suspension: 'Stock',
+  tire_size: '',
+  tire_diameter_in: '',
+  tire_type: '',
+  full_size_spare: false,
+  spare_count: '',
+  ground_clearance_in: '',
+  length_ft: '',
+  width_in: '',
+  height_ft: '',
+  wheelbase_in: '',
+  approach_angle_deg: '',
+  departure_angle_deg: '',
+  breakover_angle_deg: '',
+  fuel_range_miles: '',
+  fuel_mpg: '',
+  tank_capacity_gal: '',
+  water_capacity_gal: '',
+  payload_lbs: '',
+  has_winch: false,
+  winch_lbs: '',
+  locking_diffs: 'None',
+  has_skids: false,
+  has_rack: false,
+  has_recovery_points: false,
+  has_traction_boards: false,
+  has_air_compressor: false,
+  has_rock_sliders: false,
+  max_trail_difficulty: '',
+  max_water_depth_in: '',
+  avoid_narrow_trails: false,
+  avoid_body_damage: false,
+  is_towing: false,
+  trailer_length_ft: '',
+  tow_capacity_lbs: '',
+};
 
 export default function WelcomeGate({
   visible,
   initialMode = 'welcome',
-  onCreateAccount,
-  onSignIn,
   onContinue,
   onSetupComplete,
   onSetupSkip,
 }: WelcomeGateProps) {
-  const C = useTheme();
-  const s = styles(C);
+  const s = styles();
   const insets = useSafeAreaInsets();
+  const setRigProfile = useStore(state => state.setRigProfile);
   const [mode, setMode] = useState<WelcomeGateMode>(initialMode);
-  const [step, setStep] = useState(0);
+  const [stepIndex, setStepIndex] = useState(0);
   const [vehicle, setVehicle] = useState<WelcomeVehicleChoice | null>(null);
-  const [camping, setCamping] = useState<WelcomeCampingStyle | null>(null);
+  const [campTypes, setCampTypes] = useState<WelcomeCampType[]>([]);
   const [party, setParty] = useState<WelcomeTravelParty | null>(null);
   const [needs, setNeeds] = useState<WelcomeTravelNeed[]>([]);
+  const [rigDraft, setRigDraft] = useState<RigProfile>(DEFAULT_RIG);
 
   useEffect(() => {
     if (!visible) return;
     setMode(initialMode);
-    setStep(0);
+    setStepIndex(0);
     setVehicle(null);
-    setCamping(null);
+    setCampTypes([]);
     setParty(null);
     setNeeds([]);
+    setRigDraft(DEFAULT_RIG);
   }, [initialMode, visible]);
 
-  const selectedCount = [vehicle, camping, party].filter(Boolean).length + needs.length;
-  const setupTitle = useMemo(() => {
-    if (step === 0) return 'How are you traveling?';
-    if (step === 1) return 'Where do you like to stay?';
-    if (step === 2) return 'Who usually comes along?';
-    return 'What should Trailhead remember?';
-  }, [step]);
-  const setupBody = useMemo(() => {
-    if (step === 0) return 'This helps routes, rentals, and stops fit the way you actually travel.';
-    if (step === 1) return 'Choose the stay style you look for most often. You can change this later.';
-    if (step === 2) return 'Keep timing and stop choices practical for the people coming along.';
-    return 'Pick any that matter. Leave this blank if you want to decide later.';
-  }, [step]);
-  const canAdvance = step === 0 ? !!vehicle : step === 1 ? !!camping : step === 2 ? !!party : true;
+  const steps = useMemo<SetupStep[]>(() => {
+    if (vehicle === 'own_vehicle') return ['camp', 'party', 'vehicle', 'rig', 'needs'];
+    return ['camp', 'party', 'vehicle', 'needs'];
+  }, [vehicle]);
+  const step = steps[Math.min(stepIndex, steps.length - 1)];
+  const progress = Math.min(stepIndex + 1, steps.length);
+  const canAdvance = step === 'camp' ? campTypes.length > 0 : step === 'party' ? !!party : step === 'vehicle' ? !!vehicle : true;
+  const selectedCount = campTypes.length + [vehicle, party].filter(Boolean).length + needs.length + (hasRigData(rigDraft) ? 1 : 0);
+
+  function legacyCamping(): WelcomeSetupPreferences['camping'] {
+    if (campTypes.includes('any')) return 'mixed';
+    if (campTypes.includes('rv_parks')) return 'rv_parks';
+    if (campTypes.includes('developed')) return 'campgrounds';
+    if (campTypes.includes('dispersed')) return 'dispersed';
+    return null;
+  }
 
   function preferences(): WelcomeSetupPreferences {
     return {
       vehicle,
-      camping,
+      camping: legacyCamping(),
+      campingStyles: campTypes,
       party,
       needs,
     };
+  }
+
+  function hasRigData(rig: RigProfile) {
+    return Boolean(
+      rig.vehicle_type ||
+      rig.make ||
+      rig.model ||
+      rig.ground_clearance_in ||
+      rig.tire_size ||
+      rig.tire_diameter_in ||
+      rig.fuel_range_miles ||
+      rig.length_ft ||
+      rig.has_winch ||
+      rig.has_skids ||
+      rig.is_towing,
+    );
+  }
+
+  function saveRigIfUseful() {
+    if (vehicle !== 'own_vehicle' || !hasRigData(rigDraft)) return;
+    setRigProfile({ ...DEFAULT_RIG, ...rigDraft });
+  }
+
+  function toggleCamp(id: WelcomeCampType) {
+    setCampTypes(current => {
+      if (id === 'any') return current.includes('any') ? [] : ['any'];
+      const withoutAny = current.filter(item => item !== 'any');
+      return withoutAny.includes(id) ? withoutAny.filter(item => item !== id) : [...withoutAny, id];
+    });
   }
 
   function toggleNeed(id: WelcomeTravelNeed) {
     setNeeds(current => current.includes(id) ? current.filter(item => item !== id) : [...current, id]);
   }
 
-  function nextSetupStep() {
-    if (!canAdvance) return;
-    if (step < 3) {
-      setStep(current => current + 1);
-      return;
-    }
+  function completeSetup() {
+    saveRigIfUseful();
     onSetupComplete?.(preferences());
   }
 
+  function nextSetupStep() {
+    if (!canAdvance) return;
+    if (stepIndex < steps.length - 1) {
+      setStepIndex(current => current + 1);
+      return;
+    }
+    completeSetup();
+  }
+
   function skipSetup() {
+    saveRigIfUseful();
     onSetupSkip?.(preferences());
+  }
+
+  function goBack() {
+    if (stepIndex === 0 && initialMode === 'welcome') setMode('welcome');
+    else if (stepIndex === 0) skipSetup();
+    else setStepIndex(current => current - 1);
   }
 
   function handleRequestClose() {
@@ -255,45 +252,177 @@ export default function WelcomeGate({
     onContinue();
   }
 
-  function renderOption<T extends string>(
-    option: SingleChoiceOption<T>,
-    selected: boolean,
-    onPress: () => void,
-  ) {
+  function renderChoice<T extends string>(option: Choice<T>, selected: boolean, onPress: () => void, multi = false) {
     return (
       <TouchableOpacity
         key={option.id}
         activeOpacity={0.84}
         onPress={onPress}
-        style={[s.optionRow, selected && s.optionRowSelected]}
+        style={[s.choiceRow, selected && s.choiceRowSelected]}
       >
-        <View style={[s.optionIcon, selected && s.optionIconSelected]}>
-          <Ionicons name={option.icon} size={20} color={selected ? '#ffffff' : 'rgba(255,255,255,0.9)'} />
-        </View>
-        <View style={s.optionCopy}>
-          <Text style={[s.optionTitle, selected && s.optionTitleSelected]}>{option.title}</Text>
-          <Text style={s.optionBody}>{option.body}</Text>
-        </View>
+        <Ionicons name={option.icon} size={20} color={selected ? '#ffffff' : '#3b332a'} />
+        <Text style={[s.choiceText, selected && s.choiceTextSelected]}>{option.title}</Text>
         <Ionicons
-          name={selected ? 'checkmark-circle' : 'ellipse-outline'}
+          name={selected ? 'checkmark-circle' : multi ? 'ellipse-outline' : 'radio-button-off-outline'}
           size={22}
-          color={selected ? C.orange : 'rgba(255,255,255,0.84)'}
+          color={selected ? '#ffffff' : '#a99a89'}
         />
       </TouchableOpacity>
     );
   }
 
+  function renderPill(value: string, selected: boolean, onPress: () => void) {
+    return (
+      <TouchableOpacity key={value} style={[s.rigPill, selected && s.rigPillSelected]} onPress={onPress} activeOpacity={0.84}>
+        <Text style={[s.rigPillText, selected && s.rigPillTextSelected]}>{value}</Text>
+      </TouchableOpacity>
+    );
+  }
+
+  function renderInput(
+    label: string,
+    value: string | undefined,
+    onChangeText: (value: string) => void,
+    placeholder: string,
+    keyboardType: 'default' | 'numeric' | 'decimal-pad' = 'default',
+  ) {
+    return (
+      <View style={s.inputGroup}>
+        <Text style={s.inputLabel}>{label}</Text>
+        <TextInput
+          style={s.input}
+          value={value ?? ''}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor="#a99a89"
+          keyboardType={keyboardType}
+        />
+      </View>
+    );
+  }
+
+  function renderToggle(label: string, value: boolean | undefined, onPress: () => void) {
+    return (
+      <TouchableOpacity style={s.toggleRow} onPress={onPress} activeOpacity={0.84}>
+        <Text style={s.toggleText}>{label}</Text>
+        <View style={[s.toggle, value && s.toggleOn]}>
+          <View style={[s.toggleThumb, value && s.toggleThumbOn]} />
+        </View>
+      </TouchableOpacity>
+    );
+  }
+
   function renderSetupOptions() {
-    if (step === 0) {
-      return VEHICLE_OPTIONS.map(option => renderOption(option, vehicle === option.id, () => setVehicle(option.id)));
+    if (step === 'camp') {
+      return CAMP_OPTIONS.map(option => renderChoice(option, campTypes.includes(option.id), () => toggleCamp(option.id), true));
     }
-    if (step === 1) {
-      return CAMPING_OPTIONS.map(option => renderOption(option, camping === option.id, () => setCamping(option.id)));
+    if (step === 'party') {
+      return PARTY_OPTIONS.map(option => renderChoice(option, party === option.id, () => setParty(option.id)));
     }
-    if (step === 2) {
-      return PARTY_OPTIONS.map(option => renderOption(option, party === option.id, () => setParty(option.id)));
+    if (step === 'vehicle') {
+      return VEHICLE_OPTIONS.map(option => renderChoice(option, vehicle === option.id, () => setVehicle(option.id)));
     }
-    return NEED_OPTIONS.map(option => renderOption(option, needs.includes(option.id), () => toggleNeed(option.id)));
+    if (step === 'needs') {
+      return NEED_OPTIONS.map(option => renderChoice(option, needs.includes(option.id), () => toggleNeed(option.id), true));
+    }
+    return renderRigSetup();
+  }
+
+  function renderRigSetup() {
+    return (
+      <View style={s.rigForm}>
+        <View style={s.rigSection}>
+          <Text style={s.rigSectionTitle}>Basics</Text>
+          <View style={s.pillGrid}>
+            {VEHICLE_TYPES.map(type => renderPill(type, rigDraft.vehicle_type === type, () => setRigDraft(d => ({ ...d, vehicle_type: type }))))}
+          </View>
+          {renderInput('Rig name', rigDraft.nickname, value => setRigDraft(d => ({ ...d, nickname: value })), 'Weekend rig')}
+          <View style={s.inputRow}>
+            {renderInput('Make', rigDraft.make, value => setRigDraft(d => ({ ...d, make: value })), 'Toyota')}
+            {renderInput('Model', rigDraft.model, value => setRigDraft(d => ({ ...d, model: value })), 'Tacoma')}
+          </View>
+          <View style={s.inputRow}>
+            {renderInput('Year', rigDraft.year, value => setRigDraft(d => ({ ...d, year: value })), '2022', 'numeric')}
+            {renderInput('Trim', rigDraft.trim, value => setRigDraft(d => ({ ...d, trim: value })), 'TRD Off-Road')}
+          </View>
+        </View>
+
+        <View style={s.rigSection}>
+          <Text style={s.rigSectionTitle}>Capability</Text>
+          <View style={s.pillGrid}>
+            {DRIVE_TYPES.map(drive => renderPill(drive, rigDraft.drive === drive, () => setRigDraft(d => ({ ...d, drive }))))}
+          </View>
+          <View style={s.pillGrid}>
+            {DIFF_LOCK.map(diff => renderPill(diff, rigDraft.locking_diffs === diff, () => setRigDraft(d => ({ ...d, locking_diffs: diff }))))}
+          </View>
+          <View style={s.inputRow}>
+            {renderInput('Clearance in', rigDraft.ground_clearance_in, value => setRigDraft(d => ({ ...d, ground_clearance_in: value })), '9.4', 'decimal-pad')}
+            {renderInput('Lift in', rigDraft.lift_in, value => setRigDraft(d => ({ ...d, lift_in: value })), '2.5', 'decimal-pad')}
+          </View>
+          <View style={s.inputRow}>
+            {renderInput('Tire diameter', rigDraft.tire_diameter_in, value => setRigDraft(d => ({ ...d, tire_diameter_in: value })), '33', 'decimal-pad')}
+            {renderInput('Tire size', rigDraft.tire_size, value => setRigDraft(d => ({ ...d, tire_size: value })), '285/75R17')}
+          </View>
+          <View style={s.pillGrid}>
+            {TIRE_TYPES.map(type => renderPill(type, rigDraft.tire_type === type, () => setRigDraft(d => ({ ...d, tire_type: type }))))}
+          </View>
+          {renderToggle('Low range', rigDraft.has_low_range, () => setRigDraft(d => ({ ...d, has_low_range: !d.has_low_range })))}
+          {renderToggle('Full-size spare', rigDraft.full_size_spare, () => setRigDraft(d => ({ ...d, full_size_spare: !d.full_size_spare })))}
+        </View>
+
+        <View style={s.rigSection}>
+          <Text style={s.rigSectionTitle}>Range and fit</Text>
+          <View style={s.inputRow}>
+            {renderInput('Range miles', rigDraft.fuel_range_miles, value => setRigDraft(d => ({ ...d, fuel_range_miles: value })), '400', 'numeric')}
+            {renderInput('Real MPG', rigDraft.fuel_mpg, value => setRigDraft(d => ({ ...d, fuel_mpg: value })), '14.5', 'decimal-pad')}
+          </View>
+          <View style={s.inputRow}>
+            {renderInput('Tank gal', rigDraft.tank_capacity_gal, value => setRigDraft(d => ({ ...d, tank_capacity_gal: value })), '21', 'decimal-pad')}
+            {renderInput('Water gal', rigDraft.water_capacity_gal, value => setRigDraft(d => ({ ...d, water_capacity_gal: value })), '10', 'decimal-pad')}
+          </View>
+          <View style={s.inputRow}>
+            {renderInput('Length ft', rigDraft.length_ft, value => setRigDraft(d => ({ ...d, length_ft: value })), '18.5', 'decimal-pad')}
+            {renderInput('Height ft', rigDraft.height_ft, value => setRigDraft(d => ({ ...d, height_ft: value })), '6.8', 'decimal-pad')}
+          </View>
+          <View style={s.inputRow}>
+            {renderInput('Width in', rigDraft.width_in, value => setRigDraft(d => ({ ...d, width_in: value })), '76', 'decimal-pad')}
+            {renderInput('Water depth in', rigDraft.max_water_depth_in, value => setRigDraft(d => ({ ...d, max_water_depth_in: value })), '18', 'decimal-pad')}
+          </View>
+          <Text style={s.inputLabel}>Comfortable trail level</Text>
+          <View style={s.pillGrid}>
+            {TRAIL_DIFFICULTY.map(level => renderPill(level, rigDraft.max_trail_difficulty === level, () => setRigDraft(d => ({ ...d, max_trail_difficulty: level }))))}
+          </View>
+        </View>
+
+        <View style={s.rigSection}>
+          <Text style={s.rigSectionTitle}>Recovery</Text>
+          {renderToggle('Winch', rigDraft.has_winch, () => setRigDraft(d => ({ ...d, has_winch: !d.has_winch })))}
+          {rigDraft.has_winch ? renderInput('Winch lbs', rigDraft.winch_lbs, value => setRigDraft(d => ({ ...d, winch_lbs: value })), '10000', 'numeric') : null}
+          {renderToggle('Recovery points', rigDraft.has_recovery_points, () => setRigDraft(d => ({ ...d, has_recovery_points: !d.has_recovery_points })))}
+          {renderToggle('Traction boards', rigDraft.has_traction_boards, () => setRigDraft(d => ({ ...d, has_traction_boards: !d.has_traction_boards })))}
+          {renderToggle('Air compressor', rigDraft.has_air_compressor, () => setRigDraft(d => ({ ...d, has_air_compressor: !d.has_air_compressor })))}
+          {renderToggle('Skid plates', rigDraft.has_skids, () => setRigDraft(d => ({ ...d, has_skids: !d.has_skids })))}
+          {renderToggle('Rock sliders', rigDraft.has_rock_sliders, () => setRigDraft(d => ({ ...d, has_rock_sliders: !d.has_rock_sliders })))}
+        </View>
+
+        <View style={s.rigSection}>
+          <Text style={s.rigSectionTitle}>Camp load</Text>
+          {renderToggle('Roof rack', rigDraft.has_rack, () => setRigDraft(d => ({ ...d, has_rack: !d.has_rack })))}
+          {renderToggle('Avoid narrow trails', rigDraft.avoid_narrow_trails, () => setRigDraft(d => ({ ...d, avoid_narrow_trails: !d.avoid_narrow_trails })))}
+          {renderToggle('Avoid body damage', rigDraft.avoid_body_damage, () => setRigDraft(d => ({ ...d, avoid_body_damage: !d.avoid_body_damage })))}
+          {renderToggle('Towing', rigDraft.is_towing, () => {
+            setRigDraft(d => ({ ...d, is_towing: !d.is_towing }));
+            setNeeds(current => current.includes('towing') ? current : [...current, 'towing']);
+          })}
+          {rigDraft.is_towing ? (
+            <View style={s.inputRow}>
+              {renderInput('Trailer ft', rigDraft.trailer_length_ft, value => setRigDraft(d => ({ ...d, trailer_length_ft: value })), '20', 'decimal-pad')}
+              {renderInput('Tow cap lbs', rigDraft.tow_capacity_lbs, value => setRigDraft(d => ({ ...d, tow_capacity_lbs: value })), '7700', 'numeric')}
+            </View>
+          ) : null}
+        </View>
+      </View>
+    );
   }
 
   return (
@@ -302,82 +431,47 @@ export default function WelcomeGate({
         <ImageBackground source={HERO_IMAGE} resizeMode="cover" style={s.heroImage}>
           <LinearGradient
             pointerEvents="none"
-            colors={['rgba(3,5,4,0.58)', 'rgba(3,5,4,0.42)', 'rgba(3,5,4,0.72)']}
-            locations={[0, 0.42, 1]}
+            colors={['rgba(8,31,52,0.16)', 'rgba(8,31,52,0.08)', 'rgba(5,18,30,0.78)']}
+            locations={[0, 0.48, 1]}
             style={s.imageShade}
           />
-          <View style={[s.safe, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 14) }]}>
+          {mode === 'setup' ? <View pointerEvents="none" style={s.setupLightBackdrop} /> : null}
+          <KeyboardAvoidingView
+            style={[s.safe, { paddingTop: Math.max(insets.top, 18), paddingBottom: Math.max(insets.bottom, 14) }]}
+            behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          >
             {mode === 'welcome' ? (
               <>
                 <View style={s.heroTop}>
-                  <View style={s.brandRow}>
-                    <View style={s.brandMark}>
-                      <Ionicons name="trail-sign-outline" size={22} color="#ffffff" />
-                    </View>
-                    <Text style={s.brand}>TRAILHEAD</Text>
-                  </View>
+                  <Image source={TRAILHEAD_MARK} style={s.brandImage} resizeMode="contain" />
+                  <Text style={s.brand}>TRAILHEAD</Text>
                 </View>
 
-                <View style={s.heroCopy}>
-                  <Text style={s.title}>Find the next stop.</Text>
-                  <Text style={s.body}>
-                    Choose your travel style once. Trailhead keeps trips practical from the first search.
-                  </Text>
-                </View>
+                <View style={s.heroSpacer} />
 
-                <View style={s.featureStack}>
-                  {FEATURES.map(feature => (
-                    <View key={feature.title} style={s.featureRow}>
-                      <View style={s.featureIcon}>
-                        <Ionicons name={feature.icon} size={17} color="#ffffff" />
-                      </View>
-                      <View style={s.featureCopy}>
-                        <Text style={s.featureTitle}>{feature.title}</Text>
-                        <Text style={s.featureBody}>{feature.body}</Text>
-                      </View>
-                    </View>
-                  ))}
-                </View>
-
-                <View style={s.actionDock}>
-                  <TouchableOpacity style={s.primaryButton} onPress={() => setMode('setup')} activeOpacity={0.86}>
-                    <Text style={s.primaryText}>Set up trip style</Text>
-                    <Ionicons name="arrow-forward" size={18} color="#ffffff" />
-                  </TouchableOpacity>
-                  <View style={s.accountRow}>
-                    <TouchableOpacity style={s.accountButton} onPress={onCreateAccount} activeOpacity={0.84}>
-                      <Ionicons name="person-add-outline" size={17} color="#ffffff" />
-                      <Text style={s.accountText}>Create account</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.accountButton} onPress={onSignIn} activeOpacity={0.84}>
-                      <Ionicons name="log-in-outline" size={17} color="#ffffff" />
-                      <Text style={s.accountText}>Log in</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <TouchableOpacity style={s.linkButton} onPress={onContinue} activeOpacity={0.72}>
-                    <Text style={s.linkText}>Continue for now</Text>
+                <View style={s.heroBottom}>
+                  <LinearGradient
+                    pointerEvents="none"
+                    colors={['rgba(5,18,30,0)', 'rgba(5,18,30,0.56)', 'rgba(5,18,30,0.82)']}
+                    locations={[0, 0.42, 1]}
+                    style={s.heroBottomShade}
+                  />
+                  <Text style={s.heroMini}>Plan routes. Find camps. Explore farther.</Text>
+                  <Text style={s.title}>Create unforgettable overlanding trips with maps, camps, and routes in one place</Text>
+                  <TouchableOpacity style={s.primaryButton} onPress={() => setMode('setup')} activeOpacity={0.88}>
+                    <Text style={s.primaryText}>Continue</Text>
+                    <Ionicons name="arrow-forward" size={18} color="#101511" />
                   </TouchableOpacity>
                 </View>
               </>
             ) : (
               <>
                 <View style={s.setupHeader}>
-                  <TouchableOpacity
-                    style={s.iconButton}
-                    onPress={() => {
-                      if (step === 0 && initialMode === 'welcome') setMode('welcome');
-                      else if (step === 0) skipSetup();
-                      else setStep(current => current - 1);
-                    }}
-                    activeOpacity={0.76}
-                    accessibilityLabel="Back"
-                  >
-                    <Ionicons name="chevron-back" size={22} color="#ffffff" />
+                  <TouchableOpacity style={s.iconButton} onPress={goBack} activeOpacity={0.76} accessibilityLabel="Back">
+                    <Ionicons name="chevron-back" size={22} color="#2a241d" />
                   </TouchableOpacity>
-                  <View style={s.progressDots}>
-                    {[0, 1, 2, 3].map(index => (
-                      <View key={index} style={[s.progressDot, index <= step && s.progressDotActive]} />
-                    ))}
+                  <View style={s.progressTrack}>
+                    <View style={[s.progressFill, { width: `${(progress / steps.length) * 100}%` }]} />
                   </View>
                   <TouchableOpacity style={s.skipHeaderButton} onPress={skipSetup} activeOpacity={0.76}>
                     <Text style={s.skipHeaderText}>Later</Text>
@@ -386,47 +480,43 @@ export default function WelcomeGate({
 
                 <View style={s.setupCopy}>
                   <Text style={s.setupKicker}>Trip setup</Text>
-                  <Text style={s.setupTitle}>{setupTitle}</Text>
-                  <Text style={s.setupBody}>{setupBody}</Text>
+                  <Text style={s.setupTitle}>
+                    {step === 'camp' ? 'Preferred camp types' : step === 'party' ? 'Travel party' : step === 'vehicle' ? 'Vehicle' : step === 'rig' ? 'Your rig' : 'Extras'}
+                  </Text>
                 </View>
 
-                <ScrollView
-                  style={s.optionScroll}
-                  contentContainerStyle={s.optionContent}
-                  showsVerticalScrollIndicator={false}
-                >
+                <ScrollView style={s.optionScroll} contentContainerStyle={s.optionContent} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
                   {renderSetupOptions()}
                 </ScrollView>
 
                 <View style={s.setupDock}>
-                  <View style={s.selectionSummary}>
-                    <Ionicons name="checkmark-done-outline" size={16} color={selectedCount > 0 ? C.orange : 'rgba(255,255,255,0.5)'} />
-                    <Text style={s.selectionText}>
-                      {selectedCount > 0 ? `${selectedCount} preference${selectedCount === 1 ? '' : 's'} selected` : 'Pick what matters now'}
-                    </Text>
-                  </View>
+                  <Text style={s.selectionText}>
+                    {selectedCount > 0 ? `${selectedCount} selected` : step === 'rig' ? 'Add what you know' : 'Pick one to continue'}
+                  </Text>
                   <TouchableOpacity
-                    style={[s.primaryButton, !canAdvance && s.primaryButtonDisabled]}
+                    style={[s.primaryButton, s.setupPrimaryButton, !canAdvance && s.primaryButtonDisabled]}
                     onPress={nextSetupStep}
                     activeOpacity={canAdvance ? 0.86 : 1}
                   >
-                    <Text style={s.primaryText}>{step === 3 ? 'Done' : 'Next'}</Text>
-                    <Ionicons name={step === 3 ? 'checkmark' : 'arrow-forward'} size={18} color="#ffffff" />
+                    <Text style={[s.primaryText, s.setupPrimaryText]}>{stepIndex === steps.length - 1 ? 'Done' : step === 'rig' ? 'Save rig' : 'Next'}</Text>
+                    <Ionicons name={stepIndex === steps.length - 1 ? 'checkmark' : 'arrow-forward'} size={18} color="#ffffff" />
                   </TouchableOpacity>
-                  <TouchableOpacity style={s.linkButton} onPress={skipSetup} activeOpacity={0.72}>
-                    <Text style={s.linkText}>Skip for now</Text>
-                  </TouchableOpacity>
+                  {step === 'rig' ? (
+                    <TouchableOpacity style={s.linkButton} onPress={nextSetupStep} activeOpacity={0.72}>
+                      <Text style={s.setupLinkText}>Skip rig details</Text>
+                    </TouchableOpacity>
+                  ) : null}
                 </View>
               </>
             )}
-          </View>
+          </KeyboardAvoidingView>
         </ImageBackground>
       </View>
     </Modal>
   );
 }
 
-const styles = (C: ColorPalette) => StyleSheet.create({
+const styles = () => StyleSheet.create({
   root: {
     flex: 1,
     backgroundColor: '#050705',
@@ -438,179 +528,132 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   imageShade: {
     ...StyleSheet.absoluteFillObject,
   },
+  setupLightBackdrop: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#f6f1e8',
+  },
   safe: {
     flex: 1,
     paddingHorizontal: 20,
   },
   heroTop: {
-    minHeight: 62,
-    justifyContent: 'center',
-  },
-  brandRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-  },
-  brandMark: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.34)',
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    gap: 10,
+    alignSelf: 'center',
+    paddingTop: 12,
+  },
+  brandImage: {
+    width: 48,
+    height: 48,
+    borderRadius: 13,
   },
   brand: {
     color: '#ffffff',
     fontFamily: mono,
-    fontSize: 16,
+    fontSize: 29,
+    lineHeight: 34,
     fontWeight: '900',
     letterSpacing: 0,
+    textShadowColor: 'rgba(0,0,0,0.6)',
+    textShadowRadius: 10,
+    textShadowOffset: { width: 0, height: 1 },
   },
-  heroCopy: {
+  heroSpacer: {
     flex: 1,
-    justifyContent: 'center',
-    gap: 12,
-    paddingBottom: 12,
+  },
+  heroMini: {
+    color: 'rgba(255,255,255,0.96)',
+    fontSize: 14,
+    lineHeight: 19,
+    fontWeight: '800',
+    letterSpacing: 0,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.56)',
+    textShadowRadius: 10,
+  },
+  heroBottom: {
+    position: 'relative',
+    gap: 14,
+    marginHorizontal: -20,
+    paddingHorizontal: 20,
+    paddingTop: 24,
+    paddingBottom: 30,
+    borderTopLeftRadius: 42,
+    borderTopRightRadius: 42,
+    overflow: 'hidden',
+  },
+  heroBottomShade: {
+    ...StyleSheet.absoluteFillObject,
   },
   title: {
     color: '#ffffff',
-    fontSize: 36,
-    lineHeight: 40,
-    fontWeight: '900',
-    letterSpacing: 0,
-    maxWidth: 340,
-    textShadowColor: 'rgba(0,0,0,0.36)',
-    textShadowRadius: 14,
-    textShadowOffset: { width: 0, height: 2 },
-  },
-  body: {
-    color: 'rgba(255,255,255,0.82)',
-    fontSize: 15,
-    lineHeight: 22,
-    letterSpacing: 0,
-    maxWidth: 360,
-  },
-  featureStack: {
-    gap: 10,
-    marginBottom: 14,
-  },
-  featureRow: {
-    minHeight: 64,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    backgroundColor: 'rgba(0,0,0,0.34)',
-  },
-  featureIcon: {
-    width: 34,
-    height: 34,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(255,255,255,0.14)',
-  },
-  featureCopy: {
-    flex: 1,
-    gap: 3,
-  },
-  featureTitle: {
-    color: '#ffffff',
-    fontSize: 13.5,
+    fontSize: 23,
+    lineHeight: 29,
     fontWeight: '800',
     letterSpacing: 0,
-  },
-  featureBody: {
-    color: 'rgba(255,255,255,0.7)',
-    fontSize: 12,
-    lineHeight: 17,
-    letterSpacing: 0,
-  },
-  actionDock: {
-    gap: 10,
-    paddingBottom: 4,
+    textAlign: 'center',
+    textShadowColor: 'rgba(0,0,0,0.58)',
+    textShadowRadius: 16,
   },
   primaryButton: {
-    minHeight: 54,
-    borderRadius: 14,
+    minHeight: 56,
+    borderRadius: 28,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    backgroundColor: C.orange,
-    shadowColor: C.orange,
-    shadowOpacity: Platform.OS === 'ios' ? 0.28 : 0,
-    shadowRadius: 16,
+    backgroundColor: '#ffffff',
+    shadowColor: '#000',
+    shadowOpacity: Platform.OS === 'ios' ? 0.2 : 0,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
   },
   primaryButtonDisabled: {
-    backgroundColor: 'rgba(217,119,69,0.44)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: '#d7c8b7',
     shadowOpacity: 0,
   },
-  primaryText: {
+  setupPrimaryButton: {
+    backgroundColor: SETUP_BLUE,
+    shadowColor: SETUP_BLUE,
+    shadowOpacity: Platform.OS === 'ios' ? 0.18 : 0,
+  },
+  setupPrimaryText: {
     color: '#ffffff',
-    fontSize: 14,
+  },
+  primaryText: {
+    color: '#101511',
+    fontSize: 15,
     fontWeight: '900',
     letterSpacing: 0,
   },
-  accountRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  accountButton: {
-    minHeight: 48,
-    flex: 1,
-    borderRadius: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 7,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(0,0,0,0.34)',
-  },
-  accountText: {
-    color: '#ffffff',
-    fontSize: 13,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
   linkButton: {
-    minHeight: 38,
+    minHeight: 34,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  linkText: {
-    color: 'rgba(255,255,255,0.76)',
+  setupLinkText: {
+    color: SETUP_BLUE,
     fontSize: 13,
-    fontWeight: '800',
+    fontWeight: '900',
     letterSpacing: 0,
   },
   setupHeader: {
     minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
+    gap: 14,
   },
   iconButton: {
     width: 42,
     height: 42,
-    borderRadius: 13,
+    borderRadius: 21,
     alignItems: 'center',
     justifyContent: 'center',
+    backgroundColor: '#ffffff',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    borderColor: '#eadfce',
   },
   skipHeaderButton: {
     minWidth: 54,
@@ -619,66 +662,42 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'center',
   },
   skipHeaderText: {
-    color: 'rgba(255,255,255,0.94)',
+    color: '#3b332a',
     fontSize: 13,
     fontWeight: '800',
     letterSpacing: 0,
-    textShadowColor: 'rgba(0,0,0,0.42)',
-    textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 1 },
   },
-  progressDots: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
+  progressTrack: {
+    flex: 1,
+    height: 5,
+    borderRadius: 3,
+    overflow: 'hidden',
+    backgroundColor: '#e5d8c6',
   },
-  progressDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: 'rgba(255,255,255,0.28)',
-  },
-  progressDotActive: {
-    width: 24,
-    backgroundColor: C.orange,
+  progressFill: {
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: SETUP_BLUE,
   },
   setupCopy: {
-    gap: 9,
-    paddingTop: 18,
+    gap: 7,
+    paddingTop: 16,
     paddingBottom: 18,
   },
   setupKicker: {
-    color: 'rgba(255,255,255,0.86)',
+    color: '#8b7966',
     fontFamily: mono,
     fontSize: 12,
     fontWeight: '900',
     letterSpacing: 0,
     textTransform: 'uppercase',
-    textShadowColor: 'rgba(0,0,0,0.46)',
-    textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 1 },
   },
   setupTitle: {
-    color: '#ffffff',
-    fontSize: 31,
-    lineHeight: 36,
+    color: '#241f19',
+    fontSize: 33,
+    lineHeight: 38,
     fontWeight: '900',
     letterSpacing: 0,
-    maxWidth: 360,
-    textShadowColor: 'rgba(0,0,0,0.46)',
-    textShadowRadius: 14,
-    textShadowOffset: { width: 0, height: 2 },
-  },
-  setupBody: {
-    color: 'rgba(255,255,255,0.9)',
-    fontSize: 15,
-    lineHeight: 22,
-    fontWeight: '500',
-    letterSpacing: 0,
-    maxWidth: 360,
-    textShadowColor: 'rgba(0,0,0,0.42)',
-    textShadowRadius: 10,
-    textShadowOffset: { width: 0, height: 1 },
   },
   optionScroll: {
     flex: 1,
@@ -687,77 +706,142 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     gap: 10,
     paddingBottom: 14,
   },
-  optionRow: {
-    minHeight: 82,
+  choiceRow: {
+    minHeight: 58,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    padding: 12,
-    borderRadius: 12,
+    paddingHorizontal: 16,
+    borderRadius: 28,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
-    backgroundColor: 'rgba(0,0,0,0.56)',
+    borderColor: '#e4d7c5',
+    backgroundColor: '#fffaf2',
   },
-  optionRowSelected: {
-    borderColor: 'rgba(255,255,255,0.42)',
-    backgroundColor: 'rgba(217,119,69,0.38)',
+  choiceRowSelected: {
+    borderColor: SETUP_BLUE,
+    backgroundColor: SETUP_BLUE,
   },
-  optionIcon: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
-    backgroundColor: 'rgba(255,255,255,0.12)',
-  },
-  optionIconSelected: {
-    borderColor: 'rgba(255,255,255,0.22)',
-    backgroundColor: C.orange,
-  },
-  optionCopy: {
+  choiceText: {
     flex: 1,
-    gap: 4,
-  },
-  optionTitle: {
-    color: '#ffffff',
-    fontSize: 15.5,
-    lineHeight: 20,
+    color: '#2a241d',
+    fontSize: 16,
+    lineHeight: 22,
     fontWeight: '900',
     letterSpacing: 0,
-    textShadowColor: 'rgba(0,0,0,0.32)',
-    textShadowRadius: 6,
-    textShadowOffset: { width: 0, height: 1 },
   },
-  optionTitleSelected: {
+  choiceTextSelected: {
     color: '#ffffff',
   },
-  optionBody: {
-    color: 'rgba(255,255,255,0.84)',
-    fontSize: 13,
-    lineHeight: 19,
-    fontWeight: '500',
-    letterSpacing: 0,
-  },
   setupDock: {
-    gap: 10,
+    gap: 9,
     paddingTop: 8,
   },
-  selectionSummary: {
-    minHeight: 28,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-  },
   selectionText: {
-    color: 'rgba(255,255,255,0.82)',
+    color: '#766754',
     fontSize: 12,
     fontWeight: '800',
     letterSpacing: 0,
-    textShadowColor: 'rgba(0,0,0,0.42)',
-    textShadowRadius: 8,
-    textShadowOffset: { width: 0, height: 1 },
+    textAlign: 'center',
+  },
+  rigForm: {
+    gap: 18,
+  },
+  rigSection: {
+    gap: 10,
+  },
+  rigSectionTitle: {
+    color: '#241f19',
+    fontSize: 18,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  pillGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  rigPill: {
+    minHeight: 38,
+    borderRadius: 19,
+    paddingHorizontal: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: '#e2d5c4',
+    backgroundColor: '#fffaf2',
+  },
+  rigPillSelected: {
+    borderColor: SETUP_BLUE,
+    backgroundColor: SETUP_BLUE,
+  },
+  rigPillText: {
+    color: '#2a241d',
+    fontSize: 12,
+    fontWeight: '900',
+    letterSpacing: 0,
+  },
+  rigPillTextSelected: {
+    color: '#ffffff',
+  },
+  inputRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  inputGroup: {
+    flex: 1,
+    gap: 6,
+  },
+  inputLabel: {
+    color: '#8b7966',
+    fontFamily: mono,
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  input: {
+    minHeight: 46,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    color: '#241f19',
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0,
+    borderWidth: 1,
+    borderColor: '#e2d5c4',
+    backgroundColor: '#fffaf2',
+  },
+  toggleRow: {
+    minHeight: 48,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  toggleText: {
+    flex: 1,
+    color: '#2a241d',
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0,
+  },
+  toggle: {
+    width: 48,
+    height: 28,
+    borderRadius: 14,
+    padding: 3,
+    backgroundColor: '#dfd2c1',
+  },
+  toggleOn: {
+    backgroundColor: SETUP_BLUE,
+  },
+  toggleThumb: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: '#ffffff',
+  },
+  toggleThumbOn: {
+    transform: [{ translateX: 20 }],
   },
 });

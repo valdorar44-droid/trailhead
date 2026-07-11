@@ -2,7 +2,7 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.5',
+    version: '1.0.6',
     runtimeVersion: 'native-202607-mission-animator-1',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
@@ -17,7 +17,6 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
-      buildNumber: '8',
       usesAppleSignIn: true,
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',
@@ -113,8 +112,8 @@ module.exports = {
     ],
     experiments: { typedRoutes: true },
     extra: {
-      googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '',
-      googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '',
+      googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '253003227791-o34lb5706rokbgq6qdjhagggue5kqddh.apps.googleusercontent.com',
+      googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '253003227791-1diqvaq7d5oqnvncmdk22aus8ech1t8p.apps.googleusercontent.com',
       googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',
       router: { origin: false },
       eas: { projectId: '92c016d2-6e63-480e-a483-a6898d7e77d5' },

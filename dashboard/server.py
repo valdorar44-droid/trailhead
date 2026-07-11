@@ -1803,6 +1803,9 @@ def _clean_explore_public_labels(place: dict) -> dict:
     for key in ("state", "region"):
         if summary.get(key):
             summary[key] = _clean_explore_display_region(summary.get(key))
+    for key in ("image_url", "thumbnail_url"):
+        if summary.get(key):
+            summary[key] = _explore_contextual_image_url(place, summary.get(key))
     for key in ("hook", "short_description", "image_credit", "image_license"):
         if summary.get(key):
             summary[key] = _explore_clean_public_copy(summary.get(key), 900)
@@ -4079,6 +4082,67 @@ EXPLORE_LOCAL_IMAGE_CONTEXTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("joshua-tree", ("joshua tree",)),
 )
 
+EXPLORE_LOCAL_IMAGE_GENERIC_SLUG_WORDS = {
+    "basecamp",
+    "basecamps",
+    "camp",
+    "campground",
+    "campgrounds",
+    "camping",
+    "climb",
+    "glamping",
+    "hut",
+    "huts",
+    "land",
+    "lodge",
+    "lodges",
+    "lodging",
+    "monument",
+    "monuments",
+    "national",
+    "park",
+    "parks",
+    "peak",
+    "peaks",
+    "resort",
+    "scenic",
+    "stay",
+    "stays",
+    "trail",
+    "trailhead",
+    "trailheads",
+    "trails",
+    "view",
+    "views",
+    "water",
+}
+
+def _explore_local_image_slug_terms(url: str) -> list[str]:
+    filename = url.rsplit("/", 1)[-1].lower()
+    stem = re.sub(r"\.[a-z0-9]+$", "", filename)
+    stem = re.sub(r"-[a-f0-9]{8,}$", "", stem)
+    words = [
+        word for word in re.split(r"[^a-z0-9]+", stem)
+        if word and word not in EXPLORE_LOCAL_IMAGE_GENERIC_SLUG_WORDS
+    ]
+    terms: list[str] = []
+    for size in (3, 2):
+        for index in range(0, max(0, len(words) - size + 1)):
+            phrase = " ".join(words[index:index + size])
+            if len(phrase) >= 8:
+                terms.append(phrase)
+    for word in words:
+        if len(word) >= 6:
+            terms.append(word)
+    seen: set[str] = set()
+    out: list[str] = []
+    for term in terms:
+        if term in seen:
+            continue
+        seen.add(term)
+        out.append(term)
+    return out
+
 def _explore_contextual_image_url(place: dict, value: object) -> str:
     url = _safe_explore_image_url(value)
     if not url or not url.startswith("/assets/explore/"):
@@ -4101,6 +4165,9 @@ def _explore_contextual_image_url(place: dict, value: object) -> str:
     for token, allowed_terms in EXPLORE_LOCAL_IMAGE_CONTEXTS:
         if token in filename and not any(term in hay for term in allowed_terms):
             return ""
+    slug_terms = _explore_local_image_slug_terms(url)
+    if slug_terms and not any(term in hay for term in slug_terms):
+        return ""
     return url
 
 def _explore_place_matches_categories(place_type: str, requested: set[str] | None) -> bool:
@@ -6613,6 +6680,10 @@ class ExploreRouteRankRequest(BaseModel):
     limit: int = 48
     max_distance_mi: float = 90
     mode: str = "route"
+
+class ExplorePlacesBulkRequest(BaseModel):
+    ids: list[str] = Field(default_factory=list)
+    force_refresh: bool = False
 
 class RealtimeCopilotSessionRequest(BaseModel):
     session_id: Optional[str] = None
@@ -10352,37 +10423,38 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
 
 # ── Audio guide ────────────────────────────────────────────────────────────────
 
-ELEVENLABS_DIRECTION_MODEL = "eleven_flash_v2_5"
-ELEVENLABS_GUIDE_MODEL = "eleven_multilingual_v2"
-AUDIO_CACHE_VERSION = "v1"
+CARTESIA_TTS_ENDPOINT = "https://api.cartesia.ai/tts/bytes"
+CARTESIA_SAMPLE_RATE = 44100
+AUDIO_CACHE_VERSION = "v2-cartesia"
 
 def _tts_mode(mode: str) -> str:
-    return "guide" if mode == "guide" else "direction"
+    clean = str(mode or "").strip().lower()
+    if clean == "flyover":
+        return "flyover"
+    return "guide" if clean == "guide" else "direction"
 
 def _tts_model_id(mode: str) -> str:
-    return ELEVENLABS_DIRECTION_MODEL if mode == "direction" else ELEVENLABS_GUIDE_MODEL
+    return settings.cartesia_model_id or "sonic-3.5"
 
 def _tts_voice_settings(mode: str) -> dict:
-    return {
-        "stability": 0.42 if mode == "guide" else 0.58,
-        "similarity_boost": 0.78,
-        "style": 0.45 if mode == "guide" else 0.12,
-        "use_speaker_boost": True,
-    }
+    speed = 0.94 if mode == "flyover" else 0.98 if mode == "guide" else 1.03
+    return {"volume": 1, "speed": speed}
 
 def _normalize_tts_text(text: str, mode: str) -> str:
     clean = " ".join((text or "").split())
     if not clean:
         raise HTTPException(400, "Text is required")
-    limit = 280 if mode == "direction" else 10000
+    limit = 420 if mode == "flyover" else 280 if mode == "direction" else 10000
     return clean[:limit]
 
 def _audio_cache_digest(text: str, mode: str) -> str:
     payload = {
         "version": AUDIO_CACHE_VERSION,
+        "provider": "cartesia",
         "mode": mode,
-        "voice_id": settings.elevenlabs_voice_id,
+        "voice_id": settings.cartesia_voice_id,
         "model_id": _tts_model_id(mode),
+        "sample_rate": CARTESIA_SAMPLE_RATE,
         "voice_settings": _tts_voice_settings(mode),
         "text": text,
     }
@@ -10398,11 +10470,12 @@ def _audio_cache_path(digest: str, mode: str) -> Path:
 
 def _audio_cache_headers(text: str, mode: str, cache_status: str) -> dict[str, str]:
     digest = _audio_cache_digest(text, mode)[:24]
-    max_age = "2592000" if mode == "guide" else "300"
+    max_age = "2592000" if mode == "guide" else "900" if mode == "flyover" else "300"
     return {
         "Cache-Control": f"private, max-age={max_age}",
         "ETag": f'"tts-{digest}"',
-        "X-Trailhead-Voice": "elevenlabs",
+        "X-Trailhead-Voice": "cartesia",
+        "X-Trailhead-Voice-Model": _tts_model_id(mode),
         "X-Trailhead-Audio-Cache": cache_status,
     }
 
@@ -10428,7 +10501,7 @@ def _r2_audio_client():
         return None
 
 async def _read_audio_cache(digest: str, mode: str) -> bytes | None:
-    if mode != "guide":
+    if mode not in {"guide", "flyover"}:
         return None
     r2 = _r2_audio_client()
     key = _audio_cache_key(digest, mode)
@@ -10447,7 +10520,7 @@ async def _read_audio_cache(digest: str, mode: str) -> bytes | None:
     return None
 
 async def _write_audio_cache(digest: str, mode: str, audio: bytes) -> None:
-    if mode != "guide" or not audio:
+    if mode not in {"guide", "flyover"} or not audio:
         return
     r2 = _r2_audio_client()
     key = _audio_cache_key(digest, mode)
@@ -10479,7 +10552,7 @@ async def _write_audio_cache(digest: str, mode: str, audio: bytes) -> None:
             pass
 
 async def _delete_audio_cache(digest: str, mode: str) -> None:
-    if mode != "guide":
+    if mode not in {"guide", "flyover"}:
         return
     r2 = _r2_audio_client()
     key = _audio_cache_key(digest, mode)
@@ -10516,25 +10589,24 @@ async def _purge_guide_audio_texts(*texts: str) -> int:
         purged += 1
     return purged
 
-async def _elevenlabs_tts(clean: str, mode: str) -> bytes:
-    if not settings.elevenlabs_api_key:
-        raise HTTPException(500, "ELEVENLABS_API_KEY not configured")
-    model_id = _tts_model_id(mode)
-    url = (
-        "https://api.elevenlabs.io/v1/text-to-speech/"
-        f"{quote(settings.elevenlabs_voice_id)}?output_format=mp3_44100_128"
-    )
+async def _cartesia_tts(clean: str, mode: str) -> bytes:
+    if not settings.cartesia_api_key:
+        raise HTTPException(500, "CARTESIA_API_KEY not configured")
     payload = {
-        "text": clean,
-        "model_id": model_id,
-        "voice_settings": _tts_voice_settings(mode),
+        "model_id": _tts_model_id(mode),
+        "transcript": clean,
+        "voice": {"mode": "id", "id": settings.cartesia_voice_id},
+        "output_format": {"container": "mp3", "sample_rate": CARTESIA_SAMPLE_RATE},
+        "generation_config": _tts_voice_settings(mode),
+        "speed": "normal",
     }
     timeout = 120 if mode == "guide" else 30
     async with httpx.AsyncClient(timeout=timeout) as client:
         r = await client.post(
-            url,
+            CARTESIA_TTS_ENDPOINT,
             headers={
-                "xi-api-key": settings.elevenlabs_api_key,
+                "Authorization": f"Bearer {settings.cartesia_api_key}",
+                "Cartesia-Version": settings.cartesia_version or "2026-03-01",
                 "Accept": "audio/mpeg",
                 "Content-Type": "application/json",
             },
@@ -10542,12 +10614,12 @@ async def _elevenlabs_tts(clean: str, mode: str) -> bytes:
         )
     if r.status_code >= 400:
         detail = r.text[:240] if r.text else r.reason_phrase
-        raise HTTPException(r.status_code, f"ElevenLabs TTS failed: {detail}")
+        raise HTTPException(r.status_code, f"Cartesia TTS failed: {detail}")
     return r.content
 
 @app.get("/api/audio/tts")
 async def tts_audio(text: str = "", mode: str = "direction", token: str = "", user: dict = Depends(_current_user)):
-    """Return ElevenLabs MP3 speech. The API key stays server-side."""
+    """Return Cartesia MP3 speech. The API key stays server-side."""
     mode = _tts_mode(mode)
     if token:
         session = get_cached("campsite_cache", f"tts_session:{user['id']}:{token}", ttl_seconds=3600)
@@ -10565,7 +10637,7 @@ async def tts_audio(text: str = "", mode: str = "direction", token: str = "", us
             headers=_audio_cache_headers(clean, mode, "HIT"),
         )
 
-    audio = await _elevenlabs_tts(clean, mode)
+    audio = await _cartesia_tts(clean, mode)
     await _write_audio_cache(digest, mode, audio)
     return Response(
         content=audio,
@@ -17163,7 +17235,7 @@ a{color:#f97316;}
 <p>Account data is retained while your account is active. Community reports expire automatically (typically within 24–72 hours). You may request account deletion by contacting us at the address below.</p>
 
 <h2>6. Third-Party Services</h2>
-<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic Claude for AI trip planning; ElevenLabs for optional AI voice/audio guide generation; RIDB / Recreation.gov and National Park Service data for campsite and place information; Open-Meteo for weather data; Stripe, Apple, and Google Play for payments.</p>
+<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic Claude for AI trip planning; Cartesia for optional AI voice/audio guide generation; RIDB / Recreation.gov and National Park Service data for campsite and place information; Open-Meteo for weather data; Stripe, Apple, and Google Play for payments.</p>
 
 <h2>7. Children's Privacy</h2>
 <p>Trailhead is not directed to children under 13 and we do not knowingly collect personal information from children under 13.</p>
@@ -25042,6 +25114,60 @@ async def explore_place_detail(place_id: str):
     return _attach_official_nearby_source_pack(place)
 
 
+@app.post("/api/explore/places/bulk")
+async def explore_places_bulk(body: ExplorePlacesBulkRequest):
+    """Cache-first detail hydration for Explore lists."""
+    seen: set[str] = set()
+    ids: list[str] = []
+    for raw_id in body.ids or []:
+        place_id = str(raw_id or "").strip()
+        if not place_id or place_id in seen:
+            continue
+        seen.add(place_id)
+        ids.append(place_id)
+        if len(ids) >= 72:
+            break
+    if not ids:
+        return {"schema_version": 1, "count": 0, "places": [], "missing": []}
+
+    cache_key = f"explore_places_bulk_v1:{hashlib.sha1(json.dumps(ids, sort_keys=True).encode('utf-8')).hexdigest()[:28]}"
+    if not body.force_refresh:
+        try:
+            cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24)
+            if isinstance(cached, dict):
+                return cached
+        except Exception:
+            pass
+
+    places: list[dict] = []
+    missing: list[str] = []
+    for place_id in ids:
+        place = _find_explore_place(place_id)
+        if not place:
+            missing.append(place_id)
+            continue
+        try:
+            places.append(_attach_official_nearby_source_pack(place))
+        except Exception:
+            try:
+                places.append(_clean_explore_public_response_profile(place))
+            except Exception:
+                missing.append(place_id)
+
+    payload = {
+        "schema_version": 1,
+        "count": len(places),
+        "places": places,
+        "missing": missing,
+        "cache": {"status": "refresh", "ttl_hours": 24},
+    }
+    try:
+        set_cached("campsite_cache", cache_key, payload)
+    except Exception:
+        payload["cache"] = {"status": "uncached", "ttl_hours": 0}
+    return payload
+
+
 def _load_explore_experiences() -> dict:
     for path in (EXPLORE_BOOKABLE_EXPERIENCES, EXPLORE_TOURS_VIATOR):
         if path.exists():
@@ -25354,7 +25480,7 @@ async def explore_place_experiences(
     )
     nearby = _experience_distance_filter(experiences, float(lat) if isinstance(lat, (int, float)) else None, float(lng) if isinstance(lng, (int, float)) else None, radius_mi)
     ranked = rank_experiences(nearby, place)
-    ranked = _sort_experiences(ranked, sort, order)[:max(1, min(int(limit or 12), 24))]
+    ranked = _sort_experiences(ranked, sort, order)[:max(1, min(int(limit or 12), 48))]
     live_meta: dict = {}
     if not ranked and source.lower() in {"", "all", "viator"} and isinstance(lat, (int, float)) and isinstance(lng, (int, float)):
         points = [{"lat": float(lat), "lng": float(lng), "name": summary.get("title") or place_id, "leg_index": 0}]
@@ -25365,7 +25491,7 @@ async def explore_place_experiences(
                     points,
                     source,
                     str(summary.get("title") or ""),
-                    max(1, min(int(limit or 12), 24)),
+                    max(1, min(int(limit or 12), 48)),
                     category=category,
                     free_cancel=free_cancel,
                     lowest_price=_clean_experience_price(lowest_price),
@@ -25376,7 +25502,7 @@ async def explore_place_experiences(
                 ),
                 timeout=24.0,
             )
-            ranked = _sort_experiences(live_ranked, sort, order)[:max(1, min(int(limit or 12), 24))]
+            ranked = _sort_experiences(live_ranked, sort, order)[:max(1, min(int(limit or 12), 48))]
         except Exception:
             live_meta = {"live_status": "processing", "live_message": "Checking guided trips for this area.", "provider_status": []}
     return _experience_response(source, ranked, place_id=place_id, cache_status="fresh" if payload.get("generated_at") else "empty", **live_meta)
@@ -25954,7 +26080,7 @@ def _live_viator_route_suggestions(
     ranked_by_key: dict[str, dict] = {}
     searched_destinations: set[str] = set()
     page_count = max(1, min(int(getattr(config, "page_size", 24) or 24), 50))
-    target_limit = max(1, min(int(limit or 8), 24))
+    target_limit = max(1, min(int(limit or 8), 48))
     for point in points[:8]:
         destinations = _viator_destination_candidates_for_point(point, client, max_radius_mi=120.0, max_candidates=3)
         for destination in destinations:
@@ -26058,7 +26184,7 @@ def _viator_live_results_for_points(
     }
     if source_key not in {"", "all", "viator"}:
         return [], meta
-    max_results = max(1, min(int(limit or 8), 24))
+    max_results = max(1, min(int(limit or 8), 48))
     if existing_count >= max_results:
         meta["live_status"] = "not_needed"
         return [], meta
@@ -26213,13 +26339,13 @@ async def route_tour_suggestions(body: RouteTourRequest):
         ),
         body.sort,
         body.order,
-    )[:max(1, min(int(body.limit or 8), 24))]
+    )[:max(1, min(int(body.limit or 8), 48))]
     provider_status: list[dict] = []
     live_status = "disabled"
     live_message = ""
     client = ViatorClient(viator_config_from_env())
-    if len(ranked) < max(1, min(int(body.limit or 8), 24)) and source in {"", "all", "viator"} and client.ready():
-        live_limit = max(1, min(int(body.limit or 8), 24)) - len(ranked)
+    if len(ranked) < max(1, min(int(body.limit or 8), 48)) and source in {"", "all", "viator"} and client.ready():
+        live_limit = max(1, min(int(body.limit or 8), 48)) - len(ranked)
         filters = {
             "category": body.category,
             "free_cancel": bool(body.free_cancel),
@@ -26282,9 +26408,9 @@ async def route_tour_suggestions(body: RouteTourRequest):
             if key not in existing:
                 ranked.append(item)
                 existing.add(key)
-            if len(ranked) >= max(1, min(int(body.limit or 8), 24)):
+            if len(ranked) >= max(1, min(int(body.limit or 8), 48)):
                 break
-        ranked = _sort_experiences(ranked, body.sort, body.order)[:max(1, min(int(body.limit or 8), 24))]
+        ranked = _sort_experiences(ranked, body.sort, body.order)[:max(1, min(int(body.limit or 8), 48))]
     return {
         **_experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty"),
         "route_anchor_count": len(points),
@@ -26598,6 +26724,7 @@ def _explore_area_image_url(place: dict) -> str:
 
 def _rank_explore_camps(camps: list[dict], place: dict, lat: float, lng: float) -> list[dict]:
     area_image = _explore_area_image_url(place)
+    area_fallback_used = False
     ranked: list[dict] = []
     for idx, camp in enumerate(camps or []):
         if not isinstance(camp, dict):
@@ -26609,14 +26736,17 @@ def _rank_explore_camps(camps: list[dict], place: dict, lat: float, lng: float) 
         except Exception:
             enriched["distance_mi"] = None
         has_source_photo = bool(_camp_image_value(enriched))
-        if not has_source_photo and area_image:
+        has_area_fallback = False
+        if not has_source_photo and area_image and not area_fallback_used:
             enriched["photo_url"] = area_image
             enriched["photo_status"] = "area_fallback"
+            area_fallback_used = True
+            has_area_fallback = True
         source = " ".join(str(enriched.get(k) or "") for k in ("source_badge", "verified_source", "source"))
         score = 0
         if has_source_photo:
             score += 100
-        elif area_image:
+        elif has_area_fallback:
             score += 20
         if re.search(r"recreation|nps|national park|official", source, re.I):
             score += 30

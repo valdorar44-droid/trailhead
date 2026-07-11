@@ -22,7 +22,7 @@ export function TripPreviewCaption({ scene, sceneIndex, sceneCount, captionText 
         {warning ? (
           <Ionicons name="warning" size={12} color={accent} style={styles.topIcon} />
         ) : null}
-        <Text style={[styles.kicker, { color: accent }]} numberOfLines={1}>
+        <Text style={[styles.kicker, { color: accent }]} numberOfLines={1} ellipsizeMode="tail">
           {scene.title.toUpperCase()}
         </Text>
         {typeof scene.day === 'number' && scene.day > 0 ? (
@@ -35,7 +35,7 @@ export function TripPreviewCaption({ scene, sceneIndex, sceneCount, captionText 
         </Text>
       </View>
       {caption ? (
-        <Text style={styles.caption} numberOfLines={2}>{caption}</Text>
+        <Text style={styles.caption} numberOfLines={3} ellipsizeMode="tail">{caption}</Text>
       ) : null}
     </View>
   );
@@ -46,9 +46,9 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(8,12,18,.84)',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,.14)',
-    borderRadius: 14,
+    borderRadius: 12,
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 7,
     gap: 4,
     maxWidth: '100%',
   },
@@ -86,8 +86,8 @@ const styles = StyleSheet.create({
   },
   caption: {
     color: '#f8fafc',
-    fontSize: 12,
-    lineHeight: 16,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: '600',
   },
 });

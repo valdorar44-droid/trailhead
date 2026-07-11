@@ -11,11 +11,11 @@ import { estimateSpeechMs } from './missionBriefNativePlayer';
 /** OTA uses the JS player; native requires a new binary with TrailheadMissionAnimator. */
 export type MissionPlaybackMode = 'js' | 'native';
 
-export type MissionVoicePath = 'realtime' | 'trailhead_tts' | 'device_tts' | 'silent';
+export type MissionVoicePath = 'realtime' | 'cartesia_sonic' | 'device_tts' | 'silent';
 
 export type NarrationDoneSource =
   | 'realtime'
-  | 'trailhead_tts'
+  | 'cartesia_sonic'
   | 'device_tts'
   | 'silent'
   | 'watchdog'
@@ -77,7 +77,7 @@ export type MissionPlaybackDebugCounters = {
 
 const emptyNarrationDone = (): Record<NarrationDoneSource, number> => ({
   realtime: 0,
-  trailhead_tts: 0,
+  cartesia_sonic: 0,
   device_tts: 0,
   silent: 0,
   watchdog: 0,
@@ -144,14 +144,14 @@ export function createMissionPlaybackDebug(
     },
     narrationDone(source, data = {}) {
       counters.narrationDone[source] += 1;
-      emit('mission_playback_narration_done', { source, ...data });
+      emit('mission_playback_narration_done', { source, voice_path: data.voice_path ?? null, ...data });
     },
     watchdogFired(data) {
       counters.watchdogFires += 1;
       emit('mission_playback_watchdog', data);
     },
     voicePath(path, data = {}) {
-      emit('mission_playback_voice_path', { path, ...data });
+      emit('mission_playback_voice_path', { path, voice_path: path, fallback_reason: data.fallback_reason ?? null, ...data });
     },
     snapshot() {
       return {

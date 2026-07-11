@@ -9,6 +9,8 @@ import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
+import * as Google from 'expo-auth-session/providers/google';
+import * as WebBrowser from 'expo-web-browser';
 import { storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
@@ -45,6 +47,8 @@ import {
 } from '@/lib/routeBuilder';
 
 type AppleAuthModule = typeof import('expo-apple-authentication');
+WebBrowser.maybeCompleteAuthSession();
+
 const AppleAuthentication: AppleAuthModule | null = (() => {
   try {
     return require('expo-apple-authentication') as AppleAuthModule;
@@ -118,15 +122,27 @@ const MAKES_DATA: Record<string, string[]> = {
 const ALL_MAKES = Object.keys(MAKES_DATA);
 
 const DEFAULT_RIG: RigProfile = {
-  vehicle_type: '', year: '', make: '', model: '', trim: '',
+  nickname: '', vehicle_type: '', year: '', make: '', model: '', trim: '',
   ground_clearance_in: '', lift_in: '', drive: '4x4 PT', length_ft: '',
-  suspension: 'Stock', tire_size: '', fuel_range_miles: '', fuel_mpg: '',
+  has_low_range: false, suspension: 'Stock', tire_size: '', tire_diameter_in: '', tire_type: '',
+  full_size_spare: false, spare_count: '',
+  width_in: '', height_ft: '', wheelbase_in: '',
+  approach_angle_deg: '', departure_angle_deg: '', breakover_angle_deg: '',
+  fuel_range_miles: '', fuel_mpg: '', tank_capacity_gal: '', water_capacity_gal: '', payload_lbs: '',
   has_winch: false, winch_lbs: '', locking_diffs: 'None',
-  has_skids: false, has_rack: false,
+  has_skids: false, has_rack: false, has_recovery_points: false,
+  has_traction_boards: false, has_air_compressor: false, has_rock_sliders: false,
+  max_trail_difficulty: '', max_water_depth_in: '', avoid_narrow_trails: false, avoid_body_damage: false,
   is_towing: false, trailer_length_ft: '', tow_capacity_lbs: '',
 };
 
 const AUTH_REQUEST_TIMEOUT_MS = 25_000;
+const GOOGLE_AUTH_SCOPES = ['openid', 'profile', 'email'];
+
+function expoExtraValue(key: string) {
+  const extra = Constants.expoConfig?.extra as Record<string, unknown> | undefined;
+  return typeof extra?.[key] === 'string' ? extra[key] : '';
+}
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -201,8 +217,7 @@ function icsText(value?: string) {
 
 const PROFILE_SECTIONS = [
   { id: 'account', label: 'Account', icon: 'person-circle-outline' },
-  { id: 'booked', label: 'Booked', icon: 'ticket-outline' },
-  { id: 'library', label: 'Library', icon: 'albums-outline' },
+  { id: 'trips', label: 'Trips & Saved', icon: 'albums-outline' },
   { id: 'rig', label: 'Rig', icon: 'car-sport-outline' },
   { id: 'settings', label: 'Settings', icon: 'settings-outline' },
 ] as const;
@@ -297,6 +312,29 @@ export default function ProfileScreen() {
   const startWelcomePrompt = useStore(st => st.startWelcomePrompt);
   const startWelcomeSetup = useStore(st => st.startWelcomeSetup);
   const [offlineTripSummaries, setOfflineTripSummaries] = useState<Array<TripResult & { cached_at: number }>>([]);
+  const googleClientIds = useMemo(() => ({
+    iosClientId: expoExtraValue('googleIosClientId'),
+    androidClientId: expoExtraValue('googleAndroidClientId'),
+    webClientId: expoExtraValue('googleWebClientId'),
+  }), []);
+  const googleClientIdForPlatform = Platform.select({
+    ios: googleClientIds.iosClientId,
+    android: googleClientIds.androidClientId,
+    default: googleClientIds.webClientId,
+  }) || '';
+  const googleAuthAvailable = Boolean(googleClientIdForPlatform);
+  const googleAuthHandledRef = useRef('');
+  const googleAuthConfig = useMemo(() => ({
+    iosClientId: googleClientIds.iosClientId || undefined,
+    androidClientId: googleClientIds.androidClientId || undefined,
+    webClientId: googleClientIds.webClientId || undefined,
+    clientId: googleClientIdForPlatform || googleClientIds.androidClientId || googleClientIds.iosClientId || undefined,
+    scopes: GOOGLE_AUTH_SCOPES,
+    selectAccount: true,
+  }), [googleClientIds, googleClientIdForPlatform]);
+  const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
+    ...googleAuthConfig,
+  });
 
   function openSavedCampOnMap(camp: typeof favoriteCamps[number]) {
     setPendingMapSelection({ kind: 'camp', camp });
@@ -371,6 +409,30 @@ export default function ProfileScreen() {
     if (!user) return;
     loadSupportInbox(false).catch(() => {});
   }, [user?.id]);
+
+  useEffect(() => {
+    if (!googleResponse) return;
+    if (googleResponse.type === 'success') {
+      const identityToken = googleResponse.params?.id_token || googleResponse.authentication?.idToken || '';
+      if (!identityToken) {
+        setLoading(false);
+        Alert.alert('Google Sign In failed', 'Google did not return an identity token.');
+        return;
+      }
+      if (googleAuthHandledRef.current === identityToken) return;
+      googleAuthHandledRef.current = identityToken;
+      handleProviderLogin('google', identityToken);
+      return;
+    }
+    if (googleResponse.type === 'error') {
+      setLoading(false);
+      Alert.alert('Google Sign In failed', googleResponse.error?.message || 'Could not sign in with Google.');
+      return;
+    }
+    if (googleResponse.type === 'cancel' || googleResponse.type === 'dismiss') {
+      setLoading(false);
+    }
+  }, [googleResponse]);
 
   useEffect(() => {
     let alive = true;
@@ -780,7 +842,28 @@ export default function ProfileScreen() {
   }
 
   async function signInWithGoogle() {
-    Alert.alert('Google Sign In coming soon', 'Apple Sign In and email sign in are available now. Google needs the OAuth client IDs before it can be enabled.');
+    if (!googleAuthAvailable) {
+      Alert.alert('Google Sign In unavailable', 'Google Sign In is not configured for this platform yet.');
+      return;
+    }
+    if (!googleRequest) {
+      Alert.alert('Google Sign In unavailable', 'Google Sign In is still loading. Try again in a moment.');
+      return;
+    }
+    Keyboard.dismiss();
+    setLoading(true);
+    try {
+      const result = await promptGoogleAsync();
+      if (result.type === 'cancel' || result.type === 'dismiss' || result.type === 'locked') {
+        setLoading(false);
+      } else if (result.type === 'error') {
+        setLoading(false);
+        Alert.alert('Google Sign In failed', result.error?.message || 'Could not sign in with Google.');
+      }
+    } catch (e: any) {
+      setLoading(false);
+      Alert.alert('Google Sign In failed', e?.message ?? 'Could not open Google Sign In.');
+    }
   }
 
   async function register() {
@@ -1217,8 +1300,8 @@ export default function ProfileScreen() {
                   onPress={signInWithApple}
                 />
               ) : null}
-              {false && (
-                <TouchableOpacity style={s.socialAuthButton} onPress={signInWithGoogle} disabled={loading}>
+              {googleAuthAvailable && (
+                <TouchableOpacity style={s.socialAuthButton} onPress={signInWithGoogle} disabled={loading || !googleRequest}>
                   <Ionicons name="logo-google" size={18} color={C.text} />
                   <Text style={s.socialAuthText}>Continue with Google</Text>
                 </TouchableOpacity>
@@ -1325,8 +1408,8 @@ export default function ProfileScreen() {
                   onPress={signInWithApple}
                 />
               ) : null}
-              {false && (
-                <TouchableOpacity style={s.socialAuthButton} onPress={signInWithGoogle} disabled={loading}>
+              {googleAuthAvailable && (
+                <TouchableOpacity style={s.socialAuthButton} onPress={signInWithGoogle} disabled={loading || !googleRequest}>
                   <Ionicons name="logo-google" size={18} color={C.text} />
                   <Text style={s.socialAuthText}>Continue with Google</Text>
                 </TouchableOpacity>
@@ -1419,17 +1502,13 @@ export default function ProfileScreen() {
                 { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
                 { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
               ]
-            : profileSection === 'booked'
-              ? [
-                  { icon: 'ticket-outline', label: 'TOURS', color: '#0f766e', onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
-                  { icon: 'map-outline', label: 'ROUTE', color: C.orange, onPress: () => router.push('/(tabs)/route-builder' as any) },
-                  ...(upcomingBookedTour ? [{ icon: 'calendar-outline', label: 'CALENDAR', color: '#3b82f6', onPress: () => addBookedTourToCalendar(upcomingBookedTour) }] : []),
-                ]
-            : profileSection === 'library'
+            : profileSection === 'trips'
               ? [
                   { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
                   { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
                   { icon: 'cloud-download-outline', label: 'SAVED AREAS', color: C.green, onPress: openOfflineMapsManager },
+                  { icon: 'ticket-outline', label: 'TOURS', color: '#0f766e', onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
+                  ...(upcomingBookedTour ? [{ icon: 'calendar-outline', label: 'CALENDAR', color: '#3b82f6', onPress: () => addBookedTourToCalendar(upcomingBookedTour) }] : []),
                 ]
             : profileSection === 'rig'
               ? [
@@ -1475,11 +1554,24 @@ export default function ProfileScreen() {
           );
         })()}
 
-        {profileSection === 'booked' && (
+        {profileSection === 'trips' && (
+          <>
+          <ProfileLibraryOverview
+            savedTripCount={tripHistory.length}
+            offlineTripCount={offlineTripCount}
+            offlineOnlyCount={offlineOnlyTrips.length}
+            savedCampCount={favoriteCamps.length}
+            savedPlaceCount={savedPlaces.length}
+            importedRouteCount={importedRouteCount}
+            importedPinCount={importedPinCount}
+            onOpenDownloads={openOfflineMapsManager}
+            onPlanTrip={() => { setActiveTrip(null); router.push('/(tabs)/plan' as any); }}
+          />
+
           <View style={s.bookedScreen}>
-            <View>
+            <View style={s.sectionHeaderCompact}>
+              <Text style={s.sectionEyebrow}>TOURS</Text>
               <Text style={s.bookedScreenTitle}>Booked tours</Text>
-              <Text style={s.bookedScreenSub}>Tickets and confirmed activities.</Text>
             </View>
 
             {!bookedToursLoaded ? (
@@ -1491,7 +1583,7 @@ export default function ProfileScreen() {
               <>
                 {bookedTours.map(renderBookedTourCard)}
                 <View style={s.planAheadWrap}>
-                  <Text style={s.planAheadTitle}>Plan ahead</Text>
+                  <Text style={s.planAheadTitle}>Next</Text>
                   <View style={s.planAheadCard}>
                     {!!upcomingBookedTour && (
                       <TouchableOpacity style={s.planAheadRow} onPress={() => addBookedTourToCalendar(upcomingBookedTour)} activeOpacity={0.84}>
@@ -1538,20 +1630,7 @@ export default function ProfileScreen() {
               </View>
             )}
           </View>
-        )}
-
-        {profileSection === 'library' && (
-          <ProfileLibraryOverview
-            savedTripCount={tripHistory.length}
-            offlineTripCount={offlineTripCount}
-            offlineOnlyCount={offlineOnlyTrips.length}
-            savedCampCount={favoriteCamps.length}
-            savedPlaceCount={savedPlaces.length}
-            importedRouteCount={importedRouteCount}
-            importedPinCount={importedPinCount}
-            onOpenDownloads={openOfflineMapsManager}
-            onPlanTrip={() => { setActiveTrip(null); router.push('/(tabs)/plan' as any); }}
-          />
+          </>
         )}
 
         {profileSection === 'account' && (
@@ -2781,18 +2860,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   switchLink: { color: C.orange, fontSize: 13, fontWeight: '600' },
 
   profileCard: {
-    backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: C.border,
-    padding: 16, flexDirection: 'row', alignItems: 'center', gap: 14,
-    shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
+    backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: C.border,
+    padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12,
+    shadowColor: '#000', shadowOpacity: 0.2, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
   },
   avatar: {
-    width: 52, height: 52, borderRadius: 26,
+    width: 48, height: 48, borderRadius: 18,
     backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#E5E7EB', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 16,
+    shadowColor: '#E5E7EB', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.12, shadowRadius: 12,
   },
-  avatarText: { color: C.text, fontSize: 22, fontWeight: '800' },
+  avatarText: { color: C.text, fontSize: 20, fontWeight: '800' },
   profileInfo: { flex: 1 },
-  profileName: { color: C.text, fontSize: 16, fontWeight: '700' },
+  profileName: { color: C.text, fontSize: 17, lineHeight: 22, fontWeight: '800', letterSpacing: 0 },
   profileEmail: { color: C.text3, fontSize: 12, marginTop: 1 },
   streakText: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 4 },
   logoutBtn: { padding: 6 },
@@ -2816,18 +2895,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   profileSectionNav: { marginHorizontal: -14 },
   profileSectionNavContent: { paddingHorizontal: 14, gap: 8 },
   profileSectionChip: {
-    height: 38,
+    height: 36,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: 6,
     paddingHorizontal: 12,
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s2,
   },
   profileSectionChipActive: { backgroundColor: C.orange, borderColor: C.orange },
-  profileSectionChipText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800' },
+  profileSectionChipText: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '800', letterSpacing: 0 },
   profileSectionChipTextActive: { color: '#fff' },
   emptySectionText: { color: C.text3, fontSize: 12.5, lineHeight: 18 },
   tripSummaryCard: {
@@ -2856,18 +2935,20 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   // Quick actions
   quickActionsRow: { marginHorizontal: -14 },
   quickActionsContent: { flexDirection: 'row', paddingHorizontal: 14, gap: 10 },
-  quickAction: { alignItems: 'center', gap: 6, width: 70 },
+  quickAction: { alignItems: 'center', gap: 6, width: 68 },
   quickActionIcon: {
-    width: 54, height: 54, borderRadius: 20,
+    width: 50, height: 50, borderRadius: 16,
     borderWidth: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2,
   },
-  quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.5, textAlign: 'center' },
-  bookedScreen: { gap: 14 },
-  bookedScreenTitle: { color: C.text, fontSize: 30, lineHeight: 35, fontWeight: '900', letterSpacing: 0 },
+  quickActionLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, letterSpacing: 0, textAlign: 'center' },
+  bookedScreen: { gap: 12 },
+  sectionHeaderCompact: { gap: 2, marginTop: 2 },
+  sectionEyebrow: { color: C.orange, fontSize: 9, lineHeight: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
+  bookedScreenTitle: { color: C.text, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: 0 },
   bookedScreenSub: { color: C.text3, fontSize: 13, lineHeight: 18, marginTop: 3 },
   bookedTourCard: {
     backgroundColor: C.s2,
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
     padding: 14,
@@ -2901,17 +2982,17 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   bookedDivider: { height: 1, backgroundColor: C.border, marginTop: 2 },
   bookedDetailsButton: { minHeight: 42, alignItems: 'center', justifyContent: 'center' },
   bookedDetailsText: { color: C.blueGlow, fontSize: 16, lineHeight: 21, fontWeight: '800' },
-  planAheadWrap: { gap: 10, marginTop: 4 },
-  planAheadTitle: { color: C.text, fontSize: 25, lineHeight: 30, fontWeight: '900', letterSpacing: 0 },
+  planAheadWrap: { gap: 8, marginTop: 2 },
+  planAheadTitle: { color: C.text, fontSize: 17, lineHeight: 22, fontWeight: '900', letterSpacing: 0 },
   planAheadCard: {
     backgroundColor: C.s2,
-    borderRadius: 18,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: C.border,
     overflow: 'hidden',
   },
   planAheadRow: {
-    minHeight: 62,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
@@ -2921,10 +3002,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderBottomColor: C.border,
   },
   planAheadIcon: { width: 34, alignItems: 'center' },
-  planAheadText: { flex: 1, color: C.text, fontSize: 17, lineHeight: 22, fontWeight: '900' },
+  planAheadText: { flex: 1, color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '800' },
   bookedEmptyCard: {
     backgroundColor: C.s2,
-    borderRadius: 20,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: C.border,
     padding: 16,

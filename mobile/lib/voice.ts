@@ -227,30 +227,32 @@ export async function speakFlyoverBeat(text: string, callbacks?: VoiceCallbacks)
       },
     });
   };
-  const startTimer = setTimeout(() => {
-    if (!started && !finished) startDeviceSpeech();
-  }, callbacks?.startTimeoutMs ?? 2400);
+  const startTimer = allowDeviceFallback
+    ? setTimeout(() => {
+        if (!started && !finished) startDeviceSpeech();
+      }, callbacks?.startTimeoutMs ?? 2400)
+    : null;
   try {
     await playTrailheadVoice(clean, 'flyover', allowDeviceFallback ? { rate: 0.9, pitch: 1, language: 'en-US' } : false, {
       onStart: source => {
         if (fallbackStarted || finished) return;
         started = true;
-        clearTimeout(startTimer);
+        if (startTimer) clearTimeout(startTimer);
         callbacks?.onStart?.(source);
       },
       onFinish: source => {
         if (finished) return;
         finished = true;
-        clearTimeout(startTimer);
+        if (startTimer) clearTimeout(startTimer);
         callbacks?.onFinish?.(source);
       },
       onFallback: () => {
-        clearTimeout(startTimer);
+        if (startTimer) clearTimeout(startTimer);
         startDeviceSpeech();
       },
     });
   } catch {
-    clearTimeout(startTimer);
+    if (startTimer) clearTimeout(startTimer);
     startDeviceSpeech();
   }
 }

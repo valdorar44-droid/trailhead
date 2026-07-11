@@ -16299,12 +16299,17 @@ function MapScreen() {
     return inRightControls || inTrailGuideDock || inBottomTabs || inTopLeftControls;
   }
 
-  function centerMapOnUser() {
-    if (!userLoc) return;
+  async function centerMapOnUser() {
+    const resolved = userLoc ?? (await ensureCopilotLocation()).loc;
+    if (!resolved) {
+      setQuickToast('Location is not available yet.');
+      setTimeout(() => setQuickToast(''), 2400);
+      return;
+    }
     if (useNativeMapSurface) {
-      nativeMapRef.current?.locate(userLoc.lat, userLoc.lng);
+      nativeMapRef.current?.locate(resolved.lat, resolved.lng);
     } else {
-      postWebMessage(JSON.stringify({ type: 'locate', lat: userLoc.lat, lng: userLoc.lng }));
+      postWebMessage(JSON.stringify({ type: 'locate', lat: resolved.lat, lng: resolved.lng }));
     }
   }
 
@@ -22721,7 +22726,12 @@ function MapScreen() {
         )}
 
         {!mapControlsCollapsed && (
-          <TouchableOpacity style={[s.ctrlBtn, mapChrome.button, !userLoc && { opacity: 0.62 }]} onPress={centerMapOnUser} disabled={!userLoc}>
+          <TouchableOpacity
+            style={[s.ctrlBtn, mapChrome.button, !userLoc && { opacity: 0.82 }]}
+            onPress={centerMapOnUser}
+            activeOpacity={0.84}
+            accessibilityLabel="Locate me"
+          >
             <Ionicons name="locate" size={20} color={userLoc ? mapChrome.text : mapChrome.textMuted} />
           </TouchableOpacity>
         )}
@@ -26011,12 +26021,17 @@ function MapScreen() {
             </Text>
             <TouchableOpacity
               style={s.locDisclosureAllow}
-              onPress={() => {
+              onPress={async () => {
                 setShowLocDisclosure(false);
                 storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
-                Location.requestForegroundPermissionsAsync().then(({ status }) => {
-                  if (status === 'granted') setLocGranted(true);
-                });
+                const result = await ensureCopilotLocation();
+                if (result.loc) {
+                  if (useNativeMapSurface) {
+                    nativeMapRef.current?.locate(result.loc.lat, result.loc.lng);
+                  } else {
+                    postWebMessage(JSON.stringify({ type: 'locate', lat: result.loc.lat, lng: result.loc.lng }));
+                  }
+                }
               }}
             >
               <Ionicons name="checkmark-circle" size={16} color="#fff" />

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import json
 import math
 import re
 import sqlite3
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -32,6 +34,11 @@ except ImportError:
     )
 
 ROOT = Path(__file__).resolve().parents[2]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.explore_sources.base.enrichment import REVIEWABLE_GRADES, enrich_place_dict, primary_media_url
+
 OFFICIAL_DB = ROOT / "data" / "processed" / "trailhead_official_data.sqlite"
 APP_DB = ROOT / "trailhead.db"
 EXPLORE_CANDIDATE = ROOT / "data" / "processed" / "explore_catalog_v3.candidate.json"
@@ -67,6 +74,26 @@ GENERIC_EXPLORE_TITLES = {
     "state park",
 }
 DROP_EXPLORE_CATEGORY = ("__drop__", "__drop__")
+
+EXPLORER_FILTER_CATEGORIES = {
+    "camp": {"campground", "rv_park", "dispersed_camp", "overnight_parking"},
+    "trails": {"trail", "trailhead"},
+    "parks": {"park"},
+    "water": {"lake", "water"},
+    "views": {"viewpoint"},
+    "things": {"activity", "historic", "permit_required", "visitor_center"},
+    "land": {"forest", "public_land"},
+    "huts": {"lodging"},
+    "waterfalls": {"waterfall"},
+    "peaks": {"peak", "glacier"},
+    "trailheads": {"trailhead"},
+    "glamping": {"glamping"},
+    "springs": {"hot_spring"},
+    "climb": {"bouldering_area", "climbing_area"},
+    "scenic": {"forest_road", "offroad_route", "scenic_drive"},
+    "fuel": {"fuel"},
+    "resupply": {"resupply"},
+}
 
 OLD_MARKER_RE = re.compile(r"\(\s*old\s*\)", re.I)
 UPPER_OLD_MARKER_RE = re.compile(r"\bOLD\b")
@@ -277,7 +304,7 @@ def public_sentence_parts(value: object) -> list[str]:
     if not text:
         return []
     placeholder = "<trailhead-dot>"
-    text = re.sub(r"\b(Mt|St|Dr|Mr|Mrs|Ms|Jr|Sr|Rd|Hwy|Ft)\.", rf"\1{placeholder}", text)
+    text = re.sub(r"\b(Mt|St|Ste|Dr|Mr|Mrs|Ms|Jr|Sr|Rd|Hwy|Ft|Lt|Col|Gen|Capt|Sgt|Rev)\.", rf"\1{placeholder}", text)
     text = re.sub(r"\b([A-Z])\.", rf"\1{placeholder}", text)
     parts = [part.replace(placeholder, ".").strip() for part in re.split(r"(?<=[.!?])\s+", text) if part.strip()]
     return parts
@@ -731,6 +758,30 @@ def explore_sort_key(item: dict[str, Any]) -> tuple:
     )
 
 
+def explore_serving_sort_key(item: dict[str, Any]) -> tuple:
+    grade_order = {"signature": 0, "complete": 1, "basic": 2, "candidate": 3}
+    try:
+        rank = int(item.get("rank"))
+    except (TypeError, ValueError):
+        rank = 10_000
+    return (
+        grade_order.get(compact(item.get("enrichment_grade")), 4),
+        -int(item.get("enrichment_score") or 0),
+        rank,
+        compact(item.get("title")).casefold(),
+        str(item.get("id") or ""),
+    )
+
+
+def explore_filter_coverage(items: list[dict[str, Any]]) -> tuple[dict[str, int], list[str]]:
+    counts = Counter(compact(item.get("category")).lower() for item in items)
+    filter_counts = {
+        name: sum(counts[category] for category in categories)
+        for name, categories in EXPLORER_FILTER_CATEGORIES.items()
+    }
+    return filter_counts, sorted(name for name, count in filter_counts.items() if count == 0)
+
+
 def dedupe_explore_records(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
     by_key: dict[str, tuple[int, dict[str, Any]]] = {}
     passthrough: list[tuple[int, dict[str, Any]]] = []
@@ -769,15 +820,26 @@ def clean_public_text(value: object, max_len: int = 360) -> str:
     text = re.sub(r"\b(?:rig aware|offline ready)\b", "", text, flags=re.I)
     text = re.sub(r"\bnear the area\b", "nearby", text, flags=re.I)
     text = compact(text)
+    leading_ellipsis = bool(re.match(r"^(?:\.\s*){2,}", text))
+    text = re.sub(r"^(?:\.\s*){2,}", "", text).lstrip(" ,;:-")
+    if leading_ellipsis and text:
+        text = text[0].upper() + text[1:]
     if PUBLIC_COPY_FORBIDDEN_RE.search(text) or GENERIC_EXPLORE_DESCRIPTION_RE.search(text):
         return ""
     sentences = public_sentence_parts(text)
-    if len(sentences) >= 2:
+    while len(sentences) > 1 and (
+        len(sentences[0]) < 45
+        or sentences[0][0].islower()
+        or re.match(r"^(?:whose|which)\b", sentences[0], re.I)
+        or re.match(r"^(?:overview|attention|welcome|want to|looking for|discover|reserve your spot)\b", sentences[0], re.I)
+    ):
+        sentences = sentences[1:]
+    if sentences:
         text = " ".join(sentences[:2])
     if len(text) > max_len:
         clipped = text[:max_len].rsplit(" ", 1)[0].rstrip(" ,;:")
         sentence_end = max(clipped.rfind("."), clipped.rfind("!"), clipped.rfind("?"))
-        if sentence_end >= max(80, int(max_len * 0.45)):
+        if sentence_end >= 80:
             clipped = clipped[:sentence_end + 1]
         text = clipped if clipped.endswith((".", "!", "?")) else f"{clipped}."
     if text and not text.endswith((".", "!", "?")):
@@ -786,7 +848,7 @@ def clean_public_text(value: object, max_len: int = 360) -> str:
             text = text[:sentence_end + 1]
         else:
             text = text.rstrip(" ,;:") + "."
-    return first_sentence(text, max_len=max_len).strip() if text else ""
+    return text.strip()
 
 
 def generic_explore_title(value: object) -> bool:
@@ -870,8 +932,99 @@ def non_camp_explore_category(title: str, description: str) -> tuple[str, str] |
     return None
 
 
+def title_identity_category(title: str, explicit_category: str) -> tuple[str, str] | None:
+    text = compact(title)
+    lower = text.lower()
+    if re.search(r"\b(?:glamping|yurts?)\b", lower):
+        return "glamping", "lodging"
+    if re.search(r"\b(?:campgrounds?|campsites?)\b", lower):
+        if re.search(r"\brv\s+(?:park|resort|campground)\b", lower):
+            return "rv_park", "camping"
+        if re.search(r"\b(?:dispersed|primitive)\b", lower):
+            return "dispersed_camp", "camping"
+        return "campground", "camping"
+    if re.search(r"\b(?:group|grp)\s+site\b", lower) and not re.search(r"\b(?:day[-\s]?use|picnic)\b", lower):
+        return "campground", "camping"
+    if re.search(r"\b(?:picnic|exhibits?|ski area|ranger talk|geology talk|wayside)\b", lower):
+        return "activity", "things"
+    if re.search(r"(?<!self-)(?<!self )\bguided\b.*\b(?:programs?|tours?)\b|\b(?:programs?|tours?)\b$", lower):
+        return "activity", "things"
+    if re.search(r"\b(?:visitor|information) cent(?:er|re)\b", lower):
+        return "visitor_center", "things"
+    if re.search(r"\b(?:cabins?|huts?|lodges?|bunkhouses?|shelters?)\b", lower):
+        return "lodging", "lodging"
+    if re.search(r"\b(?:group camp|overnight camp)\b", lower) or re.search(r"\bcamp\s*$", lower):
+        return "campground", "camping"
+    if re.search(r"\btrailheads?\b", lower):
+        return "trailhead", "trails"
+    if re.search(r"\btrails?\b", lower) or re.search(r"\bwalk\s*$", lower):
+        return "trail", "trails"
+    if re.search(r"\b(?:climbing|bouldering|crags?)\b", lower):
+        return "climbing_area", "climbing"
+    if re.search(r"\b(?:national park|state park|national monument|national forest|wilderness|preserve|wildlife refuge|marine conservation area)\b", lower):
+        return "park", "parks"
+    if re.search(r"\b(?:museum|historic site|battlefield|memorial|fort|blacksmith shop)\b", lower):
+        return "historic", "historic"
+    water_precedence_categories = {
+        "activity", "glacier", "hot_spring", "lake", "peak", "place", "trail", "trailhead", "viewpoint", "water", "waterfall",
+    }
+    if explicit_category in water_precedence_categories:
+        if re.search(r"\b(?:waterfalls?|falls?)\b", lower):
+            return "waterfall", "water"
+        if re.search(r"\bhot springs?\b", lower):
+            return "hot_spring", "water"
+        if re.search(r"\b(?:lakes?|ponds?|reservoirs?)\b", lower):
+            return "lake", "water"
+        if re.search(r"\b(?:rivers?|creeks?|beaches?|geysers?|dams?|bays?|sounds?|coves?)\b", lower):
+            return "water", "water"
+    if explicit_category in {"glacier", "lake", "peak", "trail", "viewpoint", "waterfall"} and re.search(
+        r"\b(?:overlook|vista|viewpoint|lookout|pass|rim|summit|peak|butte|fault|fossil beds?|scenic point)\b",
+        lower,
+    ):
+        return "viewpoint", "viewpoint"
+    return None
+
+
 def normalize_explore_category(title: str, category: str, group: str, description: str = "") -> tuple[str, str] | None:
     hay = f"{title} {category} {group} {description}".lower()
+    explicit_category = compact(category).lower().replace(" ", "_")
+    title_category = title_identity_category(title, explicit_category)
+    if title_category:
+        return title_category
+    explicit_categories = {
+        "activity": ("activity", "things"),
+        "bouldering_area": ("bouldering_area", "climbing"),
+        "climbing_area": ("climbing_area", "climbing"),
+        "forest": ("forest", "parks"),
+        "forest_road": ("forest_road", "drives"),
+        "fuel": ("fuel", "services"),
+        "glacier": ("glacier", "viewpoint"),
+        "historic_site": ("historic", "historic"),
+        "hot_spring": ("hot_spring", "water"),
+        "lake": ("lake", "water"),
+        "monument": ("historic", "historic"),
+        "offroad_route": ("offroad_route", "drives"),
+        "park": ("park", "parks"),
+        "peak": ("peak", "viewpoint"),
+        "public_land": ("public_land", "parks"),
+        "resupply": ("resupply", "services"),
+        "scenic_drive": ("scenic_drive", "drives"),
+        "trail": ("trail", "trails"),
+        "trailhead": ("trailhead", "trails"),
+        "viewpoint": ("viewpoint", "viewpoint"),
+        "visitor_center": ("visitor_center", "things"),
+        "waterfall": ("waterfall", "water"),
+    }
+    if explicit_category in explicit_categories:
+        return explicit_categories[explicit_category]
+    if re.search(r"\b(?:scenic drive|scenic byway)\b", title, re.I):
+        return "scenic_drive", "drives"
+    if re.search(r"\b(?:ohv|off[- ]road|4x4)\b.*\b(?:road|route|trail)\b", title, re.I):
+        return "offroad_route", "drives"
+    if re.search(r"\bforest road\b", title, re.I):
+        return "forest_road", "drives"
+    if re.search(r"\btrailhead\b", title, re.I):
+        return "trailhead", "trails"
     non_camp_category = non_camp_explore_category(title, description)
     if non_camp_category == DROP_EXPLORE_CATEGORY:
         return None
@@ -922,6 +1075,71 @@ def normalize_explore_category(title: str, category: str, group: str, descriptio
     if re.search(r"\b(activity|activities|things to do|tour|guided)\b", hay):
         return "activity", "things"
     return (category or "place").lower(), group or "places"
+
+
+def guard_explore_category_relevance(
+    title: str,
+    description: str,
+    category: str,
+    group: str,
+) -> tuple[tuple[str, str] | None, str]:
+    scenic_categories = {"glacier", "lake", "peak", "trail", "trailhead", "viewpoint", "waterfall"}
+    title_text = compact(title)
+    if re.search(
+        r"\bovernight group camping\b|\b(?:available for|offers?|provides?|designated for)\s+(?:overnight\s+)?group camping\b",
+        description,
+        re.I,
+    ):
+        return ("campground", "camping"), ""
+    if re.search(
+        r"\b(?:restaurant|steakhouse|cafe|cafeteria|grill|dining room|food court)\b",
+        title_text,
+        re.I,
+    ):
+        return None, "category_mismatch_food_service"
+    if re.search(r"\b(?:bus|shuttle|transit) stop\b", title_text, re.I):
+        return None, "category_mismatch_transit_stop"
+    if category in scenic_categories and re.search(r"\b(?:office|headquarters|administration building)\b", title_text, re.I):
+        return None, "category_mismatch_office"
+    if category in scenic_categories and re.search(r"\b(?:visitor|information) cent(?:er|re)\b", title_text, re.I):
+        return ("visitor_center", "things"), ""
+    if re.search(
+        r"\b(?:ranger[- ]led|ranger\s*[-:]?\s*guided|guided (?:canoe|kayak|paddle|snowmobile)?\s*(?:programs?|tours?)|"
+        r"geology talk|ranger talk)\b",
+        title_text,
+        re.I,
+    ) or re.search(r"(?<!self-)(?<!self )\bguided\b.*\b(?:programs?|tours?)\b", title_text, re.I):
+        return ("activity", "things"), ""
+    wildlife_title = re.fullmatch(
+        r"(?:american )?(?:bighorn sheep|black bears?|brown bears?|grizzly bears?|bison|deer|elk|moose|"
+        r"mountain lions?|pikas?|pronghorn|wolves|wolf|coyotes?|bobcats?|beavers?|otters?)",
+        title_text,
+        re.I,
+    )
+    wildlife_copy = re.search(r"\b(?:species|habitat|population|commonly seen|live in|summer range)\b", description, re.I)
+    if category in scenic_categories and wildlife_title and wildlife_copy:
+        return ("activity", "things"), ""
+    if category == "lake" and not re.search(
+        r"\b(?:lakes?|ponds?|reservoirs?|rivers?|creeks?|beaches?|geysers?|dams?|bays?|sounds?|coves?)\b",
+        title_text,
+        re.I,
+    ):
+        return ("activity", "things"), ""
+    if category == "viewpoint" and not re.search(
+        r"\b(?:overlook|vista|viewpoint|lookout|pass|rim|summit|peak|butte|fault|fossil beds?|scenic point|recreation site)\b",
+        title_text,
+        re.I,
+    ):
+        return ("activity", "things"), ""
+    if category == "waterfall" and not re.search(r"\b(?:waterfalls?|falls?|cascade)\b", title_text, re.I):
+        return ("activity", "things"), ""
+    if (
+        category == "peak"
+        and re.search(r"\b(?:peninsula|island|lake|river|bay|beach|lagoon|valley|forest)\b", title_text, re.I)
+        and not re.search(r"\b(?:mount|mountain|peak|summit|hill|butte|dome)\b|\bk\d+\b", title_text, re.I)
+    ):
+        return ("viewpoint", "viewpoint"), ""
+    return (category, group), ""
 
 
 def trail_review_only(name: object) -> bool:
@@ -1122,33 +1340,78 @@ def build_trail_index(official_db: Path, limit: int = 0) -> dict[str, Any]:
     return {"generated_at": int(time.time()), "count": len(items), "items": items}
 
 
-def build_explore_index(path: Path, limit: int = 0) -> dict[str, Any]:
+def build_explore_index(
+    path: Path,
+    limit: int = 0,
+    *,
+    minimum_reviewable: int = 4000,
+    enforce_enrichment_gate: bool | None = None,
+) -> dict[str, Any]:
     if not path.exists():
-        return {"generated_at": int(time.time()), "count": 0, "items": []}
+        return {
+            "schema_version": 2,
+            "generated_at": int(time.time()),
+            "source_count": 0,
+            "count": 0,
+            "grade_counts": {},
+            "rejection_reason_counts": {"missing_catalog": 1},
+            "rejections": [],
+            "gate": {"minimum_reviewable": minimum_reviewable, "reviewable_count": 0, "passed": False},
+            "items": [],
+        }
     catalog = json.loads(path.read_text())
     places = catalog.get("places") if isinstance(catalog, dict) else []
+    source_count = len(places) if isinstance(places, list) else 0
+    if enforce_enrichment_gate is None:
+        enforce_enrichment_gate = bool(isinstance(catalog, dict) and int(catalog.get("schema_version") or 0) >= 3)
     items: list[dict[str, Any]] = []
+    rejections: list[dict[str, Any]] = []
+    rejection_counts: Counter[str] = Counter()
+
+    def reject(place: dict[str, Any], title: str, score: int, reasons: list[str]) -> None:
+        clean_reasons = sorted({compact(reason) for reason in reasons if compact(reason)})
+        rejection_counts.update(clean_reasons)
+        rejections.append({
+            "id": place.get("id"),
+            "title": title or compact(place.get("name")),
+            "enrichment_score": int(score or 0),
+            "rejection_reasons": clean_reasons,
+        })
+
     for place in places if isinstance(places, list) else []:
+        if not isinstance(place, dict):
+            rejection_counts["invalid_record"] += 1
+            continue
+        enriched = enrich_place_dict(place)
         summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
         card = place.get("card") if isinstance(place.get("card"), dict) else {}
         raw_title = summary.get("title") or card.get("headline") or place.get("name")
-        raw_description = summary.get("short_description") or card.get("summary")
+        raw_description = place.get("description") or summary.get("short_description") or card.get("summary")
         title = clean_explore_title(raw_title, raw_description, category=summary.get("category") or place.get("category"))
         if not title:
+            reject(enriched, "", enriched["enrichment_score"], [*enriched["rejection_reasons"], "invalid_name"])
             continue
         lat = summary.get("lat", place.get("lat"))
         lng = summary.get("lng", place.get("lng"))
-        if raw_description and PUBLIC_COPY_FORBIDDEN_RE.search(str(raw_description)):
-            continue
         description = clean_public_text(raw_description, 420)
         category = compact(summary.get("category") or place.get("category")).lower()
         group = compact(summary.get("explore_group") or place.get("category")).lower()
         if generic_explore_title(title) and not description:
+            reject(enriched, title, enriched["enrichment_score"], [*enriched["rejection_reasons"], "generic_name"])
             continue
         normalized = normalize_explore_category(title, category, group, description)
         if not normalized:
+            reject(enriched, title, enriched["enrichment_score"], [*enriched["rejection_reasons"], "unsupported_or_misrouted_category"])
             continue
         category, group = normalized
+        guarded_category, guard_reason = guard_explore_category_relevance(title, description, category, group)
+        if not guarded_category:
+            reject(enriched, title, enriched["enrichment_score"], [*enriched["rejection_reasons"], guard_reason])
+            continue
+        category, group = guarded_category
+        enrichment_place = dict(place)
+        enrichment_place["category"] = category
+        enriched = enrich_place_dict(enrichment_place)
         lat_value, lng_value = valid_point(lat, lng)
         item = {
             "id": place.get("id"),
@@ -1159,9 +1422,21 @@ def build_explore_index(path: Path, limit: int = 0) -> dict[str, Any]:
             "lng": round(lng_value, 7) if lng_value is not None else None,
             "rank": summary.get("rank"),
             "description": description,
-            "image_url": compact(summary.get("image_url") or summary.get("thumbnail_url")),
-            "source_url": compact(summary.get("source_url") or (place.get("facts") or {}).get("source_url")),
+            "image_url": primary_media_url(enriched),
+            "media_kind": enriched["media_kind"],
+            "source_url": compact(
+                summary.get("source_url")
+                or (place.get("facts") or {}).get("source_url")
+                or (enriched.get("provenance") or {}).get("primary", {}).get("url")
+            ),
             "verified": bool(place.get("verified")),
+            "planning_facts": enriched["planning_facts"],
+            "provenance": enriched["provenance"],
+            "checked_at": enriched["checked_at"],
+            "enrichment_score": enriched["enrichment_score"],
+            "enrichment_grade": enriched["enrichment_grade"],
+            "rejection_reasons": list(enriched["rejection_reasons"]),
+            "reviewable": bool(enriched["reviewable"]),
             "_raw_title": compact(raw_title),
             "_stale_title": is_stale_explore_title(raw_title),
         }
@@ -1170,18 +1445,105 @@ def build_explore_index(path: Path, limit: int = 0) -> dict[str, Any]:
         if item["description"] and (PUBLIC_COPY_FORBIDDEN_RE.search(item["description"]) or GENERIC_EXPLORE_DESCRIPTION_RE.search(item["description"])):
             item["description"] = ""
         if not item["description"]:
-            if generic_explore_title(title):
+            if enforce_enrichment_gate:
+                reject(enriched, title, enriched["enrichment_score"], [*enriched["rejection_reasons"], "public_copy_rejected"])
                 continue
             item["description"] = explore_description_fallback(title, category, group)
         item["description"] = polish_explore_description(title, item["description"], category, group)
+        if enforce_enrichment_gate and len(item["description"]) < 45:
+            reject(enriched, title, enriched["enrichment_score"], [*enriched["rejection_reasons"], "public_copy_rejected"])
+            continue
+        if enforce_enrichment_gate and enriched["enrichment_grade"] not in REVIEWABLE_GRADES:
+            reject(enriched, title, enriched["enrichment_score"], enriched["rejection_reasons"] or ["below_enrichment_threshold"])
+            continue
         items.append(item)
     items = dedupe_explore_records(items)
     for item in items:
         item.pop("_raw_title", None)
         item.pop("_stale_title", None)
+    items.sort(key=explore_serving_sort_key)
+    reviewable_count = len(items)
+    grade_counts = Counter(compact(item.get("enrichment_grade")) or "candidate" for item in items)
+    filter_counts, missing_filters = explore_filter_coverage(items)
+    gate_passed = reviewable_count >= minimum_reviewable
     if limit:
         items = items[:limit]
-    return {"generated_at": int(time.time()), "count": len(items), "items": items}
+    rejections.sort(key=lambda item: (item["rejection_reasons"], compact(item.get("title")).casefold(), str(item.get("id") or "")))
+    return {
+        "schema_version": 2,
+        "generated_at": int(catalog.get("generated_at") or time.time()) if isinstance(catalog, dict) else int(time.time()),
+        "source_count": source_count,
+        "count": len(items),
+        "reviewable_count": reviewable_count,
+        "grade_counts": dict(sorted(grade_counts.items())),
+        "rejection_reason_counts": dict(sorted(rejection_counts.items())),
+        "filter_counts": filter_counts,
+        "missing_filters": missing_filters,
+        "rejections": rejections,
+        "gate": {
+            "minimum_reviewable": minimum_reviewable,
+            "reviewable_count": reviewable_count,
+            "passed": gate_passed,
+        },
+        "items": items,
+    }
+
+
+def merge_explore_indexes(indexes: list[dict[str, Any]], *, minimum_reviewable: int = 4000) -> dict[str, Any]:
+    items = dedupe_explore_records([
+        dict(item)
+        for index in indexes
+        for item in index.get("items") or []
+        if isinstance(item, dict)
+    ])
+    items.sort(key=explore_serving_sort_key)
+    accepted_ids = {str(item.get("id") or "") for item in items}
+    rejection_by_key: dict[tuple[str, tuple[str, ...]], dict[str, Any]] = {}
+    for index in indexes:
+        for rejection in index.get("rejections") or []:
+            if not isinstance(rejection, dict):
+                continue
+            item_id = str(rejection.get("id") or "")
+            if item_id and item_id in accepted_ids:
+                continue
+            reasons = tuple(sorted({compact(reason) for reason in rejection.get("rejection_reasons") or [] if compact(reason)}))
+            rejection_by_key[(item_id, reasons)] = dict(rejection)
+    rejections = sorted(
+        rejection_by_key.values(),
+        key=lambda item: (item.get("rejection_reasons") or [], compact(item.get("title")).casefold(), str(item.get("id") or "")),
+    )
+    rejection_counts: Counter[str] = Counter(
+        reason
+        for rejection in rejections
+        for reason in rejection.get("rejection_reasons") or []
+    )
+    grade_counts = Counter(compact(item.get("enrichment_grade")) or "candidate" for item in items)
+    reviewable_count = len(items)
+    filter_counts, missing_filters = explore_filter_coverage(items)
+    catalogs = []
+    for index in indexes:
+        for catalog in index.get("catalogs") or []:
+            if isinstance(catalog, dict) and catalog not in catalogs:
+                catalogs.append(catalog)
+    return {
+        "schema_version": 2,
+        "generated_at": max((int(index.get("generated_at") or 0) for index in indexes), default=int(time.time())),
+        "catalogs": catalogs,
+        "source_count": sum(int(index.get("source_count") or 0) for index in indexes),
+        "count": reviewable_count,
+        "reviewable_count": reviewable_count,
+        "grade_counts": dict(sorted(grade_counts.items())),
+        "rejection_reason_counts": dict(sorted(rejection_counts.items())),
+        "filter_counts": filter_counts,
+        "missing_filters": missing_filters,
+        "rejections": rejections,
+        "gate": {
+            "minimum_reviewable": minimum_reviewable,
+            "reviewable_count": reviewable_count,
+            "passed": reviewable_count >= minimum_reviewable,
+        },
+        "items": items,
+    }
 
 
 def write_json(path: Path, payload: dict[str, Any]) -> None:

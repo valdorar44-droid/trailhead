@@ -14,7 +14,7 @@ export function ExploreModeTabs({ value, onChange }: Props) {
   const tabs: Array<{ key: ExploreMode; label: string; icon: keyof typeof Ionicons.glyphMap }> = [
     { key: 'featured', label: 'Featured', icon: 'star-outline' },
     { key: 'nearby', label: 'Nearby', icon: 'location-outline' },
-    { key: 'trip', label: 'Trips', icon: 'map-outline' },
+    { key: 'trip', label: 'Trip', icon: 'map-outline' },
   ];
   return (
     <View style={[styles.shell, { borderColor: C.border, backgroundColor: C.s1 }]}>
@@ -23,7 +23,7 @@ export function ExploreModeTabs({ value, onChange }: Props) {
         return (
           <TouchableOpacity
             key={tab.key}
-            style={[styles.tab, active && styles.tabActive]}
+            style={[styles.tab, active && { backgroundColor: C.orange }]}
             onPress={() => onChange(tab.key)}
             activeOpacity={0.86}
           >
@@ -60,6 +60,5 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: 8,
   },
-  tabActive: { backgroundColor: '#123f4f' },
   label: { fontSize: 14, fontWeight: '900', letterSpacing: 0 },
 });

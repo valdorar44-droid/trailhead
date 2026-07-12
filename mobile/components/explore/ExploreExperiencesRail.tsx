@@ -11,6 +11,7 @@ type Props = {
   error?: string;
   emptySubtitle?: string;
   title?: string;
+  attribution?: string;
   variant?: 'rail' | 'list';
   mediaUrl: (url?: string | null) => string;
   onOpen?: (experience: BookableExperience) => void;
@@ -18,9 +19,10 @@ type Props = {
   onShowArea?: (experience: BookableExperience) => void;
   initialVisible?: number;
   showMoreStep?: number;
+  onRetry?: () => void;
 };
 
-export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', variant = 'rail', mediaUrl, onOpen, onSave, onShowArea, initialVisible, showMoreStep }: Props) {
+export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', attribution, variant = 'rail', mediaUrl, onOpen, onSave, onShowArea, initialVisible, showMoreStep, onRetry }: Props) {
   const C = useTheme();
   const listMode = variant === 'list';
   const defaultVisible = initialVisible ?? (listMode ? 12 : 12);
@@ -48,6 +50,12 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
         <View style={[styles.empty, { borderColor: C.border, backgroundColor: C.s2 }]}>
           <Ionicons name="alert-circle-outline" size={19} color={C.text3} />
           <Text style={[styles.emptyText, { color: C.text2 }]}>{error}</Text>
+          {!!onRetry && (
+            <TouchableOpacity style={[styles.retryButton, { borderColor: C.border }]} onPress={onRetry} activeOpacity={0.82}>
+              <Ionicons name="refresh" size={15} color={C.orange} />
+              <Text style={[styles.retryText, { color: C.orange }]}>Retry</Text>
+            </TouchableOpacity>
+          )}
         </View>
       ) : null}
       {experiences.length ? (
@@ -96,7 +104,9 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
         </TouchableOpacity>
       ) : null}
       {experiences.length ? (
-        <Text style={[styles.attribution, { color: C.text3 }]}>Times and prices can change.</Text>
+        <Text style={[styles.attribution, { color: C.text3 }]}>
+          {providerDisclosure(attribution || experiences[0]?.attribution || experiences[0]?.source)}
+        </Text>
       ) : null}
     </View>
   );
@@ -123,6 +133,7 @@ function ExperienceCard({
   const hasCoords = Number.isFinite(Number(experience.lat)) && Number.isFinite(Number(experience.lng));
   const listMode = variant === 'list';
   const meta = experienceMeta(experience);
+  const provider = experienceProvider(experience);
   return (
     <View style={[listMode ? styles.listCard : styles.card, { borderColor: C.border, backgroundColor: C.s2 }]}>
       <View style={listMode ? styles.listImageWrap : styles.imageWrap}>
@@ -134,11 +145,14 @@ function ExperienceCard({
           </View>
         )}
         <View style={styles.badge}>
-          <Text style={styles.badgeText}>{sourceBadgeLabel(experience.source_badge || 'Trip')}</Text>
+          <Text style={styles.badgeText}>{provider}</Text>
         </View>
       </View>
       <View style={listMode ? styles.listBody : styles.body}>
         <Text style={[listMode ? styles.listTitle : styles.title, { color: C.text }]} numberOfLines={listMode ? undefined : 2}>{experience.title}</Text>
+        <Text style={[styles.providerLine, { color: C.text3 }]} numberOfLines={1}>
+          {experience.supplier_name ? `${experience.supplier_name} · via ${provider}` : `Provided by ${provider}`}
+        </Text>
         <Text style={[listMode ? styles.listMeta : styles.meta, { color: C.text3 }]} numberOfLines={listMode ? undefined : 1}>{meta}</Text>
         {listMode && experience.cancellation_summary ? (
           <Text style={[styles.cancelLine, { color: C.green }]}>{experience.cancellation_summary}</Text>
@@ -232,6 +246,18 @@ function sourceBadgeLabel(value: string) {
     .replace(/\b\w/g, char => char.toUpperCase());
 }
 
+function experienceProvider(experience: BookableExperience) {
+  const source = String(experience.source || experience.source_badge || '').trim();
+  if (/viator/i.test(source)) return 'Viator';
+  return sourceBadgeLabel(source || 'Travel partner');
+}
+
+function providerDisclosure(value?: string) {
+  const source = String(value || '').trim();
+  const provider = /viator/i.test(source) ? 'Viator' : sourceBadgeLabel(source || 'the booking partner');
+  return `Trip listings come from ${provider}. Current availability and checkout open there.`;
+}
+
 const styles = StyleSheet.create({
   shell: { marginHorizontal: 20, marginBottom: 14, borderWidth: 1, borderRadius: 16, padding: 14, gap: 12 },
   listShell: { marginHorizontal: 20, marginBottom: 14, borderWidth: 1, borderRadius: 18, padding: 14, gap: 14 },
@@ -253,6 +279,7 @@ const styles = StyleSheet.create({
   listBody: { padding: 14, gap: 8 },
   title: { fontSize: 16, lineHeight: 20, fontWeight: '900' },
   listTitle: { fontSize: 19, lineHeight: 24, fontWeight: '900' },
+  providerLine: { fontSize: 11, lineHeight: 15, fontWeight: '800' },
   meta: { fontSize: 12, fontWeight: '800' },
   listMeta: { fontSize: 13, lineHeight: 18, fontWeight: '800' },
   cancelLine: { fontSize: 12, lineHeight: 17, fontWeight: '800' },
@@ -263,6 +290,8 @@ const styles = StyleSheet.create({
   iconButton: { width: 40, minHeight: 40, borderRadius: 11, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   empty: { minHeight: 48, borderWidth: 1, borderRadius: 12, padding: 10, flexDirection: 'row', alignItems: 'center', gap: 8 },
   emptyText: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  retryButton: { minHeight: 36, borderWidth: 1, borderRadius: 9, paddingHorizontal: 10, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  retryText: { fontSize: 11, fontWeight: '900' },
   showMoreButton: { minHeight: 44, borderWidth: 1, borderRadius: 12, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   showMoreText: { fontSize: 12, fontWeight: '900' },
   attribution: { fontSize: 10.5, lineHeight: 14, fontWeight: '700' },

@@ -21,6 +21,11 @@ function assert(condition, message) {
 const guide = read(join(mobileRoot, 'app/(tabs)/guide.tsx'));
 const api = read(join(mobileRoot, 'lib/api.ts'));
 const card = read(join(mobileRoot, 'components/explore/ExplorePlaceCard.tsx'));
+const homeControls = read(join(mobileRoot, 'components/explore/ExploreHomeControls.tsx'));
+const filterRow = read(join(mobileRoot, 'components/explore/ExploreFilterRow.tsx'));
+const mapPreview = read(join(mobileRoot, 'components/explore/StaticMapboxPreview.tsx'));
+const guidedBrowser = read(join(mobileRoot, 'components/explore/GuidedDestinationBrowser.tsx'));
+const rootLayout = read(join(mobileRoot, 'app/_layout.tsx'));
 const server = read(join(repoRoot, 'dashboard/server.py'));
 
 assert(
@@ -44,8 +49,19 @@ assert(
   'Explorer bulk hydration should run in bounded chunks.',
 );
 assert(
-  card.includes('seededFallback(place') && card.includes('explore-hero-welcome-mountains') && card.includes('onboarding-hero-overland'),
-  'Explore cards need deterministic varied fallback imagery.',
+  card.includes('StaticMapboxPreview') && !card.includes('seededFallback(') && mapPreview.includes('buildStaticMapboxUrl'),
+  'Explore cards without real media must use a coordinate-specific map preview, not stock fallback imagery.',
+);
+assert(
+  !rootLayout.includes('requestForegroundPermissionsAsync'),
+  'App launch must not request location before the traveler selects a location-dependent workflow.',
+);
+assert(
+  guide.includes("permission?.status === 'denied' && permission.canAskAgain === false")
+    && guide.includes('openExploreLocationSettings')
+    && guide.includes("if (permission?.status === 'granted')")
+    && guide.includes('Linking.openSettings()'),
+  'Explorer Nearby must provide a recovery path after location is permanently denied.',
 );
 assert(
   server.includes('EXPLORE_LOCAL_IMAGE_GENERIC_SLUG_WORDS') && server.includes('_explore_contextual_image_url(place, summary.get(key))'),
@@ -58,6 +74,53 @@ assert(
 assert(
   !/Show\s+48\s+more/.test(guide),
   'Explore load-more text should stay count-aware instead of hard-coded.',
+);
+assert(
+  guide.includes('loadNextExploreCatalogPage')
+    && guide.includes('cursor,')
+    && guide.includes('catalog.next_cursor')
+    && guide.includes('setExplorePlaces(current => mergeMatchedExplorePlaces(current, remotePlaces))'),
+  'Explore load-more must request cursor pages and merge them into the in-session catalog.',
+);
+assert(
+  guide.includes('guidedOrganicFallbackFromPlaces')
+    && guide.includes('EXPLORE_GUIDED_FALLBACK_CACHE_PREFIX')
+    && guide.includes('api.getExploreCatalogIndex({ q: placeQuery, limit: 120, cursor: 0 })'),
+  'Selected Guided destination failures must retain cached or catalog-backed nearby places.',
+);
+assert(
+  guide.includes('imageUrl: mediaUrl(item.image_url)')
+    && guide.includes('imageCredit: String(item.image_credit')
+    && guidedBrowser.includes('imageUrl={destination.imageUrl}')
+    && guidedBrowser.includes('Linking.openURL(destination.imageSourceUrl!)')
+    && guidedBrowser.includes('Photo: {destination.imageCredit}')
+    && guidedBrowser.includes('cardCopyBackdrop')
+    && guidedBrowser.includes('adjustsFontSizeToFit')
+    && mapPreview.includes('[imageUrl, mapUrl]')
+    && mapPreview.includes("window.addEventListener('online', retryMedia)"),
+  'Preloaded Guided destinations must render destination media, attribution, and a map fallback.',
+);
+assert(
+  guide.includes('setGuidedTourSelectedDestinationKey(destination?.id ?? null)'),
+  'Known typed Guided destinations must use the selected destination endpoint.',
+);
+assert(
+  guide.includes('guidedTourCategoryDraft')
+    && guide.includes('applyGuidedFilters')
+    && guide.includes('setGuidedTourCategory(guidedTourCategoryDraft)'),
+  'Guided filters must remain draft values until Apply is pressed.',
+);
+assert(
+  homeControls.includes('showSort={!guidedMode}')
+    && homeControls.includes('showSourceStatus={!guidedMode}'),
+  'Guided browsing must not show unrelated Explorer sort or source-status controls.',
+);
+assert(
+  !guide.includes('Explore catalog could not load')
+    && !homeControls.includes('Source-backed')
+    && !filterRow.includes('Source-backed')
+    && !homeControls.includes('Checked details'),
+  'Explorer copy must avoid implementation language and unqualified checked-detail claims.',
 );
 
 console.log('Explore feed audit passed.');

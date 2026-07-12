@@ -210,6 +210,29 @@ assert(mapSource.includes('consumePendingFlyoverAffirmation') && mapSource.inclu
 assert(mapSource.includes('mapMissionBriefTop'), 'map renders the top cinematic caption');
 assert(!mapSource.includes('<MissionControlPanel'), 'flyover does not show the Mission Control sheet after playback');
 assert(mapSource.includes('TripPreviewControls'), 'flyover keeps the simple playback controls');
+const flyoverFailureCleanupCalls = (mapSource.match(/failMapMissionBrief\(/g) ?? []).length;
+assert(mapSource.includes('function failMapMissionBrief') && flyoverFailureCleanupCalls >= 5,
+  'short storyboard and player failures share the full flyover cleanup path');
+assert(mapSource.includes('const terrainSnapshot = mapMission3dSnapshotRef.current') &&
+  mapSource.includes('const styleSnapshot = mapMissionStyleSnapshotRef.current') &&
+  mapSource.includes('setPanelCollapsed(false)'),
+  'flyover failure cleanup restores terrain, style, and the trip panel');
+
+const nativeListenerInstallerStart = mapSource.indexOf('const installNativeMissionListeners = () =>');
+const nativeReplayStart = mapSource.indexOf('replay: () => {', nativeListenerInstallerStart);
+const nativeReplayEnd = mapSource.indexOf('pause: () => {', nativeReplayStart);
+const nativeReplaySource = nativeReplayStart >= 0 && nativeReplayEnd > nativeReplayStart
+  ? mapSource.slice(nativeReplayStart, nativeReplayEnd)
+  : '';
+assert(nativeListenerInstallerStart >= 0 &&
+  nativeReplaySource.indexOf('installNativeMissionListeners();') >= 0 &&
+  nativeReplaySource.indexOf('installNativeMissionListeners();') < nativeReplaySource.indexOf('await startMissionAnimation(nativePayload)'),
+  'native Replay reinstalls mission listeners before restarting animation');
+assert(nativeReplaySource.includes('setMapMissionPlaying(false)') &&
+  nativeReplaySource.includes('setMapMissionComplete(false)') &&
+  nativeReplaySource.includes('setMapMissionProgress(0)') &&
+  nativeReplaySource.includes("playbackDebug.sessionStart({ playback_mode: 'native', replay: true })"),
+  'native Replay resets playback UI and telemetry before restart');
 
 const playbackSource = readFileSync(join(root, 'lib/missionPlayback.ts'), 'utf8');
 assert(playbackSource.includes('cartesia_sonic'), 'mission playback tracks Cartesia Sonic voice path');
@@ -284,6 +307,27 @@ assert(iosAnimatorSource.includes('cameraOrbitSweep') &&
   'iOS native animator supports 360 scenic orbit beats');
 assert((iosAnimatorSource.match(/DispatchQueue\.main\.sync/g) ?? []).length === 1,
   'iOS native animator confines DispatchQueue.main.sync to the guarded helper');
+const iosStartSource = iosAnimatorSource.slice(
+  iosAnimatorSource.indexOf('func start(payload:'),
+  iosAnimatorSource.indexOf('func pause()', iosAnimatorSource.indexOf('func start(payload:')),
+);
+assert(iosStartSource.includes('resetPlaybackContinuity()') &&
+  iosStartSource.indexOf('resetPlaybackContinuity()') < iosStartSource.indexOf('startDisplayLink()'),
+  'native iOS replay clears camera continuity before animation starts');
+assert(iosStartSource.includes('clearOverlays()') &&
+  iosStartSource.indexOf('clearOverlays()') < iosStartSource.indexOf('startDisplayLink()'),
+  'native iOS replay clears prior progress and marker overlays before animation starts');
+for (const reset of [
+  'smoothedBearing = nil',
+  'lastCamDist = nil',
+  'lastCamBearing = nil',
+  'orbitBaseBearing = 0',
+  'lastProgressEmit = 0',
+  'warningActive = false',
+  'freeCamera = false',
+]) {
+  assert(iosStartSource.includes(reset), `native iOS replay reset includes ${reset}`);
+}
 assert(mapSource.includes('startMissionAnimation(nativePayload)'), 'map starts native animator when available');
 assert(mapSource.includes('seekMissionAnimation(ratio)') &&
   mapSource.includes('setMissionAnimationFreeCamera(enabled)') &&

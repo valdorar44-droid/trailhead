@@ -62,10 +62,10 @@ type ChecklistSection = { title: string; icon: keyof typeof Ionicons.glyphMap; i
 type ExplorerPlanPoint = { icon: keyof typeof Ionicons.glyphMap; label: string };
 
 const EXPLORER_PLAN_POINTS: ExplorerPlanPoint[] = [
-  { icon: 'trail-sign-outline', label: 'Unlimited trip planner' },
+  { icon: 'trail-sign-outline', label: 'Trip planning tools' },
   { icon: 'chatbubble-ellipses-outline', label: 'Map Co-Pilot' },
   { icon: 'bonfire-outline', label: 'Camp Briefs' },
-  { icon: 'car-sport-outline', label: 'Voice and CarPlay' },
+  { icon: 'shield-checkmark-outline', label: 'Trip and packing briefs' },
 ];
 
 const DEFAULT_CHECKLIST: ChecklistSection[] = [
@@ -230,7 +230,7 @@ export default function ProfileScreen() {
   const router = useRouter();
   const pathname = usePathname();
   const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; auth?: string }>();
-  const { user, rigProfile, setAuth, clearAuth, setRigProfile } = useStore();
+  const { user, rigProfile, setAuth, signOut, clearAuthAndLocalData, setRigProfile } = useStore();
   const tripHistory    = useStore(st => st.tripHistory);
   const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
   const themeMode      = useStore(st => st.themeMode);
@@ -245,7 +245,7 @@ export default function ProfileScreen() {
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const [profileSection, setProfileSection] = useState<ProfileSectionId>('account');
-  const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>(!user ? 'login' : 'main');
+  const [view, setView] = useState<'main' | 'login' | 'register' | 'forgot'>('main');
   const [authSuccess, setAuthSuccess] = useState('');  // brief success message before switching to main
   const authFade = useRef(new Animated.Value(1)).current;
   const [email, setEmail] = useState('');
@@ -1269,6 +1269,126 @@ export default function ProfileScreen() {
     );
   }
 
+  if (!user && view === 'main') {
+    const localRows: Array<{
+      icon: keyof typeof Ionicons.glyphMap;
+      title: string;
+      detail: string;
+      onPress: () => void;
+    }> = [
+      {
+        icon: 'bookmark-outline',
+        title: 'Saved places',
+        detail: `${savedPlaces.length} on this device`,
+        onPress: () => router.push('/(tabs)/guide'),
+      },
+      {
+        icon: 'git-branch-outline',
+        title: 'Draft trips',
+        detail: `${tripHistory.length} available locally`,
+        onPress: () => router.push('/(tabs)/route-builder'),
+      },
+      {
+        icon: 'download-outline',
+        title: 'Offline maps',
+        detail: offlineTripCount ? `${offlineTripCount} trip ${offlineTripCount === 1 ? 'pack' : 'packs'}` : 'Manage downloads',
+        onPress: openOfflineMapsManager,
+      },
+    ];
+    const preferenceRows: Array<{
+      icon: keyof typeof Ionicons.glyphMap;
+      title: string;
+      detail: string;
+      onPress: () => void;
+    }> = [
+      {
+        icon: 'car-sport-outline',
+        title: 'Vehicle and routing',
+        detail: rigProfile ? [rigProfile.year, rigProfile.make, rigProfile.model].filter(Boolean).join(' ') || 'Vehicle saved' : 'Set up your rig',
+        onPress: startWelcomeSetup,
+      },
+      {
+        icon: themeMode === 'dark' ? 'sunny-outline' : 'moon-outline',
+        title: 'Appearance',
+        detail: themeMode === 'dark' ? 'Dark mode' : 'Light mode',
+        onPress: () => setThemeMode(themeMode === 'dark' ? 'light' : 'dark'),
+      },
+      {
+        icon: 'help-circle-outline',
+        title: 'Help and support',
+        detail: 'Contact Trailhead',
+        onPress: () => contactSupport('Trailhead help'),
+      },
+      {
+        icon: 'shield-checkmark-outline',
+        title: 'Privacy',
+        detail: 'Permissions and data policy',
+        onPress: () => Linking.openURL('https://api.gettrailhead.app/privacy'),
+      },
+    ];
+
+    const renderGuestRow = (row: typeof localRows[number], index: number, total: number) => (
+      <TouchableOpacity
+        key={row.title}
+        style={[s.guestRow, index === total - 1 && s.guestRowLast]}
+        onPress={row.onPress}
+        accessibilityRole="button"
+      >
+        <View style={s.guestRowIcon}>
+          <Ionicons name={row.icon} size={20} color={C.orange} />
+        </View>
+        <View style={s.guestRowCopy}>
+          <Text style={s.guestRowTitle}>{row.title}</Text>
+          <Text style={s.guestRowDetail}>{row.detail}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={C.text3} />
+      </TouchableOpacity>
+    );
+
+    return (
+      <SafeAreaView style={s.container}>
+        <ScrollView contentContainerStyle={s.guestScroll}>
+          <View style={s.guestHeader}>
+            <View>
+              <Text style={s.guestTitle}>Profile</Text>
+              <Text style={s.guestSubtitle}>Your plans stay useful on this device.</Text>
+            </View>
+            <TouchableOpacity
+              style={s.guestThemeButton}
+              onPress={() => setThemeMode(themeMode === 'dark' ? 'light' : 'dark')}
+              accessibilityLabel={themeMode === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+            >
+              <Ionicons name={themeMode === 'dark' ? 'sunny-outline' : 'moon-outline'} size={20} color={C.text} />
+            </TouchableOpacity>
+          </View>
+
+          <View style={s.guestAccountCard}>
+            <Text style={s.guestAccountTitle}>Sign in to Trailhead</Text>
+            <Text style={s.guestAccountBody}>Use your account and Explorer plan while keeping local trips and saved places on this device.</Text>
+            <View style={s.guestAuthActions}>
+              <TouchableOpacity style={s.guestPrimaryAction} onPress={() => setView('login')}>
+                <Text style={s.guestPrimaryActionText}>Sign in</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={s.guestSecondaryAction} onPress={() => setView('register')}>
+                <Text style={s.guestSecondaryActionText}>Create account</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          <View style={s.guestSection}>
+            <Text style={s.guestSectionLabel}>ON THIS DEVICE</Text>
+            <View style={s.guestList}>{localRows.map((row, index) => renderGuestRow(row, index, localRows.length))}</View>
+          </View>
+
+          <View style={s.guestSection}>
+            <Text style={s.guestSectionLabel}>PREFERENCES AND SUPPORT</Text>
+            <View style={s.guestList}>{preferenceRows.map((row, index) => renderGuestRow(row, index, preferenceRows.length))}</View>
+          </View>
+        </ScrollView>
+      </SafeAreaView>
+    );
+  }
+
   if (view === 'login') return (
     <SafeAreaView style={s.container}>
       <Animated.View style={{ flex: 1, opacity: authFade }}>
@@ -1281,6 +1401,10 @@ export default function ProfileScreen() {
           renderVerificationPanel()
         ) : (
           <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+            <TouchableOpacity style={s.authBackButton} onPress={() => setView('main')} accessibilityRole="button">
+              <Ionicons name="chevron-back" size={18} color={C.text} />
+              <Text style={s.authBackText}>Profile</Text>
+            </TouchableOpacity>
             <View style={s.authBrand}>
               <Image source={require('@/assets/icon.png')} style={s.authIcon} />
               <View>
@@ -1386,6 +1510,10 @@ export default function ProfileScreen() {
           renderVerificationPanel()
         ) : (
           <ScrollView contentContainerStyle={s.authScroll} keyboardShouldPersistTaps="handled">
+            <TouchableOpacity style={s.authBackButton} onPress={() => setView('main')} accessibilityRole="button">
+              <Ionicons name="chevron-back" size={18} color={C.text} />
+              <Text style={s.authBackText}>Profile</Text>
+            </TouchableOpacity>
             <View style={s.authBrand}>
               <Image source={require('@/assets/icon.png')} style={s.authIcon} />
               <View>
@@ -1466,7 +1594,7 @@ export default function ProfileScreen() {
                 </View>
               )}
             </View>
-            <TouchableOpacity onPress={() => { clearAuth(); setView('login'); }}
+            <TouchableOpacity onPress={() => { signOut(); setView('main'); }}
               style={s.logoutBtn}>
               <Ionicons name="log-out-outline" size={20} color={C.text3} />
             </TouchableOpacity>
@@ -2090,8 +2218,8 @@ export default function ProfileScreen() {
               <Text style={s.planSignupTitle}>{hasPlan ? 'Explorer active' : 'Plan better trips'}</Text>
               <Text style={s.planSignupText}>
                 {hasPlan
-                  ? 'Unlimited planning, Camp Briefs, Co-Pilot, and hands-free guidance are ready.'
-                  : 'Unlimited planning, Camp Briefs, Co-Pilot, packing lists, tour deals, and hands-free guidance.'}
+                  ? 'Trip planning, Camp Briefs, Co-Pilot, and route tools are ready.'
+                  : 'Trip planning, Camp Briefs, Co-Pilot, packing lists, and route briefs.'}
               </Text>
             </View>
           </View>
@@ -2757,7 +2885,7 @@ export default function ProfileScreen() {
                     try {
                       await api.deleteAccount();
                       // Only clear local auth AFTER server confirms deletion
-                      clearAuth();
+                      clearAuthAndLocalData();
                       setView('login');
                     } catch (e: any) {
                       Alert.alert(
@@ -2809,9 +2937,49 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   scroll: { padding: 14, gap: 14, paddingBottom: 104 },
 
+  guestScroll: { paddingHorizontal: 16, paddingTop: 12, paddingBottom: 116, gap: 22 },
+  guestHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  guestTitle: { color: C.text, fontSize: 30, lineHeight: 36, fontWeight: '900', letterSpacing: 0 },
+  guestSubtitle: { color: C.text3, fontSize: 13, lineHeight: 18, marginTop: 3 },
+  guestThemeButton: {
+    width: 48, height: 48, borderRadius: 8, alignItems: 'center', justifyContent: 'center',
+    backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
+  },
+  guestAccountCard: {
+    gap: 10, padding: 16, borderRadius: 8, backgroundColor: C.s1,
+    borderWidth: 1, borderColor: C.border,
+  },
+  guestAccountTitle: { color: C.text, fontSize: 19, lineHeight: 24, fontWeight: '900', letterSpacing: 0 },
+  guestAccountBody: { color: C.text2, fontSize: 13, lineHeight: 19 },
+  guestAuthActions: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 4 },
+  guestPrimaryAction: {
+    minHeight: 48, minWidth: 112, paddingHorizontal: 20, borderRadius: 8,
+    backgroundColor: C.orange, alignItems: 'center', justifyContent: 'center',
+  },
+  guestPrimaryActionText: { color: '#fff', fontSize: 14, fontWeight: '900' },
+  guestSecondaryAction: {
+    minHeight: 48, paddingHorizontal: 14, borderRadius: 8,
+    alignItems: 'center', justifyContent: 'center',
+  },
+  guestSecondaryActionText: { color: C.orange, fontSize: 14, fontWeight: '900' },
+  guestSection: { gap: 9 },
+  guestSectionLabel: { color: C.text3, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0 },
+  guestList: { borderRadius: 8, overflow: 'hidden', backgroundColor: C.s1, borderWidth: 1, borderColor: C.border },
+  guestRow: {
+    minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12,
+    paddingHorizontal: 14, paddingVertical: 11, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: C.border,
+  },
+  guestRowLast: { borderBottomWidth: 0 },
+  guestRowIcon: { width: 34, height: 34, alignItems: 'center', justifyContent: 'center' },
+  guestRowCopy: { flex: 1, minWidth: 0 },
+  guestRowTitle: { color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  guestRowDetail: { color: C.text3, fontSize: 11.5, lineHeight: 16, marginTop: 2 },
+
   authSuccessWrap: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 16, padding: 32 },
   authSuccessText: { color: C.green, fontSize: 17, fontWeight: '700', textAlign: 'center', lineHeight: 24 },
   authScroll: { flexGrow: 1, justifyContent: 'center', padding: 28, gap: 14 },
+  authBackButton: { alignSelf: 'flex-start', minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4, paddingRight: 12 },
+  authBackText: { color: C.text, fontSize: 14, fontWeight: '800' },
   authBrand: {
     flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 8,
   },

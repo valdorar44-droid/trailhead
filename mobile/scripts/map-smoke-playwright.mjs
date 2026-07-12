@@ -58,11 +58,20 @@ async function main() {
 
   await page.waitForTimeout(6000);
 
-  for (let i = 0; i < 4; i += 1) {
+  for (let i = 0; i < 8; i += 1) {
+    const later = page.getByText(/^later$/i).first();
+    if (await later.isVisible({ timeout: 750 }).catch(() => false)) {
+      await later.click();
+      await page.waitForTimeout(1800);
+      continue;
+    }
     const gate = page.getByText(/continue for now|continue/i).first();
-    if (!(await gate.isVisible({ timeout: 1500 }).catch(() => false))) break;
-    await gate.click();
-    await page.waitForTimeout(3500);
+    if (await gate.isVisible({ timeout: 750 }).catch(() => false)) {
+      await gate.click();
+      await page.waitForTimeout(1800);
+      continue;
+    }
+    break;
   }
 
   await page.waitForTimeout(10000);

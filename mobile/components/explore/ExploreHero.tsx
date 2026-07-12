@@ -43,6 +43,8 @@ type Props = {
   mode: ExploreMode;
   weather: HeroWeather;
   hideSearch?: boolean;
+  hideCategories?: boolean;
+  showWeather?: boolean;
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
   onCategorySelect: (key: ExploreCategoryKey) => void;
@@ -58,6 +60,8 @@ export function ExploreHero({
   mode,
   weather,
   hideSearch = false,
+  hideCategories = false,
+  showWeather = true,
   onQueryChange,
   onClearQuery,
   onCategorySelect,
@@ -101,7 +105,7 @@ export function ExploreHero({
             </View>
           </View>
         ) : null}
-        {weather.loading || !weather.unavailable ? (
+        {showWeather && (weather.loading || !weather.unavailable) ? (
           <View style={styles.weather}>
             <View style={styles.weatherLeft}>
               {weather.loading ? (
@@ -136,13 +140,14 @@ export function ExploreHero({
             </View>
           </View>
         ) : null}
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          style={styles.categoryScroller}
-          contentContainerStyle={styles.categoryRail}
-        >
-          {HERO_CATEGORY_KEYS.map(key => {
+        {!hideCategories ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            style={styles.categoryScroller}
+            contentContainerStyle={styles.categoryRail}
+          >
+            {HERO_CATEGORY_KEYS.map(key => {
             const source = EXPLORE_CATEGORY_CHIPS.find(item => item.key === key);
             if (!source) return null;
             const active = key === 'nearby'
@@ -165,8 +170,9 @@ export function ExploreHero({
                 <Text style={styles.categoryLabel} numberOfLines={1}>{label}</Text>
               </TouchableOpacity>
             );
-          })}
-        </ScrollView>
+            })}
+          </ScrollView>
+        ) : null}
       </View>
     </View>
   );

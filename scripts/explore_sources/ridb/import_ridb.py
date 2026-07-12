@@ -14,7 +14,7 @@ from scripts.explore_sources.base.source_policy import assert_source_allowed
 
 
 RIDB_LICENSE = "RIDB/Recreation.gov public API; verify current terms before redistribution"
-RIDB_ATTRIBUTION = "Recreation.gov"
+RIDB_ATTRIBUTION = "Recreation.gov / RIDB"
 
 
 def load_facilities(path: str | Path) -> list[dict[str, Any]]:

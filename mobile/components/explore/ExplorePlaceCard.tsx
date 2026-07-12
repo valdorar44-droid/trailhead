@@ -1,5 +1,5 @@
 import React from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View, type ImageSourcePropType } from 'react-native';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile } from '@/lib/api';
 import { useTheme } from '@/lib/design';
@@ -17,11 +17,7 @@ import {
   sentenceAwarePreview,
   type ExploreDisplayContext,
 } from './exploreDisplay';
-
-const SCENIC_FALLBACK_IMAGE = require('@/assets/explore-hero-moraine-lake.jpg');
-const MOUNTAIN_FALLBACK_IMAGE = require('@/assets/explore-hero-welcome-mountains.jpg');
-const TRAIL_FALLBACK_IMAGE = require('@/assets/trail-fallback-backpack-sign.jpg');
-const OVERLAND_FALLBACK_IMAGE = require('@/assets/onboarding-hero-overland.png');
+import { StaticMapboxPreview } from './StaticMapboxPreview';
 
 type Props = {
   place: ExplorePlaceProfile;
@@ -30,12 +26,12 @@ type Props = {
   imageUrl: string;
   context?: ExploreDisplayContext;
   saved?: boolean;
-  canRoute?: boolean;
-  routeLabel?: string;
+  primaryLabel: string;
+  primaryIcon?: keyof typeof Ionicons.glyphMap;
+  primaryDisabled?: boolean;
+  rankReason?: string;
   onOpen: () => void;
-  onArea: () => void;
-  onRoute: () => void;
-  onNearby?: () => void;
+  onPrimary: () => void;
   onToggleSave: () => void;
 };
 
@@ -46,12 +42,12 @@ export function ExplorePlaceCard({
   imageUrl,
   context,
   saved,
-  canRoute = true,
-  routeLabel = 'Route',
+  primaryLabel,
+  primaryIcon = 'navigate',
+  primaryDisabled = false,
+  rankReason,
   onOpen,
-  onArea,
-  onRoute,
-  onNearby,
+  onPrimary,
   onToggleSave,
 }: Props) {
   const C = useTheme();
@@ -60,7 +56,25 @@ export function ExplorePlaceCard({
   const title = getExploreDisplayTitle(place);
   const region = `${context?.day ? `Day ${context.day} · ` : ''}${context?.distanceMi != null ? `${formatMiles(context.distanceMi)} · ` : ''}${getExploreDisplayRegion(place)}`;
   const summary = cardSummaryPreview(getExploreCardSummary(place));
-  const imageSource = imageUrl ? { uri: imageUrl } : fallbackImageForPlace(place);
+  const sourceLine = getExploreCardSourceLine(place);
+  const lat = Number(place.summary.lat);
+  const lng = Number(place.summary.lng);
+  const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
+  const renderMedia = (height: number) => imageUrl ? (
+    <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
+  ) : hasCoordinates ? (
+    <StaticMapboxPreview
+      pins={[{ id: place.id, title, lat, lng, kind: getExploreCategoryKey(place), active: true }]}
+      title={title}
+      showBadge={false}
+      showCopy={false}
+      height={height}
+    />
+  ) : (
+    <View style={[styles.mediaFallback, { backgroundColor: C.s2 }]}>
+      <Ionicons name={getExploreIcon(place) as any} size={34} color={C.text3} />
+    </View>
+  );
   if (compact) {
     return (
       <TouchableOpacity
@@ -69,7 +83,7 @@ export function ExplorePlaceCard({
         onPress={onOpen}
       >
         <View style={styles.railImageWrap}>
-          <Image source={imageSource} style={styles.image} resizeMode="cover" />
+          {renderMedia(244)}
           <View style={styles.railShade} />
           <View style={[styles.badge, styles.railBadge]}>
             <Ionicons name={getExploreIcon(place) as any} size={11} color="#fff" />
@@ -97,7 +111,7 @@ export function ExplorePlaceCard({
       onPress={onOpen}
     >
       <View style={[styles.imageWrap, lead && styles.leadImageWrap]}>
-        <Image source={imageSource} style={styles.image} resizeMode="cover" />
+        {renderMedia(lead ? 286 : 252)}
         <View style={styles.imageShade} />
         <View style={styles.badge}>
           <Ionicons name={getExploreIcon(place) as any} size={12} color="#fff" />
@@ -112,43 +126,39 @@ export function ExplorePlaceCard({
         </View>
       </View>
       <View style={styles.body}>
-        <View style={styles.sourceLine}>
-          <Ionicons name="shield-checkmark-outline" size={13} color={categoryColor} />
-          <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{getExploreCardSourceLine(place)}</Text>
-        </View>
-        <Text style={[styles.summary, { color: C.text2 }]}>{summary}</Text>
-        <View style={styles.factRow}>
-          {facts.map(fact => (
-            <View key={`${fact.icon}-${fact.label}`} style={[styles.fact, { borderColor: C.border, backgroundColor: C.s2 }]}>
-              <Ionicons name={fact.icon as any} size={13} color={fact.tone} />
-              <Text style={[styles.factText, { color: C.text2 }]} numberOfLines={1}>
-                {fact.value ? `${fact.value} ${fact.label}` : fact.label}
-              </Text>
-            </View>
-          ))}
-        </View>
+        {!!rankReason && (
+          <View style={styles.rankLine}>
+            <Ionicons name="ribbon-outline" size={14} color={C.orange} />
+            <Text style={[styles.rankText, { color: C.text }]} numberOfLines={2}>{rankReason}</Text>
+          </View>
+        )}
+        {!!sourceLine && (
+          <View style={styles.sourceLine}>
+            <Ionicons name="shield-checkmark-outline" size={13} color={categoryColor} />
+            <Text style={[styles.source, { color: categoryColor }]} numberOfLines={1}>{sourceLine}</Text>
+          </View>
+        )}
+        {!!summary && <Text style={[styles.summary, { color: C.text2 }]}>{summary}</Text>}
+        {facts.length ? (
+          <View style={styles.factRow}>
+            {facts.map(fact => (
+              <View key={`${fact.icon}-${fact.label}`} style={[styles.fact, { borderColor: C.border, backgroundColor: C.s2 }]}>
+                <Ionicons name={fact.icon as any} size={13} color={fact.tone} />
+                <Text style={[styles.factText, { color: C.text2 }]} numberOfLines={1}>
+                  {fact.value ? `${fact.value} ${fact.label}` : fact.label}
+                </Text>
+              </View>
+            ))}
+          </View>
+        ) : null}
         <View style={styles.actions}>
-          <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onArea}>
-            <Ionicons name="map-outline" size={17} color={C.text2} />
-            <Text style={[styles.actionText, { color: C.text2 }]}>Open</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onToggleSave}>
-            <Ionicons name={saved ? 'bookmark' : 'bookmark-outline'} size={16} color={C.text2} />
-            <Text style={[styles.actionText, { color: C.text2 }]}>{saved ? 'Saved' : 'Save'}</Text>
-          </TouchableOpacity>
-          {!!onNearby && (
-            <TouchableOpacity style={[styles.action, { borderColor: C.border }]} onPress={onNearby}>
-              <Ionicons name="locate-outline" size={16} color={C.text2} />
-              <Text style={[styles.actionText, { color: C.text2 }]}>Nearby</Text>
-            </TouchableOpacity>
-          )}
           <TouchableOpacity
-            style={[styles.action, { borderColor: C.border, opacity: canRoute ? 1 : 0.5 }]}
-            onPress={onRoute}
-            disabled={!canRoute}
+            style={[styles.primaryAction, { backgroundColor: C.orange, opacity: primaryDisabled ? 0.5 : 1 }]}
+            onPress={onPrimary}
+            disabled={primaryDisabled}
           >
-            <Ionicons name="navigate" size={16} color={C.orange} />
-            <Text style={[styles.actionText, { color: C.text2 }]}>{routeLabel}</Text>
+            <Ionicons name={primaryIcon} size={17} color="#fff" />
+            <Text style={styles.primaryActionText}>{primaryLabel}</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -159,40 +169,6 @@ export function ExplorePlaceCard({
 function formatMiles(mi: number) {
   if (!Number.isFinite(mi)) return '';
   return mi >= 10 ? `${Math.round(mi)} mi` : `${mi.toFixed(1)} mi`;
-}
-
-function fallbackImageForPlace(place: ExplorePlaceProfile): ImageSourcePropType {
-  const category = getExploreCategoryKey(place);
-  if (category === 'trails' || category === 'trailheads' || category === 'climb') {
-    return TRAIL_FALLBACK_IMAGE;
-  }
-  if (category === 'camp' || category === 'glamping' || category === 'huts' || category === 'land') {
-    return seededFallback(place, [OVERLAND_FALLBACK_IMAGE, TRAIL_FALLBACK_IMAGE, MOUNTAIN_FALLBACK_IMAGE]);
-  }
-  if (category === 'peaks' || category === 'views' || category === 'scenic' || category === 'parks') {
-    return seededFallback(place, [MOUNTAIN_FALLBACK_IMAGE, SCENIC_FALLBACK_IMAGE, OVERLAND_FALLBACK_IMAGE]);
-  }
-  if (category === 'water' || category === 'waterfalls' || category === 'springs') {
-    return seededFallback(place, [SCENIC_FALLBACK_IMAGE, MOUNTAIN_FALLBACK_IMAGE, TRAIL_FALLBACK_IMAGE]);
-  }
-  return seededFallback(place, [SCENIC_FALLBACK_IMAGE, MOUNTAIN_FALLBACK_IMAGE, OVERLAND_FALLBACK_IMAGE, TRAIL_FALLBACK_IMAGE]);
-}
-
-function seededFallback(place: ExplorePlaceProfile, images: ImageSourcePropType[]) {
-  const seed = [
-    place.id,
-    place.summary?.title,
-    place.summary?.region,
-    place.summary?.state,
-    place.summary?.lat != null ? Number(place.summary.lat).toFixed(1) : '',
-    place.summary?.lng != null ? Number(place.summary.lng).toFixed(1) : '',
-  ].join('|');
-  let hash = 0;
-  for (let index = 0; index < seed.length; index += 1) {
-    hash = ((hash << 5) - hash + seed.charCodeAt(index)) | 0;
-  }
-  const slot = Math.abs(hash) % Math.max(1, images.length);
-  return images[slot] ?? SCENIC_FALLBACK_IMAGE;
 }
 
 function cardSummaryPreview(value?: string | null) {
@@ -235,6 +211,7 @@ const styles = StyleSheet.create({
   leadImageWrap: { height: 286 },
   railImageWrap: { flex: 1 },
   image: { width: '100%', height: '100%' },
+  mediaFallback: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   imageShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.18)' },
   railShade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.28)' },
   badge: {
@@ -321,6 +298,8 @@ const styles = StyleSheet.create({
     textShadowRadius: 8,
   },
   body: { padding: 15, gap: 8 },
+  rankLine: { minHeight: 24, flexDirection: 'row', alignItems: 'center', gap: 7 },
+  rankText: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 16, fontWeight: '900' },
   title: { fontSize: 21, lineHeight: 25, fontWeight: '900', letterSpacing: 0 },
   meta: { fontSize: 13, fontWeight: '700' },
   sourceLine: { minHeight: 19, flexDirection: 'row', alignItems: 'center', gap: 5 },
@@ -338,15 +317,14 @@ const styles = StyleSheet.create({
   },
   factText: { fontSize: 11, fontWeight: '800' },
   actions: { flexDirection: 'row', alignItems: 'center', gap: 7, paddingTop: 6 },
-  action: {
+  primaryAction: {
     flex: 1,
-    minHeight: 42,
-    borderRadius: 12,
-    borderWidth: 1,
+    minHeight: 44,
+    borderRadius: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
-  actionText: { fontSize: 11, fontWeight: '900' },
+  primaryActionText: { color: '#fff', fontSize: 12, fontWeight: '900' },
 });

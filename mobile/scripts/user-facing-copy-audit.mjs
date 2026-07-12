@@ -13,6 +13,7 @@ const presets = {
   plan: ['app/(tabs)/plan.tsx'],
   explore: [
     'app/(tabs)/guide.tsx',
+    'components/explore/ExploreCategoryFilterSheet.tsx',
     'components/explore/ExploreCategoryChips.tsx',
     'components/explore/ExploreDetailSheet.tsx',
     'components/explore/ExploreExperiencesRail.tsx',
@@ -23,6 +24,7 @@ const presets = {
     'components/explore/ExplorePlaceCard.tsx',
     'components/explore/ExploreTrailArea.tsx',
     'components/explore/GuidedTripDetailModal.tsx',
+    'components/explore/GuidedDestinationBrowser.tsx',
     'components/explore/StaticMapboxPreview.tsx',
   ],
   map: [
@@ -31,6 +33,10 @@ const presets = {
     'components/map/MapLayerSheetContent.tsx',
     'components/map/MapLegendSheet.tsx',
     'components/map/RouteScoutPanel.tsx',
+  ],
+  profile: [
+    'app/(tabs)/profile.tsx',
+    'components/PaywallModal.tsx',
   ],
 };
 
@@ -84,6 +90,7 @@ const blockedTerms = [
   { label: '0 results', pattern: /\b0\s+results?\b/i },
   { label: 'Rig ready', pattern: /\brig ready\b/i },
   { label: 'Offline ready', pattern: /\boffline ready\b/i },
+  { label: 'Preview rebuild requirement', pattern: /\bpreview rebuild required\b/i },
 ];
 
 function isCheckedTextNode(node) {

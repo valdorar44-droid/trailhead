@@ -12,6 +12,7 @@
     "android:auto:dhu": "bash scripts/android-auto-dhu.sh",
     "audit:routes": "node scripts/route-builder-audit.mjs",
     "audit:copy": "node scripts/user-facing-copy-audit.mjs",
+    "audit:profile-map": "node scripts/profile-map-regression-audit.mjs",
     "audit:explore": "node scripts/explore-feed-audit.mjs",
     "audit:explore-live": "python ../scripts/audit_explore_live.py",
     "audit:viator": "python ../scripts/audit_viator_experiences.py",

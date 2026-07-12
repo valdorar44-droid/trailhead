@@ -32,6 +32,9 @@ export function GuidedTripDetailModal({
   const details = useMemo(() => buildTripDetails(experience), [experience]);
   const bookingUrl = experience?.booking_url || experience?.affiliate_url || experience?.source_url || '';
   const canMap = Number.isFinite(Number(experience?.lat)) && Number.isFinite(Number(experience?.lng));
+  const provider = /viator/i.test(String(experience?.source || experience?.source_badge || ''))
+    ? 'Viator'
+    : String(experience?.source_badge || experience?.source || 'travel partner').trim();
 
   return (
     <Modal visible={visible} animationType="slide" onRequestClose={onClose}>
@@ -141,7 +144,7 @@ export function GuidedTripDetailModal({
                 </DetailSection>
               ) : null}
 
-              <Text style={[styles.attribution, { color: C.text3 }]}>Tour content from Viator.</Text>
+              <Text style={[styles.attribution, { color: C.text3 }]}>Trip details from {provider}. Availability and prices can change; checkout continues with {provider}.</Text>
             </ScrollView>
 
             <View style={[styles.footer, { borderTopColor: C.border, backgroundColor: C.bg }]}>
@@ -168,9 +171,9 @@ export function GuidedTripDetailModal({
                 style={[styles.primaryButton, { backgroundColor: C.orange, opacity: bookingUrl ? 1 : 0.55 }]}
                 disabled={!bookingUrl}
                 onPress={() => bookingUrl && Linking.openURL(bookingUrl)}
-                accessibilityLabel="Check availability"
+                accessibilityLabel={`Continue with ${provider}`}
               >
-                <Text style={styles.primaryButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Check availability</Text>
+                <Text style={styles.primaryButtonText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.78}>Continue with {provider}</Text>
               </TouchableOpacity>
             </View>
           </>

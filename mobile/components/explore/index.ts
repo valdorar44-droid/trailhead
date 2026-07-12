@@ -1,7 +1,9 @@
 export { ExploreCategoryChips } from './ExploreCategoryChips';
+export { ExploreCategoryFilterSheet } from './ExploreCategoryFilterSheet';
 export { ExploreDetailSheet, type ExploreDetailTab, type ExploreDetailWeather } from './ExploreDetailSheet';
 export { ExploreExperiencesRail } from './ExploreExperiencesRail';
 export { ExploreFilterRow } from './ExploreFilterRow';
+export { GuidedDestinationBrowser, GUIDED_DESTINATIONS, type GuidedDestination } from './GuidedDestinationBrowser';
 export { GuidedTripDetailModal } from './GuidedTripDetailModal';
 export { ExploreHero } from './ExploreHero';
 export { ExploreHomeControls, type ExploreSortMode } from './ExploreHomeControls';

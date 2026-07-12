@@ -8,7 +8,7 @@ module.exports = {
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',
     scheme: 'trailhead',
-    userInterfaceStyle: 'dark',
+    userInterfaceStyle: 'automatic',
     splash: {
       image: './assets/splash.png',
       resizeMode: 'contain',
@@ -22,7 +22,7 @@ module.exports = {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',
         NSLocationAlwaysAndWhenInUseUsageDescription: 'Trailhead uses your location in the background so navigation and audio guide narrations continue when your phone is locked while driving.',
         NSLocationAlwaysUsageDescription: 'Trailhead uses background location so turn-by-turn navigation and landmark audio narrations play while your screen is off.',
-        NSMicrophoneUsageDescription: 'Trailhead uses your microphone when you choose to speak to the Extreme Explorer Co-Pilot.',
+        NSMicrophoneUsageDescription: 'Trailhead uses your microphone only when you choose voice Co-Pilot.',
         NSCameraUsageDescription: 'Trailhead uses your camera to take photos for field reports. For example, you can photograph a washed-out road, a campsite condition, or a trail hazard to warn other overlanders.',
         NSPhotoLibraryUsageDescription: 'Trailhead uses your photo library to attach existing photos to field reports. For example, you can select a photo of a trail condition, campsite, or road hazard to share with the overlanding community.',
         NSAppTransportSecurity: {

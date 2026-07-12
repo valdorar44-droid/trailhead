@@ -1,6 +1,6 @@
 import '@/lib/backgroundTasks'; // must be first — registers background location task
 import { useEffect, useRef, useState } from 'react';
-import { Alert, AppState, Linking, View, Text, TouchableOpacity } from 'react-native';
+import { Alert, Appearance, AppState, Linking, Platform, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
 import { storage } from '@/lib/storage';
@@ -29,7 +29,6 @@ import {
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
-const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 
 export default function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
@@ -56,6 +55,17 @@ export default function RootLayout() {
   const checking     = useRef(false);
   const pushRegistered = useRef(false);
   const welcomeGateChecked = useRef(false);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') {
+      if (typeof document !== 'undefined') document.documentElement.style.colorScheme = themeMode;
+      return;
+    }
+    const setColorScheme = (Appearance as typeof Appearance & {
+      setColorScheme?: (scheme: 'light' | 'dark') => void;
+    }).setColorScheme;
+    if (typeof setColorScheme === 'function') setColorScheme(themeMode);
+  }, [themeMode]);
 
   // We auto-apply OTA updates that arrive within ~10s of launch (so users get
   // the latest code on every cold start with one short reload). After that
@@ -391,18 +401,9 @@ export default function RootLayout() {
     let cancelled = false;
     (async () => {
       const existing = await Location.getForegroundPermissionsAsync().catch(() => null);
-      if (cancelled) return;
-      let permission = existing;
-      if (existing?.status !== 'granted') {
-        const alreadyPrompted = await storage.get(LOCATION_WARMUP_PROMPT_KEY).catch(() => null);
-        if (cancelled || alreadyPrompted || existing?.status === 'denied') {
-          if (existing?.status === 'denied') storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
-          return;
-        }
-        storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
-        permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
-      }
-      if (cancelled || permission?.status !== 'granted') return;
+      // Never interrupt first-run discovery with a permission prompt. Nearby,
+      // Map, and active navigation request location in their own context.
+      if (cancelled || existing?.status !== 'granted') return;
       const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
       if (!cancelled && fix?.coords) {
         setUserLoc({ lat: fix.coords.latitude, lng: fix.coords.longitude });

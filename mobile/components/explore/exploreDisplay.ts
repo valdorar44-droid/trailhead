@@ -575,10 +575,31 @@ export function getExploreFreshnessLabel(place: ExplorePlaceProfile) {
 }
 
 export function getExploreCardSourceLine(place: ExplorePlaceProfile) {
-  return compact([
-    getExploreTrustBadge(place),
-    getExploreBestSeason(place),
-  ]).filter((part, index, parts) => parts.indexOf(part) === index).join(' · ');
+  const v3 = readV3(place);
+  const sources = Array.isArray(v3.sources) ? v3.sources : [];
+  const source = cleanSourcePublisherLabel(
+    getExplorePrimarySourceLabel(place)
+    || v3.source_quality?.primary_name
+    || v3.source_quality?.primary_provider
+    || place.source_pack?.primary
+    || sources[0]?.publisher
+    || sources[0]?.name
+    || sources[0]?.title
+    || place.summary.source_title
+    || place.attribution,
+  );
+  return compact([source, getExploreBestSeason(place)])
+    .filter((part, index, parts) => parts.indexOf(part) === index)
+    .join(' · ');
+}
+
+export function getExplorePrimarySourceLabel(place: ExplorePlaceProfile) {
+  const primary = place.provenance?.primary;
+  if (typeof primary === 'string') return primary;
+  if (primary && typeof primary === 'object') {
+    return primary.attribution || primary.source || '';
+  }
+  return place.provenance?.primary_label || '';
 }
 
 export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceRow[] {
@@ -621,17 +642,20 @@ export function getExploreSourceRows(place: ExplorePlaceProfile): ExploreSourceR
 
 export function getExploreCardSummary(place: ExplorePlaceProfile) {
   const v3 = readV3(place);
-  const key = getExploreCategoryKey(place);
-  return cleanExploreCopy(String(
-    v3.card?.summary ||
-    place.summary.short_description ||
-    place.profile.summary ||
-    v3.card?.highlight ||
-    place.summary.hook ||
-    v3.card?.headline ||
-    FALLBACK_COPY[key] ||
-    'Check access before you go.',
-  ), place).trim();
+  const candidates = [
+    v3.card?.summary,
+    place.summary.short_description,
+    place.profile.summary,
+    v3.card?.highlight,
+    place.summary.hook,
+    v3.card?.headline,
+  ];
+  for (const candidate of candidates) {
+    const clean = normalizeExploreCopyBlock(String(candidate || ''));
+    if (!clean || isExploreLocationMismatchCopy(clean, place) || isWeakExploreCopy(clean, place)) continue;
+    return clean;
+  }
+  return '';
 }
 
 export function getExploreHighlightCopy(place: ExplorePlaceProfile) {
@@ -665,36 +689,45 @@ export function getExploreBestSeason(place: ExplorePlaceProfile) {
   const best = String(v3.best_season || '').trim();
   if (best) return shortSeasonLabel(best);
   if (place.profile.best_time_to_stop) return shortSeasonLabel(place.profile.best_time_to_stop);
-  return 'Check season';
+  return '';
 }
 
 export function getExploreQuickFacts(place: ExplorePlaceProfile, context: ExploreDisplayContext = {}): ExploreFact[] {
-  const key = getExploreCategoryKey(place);
+  const v3 = readV3(place);
   const facts: ExploreFact[] = [];
   if (context.campCount && context.campCount > 0) {
     facts.push({
-      label: key === 'camp' ? 'Campgrounds nearby' : 'Camps nearby',
+      label: 'Camps nearby',
       value: String(context.campCount),
       icon: 'bonfire-outline',
       tone: '#16a34a',
     });
-  } else if (key === 'camp' || key === 'glamping' || key === 'huts') {
-    facts.push({ label: 'Check access', icon: 'trail-sign-outline', tone: '#16a34a' });
-  } else if (key === 'waterfalls' || key === 'views') {
-    facts.push({ label: key === 'waterfalls' ? 'Viewpoints nearby' : 'Scenic stop', icon: 'binoculars-outline', tone: '#15803d' });
-  } else if (key === 'fuel') {
-    facts.push({ label: 'Check hours', icon: 'car-outline', tone: '#ea580c' });
-  } else if (key === 'resupply') {
-    facts.push({ label: 'Check supply', icon: 'basket-outline', tone: '#7c3aed' });
-  } else if (key === 'trails' || key === 'trailheads' || key === 'climb') {
-    facts.push({ label: 'Trail access', icon: 'walk-outline', tone: '#f97316' });
-  } else if (key === 'peaks') {
-    facts.push({ label: 'Mountain', icon: 'triangle-outline', tone: '#2563eb' });
-  } else {
-    facts.push({ label: 'Details', icon: 'navigate-outline', tone: '#2563eb' });
   }
-  facts.push({ label: getExploreBestSeason(place), icon: 'calendar-outline', tone: '#c4552d' });
-  facts.push({ label: getExploreTrustBadge(place), icon: 'shield-checkmark-outline', tone: '#2563eb' });
+  const explicitFacts = Array.isArray(v3.card?.facts)
+    ? v3.card.facts.map((fact: unknown) => normalizeExploreCopyBlock(String(fact || ''))).filter(Boolean)
+    : [];
+  for (const fact of explicitFacts.slice(0, 2)) {
+    facts.push({ label: fact, icon: 'information-circle-outline', tone: '#2563eb' });
+  }
+  const planningFactCount = Number(v3.enrichment?.planning_fact_count || 0);
+  if (planningFactCount > 0 && explicitFacts.length === 0) {
+    facts.push({
+      label: planningFactCount === 1 ? 'Trip detail' : 'Trip details',
+      value: String(planningFactCount),
+      icon: 'list-outline',
+      tone: '#2563eb',
+    });
+  }
+  const trails = Array.isArray(v3.trails) ? v3.trails : [];
+  if (trails.length > 0) {
+    facts.push({ label: trails.length === 1 ? 'Trail' : 'Trails', value: String(trails.length), icon: 'walk-outline', tone: '#f97316' });
+  }
+  const season = getExploreBestSeason(place);
+  if (season) facts.push({ label: season, icon: 'calendar-outline', tone: '#c4552d' });
+  const amenities = Array.isArray(v3.amenities) ? v3.amenities.map(String).filter(Boolean) : [];
+  if (amenities.length > 0) {
+    facts.push({ label: amenities.slice(0, 2).join(' · '), icon: 'checkmark-circle-outline', tone: '#16a34a' });
+  }
   return facts.slice(0, 4);
 }
 
@@ -949,6 +982,7 @@ export function exploreContentQualityScore(place: ExplorePlaceProfile) {
   if (Array.isArray(sourcePack.things_to_do) && sourcePack.things_to_do.length) score += Math.min(16, sourcePack.things_to_do.length * 3);
   if (Array.isArray(sourcePack.things_to_see) && sourcePack.things_to_see.length) score += Math.min(16, sourcePack.things_to_see.length * 3);
   if (Array.isArray(sourcePack.campgrounds) && sourcePack.campgrounds.length) score += Math.min(12, sourcePack.campgrounds.length * 3);
+  score = Math.max(score, Number(v3.enrichment?.score || 0));
   if (isExploreThinOpenReference(place)) score -= 70;
   return score;
 }

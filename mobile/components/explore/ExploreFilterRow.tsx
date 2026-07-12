@@ -8,59 +8,60 @@ type Props = {
   countLabel?: string;
   sourceLabel?: string;
   sortLabel?: string;
+  showSourceStatus?: boolean;
+  showSort?: boolean;
   onCountPress?: () => void;
-  onSourcePress?: () => void;
   onSortPress?: () => void;
 };
 
 export function ExploreFilterRow({
   shownCount,
   countLabel,
-  sourceLabel = 'Sources',
+  sourceLabel = 'Trip details',
   sortLabel = 'Best match',
+  showSourceStatus = true,
+  showSort = true,
   onCountPress,
-  onSourcePress,
   onSortPress,
 }: Props) {
   const C = useTheme();
   const compactCount = countLabel ?? formatShownCount(shownCount);
+  const displayCount = compactCount.replace(/^(\d+)\s+featured picks$/i, '$1 picks');
   const compactSort = sortLabel === 'Best match' ? 'Best' : sortLabel;
   const countAccessibilityLabel = shownCount <= 0 ? compactCount : `${shownCount} ${shownCount === 1 ? 'place' : 'places'} shown`;
-  const items = [
-    { icon: 'list-outline', label: compactCount, accessibilityLabel: countAccessibilityLabel, onPress: onCountPress, flex: 0.95 },
-    { icon: 'shield-checkmark-outline', label: sourceLabel, accessibilityLabel: 'Place details', onPress: onSourcePress, flex: 1.3 },
-    { icon: 'filter-outline', label: compactSort, accessibilityLabel: `Sort: ${sortLabel}`, onPress: onSortPress, flex: 0.95 },
-  ];
   return (
-    <View style={styles.row}>
-      {items.map(item => {
-        const content = (
-          <>
-            <Ionicons name={item.icon as any} size={16} color={C.text3} />
-            <Text style={[styles.label, { color: C.text3 }]} numberOfLines={1}>{item.label}</Text>
-          </>
-        );
-        const style = [styles.pill, { flex: item.flex, borderColor: C.border, backgroundColor: C.s1 }];
-        if (!item.onPress) {
-          return (
-            <View key={item.label} style={style} accessibilityLabel={item.accessibilityLabel}>
-              {content}
-            </View>
-          );
-        }
-        return (
-          <TouchableOpacity
-            key={item.label}
-            style={style}
-            activeOpacity={0.78}
-            onPress={item.onPress}
-            accessibilityLabel={item.accessibilityLabel}
-            accessibilityRole="button"
-          >
-            {content}
-          </TouchableOpacity>
-        );
-      })}
+    <View style={[styles.row, { borderBottomColor: C.border }]}>
+      <TouchableOpacity
+        style={styles.status}
+        activeOpacity={onCountPress ? 0.72 : 1}
+        onPress={onCountPress}
+        disabled={!onCountPress}
+        accessibilityLabel={countAccessibilityLabel}
+        accessibilityRole={onCountPress ? 'button' : undefined}
+      >
+        <Ionicons name="list-outline" size={16} color={C.text3} />
+        <Text style={[styles.label, { color: C.text2 }]} numberOfLines={1}>{displayCount}</Text>
+        {onCountPress ? <Ionicons name="chevron-down" size={14} color={C.orange} /> : null}
+      </TouchableOpacity>
+      {showSourceStatus ? (
+        <View style={styles.sourceStatus} accessibilityLabel="Place details">
+          <Ionicons name="shield-checkmark-outline" size={15} color={C.green} />
+          <Text style={[styles.sourceLabel, { color: C.text3 }]} numberOfLines={1}>{sourceLabel}</Text>
+        </View>
+      ) : null}
+      {showSort ? (
+        <TouchableOpacity
+          style={[styles.sortButton, { borderColor: C.border, backgroundColor: C.s1 }]}
+          activeOpacity={0.78}
+          onPress={onSortPress}
+          disabled={!onSortPress}
+          accessibilityLabel={`Sort: ${sortLabel}`}
+          accessibilityRole="button"
+        >
+          <Ionicons name="swap-vertical-outline" size={16} color={C.text2} />
+          <Text style={[styles.sortLabel, { color: C.text }]} numberOfLines={1}>{compactSort}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
@@ -74,22 +75,34 @@ function formatShownCount(count: number) {
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
+    alignItems: 'center',
     gap: 8,
     paddingHorizontal: 20,
-    paddingTop: 9,
-    paddingBottom: 6,
+    paddingVertical: 9,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  pill: {
+  status: {
     flex: 1,
     minWidth: 0,
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  sourceStatus: { maxWidth: 112, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 5 },
+  sortButton: {
+    minWidth: 88,
+    maxWidth: 124,
     minHeight: 38,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 9,
+    borderRadius: 8,
+    paddingHorizontal: 10,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
+    gap: 6,
   },
-  label: { fontSize: 11, fontWeight: '800' },
+  label: { flexShrink: 1, minWidth: 0, fontSize: 11, fontWeight: '800' },
+  sourceLabel: { flexShrink: 1, minWidth: 0, fontSize: 10.5, fontWeight: '700' },
+  sortLabel: { flexShrink: 1, minWidth: 0, fontSize: 11, fontWeight: '800' },
 });

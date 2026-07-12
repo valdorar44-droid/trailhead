@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Animated,
-  Image, Modal, Linking, TextInput, useWindowDimensions,
+  Image, Modal, Linking, TextInput, useWindowDimensions, Alert, Platform,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
@@ -13,10 +13,14 @@ import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow } from '@/components/TrailheadUI';
 import {
   EXPLORE_CATEGORY_CHIPS,
+  ExploreCategoryFilterSheet,
   ExploreDetailSheet,
   ExploreExperiencesRail,
   ExploreHero,
+  ExploreHomeControls,
   ExplorePlaceCard,
+  GUIDED_DESTINATIONS,
+  GuidedDestinationBrowser,
   GuidedTripDetailModal,
   exploreCategoryFromQuery,
   exploreCategoryMatches,
@@ -25,6 +29,7 @@ import {
   exploreTrustScore as scoreExploreTrust,
   getExploreCategoryKey,
   getExploreCardSummary,
+  getExplorePrimarySourceLabel,
   getExploreTrailCards,
   isExploreThinOpenReference,
   mergeCuratedExplorePlaces,
@@ -33,9 +38,10 @@ import {
   type ExploreDetailWeather,
   type ExploreNearbyModule,
   type ExploreSortMode,
+  type GuidedDestination,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
-import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
+import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -53,12 +59,56 @@ const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_index_v3';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v2:';
 const EXPLORE_EXPERIENCES_CACHE_PREFIX = 'trailhead_explore_experiences_v1:';
+const EXPLORE_GUIDED_FALLBACK_CACHE_PREFIX = 'trailhead_explore_guided_fallback_v1:';
 const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
-const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 const EXPLORE_INITIAL_VISIBLE = 48;
 const EXPLORE_VISIBLE_STEP = 48;
 const API_BASE = TRAILHEAD_API_BASE;
 const BOOKABLE_EXPERIENCES_ENABLED = true;
+
+type ExploreCatalogPageSpec = {
+  key: string;
+  q: string;
+  category: string;
+  sort: string;
+  lat?: number;
+  lng?: number;
+};
+
+type ExploreCatalogPageState = {
+  nextCursor: number | null;
+  totalCount: number;
+  loading: boolean;
+};
+
+function exploreCatalogPageSpec(
+  q: string,
+  category: string,
+  sort: ExploreSortMode,
+  lat?: number,
+  lng?: number,
+): ExploreCatalogPageSpec {
+  const cleanQuery = q.trim();
+  const cleanCategory = category.trim();
+  const serverSort = sort === 'source' ? 'ready' : sort;
+  const located = serverSort === 'nearest' && lat != null && lng != null;
+  const cleanLat = located ? Number(lat) : undefined;
+  const cleanLng = located ? Number(lng) : undefined;
+  return {
+    key: [
+      normalizeExploreText(cleanQuery),
+      cleanCategory,
+      serverSort,
+      cleanLat == null ? '' : cleanLat.toFixed(5),
+      cleanLng == null ? '' : cleanLng.toFixed(5),
+    ].join('|'),
+    q: cleanQuery,
+    category: cleanCategory,
+    sort: serverSort,
+    lat: cleanLat,
+    lng: cleanLng,
+  };
+}
 
 function safelyRemoveSubscription(subscription: { remove?: () => unknown } | null | undefined) {
   try {
@@ -247,14 +297,44 @@ function placeQueryFromExploreQuery(query: string) {
 type GuidedSearchCenter = { lat: number; lng: number; name: string };
 
 const GUIDED_TOUR_DESTINATION_CENTERS: Array<GuidedSearchCenter & { terms: string[] }> = [
-  { name: 'Moab', lat: 38.5738, lng: -109.5462, terms: ['moab', 'moab utah'] },
-  { name: 'Big Sur', lat: 36.2704, lng: -121.8081, terms: ['big sur', 'big sur california'] },
-  { name: 'Yosemite National Park', lat: 37.7485, lng: -119.587, terms: ['yosemite', 'yosemite national park'] },
-  { name: 'Zion National Park', lat: 37.2982, lng: -113.0263, terms: ['zion', 'zion national park'] },
-  { name: 'Grand Canyon National Park', lat: 36.1069, lng: -112.1129, terms: ['grand canyon', 'grand canyon national park'] },
-  { name: 'K2 Base Camp', lat: 35.8808, lng: 76.5155, terms: ['k2', 'k2 base camp', 'k2 base camp trek', 'baltoro', 'baltoro trek'] },
-  { name: 'Khaplu', lat: 35.159, lng: 76.335, terms: ['khaplu', 'hushe', 'laila peak', 'masherbrum', 'mashabrum', 'k7'] },
+  ...GUIDED_DESTINATIONS.map(destination => ({
+    name: destination.name,
+    lat: destination.lat,
+    lng: destination.lng,
+    terms: destination.terms,
+  })),
 ];
+
+function guidedDestinationsFromApi(items?: ExploreGuidedDestination[]) {
+  if (!Array.isArray(items)) return [];
+  return items.map(item => {
+    const rawGroup = String(item.collection || '').toLowerCase();
+    const group: GuidedDestination['group'] = rawGroup === 'mountain'
+      ? 'Mountain'
+      : rawGroup === 'desert'
+        ? 'Desert'
+        : rawGroup === 'water'
+          ? 'Water'
+          : 'Worldwide';
+    const searchQuery = String(item.search_query || item.name || '').trim();
+    return {
+      id: String(item.id || item.slug || searchQuery),
+      name: String(item.name || searchQuery),
+      region: String(item.region || item.country || ''),
+      group,
+      lat: Number(item.lat),
+      lng: Number(item.lng),
+      searchQuery,
+      imageUrl: mediaUrl(item.image_url),
+      imageAlt: String(item.image_alt || item.name || '').trim(),
+      imageCredit: String(item.image_credit || '').trim(),
+      imageLicense: String(item.image_license || '').trim(),
+      imageLicenseUrl: String(item.image_license_url || '').trim(),
+      imageSourceUrl: String(item.image_source_url || '').trim(),
+      terms: [searchQuery, item.name, ...(item.aliases ?? [])].map(value => String(value || '').toLowerCase()).filter(Boolean),
+    };
+  }).filter(item => item.id && item.name && Number.isFinite(item.lat) && Number.isFinite(item.lng)).slice(0, 25);
+}
 
 function guidedTourKnownDestinationCenter(query: string): GuidedSearchCenter | null {
   const clean = normalizeExploreText(placeQueryFromExploreQuery(query));
@@ -381,7 +461,108 @@ function experienceSearchMessage(res: ExploreExperiencesResponse, areaName: stri
       ? 'Checking guided trip availability for this area.'
       : `Checking guided trip availability near ${areaName}.`;
   }
-  return message || `Guided trip availability is still loading near ${areaName}.`;
+  return message || `No bookable trips were returned near ${areaName}. Try another date or destination.`;
+}
+
+function guidedDestinationSearchMessage(res: ExploreGuidedDestinationResponse, areaName: string) {
+  const status = String(res.provider_status?.status || '').toLowerCase();
+  if (!res.live_enabled || status === 'disabled') {
+    return `Guided trips are unavailable near ${areaName} right now. Nearby places are shown below.`;
+  }
+  if (status === 'timeout' || status === 'error') {
+    return `Guided trips could not refresh near ${areaName}. Nearby places are shown below.`;
+  }
+  if (status === 'processing' || status === 'queued') {
+    return `Checking guided trip availability near ${areaName}.`;
+  }
+  return `No guided trips matched near ${areaName}. Try another date or browse the nearby places below.`;
+}
+
+function exploreFacetKey(value: string): ExploreCategoryKey | null {
+  const clean = normalizeExploreText(value).replace(/\s+/g, '_');
+  const direct = EXPLORE_CATEGORY_CHIPS.find(item => item.key === clean)?.key;
+  if (direct) return direct;
+  const aliases: Record<string, ExploreCategoryKey> = {
+    camping: 'camp',
+    campground: 'camp',
+    campgrounds: 'camp',
+    huts_lodging: 'huts',
+    lodging: 'huts',
+    trail: 'trails',
+    trail_area: 'trails',
+    parks_land: 'parks',
+    public_land: 'land',
+    water_scenic: 'water',
+    services: 'resupply',
+    experience: 'guided',
+    experiences: 'guided',
+    tour: 'guided',
+    tours: 'guided',
+  };
+  return aliases[clean] ?? null;
+}
+
+function exploreFacetCountsFromCatalog(
+  catalog: Awaited<ReturnType<typeof api.getExploreCatalogIndex>>,
+  places: ExplorePlaceProfile[],
+) {
+  const raw = catalog.facets?.categories ?? catalog.category_counts ?? {};
+  const counts: Partial<Record<ExploreCategoryKey, number>> = {};
+  Object.entries(raw).forEach(([key, value]) => {
+    const category = exploreFacetKey(key);
+    const count = Number(value);
+    if (!category || !Number.isFinite(count) || count <= 0) return;
+    counts[category] = Math.max(counts[category] ?? 0, count);
+  });
+  if (Object.keys(counts).length === 0) {
+    places.forEach(place => {
+      const category = getExploreCategoryKey(place);
+      counts[category] = (counts[category] ?? 0) + 1;
+    });
+  }
+  const globalCount = Number(raw.all ?? 0);
+  counts.all = globalCount > 0
+    ? globalCount
+    : Number(catalog.total_count || catalog.count || places.length || 0);
+  return counts;
+}
+
+function exploreFacetCountsFromPlaces(places: ExplorePlaceProfile[]) {
+  const counts: Partial<Record<ExploreCategoryKey, number>> = { all: places.length };
+  places.forEach(place => {
+    const category = getExploreCategoryKey(place);
+    counts[category] = (counts[category] ?? 0) + 1;
+  });
+  return counts;
+}
+
+function exploreRankReason(
+  place: ExplorePlaceProfile,
+  context: { mode: 'featured' | 'nearby' | 'trip'; query: string; distance?: number | null; day?: number; sort: ExploreSortMode },
+) {
+  if (context.day != null) return `Close to day ${context.day} of your trip`;
+  if (context.mode === 'nearby' && context.distance != null) return `${fmtMi(context.distance)} from your location`;
+  const query = placeQueryFromExploreQuery(context.query).trim();
+  if (query) return `Matches ${query}`;
+  const expectedSort = context.sort === 'source' ? 'ready' : context.sort;
+  const serverReason = String(place.ranking?.sort || '') === expectedSort
+    ? String(place.ranking?.reason || '').trim()
+    : '';
+  if (serverReason) return serverReason;
+  const record = place as ExplorePlaceProfile & {
+    verified?: boolean;
+    quality_score?: number;
+    source_quality?: { label?: string; primary_name?: string; primary_provider?: string };
+  };
+  const sourceQuality = [record.quality, record.source_quality?.label, place.source_pack?.quality].filter(Boolean).join(' ');
+  if (record.verified || /official/i.test(sourceQuality)) {
+    const provider = record.source_quality?.primary_name || record.source_quality?.primary_provider || place.source_pack?.primary || place.summary.source_title;
+    return provider ? `Official details from ${provider}` : 'Official place details';
+  }
+  if (context.sort === 'source' && (place.sources?.length || place.source_pack?.sources?.length)) return 'Cross-checked sources';
+  if (Number(record.quality_score || 0) >= 80) return 'Strong details for planning';
+  if (Array.isArray(record.card?.facts) && record.card.facts.length >= 2) return 'Trip details included';
+  return '';
 }
 
 function normalizeExploreText(value: string) {
@@ -1330,23 +1511,25 @@ function mergeDynamicTrailArea(place: ExplorePlaceProfile, area: ExplorePlacePro
 }
 
 function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceProfile {
-  const title = String(item.title || 'Explore stop').trim();
+  const title = String(item.title || '').trim();
   const category = item.category || 'Explore';
   const region = item.region || '';
-  const hook = item.hook || item.short_description || `Plan around ${title}.`;
-  const short = item.short_description || item.hook || 'Check nearby stays, trails, weather, and directions.';
+  const hook = item.hook || item.short_description || '';
+  const short = item.short_description || item.hook || '';
+  const accessNotes = typeof item.access === 'string' ? item.access : '';
+  const safetyNotes = typeof item.safety === 'string' ? item.safety : '';
   const sourceTitle = cleanExploreSourceLabel(item.source_title || '', '');
   const cleanSources = (item.sources ?? []).map(source => {
     const rawTitle = String((source as any)?.title || '').trim();
     const rawPublisher = String((source as any)?.publisher || '').trim();
     const publisher = cleanExploreSourceLabel(rawPublisher || rawTitle, '');
-    const sourceName = cleanExploreSourceLabel(rawTitle, rawTitle || publisher || 'Trailhead');
+    const sourceName = cleanExploreSourceLabel(rawTitle, rawTitle || publisher);
     return {
       ...(source as any),
-      title: sourceName || publisher || 'Trailhead',
-      publisher: publisher || sourceName || 'Trailhead',
+      title: sourceName || publisher,
+      publisher: publisher || sourceName,
     };
-  });
+  }).filter(source => source.title || source.publisher || source.url);
   return {
     id: item.id,
     category: item.v3_category || item.category,
@@ -1361,6 +1544,9 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
     quality: item.quality || item.source_quality,
     quality_score: item.quality_score,
     verified: item.verified,
+    enrichment: item.enrichment,
+    provenance: item.provenance,
+    ranking: item.ranking,
     search_aliases: item.search_aliases ?? [],
     search_blob: item.search_blob || '',
     best_season: item.best_season || '',
@@ -1395,45 +1581,45 @@ function exploreIndexItemToProfile(item: ExploreCatalogIndexItem): ExplorePlaceP
     profile: {
       hook,
       summary: short,
-      story: short,
-      why_it_matters: short,
-      what_to_know: 'Check current access, fees, closures, permits, and local rules before you go.',
-      best_time_to_stop: 'Check season and current conditions.',
-      access_notes: 'Check the source link before you go.',
-      nearby_context: 'Compare nearby camps, trails, services, and weather.',
+      story: '',
+      why_it_matters: item.card?.highlight || '',
+      what_to_know: safetyNotes,
+      best_time_to_stop: item.best_season || '',
+      access_notes: accessNotes,
+      nearby_context: '',
     },
-    audio_script: short,
+    audio_script: '',
     wiki_extract: '',
     source_pack: {
-      quality: item.source_quality || 'open',
+      quality: item.source_quality || '',
       primary: sourceTitle,
-      official_url: item.source_url || '',
+      official_url: /official/i.test(String(item.source_quality || '')) ? item.source_url || '' : '',
       sources: cleanSources.length ? cleanSources : item.source_url ? [{
         title,
-        publisher: sourceTitle || 'Trailhead',
+        publisher: sourceTitle,
         url: item.source_url,
-        kind: item.source_quality || 'open',
+        kind: item.source_quality || '',
       }] : [],
       photos: item.media?.length ? item.media.map(photo => ({
         url: photo.url,
-        caption: photo.caption || title,
-        credit: photo.credit || item.image_credit || sourceTitle || '',
+        caption: photo.caption || '',
+        credit: photo.credit || item.image_credit || '',
       })) : (item.image_url || item.thumbnail_url) ? [{
         url: item.image_url || item.thumbnail_url,
-        caption: title,
-        credit: item.image_credit || sourceTitle || '',
+        caption: '',
+        credit: item.image_credit || '',
       }] : [],
       topics: item.tags ?? [],
-      source_note: 'Open the full card for more details.',
+      source_note: '',
     },
     facts: {
       coordinates: item.lat != null && item.lng != null ? `${Number(item.lat).toFixed(5)}, ${Number(item.lng).toFixed(5)}` : '',
       source_url: item.source_url || '',
       source_title: sourceTitle,
-      official_url: item.source_url || '',
+      official_url: /official/i.test(String(item.source_quality || '')) ? item.source_url || '' : '',
       source_quality: item.source_quality || '',
     },
-    attribution: sourceTitle || 'Trailhead',
+    attribution: sourceTitle || cleanExploreSourceLabel(cleanSources[0]?.publisher || cleanSources[0]?.title || '', ''),
   };
 }
 
@@ -1753,6 +1939,54 @@ function withExploreTimeout<T>(promise: Promise<T>, ms = 9000) {
   });
 }
 
+function guidedOrganicFallbackFromPlaces(
+  places: ExplorePlaceProfile[],
+  center: GuidedSearchCenter | null,
+  query: string,
+  limit = 6,
+) {
+  const blocked = new Set<ExploreCategoryKey>(['camp', 'glamping', 'huts', 'fuel', 'resupply', 'guided', 'tours']);
+  const normalizedQuery = normalizeExploreText(query);
+  return places
+    .filter(place => !blocked.has(getExploreCategoryKey(place)))
+    .map(place => {
+      const lat = place.summary.lat;
+      const lng = place.summary.lng;
+      const hasCoordinates = lat != null && lng != null && Number.isFinite(Number(lat)) && Number.isFinite(Number(lng));
+      const distance = center && hasCoordinates
+        ? distMi(center, { lat: Number(lat), lng: Number(lng) })
+        : null;
+      const queryScore = normalizedQuery
+        ? Math.max(
+          explorePlaceIdentitySearchText(place).includes(normalizedQuery) ? 140 : 0,
+          scoreExploreQuery(place, normalizedQuery),
+          scoreExploreRichText(place, normalizedQuery),
+        )
+        : 0;
+      return {
+        place,
+        distance,
+        queryScore,
+        quality: exploreContentQualityScore(place) + scoreExploreTrust(place),
+      };
+    })
+    .filter(item => (item.distance != null && item.distance <= 140) || item.queryScore > 0)
+    .sort((a, b) => {
+      const aNearby = a.distance != null && a.distance <= 140;
+      const bNearby = b.distance != null && b.distance <= 140;
+      if (aNearby !== bNearby) return aNearby ? -1 : 1;
+      if (aNearby && bNearby && a.distance !== b.distance) return Number(a.distance) - Number(b.distance);
+      if (b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
+      return b.quality - a.quality;
+    })
+    .slice(0, Math.max(1, limit))
+    .map((item, index) => ({
+      ...item.place,
+      matched_explore_query: normalizedQuery,
+      matched_explore_rank: index,
+    } as ExplorePlaceProfile));
+}
+
 function shouldUseExploreCampgroundEndpoint(place: ExplorePlaceProfile) {
   if (place.id.startsWith('explore:hub:')) return false;
   if (isLocalCuratedExplorePlace(place)) return false;
@@ -1819,20 +2053,28 @@ function GuideScreenContent() {
   const [weatherLoading, setWeatherLoading] = useState(false);
   const [tab, setTab] = useState<'explore' | 'narrations' | 'weather'>('explore');
   const [exploreMode, setExploreMode] = useState<'featured' | 'nearby' | 'trip'>('featured');
-  const [exploreSortMode] = useState<ExploreSortMode>('best');
+  const [exploreSortMode, setExploreSortMode] = useState<ExploreSortMode>('best');
   const [exploreCategory, setExploreCategory] = useState<ExploreCategoryKey>('all');
+  const [exploreFilterSheetOpen, setExploreFilterSheetOpen] = useState(false);
   const [guidedTourCategory, setGuidedTourCategory] = useState<GuidedTourCategory>('all');
   const [guidedTourSort, setGuidedTourSort] = useState<GuidedTourSort>('top_rated');
   const [guidedTourDate, setGuidedTourDate] = useState<GuidedTourDate>('any');
   const [guidedTourCustomDate, setGuidedTourCustomDate] = useState('');
   const [guidedTourFreeCancel, setGuidedTourFreeCancel] = useState(false);
   const [guidedTourEnglishOnly, setGuidedTourEnglishOnly] = useState(false);
+  const [guidedTourCategoryDraft, setGuidedTourCategoryDraft] = useState<GuidedTourCategory>('all');
+  const [guidedTourSortDraft, setGuidedTourSortDraft] = useState<GuidedTourSort>('top_rated');
+  const [guidedTourFreeCancelDraft, setGuidedTourFreeCancelDraft] = useState(false);
+  const [guidedTourEnglishOnlyDraft, setGuidedTourEnglishOnlyDraft] = useState(false);
   const [guidedDateSheetOpen, setGuidedDateSheetOpen] = useState(false);
   const [guidedFilterSheetOpen, setGuidedFilterSheetOpen] = useState(false);
   const [guidedCalendarMonth, setGuidedCalendarMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
   const [guidedTourDraft, setGuidedTourDraft] = useState('');
   const [guidedTourSearchQuery, setGuidedTourSearchQuery] = useState('');
+  const [guidedTourSelectedCenter, setGuidedTourSelectedCenter] = useState<GuidedSearchCenter | null>(null);
+  const [guidedTourSelectedDestinationKey, setGuidedTourSelectedDestinationKey] = useState<string | null>(null);
   const [guidedTourSearchRunId, setGuidedTourSearchRunId] = useState(0);
+  const [guidedDestinations, setGuidedDestinations] = useState<GuidedDestination[]>(GUIDED_DESTINATIONS);
   const [guidedFallbackExplorePlaces, setGuidedFallbackExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
   const [exploreSavedOnly, setExploreSavedOnly] = useState(false);
   const [exploreQuery, setExploreQuery] = useState('');
@@ -1857,16 +2099,24 @@ function GuideScreenContent() {
   const [exploreSearchExperienceLoading, setExploreSearchExperienceLoading] = useState(false);
   const [exploreSearchExperiencePending, setExploreSearchExperiencePending] = useState(false);
   const [exploreSearchExperienceError, setExploreSearchExperienceError] = useState('');
+  const [exploreSearchExperienceAttribution, setExploreSearchExperienceAttribution] = useState('');
   const [selectedExperience, setSelectedExperience] = useState<BookableExperience | null>(null);
   const [selectedExperienceLoading, setSelectedExperienceLoading] = useState(false);
   const [exploreHomeWeather, setExploreHomeWeather] = useState<any>(null);
   const [exploreHomeWeatherLoading, setExploreHomeWeatherLoading] = useState(false);
   const [exploreHomeWeatherError, setExploreHomeWeatherError] = useState('');
   const [liveExplorePlaces, setLiveExplorePlaces] = useState<OsmPoi[]>([]);
+  const [liveExploreError, setLiveExploreError] = useState('');
   const [exploreLoading, setExploreLoading] = useState(false);
   const [exploreSearchResolving, setExploreSearchResolving] = useState(false);
   const [liveExploreLoading, setLiveExploreLoading] = useState(false);
   const [exploreError, setExploreError] = useState('');
+  const [exploreCatalogNotice, setExploreCatalogNotice] = useState('');
+  const [exploreFacetCounts, setExploreFacetCounts] = useState<Partial<Record<ExploreCategoryKey, number>>>({});
+  const [exploreCatalogPages, setExploreCatalogPages] = useState<Record<string, ExploreCatalogPageState>>({});
+  const [exploreCatalogReloadId, setExploreCatalogReloadId] = useState(0);
+  const [exploreLocationRequestId, setExploreLocationRequestId] = useState(0);
+  const [exploreLocationState, setExploreLocationState] = useState<'idle' | 'requesting' | 'denied' | 'blocked' | 'error'>('idle');
   const [selectedExplore, setSelectedExplore] = useState<ExplorePlaceProfile | null>(null);
   const [selectedLivePlace, setSelectedLivePlace] = useState<OsmPoi | null>(null);
   const [paywallVisible, setPaywallVisible] = useState(false);
@@ -1875,13 +2125,46 @@ function GuideScreenContent() {
   const [autoPlay, setAutoPlay] = useState(false);
   const [highlightSentence, setHighlightSentence] = useState(-1);
   const locationSub = useRef<Location.LocationSubscription | null>(null);
-  const exploreLocationPrompted = useRef(false);
   const exploreSearchRefinementKeys = useRef<Set<string>>(new Set());
   const exploreEnrichmentKeys = useRef<Set<string>>(new Set());
   const exploreDetailPrefetchKeys = useRef<Set<string>>(new Set());
+  const explorePlacesRef = useRef<ExplorePlaceProfile[]>([]);
+  const exploreCatalogPagesRef = useRef<Record<string, ExploreCatalogPageState>>({});
   const storyScrollRef = useRef<ScrollView | null>(null);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
+  const activeExploreCatalogPageSpec = useMemo(() => {
+    if (tab !== 'explore' || exploreMode !== 'featured' || exploreSavedOnly) return null;
+    const query = exploreQuery.trim();
+    const category = exploreCategoryFetchParamFromQuery(query, exploreCategory);
+    if (category === 'guided' || category === 'tours') return null;
+    return exploreCatalogPageSpec(
+      query,
+      category,
+      exploreSortMode,
+      userLoc?.lat,
+      userLoc?.lng,
+    );
+  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, exploreSortMode, tab, userLoc?.lat, userLoc?.lng]);
+  const activeExploreCatalogPage = activeExploreCatalogPageSpec
+    ? exploreCatalogPages[activeExploreCatalogPageSpec.key]
+    : undefined;
+
+  const updateExploreCatalogPage = useCallback((
+    key: string,
+    next: ExploreCatalogPageState | ((current: ExploreCatalogPageState) => ExploreCatalogPageState),
+  ) => {
+    const current = exploreCatalogPagesRef.current[key] ?? { nextCursor: null, totalCount: 0, loading: false };
+    const value = typeof next === 'function' ? next(current) : next;
+    const updated = { ...exploreCatalogPagesRef.current, [key]: value };
+    exploreCatalogPagesRef.current = updated;
+    setExploreCatalogPages(updated);
+    return value;
+  }, []);
+
+  useEffect(() => {
+    explorePlacesRef.current = explorePlaces;
+  }, [explorePlaces]);
 
   useEffect(() => {
     if (mapboxToken) return;
@@ -1922,6 +2205,7 @@ function GuideScreenContent() {
   useEffect(() => {
     let cancelled = false;
     let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
+    const homePageSpec = exploreCatalogPageSpec('', '', 'best');
 
     const mergeById = (base: ExplorePlaceProfile[], next: ExplorePlaceProfile[]) => {
       const seen = new Set(base.map(place => place.id));
@@ -1950,44 +2234,86 @@ function GuideScreenContent() {
 
     const readCachedCatalog = async () => {
       const raw = await storage.get(EXPLORE_CACHE_KEY).catch(() => '');
-      if (!raw) return [] as ExplorePlaceProfile[];
+      if (!raw) return { places: [] as ExplorePlaceProfile[], nextCursor: null as number | null, totalCount: 0 };
       try {
         const cached = JSON.parse(raw);
-        return Array.isArray(cached?.places) ? cached.places as ExplorePlaceProfile[] : [];
+        const places = Array.isArray(cached?.places) ? cached.places as ExplorePlaceProfile[] : [];
+        const nextCursor = cached?.next_cursor != null && Number.isFinite(Number(cached.next_cursor))
+          ? Number(cached.next_cursor)
+          : null;
+        const totalCount = Number(cached?.total_count || places.length || 0);
+        return { places, nextCursor, totalCount };
       } catch {
-        return [] as ExplorePlaceProfile[];
+        return { places: [] as ExplorePlaceProfile[], nextCursor: null as number | null, totalCount: 0 };
       }
     };
 
     const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
-      let nextCursor = cursor;
+      if (cursor == null) return;
+      const currentPage = exploreCatalogPagesRef.current[homePageSpec.key];
+      if (currentPage?.loading || currentPage?.nextCursor !== cursor) return;
+      updateExploreCatalogPage(homePageSpec.key, current => ({ ...current, loading: true }));
+      let nextCursor: number | null = cursor;
       let allPlaces = seededPlaces;
-      for (let page = 0; nextCursor != null && page < 2; page += 1) {
-        const catalog = await api.getExploreCatalogIndex({ limit: 180, cursor: nextCursor });
-        const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
-        allPlaces = mergeById(allPlaces, pagePlaces);
-        nextCursor = catalog.next_cursor;
-        if (cancelled) return;
-        await new Promise(resolve => setTimeout(resolve, 220));
-      }
-      if (!cancelled && allPlaces.length > seededPlaces.length) {
-        storage.set(EXPLORE_CACHE_KEY, JSON.stringify({ places: allPlaces, fetched_at: Date.now() })).catch(() => {});
+      let totalCount = currentPage?.totalCount || seededPlaces.length;
+      try {
+        for (let page = 0; nextCursor != null && page < 2; page += 1) {
+          const requestedCursor: number = nextCursor;
+          const catalog = await api.getExploreCatalogIndex({ limit: 180, cursor: requestedCursor });
+          if (cancelled) return;
+          const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+          allPlaces = mergeById(allPlaces, pagePlaces);
+          setExplorePlaces(current => mergeById(current, pagePlaces));
+          totalCount = Number(catalog.total_count || catalog.count || totalCount || allPlaces.length);
+          nextCursor = catalog.next_cursor === requestedCursor ? null : catalog.next_cursor ?? null;
+          updateExploreCatalogPage(homePageSpec.key, {
+            nextCursor,
+            totalCount,
+            loading: nextCursor != null && page < 1,
+          });
+          if (nextCursor != null) await new Promise(resolve => setTimeout(resolve, 220));
+        }
+      } finally {
+        if (!cancelled) {
+          updateExploreCatalogPage(homePageSpec.key, current => ({ ...current, nextCursor, totalCount, loading: false }));
+          storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
+            places: allPlaces,
+            next_cursor: nextCursor,
+            total_count: totalCount,
+            fetched_at: Date.now(),
+          })).catch(() => {});
+        }
       }
     };
 
     // Compact home load: show a curated first page, keep source-rich data findable through search/filter.
     setExploreLoading(true);
     (async () => {
-      const applyFirstPage = (firstPage: Awaited<ReturnType<typeof api.getExploreCatalogIndex>>) => {
+      const applyFirstPage = (firstPage: Awaited<ReturnType<typeof api.getExploreHome>>) => {
         const firstPlaces = (firstPage.places ?? []).map(exploreIndexItemToProfile);
+        const remoteDestinations = guidedDestinationsFromApi(firstPage.guided_destinations ?? firstPage.guided?.destinations);
+        if (remoteDestinations.length) setGuidedDestinations(remoteDestinations);
         setExplorePlaces(current => current.length ? mergeById(current, firstPlaces) : firstPlaces);
+        setExploreFacetCounts(exploreFacetCountsFromCatalog(firstPage, firstPlaces));
+        const totalCount = Number(firstPage.total_count || firstPage.count || firstPlaces.length);
+        const nextCursor = firstPage.next_cursor ?? null;
+        updateExploreCatalogPage(homePageSpec.key, { nextCursor, totalCount, loading: false });
+        storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
+          places: firstPlaces,
+          next_cursor: nextCursor,
+          total_count: totalCount,
+          fetched_at: Date.now(),
+        })).catch(() => {});
         setExploreError('');
+        setExploreCatalogNotice('');
         setExploreLoading(false);
         backgroundTimer = setTimeout(() => {
-          hydrateRemainingCatalog(firstPage.next_cursor, firstPlaces).catch(() => {});
-        }, 5200);
+          hydrateRemainingCatalog(nextCursor, firstPlaces).catch(() => {
+            updateExploreCatalogPage(homePageSpec.key, current => ({ ...current, loading: false }));
+          });
+        }, 1200);
       };
-      const firstPageRequest = api.getExploreCatalogIndex({ limit: 120, cursor: 0 });
+      const firstPageRequest = api.getExploreHome({ mode: 'featured', sort: 'best', limit: 120 });
       try {
         const firstPage = await withExploreTimeout(firstPageRequest);
         if (cancelled) return;
@@ -1995,10 +2321,16 @@ function GuideScreenContent() {
       } catch {
         const cached = await readCachedCatalog();
         if (cancelled) return;
-        if (cached.length) {
-          const cachedPage = cached.slice(0, 160);
-          setExplorePlaces(current => current.length ? mergeById(current, cachedPage) : cachedPage);
+        if (cached.places.length) {
+          setExplorePlaces(current => current.length ? mergeById(current, cached.places) : cached.places);
+          setExploreFacetCounts(current => Object.keys(current).length ? current : exploreFacetCountsFromPlaces(cached.places));
+          updateExploreCatalogPage(homePageSpec.key, {
+            nextCursor: cached.nextCursor,
+            totalCount: cached.totalCount,
+            loading: false,
+          });
           setExploreError('');
+          setExploreCatalogNotice('Offline: showing saved Explore data.');
           setExploreLoading(false);
         } else {
           setExploreError('');
@@ -2010,7 +2342,8 @@ function GuideScreenContent() {
             return;
           } catch {
             if (cancelled) return;
-            setExploreError('Explore catalog could not load. Try again when connected.');
+            setExploreError('Places could not load. Try again when connected.');
+            setExploreCatalogNotice('');
             setExploreLoading(false);
           }
         }
@@ -2021,7 +2354,7 @@ function GuideScreenContent() {
       cancelled = true;
       if (backgroundTimer) clearTimeout(backgroundTimer);
     };
-  }, []);
+  }, [exploreCatalogReloadId, updateExploreCatalogPage]);
 
 
 
@@ -2038,11 +2371,21 @@ function GuideScreenContent() {
     }
 
     let cancelled = false;
+    const pageSpec = category === 'guided' || category === 'tours'
+      ? null
+      : exploreCatalogPageSpec(query, category, exploreSortMode, userLoc?.lat, userLoc?.lng);
+    if (pageSpec) {
+      updateExploreCatalogPage(pageSpec.key, { nextCursor: null, totalCount: 0, loading: true });
+    }
     setExploreSearchResolving(true);
     const timer = setTimeout(() => {
       withExploreTimeout(api.getExploreCatalogIndex({
         q: query.length >= 2 ? query : undefined,
         category: category || undefined,
+        mode: 'featured',
+        sort: exploreSortMode === 'source' ? 'ready' : exploreSortMode,
+        lat: exploreSortMode === 'nearest' ? userLoc?.lat : undefined,
+        lng: exploreSortMode === 'nearest' ? userLoc?.lng : undefined,
         limit: 420,
         cursor: 0,
       }), 12000)
@@ -2054,42 +2397,38 @@ function GuideScreenContent() {
             matched_explore_query: matchedQuery,
             matched_explore_rank: index,
           }));
-          if (!remotePlaces.length) return;
-          setExplorePlaces(current => {
-            const seen = new Set(current.map(place => place.id));
-            const merged = [...current];
-            for (const place of remotePlaces) {
-              if (!place?.id) continue;
-              if (seen.has(place.id)) {
-                const index = merged.findIndex(item => item.id === place.id);
-                if (index >= 0) {
-                  const previousRank = Number((merged[index] as any).matched_explore_rank);
-                  const nextRank = Number((place as any).matched_explore_rank);
-                  merged[index] = {
-                    ...merged[index],
-                    matched_explore_query: matchedQuery,
-                    matched_explore_rank: Number.isFinite(previousRank) ? Math.min(previousRank, nextRank) : nextRank,
-                  } as ExplorePlaceProfile;
-                }
-                continue;
-              }
-              seen.add(place.id);
-              merged.push(place);
-            }
-            return merged;
-          });
+          if (pageSpec) {
+            updateExploreCatalogPage(pageSpec.key, {
+              nextCursor: catalog.next_cursor ?? null,
+              totalCount: Number(catalog.total_count || catalog.count || remotePlaces.length),
+              loading: false,
+            });
+          }
+          setExploreFacetCounts(current => ({
+            ...current,
+            ...exploreFacetCountsFromCatalog(catalog, remotePlaces),
+          }));
+          if (remotePlaces.length) setExplorePlaces(current => mergeMatchedExplorePlaces(current, remotePlaces));
         })
-        .catch(() => {})
+        .catch(() => {
+          if (!cancelled && pageSpec) {
+            updateExploreCatalogPage(pageSpec.key, current => ({ ...current, loading: false }));
+          }
+        })
         .finally(() => {
-          if (!cancelled) setExploreSearchResolving(false);
+          if (!cancelled) {
+            setExploreSearchResolving(false);
+            if (pageSpec) updateExploreCatalogPage(pageSpec.key, current => ({ ...current, loading: false }));
+          }
         });
     }, 280);
 
     return () => {
       cancelled = true;
       clearTimeout(timer);
+      if (pageSpec) updateExploreCatalogPage(pageSpec.key, current => ({ ...current, loading: false }));
     };
-  }, [tab, exploreMode, exploreQuery, exploreCategory, exploreSavedOnly]);
+  }, [tab, exploreMode, exploreQuery, exploreCategory, exploreSavedOnly, exploreSortMode, updateExploreCatalogPage, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2106,65 +2445,77 @@ function GuideScreenContent() {
   useEffect(() => {
     if (exploreMode !== 'nearby' || !userLoc) {
       setLiveExplorePlaces([]);
+      setLiveExploreError('');
       return;
     }
     let cancelled = false;
     setLiveExploreLoading(true);
+    setLiveExploreError('');
     api.getNearbyPlaces(userLoc.lat, userLoc.lng, 35, 'food,grocery,fuel,lodging,attraction,hardware,mechanic,medical,camping')
       .then(places => {
         if (!cancelled) setLiveExplorePlaces(places.slice(0, 18));
       })
       .catch(() => {
-        if (!cancelled) setLiveExplorePlaces([]);
+        if (!cancelled) {
+          setLiveExplorePlaces([]);
+          setLiveExploreError('Nearby places could not refresh. Check your connection and try again.');
+        }
       })
       .finally(() => {
         if (!cancelled) setLiveExploreLoading(false);
       });
     return () => { cancelled = true; };
-  }, [exploreMode, userLoc?.lat, userLoc?.lng]);
+  }, [exploreMode, exploreLocationRequestId, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
-    if (tab !== 'explore' || userLoc || exploreLocationPrompted.current) return;
+    if (tab !== 'explore' || exploreMode !== 'nearby' || userLoc) return;
     let cancelled = false;
-    exploreLocationPrompted.current = true;
-    setExploreHomeWeatherLoading(true);
+    setExploreLocationState('requesting');
     setExploreHomeWeatherError('');
     (async () => {
       const existing = await Location.getForegroundPermissionsAsync().catch(() => null);
-      const alreadyPrompted = await storage.get(LOCATION_WARMUP_PROMPT_KEY).catch(() => null);
       if (cancelled) return;
-      if (existing?.status !== 'granted' && alreadyPrompted) {
-        setExploreHomeWeather(null);
-        setExploreHomeWeatherError('Turn on location to show nearby weather.');
-        setExploreHomeWeatherLoading(false);
-        return;
-      }
       const permission = existing?.status === 'granted'
         ? existing
         : await Location.requestForegroundPermissionsAsync().catch(() => null);
       if (cancelled) return;
       if (permission?.status !== 'granted') {
-        storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
         setExploreHomeWeather(null);
-        setExploreHomeWeatherError('Turn on location to show nearby weather.');
-        setExploreHomeWeatherLoading(false);
+        setExploreLocationState(permission?.status === 'denied' && permission.canAskAgain === false ? 'blocked' : permission ? 'denied' : 'error');
         return;
       }
       const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
       if (cancelled) return;
       if (fix?.coords) {
         setUserLoc({ lat: fix.coords.latitude, lng: fix.coords.longitude });
+        setExploreLocationState('idle');
       } else {
         setExploreHomeWeather(null);
-        setExploreHomeWeatherError('Turn on location to show nearby weather.');
-        setExploreHomeWeatherLoading(false);
+        setExploreLocationState('error');
       }
     })();
     return () => { cancelled = true; };
-  }, [tab, userLoc?.lat, userLoc?.lng, setUserLoc]);
+  }, [tab, exploreMode, exploreLocationRequestId, userLoc?.lat, userLoc?.lng, setUserLoc]);
+
+  async function openExploreLocationSettings() {
+    const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
+    if (permission?.status === 'granted') {
+      setExploreLocationState('requesting');
+      setExploreLocationRequestId(value => value + 1);
+      return;
+    }
+    if (Platform.OS === 'web') {
+      Alert.alert(
+        'Location is blocked',
+        "Allow location from this site's browser controls, then tap Use my location again.",
+      );
+      return;
+    }
+    Linking.openSettings().catch(() => {});
+  }
 
   useEffect(() => {
-    if (tab !== 'explore' || !userLoc) {
+    if (tab !== 'explore' || exploreMode !== 'nearby' || !userLoc) {
       setExploreHomeWeather(null);
       setExploreHomeWeatherError(userLoc ? '' : '');
       setExploreHomeWeatherLoading(false);
@@ -2369,6 +2720,7 @@ function GuideScreenContent() {
     if (!shouldLoad) {
       setExploreSearchExperiences([]);
       setExploreSearchExperienceError('');
+      setExploreSearchExperienceAttribution('');
       setExploreSearchExperienceLoading(false);
       setExploreSearchExperiencePending(false);
       return;
@@ -2385,7 +2737,9 @@ function GuideScreenContent() {
       const effectiveQuery = guidedCategoryActive ? (guidedTourSearchQuery || exploreQuery) : exploreQuery;
       const placeQuery = placeQueryFromExploreQuery(effectiveQuery);
       let center = userLoc ? { ...userLoc, name: 'this area' } : null;
-      const knownCenter = guidedCategoryActive ? guidedTourKnownDestinationCenter(placeQuery) : null;
+      const knownCenter = guidedCategoryActive
+        ? guidedTourSelectedCenter || guidedTourKnownDestinationCenter(placeQuery)
+        : null;
       if (knownCenter) center = knownCenter;
       if (!center && placeQuery.length < 2) {
         setExploreSearchExperiences([]);
@@ -2402,6 +2756,91 @@ function GuideScreenContent() {
         }
       }
       const tourOptions = guidedTourQueryOptions(guidedTourCategory, guidedTourSort, guidedTourDate, guidedTourCustomDate, guidedTourFreeCancel);
+      if (guidedCategoryActive && guidedTourSelectedDestinationKey) {
+        try {
+          const res = await withExploreTimeout(
+            api.getExploreGuidedDestination(guidedTourSelectedDestinationKey, effectiveQuery, 24, tourOptions),
+            50000,
+          );
+          if (cancelled) return;
+          const results = res.experiences ?? [];
+          const matchedQuery = normalizeExploreText(effectiveQuery);
+          const organicPlaces = (res.organic_places ?? []).map((item, index) => ({
+            ...exploreIndexItemToProfile(item),
+            matched_explore_query: matchedQuery,
+            matched_explore_rank: index,
+          }));
+          const providerStatus = String(res.provider_status?.status || '').toLowerCase();
+          const processing = providerStatus === 'processing' || providerStatus === 'queued';
+          const shouldRetryLive = results.length === 0 && processing && retryAttempt < maxLiveRetries;
+          setExploreSearchExperiences(results);
+          setGuidedFallbackExplorePlaces(organicPlaces);
+          if (organicPlaces.length) {
+            setExplorePlaces(current => mergeMatchedExplorePlaces(current, organicPlaces));
+            storage.set(
+              `${EXPLORE_GUIDED_FALLBACK_CACHE_PREFIX}${guidedTourSelectedDestinationKey}`,
+              JSON.stringify({ places: organicPlaces, fetched_at: Date.now() }),
+            ).catch(() => {});
+          }
+          setExploreSearchExperienceAttribution(String(res.source || 'Viator'));
+          setExploreSearchExperienceError(results.length ? '' : guidedDestinationSearchMessage(res, res.destination?.name || center?.name || 'this area'));
+          setExploreSearchExperiencePending(shouldRetryLive);
+          if (shouldRetryLive) retryTimer = setTimeout(() => loadTours(retryAttempt + 1), 6000);
+        } catch {
+          if (!cancelled) {
+            const fallbackCenter = center
+              ? { lat: Number(center.lat), lng: Number(center.lng), name: center.name }
+              : null;
+            const cachedFallback = guidedOrganicFallbackFromPlaces(
+              explorePlacesRef.current,
+              fallbackCenter,
+              placeQuery,
+            );
+            setExploreSearchExperiences([]);
+            setGuidedFallbackExplorePlaces(cachedFallback);
+            setExploreSearchExperienceAttribution('');
+            setExploreSearchExperienceError(cachedFallback.length
+              ? `Guided trips are unavailable near ${fallbackCenter?.name || placeQuery || 'this area'} right now. Nearby places are shown below.`
+              : 'Guided trips are not available right now.');
+            setExploreSearchExperiencePending(false);
+            storage.get(`${EXPLORE_GUIDED_FALLBACK_CACHE_PREFIX}${guidedTourSelectedDestinationKey}`)
+              .then(raw => {
+                if (cancelled || !raw) return;
+                try {
+                  const cached = JSON.parse(raw);
+                  const places = Array.isArray(cached?.places)
+                    ? cached.places.filter((place: ExplorePlaceProfile) => !!place?.id).slice(0, 6)
+                    : [];
+                  if (!places.length) return;
+                  setGuidedFallbackExplorePlaces(places);
+                  setExplorePlaces(current => mergeMatchedExplorePlaces(current, places));
+                  setExploreSearchExperienceError(
+                    `Guided trips are unavailable near ${fallbackCenter?.name || placeQuery || 'this area'} right now. Nearby places are shown below.`,
+                  );
+                } catch {}
+              })
+              .catch(() => {});
+            if (placeQuery.length >= 2) {
+              withExploreTimeout(api.getExploreCatalogIndex({ q: placeQuery, limit: 120, cursor: 0 }), 9000)
+                .then(catalog => {
+                  if (cancelled) return;
+                  const catalogPlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
+                  const organicPlaces = guidedOrganicFallbackFromPlaces(catalogPlaces, fallbackCenter, placeQuery);
+                  if (!organicPlaces.length) return;
+                  setGuidedFallbackExplorePlaces(organicPlaces);
+                  setExplorePlaces(current => mergeMatchedExplorePlaces(current, organicPlaces));
+                  setExploreSearchExperienceError(
+                    `Guided trips are unavailable near ${fallbackCenter?.name || placeQuery}. Nearby places are shown below.`,
+                  );
+                })
+                .catch(() => {});
+            }
+          }
+        } finally {
+          if (!cancelled) setExploreSearchExperienceLoading(false);
+        }
+        return;
+      }
       withExploreTimeout(api.getExploreExperiences(center?.lat, center?.lng, center ? 60 : 100, 'viator', 48, effectiveQuery, tourOptions), 30000)
         .then(res => {
           if (cancelled) return;
@@ -2409,6 +2848,7 @@ function GuideScreenContent() {
           const processing = String(res.live_status || '').toLowerCase() === 'processing';
           const shouldRetryLive = results.length === 0 && processing && retryAttempt < maxLiveRetries;
           setExploreSearchExperiences(results);
+          setExploreSearchExperienceAttribution(String(res.attribution || res.source || 'Viator'));
           setExploreSearchExperienceError(results.length ? '' : experienceSearchMessage(res, center?.name || 'this area'));
           setExploreSearchExperiencePending(shouldRetryLive);
           if (shouldRetryLive) {
@@ -2430,7 +2870,7 @@ function GuideScreenContent() {
       cancelled = true;
       if (retryTimer) clearTimeout(retryTimer);
     };
-  }, [tab, exploreCategory, exploreQuery, guidedTourCategory, guidedTourCustomDate, guidedTourDate, guidedTourFreeCancel, guidedTourSearchQuery, guidedTourSearchRunId, guidedTourSort, userLoc?.lat, userLoc?.lng]);
+  }, [tab, exploreCategory, exploreQuery, guidedTourCategory, guidedTourCustomDate, guidedTourDate, guidedTourFreeCancel, guidedTourSearchQuery, guidedTourSearchRunId, guidedTourSelectedCenter, guidedTourSelectedDestinationKey, guidedTourSort, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
     if (!activeTrip) {
@@ -2470,9 +2910,21 @@ function GuideScreenContent() {
     mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
   ), [explorePlaces, exploreTrailAreasById]);
   const exploreHubMeta = useMemo(() => buildExploreHubMeta(enrichedExplorePlaces), [enrichedExplorePlaces]);
-  const heroHeight = Math.max(480, Math.min(560, Math.round(windowHeight * 0.58)));
+  const availableExploreCategoryCounts = useMemo(() => {
+    const serverHasCategories = Object.entries(exploreFacetCounts).some(([key, count]) => key !== 'all' && Number(count) > 0);
+    const counts = serverHasCategories
+      ? { ...exploreFacetCounts }
+      : exploreFacetCountsFromPlaces(enrichedExplorePlaces);
+    counts.all = Number(exploreFacetCounts.all || enrichedExplorePlaces.length || 0);
+    counts.guided = guidedDestinations.length;
+    return counts;
+  }, [enrichedExplorePlaces, exploreFacetCounts, guidedDestinations.length]);
+  const heroHeight = Math.max(310, Math.min(370, Math.round(windowHeight * 0.4)));
   const hasExploreQuery = exploreQuery.trim().length > 0;
   const guidedCategoryActive = exploreCategory === 'guided' || exploreCategory === 'tours';
+  const showGuidedDestinations = guidedCategoryActive
+    && guidedTourSearchRunId <= 0
+    && !isExplicitTourOnlyQuery(exploreQuery);
   const guidedPanelQuery = guidedTourSearchQuery || guidedTourDraft || exploreQuery;
   const experienceDestinationLabel = placeQueryFromExploreQuery(guidedCategoryActive ? guidedPanelQuery : exploreQuery);
   const guidedVisibleExperiences = useMemo(() => (
@@ -2488,6 +2940,9 @@ function GuideScreenContent() {
     : exploreSearchExperienceLoading;
   const guidedFallbackDisplayPlaces = useMemo(() => {
     if (!guidedCategoryActive || guidedTourSearchRunId <= 0 || guidedVisibleExperiences.length > 0) return [];
+    if (guidedTourSelectedDestinationKey && guidedFallbackExplorePlaces.length) {
+      return guidedFallbackExplorePlaces.slice(0, 6);
+    }
     const query = normalizeExploreText(placeQueryFromExploreQuery(guidedTourSearchQuery || exploreQuery));
     if (query.length < 2) return [];
     const sourcePlaces = guidedFallbackExplorePlaces.length ? guidedFallbackExplorePlaces : enrichedExplorePlaces;
@@ -2510,13 +2965,13 @@ function GuideScreenContent() {
       })
       .map(item => item.place)
       .slice(0, 6);
-  }, [enrichedExplorePlaces, exploreQuery, guidedCategoryActive, guidedFallbackExplorePlaces, guidedTourSearchQuery, guidedTourSearchRunId, guidedVisibleExperiences.length]);
+  }, [enrichedExplorePlaces, exploreQuery, guidedCategoryActive, guidedFallbackExplorePlaces, guidedTourSearchQuery, guidedTourSearchRunId, guidedTourSelectedDestinationKey, guidedVisibleExperiences.length]);
   const hasGuidedFallbackPlaces = guidedCategoryActive
     && guidedTourSearchRunId > 0
     && guidedVisibleExperiences.length === 0
     && guidedFallbackDisplayPlaces.length > 0;
   const showGuidedFallbackPlaces = hasGuidedFallbackPlaces && !guidedExperienceSearchLoading;
-  const guidedExperienceRailError = hasGuidedFallbackPlaces ? '' : guidedResultsError;
+  const guidedExperienceRailError = guidedResultsError;
   const showExperienceSearch = shouldSearchBookableExperiences(exploreQuery, exploreCategory);
   const holdGuidedExploreResults = showExperienceSearch
     && guidedCategoryActive
@@ -2687,8 +3142,8 @@ function GuideScreenContent() {
         const categoryDiff = sortByCategoryAffinity(a, b);
         if (categoryDiff !== 0) return categoryDiff;
       }
+      if (b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
       if (b.trustScore !== a.trustScore) return b.trustScore - a.trustScore;
-      if (query && b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
       if (query && b.queryScore !== a.queryScore) return b.queryScore - a.queryScore;
       const categoryDiff = sortByCategoryAffinity(a, b);
       if (categoryDiff !== 0) return categoryDiff;
@@ -2710,6 +3165,11 @@ function GuideScreenContent() {
         if (query && b.contentScore !== a.contentScore) return b.contentScore - a.contentScore;
         const categoryDiff = sortByCategoryAffinity(a, b);
         if (categoryDiff !== 0) return categoryDiff;
+        const aServingPosition = Number(a.place.ranking?.position);
+        const bServingPosition = Number(b.place.ranking?.position);
+        if (Number.isFinite(aServingPosition) && Number.isFinite(bServingPosition) && aServingPosition !== bServingPosition) {
+          return aServingPosition - bServingPosition;
+        }
         const aHero = a.place.summary.hero_rank ?? a.place.summary.rank;
         const bHero = b.place.summary.hero_rank ?? b.place.summary.rank;
         if (aHero !== bHero) return aHero - bHero;
@@ -2803,6 +3263,7 @@ function GuideScreenContent() {
     const guidedCategoryActiveNow = exploreCategory === 'guided' || exploreCategory === 'tours';
     const query = (guidedTourSearchQuery || exploreQuery).trim();
     const destination = placeQueryFromExploreQuery(query);
+    if (guidedTourSelectedDestinationKey) return;
     if (
       tab !== 'explore'
       || exploreMode !== 'featured'
@@ -2837,7 +3298,7 @@ function GuideScreenContent() {
     return () => {
       cancelled = true;
     };
-  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, guidedTourSearchQuery, guidedTourSearchRunId, tab]);
+  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, guidedTourSearchQuery, guidedTourSearchRunId, guidedTourSelectedDestinationKey, tab]);
 
   const holdLegacySearchWrapper = exploreSearchResolving
     && exploreQueryHasBrowseIntent(exploreQuery)
@@ -2911,6 +3372,9 @@ function GuideScreenContent() {
     () => holdLegacySearchWrapper ? [] : rankedExplore.slice(0, exploreVisibleLimit),
     [holdLegacySearchWrapper, rankedExplore, exploreVisibleLimit],
   );
+  const canLoadMoreExploreCatalog = !!activeExploreCatalogPageSpec && activeExploreCatalogPage?.nextCursor != null;
+  const exploreCatalogPageLoading = !!activeExploreCatalogPage?.loading;
+  const exploreLocalRemaining = Math.max(0, rankedExplore.length - visibleRankedExplore.length);
   const detailHydrationWindow = useMemo(
     () => rankedExplore.slice(0, Math.min(rankedExplore.length, exploreVisibleLimit + EXPLORE_VISIBLE_STEP)),
     [exploreVisibleLimit, rankedExplore],
@@ -3073,6 +3537,13 @@ function GuideScreenContent() {
       })
       .filter(section => section.rows.length > 0);
   }, [exploreCategory, exploreHubMeta.categoryKeysByHubId, exploreMode, exploreSavedOnly, featuredReservedExploreIds, hasExploreQuery, rankedExplore]);
+  const featuredHomeMoreExplore = useMemo(() => {
+    if (!showExploreHome || exploreVisibleLimit <= EXPLORE_INITIAL_VISIBLE) return [];
+    const displayed = new Set(featuredReservedExploreIds);
+    featuredSections.forEach(section => section.rows.forEach(({ place }) => displayed.add(place.id)));
+    const limit = exploreVisibleLimit - EXPLORE_INITIAL_VISIBLE;
+    return rankedExplore.filter(({ place }) => !displayed.has(place.id)).slice(0, limit);
+  }, [exploreVisibleLimit, featuredReservedExploreIds, featuredSections, rankedExplore, showExploreHome]);
   const exploreHomeCountLabel = useMemo(() => {
     if (tourSearchPaused) return 'Free ideas';
     if (holdLegacySearchWrapper) return 'Searching';
@@ -3099,9 +3570,10 @@ function GuideScreenContent() {
     }
     const count = (featuredLead ? 1 : 0)
       + trendingExplore.length
-      + featuredSections.reduce((total, section) => total + section.rows.length, 0);
+      + featuredSections.reduce((total, section) => total + section.rows.length, 0)
+      + featuredHomeMoreExplore.length;
     return exploreCountLabel(count, 'featured pick', 'featured picks');
-  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredLead, featuredSections, guidedCategoryActive, guidedExperienceSearchLoading, guidedFallbackDisplayPlaces.length, guidedResultsError, guidedTourSearchRunId, guidedVisibleExperiences.length, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, showGuidedFallbackPlaces, tourSearchPaused, trendingExplore.length, exploreQuery]);
+  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredHomeMoreExplore.length, featuredLead, featuredSections, guidedCategoryActive, guidedExperienceSearchLoading, guidedFallbackDisplayPlaces.length, guidedResultsError, guidedTourSearchRunId, guidedVisibleExperiences.length, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, showGuidedFallbackPlaces, tourSearchPaused, trendingExplore.length, exploreQuery]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -3316,10 +3788,10 @@ function GuideScreenContent() {
         category: mapCategory,
         region: place.card?.region,
         summary: place.profile.summary || place.profile.hook || place.summary.short_description || place.summary.hook,
-        note: place.summary.short_description || place.summary.hook || 'Suggested explore stop near this area.',
+        note: place.summary.short_description || place.summary.hook || '',
         imageUrl: mediaUrl(place.summary.image_url || place.summary.thumbnail_url),
         photos,
-        sourceLabel: cleanExploreSourceLabel(place.source_quality?.primary_name || place.source_pack?.primary || place.attribution, 'Explore Area'),
+        sourceLabel: cleanExploreSourceLabel(place.source_quality?.primary_name || place.source_pack?.primary || place.attribution, ''),
         sourceUrl: place.summary.source_url || place.facts?.source_url,
         officialUrl: place.source_pack?.official_url || place.facts?.official_url,
         freshnessLabel: place.source_quality?.freshness_label || (place.facts?.last_updated ? `Updated ${new Date(Number(place.facts.last_updated) * 1000).toLocaleDateString()}` : ''),
@@ -3350,7 +3822,7 @@ function GuideScreenContent() {
         lat,
         lng,
         icon: item.kind === 'campground' ? 'camp' : 'pin',
-        note: item.description || item.kind || item.source_label || 'Explore detail',
+        note: item.description || item.kind || item.source_label || '',
         sourceLabel: item.source_label || item.source || selectedExplore?.source_pack?.primary,
         createdAt: Date.now(),
       },
@@ -3376,6 +3848,54 @@ function GuideScreenContent() {
 
   function isExploreSaved(place: ExplorePlaceProfile) {
     return savedExploreIds.includes(place.id);
+  }
+
+  function isExploreAddedToTrip(place: ExplorePlaceProfile) {
+    if (!activeTrip) return false;
+    const title = normalizeExploreText(place.summary.title);
+    const lat = Number(place.summary.lat);
+    const lng = Number(place.summary.lng);
+    return activeTrip.plan.waypoints.some(waypoint => {
+      if (normalizeExploreText(waypoint.name) === title) return true;
+      return Number.isFinite(lat)
+        && Number.isFinite(lng)
+        && Number.isFinite(Number(waypoint.lat))
+        && Number.isFinite(Number(waypoint.lng))
+        && Math.abs(Number(waypoint.lat) - lat) < 0.0001
+        && Math.abs(Number(waypoint.lng) - lng) < 0.0001;
+    });
+  }
+
+  function addExplorePlaceToTrip(place: ExplorePlaceProfile) {
+    if (!activeTrip || isExploreAddedToTrip(place)) return;
+    const lastDay = activeTrip.plan.waypoints.reduce((day, waypoint) => Math.max(day, Number(waypoint.day) || 1), 1);
+    const source = getExplorePrimarySourceLabel(place)
+      || place.source_quality?.primary_name
+      || place.source_pack?.primary
+      || place.summary.source_title
+      || '';
+    const access = typeof place.access === 'string' ? place.access : place.profile.access_notes;
+    const waypoint = {
+      day: lastDay,
+      name: place.summary.title,
+      type: 'waypoint',
+      description: getExploreCardSummary(place),
+      land_type: getExploreCategoryKey(place),
+      notes: [place.best_season, access].filter(Boolean).join(' · '),
+      lat: place.summary.lat ?? undefined,
+      lng: place.summary.lng ?? undefined,
+      verified_source: source,
+      needs_review: !(place.verified || place.provenance?.verified),
+      verification_note: place.source_pack?.official_url || place.summary.source_url || place.facts?.source_url || '',
+    };
+    setActiveTrip({
+      ...activeTrip,
+      plan: {
+        ...activeTrip.plan,
+        waypoints: [...activeTrip.plan.waypoints, waypoint],
+      },
+      updated_at: Date.now(),
+    });
   }
 
   function toggleSavedExplore(place: ExplorePlaceProfile) {
@@ -3448,7 +3968,7 @@ function GuideScreenContent() {
         lat: Number(experience.lat),
         lng: Number(experience.lng),
         icon: 'star',
-        note: experience.summary || 'Guided trip or local experience',
+        note: experience.summary || experience.description || '',
         createdAt: Date.now(),
       },
     });
@@ -3491,7 +4011,7 @@ function GuideScreenContent() {
       day: activeTrip.plan.waypoints[0]?.day ?? 1,
       name: experience.title,
       type: 'bookable_experience',
-      description: experience.summary || experience.description || 'Saved for trip planning.',
+      description: experience.summary || experience.description || '',
       land_type: 'external_booking',
       notes: [
         experience.duration_label,
@@ -3752,6 +4272,8 @@ function GuideScreenContent() {
     compact = false,
   ) {
     const { place, distance, day } = item;
+    const addedToTrip = isExploreAddedToTrip(place);
+    const canOpenMap = place.summary.lat != null && place.summary.lng != null;
     return (
       <ExplorePlaceCard
         key={place.id}
@@ -3765,12 +4287,18 @@ function GuideScreenContent() {
           campCount: exploreCampgroundsById[place.id]?.length,
         }}
         saved={isExploreSaved(place)}
-        canRoute={place.summary.lat != null && place.summary.lng != null}
-        routeLabel={userLoc ? 'Route' : 'Map'}
+        primaryLabel={activeTrip ? (addedToTrip ? 'Added to trip' : 'Add to trip') : userLoc ? 'Route' : 'View on map'}
+        primaryIcon={activeTrip ? (addedToTrip ? 'checkmark-circle' : 'add-circle-outline') : userLoc ? 'navigate' : 'map-outline'}
+        primaryDisabled={activeTrip ? addedToTrip : !canOpenMap}
+        rankReason={exploreRankReason(place, {
+          mode: exploreMode,
+          query: exploreQuery,
+          distance,
+          day,
+          sort: exploreSortMode,
+        })}
         onOpen={() => openExplorePlace(place, exploreTabForResultCardOpen(place))}
-        onArea={() => showExploreOnMap(place)}
-        onRoute={() => routeExplore(place)}
-        onNearby={() => openExplorePlace(place, 'nearby')}
+        onPrimary={() => activeTrip ? addExplorePlaceToTrip(place) : routeExplore(place)}
         onToggleSave={() => toggleSavedExplore(place)}
       />
     );
@@ -3899,11 +4427,157 @@ function GuideScreenContent() {
 
   function submitGuidedTourSearch() {
     const query = guidedTourDraft.trim();
+    const normalizedQuery = normalizeExploreText(query);
+    const destination = guidedDestinations.find(item => (
+      [item.name, item.searchQuery, ...item.terms]
+        .filter(Boolean)
+        .some(term => normalizedQuery === normalizeExploreText(String(term)))
+    ));
+    setGuidedTourSelectedDestinationKey(destination?.id ?? null);
+    setGuidedTourSelectedCenter(destination ? { lat: destination.lat, lng: destination.lng, name: destination.name } : null);
     setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
     setExploreCategory('guided');
     setGuidedTourSearchQuery(query);
     if (query) setExploreQuery(query);
+    setGuidedFallbackExplorePlaces([]);
+    setExploreSearchExperiences([]);
+    setExploreSearchExperienceError('');
     setGuidedTourSearchRunId(value => value + 1);
+  }
+
+  function selectGuidedDestination(destination: GuidedDestination) {
+    const query = destination.searchQuery || destination.name;
+    setExploreMode('featured');
+    setExploreSavedOnly(false);
+    setExploreCategory('guided');
+    setGuidedTourDraft(query);
+    setGuidedTourSearchQuery(query);
+    setExploreQuery(query);
+    setGuidedTourSelectedCenter({ lat: destination.lat, lng: destination.lng, name: destination.name });
+    setGuidedTourSelectedDestinationKey(destination.id);
+    setGuidedFallbackExplorePlaces([]);
+    setExploreSearchExperiences([]);
+    setExploreSearchExperienceError('');
+    setGuidedTourSearchRunId(value => value + 1);
+  }
+
+  function handleExploreModeChange(mode: 'featured' | 'nearby' | 'trip') {
+    setExploreSavedOnly(false);
+    setExploreMode(mode);
+    if (mode !== 'featured' && (exploreCategory === 'guided' || exploreCategory === 'tours')) {
+      setExploreCategory('all');
+      setExploreQuery('');
+      setGuidedTourSelectedCenter(null);
+      setGuidedTourSelectedDestinationKey(null);
+      setGuidedTourSearchRunId(0);
+    }
+  }
+
+  async function loadNextExploreCatalogPage() {
+    const spec = activeExploreCatalogPageSpec;
+    if (!spec) return false;
+    const pageState = exploreCatalogPagesRef.current[spec.key];
+    const cursor = pageState?.nextCursor;
+    if (cursor == null || pageState.loading) return false;
+    updateExploreCatalogPage(spec.key, current => ({ ...current, loading: true }));
+    try {
+      const catalog = await withExploreTimeout(api.getExploreCatalogIndex({
+        q: spec.q || undefined,
+        category: spec.category || undefined,
+        mode: 'featured',
+        sort: spec.sort,
+        lat: spec.lat,
+        lng: spec.lng,
+        limit: 180,
+        cursor,
+      }), 12000);
+      const matchedQuery = normalizeExploreText(spec.q);
+      const remotePlaces = (catalog.places ?? []).map((item, index) => ({
+        ...exploreIndexItemToProfile(item),
+        ...(matchedQuery ? {
+          matched_explore_query: matchedQuery,
+          matched_explore_rank: cursor + index,
+        } : {}),
+      } as ExplorePlaceProfile));
+      if (remotePlaces.length) {
+        const cachedPlaces = mergeMatchedExplorePlaces(explorePlacesRef.current, remotePlaces);
+        setExplorePlaces(current => mergeMatchedExplorePlaces(current, remotePlaces));
+        if (!spec.q && !spec.category && spec.sort === 'best') {
+          storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
+            places: cachedPlaces,
+            next_cursor: catalog.next_cursor ?? null,
+            total_count: Number(catalog.total_count || catalog.count || cachedPlaces.length),
+            fetched_at: Date.now(),
+          })).catch(() => {});
+        }
+      }
+      setExploreFacetCounts(current => ({
+        ...current,
+        ...exploreFacetCountsFromCatalog(catalog, remotePlaces),
+      }));
+      const nextCursor = catalog.next_cursor === cursor ? null : catalog.next_cursor ?? null;
+      updateExploreCatalogPage(spec.key, {
+        nextCursor,
+        totalCount: Number(catalog.total_count || catalog.count || pageState.totalCount || remotePlaces.length),
+        loading: false,
+      });
+      return remotePlaces.length > 0;
+    } catch {
+      updateExploreCatalogPage(spec.key, current => ({ ...current, loading: false }));
+      return false;
+    }
+  }
+
+  function showMoreExplorePlaces() {
+    const localRemaining = Math.max(0, rankedExplore.length - exploreVisibleLimit);
+    setExploreVisibleLimit(limit => limit + EXPLORE_VISIBLE_STEP);
+    if (localRemaining <= EXPLORE_VISIBLE_STEP && activeExploreCatalogPage?.nextCursor != null) {
+      loadNextExploreCatalogPage().catch(() => {});
+    }
+  }
+
+  function cycleExploreSort() {
+    setExploreSortMode(current => {
+      if (current === 'best') return 'source';
+      if (current === 'source') {
+        if (!userLoc) setExploreMode('nearby');
+        return 'nearest';
+      }
+      return 'best';
+    });
+  }
+
+  function changeGuidedTourDraft(value: string) {
+    setGuidedTourDraft(value);
+    setGuidedTourSelectedCenter(null);
+    setGuidedTourSelectedDestinationKey(null);
+    if (guidedTourSelectedDestinationKey) {
+      setGuidedTourSearchQuery('');
+      setExploreQuery('');
+      setGuidedTourSearchRunId(0);
+      setExploreSearchExperiences([]);
+      setGuidedFallbackExplorePlaces([]);
+    }
+  }
+
+  function openGuidedFilters() {
+    setGuidedTourCategoryDraft(guidedTourCategory);
+    setGuidedTourSortDraft(guidedTourSort);
+    setGuidedTourFreeCancelDraft(guidedTourFreeCancel);
+    setGuidedTourEnglishOnlyDraft(guidedTourEnglishOnly);
+    setGuidedFilterSheetOpen(true);
+  }
+
+  function closeGuidedFilters() {
+    setGuidedFilterSheetOpen(false);
+  }
+
+  function applyGuidedFilters() {
+    setGuidedTourCategory(guidedTourCategoryDraft);
+    setGuidedTourSort(guidedTourSortDraft);
+    setGuidedTourFreeCancel(guidedTourFreeCancelDraft);
+    setGuidedTourEnglishOnly(guidedTourEnglishOnlyDraft);
+    setGuidedFilterSheetOpen(false);
   }
 
   function renderGuidedTourControls() {
@@ -3948,7 +4622,7 @@ function GuideScreenContent() {
             <Text style={s.guidedFieldLabel}>Where</Text>
             <TextInput
               value={guidedTourDraft}
-              onChangeText={setGuidedTourDraft}
+              onChangeText={changeGuidedTourDraft}
               onSubmitEditing={submitGuidedTourSearch}
               returnKeyType="search"
               placeholder="Moab, Yosemite, Big Sur"
@@ -3961,7 +4635,7 @@ function GuideScreenContent() {
         </View>
 
         {renderSelector('Date', dateLabel, 'calendar-outline', () => setGuidedDateSheetOpen(true))}
-        {renderSelector('Filters', filterLabel, 'options-outline', () => setGuidedFilterSheetOpen(true))}
+        {renderSelector('Filters', filterLabel, 'options-outline', openGuidedFilters)}
 
         <TouchableOpacity
           style={[s.guidedSearchButton, { opacity: canSearch ? 1 : 0.55 }]}
@@ -4091,12 +4765,12 @@ function GuideScreenContent() {
       </TouchableOpacity>
     );
     return (
-      <Modal visible={guidedFilterSheetOpen} animationType="slide" transparent onRequestClose={() => setGuidedFilterSheetOpen(false)}>
+      <Modal visible={guidedFilterSheetOpen} animationType="slide" transparent onRequestClose={closeGuidedFilters}>
         <View style={s.sheetBackdrop}>
           <View style={[s.sheet, { paddingBottom: Math.max(16, insets.bottom + 12) }]}>
             <View style={s.sheetHeader}>
               <Text style={s.sheetTitle}>Filters</Text>
-              <TouchableOpacity style={s.sheetClose} onPress={() => setGuidedFilterSheetOpen(false)} accessibilityLabel="Close filters">
+              <TouchableOpacity style={s.sheetClose} onPress={closeGuidedFilters} accessibilityLabel="Close filters">
                 <Ionicons name="close" size={18} color={C.text} />
               </TouchableOpacity>
             </View>
@@ -4105,8 +4779,8 @@ function GuideScreenContent() {
               {GUIDED_CATEGORY_OPTIONS.map(item => renderRadio(
                 item.label,
                 item.icon,
-                guidedTourCategory === item.key,
-                () => setGuidedTourCategory(item.key),
+                guidedTourCategoryDraft === item.key,
+                () => setGuidedTourCategoryDraft(item.key),
               ))}
             </View>
             <Text style={s.sheetSectionTitle}>Sort</Text>
@@ -4114,16 +4788,16 @@ function GuideScreenContent() {
               {GUIDED_SORT_OPTIONS.map(item => renderRadio(
                 item.label,
                 item.icon,
-                guidedTourSort === item.key,
-                () => setGuidedTourSort(item.key),
+                guidedTourSortDraft === item.key,
+                () => setGuidedTourSortDraft(item.key),
               ))}
             </View>
             <Text style={s.sheetSectionTitle}>Details</Text>
             <View style={s.sheetRows}>
-              {renderToggle('Free cancellation', 'shield-checkmark-outline', guidedTourFreeCancel, () => setGuidedTourFreeCancel(value => !value))}
-              {renderToggle('English', 'language-outline', guidedTourEnglishOnly, () => setGuidedTourEnglishOnly(value => !value))}
+              {renderToggle('Free cancellation', 'shield-checkmark-outline', guidedTourFreeCancelDraft, () => setGuidedTourFreeCancelDraft(value => !value))}
+              {renderToggle('English', 'language-outline', guidedTourEnglishOnlyDraft, () => setGuidedTourEnglishOnlyDraft(value => !value))}
             </View>
-            <TouchableOpacity style={s.sheetApplyButton} onPress={() => setGuidedFilterSheetOpen(false)} activeOpacity={0.86}>
+            <TouchableOpacity style={s.sheetApplyButton} onPress={applyGuidedFilters} activeOpacity={0.86}>
               <Text style={s.sheetApplyText}>Apply filters</Text>
             </TouchableOpacity>
           </View>
@@ -4134,6 +4808,7 @@ function GuideScreenContent() {
 
 	  function selectExploreHomeCategory(key: ExploreCategoryKey) {
 	    setExploreSavedOnly(false);
+	    if (key !== 'guided' && key !== 'tours') setGuidedTourSelectedDestinationKey(null);
 	    if (exploreQuery.trim()) {
 	      setExploreQuery('');
 	    }
@@ -4142,6 +4817,13 @@ function GuideScreenContent() {
       setExploreMode('nearby');
       return;
     }
+	    if ((key === 'guided' || key === 'tours') && exploreCategory !== key) {
+	      setGuidedTourDraft('');
+	      setGuidedTourSearchQuery('');
+	      setGuidedTourSelectedCenter(null);
+	      setGuidedTourSelectedDestinationKey(null);
+	      setGuidedTourSearchRunId(0);
+	    }
     if (key === 'all') {
       setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
       setExploreCategory('all');
@@ -4173,6 +4855,8 @@ function GuideScreenContent() {
           mode={exploreMode}
           weather={heroWeather}
           hideSearch={guidedCategoryActive}
+	          hideCategories
+	          showWeather={exploreMode === 'nearby' && !!userLoc}
 	          onQueryChange={handleExploreQueryChange}
           onClearQuery={() => setExploreQuery('')}
           onCategorySelect={selectExploreHomeCategory}
@@ -4246,14 +4930,51 @@ function GuideScreenContent() {
 
         {tab === 'explore' && (
           <View style={s.exploreFeedSheet}>
+            <ExploreHomeControls
+              category={exploreCategory}
+              mode={exploreMode}
+              savedOnly={exploreSavedOnly}
+              hasQuery={hasExploreQuery}
+              shownCount={rankedExplore.length}
+              countLabel={exploreHomeCountLabel}
+              categoryCounts={availableExploreCategoryCounts}
+              sortMode={exploreSortMode}
+              guidedMode={guidedCategoryActive}
+              onModeChange={handleExploreModeChange}
+              onCategorySelect={selectExploreHomeCategory}
+              onOpenFilters={() => setExploreFilterSheetOpen(true)}
+              onClearCategory={() => {
+                setExploreCategory('all');
+                setGuidedTourSearchQuery('');
+                setGuidedTourSelectedCenter(null);
+                setGuidedTourSelectedDestinationKey(null);
+                setGuidedTourSearchRunId(0);
+              }}
+              onClearSaved={() => setExploreSavedOnly(false)}
+              onShowMore={!guidedCategoryActive && (visibleRankedExplore.length < rankedExplore.length || canLoadMoreExploreCatalog)
+                ? showMoreExplorePlaces
+                : undefined}
+              onSortCycle={cycleExploreSort}
+            />
+            {!!exploreCatalogNotice && (
+              <View style={s.catalogNotice}>
+                <Ionicons name="cloud-offline-outline" size={16} color={C.text3} />
+                <Text style={s.catalogNoticeText}>{exploreCatalogNotice}</Text>
+                <TouchableOpacity onPress={() => setExploreCatalogReloadId(value => value + 1)} hitSlop={8} accessibilityLabel="Retry Explore catalog">
+                  <Ionicons name="refresh" size={17} color={C.orange} />
+                </TouchableOpacity>
+              </View>
+            )}
             {(showExperienceSearch || tourSearchPaused) && (
               <>
                 {renderGuidedTourControls()}
+                {showGuidedDestinations ? <GuidedDestinationBrowser destinations={guidedDestinations} onSelect={selectGuidedDestination} /> : null}
                 <ExploreExperiencesRail
                   experiences={guidedVisibleExperiences}
                   loading={tourSearchPaused ? false : guidedExperienceSearchLoading}
                   error={tourSearchPaused ? 'Guided trips are not available right now.' : guidedExperienceRailError}
                   title="Available trips"
+                  attribution={exploreSearchExperienceAttribution || 'Viator'}
                   variant="list"
                   emptySubtitle={
                     tourSearchPaused
@@ -4272,6 +4993,7 @@ function GuideScreenContent() {
                   onShowArea={showExperienceOnMap}
                   initialVisible={12}
                   showMoreStep={12}
+                  onRetry={() => setGuidedTourSearchRunId(value => value + 1)}
                 />
               </>
             )}
@@ -4283,12 +5005,43 @@ function GuideScreenContent() {
                   {liveExploreLoading && <ActivityIndicator color={C.orange} size="small" />}
                 </View>
                 {exploreNearbyNeedsLocation ? (
-                  <Text style={s.livePlacesEmpty}>Turn on location to see nearby services and places.</Text>
+                  <View style={s.nearbyPermissionState}>
+                    {exploreLocationState === 'requesting' ? <ActivityIndicator color={C.orange} size="small" /> : <Ionicons name="location-outline" size={22} color={C.text3} />}
+                    <Text style={s.livePlacesEmpty}>
+                      {exploreLocationState === 'requesting'
+                        ? 'Getting your location...'
+                        : exploreLocationState === 'blocked'
+                          ? `Location is blocked. Allow it in ${Platform.OS === 'web' ? 'your browser' : 'Settings'} to rank nearby places.`
+                          : exploreLocationState === 'denied'
+                          ? 'Location access is off. Enable it to rank nearby places.'
+                          : 'Use your location to rank nearby services and trail stops.'}
+                    </Text>
+                    {exploreLocationState !== 'requesting' ? (
+                      <TouchableOpacity
+                        style={s.stateAction}
+                        onPress={exploreLocationState === 'blocked' ? openExploreLocationSettings : () => setExploreLocationRequestId(value => value + 1)}
+                        activeOpacity={0.84}
+                      >
+                        <Ionicons name={exploreLocationState === 'blocked' ? 'settings-outline' : 'locate-outline'} size={15} color="#fff" />
+                        <Text style={s.stateActionText}>
+                          {exploreLocationState === 'blocked' ? (Platform.OS === 'web' ? 'How to enable' : 'Open settings') : 'Use my location'}
+                        </Text>
+                      </TouchableOpacity>
+                    ) : null}
+                  </View>
                 ) : liveExploreLoading && liveExplorePlaces.length === 0 ? (
                   <>
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
                   </>
+                ) : liveExploreError ? (
+                  <View style={s.nearbyPermissionState}>
+                    <Text style={s.livePlacesEmpty}>{liveExploreError}</Text>
+                    <TouchableOpacity style={s.stateAction} onPress={() => setExploreLocationRequestId(value => value + 1)} activeOpacity={0.84}>
+                      <Ionicons name="refresh" size={15} color="#fff" />
+                      <Text style={s.stateActionText}>Try again</Text>
+                    </TouchableOpacity>
+                  </View>
                 ) : null}
                 {liveExplorePlaces.map(place => (
                   <TouchableOpacity key={place.id} style={s.livePlaceRow} activeOpacity={0.86} onPress={() => setSelectedLivePlace(place)}>
@@ -4311,7 +5064,7 @@ function GuideScreenContent() {
             </View>
             )}
 
-            <View style={s.exploreHomeHeading}>
+            {(!showExperienceSearch || showGuidedFallbackPlaces) && !showGuidedDestinations && <View style={s.exploreHomeHeading}>
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.exploreHomeTitle}>
                   {exploreMode === 'nearby'
@@ -4334,7 +5087,7 @@ function GuideScreenContent() {
                 </Text>
                 <Text style={s.exploreHomeCount}>{exploreHomeCountLabel}</Text>
               </View>
-            </View>
+            </View>}
 
             {(exploreLoading || exploreSearchResolving) && !tourSearchPaused && !exploreNearbyNeedsLocation && (rankedExplore.length === 0 || holdLegacySearchWrapper) && featuredSections.length === 0 && !featuredLead && (
               <View style={s.exploreLoadingBlock}>
@@ -4355,7 +5108,12 @@ function GuideScreenContent() {
             {!!exploreError && !exploreLoading && !exploreSearchResolving && rankedExplore.length === 0 && featuredSections.length === 0 && !featuredLead && (
               <View style={s.emptyState}>
                 <Ionicons name="cloud-offline-outline" size={44} color={C.text3} />
+                <Text style={s.emptyTitle}>Explore is offline</Text>
                 <Text style={s.emptySub}>{exploreError}</Text>
+                <TouchableOpacity style={s.stateAction} onPress={() => setExploreCatalogReloadId(value => value + 1)} activeOpacity={0.84}>
+                  <Ionicons name="refresh" size={15} color="#fff" />
+                  <Text style={s.stateActionText}>Try again</Text>
+                </TouchableOpacity>
               </View>
             )}
             {showGuidedFallbackPlaces ? (
@@ -4402,6 +5160,31 @@ function GuideScreenContent() {
                   </TouchableOpacity>
                 </View>
                 ))}
+                {featuredHomeMoreExplore.length > 0 ? (
+                  <View style={s.explorePreviewSection}>
+                    <View style={s.exploreSectionHeader}>
+                      <Text style={s.exploreSectionTitle}>More places</Text>
+                    </View>
+                    {featuredHomeMoreExplore.map((item, idx) => renderExploreCard(item, idx))}
+                  </View>
+                ) : null}
+                {(exploreLocalRemaining > 0 || canLoadMoreExploreCatalog || exploreCatalogPageLoading) ? (
+                  <TouchableOpacity
+                    style={s.exploreLoadMoreBtn}
+                    onPress={showMoreExplorePlaces}
+                    disabled={exploreCatalogPageLoading && exploreLocalRemaining <= 0}
+                    activeOpacity={0.84}
+                  >
+                    {exploreCatalogPageLoading && exploreLocalRemaining <= 0 ? <ActivityIndicator color={C.orange} size="small" /> : null}
+                    <Text style={s.exploreLoadMoreText}>
+                      {exploreLocalRemaining > 0
+                        ? `Show ${Math.min(EXPLORE_VISIBLE_STEP, exploreLocalRemaining)} more`
+                        : exploreCatalogPageLoading
+                          ? 'Finding more places'
+                          : 'Show more places'}
+                    </Text>
+                  </TouchableOpacity>
+                ) : null}
               </>
             ) : !tourSearchPaused && !showExperienceSearch && ((!exploreLoading && !exploreSearchResolving) || exploreNearbyNeedsLocation) && rankedExplore.length === 0 ? (
               <View style={s.emptyState}>
@@ -4432,17 +5215,47 @@ function GuideScreenContent() {
                             ? 'Enter a destination or route to find groceries, repair, water, and services.'
                             : 'Try a town, park, trail, waterfall, or hot spring nearby.'}
                 </Text>
+                {exploreTripNeedsRoute ? (
+                  <TouchableOpacity
+                    style={s.stateAction}
+                    onPress={() => router.push('/(tabs)/route-builder')}
+                    activeOpacity={0.84}
+                  >
+                    <Ionicons name="map-outline" size={15} color="#fff" />
+                    <Text style={s.stateActionText}>Open route builder</Text>
+                  </TouchableOpacity>
+                ) : !exploreSavedOnly && !exploreNearbyNeedsLocation ? (
+                  <TouchableOpacity
+                    style={s.stateAction}
+                    onPress={() => {
+                      setExploreQuery('');
+                      setExploreCategory('all');
+                      setExploreSortMode('best');
+                    }}
+                    activeOpacity={0.84}
+                  >
+                    <Ionicons name="refresh" size={15} color="#fff" />
+                    <Text style={s.stateActionText}>Reset search</Text>
+                  </TouchableOpacity>
+                ) : null}
               </View>
             ) : (
               <>
                 {visibleRankedExplore.map((item, idx) => renderExploreCard(item, idx))}
-                {!holdLegacySearchWrapper && visibleRankedExplore.length < rankedExplore.length && (
+                {!holdLegacySearchWrapper && (exploreLocalRemaining > 0 || canLoadMoreExploreCatalog || exploreCatalogPageLoading) && (
                   <TouchableOpacity
                     style={s.exploreLoadMoreBtn}
-                    onPress={() => setExploreVisibleLimit(limit => limit + EXPLORE_VISIBLE_STEP)}
+                    onPress={showMoreExplorePlaces}
+                    disabled={exploreCatalogPageLoading && exploreLocalRemaining <= 0}
+                    activeOpacity={0.84}
                   >
+                    {exploreCatalogPageLoading && exploreLocalRemaining <= 0 ? <ActivityIndicator color={C.orange} size="small" /> : null}
                     <Text style={s.exploreLoadMoreText}>
-                      Show {Math.min(EXPLORE_VISIBLE_STEP, rankedExplore.length - visibleRankedExplore.length)} more
+                      {exploreLocalRemaining > 0
+                        ? `Show ${Math.min(EXPLORE_VISIBLE_STEP, exploreLocalRemaining)} more`
+                        : exploreCatalogPageLoading
+                          ? 'Finding more places'
+                          : 'Show more places'}
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -4618,6 +5431,13 @@ function GuideScreenContent() {
 
       {renderGuidedDateSheet()}
       {renderGuidedFilterSheet()}
+      <ExploreCategoryFilterSheet
+        visible={exploreFilterSheetOpen}
+        selected={exploreCategory}
+        counts={availableExploreCategoryCounts}
+        onSelect={selectExploreHomeCategory}
+        onClose={() => setExploreFilterSheetOpen(false)}
+      />
 
       <PaywallModal
         visible={paywallVisible}
@@ -4907,6 +5727,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   exploreHomeTitle: { color: C.text, fontSize: 23, lineHeight: 28, fontWeight: '900', letterSpacing: 0 },
   exploreHomeCount: { color: C.text3, fontSize: 12, lineHeight: 16, fontWeight: '800', marginTop: 3 },
+  catalogNotice: { minHeight: 42, marginHorizontal: 20, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  catalogNoticeText: { flex: 1, minWidth: 0, color: C.text2, fontSize: 12, lineHeight: 17, fontWeight: '700' },
   guidedSearchPanel: {
     marginHorizontal: 20,
     marginBottom: 0,
@@ -5213,6 +6035,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   livePlacesTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 2 },
   livePlacesTitle: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8 },
   livePlacesEmpty: { color: C.text3, fontSize: 12, lineHeight: 18, paddingHorizontal: 2, paddingBottom: 2 },
+  nearbyPermissionState: { minHeight: 96, alignItems: 'center', justifyContent: 'center', gap: 10, padding: 12 },
   livePlaceSkeleton: { minHeight: 64, padding: 8 },
   livePlaceRow: { flexDirection: 'row', alignItems: 'center', gap: 10, borderWidth: 1, borderColor: C.border, backgroundColor: C.glass, borderRadius: 13, padding: 8 },
   livePlacePhoto: { width: 46, height: 46, borderRadius: 11, backgroundColor: C.s2 },
@@ -5295,6 +6118,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   emptyState: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12, paddingTop: 80 },
   emptyTitle: { color: C.text, fontSize: 17, fontWeight: '700' },
   emptySub: { color: C.text3, fontSize: 13, textAlign: 'center', maxWidth: 280, lineHeight: 20 },
+  stateAction: { minHeight: 42, borderRadius: 10, paddingHorizontal: 14, backgroundColor: C.orange, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  stateActionText: { color: '#fff', fontSize: 12, fontWeight: '900' },
   modal: { flex: 1, backgroundColor: C.bg },
   profileScroll: { paddingBottom: 34 },
   profileHero: { height: 310, backgroundColor: C.s1 },

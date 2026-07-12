@@ -26,15 +26,15 @@ type Benefit = {
 };
 
 const BENEFITS: Benefit[] = [
-  { icon: 'trail-sign-outline', title: 'Unlimited trip planner', text: 'Build routes, days, stops, and packing lists without limits.' },
+  { icon: 'trail-sign-outline', title: 'Trip planning tools', text: 'Build routes, compare stops, and keep trip details together.' },
   { icon: 'chatbubble-ellipses-outline', title: 'Co-Pilot on the map', text: 'Ask for camps, route changes, and nearby stops while you move.' },
   { icon: 'bonfire-outline', title: 'Camp Briefs', text: 'Open deeper stay context before you commit to a night.' },
-  { icon: 'pricetag-outline', title: 'Featured tour discounts', text: 'Exclusive deals on selected guided trips.' },
-  { icon: 'car-sport-outline', title: 'Hands-free CarPlay', text: 'Voice Co-Pilot for drive-time scouting.' },
+  { icon: 'shield-checkmark-outline', title: 'Trip briefs', text: 'Review route conditions, camp context, and packing needs.' },
 ];
 
 function contextLine(code?: string) {
   if (code === 'search_limit') return 'Keep searches, camp research, and route planning moving.';
+  if (code === 'explorer_required') return 'Co-Pilot is included with Trailhead Explorer.';
   if (String(code || '').includes('camp')) return 'Open Camp Briefs and deeper stay context.';
   if (String(code || '').includes('category')) return 'Unlock more Explorer results and route-ready details.';
   return 'Upgrade when you want more planning, camp research, and voice help.';
@@ -56,7 +56,7 @@ export default function PaywallModal({ visible, code, message, onClose }: Props)
   const title = isSearchLimit ? 'Keep exploring' : 'Plan better trips';
   const subtitle = isSearchLimit
     ? 'Keep searches, Camp Briefs, and route planning moving.'
-    : 'Unlimited planning, Camp Briefs, Co-Pilot, packing lists, tour deals, and hands-free voice.';
+    : 'Trip planning, Camp Briefs, Co-Pilot, packing lists, and route briefs.';
 
   async function handlePurchase(productId: string) {
     const started = await purchase(productId);

@@ -1,6 +1,7 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -286,6 +287,11 @@ EXPLORE_OFFICIAL_FEATURED = Path(__file__).parent / "explore_official_featured_v
 EXPLORE_GLOBAL_SEED = Path(__file__).resolve().parents[1] / "scripts" / "explore_global_seed_v1.json"
 EXPLORE_BOOKABLE_EXPERIENCES = Path(__file__).parent / "explore_bookable_experiences_v1.json"
 EXPLORE_TOURS_VIATOR = Path(__file__).parent / "explore_tours_viator_v1.json"
+EXPLORE_GUIDED_DESTINATIONS = Path(__file__).parent / "explore_guided_destinations_v1.json"
+EXPLORE_SERVING_INDEX = Path(
+    os.getenv("TRAILHEAD_EXPLORE_SERVING_INDEX")
+    or (Path(__file__).parent / "explore_serving_index_v2.json")
+)
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
 OFFICIAL_DATA_DB = Path(__file__).resolve().parents[1] / "data" / "processed" / "trailhead_official_data.sqlite"
 CANONICAL_SERVING_DIR = Path(os.getenv("TRAILHEAD_CANONICAL_SERVING_DIR") or (Path(__file__).resolve().parents[1] / "data" / "processed" / "canonical_serving"))
@@ -1325,7 +1331,9 @@ _EXPLORE_CATALOG_CACHE: dict[str, Any] = {
     "loaded_at": 0.0,
     "catalog": None,
 }
-EXPLORE_RUNTIME_CACHE_VERSION = 3
+_EXPLORE_LEGACY_SEARCH_CACHE: dict[str, object] = {"key": None, "places": []}
+_EXPLORE_GLOBAL_SEED_RAW_CACHE: dict[str, object] = {"mtime": 0, "groups": []}
+EXPLORE_RUNTIME_CACHE_VERSION = 6
 EXPLORE_RUNTIME_CACHE_PATH = Path(
     os.getenv("TRAILHEAD_EXPLORE_RUNTIME_CACHE")
     or (Path(__file__).resolve().parents[1] / "data" / "processed" / "explore_catalog_runtime_cache.json")
@@ -1334,6 +1342,107 @@ EXPLORE_RUNTIME_CACHE_PATH = Path(
 
 def _explore_runtime_cache_enabled() -> bool:
     return str(os.getenv("TRAILHEAD_EXPLORE_RUNTIME_CACHE_ENABLED", "1")).strip().lower() not in {"0", "false", "no", "off"}
+
+
+def _explore_legacy_search_cache_key() -> tuple[object, ...]:
+    parts: list[object] = []
+    for path in (EXPLORE_CATALOG, EXPLORE_CATALOG_V3):
+        try:
+            stat = path.stat()
+            parts.append((str(path), stat.st_mtime_ns, stat.st_size))
+        except Exception:
+            parts.append((str(path), 0, 0))
+    return tuple(parts)
+
+
+def _set_explore_legacy_search_profiles(places: list[dict]) -> None:
+    _EXPLORE_LEGACY_SEARCH_CACHE.update({
+        "key": _explore_legacy_search_cache_key(),
+        "places": places,
+    })
+
+
+def _load_explore_legacy_search_profiles() -> list[dict]:
+    cache_key = _explore_legacy_search_cache_key()
+    if _EXPLORE_LEGACY_SEARCH_CACHE.get("key") == cache_key:
+        return list(_EXPLORE_LEGACY_SEARCH_CACHE.get("places") or [])
+    try:
+        payload = json.loads(EXPLORE_CATALOG.read_text())
+        places = [place for place in payload.get("places") or [] if isinstance(place, dict)]
+    except Exception:
+        places = []
+    places = _merge_explore_profile_lists(places, _load_explore_catalog_v3_profiles())
+    places = _merge_explore_profile_lists(places, _server_curated_explore_profiles())
+    places = _apply_explore_legacy_wrapper_metadata(places)
+    _set_explore_legacy_search_profiles(places)
+    return list(places)
+
+
+def _load_explore_global_seed_groups() -> list[dict]:
+    try:
+        mtime = EXPLORE_GLOBAL_SEED.stat().st_mtime_ns
+    except Exception:
+        return []
+    if _EXPLORE_GLOBAL_SEED_RAW_CACHE.get("mtime") == mtime:
+        return list(_EXPLORE_GLOBAL_SEED_RAW_CACHE.get("groups") or [])
+    try:
+        payload = json.loads(EXPLORE_GLOBAL_SEED.read_text())
+        groups = [group for group in payload.get("groups") or [] if isinstance(group, dict)]
+    except Exception:
+        groups = []
+    _EXPLORE_GLOBAL_SEED_RAW_CACHE.update({"mtime": mtime, "groups": groups})
+    return list(groups)
+
+
+def _explore_global_seed_search_profiles(q: str, category: str = "", limit: int = 80) -> list[dict]:
+    query_terms = _explore_relaxed_destination_terms(q, category) or _explore_query_terms_for_category(q, category)
+    if not query_terms:
+        return []
+    candidates: list[tuple[float, int, str, dict]] = []
+    rank = 880000
+    for group in _load_explore_global_seed_groups():
+        group_key = str(group.get("key") or "").strip()
+        for entry in group.get("entries") or []:
+            rank += 1
+            if not isinstance(entry, dict):
+                continue
+            region = str(entry.get("state") or entry.get("region") or "")
+            hay = " ".join(str(value or "") for value in [
+                entry.get("title"),
+                entry.get("base_title"),
+                region,
+                *(entry.get("tags") or []),
+                entry.get("source_note"),
+            ]).lower()
+            if "switzerland" in region.lower():
+                hay += " swiss swiss alps"
+            if "norway" in region.lower():
+                hay += " norway norwegian scenic"
+            if "italy" in region.lower():
+                hay += " italy italian alps"
+            if "dolomites" in str(entry.get("title") or "").lower() or "dolomites" in region.lower():
+                hay += " dolomites"
+            if not _explore_terms_match_tokens(query_terms, _explore_query_tokens(hay)):
+                continue
+            title_tokens = _explore_query_tokens(str(entry.get("title") or ""))
+            all_in_title = _explore_terms_match_tokens(query_terms, title_tokens)
+            group_bonus = 0.0
+            normalized_category = _normalize_place_category(category)
+            if normalized_category in {"trail", "trails", "trailhead"} and group_key == "trails":
+                group_bonus = -8.0
+            elif normalized_category in {"viewpoint", "scenic"} and group_key in {"parks", "water_scenic"}:
+                group_bonus = -8.0
+            score = (0.0 if all_in_title else 20.0) + group_bonus
+            candidates.append((score, rank, str(entry.get("title") or ""), {"entry": entry, "group_key": group_key}))
+    candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+    profiles: list[dict] = []
+    for _score, rank, _title, candidate in candidates:
+        profile = _global_seed_entry_to_profile(candidate["entry"], candidate["group_key"], rank)
+        if profile:
+            profiles.append(profile)
+        if len(profiles) >= max(1, min(int(limit or 80), 160)):
+            return profiles
+    return profiles
 
 
 def _explore_runtime_cache_can_write(catalog: dict) -> bool:
@@ -1353,7 +1462,7 @@ def _explore_runtime_cache_can_write(catalog: dict) -> bool:
 
 def _explore_catalog_cache_key() -> tuple[object, ...]:
     parts: list[object] = []
-    for path in (EXPLORE_CATALOG, EXPLORE_CATALOG_V3, EXPLORE_OFFICIAL_FEATURED, EXPLORE_GLOBAL_SEED, CANONICAL_EXPLORE_INDEX_PATH):
+    for path in (EXPLORE_CATALOG, EXPLORE_CATALOG_V3, EXPLORE_OFFICIAL_FEATURED, EXPLORE_GLOBAL_SEED, CANONICAL_EXPLORE_INDEX_PATH, EXPLORE_SERVING_INDEX):
         try:
             stat = path.stat()
             parts.append((str(path), stat.st_mtime_ns, stat.st_size))
@@ -1462,6 +1571,8 @@ def _explore_public_source_label(value: object) -> str:
         return "Bureau of Land Management"
     if lower in {"fws"}:
         return "US Fish and Wildlife Service"
+    if lower in {"osm", "openstreetmap"}:
+        return "OpenStreetMap"
     text = re.sub(r"\bRIDB\b", "Recreation.gov", text, flags=re.I)
     text = re.sub(r"\bNPS\b", "National Park Service", text, flags=re.I)
     text = re.sub(r"\bUSFS\b", "US Forest Service", text, flags=re.I)
@@ -3281,6 +3392,248 @@ def _server_curated_explore_profiles() -> list[dict]:
     ]
 
 
+_EXPLORE_PROMOTED_INDEX_CACHE: dict[str, object] = {"mtime": 0, "payload": None}
+
+
+def _load_explore_promoted_index() -> dict | None:
+    if str(os.getenv("TRAILHEAD_EXPLORE_PROMOTED_INDEX_ENABLED", "1")).strip().lower() in {"0", "false", "no", "off"}:
+        return None
+    try:
+        stat = EXPLORE_SERVING_INDEX.stat()
+    except Exception:
+        return None
+    if _EXPLORE_PROMOTED_INDEX_CACHE.get("mtime") == stat.st_mtime_ns:
+        cached = _EXPLORE_PROMOTED_INDEX_CACHE.get("payload")
+        return cached if isinstance(cached, dict) else None
+    try:
+        payload = json.loads(EXPLORE_SERVING_INDEX.read_text())
+    except Exception:
+        return None
+    items = payload.get("items") if isinstance(payload, dict) else None
+    if not isinstance(items, list) or not items:
+        return None
+    reviewable = [item for item in items if isinstance(item, dict) and item.get("reviewable") is not False]
+    if len(reviewable) < 4000:
+        return None
+    clean_payload = {**payload, "items": reviewable, "count": len(reviewable)}
+    _EXPLORE_PROMOTED_INDEX_CACHE.update({"mtime": stat.st_mtime_ns, "payload": clean_payload})
+    return clean_payload
+
+
+def _promoted_explore_source_label(item: dict) -> str:
+    provenance = item.get("provenance") if isinstance(item.get("provenance"), dict) else {}
+    primary = provenance.get("primary") if isinstance(provenance.get("primary"), dict) else {}
+    return (
+        _explore_public_source_label(primary.get("attribution") or primary.get("source"))
+        or _explore_public_source_label(item.get("source_label"))
+        or "Trailhead"
+    )
+
+
+def _promoted_explore_item_to_profile(item: dict, index: int, existing: dict | None = None) -> dict | None:
+    title = _explore_clean_display_title(item.get("title") or "")
+    if not title:
+        return None
+    category = _canonical_explore_category(item)
+    category_label = _official_cache_category_label(category)
+    group = _normalize_place_category(item.get("group") or category)
+    description = _explore_clean_public_copy(item.get("description"), 700)
+    if not description:
+        description = _official_cache_description_fallback(title, category_label, "")
+    image_url = _safe_explore_image_url(item.get("image_url"))
+    try:
+        lat = float(item.get("lat"))
+        lng = float(item.get("lng"))
+    except Exception:
+        return None
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    place_id = str(item.get("id") or "").strip()
+    if not place_id:
+        return None
+    if existing:
+        profile = dict(existing)
+        profile["summary"] = dict(existing.get("summary") or {})
+        profile["card"] = dict(existing.get("card") or {})
+        profile["profile"] = dict(existing.get("profile") or {})
+        profile["source_pack"] = dict(existing.get("source_pack") or {})
+    else:
+        profile = {
+            "id": place_id,
+            "category": category,
+            "canonical_role": "",
+            "parent_hub_id": "",
+            "parent_hub_title": "",
+            "module_target": "",
+            "hidden_from_featured": False,
+            "subcategories": [category, group],
+            "source_ids": [place_id],
+            "search_aliases": [title],
+            "search_blob": f"{title} {category_label} {group} {description}",
+            "best_season": "",
+            "access": "",
+            "safety": "",
+            "amenities": [],
+            "media": ([{"url": image_url, "caption": title, "credit": "", "license": ""}] if image_url else []),
+            "card": {"title": title, "headline": title, "summary": description, "highlight": description, "region": "", "facts": [category_label]},
+            "summary": {
+                "id": place_id,
+                "title": title,
+                "category": category_label,
+                "explore_group": group,
+                "state": "",
+                "region": "",
+                "lat": lat,
+                "lng": lng,
+                "rank": 100000 + index,
+                "hero_rank": 100000 + index,
+                "tags": [category_label],
+                "badges": [category_label],
+                "hook": title,
+                "short_description": description,
+                "thumbnail_url": image_url,
+                "image_url": image_url,
+                "image_credit": "",
+                "image_license": "",
+                "source_url": str(item.get("source_url") or ""),
+                "source_title": "Trailhead",
+            },
+            "profile": {
+                "hook": title,
+                "summary": description,
+                "story": description,
+                "why_it_matters": description,
+                "what_to_know": "Check current access, fees, closures, permits, and weather before you go.",
+                "best_time_to_stop": "",
+                "access_notes": "Check current access before you go.",
+                "nearby_context": "",
+            },
+            "audio_script": description,
+            "wiki_extract": "",
+            "source_pack": {"quality": "", "primary": "Trailhead", "official_url": str(item.get("source_url") or ""), "sources": [], "photos": [], "activities": [category_label], "topics": [category_label], "extract": description},
+            "facts": {"coordinates": f"{lat:.5f}, {lng:.5f}", "source_url": str(item.get("source_url") or ""), "last_updated": item.get("checked_at")},
+            "attribution": "Trailhead",
+        }
+    source_label = _promoted_explore_source_label(item)
+    provenance = item.get("provenance") if isinstance(item.get("provenance"), dict) else {}
+    raw_sources = provenance.get("sources") if isinstance(provenance.get("sources"), list) else []
+    public_sources = []
+    for raw in raw_sources:
+        if not isinstance(raw, dict):
+            continue
+        label = _explore_public_source_label(raw.get("attribution") or raw.get("source")) or source_label
+        public_sources.append({
+            "title": label,
+            "publisher": label,
+            "url": str(raw.get("url") or ""),
+            "kind": "Official" if str(raw.get("quality") or "").lower().startswith("official") else "Source",
+        })
+    if not public_sources:
+        public_sources = [{"title": source_label, "publisher": source_label, "url": str(item.get("source_url") or ""), "kind": "Source"}]
+    planning_facts = [fact for fact in item.get("planning_facts") or [] if isinstance(fact, dict) and str(fact.get("value") or "").strip()]
+    fact_values = [str(fact.get("value") or "").strip() for fact in planning_facts]
+    area = next((str(fact.get("value") or "").strip() for fact in planning_facts if str(fact.get("key") or "") == "area"), "")
+    summary = dict(profile.get("summary") or {})
+    summary.update({
+        "id": place_id,
+        "title": title,
+        "category": category_label,
+        "explore_group": group,
+        "lat": lat,
+        "lng": lng,
+        "rank": 100000 + index,
+        "hero_rank": 100000 + index,
+        "short_description": description,
+        "image_url": image_url or summary.get("image_url") or "",
+        "thumbnail_url": image_url or summary.get("thumbnail_url") or "",
+        "source_title": source_label,
+        "source_url": str(item.get("source_url") or summary.get("source_url") or ""),
+    })
+    if area and not summary.get("region"):
+        summary["region"] = area
+        summary["state"] = area
+    profile["summary"] = summary
+    profile["id"] = place_id
+    profile["category"] = category
+    card = dict(profile.get("card") or {})
+    if fact_values:
+        card["facts"] = fact_values[:4]
+    if area and not card.get("region"):
+        card["region"] = area
+    profile["card"] = card
+    source_pack = dict(profile.get("source_pack") or {})
+    source_pack.update({
+        "primary": source_label,
+        "official_url": str(item.get("source_url") or source_pack.get("official_url") or ""),
+        "sources": public_sources,
+    })
+    profile["source_pack"] = source_pack
+    profile["sources"] = public_sources
+    profile["quality"] = str(item.get("enrichment_grade") or profile.get("quality") or "")
+    profile["quality_score"] = item.get("enrichment_score")
+    profile["verified"] = bool(item.get("verified"))
+    profile["planning_facts"] = planning_facts
+    profile["enrichment_score"] = item.get("enrichment_score")
+    profile["enrichment_grade"] = str(item.get("enrichment_grade") or "")
+    profile["checked_at"] = item.get("checked_at")
+    profile["media_kind"] = str(item.get("media_kind") or "")
+    profile["reviewable"] = True
+    profile["promoted_serving"] = True
+    profile["promoted_category"] = str(item.get("category") or "")
+    primary_provenance = provenance.get("primary") if isinstance(provenance.get("primary"), dict) else {}
+    if (
+        str(primary_provenance.get("source") or "").lower() == "ridb"
+        and bool(item.get("verified"))
+        and re.search(r"\b(glamping|yurts?|safari tents?)\b", title, re.I)
+    ):
+        profile["supplemental_filters"] = ["glamping"]
+    profile["rejection_reasons"] = list(item.get("rejection_reasons") or [])
+    profile["provenance"] = provenance
+    profile["enrichment"] = {
+        "score": int(item.get("enrichment_score") or 0),
+        "level": str(item.get("enrichment_grade") or "complete"),
+        "grade": str(item.get("enrichment_grade") or "complete"),
+        "has_coordinates": item.get("lat") is not None and item.get("lng") is not None,
+        "has_description": bool(str(item.get("description") or "").strip()),
+        "has_image": bool(str(item.get("image_url") or "").strip()),
+        "has_source": bool(provenance or item.get("source_url")),
+        "planning_fact_count": len(planning_facts),
+    }
+    return profile
+
+
+def _merge_promoted_explore_serving_index(places: list[dict]) -> tuple[list[dict], dict | None]:
+    payload = _load_explore_promoted_index()
+    if not payload:
+        return places, None
+    base_by_id = {str(place.get("id") or ""): place for place in places if isinstance(place, dict) and place.get("id")}
+    promoted: list[dict] = []
+    seen: set[str] = set()
+    for index, item in enumerate(payload.get("items") or [], start=1):
+        item_id = str(item.get("id") or "")
+        profile = _promoted_explore_item_to_profile(item, index, base_by_id.get(item_id))
+        if not profile or not item_id or item_id in seen:
+            continue
+        seen.add(item_id)
+        promoted.append(profile)
+    for category in payload.get("missing_filters") or []:
+        if any(_explore_place_matches_indexed_category(place, category) for place in promoted):
+            continue
+        supplements = [
+            place for place in places
+            if str(place.get("id") or "") not in seen
+            and _explore_place_matches_indexed_category(place, category)
+        ]
+        supplements.sort(key=lambda place: _explore_query_sort_key(place, []))
+        for place in supplements:
+            place_id = str(place.get("id") or "")
+            if not place_id or place_id in seen:
+                continue
+            seen.add(place_id)
+            promoted.append(_clean_explore_public_labels(sanitize_place_profile(place)))
+    return promoted or places, payload
+
+
 def _load_explore_catalog() -> dict:
     cache_key = _explore_catalog_cache_key()
     cached = _EXPLORE_CATALOG_CACHE.get("catalog")
@@ -3306,6 +3659,7 @@ def _load_explore_catalog() -> dict:
         try:
             catalog = json.loads(EXPLORE_CATALOG.read_text())
             places = list(catalog.get("places") or [])
+            promoted_source = _load_explore_promoted_index() if _explore_catalog_should_merge_global_indexes() else None
             seen = {str(place.get("id") or "") for place in places if isinstance(place, dict)}
             id_to_index = {str(place.get("id") or ""): idx for idx, place in enumerate(places) if isinstance(place, dict)}
             title_to_index = {
@@ -3314,7 +3668,7 @@ def _load_explore_catalog() -> dict:
                 if isinstance(place, dict) and (key := _explore_title_merge_key(place))
             }
             sidecar_profiles = list(_load_explore_catalog_v3_profiles())
-            if _explore_catalog_should_merge_global_indexes():
+            if _explore_catalog_should_merge_global_indexes() and not promoted_source:
                 sidecar_profiles.extend(_load_explore_official_featured_profiles())
                 sidecar_profiles.extend(_load_explore_global_seed_profiles())
                 sidecar_profiles.extend(_canonical_explore_featured_profiles(limit=520))
@@ -3335,7 +3689,7 @@ def _load_explore_catalog() -> dict:
                     if title_key:
                         title_to_index[title_key] = len(places) - 1
                     seen.add(place_id)
-            if _explore_catalog_should_merge_global_indexes():
+            if _explore_catalog_should_merge_global_indexes() and not promoted_source:
                 for place in _server_curated_explore_profiles():
                     place_id = str(place.get("id") or "")
                     title_key = _explore_title_merge_key(place)
@@ -3349,15 +3703,35 @@ def _load_explore_catalog() -> dict:
                     id_to_index[place_id] = len(places) - 1
                     if title_key:
                         title_to_index[title_key] = len(places) - 1
+            if promoted_source:
+                legacy_search_places = _merge_explore_profile_lists(list(places), _server_curated_explore_profiles())
+                _set_explore_legacy_search_profiles(_apply_explore_legacy_wrapper_metadata(legacy_search_places))
+                places, promoted_index = _merge_promoted_explore_serving_index(places)
+            else:
+                promoted_index = None
+                _set_explore_legacy_search_profiles(list(places))
             places = _apply_explore_legacy_wrapper_metadata(places)
             merged = {
                 **catalog,
-                "catalog_id": "explore-us-top-v1-plus-real-data-v3",
+                "schema_version": 3 if promoted_index else catalog.get("schema_version", 1),
+                "catalog_id": "trailhead-explore-serving-v2" if promoted_index else "explore-us-top-v1-plus-real-data-v3",
                 "source": "Trailhead Explore",
                 "count": len(places),
                 "places": places,
             }
-            return store_cache(_sanitize_explore_catalog(_apply_explore_story_overrides(merged)), persist=True)
+            if promoted_index:
+                merged.update({
+                    "serving_index_version": promoted_index.get("schema_version", 2),
+                    "reviewable_count": promoted_index.get("reviewable_count", len(promoted_index.get("items") or [])),
+                    "gate": promoted_index.get("gate") or {},
+                    "grade_counts": promoted_index.get("grade_counts") or {},
+                    "filter_counts": promoted_index.get("filter_counts") or {},
+                    "missing_filters": promoted_index.get("missing_filters") or [],
+                })
+            final_catalog = _apply_explore_story_overrides(merged)
+            if not promoted_index:
+                final_catalog = _sanitize_explore_catalog(final_catalog)
+            return store_cache(final_catalog, persist=True)
         except Exception:
             pass
     return store_cache(_sanitize_explore_catalog(_apply_explore_story_overrides({
@@ -4263,6 +4637,12 @@ def _explore_place_matches_category_request(place: dict, requested: set[str] | N
             summary.get("title"),
             *(place.get("subcategories") or []),
         ]).lower()
+        glamping_record = bool(re.search(r"\b(glamping|glamp|yurts?|safari tents?)\b", hay))
+        campground_record = bool(re.search(r"\b(campgrounds?|campsites?|camping|tent sites?|rv sites?)\b", title_text))
+        if normalized == {"glamping"}:
+            return glamping_record
+        if glamping_record and not campground_record:
+            return False
         if re.search(r"\b(trails?|trailheads?|hikes?|treks?)\b", title_text) and not re.search(r"\b(campgrounds?|campsites?|camping|rv park|rv resort|glamping|huts?|cabins?|lodging|stays?)\b", title_text):
             return False
         if strict_campground:
@@ -4315,6 +4695,20 @@ def _explore_place_matches_category_request(place: dict, requested: set[str] | N
         *(summary.get("tags") or []),
     ]).lower()
     visual_blocked = bool(re.search(r"\b(bus stop|shuttle|entrance station|restaurant|steakhouse|cafe|grill|market|store|bookstore|kennel|conservancy|clinic|medical|healthcare|visitor center|exhibit|talk|program|parking|restroom|trailhead|appeared about|rocks are|geologically speaking)\b", visual_hay))
+    if "public_land" in normalized:
+        if stay_like or re.search(r"\b(visitor|information)\s+cent(?:er|re)\b", title_hay):
+            return False
+        explicit_land_tokens = {
+            _normalize_place_category(place.get("category")),
+            _normalize_place_category(summary.get("category")),
+            *[_normalize_place_category(item) for item in (place.get("subcategories") or [])],
+        }
+        if explicit_land_tokens.intersection({"public_land", "land_unit", "national_forest", "forest", "wilderness", "conservation_area"}):
+            return True
+        return bool(
+            explicit_land_tokens.intersection({"park"})
+            and re.search(r"\b(national forest|wilderness|public lands?|conservation area)\b", title_hay)
+        )
     if normalized.intersection({"viewpoint", "scenic"}):
         if stay_like and not re.search(r"\b(viewpoint|overlook|vista|scenic)\b", title_hay):
             return False
@@ -4326,13 +4720,27 @@ def _explore_place_matches_category_request(place: dict, requested: set[str] | N
             return False
         return bool(tokens.intersection({"waterfall", "waterfalls"})) or bool(re.search(r"\b(waterfalls?|falls|cascade)\b", hay))
     if normalized.intersection({"spring", "springs", "hot_spring", "hot_springs"}):
-        if stay_like and not re.search(r"\b(hot\s+springs?|springs?)\b", title_hay):
+        explicit_spring = bool(tokens.intersection({"spring", "springs", "hot_spring", "hot_springs"}))
+        if explicit_spring and not stay_like:
+            return True
+        if stay_like:
             return False
-        return bool(tokens.intersection({"spring", "springs", "hot_spring", "hot_springs"})) or bool(re.search(r"\b(hot\s+springs?|springs?)\b", hay))
+        if tokens.intersection({"park", "public_land", "historic", "monument", "visitor_center", "attraction"}):
+            return False
+        if re.search(r"\b(campgrounds?|campsites?|camping|trailheads?|trails?|visitor centers?|national parks?|monuments?|lodges?|hotels?|huts?)\b", title_hay):
+            return False
+        return bool(
+            re.search(r"\b(?:hot|mineral|thermal|geothermal)\s+springs?\b", title_hay)
+            or re.search(r"\bsprings?\s+connector\b", title_hay)
+        )
     if "peak" in normalized:
-        if stay_like and not re.search(r"\b(peaks?|mountains?|summit)\b", title_hay):
+        if stay_like:
             return False
-        return bool(tokens.intersection({"peak", "peaks"})) or bool(re.search(r"\b(peaks?|mountains?|summit)\b", hay))
+        explicit_peak_tokens = {
+            _normalize_place_category(place.get("category")),
+            _normalize_place_category(summary.get("category")),
+        }
+        return bool(explicit_peak_tokens.intersection({"peak", "mountain", "summit"}))
     if tokens.intersection(normalized):
         return True
     return _explore_place_matches_categories(_catalog_place_category(place.get("summary") or {}), normalized)
@@ -4343,6 +4751,41 @@ def _explore_index_display_category(place: dict, category: str) -> str:
     card = place.get("card") if isinstance(place.get("card"), dict) else {}
     title = str(summary.get("title") or card.get("title") or "").lower()
     normalized = _normalize_place_category(category)
+    if place.get("promoted_serving"):
+        promoted_category = str(place.get("promoted_category") or place.get("category") or "").strip().lower()
+        promoted_labels = {
+            "campground": "Campground",
+            "rv_park": "RV Park",
+            "dispersed_camp": "Dispersed Camp",
+            "overnight_parking": "Overnight Parking",
+            "trail": "Trail",
+            "trailhead": "Trailhead",
+            "park": "Park",
+            "lake": "Lake",
+            "water": "Water",
+            "viewpoint": "Viewpoint",
+            "activity": "Activity",
+            "historic": "Historic Site",
+            "permit_required": "Permit",
+            "visitor_center": "Visitor Center",
+            "forest": "Forest",
+            "public_land": "Public Land",
+            "lodging": "Lodging",
+            "waterfall": "Waterfall",
+            "peak": "Peak",
+            "glacier": "Glacier",
+            "glamping": "Glamping",
+            "hot_spring": "Hot Spring",
+            "bouldering_area": "Bouldering Area",
+            "climbing_area": "Climbing Area",
+            "forest_road": "Forest Road",
+            "offroad_route": "Off-road Route",
+            "scenic_drive": "Scenic Drive",
+            "fuel": "Fuel",
+            "resupply": "Resupply",
+        }
+        if promoted_category in promoted_labels:
+            return promoted_labels[promoted_category]
     primary_hay = " ".join(str(value or "") for value in [
         category,
         place.get("category"),
@@ -4429,6 +4872,8 @@ def _explore_place_index_item(place: dict) -> dict:
     image_url = _explore_contextual_image_url(place, summary.get("image_url") or summary.get("thumbnail_url"))
     thumbnail_url = _explore_contextual_image_url(place, summary.get("thumbnail_url") or summary.get("image_url"))
     category = _explore_index_display_category(place, category)
+    enrichment = _explore_enrichment_metadata(place)
+    provenance = _explore_provenance_metadata(place)
     return {
         "id": place.get("id") or summary.get("id") or "",
         "title": title,
@@ -4473,6 +4918,13 @@ def _explore_place_index_item(place: dict) -> dict:
         "media": place.get("media") or [],
         "card": place.get("card") or {},
         "linked_trail_ids": place.get("linked_trail_ids") or [],
+        "enrichment_score": place.get("enrichment_score") if place.get("enrichment_score") is not None else enrichment.get("score"),
+        "enrichment_grade": place.get("enrichment_grade") or enrichment.get("grade") or enrichment.get("level") or "basic",
+        "planning_facts": _explore_planning_facts(place, provenance),
+        "provenance": provenance,
+        "checked_at": place.get("checked_at") or (place.get("facts") or {}).get("last_updated") or 0,
+        "media_kind": place.get("media_kind") or ("photo" if image_url or thumbnail_url else "map_preview"),
+        "reviewable": bool(place.get("reviewable", True)),
     }
 
 def _explore_place_to_nearby_place(place: dict, center_lat: float, center_lng: float) -> dict | None:
@@ -5456,7 +5908,11 @@ def _explore_catalog_nearby_trail_profiles(
     safe_limit = max(1, min(int(limit or 80), 240))
     radius_m = max(1.0, float(radius_mi or 65.0)) * 1609.344
     candidates: list[dict] = []
-    for profile in _load_explore_catalog().get("places") or []:
+    search_places = [
+        *(_load_explore_catalog().get("places") or []),
+        *_load_explore_legacy_search_profiles(),
+    ]
+    for profile in search_places:
         if not isinstance(profile, dict) or not _explore_profile_matches_trail_result(profile):
             continue
         point = _explore_profile_point(profile)
@@ -5533,7 +5989,12 @@ def _explore_profile_matches_stay_result(profile: dict) -> bool:
         return True
     return False
 
-def _explore_catalog_stay_profiles_for_destination(destination_query: str, *, limit: int = 60) -> list[dict]:
+def _explore_catalog_stay_profiles_for_destination(
+    destination_query: str,
+    *,
+    limit: int = 60,
+    prefer_destination_guides: bool = False,
+) -> list[dict]:
     safe_limit = max(1, min(int(limit or 60), 180))
     queries = _explore_stay_destination_search_queries(destination_query)
     if not queries:
@@ -5545,7 +6006,11 @@ def _explore_catalog_stay_profiles_for_destination(destination_query: str, *, li
         if str(query or "").strip()
     ]
     matches: list[dict] = []
-    for profile in _load_explore_catalog().get("places") or []:
+    search_places = [
+        *(_load_explore_catalog().get("places") or []),
+        *_load_explore_legacy_search_profiles(),
+    ]
+    for profile in search_places:
         if not isinstance(profile, dict) or not _explore_profile_matches_stay_result(profile):
             continue
         if destination_anchors and not _explore_profile_near_destination(profile, destination_anchors, radius_mi=140):
@@ -5559,8 +6024,28 @@ def _explore_catalog_stay_profiles_for_destination(destination_query: str, *, li
             matches.append(profile)
     matches = _dedupe_ranked_explore_profiles(matches)
     query_terms = query_term_sets[0] if query_term_sets else []
-    matches.sort(key=lambda place: _explore_stay_result_sort_key(place, query_terms))
+    matches.sort(key=lambda place: (
+        *(_explore_stay_guide_sort_key(place) if prefer_destination_guides else (0, 0)),
+        *_explore_stay_result_sort_key(place, query_terms),
+    ))
     return matches[:safe_limit]
+
+
+def _explore_stay_guide_sort_key(profile: dict) -> tuple[int, float]:
+    place_id = str(profile.get("id") or "").lower()
+    summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
+    try:
+        hero_rank = float(summary.get("hero_rank") or summary.get("rank") or 999999)
+    except (TypeError, ValueError):
+        hero_rank = 999999.0
+    if place_id.startswith("explore:huts_lodging:"):
+        return (0, hero_rank)
+    if place_id.startswith("explore:camping:"):
+        return (1, hero_rank)
+    if place_id.startswith("explore:glamping:"):
+        return (2, hero_rank)
+    return (3, hero_rank)
+
 
 def _explore_stay_result_sort_key(profile: dict, query_terms: list[str] | None = None) -> tuple:
     summary = profile.get("summary") if isinstance(profile.get("summary"), dict) else {}
@@ -5625,6 +6110,30 @@ def _explore_stay_result_sort_key(profile: dict, query_terms: list[str] | None =
         1 if thin_title else 0,
         *_explore_query_sort_key(profile, query_terms),
     )
+
+
+def _canonical_camp_search_profiles(q: str, *, limit: int = 120) -> list[dict]:
+    query_terms = _explore_query_terms_for_category(q, "camp")
+    if not query_terms:
+        return []
+    safe_limit = max(1, min(int(limit or 120), 240))
+    items, generated_at = _load_canonical_camp_index()
+    profiles: list[dict] = []
+    for idx, item in enumerate(items, start=1):
+        if not isinstance(item, dict):
+            continue
+        raw_text = " ".join(str(item.get(key) or "") for key in (
+            "id", "name", "summary", "label", "land_type", "source_label",
+        ))
+        if not _explore_terms_match_tokens(query_terms, _explore_query_tokens(raw_text)):
+            continue
+        camp = _canonical_camp_to_record(item, generated_at=generated_at)
+        profile = _camp_record_to_explore_profile(camp, rank=736000 + idx) if camp else None
+        if profile and _explore_query_terms_match(profile, query_terms):
+            profiles.append(profile)
+    profiles.sort(key=lambda profile: _explore_query_sort_key(profile, query_terms))
+    return _dedupe_ranked_explore_profiles(profiles)[:safe_limit]
+
 
 def _camp_record_to_explore_profile(camp: dict, *, rank: int = 736000, destination: str = "") -> dict | None:
     try:
@@ -5730,7 +6239,11 @@ def _explore_stay_fallback_profiles(q: str = "", limit: int = 120, *, include_lo
         return []
     safe_limit = max(1, min(int(limit or 120), 300))
     nearby_profiles: list[dict] = []
-    nearby_profiles.extend(_explore_catalog_stay_profiles_for_destination(destination_query, limit=min(safe_limit, 80)))
+    nearby_profiles.extend(_explore_catalog_stay_profiles_for_destination(
+        destination_query,
+        limit=min(safe_limit, 80),
+        prefer_destination_guides=include_lodging,
+    ))
     destination_profiles = _explore_stay_destination_profiles(destination_query, limit=12)[:6]
     for destination in destination_profiles:
         summary = destination.get("summary") if isinstance(destination.get("summary"), dict) else {}
@@ -5800,6 +6313,24 @@ def _explore_trail_fallback_profiles(q: str = "", limit: int = 120) -> list[dict
             radius_mi = float(summary.get("trail_radius_mi") or 65)
         except Exception:
             radius_mi = 65
+        destination_matches = _official_cache_search_profiles(
+            q=destination_query,
+            category="trail",
+            limit=120,
+        )
+        for profile in destination_matches:
+            point = _explore_profile_point(profile)
+            if point == (None, None):
+                continue
+            distance_m = _haversine_m(lat, lng, point[0], point[1])
+            if distance_m > radius_mi * 1609.344:
+                continue
+            enriched = _explore_profile_with_stay_destination(profile, destination_name)
+            enriched_summary = dict(enriched.get("summary") or {})
+            enriched_summary["distance_m"] = round(distance_m)
+            enriched_summary["nearby_catalog_trail"] = True
+            enriched["summary"] = enriched_summary
+            candidates.append(enriched)
         nearby_catalog = _explore_catalog_nearby_trail_profiles(
             lat,
             lng,
@@ -5833,6 +6364,25 @@ def _explore_trail_fallback_profiles(q: str = "", limit: int = 120) -> list[dict
         *_explore_query_sort_key(place, []),
     ))
     return candidates[:safe_limit]
+
+
+def _explore_trail_query_priority(
+    profile: dict,
+    trail_first_rank: dict[str, int],
+    trail_first_near_ids: set[str],
+    direct_catalog_ids: set[str],
+) -> tuple[int, int]:
+    place_id = str(profile.get("id") or "")
+    if place_id.startswith("pk:"):
+        return (-1, 0)
+    if place_id in trail_first_near_ids:
+        return (0, trail_first_rank[place_id])
+    if place_id in direct_catalog_ids:
+        return (1, 0)
+    if place_id in trail_first_rank:
+        return (2, trail_first_rank[place_id])
+    return (3, 999999)
+
 
 def _explore_can_relax_empty_category(category: str = "") -> bool:
     normalized = _normalize_place_category(category)
@@ -6447,8 +6997,20 @@ EXPLORE_CATEGORY_ALIASES = {
     "scenicviews": "viewpoint",
     "waterfalls": "waterfall",
     "falls": "waterfall",
+    "parks": "park",
+    "trailheads": "trailhead",
+    "hotsprings": "hot_spring",
+    "hot_springs": "hot_spring",
     "mountain": "peak",
     "mountains": "peak",
+    "peaks": "peak",
+    "publicland": "public_land",
+    "publiclands": "public_land",
+    "land": "public_land",
+    "lands": "public_land",
+    "supplies": "resupply",
+    "supply": "resupply",
+    "groceries": "resupply",
     "cabin": "lodging",
     "cabins": "lodging",
     "hut": "lodging",
@@ -24575,75 +25137,591 @@ async def api_get_place(trailhead_place_id: str):
 
 # ── Explore catalog ────────────────────────────────────────────────────────────
 
-@app.get("/api/explore/catalog")
-async def explore_catalog():
-    """Return the prebuilt featured Explore catalog."""
-    return _load_explore_catalog()
+EXPLORE_SERVING_SCHEMA_VERSION = 3
+EXPLORE_SERVING_MODES = {"featured", "nearby", "trip"}
+EXPLORE_SERVING_SORTS = {"best", "ready", "nearest"}
+EXPLORE_VISIBLE_FACETS = (
+    "camp", "glamping", "huts", "trails", "trailheads", "views", "peaks",
+    "waterfalls", "springs", "climb", "water", "scenic", "parks", "land",
+    "fuel", "resupply", "things", "guided",
+)
+EXPLORE_PROMOTED_FILTER_CATEGORIES = {
+    "camp": {"campground", "rv_park", "dispersed_camp", "overnight_parking"},
+    "trails": {"trail", "trailhead"},
+    "parks": {"park"},
+    "water": {"lake", "water"},
+    "views": {"viewpoint"},
+    "things": {"activity", "historic", "permit_required", "visitor_center"},
+    "land": {"forest", "public_land"},
+    "huts": {"lodging"},
+    "waterfalls": {"waterfall"},
+    "peaks": {"peak", "glacier"},
+    "trailheads": {"trailhead"},
+    "glamping": {"glamping"},
+    "springs": {"hot_spring"},
+    "climb": {"bouldering_area", "climbing_area"},
+    "scenic": {"forest_road", "offroad_route", "scenic_drive"},
+    "fuel": {"fuel"},
+    "resupply": {"resupply"},
+}
+_EXPLORE_GUIDED_DESTINATIONS_CACHE: dict[str, object] = {"mtime": 0, "items": []}
+_EXPLORE_FACET_COUNTS_CACHE: dict[str, object] = {"key": None, "counts": {}}
 
-@app.get("/api/explore/catalog/index")
-async def explore_catalog_index(q: str = "", category: str = "", limit: int = 500, cursor: int = 0):
-    """Return lightweight Explore cards for scalable browsing."""
+
+def _load_explore_guided_destinations() -> list[dict]:
+    """Load the local destination shelf. This path never contacts Viator."""
+    try:
+        mtime = EXPLORE_GUIDED_DESTINATIONS.stat().st_mtime_ns
+    except Exception:
+        return []
+    if _EXPLORE_GUIDED_DESTINATIONS_CACHE.get("mtime") == mtime:
+        return list(_EXPLORE_GUIDED_DESTINATIONS_CACHE.get("items") or [])
+    try:
+        payload = json.loads(EXPLORE_GUIDED_DESTINATIONS.read_text())
+    except Exception:
+        return []
+    raw_items = payload.get("destinations") if isinstance(payload, dict) else []
+    if not isinstance(raw_items, list):
+        return []
+    items: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_slugs: set[str] = set()
+    for raw in raw_items:
+        if not isinstance(raw, dict):
+            continue
+        destination_id = str(raw.get("id") or "").strip()
+        slug = re.sub(r"[^a-z0-9-]+", "-", str(raw.get("slug") or "").strip().lower()).strip("-")
+        name = re.sub(r"\s+", " ", str(raw.get("name") or "").strip())
+        try:
+            lat = float(raw.get("lat"))
+            lng = float(raw.get("lng"))
+        except Exception:
+            continue
+        if (
+            not destination_id
+            or not slug
+            or not name
+            or destination_id in seen_ids
+            or slug in seen_slugs
+            or not -90 <= lat <= 90
+            or not -180 <= lng <= 180
+        ):
+            continue
+        seen_ids.add(destination_id)
+        seen_slugs.add(slug)
+        items.append({
+            **raw,
+            "id": destination_id,
+            "slug": slug,
+            "name": name,
+            "lat": lat,
+            "lng": lng,
+            "aliases": [str(item).strip() for item in raw.get("aliases") or [] if str(item).strip()][:8],
+            "best_for": [str(item).strip() for item in raw.get("best_for") or [] if str(item).strip()][:4],
+        })
+        if len(items) == 25:
+            break
+    _EXPLORE_GUIDED_DESTINATIONS_CACHE.update({"mtime": mtime, "items": items})
+    return list(items)
+
+
+def _explore_guided_destination_profile(destination: dict, index: int) -> dict:
+    destination_id = str(destination.get("id") or "")
+    title = str(destination.get("name") or "")
+    region = str(destination.get("region") or destination.get("country") or "")
+    summary_text = str(destination.get("summary") or "")
+    image_url = _safe_explore_image_url(destination.get("image_url"))
+    aliases = [title, region, destination.get("country"), *(destination.get("aliases") or [])]
+    aliases = [str(value).strip() for value in aliases if str(value or "").strip()]
+    tags = ["Guided", str(destination.get("collection") or "").title(), *(destination.get("best_for") or [])]
+    return {
+        "id": destination_id,
+        "category": "guided",
+        "canonical_role": "guided_destination",
+        "hidden_from_featured": True,
+        "subcategories": ["guided", "tours", "destination"],
+        "sources": [{"title": "Trailhead destination guide", "publisher": "Trailhead", "kind": "curated_destination"}],
+        "source_ids": [destination_id],
+        "quality": "curated",
+        "quality_score": 82,
+        "verified": True,
+        "search_aliases": aliases,
+        "search_blob": " ".join([*aliases, *[str(item) for item in tags], summary_text]),
+        "best_season": "",
+        "access": "Choose dates to check live guided options.",
+        "safety": "Review operator requirements and current local conditions before booking.",
+        "amenities": destination.get("best_for") or [],
+        "media": ([{"url": image_url, "caption": destination.get("image_alt") or title, "credit": "", "license": ""}] if image_url else []),
+        "card": {
+            "title": title,
+            "headline": title,
+            "summary": summary_text,
+            "highlight": summary_text,
+            "region": region,
+            "facts": destination.get("best_for") or [],
+            "image_url": image_url,
+        },
+        "summary": {
+            "id": destination_id,
+            "title": title,
+            "category": "Guided",
+            "explore_group": "guided",
+            "state": "",
+            "region": region,
+            "lat": destination.get("lat"),
+            "lng": destination.get("lng"),
+            "rank": 500000 + index,
+            "hero_rank": 500000 + index,
+            "tags": tags,
+            "badges": ["Guided destination"],
+            "hook": title,
+            "short_description": summary_text,
+            "thumbnail_url": image_url,
+            "image_url": image_url,
+            "image_credit": "",
+            "image_license": "",
+            "source_url": "",
+            "source_title": "Trailhead destination guide",
+        },
+        "profile": {
+            "hook": title,
+            "summary": summary_text,
+            "story": summary_text,
+            "why_it_matters": summary_text,
+            "what_to_know": "Choose this destination to check current guided trips and free places nearby.",
+            "best_time_to_stop": "",
+            "access_notes": "Review operator requirements and local conditions before booking.",
+            "nearby_context": region,
+        },
+        "audio_script": summary_text,
+        "source_pack": {
+            "quality": "curated",
+            "primary": "Trailhead destination guide",
+            "official_url": "",
+            "sources": [{"title": "Trailhead destination guide", "publisher": "Trailhead", "kind": "curated_destination"}],
+            "photos": [],
+            "activities": destination.get("best_for") or [],
+            "topics": tags,
+            "source_note": "Curated destination; live products are resolved only after selection.",
+            "extract": summary_text,
+            "booking_url": "",
+            "license": "",
+        },
+        "facts": {
+            "coordinates": f"{float(destination.get('lat')):.5f}, {float(destination.get('lng')):.5f}",
+            "source_title": "Trailhead destination guide",
+            "source_quality": "curated",
+        },
+        "attribution": "Trailhead",
+        "guided_destination": destination,
+    }
+
+
+def _explore_guided_destination_profiles() -> list[dict]:
+    return [
+        _explore_guided_destination_profile(destination, index)
+        for index, destination in enumerate(_load_explore_guided_destinations(), start=1)
+    ]
+
+
+def _explore_enrichment_metadata(place: dict) -> dict:
+    promoted = place.get("enrichment") if isinstance(place.get("enrichment"), dict) else {}
+    if place.get("enrichment_score") is not None or promoted.get("score") is not None:
+        score = int(place.get("enrichment_score") if place.get("enrichment_score") is not None else promoted.get("score") or 0)
+        grade = str(place.get("enrichment_grade") or promoted.get("grade") or promoted.get("level") or "complete")
+        return {
+            **promoted,
+            "score": score,
+            "level": grade,
+            "grade": grade,
+            "planning_fact_count": len(place.get("planning_facts") or []) or int(promoted.get("planning_fact_count") or 0),
+        }
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    profile = place.get("profile") if isinstance(place.get("profile"), dict) else {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    facts = place.get("facts") if isinstance(place.get("facts"), dict) else {}
+    description = str(summary.get("short_description") or profile.get("summary") or "").strip()
+    image_url = _safe_explore_image_url(
+        summary.get("image_url")
+        or summary.get("thumbnail_url")
+        or next((item.get("url") for item in place.get("media") or [] if isinstance(item, dict) and item.get("url")), "")
+    )
+    sources = source_pack.get("sources") if isinstance(source_pack.get("sources"), list) else []
+    source_present = bool(source_pack.get("primary") or summary.get("source_title") or sources or place.get("sources"))
+    has_coordinates = isinstance(summary.get("lat"), (int, float)) and isinstance(summary.get("lng"), (int, float))
+    planning_values = [
+        place.get("best_season"), place.get("access"), place.get("safety"),
+        profile.get("best_time_to_stop"), profile.get("access_notes"),
+        *(place.get("amenities") or []),
+        *(source_pack.get("fees") or []),
+        *(source_pack.get("operating_hours") or []),
+    ]
+    planning_fact_count = sum(1 for value in planning_values if str(value or "").strip())
+    public_fact_count = sum(
+        1 for key, value in facts.items()
+        if key not in {"coordinates", "source_url", "source_title", "official_url", "source_quality", "last_updated"}
+        and str(value or "").strip()
+    )
+    planning_fact_count += public_fact_count
+    score = (
+        (20 if has_coordinates else 0)
+        + (25 if len(description) >= 80 else 12 if description else 0)
+        + (20 if source_present else 0)
+        + (20 if image_url else 0)
+        + min(15, planning_fact_count * 5)
+    )
+    return {
+        "score": score,
+        "level": "rich" if score >= 80 else "ready" if score >= 60 else "basic",
+        "has_coordinates": has_coordinates,
+        "has_description": bool(description),
+        "has_image": bool(image_url),
+        "has_source": source_present,
+        "planning_fact_count": planning_fact_count,
+    }
+
+
+def _explore_provenance_metadata(place: dict) -> dict:
+    promoted = place.get("provenance") if isinstance(place.get("provenance"), dict) else {}
+    if isinstance(promoted.get("primary"), dict) and isinstance(promoted.get("sources"), list):
+        primary = promoted.get("primary") or {}
+        primary_label = (
+            _explore_public_source_label(primary.get("attribution") or primary.get("source"))
+            or str(primary.get("attribution") or primary.get("source") or "")
+        )
+        return {
+            **promoted,
+            "primary_label": primary_label,
+            "source_count": int(promoted.get("source_count") or len(promoted.get("sources") or [])),
+            "verified": bool(promoted.get("verified", place.get("verified"))),
+        }
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    raw_sources = place.get("sources") if isinstance(place.get("sources"), list) else []
+    if not raw_sources:
+        raw_sources = source_pack.get("sources") if isinstance(source_pack.get("sources"), list) else []
+    sources: list[dict] = []
+    for raw in raw_sources[:8]:
+        if not isinstance(raw, dict):
+            continue
+        label = _explore_public_source_label(raw.get("publisher") or raw.get("title") or raw.get("name") or raw.get("source"))
+        if not label:
+            continue
+        sources.append({"name": label, "url": str(raw.get("url") or ""), "kind": str(raw.get("kind") or "")})
+    primary = _explore_public_source_label(source_pack.get("primary") or summary.get("source_title"))
+    if primary and not any(item.get("name") == primary for item in sources):
+        sources.insert(0, {"name": primary, "url": str(source_pack.get("official_url") or summary.get("source_url") or ""), "kind": ""})
+    return {
+        "primary": primary or (sources[0]["name"] if sources else ""),
+        "primary_label": primary or (sources[0]["name"] if sources else ""),
+        "source_count": len(sources),
+        "verified": bool(place.get("verified")),
+        "sources": sources,
+    }
+
+
+def _explore_planning_facts(place: dict, provenance: dict | None = None) -> list[dict]:
+    existing = [fact for fact in place.get("planning_facts") or [] if isinstance(fact, dict) and str(fact.get("value") or "").strip()]
+    if existing:
+        return existing
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    card = place.get("card") if isinstance(place.get("card"), dict) else {}
+    checked_at = place.get("checked_at") or (place.get("facts") or {}).get("last_updated") or 0
+    source_id = str(place.get("id") or summary.get("id") or "")
+    category = _explore_index_display_category(place, str(summary.get("category") or place.get("category") or "Place"))
+    region = _clean_explore_display_region(card.get("region") or summary.get("region") or summary.get("state") or "")
+    source = provenance or _explore_provenance_metadata(place)
+    source_label = str(source.get("primary_label") or source.get("primary") or "")
+    values = [
+        ("category", "place_type", "Type", category),
+        ("region", "area", "Area", region),
+        ("source_pack.primary", "source", "Source", source_label),
+    ]
+    return [
+        {
+            "checked_at": checked_at,
+            "field": field,
+            "key": key,
+            "label": label,
+            "source_id": source_id,
+            "value": value,
+        }
+        for field, key, label, value in values
+        if str(value or "").strip()
+    ]
+
+
+def _explore_ranking_reason(place: dict, *, mode: str, sort: str) -> str:
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    if sort == "nearest" and isinstance(summary.get("distance_m"), (int, float)):
+        miles = float(summary["distance_m"]) / 1609.344
+        return "Under 1 mile away" if miles < 1 else f"{miles:.0f} miles away"
+    enrichment = _explore_enrichment_metadata(place)
+    if sort == "ready" or enrichment["level"] == "rich":
+        return "Strong details for planning"
+    if mode == "trip":
+        return "Fits the current trip area"
+    if mode == "nearby":
+        return "Near the selected area"
+    return "Featured by Trailhead"
+
+
+def _decorate_explore_serving_places(places: list[dict], *, mode: str, sort: str, start_position: int = 1) -> list[dict]:
+    decorated: list[dict] = []
+    for position, place in enumerate(places, start=max(1, int(start_position or 1))):
+        enriched = dict(place)
+        enrichment = _explore_enrichment_metadata(place)
+        provenance = _explore_provenance_metadata(place)
+        enriched["enrichment"] = enrichment
+        enriched["enrichment_score"] = (
+            place.get("enrichment_score")
+            if place.get("enrichment_score") is not None
+            else int(enrichment.get("score") or 0)
+        )
+        enriched["enrichment_grade"] = str(
+            place.get("enrichment_grade")
+            or enrichment.get("grade")
+            or enrichment.get("level")
+            or "basic"
+        )
+        enriched["planning_facts"] = _explore_planning_facts(place, provenance)
+        enriched["provenance"] = provenance
+        enriched["checked_at"] = place.get("checked_at") or (place.get("facts") or {}).get("last_updated") or 0
+        summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+        has_image = bool(_safe_explore_image_url(summary.get("image_url") or summary.get("thumbnail_url")))
+        enriched["media_kind"] = str(place.get("media_kind") or ("photo" if has_image else "map_preview"))
+        enriched["reviewable"] = bool(place.get("reviewable", True))
+        enriched["ranking"] = {
+            "position": position,
+            "sort": sort,
+            "score": round(float(enrichment.get("score") or 0), 2),
+            "reason": _explore_ranking_reason(place, mode=mode, sort=sort),
+        }
+        decorated.append(enriched)
+    return decorated
+
+
+def _explore_promoted_filter_key(category: str) -> str:
+    raw = re.sub(r"[^a-z0-9_]+", "", str(category or "").strip().lower().replace(" ", "_"))
+    if raw in EXPLORE_PROMOTED_FILTER_CATEGORIES:
+        return raw
+    normalized = _normalize_place_category(raw)
+    return {
+        "campground": "camp",
+        "rv_park": "camp",
+        "dispersed_camp": "camp",
+        "overnight_parking": "camp",
+        "trail": "trails",
+        "trailhead": "trailheads" if raw in {"trailhead", "trailheads"} else "trails",
+        "park": "parks",
+        "lake": "water",
+        "water": "water",
+        "viewpoint": "views",
+        "activity": "things",
+        "historic": "things",
+        "permit_required": "things",
+        "visitor_center": "things",
+        "forest": "land",
+        "public_land": "land",
+        "lodging": "huts",
+        "waterfall": "waterfalls",
+        "peak": "peaks",
+        "glacier": "peaks",
+        "hot_spring": "springs",
+        "bouldering_area": "climb",
+        "climbing_area": "climb",
+        "forest_road": "scenic",
+        "offroad_route": "scenic",
+        "scenic_drive": "scenic",
+        "fuel": "fuel",
+        "resupply": "resupply",
+        "glamping": "glamping",
+    }.get(normalized, raw)
+
+
+def _explore_place_matches_indexed_category(place: dict, category: str) -> bool:
+    """Use exact card identity for browse facets; free-text search keeps broader matching."""
+    filter_key = _explore_promoted_filter_key(category)
+    if place.get("promoted_serving"):
+        if filter_key in {str(value) for value in place.get("supplemental_filters") or []}:
+            return True
+        promoted_category = str(place.get("promoted_category") or place.get("category") or "").strip().lower()
+        return promoted_category in EXPLORE_PROMOTED_FILTER_CATEGORIES.get(filter_key, set())
+    normalized = _normalize_place_category(category)
+    summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+    title = str(summary.get("title") or (place.get("card") or {}).get("title") or "").lower()
+    primary = {
+        _normalize_place_category(place.get("category")),
+        _normalize_place_category(summary.get("category")),
+        _normalize_place_category(summary.get("explore_group")),
+        *[_normalize_place_category(item) for item in (place.get("subcategories") or [])],
+    } - {""}
+    if normalized == "guided":
+        return _normalize_place_category(place.get("category")) == "guided"
+    if normalized == "trailhead":
+        return "trailhead" in primary or bool(re.search(r"\btrail\s*heads?\b|\btrail access\b", title))
+    if normalized == "trail":
+        if "trailhead" in primary or re.search(r"\btrail\s*heads?\b", title):
+            return False
+        return "trail" in primary or bool(re.search(r"\b(trails?|hikes?|treks?|routes?|loops?)\b", title))
+    if normalized == "viewpoint":
+        return bool(primary.intersection({"viewpoint", "overlook", "lookout"})) or bool(re.search(r"\b(viewpoints?|overlooks?|lookouts?|vista)\b", title))
+    if normalized == "waterfall":
+        return "waterfall" in primary or bool(re.search(r"\b(waterfalls?|falls|cascade)\b", title))
+    if normalized == "climb":
+        if re.search(r"\b(cabins?|huts?|lodges?|lodging|campgrounds?|campsites?|camping)\b", title) and not re.search(r"\b(climbing|bouldering|crag)\b", title):
+            return False
+        return bool(primary.intersection({"climb", "climbing", "climbing_area", "bouldering_area"})) or bool(re.search(r"\b(climbing|bouldering|crag)\b", title))
+    if normalized == "water":
+        return bool(primary.intersection({"water", "lake", "river", "reservoir", "beach", "marina", "glacier"})) or bool(
+            re.search(r"\b(lake|river|reservoir|lagoon|beach|marina|glacier|water access)\b", title)
+        )
+    if normalized == "lodging":
+        if re.search(r"\b(campgrounds?|campsites?|camping)\b", title) and not re.search(r"\b(cabins?|huts?|lodges?|lodging|shelters?|lookouts?|hotels?|inns?)\b", title):
+            return False
+        return bool(primary.intersection({"lodging", "huts_lodging", "hut", "cabin", "shelter"})) or bool(
+            re.search(r"\b(cabins?|huts?|lodges?|lodging|shelters?|lookouts?|hotels?|inns?)\b", title)
+        )
+    if normalized == "park":
+        return bool(primary.intersection({"park", "forest", "national_park", "recreation_area"})) or bool(
+            re.search(r"\b(national|state|provincial|regional)\s+(park|monument|preserve|forest)\b", title)
+        )
+    if normalized == "fuel":
+        return "fuel" in primary or bool(re.search(r"\b(fuel|gas|diesel|petrol|service station)\b", title))
+    if normalized == "resupply":
+        return "resupply" in primary or bool(re.search(r"\b(resupply|grocery|market|supplies|outfitter)\b", title))
+    return _explore_place_matches_category_request(place, {normalized})
+
+
+def _explore_visible_category_counts(catalog: dict) -> dict[str, int]:
+    guided_count = len(_load_explore_guided_destinations())
+    cache_key = (id(catalog), len(catalog.get("places") or []), _EXPLORE_GUIDED_DESTINATIONS_CACHE.get("mtime"), guided_count)
+    if _EXPLORE_FACET_COUNTS_CACHE.get("key") == cache_key:
+        return dict(_EXPLORE_FACET_COUNTS_CACHE.get("counts") or {})
+    places = _dedupe_ranked_explore_profiles(list(catalog.get("places") or []))
+    counts = {
+        category: sum(1 for place in places if _explore_place_matches_indexed_category(place, category))
+        for category in EXPLORE_VISIBLE_FACETS
+        if category != "guided"
+    }
+    counts["guided"] = guided_count
+    counts["all"] = len(places)
+    counts["nearby"] = sum(1 for place in places if _explore_profile_point(place) != (None, None))
+    counts["tours"] = guided_count
+    _EXPLORE_FACET_COUNTS_CACHE.update({"key": cache_key, "counts": counts})
+    return dict(counts)
+
+
+def _explore_serving_query(
+    *,
+    q: str = "",
+    category: str = "",
+    mode: str = "featured",
+    sort: str = "best",
+    lat: float | None = None,
+    lng: float | None = None,
+) -> dict:
     catalog = _load_explore_catalog()
-    places = list(catalog.get("places") or [])
+    safe_mode = str(mode or "featured").strip().lower()
+    if safe_mode not in EXPLORE_SERVING_MODES:
+        safe_mode = "featured"
+    safe_sort = str(sort or "best").strip().lower()
+    if safe_sort not in EXPLORE_SERVING_SORTS:
+        safe_sort = "best"
     effective_category = category or _explore_category_hint_from_query(q)
+    normalized_category = _normalize_place_category(effective_category) if effective_category else ""
+    guided_request = normalized_category == "guided"
+    places = _explore_guided_destination_profiles() if guided_request else list(catalog.get("places") or [])
     query_terms = _explore_query_terms_for_category(q, effective_category)
-    stay_request = _explore_stay_request(effective_category, q)
-    trail_request = _explore_trail_request(effective_category, q)
+    global_profiles: list[dict] = []
+    global_profile_ids: set[str] = set()
+    global_relaxed_ids: set[str] = set()
+    pakistan_profiles: list[dict] = []
+    if str(q or "").strip() and not guided_request:
+        legacy_matches = [
+            place for place in _load_explore_legacy_search_profiles()
+            if not query_terms or _explore_query_terms_match(place, query_terms)
+        ]
+        places = _merge_explore_profile_lists(places, legacy_matches)
+        global_profiles = _explore_global_seed_search_profiles(q, effective_category, limit=120)
+        global_profile_ids = {str(place.get("id") or "") for place in global_profiles}
+        pakistan_profiles = _pakistan_trek_explore_profiles(q=q, category=effective_category, limit=80)
+        places = _merge_explore_profile_lists(places, pakistan_profiles)
+    stay_request = not guided_request and _explore_stay_request(effective_category, q)
+    trail_request = not guided_request and _explore_trail_request(effective_category, q)
     stay_destination_query = _explore_stay_destination_query(q) if stay_request else ""
     stay_destination_terms = _explore_query_terms_for_category(stay_destination_query, "camp") if stay_destination_query else []
     stay_destination_anchors = _explore_stay_destination_profiles(stay_destination_query, limit=1) if stay_destination_query else []
     stay_first_ids: set[str] = set()
-    trail_first_ids: set[str] = set()
+    trail_first_ids: set[str] = {str(place.get("id") or "") for place in pakistan_profiles}
+    trail_first_rank: dict[str, int] = {}
+    trail_first_near_ids: set[str] = set()
     direct_catalog_ids: set[str] = set()
     if query_terms:
         places = [place for place in places if _explore_query_terms_match(place, query_terms)]
     if effective_category:
         requested = {_normalize_place_category(effective_category)}
-        places = [place for place in places if _explore_place_matches_category_request(place, requested)]
+        if category and not str(q or "").strip():
+            places = [place for place in places if _explore_place_matches_indexed_category(place, category) or guided_request]
+        else:
+            places = [place for place in places if _explore_place_matches_category_request(place, requested) or guided_request]
+    if global_profiles:
+        category_matches = [
+            place for place in global_profiles
+            if not effective_category or _explore_place_matches_category_request(place, {_normalize_place_category(effective_category)})
+        ]
+        selected_global = category_matches or (global_profiles if not places else [])
+        if not category_matches and effective_category and not places:
+            global_relaxed_ids = {str(place.get("id") or "") for place in selected_global}
+        places = _merge_explore_profile_lists(places, selected_global)
     direct_catalog_ids = {str(place.get("id") or "") for place in places}
-    if q or category:
-        stay_include_lodging = _normalize_place_category(effective_category) in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"}
+    strict_category_only = bool(str(category or "").strip() and not str(q or "").strip())
+    if (q or category) and not guided_request and (not strict_category_only or not places) and (
+        stay_request or trail_request or not places or bool(global_relaxed_ids) or bool(q and category)
+    ):
+        stay_include_lodging = normalized_category in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"}
         stay_first_profiles = (
-            _explore_stay_fallback_profiles(
-                q=q,
-                limit=min(max(limit + cursor + 80, 80), 240),
-                include_lodging=stay_include_lodging,
-            )
-            if stay_request
-            else []
+            _explore_stay_fallback_profiles(q=q, limit=240, include_lodging=stay_include_lodging)
+            if stay_request else []
         )
         stay_first_ids = {str(place.get("id") or "") for place in stay_first_profiles}
-        trail_first_profiles = (
-            _explore_trail_fallback_profiles(
-                q=q,
-                limit=min(max(limit + cursor + 80, 80), 240),
-            )
-            if trail_request
-            else []
-        )
-        trail_first_ids = {str(place.get("id") or "") for place in trail_first_profiles}
+        trail_first_profiles = _explore_trail_fallback_profiles(q=q, limit=240) if trail_request else []
+        trail_first_ids.update(str(place.get("id") or "") for place in trail_first_profiles)
+        trail_first_rank.update({
+            str(place.get("id") or ""): index
+            for index, place in enumerate(trail_first_profiles)
+            if str(place.get("id") or "")
+        })
+        for place in trail_first_profiles:
+            summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
+            try:
+                is_near = float(summary.get("distance_m")) <= 50 * 1609.344
+            except (TypeError, ValueError):
+                is_near = False
+            if is_near and str(place.get("id") or ""):
+                trail_first_near_ids.add(str(place.get("id") or ""))
         if stay_request and stay_first_profiles:
             places = _merge_explore_profile_lists(stay_first_profiles, places)
         elif trail_request:
-            places = _merge_explore_profile_lists(
-                places,
-                [
-                    *_official_cache_search_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 120)),
-                    *_canonical_serving_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 80, 80), 240)),
-                    *_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 20, 20), 80)),
-                ],
-            )
+            places = _merge_explore_profile_lists(places, [
+                *_official_cache_search_profiles(q=q, category=effective_category, limit=120),
+                *_canonical_serving_profiles(q=q, category=effective_category, limit=600),
+                *_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=80),
+            ])
             places = _merge_explore_profile_lists(places, trail_first_profiles)
         else:
             places = _merge_explore_profile_lists([*stay_first_profiles, *trail_first_profiles], places)
-            places = _merge_explore_profile_lists(
-                places,
-                [
-                    *_official_cache_search_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 120)),
-                    *_canonical_serving_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 80, 80), 240)),
-                    *_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 20, 20), 80)),
-                ],
+            camp_profiles = (
+                _canonical_camp_search_profiles(q, limit=240)
+                if normalized_category in {"camp", "camping", "campground", "rv", "rv_park"}
+                else []
             )
+            places = _merge_explore_profile_lists(places, [
+                *_official_cache_search_profiles(q=q, category=effective_category, limit=120),
+                *_canonical_serving_profiles(q=q, category=effective_category, limit=600),
+                *camp_profiles,
+                *_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=80),
+            ])
         if query_terms:
             places = [
                 place for place in places
@@ -24663,57 +25741,230 @@ async def explore_catalog_index(q: str = "", category: str = "", limit: int = 50
         if stay_request:
             places = [place for place in places if _explore_profile_matches_stay_result(place)]
         elif trail_request:
-            places = [place for place in places if _explore_place_matches_category_request(place, {"trail"})]
+            places = [
+                place for place in places
+                if str(place.get("id") or "") in global_relaxed_ids
+                or _explore_place_matches_category_request(place, {"trail"})
+            ]
         elif effective_category:
-            places = [place for place in places if _explore_place_matches_category_request(place, requested)]
+            places = [
+                place for place in places
+                if str(place.get("id") or "") in global_relaxed_ids
+                or _explore_place_matches_category_request(place, requested)
+            ]
+    if lat is not None and lng is not None and safe_mode in {"nearby", "trip"} and not guided_request:
+        nearby_profiles = [
+            *_official_cache_nearby_profiles(float(lat), float(lng), category=effective_category, limit=120),
+            *_canonical_serving_profiles(
+                q=q,
+                category=effective_category,
+                limit=600,
+                lat=float(lat),
+                lng=float(lng),
+                radius_mi=180.0 if safe_mode == "trip" else 80.0,
+            ),
+        ]
+        places = _merge_explore_profile_lists(places, nearby_profiles)
+        if query_terms:
+            places = [place for place in places if _explore_query_terms_match(place, query_terms)]
+        if effective_category:
+            if category and not str(q or "").strip():
+                places = [place for place in places if _explore_place_matches_indexed_category(place, category)]
+            else:
+                places = [place for place in places if _explore_place_matches_category_request(place, {normalized_category})]
     if query_terms:
-        places = [place for place in places if not _explore_skip_for_broad_search(place, query_terms)]
+        places = [
+            place for place in places
+            if str(place.get("id") or "") in global_profile_ids
+            or not _explore_skip_for_broad_search(place, query_terms)
+        ]
     if stay_request:
-        places = sorted(
-            places,
-            key=lambda p: (
-                _explore_requested_category_priority(p, effective_category),
-                *_explore_stay_result_sort_key(p, query_terms),
-            ),
-        )
+        prefer_destination_guides = normalized_category in {
+            "lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays",
+        }
+        places = sorted(places, key=lambda place: (
+            *(_explore_stay_guide_sort_key(place) if prefer_destination_guides else (0, 0)),
+            _explore_requested_category_priority(place, effective_category),
+            *_explore_stay_result_sort_key(place, query_terms),
+            str(place.get("id") or ""),
+        ))
     else:
-        places = sorted(
-            places,
-            key=lambda p: (
-                0 if trail_request and str(p.get("id") or "") in direct_catalog_ids else 1,
-                _explore_requested_category_priority(p, effective_category),
-                *_explore_query_sort_key(p, query_terms),
-            ),
+        camp_destination_anchors = (
+            _explore_stay_destination_hint_profiles(_explore_stay_destination_query(q))
+            if q and normalized_category in {"camp", "camping", "campground", "rv", "rv_park"}
+            else []
         )
+        places = sorted(places, key=lambda place: (
+            0 if query_terms or place.get("promoted_serving") or guided_request else 1,
+            *(_explore_trail_query_priority(
+                place,
+                trail_first_rank,
+                trail_first_near_ids,
+                direct_catalog_ids,
+            ) if trail_request else (0, 0)),
+            0 if not camp_destination_anchors or _explore_profile_near_destination(
+                place,
+                camp_destination_anchors,
+                radius_mi=140,
+            ) else 1,
+            _explore_requested_category_priority(place, effective_category),
+            *_explore_query_sort_key(place, query_terms),
+            str(place.get("id") or ""),
+        ))
     places = _dedupe_ranked_explore_profiles(places)
     if not places and stay_request:
-        places = _explore_stay_fallback_profiles(
-            q=q,
-            limit=min(max(limit + cursor + 80, 80), 240),
-            include_lodging=_normalize_place_category(effective_category) in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"},
-        )
+        places = _explore_stay_fallback_profiles(q=q, limit=240, include_lodging=normalized_category in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"})
         query_terms = _explore_query_terms_for_category(_explore_stay_destination_query(q), "camp")
-        places = [place for place in places if _explore_profile_matches_stay_result(place)]
-        places = _dedupe_ranked_explore_profiles(places)
+        places = _dedupe_ranked_explore_profiles([place for place in places if _explore_profile_matches_stay_result(place)])
     if not places and trail_request:
-        places = _explore_trail_fallback_profiles(q=q, limit=min(max(limit + cursor + 80, 80), 240))
+        places = _dedupe_ranked_explore_profiles(_explore_trail_fallback_profiles(q=q, limit=240))
         query_terms = []
-        places = _dedupe_ranked_explore_profiles(places)
-    if not places and q and not _explore_stay_request(effective_category, q):
-        places = _explore_relaxed_destination_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 160))
+    if not places and q and not guided_request and not _explore_stay_request(effective_category, q):
+        places = _explore_relaxed_destination_profiles(q=q, category=effective_category, limit=160)
         query_terms = _explore_relaxed_destination_terms(q, effective_category)
-    cursor = max(0, int(cursor or 0))
-    limit = max(1, min(int(limit or 500), 1000))
-    items = [_explore_place_index_item(place) for place in places[cursor:cursor + limit]]
-    next_cursor = cursor + limit if cursor + limit < len(places) else None
+    if lat is not None and lng is not None:
+        located: list[dict] = []
+        for place in places:
+            point = _explore_profile_point(place)
+            if point == (None, None):
+                located.append(place)
+                continue
+            enriched = dict(place)
+            summary = dict(place.get("summary") or {})
+            summary["distance_m"] = round(_haversine_m(float(lat), float(lng), float(point[0]), float(point[1])))
+            enriched["summary"] = summary
+            located.append(enriched)
+        places = located
+    enrichment_by_id = {
+        str(place.get("id") or index): _explore_enrichment_metadata(place)
+        for index, place in enumerate(places)
+    }
+    if safe_sort == "ready":
+        places.sort(key=lambda place: (
+            -int(enrichment_by_id.get(str(place.get("id") or ""), {}).get("score") or 0),
+            _explore_source_quality_score(place),
+            *_explore_query_sort_key(place, query_terms),
+            str(place.get("id") or ""),
+        ))
+    elif safe_sort == "nearest" and lat is not None and lng is not None:
+        places.sort(key=lambda place: (
+            float((place.get("summary") or {}).get("distance_m") or 10**15),
+            -int(enrichment_by_id.get(str(place.get("id") or ""), {}).get("score") or 0),
+            str(place.get("id") or ""),
+        ))
+    category_counts = _explore_visible_category_counts(catalog)
     return {
-        "schema_version": catalog.get("schema_version", 1),
+        "catalog": catalog,
+        "places": places,
+        "mode": safe_mode,
+        "sort": safe_sort,
+        "effective_category": effective_category,
+        "query_terms": query_terms,
+        "category_counts": category_counts,
+    }
+
+
+def _explore_serving_response(
+    result: dict,
+    *,
+    limit: int,
+    cursor: int,
+    compact: bool,
+) -> dict:
+    catalog = result["catalog"]
+    places = result["places"]
+    safe_cursor = max(0, int(cursor or 0))
+    safe_limit = max(1, min(int(limit or (500 if compact else 60)), 1000 if compact else 100))
+    page_profiles = _decorate_explore_serving_places(
+        places[safe_cursor:safe_cursor + safe_limit],
+        mode=result["mode"],
+        sort=result["sort"],
+        start_position=safe_cursor + 1,
+    )
+    if compact:
+        page = []
+        for place in page_profiles:
+            item = _explore_place_index_item(place)
+            item["enrichment"] = place.get("enrichment") or {}
+            item["provenance"] = place.get("provenance") or {}
+            item["ranking"] = place.get("ranking") or {}
+            page.append(item)
+    else:
+        page = [_clean_explore_public_response_profile(place) for place in page_profiles]
+    next_cursor = safe_cursor + safe_limit if safe_cursor + safe_limit < len(places) else None
+    category_counts = result["category_counts"]
+    return {
+        "schema_version": EXPLORE_SERVING_SCHEMA_VERSION,
+        "catalog_schema_version": catalog.get("schema_version", 1),
         "catalog_id": catalog.get("catalog_id", ""),
         "generated_at": catalog.get("generated_at", 0),
+        "source": catalog.get("source", "Trailhead Explore"),
+        "mode": result["mode"],
+        "sort": result["sort"],
+        "category": result.get("effective_category") or "",
         "count": len(places),
-        "cursor": cursor,
+        "total_count": len(places),
+        "page_count": len(page),
+        "cursor": safe_cursor,
         "next_cursor": next_cursor,
-        "places": items,
+        "facets": {
+            "categories": category_counts,
+            "modes": sorted(EXPLORE_SERVING_MODES),
+            "sorts": sorted(EXPLORE_SERVING_SORTS),
+        },
+        "category_counts": category_counts,
+        "places": page,
+    }
+
+@app.get("/api/explore/catalog")
+async def explore_catalog():
+    """Return the prebuilt featured Explore catalog."""
+    return _load_explore_catalog()
+
+@app.get("/api/explore/catalog/index")
+async def explore_catalog_index(
+    q: str = "",
+    category: str = "",
+    mode: str = "featured",
+    sort: str = "best",
+    lat: float | None = None,
+    lng: float | None = None,
+    limit: int = 500,
+    cursor: int = 0,
+):
+    """Return deterministic, lightweight Explore cards for scalable browsing."""
+    result = _explore_serving_query(
+        q=q,
+        category=category,
+        mode=mode,
+        sort=sort,
+        lat=lat,
+        lng=lng,
+    )
+    return _explore_serving_response(result, limit=limit, cursor=cursor, compact=True)
+
+
+@app.get("/api/explore/home")
+async def explore_home(
+    mode: str = "featured",
+    sort: str = "best",
+    lat: float | None = None,
+    lng: float | None = None,
+    limit: int = 24,
+):
+    """Return the first Explore page plus 25 local Guided destination cards."""
+    result = _explore_serving_query(mode=mode, sort=sort, lat=lat, lng=lng)
+    response = _explore_serving_response(result, limit=limit, cursor=0, compact=True)
+    destinations = _load_explore_guided_destinations()
+    return {
+        **response,
+        "guided": {
+            "catalog_id": "trailhead-guided-destinations-v1",
+            "count": len(destinations),
+            "provider_calls": 0,
+            "destinations": destinations,
+        },
+        "guided_destinations": destinations,
     }
 
 
@@ -24859,71 +26110,21 @@ async def explore_places(
     lat: float | None = None,
     lng: float | None = None,
     mode: str = "featured",
+    sort: str = "best",
     q: str = "",
     category: str = "",
     limit: int = 60,
     cursor: int = 0,
 ):
-    catalog = _load_explore_catalog()
-    places = list(catalog.get("places") or [])
-    effective_category = category or _explore_category_hint_from_query(q)
-    query_terms = _explore_query_terms_for_category(q, effective_category)
-    if query_terms:
-        places = [place for place in places if _explore_query_terms_match(place, query_terms)]
-    if effective_category:
-        requested = {_normalize_place_category(effective_category)}
-        places = [place for place in places if _explore_place_matches_category_request(place, requested)]
-    official_places: list[dict] = []
-    if q or category:
-        official_places.extend(_official_cache_search_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 30, 30), 120)))
-        official_places.extend(_canonical_serving_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 60, 60), 240)))
-        official_places.extend(_pakistan_trek_explore_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 20, 20), 80)))
-    if lat is not None and lng is not None and mode in {"nearby", "trip"}:
-        official_places.extend(_official_cache_nearby_profiles(lat, lng, category=effective_category, limit=min(max(limit + cursor + 30, 30), 120)))
-        official_places.extend(_canonical_serving_profiles(
-            q=q,
-            category=effective_category,
-            limit=min(max(limit + cursor + 60, 60), 240),
-            lat=lat,
-            lng=lng,
-            radius_mi=180.0 if mode == "trip" else 80.0,
-        ))
-    if official_places:
-        places = _merge_explore_profile_lists(places, official_places)
-        if query_terms:
-            places = [place for place in places if _explore_query_terms_match(place, query_terms)]
-        if effective_category:
-            places = [place for place in places if _explore_place_matches_category_request(place, requested)]
-    if query_terms:
-        places = [place for place in places if not _explore_skip_for_broad_search(place, query_terms)]
-    if lat is not None and lng is not None and mode in {"nearby", "trip"}:
-        ranked = []
-        for place in places:
-            summary = place.get("summary") or {}
-            plat = summary.get("lat")
-            plng = summary.get("lng")
-            if not isinstance(plat, (int, float)) or not isinstance(plng, (int, float)):
-                continue
-            dist_m = _haversine_m(lat, lng, float(plat), float(plng))
-            enriched = dict(place)
-            enriched["summary"] = {**summary, "distance_m": round(dist_m)}
-            ranked.append(enriched)
-        places = sorted(ranked, key=lambda p: (p.get("summary") or {}).get("distance_m", 999999999))
-    else:
-        places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
-    places = _dedupe_ranked_explore_profiles(places)
-    if not places and _explore_stay_request(effective_category, q):
-        places = _explore_stay_fallback_profiles(q=q, limit=min(max(limit + cursor + 60, 60), 240))
-        query_terms = _explore_query_terms_for_category(_explore_stay_destination_query(q), "camp")
-        places = _dedupe_ranked_explore_profiles(places)
-    if not places and q and not _explore_stay_request(effective_category, q):
-        places = _explore_relaxed_destination_profiles(q=q, category=effective_category, limit=min(max(limit + cursor + 40, 40), 160))
-        query_terms = _explore_relaxed_destination_terms(q, effective_category)
-    cursor = max(0, int(cursor or 0))
-    limit = max(1, min(limit, 100))
-    page = [_clean_explore_public_response_profile(place) for place in places[cursor:cursor + limit]]
-    next_cursor = cursor + limit if cursor + limit < len(places) else None
-    return {**catalog, "places": page, "mode": mode, "count": len(places), "cursor": cursor, "next_cursor": next_cursor}
+    result = _explore_serving_query(
+        q=q,
+        category=category,
+        mode=mode,
+        sort=sort,
+        lat=lat,
+        lng=lng,
+    )
+    return _explore_serving_response(result, limit=limit, cursor=cursor, compact=False)
 
 
 def _find_explore_place(place_id: str) -> dict | None:
@@ -26291,6 +27492,269 @@ def _viator_live_results_for_points(
         }],
     })
     return [], meta
+
+
+def _find_explore_guided_destination(destination_key: str) -> dict | None:
+    wanted = unquote(str(destination_key or "")).strip().lower()
+    for destination in _load_explore_guided_destinations():
+        if wanted in {
+            str(destination.get("id") or "").lower(),
+            str(destination.get("slug") or "").lower(),
+        }:
+            return destination
+    return None
+
+
+def _guided_destination_organic_places(destination: dict, limit: int = 8) -> list[dict]:
+    safe_limit = max(1, min(int(limit or 8), 16))
+    try:
+        center_lat = float(destination.get("lat"))
+        center_lng = float(destination.get("lng"))
+    except Exception:
+        return []
+    blocked = {"camp", "camping", "campground", "rv", "rv_park", "glamping", "lodging", "fuel", "resupply"}
+    ranked: list[tuple[float, dict]] = []
+    for place in _load_explore_catalog().get("places") or []:
+        point = _explore_profile_point(place)
+        if point == (None, None):
+            continue
+        tokens = _explore_place_category_tokens(place)
+        if tokens.intersection(blocked):
+            continue
+        distance_mi = _haversine_m(center_lat, center_lng, float(point[0]), float(point[1])) / 1609.344
+        if distance_mi > 140:
+            continue
+        if not _explore_place_matches_things_request(place) and not tokens.intersection({
+            "park", "public_land", "trail", "trails", "trailhead", "viewpoint", "scenic",
+            "water", "waterfall", "peak", "historic", "monument", "climb", "climbing",
+        }):
+            continue
+        enriched = dict(place)
+        summary = dict(place.get("summary") or {})
+        summary["distance_m"] = round(distance_mi * 1609.344)
+        enriched["summary"] = summary
+        score = distance_mi + _explore_source_quality_score(place) + (100 - _explore_enrichment_metadata(place)["score"]) / 8
+        ranked.append((score, enriched))
+    ranked.sort(key=lambda item: (item[0], str(item[1].get("id") or "")))
+    places = [place for _, place in ranked[:safe_limit]]
+    if not places:
+        query = str(destination.get("search_query") or destination.get("name") or "")
+        fallback = _explore_serving_query(q=query, mode="featured", sort="ready")
+        places = [place for place in fallback["places"] if str(place.get("category") or "") != "guided"][:safe_limit]
+    if not places:
+        places = [_explore_guided_destination_profile(destination, 1)]
+    decorated = _decorate_explore_serving_places(places, mode="nearby", sort="nearest")
+    output: list[dict] = []
+    for place in decorated[:safe_limit]:
+        item = _explore_place_index_item(place)
+        item["enrichment"] = place.get("enrichment") or {}
+        item["provenance"] = place.get("provenance") or {}
+        item["ranking"] = place.get("ranking") or {}
+        output.append(item)
+    return output
+
+
+def _resolve_viator_guided_destination(destination: dict, provider_destinations: list[dict]) -> dict | None:
+    target_terms = {
+        _viator_destination_text(destination.get("name")),
+        _viator_destination_text(destination.get("search_query")),
+        *[_viator_destination_text(item) for item in destination.get("aliases") or []],
+    } - {""}
+    try:
+        target_lat = float(destination.get("lat"))
+        target_lng = float(destination.get("lng"))
+    except Exception:
+        target_lat = target_lng = None
+    ranked: list[tuple[float, dict]] = []
+    for raw in provider_destinations:
+        normalized = _viator_normalize_destination(raw)
+        if not normalized:
+            continue
+        provider_name = _viator_destination_text(normalized.get("name"))
+        text_score: float | None = None
+        if provider_name in target_terms:
+            text_score = 0.0
+        elif any(provider_name and (provider_name in term or term in provider_name) for term in target_terms):
+            text_score = 8.0
+        distance_mi: float | None = None
+        if target_lat is not None and target_lng is not None and normalized.get("lat") is not None and normalized.get("lng") is not None:
+            distance_mi = _haversine_m(target_lat, target_lng, float(normalized["lat"]), float(normalized["lng"])) / 1609.344
+        if text_score is None and (distance_mi is None or distance_mi > 100):
+            continue
+        type_penalty = 0.0 if str(normalized.get("type") or "").upper() in {"CITY", "REGION"} else 4.0
+        score = (text_score if text_score is not None else 20.0) + type_penalty + min(distance_mi or 0.0, 100.0) / 20.0
+        ranked.append((score, normalized))
+    ranked.sort(key=lambda item: (item[0], str(item[1].get("name") or ""), str(item[1].get("id") or "")))
+    return ranked[0][1] if ranked else None
+
+
+def _fetch_viator_guided_destination_live(
+    client: ViatorClient,
+    destination: dict,
+    *,
+    q: str,
+    free_cancel: bool,
+    start_date: str,
+    end_date: str,
+    lowest_price: float | None,
+    highest_price: float | None,
+    sort: str,
+    order: str,
+    currency: str,
+    limit: int,
+) -> dict:
+    provider_calls = 1
+    timeout = min(float(client.config.request_timeout_seconds), 20.0)
+    destinations_payload = client.get_destinations(timeout=timeout)
+    raw_destinations = destinations_payload.get("destinations") if isinstance(destinations_payload, dict) else []
+    provider_destination = _resolve_viator_guided_destination(
+        destination,
+        raw_destinations if isinstance(raw_destinations, list) else [],
+    )
+    if provider_destination:
+        provider_calls += 1
+        flags = ["FREE_CANCELLATION"] if free_cancel else None
+        viator_sort, viator_order = _viator_sort_params(sort, order)
+        search_payload = client.search_products(
+            destination_id=str(provider_destination["id"]),
+            flags=flags,
+            start_date=_clean_experience_date(start_date),
+            end_date=_clean_experience_date(end_date),
+            lowest_price=_clean_experience_price(lowest_price),
+            highest_price=_clean_experience_price(highest_price),
+            sort=viator_sort,
+            order=viator_order,
+            count=limit,
+            start=1,
+            currency=currency or "USD",
+            timeout=timeout,
+        )
+        resolution = "provider_destination"
+    else:
+        provider_calls += 1
+        search_term = re.sub(r"\s+", " ", str(q or destination.get("search_query") or destination.get("name") or "").strip())
+        search_payload = client.search_freetext(
+            search_term=search_term,
+            count=limit,
+            start=1,
+            currency=currency or "USD",
+            timeout=timeout,
+        )
+        resolution = "freetext"
+    return {
+        "provider_calls": provider_calls,
+        "destinations_payload": destinations_payload,
+        "provider_destination": provider_destination,
+        "search_payload": search_payload,
+        "resolution": resolution,
+    }
+
+
+_VIATOR_GUIDED_EXECUTOR = ThreadPoolExecutor(max_workers=4, thread_name_prefix="viator-guided")
+
+
+@app.get("/api/explore/guided-destinations/{destination_key}")
+async def explore_guided_destination(
+    destination_key: str,
+    q: str = "",
+    category: str = "",
+    free_cancel: bool = False,
+    start_date: str = "",
+    end_date: str = "",
+    lowest_price: float | None = None,
+    highest_price: float | None = None,
+    sort: str = "recommended",
+    order: str = "descending",
+    currency: str = "USD",
+    limit: int = 12,
+):
+    destination = _find_explore_guided_destination(destination_key)
+    if not destination:
+        raise HTTPException(404, "Guided destination not found")
+    safe_limit = max(1, min(int(limit or 12), 24))
+    organic_places = _guided_destination_organic_places(destination, min(safe_limit, 12))
+    client = ViatorClient(viator_config_from_env())
+    if not client.ready():
+        return {
+            "schema_version": EXPLORE_SERVING_SCHEMA_VERSION,
+            "destination": destination,
+            "source": "viator",
+            "live_enabled": False,
+            "provider_status": {"status": "disabled", "provider_calls": 0},
+            "provider_destination_id": None,
+            "count": 0,
+            "experiences": [],
+            "organic_fallback": True,
+            "organic_places": organic_places,
+        }
+
+    try:
+        live_future = asyncio.get_running_loop().run_in_executor(
+            _VIATOR_GUIDED_EXECUTOR,
+            functools.partial(
+                _fetch_viator_guided_destination_live,
+                client,
+                destination,
+                q=q,
+                free_cancel=free_cancel,
+                start_date=start_date,
+                end_date=end_date,
+                lowest_price=lowest_price,
+                highest_price=highest_price,
+                sort=sort,
+                order=order,
+                currency=currency,
+                limit=safe_limit,
+            ),
+        )
+        live = await asyncio.wait_for(
+            live_future,
+            timeout=min(45.0, max(8.0, float(client.config.request_timeout_seconds) * 2 + 5.0)),
+        )
+    except (asyncio.TimeoutError, TimeoutError) as exc:
+        live = {
+            "provider_calls": 1,
+            "destinations_payload": {"status": "timeout", "reason": str(exc), "endpoint": "/destinations"},
+            "provider_destination": None,
+            "search_payload": {"products": [], "status": "timeout", "reason": "Guided trip lookup timed out."},
+            "resolution": "timeout",
+        }
+    provider_calls = int(live.get("provider_calls") or 0)
+    destinations_payload = live.get("destinations_payload") or {}
+    provider_destination = live.get("provider_destination")
+    search_payload = live.get("search_payload") or {"products": []}
+    resolution = str(live.get("resolution") or "")
+    experiences = [
+        item.to_dict()
+        for item in normalize_viator_products(_viator_products_payload(search_payload), ttl_hours=client.config.cache_ttl_hours)
+    ]
+    experiences = _filter_experiences_for_destination_page(
+        experiences,
+        category=category,
+        free_cancel=free_cancel,
+        lowest_price=_clean_experience_price(lowest_price),
+        highest_price=_clean_experience_price(highest_price),
+    )
+    experiences = _sort_experiences(experiences, sort, order)[:safe_limit]
+    provider_status = {
+        **_viator_provider_status(search_payload),
+        "resolution": resolution,
+        "destination_lookup": _viator_provider_status(destinations_payload),
+        "provider_calls": provider_calls,
+    }
+    provider_failed = str(provider_status.get("status") or "").lower() in {"error", "timeout", "disabled"}
+    return {
+        "schema_version": EXPLORE_SERVING_SCHEMA_VERSION,
+        "destination": destination,
+        "source": "viator",
+        "live_enabled": True,
+        "provider_status": provider_status,
+        "provider_destination_id": str(provider_destination.get("id")) if provider_destination else None,
+        "count": len(experiences),
+        "experiences": experiences,
+        "organic_fallback": provider_failed or not experiences,
+        "organic_places": organic_places,
+    }
 
 
 @app.post("/api/tours/route")

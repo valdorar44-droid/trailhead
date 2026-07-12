@@ -16,13 +16,15 @@ type Props = {
   hasQuery?: boolean;
   shownCount: number;
   countLabel?: string;
+  categoryCounts?: Partial<Record<ExploreCategoryKey, number>>;
   sortMode: ExploreSortMode;
+  guidedMode?: boolean;
   onModeChange: (mode: ExploreMode) => void;
   onCategorySelect: (key: ExploreCategoryKey) => void;
+  onOpenFilters?: () => void;
   onClearCategory: () => void;
   onClearSaved: () => void;
   onShowMore?: () => void;
-  onSourcePress?: () => void;
   onSortCycle: () => void;
 };
 
@@ -33,13 +35,15 @@ export function ExploreHomeControls({
   hasQuery,
   shownCount,
   countLabel: countLabelOverride,
+  categoryCounts,
   sortMode,
+  guidedMode = false,
   onModeChange,
   onCategorySelect,
+  onOpenFilters,
   onClearCategory,
   onClearSaved,
   onShowMore,
-  onSourcePress,
   onSortCycle,
 }: Props) {
   const C = useTheme();
@@ -48,15 +52,16 @@ export function ExploreHomeControls({
   return (
     <View style={styles.shell}>
       <ExploreModeTabs value={mode} onChange={onModeChange} />
-      <ExploreCategoryChips selected={category} mode={mode} onSelect={onCategorySelect} />
+      <ExploreCategoryChips selected={category} mode={mode} counts={categoryCounts} onSelect={onCategorySelect} onMore={onOpenFilters} />
       <ExploreFilterRow
         shownCount={shownCount}
         countLabel={countLabel}
-        sourceLabel="Details"
+        sourceLabel={sortMode === 'source' ? 'Most detail first' : 'Trip details'}
         sortLabel={sortLabel}
+        showSourceStatus={!guidedMode}
+        showSort={!guidedMode}
         onCountPress={onShowMore}
-        onSourcePress={onSourcePress}
-        onSortPress={onSortCycle}
+        onSortPress={guidedMode ? undefined : onSortCycle}
       />
       {category !== 'all' ? (
         <ClearControl
@@ -97,7 +102,7 @@ function ClearControl({
 
 function sortLabelForMode(sortMode: ExploreSortMode) {
   if (sortMode === 'nearest') return 'Nearest';
-  if (sortMode === 'source') return 'Ready first';
+  if (sortMode === 'source') return 'Most detail';
   return 'Best match';
 }
 

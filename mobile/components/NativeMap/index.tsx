@@ -244,6 +244,7 @@ export interface NativeMapProps {
   suppressFeatureTaps?: boolean;
 
   // Overlay visibility
+  showLandOverlay?: boolean;
   showUsgsOverlay: boolean;
   showTerrain:     boolean;
   showTrailOverlay?: boolean;
@@ -790,7 +791,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
     suppressFeatureTaps = false,
-    showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
+    showLandOverlay = false, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
     missionBriefActive = false, missionBriefFullRoute = [], missionBriefProgressRoute = [],
     missionBriefMarker = null, missionBriefCallouts = [], missionBriefWarning = false,
     onMapReady, onBoundsChange, onMapGesture, onMapTap,
@@ -2554,6 +2555,24 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, [campClusterMaxZoom, drawableCamps, isExtremeMapbox, navMode, onCampTap, onMapTap, refreshMapSourcesForBounds, rememberFreeCamera, shouldClusterCamps, showTerrain, suppressFeatureTaps]);
 
   const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
+  const publicLandBelowLayerID = traceDraftCoords.length > 1
+    ? 'trail-trace-draft-glow'
+    : traceRouteCoords.length > 1
+      ? 'trail-trace-route-glow'
+      : routeCoords.length > 0 && !waterRouteVisualActive
+        ? 'route-shadow'
+        : missionBriefActive && missionBriefFullRoute.length > 1
+          ? 'mission-brief-full-route-casing'
+          : waterNavLineFC.features.length > 0
+            ? 'water-nav-line-casing'
+            : waterCorridorFC.features.length > 0
+              ? 'safe-water-corridor-band'
+              : undefined;
+  const publicLandLayerPositionProps = isMapboxStandardStyle
+    ? ({ slot: 'bottom' } as any)
+    : publicLandBelowLayerID
+      ? ({ belowLayerID: publicLandBelowLayerID } as any)
+      : {};
   const userLocationShape = userLoc
     ? {
         type: 'FeatureCollection',
@@ -3632,6 +3651,23 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
             style={{ lineColor: '#a855f7', lineWidth: 1.5, lineOpacity: 0.8, lineDasharray: [3, 2] }}
           />
         </MapGL.ShapeSource>
+      )}
+
+      {/* ── Public land ownership overlay ─────────────────────────────── */}
+      {showLandOverlay && (
+        <MapGL.RasterSource
+          id="public-land-overlay"
+          tileUrlTemplates={[`${API_BASE_URL}/api/land-tile/{z}/{y}/{x}`]}
+          tileSize={256}
+          minZoomLevel={3}
+          maxZoomLevel={16}
+        >
+          <MapGL.RasterLayer
+            id="public-land-overlay-layer"
+            {...publicLandLayerPositionProps}
+            style={{ rasterOpacity: 0.58 }}
+          />
+        </MapGL.RasterSource>
       )}
 
       {/* ── USGS Topo overlay ─────────────────────────────────────────── */}

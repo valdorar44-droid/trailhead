@@ -126,6 +126,14 @@ class ExplorePlaceV3:
     updated_at: int = 0
     linked_trail_ids: list[str] = field(default_factory=list)
     linked_place_ids: list[str] = field(default_factory=list)
+    planning_facts: list[dict[str, Any]] = field(default_factory=list)
+    provenance: dict[str, Any] = field(default_factory=dict)
+    checked_at: int = 0
+    media_kind: str = "none"
+    enrichment_score: int = 0
+    enrichment_grade: str = "candidate"
+    rejection_reasons: list[str] = field(default_factory=list)
+    reviewable: bool = False
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

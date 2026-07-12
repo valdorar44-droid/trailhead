@@ -1,5 +1,5 @@
-import React, { useMemo, useState } from 'react';
-import { Image, StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
+import React, { useEffect, useMemo, useState } from 'react';
+import { AppState, Image, Platform, StyleSheet, Text, TouchableOpacity, View, type StyleProp, type ViewStyle } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useStore } from '@/lib/store';
 import { useTheme } from '@/lib/design';
@@ -17,7 +17,11 @@ type Props = {
   pins: StaticMapboxPin[];
   title: string;
   subtitle?: string;
+  imageUrl?: string;
+  imageAlt?: string;
   badgeLabel?: string;
+  showBadge?: boolean;
+  showCopy?: boolean;
   height?: number;
   onPress?: () => void;
   style?: StyleProp<ViewStyle>;
@@ -25,21 +29,57 @@ type Props = {
 
 const MAPBOX_STATIC_STYLE = 'mapbox/outdoors-v12';
 
-export function StaticMapboxPreview({ pins, title, subtitle, badgeLabel, height = 260, onPress, style }: Props) {
+export function StaticMapboxPreview({
+  pins,
+  title,
+  subtitle,
+  imageUrl,
+  imageAlt,
+  badgeLabel,
+  showBadge = true,
+  showCopy = true,
+  height = 260,
+  onPress,
+  style,
+}: Props) {
   const C = useTheme();
   const token = useStore(st => st.mapboxToken);
-  const [failedUrl, setFailedUrl] = useState('');
+  const [failedUrls, setFailedUrls] = useState<string[]>([]);
   const [loadedUrl, setLoadedUrl] = useState('');
   const cleanPins = useMemo(
     () => dedupePreviewPins(pins).slice(0, 16),
     [pins],
   );
-  const url = useMemo(
+  const mapUrl = useMemo(
     () => buildStaticMapboxUrl(cleanPins, token, Math.max(180, Math.min(640, Math.round(height)))),
     [cleanPins, height, token],
   );
+  const url = useMemo(
+    () => [imageUrl, mapUrl]
+      .map(candidate => String(candidate || '').trim())
+      .find(candidate => candidate && !failedUrls.includes(candidate)) || '',
+    [failedUrls, imageUrl, mapUrl],
+  );
+  useEffect(() => {
+    setFailedUrls([]);
+  }, [imageUrl, mapUrl]);
+  useEffect(() => {
+    const retryMedia = () => setFailedUrls([]);
+    const appState = AppState.addEventListener('change', state => {
+      if (state === 'active') retryMedia();
+    });
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.addEventListener('online', retryMedia);
+    }
+    return () => {
+      appState.remove();
+      if (Platform.OS === 'web' && typeof window !== 'undefined') {
+        window.removeEventListener('online', retryMedia);
+      }
+    };
+  }, []);
   const Wrapper: any = onPress ? TouchableOpacity : View;
-  const canLoadImage = !!url && failedUrl !== url;
+  const canLoadImage = !!url;
   const imageReady = canLoadImage && loadedUrl === url;
   return (
     <Wrapper style={[styles.wrap, { height, backgroundColor: C.s1 }, style]} activeOpacity={0.9} onPress={onPress as any}>
@@ -58,19 +98,25 @@ export function StaticMapboxPreview({ pins, title, subtitle, badgeLabel, height 
           source={{ uri: url }}
           style={[StyleSheet.absoluteFillObject, !imageReady && styles.pendingImage]}
           resizeMode="cover"
+          accessible={!!imageAlt}
+          accessibilityLabel={imageAlt}
           onLoad={() => setLoadedUrl(url)}
-          onError={() => setFailedUrl(url)}
+          onError={() => setFailedUrls(current => current.includes(url) ? current : [...current, url])}
         />
       ) : null}
       <View style={styles.shade} />
-      <View style={styles.badge}>
-        <Ionicons name="navigate-outline" size={15} color="#fff" />
-        <Text style={styles.badgeText}>{badgeLabel || (cleanPins.length ? (cleanPins.length === 1 ? '1 area' : `${cleanPins.length} places`) : 'Area')}</Text>
-      </View>
-      <View style={styles.copy}>
-        <Text style={styles.title} numberOfLines={2}>{title}</Text>
-        {!!subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
-      </View>
+      {showBadge ? (
+        <View style={styles.badge}>
+          <Ionicons name="navigate-outline" size={15} color="#fff" />
+          <Text style={styles.badgeText}>{badgeLabel || (cleanPins.length ? (cleanPins.length === 1 ? '1 area' : `${cleanPins.length} places`) : 'Area')}</Text>
+        </View>
+      ) : null}
+      {showCopy ? (
+        <View style={styles.copy}>
+          <Text style={styles.title} numberOfLines={2}>{title}</Text>
+          {!!subtitle && <Text style={styles.subtitle} numberOfLines={1}>{subtitle}</Text>}
+        </View>
+      ) : null}
     </Wrapper>
   );
 }

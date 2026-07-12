@@ -9,6 +9,7 @@ import type { RouteOpts, RouteResult, RouteStep, MapBounds, WP } from './types';
 import type { RouteProviderMode } from './types';
 import type { PremiumMapStyle } from './mapStyle';
 import { campMarkerVisual } from '@/lib/campMarkerVisual';
+import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
 
@@ -73,6 +74,7 @@ export interface NativeMapProps {
   traceRouteCoords?: [number, number][];
   tracePinCoords?: [number, number][];
   suppressFeatureTaps?: boolean;
+  showLandOverlay?: boolean;
   showUsgsOverlay: boolean;
   showTrailOverlay?: boolean;
   showTerrain:     boolean;
@@ -868,6 +870,27 @@ const mapboxContainerStyle: React.CSSProperties = {
   height: '100%',
 };
 
+function syncWebLandOverlay(map: any, visible: boolean) {
+  if (!map?.isStyleLoaded?.()) return;
+  if (map.getLayer?.('trailhead-public-land')) map.removeLayer('trailhead-public-land');
+  if (map.getSource?.('trailhead-public-land')) map.removeSource('trailhead-public-land');
+  if (!visible) return;
+  map.addSource('trailhead-public-land', {
+    type: 'raster',
+    tiles: [`${TRAILHEAD_API_BASE}/api/land-tile/{z}/{y}/{x}`],
+    tileSize: 256,
+    minzoom: 3,
+    maxzoom: 16,
+    attribution: 'BLM Surface Management Agency',
+  });
+  map.addLayer({
+    id: 'trailhead-public-land',
+    type: 'raster',
+    source: 'trailhead-public-land',
+    paint: { 'raster-opacity': 0.58 },
+  }, map.getLayer?.('trailhead-web-route-casing') ? 'trailhead-web-route-casing' : undefined);
+}
+
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const C = useTheme();
   const mapboxToken = useStore(st => st.mapboxToken);
@@ -1090,6 +1113,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           props.onBoundsChange?.(currentBounds(mapRef.current));
           syncWebRoute(mapRef.current, props.waypoints);
           syncWebTrailHighlight(mapRef.current, trailHighlightRef.current);
+          syncWebLandOverlay(mapRef.current, !!props.showLandOverlay);
           syncWebMarkers(mapgl, mapRef.current, props, markerRefs);
         });
         mapRef.current.on('moveend', () => props.onBoundsChange?.(currentBounds(mapRef.current)));
@@ -1146,6 +1170,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       routeReadyRef.current = true;
       syncWebRoute(mapRef.current, props.waypoints);
       syncWebTrailHighlight(mapRef.current, trailHighlightRef.current);
+      syncWebLandOverlay(mapRef.current, !!latestPropsRef.current.showLandOverlay);
       if (isMapboxWeb && mapRef.current?.setConfigProperty) {
         Object.entries(styleConfig(premiumStyle, props.showTerrain).basemap).forEach(([key, value]) => {
           mapRef.current.setConfigProperty('basemap', key, value);
@@ -1153,6 +1178,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       }
     });
   }, [isWebMap, isMapboxWeb, premiumStyle, props.showTerrain]);
+
+  useEffect(() => {
+    if (!isWebMap || !mapRef.current || !routeReadyRef.current) return;
+    syncWebLandOverlay(mapRef.current, !!props.showLandOverlay);
+  }, [isWebMap, props.showLandOverlay]);
 
   useEffect(() => {
     if (!isWebMap || !mapRef.current || !routeReadyRef.current) return;

@@ -259,7 +259,8 @@ interface AppState {
   welcomeSetupRunId: number;
   tourTargets: Record<string, TourTargetRect>;
   setAuth: (token: string, user: User) => void;
-  clearAuth: () => void;
+  signOut: () => void;
+  clearAuthAndLocalData: () => void;
   setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
   setTabBarHidden: (hidden: boolean) => void;
   setRigProfile: (rig: RigProfile) => void;
@@ -353,7 +354,25 @@ export const useStore = create<AppState>((set) => ({
     }));
   },
 
-  clearAuth: () => {
+  signOut: () => {
+    const freshSession = newSessionId();
+    sd('trailhead_token');
+    sd('trailhead_user');
+    sd(PLAN_KEY);
+    sd('trailhead_iap_pending');
+    ss('trailhead_session', freshSession);
+    set({
+      token: null,
+      user: null,
+      pendingMapSelection: null,
+      pendingStartCopilotVoice: false,
+      sessionId: freshSession,
+      hasPlan: false,
+      planExpiresAt: null,
+    });
+  },
+
+  clearAuthAndLocalData: () => {
     const freshSession = newSessionId();
     sd('trailhead_token');
     sd('trailhead_user');

@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
 from scripts.explore_sources.base.aliases import apply_aliases
 from scripts.explore_sources.base.cards import build_card
 from scripts.explore_sources.base.dedupe import dedupe_places, disambiguate_duplicate_display_names, link_trailheads_to_trails
+from scripts.explore_sources.base.enrichment import enrich_place, enrich_place_dict
 from scripts.explore_sources.base.fetch import parse_headers, resolve_input_paths
 from scripts.explore_sources.base.content_quality import sanitize_place_profile
 from scripts.explore_sources.base.quality import score_place
@@ -179,6 +180,7 @@ def build_catalog(
         score_place(place)
         build_card(place)
         apply_aliases(place, linked_names)
+        enrich_place(place)
     if import_out_dir:
         write_import_outputs(all_records, places, all_trails, import_out_dir)
     return all_records, places, all_trails
@@ -306,7 +308,7 @@ def main() -> int:
         "generated_at": generated_at,
         "source": "Prepared OSM/Geofabrik, RIDB/Recreation.gov, NPS, USFS, BLM, Wikidata, and OpenBeta fixtures; source attribution preserved",
         "count": len(places),
-        "places": [sanitize_place_profile(place.to_dict()) for place in places],
+        "places": [enrich_place_dict(sanitize_place_profile(place.to_dict())) for place in places],
     }
     trail_payload = {
         "schema_version": 1,

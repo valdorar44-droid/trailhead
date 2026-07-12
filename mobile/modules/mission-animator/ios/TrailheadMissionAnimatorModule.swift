@@ -182,7 +182,9 @@ private final class NativeMissionAnimator: NSObject {
             emit("onMissionError", ["message": "MapView not found", "code": "no_map"])
             return false
         }
+        resetPlaybackContinuity()
         installLayers()
+        clearOverlays()
         updateFullRoute()
         playing = true
         paused = false
@@ -191,6 +193,17 @@ private final class NativeMissionAnimator: NSObject {
         startDisplayLink()
         advanceScene()
         return true
+    }
+
+    private func resetPlaybackContinuity() {
+        smoothedBearing = nil
+        lastCamDist = nil
+        lastCamBearing = nil
+        orbitBaseBearing = 0
+        lastProgressEmit = 0
+        warningActive = false
+        freeCamera = false
+        narrationDone = true
     }
 
     func pause() -> Bool {

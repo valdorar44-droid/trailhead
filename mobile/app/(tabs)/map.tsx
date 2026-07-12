@@ -769,6 +769,36 @@ type CopilotChatMessage = {
   text: string;
   action?: MapActionRequest | null;
 };
+const COPILOT_QUICK_ACTIONS: Array<{
+  label: string;
+  prompt: string;
+  icon: keyof typeof Ionicons.glyphMap;
+}> = [
+  { label: 'Flyover', prompt: 'open flyover', icon: 'play-outline' },
+  { label: 'Camps', prompt: 'show camps near my route', icon: 'bonfire-outline' },
+  { label: 'Fuel', prompt: 'find fuel nearby', icon: 'flash-outline' },
+  { label: 'Public land', prompt: 'turn on public land', icon: 'layers-outline' },
+];
+
+function copilotActionDisplayLabel(action?: MapActionRequest | null) {
+  if (!action) return 'Map action';
+  if (action.label?.trim()) return action.label.trim();
+  return ({
+    toggleLayer: 'Layer change',
+    setMapStyle: 'Map style',
+    buildRoute: 'Route preview',
+    modifyRoute: 'Route change',
+    startRouteScout: 'Route scout',
+    saveScoutToRouteBuilder: 'Add route to plan',
+    dropPin: 'New map pin',
+    saveTrip: 'Save trip',
+    downloadOfflineArea: 'Offline download',
+    flyToPlace: 'Move map',
+    zoomMap: 'Map view',
+    setMapZoom: 'Map view',
+    routeToSelectedPlace: 'Route preview',
+  } as Record<string, string>)[action.action_type] || 'Map action';
+}
 type PremiumMapStyle =
   | 'standard'
   | 'standard_satellite'
@@ -4337,7 +4367,7 @@ const buildMapHtml = (
   var _routeLoading=false;
   var routeIsProper=false;
   var trailCaptureMode=false;
-  var showUsgsOverlay=false;
+  var showLandOverlay=false,showUsgsOverlay=false;
   var showTerrainLayer=false,showNaipLayer=false,showFireLayer=false,showAvaLayer=false,showRadarLayer=false,showMvumLayer=false,showRoadsLayer=false,showNauticalLayer=false;
   var radarFrames=[],radarFrameIdx=0,radarTimer=null;
   var _mvumTimer=null,_roadsTimer=null;
@@ -4748,6 +4778,7 @@ const buildMapHtml = (
     map.on('style.load',function(){
       setupSources();setupLayers();renderWaypoints();
       updateCampSrc();updateGasSrc();updatePoiSrc();updateRoute();updateBreadcrumb();updateReportMarkers();
+      if(showLandOverlay)setLandOverlay(true);
       if(showUsgsOverlay)setUsgsOverlay(true);
       if(showTerrainLayer)setTerrainLayer(true);
       if(showNaipLayer)setNaipLayer(true);
@@ -5128,9 +5159,13 @@ const buildMapHtml = (
   }
 
   function setLandOverlay(show){
+    showLandOverlay=show;
     if(!map||!mapReady)return;
     if(map.getLayer('blm-sma'))map.removeLayer('blm-sma');
     if(map.getSource('blm-sma'))map.removeSource('blm-sma');
+    if(!show)return;
+    map.addSource('blm-sma',{type:'raster',tiles:[apiBase+'/api/land-tile/{z}/{y}/{x}'],tileSize:256,minzoom:3,maxzoom:16,attribution:'BLM Surface Management Agency'});
+    map.addLayer({id:'blm-sma',type:'raster',source:'blm-sma',paint:{'raster-opacity':0.58}},map.getLayer('route-shadow')?'route-shadow':undefined);
   }
 
   // ── USGS National Map topo overlay (full trail + contour detail) ──────────────
@@ -5929,6 +5964,9 @@ function MapScreen() {
   }, []);
 
   const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
+  const [extremeConfigLoaded, setExtremeConfigLoaded] = useState(false);
+  const [extremeConfigLoadFailed, setExtremeConfigLoadFailed] = useState(false);
+  const [extremeConfigReloadKey, setExtremeConfigReloadKey] = useState(0);
   const [extremeMapboxCapabilities, setExtremeMapboxCapabilities] = useState<ExtremeMapboxCapabilities | null>(
     Platform.OS === 'ios' ? { supported: true, renderer: 'metal', reason: 'supported' } : null
   );
@@ -5950,13 +5988,22 @@ function MapScreen() {
     let mounted = true;
     if (!user) {
       setExtremeConfig(null);
+      setExtremeConfigLoadFailed(false);
+      setExtremeConfigLoaded(true);
       return () => { mounted = false; };
     }
+    setExtremeConfigLoaded(false);
+    setExtremeConfigLoadFailed(false);
     api.getExtremeConfig()
       .then(cfg => { if (mounted) setExtremeConfig(cfg); })
-      .catch(() => { if (mounted) setExtremeConfig(null); });
+      .catch(() => {
+        if (!mounted) return;
+        setExtremeConfig(null);
+        setExtremeConfigLoadFailed(true);
+      })
+      .finally(() => { if (mounted) setExtremeConfigLoaded(true); });
     return () => { mounted = false; };
-  }, [user?.id]);
+  }, [user?.id, extremeConfigReloadKey]);
 
   useEffect(() => {
     let mounted = true;
@@ -6027,6 +6074,13 @@ function MapScreen() {
     extremeTrafficEnabled
   );
   const extremeCopilotAvailable = !!extremeConfig?.enabled && !!extremeConfig?.feature_flags?.copilot;
+  const extremeCopilotUnavailable = !!user && extremeConfigLoaded && (
+    extremeConfigLoadFailed
+    || !extremeConfig
+    || !!extremeConfig.kill_switch
+    || !extremeConfig.beta_active
+    || (!!extremeConfig.explorer_entitled && !extremeCopilotAvailable)
+  );
   const [showExtremeCopilot, setShowExtremeCopilot] = useState(false);
   const [extremeCopilotInput, setExtremeCopilotInput] = useState('');
   const [extremeCopilotSessionId, setExtremeCopilotSessionId] = useState<string | null>(null);
@@ -6134,7 +6188,7 @@ function MapScreen() {
   const trailGuideDockLabel = trailGuideStateLabel(trailGuideAvatarState);
   const trailGuideSheetSub = extremeConfig?.copilot?.voice_enabled
     ? (trailGuideDockLabel || extremeCopilotVoiceStatus || 'Text and push-to-talk')
-    : 'Text actions · preview rebuild required for voice';
+    : 'Text Co-Pilot';
   const copilotAccentText = themeMode === 'light' ? '#ffffff' : '#050505';
   useEffect(() => () => {
     realtimeCopilotRef.current?.stop();
@@ -7256,6 +7310,7 @@ function MapScreen() {
   // ── Location watch ──────────────────────────────────────────────────────────
 
   const [locGranted, setLocGranted] = useState(false);
+  const [locPermissionState, setLocPermissionState] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
 
   // On mount: check if already granted; otherwise show disclosure first
   useEffect(() => {
@@ -7265,8 +7320,10 @@ function MapScreen() {
       if (cancelled) return;
       if (existing?.status === 'granted') {
         setLocGranted(true);
+        setLocPermissionState('granted');
         return;
       }
+      if (existing?.status === 'denied') setLocPermissionState('denied');
       const alreadyPrompted = await storage.get(LOCATION_WARMUP_PROMPT_KEY).catch(() => null);
       if (!cancelled && !alreadyPrompted) setShowLocDisclosure(true);
     })();
@@ -7726,6 +7783,10 @@ function MapScreen() {
 
   // POI layer
   useEffect(() => { showPoisRef.current = showPois; }, [showPois]);
+
+  useEffect(() => {
+    postWebMessage(JSON.stringify({ type: 'set_land_overlay', show: showLands }));
+  }, [showLands]);
 
   useEffect(() => {
     if (!selectedPlace) {
@@ -9949,12 +10010,29 @@ function MapScreen() {
     if (userLoc) return { loc: userLoc, status: 'available' };
     const permission = await Location.requestForegroundPermissionsAsync().catch(() => null);
     if (permission?.status !== 'granted') {
-      setShowLocDisclosure(true);
-      setQuickToast('Location permission is needed for routing.');
+      setShowLocDisclosure(false);
+      setLocPermissionState(permission?.status === 'denied' ? 'denied' : 'undetermined');
+      if (permission?.status === 'denied' && permission.canAskAgain === false) {
+        if (Platform.OS === 'web') {
+          setQuickToast('Location is blocked. Allow it in your browser settings, then tap Locate.');
+        } else {
+          Alert.alert(
+            'Location is off',
+            'Allow location for Trailhead in Settings, then tap Locate again.',
+            [
+              { text: 'Not now', style: 'cancel' },
+              { text: 'Open Settings', onPress: () => { Linking.openSettings().catch(() => {}); } },
+            ],
+          );
+        }
+      } else {
+        setQuickToast('Location access was not granted. Retry from Locate when you are ready.');
+      }
       setTimeout(() => setQuickToast(''), 2800);
       return { loc: null, status: permission?.status || 'denied' };
     }
     setLocGranted(true);
+    setLocPermissionState('granted');
     const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced }).catch(() => null);
     if (!fix) return { loc: null, status: 'unavailable' };
     const loc = { lat: fix.coords.latitude, lng: fix.coords.longitude, accuracy: fix.coords.accuracy ?? null };
@@ -11397,7 +11475,7 @@ function MapScreen() {
     return {
       user: {
         location: userLoc,
-        location_permission: locGranted ? 'granted' : 'undetermined',
+        location_permission: locPermissionState,
         heading: userHeading,
         speed: userSpeed,
         plan_tier: extremeConfig?.tier_name ?? 'Trailhead',
@@ -14027,6 +14105,31 @@ function MapScreen() {
     }
   }
 
+  function failMapMissionBrief(message?: string) {
+    const terrainSnapshot = mapMission3dSnapshotRef.current;
+    const styleSnapshot = mapMissionStyleSnapshotRef.current;
+    stopMapMissionBrief();
+
+    // The failure callback can retain the render that started playback. Restore
+    // explicit snapshots so queued terrain/style updates cannot outlive cleanup.
+    if (terrainSnapshot != null) {
+      setMap3dEnabled(terrainSnapshot);
+      if (!useNativeMapSurface) {
+        postWebMessage(JSON.stringify({ type: 'set_layer', layer: 'terrain', show: terrainSnapshot }));
+      }
+    }
+    if (styleSnapshot) {
+      setPremiumMapStyle(styleSnapshot.premiumMapStyle);
+      applyMapLayer(styleSnapshot.mapLayer, styleSnapshot.premiumMapStyle);
+    }
+    if (activeTrip) {
+      setShowPanel(true);
+      setPanelCollapsed(false);
+    }
+    setQuickToast(message || 'Flyover could not start.');
+    setTimeout(() => setQuickToast(''), 2800);
+  }
+
   // Guarantee a terrain-capable Mapbox mode for the cinematic 3D flythrough.
   // Returns true if raised 3D terrain is available, false when we fall back to flat map mode.
   function ensureMissionTerrainMode(): boolean {
@@ -14719,11 +14822,7 @@ function MapScreen() {
     const rawCinematic = directedCinematic ?? localCinematic;
     missionStoryboardPathRef.current = directedCinematic ? 'ai_director' : (scoutLiveCinematic ? 'scout_live' : 'deterministic');
     if (!rawCinematic || rawCinematic.scenes.length < 2) {
-      missionRunningRef.current = false;
-      setMapMissionPreparing(false);
-      setMapMissionError(true);
-      setQuickToast('Route is too short for a flyover.');
-      setTimeout(() => setQuickToast(''), 2600);
+      failMapMissionBrief('Route is too short for a flyover.');
       return false;
     }
     const cinematic = normalizeCinematicForPlayback(rawCinematic, route, flyoverMode, camera);
@@ -14767,56 +14866,83 @@ function MapScreen() {
         callouts: [],
         warning: false,
       });
-      mapMissionNativeSubsRef.current = [
-        addMissionSceneStartListener(({ index }) => {
-          const scene = mapMissionCinematicRef.current?.scenes[index];
-          if (scene) {
-            if (shouldNarrateFlyover) beginMissionSceneBeat(scene, index);
-            else beginSilentFlyoverScene(scene, index);
-          }
-        }),
-        addMissionSceneEndListener(({ index }) => {
-          const scene = mapMissionCinematicRef.current?.scenes[index] ?? null;
-          playbackDebug.sceneEnd({
-            scene_id: scene?.id ?? null,
-            scene_type: scene?.type ?? null,
-            scene_index: index,
-          });
-        }),
-        addMissionSceneProgressListener(({ progress }) => {
-          setMapMissionProgress(Math.max(0, Math.min(1, Number(progress) || 0)));
-        }),
-        addMissionDebugListener(({ kind }) => {
-          if (kind === 'camera') playbackDebug.cameraTick();
-          else if (kind === 'overlay') playbackDebug.overlayTick();
-        }),
-        addMissionCompleteListener(() => {
-          clearMissionNativeListeners();
-          setMapMissionPlaying(false);
-          setMapMissionPaused(false);
-          setMapMissionComplete(true);
-          setMapMissionProgress(1);
-          setCopilotBriefPresence('complete');
-          mapMissionPresenceAfterSpeechRef.current = 'complete';
-          logCopilotMapTelemetry('mission_playback_complete', {
-            playback_mode: 'native',
-            storyboard_path: missionStoryboardPathRef.current,
-            counters: playbackDebug.snapshot(),
-          });
-          focusMapMissionCompletionOverview();
-        }),
-        addMissionErrorListener(({ message }) => {
-          clearMissionNativeListeners();
-          setMapMissionPreparing(false);
-          setMapMissionPlaying(false);
-          setMapMissionError(true);
-          setCopilotBriefPresence('idle');
-          setQuickToast(message || 'Flyover failed');
-          setTimeout(() => setQuickToast(''), 2800);
-        }),
-      ];
+      const installNativeMissionListeners = () => {
+        clearMissionNativeListeners();
+        mapMissionNativeSubsRef.current = [
+          addMissionSceneStartListener(({ index }) => {
+            const scene = mapMissionCinematicRef.current?.scenes[index];
+            if (scene) {
+              if (shouldNarrateFlyover) beginMissionSceneBeat(scene, index);
+              else beginSilentFlyoverScene(scene, index);
+            }
+          }),
+          addMissionSceneEndListener(({ index }) => {
+            const scene = mapMissionCinematicRef.current?.scenes[index] ?? null;
+            playbackDebug.sceneEnd({
+              scene_id: scene?.id ?? null,
+              scene_type: scene?.type ?? null,
+              scene_index: index,
+            });
+          }),
+          addMissionSceneProgressListener(({ progress }) => {
+            setMapMissionProgress(Math.max(0, Math.min(1, Number(progress) || 0)));
+          }),
+          addMissionDebugListener(({ kind }) => {
+            if (kind === 'camera') playbackDebug.cameraTick();
+            else if (kind === 'overlay') playbackDebug.overlayTick();
+          }),
+          addMissionCompleteListener(() => {
+            clearMissionNativeListeners();
+            setMapMissionPlaying(false);
+            setMapMissionPaused(false);
+            setMapMissionComplete(true);
+            setMapMissionProgress(1);
+            setCopilotBriefPresence('complete');
+            mapMissionPresenceAfterSpeechRef.current = 'complete';
+            logCopilotMapTelemetry('mission_playback_complete', {
+              playback_mode: 'native',
+              storyboard_path: missionStoryboardPathRef.current,
+              counters: playbackDebug.snapshot(),
+            });
+            focusMapMissionCompletionOverview();
+          }),
+          addMissionErrorListener(({ message }) => {
+            failMapMissionBrief(message || 'Flyover failed.');
+          }),
+        ];
+      };
+      installNativeMissionListeners();
       mapMissionPlayerRef.current = {
-        replay: () => { void startMissionAnimation(nativePayload); },
+        replay: () => {
+          void (async () => {
+            missionRunningRef.current = true;
+            missionPrimedSceneIndexRef.current = -1;
+            mapMissionPresenceAfterSpeechRef.current = 'flying';
+            setMapMissionVisible(true);
+            setMapMissionPreparing(true);
+            setMapMissionPlaying(false);
+            setMapMissionPaused(false);
+            setMapMissionComplete(false);
+            setMapMissionError(false);
+            setMapMissionScene(null);
+            setMapMissionSceneIndex(0);
+            setMapMissionCaptionText('');
+            setMapMissionProgress(0);
+            setMapMissionFreeCamera(false);
+            setCopilotBriefPresence('building');
+            playbackDebug.reset();
+            playbackDebug.sessionStart({ playback_mode: 'native', replay: true });
+            installNativeMissionListeners();
+            const replayStarted = await startMissionAnimation(nativePayload);
+            if (!replayStarted) {
+              failMapMissionBrief('Flyover could not restart.');
+              return;
+            }
+            setMapMissionPreparing(false);
+            setMapMissionPlaying(true);
+            setCopilotBriefPresence('flying');
+          })();
+        },
         pause: () => {
           clearNarrationFallbackTimer();
           stopTrailheadVoice();
@@ -14979,12 +15105,7 @@ function MapScreen() {
         focusMapMissionCompletionOverview();
       },
       onError: message => {
-        setMapMissionPreparing(false);
-        setMapMissionPlaying(false);
-        setMapMissionError(true);
-        setCopilotBriefPresence('idle');
-        setQuickToast(message || 'Flyover failed');
-        setTimeout(() => setQuickToast(''), 2800);
+        failMapMissionBrief(message || 'Flyover failed.');
       },
     });
 
@@ -15213,8 +15334,8 @@ function MapScreen() {
         return { applied: true, layer, show };
       }
       if (layer === 'lands') {
-        toggleLandOverlay(false);
-        return { applied: true, layer, show: false };
+        toggleLandOverlay(show);
+        return { applied: true, layer, show };
       }
       if (layer === 'trails') {
         setLayerTrails(show);
@@ -16139,10 +16260,39 @@ function MapScreen() {
   }
 
   function handleTrailGuideDockPress() {
+    if (!user) {
+      router.push('/(tabs)/profile');
+      return;
+    }
+    if (extremeCopilotUnavailable) {
+      if (extremeConfigLoadFailed) {
+        Alert.alert(
+          'Co-Pilot could not connect',
+          'Check your signal, then try again.',
+          [
+            { text: 'Not now', style: 'cancel' },
+            { text: 'Retry', onPress: () => setExtremeConfigReloadKey(value => value + 1) },
+          ],
+        );
+      } else {
+        Alert.alert('Co-Pilot unavailable', 'Co-Pilot is temporarily unavailable. Try again later.');
+      }
+      return;
+    }
+    if (!extremeCopilotAvailable) {
+      setPaywallCode('explorer_required');
+      setPaywallMessage('Co-Pilot is included with Trailhead Explorer.');
+      setPaywallVisible(true);
+      return;
+    }
     openTrailGuideSheet();
   }
 
   function handleTrailGuideDockLongPress() {
+    if (!extremeCopilotAvailable) {
+      handleTrailGuideDockPress();
+      return;
+    }
     if (extremeConfig?.copilot?.voice_enabled && !extremeCopilotVoiceBusy) {
       toggleCopilotVoice();
       return;
@@ -16300,16 +16450,20 @@ function MapScreen() {
   }
 
   async function centerMapOnUser() {
-    const resolved = userLoc ?? (await ensureCopilotLocation()).loc;
-    if (!resolved) {
-      setQuickToast('Location is not available yet.');
-      setTimeout(() => setQuickToast(''), 2400);
+    const resolved = userLoc
+      ? { loc: userLoc, status: 'available' }
+      : await ensureCopilotLocation();
+    if (!resolved.loc) {
+      if (resolved.status === 'unavailable') {
+        setQuickToast('A location fix is not available yet.');
+        setTimeout(() => setQuickToast(''), 2400);
+      }
       return;
     }
     if (useNativeMapSurface) {
-      nativeMapRef.current?.locate(resolved.lat, resolved.lng);
+      nativeMapRef.current?.locate(resolved.loc.lat, resolved.loc.lng);
     } else {
-      postWebMessage(JSON.stringify({ type: 'locate', lat: resolved.lat, lng: resolved.lng }));
+      postWebMessage(JSON.stringify({ type: 'locate', lat: resolved.loc.lat, lng: resolved.loc.lng }));
     }
   }
 
@@ -18709,8 +18863,8 @@ function MapScreen() {
   }
 
   function toggleLandOverlay(val: boolean) {
-    setShowLands(false);
-    postWebMessage(JSON.stringify({ type: 'set_land_overlay', show: false }));
+    setShowLands(val);
+    postWebMessage(JSON.stringify({ type: 'set_land_overlay', show: val }));
   }
 
   function toggleUsgsOverlay(val: boolean) {
@@ -20802,6 +20956,7 @@ function MapScreen() {
   ];
   const layerSheetItems = [
     { key: '3d', label: map3dEnabled ? '2D View' : '3D Terrain', sub: map3dEnabled ? 'Return to flat view' : 'Tilted terrain and buildings', icon: map3dEnabled ? 'map-outline' : 'cube-outline', val: map3dEnabled, color: '#a3e635', onPress: () => toggleMap3d() },
+    { key: 'lands', label: 'Public Land', sub: 'BLM, USFS and park boundaries', icon: 'layers-outline', val: showLands, color: '#D97745', onPress: () => toggleLandOverlay(!showLands) },
     { key: 'usgs', label: 'Topo Lines', sub: 'Contours and trail context', icon: 'trail-sign-outline', val: showUsgs, color: '#0ea5e9', onPress: () => toggleUsgsOverlay(!showUsgs) },
     { key: 'pois', label: 'Places', sub: 'Fuel, water, services', icon: 'location-outline', val: showPois, color: '#3b82f6', onPress: () => togglePoiOverlay(!showPois) },
     { key: 'trails', label: 'Trails & Dirt', sub: 'Tracks and paths', icon: 'trail-sign-outline', val: layerTrails, color: '#22c55e', onPress: () => setLayerTrails(!layerTrails) },
@@ -21516,6 +21671,7 @@ function MapScreen() {
           trailPreviewProgress={trailPreviewProgress}
           trailPreviewTone={trailPreviewTone}
           suppressFeatureTaps={mapTapToolOwnsFeatureSelection}
+          showLandOverlay={showLands}
           showUsgsOverlay={showUsgs}
           showTerrain={map3dEnabled && !navMode}
           showTrailOverlay={layerTrails}
@@ -23853,6 +24009,16 @@ function MapScreen() {
                   {trailGuideSheetSub}
                 </Text>
               </View>
+              {Boolean(user?.is_admin) && (
+                <TouchableOpacity
+                  style={s.extremeCopilotSupportButton}
+                  onPress={shareAdminCopilotDebugTranscript}
+                  disabled={extremeCopilotBusy}
+                  accessibilityLabel="Share Co-Pilot support log"
+                >
+                  <Ionicons name="bug-outline" size={17} color={C.yellow} />
+                </TouchableOpacity>
+              )}
               <TouchableOpacity style={s.extremeCopilotClose} onPress={() => setShowExtremeCopilot(false)}>
                 <Ionicons name="close" size={17} color={C.text2} />
               </TouchableOpacity>
@@ -23864,7 +24030,7 @@ function MapScreen() {
                   <Text style={[s.extremeCopilotBubbleText, msg.role === 'user' && s.extremeCopilotBubbleTextUser]}>{msg.text}</Text>
                   {msg.action && (
                     <Text style={s.extremeCopilotActionMeta}>
-                      {msg.action.label || msg.action.action_type}{msg.action.requires_confirmation ? ' · confirmation required' : ''}
+                      {copilotActionDisplayLabel(msg.action)}
                     </Text>
                   )}
                 </View>
@@ -23879,42 +24045,34 @@ function MapScreen() {
             {pendingCopilotAction && (
               <View style={s.extremeCopilotConfirm}>
                 <View style={{ flex: 1, minWidth: 0 }}>
-                  <Text style={s.extremeCopilotConfirmTitle}>{pendingCopilotAction.label || pendingCopilotAction.action_type}</Text>
+                  <Text style={s.extremeCopilotConfirmTitle}>{copilotActionDisplayLabel(pendingCopilotAction)}</Text>
                   <Text style={s.extremeCopilotConfirmSub} numberOfLines={2}>
-                    Confirm before Copilot changes route state, saves data, creates a pin, or starts a download.
+                    Review this change before applying it.
                   </Text>
                 </View>
                 <TouchableOpacity style={s.extremeCopilotCancelBtn} onPress={() => runCopilotAction(pendingCopilotAction, false)}>
-                  <Text style={s.extremeCopilotCancelText}>CANCEL</Text>
+                  <Text style={s.extremeCopilotCancelText}>Cancel</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.extremeCopilotRunBtn} onPress={() => runCopilotAction(pendingCopilotAction, true)}>
-                  <Text style={s.extremeCopilotRunText}>RUN</Text>
+                  <Text style={s.extremeCopilotRunText}>Apply</Text>
                 </TouchableOpacity>
               </View>
             )}
 
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.extremeCopilotChips}>
-              {Boolean(user?.is_admin) && (
-                <TouchableOpacity style={[s.extremeCopilotChip, s.extremeCopilotDebugChip]} onPress={shareAdminCopilotDebugTranscript} disabled={extremeCopilotBusy}>
-                  <Ionicons name="bug-outline" size={13} color={C.yellow} />
-                  <Text style={[s.extremeCopilotChipText, s.extremeCopilotDebugChipText]}>support log</Text>
-                </TouchableOpacity>
-              )}
-              {[
-                'open flyover',
-                'what can you do?',
-                'plan 5 days with public camps and photos',
-                'show camps near my route',
-                'find fuel nearby',
-                'turn on radar',
-                'route me there',
-                'drop a pin here',
-              ].map(prompt => (
-                <TouchableOpacity key={prompt} style={s.extremeCopilotChip} onPress={() => submitCopilotMessage(prompt)} disabled={extremeCopilotBusy}>
-                  <Text style={s.extremeCopilotChipText}>{prompt}</Text>
+            <View style={s.extremeCopilotQuickActions}>
+              {COPILOT_QUICK_ACTIONS.map(action => (
+                <TouchableOpacity
+                  key={action.label}
+                  style={s.extremeCopilotQuickAction}
+                  onPress={() => submitCopilotMessage(action.prompt)}
+                  disabled={extremeCopilotBusy}
+                  accessibilityLabel={action.label}
+                >
+                  <Ionicons name={action.icon} size={18} color={C.orange} />
+                  <Text style={s.extremeCopilotQuickActionText} numberOfLines={2}>{action.label}</Text>
                 </TouchableOpacity>
               ))}
-            </ScrollView>
+            </View>
 
             {extremeConfig?.copilot?.voice_enabled && (
               <View style={s.extremeCopilotVoiceRow}>
@@ -24044,6 +24202,14 @@ function MapScreen() {
         pinOptions={COMMUNITY_PIN_TYPES}
         activePinFilters={activePinFilters}
         weatherLayerItems={[
+          {
+            key: 'lands',
+            title: 'Public Land',
+            sub: 'BLM, USFS, and park boundaries',
+            enabled: showLands,
+            icon: 'layers-outline',
+            onPress: () => toggleLandOverlay(!showLands),
+          },
           {
             key: 'trails',
             title: 'Trails',
@@ -25878,18 +26044,31 @@ function MapScreen() {
         );
       })()}
 
-      {extremeCopilotAvailable && !androidInlineSearchKeyboardActive && !scopedMapSearchActive && !navMode && !mapSheetOpen && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
+      {extremeConfigLoaded && !androidInlineSearchKeyboardActive && !scopedMapSearchActive && !navMode && !mapSheetOpen && !safeWaterPlanningActive && !waterFollowActive && !showExtremeCopilot && (
         <View style={[s.extremeCopilotDock, { bottom: bottomInset + 92 }]} pointerEvents="box-none">
           <TouchableOpacity
-            style={s.extremeCopilotFab}
+            style={[s.extremeCopilotFab, !extremeCopilotAvailable && s.extremeCopilotFabLocked]}
             activeOpacity={0.88}
             delayLongPress={320}
             onLongPress={handleTrailGuideDockLongPress}
             onPress={handleTrailGuideDockPress}
-            accessibilityLabel="Open Co-Pilot"
-            accessibilityHint={extremeConfig?.copilot?.voice_enabled ? 'Long press to start or stop Co-Pilot voice.' : 'Opens text Co-Pilot.'}
+            accessibilityLabel={extremeCopilotAvailable
+              ? 'Open Co-Pilot'
+              : extremeCopilotUnavailable
+                ? 'Co-Pilot unavailable'
+                : user
+                  ? 'Co-Pilot with Explorer'
+                  : 'Sign in for Co-Pilot'}
+            accessibilityHint={extremeCopilotAvailable && extremeConfig?.copilot?.voice_enabled ? 'Long press to start or stop Co-Pilot voice.' : undefined}
           >
-            <TrailGuideAvatar state={trailGuideAvatarState} colors={C} label={trailGuideDockLabel} />
+            <View>
+              <TrailGuideAvatar state={trailGuideAvatarState} colors={C} label={extremeCopilotAvailable ? trailGuideDockLabel : 'Co-Pilot'} />
+              {!extremeCopilotAvailable ? (
+                <View style={[s.extremeCopilotLockBadge, extremeCopilotUnavailable && s.extremeCopilotUnavailableBadge]}>
+                  <Ionicons name={extremeCopilotUnavailable ? 'cloud-offline-outline' : 'lock-closed'} size={10} color="#fff" />
+                </View>
+              ) : null}
+            </View>
           </TouchableOpacity>
           </View>
       )}
@@ -26036,6 +26215,16 @@ function MapScreen() {
             >
               <Ionicons name="checkmark-circle" size={16} color="#fff" />
               <Text style={s.locDisclosureAllowText}>Continue</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.locDisclosureDeny}
+              onPress={() => {
+                setShowLocDisclosure(false);
+                storage.set(LOCATION_WARMUP_PROMPT_KEY, '1').catch(() => {});
+              }}
+              accessibilityRole="button"
+            >
+              <Text style={s.locDisclosureDenyText}>Not now</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -30892,6 +31081,25 @@ const makeStyles = (C: ColorPalette) => {
     paddingHorizontal: 4,
     paddingVertical: 4,
   },
+  extremeCopilotFabLocked: {
+    opacity: 0.86,
+  },
+  extremeCopilotLockBadge: {
+    position: 'absolute',
+    right: -2,
+    top: -2,
+    width: 20,
+    height: 20,
+    borderRadius: 10,
+    backgroundColor: C.orange,
+    borderWidth: 2,
+    borderColor: C.bg,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  extremeCopilotUnavailableBadge: {
+    backgroundColor: C.text3,
+  },
   extremeCopilotMiniVoice: {
     width: 42,
     height: 42,
@@ -30974,6 +31182,16 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.s2,
+  },
+  extremeCopilotSupportButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.yellow + '55',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.yellow + '10',
   },
   extremeCopilotLog: {
     maxHeight: 260,
@@ -31066,35 +31284,31 @@ const makeStyles = (C: ColorPalette) => {
     fontFamily: mono,
     fontWeight: '900',
   },
-  extremeCopilotChips: {
-    gap: 7,
+  extremeCopilotQuickActions: {
+    flexDirection: 'row',
+    gap: 8,
     paddingBottom: 10,
   },
-  extremeCopilotChip: {
-    minHeight: 32,
-    flexDirection: 'row',
+  extremeCopilotQuickAction: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 58,
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderRadius: 999,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s2,
-    paddingHorizontal: 11,
+    paddingHorizontal: 5,
+    paddingVertical: 7,
   },
-  extremeCopilotChipText: {
+  extremeCopilotQuickActionText: {
     color: C.text2,
     fontSize: 10,
-    fontFamily: mono,
-    fontWeight: '700',
-  },
-  extremeCopilotDebugChip: {
-    borderColor: C.yellow + '66',
-    backgroundColor: C.yellow + '12',
-  },
-  extremeCopilotDebugChipText: {
-    color: C.yellow,
-    fontWeight: '900',
+    lineHeight: 13,
+    textAlign: 'center',
+    fontWeight: '800',
   },
   extremeCopilotVoiceRow: {
     flexDirection: 'row',

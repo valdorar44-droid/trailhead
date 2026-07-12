@@ -7,14 +7,50 @@ import { EXPLORE_CATEGORY_CHIPS, type ExploreCategoryKey } from './exploreDispla
 type Props = {
   selected: ExploreCategoryKey;
   mode: 'featured' | 'nearby' | 'trip';
+  counts?: Partial<Record<ExploreCategoryKey, number>>;
   onSelect: (key: ExploreCategoryKey) => void;
+  onMore?: () => void;
 };
 
-export function ExploreCategoryChips({ selected, mode, onSelect }: Props) {
+const CATEGORY_PRIORITY: ExploreCategoryKey[] = [
+  'all',
+  'guided',
+  'camp',
+  'trails',
+  'parks',
+  'water',
+  'views',
+  'things',
+  'land',
+  'huts',
+  'waterfalls',
+  'peaks',
+  'trailheads',
+  'glamping',
+  'springs',
+  'climb',
+  'scenic',
+  'fuel',
+  'resupply',
+  'nearby',
+];
+
+const PRIMARY_KEYS: ExploreCategoryKey[] = ['all', 'guided', 'camp', 'trails', 'parks', 'water', 'things'];
+
+export function ExploreCategoryChips({ selected, mode, counts, onSelect, onMore }: Props) {
   const C = useTheme();
+  const availableKeys = CATEGORY_PRIORITY.filter(key => {
+    if (key === 'all' || key === 'nearby') return true;
+    if (key === selected) return true;
+    return Number(counts?.[key] ?? 0) > 0;
+  });
+  const visibleKeys = PRIMARY_KEYS.filter(key => availableKeys.includes(key));
+  if (selected !== 'nearby' && !visibleKeys.includes(selected)) visibleKeys.push(selected);
+  const hasMore = availableKeys.some(key => key !== 'nearby' && !visibleKeys.includes(key));
   return (
     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-      {EXPLORE_CATEGORY_CHIPS.map(item => {
+      {visibleKeys.map(key => EXPLORE_CATEGORY_CHIPS.find(item => item.key === key)).filter(Boolean).map(item => {
+        if (!item) return null;
         const active = item.key === 'nearby' ? mode === 'nearby' : selected === item.key && mode !== 'nearby';
         return (
           <TouchableOpacity
@@ -33,6 +69,18 @@ export function ExploreCategoryChips({ selected, mode, onSelect }: Props) {
           </TouchableOpacity>
         );
       })}
+      {hasMore && onMore ? (
+        <TouchableOpacity
+          style={[styles.chip, { borderColor: C.border, backgroundColor: C.s1 }]}
+          activeOpacity={0.84}
+          onPress={onMore}
+          accessibilityRole="button"
+          accessibilityLabel="Open all Explore filters"
+        >
+          <Ionicons name="options-outline" size={18} color={C.text2} />
+          <Text style={[styles.label, { color: C.text }]}>Filters</Text>
+        </TouchableOpacity>
+      ) : null}
     </ScrollView>
   );
 }

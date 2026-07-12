@@ -710,14 +710,32 @@ export const api = {
       : req<Record<string, string>>(`/api/trip/${tripId}/guide${generate ? '?generate=true' : ''}`),
   getExploreCatalog: () =>
     req<ExploreCatalog>('/api/explore/catalog'),
-  getExploreCatalogIndex: (params: { q?: string; category?: string; limit?: number; cursor?: number } = {}) => {
+  getExploreCatalogIndex: (params: { q?: string; category?: string; mode?: string; sort?: string; lat?: number; lng?: number; limit?: number; cursor?: number } = {}) => {
     const qs = new URLSearchParams({
       limit: String(params.limit ?? 500),
       cursor: String(params.cursor ?? 0),
     });
     if (params.q) qs.set('q', params.q);
     if (params.category) qs.set('category', params.category);
+    if (params.mode) qs.set('mode', params.mode);
+    if (params.sort) qs.set('sort', params.sort);
+    if (params.lat != null && params.lng != null) {
+      qs.set('lat', String(params.lat));
+      qs.set('lng', String(params.lng));
+    }
     return req<ExploreCatalogIndex>(`/api/explore/catalog/index?${qs.toString()}`);
+  },
+  getExploreHome: (params: { mode?: string; sort?: string; lat?: number; lng?: number; limit?: number } = {}) => {
+    const qs = new URLSearchParams({
+      mode: params.mode || 'featured',
+      sort: params.sort || 'best',
+      limit: String(params.limit ?? 120),
+    });
+    if (params.lat != null && params.lng != null) {
+      qs.set('lat', String(params.lat));
+      qs.set('lng', String(params.lng));
+    }
+    return req<ExploreHomeResponse>(`/api/explore/home?${qs.toString()}`);
   },
   getExplorePlaces: (lat?: number, lng?: number, mode: 'featured' | 'nearby' | 'trip' = 'featured', limit = 60, cursor = 0) => {
     const qs = new URLSearchParams({ mode, limit: String(limit), cursor: String(cursor) });
@@ -770,6 +788,12 @@ export const api = {
     if (q.trim()) qs.set('q', q.trim());
     appendExploreExperienceOptions(qs, options);
     return req<ExploreExperiencesResponse>(`/api/explore/experiences?${qs.toString()}`);
+  },
+  getExploreGuidedDestination: (destinationKey: string, q = '', limit = 24, options: ExploreExperienceQueryOptions = {}) => {
+    const qs = new URLSearchParams({ limit: String(limit) });
+    if (q.trim()) qs.set('q', q.trim());
+    appendExploreExperienceOptions(qs, options);
+    return req<ExploreGuidedDestinationResponse>(`/api/explore/guided-destinations/${encodeURIComponent(destinationKey)}?${qs.toString()}`);
   },
   getExploreExperience: (experienceId: string) =>
     req<BookableExperience>(`/api/explore/experiences/${encodeURIComponent(experienceId)}`),
@@ -3454,6 +3478,44 @@ export interface ExplorePlaceProfile {
   best_season?: string;
   source_ids?: string[];
   verified?: boolean;
+  enrichment?: {
+    score?: number;
+    level?: 'rich' | 'ready' | 'basic' | string;
+    has_coordinates?: boolean;
+    has_description?: boolean;
+    has_image?: boolean;
+    has_source?: boolean;
+    planning_fact_count?: number;
+  };
+  provenance?: {
+    primary?: string | {
+      attribution?: string;
+      source?: string;
+      source_id?: string;
+      url?: string;
+      quality?: string;
+      checked_at?: number;
+    };
+    primary_label?: string;
+    source_count?: number;
+    verified?: boolean;
+    sources?: {
+      name?: string;
+      attribution?: string;
+      source?: string;
+      source_id?: string;
+      url?: string;
+      kind?: string;
+      quality?: string;
+      checked_at?: number;
+    }[];
+  };
+  ranking?: {
+    position?: number;
+    sort?: string;
+    score?: number;
+    reason?: string;
+  };
   search_blob?: string;
   amenities?: string[];
   media?: { url?: string; caption?: string; credit?: string; license?: string }[];
@@ -3631,6 +3693,9 @@ export interface ExploreCatalogIndexItem {
   quality?: string;
   quality_score?: number;
   verified?: boolean;
+  enrichment?: ExplorePlaceProfile['enrichment'];
+  provenance?: ExplorePlaceProfile['provenance'];
+  ranking?: ExplorePlaceProfile['ranking'];
   search_aliases?: string[];
   search_blob?: string;
   best_season?: string;
@@ -3653,9 +3718,62 @@ export interface ExploreCatalogIndex {
   catalog_id: string;
   generated_at: number;
   count: number;
+  total_count?: number;
+  page_count?: number;
   cursor: number;
   next_cursor?: number | null;
+  facets?: {
+    categories?: Record<string, number>;
+    [key: string]: unknown;
+  };
+  category_counts?: Record<string, number>;
   places: ExploreCatalogIndexItem[];
+}
+export interface ExploreGuidedDestination {
+  id: string;
+  slug?: string;
+  name: string;
+  region: string;
+  country?: string;
+  continent?: string;
+  collection?: 'mountain' | 'desert' | 'water' | 'worldwide' | string;
+  lat: number;
+  lng: number;
+  search_query?: string;
+  aliases?: string[];
+  summary?: string;
+  best_for?: string[];
+  image_url?: string;
+  image_alt?: string;
+  image_credit?: string;
+  image_license?: string;
+  image_license_url?: string;
+  image_source_url?: string;
+}
+export interface ExploreHomeResponse extends ExploreCatalogIndex {
+  guided?: {
+    catalog_id?: string;
+    count?: number;
+    provider_calls?: number;
+    destinations?: ExploreGuidedDestination[];
+  };
+  guided_destinations?: ExploreGuidedDestination[];
+}
+export interface ExploreGuidedDestinationResponse {
+  schema_version: number;
+  destination: ExploreGuidedDestination;
+  source: string;
+  live_enabled: boolean;
+  provider_status?: ViatorProviderStatus & {
+    resolution?: string;
+    provider_calls?: number;
+    destination_lookup?: ViatorProviderStatus;
+  };
+  provider_destination_id?: string | null;
+  count: number;
+  experiences: BookableExperience[];
+  organic_fallback: boolean;
+  organic_places: ExploreCatalogIndexItem[];
 }
 export interface ExploreEnrichmentResponse {
   schema_version: number;

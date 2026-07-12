@@ -62,7 +62,34 @@ function cacheKey(pairs: string[]): string {
 
 function parsePair(pair: string): [number, number] | null {
   const [lng, lat] = pair.split(',').map(Number);
-  return Number.isFinite(lng) && Number.isFinite(lat) ? [lng, lat] : null;
+  return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90 ? [lng, lat] : null;
+}
+
+function cleanRouteCoords(coords: unknown): [number, number][] {
+  const clean: [number, number][] = [];
+  if (!Array.isArray(coords)) return clean;
+  for (const coord of coords) {
+    if (!Array.isArray(coord) || coord.length < 2) continue;
+    const lng = Number(coord[0]);
+    const lat = Number(coord[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 90) continue;
+    const prev = clean[clean.length - 1];
+    if (prev && Math.abs(prev[0] - lng) < 1e-7 && Math.abs(prev[1] - lat) < 1e-7) continue;
+    clean.push([lng, lat]);
+  }
+  return clean;
+}
+
+function normalizePairs(pairs: string[]): string[] {
+  const normalized: string[] = [];
+  for (const pair of pairs) {
+    const coord = parsePair(pair);
+    if (!coord) continue;
+    const next = `${coord[0]},${coord[1]}`;
+    if (normalized[normalized.length - 1] === next) continue;
+    normalized.push(next);
+  }
+  return normalized;
 }
 
 function coordDistanceM(a: [number, number], b: [number, number]): number {
@@ -122,7 +149,7 @@ async function saveRoute(pairs: string[], result: RouteResult) {
     await ensureCacheDir();
     const key  = cacheKey(pairs);
     const path = `${CACHE_DIR}${key}.json`;
-    const json = JSON.stringify({ ...result, requestedPairs: pairs, routeCacheVersion: ROUTE_CACHE_VERSION, savedAt: Date.now() });
+    const json = JSON.stringify({ ...result, coords: cleanRouteCoords(result.coords), requestedPairs: pairs, routeCacheVersion: ROUTE_CACHE_VERSION, savedAt: Date.now() });
     // Save keyed route + always overwrite last_route (the "I was just navigating" fallback)
     await Promise.all([
       FileSystem.writeAsStringAsync(path, json),
@@ -214,7 +241,9 @@ export async function fetchRoute(
   routeOpts:   RouteOpts,
   providerMode: RouteProviderMode = 'trailhead',
 ): Promise<RouteResult> {
+  pairs = normalizePairs(pairs);
   console.log('[fetchRoute] pairs:', pairs);
+  if (pairs.length < 2) return buildNoRoute(pairs, 'Route needs two valid points.');
   const nativeOfflineErrors: string[] = [];
 
   const tryNativeOfflineValhalla = async () => {
@@ -403,7 +432,7 @@ function parseMapboxDirectionsRoute(data: any, source: string, label: string): R
     legs.push(ls);
   }
   return sourceRoute({
-    coords: route.geometry.coordinates,
+    coords: cleanRouteCoords(route.geometry?.coordinates),
     steps,
     legs,
     totalDistance: route.distance,
@@ -533,7 +562,7 @@ function parseValhallaRoute(data: any): RouteResult {
     steps.push(...ls); legs.push(ls);
   }
 
-  return { coords: all, steps, legs,
+  return { coords: cleanRouteCoords(all), steps, legs,
            totalDistance: Math.round((data.trip.summary.length ?? 0) * 1609.34),
            totalDuration: data.trip.summary.time ?? 0, isProper: true };
 }
@@ -671,7 +700,7 @@ async function fetchOSRM(
     steps.push(...ls); legs.push(ls);
   }
 
-  return sourceRoute({ coords: route.geometry.coordinates, steps, legs,
+  return sourceRoute({ coords: cleanRouteCoords(route.geometry?.coordinates), steps, legs,
            totalDistance: route.distance ?? 0,
            totalDuration: route.duration ?? 0, isProper: true }, 'osrm', 'OSRM');
 }
@@ -698,7 +727,7 @@ async function fetchLocalRouter(
   const data = await res.json();
   if (!data.coords?.length) return null;
 
-  const coords: [number, number][] = data.coords.map((c: number[]) => [c[0], c[1]]);
+  const coords = cleanRouteCoords(data.coords);
 
   // Use real turn-by-turn steps from the offline router
   const steps: RouteStep[] = (data.steps ?? []).map((s: any) => ({
@@ -733,17 +762,17 @@ async function fetchLocalRouter(
 
 // ── Straight-line fallback (truly offline with no cached route) ───────────────
 export function buildFallbackRoute(pairs: string[], debug = 'route fallback'): RouteResult {
-  const coords: [number, number][] = pairs.map(p => {
+  const coords = cleanRouteCoords(pairs.map(p => {
     const [ln, lt] = p.split(',');
     return [parseFloat(ln), parseFloat(lt)];
-  });
+  }));
   return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, routeSource: 'fallback-line', routeSourceLabel: 'Fallback line', debug };
 }
 
 export function buildNoRoute(pairs: string[], debug = 'route unavailable'): RouteResult {
-  const coords: [number, number][] = pairs.slice(0, 1).map(p => {
+  const coords = cleanRouteCoords(pairs.slice(0, 1).map(p => {
     const [ln, lt] = p.split(',');
     return [parseFloat(ln), parseFloat(lt)];
-  });
+  }));
   return { coords, steps: [], legs: [[]], totalDistance: 0, totalDuration: 0, isProper: false, routeSource: 'no-route', routeSourceLabel: 'No drawable route', debug };
 }

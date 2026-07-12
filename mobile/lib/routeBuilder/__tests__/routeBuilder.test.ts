@@ -1,6 +1,7 @@
 import {
   buildRouteLocationsForShape,
   buildRouteBuilderSession,
+  cleanRouteCoords,
   computeDaySegmentsFromRouteGeometry,
   computeTripReadiness,
   filterDurableNavigationStops,
@@ -25,6 +26,18 @@ assertRouteBuilderContract(loop.length === 5 && loop.some(loc => loc.role === 'o
 
 const thereAndBack = buildRouteLocationsForShape({ shape: 'there_and_back', start: moab, destination: bigSur });
 assertRouteBuilderContract(thereAndBack.length === 3 && thereAndBack[2].role === 'return_anchor', 'there-and-back location expansion');
+
+const cleanedRouteCoords = cleanRouteCoords([
+  [-109.5498, 38.5733],
+  [-109.5498, 38.5733],
+  [Number.NaN, 38.1],
+  [-121.8081, 36.2704],
+  [-109.5498, 38.5733],
+] as [number, number][]);
+assertRouteBuilderContract(
+  cleanedRouteCoords.length === 3 && cleanedRouteCoords[0][0] === -109.5498 && cleanedRouteCoords[2][0] === -109.5498,
+  'route coordinate cleanup keeps valid there-and-back geometry',
+);
 
 const durableStops = filterDurableNavigationStops([
   { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'start' },

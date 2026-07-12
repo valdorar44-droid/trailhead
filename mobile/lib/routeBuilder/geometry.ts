@@ -20,6 +20,20 @@ export function pointsToCoords(points: Array<{ lat: number; lng: number }>): [nu
   return points.map(point => [point.lng, point.lat]);
 }
 
+export function cleanRouteCoords(coords: [number, number][] | undefined | null) {
+  const clean: [number, number][] = [];
+  for (const coord of coords ?? []) {
+    if (!Array.isArray(coord) || coord.length < 2) continue;
+    const lng = Number(coord[0]);
+    const lat = Number(coord[1]);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat) || Math.abs(lng) > 180 || Math.abs(lat) > 90) continue;
+    const prev = clean[clean.length - 1];
+    if (prev && Math.abs(prev[0] - lng) < 1e-7 && Math.abs(prev[1] - lat) < 1e-7) continue;
+    clean.push([lng, lat]);
+  }
+  return clean;
+}
+
 export function routeDistanceMi(points: Array<{ lat: number; lng: number }>) {
   let miles = 0;
   for (let i = 1; i < points.length; i += 1) miles += haversineMi(points[i - 1], points[i]);
@@ -130,7 +144,7 @@ export function decodePolyline6(shape: string): [number, number][] {
 }
 
 export function providerGeometryFromRoute(result: RouteBuildResult | null | undefined, units: 'miles' | 'kilometers' = 'miles'): ProviderRouteGeometry {
-  const coords = (result?.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []);
+  const coords = cleanRouteCoords((result?.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []));
   const summaryLength = Number(result?.trip?.summary?.length);
   const summaryTime = Number(result?.trip?.summary?.time);
   const engine = result?._trailhead?.engine;
@@ -166,16 +180,17 @@ export function savedGeometryFromCoords(
   totalDistanceMeters?: number,
   totalDurationSeconds?: number,
 ): ProviderRouteGeometry {
-  const points = coordsToPoints(coords ?? []);
+  const clean = cleanRouteCoords(coords);
+  const points = coordsToPoints(clean);
   const calculatedMi = routeDistanceMi(points);
   const meters = Number(totalDistanceMeters);
   const seconds = Number(totalDurationSeconds);
   return {
-    coords: coords ?? [],
+    coords: clean,
     totalDistanceMi: Number.isFinite(meters) && meters > 0 ? meters * MI_PER_METER : calculatedMi,
     totalDurationHours: Number.isFinite(seconds) && seconds > 0 ? seconds / 3600 : Math.max(0, calculatedMi / 42),
-    source: coords && coords.length >= 2 ? 'saved' : 'none',
-    confidence: coords && coords.length >= 2 ? 'high' : 'none',
+    source: clean.length >= 2 ? 'saved' : 'none',
+    confidence: clean.length >= 2 ? 'high' : 'none',
   };
 }
 

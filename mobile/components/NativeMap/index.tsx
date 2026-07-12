@@ -407,8 +407,29 @@ function communityPinVisual(type?: string) {
 }
 
 // ── Helper: coords → GeoJSON ──────────────────────────────────────────────────
+function isValidLngLat(coord: unknown): coord is [number, number] {
+  if (!Array.isArray(coord) || coord.length < 2) return false;
+  const lng = Number(coord[0]);
+  const lat = Number(coord[1]);
+  return Number.isFinite(lng) && Number.isFinite(lat) && Math.abs(lng) <= 180 && Math.abs(lat) <= 90;
+}
+
+function cleanLineCoords(coords: [number, number][]) {
+  const clean: [number, number][] = [];
+  for (const coord of coords ?? []) {
+    if (!isValidLngLat(coord)) continue;
+    const next: [number, number] = [Number(coord[0]), Number(coord[1])];
+    const prev = clean[clean.length - 1];
+    if (prev && Math.abs(prev[0] - next[0]) < 1e-7 && Math.abs(prev[1] - next[1]) < 1e-7) continue;
+    clean.push(next);
+  }
+  return clean;
+}
+
 function lineFC(coords: [number,number][]) {
-  return { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: coords }, properties: {} };
+  const clean = cleanLineCoords(coords);
+  if (clean.length < 2) return emptyFC();
+  return { type: 'Feature' as const, geometry: { type: 'LineString' as const, coordinates: clean }, properties: {} };
 }
 function pointFC(features: GeoJSON.Feature[]) {
   return { type: 'FeatureCollection' as const, features };
@@ -898,7 +919,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const mapboxToken = useStore(s => s.mapboxToken);
   const activeTrip  = useStore(s => s.activeTrip);
   const C = useTheme();
-  const isExtremeMapbox = mapLayer === 'extreme' && !!mapboxToken;
+  const [customMapFallback, setCustomMapFallback] = useState(false);
+  useEffect(() => {
+    setCustomMapFallback(false);
+  }, [mapLayer]);
+  const isExtremeMapbox = (mapLayer === 'extreme' || customMapFallback) && !!mapboxToken;
   const MapGL: any = isExtremeMapbox ? MapboxGL : MapLibreGL;
   const routeArrowFont = isExtremeMapbox
     ? ['DIN Pro Medium', 'Arial Unicode MS Regular']
@@ -1412,7 +1437,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     [effectiveMapLayer, mapboxToken, localTiles, tileSession, contourMode, trailMode, showNautical, showTerrain, props.premiumMapStyle],
   );
   const premiumStyle = props.premiumMapStyle ?? 'standard';
-  const mapboxStyleURL = MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard;
+  const mapboxStyleURL = customMapFallback
+    ? MAPBOX_STYLE_URLS.outdoors
+    : MAPBOX_STYLE_URLS[premiumStyle] ?? MAPBOX_STYLE_URLS.standard;
   const isMapboxStandardStyle = isExtremeMapbox && (
     premiumStyle === 'standard' || premiumStyle === 'standard_satellite' || premiumStyle === 'dawn' || premiumStyle === 'dusk' || premiumStyle === 'night'
   );
@@ -1935,10 +1962,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       }
     },
     restoreRoute(coords, steps, legs, td, tt) {
-      setRouteCoords(coords);
+      const clean = cleanLineCoords(coords);
+      setRouteCoords(clean);
       setRouteSteps(steps);
-      routeRef.current = makeRouteState(coords);
-      onRouteReady({ coords, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
+      routeRef.current = makeRouteState(clean);
+      onRouteReady({ coords: clean, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
   }), [applyLocateCamera, clearLocateSettleTimers, emitDebugEvent, waypoints, routePairsForWaypoints, searchDest, mapboxToken, makeRouteState, navMode, rememberFreeCamera, showTerrain]);
@@ -1993,20 +2021,22 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (requestId !== routeRequestRef.current) return;
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts, routeProviderMode);
       if (requestId !== routeRequestRef.current) return;
-      setRouteCoords(result.coords);
+      const cleanCoords = cleanLineCoords(result.coords);
+      const cleanResult = { ...result, coords: cleanCoords };
+      setRouteCoords(cleanCoords);
       setRouteSteps(result.steps);
-      routeRef.current = makeRouteState(result.coords);
-      onRouteReady({ ...result, fromIdx });
+      routeRef.current = makeRouteState(cleanCoords);
+      onRouteReady({ ...cleanResult, fromIdx });
       // Persist for offline relaunch
       onRoutePersist({
-        coords: result.coords, steps: result.steps, legs: result.legs,
+        coords: cleanCoords, steps: result.steps, legs: result.legs,
         totalDistance: result.totalDistance, totalDuration: result.totalDuration,
         tripId: activeTrip?.trip_id ?? null,
         routeSource: (result as any).routeSource ?? null,
         routeSourceLabel: (result as any).routeSourceLabel ?? null,
       });
       const routePayload = {
-        coords: result.coords, steps: result.steps, legs: result.legs,
+        coords: cleanCoords, steps: result.steps, legs: result.legs,
         totalDistance: result.totalDistance, totalDuration: result.totalDuration,
         tripId: activeTrip?.trip_id ?? null, ts: Date.now(),
         routeSource: (result as any).routeSource ?? null,
@@ -2017,10 +2047,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     } catch {
       if (requestId !== routeRequestRef.current) return;
       const fb = buildFallbackRoute(pairs);
-      setRouteCoords(fb.coords);
+      const cleanCoords = cleanLineCoords(fb.coords);
+      const cleanFallback = { ...fb, coords: cleanCoords };
+      setRouteCoords(cleanCoords);
       setRouteSteps(fb.steps);
-      routeRef.current = makeRouteState(fb.coords);
-      onRouteReady({ ...fb, fromIdx });
+      routeRef.current = makeRouteState(cleanCoords);
+      onRouteReady({ ...cleanFallback, fromIdx });
     } finally {
       if (requestId === routeRequestRef.current) isRoutingRef.current = false;
     }
@@ -2037,7 +2069,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     setBreadcrumb([]);
     routeRef.current = makeRouteState([]);
     if (!navMode && routableWaypoints.length > 10) {
-      const previewCoords = routableWaypoints.map(w => [w.lng, w.lat] as [number, number]);
+      const previewCoords = cleanLineCoords(routableWaypoints.map(w => [w.lng, w.lat] as [number, number]));
       setRouteCoords(previewCoords);
       setRouteSteps([]);
       routeRef.current = makeRouteState(previewCoords);
@@ -2250,8 +2282,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     const afterReady = mapReadyRef.current;
     emitDebugEvent('map:load-failed', { afterReady, message: event?.message ?? event?.nativeEvent?.message ?? null });
     if (afterReady) return;
+    if (!isExtremeMapbox && mapboxToken) {
+      setCustomMapFallback(true);
+      return;
+    }
     onError?.('map-load-failed');
-  }, [emitDebugEvent, onError]);
+  }, [emitDebugEvent, isExtremeMapbox, mapboxToken, onError]);
 
   const handleRegionIsChanging = useCallback((feat: any) => {
     if (!isUserCameraEvent(feat)) return;

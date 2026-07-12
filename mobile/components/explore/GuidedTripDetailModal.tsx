@@ -13,6 +13,7 @@ type Props = {
   mediaUrl: (url?: string | null) => string;
   onClose: () => void;
   onSave?: (experience: BookableExperience) => void;
+  saveLabel?: string;
   onShowArea?: (experience: BookableExperience) => void;
 };
 
@@ -24,6 +25,7 @@ export function GuidedTripDetailModal({
   mediaUrl,
   onClose,
   onSave,
+  saveLabel = 'Add to trip',
   onShowArea,
 }: Props) {
   const C = useTheme();
@@ -161,10 +163,17 @@ export function GuidedTripDetailModal({
                 <TouchableOpacity
                   style={[styles.secondaryButton, { borderColor: C.border }]}
                   onPress={() => onSave(experience)}
-                  accessibilityLabel="Save trip"
+                  accessibilityLabel={`${saveLabel}: ${experience.title}`}
                 >
                   <Ionicons name="add-circle-outline" size={17} color={C.text2} />
-                  <Text style={[styles.secondaryButtonText, { color: C.text2 }]}>Save</Text>
+                  <Text
+                    style={[styles.secondaryButtonText, { color: C.text2 }]}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.76}
+                  >
+                    {saveLabel}
+                  </Text>
                 </TouchableOpacity>
               ) : null}
               <TouchableOpacity

@@ -1,6 +1,8 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import sqlite3, json, time, math, hashlib, random, secrets, re
+import base64, sqlite3, json, time, math, hashlib, random, secrets, re
+from datetime import date as _date, datetime as _datetime, timedelta as _timedelta, timezone as _timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import settings
 
 # Report expiry by type (seconds)
@@ -31,6 +33,44 @@ def _conn() -> sqlite3.Connection:
     db.execute("PRAGMA busy_timeout=30000")
     db.row_factory = sqlite3.Row
     return db
+
+
+def _migrate_trip_documents_to_account_scope(db: sqlite3.Connection) -> None:
+    """Replace the original global trip id primary key with an account-local key."""
+    columns = db.execute("PRAGMA table_info(trip_documents_v2)").fetchall()
+    if not columns:
+        return
+    primary_key = [row["name"] for row in sorted(columns, key=lambda row: row["pk"]) if row["pk"]]
+    if primary_key == ["user_id", "id"]:
+        return
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute("ALTER TABLE trip_documents_v2 RENAME TO trip_documents_v2_global_ids")
+        db.execute(
+            """CREATE TABLE trip_documents_v2 (
+                   id            TEXT NOT NULL,
+                   user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                   status        TEXT NOT NULL DEFAULT 'draft',
+                   revision      INTEGER NOT NULL DEFAULT 1,
+                   document_json TEXT NOT NULL,
+                   created_at    INTEGER NOT NULL,
+                   updated_at    INTEGER NOT NULL,
+                   archived_at   INTEGER,
+                   deleted_at    INTEGER,
+                   PRIMARY KEY (user_id, id)
+               )"""
+        )
+        db.execute(
+            """INSERT INTO trip_documents_v2
+               (id,user_id,status,revision,document_json,created_at,updated_at,archived_at,deleted_at)
+               SELECT id,user_id,status,revision,document_json,created_at,updated_at,archived_at,deleted_at
+               FROM trip_documents_v2_global_ids"""
+        )
+        db.execute("DROP TABLE trip_documents_v2_global_ids")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
 
 def init_db():
     db = _conn()
@@ -420,6 +460,125 @@ def init_db():
             UNIQUE(trailhead_place_id, user_id, start_date, end_date),
             FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
         );
+        CREATE TABLE IF NOT EXISTS availability_monitors (
+            id                   TEXT PRIMARY KEY,
+            user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            target_id            TEXT NOT NULL,
+            target_label         TEXT NOT NULL,
+            monitor_type         TEXT NOT NULL,
+            start_date           TEXT,
+            end_date             TEXT,
+            party_size           INTEGER,
+            source               TEXT,
+            booking_url          TEXT,
+            criteria_json        TEXT NOT NULL DEFAULT '{}',
+            status               TEXT NOT NULL DEFAULT 'active',
+            billing_kind         TEXT NOT NULL,
+            credits_charged      INTEGER NOT NULL DEFAULT 0,
+            duration_days        INTEGER NOT NULL,
+            expires_at           INTEGER NOT NULL,
+            reservation_alert_id INTEGER REFERENCES place_reservation_alerts(id) ON DELETE SET NULL,
+            idempotency_key      TEXT NOT NULL,
+            request_hash         TEXT NOT NULL,
+            failure_reason       TEXT,
+            refunded_at          INTEGER,
+            cancelled_at         INTEGER,
+            created_at           INTEGER NOT NULL,
+            updated_at           INTEGER NOT NULL,
+            UNIQUE(user_id, idempotency_key)
+        );
+        CREATE TABLE IF NOT EXISTS authored_trip_packs (
+            id                        TEXT PRIMARY KEY,
+            slug                      TEXT NOT NULL UNIQUE,
+            status                    TEXT NOT NULL DEFAULT 'draft',
+            draft_title               TEXT NOT NULL,
+            draft_summary             TEXT NOT NULL,
+            draft_price_credits       INTEGER NOT NULL,
+            draft_coverage_region     TEXT NOT NULL,
+            draft_public_metadata     TEXT NOT NULL DEFAULT '{}',
+            draft_validation_metadata TEXT NOT NULL DEFAULT '{}',
+            draft_template_json       TEXT NOT NULL,
+            draft_revision            INTEGER NOT NULL DEFAULT 1,
+            current_published_version INTEGER,
+            created_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            updated_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at                INTEGER NOT NULL,
+            updated_at                INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS authored_trip_pack_versions (
+            pack_id             TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            version             INTEGER NOT NULL,
+            slug                TEXT NOT NULL,
+            title               TEXT NOT NULL,
+            summary             TEXT NOT NULL,
+            price_credits       INTEGER NOT NULL,
+            coverage_region     TEXT NOT NULL,
+            public_metadata     TEXT NOT NULL DEFAULT '{}',
+            validation_metadata TEXT NOT NULL DEFAULT '{}',
+            template_json       TEXT NOT NULL,
+            published_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            published_at        INTEGER NOT NULL,
+            PRIMARY KEY (pack_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS authored_trip_pack_features (
+            period_month TEXT PRIMARY KEY,
+            pack_id      TEXT NOT NULL,
+            version      INTEGER NOT NULL,
+            selected_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            selected_at  INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS authored_trip_pack_entitlements (
+            id                TEXT PRIMARY KEY,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            pack_id           TEXT NOT NULL,
+            version           INTEGER NOT NULL,
+            acquisition_type  TEXT NOT NULL,
+            list_price_credits INTEGER NOT NULL,
+            credits_charged   INTEGER NOT NULL,
+            explorer_discount INTEGER NOT NULL DEFAULT 0,
+            claim_month       TEXT,
+            trip_id           TEXT NOT NULL,
+            idempotency_key   TEXT NOT NULL,
+            request_hash      TEXT NOT NULL,
+            acquired_at       INTEGER NOT NULL,
+            UNIQUE(user_id, pack_id),
+            UNIQUE(user_id, idempotency_key),
+            UNIQUE(user_id, claim_month),
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS communication_preferences (
+            user_id                    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            weekly_digest              INTEGER NOT NULL DEFAULT 0,
+            trip_window_briefs         INTEGER NOT NULL DEFAULT 0,
+            deal_alerts                 INTEGER NOT NULL DEFAULT 0,
+            timezone                    TEXT NOT NULL DEFAULT 'UTC',
+            locale                      TEXT NOT NULL DEFAULT 'en-US',
+            unsubscribed_all            INTEGER NOT NULL DEFAULT 0,
+            weekly_digest_opted_in_at   INTEGER,
+            trip_briefs_opted_in_at     INTEGER,
+            deal_alerts_opted_in_at     INTEGER,
+            unsubscribed_at             INTEGER,
+            updated_at                  INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS community_publications (
+            id                    TEXT PRIMARY KEY,
+            user_id               INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            trip_id               TEXT NOT NULL,
+            note_id               TEXT NOT NULL,
+            source_note_fingerprint TEXT NOT NULL,
+            publication_type      TEXT NOT NULL,
+            title                 TEXT NOT NULL,
+            body                  TEXT NOT NULL,
+            place_id              TEXT,
+            status                TEXT NOT NULL DEFAULT 'pending_review',
+            moderation_note       TEXT,
+            moderated_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            submitted_at          INTEGER NOT NULL,
+            updated_at            INTEGER NOT NULL,
+            moderated_at          INTEGER,
+            retracted_at          INTEGER
+        );
         CREATE TABLE IF NOT EXISTS viator_bookings (
             id                  TEXT PRIMARY KEY,
             user_id             INTEGER NOT NULL REFERENCES users(id),
@@ -661,7 +820,53 @@ def init_db():
             read_by_user_at INTEGER,
             read_by_admin_at INTEGER
         );
+        CREATE TABLE IF NOT EXISTS saved_entities (
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            canonical_id  TEXT NOT NULL,
+            entity_type   TEXT NOT NULL,
+            title         TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'active',
+            data_json     TEXT NOT NULL DEFAULT '{}',
+            revision      INTEGER NOT NULL DEFAULT 1,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL,
+            archived_at   INTEGER,
+            deleted_at    INTEGER,
+            PRIMARY KEY (user_id, canonical_id)
+        );
+        CREATE TABLE IF NOT EXISTS saved_entity_mutations (
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            idempotency_key TEXT NOT NULL,
+            canonical_id    TEXT NOT NULL,
+            mutation_kind   TEXT NOT NULL,
+            request_hash    TEXT NOT NULL,
+            response_json   TEXT NOT NULL,
+            created_at      INTEGER NOT NULL,
+            PRIMARY KEY (user_id, idempotency_key)
+        );
+        CREATE TABLE IF NOT EXISTS trip_documents_v2 (
+            id            TEXT NOT NULL,
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            status        TEXT NOT NULL DEFAULT 'draft',
+            revision      INTEGER NOT NULL DEFAULT 1,
+            document_json TEXT NOT NULL,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL,
+            archived_at   INTEGER,
+            deleted_at    INTEGER,
+            PRIMARY KEY (user_id, id)
+        );
+        CREATE TABLE IF NOT EXISTS trip_document_mutations (
+            user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            idempotency_key TEXT NOT NULL,
+            trip_id        TEXT NOT NULL,
+            request_hash   TEXT NOT NULL,
+            response_json  TEXT NOT NULL,
+            created_at     INTEGER NOT NULL,
+            PRIMARY KEY (user_id, idempotency_key)
+        );
     """)
+    _migrate_trip_documents_to_account_scope(db)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_reports_geo ON reports(lat, lng, expires_at)",
@@ -683,6 +888,17 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_place_photos_place ON place_photos(trailhead_place_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_edit_suggestions_status ON place_edit_suggestions(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_reservation_alerts_user ON place_reservation_alerts(user_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_availability_monitors_user ON availability_monitors(user_id, status, expires_at, updated_at DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_availability_monitors_active_target ON availability_monitors(user_id,target_id,monitor_type,COALESCE(start_date,''),COALESCE(end_date,'')) WHERE status='active'",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_packs_status ON authored_trip_packs(status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_versions_published ON authored_trip_pack_versions(published_at DESC, pack_id)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_user ON authored_trip_pack_entitlements(user_id, acquired_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_communication_preferences_digest ON communication_preferences(weekly_digest,unsubscribed_all,user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_communication_preferences_briefs ON communication_preferences(trip_window_briefs,unsubscribed_all,user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_community_publications_user ON community_publications(user_id,submitted_at DESC,id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_community_publications_review ON community_publications(status,submitted_at,id)",
+        "CREATE INDEX IF NOT EXISTS idx_community_publications_place ON community_publications(place_id,status,submitted_at DESC,id DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_community_publications_open_source ON community_publications(user_id,trip_id,note_id,publication_type) WHERE status IN ('pending_review','approved')",
         "CREATE INDEX IF NOT EXISTS idx_fullness_geo ON camp_fullness(lat, lng, status, expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
@@ -705,6 +921,10 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_push_campaign_deliveries_campaign ON push_campaign_deliveries(campaign_id, delivery_status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_support_threads_user ON support_threads(user_id, last_message_at, status)",
         "CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_saved_entities_user_updated ON saved_entities(user_id, updated_at DESC, canonical_id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_saved_entities_user_type ON saved_entities(user_id, entity_type, status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_trip_documents_v2_user_updated ON trip_documents_v2(user_id, updated_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_trip_document_mutations_trip ON trip_document_mutations(user_id, trip_id, created_at)",
     ]:
         try:
             db.execute(idx_sql)
@@ -978,6 +1198,125 @@ def init_db():
             UNIQUE(trailhead_place_id, user_id, start_date, end_date),
             FOREIGN KEY (trailhead_place_id) REFERENCES places(trailhead_place_id)
         )""",
+        """CREATE TABLE IF NOT EXISTS availability_monitors (
+            id                   TEXT PRIMARY KEY,
+            user_id              INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            target_id            TEXT NOT NULL,
+            target_label         TEXT NOT NULL,
+            monitor_type         TEXT NOT NULL,
+            start_date           TEXT,
+            end_date             TEXT,
+            party_size           INTEGER,
+            source               TEXT,
+            booking_url          TEXT,
+            criteria_json        TEXT NOT NULL DEFAULT '{}',
+            status               TEXT NOT NULL DEFAULT 'active',
+            billing_kind         TEXT NOT NULL,
+            credits_charged      INTEGER NOT NULL DEFAULT 0,
+            duration_days        INTEGER NOT NULL,
+            expires_at           INTEGER NOT NULL,
+            reservation_alert_id INTEGER REFERENCES place_reservation_alerts(id) ON DELETE SET NULL,
+            idempotency_key      TEXT NOT NULL,
+            request_hash         TEXT NOT NULL,
+            failure_reason       TEXT,
+            refunded_at          INTEGER,
+            cancelled_at         INTEGER,
+            created_at           INTEGER NOT NULL,
+            updated_at           INTEGER NOT NULL,
+            UNIQUE(user_id, idempotency_key)
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_trip_packs (
+            id                        TEXT PRIMARY KEY,
+            slug                      TEXT NOT NULL UNIQUE,
+            status                    TEXT NOT NULL DEFAULT 'draft',
+            draft_title               TEXT NOT NULL,
+            draft_summary             TEXT NOT NULL,
+            draft_price_credits       INTEGER NOT NULL,
+            draft_coverage_region     TEXT NOT NULL,
+            draft_public_metadata     TEXT NOT NULL DEFAULT '{}',
+            draft_validation_metadata TEXT NOT NULL DEFAULT '{}',
+            draft_template_json       TEXT NOT NULL,
+            draft_revision            INTEGER NOT NULL DEFAULT 1,
+            current_published_version INTEGER,
+            created_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            updated_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at                INTEGER NOT NULL,
+            updated_at                INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_trip_pack_versions (
+            pack_id             TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            version             INTEGER NOT NULL,
+            slug                TEXT NOT NULL,
+            title               TEXT NOT NULL,
+            summary             TEXT NOT NULL,
+            price_credits       INTEGER NOT NULL,
+            coverage_region     TEXT NOT NULL,
+            public_metadata     TEXT NOT NULL DEFAULT '{}',
+            validation_metadata TEXT NOT NULL DEFAULT '{}',
+            template_json       TEXT NOT NULL,
+            published_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            published_at        INTEGER NOT NULL,
+            PRIMARY KEY (pack_id, version)
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_trip_pack_features (
+            period_month TEXT PRIMARY KEY,
+            pack_id      TEXT NOT NULL,
+            version      INTEGER NOT NULL,
+            selected_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            selected_at  INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_trip_pack_entitlements (
+            id                TEXT PRIMARY KEY,
+            user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            pack_id           TEXT NOT NULL,
+            version           INTEGER NOT NULL,
+            acquisition_type  TEXT NOT NULL,
+            list_price_credits INTEGER NOT NULL,
+            credits_charged   INTEGER NOT NULL,
+            explorer_discount INTEGER NOT NULL DEFAULT 0,
+            claim_month       TEXT,
+            trip_id           TEXT NOT NULL,
+            idempotency_key   TEXT NOT NULL,
+            request_hash      TEXT NOT NULL,
+            acquired_at       INTEGER NOT NULL,
+            UNIQUE(user_id, pack_id),
+            UNIQUE(user_id, idempotency_key),
+            UNIQUE(user_id, claim_month),
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        )""",
+        """CREATE TABLE IF NOT EXISTS communication_preferences (
+            user_id                    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+            weekly_digest              INTEGER NOT NULL DEFAULT 0,
+            trip_window_briefs         INTEGER NOT NULL DEFAULT 0,
+            deal_alerts                 INTEGER NOT NULL DEFAULT 0,
+            timezone                    TEXT NOT NULL DEFAULT 'UTC',
+            locale                      TEXT NOT NULL DEFAULT 'en-US',
+            unsubscribed_all            INTEGER NOT NULL DEFAULT 0,
+            weekly_digest_opted_in_at   INTEGER,
+            trip_briefs_opted_in_at     INTEGER,
+            deal_alerts_opted_in_at     INTEGER,
+            unsubscribed_at             INTEGER,
+            updated_at                  INTEGER NOT NULL
+        )""",
+        """CREATE TABLE IF NOT EXISTS community_publications (
+            id                    TEXT PRIMARY KEY,
+            user_id               INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            trip_id               TEXT NOT NULL,
+            note_id               TEXT NOT NULL,
+            source_note_fingerprint TEXT NOT NULL,
+            publication_type      TEXT NOT NULL,
+            title                 TEXT NOT NULL,
+            body                  TEXT NOT NULL,
+            place_id              TEXT,
+            status                TEXT NOT NULL DEFAULT 'pending_review',
+            moderation_note       TEXT,
+            moderated_by          INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            submitted_at          INTEGER NOT NULL,
+            updated_at            INTEGER NOT NULL,
+            moderated_at          INTEGER,
+            retracted_at          INTEGER
+        )""",
         """CREATE TABLE IF NOT EXISTS viator_bookings (
             id                  TEXT PRIMARY KEY,
             user_id             INTEGER NOT NULL REFERENCES users(id),
@@ -1007,6 +1346,18 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_place_photos_place ON place_photos(trailhead_place_id, status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_edit_suggestions_status ON place_edit_suggestions(status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_place_reservation_alerts_user ON place_reservation_alerts(user_id, status, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_availability_monitors_user ON availability_monitors(user_id, status, expires_at, updated_at DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_availability_monitors_active_target ON availability_monitors(user_id,target_id,monitor_type,COALESCE(start_date,''),COALESCE(end_date,'')) WHERE status='active'",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_packs_status ON authored_trip_packs(status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_versions_published ON authored_trip_pack_versions(published_at DESC, pack_id)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_user ON authored_trip_pack_entitlements(user_id, acquired_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_communication_preferences_digest ON communication_preferences(weekly_digest,unsubscribed_all,user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_communication_preferences_briefs ON communication_preferences(trip_window_briefs,unsubscribed_all,user_id)",
+        "CREATE INDEX IF NOT EXISTS idx_community_publications_user ON community_publications(user_id,submitted_at DESC,id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_community_publications_review ON community_publications(status,submitted_at,id)",
+        "CREATE INDEX IF NOT EXISTS idx_community_publications_place ON community_publications(place_id,status,submitted_at DESC,id DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_community_publications_open_source ON community_publications(user_id,trip_id,note_id,publication_type) WHERE status IN ('pending_review','approved')",
+        "ALTER TABLE authored_trip_pack_versions ADD COLUMN slug TEXT",
         "CREATE INDEX IF NOT EXISTS idx_viator_bookings_user ON viator_bookings(user_id, status, updated_at)",
         "CREATE INDEX IF NOT EXISTS idx_viator_bookings_reference ON viator_bookings(booking_reference)",
         """CREATE TABLE IF NOT EXISTS trail_field_reports (
@@ -1209,11 +1560,102 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_extreme_ledger_session ON extreme_ledger_events(session_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_extreme_trip_metadata_user ON extreme_trip_metadata(user_id, updated_at)",
         "CREATE INDEX IF NOT EXISTS idx_extreme_copilot_user ON extreme_copilot_actions(user_id, created_at)",
+        """CREATE TABLE IF NOT EXISTS saved_entities (
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            canonical_id  TEXT NOT NULL,
+            entity_type   TEXT NOT NULL,
+            title         TEXT NOT NULL,
+            status        TEXT NOT NULL DEFAULT 'active',
+            data_json     TEXT NOT NULL DEFAULT '{}',
+            revision      INTEGER NOT NULL DEFAULT 1,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL,
+            archived_at   INTEGER,
+            deleted_at    INTEGER,
+            PRIMARY KEY (user_id, canonical_id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS saved_entity_mutations (
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            idempotency_key TEXT NOT NULL,
+            canonical_id    TEXT NOT NULL,
+            mutation_kind   TEXT NOT NULL,
+            request_hash    TEXT NOT NULL,
+            response_json   TEXT NOT NULL,
+            created_at      INTEGER NOT NULL,
+            PRIMARY KEY (user_id, idempotency_key)
+        )""",
+        """CREATE TABLE IF NOT EXISTS trip_documents_v2 (
+            id            TEXT NOT NULL,
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            status        TEXT NOT NULL DEFAULT 'draft',
+            revision      INTEGER NOT NULL DEFAULT 1,
+            document_json TEXT NOT NULL,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL,
+            archived_at   INTEGER,
+            deleted_at    INTEGER,
+            PRIMARY KEY (user_id, id)
+        )""",
+        """CREATE TABLE IF NOT EXISTS trip_document_mutations (
+            user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            idempotency_key TEXT NOT NULL,
+            trip_id        TEXT NOT NULL,
+            request_hash   TEXT NOT NULL,
+            response_json  TEXT NOT NULL,
+            created_at     INTEGER NOT NULL,
+            PRIMARY KEY (user_id, idempotency_key)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_saved_entities_user_updated ON saved_entities(user_id, updated_at DESC, canonical_id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_saved_entities_user_type ON saved_entities(user_id, entity_type, status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_saved_entity_mutations_item ON saved_entity_mutations(user_id, canonical_id, created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_trip_documents_v2_user_updated ON trip_documents_v2(user_id, updated_at DESC, id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_trip_document_mutations_trip ON trip_document_mutations(user_id, trip_id, created_at)",
     ]:
         try:
             db.execute(sql)
         except Exception:
             pass
+    # Preserve pre-policy campground alerts as grandfathered 30-day watches.
+    try:
+        db.execute(
+            """INSERT OR IGNORE INTO availability_monitors
+               (id,user_id,target_id,target_label,monitor_type,start_date,end_date,
+                party_size,source,booking_url,criteria_json,status,billing_kind,
+                credits_charged,duration_days,expires_at,reservation_alert_id,
+                idempotency_key,request_hash,created_at,updated_at)
+               SELECT
+                 'legacy_reservation_' || alert.id,
+                 alert.user_id,
+                 alert.trailhead_place_id,
+                 COALESCE(NULLIF(place.name,''),'Saved campground'),
+                 'campground',alert.start_date,alert.end_date,
+                 COALESCE(alert.party_size,1),COALESCE(alert.source,'trailhead'),
+                 alert.booking_url,'{}',
+                 CASE WHEN alert.status='active' THEN 'active' ELSE 'cancelled' END,
+                 'legacy',0,30,
+                 COALESCE(alert.updated_at,alert.created_at) + 2592000,
+                 alert.id,
+                 'legacy-reservation-' || alert.id,
+                 'legacy-reservation-' || alert.id,
+                 alert.created_at,COALESCE(alert.updated_at,alert.created_at)
+               FROM place_reservation_alerts alert
+               JOIN users account ON account.id=alert.user_id
+               LEFT JOIN places place ON place.trailhead_place_id=alert.trailhead_place_id
+               WHERE NOT EXISTS (
+                 SELECT 1 FROM availability_monitors monitor
+                 WHERE monitor.reservation_alert_id=alert.id
+               )"""
+        )
+    except Exception:
+        pass
+    try:
+        db.execute(
+            """UPDATE authored_trip_pack_versions
+               SET slug=(SELECT pack.slug FROM authored_trip_packs pack WHERE pack.id=authored_trip_pack_versions.pack_id)
+               WHERE slug IS NULL OR slug=''"""
+        )
+    except Exception:
+        pass
     db.commit()
     db.close()
     try:
@@ -1289,17 +1731,31 @@ def clear_conversation(session_id: str):
 
 def save_trip(trip_id: str, request: str, plan: dict, user_id: int | None = None):
     db = _conn()
-    now = int(time.time())
-    existing = db.execute("SELECT created_at, audio_guide FROM trips WHERE id=?", (trip_id,)).fetchone()
-    created_at = existing["created_at"] if existing else now
-    audio_guide = existing["audio_guide"] if existing else None
-    db.execute(
-        """INSERT OR REPLACE INTO trips
-           (id, user_id, created_at, updated_at, request, plan, audio_guide, version)
-           VALUES (?,?,?,?,?,?,?,COALESCE((SELECT version + 1 FROM trips WHERE id=?), 1))""",
-        (trip_id, user_id, created_at, now, request, json.dumps(plan), audio_guide, trip_id)
-    )
-    db.commit(); db.close()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        now = int(time.time())
+        existing = db.execute("SELECT user_id FROM trips WHERE id=?", (trip_id,)).fetchone()
+        if existing and existing["user_id"] != user_id:
+            raise PermissionError("Not authorized")
+        if existing:
+            db.execute(
+                """UPDATE trips SET request=?,plan=?,updated_at=?,version=COALESCE(version,1)+1
+                   WHERE id=? AND user_id IS ?""",
+                (request, json.dumps(plan), now, trip_id, user_id),
+            )
+        else:
+            db.execute(
+                """INSERT INTO trips
+                   (id,user_id,created_at,updated_at,request,plan,version)
+                   VALUES (?,?,?,?,?,?,1)""",
+                (trip_id, user_id, now, now, request, json.dumps(plan)),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def get_trip(trip_id: str) -> dict | None:
     db = _conn()
@@ -1336,31 +1792,45 @@ def save_account_trip(
     source: str = "web",
 ) -> dict:
     db = _conn()
-    now = int(time.time())
-    existing = db.execute("SELECT created_at, audio_guide, version FROM trips WHERE id=?", (trip_id,)).fetchone()
-    created_at = existing["created_at"] if existing else now
-    version = (existing["version"] or 1) + 1 if existing else 1
-    audio_guide = existing["audio_guide"] if existing else None
-    db.execute(
-        """INSERT OR REPLACE INTO trips
-           (id, user_id, created_at, updated_at, request, plan, route_geometry,
-            builder_state, source, version, audio_guide)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            trip_id,
-            user_id,
-            created_at,
-            now,
-            request,
-            json.dumps(trip),
-            json.dumps(route_geometry) if route_geometry is not None else None,
-            json.dumps(builder_state) if builder_state is not None else None,
-            source,
-            version,
-            audio_guide,
-        )
-    )
-    db.commit(); db.close()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        now = int(time.time())
+        existing = db.execute(
+            "SELECT user_id FROM trips WHERE id=?", (trip_id,),
+        ).fetchone()
+        if existing and existing["user_id"] != user_id:
+            raise PermissionError("Not authorized")
+        if existing:
+            db.execute(
+                """UPDATE trips SET request=?,plan=?,route_geometry=?,builder_state=?,source=?,
+                          updated_at=?,version=COALESCE(version,1)+1
+                   WHERE id=? AND user_id=?""",
+                (
+                    request, json.dumps(trip),
+                    json.dumps(route_geometry) if route_geometry is not None else None,
+                    json.dumps(builder_state) if builder_state is not None else None,
+                    source, now, trip_id, user_id,
+                ),
+            )
+        else:
+            db.execute(
+                """INSERT INTO trips
+                   (id,user_id,created_at,updated_at,request,plan,route_geometry,
+                    builder_state,source,version)
+                   VALUES (?,?,?,?,?,?,?,?,?,1)""",
+                (
+                    trip_id, user_id, now, now, request, json.dumps(trip),
+                    json.dumps(route_geometry) if route_geometry is not None else None,
+                    json.dumps(builder_state) if builder_state is not None else None,
+                    source,
+                ),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
     saved = get_trip(trip_id)
     return saved if saved else trip
 
@@ -1403,15 +1873,26 @@ def save_trip_geometry(trip_id: str, user_id: int, route_geometry: dict) -> dict
         db.close()
         raise PermissionError("Not authorized")
     db.execute(
-        "UPDATE trips SET route_geometry=?, updated_at=?, version=COALESCE(version,1)+1 WHERE id=?",
-        (json.dumps(route_geometry), int(time.time()), trip_id)
+        """UPDATE trips SET route_geometry=?, updated_at=?, version=COALESCE(version,1)+1
+           WHERE id=? AND user_id=?""",
+        (json.dumps(route_geometry), int(time.time()), trip_id, user_id)
     )
     db.commit(); db.close()
     return get_trip(trip_id)
 
-def save_audio_guide(trip_id: str, guide: dict):
+def save_audio_guide(trip_id: str, guide: dict, user_id: int | None = None):
     db = _conn()
-    db.execute("UPDATE trips SET audio_guide=? WHERE id=?", (json.dumps(guide), trip_id))
+    row = db.execute("SELECT user_id FROM trips WHERE id=?", (trip_id,)).fetchone()
+    if not row:
+        db.close()
+        raise ValueError("Trip not found")
+    if user_id is not None and row["user_id"] != user_id:
+        db.close()
+        raise PermissionError("Not authorized")
+    db.execute(
+        "UPDATE trips SET audio_guide=? WHERE id=? AND user_id IS ?",
+        (json.dumps(guide), trip_id, row["user_id"]),
+    )
     db.commit(); db.close()
 
 def get_audio_guide(trip_id: str) -> dict | None:
@@ -1420,7 +1901,1233 @@ def get_audio_guide(trip_id: str) -> dict | None:
     db.close()
     return json.loads(row["audio_guide"]) if row and row["audio_guide"] else None
 
+
+# -- Account library and canonical trip documents --------------------------------
+
+SAVED_ENTITY_TYPES = {"place", "camp", "trail", "activity", "water", "pack"}
+SAVED_ENTITY_STATUSES = {"active", "archived", "deleted"}
+TRIP_DOCUMENT_STATUSES = {"draft", "active", "completed", "archived", "deleted"}
+_CANONICAL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,239}$")
+_IDEMPOTENCY_KEY_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$")
+
+
+class RevisionConflictError(ValueError):
+    def __init__(self, current_revision: int):
+        self.current_revision = int(current_revision)
+        super().__init__(f"Revision conflict; current revision is {self.current_revision}")
+
+
+class IdempotencyConflictError(ValueError):
+    pass
+
+
+def _validate_canonical_id(value: str, label: str = "canonical id") -> str:
+    clean = str(value or "").strip()
+    if not _CANONICAL_ID_RE.fullmatch(clean):
+        raise ValueError(f"Invalid {label}")
+    return clean
+
+
+def _json_object(value: dict, label: str, max_bytes: int) -> tuple[dict, str]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    try:
+        encoded = json.dumps(value, separators=(",", ":"), sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must contain valid JSON") from exc
+    if len(encoded.encode("utf-8")) > max_bytes:
+        raise ValueError(f"{label} is too large")
+    return json.loads(encoded), encoded
+
+
+def _encode_account_cursor(updated_at: int, item_id: str) -> str:
+    raw = json.dumps({"t": int(updated_at), "id": item_id}, separators=(",", ":")).encode("utf-8")
+    return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+
+def _decode_account_cursor(cursor: str | None) -> tuple[int, str] | None:
+    if not cursor:
+        return None
+    try:
+        clean = str(cursor).strip()
+        raw = base64.urlsafe_b64decode(clean + "=" * (-len(clean) % 4))
+        payload = json.loads(raw.decode("utf-8"))
+        stamp = int(payload["t"])
+        item_id = str(payload["id"])
+        if stamp < 0 or not item_id or set(payload) != {"t", "id"}:
+            raise ValueError
+        return stamp, item_id
+    except Exception as exc:
+        raise ValueError("Invalid cursor") from exc
+
+
+def _saved_entity_from_row(row: sqlite3.Row | dict) -> dict:
+    item = dict(row)
+    try:
+        data = json.loads(item.pop("data_json"))
+    except Exception:
+        data = {}
+    item["data"] = data if isinstance(data, dict) else {}
+    return item
+
+
+def get_saved_entity(user_id: int, canonical_id: str, include_deleted: bool = False) -> dict | None:
+    canonical_id = _validate_canonical_id(canonical_id)
+    db = _conn()
+    row = db.execute(
+        "SELECT * FROM saved_entities WHERE user_id=? AND canonical_id=?",
+        (user_id, canonical_id),
+    ).fetchone()
+    db.close()
+    if not row or (row["status"] == "deleted" and not include_deleted):
+        return None
+    return _saved_entity_from_row(row)
+
+
+def upsert_saved_entity(
+    user_id: int,
+    canonical_id: str,
+    entity_type: str,
+    title: str,
+    data: dict,
+    expected_revision: int = 0,
+    status: str = "active",
+    idempotency_key: str | None = None,
+    mutation_kind: str = "upsert",
+    request_hash_payload: dict | None = None,
+) -> dict:
+    canonical_id = _validate_canonical_id(canonical_id)
+    entity_type = str(entity_type or "").strip().lower()
+    status = str(status or "").strip().lower()
+    title = re.sub(r"\s+", " ", str(title or "")).strip()
+    if entity_type not in SAVED_ENTITY_TYPES:
+        raise ValueError("Invalid saved entity type")
+    if status not in SAVED_ENTITY_STATUSES:
+        raise ValueError("Invalid saved entity status")
+    if not title or len(title) > 200:
+        raise ValueError("Title must be between 1 and 200 characters")
+    if not isinstance(expected_revision, int) or expected_revision < 0:
+        raise ValueError("Expected revision must be a non-negative integer")
+    normalized_data, data_json = _json_object(data, "Saved entity data", 512 * 1024)
+    clean_key = str(idempotency_key or "").strip() or None
+    if clean_key and not _IDEMPOTENCY_KEY_RE.fullmatch(clean_key):
+        raise ValueError("Invalid Idempotency-Key")
+    mutation_kind = str(mutation_kind or "upsert").strip().lower()
+    hash_payload = request_hash_payload or {
+        "canonical_id": canonical_id,
+        "entity_type": entity_type,
+        "title": title,
+        "data": normalized_data,
+        "expected_revision": expected_revision,
+        "status": status,
+    }
+    request_hash = hashlib.sha256(json.dumps({
+        "mutation_kind": mutation_kind,
+        "payload": hash_payload,
+    }, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if clean_key:
+            replay = db.execute(
+                """SELECT request_hash,response_json FROM saved_entity_mutations
+                   WHERE user_id=? AND idempotency_key=?""",
+                (user_id, clean_key),
+            ).fetchone()
+            if replay:
+                if replay["request_hash"] != request_hash:
+                    raise IdempotencyConflictError(
+                        "Idempotency-Key was already used for a different request"
+                    )
+                result = json.loads(replay["response_json"])
+                db.commit()
+                return result
+        row = db.execute(
+            "SELECT revision, created_at FROM saved_entities WHERE user_id=? AND canonical_id=?",
+            (user_id, canonical_id),
+        ).fetchone()
+        current_revision = int(row["revision"] or 1) if row else 0
+        if expected_revision != current_revision:
+            raise RevisionConflictError(current_revision)
+        now = int(time.time())
+        revision = current_revision + 1
+        created_at = int(row["created_at"]) if row else now
+        archived_at = now if status == "archived" else None
+        deleted_at = now if status == "deleted" else None
+        db.execute(
+            """INSERT INTO saved_entities
+               (user_id,canonical_id,entity_type,title,status,data_json,revision,
+                created_at,updated_at,archived_at,deleted_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(user_id,canonical_id) DO UPDATE SET
+                 entity_type=excluded.entity_type,
+                 title=excluded.title,
+                 status=excluded.status,
+                 data_json=excluded.data_json,
+                 revision=excluded.revision,
+                 updated_at=excluded.updated_at,
+                 archived_at=excluded.archived_at,
+                 deleted_at=excluded.deleted_at""",
+            (
+                user_id, canonical_id, entity_type, title, status, data_json, revision,
+                created_at, now, archived_at, deleted_at,
+            ),
+        )
+        saved = db.execute(
+            "SELECT * FROM saved_entities WHERE user_id=? AND canonical_id=?",
+            (user_id, canonical_id),
+        ).fetchone()
+        result = _saved_entity_from_row(saved)
+        if clean_key:
+            db.execute(
+                """INSERT INTO saved_entity_mutations
+                   (user_id,idempotency_key,canonical_id,mutation_kind,request_hash,response_json,created_at)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (
+                    user_id, clean_key, canonical_id, mutation_kind, request_hash,
+                    json.dumps(result, separators=(",", ":"), sort_keys=True), now,
+                ),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return result
+
+
+def set_saved_entity_status(
+    user_id: int,
+    canonical_id: str,
+    status: str,
+    expected_revision: int,
+    idempotency_key: str | None = None,
+    mutation_kind: str | None = None,
+) -> dict | None:
+    existing = get_saved_entity(user_id, canonical_id, include_deleted=True)
+    if not existing:
+        return None
+    return upsert_saved_entity(
+        user_id,
+        canonical_id,
+        existing["entity_type"],
+        existing["title"],
+        existing["data"],
+        expected_revision=expected_revision,
+        status=status,
+        idempotency_key=idempotency_key,
+        mutation_kind=mutation_kind or status,
+        request_hash_payload={
+            "canonical_id": canonical_id,
+            "status": status,
+            "expected_revision": expected_revision,
+        },
+    )
+
+
+def list_saved_entities(
+    user_id: int,
+    limit: int = 50,
+    cursor: str | None = None,
+    entity_type: str | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+) -> dict:
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    entity_type = str(entity_type or "").strip().lower() or None
+    if entity_type and entity_type not in SAVED_ENTITY_TYPES:
+        raise ValueError("Invalid saved entity type")
+    decoded_cursor = _decode_account_cursor(cursor)
+    clauses = ["user_id=?"]
+    params: list = [user_id]
+    if not include_deleted:
+        clauses.append("status!='deleted'")
+    if not include_archived:
+        clauses.append("status!='archived'")
+    if entity_type:
+        clauses.append("entity_type=?")
+        params.append(entity_type)
+    if decoded_cursor:
+        clauses.append("(updated_at<? OR (updated_at=? AND canonical_id<?))")
+        params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+    params.append(limit + 1)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT * FROM saved_entities
+            WHERE {' AND '.join(clauses)}
+            ORDER BY updated_at DESC, canonical_id DESC
+            LIMIT ?""",
+        params,
+    ).fetchall()
+    db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    items = [_saved_entity_from_row(row) for row in page]
+    next_cursor = _encode_account_cursor(page[-1]["updated_at"], page[-1]["canonical_id"]) if has_more else None
+    return {"items": items, "next_cursor": next_cursor}
+
+
+def _legacy_trip_document(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    try:
+        saved_trip = json.loads(raw.get("document_json") or raw.get("plan") or "{}")
+    except Exception:
+        saved_trip = {}
+    saved_trip = saved_trip if isinstance(saved_trip, dict) else {}
+    plan = saved_trip.get("plan") if isinstance(saved_trip.get("plan"), dict) else saved_trip
+    title = str(plan.get("trip_name") or saved_trip.get("trip_name") or "Untitled route").strip()[:200]
+
+    def _legacy_json(name: str, fallback):
+        value = raw.get(name)
+        if value in (None, ""):
+            return fallback
+        if isinstance(value, (dict, list)):
+            return value
+        try:
+            return json.loads(value)
+        except Exception:
+            return fallback
+
+    starts_on = str(
+        saved_trip.get("starts_on") or saved_trip.get("startsOn")
+        or saved_trip.get("start_date") or ""
+    ).strip() or None
+    ends_on = str(
+        saved_trip.get("ends_on") or saved_trip.get("endsOn")
+        or saved_trip.get("end_date") or ""
+    ).strip() or None
+    route = _legacy_json("route_geometry", {})
+
+    return {
+        "schema_version": 2,
+        "trip_id": raw["id"],
+        "revision": int(raw.get("revision") or raw.get("version") or 1),
+        "status": "draft",
+        "title": title or "Untitled route",
+        "summary": str(plan.get("overview") or saved_trip.get("summary") or "").strip() or None,
+        "regions": plan.get("states") if isinstance(plan.get("states"), list) else [],
+        "starts_on": starts_on,
+        "ends_on": ends_on,
+        "dates": {"starts_on": starts_on, "ends_on": ends_on},
+        "rig_snapshot": {},
+        "route": route,
+        "days": plan.get("daily_itinerary") if isinstance(plan.get("daily_itinerary"), list) else [],
+        "items": plan.get("waypoints") if isinstance(plan.get("waypoints"), list) else [],
+        "notes": [],
+        "readiness": {},
+        "bookings": [],
+        "alerts": [],
+        "offline": {},
+        "visibility": "private",
+        "source": raw.get("source") or "legacy_v1",
+        "created_at": int(raw.get("created_at") or 0),
+        "updated_at": int(raw.get("updated_at") or raw.get("created_at") or 0),
+        "archived_at": None,
+        "deleted_at": None,
+        "legacy_v1": {
+            "request": raw.get("request") or "",
+            "trip": saved_trip,
+            "route_geometry": route or None,
+            "builder_state": _legacy_json("builder_state", None),
+        },
+    }
+
+
+def _trip_document_from_row(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    if raw.get("origin") == "v1" or ("document_json" not in raw and "plan" in raw):
+        return _legacy_trip_document(raw)
+    try:
+        document = json.loads(raw.get("document_json") or "{}")
+    except Exception:
+        document = {}
+    document = document if isinstance(document, dict) else {}
+    document.update({
+        "schema_version": 2,
+        "trip_id": raw["id"],
+        "revision": int(raw.get("revision") or 1),
+        "status": raw.get("status") or "draft",
+        "created_at": int(raw.get("created_at") or 0),
+        "updated_at": int(raw.get("updated_at") or raw.get("created_at") or 0),
+        "archived_at": raw.get("archived_at"),
+        "deleted_at": raw.get("deleted_at"),
+    })
+    return document
+
+
+def get_trip_document_v2(user_id: int, trip_id: str, include_deleted: bool = False) -> dict | None:
+    trip_id = _validate_canonical_id(trip_id, "trip id")
+    db = _conn()
+    row = db.execute(
+        "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
+    ).fetchone()
+    if row:
+        db.close()
+        if row["status"] == "deleted" and not include_deleted:
+            return None
+        return _trip_document_from_row(row)
+    legacy = db.execute(
+        """SELECT id,user_id,created_at,COALESCE(updated_at,created_at) AS updated_at,
+                  request,plan,route_geometry,builder_state,source,version AS revision
+           FROM trips WHERE id=? AND user_id=?""",
+        (trip_id, user_id),
+    ).fetchone()
+    db.close()
+    if not legacy:
+        return None
+    return _legacy_trip_document(legacy)
+
+
+def _normalize_trip_document(document: dict, trip_id: str) -> tuple[dict, str]:
+    normalized, _ = _json_object(document, "Trip document", 2 * 1024 * 1024)
+    if int(normalized.get("schema_version") or 0) != 2:
+        raise ValueError("Trip document schema_version must be 2")
+    supplied_id = str(normalized.get("trip_id") or trip_id).strip()
+    if supplied_id != trip_id:
+        raise ValueError("Trip document id does not match the route")
+    status = str(normalized.get("status") or "draft").strip().lower()
+    if status not in TRIP_DOCUMENT_STATUSES:
+        raise ValueError("Invalid trip document status")
+    title = re.sub(r"\s+", " ", str(normalized.get("title") or "")).strip()
+    if not title or len(title) > 200:
+        raise ValueError("Trip title must be between 1 and 200 characters")
+    visibility = str(normalized.get("visibility") or "private").strip().lower()
+    if visibility not in {"private", "shared", "public"}:
+        raise ValueError("Invalid trip visibility")
+    normalized["trip_id"] = trip_id
+    normalized["status"] = status
+    normalized["title"] = title
+    normalized["visibility"] = visibility
+    for server_field in ("revision", "created_at", "updated_at", "archived_at", "deleted_at"):
+        normalized.pop(server_field, None)
+    normalized, document_json = _json_object(normalized, "Trip document", 2 * 1024 * 1024)
+    return normalized, document_json
+
+
+def upsert_trip_document_v2(
+    user_id: int,
+    trip_id: str,
+    document: dict,
+    expected_revision: int,
+    idempotency_key: str,
+) -> dict:
+    trip_id = _validate_canonical_id(trip_id, "trip id")
+    idempotency_key = str(idempotency_key or "").strip()
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
+        raise ValueError("Invalid Idempotency-Key")
+    if not isinstance(expected_revision, int) or expected_revision < 0:
+        raise ValueError("Expected revision must be a non-negative integer")
+    normalized, document_json = _normalize_trip_document(document, trip_id)
+    request_hash = hashlib.sha256(json.dumps({
+        "trip_id": trip_id,
+        "expected_revision": expected_revision,
+        "document": normalized,
+    }, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        replay = db.execute(
+            "SELECT request_hash,response_json FROM trip_document_mutations WHERE user_id=? AND idempotency_key=?",
+            (user_id, idempotency_key),
+        ).fetchone()
+        if replay:
+            if replay["request_hash"] != request_hash:
+                raise ValueError("Idempotency-Key was already used for a different request")
+            result = json.loads(replay["response_json"])
+            db.commit()
+            return result
+
+        current = db.execute(
+            "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
+        ).fetchone()
+        legacy = None
+        if not current:
+            legacy = db.execute(
+                """SELECT id,user_id,created_at,COALESCE(updated_at,created_at) AS updated_at,
+                          request,plan,route_geometry,builder_state,source,version AS revision
+                   FROM trips WHERE id=? AND user_id=?""",
+                (trip_id, user_id),
+            ).fetchone()
+        current_revision = int(current["revision"] or 1) if current else int(legacy["revision"] or 1) if legacy else 0
+        if expected_revision != current_revision:
+            raise RevisionConflictError(current_revision)
+
+        now = int(time.time())
+        revision = current_revision + 1
+        created_at = int(current["created_at"]) if current else int(legacy["created_at"]) if legacy else now
+        status = normalized["status"]
+        archived_at = now if status == "archived" else None
+        deleted_at = now if status == "deleted" else None
+        db.execute(
+            """INSERT INTO trip_documents_v2
+               (id,user_id,status,revision,document_json,created_at,updated_at,archived_at,deleted_at)
+               VALUES (?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(user_id,id) DO UPDATE SET
+                 status=excluded.status,
+                 revision=excluded.revision,
+                 document_json=excluded.document_json,
+                 updated_at=excluded.updated_at,
+                 archived_at=excluded.archived_at,
+                 deleted_at=excluded.deleted_at""",
+            (trip_id, user_id, status, revision, document_json, created_at, now, archived_at, deleted_at),
+        )
+        saved = db.execute(
+            "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
+        ).fetchone()
+        result = _trip_document_from_row(saved)
+        db.execute(
+            """INSERT INTO trip_document_mutations
+               (user_id,idempotency_key,trip_id,request_hash,response_json,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (user_id, idempotency_key, trip_id, request_hash, json.dumps(result, separators=(",", ":")), now),
+        )
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def list_trip_documents_v2(
+    user_id: int,
+    limit: int = 50,
+    cursor: str | None = None,
+    status: str | None = None,
+    include_archived: bool = False,
+    include_deleted: bool = False,
+) -> dict:
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    status = str(status or "").strip().lower() or None
+    if status and status not in TRIP_DOCUMENT_STATUSES:
+        raise ValueError("Invalid trip document status")
+    if status == "deleted" and not include_deleted:
+        raise ValueError("include_deleted is required when filtering deleted trips")
+    decoded_cursor = _decode_account_cursor(cursor)
+    clauses = ["user_id=?"]
+    params: list = [user_id]
+    if status:
+        clauses.append("status=?")
+        params.append(status)
+    else:
+        if not include_deleted:
+            clauses.append("status!='deleted'")
+        if not include_archived:
+            clauses.append("status!='archived'")
+    if decoded_cursor:
+        clauses.append("(updated_at<? OR (updated_at=? AND id<?))")
+        params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+    params.append(limit + 1)
+    db = _conn()
+    rows = db.execute(
+        f"""WITH account_trips AS (
+                SELECT id,user_id,status,revision,document_json,created_at,updated_at,
+                       archived_at,deleted_at,NULL AS request,NULL AS plan,
+                       NULL AS route_geometry,NULL AS builder_state,NULL AS source,
+                       'v2' AS origin
+                FROM trip_documents_v2
+                WHERE user_id=?
+                UNION ALL
+                SELECT t.id,t.user_id,'draft' AS status,COALESCE(t.version,1) AS revision,
+                       NULL AS document_json,t.created_at,COALESCE(t.updated_at,t.created_at) AS updated_at,
+                       NULL AS archived_at,NULL AS deleted_at,t.request,t.plan,
+                       t.route_geometry,t.builder_state,t.source,'v1' AS origin
+                FROM trips t
+                WHERE t.user_id=?
+                  AND NOT EXISTS (
+                    SELECT 1 FROM trip_documents_v2 v2
+                    WHERE v2.user_id=t.user_id AND v2.id=t.id
+                  )
+            )
+            SELECT * FROM account_trips
+            WHERE {' AND '.join(clauses)}
+            ORDER BY updated_at DESC,id DESC
+            LIMIT ?""",
+        [user_id, user_id, *params],
+    ).fetchall()
+    db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    items = [_trip_document_from_row(row) for row in page]
+    next_cursor = _encode_account_cursor(page[-1]["updated_at"], page[-1]["id"]) if has_more else None
+    return {"items": items, "next_cursor": next_cursor}
+
 # ── Cache ─────────────────────────────────────────────────────────────────────
+
+# -- Communication preferences and reviewed community publications -------------
+
+COMMUNICATION_CHANNELS = {
+    "weekly_digest": "weekly_digest_opted_in_at",
+    "trip_window_briefs": "trip_briefs_opted_in_at",
+    "deal_alerts": "deal_alerts_opted_in_at",
+}
+COMMUNITY_PUBLICATION_TYPES = {"trip_recap", "place_update", "correction"}
+COMMUNITY_PUBLICATION_STATUSES = {"pending_review", "approved", "rejected", "retracted"}
+TRIP_BRIEF_LEAD_DAYS = 7
+TRIP_BRIEF_MAX_DURATION_DAYS = 90
+_LOCALE_RE = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
+_DECIMAL_PAIR_RE = re.compile(r"(?<!\d)([-+]?\d{1,2}\.\d{3,})\s*[,;/]\s*([-+]?\d{1,3}\.\d{3,})(?!\d)")
+_LABELED_COORDINATE_RE = re.compile(
+    r"\b(?:lat(?:itude)?)\s*[:=]?\s*[-+]?\d{1,2}(?:\.\d+)?\s*[,;/ ]+"
+    r"(?:lon(?:gitude)?|lng)\s*[:=]?\s*[-+]?\d{1,3}(?:\.\d+)?\b",
+    re.IGNORECASE,
+)
+
+
+class PublicationSourceNoteNotFoundError(ValueError):
+    pass
+
+
+class PublicationTargetRequiredError(ValueError):
+    pass
+
+
+class PublicationTargetNotFoundError(ValueError):
+    pass
+
+
+class PublicationAlreadySubmittedError(ValueError):
+    def __init__(self, publication_id: str):
+        self.publication_id = publication_id
+        super().__init__("This note already has a submission under review")
+
+
+class PublicationStateConflictError(ValueError):
+    def __init__(self, status: str):
+        self.status = status
+        super().__init__("This publication can no longer be changed that way")
+
+
+class PublicationPrivacyError(ValueError):
+    pass
+
+
+def _validate_preference_timezone(value: str) -> str:
+    clean = str(value or "").strip()
+    if not clean or len(clean) > 80:
+        raise ValueError("Choose a valid timezone")
+    try:
+        ZoneInfo(clean)
+    except (ZoneInfoNotFoundError, ValueError) as exc:
+        raise ValueError("Choose a valid timezone") from exc
+    return clean
+
+
+def _validate_preference_locale(value: str) -> str:
+    clean = str(value or "").strip()
+    if not _LOCALE_RE.fullmatch(clean):
+        raise ValueError("Locale must use a language or language-region code")
+    return clean
+
+
+def _communication_preferences_from_row(row: sqlite3.Row | dict | None) -> dict:
+    raw = dict(row) if row else {}
+    return {
+        "weekly_digest": bool(raw.get("weekly_digest", 0)),
+        "trip_window_briefs": bool(raw.get("trip_window_briefs", 0)),
+        "deal_alerts": bool(raw.get("deal_alerts", 0)),
+        "timezone": str(raw.get("timezone") or "UTC"),
+        "locale": str(raw.get("locale") or "en-US"),
+        "unsubscribed_all": bool(raw.get("unsubscribed_all", 0)),
+        "updated_at": raw.get("updated_at"),
+    }
+
+
+def get_communication_preferences(user_id: int) -> dict:
+    db = _conn()
+    row = db.execute(
+        "SELECT * FROM communication_preferences WHERE user_id=?", (user_id,),
+    ).fetchone()
+    db.close()
+    return _communication_preferences_from_row(row)
+
+
+def update_communication_preferences(user_id: int, changes: dict) -> dict:
+    if not isinstance(changes, dict):
+        raise ValueError("Preferences must be an object")
+    allowed = {*COMMUNICATION_CHANNELS, "timezone", "locale"}
+    if set(changes) - allowed:
+        raise ValueError("Unsupported communication preference")
+    for channel in COMMUNICATION_CHANNELS:
+        if channel in changes and not isinstance(changes[channel], bool):
+            raise ValueError("Communication choices must be true or false")
+    timezone_name = _validate_preference_timezone(changes["timezone"]) if "timezone" in changes else None
+    locale = _validate_preference_locale(changes["locale"]) if "locale" in changes else None
+
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            "SELECT * FROM communication_preferences WHERE user_id=?", (user_id,),
+        ).fetchone()
+        state = {
+            "weekly_digest": int(existing["weekly_digest"]) if existing else 0,
+            "trip_window_briefs": int(existing["trip_window_briefs"]) if existing else 0,
+            "deal_alerts": int(existing["deal_alerts"]) if existing else 0,
+            "timezone": str(existing["timezone"] or "UTC") if existing else "UTC",
+            "locale": str(existing["locale"] or "en-US") if existing else "en-US",
+            "unsubscribed_all": int(existing["unsubscribed_all"]) if existing else 0,
+            "weekly_digest_opted_in_at": existing["weekly_digest_opted_in_at"] if existing else None,
+            "trip_briefs_opted_in_at": existing["trip_briefs_opted_in_at"] if existing else None,
+            "deal_alerts_opted_in_at": existing["deal_alerts_opted_in_at"] if existing else None,
+            "unsubscribed_at": existing["unsubscribed_at"] if existing else None,
+        }
+        any_opt_in = False
+        for channel, opted_at_field in COMMUNICATION_CHANNELS.items():
+            if channel not in changes:
+                continue
+            enabled = bool(changes[channel])
+            was_enabled = bool(state[channel])
+            state[channel] = int(enabled)
+            state[opted_at_field] = now if enabled and not was_enabled else state[opted_at_field] if enabled else None
+            any_opt_in = any_opt_in or enabled
+        if timezone_name is not None:
+            state["timezone"] = timezone_name
+        if locale is not None:
+            state["locale"] = locale
+        if any_opt_in:
+            state["unsubscribed_all"] = 0
+            state["unsubscribed_at"] = None
+
+        db.execute(
+            """INSERT INTO communication_preferences
+               (user_id,weekly_digest,trip_window_briefs,deal_alerts,timezone,locale,
+                unsubscribed_all,weekly_digest_opted_in_at,trip_briefs_opted_in_at,
+                deal_alerts_opted_in_at,unsubscribed_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 weekly_digest=excluded.weekly_digest,
+                 trip_window_briefs=excluded.trip_window_briefs,
+                 deal_alerts=excluded.deal_alerts,
+                 timezone=excluded.timezone,
+                 locale=excluded.locale,
+                 unsubscribed_all=excluded.unsubscribed_all,
+                 weekly_digest_opted_in_at=excluded.weekly_digest_opted_in_at,
+                 trip_briefs_opted_in_at=excluded.trip_briefs_opted_in_at,
+                 deal_alerts_opted_in_at=excluded.deal_alerts_opted_in_at,
+                 unsubscribed_at=excluded.unsubscribed_at,
+                 updated_at=excluded.updated_at""",
+            (
+                user_id, state["weekly_digest"], state["trip_window_briefs"], state["deal_alerts"],
+                state["timezone"], state["locale"], state["unsubscribed_all"],
+                state["weekly_digest_opted_in_at"], state["trip_briefs_opted_in_at"],
+                state["deal_alerts_opted_in_at"], state["unsubscribed_at"], now,
+            ),
+        )
+        row = db.execute(
+            "SELECT * FROM communication_preferences WHERE user_id=?", (user_id,),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _communication_preferences_from_row(row)
+
+
+def unsubscribe_all_communications(user_id: int) -> dict:
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            "SELECT timezone,locale FROM communication_preferences WHERE user_id=?", (user_id,),
+        ).fetchone()
+        timezone_name = str(existing["timezone"] or "UTC") if existing else "UTC"
+        locale = str(existing["locale"] or "en-US") if existing else "en-US"
+        db.execute(
+            """INSERT INTO communication_preferences
+               (user_id,weekly_digest,trip_window_briefs,deal_alerts,timezone,locale,
+                unsubscribed_all,weekly_digest_opted_in_at,trip_briefs_opted_in_at,
+                deal_alerts_opted_in_at,unsubscribed_at,updated_at)
+               VALUES (?,0,0,0,?,?,1,NULL,NULL,NULL,?,?)
+               ON CONFLICT(user_id) DO UPDATE SET
+                 weekly_digest=0,trip_window_briefs=0,deal_alerts=0,
+                 unsubscribed_all=1,weekly_digest_opted_in_at=NULL,
+                 trip_briefs_opted_in_at=NULL,deal_alerts_opted_in_at=NULL,
+                 unsubscribed_at=excluded.unsubscribed_at,updated_at=excluded.updated_at""",
+            (user_id, timezone_name, locale, now, now),
+        )
+        row = db.execute(
+            "SELECT * FROM communication_preferences WHERE user_id=?", (user_id,),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _communication_preferences_from_row(row)
+
+
+def select_weekly_digest_recipients(limit: int = 500, after_user_id: int = 0) -> list[dict]:
+    if not isinstance(limit, int) or limit < 1 or limit > 5000:
+        raise ValueError("Limit must be between 1 and 5000")
+    db = _conn()
+    rows = db.execute(
+        """SELECT u.id AS user_id,u.email,p.timezone,p.locale
+           FROM communication_preferences p
+           JOIN users u ON u.id=p.user_id
+           WHERE p.weekly_digest=1 AND p.unsubscribed_all=0 AND u.id>?
+           ORDER BY u.id ASC LIMIT ?""",
+        (max(0, int(after_user_id or 0)), limit),
+    ).fetchall()
+    db.close()
+    return [dict(row) for row in rows]
+
+
+def _trip_brief_dates(document: dict) -> tuple[_date, _date] | None:
+    dates = document.get("dates") if isinstance(document.get("dates"), dict) else {}
+    starts_on = str(document.get("starts_on") or dates.get("starts_on") or "").strip()
+    ends_on = str(document.get("ends_on") or dates.get("ends_on") or "").strip()
+    if not starts_on or not ends_on:
+        return None
+    try:
+        start_date = _date.fromisoformat(starts_on)
+        end_date = _date.fromisoformat(ends_on)
+    except ValueError:
+        return None
+    duration = (end_date - start_date).days
+    if duration < 0 or duration > TRIP_BRIEF_MAX_DURATION_DAYS:
+        return None
+    return start_date, end_date
+
+
+def select_trip_window_brief_recipients(
+    now: int | None = None,
+    limit: int = 500,
+    after_user_id: int = 0,
+    after_trip_id: str = "",
+) -> list[dict]:
+    if not isinstance(limit, int) or limit < 1 or limit > 5000:
+        raise ValueError("Limit must be between 1 and 5000")
+    timestamp = int(now or time.time())
+    db = _conn()
+    rows = db.execute(
+        """SELECT u.id AS user_id,u.email,p.timezone,p.locale,
+                  t.id AS trip_id,t.document_json
+           FROM communication_preferences p
+           JOIN users u ON u.id=p.user_id
+           JOIN trip_documents_v2 t ON t.user_id=u.id
+           WHERE p.trip_window_briefs=1 AND p.unsubscribed_all=0
+             AND t.status NOT IN ('archived','deleted')
+             AND (u.id>? OR (u.id=? AND t.id>?))
+           ORDER BY u.id ASC,t.id ASC""",
+        (
+            max(0, int(after_user_id or 0)), max(0, int(after_user_id or 0)),
+            str(after_trip_id or ""),
+        ),
+    ).fetchall()
+    db.close()
+    selected: list[dict] = []
+    for row in rows:
+        try:
+            document = json.loads(row["document_json"] or "{}")
+        except Exception:
+            continue
+        if not isinstance(document, dict):
+            continue
+        date_range = _trip_brief_dates(document)
+        if not date_range:
+            continue
+        start_date, end_date = date_range
+        try:
+            local_tz = ZoneInfo(str(row["timezone"] or "UTC"))
+        except (ZoneInfoNotFoundError, ValueError):
+            continue
+        local_date = _datetime.fromtimestamp(timestamp, tz=_timezone.utc).astimezone(local_tz).date()
+        if not (start_date - _timedelta(days=TRIP_BRIEF_LEAD_DAYS) <= local_date <= end_date):
+            continue
+        selected.append({
+            "user_id": int(row["user_id"]),
+            "email": row["email"],
+            "timezone": row["timezone"],
+            "locale": row["locale"],
+            "trip_id": row["trip_id"],
+            "trip_title": str(document.get("title") or "Untitled route")[:200],
+            "starts_on": start_date.isoformat(),
+            "ends_on": end_date.isoformat(),
+            "days_until_start": (start_date - local_date).days,
+        })
+        if len(selected) >= limit:
+            break
+    return selected
+
+
+def _contains_coordinates(value: str) -> bool:
+    if _LABELED_COORDINATE_RE.search(value):
+        return True
+    for match in _DECIMAL_PAIR_RE.finditer(value):
+        try:
+            lat, lng = float(match.group(1)), float(match.group(2))
+        except ValueError:
+            continue
+        if -90 <= lat <= 90 and -180 <= lng <= 180:
+            return True
+    return False
+
+
+def _normalize_publication_copy(title: str, body: str) -> tuple[str, str]:
+    clean_title = re.sub(r"\s+", " ", str(title or "").replace("\x00", "")).strip()
+    clean_body = str(body or "").replace("\r\n", "\n").replace("\r", "\n").replace("\x00", "").strip()
+    if len(clean_title) < 3 or len(clean_title) > 160:
+        raise ValueError("Title must be between 3 and 160 characters")
+    if len(clean_body) < 20 or len(clean_body) > 5000:
+        raise ValueError("Reviewed copy must be between 20 and 5000 characters")
+    if _contains_coordinates(f"{clean_title}\n{clean_body}"):
+        raise PublicationPrivacyError("Remove precise coordinates before submitting this note")
+    return clean_title, clean_body
+
+
+def _publication_target_exists(db: sqlite3.Connection, user_id: int, place_id: str) -> bool:
+    if db.execute(
+        "SELECT 1 FROM places WHERE trailhead_place_id=?", (place_id,),
+    ).fetchone():
+        return True
+    return bool(db.execute(
+        """SELECT 1 FROM saved_entities
+           WHERE user_id=? AND canonical_id=? AND status!='deleted' AND entity_type!='pack'""",
+        (user_id, place_id),
+    ).fetchone())
+
+
+def _community_publication_from_row(
+    row: sqlite3.Row | dict,
+    *,
+    include_moderation: bool = False,
+    include_user: bool = False,
+) -> dict:
+    raw = dict(row)
+    item = {
+        "id": raw["id"],
+        "publication_type": raw["publication_type"],
+        "title": raw["title"],
+        "body": raw["body"],
+        "place_id": raw.get("place_id"),
+        "status": raw["status"],
+        "submitted_at": int(raw["submitted_at"]),
+        "updated_at": int(raw["updated_at"]),
+        "moderated_at": raw.get("moderated_at"),
+        "retracted_at": raw.get("retracted_at"),
+    }
+    if include_moderation:
+        item["moderation_note"] = raw.get("moderation_note")
+    if include_user:
+        item["user_id"] = int(raw["user_id"])
+        if "username" in raw:
+            item["username"] = raw.get("username")
+    return item
+
+
+def submit_community_publication(
+    user_id: int,
+    trip_id: str,
+    note_id: str,
+    publication_type: str,
+    title: str,
+    body: str,
+    place_id: str | None = None,
+) -> dict:
+    trip_id = _validate_canonical_id(trip_id, "trip id")
+    note_id = str(note_id or "").strip()
+    if not note_id or len(note_id) > 240:
+        raise PublicationSourceNoteNotFoundError("Private trip note not found")
+    publication_type = str(publication_type or "").strip().lower()
+    if publication_type not in COMMUNITY_PUBLICATION_TYPES:
+        raise ValueError("Invalid publication type")
+    clean_title, clean_body = _normalize_publication_copy(title, body)
+    clean_place_id = str(place_id or "").strip() or None
+    if publication_type in {"place_update", "correction"}:
+        if not clean_place_id:
+            raise PublicationTargetRequiredError("Choose the place this update belongs to")
+        clean_place_id = _validate_canonical_id(clean_place_id, "place id")
+    elif clean_place_id:
+        raise ValueError("Trip recaps cannot target a place")
+
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        trip = db.execute(
+            """SELECT document_json FROM trip_documents_v2
+               WHERE id=? AND user_id=? AND status!='deleted'""",
+            (trip_id, user_id),
+        ).fetchone()
+        if not trip:
+            raise PublicationSourceNoteNotFoundError("Private trip note not found")
+        try:
+            document = json.loads(trip["document_json"] or "{}")
+        except Exception:
+            document = {}
+        notes = document.get("notes") if isinstance(document, dict) else None
+        source_note = next(
+            (
+                note for note in notes or []
+                if isinstance(note, dict)
+                and str(note.get("id") or "").strip() == note_id
+                and str(note.get("visibility") or "private").strip().lower() == "private"
+            ),
+            None,
+        )
+        if not source_note:
+            raise PublicationSourceNoteNotFoundError("Private trip note not found")
+        if clean_place_id and not _publication_target_exists(db, user_id, clean_place_id):
+            raise PublicationTargetNotFoundError("The selected place could not be found")
+        duplicate = db.execute(
+            """SELECT id FROM community_publications
+               WHERE user_id=? AND trip_id=? AND note_id=? AND publication_type=?
+                 AND status IN ('pending_review','approved')""",
+            (user_id, trip_id, note_id, publication_type),
+        ).fetchone()
+        if duplicate:
+            raise PublicationAlreadySubmittedError(duplicate["id"])
+
+        publication_id = f"publication_{secrets.token_hex(16)}"
+        now = int(time.time())
+        fingerprint = hashlib.sha256(
+            json.dumps(source_note, separators=(",", ":"), sort_keys=True, default=str).encode("utf-8")
+        ).hexdigest()
+        db.execute(
+            """INSERT INTO community_publications
+               (id,user_id,trip_id,note_id,source_note_fingerprint,publication_type,
+                title,body,place_id,status,submitted_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,'pending_review',?,?)""",
+            (
+                publication_id, user_id, trip_id, note_id, fingerprint, publication_type,
+                clean_title, clean_body, clean_place_id, now, now,
+            ),
+        )
+        row = db.execute(
+            "SELECT * FROM community_publications WHERE id=?", (publication_id,),
+        ).fetchone()
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        duplicate = db.execute(
+            """SELECT id FROM community_publications
+               WHERE user_id=? AND trip_id=? AND note_id=? AND publication_type=?
+                 AND status IN ('pending_review','approved')""",
+            (user_id, trip_id, note_id, publication_type),
+        ).fetchone()
+        if duplicate:
+            raise PublicationAlreadySubmittedError(duplicate["id"]) from exc
+        raise
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _community_publication_from_row(row, include_moderation=True)
+
+
+def list_community_publications_for_user(
+    user_id: int,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict:
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    decoded_cursor = _decode_account_cursor(cursor)
+    clauses = ["user_id=?"]
+    params: list = [user_id]
+    if decoded_cursor:
+        clauses.append("(submitted_at<? OR (submitted_at=? AND id<?))")
+        params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+    params.append(limit + 1)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT * FROM community_publications
+            WHERE {' AND '.join(clauses)}
+            ORDER BY submitted_at DESC,id DESC LIMIT ?""",
+        params,
+    ).fetchall()
+    db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    items = [_community_publication_from_row(row, include_moderation=True) for row in page]
+    next_cursor = _encode_account_cursor(page[-1]["submitted_at"], page[-1]["id"]) if has_more else None
+    return {"items": items, "next_cursor": next_cursor}
+
+
+def retract_community_publication(user_id: int, publication_id: str) -> dict | None:
+    publication_id = _validate_canonical_id(publication_id, "publication id")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT * FROM community_publications WHERE id=?", (publication_id,),
+        ).fetchone()
+        if not row:
+            db.commit()
+            return None
+        if int(row["user_id"]) != int(user_id):
+            raise PermissionError("Not authorized")
+        if row["status"] != "retracted":
+            now = int(time.time())
+            db.execute(
+                """UPDATE community_publications
+                   SET status='retracted',retracted_at=?,updated_at=? WHERE id=?""",
+                (now, now, publication_id),
+            )
+        saved = db.execute(
+            "SELECT * FROM community_publications WHERE id=?", (publication_id,),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _community_publication_from_row(saved, include_moderation=True)
+
+
+def list_community_publications_for_review(
+    status: str = "pending_review",
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict:
+    status = str(status or "").strip().lower()
+    if status not in COMMUNITY_PUBLICATION_STATUSES:
+        raise ValueError("Invalid publication status")
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    decoded_cursor = _decode_account_cursor(cursor)
+    clauses = ["p.status=?"]
+    params: list = [status]
+    if decoded_cursor:
+        clauses.append("(p.submitted_at<? OR (p.submitted_at=? AND p.id<?))")
+        params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+    params.append(limit + 1)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT p.*,u.username FROM community_publications p
+            JOIN users u ON u.id=p.user_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY p.submitted_at DESC,p.id DESC LIMIT ?""",
+        params,
+    ).fetchall()
+    db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    items = [
+        _community_publication_from_row(row, include_moderation=True, include_user=True)
+        for row in page
+    ]
+    next_cursor = _encode_account_cursor(page[-1]["submitted_at"], page[-1]["id"]) if has_more else None
+    return {"items": items, "next_cursor": next_cursor}
+
+
+def moderate_community_publication(
+    publication_id: str,
+    status: str,
+    moderator_user_id: int,
+    note: str | None = None,
+) -> dict | None:
+    publication_id = _validate_canonical_id(publication_id, "publication id")
+    status = str(status or "").strip().lower()
+    if status not in {"approved", "rejected"}:
+        raise ValueError("Moderation status must be approved or rejected")
+    clean_note = re.sub(r"\s+", " ", str(note or "")).strip() or None
+    if clean_note and len(clean_note) > 1000:
+        raise ValueError("Moderation note is too long")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT * FROM community_publications WHERE id=?", (publication_id,),
+        ).fetchone()
+        if not row:
+            db.commit()
+            return None
+        if row["status"] != "pending_review":
+            raise PublicationStateConflictError(row["status"])
+        now = int(time.time())
+        db.execute(
+            """UPDATE community_publications
+               SET status=?,moderation_note=?,moderated_by=?,moderated_at=?,updated_at=?
+               WHERE id=?""",
+            (status, clean_note, moderator_user_id, now, now, publication_id),
+        )
+        saved = db.execute(
+            """SELECT p.*,u.username FROM community_publications p
+               JOIN users u ON u.id=p.user_id WHERE p.id=?""",
+            (publication_id,),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _community_publication_from_row(
+        saved, include_moderation=True, include_user=True,
+    )
+
+
+def _publication_contributor(user_id: int) -> dict | None:
+    profile = get_contributor_profile(user_id)
+    if not profile:
+        return None
+    tier = profile.get("tier") if isinstance(profile.get("tier"), dict) else {}
+    return {
+        "user_id": int(profile["user_id"]),
+        "display_name": profile.get("display_name") or profile.get("username"),
+        "title": profile.get("title"),
+        "avatar_color": profile.get("avatar_color"),
+        "tier": {key: tier.get(key) for key in ("id", "label") if tier.get(key) is not None},
+    }
+
+
+def list_approved_place_publications(
+    place_id: str,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict:
+    place_id = _validate_canonical_id(place_id, "place id")
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    decoded_cursor = _decode_account_cursor(cursor)
+    clauses = [
+        "p.place_id=?", "p.status='approved'", "p.publication_type IN ('place_update','correction')",
+        "u.public_profile_visible=1",
+    ]
+    params: list = [place_id]
+    if decoded_cursor:
+        clauses.append("(p.submitted_at<? OR (p.submitted_at=? AND p.id<?))")
+        params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+    params.append(limit + 1)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT p.* FROM community_publications p
+            JOIN users u ON u.id=p.user_id
+            WHERE {' AND '.join(clauses)}
+            ORDER BY p.submitted_at DESC,p.id DESC LIMIT ?""",
+        params,
+    ).fetchall()
+    db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    items: list[dict] = []
+    for row in page:
+        contributor = _publication_contributor(int(row["user_id"]))
+        if not contributor:
+            continue
+        item = _community_publication_from_row(row)
+        item.pop("status", None)
+        item.pop("updated_at", None)
+        item.pop("retracted_at", None)
+        item["contributor"] = contributor
+        items.append(item)
+    next_cursor = _encode_account_cursor(page[-1]["submitted_at"], page[-1]["id"]) if has_more else None
+    return {"items": items, "next_cursor": next_cursor}
+
 
 def get_cached(table: str, key: str, ttl_seconds: int = 86400) -> list | None:
     db = _conn()
@@ -1635,9 +3342,23 @@ def delete_user(user_id: int) -> None:
                 break
 
     # Fallback: disable FK constraints, delete user row directly.
-    # Orphan rows remain but the account (PII/login) is gone — meets Apple 5.1.1(v).
+    # Delete account-owned library/trip records explicitly because foreign keys are
+    # disabled on this recovery path.
     db = sqlite3.connect(settings.db_path, timeout=60.0, check_same_thread=False)
     db.execute("PRAGMA foreign_keys=OFF")
+    db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
+    db.execute("UPDATE authored_trip_packs SET created_by=NULL WHERE created_by=?", (user_id,))
+    db.execute("UPDATE authored_trip_packs SET updated_by=NULL WHERE updated_by=?", (user_id,))
+    db.execute("UPDATE authored_trip_pack_versions SET published_by=NULL WHERE published_by=?", (user_id,))
+    db.execute("UPDATE authored_trip_pack_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
+    db.execute("DELETE FROM availability_monitors WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM community_publications WHERE user_id=?", (user_id,))
+    db.execute("UPDATE community_publications SET moderated_by=NULL WHERE moderated_by=?", (user_id,))
+    db.execute("DELETE FROM communication_preferences WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM trip_document_mutations WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM trip_documents_v2 WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM saved_entity_mutations WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM saved_entities WHERE user_id=?", (user_id,))
     db.execute("DELETE FROM users WHERE id=?", (user_id,))
     db.commit()
     db.close()
@@ -1654,6 +3375,11 @@ def _delete_user_full(user_id: int) -> None:
     db.execute("DELETE FROM camp_field_reports  WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM camp_comments       WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM place_reservation_alerts WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM availability_monitors WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM community_publications WHERE user_id=?", (user_id,))
+    db.execute("UPDATE community_publications SET moderated_by=NULL WHERE moderated_by=?", (user_id,))
+    db.execute("DELETE FROM communication_preferences WHERE user_id=?", (user_id,))
     db.execute("DELETE FROM place_photos        WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM place_comments      WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM trail_field_reports WHERE user_id=?",    (user_id,))
@@ -1668,6 +3394,10 @@ def _delete_user_full(user_id: int) -> None:
     db.execute("DELETE FROM reports             WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM community_pins      WHERE user_id=?",    (user_id,))
     db.execute("DELETE FROM trips               WHERE user_id=?",    (user_id,))
+    db.execute("DELETE FROM trip_document_mutations WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM trip_documents_v2   WHERE user_id=?",    (user_id,))
+    db.execute("DELETE FROM saved_entity_mutations WHERE user_id=?", (user_id,))
+    db.execute("DELETE FROM saved_entities       WHERE user_id=?",    (user_id,))
     # stripe_purchases uses session_id PK — delete by user_id if col exists (added via migration)
     try:
         db.execute("DELETE FROM stripe_purchases WHERE user_id=?",   (user_id,))
@@ -3588,9 +5318,37 @@ def use_free_camp_search(user_id: int) -> bool:
 # ── Push tokens ───────────────────────────────────────────────────────────────
 
 def save_push_token(user_id: int, token: str):
+    clean = str(token or "").strip()
+    if not clean or len(clean) > 512:
+        raise ValueError("Invalid push token")
     db = _conn()
-    db.execute("UPDATE users SET push_token=? WHERE id=?", (token, user_id))
-    db.commit(); db.close()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(
+            "UPDATE users SET push_token=NULL WHERE push_token=? AND id!=?", (clean, user_id),
+        )
+        db.execute("UPDATE users SET push_token=? WHERE id=?", (clean, user_id))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def clear_push_token(user_id: int, expected_token: str | None = None) -> bool:
+    clean = str(expected_token or "").strip() or None
+    db = _conn()
+    if clean:
+        cursor = db.execute(
+            "UPDATE users SET push_token=NULL WHERE id=? AND push_token=?", (user_id, clean),
+        )
+    else:
+        cursor = db.execute("UPDATE users SET push_token=NULL WHERE id=?", (user_id,))
+    db.commit()
+    cleared = bool(cursor.rowcount)
+    db.close()
+    return cleared
 
 def get_push_token(user_id: int) -> str | None:
     db = _conn()
@@ -5381,6 +7139,1306 @@ def get_place_reservation_alerts(trailhead_place_id: str, user_id: int | None = 
         ).fetchall()
     db.close()
     return [dict(r) for r in rows]
+
+
+# -- Availability monitors ------------------------------------------------------
+
+AVAILABILITY_MONITOR_TYPES = {
+    "campground", "permit", "tour", "route_reopening", "closure", "safety",
+}
+QUOTA_EXEMPT_MONITOR_TYPES = {"route_reopening", "closure", "safety"}
+AVAILABILITY_TRIAL_DAYS = 7
+AVAILABILITY_STANDARD_DAYS = 30
+AVAILABILITY_EXPLORER_LIMIT = 5
+AVAILABILITY_MONITOR_CREDITS = 50
+AVAILABILITY_MONITOR_STATUSES = {"active", "expired", "cancelled", "failed"}
+
+
+class InsufficientMonitorCreditsError(ValueError):
+    def __init__(self, balance: int):
+        self.balance = int(balance)
+        self.required = AVAILABILITY_MONITOR_CREDITS
+        super().__init__("Not enough credits for this availability watch")
+
+
+class MonitorAlreadyExistsError(ValueError):
+    def __init__(self, monitor_id: str):
+        self.monitor_id = monitor_id
+        super().__init__("An active watch already exists for these dates")
+
+
+class MonitorCreationError(RuntimeError):
+    def __init__(self, monitor: dict):
+        self.monitor = monitor
+        super().__init__("The availability watch could not be started")
+
+
+def _active_explorer_monitor_plan(plan_type: str, plan_expires_at: int | None, now: int) -> bool:
+    plan = str(plan_type or "free").strip().lower()
+    entitled_plan = (
+        plan in EXPLORER_PLAN_TYPES
+        or "explorer" in plan
+        or "extreme" in plan
+    )
+    return entitled_plan and int(plan_expires_at or 0) > now
+
+
+def _clean_monitor_date(value: str | None, label: str) -> str | None:
+    clean = str(value or "").strip() or None
+    if clean is None:
+        return None
+    try:
+        _dt.date.fromisoformat(clean)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be an ISO date") from exc
+    return clean
+
+
+def _expire_availability_monitors_db(db: sqlite3.Connection, now: int, user_id: int | None = None) -> None:
+    user_clause = " AND user_id=?" if user_id is not None else ""
+    db.execute(
+        f"""UPDATE place_reservation_alerts
+            SET status='expired', updated_at=?
+            WHERE id IN (
+                SELECT reservation_alert_id FROM availability_monitors
+                WHERE status='active' AND expires_at<=?{user_clause}
+                  AND reservation_alert_id IS NOT NULL
+            )""",
+        [now, now, *([user_id] if user_id is not None else [])],
+    )
+    db.execute(
+        f"""UPDATE availability_monitors
+            SET status='expired', updated_at=?
+            WHERE status='active' AND expires_at<=?{user_clause}""",
+        [now, now, *([user_id] if user_id is not None else [])],
+    )
+
+
+def _availability_monitor_from_row(row: sqlite3.Row | dict, now: int | None = None) -> dict:
+    monitor = dict(row)
+    try:
+        criteria = json.loads(monitor.pop("criteria_json", "{}"))
+    except Exception:
+        criteria = {}
+    monitor["criteria"] = criteria if isinstance(criteria, dict) else {}
+    monitor["quota_exempt"] = monitor.get("monitor_type") in QUOTA_EXEMPT_MONITOR_TYPES
+    monitor["remaining_seconds"] = max(0, int(monitor.get("expires_at") or 0) - int(now or time.time()))
+    monitor.pop("request_hash", None)
+    monitor.pop("idempotency_key", None)
+    monitor.pop("user_id", None)
+    return monitor
+
+
+def availability_monitor_policy(user_id: int) -> dict:
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        _expire_availability_monitors_db(db, now, user_id)
+        user = db.execute(
+            "SELECT credits,plan_type,plan_expires_at FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            raise ValueError("Account not found")
+        trial_used = bool(db.execute(
+            """SELECT 1 FROM availability_monitors
+               WHERE user_id=? AND billing_kind='trial' AND status!='failed' LIMIT 1""",
+            (user_id,),
+        ).fetchone())
+        counts = db.execute(
+            """SELECT
+                 COUNT(*) AS active_total,
+                 SUM(CASE WHEN billing_kind IN ('trial','explorer','legacy') THEN 1 ELSE 0 END) AS free_active,
+                 SUM(CASE WHEN billing_kind='credits' THEN 1 ELSE 0 END) AS paid_active,
+                 SUM(CASE WHEN billing_kind='safety_free' THEN 1 ELSE 0 END) AS safety_active
+               FROM availability_monitors
+               WHERE user_id=? AND status='active' AND expires_at>?""",
+            (user_id, now),
+        ).fetchone()
+        plan_type = str(user["plan_type"] or "free")
+        plan_expires_at = int(user["plan_expires_at"] or 0)
+        explorer_active = _active_explorer_monitor_plan(plan_type, plan_expires_at, now)
+        free_active = int(counts["free_active"] or 0)
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {
+        "trial": {
+            "available": not trial_used,
+            "used": trial_used,
+            "duration_days": AVAILABILITY_TRIAL_DAYS,
+        },
+        "explorer": {
+            "active": explorer_active,
+            "included_limit": AVAILABILITY_EXPLORER_LIMIT,
+            "included_active": free_active,
+            "included_remaining": max(0, AVAILABILITY_EXPLORER_LIMIT - free_active) if explorer_active else 0,
+        },
+        "extra_monitor": {
+            "credits": AVAILABILITY_MONITOR_CREDITS,
+            "duration_days": AVAILABILITY_STANDARD_DAYS,
+        },
+        "safety_and_legal_alerts": {"free": True, "quota_exempt": True},
+        "active_total": int(counts["active_total"] or 0),
+        "paid_active": int(counts["paid_active"] or 0),
+        "safety_active": int(counts["safety_active"] or 0),
+        "credit_balance": int(user["credits"] or 0),
+    }
+
+
+def _link_place_reservation_alert(
+    db: sqlite3.Connection,
+    target_id: str,
+    user_id: int,
+    start_date: str | None,
+    end_date: str | None,
+    party_size: int,
+    source: str,
+    booking_url: str | None,
+    now: int,
+) -> int | None:
+    if not db.execute("SELECT 1 FROM places WHERE trailhead_place_id=?", (target_id,)).fetchone():
+        return None
+    existing = db.execute(
+        """SELECT id FROM place_reservation_alerts
+           WHERE trailhead_place_id=? AND user_id=?
+             AND COALESCE(start_date,'')=COALESCE(?, '')
+             AND COALESCE(end_date,'')=COALESCE(?, '')
+           ORDER BY updated_at DESC LIMIT 1""",
+        (target_id, user_id, start_date, end_date),
+    ).fetchone()
+    if existing:
+        db.execute(
+            """UPDATE place_reservation_alerts
+               SET party_size=?,source=?,booking_url=?,status='active',updated_at=?
+               WHERE id=?""",
+            (party_size, source, booking_url, now, existing["id"]),
+        )
+        return int(existing["id"])
+    cur = db.execute(
+        """INSERT INTO place_reservation_alerts
+           (trailhead_place_id,user_id,start_date,end_date,party_size,source,booking_url,status,created_at,updated_at)
+           VALUES (?,?,?,?,?,?,?,'active',?,?)""",
+        (target_id, user_id, start_date, end_date, party_size, source, booking_url, now, now),
+    )
+    return int(cur.lastrowid)
+
+
+def create_availability_monitor(
+    user_id: int,
+    target_id: str,
+    target_label: str,
+    monitor_type: str,
+    idempotency_key: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+    party_size: int = 1,
+    source: str = "trailhead",
+    booking_url: str | None = None,
+    criteria: dict | None = None,
+    job_creator=None,
+) -> dict:
+    target_id = _validate_canonical_id(target_id, "monitor target id")
+    target_label = re.sub(r"\s+", " ", str(target_label or "")).strip()
+    monitor_type = str(monitor_type or "").strip().lower()
+    idempotency_key = str(idempotency_key or "").strip()
+    start_date = _clean_monitor_date(start_date, "start_date")
+    end_date = _clean_monitor_date(end_date, "end_date")
+    if not target_label or len(target_label) > 200:
+        raise ValueError("Target label must be between 1 and 200 characters")
+    if monitor_type not in AVAILABILITY_MONITOR_TYPES:
+        raise ValueError("Unsupported availability watch type")
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
+        raise ValueError("Invalid Idempotency-Key")
+    if start_date and end_date and end_date < start_date:
+        raise ValueError("end_date must be on or after start_date")
+    if not isinstance(party_size, int) or party_size < 1 or party_size > 20:
+        raise ValueError("Party size must be between 1 and 20")
+    source = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(source or "trailhead").strip())[:80] or "trailhead"
+    booking_url = str(booking_url or "").strip() or None
+    if booking_url and (len(booking_url) > 2000 or not re.match(r"^https?://", booking_url, re.I)):
+        raise ValueError("Booking URL must use http or https")
+    criteria, criteria_json = _json_object(criteria or {}, "Availability criteria", 64 * 1024)
+    request_payload = {
+        "target_id": target_id,
+        "target_label": target_label,
+        "monitor_type": monitor_type,
+        "start_date": start_date,
+        "end_date": end_date,
+        "party_size": party_size,
+        "source": source,
+        "booking_url": booking_url,
+        "criteria": criteria,
+    }
+    request_hash = hashlib.sha256(json.dumps(
+        request_payload, separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")).hexdigest()
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        _expire_availability_monitors_db(db, now, user_id)
+        replay = db.execute(
+            """SELECT * FROM availability_monitors
+               WHERE user_id=? AND idempotency_key=?""",
+            (user_id, idempotency_key),
+        ).fetchone()
+        if replay:
+            if replay["request_hash"] != request_hash:
+                raise ValueError("Idempotency-Key was already used for a different request")
+            result = _availability_monitor_from_row(replay, now)
+            result["replayed"] = True
+            db.commit()
+            return result
+        duplicate = db.execute(
+            """SELECT id FROM availability_monitors
+               WHERE user_id=? AND target_id=? AND monitor_type=? AND status='active'
+                 AND COALESCE(start_date,'')=COALESCE(?, '')
+                 AND COALESCE(end_date,'')=COALESCE(?, '')
+               LIMIT 1""",
+            (user_id, target_id, monitor_type, start_date, end_date),
+        ).fetchone()
+        if duplicate:
+            raise MonitorAlreadyExistsError(str(duplicate["id"]))
+        user = db.execute(
+            "SELECT credits,plan_type,plan_expires_at FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            raise ValueError("Account not found")
+
+        if monitor_type in QUOTA_EXEMPT_MONITOR_TYPES:
+            billing_kind = "safety_free"
+            duration_days = AVAILABILITY_STANDARD_DAYS
+            credits_charged = 0
+        else:
+            trial_used = bool(db.execute(
+                """SELECT 1 FROM availability_monitors
+                   WHERE user_id=? AND billing_kind='trial' AND status!='failed' LIMIT 1""",
+                (user_id,),
+            ).fetchone())
+            plan_type = str(user["plan_type"] or "free")
+            explorer_active = _active_explorer_monitor_plan(
+                plan_type, user["plan_expires_at"], now,
+            )
+            free_active = int(db.execute(
+                """SELECT COUNT(*) FROM availability_monitors
+                   WHERE user_id=? AND status='active' AND expires_at>?
+                     AND billing_kind IN ('trial','explorer','legacy')""",
+                (user_id, now),
+            ).fetchone()[0])
+            if explorer_active and free_active < AVAILABILITY_EXPLORER_LIMIT:
+                billing_kind = "explorer"
+                duration_days = AVAILABILITY_STANDARD_DAYS
+                credits_charged = 0
+            elif not explorer_active and not trial_used:
+                billing_kind = "trial"
+                duration_days = AVAILABILITY_TRIAL_DAYS
+                credits_charged = 0
+            else:
+                billing_kind = "credits"
+                duration_days = AVAILABILITY_STANDARD_DAYS
+                credits_charged = AVAILABILITY_MONITOR_CREDITS
+                db.execute(
+                    "UPDATE users SET credits=credits-? WHERE id=? AND credits>=?",
+                    (credits_charged, user_id, credits_charged),
+                )
+                if db.execute("SELECT changes()").fetchone()[0] == 0:
+                    raise InsufficientMonitorCreditsError(int(user["credits"] or 0))
+                db.execute(
+                    """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
+                       VALUES (?,?,?,?)""",
+                    (user_id, -credits_charged, f"Availability watch: {target_label}", now),
+                )
+
+        reservation_alert_id = None
+        if monitor_type == "campground":
+            reservation_alert_id = _link_place_reservation_alert(
+                db, target_id, user_id, start_date, end_date, party_size,
+                source, booking_url, now,
+            )
+        monitor_id = f"mon_{secrets.token_hex(12)}"
+        expires_at = now + duration_days * 86400
+        db.execute(
+            """INSERT INTO availability_monitors
+               (id,user_id,target_id,target_label,monitor_type,start_date,end_date,
+                party_size,source,booking_url,criteria_json,status,billing_kind,
+                credits_charged,duration_days,expires_at,reservation_alert_id,
+                idempotency_key,request_hash,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?,?,?,?)""",
+            (
+                monitor_id, user_id, target_id, target_label, monitor_type,
+                start_date, end_date, party_size, source, booking_url, criteria_json,
+                billing_kind, credits_charged, duration_days, expires_at,
+                reservation_alert_id, idempotency_key, request_hash, now, now,
+            ),
+        )
+        saved = db.execute("SELECT * FROM availability_monitors WHERE id=?", (monitor_id,)).fetchone()
+        result = _availability_monitor_from_row(saved, now)
+        result["replayed"] = False
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+    if job_creator is not None:
+        try:
+            job_creator(result)
+        except Exception as exc:
+            failed = fail_availability_monitor_creation(
+                user_id, result["id"], "The watch could not be started",
+            )
+            raise MonitorCreationError(failed) from exc
+    return result
+
+
+def get_availability_monitor(user_id: int, monitor_id: str) -> dict | None:
+    monitor_id = str(monitor_id or "").strip()
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        _expire_availability_monitors_db(db, now, user_id)
+        row = db.execute("SELECT * FROM availability_monitors WHERE id=?", (monitor_id,)).fetchone()
+        if row and int(row["user_id"]) != int(user_id):
+            raise PermissionError("Not authorized")
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _availability_monitor_from_row(row, now) if row else None
+
+
+def list_availability_monitors(
+    user_id: int,
+    limit: int = 50,
+    cursor: str | None = None,
+    status: str | None = None,
+) -> dict:
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    status = str(status or "").strip().lower() or None
+    if status and status not in AVAILABILITY_MONITOR_STATUSES:
+        raise ValueError("Invalid availability watch status")
+    decoded_cursor = _decode_account_cursor(cursor)
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        _expire_availability_monitors_db(db, now, user_id)
+        clauses = ["user_id=?"]
+        params: list = [user_id]
+        if status:
+            clauses.append("status=?")
+            params.append(status)
+        if decoded_cursor:
+            clauses.append("(updated_at<? OR (updated_at=? AND id<?))")
+            params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+        params.append(limit + 1)
+        rows = db.execute(
+            f"""SELECT * FROM availability_monitors
+                WHERE {' AND '.join(clauses)}
+                ORDER BY updated_at DESC,id DESC LIMIT ?""",
+            params,
+        ).fetchall()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    return {
+        "items": [_availability_monitor_from_row(row, now) for row in page],
+        "next_cursor": _encode_account_cursor(page[-1]["updated_at"], page[-1]["id"]) if has_more else None,
+    }
+
+
+def cancel_availability_monitor(user_id: int, monitor_id: str) -> dict | None:
+    monitor_id = str(monitor_id or "").strip()
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        _expire_availability_monitors_db(db, now, user_id)
+        row = db.execute("SELECT * FROM availability_monitors WHERE id=?", (monitor_id,)).fetchone()
+        if not row:
+            db.commit()
+            return None
+        if int(row["user_id"]) != int(user_id):
+            raise PermissionError("Not authorized")
+        if row["status"] == "active":
+            db.execute(
+                """UPDATE availability_monitors
+                   SET status='cancelled',cancelled_at=?,updated_at=? WHERE id=?""",
+                (now, now, monitor_id),
+            )
+            if row["reservation_alert_id"]:
+                db.execute(
+                    """UPDATE place_reservation_alerts
+                       SET status='cancelled',updated_at=? WHERE id=?""",
+                    (now, row["reservation_alert_id"]),
+                )
+        saved = db.execute("SELECT * FROM availability_monitors WHERE id=?", (monitor_id,)).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _availability_monitor_from_row(saved, now)
+
+
+def fail_availability_monitor_creation(user_id: int, monitor_id: str, reason: str) -> dict:
+    now = int(time.time())
+    reason = re.sub(r"\s+", " ", str(reason or "")).strip()[:300] or "The watch could not be started"
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT * FROM availability_monitors WHERE id=?", (monitor_id,)).fetchone()
+        if not row:
+            raise ValueError("Availability watch not found")
+        if int(row["user_id"]) != int(user_id):
+            raise PermissionError("Not authorized")
+        if row["status"] == "failed":
+            db.commit()
+            return _availability_monitor_from_row(row, now)
+        if row["status"] != "active":
+            raise ValueError("Only an active watch can fail during creation")
+        refund = int(row["credits_charged"] or 0)
+        refunded_at = None
+        if refund > 0 and not row["refunded_at"]:
+            db.execute("UPDATE users SET credits=credits+? WHERE id=?", (refund, user_id))
+            db.execute(
+                """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
+                   VALUES (?,?,?,?)""",
+                (user_id, refund, f"Availability watch refund: {row['target_label']}", now),
+            )
+            refunded_at = now
+        db.execute(
+            """UPDATE availability_monitors
+               SET status='failed',failure_reason=?,refunded_at=?,updated_at=? WHERE id=?""",
+            (reason, refunded_at, now, monitor_id),
+        )
+        if row["reservation_alert_id"]:
+            db.execute(
+                "UPDATE place_reservation_alerts SET status='failed',updated_at=? WHERE id=?",
+                (now, row["reservation_alert_id"]),
+            )
+        saved = db.execute("SELECT * FROM availability_monitors WHERE id=?", (monitor_id,)).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _availability_monitor_from_row(saved, now)
+
+
+# -- Trailhead-authored trip packs ----------------------------------------------
+
+TRIP_PACK_PRICES = {250, 500, 900}
+TRIP_PACK_COVERAGE_REGIONS = {"north_america", "global"}
+TRIP_PACK_VALIDATION_CHECKS = {
+    "route_reviewed",
+    "rig_requirements_reviewed",
+    "camps_reviewed",
+    "fuel_water_reviewed",
+    "season_reviewed",
+    "backup_options_reviewed",
+    "media_licenses_reviewed",
+    "offline_coverage_reviewed",
+}
+TRIP_PACK_EXPLORER_DISCOUNT_PERCENT = 20
+
+
+class InsufficientTripPackCreditsError(ValueError):
+    def __init__(self, balance: int, credits_needed: int, list_price: int):
+        self.balance = int(balance)
+        self.credits_needed = int(credits_needed)
+        self.list_price = int(list_price)
+        super().__init__("Not enough credits for this trip pack")
+
+
+class FeaturedTripPackUnavailableError(ValueError):
+    pass
+
+
+class MonthlyTripPackClaimUsedError(ValueError):
+    def __init__(self, period_month: str):
+        self.period_month = period_month
+        super().__init__("This month's featured trip pack has already been claimed")
+
+
+class ExplorerTripPackClaimRequiredError(ValueError):
+    pass
+
+
+def _utc_month(ts: int | None = None) -> str:
+    return time.strftime("%Y-%m", time.gmtime(ts or int(time.time())))
+
+
+def _validate_trip_pack_month(period_month: str) -> str:
+    clean = str(period_month or "").strip()
+    if not re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", clean):
+        raise ValueError("period_month must use YYYY-MM")
+    return clean
+
+
+def _decode_pack_json(value: object, fallback):
+    if isinstance(value, (dict, list)):
+        return value
+    try:
+        return json.loads(str(value or ""))
+    except Exception:
+        return fallback
+
+
+def _stable_trip_pack_template(pack_id: str, template: dict) -> tuple[dict, str]:
+    template_copy, _ = _json_object(template, "Trip pack template", 2 * 1024 * 1024)
+    template_id = f"pack_template_{pack_id}"[:240]
+    template_copy.update({
+        "schema_version": 2,
+        "trip_id": template_id,
+        "status": "draft",
+        "visibility": "private",
+    })
+    normalized, _ = _normalize_trip_document(template_copy, template_id)
+    items = normalized.get("items") or []
+    if not isinstance(items, list):
+        raise ValueError("Trip pack items must be a list")
+    seen_ids: set[str] = set()
+    stable_items: list[dict] = []
+    for index, raw_item in enumerate(items):
+        if not isinstance(raw_item, dict):
+            raise ValueError("Every trip pack item must be an object")
+        item = dict(raw_item)
+        item_id = str(item.get("id") or "").strip()
+        if not item_id:
+            identity = str(
+                item.get("canonical_id") or item.get("entity_id")
+                or index
+            )
+            digest = hashlib.sha256(f"{pack_id}:{index}:{identity}".encode("utf-8")).hexdigest()[:20]
+            item_id = f"packitem_{digest}"
+        if not _CANONICAL_ID_RE.fullmatch(item_id):
+            raise ValueError("Trip pack item ids must be stable identifiers")
+        if item_id in seen_ids:
+            raise ValueError("Trip pack item ids must be unique")
+        seen_ids.add(item_id)
+        item["id"] = item_id
+        stable_items.append(item)
+    normalized["items"] = stable_items
+    normalized, template_json = _json_object(normalized, "Trip pack template", 2 * 1024 * 1024)
+    return normalized, template_json
+
+
+def _validate_trip_pack_fields(
+    pack_id: str,
+    slug: str,
+    title: str,
+    summary: str,
+    price_credits: int,
+    coverage_region: str,
+    public_metadata: dict,
+    validation_metadata: dict,
+    template: dict,
+) -> dict:
+    pack_id = _validate_canonical_id(pack_id, "trip pack id")
+    slug = re.sub(r"[^a-z0-9]+", "-", str(slug or "").strip().lower()).strip("-")
+    title = re.sub(r"\s+", " ", str(title or "")).strip()
+    summary = re.sub(r"\s+", " ", str(summary or "")).strip()
+    coverage_region = str(coverage_region or "").strip().lower()
+    if not slug or len(slug) > 120:
+        raise ValueError("Trip pack slug is required")
+    if not title or len(title) > 200:
+        raise ValueError("Trip pack title must be between 1 and 200 characters")
+    if not summary or len(summary) > 2000:
+        raise ValueError("Trip pack summary must be between 1 and 2000 characters")
+    if price_credits not in TRIP_PACK_PRICES:
+        raise ValueError("Trip pack price must be 250, 500, or 900 credits")
+    if coverage_region not in TRIP_PACK_COVERAGE_REGIONS:
+        raise ValueError("Trip pack coverage must be north_america or global")
+    public_metadata, public_metadata_json = _json_object(
+        public_metadata, "Trip pack public metadata", 256 * 1024,
+    )
+    validation_metadata, validation_metadata_json = _json_object(
+        validation_metadata, "Trip pack validation metadata", 256 * 1024,
+    )
+    template_for_pack = dict(template)
+    template_for_pack["title"] = title
+    template_for_pack.setdefault("summary", summary)
+    normalized_template, template_json = _stable_trip_pack_template(pack_id, template_for_pack)
+    return {
+        "id": pack_id,
+        "slug": slug,
+        "title": title,
+        "summary": summary,
+        "price_credits": price_credits,
+        "coverage_region": coverage_region,
+        "public_metadata": public_metadata,
+        "public_metadata_json": public_metadata_json,
+        "validation_metadata": validation_metadata,
+        "validation_metadata_json": validation_metadata_json,
+        "template": normalized_template,
+        "template_json": template_json,
+    }
+
+
+def _trip_pack_admin_from_row(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    raw["public_metadata"] = _decode_pack_json(raw.pop("draft_public_metadata", "{}"), {})
+    raw["validation_metadata"] = _decode_pack_json(raw.pop("draft_validation_metadata", "{}"), {})
+    raw["template"] = _decode_pack_json(raw.pop("draft_template_json", "{}"), {})
+    for field in ("title", "summary", "price_credits", "coverage_region"):
+        raw[field] = raw.pop(f"draft_{field}")
+    return raw
+
+
+def save_authored_trip_pack_draft(
+    pack_id: str,
+    slug: str,
+    title: str,
+    summary: str,
+    price_credits: int,
+    coverage_region: str,
+    public_metadata: dict,
+    validation_metadata: dict,
+    template: dict,
+    admin_user_id: int,
+) -> dict:
+    clean = _validate_trip_pack_fields(
+        pack_id, slug, title, summary, price_credits, coverage_region,
+        public_metadata, validation_metadata, template,
+    )
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        reserved_slug = db.execute(
+            """SELECT 1 FROM authored_trip_pack_versions
+               WHERE slug=? AND pack_id!=? LIMIT 1""",
+            (clean["slug"], clean["id"]),
+        ).fetchone()
+        if reserved_slug:
+            raise ValueError("Trip pack slug is already in use")
+        existing = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (clean["id"],)).fetchone()
+        if existing:
+            db.execute(
+                """UPDATE authored_trip_packs SET
+                     slug=?,draft_title=?,draft_summary=?,draft_price_credits=?,
+                     draft_coverage_region=?,draft_public_metadata=?,
+                     draft_validation_metadata=?,draft_template_json=?,
+                     draft_revision=draft_revision+1,updated_by=?,updated_at=?
+                   WHERE id=?""",
+                (
+                    clean["slug"], clean["title"], clean["summary"], clean["price_credits"],
+                    clean["coverage_region"], clean["public_metadata_json"],
+                    clean["validation_metadata_json"], clean["template_json"],
+                    admin_user_id, now, clean["id"],
+                ),
+            )
+        else:
+            db.execute(
+                """INSERT INTO authored_trip_packs
+                   (id,slug,status,draft_title,draft_summary,draft_price_credits,
+                    draft_coverage_region,draft_public_metadata,draft_validation_metadata,
+                    draft_template_json,draft_revision,created_by,updated_by,created_at,updated_at)
+                   VALUES (?,?,'draft',?,?,?,?,?,?,?,1,?,?,?,?)""",
+                (
+                    clean["id"], clean["slug"], clean["title"], clean["summary"],
+                    clean["price_credits"], clean["coverage_region"], clean["public_metadata_json"],
+                    clean["validation_metadata_json"], clean["template_json"], admin_user_id,
+                    admin_user_id, now, now,
+                ),
+            )
+        saved = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (clean["id"],)).fetchone()
+        db.commit()
+    except sqlite3.IntegrityError as exc:
+        db.rollback()
+        raise ValueError("Trip pack id or slug is already in use") from exc
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _trip_pack_admin_from_row(saved)
+
+
+def get_authored_trip_pack_admin(pack_id: str) -> dict | None:
+    pack_id = _validate_canonical_id(pack_id, "trip pack id")
+    db = _conn()
+    row = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (pack_id,)).fetchone()
+    db.close()
+    return _trip_pack_admin_from_row(row) if row else None
+
+
+def list_authored_trip_packs_admin() -> list[dict]:
+    db = _conn()
+    rows = db.execute("SELECT * FROM authored_trip_packs ORDER BY updated_at DESC,id").fetchall()
+    db.close()
+    return [_trip_pack_admin_from_row(row) for row in rows]
+
+
+def publish_authored_trip_pack(pack_id: str, admin_user_id: int) -> dict:
+    pack_id = _validate_canonical_id(pack_id, "trip pack id")
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        pack = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (pack_id,)).fetchone()
+        if not pack:
+            raise ValueError("Trip pack not found")
+        validation = _decode_pack_json(pack["draft_validation_metadata"], {})
+        missing = sorted(check for check in TRIP_PACK_VALIDATION_CHECKS if validation.get(check) is not True)
+        if missing:
+            raise ValueError("Trip pack review is incomplete: " + ", ".join(missing))
+        version = int(db.execute(
+            "SELECT COALESCE(MAX(version),0)+1 FROM authored_trip_pack_versions WHERE pack_id=?",
+            (pack_id,),
+        ).fetchone()[0])
+        db.execute(
+            """INSERT INTO authored_trip_pack_versions
+               (pack_id,version,slug,title,summary,price_credits,coverage_region,
+                public_metadata,validation_metadata,template_json,published_by,published_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                pack_id, version, pack["slug"], pack["draft_title"], pack["draft_summary"],
+                pack["draft_price_credits"], pack["draft_coverage_region"],
+                pack["draft_public_metadata"], pack["draft_validation_metadata"],
+                pack["draft_template_json"], admin_user_id, now,
+            ),
+        )
+        db.execute(
+            """UPDATE authored_trip_packs
+               SET status='published',current_published_version=?,updated_by=?,updated_at=?
+               WHERE id=?""",
+            (version, admin_user_id, now, pack_id),
+        )
+        published = db.execute(
+            """SELECT p.id,p.slug,v.*,p.status
+               FROM authored_trip_packs p JOIN authored_trip_pack_versions v
+                 ON v.pack_id=p.id AND v.version=p.current_published_version
+               WHERE p.id=?""",
+            (pack_id,),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    result = _public_trip_pack_from_row(published, include_template=True)
+    return result
+
+
+def _public_trip_pack_from_row(row: sqlite3.Row | dict, include_template: bool = False) -> dict:
+    raw = dict(row)
+    result = {
+        "id": raw["id"],
+        "slug": raw["slug"],
+        "version": int(raw["version"]),
+        "title": raw["title"],
+        "summary": raw["summary"],
+        "price_credits": int(raw["price_credits"]),
+        "explorer_price_credits": int(raw["price_credits"]) * 80 // 100,
+        "coverage_region": raw["coverage_region"],
+        "public_metadata": _decode_pack_json(raw.get("public_metadata"), {}),
+        "validation_metadata": _decode_pack_json(raw.get("validation_metadata"), {}),
+        "published_at": int(raw["published_at"]),
+        "featured": bool(raw.get("featured") or 0),
+    }
+    if include_template:
+        result["template"] = _decode_pack_json(raw.get("template_json"), {})
+    return result
+
+
+def _published_trip_pack_query() -> str:
+    return """SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.title,v.summary,v.price_credits,
+                     v.coverage_region,v.public_metadata,v.validation_metadata,
+                     v.template_json,v.published_at,
+                     CASE WHEN feature.pack_id=p.id AND feature.version=v.version THEN 1 ELSE 0 END AS featured
+              FROM authored_trip_packs p
+              JOIN authored_trip_pack_versions v
+                ON v.pack_id=p.id AND v.version=p.current_published_version
+              LEFT JOIN authored_trip_pack_features feature
+                ON feature.period_month=? AND feature.pack_id=p.id AND feature.version=v.version
+              WHERE p.status='published'"""
+
+
+def list_published_trip_packs(
+    limit: int = 50,
+    cursor: str | None = None,
+    coverage_region: str | None = None,
+) -> dict:
+    if not isinstance(limit, int) or limit < 1 or limit > 100:
+        raise ValueError("Limit must be between 1 and 100")
+    coverage_region = str(coverage_region or "").strip().lower() or None
+    if coverage_region and coverage_region not in TRIP_PACK_COVERAGE_REGIONS:
+        raise ValueError("Invalid trip pack coverage")
+    decoded_cursor = _decode_account_cursor(cursor)
+    sql = _published_trip_pack_query()
+    params: list = [_utc_month()]
+    if coverage_region:
+        sql += " AND v.coverage_region=?"
+        params.append(coverage_region)
+    if decoded_cursor:
+        sql += " AND (v.published_at<? OR (v.published_at=? AND p.id<?))"
+        params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+    sql += " ORDER BY v.published_at DESC,p.id DESC LIMIT ?"
+    params.append(limit + 1)
+    db = _conn()
+    rows = db.execute(sql, params).fetchall()
+    db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    return {
+        "items": [_public_trip_pack_from_row(row) for row in page],
+        "next_cursor": _encode_account_cursor(page[-1]["published_at"], page[-1]["id"]) if has_more else None,
+    }
+
+
+def get_published_trip_pack(pack_id_or_slug: str, include_template: bool = False) -> dict | None:
+    clean = str(pack_id_or_slug or "").strip()
+    db = _conn()
+    row = db.execute(
+        _published_trip_pack_query() + " AND (p.id=? OR COALESCE(v.slug,p.slug)=?) LIMIT 1",
+        (_utc_month(), clean, clean),
+    ).fetchone()
+    db.close()
+    return _public_trip_pack_from_row(row, include_template=include_template) if row else None
+
+
+def select_featured_trip_pack(
+    period_month: str,
+    pack_id: str,
+    admin_user_id: int,
+    version: int | None = None,
+) -> dict:
+    period_month = _validate_trip_pack_month(period_month)
+    pack_id = _validate_canonical_id(pack_id, "trip pack id")
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if version is None:
+            row = db.execute(
+                """SELECT current_published_version AS version FROM authored_trip_packs
+                   WHERE id=? AND status='published'""",
+                (pack_id,),
+            ).fetchone()
+            version = int(row["version"]) if row and row["version"] else None
+        if version is None or not db.execute(
+            """SELECT 1 FROM authored_trip_pack_versions version
+               JOIN authored_trip_packs pack ON pack.id=version.pack_id
+               WHERE version.pack_id=? AND version.version=? AND pack.status='published'""",
+            (pack_id, version),
+        ).fetchone():
+            raise ValueError("Published trip pack version not found")
+        db.execute(
+            """INSERT INTO authored_trip_pack_features
+               (period_month,pack_id,version,selected_by,selected_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(period_month) DO UPDATE SET
+                 pack_id=excluded.pack_id,version=excluded.version,
+                 selected_by=excluded.selected_by,selected_at=excluded.selected_at""",
+            (period_month, pack_id, version, admin_user_id, now),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {"period_month": period_month, "pack_id": pack_id, "version": version, "selected_at": now}
+
+
+def get_featured_trip_pack(period_month: str | None = None, include_template: bool = False) -> dict | None:
+    month = _validate_trip_pack_month(period_month or _utc_month())
+    db = _conn()
+    row = db.execute(
+        """SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.title,v.summary,v.price_credits,
+                  v.coverage_region,v.public_metadata,v.validation_metadata,
+                  v.template_json,v.published_at,1 AS featured
+           FROM authored_trip_pack_features feature
+           JOIN authored_trip_packs p ON p.id=feature.pack_id
+           JOIN authored_trip_pack_versions v
+             ON v.pack_id=feature.pack_id AND v.version=feature.version
+           WHERE feature.period_month=? AND p.status='published'""",
+        (month,),
+    ).fetchone()
+    db.close()
+    return _public_trip_pack_from_row(row, include_template=include_template) if row else None
+
+
+def _clone_authored_pack_trip_db(
+    db: sqlite3.Connection,
+    user_id: int,
+    pack_id: str,
+    version: int,
+    template_json: str,
+    now: int,
+) -> dict:
+    template = _decode_pack_json(template_json, {})
+    trip_id = f"packtrip_{user_id}_{secrets.token_hex(12)}"
+    document = dict(template) if isinstance(template, dict) else {}
+    document.update({
+        "schema_version": 2,
+        "trip_id": trip_id,
+        "status": "draft",
+        "visibility": "private",
+        "source": f"trip_pack:{pack_id}:v{version}",
+    })
+    normalized, document_json = _normalize_trip_document(document, trip_id)
+    db.execute(
+        """INSERT INTO trip_documents_v2
+           (id,user_id,status,revision,document_json,created_at,updated_at,archived_at,deleted_at)
+           VALUES (?,?,'draft',1,?,?,?,NULL,NULL)""",
+        (trip_id, user_id, document_json, now, now),
+    )
+    row = db.execute(
+        "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
+    ).fetchone()
+    return _trip_document_from_row(row)
+
+
+def _trip_pack_entitlement_query() -> str:
+    return """SELECT entitlement.*,COALESCE(version.slug,pack.slug) AS slug,version.title,version.summary,
+                     version.price_credits,version.coverage_region,
+                     version.public_metadata,version.validation_metadata,
+                     version.template_json,version.published_at
+              FROM authored_trip_pack_entitlements entitlement
+              JOIN authored_trip_packs pack ON pack.id=entitlement.pack_id
+              JOIN authored_trip_pack_versions version
+                ON version.pack_id=entitlement.pack_id AND version.version=entitlement.version"""
+
+
+def _trip_pack_entitlement_result(
+    db: sqlite3.Connection,
+    row: sqlite3.Row | dict,
+    *,
+    already_owned: bool,
+) -> dict:
+    raw = dict(row)
+    entitlement = {
+        "id": raw["id"],
+        "pack_id": raw["pack_id"],
+        "version": int(raw["version"]),
+        "acquisition_type": raw["acquisition_type"],
+        "list_price_credits": int(raw["list_price_credits"]),
+        "credits_charged": int(raw["credits_charged"]),
+        "explorer_discount": int(raw["explorer_discount"]),
+        "claim_month": raw["claim_month"],
+        "trip_id": raw["trip_id"],
+        "acquired_at": int(raw["acquired_at"]),
+        "permanent": True,
+    }
+    pack = {
+        "id": raw["pack_id"],
+        "slug": raw["slug"],
+        "version": int(raw["version"]),
+        "title": raw["title"],
+        "summary": raw["summary"],
+        "price_credits": int(raw["price_credits"]),
+        "coverage_region": raw["coverage_region"],
+        "public_metadata": _decode_pack_json(raw["public_metadata"], {}),
+        "validation_metadata": _decode_pack_json(raw["validation_metadata"], {}),
+        "published_at": int(raw["published_at"]),
+    }
+    trip_row = db.execute(
+        "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?",
+        (raw["user_id"], raw["trip_id"]),
+    ).fetchone()
+    trip = None
+    if trip_row and trip_row["status"] != "deleted":
+        trip = _trip_document_from_row(trip_row)
+    return {
+        "entitlement": entitlement,
+        "pack": pack,
+        "trip": trip,
+        "already_owned": already_owned,
+    }
+
+
+def _restore_trip_pack_entitlement_db(
+    db: sqlite3.Connection,
+    row: sqlite3.Row | dict,
+    user_id: int,
+    now: int,
+) -> sqlite3.Row:
+    raw = dict(row)
+    trip = db.execute(
+        "SELECT status FROM trip_documents_v2 WHERE user_id=? AND id=?",
+        (user_id, raw["trip_id"]),
+    ).fetchone()
+    if not trip or trip["status"] == "deleted":
+        cloned = _clone_authored_pack_trip_db(
+            db, user_id, raw["pack_id"], int(raw["version"]), raw["template_json"], now,
+        )
+        db.execute(
+            "UPDATE authored_trip_pack_entitlements SET trip_id=? WHERE id=?",
+            (cloned["trip_id"], raw["id"]),
+        )
+    return db.execute(
+        _trip_pack_entitlement_query() + " WHERE entitlement.id=?",
+        (raw["id"],),
+    ).fetchone()
+
+
+def _acquire_authored_trip_pack(
+    user_id: int,
+    idempotency_key: str,
+    *,
+    pack_id: str | None = None,
+    claim_month: str | None = None,
+) -> dict:
+    idempotency_key = str(idempotency_key or "").strip()
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
+        raise ValueError("Invalid Idempotency-Key")
+    if claim_month is not None:
+        claim_month = _validate_trip_pack_month(claim_month)
+    if pack_id is not None:
+        pack_id = _validate_canonical_id(pack_id, "trip pack id")
+    request_hash = hashlib.sha256(json.dumps({
+        "pack_id": pack_id,
+        "claim_month": claim_month,
+        "mode": "featured_claim" if claim_month else "purchase",
+    }, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        replay = db.execute(
+            _trip_pack_entitlement_query()
+            + " WHERE entitlement.user_id=? AND entitlement.idempotency_key=?",
+            (user_id, idempotency_key),
+        ).fetchone()
+        if replay:
+            if replay["request_hash"] != request_hash:
+                raise ValueError("Idempotency-Key was already used for a different request")
+            replay = _restore_trip_pack_entitlement_db(db, replay, user_id, now)
+            result = _trip_pack_entitlement_result(db, replay, already_owned=True)
+            result["replayed"] = True
+            result["credit_balance"] = int(db.execute(
+                "SELECT credits FROM users WHERE id=?", (user_id,),
+            ).fetchone()[0])
+            db.commit()
+            return result
+
+        if claim_month:
+            version_row = db.execute(
+                """SELECT pack.id,pack.slug,version.*
+                   FROM authored_trip_pack_features feature
+                   JOIN authored_trip_packs pack ON pack.id=feature.pack_id
+                   JOIN authored_trip_pack_versions version
+                     ON version.pack_id=feature.pack_id AND version.version=feature.version
+                   WHERE feature.period_month=? AND pack.status='published'""",
+                (claim_month,),
+            ).fetchone()
+            if not version_row:
+                raise FeaturedTripPackUnavailableError("No featured trip pack is available this month")
+            pack_id = str(version_row["id"])
+        else:
+            version_row = db.execute(
+                """SELECT pack.id,pack.slug,version.*
+                   FROM authored_trip_packs pack
+                   JOIN authored_trip_pack_versions version
+                     ON version.pack_id=pack.id AND version.version=pack.current_published_version
+                   WHERE pack.id=? AND pack.status='published'""",
+                (pack_id,),
+            ).fetchone()
+            if not version_row:
+                raise ValueError("Published trip pack not found")
+
+        owned = db.execute(
+            _trip_pack_entitlement_query()
+            + " WHERE entitlement.user_id=? AND entitlement.pack_id=?",
+            (user_id, pack_id),
+        ).fetchone()
+        if owned:
+            owned = _restore_trip_pack_entitlement_db(db, owned, user_id, now)
+            result = _trip_pack_entitlement_result(db, owned, already_owned=True)
+            result["replayed"] = False
+            result["credit_balance"] = int(db.execute(
+                "SELECT credits FROM users WHERE id=?", (user_id,),
+            ).fetchone()[0])
+            db.commit()
+            return result
+
+        user = db.execute(
+            "SELECT credits,plan_type,plan_expires_at FROM users WHERE id=?", (user_id,),
+        ).fetchone()
+        if not user:
+            raise ValueError("Account not found")
+        explorer_active = _active_explorer_monitor_plan(
+            user["plan_type"], user["plan_expires_at"], now,
+        )
+        list_price = int(version_row["price_credits"])
+        if claim_month:
+            if not explorer_active:
+                raise ExplorerTripPackClaimRequiredError("The featured monthly trip pack is included with Explorer")
+            previous_claim = db.execute(
+                """SELECT pack_id FROM authored_trip_pack_entitlements
+                   WHERE user_id=? AND claim_month=?""",
+                (user_id, claim_month),
+            ).fetchone()
+            if previous_claim:
+                raise MonthlyTripPackClaimUsedError(claim_month)
+            acquisition_type = "featured_claim"
+            credits_charged = 0
+            explorer_discount = list_price
+        else:
+            acquisition_type = "purchase"
+            explorer_discount = list_price * TRIP_PACK_EXPLORER_DISCOUNT_PERCENT // 100 if explorer_active else 0
+            credits_charged = list_price - explorer_discount
+            db.execute(
+                "UPDATE users SET credits=credits-? WHERE id=? AND credits>=?",
+                (credits_charged, user_id, credits_charged),
+            )
+            if db.execute("SELECT changes()").fetchone()[0] == 0:
+                raise InsufficientTripPackCreditsError(
+                    int(user["credits"] or 0), credits_charged, list_price,
+                )
+            db.execute(
+                """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
+                   VALUES (?,?,?,?)""",
+                (user_id, -credits_charged, f"Trip pack: {version_row['title']}", now),
+            )
+
+        trip = _clone_authored_pack_trip_db(
+            db, user_id, pack_id, int(version_row["version"]), version_row["template_json"], now,
+        )
+        entitlement_id = f"packent_{secrets.token_hex(12)}"
+        db.execute(
+            """INSERT INTO authored_trip_pack_entitlements
+               (id,user_id,pack_id,version,acquisition_type,list_price_credits,
+                credits_charged,explorer_discount,claim_month,trip_id,
+                idempotency_key,request_hash,acquired_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                entitlement_id, user_id, pack_id, int(version_row["version"]),
+                acquisition_type, list_price, credits_charged, explorer_discount,
+                claim_month, trip["trip_id"], idempotency_key, request_hash, now,
+            ),
+        )
+        saved = db.execute(
+            _trip_pack_entitlement_query() + " WHERE entitlement.id=?",
+            (entitlement_id,),
+        ).fetchone()
+        result = _trip_pack_entitlement_result(db, saved, already_owned=False)
+        result["replayed"] = False
+        result["credit_balance"] = int(db.execute(
+            "SELECT credits FROM users WHERE id=?", (user_id,),
+        ).fetchone()[0])
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def acquire_authored_trip_pack(user_id: int, pack_id: str, idempotency_key: str) -> dict:
+    return _acquire_authored_trip_pack(
+        user_id, idempotency_key, pack_id=pack_id,
+    )
+
+
+def claim_featured_authored_trip_pack(
+    user_id: int,
+    idempotency_key: str,
+    period_month: str | None = None,
+) -> dict:
+    return _acquire_authored_trip_pack(
+        user_id, idempotency_key, claim_month=period_month or _utc_month(),
+    )
+
+
+def list_owned_authored_trip_packs(user_id: int) -> list[dict]:
+    db = _conn()
+    rows = db.execute(
+        _trip_pack_entitlement_query()
+        + " WHERE entitlement.user_id=? ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
+        (user_id,),
+    ).fetchall()
+    results = [_trip_pack_entitlement_result(db, row, already_owned=True) for row in rows]
+    db.close()
+    return results
+
+
+def restore_owned_authored_trip_packs(user_id: int) -> list[dict]:
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        rows = db.execute(
+            _trip_pack_entitlement_query()
+            + " WHERE entitlement.user_id=? ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
+            (user_id,),
+        ).fetchall()
+        restored = [
+            _restore_trip_pack_entitlement_db(db, row, user_id, now)
+            for row in rows
+        ]
+        results = [_trip_pack_entitlement_result(db, row, already_owned=True) for row in restored]
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return results
+
+
+def authored_trip_pack_release_validation(
+    minimum_published: int = 10,
+    target_north_america_ratio: float = 0.70,
+    tolerance: float = 0.10,
+) -> dict:
+    db = _conn()
+    rows = db.execute(
+        """SELECT current_version.coverage_region,COUNT(*) AS count
+           FROM authored_trip_packs pack
+           JOIN authored_trip_pack_versions current_version
+             ON current_version.pack_id=pack.id
+            AND current_version.version=pack.current_published_version
+           WHERE pack.status='published'
+           GROUP BY current_version.coverage_region"""
+    ).fetchall()
+    db.close()
+    counts = {"north_america": 0, "global": 0}
+    for row in rows:
+        if row["coverage_region"] in counts:
+            counts[row["coverage_region"]] = int(row["count"])
+    total = counts["north_america"] + counts["global"]
+    ratio = counts["north_america"] / total if total else None
+    issues: list[str] = []
+    if total < minimum_published:
+        issues.append(f"Publish at least {minimum_published} reviewed trip packs before launch.")
+    if total and abs(float(ratio) - target_north_america_ratio) > tolerance:
+        issues.append("Published coverage should remain close to a 70/30 North America and global mix.")
+    if total and counts["global"] == 0:
+        issues.append("Add reviewed global coverage before launch.")
+    return {
+        "launch_ready": not issues,
+        "published_total": total,
+        "counts": counts,
+        "north_america_ratio": ratio,
+        "target_north_america_ratio": target_north_america_ratio,
+        "tolerance": tolerance,
+        "minimum_published": minimum_published,
+        "issues": issues,
+    }
 
 
 def _decode_viator_booking(row: sqlite3.Row | dict) -> dict:

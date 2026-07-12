@@ -16,7 +16,7 @@ import { EventEmitter, requireNativeModule } from 'expo-modules-core';
 import MapLibreGL from '@maplibre/maplibre-react-native';
 import MapboxGL from '@rnmapbox/maps';
 import { Ionicons } from '@expo/vector-icons';
-import { storage } from '@/lib/storage';
+import { accountStorage } from '@/lib/storage';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 
 import { buildMapStyle, MapMode } from './mapStyle';
@@ -1025,13 +1025,13 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       mapLayer,
       premiumMapStyle: props.premiumMapStyle ?? null,
     };
-    storage.set(RECENT_MAP_VIEWPORT_KEY, JSON.stringify(payload)).catch(() => {});
+    accountStorage.set(RECENT_MAP_VIEWPORT_KEY, JSON.stringify(payload)).catch(() => {});
   }, [mapLayer, navMode, props.premiumMapStyle]);
 
   const restoreRecentViewportIfNeeded = useCallback(async () => {
     if (recentViewportRestoredRef.current || navMode || waypoints.length > 0 || searchMarker) return;
     recentViewportRestoredRef.current = true;
-    const cached = parseCachedMapViewport(await storage.get(RECENT_MAP_VIEWPORT_KEY).catch(() => null));
+    const cached = parseCachedMapViewport(await accountStorage.get(RECENT_MAP_VIEWPORT_KEY).catch(() => null));
     if (!cached || Date.now() - cached.at > RECENT_MAP_VIEWPORT_TTL_MS) return;
     freeCameraDefaultRef.current = {
       centerCoordinate: cached.centerCoordinate,
@@ -2005,6 +2005,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   // ── Routing ─────────────────────────────────────────────────────────────────
   const doFetchRoute = useCallback(async (pairs: string[], fromIdx: number) => {
     const requestId = ++routeRequestRef.current;
+    const requestEpoch = accountStorage.epoch();
     isRoutingRef.current = true;
     onRouteProgress?.(null);
     offRouteStreakRef.current = 0;
@@ -2018,9 +2019,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       } else {
         await ensureRouteTileFile(pairs);
       }
-      if (requestId !== routeRequestRef.current) return;
+      if (requestId !== routeRequestRef.current || accountStorage.epoch() !== requestEpoch) return;
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts, routeProviderMode);
-      if (requestId !== routeRequestRef.current) return;
+      if (requestId !== routeRequestRef.current || accountStorage.epoch() !== requestEpoch) return;
       const cleanCoords = cleanLineCoords(result.coords);
       const cleanResult = { ...result, coords: cleanCoords };
       setRouteCoords(cleanCoords);
@@ -2042,10 +2043,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         routeSource: (result as any).routeSource ?? null,
         routeSourceLabel: (result as any).routeSourceLabel ?? null,
       };
-      storage.set('trailhead_active_route', JSON.stringify(routePayload)).catch(() => {});
+      accountStorage.set('trailhead_active_route', JSON.stringify(routePayload), requestEpoch).catch(() => {});
       saveRouteGeometry(activeTrip?.trip_id, routePayload).catch(() => {});
     } catch {
-      if (requestId !== routeRequestRef.current) return;
+      if (requestId !== routeRequestRef.current || accountStorage.epoch() !== requestEpoch) return;
       const fb = buildFallbackRoute(pairs);
       const cleanCoords = cleanLineCoords(fb.coords);
       const cleanFallback = { ...fb, coords: cleanCoords };
@@ -2060,7 +2061,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // When a new trip is planned: auto-route + fit camera to show all waypoints
   useEffect(() => {
-    if (routableWaypoints.length < 2) return;
     routeRequestRef.current++;
     isRoutingRef.current = false;
     setRouteCoords([]);
@@ -2068,6 +2068,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     setPassedCoords([]);
     setBreadcrumb([]);
     routeRef.current = makeRouteState([]);
+    onRouteProgress?.(null);
+    if (routableWaypoints.length < 2) return;
     if (!navMode && routableWaypoints.length > 10) {
       const previewCoords = cleanLineCoords(routableWaypoints.map(w => [w.lng, w.lat] as [number, number]));
       setRouteCoords(previewCoords);

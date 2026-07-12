@@ -16,13 +16,14 @@ type Props = {
   mediaUrl: (url?: string | null) => string;
   onOpen?: (experience: BookableExperience) => void;
   onSave?: (experience: BookableExperience) => void;
+  saveActionLabel?: string;
   onShowArea?: (experience: BookableExperience) => void;
   initialVisible?: number;
   showMoreStep?: number;
   onRetry?: () => void;
 };
 
-export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', attribution, variant = 'rail', mediaUrl, onOpen, onSave, onShowArea, initialVisible, showMoreStep, onRetry }: Props) {
+export function ExploreExperiencesRail({ experiences, loading, error, emptySubtitle, title = 'Guided trips', attribution, variant = 'rail', mediaUrl, onOpen, onSave, saveActionLabel = 'Add to trip', onShowArea, initialVisible, showMoreStep, onRetry }: Props) {
   const C = useTheme();
   const listMode = variant === 'list';
   const defaultVisible = initialVisible ?? (listMode ? 12 : 12);
@@ -68,6 +69,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
                 mediaUrl={mediaUrl}
                 onOpen={onOpen}
                 onSave={onSave}
+                saveActionLabel={saveActionLabel}
                 onShowArea={onShowArea}
                 variant="list"
               />
@@ -82,6 +84,7 @@ export function ExploreExperiencesRail({ experiences, loading, error, emptySubti
                 mediaUrl={mediaUrl}
                 onOpen={onOpen}
                 onSave={onSave}
+                saveActionLabel={saveActionLabel}
                 onShowArea={onShowArea}
                 variant="rail"
               />
@@ -117,6 +120,7 @@ function ExperienceCard({
   mediaUrl,
   onOpen,
   onSave,
+  saveActionLabel,
   onShowArea,
   variant,
 }: {
@@ -124,6 +128,7 @@ function ExperienceCard({
   mediaUrl: (url?: string | null) => string;
   onOpen?: (experience: BookableExperience) => void;
   onSave?: (experience: BookableExperience) => void;
+  saveActionLabel: string;
   onShowArea?: (experience: BookableExperience) => void;
   variant: 'rail' | 'list';
 }) {
@@ -172,7 +177,7 @@ function ExperienceCard({
           <TouchableOpacity
             style={[styles.iconButton, { borderColor: C.border }]}
             onPress={() => onSave?.(experience)}
-            accessibilityLabel={`Save ${experience.title} to trip`}
+            accessibilityLabel={`${saveActionLabel}: ${experience.title}`}
           >
             <Ionicons name="add-circle-outline" size={17} color={C.text2} />
           </TouchableOpacity>

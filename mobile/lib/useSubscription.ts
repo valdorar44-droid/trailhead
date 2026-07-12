@@ -2,7 +2,7 @@ import { useEffect, useRef, useCallback, useState } from 'react';
 import { Alert, Platform } from 'react-native';
 import { api } from './api';
 import { useStore } from './store';
-import { storage } from './storage';
+import { accountStorage } from './storage';
 
 export const PRODUCT_IDS = {
   monthly: 'com.trailhead.explorer.monthly.v2',
@@ -117,21 +117,27 @@ export function useSubscription() {
   const errorListenerRef    = useRef<{ remove: () => void } | null>(null);
 
   const activateOnBackend = useCallback(async (productId: string, transactionId: string) => {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     if (!token) {
       if (productId && transactionId) {
-        storage.set('trailhead_iap_pending', JSON.stringify({ productId, transactionId, updatedAt: Date.now() })).catch(() => {});
+        accountStorage.set('trailhead_iap_pending', JSON.stringify({ productId, transactionId, updatedAt: Date.now() }), requestEpoch).catch(() => {});
       }
       setError('Purchase saved. Sign in or create an account when you want Explorer access synced in Trailhead.');
       return true;
     }
     if (productId && transactionId) {
-      storage.set('trailhead_iap_pending', JSON.stringify({ productId, transactionId, updatedAt: Date.now() })).catch(() => {});
+      accountStorage.set('trailhead_iap_pending', JSON.stringify({ productId, transactionId, updatedAt: Date.now() }), requestEpoch).catch(() => {});
     }
     try {
       const res = await api.activateSubscription(productId, transactionId);
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+      ) return false;
       const active = res.status !== 'error';
       setPlan(active, active ? res.plan_expires_at ?? null : null);
-      storage.del('trailhead_iap_pending').catch(() => {});
+      accountStorage.del('trailhead_iap_pending', requestEpoch).catch(() => {});
       return active;
     } catch (e: any) {
       setError(e?.message ?? 'Purchase was received, but Explorer could not be activated yet. Tap Restore purchases to retry.');

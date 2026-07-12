@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { PlacePack, PlacePackPoint } from './api';
+import { accountStorage } from './storage';
 
 const DIR = FileSystem.documentDirectory + 'offline_place_packs/';
 const INDEX_PATH = DIR + '_index.json';
@@ -42,19 +43,22 @@ async function writeIndex(ids: string[]) {
 }
 
 export async function saveOfflinePlacePack(pack: PlacePack, preserveIds: string[] = []): Promise<void> {
-  await ensureDir();
-  await FileSystem.writeAsStringAsync(packPath(pack.pack_id), JSON.stringify(pack));
-  const index = await getIndex();
-  const preserve = new Set([pack.pack_id, ...preserveIds.filter(Boolean)]);
-  const ordered = [pack.pack_id, ...index.filter(id => id !== pack.pack_id)];
-  const kept: string[] = [];
-  for (const id of ordered) {
-    if (kept.length < MAX_PLACE_PACKS || preserve.has(id)) kept.push(id);
-  }
-  const updated = kept;
-  const evicted = index.filter(id => !updated.includes(id));
-  await Promise.all(evicted.map(id => FileSystem.deleteAsync(packPath(id), { idempotent: true }).catch(() => {})));
-  await writeIndex(updated);
+  const epoch = accountStorage.epoch();
+  await accountStorage.run(async () => {
+    await ensureDir();
+    await FileSystem.writeAsStringAsync(packPath(pack.pack_id), JSON.stringify(pack));
+    const index = await getIndex();
+    const preserve = new Set([pack.pack_id, ...preserveIds.filter(Boolean)]);
+    const ordered = [pack.pack_id, ...index.filter(id => id !== pack.pack_id)];
+    const kept: string[] = [];
+    for (const id of ordered) {
+      if (kept.length < MAX_PLACE_PACKS || preserve.has(id)) kept.push(id);
+    }
+    const updated = kept;
+    const evicted = index.filter(id => !updated.includes(id));
+    await Promise.all(evicted.map(id => FileSystem.deleteAsync(packPath(id), { idempotent: true }).catch(() => {})));
+    await writeIndex(updated);
+  }, epoch);
 }
 
 export async function loadOfflinePlacePack(packId: string): Promise<PlacePack | null> {
@@ -84,9 +88,12 @@ export async function listOfflinePlacePacks(): Promise<OfflinePlacePackSummary[]
 }
 
 export async function deleteOfflinePlacePack(packId: string): Promise<void> {
-  await FileSystem.deleteAsync(packPath(packId), { idempotent: true }).catch(() => {});
-  const index = await getIndex();
-  await writeIndex(index.filter(id => id !== packId));
+  const epoch = accountStorage.epoch();
+  await accountStorage.run(async () => {
+    await FileSystem.deleteAsync(packPath(packId), { idempotent: true }).catch(() => {});
+    const index = await getIndex();
+    await writeIndex(index.filter(id => id !== packId));
+  }, epoch);
 }
 
 export async function loadTripPlacePoints(tripId?: string | null): Promise<PlacePackPoint[]> {

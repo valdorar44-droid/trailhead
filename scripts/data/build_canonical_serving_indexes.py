@@ -64,6 +64,16 @@ GENERIC_EXPLORE_DESCRIPTION_RE = re.compile(
     r"check current access, fees, fire restrictions, reservations, and seasonal road conditions before you go)\b",
     re.I,
 )
+TERSE_SOURCE_GEOGRAPHY_RE = re.compile(
+    r"^(?:a\s+|an\s+)?(?:lake|mountain|waterfall|glacier|island|hill|volcano|national park|"
+    r"marine reserve|animal sanctuary|locality|river|peak|hot spring)\s+(?:in|on|near|of)\s+[^.]{1,180}\.?$",
+    re.I,
+)
+SOURCE_GEOGRAPHY_DETAIL_RE = re.compile(
+    r"\b(?:district|range|region|valley|island|peninsula|reserve|sanctuary|territory|province|"
+    r"county|municipality|basin|coast|volcanic|highest|deepest|largest|protected)\b",
+    re.I,
+)
 GENERIC_EXPLORE_TITLES = {
     "campground",
     "campgrounds",
@@ -851,6 +861,54 @@ def clean_public_text(value: object, max_len: int = 360) -> str:
     return text.strip()
 
 
+def source_backed_feature_description(place: dict[str, Any], title: str, description: str) -> str:
+    """Turn a terse source label into readable copy only when the record has corroborating detail."""
+    text = compact(description)
+    if not text or not TERSE_SOURCE_GEOGRAPHY_RE.fullmatch(text):
+        return text
+    if re.fullmatch(r"Q\d+", compact(title), re.I) or not primary_media_url(place):
+        return text
+    providers = {
+        compact(source.get("source")).lower()
+        for source in (place.get("sources") or [])
+        if isinstance(source, dict)
+    }
+    if "wikidata" not in providers:
+        return text
+
+    locations: list[str] = []
+    for field in ("admin", "region", "country"):
+        value = compact(place.get(field))
+        if value and value.casefold() not in {item.casefold() for item in locations}:
+            locations.append(value)
+    source_type_values: list[object] = []
+    for field in ("subcategories", "tags"):
+        values = place.get(field)
+        source_type_values.extend(values if isinstance(values, list) else [values])
+    source_types = {
+        compact(value).lower().replace("_", " ")
+        for value in source_type_values
+        if compact(value)
+    }
+    meaningful_types = source_types & {
+        "glacier", "hot spring", "lake", "marine reserve", "mountain", "national park",
+        "nature reserve", "protected area", "river", "volcano", "waterfall",
+    }
+    category = compact(place.get("category")).lower().replace("_", " ")
+    meaningful_types.discard(category)
+    specificity = len(locations) + len(meaningful_types) + int(bool(SOURCE_GEOGRAPHY_DETAIL_RE.search(text)))
+    if specificity < 2:
+        return text
+
+    phrase = text.rstrip(". ")
+    if re.match(r"^(?:a|an)\s+", phrase, re.I):
+        named = f"{title} is {phrase[0].lower() + phrase[1:]}"
+    else:
+        article = "an" if phrase[:1].lower() in "aeiou" else "a"
+        named = f"{title} is {article} {phrase[0].lower() + phrase[1:]}"
+    return named.rstrip(". ") + "."
+
+
 def generic_explore_title(value: object) -> bool:
     text = re.sub(r"[^a-z0-9]+", " ", compact(value).lower()).strip()
     return text in GENERIC_EXPLORE_TITLES
@@ -932,7 +990,7 @@ def non_camp_explore_category(title: str, description: str) -> tuple[str, str] |
     return None
 
 
-def title_identity_category(title: str, explicit_category: str) -> tuple[str, str] | None:
+def title_identity_category(title: str, explicit_category: str, description: str = "") -> tuple[str, str] | None:
     text = compact(title)
     lower = text.lower()
     if re.search(r"\b(?:glamping|yurts?)\b", lower):
@@ -965,6 +1023,8 @@ def title_identity_category(title: str, explicit_category: str) -> tuple[str, st
         return "park", "parks"
     if re.search(r"\b(?:museum|historic site|battlefield|memorial|fort|blacksmith shop)\b", lower):
         return "historic", "historic"
+    if explicit_category == "hot_spring" and re.search(r"\b(?:hot|thermal) springs?\b", description, re.I):
+        return "hot_spring", "water"
     water_precedence_categories = {
         "activity", "glacier", "hot_spring", "lake", "peak", "place", "trail", "trailhead", "viewpoint", "water", "waterfall",
     }
@@ -988,7 +1048,14 @@ def title_identity_category(title: str, explicit_category: str) -> tuple[str, st
 def normalize_explore_category(title: str, category: str, group: str, description: str = "") -> tuple[str, str] | None:
     hay = f"{title} {category} {group} {description}".lower()
     explicit_category = compact(category).lower().replace(" ", "_")
-    title_category = title_identity_category(title, explicit_category)
+    non_camp_category = non_camp_explore_category(title, description)
+    hard_non_camp_exclusion = non_camp_category == DROP_EXPLORE_CATEGORY and (
+        re.search(r"\bnot a public campground\b|\bdoes not have camping\b", hay)
+        or re.search(r"\b(?:non[-\s]?camper\s+)?dump station\b", compact(title), re.I)
+    )
+    if hard_non_camp_exclusion:
+        return None
+    title_category = title_identity_category(title, explicit_category, description)
     if title_category:
         return title_category
     explicit_categories = {
@@ -1025,7 +1092,6 @@ def normalize_explore_category(title: str, category: str, group: str, descriptio
         return "forest_road", "drives"
     if re.search(r"\btrailhead\b", title, re.I):
         return "trailhead", "trails"
-    non_camp_category = non_camp_explore_category(title, description)
     if non_camp_category == DROP_EXPLORE_CATEGORY:
         return None
     if non_camp_category:
@@ -1404,6 +1470,9 @@ def build_explore_index(
             reject(enriched, title, enriched["enrichment_score"], [*enriched["rejection_reasons"], "unsupported_or_misrouted_category"])
             continue
         category, group = normalized
+        source_description = source_backed_feature_description(place, title, description)
+        description_repaired = source_description != description
+        description = source_description
         guarded_category, guard_reason = guard_explore_category_relevance(title, description, category, group)
         if not guarded_category:
             reject(enriched, title, enriched["enrichment_score"], [*enriched["rejection_reasons"], guard_reason])
@@ -1411,6 +1480,8 @@ def build_explore_index(
         category, group = guarded_category
         enrichment_place = dict(place)
         enrichment_place["category"] = category
+        if description_repaired:
+            enrichment_place["description"] = description
         enriched = enrich_place_dict(enrichment_place)
         lat_value, lng_value = valid_point(lat, lng)
         item = {

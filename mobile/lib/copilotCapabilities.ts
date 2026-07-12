@@ -1,4 +1,4 @@
-import { storage } from '@/lib/storage';
+import { accountStorage, type AccountStorageEpoch } from '@/lib/storage';
 import type { CampReusePolicy, RouteStyleMode, TripShapeMode } from '@/lib/api';
 
 export const TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY = 'trailhead_copilot_route_builder_draft_v1';
@@ -275,7 +275,7 @@ export function normalizeTrailheadRouteBuilderDraft(value: unknown): TrailheadRo
 }
 
 export async function loadTrailheadRouteBuilderDraft(): Promise<TrailheadRouteBuilderDraft | null> {
-  const raw = await storage.get(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY).catch(() => null);
+  const raw = await accountStorage.get(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY).catch(() => null);
   if (!raw) return null;
   try {
     return normalizeTrailheadRouteBuilderDraft(JSON.parse(raw));
@@ -284,17 +284,21 @@ export async function loadTrailheadRouteBuilderDraft(): Promise<TrailheadRouteBu
   }
 }
 
-export async function saveTrailheadRouteBuilderDraft(draft: TrailheadRouteBuilderDraft): Promise<TrailheadRouteBuilderDraft> {
+export async function saveTrailheadRouteBuilderDraft(
+  draft: TrailheadRouteBuilderDraft,
+  epoch: AccountStorageEpoch = accountStorage.epoch(),
+): Promise<TrailheadRouteBuilderDraft> {
   const clean = normalizeTrailheadRouteBuilderDraft({ ...draft, updatedAt: Date.now(), source: draft.source || 'copilot' });
-  await storage.set(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY, JSON.stringify(clean));
+  await accountStorage.set(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY, JSON.stringify(clean), epoch);
   return clean;
 }
 
 export async function mergeTrailheadRouteBuilderDraft(update: TrailheadRouteBuilderDraft): Promise<TrailheadRouteBuilderDraft> {
+  const epoch = accountStorage.epoch();
   const existing = await loadTrailheadRouteBuilderDraft();
-  return saveTrailheadRouteBuilderDraft({ ...(existing ?? {}), ...update, source: update.source || existing?.source || 'copilot' });
+  return saveTrailheadRouteBuilderDraft({ ...(existing ?? {}), ...update, source: update.source || existing?.source || 'copilot' }, epoch);
 }
 
-export async function clearTrailheadRouteBuilderDraft() {
-  await storage.del(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY).catch(() => {});
+export async function clearTrailheadRouteBuilderDraft(epoch: AccountStorageEpoch = accountStorage.epoch()) {
+  await accountStorage.del(TRAILHEAD_COPILOT_ROUTE_BUILDER_DRAFT_KEY, epoch).catch(() => {});
 }

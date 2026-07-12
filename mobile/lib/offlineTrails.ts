@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { TrailFeature } from './trailEngine';
 import type { TrailPreviewManifest } from './api';
+import { accountStorage } from './storage';
 
 export type OfflineTrail = {
   id: string;
@@ -38,17 +39,23 @@ async function writeIndex(ids: string[]) {
 }
 
 export async function saveOfflineTrail(item: OfflineTrail) {
-  await ensureDir();
-  await FileSystem.writeAsStringAsync(fileFor(item.id), JSON.stringify(item));
-  const ids = await readIndex();
-  await writeIndex([item.id, ...ids.filter(id => id !== item.id)].slice(0, 200));
+  const epoch = accountStorage.epoch();
+  await accountStorage.run(async () => {
+    await ensureDir();
+    await FileSystem.writeAsStringAsync(fileFor(item.id), JSON.stringify(item));
+    const ids = await readIndex();
+    await writeIndex([item.id, ...ids.filter(id => id !== item.id)].slice(0, 200));
+  }, epoch);
 }
 
 export async function deleteOfflineTrail(id: string) {
-  await ensureDir();
-  await FileSystem.deleteAsync(fileFor(id), { idempotent: true }).catch(() => {});
-  const ids = await readIndex();
-  await writeIndex(ids.filter(existing => existing !== id));
+  const epoch = accountStorage.epoch();
+  await accountStorage.run(async () => {
+    await ensureDir();
+    await FileSystem.deleteAsync(fileFor(id), { idempotent: true }).catch(() => {});
+    const ids = await readIndex();
+    await writeIndex(ids.filter(existing => existing !== id));
+  }, epoch);
 }
 
 export async function loadOfflineTrail(id: string): Promise<OfflineTrail | null> {

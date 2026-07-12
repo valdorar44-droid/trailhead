@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "non_category_controls": [
+    "all",
+    "nearby"
+  ],
+  "dynamic_filters": {
+    "fuel": {
+      "endpoint": "/api/places/nearby",
+      "required_query": [
+        "lat",
+        "lng"
+      ],
+      "categories": [
+        "fuel"
+      ],
+      "source_policy": "Location-scoped OpenStreetMap results with optional Foursquare enrichment"
+    },
+    "guided": {
+      "endpoint": "/api/explore/experiences",
+      "required_query": [
+        "q"
+      ],
+      "categories": [
+        "guided experiences"
+      ],
+      "source_policy": "Viator products with Trailhead's cached destination fallback"
+    },
+    "resupply": {
+      "endpoint": "/api/places/nearby",
+      "required_query": [
+        "lat",
+        "lng"
+      ],
+      "categories": [
+        "food",
+        "grocery",
+        "hardware",
+        "mechanic",
+        "medical"
+      ],
+      "source_policy": "Location-scoped OpenStreetMap results with optional Foursquare enrichment"
+    }
+  }
+}

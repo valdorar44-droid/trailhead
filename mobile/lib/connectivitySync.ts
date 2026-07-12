@@ -4,6 +4,7 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { api, TripResult, RouteWeatherResult } from './api';
 import { TRAILHEAD_API_BASE } from './apiBase';
 import { useStore } from './store';
+import { accountStorage } from './storage';
 
 const BASE = TRAILHEAD_API_BASE;
 const POLL_MS = 45_000;
@@ -42,13 +43,18 @@ export function useConnectivitySync({
 
   const syncWeather = useCallback(async (trip: TripResult) => {
     if (isSyncing.current) return;
+    const epoch = accountStorage.epoch();
     isSyncing.current = true;
     try {
       const weather = await api.getRouteWeather(trip.trip_id, trip.plan.waypoints, useStore.getState().weatherUnitMode);
       const path = `${FileSystem.documentDirectory}weather_${trip.trip_id}.json`;
-      await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), {
-        encoding: FileSystem.EncodingType.UTF8,
-      });
+      const stored = await accountStorage.run(async () => {
+        await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), {
+          encoding: FileSystem.EncodingType.UTF8,
+        });
+        return true;
+      }, epoch);
+      if (!stored) return;
       onWeatherUpdate(weather);
       onSyncComplete();
     } catch {
@@ -59,7 +65,13 @@ export function useConnectivitySync({
   }, [onWeatherUpdate, onSyncComplete]);
 
   const tick = useCallback(async () => {
+    const tickEpoch = accountStorage.epoch();
+    const tickAccountId = useStore.getState().user?.id;
     const online = await probe();
+    if (
+      accountStorage.epoch() !== tickEpoch
+      || String(useStore.getState().user?.id ?? '') !== String(tickAccountId ?? '')
+    ) return;
     const prevOnline = wasOnline.current;
     wasOnline.current = online;
 

@@ -1,4 +1,4 @@
-import { storage } from '@/lib/storage';
+import { accountStorage, type AccountStorageEpoch } from '@/lib/storage';
 import { api } from '@/lib/api';
 import type { ViatorBookingRecord } from '@/lib/api';
 
@@ -96,7 +96,7 @@ function tourTime(tour: BookedTour) {
 }
 
 async function loadLocalBookedTours(): Promise<BookedTour[]> {
-  const raw = await storage.get(BOOKED_TOURS_STORAGE_KEY).catch(() => null);
+  const raw = await accountStorage.get(BOOKED_TOURS_STORAGE_KEY).catch(() => null);
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw);
@@ -124,18 +124,19 @@ export async function loadBookedTours(options: { includeRemote?: boolean } = {})
   }
 }
 
-export async function saveBookedTours(tours: BookedTour[]) {
+export async function saveBookedTours(tours: BookedTour[], epoch: AccountStorageEpoch = accountStorage.epoch()) {
   const clean = tours
     .map(cleanTour)
     .filter((tour): tour is BookedTour => !!tour)
     .sort((a, b) => tourTime(a) - tourTime(b));
-  await storage.set(BOOKED_TOURS_STORAGE_KEY, JSON.stringify(clean));
+  await accountStorage.set(BOOKED_TOURS_STORAGE_KEY, JSON.stringify(clean), epoch);
   return clean;
 }
 
 export async function saveBookedTour(tour: BookedTour) {
+  const epoch = accountStorage.epoch();
   const clean = cleanTour(tour);
   if (!clean) return loadBookedTours();
   const existing = await loadLocalBookedTours();
-  return saveBookedTours([clean, ...existing.filter(item => item.id !== clean.id)]);
+  return saveBookedTours([clean, ...existing.filter(item => item.id !== clean.id)], epoch);
 }

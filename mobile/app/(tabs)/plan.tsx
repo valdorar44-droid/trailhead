@@ -26,6 +26,7 @@ import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { mergeTripPreferencesIntoRigContext, tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
+import { accountStorage } from '@/lib/storage';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
@@ -126,6 +127,11 @@ function PlanScreenContent() {
     [rigProfile, welcomeSetupPreferences],
   );
 
+  function accountRequestIsCurrent(epoch: number, accountId: string | number | null | undefined) {
+    return accountStorage.epoch() === epoch
+      && String(useStore.getState().user?.id ?? '') === String(accountId ?? '');
+  }
+
   useEffect(() => {
     setMessages([]);
     setInput('');
@@ -149,8 +155,11 @@ function PlanScreenContent() {
   }
 
   async function openHistoryTrip(tripId: string) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     try {
       const cached = await loadOfflineTrip(tripId);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (cached) {
         setActiveTrip(cached, true);
         setMessages([{ role: 'ai', trip: cached }]);
@@ -159,6 +168,7 @@ function PlanScreenContent() {
       }
 
       const trip = await api.getTrip(tripId);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setActiveTrip(trip);
       setMessages([{ role: 'ai', trip }]);
       setPlanPhase('active');
@@ -229,6 +239,8 @@ function PlanScreenContent() {
   async function send() {
     const text = input.trim();
     if (!text || loading || sendRef.current) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     sendRef.current = true;
     setTimeout(() => { sendRef.current = false; }, 1500);
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -238,6 +250,10 @@ function PlanScreenContent() {
     activateKeepAwakeAsync('ai-chat');
 
     const finalText = await resolveLocation(text);
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+      deactivateKeepAwake('ai-chat');
+      return;
+    }
 
     // ── If route is ready and user types a build phrase, build directly ───────
     // Prevents Claude from returning raw JSON in the chat bubble instead of
@@ -257,6 +273,7 @@ function PlanScreenContent() {
       startStages(CHAT_STAGES);
       try {
         const data = await api.chat(finalText, sessionId, activeTrip, planningContext as any);
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
 
         if (data.type === 'trip_update' && data.trip) {
           setActiveTrip(data.trip);
@@ -272,6 +289,7 @@ function PlanScreenContent() {
         }
         setPlanPhase('active');
       } catch (e: any) {
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         if (isOutOfCredits(e)) handleOutOfCredits();
         else {
           const message = e instanceof ApiError || isRouteValidationMessage(e?.message)
@@ -281,7 +299,9 @@ function PlanScreenContent() {
         }
         setPlanPhase('active');
       } finally {
-        stopStages(); setLoading(false); scrollToEnd();
+        if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+          stopStages(); setLoading(false); scrollToEnd();
+        }
         deactivateKeepAwake('ai-chat');
       }
       return;
@@ -292,6 +312,7 @@ function PlanScreenContent() {
     startStages(CHAT_STAGES);
     try {
       const data = await api.chat(finalText, sessionId, null, planningContext as any);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
 
       if (data.type === 'ready') {
         setMessages(m => [
@@ -305,6 +326,7 @@ function PlanScreenContent() {
         setPlanPhase('chatting');
       }
     } catch (e: any) {
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (isOutOfCredits(e)) { handleOutOfCredits(); setPlanPhase('idle'); }
       else {
         // Keep raw responses and JSON out of the visible chat.
@@ -320,7 +342,9 @@ function PlanScreenContent() {
         setPlanPhase('ready'); // stay in ready so they can retry
       }
     } finally {
-      stopStages(); setLoading(false); scrollToEnd();
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        stopStages(); setLoading(false); scrollToEnd();
+      }
       deactivateKeepAwake('ai-chat');
     }
   }
@@ -354,11 +378,18 @@ function PlanScreenContent() {
 
   // ── Build full trip from conversation ─────────────────────────────────────
   async function buildTrip() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const keepAwakeTag = `trip-build-${requestEpoch}-${Date.now()}`;
     setMessages(m => m.filter(msg => !msg.outline));
     setPlanPhase('planning');
     setLoading(true);
     // Prevent screen sleep during long planner runs (can take 2-3 min)
-    await activateKeepAwakeAsync('trip-build');
+    await activateKeepAwakeAsync(keepAwakeTag);
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+      deactivateKeepAwake(keepAwakeTag);
+      return;
+    }
     // Use the longer stage list so "this can take a minute" shows up for long trips
     startStages(PLAN_STAGES_LONG);
     try {
@@ -368,6 +399,7 @@ function PlanScreenContent() {
         camp_reuse_policy: tripPreferenceContext.route_builder.camp_reuse_policy,
         trip_preferences: tripPreferenceContext,
       } : {});
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setActiveTrip(result);
       setMessages(m => [...m, { role: 'ai', trip: result }]);
@@ -388,13 +420,19 @@ function PlanScreenContent() {
       maybeShowReviewPrompt().catch(() => {});
       setPlanPhase('active');
       // Download route weather for offline use (fail silently)
+      const weatherEpoch = accountStorage.epoch();
       api.getRouteWeather(result.trip_id, result.plan.waypoints, weatherUnitMode).then(async weather => {
         const path = `${FileSystem.documentDirectory}weather_${result.trip_id}.json`;
-        await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), { encoding: FileSystem.EncodingType.UTF8 });
+        const stored = await accountStorage.run(async () => {
+          await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), { encoding: FileSystem.EncodingType.UTF8 });
+          return true;
+        }, weatherEpoch);
+        if (!stored) return;
         setWeatherToast('Weather saved for this trip');
         setTimeout(() => setWeatherToast(''), 3000);
       }).catch(() => {});
     } catch (e: any) {
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (isOutOfCredits(e)) {
         handleOutOfCredits();
         setMessages(m => m); // keep messages unchanged
@@ -423,7 +461,10 @@ function PlanScreenContent() {
         setPlanPhase('ready');
       }
     } finally {
-      stopStages(); setLoading(false); scrollToEnd();
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        stopStages(); setLoading(false); scrollToEnd();
+      }
+      deactivateKeepAwake(keepAwakeTag);
     }
   }
 
@@ -966,7 +1007,11 @@ async function shareGpx(trip: TripResult) {
     .join('\n');
   const gpx = `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Trailhead" xmlns="http://www.topografix.com/GPX/1/1">\n  <metadata><name>${trip.plan.trip_name}</name></metadata>\n${wpts}\n</gpx>`;
   const path = `${FileSystem.documentDirectory}${trip.plan.trip_name.replace(/[^a-z0-9]/gi, '_')}.gpx`;
-  await FileSystem.writeAsStringAsync(path, gpx, { encoding: FileSystem.EncodingType.UTF8 });
+  const stored = await accountStorage.run(async () => {
+    await FileSystem.writeAsStringAsync(path, gpx, { encoding: FileSystem.EncodingType.UTF8 });
+    return true;
+  });
+  if (!stored) return;
   await Sharing.shareAsync(path, { mimeType: 'application/gpx+xml', UTI: 'public.gpx' });
 }
 

@@ -11,15 +11,17 @@ import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as Google from 'expo-auth-session/providers/google';
 import * as WebBrowser from 'expo-web-browser';
-import { storage } from '@/lib/storage';
+import { accountStorage, storage } from '@/lib/storage';
 import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
+import * as Location from 'expo-location';
 import { api, ApiError, ContestStatus, ContributorProfile, SupportThread, TripResult } from '@/lib/api';
-import { useStore, RigProfile, SavedPlace, TripHistoryItem } from '@/lib/store';
+import { cancelActiveTripMirror, useStore, RigProfile, SavedPlace, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import ProfileLibraryOverview from '@/components/profile/ProfileLibraryOverview';
+import CommunicationPreferencesSection from '@/components/profile/CommunicationPreferencesSection';
 import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
 import { useSubscription } from '@/lib/useSubscription';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -38,6 +40,10 @@ import {
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { trackPhase0Event } from '@/lib/telemetry';
 import { BookedTour, loadBookedTours } from '@/lib/bookedTours';
+import { eraseTripRepositoryScope } from '@/lib/tripRepository';
+import { AUDIO_LOCATION_TASK } from '@/lib/backgroundTasks';
+import { removeAccountPushToken, removeLocalPushRegistration } from '@/lib/deviceNotifications';
+import { cancelTripRepositorySync } from '@/lib/tripRepositorySync';
 import {
   displayConsumptionToMpg,
   displayToMiles,
@@ -231,6 +237,11 @@ export default function ProfileScreen() {
   const pathname = usePathname();
   const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; auth?: string }>();
   const { user, rigProfile, setAuth, signOut, clearAuthAndLocalData, setRigProfile } = useStore();
+
+  function accountRequestIsCurrent(epoch: number, accountId: string | number | null | undefined) {
+    return accountStorage.epoch() === epoch
+      && String(useStore.getState().user?.id ?? '') === String(accountId ?? '');
+  }
   const tripHistory    = useStore(st => st.tripHistory);
   const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
   const themeMode      = useStore(st => st.themeMode);
@@ -294,6 +305,9 @@ export default function ProfileScreen() {
   const [supportDraft, setSupportDraft] = useState('');
   const [supportSending, setSupportSending] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
+  const [accountLifecycleBusy, setAccountLifecycleBusy] = useState(false);
+  const accountLifecycleBusyRef = useRef(false);
+  const deletedAccountPendingCleanupRef = useRef<number | null>(null);
   const [bookedTours, setBookedTours] = useState<BookedTour[]>([]);
   const [bookedToursLoaded, setBookedToursLoaded] = useState(false);
   const [adminClearingCampCache, setAdminClearingCampCache] = useState(false);
@@ -349,6 +363,134 @@ export default function ProfileScreen() {
     }
     setPendingMapSelection({ kind: 'place', place });
     router.push('/(tabs)/map');
+  }
+
+  async function stopAccountBackgroundLocation() {
+    if (Platform.OS !== 'ios') return;
+    const active = await Location.hasStartedLocationUpdatesAsync(AUDIO_LOCATION_TASK);
+    if (active) await Location.stopLocationUpdatesAsync(AUDIO_LOCATION_TASK);
+  }
+
+  function showCleanupIncomplete(accountId: number) {
+    Alert.alert(
+      'Signed Out',
+      'Trailhead could not confirm that all saved account data was cleared from this device. Try clearing it again, or close and reopen Trailhead before anyone else uses this device.',
+      [
+        { text: 'Close', style: 'cancel' },
+        { text: 'Try Again', onPress: () => { void retryAccountCleanup(accountId); } },
+      ],
+    );
+  }
+
+  async function retryAccountCleanup(accountId: number) {
+    if (accountLifecycleBusyRef.current) return;
+    accountLifecycleBusyRef.current = true;
+    setAccountLifecycleBusy(true);
+    try {
+      await stopAccountBackgroundLocation();
+      await cancelTripRepositorySync();
+      await cancelActiveTripMirror();
+      await eraseTripRepositoryScope(accountId);
+      await clearAuthAndLocalData();
+      const pushCleanupDrained = accountStorage.beginCleanup();
+      try {
+        await pushCleanupDrained;
+        await removeLocalPushRegistration();
+      } finally {
+        accountStorage.endCleanup();
+      }
+      deletedAccountPendingCleanupRef.current = null;
+      Alert.alert('Device Data Cleared', 'Saved account data has been cleared from this device.');
+    } catch {
+      Alert.alert('Cleanup Not Finished', 'Close and reopen Trailhead before anyone else uses this device.');
+    } finally {
+      accountLifecycleBusyRef.current = false;
+      setAccountLifecycleBusy(false);
+    }
+  }
+
+  async function signOutFromDevice() {
+    const accountId = user?.id;
+    if (accountId == null || accountLifecycleBusyRef.current) return;
+    const authToken = useStore.getState().token || undefined;
+    const finishingDeletedAccount = deletedAccountPendingCleanupRef.current === accountId;
+    accountLifecycleBusyRef.current = true;
+    setAccountLifecycleBusy(true);
+    let cleanupIncomplete = false;
+    // Both actions clear all private in-memory Store state before their first await.
+    const localClear = finishingDeletedAccount ? clearAuthAndLocalData() : signOut();
+    setView(finishingDeletedAccount ? 'login' : 'main');
+    try { await cancelTripRepositorySync(); } catch { cleanupIncomplete = true; }
+    try { await cancelActiveTripMirror(); } catch { cleanupIncomplete = true; }
+    try { await eraseTripRepositoryScope(accountId); } catch { cleanupIncomplete = true; }
+    try { await stopAccountBackgroundLocation(); } catch { cleanupIncomplete = true; }
+    try {
+      await localClear;
+      if (finishingDeletedAccount) deletedAccountPendingCleanupRef.current = null;
+    } catch {
+      cleanupIncomplete = true;
+    }
+    if (!finishingDeletedAccount) {
+      const pushCleanupDrained = accountStorage.beginCleanup();
+      try {
+        await pushCleanupDrained;
+        await removeAccountPushToken(authToken);
+      } catch {
+        cleanupIncomplete = true;
+      } finally {
+        accountStorage.endCleanup();
+      }
+    }
+    accountLifecycleBusyRef.current = false;
+    setAccountLifecycleBusy(false);
+    if (cleanupIncomplete) showCleanupIncomplete(accountId);
+  }
+
+  async function deleteAccountAndClearDevice() {
+    const accountId = user?.id;
+    if (accountId == null || accountLifecycleBusyRef.current) return;
+    accountLifecycleBusyRef.current = true;
+    setAccountLifecycleBusy(true);
+    try {
+      await stopAccountBackgroundLocation();
+      if (deletedAccountPendingCleanupRef.current !== accountId) {
+        await removeAccountPushToken();
+        await api.deleteAccount();
+        deletedAccountPendingCleanupRef.current = accountId;
+      }
+      let cleanupIncomplete = false;
+      try { await cancelTripRepositorySync(); } catch { cleanupIncomplete = true; }
+      try { await cancelActiveTripMirror(); } catch { cleanupIncomplete = true; }
+      try { await eraseTripRepositoryScope(accountId); } catch { cleanupIncomplete = true; }
+      try { await clearAuthAndLocalData(); } catch { cleanupIncomplete = true; }
+      setView('login');
+      if (cleanupIncomplete) showCleanupIncomplete(accountId);
+      else deletedAccountPendingCleanupRef.current = null;
+    } catch {
+      Alert.alert(
+        'Deletion Failed',
+        'Could not delete your account. Please check your connection and try again.',
+      );
+    } finally {
+      accountLifecycleBusyRef.current = false;
+      setAccountLifecycleBusy(false);
+    }
+  }
+
+  function confirmAccountDeletion() {
+    if (accountLifecycleBusyRef.current) return;
+    Alert.alert(
+      'Delete Account',
+      'This permanently deletes your account, all trips, reports, and credits. This cannot be undone.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete My Account',
+          style: 'destructive',
+          onPress: () => { void deleteAccountAndClearDevice(); },
+        },
+      ],
+    );
   }
 
   function clearCampCacheAdmin() {
@@ -475,27 +617,92 @@ export default function ProfileScreen() {
     if (rigProfile && !editingRig) setRigDraft(rigProfile);
   }, [rigProfile]);
 
-  // Load checklist from SecureStore on mount
+  // Component-local account data must not survive a sign-out or account change.
   useEffect(() => {
-    storage.get('trailhead_checklist').then(json => {
-      if (json) setChecklist(JSON.parse(json));
+    const accountId = user?.id;
+    const storageEpoch = accountStorage.epoch();
+    setChecklist(DEFAULT_CHECKLIST);
+    setRigDraft(rigProfile ?? DEFAULT_RIG);
+    setEditingRig(false);
+    setCreditHistory([]);
+    setCreditHistoryLoaded(false);
+    setShowHistory(false);
+    setSupportThreads([]);
+    setSupportUnreadCount(0);
+    setSupportSelectedThreadId(null);
+    setSupportDraft('');
+    setSupportLoading(false);
+    setSupportSending(false);
+    setShowSupportInbox(false);
+    setBookedTours([]);
+    setBookedToursLoaded(false);
+    setGpxBatches([]);
+    setGpxResult('');
+    setGpxImporting(false);
+    setOfflineCachedIds(new Set());
+    setOfflineTripSummaries([]);
+    setContributions(null);
+    setContest(null);
+    setShowContributions(false);
+    setShowContest(false);
+    setContributorExperience('');
+    setContributorRegions('');
+    setContributorSample('');
+    setContributorApplyResult('');
+    setShowContributorApply(false);
+    setBugTitle('');
+    setBugDesc('');
+    setBugSent(false);
+    setShowBugModal(false);
+    setEmail('');
+    setUsername('');
+    setPassword('');
+    setConfirmPassword('');
+    setRefCode('');
+    setPendingVerifyEmail('');
+    setResetSent(false);
+    if (accountId == null) return;
+    accountStorage.get('trailhead_checklist').then(json => {
+      if (
+        accountStorage.epoch() === storageEpoch
+        && String(useStore.getState().user?.id ?? '') === String(accountId)
+        && json
+      ) setChecklist(JSON.parse(json));
     }).catch(() => {});
-  }, []);
+  }, [user?.id]);
 
   const refreshOfflineTrips = useCallback(() => {
+    if (accountStorage.isCleaning()) return;
+    const storageEpoch = accountStorage.epoch();
+    const accountId = useStore.getState().user?.id;
+    const requestIsCurrent = () => !accountStorage.isCleaning()
+      && accountStorage.epoch() === storageEpoch
+      && String(useStore.getState().user?.id ?? '') === String(accountId ?? '');
     getOfflineTripIndex().then(ids => {
-      setOfflineCachedIds(new Set(ids));
+      if (requestIsCurrent()) setOfflineCachedIds(new Set(ids));
     }).catch(() => {});
-    getOfflineTripSummaries().then(setOfflineTripSummaries).catch(() => {});
+    getOfflineTripSummaries().then(trips => {
+      if (requestIsCurrent()) setOfflineTripSummaries(trips);
+    }).catch(() => {});
   }, []);
 
   const refreshBookedTours = useCallback(() => {
+    const accountId = useStore.getState().user?.id;
+    const storageEpoch = accountStorage.epoch();
     loadBookedTours({ includeRemote: !!user })
       .then(tours => {
+        if (
+          accountStorage.epoch() !== storageEpoch
+          || String(useStore.getState().user?.id ?? '') !== String(accountId ?? '')
+        ) return;
         setBookedTours(tours);
         setBookedToursLoaded(true);
       })
       .catch(() => {
+        if (
+          accountStorage.epoch() !== storageEpoch
+          || String(useStore.getState().user?.id ?? '') !== String(accountId ?? '')
+        ) return;
         setBookedTours([]);
         setBookedToursLoaded(true);
       });
@@ -505,12 +712,55 @@ export default function ProfileScreen() {
   useEffect(() => {
     refreshOfflineTrips();
     refreshBookedTours();
-    loadGpxImportBatches().then(setGpxBatches).catch(() => {});
+    if (accountStorage.isCleaning()) return;
+    const storageEpoch = accountStorage.epoch();
+    const accountId = useStore.getState().user?.id;
+    loadGpxImportBatches().then(batches => {
+      if (
+        !accountStorage.isCleaning()
+        && accountStorage.epoch() === storageEpoch
+        && String(useStore.getState().user?.id ?? '') === String(accountId ?? '')
+      ) setGpxBatches(batches);
+    }).catch(() => {});
   }, [refreshBookedTours, refreshOfflineTrips]);
 
   useFocusEffect(useCallback(() => {
+    refreshOfflineTrips();
     refreshBookedTours();
-  }, [refreshBookedTours]));
+  }, [refreshBookedTours, refreshOfflineTrips]));
+
+  useEffect(() => accountStorage.subscribe((cleaning, storageEpoch) => {
+    if (cleaning) {
+      setChecklist(DEFAULT_CHECKLIST);
+      setBookedTours([]);
+      setBookedToursLoaded(false);
+      setGpxBatches([]);
+      setOfflineCachedIds(new Set());
+      setOfflineTripSummaries([]);
+      setSupportThreads([]);
+      setSupportUnreadCount(0);
+      setSupportSelectedThreadId(null);
+      return;
+    }
+    const accountId = useStore.getState().user?.id;
+    if (accountId == null) return;
+    accountStorage.get('trailhead_checklist').then(json => {
+      if (
+        accountStorage.epoch() === storageEpoch
+        && String(useStore.getState().user?.id ?? '') === String(accountId)
+        && json
+      ) setChecklist(JSON.parse(json));
+    }).catch(() => {});
+    refreshOfflineTrips();
+    refreshBookedTours();
+    loadGpxImportBatches().then(batches => {
+      if (
+        accountStorage.epoch() === storageEpoch
+        && String(useStore.getState().user?.id ?? '') === String(accountId)
+      ) setGpxBatches(batches);
+    }).catch(() => {});
+    loadSupportInbox(false).catch(() => {});
+  }), [refreshBookedTours, refreshOfflineTrips]);
 
   const offlineTripCount = useMemo(
     () => tripHistory.filter(trip => offlineCachedIds.has(trip.trip_id)).length,
@@ -544,6 +794,7 @@ export default function ProfileScreen() {
   }
 
   async function addBookedTourToCalendar(tour: BookedTour) {
+    const storageEpoch = accountStorage.epoch();
     const start = parseTourDate(tour.startAt);
     if (!start) {
       Alert.alert('Calendar', 'Date is not ready for this booking.');
@@ -571,7 +822,11 @@ export default function ProfileScreen() {
       if (!baseDir) throw new Error('Missing calendar export directory');
       const safeId = tour.id.replace(/[^a-z0-9_-]/gi, '-').slice(0, 80) || 'tour';
       const uri = `${baseDir}trailhead-${safeId}.ics`;
-      await FileSystem.writeAsStringAsync(uri, ics);
+      const stored = await accountStorage.run(async () => {
+        await FileSystem.writeAsStringAsync(uri, ics);
+        return true;
+      }, storageEpoch);
+      if (!stored) return;
       if (await Sharing.isAvailableAsync()) {
         await Sharing.shareAsync(uri, { mimeType: 'text/calendar', dialogTitle: 'Add to calendar', UTI: 'com.apple.ical.ics' });
       } else {
@@ -662,60 +917,78 @@ export default function ProfileScreen() {
   }, [favoriteCamps.length, hasPlan, savedPlaces.length, tripHistory.length, user]));
 
   async function openContest() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setShowContest(true);
     setContestLoading(true);
     try {
-      setContest(await api.getContestStatus());
+      const nextContest = await api.getContestStatus();
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      setContest(nextContest);
     } catch (e: any) {
       Alert.alert('Contest unavailable', e?.message ?? 'Could not load contest standings.');
     } finally {
-      setContestLoading(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setContestLoading(false);
     }
   }
 
   async function enterContestDrawing() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setContestEntering(true);
     try {
       const res = await api.enterContestDrawing();
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setContest(prev => prev ? { ...prev, ...res.status } : prev);
       Alert.alert('Entry saved', 'You are entered in this month’s drawing. No purchase is required and a purchase does not improve your odds.');
     } catch (e: any) {
       Alert.alert('Entry failed', e?.message ?? 'Could not save your entry.');
     } finally {
-      setContestEntering(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setContestEntering(false);
     }
   }
 
   async function openContributions() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setShowContributions(true);
     setContributionsLoading(true);
     try {
-      setContributions(await api.getMyContributions());
+      const nextContributions = await api.getMyContributions();
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      setContributions(nextContributions);
     } catch (e: any) {
       Alert.alert('Contributions unavailable', e?.message ?? 'Could not load your contribution profile.');
     } finally {
-      setContributionsLoading(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setContributionsLoading(false);
     }
   }
 
   async function toggleContributionVisibility() {
     if (!contributions) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setVisibilitySaving(true);
     try {
-      setContributions(await api.setContributionVisibility(!contributions.public_profile_visible));
+      const nextContributions = await api.setContributionVisibility(!contributions.public_profile_visible);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      setContributions(nextContributions);
     } catch (e: any) {
       Alert.alert('Privacy update failed', e?.message ?? 'Could not update profile visibility.');
     } finally {
-      setVisibilitySaving(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setVisibilitySaving(false);
     }
   }
 
   async function loadSupportInbox(openModal = false, preferredThreadId?: number | null) {
     if (!user) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user.id;
     if (openModal) setShowSupportInbox(true);
     setSupportLoading(true);
     try {
       const inbox = await api.getSupportInbox();
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setSupportThreads(inbox.threads || []);
       setSupportUnreadCount(inbox.unread_count || 0);
       const nextThreadId = preferredThreadId
@@ -724,6 +997,7 @@ export default function ProfileScreen() {
         ?? null;
       if (nextThreadId) {
         const detail = await api.getSupportThread(nextThreadId);
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         setSupportThreads(prev => prev.map(thread => thread.id === detail.id ? detail : thread));
         setSupportSelectedThreadId(detail.id);
       } else {
@@ -732,7 +1006,7 @@ export default function ProfileScreen() {
     } catch (e: any) {
       if (openModal) Alert.alert('Inbox unavailable', e?.message ?? 'Could not load messages right now.');
     } finally {
-      setSupportLoading(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setSupportLoading(false);
     }
   }
 
@@ -741,10 +1015,13 @@ export default function ProfileScreen() {
   }
 
   async function openSupportThread(threadId: number) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setSupportSelectedThreadId(threadId);
     setSupportLoading(true);
     try {
       const detail = await api.getSupportThread(threadId);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setSupportThreads(prev => {
         const others = prev.filter(thread => thread.id !== detail.id);
         return [detail, ...others];
@@ -756,13 +1033,15 @@ export default function ProfileScreen() {
     } catch (e: any) {
       Alert.alert('Thread unavailable', e?.message ?? 'Could not open that message thread.');
     } finally {
-      setSupportLoading(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setSupportLoading(false);
     }
   }
 
   async function sendSupportReply() {
     const text = supportDraft.trim();
     if (!text || supportSending) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setSupportSending(true);
     try {
       const selectedThread = supportThreads.find(thread => thread.id === supportSelectedThreadId) ?? null;
@@ -772,16 +1051,18 @@ export default function ProfileScreen() {
         category: selectedThread?.category || 'support',
         body: text,
       });
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setSupportDraft('');
       await loadSupportInbox(true, response.thread_id);
     } catch (e: any) {
       Alert.alert('Message failed', e?.message ?? 'Could not send your message.');
     } finally {
-      setSupportSending(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setSupportSending(false);
     }
   }
 
   async function login() {
+    if (accountLifecycleBusyRef.current) return;
     if (!email || !password) { Alert.alert('Fill in all fields'); return; }
     setLoading(true);
     try {
@@ -805,6 +1086,7 @@ export default function ProfileScreen() {
   }
 
   async function handleProviderLogin(provider: 'apple' | 'google', identityToken: string, fullName = '', providerEmail = '') {
+    if (accountLifecycleBusyRef.current) return;
     if (!identityToken) {
       Alert.alert('Sign in failed', `${provider === 'apple' ? 'Apple' : 'Google'} did not return a sign-in token.`);
       return;
@@ -867,6 +1149,7 @@ export default function ProfileScreen() {
   }
 
   async function register() {
+    if (accountLifecycleBusyRef.current) return;
     const cleanEmail = email.trim().toLowerCase();
     const cleanUsername = username.trim();
     if (!cleanEmail || !cleanUsername || !password || !confirmPassword) { Alert.alert('Fill in all fields'); return; }
@@ -926,8 +1209,14 @@ export default function ProfileScreen() {
 
   async function loadHistory() {
     if (creditHistoryLoaded) { setShowHistory(p => !p); return; }
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     try {
       const res = await api.getCredits();
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+      ) return;
       setCreditHistory(Array.isArray(res.history) ? res.history : []);
       setCreditHistoryLoaded(true);
       setShowHistory(true);
@@ -941,8 +1230,14 @@ export default function ProfileScreen() {
   }
 
   async function openTripFromProfile(t: TripHistoryItem) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     try {
       const cached = await loadOfflineTrip(t.trip_id);
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+      ) return;
       if (cached) {
         setActiveTrip({ ...cached, updated_at: Date.now() }, true);
         trackPhase0Event('phase0_saved_trip_opened', {
@@ -955,6 +1250,10 @@ export default function ProfileScreen() {
       }
 
       const trip = await api.getTrip(t.trip_id);
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+      ) return;
       setActiveTrip({ ...trip, updated_at: Date.now() });
       trackPhase0Event('phase0_saved_trip_opened', {
         trip_id: t.trip_id,
@@ -998,6 +1297,8 @@ export default function ProfileScreen() {
   }
 
   async function openGpxBatch(batch: GpxImportBatch) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const tripId = batch.routeTripId || batch.routeTripIds?.[0];
     if (!tripId) {
       setGpxResult('This GPX import only added waypoint pins. Enable GPX in map filters to view them.');
@@ -1005,6 +1306,10 @@ export default function ProfileScreen() {
     }
     try {
       const trip = await loadOfflineTrip(tripId);
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+      ) return;
       if (!trip) {
         setGpxResult('That imported route is no longer saved offline on this device.');
         return;
@@ -1012,7 +1317,9 @@ export default function ProfileScreen() {
       setActiveTrip(trip, true);
       router.push('/(tabs)/map');
     } catch (e: any) {
-      setGpxResult('Could not open this GPX route. Try re-importing the file.');
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        setGpxResult('Could not open this GPX route. Try re-importing the file.');
+      }
     }
   }
 
@@ -1026,13 +1333,20 @@ export default function ProfileScreen() {
           text: 'Remove',
           style: 'destructive',
           onPress: async () => {
+            const requestEpoch = accountStorage.epoch();
+            const requestAccountId = useStore.getState().user?.id;
+            const requestIsCurrent = () => accountRequestIsCurrent(requestEpoch, requestAccountId);
             const tripIds = batch.routeTripIds ?? (batch.routeTripId ? [batch.routeTripId] : []);
             await Promise.all(tripIds.map(async id => {
+              if (!requestIsCurrent()) return;
               removeTripFromHistory(id);
               await deleteOfflineTrip(id);
+              if (!requestIsCurrent()) return;
               await deleteRouteGeometry(id);
             }));
+            if (!requestIsCurrent()) return;
             const next = await removeGpxImportBatch(batch.id);
+            if (!requestIsCurrent()) return;
             setGpxBatches(next);
             refreshOfflineTrips();
           },
@@ -1043,14 +1357,24 @@ export default function ProfileScreen() {
 
   async function submitBug() {
     if (!bugTitle.trim() || !bugDesc.trim()) { Alert.alert('Fill in both fields'); return; }
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setBugSubmitting(true);
     try {
       await api.submitBugReport({ title: bugTitle.trim(), description: bugDesc.trim(), app_version: '1.0' });
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setBugSent(true);
       setBugTitle(''); setBugDesc('');
-      setTimeout(() => { setShowBugModal(false); setBugSent(false); }, 2500);
-    } catch (e: any) { Alert.alert('Submission failed', e.message); }
-    finally { setBugSubmitting(false); }
+      setTimeout(() => {
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+        setShowBugModal(false);
+        setBugSent(false);
+      }, 2500);
+    } catch (e: any) {
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) Alert.alert('Submission failed', e.message);
+    } finally {
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setBugSubmitting(false);
+    }
   }
 
   function shareReferral() {
@@ -1062,12 +1386,13 @@ export default function ProfileScreen() {
   }
 
   function toggleCheckItem(sectionIdx: number, itemId: string) {
+    const storageEpoch = accountStorage.epoch();
     setChecklist(prev => {
       const next = prev.map((sec, si) => si !== sectionIdx ? sec : {
         ...sec,
         items: sec.items.map(item => item.id === itemId ? { ...item, done: !item.done } : item),
       });
-      storage.set('trailhead_checklist', JSON.stringify(next)).catch(() => {});
+      accountStorage.set('trailhead_checklist', JSON.stringify(next), storageEpoch).catch(() => {});
       return next;
     });
   }
@@ -1075,7 +1400,7 @@ export default function ProfileScreen() {
   function resetChecklist() {
     const reset = checklist.map(sec => ({ ...sec, items: sec.items.map(i => ({ ...i, done: false })) }));
     setChecklist(reset);
-    storage.set('trailhead_checklist', JSON.stringify(reset)).catch(() => {});
+    accountStorage.set('trailhead_checklist', JSON.stringify(reset)).catch(() => {});
   }
 
   function saveRig() {
@@ -1089,6 +1414,10 @@ export default function ProfileScreen() {
   }
 
   async function importGpx() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '');
     setGpxImporting(true);
     setGpxResult('');
     try {
@@ -1096,6 +1425,7 @@ export default function ProfileScreen() {
       if (result.canceled) return;
       const file = result.assets[0];
       const content = await FileSystem.readAsStringAsync(file.uri);
+      if (!requestIsCurrent()) return;
       const parsed = parseGpx(content, file.name);
       if (parsed.waypoints.length === 0 && parsed.tracks.length === 0) {
         setGpxResult('This GPX file did not include waypoints or track points.');
@@ -1123,6 +1453,7 @@ export default function ProfileScreen() {
       let duplicatePins = 0;
       if (pins.length > 0) {
         const results = await Promise.all(pins.slice(0, pinLimit).map(p => api.submitPin(p).catch(() => null)));
+        if (!requestIsCurrent()) return;
         importedPins = results.filter((res: any) => res?.status === 'ok' || res?.id).length;
         duplicatePins = results.filter((res: any) => res?.status === 'duplicate').length;
       }
@@ -1133,6 +1464,7 @@ export default function ProfileScreen() {
       let totalDistance = 0;
       const tracks = [...parsed.tracks].sort((a, b) => b.distanceMiles - a.distanceMiles);
       for (const [idx, track] of tracks.entries()) {
+        if (!requestIsCurrent()) return;
         const tripId = `gpx_${Date.now()}_${idx + 1}`;
         const routeCoords = thinTrackCoords(track.coords);
         const trip = buildTripFromGpxTrack({ ...track, coords: routeCoords }, tripId);
@@ -1144,6 +1476,7 @@ export default function ProfileScreen() {
           totalDistance: gpxTrackDistanceMiles(routeCoords) * 1609.344,
           totalDuration: Math.max(600, gpxTrackDistanceMiles(routeCoords) / 18 * 3600),
         });
+        if (!requestIsCurrent()) return;
         if (idx === 0) {
           setActiveTrip(trip, true);
           primaryTripId = trip.trip_id;
@@ -1160,6 +1493,7 @@ export default function ProfileScreen() {
           planned_at: Date.now(),
         });
       }
+      if (!requestIsCurrent()) return;
       if (savedTripIds.length > 0) {
         refreshOfflineTrips();
         const batch: GpxImportBatch = {
@@ -1180,6 +1514,7 @@ export default function ProfileScreen() {
           status: 'review',
         };
         const batches = await saveGpxImportBatch(batch);
+        if (!requestIsCurrent()) return;
         setGpxBatches(batches);
         setGpxResult(`Imported ${savedTripIds.length} GPX route${savedTripIds.length === 1 ? '' : 's'} and ${importedPins} new waypoint pin${importedPins === 1 ? '' : 's'}.${duplicatePins ? ` ${duplicatePins} duplicate waypoint${duplicatePins === 1 ? '' : 's'} grouped with existing pins.` : ''}${batch.skippedPins ? ` ${batch.skippedPins} waypoints held back by the current import limit.` : ''}`);
         router.push('/(tabs)/map');
@@ -1200,13 +1535,14 @@ export default function ProfileScreen() {
           status: 'review',
         };
         const batches = await saveGpxImportBatch(batch);
+        if (!requestIsCurrent()) return;
         setGpxBatches(batches);
         setGpxResult(`Imported ${importedPins} new GPX waypoint pin${importedPins === 1 ? '' : 's'}.${duplicatePins ? ` ${duplicatePins} duplicate waypoint${duplicatePins === 1 ? '' : 's'} grouped with existing pins.` : ''}${batch.skippedPins ? ` ${batch.skippedPins} waypoints held back by the current import limit.` : ''} Enable GPX in map filters to see them.`);
       }
     } catch (e: any) {
-      setGpxResult(`Import failed: ${e.message}`);
+      if (requestIsCurrent()) setGpxResult(`Import failed: ${e.message}`);
     } finally {
-      setGpxImporting(false);
+      if (requestIsCurrent()) setGpxImporting(false);
     }
   }
 
@@ -1216,6 +1552,8 @@ export default function ProfileScreen() {
       Alert.alert('Add a little more detail', 'Tell us your mapping experience and at least one region you know well.');
       return;
     }
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = user?.id;
     setContributorApplying(true);
     setContributorApplyResult('');
     try {
@@ -1224,11 +1562,14 @@ export default function ProfileScreen() {
         regions,
         sample_note: contributorSample.trim() || undefined,
       });
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setContributorApplyResult('Application received. We will review it before field-check access is enabled.');
     } catch (e: any) {
-      setContributorApplyResult(e?.message ?? 'Application failed. Please try again.');
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        setContributorApplyResult(e?.message ?? 'Application failed. Please try again.');
+      }
     } finally {
-      setContributorApplying(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setContributorApplying(false);
     }
   }
 
@@ -1594,9 +1935,16 @@ export default function ProfileScreen() {
                 </View>
               )}
             </View>
-            <TouchableOpacity onPress={() => { signOut(); setView('main'); }}
-              style={s.logoutBtn}>
-              <Ionicons name="log-out-outline" size={20} color={C.text3} />
+            <TouchableOpacity
+              onPress={() => { void signOutFromDevice(); }}
+              style={[s.logoutBtn, accountLifecycleBusy && s.actionDisabled]}
+              disabled={accountLifecycleBusy}
+              accessibilityRole="button"
+              accessibilityLabel="Sign out"
+            >
+              {accountLifecycleBusy
+                ? <ActivityIndicator size="small" color={C.text3} />
+                : <Ionicons name="log-out-outline" size={20} color={C.text3} />}
             </TouchableOpacity>
           </TrailheadCard>
         </TourTarget>
@@ -2343,6 +2691,11 @@ export default function ProfileScreen() {
         </View>
         )}
 
+        <CommunicationPreferencesSection
+          active={profileSection === 'settings'}
+          signedIn={Boolean(user)}
+        />
+
         <Modal visible={showSupportInbox} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSupportInbox(false)}>
           <SafeAreaView style={s.contestModal}>
             <TrailheadTopBar
@@ -2871,37 +3224,14 @@ export default function ProfileScreen() {
         {/* Delete account — required by App Store guideline 5.1.1(v) */}
         {profileSection === 'settings' && (
         <TouchableOpacity
-          style={s.deleteAccountBtn}
-          onPress={() => {
-            Alert.alert(
-              'Delete Account',
-              'This permanently deletes your account, all trips, reports, and credits. This cannot be undone.',
-              [
-                { text: 'Cancel', style: 'cancel' },
-                {
-                  text: 'Delete My Account',
-                  style: 'destructive',
-                  onPress: async () => {
-                    try {
-                      await api.deleteAccount();
-                      // Only clear local auth AFTER server confirms deletion
-                      clearAuthAndLocalData();
-                      setView('login');
-                    } catch (e: any) {
-                      Alert.alert(
-                        'Deletion Failed',
-                        'Could not delete your account. Please check your connection and try again.',
-                        [{ text: 'OK' }]
-                      );
-                    }
-                  },
-                },
-              ],
-            );
-          }}
+          style={[s.deleteAccountBtn, accountLifecycleBusy && s.actionDisabled]}
+          onPress={confirmAccountDeletion}
+          disabled={accountLifecycleBusy}
         >
-          <Ionicons name="trash-outline" size={14} color="#ef4444" />
-          <Text style={s.deleteAccountText}>Delete Account</Text>
+          {accountLifecycleBusy
+            ? <ActivityIndicator size="small" color="#ef4444" />
+            : <Ionicons name="trash-outline" size={14} color="#ef4444" />}
+          <Text style={s.deleteAccountText}>{accountLifecycleBusy ? 'Clearing account...' : 'Delete Account'}</Text>
         </TouchableOpacity>
         )}
 
@@ -3043,6 +3373,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   profileEmail: { color: C.text3, fontSize: 12, marginTop: 1 },
   streakText: { color: C.orange, fontSize: 11, fontFamily: mono, marginTop: 4 },
   logoutBtn: { padding: 6 },
+  actionDisabled: { opacity: 0.55 },
   deleteAccountBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
     gap: 6, paddingVertical: 12, borderRadius: 12,

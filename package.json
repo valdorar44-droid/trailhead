@@ -13,6 +13,7 @@
     "data:build-search": "node scripts/data/build-search.ts",
     "data:build-tiles": "node scripts/data/build-tiles.ts",
     "data:audit-catalog": "python3 scripts/data/audit_canonical_catalog.py",
+    "data:audit-explore-filters": "python3 scripts/data/audit_explore_filter_coverage.py",
     "data:build-canonical-indexes": "python3 scripts/data/build_canonical_serving_indexes.py",
     "data:validate": "node scripts/data/validate.ts",
     "dev": "cd dashboard/site && ASTRO_TELEMETRY_DISABLED=1 astro dev --host 0.0.0.0",

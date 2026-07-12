@@ -175,7 +175,7 @@ class ViatorSourcePackTests(unittest.TestCase):
     def test_client_uses_viator_v2_headers_and_documented_sort(self):
         opener = CapturingOpener()
         client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=opener)
-        payload = client.search_products(destination_id="5600", count=3)
+        payload = client.search_products(destination_id="5600", count=3, campaign_value="explore-hub")
         self.assertEqual(payload["status"], "ok")
         self.assertEqual(payload["tracking_id"], "trace-123")
         request = opener.requests[0]
@@ -184,8 +184,19 @@ class ViatorSourcePackTests(unittest.TestCase):
         self.assertEqual(headers["content-type"], "application/json;version=2.0")
         self.assertEqual(headers["accept-language"], "en-US")
         self.assertEqual(headers["exp-api-key"], "test")
+        self.assertEqual(headers["campaign-value"], "explore-hub")
         self.assertEqual(opener.bodies[0]["sorting"]["sort"], "TRAVELER_RATING")
         self.assertEqual(opener.bodies[0]["pagination"]["count"], 3)
+
+    def test_campaign_value_rejects_identity_or_location_shaped_values(self):
+        opener = CapturingOpener()
+        client = ViatorClient(ViatorConfig(api_key="test", enable_live=True), opener=opener)
+        client.search_freetext(
+            search_term="Moab",
+            campaign_value="trip-day:user@example.com:" + "x" * 100,
+        )
+        headers = {key.lower(): value for key, value in opener.requests[0].header_items()}
+        self.assertEqual(headers["campaign-value"], "trailhead-app")
 
     def test_live_route_suggestions_fetches_multiple_viator_pages(self):
         opener = PagedViatorOpener(total=18)

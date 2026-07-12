@@ -37,11 +37,24 @@ const presets = {
   profile: [
     'app/(tabs)/profile.tsx',
     'components/PaywallModal.tsx',
+    'components/profile/CommunicationPreferencesSection.tsx',
+    'components/profile/ProfileLibraryOverview.tsx',
+  ],
+  trips: [
+    'app/(tabs)/trips.tsx',
+    'components/trips/AvailabilityWatchManager.tsx',
+    'components/trips/SavedItemsSection.tsx',
+    'components/trips/TripActionSheet.tsx',
+    'components/trips/TripCard.tsx',
+    'components/trips/TripFilterSegment.tsx',
+    'components/trips/TripNotesSheet.tsx',
+    'components/trips/TripPublicationPanel.tsx',
+    'components/PremiumPlaceSheet.tsx',
   ],
 };
 
 function expandTargets(args) {
-  if (args.length === 0) return presets.plan;
+  if (args.length === 0) return Array.from(new Set(Object.values(presets).flat()));
   const out = [];
   for (let idx = 0; idx < args.length; idx += 1) {
     const arg = args[idx];

@@ -7,13 +7,13 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import quote, unquote
-from fastapi import FastAPI, HTTPException, Depends, Request
+from fastapi import FastAPI, HTTPException, Depends, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, ValidationError
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 import httpx
 import bcrypt as _bcrypt_lib
 from jose import jwt, JWTError
@@ -106,13 +106,23 @@ from db.store import (
     list_extreme_sessions, list_extreme_ledger_events, get_extreme_ledger_summary,
     get_extreme_admin_config, set_extreme_admin_config,
     authorize_offline_download,
-    save_push_token, get_push_token,
+    save_push_token, clear_push_token, get_push_token,
     get_push_campaign_recipients, count_push_campaign_recipients,
     create_push_campaign, record_push_campaign_delivery, finalize_push_campaign,
     list_push_campaigns, get_push_campaign,
     create_support_thread, list_support_threads_for_user, list_support_threads_admin,
     get_support_thread, add_support_message, update_support_thread_status,
     list_user_trips, save_account_trip, save_trip_geometry,
+    RevisionConflictError, IdempotencyConflictError,
+    get_saved_entity, list_saved_entities, upsert_saved_entity, set_saved_entity_status,
+    get_trip_document_v2, list_trip_documents_v2, upsert_trip_document_v2,
+    get_communication_preferences, update_communication_preferences, unsubscribe_all_communications,
+    PublicationSourceNoteNotFoundError, PublicationTargetRequiredError,
+    PublicationTargetNotFoundError, PublicationAlreadySubmittedError,
+    PublicationStateConflictError, PublicationPrivacyError,
+    submit_community_publication, list_community_publications_for_user,
+    retract_community_publication, list_community_publications_for_review,
+    moderate_community_publication, list_approved_place_publications,
     create_plan_job, get_plan_job, update_plan_job,
     submit_field_report, get_field_reports, get_field_report_summary,
     add_camp_comment, get_camp_comments,
@@ -121,6 +131,16 @@ from db.store import (
     add_place_edit_suggestion, get_place_edit_suggestions, update_place_edit_suggestion_status,
     list_place_comments, update_place_comment_status, list_place_photos, update_place_photo_status,
     save_place_reservation_alert, get_place_reservation_alerts,
+    InsufficientMonitorCreditsError, MonitorAlreadyExistsError, MonitorCreationError,
+    availability_monitor_policy, create_availability_monitor, get_availability_monitor,
+    list_availability_monitors, cancel_availability_monitor,
+    InsufficientTripPackCreditsError, FeaturedTripPackUnavailableError,
+    MonthlyTripPackClaimUsedError, ExplorerTripPackClaimRequiredError,
+    save_authored_trip_pack_draft, get_authored_trip_pack_admin, list_authored_trip_packs_admin,
+    publish_authored_trip_pack, list_published_trip_packs, get_published_trip_pack,
+    select_featured_trip_pack, get_featured_trip_pack, acquire_authored_trip_pack,
+    claim_featured_authored_trip_pack, list_owned_authored_trip_packs,
+    restore_owned_authored_trip_packs, authored_trip_pack_release_validation,
     upsert_route_intelligence_places, list_cached_places_near_samples,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
     upsert_trail_profile, get_trail_profile, list_trail_profiles_near,
@@ -7100,6 +7120,20 @@ class PlaceReservationAlertPayload(BaseModel):
     party_size: Optional[int] = None
 
 
+class AvailabilityMonitorCreateRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    target_id: str = Field(min_length=1, max_length=240)
+    target_label: str = Field(min_length=1, max_length=200)
+    monitor_type: Literal["campground", "permit", "tour", "route_reopening", "closure", "safety"]
+    start_date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    end_date: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    party_size: int = Field(default=1, ge=1, le=20)
+    source: str = Field(default="trailhead", max_length=80)
+    booking_url: Optional[str] = Field(default=None, max_length=2000)
+    criteria: dict = Field(default_factory=dict)
+
+
 class AnalyticsEventRequest(BaseModel):
     event_type: str
     session_id: str = ""
@@ -9334,6 +9368,34 @@ async def reset_password_web(token: str = ""):
 async def me(user: dict = Depends(_current_user)):
     return _safe_user(user)
 
+
+def _server_feature_enabled(name: str) -> bool:
+    return str(os.getenv(name, "0")).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _product_feature_enabled(env_name: str, user: dict | None = None) -> bool:
+    return bool((isinstance(user, dict) and user.get("is_admin")) or _server_feature_enabled(env_name))
+
+
+def _require_product_feature(env_name: str, user: dict | None = None) -> None:
+    if not _product_feature_enabled(env_name, user):
+        raise HTTPException(404, {
+            "code": "feature_unavailable",
+            "message": "This feature is not available yet.",
+        })
+
+
+@app.get("/api/product/features")
+async def product_features(user: dict | None = Depends(_optional_user)):
+    return {
+        "trip_graph_v2": _product_feature_enabled("TRAILHEAD_TRIP_GRAPH_V2_ENABLED", user),
+        "trips_tab": _product_feature_enabled("TRAILHEAD_TRIPS_TAB_ENABLED", user),
+        "availability_monitors": _product_feature_enabled("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user),
+        "trip_packs": _product_feature_enabled("TRAILHEAD_TRIP_PACKS_ENABLED", user),
+        "community_publications": _product_feature_enabled("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user),
+        "digest_preferences": _product_feature_enabled("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user),
+    }
+
 @app.delete("/api/auth/me")
 async def delete_account(user: dict = Depends(_current_user)):
     """Permanently delete the authenticated user's account and all associated data.
@@ -9460,6 +9522,13 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
     if not settings.anthropic_api_key:
         raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
 
+    if body.current_trip:
+        current_trip_id = str(body.current_trip.get("trip_id") or "").strip()
+        existing_trip = get_trip(current_trip_id) if current_trip_id else None
+        expected_owner = user["id"] if user else None
+        if existing_trip and existing_trip.get("user_id") != expected_owner:
+            raise HTTPException(403, "Not authorized to update this trip")
+
     if user:
         if has_active_plan(user):
             from db.store import get_plan_action_count_today, log_ai_usage
@@ -9469,7 +9538,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
             log_ai_usage(user["id"], "trip_edit" if body.current_trip else "chat")
         else:
             cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
-            _check_credits(user, cost, f"AI chat")
+            _check_credits(user, cost, "Trip guidance")
     else:
         _anon_check(_client_ip(request), "chat")
 
@@ -9562,13 +9631,16 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
                 body.message,
             )
             edited_plan["timeline"] = timeline
-            trip_id = body.current_trip.get("trip_id", str(uuid.uuid4())[:8])
+            trip_id = body.current_trip.get("trip_id", uuid.uuid4().hex)
             updated = {"trip_id": trip_id, "plan": edited_plan,
                        "campsites": enrichment["campsites"][:70],
                        "gas_stations": enrichment["gas_stations"][:45],
                        "route_pois": enrichment["route_pois"][:50],
                        "timeline": timeline}
-            save_trip(trip_id, body.message, updated, user_id=user["id"] if user else None)
+            try:
+                save_trip(trip_id, body.message, updated, user_id=user["id"] if user else None)
+            except PermissionError:
+                raise HTTPException(403, "Not authorized to update this trip")
             return {"type": "trip_update", "content": result.get("message", "Route updated."),
                     "trip": updated, "trail_dna": trail_dna}
 
@@ -9727,7 +9799,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                 add_credits(user["id"], estimated_cost - actual_cost,
                             f"Credit adjustment — actual trip is {actual_days} days")
 
-        trip_id = str(uuid.uuid4())[:8]
+        trip_id = uuid.uuid4().hex
         result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": [], "route_pois": [], "timeline": _build_trip_timeline(plan_data, request_context=body.request or "")}
         save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
 
@@ -9801,7 +9873,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
     except Exception as e:
         if user and cost > 0:
             add_credits(user["id"], cost, "Refund — planning error")
-        update_plan_job(job_id, "failed", error=f"AI planning failed: {e}")
+        update_plan_job(job_id, "failed", error=f"Trip planning failed: {e}")
 
 
 @app.post("/api/plan")
@@ -9821,7 +9893,7 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
             log_ai_usage(user["id"], "trip_plan")
         else:
             cost = _plan_credit_cost(day_hint)
-            if not user.get("is_admin") and not deduct_credits(user["id"], cost, f"AI trip plan (~{day_hint}d)"):
+            if not user.get("is_admin") and not deduct_credits(user["id"], cost, f"Trip plan (~{day_hint}d)"):
                 raise HTTPException(402, detail={
                     "code": "insufficient_credits",
                     "message": f"A {day_hint}-day plan costs {cost} credits.",
@@ -9862,7 +9934,19 @@ class PushTokenRequest(BaseModel):
 @app.post("/api/push-token")
 async def register_push_token(body: PushTokenRequest, user: dict = Depends(_current_user)):
     """Store the device's Expo push token so the server can notify on job completion."""
-    save_push_token(user["id"], body.token)
+    try:
+        save_push_token(user["id"], body.token)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    return {"ok": True}
+
+
+@app.delete("/api/push-token")
+async def unregister_push_token(
+    push_token: str | None = Header(default=None, alias="X-Push-Token"),
+    user: dict = Depends(_current_user),
+):
+    clear_push_token(user["id"], expected_token=push_token)
     return {"ok": True}
 
 @app.get("/api/support/inbox")
@@ -10027,6 +10111,111 @@ class AccountTripRequest(BaseModel):
     route_geometry: Optional[dict] = None
     builder_state: Optional[dict] = None
     source: str = "web"
+
+
+class TripDocumentPayload(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[2] = 2
+    trip_id: Optional[str] = Field(default=None, max_length=240)
+    revision: Optional[int] = Field(default=None, ge=0)
+    status: Literal["draft", "active", "completed", "archived", "deleted"] = "draft"
+    title: str = Field(min_length=1, max_length=200)
+    summary: Optional[str] = Field(default=None, max_length=4000)
+    regions: list[str] = Field(default_factory=list, max_length=100)
+    starts_on: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    ends_on: Optional[str] = Field(default=None, pattern=r"^\d{4}-\d{2}-\d{2}$")
+    dates: dict = Field(default_factory=dict)
+    rig_snapshot: dict = Field(default_factory=dict)
+    route: dict = Field(default_factory=dict)
+    days: list[dict] = Field(default_factory=list, max_length=366)
+    items: list[dict] = Field(default_factory=list, max_length=5000)
+    notes: list[dict] = Field(default_factory=list, max_length=5000)
+    readiness: dict = Field(default_factory=dict)
+    bookings: list[dict] = Field(default_factory=list, max_length=1000)
+    alerts: list[dict] = Field(default_factory=list, max_length=1000)
+    offline: dict = Field(default_factory=dict)
+    visibility: Literal["private", "shared", "public"] = "private"
+    source: str = Field(default="trailhead", max_length=80)
+    legacy_v1: Optional[dict] = None
+    created_at: Optional[int] = Field(default=None, ge=0)
+    updated_at: Optional[int] = Field(default=None, ge=0)
+    archived_at: Optional[int] = Field(default=None, ge=0)
+    deleted_at: Optional[int] = Field(default=None, ge=0)
+
+
+class TripDocumentWriteRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    trip_id: Optional[str] = Field(default=None, max_length=240)
+    expected_revision: int = Field(default=0, ge=0)
+    document: TripDocumentPayload
+
+
+class RevisionMutationRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    expected_revision: int = Field(ge=0)
+
+
+class SavedEntityWriteRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    canonical_id: Optional[str] = Field(default=None, max_length=240)
+    entity_type: Literal["place", "camp", "trail", "activity", "water", "pack"]
+    title: str = Field(min_length=1, max_length=200)
+    status: Literal["active", "archived"] = "active"
+    data: dict = Field(default_factory=dict)
+    expected_revision: int = Field(default=0, ge=0)
+
+
+class CommunicationPreferencesUpdate(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    weekly_digest: Optional[bool] = None
+    trip_window_briefs: Optional[bool] = None
+    deal_alerts: Optional[bool] = None
+    timezone: Optional[str] = Field(default=None, min_length=1, max_length=80)
+    locale: Optional[str] = Field(default=None, min_length=2, max_length=10)
+
+
+class CommunityPublicationSubmit(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    trip_id: str = Field(min_length=1, max_length=240)
+    note_id: str = Field(min_length=1, max_length=240)
+    publication_type: Literal["trip_recap", "place_update", "correction"]
+    title: str = Field(min_length=3, max_length=160)
+    body: str = Field(min_length=20, max_length=5000)
+    place_id: Optional[str] = Field(default=None, max_length=240)
+
+
+class CommunityPublicationModerate(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    status: Literal["approved", "rejected"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class AuthoredTripPackDraftRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    pack_id: Optional[str] = Field(default=None, max_length=240)
+    slug: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2000)
+    price_credits: Literal[250, 500, 900]
+    coverage_region: Literal["north_america", "global"]
+    public_metadata: dict = Field(default_factory=dict)
+    validation_metadata: dict = Field(default_factory=dict)
+    template: TripDocumentPayload
+
+
+class AuthoredTripPackFeatureRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    pack_id: str = Field(min_length=1, max_length=240)
+    version: Optional[int] = Field(default=None, ge=1)
 
 class RouteGeometryRequest(BaseModel):
     route_geometry: dict
@@ -10714,38 +10903,695 @@ async def user_trips(limit: int = 25, user: dict = Depends(_current_user)):
 @app.post("/api/trips")
 async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_current_user)):
     trip = dict(body.trip or {})
-    trip_id = str(trip.get("trip_id") or f"web_{uuid.uuid4().hex[:12]}")
+    trip_id = str(trip.get("trip_id") or f"web_{uuid.uuid4().hex}")
     trip["trip_id"] = trip_id
     existing = get_trip(trip_id)
-    if existing and existing.get("user_id") and existing.get("user_id") != user["id"]:
+    if existing and existing.get("user_id") != user["id"]:
         raise HTTPException(403, "Not authorized to update this trip")
-    saved = save_account_trip(
-        trip_id,
-        trip,
-        user["id"],
-        request=body.request,
-        route_geometry=body.route_geometry,
-        builder_state=body.builder_state,
-        source=body.source or "web",
-    )
+    try:
+        saved = save_account_trip(
+            trip_id,
+            trip,
+            user["id"],
+            request=body.request,
+            route_geometry=body.route_geometry,
+            builder_state=body.builder_state,
+            source=body.source or "web",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
     return saved
+
+
+def _raise_account_store_error(exc: Exception) -> None:
+    if isinstance(exc, PublicationSourceNoteNotFoundError):
+        raise HTTPException(404, {
+            "code": "publication_source_not_found",
+            "message": "The private trip note could not be found.",
+        })
+    if isinstance(exc, PublicationTargetRequiredError):
+        raise HTTPException(400, {
+            "code": "publication_target_required",
+            "message": "Choose the place this update belongs to.",
+        })
+    if isinstance(exc, PublicationTargetNotFoundError):
+        raise HTTPException(404, {
+            "code": "publication_target_not_found",
+            "message": "The selected place could not be found.",
+        })
+    if isinstance(exc, PublicationAlreadySubmittedError):
+        raise HTTPException(409, {
+            "code": "publication_exists",
+            "message": "This note already has a submission under review.",
+            "publication_id": exc.publication_id,
+        })
+    if isinstance(exc, PublicationStateConflictError):
+        raise HTTPException(409, {
+            "code": "publication_state_conflict",
+            "message": "This publication can no longer be changed that way.",
+            "status": exc.status,
+        })
+    if isinstance(exc, PublicationPrivacyError):
+        raise HTTPException(400, {
+            "code": "publication_private_content",
+            "message": "Remove precise coordinates before submitting this note.",
+        })
+    if isinstance(exc, IdempotencyConflictError):
+        raise HTTPException(409, {
+            "code": "idempotency_conflict",
+            "message": "This request key was already used for a different change.",
+        })
+    if isinstance(exc, InsufficientTripPackCreditsError):
+        raise HTTPException(402, {
+            "code": "trip_pack_credits",
+            "message": f"This trip pack needs {exc.credits_needed} credits.",
+            "credits_needed": exc.credits_needed,
+            "credit_balance": exc.balance,
+            "list_price_credits": exc.list_price,
+            "earn_hint": True,
+        })
+    if isinstance(exc, FeaturedTripPackUnavailableError):
+        raise HTTPException(404, {
+            "code": "featured_pack_unavailable",
+            "message": "This month's featured trip pack is not available yet.",
+        })
+    if isinstance(exc, MonthlyTripPackClaimUsedError):
+        raise HTTPException(409, {
+            "code": "featured_pack_claim_used",
+            "message": "This month's featured trip pack has already been claimed.",
+            "period_month": exc.period_month,
+        })
+    if isinstance(exc, ExplorerTripPackClaimRequiredError):
+        raise HTTPException(403, {
+            "code": "explorer_required",
+            "message": "The featured monthly trip pack is included with Explorer.",
+        })
+    if isinstance(exc, InsufficientMonitorCreditsError):
+        raise HTTPException(402, {
+            "code": "availability_monitor_credits",
+            "message": "Add 50 credits to watch this opening for 30 days.",
+            "credits_needed": exc.required,
+            "credit_balance": exc.balance,
+            "earn_hint": True,
+        })
+    if isinstance(exc, MonitorAlreadyExistsError):
+        raise HTTPException(409, {
+            "code": "watch_exists",
+            "message": "You are already watching this opening for those dates.",
+            "monitor_id": exc.monitor_id,
+        })
+    if isinstance(exc, MonitorCreationError):
+        refunded = bool(exc.monitor.get("refunded_at"))
+        raise HTTPException(503, {
+            "code": "watch_not_started",
+            "message": "We couldn't start this watch. Any credits used were returned.",
+            "monitor": exc.monitor,
+            "refund": {
+                "completed": refunded,
+                "credits_returned": int(exc.monitor.get("credits_charged") or 0) if refunded else 0,
+            },
+        })
+    if isinstance(exc, RevisionConflictError):
+        raise HTTPException(409, {
+            "code": "revision_conflict",
+            "message": "This item changed on another device.",
+            "current_revision": exc.current_revision,
+        })
+    if isinstance(exc, PermissionError):
+        raise HTTPException(403, "Not authorized")
+    if isinstance(exc, ValueError):
+        raise HTTPException(400, str(exc))
+    raise exc
+
+
+@app.get("/api/library")
+async def api_library_items(
+    limit: int = 50,
+    cursor: str = "",
+    entity_type: str = "",
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    user: dict = Depends(_current_user),
+):
+    try:
+        return list_saved_entities(
+            user["id"],
+            limit=limit,
+            cursor=cursor or None,
+            entity_type=entity_type or None,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/library", status_code=201)
+async def api_create_library_item(
+    body: SavedEntityWriteRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    if not body.canonical_id:
+        raise HTTPException(400, "canonical_id is required")
+    try:
+        return upsert_saved_entity(
+            user["id"], body.canonical_id, body.entity_type, body.title, body.data,
+            expected_revision=body.expected_revision, status=body.status,
+            idempotency_key=idempotency_key, mutation_kind="create",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/library/{canonical_id}")
+async def api_library_item(
+    canonical_id: str,
+    include_deleted: bool = False,
+    user: dict = Depends(_current_user),
+):
+    try:
+        item = get_saved_entity(user["id"], canonical_id, include_deleted=include_deleted)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not item:
+        raise HTTPException(404, "Saved item not found")
+    return item
+
+
+@app.put("/api/library/{canonical_id}")
+async def api_update_library_item(
+    canonical_id: str,
+    body: SavedEntityWriteRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    if body.canonical_id and body.canonical_id != canonical_id:
+        raise HTTPException(400, "canonical_id does not match the route")
+    try:
+        return upsert_saved_entity(
+            user["id"], canonical_id, body.entity_type, body.title, body.data,
+            expected_revision=body.expected_revision, status=body.status,
+            idempotency_key=idempotency_key, mutation_kind="update",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/library/{canonical_id}/archive")
+async def api_archive_library_item(
+    canonical_id: str,
+    body: RevisionMutationRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    try:
+        item = set_saved_entity_status(
+            user["id"], canonical_id, "archived", body.expected_revision,
+            idempotency_key=idempotency_key, mutation_kind="archive",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not item:
+        raise HTTPException(404, "Saved item not found")
+    return item
+
+
+@app.post("/api/library/{canonical_id}/restore")
+async def api_restore_library_item(
+    canonical_id: str,
+    body: RevisionMutationRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    try:
+        item = set_saved_entity_status(
+            user["id"], canonical_id, "active", body.expected_revision,
+            idempotency_key=idempotency_key, mutation_kind="restore",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not item:
+        raise HTTPException(404, "Saved item not found")
+    return item
+
+
+@app.delete("/api/library/{canonical_id}")
+async def api_delete_library_item(
+    canonical_id: str,
+    expected_revision: int,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    try:
+        item = set_saved_entity_status(
+            user["id"], canonical_id, "deleted", expected_revision,
+            idempotency_key=idempotency_key, mutation_kind="delete",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not item:
+        raise HTTPException(404, "Saved item not found")
+    return {"deleted": True, "canonical_id": canonical_id, "revision": item["revision"]}
+
+
+@app.get("/api/communication-preferences")
+async def api_communication_preferences(user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user)
+    return get_communication_preferences(user["id"])
+
+
+@app.put("/api/communication-preferences")
+async def api_update_communication_preferences(
+    body: CommunicationPreferencesUpdate,
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user)
+    changes = {
+        key: value
+        for key, value in body.model_dump().items()
+        if key in body.model_fields_set
+    }
+    try:
+        return update_communication_preferences(user["id"], changes)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/communication-preferences/unsubscribe-all")
+async def api_unsubscribe_all_communications(user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user)
+    return unsubscribe_all_communications(user["id"])
+
+
+@app.get("/api/community/publications")
+async def api_my_community_publications(
+    limit: int = 50,
+    cursor: str = "",
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user)
+    try:
+        return list_community_publications_for_user(
+            user["id"], limit=limit, cursor=cursor or None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/community/publications", status_code=201)
+async def api_submit_community_publication(
+    body: CommunityPublicationSubmit,
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user)
+    try:
+        return submit_community_publication(
+            user["id"], body.trip_id, body.note_id, body.publication_type,
+            body.title, body.body, body.place_id,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/community/publications/{publication_id}/retract")
+async def api_retract_community_publication(
+    publication_id: str,
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user)
+    try:
+        publication = retract_community_publication(user["id"], publication_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not publication:
+        raise HTTPException(404, "Publication not found")
+    return publication
+
+
+@app.get("/api/admin/community/publications")
+async def api_admin_community_publications(
+    status: str = "pending_review",
+    limit: int = 50,
+    cursor: str = "",
+    admin: dict = Depends(_require_admin),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", admin)
+    try:
+        return list_community_publications_for_review(
+            status=status, limit=limit, cursor=cursor or None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/admin/community/publications/{publication_id}/moderate")
+async def api_admin_moderate_community_publication(
+    publication_id: str,
+    body: CommunityPublicationModerate,
+    admin: dict = Depends(_require_admin),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", admin)
+    try:
+        publication = moderate_community_publication(
+            publication_id, body.status, admin["id"], body.note,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not publication:
+        raise HTTPException(404, "Publication not found")
+    return publication
+
+
+@app.get("/api/community/places/{place_id}/publications")
+async def api_approved_place_publications(
+    place_id: str,
+    limit: int = 50,
+    cursor: str = "",
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user)
+    try:
+        return list_approved_place_publications(
+            place_id, limit=limit, cursor=cursor or None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+def _save_authored_pack_request(
+    pack_id: str,
+    body: AuthoredTripPackDraftRequest,
+    admin: dict,
+) -> dict:
+    template = body.template.model_dump(mode="json", exclude_none=True)
+    try:
+        return save_authored_trip_pack_draft(
+            pack_id=pack_id,
+            slug=body.slug,
+            title=body.title,
+            summary=body.summary,
+            price_credits=body.price_credits,
+            coverage_region=body.coverage_region,
+            public_metadata=body.public_metadata,
+            validation_metadata=body.validation_metadata,
+            template=template,
+            admin_user_id=admin["id"],
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/admin/trip-packs")
+async def api_admin_trip_packs(admin: dict = Depends(_require_admin)):
+    return {"items": list_authored_trip_packs_admin()}
+
+
+@app.post("/api/admin/trip-packs", status_code=201)
+async def api_admin_create_trip_pack(
+    body: AuthoredTripPackDraftRequest,
+    admin: dict = Depends(_require_admin),
+):
+    pack_id = str(body.pack_id or f"pack_{uuid.uuid4().hex}")
+    return _save_authored_pack_request(pack_id, body, admin)
+
+
+@app.get("/api/admin/trip-packs/release-validation")
+async def api_admin_trip_pack_release_validation(admin: dict = Depends(_require_admin)):
+    return authored_trip_pack_release_validation()
+
+
+@app.get("/api/admin/trip-packs/{pack_id}")
+async def api_admin_trip_pack(pack_id: str, admin: dict = Depends(_require_admin)):
+    try:
+        pack = get_authored_trip_pack_admin(pack_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not pack:
+        raise HTTPException(404, "Trip pack not found")
+    return pack
+
+
+@app.put("/api/admin/trip-packs/{pack_id}")
+async def api_admin_update_trip_pack(
+    pack_id: str,
+    body: AuthoredTripPackDraftRequest,
+    admin: dict = Depends(_require_admin),
+):
+    if body.pack_id and body.pack_id != pack_id:
+        raise HTTPException(400, "pack_id does not match the route")
+    return _save_authored_pack_request(pack_id, body, admin)
+
+
+@app.post("/api/admin/trip-packs/{pack_id}/publish")
+async def api_admin_publish_trip_pack(pack_id: str, admin: dict = Depends(_require_admin)):
+    try:
+        return publish_authored_trip_pack(pack_id, admin["id"])
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.put("/api/admin/trip-packs/featured/{period_month}")
+async def api_admin_feature_trip_pack(
+    period_month: str,
+    body: AuthoredTripPackFeatureRequest,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        return select_featured_trip_pack(
+            period_month, body.pack_id, admin["id"], body.version,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/trip-packs")
+async def api_public_trip_packs(
+    limit: int = 50,
+    cursor: str = "",
+    coverage_region: str = "",
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_TRIP_PACKS_ENABLED", user)
+    try:
+        return list_published_trip_packs(
+            limit=limit,
+            cursor=cursor or None,
+            coverage_region=coverage_region or None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/trip-packs/featured/current")
+async def api_featured_trip_pack(user: dict | None = Depends(_optional_user)):
+    _require_product_feature("TRAILHEAD_TRIP_PACKS_ENABLED", user)
+    pack = get_featured_trip_pack()
+    if not pack:
+        raise HTTPException(404, "Featured trip pack not found")
+    return pack
+
+
+@app.post("/api/trip-packs/featured/claim")
+async def api_claim_featured_trip_pack(
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_TRIP_PACKS_ENABLED", user)
+    try:
+        return claim_featured_authored_trip_pack(user["id"], idempotency_key)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/trip-packs/owned")
+async def api_owned_trip_packs(user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_TRIP_PACKS_ENABLED", user)
+    return {"items": list_owned_authored_trip_packs(user["id"])}
+
+
+@app.post("/api/trip-packs/restore")
+async def api_restore_trip_packs(user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_TRIP_PACKS_ENABLED", user)
+    return {"items": restore_owned_authored_trip_packs(user["id"])}
+
+
+@app.get("/api/trip-packs/{pack_id}")
+async def api_public_trip_pack(pack_id: str, user: dict | None = Depends(_optional_user)):
+    _require_product_feature("TRAILHEAD_TRIP_PACKS_ENABLED", user)
+    pack = get_published_trip_pack(pack_id)
+    if not pack:
+        raise HTTPException(404, "Trip pack not found")
+    return pack
+
+
+@app.post("/api/trip-packs/{pack_id}/acquire")
+async def api_acquire_trip_pack(
+    pack_id: str,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_TRIP_PACKS_ENABLED", user)
+    try:
+        return acquire_authored_trip_pack(user["id"], pack_id, idempotency_key)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/trips/v2")
+async def api_trip_documents_v2(
+    limit: int = 50,
+    cursor: str = "",
+    status: str = "",
+    include_archived: bool = False,
+    include_deleted: bool = False,
+    user: dict = Depends(_current_user),
+):
+    try:
+        return list_trip_documents_v2(
+            user["id"],
+            limit=limit,
+            cursor=cursor or None,
+            status=status or None,
+            include_archived=include_archived,
+            include_deleted=include_deleted,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/trips/v2", status_code=201)
+async def api_create_trip_document_v2(
+    body: TripDocumentWriteRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    document = body.document.model_dump(mode="json", exclude_none=True)
+    trip_id = str(body.trip_id or document.get("trip_id") or f"trip_{uuid.uuid4().hex}")
+    if body.trip_id and document.get("trip_id") and body.trip_id != document["trip_id"]:
+        raise HTTPException(400, "trip_id does not match the document")
+    document["trip_id"] = trip_id
+    try:
+        return upsert_trip_document_v2(
+            user["id"], trip_id, document, body.expected_revision, idempotency_key,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/trips/v2/{trip_id}")
+async def api_trip_document_v2(
+    trip_id: str,
+    include_deleted: bool = False,
+    user: dict = Depends(_current_user),
+):
+    try:
+        trip = get_trip_document_v2(user["id"], trip_id, include_deleted=include_deleted)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not trip:
+        raise HTTPException(404, "Trip not found")
+    return trip
+
+
+@app.put("/api/trips/v2/{trip_id}")
+async def api_update_trip_document_v2(
+    trip_id: str,
+    body: TripDocumentWriteRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    document = body.document.model_dump(mode="json", exclude_none=True)
+    supplied_id = str(body.trip_id or document.get("trip_id") or trip_id)
+    if supplied_id != trip_id:
+        raise HTTPException(400, "trip_id does not match the route")
+    document["trip_id"] = trip_id
+    try:
+        return upsert_trip_document_v2(
+            user["id"], trip_id, document, body.expected_revision, idempotency_key,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+async def _mutate_trip_document_status(
+    trip_id: str,
+    status: str,
+    expected_revision: int,
+    idempotency_key: str,
+    user: dict,
+) -> dict:
+    try:
+        trip = get_trip_document_v2(user["id"], trip_id, include_deleted=True)
+        if not trip:
+            raise HTTPException(404, "Trip not found")
+        if trip.get("status") == "deleted" and status != "deleted":
+            raise HTTPException(404, "Trip not found")
+        trip["status"] = status
+        return upsert_trip_document_v2(
+            user["id"], trip_id, trip, expected_revision, idempotency_key,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/trips/v2/{trip_id}/archive")
+async def api_archive_trip_document_v2(
+    trip_id: str,
+    body: RevisionMutationRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    return await _mutate_trip_document_status(
+        trip_id, "archived", body.expected_revision, idempotency_key, user,
+    )
+
+
+@app.post("/api/trips/v2/{trip_id}/restore")
+async def api_restore_trip_document_v2(
+    trip_id: str,
+    body: RevisionMutationRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    return await _mutate_trip_document_status(
+        trip_id, "active", body.expected_revision, idempotency_key, user,
+    )
+
+
+@app.delete("/api/trips/v2/{trip_id}")
+async def api_delete_trip_document_v2(
+    trip_id: str,
+    expected_revision: int,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    trip = await _mutate_trip_document_status(
+        trip_id, "deleted", expected_revision, idempotency_key, user,
+    )
+    return {"deleted": True, "trip_id": trip_id, "revision": trip["revision"]}
 
 @app.put("/api/trip/{trip_id}")
 async def update_account_trip(trip_id: str, body: AccountTripRequest, user: dict = Depends(_current_user)):
     existing = get_trip(trip_id)
-    if existing and existing.get("user_id") and existing.get("user_id") != user["id"]:
+    if existing and existing.get("user_id") != user["id"]:
         raise HTTPException(403, "Not authorized to update this trip")
     trip = dict(body.trip or {})
     trip["trip_id"] = trip_id
-    saved = save_account_trip(
-        trip_id,
-        trip,
-        user["id"],
-        request=body.request,
-        route_geometry=body.route_geometry,
-        builder_state=body.builder_state,
-        source=body.source or "web",
-    )
+    try:
+        saved = save_account_trip(
+            trip_id,
+            trip,
+            user["id"],
+            request=body.request,
+            route_geometry=body.route_geometry,
+            builder_state=body.builder_state,
+            source=body.source or "web",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
     return saved
 
 @app.put("/api/trip/{trip_id}/geometry")
@@ -10766,7 +11612,7 @@ async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(
     if not trip:
         raise HTTPException(404, "Trip not found")
     trip_owner = trip.get("user_id")
-    if trip_owner and user["id"] != trip_owner:
+    if trip_owner != user["id"]:
         raise HTTPException(403, "Not authorized to view this trip")
 
     cached = get_audio_guide(trip_id)
@@ -10801,7 +11647,12 @@ async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(
             add_credits(user["id"], cost, "Refund — audio guide error")
         raise HTTPException(500, f"Guide generation failed: {e}")
 
-    save_audio_guide(trip_id, guide)
+    try:
+        save_audio_guide(trip_id, guide, user_id=user["id"])
+    except PermissionError:
+        if charged_audio_guide:
+            add_credits(user["id"], cost, "Refund — audio guide ownership changed")
+        raise HTTPException(403, "Not authorized to update this trip")
     return guide
 
 
@@ -11550,6 +12401,80 @@ async def _resolve_camp_link(place: dict, booking_url: str, reservable: bool) ->
     return {"url": url, "label": _camp_link_label(url, official, reservable), "confidence": "source"}
 
 
+@app.get("/api/availability-monitors/status")
+async def api_availability_monitor_status(user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user)
+    try:
+        return availability_monitor_policy(user["id"])
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/availability-monitors")
+async def api_list_availability_monitors(
+    limit: int = 50,
+    cursor: str = "",
+    status: str = "",
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user)
+    try:
+        return list_availability_monitors(
+            user["id"], limit=limit, cursor=cursor or None, status=status or None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/availability-monitors", status_code=201)
+async def api_create_availability_monitor(
+    body: AvailabilityMonitorCreateRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user)
+    try:
+        return create_availability_monitor(
+            user["id"],
+            target_id=body.target_id,
+            target_label=body.target_label,
+            monitor_type=body.monitor_type,
+            idempotency_key=idempotency_key,
+            start_date=body.start_date,
+            end_date=body.end_date,
+            party_size=body.party_size,
+            source=body.source,
+            booking_url=body.booking_url,
+            criteria=body.criteria,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/availability-monitors/{monitor_id}")
+async def api_get_availability_monitor(monitor_id: str, user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user)
+    try:
+        monitor = get_availability_monitor(user["id"], monitor_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not monitor:
+        raise HTTPException(404, "Availability watch not found")
+    return monitor
+
+
+@app.post("/api/availability-monitors/{monitor_id}/cancel")
+async def api_cancel_availability_monitor(monitor_id: str, user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user)
+    try:
+        monitor = cancel_availability_monitor(user["id"], monitor_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not monitor:
+        raise HTTPException(404, "Availability watch not found")
+    return monitor
+
+
 @app.get("/api/places/{trailhead_place_id}/reservation-status")
 async def api_place_reservation_status(trailhead_place_id: str, start_date: str = "", end_date: str = "",
                                        user: dict | None = Depends(_optional_user)):
@@ -11587,21 +12512,48 @@ async def api_place_reservation_status(trailhead_place_id: str, start_date: str 
 
 @app.post("/api/places/{trailhead_place_id}/reservation-alerts")
 async def api_place_reservation_alert(trailhead_place_id: str, body: PlaceReservationAlertPayload,
+                                      idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
                                       user: dict = Depends(_current_user)):
     place = get_place(trailhead_place_id)
     if not place:
         raise HTTPException(404, "Place not found")
     booking_url = _place_booking_url(place)
-    alert = save_place_reservation_alert(
-        trailhead_place_id,
-        user["id"],
-        (body.start_date or "").strip()[:20] or None,
-        (body.end_date or "").strip()[:20] or None,
-        max(1, min(int(body.party_size or 1), 20)),
-        str(place.get("source") or ""),
-        booking_url or None,
-    )
-    return {"ok": True, "alert": alert}
+    start_date = (body.start_date or "").strip()[:20] or None
+    end_date = (body.end_date or "").strip()[:20] or None
+    party_size = max(1, min(int(body.party_size or 1), 20))
+    if not _product_feature_enabled("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user):
+        alert = save_place_reservation_alert(
+            trailhead_place_id,
+            user["id"],
+            start_date,
+            end_date,
+            party_size,
+            str(place.get("source") or "trailhead"),
+            booking_url or None,
+        )
+        return {"ok": True, "alert": alert}
+    if not idempotency_key:
+        key_payload = f"{user['id']}:{trailhead_place_id}:{start_date or ''}:{end_date or ''}"
+        idempotency_key = f"reservation-{hashlib.sha256(key_payload.encode('utf-8')).hexdigest()[:32]}"
+    try:
+        monitor = create_availability_monitor(
+            user["id"],
+            target_id=trailhead_place_id,
+            target_label=str(place.get("name") or "Campground"),
+            monitor_type="campground",
+            idempotency_key=idempotency_key,
+            start_date=start_date,
+            end_date=end_date,
+            party_size=party_size,
+            source=str(place.get("source") or "trailhead"),
+            booking_url=booking_url or None,
+            criteria={"place_id": trailhead_place_id},
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    alerts = get_place_reservation_alerts(trailhead_place_id, user["id"])
+    alert = next((item for item in alerts if item.get("id") == monitor.get("reservation_alert_id")), None)
+    return {"ok": True, "alert": alert, "monitor": monitor}
 
 
 @app.get("/api/admin/place-edit-suggestions")
@@ -13952,7 +14904,11 @@ def _explore_catalog_geocode_candidates(query: str, limit: int = 8, country_filt
     if _geocode_query_is_road(query):
         return []
     candidates: list[dict] = []
-    for place in _load_explore_catalog().get("places") or []:
+    search_places = _merge_explore_profile_lists(
+        list(_load_explore_catalog().get("places") or []),
+        _load_explore_legacy_search_profiles(),
+    )
+    for place in search_places:
         candidate = _explore_place_to_geocode_candidate(place, query)
         if not candidate:
             continue
@@ -17266,7 +18222,7 @@ async def create_checkout(body: CheckoutRequest, user: dict = Depends(_current_u
                     "unit_amount": pkg["price_cents"],
                     "product_data": {
                         "name": f"Trailhead Credits — {pkg['label']}",
-                        "description": f"{pkg['credits']} trail credits for AI trip planning",
+                        "description": f"{pkg['credits']} trail credits for trip planning, route tools, and travel briefs",
                         "images": [f"{settings.public_url}/static/credits-icon.png"],
                     },
                 },
@@ -17728,7 +18684,7 @@ a{color:#f97316;}
 <p>By downloading or using Trailhead ("the App"), you agree to be bound by these Terms of Use. If you do not agree, do not use the App.</p>
 
 <h2>2. Description of Service</h2>
-<p>Trailhead is an AI-powered overlanding and road trip planning application that provides route suggestions, campsite recommendations, navigation, and community reporting features. Trip plans are generated by AI and are suggestions only — always verify conditions independently before traveling.</p>
+<p>Trailhead is an overlanding and road trip planning application that provides route suggestions, campsite recommendations, navigation, and community reporting features. Trip plans are planning aids only. Always verify routes and conditions independently before traveling.</p>
 
 <h2>3. User Accounts</h2>
 <p>You must create an account to access most features. You are responsible for maintaining the confidentiality of your credentials and for all activities under your account. You may delete your account at any time from the Profile screen.</p>
@@ -17743,7 +18699,7 @@ a{color:#f97316;}
 <p>User-submitted reports (road conditions, hazards, campsite conditions) reflect the views of individual users and are not verified by Trailhead. Trailhead reserves the right to remove any report that violates these terms. Never rely solely on community reports for safety-critical decisions.</p>
 
 <h2>7. Safety Disclaimer</h2>
-<p>Overlanding and off-road travel involve inherent risks. AI-generated route suggestions may be inaccurate, outdated, or unsuitable for your vehicle or conditions. Always carry emergency supplies, inform others of your plans, and exercise independent judgment. Trailhead is not liable for accidents, injuries, property damage, or other losses resulting from use of the App.</p>
+<p>Overlanding and off-road travel involve inherent risks. Route suggestions may be inaccurate, outdated, or unsuitable for your vehicle or conditions. Always carry emergency supplies, inform others of your plans, and exercise independent judgment. Trailhead is not liable for accidents, injuries, property damage, or other losses resulting from use of the App.</p>
 
 <h2>8. Intellectual Property</h2>
 <p>All content, design, and functionality of the App are owned by Trailhead. You may not reproduce, distribute, or create derivative works without written permission.</p>
@@ -17785,7 +18741,7 @@ a{color:#f97316;}
 <p>We collect information you provide directly: email address, username, and password (stored as a bcrypt hash). If you use Apple or Google sign in, we store the verified email address and provider account identifier needed to keep you signed in. When you use the app we collect location data (with your permission) to show nearby campsites, fuel stations, and community reports. We collect usage data such as trips planned, reports submitted, and credits earned or spent.</p>
 
 <h2>2. How We Use Your Information</h2>
-<p>Your information is used to: provide and improve the Trailhead service; personalise AI trip plans to your vehicle and preferences; display nearby campsite and hazard data on the map; process credit purchases via Stripe; send service-related communications. We do not sell your personal data to third parties.</p>
+<p>Your information is used to: provide and improve the Trailhead service; tailor trip plans to your vehicle and preferences; display nearby campsite and hazard data on the map; process credit purchases via Stripe; send service-related communications. We do not sell your personal data to third parties.</p>
 
 <h2>3. Location Data</h2>
 <p>Trailhead requests foreground location access to center the map and find nearby camps and reports. Background location is requested only to enable automatic audio guide narrations as you drive. You can disable location access in your device Settings at any time, which will disable navigation and nearby features.</p>
@@ -17797,7 +18753,7 @@ a{color:#f97316;}
 <p>Account data is retained while your account is active. Community reports expire automatically (typically within 24–72 hours). You may request account deletion by contacting us at the address below.</p>
 
 <h2>6. Third-Party Services</h2>
-<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic Claude for AI trip planning; Cartesia for optional AI voice/audio guide generation; RIDB / Recreation.gov and National Park Service data for campsite and place information; Open-Meteo for weather data; Stripe, Apple, and Google Play for payments.</p>
+<p>Trailhead uses: Mapbox for maps (see <a href="https://www.mapbox.com/legal/privacy">Mapbox Privacy Policy</a>); Anthropic for assisted trip planning; Cartesia for optional voice and audio guide generation; RIDB / Recreation.gov and National Park Service data for campsite and place information; Open-Meteo for weather data; Stripe, Apple, and Google Play for payments.</p>
 
 <h2>7. Children's Privacy</h2>
 <p>Trailhead is not directed to children under 13 and we do not knowingly collect personal information from children under 13.</p>
@@ -22716,7 +23672,7 @@ async def search_place_card(q: str, lat: float | None = None, lng: float | None 
             "subtype": "City" if _query_looks_like_locality(query) else "poi",
             "display_type": "City" if _query_looks_like_locality(query) else "Place",
             "source": "search",
-            "source_label": "Place search",
+            "source_label": "Map search",
             "summary": "Search nearby camps, trails, stays, fuel, and services from here.",
             "photo_status": "placeholder",
         }
@@ -26700,6 +27656,7 @@ async def explore_place_experiences(
                     sort=sort,
                     order=order,
                     run_now=True,
+                    campaign_value="explore-place-detail",
                 ),
                 timeout=24.0,
             )
@@ -26769,6 +27726,7 @@ async def explore_experiences(
                     sort=sort,
                     order=order,
                     run_now=True,
+                    campaign_value="explore-global",
                 ),
                 timeout=24.0,
             )
@@ -26787,6 +27745,7 @@ async def explore_experiences(
                 highest_price=max_price,
                 sort=sort,
                 order=order,
+                campaign_value="explore-global",
             )
     else:
         live_ranked, live_meta = _viator_live_results_for_points(
@@ -26803,6 +27762,7 @@ async def explore_experiences(
             highest_price=max_price,
             sort=sort,
             order=order,
+            campaign_value="explore-global",
         )
     if live_ranked:
         existing = {str(item.get("id") or item.get("source_id") or item.get("title")) for item in ranked}
@@ -27137,7 +28097,9 @@ def _viator_destination_for_point(point: dict, max_radius_mi: float = 95.0) -> d
     )
     return candidates[0] if candidates else None
 
-def _viator_route_cache_key(points: list[dict], q: str = "", filter_token: str = "") -> str:
+def _viator_route_cache_key(
+    points: list[dict], q: str = "", filter_token: str = "", campaign_value: str = "trip-day",
+) -> str:
     destination_ids: list[str] = []
     for point in points[:8]:
         for destination in _viator_destination_candidates_for_point(point, None, max_candidates=3, allow_fetch=False):
@@ -27149,7 +28111,7 @@ def _viator_route_cache_key(points: list[dict], q: str = "", filter_token: str =
         if len(destination_ids) >= 4:
             break
     query = re.sub(r"\s+", " ", str(q or "").strip().lower())[:96]
-    return f"dest:{','.join(destination_ids) or 'none'}|q:{query}|f:{filter_token or 'base'}"
+    return f"dest:{','.join(destination_ids) or 'none'}|q:{query}|f:{filter_token or 'base'}|c:{campaign_value}"
 
 def _fresh_viator_route_cache(cache_key: str) -> dict | None:
     cached = _viator_route_live_cache.get(cache_key)
@@ -27161,7 +28123,16 @@ def _fresh_viator_route_cache(cache_key: str) -> dict | None:
         return None
     return cached
 
-def _queue_viator_route_refresh(cache_key: str, client: ViatorClient, points: list[dict], *, limit: int, q: str = "", filters: dict | None = None) -> bool:
+def _queue_viator_route_refresh(
+    cache_key: str,
+    client: ViatorClient,
+    points: list[dict],
+    *,
+    limit: int,
+    q: str = "",
+    filters: dict | None = None,
+    campaign_value: str = "trip-day",
+) -> bool:
     now = int(time.time())
     job = _viator_route_live_jobs.get(cache_key)
     if job and job.get("status") in {"queued", "running"} and now - int(job.get("started_at") or now) < 90:
@@ -27170,17 +28141,32 @@ def _queue_viator_route_refresh(cache_key: str, client: ViatorClient, points: li
     if stale_error and stale_error.get("status") in {"error", "provider_error", "timeout"} and now - int(stale_error.get("fetched_at") or 0) < VIATOR_LIVE_ERROR_RETRY_SECONDS:
         return False
     _viator_route_live_jobs[cache_key] = {"status": "queued", "started_at": now}
-    asyncio.create_task(_refresh_viator_route_cache(cache_key, client.config, points, limit=limit, q=q, filters=filters or {}))
+    asyncio.create_task(_refresh_viator_route_cache(
+        cache_key, client.config, points, limit=limit, q=q,
+        filters=filters or {}, campaign_value=campaign_value,
+    ))
     return True
 
-async def _refresh_viator_route_cache(cache_key: str, config, points: list[dict], *, limit: int, q: str = "", filters: dict | None = None) -> None:
+async def _refresh_viator_route_cache(
+    cache_key: str,
+    config,
+    points: list[dict],
+    *,
+    limit: int,
+    q: str = "",
+    filters: dict | None = None,
+    campaign_value: str = "trip-day",
+) -> None:
     now = int(time.time())
     _viator_route_live_jobs[cache_key] = {"status": "running", "started_at": now}
     timeout = max(6.0, min(float(getattr(config, "request_timeout_seconds", 120.0)) + 5.0, 125.0))
     try:
         def run_live() -> tuple[list[dict], list[dict]]:
             client = ViatorClient(config)
-            return _live_viator_route_suggestions(client, points, limit=limit, q=q, filters=filters or {})
+            return _live_viator_route_suggestions(
+                client, points, limit=limit, q=q, filters=filters or {},
+                campaign_value=campaign_value,
+            )
         results, statuses = await asyncio.wait_for(asyncio.to_thread(run_live), timeout=timeout)
         fetched_at = int(time.time())
         provider_error = any(
@@ -27267,6 +28253,7 @@ def _live_viator_route_suggestions(
     limit: int,
     q: str = "",
     filters: dict | None = None,
+    campaign_value: str = "trip-day",
 ) -> tuple[list[dict], list[dict]]:
     config = client.config
     filter_values = filters or {}
@@ -27306,6 +28293,7 @@ def _live_viator_route_suggestions(
                     order=order_value,
                     count=request_count,
                     start=request_start,
+                    campaign_value=campaign_value,
                     timeout=min(float(getattr(config, "request_timeout_seconds", 120.0) or 120.0), 20.0),
                 )
                 products_payload = _viator_products_payload(payload)
@@ -27332,6 +28320,7 @@ def _live_viator_route_suggestions(
             search_term=q.strip(),
             count=max(1, min(target_limit, page_count)),
             start=1,
+            campaign_value=campaign_value,
             timeout=min(float(getattr(config, "request_timeout_seconds", 120.0) or 120.0), 20.0),
         )
         statuses.append({"query": q.strip(), **_viator_provider_status(payload)})
@@ -27374,6 +28363,7 @@ def _viator_live_results_for_points(
     sort: str = "recommended",
     order: str = "descending",
     run_now: bool = False,
+    campaign_value: str = "explore-global",
 ) -> tuple[list[dict], dict]:
     client = ViatorClient(viator_config_from_env())
     source_key = str(source or "viator").lower()
@@ -27407,7 +28397,9 @@ def _viator_live_results_for_points(
         "order": order,
     }
     filter_token = _experience_filter_cache_token(**filters)
-    cache_key = _viator_route_cache_key(points, q or "", f"{filter_token}|limit:{max_results}")
+    cache_key = _viator_route_cache_key(
+        points, q or "", f"{filter_token}|limit:{max_results}", campaign_value,
+    )
     cached_live = _fresh_viator_route_cache(cache_key)
     if cached_live:
         meta.update({
@@ -27427,7 +28419,10 @@ def _viator_live_results_for_points(
 
     if run_now:
         try:
-            results, statuses = _live_viator_route_suggestions(client, points, limit=max(live_limit, min(max_results, 12)), q=q or "", filters=filters)
+            results, statuses = _live_viator_route_suggestions(
+                client, points, limit=max(live_limit, min(max_results, 12)),
+                q=q or "", filters=filters, campaign_value=campaign_value,
+            )
         except Exception as exc:
             fetched_at = int(time.time())
             meta.update({
@@ -27462,7 +28457,10 @@ def _viator_live_results_for_points(
         })
         return results[:live_limit], meta
 
-    queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(max_results, 8)), q=q or "", filters=filters)
+    queued = _queue_viator_route_refresh(
+        cache_key, client, points, limit=max(live_limit, min(max_results, 8)),
+        q=q or "", filters=filters, campaign_value=campaign_value,
+    )
     job = _viator_route_live_jobs.get(cache_key) or {}
     recent_error = _viator_route_live_cache.get(cache_key)
     if not queued and recent_error and recent_error.get("status") in {"error", "provider_error", "timeout"}:
@@ -27627,6 +28625,7 @@ def _fetch_viator_guided_destination_live(
             count=limit,
             start=1,
             currency=currency or "USD",
+            campaign_value="explore-guided",
             timeout=timeout,
         )
         resolution = "provider_destination"
@@ -27638,6 +28637,7 @@ def _fetch_viator_guided_destination_live(
             count=limit,
             start=1,
             currency=currency or "USD",
+            campaign_value="explore-guided",
             timeout=timeout,
         )
         resolution = "freetext"
@@ -27821,7 +28821,9 @@ async def route_tour_suggestions(body: RouteTourRequest):
             "order": body.order,
         }
         filter_token = _experience_filter_cache_token(**filters)
-        cache_key = _viator_route_cache_key(points, body.q or "", filter_token)
+        cache_key = _viator_route_cache_key(
+            points, body.q or "", filter_token, "trip-day",
+        )
         cached_live = _fresh_viator_route_cache(cache_key)
         live_ranked: list[dict] = []
         if cached_live:
@@ -27836,7 +28838,11 @@ async def route_tour_suggestions(body: RouteTourRequest):
             live_status = "cache_hit"
             live_message = "Live tour cache used."
         else:
-            queued = _queue_viator_route_refresh(cache_key, client, points, limit=max(live_limit, min(int(body.limit or 8), 8)), q=body.q or "", filters=filters)
+            queued = _queue_viator_route_refresh(
+                cache_key, client, points,
+                limit=max(live_limit, min(int(body.limit or 8), 8)),
+                q=body.q or "", filters=filters, campaign_value="trip-day",
+            )
             job = _viator_route_live_jobs.get(cache_key) or {}
             recent_error = _viator_route_live_cache.get(cache_key)
             if not queued and recent_error and recent_error.get("status") in {"error", "provider_error", "timeout"}:
@@ -27899,7 +28905,9 @@ async def explore_experience_refresh(source: str = "viator", destination_id: str
             "results": [],
             "message": "Set VIATOR_API_KEY and VIATOR_ENABLE_LIVE=true to refresh live Viator Basic Access products.",
         }
-    payload = client.search_products(destination_id=destination_id, count=limit)
+    payload = client.search_products(
+        destination_id=destination_id, count=limit, campaign_value="explore-global",
+    )
     experiences = [item.to_dict() for item in normalize_viator_products(payload, ttl_hours=config.cache_ttl_hours)]
     return {
         "ok": payload.get("status") != "error",
@@ -27931,9 +28939,19 @@ async def viator_diagnostics(destination_id: str = "5600", q: str = "Moab", limi
     destinations = client.get_destinations(timeout=12.0)
     destination_count = len(destinations.get("destinations") or []) if isinstance(destinations.get("destinations"), list) else 0
     diagnostics["checks"].append({"name": "destinations", "count": destination_count, **_viator_provider_status(destinations)})
-    products = client.search_products(destination_id=destination_id, count=max(1, min(int(limit or 3), 5)), timeout=12.0)
+    products = client.search_products(
+        destination_id=destination_id,
+        count=max(1, min(int(limit or 3), 5)),
+        campaign_value="explore-global",
+        timeout=12.0,
+    )
     diagnostics["checks"].append({"name": "products_search", "count": len(_viator_products_payload(products).get("products") or []), **_viator_provider_status(products)})
-    freetext = client.search_freetext(search_term=q, count=max(1, min(int(limit or 3), 5)), timeout=12.0)
+    freetext = client.search_freetext(
+        search_term=q,
+        count=max(1, min(int(limit or 3), 5)),
+        campaign_value="explore-global",
+        timeout=12.0,
+    )
     diagnostics["checks"].append({"name": "freetext", "count": len(_viator_products_payload(freetext).get("products") or []), **_viator_provider_status(freetext)})
     return diagnostics
 

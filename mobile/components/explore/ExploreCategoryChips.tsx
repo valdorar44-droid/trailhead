@@ -36,11 +36,12 @@ const CATEGORY_PRIORITY: ExploreCategoryKey[] = [
 ];
 
 const PRIMARY_KEYS: ExploreCategoryKey[] = ['all', 'guided', 'camp', 'trails', 'parks', 'water', 'things'];
+const DYNAMIC_KEYS = new Set<ExploreCategoryKey>(['fuel', 'resupply']);
 
 export function ExploreCategoryChips({ selected, mode, counts, onSelect, onMore }: Props) {
   const C = useTheme();
   const availableKeys = CATEGORY_PRIORITY.filter(key => {
-    if (key === 'all' || key === 'nearby') return true;
+    if (key === 'all' || key === 'nearby' || DYNAMIC_KEYS.has(key)) return true;
     if (key === selected) return true;
     return Number(counts?.[key] ?? 0) > 0;
   });

@@ -5,7 +5,11 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.data.build_canonical_serving_indexes import build_explore_index, clean_public_text
+from scripts.data.build_canonical_serving_indexes import (
+    build_explore_index,
+    clean_public_text,
+    source_backed_feature_description,
+)
 from scripts.data.promote_explore_serving_index import promote
 from scripts.explore_sources.base.enrichment import enrich_place_dict
 
@@ -162,6 +166,64 @@ class ExploreEnrichmentContractTests(unittest.TestCase):
 
         self.assertEqual(payload["items"][0]["category"], "park")
         self.assertEqual(payload["items"][0]["group"], "parks")
+
+    def test_named_source_backed_thermal_feature_clears_the_gate_without_weakening_it(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "catalog.json"
+            spring = place("spring", "Frying Pan Lake", photo=True)
+            spring.update({
+                "category": "hot_spring",
+                "subcategories": ["hot_spring"],
+                "tags": ["hot_spring", "lake", "wikidata"],
+                "region": "Bay of Plenty Region",
+                "admin": "Rotorua Lakes District",
+                "country": "New Zealand",
+                "description": "hot spring in Bay of Plenty Region, New Zealand",
+                "sources": [{
+                    "source": "wikidata",
+                    "source_id": "Q913465",
+                    "url": "https://www.wikidata.org/wiki/Q913465",
+                    "attribution": "Wikidata contributors",
+                    "license": "Creative Commons CC0 1.0",
+                    "quality": "open_community_data",
+                }],
+                "quality": "open_community_data",
+                "verified": False,
+            })
+            spring["summary"]["category"] = "Hot Spring"
+            path.write_text(json.dumps({"schema_version": 3, "places": [spring]}))
+
+            payload = build_explore_index(path, minimum_reviewable=1)
+
+        item = payload["items"][0]
+        self.assertEqual((item["category"], item["group"]), ("hot_spring", "water"))
+        self.assertEqual(
+            item["description"],
+            "Frying Pan Lake is a hot spring in Bay of Plenty Region, New Zealand.",
+        )
+        self.assertEqual(item["enrichment_grade"], "complete")
+
+    def test_terse_unphotographed_or_uncorroborated_source_copy_stays_rejected(self):
+        weak = place("weak-peak", "Remote Peak")
+        weak.update({
+            "category": "peak",
+            "description": "mountain in Pakistan",
+            "region": "Pakistan",
+            "country": "Pakistan",
+            "sources": [{
+                "source": "wikidata",
+                "source_id": "Q123",
+                "url": "https://www.wikidata.org/wiki/Q123",
+                "attribution": "Wikidata contributors",
+                "quality": "open_community_data",
+            }],
+        })
+
+        self.assertEqual(
+            source_backed_feature_description(weak, "Remote Peak", weak["description"]),
+            weak["description"],
+        )
+        self.assertFalse(enrich_place_dict(weak)["reviewable"])
 
     def test_official_scenic_drive_uses_only_explicit_route_facts(self):
         with tempfile.TemporaryDirectory() as tmp:

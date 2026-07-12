@@ -1,6 +1,7 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { XMLParser } from 'fast-xml-parser';
 import type { TripResult, Waypoint } from './api';
+import { accountStorage } from './storage';
 
 export type GpxPoint = {
   lat: number;
@@ -246,16 +247,18 @@ export async function loadGpxImportBatches(): Promise<GpxImportBatch[]> {
 }
 
 export async function saveGpxImportBatch(batch: GpxImportBatch) {
+  const epoch = accountStorage.epoch();
   const current = await loadGpxImportBatches();
   const next = [batch, ...current.filter(item => item.id !== batch.id)].slice(0, 25);
-  await FileSystem.writeAsStringAsync(BATCH_INDEX_PATH, JSON.stringify(next));
+  await accountStorage.run(() => FileSystem.writeAsStringAsync(BATCH_INDEX_PATH, JSON.stringify(next)), epoch);
   return next;
 }
 
 export async function removeGpxImportBatch(batchId: string) {
+  const epoch = accountStorage.epoch();
   const current = await loadGpxImportBatches();
   const next = current.filter(item => item.id !== batchId);
-  await FileSystem.writeAsStringAsync(BATCH_INDEX_PATH, JSON.stringify(next));
+  await accountStorage.run(() => FileSystem.writeAsStringAsync(BATCH_INDEX_PATH, JSON.stringify(next)), epoch);
   return next;
 }
 

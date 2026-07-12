@@ -702,10 +702,28 @@ export default function PremiumPlaceSheet({
         end_date: alertEnd.trim() || undefined,
         party_size: 1,
       });
-      setReservation(prev => prev ? { ...prev, alerts: [res.alert, ...(prev.alerts ?? []).filter(a => a.id !== res.alert.id)] } : prev);
-      Alert.alert('Alert saved', 'Trailhead will open booking details when availability is checked.');
+      if (res.alert) {
+        setReservation(prev => prev ? { ...prev, alerts: [res.alert!, ...(prev.alerts ?? []).filter(a => a.id !== res.alert!.id)] } : prev);
+      }
+      if (res.monitor) {
+        const billing = res.monitor.billing_kind;
+        const detail = billing === 'trial'
+          ? 'Your seven-day availability watch is active.'
+          : billing === 'explorer'
+            ? 'This availability watch is included with Explorer for 30 days.'
+            : billing === 'credits'
+              ? `${res.monitor.credits_charged} credits were used for a 30-day availability watch.`
+              : `Your availability watch is active for ${res.monitor.duration_days} days.`;
+        Alert.alert('Availability watch active', detail);
+      } else {
+        Alert.alert('Availability alert saved', 'Trailhead will keep this campground in your booking alerts.');
+      }
     } catch (err: any) {
-      Alert.alert('Could not save alert', err?.status === 401 || err?.status === 403 ? 'Sign in to save availability alerts.' : (err?.message ?? 'Try again in a moment.'));
+      if (err instanceof PaywallError && err.code === 'availability_monitor_credits') {
+        Alert.alert('50 credits needed', 'Add credits in Profile to start another 30-day availability watch.');
+      } else {
+        Alert.alert('Could not start watch', err?.status === 401 || err?.status === 403 ? 'Sign in to watch availability.' : (err?.message ?? 'Try again in a moment.'));
+      }
     } finally {
       setCommunityBusy(false);
     }
@@ -1026,7 +1044,7 @@ export default function PremiumPlaceSheet({
                     {reservation.alert_supported ? (
                       <TouchableOpacity style={s.smallSecondaryBtn} onPress={saveAvailabilityAlert} disabled={communityBusy}>
                         <Ionicons name="notifications-outline" size={13} color={C.orange} />
-                        <Text style={s.smallSecondaryText}>Save alert</Text>
+                        <Text style={s.smallSecondaryText}>Watch openings</Text>
                       </TouchableOpacity>
                     ) : null}
                   </View>

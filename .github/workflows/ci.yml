@@ -1,0 +1,76 @@
+name: Trailhead CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: trailhead-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend and catalog contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Compile backend
+        run: python -m py_compile dashboard/server.py db/store.py
+
+      - name: Run backend tests
+        run: python -m unittest discover -s tests
+
+      - name: Validate tracked diffs
+        run: git diff --check
+
+  mobile:
+    name: Mobile contracts
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Test trip repository
+        run: npm run test:trip-repository
+
+      - name: Test account storage lifecycle
+        run: npm run test:account-storage
+
+      - name: Audit user-facing copy
+        run: npm run audit:copy
+
+      - name: Audit Explorer
+        run: npm run audit:explore
+
+      - name: Audit routes
+        run: npm run audit:routes
+
+      - name: Audit Profile and Map
+        run: npm run audit:profile-map

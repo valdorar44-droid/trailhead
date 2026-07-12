@@ -26,22 +26,33 @@ assert(layout.includes("if (Platform.OS === 'web')") && layout.includes("typeof 
 assert(layout.includes('document.documentElement.style.colorScheme = themeMode'),
   'web receives the selected color-scheme hint without calling the native Appearance API');
 
-const signOutStart = store.indexOf('signOut: () => {');
-const signOutEnd = store.indexOf('clearAuthAndLocalData: () => {', signOutStart);
+const signOutStart = store.indexOf('signOut: async () => {');
+const signOutEnd = store.indexOf('clearAuthAndLocalData: async () => {', signOutStart);
 const signOut = signOutStart >= 0 && signOutEnd > signOutStart ? store.slice(signOutStart, signOutEnd) : '';
 assert(signOut.includes("sd('trailhead_token')") && signOut.includes('user: null'),
   'sign-out clears account credentials');
-for (const destructiveOperation of [
-  "sd('trailhead_rig')",
-  "sd('trailhead_history')",
-  "sd('trailhead_favorites')",
-  'deleteTripFile()',
-  'deleteRigFile()',
-]) {
-  assert(!signOut.includes(destructiveOperation), `sign-out preserves local data: ${destructiveOperation}`);
-}
-assert(profile.includes("onPress={() => { signOut(); setView('main'); }}"),
-  'Profile uses non-destructive sign-out');
+assert(signOut.includes('eraseLegacyAccountData()') && signOut.includes('await Promise.all'),
+  'sign-out clears durable account data before completing');
+const profileSignOutStart = profile.indexOf('async function signOutFromDevice()');
+const profileSignOutEnd = profile.indexOf('async function deleteAccountAndClearDevice()', profileSignOutStart);
+const profileSignOut = profileSignOutStart >= 0 && profileSignOutEnd > profileSignOutStart
+  ? profile.slice(profileSignOutStart, profileSignOutEnd)
+  : '';
+const localClearAt = profileSignOut.indexOf('const localClear =');
+const cancelTripSyncAt = profileSignOut.indexOf('await cancelTripRepositorySync()');
+const cancelTripMirrorAt = profileSignOut.indexOf('await cancelActiveTripMirror()');
+const eraseTripsAt = profileSignOut.indexOf('await eraseTripRepositoryScope(accountId)');
+const stopLocationAt = profileSignOut.indexOf('await stopAccountBackgroundLocation()');
+const removePushAt = profileSignOut.indexOf('await removeAccountPushToken(authToken)');
+assert(localClearAt >= 0
+  && localClearAt < cancelTripSyncAt
+  && cancelTripSyncAt < cancelTripMirrorAt
+  && cancelTripMirrorAt < eraseTripsAt
+  && eraseTripsAt < stopLocationAt
+  && stopLocationAt < removePushAt,
+  'Profile invalidates private memory before disconnecting sync, repository data, location, and push');
+assert(!profileSignOut.includes('You are still signed in'),
+  'sign-out cleanup failures do not claim the invalidated session remains active');
 const registerStart = profile.indexOf("if (view === 'register')");
 const registerEnd = profile.indexOf('\n  return (', registerStart);
 const register = registerStart >= 0 && registerEnd > registerStart ? profile.slice(registerStart, registerEnd) : '';

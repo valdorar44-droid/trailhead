@@ -6,7 +6,7 @@ on:
       channel:
         description: "Expo update channel to publish"
         required: true
-        default: "both"
+        default: "preview"
         type: choice
         options:
           - production
@@ -37,6 +37,18 @@ jobs:
       EXPO_PUBLIC_API_URL: https://api.gettrailhead.app
       EXPO_NO_TELEMETRY: "1"
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Require main for production
+        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
+        shell: bash
+        run: |
+          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
+            echo "Production OTA releases must run from main."
+            exit 1
+          fi
+
       - name: Check EXPO_TOKEN
         shell: bash
         run: |
@@ -44,9 +56,6 @@ jobs:
             echo "Missing EXPO_TOKEN. Add it in GitHub repo Settings -> Secrets and variables -> Actions."
             exit 1
           fi
-
-      - name: Checkout repository
-        uses: actions/checkout@v4
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -67,10 +76,19 @@ jobs:
       - name: Typecheck mobile app
         run: npx tsc --noEmit
 
-      - name: Publish production OTA
-        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
-        run: eas update --channel production --message "${{ github.event.inputs.message }}" --non-interactive
+      - name: Test trip repository
+        run: npm run test:trip-repository
+
+      - name: Test account storage lifecycle
+        run: npm run test:account-storage
+
+      - name: Run release audits
+        run: npm run audit:copy && npm run audit:explore && npm run audit:routes && npm run audit:profile-map
 
       - name: Publish preview OTA
         if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
         run: eas update --channel preview --message "${{ github.event.inputs.message }}" --non-interactive
+
+      - name: Publish production OTA
+        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
+        run: eas update --channel production --message "${{ github.event.inputs.message }}" --non-interactive

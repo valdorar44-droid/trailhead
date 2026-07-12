@@ -44,7 +44,10 @@ class DiscoveryPackBridgeTests(unittest.IsolatedAsyncioTestCase):
         }
         fetch = AsyncMock(return_value=payload)
 
-        with patch.object(server._place_packs, "fetch_remote_pack", new=fetch):
+        with (
+            patch.object(server._place_packs, "fetch_remote_pack", new=fetch),
+            patch.object(server, "_canonical_camps_in_bounds", return_value=[]),
+        ):
             result = await server._load_camp_pack_area(
                 n=38.75,
                 s=38.45,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import gzip
+import re
 import socket
 import time
 import urllib.error
@@ -13,6 +14,17 @@ from typing import Any
 
 
 DEFAULT_BASE_URL = "https://api.viator.com/partner"
+VIATOR_CAMPAIGN_VALUES = frozenset({
+    "digest-weekly",
+    "explore-global",
+    "explore-guided",
+    "explore-hub",
+    "explore-place-detail",
+    "guided-trip",
+    "saved-camp-nearby",
+    "trip-builder-stop",
+    "trip-day",
+})
 
 
 @dataclass
@@ -69,6 +81,7 @@ class ViatorClient:
         count: int = 12,
         start: int = 1,
         currency: str = "USD",
+        campaign_value: str = "",
         timeout: float | None = None,
     ) -> dict[str, Any]:
         if not self.ready():
@@ -94,7 +107,12 @@ class ViatorClient:
             "pagination": {"start": max(1, int(start or 1)), "count": max(1, min(int(count), 50))},
             "currency": currency,
         }
-        return self._post_json("/products/search", payload, timeout=timeout or self.config.request_timeout_seconds)
+        return self._post_json(
+            "/products/search",
+            payload,
+            timeout=timeout or self.config.request_timeout_seconds,
+            campaign_value=campaign_value,
+        )
 
     def search_freetext(
         self,
@@ -104,6 +122,7 @@ class ViatorClient:
         count: int = 12,
         start: int = 1,
         currency: str = "USD",
+        campaign_value: str = "",
         timeout: float | None = None,
     ) -> dict[str, Any]:
         if not self.ready():
@@ -121,20 +140,35 @@ class ViatorClient:
                 }
             ],
         }
-        return self._post_json("/search/freetext", payload, timeout=timeout or self.config.request_timeout_seconds)
+        return self._post_json(
+            "/search/freetext",
+            payload,
+            timeout=timeout or self.config.request_timeout_seconds,
+            campaign_value=campaign_value,
+        )
 
     def get_destinations(self, *, timeout: float | None = None) -> dict[str, Any]:
         if not self.ready():
             return {"destinations": [], "status": "disabled", "reason": "VIATOR_API_KEY missing or VIATOR_ENABLE_LIVE=false"}
         return self._get_json("/destinations", timeout=timeout or self.config.request_timeout_seconds)
 
-    def get_product(self, product_code: str, *, timeout: float | None = None) -> dict[str, Any]:
+    def get_product(
+        self,
+        product_code: str,
+        *,
+        campaign_value: str = "",
+        timeout: float | None = None,
+    ) -> dict[str, Any]:
         if not self.ready():
             return {"status": "disabled", "reason": "VIATOR_API_KEY missing or VIATOR_ENABLE_LIVE=false"}
         code = self._path_token(product_code)
         if not code:
             return {"status": "empty", "reason": "product_code missing"}
-        return self._get_json(f"/products/{code}", timeout=timeout or self.config.request_timeout_seconds)
+        return self._get_json(
+            f"/products/{code}",
+            timeout=timeout or self.config.request_timeout_seconds,
+            campaign_value=campaign_value,
+        )
 
     def get_availability_schedule(self, product_code: str, *, currency: str = "USD", timeout: float | None = None) -> dict[str, Any]:
         if not self.ready():
@@ -212,8 +246,8 @@ class ViatorClient:
             return self._booking_disabled_payload("/bookings/modified-since/acknowledge")
         return self._post_json("/bookings/modified-since/acknowledge", payload, timeout=timeout or self.config.request_timeout_seconds)
 
-    def _headers(self) -> dict[str, str]:
-        return {
+    def _headers(self, campaign_value: str = "") -> dict[str, str]:
+        headers = {
             "Accept-Language": "en-US",
             "Content-Type": "application/json;version=2.0",
             "Accept": "application/json;version=2.0",
@@ -222,21 +256,32 @@ class ViatorClient:
             "User-Agent": "Trailhead/1.0 ViatorPartnerAPI",
         }
 
-    def _post_json(self, path: str, payload: dict[str, Any], timeout: float = 20.0) -> dict[str, Any]:
+        campaign = self._campaign_value(campaign_value)
+        if campaign:
+            headers["campaign-value"] = campaign
+        return headers
+
+    def _post_json(
+        self,
+        path: str,
+        payload: dict[str, Any],
+        timeout: float = 20.0,
+        campaign_value: str = "",
+    ) -> dict[str, Any]:
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(
             f"{self.config.base_url}{path}",
             data=body,
             method="POST",
-            headers=self._headers(),
+            headers=self._headers(campaign_value),
         )
         return self._open_json(request, path=path, timeout=timeout)
 
-    def _get_json(self, path: str, timeout: float = 20.0) -> dict[str, Any]:
+    def _get_json(self, path: str, timeout: float = 20.0, campaign_value: str = "") -> dict[str, Any]:
         request = urllib.request.Request(
             f"{self.config.base_url}{path}",
             method="GET",
-            headers=self._headers(),
+            headers=self._headers(campaign_value),
         )
         return self._open_json(request, path=path, timeout=timeout)
 
@@ -251,6 +296,15 @@ class ViatorClient:
     @staticmethod
     def _path_token(value: str) -> str:
         return urllib.parse.quote(str(value or "").strip(), safe="")
+
+    @staticmethod
+    def _campaign_value(value: str) -> str:
+        """Use surface-only attribution; never forward identity or location text."""
+        clean = re.sub(r"[^a-z0-9_-]+", "-", str(value or "").strip().lower())
+        clean = re.sub(r"-+", "-", clean).strip("-_")[:60]
+        if not clean:
+            return ""
+        return clean if clean in VIATOR_CAMPAIGN_VALUES else "trailhead-app"
 
     @staticmethod
     def _query(params: dict[str, Any]) -> str:

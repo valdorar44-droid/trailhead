@@ -4,6 +4,8 @@
  * account" system prompt that fires whenever iCloud Keychain tries to sync.
  */
 import * as SecureStore from 'expo-secure-store';
+import { createAccountStorageLifecycle } from './accountStorageLifecycle';
+export type { AccountStorageEpoch } from './accountStorageLifecycle';
 
 const OPT = { keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY };
 const hasWebStorage = () => typeof window !== 'undefined' && !!window.localStorage;
@@ -28,3 +30,13 @@ export const storage = {
     return SecureStore.deleteItemAsync(key, OPT);
   },
 };
+
+export const accountStorage = createAccountStorageLifecycle(storage);
+
+export function beginAccountStorageCleanup() {
+  return accountStorage.beginCleanup();
+}
+
+export function endAccountStorageCleanup() {
+  accountStorage.endCleanup();
+}

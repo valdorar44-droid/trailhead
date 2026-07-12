@@ -25,6 +25,8 @@ const homeControls = read(join(mobileRoot, 'components/explore/ExploreHomeContro
 const filterRow = read(join(mobileRoot, 'components/explore/ExploreFilterRow.tsx'));
 const mapPreview = read(join(mobileRoot, 'components/explore/StaticMapboxPreview.tsx'));
 const guidedBrowser = read(join(mobileRoot, 'components/explore/GuidedDestinationBrowser.tsx'));
+const categoryChips = read(join(mobileRoot, 'components/explore/ExploreCategoryChips.tsx'));
+const categorySheet = read(join(mobileRoot, 'components/explore/ExploreCategoryFilterSheet.tsx'));
 const rootLayout = read(join(mobileRoot, 'app/_layout.tsx'));
 const server = read(join(repoRoot, 'dashboard/server.py'));
 
@@ -121,6 +123,14 @@ assert(
     && !filterRow.includes('Source-backed')
     && !homeControls.includes('Checked details'),
   'Explorer copy must avoid implementation language and unqualified checked-detail claims.',
+);
+assert(
+  categoryChips.includes("new Set<ExploreCategoryKey>(['fuel', 'resupply'])")
+    && categorySheet.includes("item.key === 'fuel' || item.key === 'resupply'")
+    && guide.includes('const radii = serviceCategory ? [35, 100, 250] : [35]')
+    && guide.includes("candidates.filter(place => livePlaceMatchesCategory(place, serviceCategory))")
+    && guide.includes("setExploreMode('nearby')"),
+  'Fuel and Supplies filters must stay reachable and use widening, category-specific nearby searches.',
 );
 
 console.log('Explore feed audit passed.');

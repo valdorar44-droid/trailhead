@@ -43,10 +43,30 @@ import {
 import { useStore } from '@/lib/store';
 import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
-import { storage } from '@/lib/storage';
+import { accountStorage, storage } from '@/lib/storage';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
+import {
+  addEntityToTrip,
+  createTripFromEntity,
+  getSavedEntity,
+  getTrip,
+  getTripRepositorySnapshot,
+  removeEntity,
+  saveEntity,
+  upsertTrip,
+  useTripRepositorySnapshot,
+  type SavedEntityV1,
+} from '@/lib/tripRepository';
+import {
+  addSavedEntityToTripResult,
+  canonicalSavedEntityId,
+  savedEntityFromExperience,
+  savedEntityFromExplorePlace,
+  starterTripResult,
+  tripDocumentFromTripResult,
+} from '@/lib/tripCompatibility';
 import {
   cleanExploreSourceLabel,
   sourcePackItemCanShow,
@@ -60,7 +80,6 @@ const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v2:';
 const EXPLORE_EXPERIENCES_CACHE_PREFIX = 'trailhead_explore_experiences_v1:';
 const EXPLORE_GUIDED_FALLBACK_CACHE_PREFIX = 'trailhead_explore_guided_fallback_v1:';
-const SAVED_EXPLORE_KEY = 'trailhead_saved_explore_places_v1';
 const EXPLORE_INITIAL_VISIBLE = 48;
 const EXPLORE_VISIBLE_STEP = 48;
 const API_BASE = TRAILHEAD_API_BASE;
@@ -108,6 +127,17 @@ function exploreCatalogPageSpec(
     lat: cleanLat,
     lng: cleanLng,
   };
+}
+
+function livePlaceMatchesCategory(place: OsmPoi, category: ExploreCategoryKey) {
+  if (category !== 'fuel' && category !== 'resupply') return true;
+  const details = place as OsmPoi & { category?: string; tags?: string[] };
+  const text = [place.type, place.subtype, place.name, details.category, details.tags?.join(' ')]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+  if (category === 'fuel') return /\b(fuel|gas|diesel|petrol|service station)\b/.test(text);
+  return /\b(grocery|market|food|hardware|mechanic|repair|medical|pharmacy|parts|supplies|resupply)\b/.test(text);
 }
 
 function safelyRemoveSubscription(subscription: { remove?: () => unknown } | null | undefined) {
@@ -2043,6 +2073,7 @@ function GuideScreenContent() {
   const setMapboxToken = useStore(st => st.setMapboxToken);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
+  const tripRepository = useTripRepositorySnapshot();
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
   const [guideError, setGuideError] = useState('');
@@ -2084,7 +2115,40 @@ function GuideScreenContent() {
   const [exploreTrailAreasById, setExploreTrailAreasById] = useState<Record<string, ExplorePlaceProfile>>({});
   const [exploreTrailAreaLoadingId, setExploreTrailAreaLoadingId] = useState<string | null>(null);
   const [exploreTrailAreaErrors, setExploreTrailAreaErrors] = useState<Record<string, string>>({});
-  const [savedExploreIds, setSavedExploreIds] = useState<string[]>([]);
+  const savedExploreIds = useMemo(
+    () => tripRepository.savedEntities.map(entity => entity.id),
+    [tripRepository.savedEntities],
+  );
+
+  useEffect(() => {
+    if (!tripRepository.initialized || explorePlaces.length === 0) return;
+    const storageEpoch = accountStorage.epoch();
+    const accountId = useStore.getState().user?.id;
+    const ownerScope = getTripRepositorySnapshot().ownerScope;
+    const repositoryIsCurrent = () => accountStorage.epoch() === storageEpoch
+      && String(useStore.getState().user?.id ?? '') === String(accountId ?? '')
+      && getTripRepositorySnapshot().ownerScope === ownerScope;
+    const profiles = new Map<string, ExplorePlaceProfile>();
+    explorePlaces.forEach(place => {
+      profiles.set(place.id, place);
+      profiles.set(canonicalSavedEntityId(place.id, 'place'), place);
+    });
+    const placeholders = tripRepository.savedEntities.filter(entity =>
+      entity.title === 'Saved Explorer place' && profiles.has(entity.id),
+    );
+    placeholders.forEach(entity => {
+      const profile = profiles.get(entity.id);
+      if (!profile) return;
+      const enriched = savedEntityFromExplorePlace(profile);
+      const write = enriched.id === entity.id
+        ? saveEntity(enriched, { expectedRevision: entity.revision })
+        : saveEntity(enriched).then(() => {
+            if (!repositoryIsCurrent()) return;
+            return removeEntity(entity.id, { expectedRevision: entity.revision });
+          });
+      write.catch(() => {});
+    });
+  }, [explorePlaces, tripRepository.initialized, tripRepository.revision]);
   const [exploreCampgroundsById, setExploreCampgroundsById] = useState<Record<string, CampsitePin[]>>({});
   const [exploreCampSourceById, setExploreCampSourceById] = useState<Record<string, 'official' | 'fallback'>>({});
   const [exploreCampLoadingId, setExploreCampLoadingId] = useState<string | null>(null);
@@ -2431,18 +2495,6 @@ function GuideScreenContent() {
   }, [tab, exploreMode, exploreQuery, exploreCategory, exploreSavedOnly, exploreSortMode, updateExploreCatalogPage, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
-    let cancelled = false;
-    storage.get(SAVED_EXPLORE_KEY).then(raw => {
-      if (cancelled || !raw) return;
-      try {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) setSavedExploreIds(parsed.filter(Boolean).map(String));
-      } catch {}
-    }).catch(() => {});
-    return () => { cancelled = true; };
-  }, []);
-
-  useEffect(() => {
     if (exploreMode !== 'nearby' || !userLoc) {
       setLiveExplorePlaces([]);
       setLiveExploreError('');
@@ -2451,9 +2503,26 @@ function GuideScreenContent() {
     let cancelled = false;
     setLiveExploreLoading(true);
     setLiveExploreError('');
-    api.getNearbyPlaces(userLoc.lat, userLoc.lng, 35, 'food,grocery,fuel,lodging,attraction,hardware,mechanic,medical,camping')
+    const serviceCategory = exploreCategory === 'fuel' || exploreCategory === 'resupply' ? exploreCategory : null;
+    const categories = serviceCategory === 'fuel'
+      ? 'fuel'
+      : serviceCategory === 'resupply'
+        ? 'food,grocery,hardware,mechanic,medical,parts'
+        : 'food,grocery,fuel,lodging,attraction,hardware,mechanic,medical,camping';
+    const radii = serviceCategory ? [35, 100, 250] : [35];
+    (async () => {
+      let places: OsmPoi[] = [];
+      for (const radius of radii) {
+        const candidates = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radius, categories);
+        places = serviceCategory
+          ? candidates.filter(place => livePlaceMatchesCategory(place, serviceCategory))
+          : candidates;
+        if (places.length > 0) break;
+      }
+      return places;
+    })()
       .then(places => {
-        if (!cancelled) setLiveExplorePlaces(places.slice(0, 18));
+        if (!cancelled) setLiveExplorePlaces(places.slice(0, serviceCategory ? 36 : 18));
       })
       .catch(() => {
         if (!cancelled) {
@@ -2465,7 +2534,7 @@ function GuideScreenContent() {
         if (!cancelled) setLiveExploreLoading(false);
       });
     return () => { cancelled = true; };
-  }, [exploreMode, exploreLocationRequestId, userLoc?.lat, userLoc?.lng]);
+  }, [exploreCategory, exploreMode, exploreLocationRequestId, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
     if (tab !== 'explore' || exploreMode !== 'nearby' || userLoc) return;
@@ -2873,10 +2942,20 @@ function GuideScreenContent() {
   }, [tab, exploreCategory, exploreQuery, guidedTourCategory, guidedTourCustomDate, guidedTourDate, guidedTourFreeCancel, guidedTourSearchQuery, guidedTourSearchRunId, guidedTourSelectedCenter, guidedTourSelectedDestinationKey, guidedTourSort, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
+    let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = activeTrip?.trip_id;
+    const requestIsCurrent = () => !cancelled
+      && accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && useStore.getState().activeTrip?.trip_id === requestTripId;
     if (!activeTrip) {
       setGuide({});
       setWeatherByWp({});
-      return;
+      setGuideLoading(false);
+      setWeatherLoading(false);
+      return () => { cancelled = true; };
     }
     setGuideError('');
     if (activeTrip.audio_guide) {
@@ -2884,9 +2963,9 @@ function GuideScreenContent() {
     } else {
       setGuideLoading(true);
       api.getAudioGuide(activeTrip.trip_id, false)
-        .then(setGuide)
-        .catch(() => setGuide({}))
-        .finally(() => setGuideLoading(false));
+        .then(nextGuide => { if (requestIsCurrent()) setGuide(nextGuide); })
+        .catch(() => { if (requestIsCurrent()) setGuide({}); })
+        .finally(() => { if (requestIsCurrent()) setGuideLoading(false); });
     }
     const wpsWithCoords = activeTrip.plan.waypoints.filter(w => w.lat && w.lng).slice(0, 6);
     if (wpsWithCoords.length > 0) {
@@ -2898,17 +2977,23 @@ function GuideScreenContent() {
           results[wp.name] = data;
         } catch {}
       })).finally(() => {
+        if (!requestIsCurrent()) return;
         setWeatherByWp(results);
         setWeatherLoading(false);
       });
     }
-  }, [activeTrip?.trip_id, activeTrip?.updated_at, weatherUnitMode]);
+    return () => { cancelled = true; };
+  }, [activeTrip?.trip_id, activeTrip?.updated_at, user?.id, weatherUnitMode]);
 
   const waypoints = useMemo(() => activeTrip?.plan.waypoints.filter(w => w.lat && w.lng) ?? [], [activeTrip?.trip_id, activeTrip?.updated_at]);
   const displayName = useMemo(() => (user?.username || '').trim().split(/\s+/)[0] || '', [user?.username]);
   const enrichedExplorePlaces = useMemo(() => (
     mergeCuratedExplorePlaces(explorePlaces).map(place => exploreTrailAreasById[place.id] ?? place)
   ), [explorePlaces, exploreTrailAreasById]);
+  const filteredLiveExplorePlaces = useMemo(
+    () => liveExplorePlaces.filter(place => livePlaceMatchesCategory(place, exploreCategory)),
+    [exploreCategory, liveExplorePlaces],
+  );
   const exploreHubMeta = useMemo(() => buildExploreHubMeta(enrichedExplorePlaces), [enrichedExplorePlaces]);
   const availableExploreCategoryCounts = useMemo(() => {
     const serverHasCategories = Object.entries(exploreFacetCounts).some(([key, count]) => key !== 'all' && Number(count) > 0);
@@ -3074,7 +3159,7 @@ function GuideScreenContent() {
       && queryScoreForPlace(place) > 0
     ));
     const filtered = places.filter(({ place }) => {
-      if (exploreSavedOnly && !savedExploreIds.includes(place.id)) return false;
+      if (exploreSavedOnly && !savedExploreIds.includes(canonicalSavedEntityId(place.id, 'place'))) return false;
       if (!exploreSavedOnly && !placeQuery && exploreCategory === 'all' && shouldHideExploreHomeWrapper(place)) return false;
       if (!exploreSavedOnly && !placeQuery && exploreCategory === 'all' && exploreHubMeta.parentByChildId.has(place.id)) return false;
       if (!exploreSavedOnly && placeQuery && concreteBrowseMatchesExist && isLegacyExploreAreaWrapper(place)) return false;
@@ -3560,6 +3645,9 @@ function GuideScreenContent() {
       return experienceDestinationLabel ? 'Try a new search' : 'Search destination';
     }
     if (!showExploreHome) {
+      if (exploreMode === 'nearby' && filteredLiveExplorePlaces.length > 0) {
+        return exploreCountLabel(filteredLiveExplorePlaces.length, 'nearby place', 'nearby places');
+      }
       if (rankedExplore.length <= 0) {
         if (exploreSavedOnly) return 'Save places here';
         if (exploreNearbyNeedsLocation) return 'Location needed';
@@ -3573,7 +3661,7 @@ function GuideScreenContent() {
       + featuredSections.reduce((total, section) => total + section.rows.length, 0)
       + featuredHomeMoreExplore.length;
     return exploreCountLabel(count, 'featured pick', 'featured picks');
-  }, [exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredHomeMoreExplore.length, featuredLead, featuredSections, guidedCategoryActive, guidedExperienceSearchLoading, guidedFallbackDisplayPlaces.length, guidedResultsError, guidedTourSearchRunId, guidedVisibleExperiences.length, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, showGuidedFallbackPlaces, tourSearchPaused, trendingExplore.length, exploreQuery]);
+  }, [exploreMode, exploreNearbyNeedsLocation, exploreSavedOnly, exploreSearchResolving, exploreTripNeedsRoute, experienceDestinationLabel, featuredHomeMoreExplore.length, featuredLead, featuredSections, filteredLiveExplorePlaces.length, guidedCategoryActive, guidedExperienceSearchLoading, guidedFallbackDisplayPlaces.length, guidedResultsError, guidedTourSearchRunId, guidedVisibleExperiences.length, holdLegacySearchWrapper, rankedExplore.length, showExperienceSearch, showExploreHome, showGuidedFallbackPlaces, tourSearchPaused, trendingExplore.length, exploreQuery]);
   const relatedExplore = useMemo(() => {
     if (selectedExplore?.summary.lat == null || selectedExplore?.summary.lng == null) return [];
     const selectedGroup = groupForExplorePlace(selectedExplore);
@@ -3649,13 +3737,24 @@ function GuideScreenContent() {
 
   async function generateGuide() {
     if (!activeTrip || guideLoading) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = activeTrip.trip_id;
+    const requestIsCurrent = () => {
+      const current = useStore.getState();
+      return accountStorage.epoch() === requestEpoch
+        && String(current.user?.id ?? '') === String(requestAccountId ?? '')
+        && current.activeTrip?.trip_id === requestTripId;
+    };
     setGuideError('');
     setGuideLoading(true);
     try {
       const generated = await api.getAudioGuide(activeTrip.trip_id, true);
+      if (!requestIsCurrent()) return;
       setGuide(generated);
       setActiveTrip({ ...activeTrip, audio_guide: generated });
     } catch (e: any) {
+      if (!requestIsCurrent()) return;
       if (e instanceof PaywallError) {
         setGuideError(e.message || 'Explorer is required for new trip audio.');
         showPaywall(e);
@@ -3663,21 +3762,30 @@ function GuideScreenContent() {
         setGuideError('Could not generate the audio guide right now.');
       }
     } finally {
-      setGuideLoading(false);
+      if (requestIsCurrent()) setGuideLoading(false);
     }
   }
 
   useEffect(() => {
+    let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = activeTrip?.trip_id;
+    const requestIsCurrent = () => !cancelled
+      && accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && useStore.getState().activeTrip?.trip_id === requestTripId;
     if (!autoPlay || !activeTrip) {
       safelyRemoveSubscription(locationSub.current);
       locationSub.current = null;
-      return;
+      return () => { cancelled = true; };
     }
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
-      if (status !== 'granted') return;
+      if (status !== 'granted' || !requestIsCurrent()) return;
       Location.watchPositionAsync(
         { accuracy: Location.Accuracy.Balanced, distanceInterval: 200 },
         loc => {
+          if (!requestIsCurrent()) return;
           const { latitude, longitude } = loc.coords;
           for (const wp of activeTrip.plan.waypoints.filter(w => w.lat && w.lng)) {
             const dist = Math.sqrt(
@@ -3690,10 +3798,26 @@ function GuideScreenContent() {
             }
           }
         }
-      ).then(sub => { locationSub.current = sub; });
+      ).then(sub => {
+        if (!requestIsCurrent()) {
+          safelyRemoveSubscription(sub);
+          return;
+        }
+        locationSub.current = sub;
+      });
     });
-    return () => { safelyRemoveSubscription(locationSub.current); locationSub.current = null; };
-  }, [autoPlay, activeTrip?.trip_id, guide]);
+    return () => {
+      cancelled = true;
+      safelyRemoveSubscription(locationSub.current);
+      locationSub.current = null;
+    };
+  }, [autoPlay, activeTrip?.trip_id, guide, user?.id]);
+
+  useEffect(() => {
+    stopTrailheadVoice();
+    stopStoryHighlight();
+    setPlaying(null);
+  }, [activeTrip?.trip_id, user?.id]);
 
   function playNarration(name: string, text: string, highlightText = false) {
     stopTrailheadVoice();
@@ -3847,11 +3971,13 @@ function GuideScreenContent() {
   }
 
   function isExploreSaved(place: ExplorePlaceProfile) {
-    return savedExploreIds.includes(place.id);
+    return savedExploreIds.includes(canonicalSavedEntityId(place.id, 'place'));
   }
 
   function isExploreAddedToTrip(place: ExplorePlaceProfile) {
     if (!activeTrip) return false;
+    const canonicalTrip = getTrip(activeTrip.trip_id);
+    if (canonicalTrip?.items.some(item => item.entityId === canonicalSavedEntityId(place.id, 'place'))) return true;
     const title = normalizeExploreText(place.summary.title);
     const lat = Number(place.summary.lat);
     const lng = Number(place.summary.lng);
@@ -3866,46 +3992,81 @@ function GuideScreenContent() {
     });
   }
 
-  function addExplorePlaceToTrip(place: ExplorePlaceProfile) {
-    if (!activeTrip || isExploreAddedToTrip(place)) return;
-    const lastDay = activeTrip.plan.waypoints.reduce((day, waypoint) => Math.max(day, Number(waypoint.day) || 1), 1);
-    const source = getExplorePrimarySourceLabel(place)
-      || place.source_quality?.primary_name
-      || place.source_pack?.primary
-      || place.summary.source_title
-      || '';
-    const access = typeof place.access === 'string' ? place.access : place.profile.access_notes;
-    const waypoint = {
-      day: lastDay,
-      name: place.summary.title,
-      type: 'waypoint',
-      description: getExploreCardSummary(place),
-      land_type: getExploreCategoryKey(place),
-      notes: [place.best_season, access].filter(Boolean).join(' · '),
-      lat: place.summary.lat ?? undefined,
-      lng: place.summary.lng ?? undefined,
-      verified_source: source,
-      needs_review: !(place.verified || place.provenance?.verified),
-      verification_note: place.source_pack?.official_url || place.summary.source_url || place.facts?.source_url || '',
-    };
-    setActiveTrip({
-      ...activeTrip,
-      plan: {
-        ...activeTrip.plan,
-        waypoints: [...activeTrip.plan.waypoints, waypoint],
-      },
-      updated_at: Date.now(),
-    });
+  async function canonicalSavedEntity(entity: SavedEntityV1) {
+    return getSavedEntity(entity.id) ?? saveEntity(entity);
   }
 
-  function toggleSavedExplore(place: ExplorePlaceProfile) {
-    setSavedExploreIds(prev => {
-      const next = prev.includes(place.id)
-        ? prev.filter(id => id !== place.id)
-        : [...prev, place.id];
-      storage.set(SAVED_EXPLORE_KEY, JSON.stringify(next)).catch(() => {});
-      return next;
-    });
+  async function canonicalActiveTrip() {
+    if (!activeTrip) return null;
+    return getTrip(activeTrip.trip_id) ?? upsertTrip(tripDocumentFromTripResult(activeTrip));
+  }
+
+  async function addSavedEntityToActiveTrip(entity: SavedEntityV1) {
+    if (!activeTrip) return false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = activeTrip.trip_id;
+    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && useStore.getState().activeTrip?.trip_id === requestTripId;
+    const saved = await canonicalSavedEntity(entity);
+    if (!requestIsCurrent()) return false;
+    const trip = await canonicalActiveTrip();
+    if (!requestIsCurrent()) return false;
+    if (!trip) return false;
+    if (!trip.items.some(item => item.entityId === saved.id)) {
+      const lastDay = activeTrip.plan.waypoints.reduce((day, waypoint) => Math.max(day, Number(waypoint.day) || 1), 1);
+      await addEntityToTrip(trip.id, saved.id, { day: lastDay });
+      if (!requestIsCurrent()) return false;
+    }
+    setActiveTrip(addSavedEntityToTripResult(activeTrip, saved));
+    return true;
+  }
+
+  async function addExplorePlaceToTrip(place: ExplorePlaceProfile) {
+    if (!activeTrip || isExploreAddedToTrip(place)) return;
+    try {
+      await addSavedEntityToActiveTrip(savedEntityFromExplorePlace(place));
+    } catch {
+      Alert.alert('Place not added', 'This place is still saved in Explore. Try adding it to the trip again.');
+    }
+  }
+
+  async function startTripWithEntity(entity: SavedEntityV1) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    try {
+      const saved = await canonicalSavedEntity(entity);
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+      ) return;
+      const document = await createTripFromEntity(saved, `Trip to ${saved.title}`);
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+      ) return;
+      setActiveTrip(starterTripResult(document, saved));
+      setSelectedExplore(null);
+      closeExperienceDetail();
+      router.push('/(tabs)/route-builder');
+    } catch {
+      Alert.alert('Trip not started', 'Your saved items are unchanged. Try starting the trip again.');
+    }
+  }
+
+  function startTripFromExplore(place: ExplorePlaceProfile) {
+    return startTripWithEntity(savedEntityFromExplorePlace(place));
+  }
+
+  async function toggleSavedExplore(place: ExplorePlaceProfile) {
+    try {
+      const existing = getSavedEntity(canonicalSavedEntityId(place.id, 'place'));
+      if (existing) await removeEntity(existing.id, { expectedRevision: existing.revision });
+      else await saveEntity(savedEntityFromExplorePlace(place));
+    } catch {
+      Alert.alert('Save not updated', 'Your saved places could not be changed right now.');
+    }
   }
 
   function showExploreCampOnMap(camp: CampsitePin) {
@@ -4002,36 +4163,17 @@ function GuideScreenContent() {
     showExperienceOnMap(experience);
   }
 
-  function saveExperienceToPlanner(experience: BookableExperience) {
+  async function saveExperienceToPlanner(experience: BookableExperience) {
+    const entity = savedEntityFromExperience(experience);
     if (!activeTrip) {
-      openExperienceDetail(experience);
+      await startTripWithEntity(entity);
       return;
     }
-    const waypoint = {
-      day: activeTrip.plan.waypoints[0]?.day ?? 1,
-      name: experience.title,
-      type: 'bookable_experience',
-      description: experience.summary || experience.description || '',
-      land_type: 'external_booking',
-      notes: [
-        experience.duration_label,
-        experience.price_from ? `From ${experience.currency || 'USD'} ${experience.price_from}` : '',
-        'Check availability before you go',
-      ].filter(Boolean).join(' · '),
-      lat: experience.lat ?? undefined,
-      lng: experience.lng ?? undefined,
-      verified_source: 'Travel partner',
-      needs_review: true,
-      verification_note: experience.booking_url || experience.affiliate_url || experience.source_url || '',
-    };
-    setActiveTrip({
-      ...activeTrip,
-      plan: {
-        ...activeTrip.plan,
-        waypoints: [...activeTrip.plan.waypoints, waypoint],
-      },
-      updated_at: Date.now(),
-    });
+    try {
+      await addSavedEntityToActiveTrip(entity);
+    } catch {
+      Alert.alert('Trip not updated', 'The guided trip is still available here. Try adding it again.');
+    }
   }
 
   async function fetchExploreWeather(place: ExplorePlaceProfile) {
@@ -4287,8 +4429,8 @@ function GuideScreenContent() {
           campCount: exploreCampgroundsById[place.id]?.length,
         }}
         saved={isExploreSaved(place)}
-        primaryLabel={activeTrip ? (addedToTrip ? 'Added to trip' : 'Add to trip') : userLoc ? 'Route' : 'View on map'}
-        primaryIcon={activeTrip ? (addedToTrip ? 'checkmark-circle' : 'add-circle-outline') : userLoc ? 'navigate' : 'map-outline'}
+        primaryLabel={activeTrip ? (addedToTrip ? 'Added to trip' : 'Add to trip') : 'Start trip'}
+        primaryIcon={activeTrip ? (addedToTrip ? 'checkmark-circle' : 'add-circle-outline') : 'add-circle-outline'}
         primaryDisabled={activeTrip ? addedToTrip : !canOpenMap}
         rankReason={exploreRankReason(place, {
           mode: exploreMode,
@@ -4298,7 +4440,7 @@ function GuideScreenContent() {
           sort: exploreSortMode,
         })}
         onOpen={() => openExplorePlace(place, exploreTabForResultCardOpen(place))}
-        onPrimary={() => activeTrip ? addExplorePlaceToTrip(place) : routeExplore(place)}
+        onPrimary={() => activeTrip ? addExplorePlaceToTrip(place) : startTripFromExplore(place)}
         onToggleSave={() => toggleSavedExplore(place)}
       />
     );
@@ -4418,6 +4560,7 @@ function GuideScreenContent() {
         mediaUrl={mediaUrl}
         onOpen={openExperienceDetail}
         onSave={saveExperienceToPlanner}
+        saveActionLabel={activeTrip ? 'Add to trip' : 'Start trip'}
         onShowArea={showExperienceOnMap}
         initialVisible={12}
         showMoreStep={12}
@@ -4464,6 +4607,9 @@ function GuideScreenContent() {
   function handleExploreModeChange(mode: 'featured' | 'nearby' | 'trip') {
     setExploreSavedOnly(false);
     setExploreMode(mode);
+    if (mode !== 'nearby' && (exploreCategory === 'fuel' || exploreCategory === 'resupply')) {
+      setExploreCategory('all');
+    }
     if (mode !== 'featured' && (exploreCategory === 'guided' || exploreCategory === 'tours')) {
       setExploreCategory('all');
       setExploreQuery('');
@@ -4817,6 +4963,11 @@ function GuideScreenContent() {
       setExploreMode('nearby');
       return;
     }
+	    if (key === 'fuel' || key === 'resupply') {
+	      setExploreCategory(exploreCategory === key ? 'all' : key);
+	      setExploreMode('nearby');
+	      return;
+	    }
 	    if ((key === 'guided' || key === 'tours') && exploreCategory !== key) {
 	      setGuidedTourDraft('');
 	      setGuidedTourSearchQuery('');
@@ -4990,6 +5141,7 @@ function GuideScreenContent() {
                   mediaUrl={mediaUrl}
                   onOpen={openExperienceDetail}
                   onSave={saveExperienceToPlanner}
+                  saveActionLabel={activeTrip ? 'Add to trip' : 'Start trip'}
                   onShowArea={showExperienceOnMap}
                   initialVisible={12}
                   showMoreStep={12}
@@ -5029,7 +5181,7 @@ function GuideScreenContent() {
                       </TouchableOpacity>
                     ) : null}
                   </View>
-                ) : liveExploreLoading && liveExplorePlaces.length === 0 ? (
+                ) : liveExploreLoading && filteredLiveExplorePlaces.length === 0 ? (
                   <>
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
@@ -5043,7 +5195,7 @@ function GuideScreenContent() {
                     </TouchableOpacity>
                   </View>
                 ) : null}
-                {liveExplorePlaces.map(place => (
+                {filteredLiveExplorePlaces.map(place => (
                   <TouchableOpacity key={place.id} style={s.livePlaceRow} activeOpacity={0.86} onPress={() => setSelectedLivePlace(place)}>
                     {place.photo_url ? (
                       <Image source={{ uri: mediaUrl(place.photo_url) }} style={s.livePlacePhoto} resizeMode="cover" />
@@ -5186,7 +5338,7 @@ function GuideScreenContent() {
                   </TouchableOpacity>
                 ) : null}
               </>
-            ) : !tourSearchPaused && !showExperienceSearch && ((!exploreLoading && !exploreSearchResolving) || exploreNearbyNeedsLocation) && rankedExplore.length === 0 ? (
+            ) : !tourSearchPaused && !showExperienceSearch && ((!exploreLoading && !exploreSearchResolving) || exploreNearbyNeedsLocation) && rankedExplore.length === 0 && filteredLiveExplorePlaces.length === 0 ? (
               <View style={s.emptyState}>
                 <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : exploreTripNeedsRoute ? 'map-outline' : 'search-outline'} size={44} color={C.text3} />
                 <Text style={s.emptyTitle}>
@@ -5465,7 +5617,8 @@ function GuideScreenContent() {
         topInset={insets.top}
         mediaUrl={mediaUrl}
         onClose={closeExperienceDetail}
-        onSave={activeTrip ? saveExperienceToPlanner : undefined}
+        onSave={saveExperienceToPlanner}
+        saveLabel={activeTrip ? 'Add to trip' : 'Start trip'}
         onShowArea={showSelectedExperienceOnMap}
       />
 
@@ -5503,8 +5656,8 @@ function GuideScreenContent() {
             onClose={() => setSelectedExplore(null)}
             onPlayAudio={() => playExplore(selectedExplore)}
             onShowArea={() => showExploreOnMap(selectedExplore)}
-            onRoute={() => routeExplore(selectedExplore)}
-            routeLabel={userLoc ? 'Route' : 'Map'}
+            onRoute={() => activeTrip ? addExplorePlaceToTrip(selectedExplore) : startTripFromExplore(selectedExplore)}
+            routeLabel={activeTrip ? (isExploreAddedToTrip(selectedExplore) ? 'Added to trip' : 'Add to trip') : 'Start trip'}
             onToggleSave={() => toggleSavedExplore(selectedExplore)}
             onNearbyAction={module => handleExploreNearbyAction(selectedExplore, module)}
             onSourcePackItem={showSourcePackItemOnMap}

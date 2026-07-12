@@ -1,9 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { TripResult } from './api';
+import { accountStorage } from './storage';
 
 const DIR = FileSystem.documentDirectory + 'offline_trips/';
 const INDEX_PATH = DIR + '_index.json';
-const MAX_OFFLINE_TRIPS = 20;
 
 async function ensureDir() {
   const info = await FileSystem.getInfoAsync(DIR);
@@ -11,20 +11,18 @@ async function ensureDir() {
 }
 
 export async function saveOfflineTrip(trip: TripResult): Promise<void> {
+  const epoch = accountStorage.epoch();
   try {
-    await ensureDir();
-    await FileSystem.writeAsStringAsync(
-      DIR + trip.trip_id + '.json',
-      JSON.stringify({ ...trip, cached_at: Date.now() }),
-    );
-    const index = await getOfflineTripIndex();
-    const updated = [trip.trip_id, ...index.filter(id => id !== trip.trip_id)].slice(0, MAX_OFFLINE_TRIPS);
-    // Evict oldest
-    if (index.length >= MAX_OFFLINE_TRIPS) {
-      const toEvict = index[MAX_OFFLINE_TRIPS - 1];
-      await FileSystem.deleteAsync(DIR + toEvict + '.json', { idempotent: true });
-    }
-    await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(updated));
+    await accountStorage.run(async () => {
+      await ensureDir();
+      await FileSystem.writeAsStringAsync(
+        DIR + trip.trip_id + '.json',
+        JSON.stringify({ ...trip, cached_at: Date.now() }),
+      );
+      const index = await getOfflineTripIndex();
+      const updated = [trip.trip_id, ...index.filter(id => id !== trip.trip_id)];
+      await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(updated));
+    }, epoch);
   } catch {
     // Never crash the app for cache failures
   }
@@ -53,12 +51,19 @@ export async function getOfflineTripSummaries(): Promise<Array<TripResult & { ca
 }
 
 export async function deleteOfflineTrip(tripId: string): Promise<void> {
+  const epoch = accountStorage.epoch();
   try {
-    await FileSystem.deleteAsync(DIR + tripId + '.json', { idempotent: true });
-    const index = await getOfflineTripIndex();
-    const updated = index.filter(id => id !== tripId);
-    await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(updated));
+    await accountStorage.run(async () => {
+      await FileSystem.deleteAsync(DIR + tripId + '.json', { idempotent: true });
+      const index = await getOfflineTripIndex();
+      const updated = index.filter(id => id !== tripId);
+      await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(updated));
+    }, epoch);
   } catch {}
+}
+
+export async function deleteAllOfflineTrips(): Promise<void> {
+  await accountStorage.run(() => FileSystem.deleteAsync(DIR, { idempotent: true }));
 }
 
 export async function isOfflineCached(tripId: string): Promise<boolean> {

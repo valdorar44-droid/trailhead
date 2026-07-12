@@ -3,6 +3,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { TrailheadCard, TrailheadMetricRow } from '@/components/TrailheadUI';
 import { mono, useTheme } from '@/lib/design';
 import type { ColorPalette } from '@/lib/design';
+import { useTripRepositorySnapshot } from '@/lib/tripRepository';
+import { useStore } from '@/lib/store';
 
 type LibraryOverviewProps = {
   savedTripCount: number;
@@ -29,7 +31,17 @@ export default function ProfileLibraryOverview({
 }: LibraryOverviewProps) {
   const C = useTheme();
   const s = styles(C);
-  const savedNearbyCount = savedCampCount + savedPlaceCount;
+  const repository = useTripRepositorySnapshot();
+  const accountId = useStore(state => state.user?.id ?? null);
+  const expectedScope = accountId == null ? 'anonymous' : `account:${accountId}`;
+  const canonicalReady = repository.initialized && repository.ownerScope === expectedScope;
+  const canonicalTripCount = repository.trips.filter(trip => trip.status !== 'archived').length;
+  const canonicalCampCount = repository.savedEntities.filter(item => item.kind === 'camp').length;
+  const canonicalPlaceCount = repository.savedEntities.length - canonicalCampCount;
+  const resolvedTripCount = canonicalReady ? canonicalTripCount : savedTripCount;
+  const resolvedCampCount = canonicalReady ? canonicalCampCount : savedCampCount;
+  const resolvedPlaceCount = canonicalReady ? canonicalPlaceCount : savedPlaceCount;
+  const savedNearbyCount = resolvedCampCount + resolvedPlaceCount;
   const importedTotal = importedRouteCount + importedPinCount;
   const offlineTotal = Math.max(offlineTripCount, 0) + Math.max(offlineOnlyCount, 0);
 
@@ -37,7 +49,7 @@ export default function ProfileLibraryOverview({
     <View style={s.root}>
       <TrailheadMetricRow
         metrics={[
-          { label: 'Trips', value: savedTripCount > 0 ? String(savedTripCount) : '0', icon: 'map-outline', tone: C.silverBright },
+          { label: 'Trips', value: resolvedTripCount > 0 ? String(resolvedTripCount) : '0', icon: 'map-outline', tone: C.silverBright },
           { label: 'Saved', value: savedNearbyCount > 0 ? String(savedNearbyCount) : '0', icon: 'bookmark-outline', tone: C.orange },
           { label: 'GPX', value: importedTotal > 0 ? String(importedTotal) : '0', icon: 'git-branch-outline', tone: '#38bdf8' },
         ]}
@@ -110,7 +122,7 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     letterSpacing: 0,
   },
   summaryText: {
-    color: C.text3,
+    color: C.text2,
     fontSize: 12,
     lineHeight: 17,
   },

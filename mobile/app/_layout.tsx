@@ -3,11 +3,17 @@ import { useEffect, useRef, useState } from 'react';
 import { Alert, Appearance, AppState, Linking, Platform, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
 import { StatusBar } from 'expo-status-bar';
-import { storage } from '@/lib/storage';
+import { accountStorage, storage } from '@/lib/storage';
 import * as Location from 'expo-location';
 import * as Notifications from 'expo-notifications';
 import * as Updates from 'expo-updates';
-import { useStore } from '@/lib/store';
+import {
+  cancelActiveTripMirror,
+  restoreLegacyAccountState,
+  restoreSeparatedAnonymousLegacyState,
+  separateAnonymousLegacyState,
+  useStore,
+} from '@/lib/store';
 import { api } from '@/lib/api';
 import { mono } from '@/lib/design';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
@@ -26,18 +32,48 @@ import {
   type WelcomeGateChoice,
   type WelcomeSetupPreferences,
 } from '@/lib/welcomeGate';
+import {
+  eraseTripRepositoryScope,
+  getTripRepositorySnapshot,
+  initializeTripRepository,
+  inspectTripRepositoryScope,
+  mergeTripRepositoryScope,
+  migrateLegacyTripRepositoryData,
+  switchTripRepositoryScope,
+} from '@/lib/tripRepository';
+import {
+  cancelTripRepositorySync,
+  setTripRepositorySyncIdentity,
+  startTripRepositoryAutoSync,
+  synchronizeTripRepository,
+} from '@/lib/tripRepositorySync';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
+const TRIP_REPOSITORY_ACCOUNT_DECISION_PREFIX = 'trailhead_trip_repository_account_decision_v1';
+
+function askToAddSignedOutTrips(count: number): Promise<boolean> {
+  return new Promise(resolve => {
+    Alert.alert(
+      'Add trips to your account?',
+      `${count} ${count === 1 ? 'item was' : 'items were'} saved while signed out. Add ${count === 1 ? 'it' : 'them'} to this account?`,
+      [
+        { text: 'Keep separate', style: 'cancel', onPress: () => resolve(false) },
+        { text: 'Add to account', onPress: () => resolve(true) },
+      ],
+      { cancelable: false },
+    );
+  });
+}
 
 export default function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
   const setPlan            = useStore(s => s.setPlan);
   const setActiveTrip      = useStore(s => s.setActiveTrip);
-  const restoreActiveTrip  = useStore(s => s.restoreActiveTrip);
   const setUserLoc         = useStore(s => s.setUserLoc);
   const themeMode    = useStore(s => s.themeMode);
   const user         = useStore(s => s.user);
+  const authToken    = useStore(s => s.token);
   const sessionId    = useStore(s => s.sessionId);
   const welcomePromptRunId = useStore(s => s.welcomePromptRunId);
   const welcomeSetupRunId = useStore(s => s.welcomeSetupRunId);
@@ -55,6 +91,99 @@ export default function RootLayout() {
   const checking     = useRef(false);
   const pushRegistered = useRef(false);
   const welcomeGateChecked = useRef(false);
+  const lastRepositoryAccountId = useRef<number | null>(null);
+  const repositoryTransitionRun = useRef(0);
+  const tripGraphSyncEnabled = useRef(false);
+  const stopTripRepositoryAutoSync = useRef<(() => void) | null>(null);
+
+  useEffect(() => {
+    if (!startupReady) return;
+    const run = ++repositoryTransitionRun.current;
+    const parsedAccountId = user?.id == null ? NaN : Number(user.id);
+    const accountId = Number.isFinite(parsedAccountId) ? parsedAccountId : null;
+    const previousAccountId = lastRepositoryAccountId.current;
+    if (accountId != null) lastRepositoryAccountId.current = accountId;
+
+    const transition = async () => {
+      if (accountId == null) {
+        tripGraphSyncEnabled.current = false;
+        stopTripRepositoryAutoSync.current?.();
+        stopTripRepositoryAutoSync.current = null;
+        await cancelTripRepositorySync();
+        await cancelActiveTripMirror();
+        if (run !== repositoryTransitionRun.current) return;
+
+        const currentScope = getTripRepositorySnapshot().ownerScope;
+        const currentAccountId = currentScope.startsWith('account:')
+          ? Number(currentScope.slice('account:'.length))
+          : null;
+        const accountToErase = previousAccountId ?? (Number.isFinite(currentAccountId) ? currentAccountId : null);
+        try {
+          if (accountToErase != null) await eraseTripRepositoryScope(accountToErase);
+        } finally {
+          if (run === repositoryTransitionRun.current) {
+            await switchTripRepositoryScope();
+            await restoreSeparatedAnonymousLegacyState().catch(() => false);
+          }
+        }
+        if (run === repositoryTransitionRun.current) lastRepositoryAccountId.current = null;
+        return;
+      }
+
+      stopTripRepositoryAutoSync.current?.();
+      stopTripRepositoryAutoSync.current = null;
+      await cancelTripRepositorySync();
+      await cancelActiveTripMirror();
+      if (run !== repositoryTransitionRun.current) return;
+      if (previousAccountId != null && previousAccountId !== accountId) {
+        await eraseTripRepositoryScope(previousAccountId).catch(() => {});
+        if (run !== repositoryTransitionRun.current) return;
+      }
+
+      const anonymous = await inspectTripRepositoryScope();
+      const anonymousCount = anonymous.tripCount + anonymous.savedEntityCount;
+      const local = useStore.getState();
+      const legacyCount = Number(Boolean(local.activeTrip))
+        + Number(Boolean(local.rigProfile))
+        + local.tripHistory.length
+        + local.favoriteCamps.length
+        + local.savedPlaces.length
+        + local.waterSpots.length
+        + local.catchLogs.length
+        + local.waterRoutes.length
+        + local.markerGroups.length;
+      const signedOutCount = Math.max(anonymousCount, legacyCount);
+      const decisionKey = `${TRIP_REPOSITORY_ACCOUNT_DECISION_PREFIX}:${accountId}:${anonymous.revision}:${legacyCount}`;
+      const priorDecision = signedOutCount > 0 ? await storage.get(decisionKey).catch(() => null) : null;
+      let merge = priorDecision === 'merge';
+      if (signedOutCount > 0 && priorDecision == null) {
+        merge = await askToAddSignedOutTrips(signedOutCount);
+        await storage.set(decisionKey, merge ? 'merge' : 'separate').catch(() => {});
+      }
+      if (run !== repositoryTransitionRun.current) return;
+      if (signedOutCount > 0 && merge) {
+        await mergeTripRepositoryScope(null, accountId);
+      } else {
+        if (signedOutCount > 0) await separateAnonymousLegacyState();
+        await switchTripRepositoryScope(accountId);
+      }
+
+      const features = await api.productFeatures().catch(() => null);
+      if (run !== repositoryTransitionRun.current) return;
+      tripGraphSyncEnabled.current = Boolean(features?.trip_graph_v2);
+      if (!tripGraphSyncEnabled.current || !authToken) {
+        await cancelTripRepositorySync();
+        return;
+      }
+      await setTripRepositorySyncIdentity(`account:${accountId}`, authToken);
+      if (run !== repositoryTransitionRun.current) return;
+      if (!stopTripRepositoryAutoSync.current) {
+        stopTripRepositoryAutoSync.current = startTripRepositoryAutoSync();
+      }
+      await synchronizeTripRepository().catch(() => {});
+    };
+    transition().catch(() => {});
+  }, [authToken, startupReady, user?.id]);
 
   useEffect(() => {
     if (Platform.OS === 'web') {
@@ -86,10 +215,24 @@ export default function RootLayout() {
   async function handleVerificationUrl(url: string | null | undefined) {
     const token = verificationTokenFromUrl(url);
     if (!token) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     try {
       const res = await api.verifyEmail(token);
+      const currentAccountId = useStore.getState().user?.id;
+      if (
+        accountStorage.epoch() !== requestEpoch
+        || String(currentAccountId ?? '') !== String(requestAccountId ?? '')
+      ) return;
+      if (accountStorage.isCleaning()) {
+        Alert.alert('Please wait', 'Trailhead is still clearing the previous account from this device.');
+        return;
+      }
+      if (requestAccountId != null && String(res.user.id) !== String(requestAccountId)) {
+        Alert.alert('Sign out first', 'This confirmation link belongs to a different account. Sign out before confirming it.');
+        return;
+      }
       setAuth(res.token, res.user);
-      storage.set('trailhead_user', JSON.stringify(res.user)).catch(() => {});
       Alert.alert('Email confirmed', 'Your Trailhead account is active.');
       router.push('/(tabs)/profile');
     } catch (e: any) {
@@ -120,19 +263,26 @@ export default function RootLayout() {
   }
 
   async function refreshSubscriptionStatus() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const token = await storage.get('trailhead_token').catch(() => null);
+    if (accountStorage.epoch() !== requestEpoch) return;
     if (!token) {
       setPlan(false, null);
       return;
     }
     const sub = await api.subscriptionStatus().catch(() => null);
-    if (!sub) return;
+    if (
+      !sub
+      || accountStorage.epoch() !== requestEpoch
+      || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+    ) return;
     if (sub.is_active) {
       setPlan(true, sub.plan_expires_at ?? null);
-      storage.del('trailhead_iap_pending').catch(() => {});
+      accountStorage.del('trailhead_iap_pending', requestEpoch).catch(() => {});
     } else {
       setPlan(false, null);
-      storage.del('trailhead_iap_pending').catch(() => {});
+      accountStorage.del('trailhead_iap_pending', requestEpoch).catch(() => {});
     }
   }
 
@@ -257,6 +407,19 @@ export default function RootLayout() {
       appStateSub = AppState.addEventListener('change', state => {
         if (state === 'active') {
           refreshSubscriptionStatus();
+          const currentAuth = useStore.getState();
+          if (currentAuth.user && currentAuth.token) {
+            void api.productFeatures().then(async features => {
+              const ownerScope = `account:${currentAuth.user!.id}`;
+              if (!features.trip_graph_v2 || getTripRepositorySnapshot().ownerScope !== ownerScope) return;
+              tripGraphSyncEnabled.current = true;
+              await setTripRepositorySyncIdentity(ownerScope, currentAuth.token);
+              if (!stopTripRepositoryAutoSync.current) {
+                stopTripRepositoryAutoSync.current = startTripRepositoryAutoSync();
+              }
+              await synchronizeTripRepository();
+            }).catch(() => {});
+          }
           if (updateReady.current) {
             // Update was downloaded while app was backgrounded — apply now
             Updates.reloadAsync().catch(() => {});
@@ -267,27 +430,63 @@ export default function RootLayout() {
       });
     }
 
-    // Restore session on launch
-    storage.get('trailhead_token').then(async token => {
-      if (!token) return;
-      try {
-        const user = await api.me();
-        storage.set('trailhead_user', JSON.stringify(user)).catch(() => {});
-        setAuth(token, user);
-        restoreActiveTrip(); // setAuth clears activeTrip; restore from file
-        await refreshSubscriptionStatus();
-      } catch (e: any) {
-        const isNetworkError = !e?.message || e.message.includes('Network') || e.message.includes('fetch') || e instanceof TypeError;
-        if (isNetworkError) {
-          const cachedUser = await storage.get('trailhead_user').catch(() => null);
-          if (cachedUser) {
-            try { setAuth(token, JSON.parse(cachedUser)); restoreActiveTrip(); } catch {}
+    // Resolve account ownership before touching legacy trip storage. Otherwise an
+    // authenticated user's old files can be imported into the anonymous scope.
+    void (async () => {
+      const token = await storage.get('trailhead_token').catch(() => null);
+      const hadStoredToken = Boolean(token);
+      let restoredUser: Awaited<ReturnType<typeof api.me>> | null = null;
+      if (token) {
+        try {
+          restoredUser = await api.me();
+          await storage.set('trailhead_user', JSON.stringify(restoredUser)).catch(() => {});
+        } catch (error: any) {
+          const isNetworkError = !error?.message
+            || error.message.includes('Network')
+            || error.message.includes('fetch')
+            || error instanceof TypeError;
+          if (isNetworkError) {
+            const cachedUser = await storage.get('trailhead_user').catch(() => null);
+            if (cachedUser) {
+              try {
+                const parsed = JSON.parse(cachedUser);
+                if (Number.isFinite(Number(parsed?.id))) restoredUser = parsed;
+              } catch {}
+            }
+          } else {
+            await Promise.all([
+              storage.del('trailhead_token').catch(() => {}),
+              storage.del('trailhead_user').catch(() => {}),
+            ]);
           }
-        } else {
-          storage.del('trailhead_token');
-          storage.del('trailhead_user');
         }
       }
+
+      if (restoredUser && token) {
+        await restoreLegacyAccountState();
+        await initializeTripRepository(restoredUser.id);
+        await migrateLegacyTripRepositoryData().catch(() => {});
+        if (!launchCancelled) {
+          setAuth(token, restoredUser);
+          await refreshSubscriptionStatus();
+        }
+      } else {
+        await cancelTripRepositorySync();
+        // A rejected credential never reclassifies unknown account files as
+        // signed-out data. Only a separately stashed anonymous scope is restored.
+        if (!hadStoredToken) {
+          const restored = await restoreSeparatedAnonymousLegacyState().catch(() => false);
+          if (!restored) await restoreLegacyAccountState();
+          await initializeTripRepository();
+          await migrateLegacyTripRepositoryData().catch(() => {});
+        } else {
+          await restoreSeparatedAnonymousLegacyState(true).catch(() => false);
+          await initializeTripRepository();
+        }
+      }
+    })().catch(async () => {
+      await cancelTripRepositorySync().catch(() => {});
+      await initializeTripRepository().catch(() => {});
     }).finally(() => {
       if (!launchCancelled) setStartupReady(true);
     });
@@ -297,8 +496,9 @@ export default function RootLayout() {
     // Apple account" prompt. Subscription status comes from api.subscriptionStatus()
     // above. StoreKit is only called when the user explicitly opens the paywall.
 
-    // Request push permissions and register token with server
-    Notifications.requestPermissionsAsync().then(async ({ status }) => {
+    // Do not prompt on launch. Contextual notification UI owns permission requests.
+    const pushTokenEpoch = accountStorage.epoch();
+    Notifications.getPermissionsAsync().then(async ({ status }) => {
       if (status !== 'granted') return;
       try {
         const tokenData = await Notifications.getExpoPushTokenAsync({
@@ -306,7 +506,7 @@ export default function RootLayout() {
         });
         const token = tokenData.data;
         // Save token for use after login (user may not be loaded yet)
-        storage.set('trailhead_push_token', token).catch(() => {});
+        await accountStorage.set('trailhead_push_token', token, pushTokenEpoch);
       } catch {}
     }).catch(() => {});
 
@@ -323,7 +523,16 @@ export default function RootLayout() {
       } else if (data?.type === 'trip_ready' && data?.job_id) {
         // User tapped "your route is ready" notification — fetch and load the trip
         try {
+          const requestEpoch = accountStorage.epoch();
+          const requestAccountId = useStore.getState().user?.id;
+          if (requestAccountId == null || !useStore.getState().token) return;
           const job = await api.getPlanJob(data.job_id);
+          const current = useStore.getState();
+          if (
+            accountStorage.epoch() !== requestEpoch
+            || String(current.user?.id ?? '') !== String(requestAccountId)
+            || !current.token
+          ) return;
           if (job.result) {
             setActiveTrip(job.result);
             router.push('/(tabs)/plan' as any);
@@ -347,6 +556,9 @@ export default function RootLayout() {
 
     return () => {
       launchCancelled = true;
+      stopTripRepositoryAutoSync.current?.();
+      stopTripRepositoryAutoSync.current = null;
+      void cancelTripRepositorySync();
       notifSub.remove();
       linkSub.remove();
       appStateSub?.remove();
@@ -355,12 +567,23 @@ export default function RootLayout() {
 
   // Register push token with server whenever user signs in
   useEffect(() => {
-    if (!user || pushRegistered.current) return;
+    if (!user) {
+      pushRegistered.current = false;
+      return;
+    }
+    if (pushRegistered.current) return;
     pushRegistered.current = true;
+    const registrationEpoch = accountStorage.epoch();
+    const registrationAccountId = user.id;
     storage.get('trailhead_push_token').then(token => {
-      if (token) api.registerPushToken(token).catch(() => {});
+      if (
+        !token
+        || accountStorage.epoch() !== registrationEpoch
+        || String(useStore.getState().user?.id ?? '') !== String(registrationAccountId)
+      ) return;
+      accountStorage.run(() => api.registerPushToken(token), registrationEpoch).catch(() => {});
     }).catch(() => {});
-  }, [user]);
+  }, [user?.id]);
 
   useEffect(() => {
     if (!user) return;

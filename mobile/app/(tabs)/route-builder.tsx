@@ -44,7 +44,7 @@ import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore, type TripHistoryItem } from '@/lib/store';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
-import { storage } from '@/lib/storage';
+import { accountStorage, storage } from '@/lib/storage';
 import { trackPhase0Once } from '@/lib/telemetry';
 import { buildRentalSuggestionFit } from '@/lib/outdoorRentals';
 import {
@@ -1611,7 +1611,12 @@ function RouteBuilderScreenContent() {
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const user = useStore(st => st.user);
-  const token = useStore(st => st.token);
+  const [accountEpoch, setAccountEpoch] = useState(accountStorage.epoch);
+
+  function accountRequestIsCurrent(epoch: number, accountId: string | number | null | undefined) {
+    return accountStorage.epoch() === epoch
+      && String(useStore.getState().user?.id ?? '') === String(accountId ?? '');
+  }
   const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
@@ -1624,12 +1629,17 @@ function RouteBuilderScreenContent() {
   const sessionId = useStore(st => st.sessionId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
+  const routeBuilderAccountScopeRef = useRef(`${accountEpoch}:${String(user?.id ?? '')}`);
   const {
     getState: getOfflineMapState,
     getRoutingState: getOfflineRoutingState,
     getContourState: getOfflineContourState,
     getTrailState: getOfflineTrailState,
   } = useOfflineFiles();
+
+  useEffect(() => accountStorage.subscribe((_cleaning, epoch) => {
+    setAccountEpoch(epoch);
+  }), []);
 
   const [activeDay, setActiveDay] = useState(1);
   const [routeTabMode, setRouteTabMode] = useState<RouteTabMode>('hub');
@@ -1871,19 +1881,21 @@ function RouteBuilderScreenContent() {
 
   const consumeCopilotRouteBuilderDraft = useCallback(() => {
     let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     setRouteBuilderDraftLoading(true);
     loadTrailheadRouteBuilderDraft().then(draft => {
-      if (cancelled || !draft) return;
+      if (cancelled || !draft || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       const key = `${draft.id || 'draft'}:${draft.updatedAt || 0}`;
       if (consumedRouteBuilderDraftRef.current === key) return;
       consumedRouteBuilderDraftRef.current = key;
       applyCopilotDraft(draft);
-      clearTrailheadRouteBuilderDraft().catch(() => {});
+      clearTrailheadRouteBuilderDraft(requestEpoch).catch(() => {});
     }).catch(() => {}).finally(() => {
-      if (!cancelled) setRouteBuilderDraftLoading(false);
+      if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteBuilderDraftLoading(false);
     });
     return () => { cancelled = true; };
-  }, []);
+  }, [sessionId, user?.id]);
 
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
@@ -1935,9 +1947,11 @@ function RouteBuilderScreenContent() {
 
   useEffect(() => {
     let mounted = true;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     loadAllPlacePoints()
       .then(points => {
-        if (!mounted) return;
+        if (!mounted || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         setOfflinePlaces(points.map(point => ({
           id: point.id,
           name: point.name,
@@ -1987,25 +2001,31 @@ function RouteBuilderScreenContent() {
         })));
       })
       .catch(() => {
-        if (mounted) setOfflinePlaces([]);
+        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) setOfflinePlaces([]);
       });
     return () => { mounted = false; };
-  }, []);
+  }, [user?.id]);
 
   useEffect(() => {
     let mounted = true;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     listOfflineTrails()
       .then(items => {
-        if (mounted) setSavedTrails(items.filter(item => item.geometry?.features?.length).slice(0, 20));
+        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+          setSavedTrails(items.filter(item => item.geometry?.features?.length).slice(0, 20));
+        }
       })
       .catch(() => {
-        if (mounted) setSavedTrails([]);
+        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) setSavedTrails([]);
       });
     return () => { mounted = false; };
-  }, [routeTabMode]);
+  }, [routeTabMode, user?.id]);
 
   useEffect(() => {
     let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const routes = tripHistory.slice(0, 10);
     if (!routes.length) {
       setRouteTripCards({});
@@ -2017,12 +2037,16 @@ function RouteBuilderScreenContent() {
         : await loadOfflineTrip(route.trip_id).catch(() => null);
       return [route.trip_id, tripCardData(route, trip, offlinePlaces)] as const;
     })).then(entries => {
-      if (!cancelled) setRouteTripCards(Object.fromEntries(entries));
+      if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        setRouteTripCards(Object.fromEntries(entries));
+      }
     }).catch(() => {
-      if (!cancelled) setRouteTripCards(Object.fromEntries(routes.map(route => [route.trip_id, tripCardData(route, null, offlinePlaces)])));
+      if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        setRouteTripCards(Object.fromEntries(routes.map(route => [route.trip_id, tripCardData(route, null, offlinePlaces)])));
+      }
     });
     return () => { cancelled = true; };
-  }, [activeTrip, offlinePlaces, tripHistory]);
+  }, [activeTrip, offlinePlaces, tripHistory, user?.id]);
 
   useEffect(() => {
     if (routeTabMode !== 'wizard' || !activeTrip || importedTripId === activeTrip.trip_id || stops.length > 0) return;
@@ -2270,13 +2294,15 @@ function RouteBuilderScreenContent() {
       return;
     }
     let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     api.getFuelEstimate(totals.miles, planningStats.mpg, routeStates.slice(0, 6), weatherUnitMode)
       .then(estimate => {
-        if (cancelled) return;
+        if (cancelled || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         setFuelEstimate(estimate);
       })
       .catch(() => {
-        if (cancelled) return;
+        if (cancelled || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         setFuelEstimate(null);
       });
     return () => { cancelled = true; };
@@ -2429,11 +2455,13 @@ function RouteBuilderScreenContent() {
       return;
     }
     let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     setRentalOffersLoading(true);
     setRentalIdeaSaved(false);
     api.getRentalOffers(rentalSuggestion.query)
       .then(res => {
-        if (cancelled) return;
+        if (cancelled || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         const offers = res.status === 'ok' ? res.offers : [];
         setRentalOffers(offers);
         if (offers.length) {
@@ -2448,10 +2476,10 @@ function RouteBuilderScreenContent() {
         }
       })
       .catch(() => {
-        if (!cancelled) setRentalOffers([]);
+        if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) setRentalOffers([]);
       })
       .finally(() => {
-        if (!cancelled) setRentalOffersLoading(false);
+        if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) setRentalOffersLoading(false);
       });
     return () => { cancelled = true; };
   }, [rentalSuggestion.cacheKey, sessionId]);
@@ -2492,6 +2520,8 @@ function RouteBuilderScreenContent() {
   }
 
   async function loadRouteToursForStops(inputStops: BuilderStop[], geometry?: ProviderRouteGeometry | null, retryingLive = false) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const anchors = inputStops
       .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
       .slice(0, 18)
@@ -2510,19 +2540,23 @@ function RouteBuilderScreenContent() {
         source: 'viator',
         q: [routeName, inputStops[0]?.name, inputStops[inputStops.length - 1]?.name].filter(Boolean).join(' '),
       });
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       const results = response.results ?? [];
       setRouteTours(results);
       setRouteToursStatus(response.live_message || '');
       if (!retryingLive && results.length === 0 && response.live_status === 'processing') {
         setTimeout(() => {
+          if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
           loadRouteToursForStops(inputStops, geometry, true).catch(() => {});
         }, 6500);
       }
     } catch {
-      setRouteTours([]);
-      setRouteToursStatus('');
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        setRouteTours([]);
+        setRouteToursStatus('');
+      }
     } finally {
-      setRouteToursLoading(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteToursLoading(false);
     }
   }
 
@@ -2573,20 +2607,26 @@ function RouteBuilderScreenContent() {
 
   async function getRouteBuilderLocation() {
     if (userLoc) return userLoc;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const { status } = await Location.requestForegroundPermissionsAsync();
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
     if (status !== 'granted') {
       Alert.alert('Location needed', 'Allow location or type a start city so Trailhead knows where this route begins.');
       return null;
     }
     const fix = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
     const loc = { lat: fix.coords.latitude, lng: fix.coords.longitude };
     setStoreUserLoc(loc);
     return loc;
   }
 
   async function setWizardStartFromLocation() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const loc = await getRouteBuilderLocation();
-    if (!loc) return;
+    if (!loc || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return false;
     const start: BuilderStop = {
       id: `start_${Date.now()}`,
       day: 1,
@@ -2606,6 +2646,7 @@ function RouteBuilderScreenContent() {
     setStartQuery('');
     setPendingType('waypoint');
     fly(start.lat, start.lng, 10);
+    return true;
   }
 
   function rebalanceFrameworkTargets(prev: BuilderStop[], anchor: BuilderStop): BuilderStop[] {
@@ -2660,18 +2701,25 @@ function RouteBuilderScreenContent() {
 
   async function runSearch() {
     if (!query.trim()) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const searchQuery = query;
     setSearching(true);
     try {
-      setSearchResults(await resolveRouteBuilderSearchResults({
-        query,
+      const results = await resolveRouteBuilderSearchResults({
+        query: searchQuery,
         offlinePlaces,
         searchOnline: geocodePlaces,
-        catalogFirst: isRouteBuilderCategoryQuery(query),
-      }));
+        catalogFirst: isRouteBuilderCategoryQuery(searchQuery),
+      });
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      setSearchResults(results);
     } catch {
-      setSearchResults(searchOfflineRouteBuilderPlaces(offlinePlaces, query.trim()));
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        setSearchResults(searchOfflineRouteBuilderPlaces(offlinePlaces, searchQuery.trim()));
+      }
     } finally {
-      setSearching(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setSearching(false);
     }
   }
 
@@ -2715,6 +2763,9 @@ function RouteBuilderScreenContent() {
   }
 
   async function runDiscovery(tab: DiscoveryTab, target: { lat: number; lng: number }, leg: LegSearchContext | null, opts: { focusMap?: boolean; retryingLive?: boolean } = {}) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestIsCurrent = () => accountRequestIsCurrent(requestEpoch, requestAccountId);
     const key = discoveryKeyFor(tab, target, leg);
     setActiveDiscoveryKey(key);
     const useLeg = !!leg;
@@ -2723,6 +2774,7 @@ function RouteBuilderScreenContent() {
     if (opts.focusMap !== false) fly(target.lat, target.lng, useLeg ? 8 : 9);
     try {
       const searchLeg = leg ? await resolveLegSearchContext(leg) : null;
+      if (!requestIsCurrent()) return;
       if (tab === 'camps') {
         if (useLeg) {
           const radius = Math.max(34, Math.min(62, searchLeg!.miles / 3.5 + 14));
@@ -2738,6 +2790,7 @@ function RouteBuilderScreenContent() {
             include_stale: true,
             limit: 140,
           }).catch(() => null));
+          if (!requestIsCurrent()) return;
           if (found.length === 0) {
             found = uniqueByGeo((await Promise.all(
               legSamplePoints(searchLeg!).map(point => api.getDiscoveryCamps(point.lat, point.lng, radius, campTypeFilters, {
@@ -2746,6 +2799,7 @@ function RouteBuilderScreenContent() {
                 stale_after_hours: 6,
               }).catch(() => []))
             )).flat());
+            if (!requestIsCurrent()) return;
           }
           const offlineCamps = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['camp'], 18)
             .map(point => offlinePoiToCamp(point))
@@ -2763,6 +2817,7 @@ function RouteBuilderScreenContent() {
               surface: 'route_builder_overnight',
               stale_after_hours: 6,
             }).catch(() => []);
+            if (!requestIsCurrent()) return;
             scoped = filterCampsByPhotoMode(endpointCamps, campPhotoOnly)
               .map(camp => withLegProjection(camp, searchLeg!))
               .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b) || haversineMi(a, searchLeg!.to) - haversineMi(b, searchLeg!.to));
@@ -2781,6 +2836,7 @@ function RouteBuilderScreenContent() {
               fallbackText = ' near the day-end area';
             }
           }
+          if (!requestIsCurrent()) return;
           storeDiscoveryResults(key, {
             camps: scoped,
             summary: builderResultSummary(
@@ -2805,16 +2861,19 @@ function RouteBuilderScreenContent() {
             include_stale: true,
             limit: 120,
           }).catch(() => null));
+          if (!requestIsCurrent()) return;
           if (liveCamps.length === 0) {
             liveCamps = await api.getDiscoveryCamps(target.lat, target.lng, 45, campTypeFilters, {
               ...campDiscoveryRequestOptions,
               surface: 'route_builder_area',
               stale_after_hours: 6,
             }).catch(() => []);
+            if (!requestIsCurrent()) return;
           }
           const found = filterCampsByPhotoMode(uniqueByGeo([...liveCamps, ...offlineCamps]), campPhotoOnly)
             .filter(camp => campMatchesFilters(camp, campTypeFilters, campPreferenceMode))
             .sort((a, b) => campPreferenceScore(a) - campPreferenceScore(b));
+          if (!requestIsCurrent()) return;
           storeDiscoveryResults(key, {
             camps: found,
             summary: builderResultSummary(found.length, 'camp', `${campPhotoOnly ? ' with photos' : ''} near this area`, campPreferenceLabel.toLowerCase()),
@@ -2836,6 +2895,7 @@ function RouteBuilderScreenContent() {
             include_stale: true,
             limit: 120,
           }).catch(() => null));
+          if (!requestIsCurrent()) return;
           const offlineFuel = routeScopedOfflinePlaces(offlinePlaces, searchLeg!, ['fuel', 'propane']);
           const stations = uniqueByGeo([...intelFuel, ...offlineFuel.map(poiToGasStation)]);
           if (stations.length === 0) {
@@ -2856,6 +2916,7 @@ function RouteBuilderScreenContent() {
                 dedupe: uniqueByGeo,
               }),
             ]);
+            if (!requestIsCurrent()) return;
             stations.push(...uniqueByGeo([
               ...mapboxFuel.map(poiToGasStation),
               ...nrelStations,
@@ -2868,12 +2929,14 @@ function RouteBuilderScreenContent() {
               provider: point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6),
               dedupe: uniqueByGeo,
             });
+            if (!requestIsCurrent()) return;
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           const scoped = spreadAlongLeg(stations
             .map(st => withLegProjection(st, searchLeg!))
             .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(searchLeg!.miles) + 18)
           );
+          if (!requestIsCurrent()) return;
           storeDiscoveryResults(key, { gas: scoped, summary: builderResultSummary(scoped.length, 'fuel stop', ' along this leg') });
         } else {
           const intelFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
@@ -2887,6 +2950,7 @@ function RouteBuilderScreenContent() {
             include_stale: true,
             limit: 80,
           }).catch(() => null));
+          if (!requestIsCurrent()) return;
           const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], 45);
           const stations = uniqueByGeo([...intelFuel, ...offlineFuel.map(poiToGasStation)]);
           if (stations.length === 0) {
@@ -2904,6 +2968,7 @@ function RouteBuilderScreenContent() {
                 provider: point => searchMapContextNearby('gas station', point, 35, 'fuel', 8),
               }),
             ]);
+            if (!requestIsCurrent()) return;
             stations.push(...uniqueByGeo([
               ...mapboxFuel.map(poiToGasStation),
               ...nrelStations,
@@ -2915,9 +2980,11 @@ function RouteBuilderScreenContent() {
               points: [target],
               provider: point => searchNominatimNearby('gas station', point, 35, 'fuel', 8),
             });
+            if (!requestIsCurrent()) return;
             stations.push(...nominatimFuel.map(poiToGasStation));
           }
           stations.sort((a, b) => (a.route_distance_mi ?? haversineMi(a, target)) - (b.route_distance_mi ?? haversineMi(b, target)));
+          if (!requestIsCurrent()) return;
           storeDiscoveryResults(key, { gas: stations, summary: builderResultSummary(stations.length, 'fuel stop', ' near this area') });
         }
       } else if (tab === 'tours') {
@@ -2943,6 +3010,7 @@ function RouteBuilderScreenContent() {
           source: 'viator',
           q,
         }).catch(() => ({ results: [] as BookableExperience[], live_status: '', live_message: '' }));
+        if (!requestIsCurrent()) return;
         const found = response.results ?? [];
         storeDiscoveryResults(key, {
           tours: found,
@@ -2952,6 +3020,7 @@ function RouteBuilderScreenContent() {
         });
         if (!found.length && response.live_status === 'processing' && !opts.retryingLive) {
           setTimeout(() => {
+            if (!requestIsCurrent()) return;
             runDiscovery(tab, target, leg, { focusMap: false, retryingLive: true }).catch(() => {});
           }, 7000);
         }
@@ -2985,6 +3054,7 @@ function RouteBuilderScreenContent() {
             summary: item.summary || item.why_go, access_note: item.access_notes,
           } as any)) };
         });
+        if (!requestIsCurrent()) return;
         const scoped = ((smart.places ?? []) as OsmPoi[])
           .map(smartPlaceToExcursion)
           .filter(item => !item.sensitive_location || item.source_confidence === 'high')
@@ -3006,10 +3076,12 @@ function RouteBuilderScreenContent() {
             include_stale: true,
             limit: 140,
           }).catch(() => null), ['fuel', 'propane', 'camp', 'camping']);
+          if (!requestIsCurrent()) return;
           if (found.length === 0) {
             found = uniqueByGeo((await Promise.all(
               legSamplePoints(searchLeg!).map(point => api.getNearbySmartPack(point.lat, point.lng, radius, ROUTE_POI_TYPES, legRoute, { scope_id: key, recommended_day: searchLeg!.targetDay ?? activeDay, route_scope: 'leg' }).then(pack => pack.places as OsmPoi[]).catch(() => []))
             )).flat());
+            if (!requestIsCurrent()) return;
           }
           const offlineRoutePlaces = routeScopedOfflinePlaces(
             filteredOfflinePlaces,
@@ -3024,6 +3096,7 @@ function RouteBuilderScreenContent() {
               limitPerQuery: 3,
               provider: searchMapContextNearby,
             }));
+            if (!requestIsCurrent()) return;
             routePlaces.push(...mapboxPlaces);
           }
           if (routePlaces.length === 0) {
@@ -3033,12 +3106,14 @@ function RouteBuilderScreenContent() {
               limitPerQuery: 3,
               provider: searchNominatimNearby,
             }));
+            if (!requestIsCurrent()) return;
             routePlaces.push(...nominatimPlaces);
           }
           const scoped = spreadAlongLeg(routePlaces
               .map(poi => withLegProjection(poi, searchLeg!))
               .filter(poi => poi.route_distance_mi <= routeBufferForMiles(searchLeg!.miles) + 5)
           );
+          if (!requestIsCurrent()) return;
           storeDiscoveryResults(key, { pois: scoped, summary: builderResultSummary(scoped.length, 'place', ' along this leg') });
         } else {
           let found = routeIntelligencePois(await api.getRouteIntelligence({
@@ -3053,10 +3128,12 @@ function RouteBuilderScreenContent() {
             include_stale: true,
             limit: 100,
           }).catch(() => null), ['fuel', 'propane', 'camp', 'camping']);
+          if (!requestIsCurrent()) return;
           if (found.length === 0) {
             found = await api.getNearbySmartPack(target.lat, target.lng, 40, ROUTE_POI_TYPES, excursionRouteCoords())
               .then(pack => pack.places as OsmPoi[])
               .catch(() => api.getOsmPois(target.lat, target.lng, 40, ROUTE_POI_TYPES).catch(() => []));
+            if (!requestIsCurrent()) return;
           }
           const offlineRoutePlaces = areaScopedOfflinePlaces(
             filteredOfflinePlaces,
@@ -3072,6 +3149,7 @@ function RouteBuilderScreenContent() {
               limitPerQuery: 5,
               provider: searchMapContextNearby,
             }));
+            if (!requestIsCurrent()) return;
             routePlaces.push(...mapboxPlaces);
           }
           if (routePlaces.length === 0) {
@@ -3081,19 +3159,23 @@ function RouteBuilderScreenContent() {
               limitPerQuery: 5,
               provider: searchNominatimNearby,
             }));
+            if (!requestIsCurrent()) return;
             routePlaces.push(...nominatimPlaces);
           }
           const scoped = routePlaces
             .map(poi => ({ ...poi, route_distance_mi: poi.route_distance_mi ?? haversineMi(poi, target) }))
             .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
+          if (!requestIsCurrent()) return;
           storeDiscoveryResults(key, { pois: scoped, summary: builderResultSummary(scoped.length, 'place', ' near this area') });
         }
       }
     } catch {
-      Alert.alert('Search failed', 'Could not load nearby stops right now.');
-      setInlineSearch(null);
+      if (requestIsCurrent()) {
+        Alert.alert('Search failed', 'Could not load nearby stops right now.');
+        setInlineSearch(null);
+      }
     } finally {
-      setDiscoverLoading(false);
+      if (requestIsCurrent()) setDiscoverLoading(false);
     }
   }
 
@@ -3571,6 +3653,9 @@ function RouteBuilderScreenContent() {
   }
 
   async function openCampDetail(camp: CampsitePin) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    selectedCampRef.current = camp;
     setSelectedCamp(camp);
     setCampDetail(null);
     setCampInsight(null);
@@ -3578,13 +3663,23 @@ function RouteBuilderScreenContent() {
     setCampWeather(null);
     setCampFullness(null);
     fly(camp.lat, camp.lng, 13);
-    api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(setCampWeather).catch(() => {});
-    if (camp.id) api.getCampFullness(camp.id).then(setCampFullness).catch(() => {});
+    api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(weather => {
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId) && selectedCampRef.current?.id === camp.id) {
+        setCampWeather(weather);
+      }
+    }).catch(() => {});
+    if (camp.id) api.getCampFullness(camp.id).then(fullness => {
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId) && selectedCampRef.current?.id === camp.id) {
+        setCampFullness(fullness);
+      }
+    }).catch(() => {});
     if (camp.id) {
       api.getCampsiteDetail(camp.id)
         .then(detail => enrichCampDetailWithGoogle(detail, camp))
         .then(detail => {
-          if (selectedCampRef.current?.id === camp.id) setCampDetail({ ...detail, description: stripHtml(detail.description) });
+          if (accountRequestIsCurrent(requestEpoch, requestAccountId) && selectedCampRef.current?.id === camp.id) {
+            setCampDetail({ ...detail, description: stripHtml(detail.description) });
+          }
         })
         .catch(() => {});
     }
@@ -3592,14 +3687,13 @@ function RouteBuilderScreenContent() {
 
   async function loadFullCampDetail() {
     if (!selectedCamp) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const camp = selectedCamp;
     setDetailLoading(true);
     try {
       const detail = await enrichCampDetailWithGoogle(await api.getCampsiteDetail(camp.id), camp);
-      if (selectedCampRef.current?.id !== camp.id) {
-        setDetailLoading(false);
-        return;
-      }
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId) || selectedCampRef.current?.id !== camp.id) return;
       const insight = await api.getCampsiteInsight({
         name: camp.name,
         lat: camp.lat,
@@ -3609,14 +3703,12 @@ function RouteBuilderScreenContent() {
         amenities: detail.amenities ?? [],
         facility_id: camp.id ?? '',
       });
-      if (selectedCampRef.current?.id !== camp.id) {
-        setDetailLoading(false);
-        return;
-      }
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId) || selectedCampRef.current?.id !== camp.id) return;
       setCampDetail({ ...detail, description: stripHtml(detail.description) });
       setCampInsight(insight);
       setShowCampDetail(true);
     } catch (e: any) {
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (e instanceof PaywallError) {
         setPaywallCode(e.code || 'camp_detail');
         setPaywallMessage(e.message || 'Use credits to open full campsite profiles. You can still add this camp to your route from the free preview.');
@@ -3633,16 +3725,13 @@ function RouteBuilderScreenContent() {
           source_confidence_notes: camp.source_freshness,
           description: stripHtml(camp.description) || 'This camp has a route preview, but a full profile has not been built yet. You can still add it to the trip and replace it later from the route.',
         } as CampsiteDetail, camp);
-        if (selectedCampRef.current?.id !== camp.id) {
-          setDetailLoading(false);
-          return;
-        }
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId) || selectedCampRef.current?.id !== camp.id) return;
         setCampDetail(fallbackDetail);
         setCampInsight(null);
         setShowCampDetail(true);
       }
     } finally {
-      setDetailLoading(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setDetailLoading(false);
     }
   }
 
@@ -3721,12 +3810,15 @@ function RouteBuilderScreenContent() {
       Alert.alert('Destination needed', 'Enter the place you want to end up at, then build the trip outline.');
       return null;
     }
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     if (manageLoading) setBuildingFramework(true);
     try {
       let start = orderedStops[0] ?? null;
       const startQ = startQuery.trim();
       if (startQ) {
         const [startPlace] = await geocodePlaces(startQ);
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
         if (!startPlace) {
           Alert.alert('Start not found', 'Try a city, address, trailhead, or map point for the route start.');
           return null;
@@ -3758,7 +3850,7 @@ function RouteBuilderScreenContent() {
         };
       } else if (!start && !startQ) {
         const loc = await getRouteBuilderLocation();
-        if (!loc) return null;
+        if (!loc || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
         start = {
           id: `start_${Date.now()}`,
           day: 1,
@@ -3773,6 +3865,7 @@ function RouteBuilderScreenContent() {
         };
       }
       const [place] = await geocodePlaces(q);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
       if (!place) {
         Alert.alert('Destination not found', 'Try a city, campground, park, trailhead, or map point.');
         return null;
@@ -3801,7 +3894,7 @@ function RouteBuilderScreenContent() {
       fly((start.lat + destination.lat) / 2, (start.lng + destination.lng) / 2, 5);
       return next;
     } finally {
-      if (manageLoading) setBuildingFramework(false);
+      if (manageLoading && accountRequestIsCurrent(requestEpoch, requestAccountId)) setBuildingFramework(false);
     }
   }
 
@@ -3849,6 +3942,8 @@ function RouteBuilderScreenContent() {
   }
 
   async function buildRouteSpine(first: BuilderStop, last: BuilderStop): Promise<RouteSpineBuild | null> {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     if (closeEnough(first, last)) {
       setRouteGeometry(null);
       return null;
@@ -3877,6 +3972,7 @@ function RouteBuilderScreenContent() {
       });
       const units = routeUnitsParam(weatherUnitMode);
       const routed = await buildBridgeRoute(locations.map(loc => ({ lat: loc.lat, lng: loc.lng, type: loc.type })), opts, units);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
       const geometry = providerGeometryFromRoute(routed, units);
       if (geometry.coords.length >= 2) {
         setRouteGeometry(geometry);
@@ -3886,6 +3982,7 @@ function RouteBuilderScreenContent() {
       Alert.alert('Route needs another stop', 'Trailhead could not build a road route for this outline. Add a real stop, allow ferries, or save it as a draft after choosing stops.');
       return null;
     } catch (e: any) {
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
       setRouteGeometry(null);
       if (e instanceof ApiError && e.status === 422) {
         const detail: any = e.detail;
@@ -3898,6 +3995,8 @@ function RouteBuilderScreenContent() {
   }
 
   async function buildSavedRouteGeometry(inputStops: BuilderStop[]): Promise<SavedRouteGeometryPayload | null> {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const navStops = filterDurableNavigationStops(orderBuilderStops(inputStops));
     if (navStops.length < 2) return null;
     try {
@@ -3916,6 +4015,7 @@ function RouteBuilderScreenContent() {
         },
         units,
       );
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
       const geometry = providerGeometryFromRoute(routed, units);
       if (geometry.coords.length < 2) return null;
       setRouteGeometry(geometry);
@@ -3927,7 +4027,9 @@ function RouteBuilderScreenContent() {
         ts: Date.now(),
       };
     } catch (err) {
-      console.warn('Route Builder geometry save route failed', err instanceof Error ? err.message : err);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+        console.warn('Route Builder geometry save route failed', err instanceof Error ? err.message : err);
+      }
       return null;
     }
   }
@@ -4259,12 +4361,15 @@ function RouteBuilderScreenContent() {
   }
 
   async function buildRouteFramework() {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     setBuildingFramework(true);
     setFrameworkStatus('Setting up your trip...');
     let base = orderedStops;
     try {
       if (endQuery.trim()) {
         const next = await addDestinationFromSetup(false);
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         if (!next) return;
         base = next;
       }
@@ -4284,6 +4389,7 @@ function RouteBuilderScreenContent() {
       ];
 
       const spineBuild = await buildRouteSpine(first, last);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (!spineBuild || spineBuild.spine.length < 2) return;
       const { spine, geometry: buildGeometry } = spineBuild;
       const routeMiles = routeDistanceMi(spine) || roughMiles;
@@ -4293,6 +4399,7 @@ function RouteBuilderScreenContent() {
       if (tripBuildMode === 'recommended') {
         setFrameworkStatus('Finding overnight options...');
         const anchors = await findCampAwareAnchors(count, nextDays, spine, routeMiles);
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         for (const anchor of anchors) {
           framework.push(anchor.stop);
           if (anchor.strong) strongAnchors += 1;
@@ -4303,6 +4410,7 @@ function RouteBuilderScreenContent() {
       }
       setFrameworkStatus('Checking fuel range and resupply...');
       const fuelStops = await findFuelStopsForRoute(count, spine, routeMiles);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       framework.push(...fuelStops);
 
       if (tripLoop) {
@@ -4355,6 +4463,7 @@ function RouteBuilderScreenContent() {
       setFrameworkStatus('Checking tours along your route...');
       loadRouteToursForStops(framework, buildGeometry).catch(() => {});
       setFrameworkStatus('Route built. Preparing your trip overview...');
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       await commitTrip(
         buildTrip(framework, nextDays, nextName, buildGeometry),
         true,
@@ -4365,7 +4474,7 @@ function RouteBuilderScreenContent() {
         buildGeometry,
       );
     } finally {
-      setBuildingFramework(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setBuildingFramework(false);
     }
   }
 
@@ -4627,6 +4736,9 @@ function RouteBuilderScreenContent() {
     fallbackGeometry?: ProviderRouteGeometry | null,
   ) {
     if (routeSaving) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestToken = useStore.getState().token;
     setRouteSaving(true);
     const knownGoodGeometry = fallbackGeometry?.coords?.length ? fallbackGeometry : routeGeometry;
     const routeGeometryPayload = await buildSavedRouteGeometry(inputStops)
@@ -4639,6 +4751,9 @@ function RouteBuilderScreenContent() {
             ts: Date.now(),
           } satisfies SavedRouteGeometryPayload
         : null);
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+      return;
+    }
     const geometryForTrip = routeGeometryPayload?.coords?.length
       ? savedGeometryFromCoords(
           routeGeometryPayload.coords,
@@ -4687,7 +4802,8 @@ function RouteBuilderScreenContent() {
         planned_at: Date.now(),
       });
       await saveOfflineTrip(tripToSave);
-      if (user && token) {
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      if (requestAccountId && requestToken) {
         api.saveTrip(tripToSave, routeGeometryPayload, builderState, 'mobile-route-builder').catch(err => {
           console.warn('Route Builder server save failed', err?.message ?? err);
         });
@@ -4695,12 +4811,14 @@ function RouteBuilderScreenContent() {
       if (openMap) {
         if (settleBeforeOpenMs > 0) {
           await new Promise(resolve => setTimeout(resolve, settleBeforeOpenMs));
+          if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         }
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         setRouteTabMode('hub');
         router.replace('/(tabs)/map');
       }
     } finally {
-      setRouteSaving(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteSaving(false);
     }
   }
 
@@ -4791,6 +4909,57 @@ function RouteBuilderScreenContent() {
     setSelectedRoutePlace(null);
   }
 
+  useEffect(() => {
+    const nextScope = `${accountEpoch}:${String(user?.id ?? '')}`;
+    if (routeBuilderAccountScopeRef.current === nextScope) return;
+    routeBuilderAccountScopeRef.current = nextScope;
+    consumedRouteBuilderDraftRef.current = '';
+    resetRouteDraft();
+    setRouteTabMode('hub');
+    setRouteTours([]);
+    setRouteToursLoading(false);
+    setRouteToursLoadedFor('');
+    setRouteToursStatus('');
+    setSavedTrails([]);
+    setRouteTripCards({});
+    setOfflinePlaces([]);
+    setFuelEstimate(null);
+    setRouteGeometry(null);
+    setCopilotAutoBuildRunId(0);
+    setBuildingFramework(false);
+    setRouteSaving(false);
+    setQuery('');
+    setSearching(false);
+    setDiscoverTab('camps');
+    setDiscoverLoading(false);
+    setPendingType('start');
+    setInsertAfterId(null);
+    setInsertTargetDay(null);
+    setReplaceStopId(null);
+    selectedCampRef.current = null;
+    setSelectedCamp(null);
+    setCampDetail(null);
+    setCampWeather(null);
+    setCampFullness(null);
+    setCampInsight(null);
+    setShowCampDetail(false);
+    setCampGalleryIndex(null);
+    setQuickCampPhotoIndex(0);
+    setDetailLoading(false);
+    setPaywallVisible(false);
+    setActivePlaceFilters(DEFAULT_PLACE_FILTERS);
+    setShowPlaceFilters(false);
+    setWelcomeSetupPreferences(null);
+    setWelcomeDefaultsApplied(false);
+    setRentalOffers([]);
+    setRentalOffersLoading(false);
+    setRentalIdeaSaved(false);
+    setRouteActionSheet(null);
+    setRouteNameDraft('');
+    setShowNewRouteConfirm(false);
+    setRouteBuilderDraftLoading(true);
+  }, [accountEpoch, user?.id]);
+
   function beginCleanNewRoute() {
     resetRouteDraft();
     setActiveTrip(null);
@@ -4807,9 +4976,13 @@ function RouteBuilderScreenContent() {
 
   async function saveCloseAndStartNewRoute() {
     if (routeSaving) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestToken = useStore.getState().token;
     setRouteSaving(true);
     try {
       const geometryPayload = orderedStops.length >= 2 ? await buildSavedRouteGeometry(orderedStops) : null;
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       const geometryForDraft = geometryPayload?.coords?.length
         ? savedGeometryFromCoords(
             geometryPayload.coords,
@@ -4822,9 +4995,13 @@ function RouteBuilderScreenContent() {
         const tripToSave = geometryPayload ? { ...draftTrip, route_geometry: geometryPayload } : draftTrip;
         setActiveTrip(tripToSave);
         await saveOfflineTrip(tripToSave).catch(() => {});
-        api.saveTrip(tripToSave, geometryPayload, null, 'mobile-route-builder-close').catch(err => {
-          console.warn('Route Builder close save failed', err?.message ?? err);
-        });
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+        if (requestAccountId && requestToken) {
+          api.saveTrip(tripToSave, geometryPayload, null, 'mobile-route-builder-close').catch(err => {
+            console.warn('Route Builder close save failed', err?.message ?? err);
+          });
+        }
+        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         addTripToHistory({
           trip_id: tripToSave.trip_id,
           trip_name: tripToSave.plan.trip_name,
@@ -4834,10 +5011,11 @@ function RouteBuilderScreenContent() {
           planned_at: Date.now(),
         });
       }
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setShowNewRouteConfirm(false);
       beginCleanNewRoute();
     } finally {
-      setRouteSaving(false);
+      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteSaving(false);
     }
   }
 
@@ -4898,7 +5076,10 @@ function RouteBuilderScreenContent() {
   }
 
   async function openSavedRoute(tripId: string) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
     const trip = activeTrip?.trip_id === tripId ? activeTrip : await loadOfflineTrip(tripId);
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
     if (trip) {
       setActiveTrip(trip, activeTrip?.trip_id !== tripId);
       setRouteTabMode('hub');
@@ -4911,8 +5092,10 @@ function RouteBuilderScreenContent() {
       return;
     }
     const serverTrip = await api.getTrip(tripId).catch(() => null);
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
     if (serverTrip) {
       await saveOfflineTrip(serverTrip).catch(() => {});
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setActiveTrip(serverTrip, false);
       setRouteTabMode('hub');
       router.replace('/(tabs)/map');
@@ -4933,7 +5116,10 @@ function RouteBuilderScreenContent() {
         text: 'Delete',
         style: 'destructive',
         onPress: async () => {
+          const requestEpoch = accountStorage.epoch();
+          const requestAccountId = useStore.getState().user?.id;
           await deleteOfflineTrail(trail.id).catch(() => {});
+          if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
           setSavedTrails(prev => prev.filter(item => item.id !== trail.id));
         },
       },
@@ -5306,7 +5492,9 @@ function RouteBuilderScreenContent() {
                   blurOnSubmit
                   onSubmitEditing={() => { Keyboard.dismiss(); if (canMoveNext) nextStep(); }}
                 />
-                <TouchableOpacity style={s.currentLocationBtn} onPress={async () => { await setWizardStartFromLocation(); setWizardStep(1); }}>
+                <TouchableOpacity style={s.currentLocationBtn} onPress={async () => {
+                  if (await setWizardStartFromLocation()) setWizardStep(1);
+                }}>
                   <Ionicons name="locate-outline" size={13} color={C.orange} />
                   <Text style={s.currentLocationText}>CURRENT</Text>
                 </TouchableOpacity>

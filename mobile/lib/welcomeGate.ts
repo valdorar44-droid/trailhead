@@ -1,4 +1,4 @@
-import { storage } from '@/lib/storage';
+import { accountStorage, storage } from '@/lib/storage';
 
 export const WELCOME_GATE_SEEN_KEY = 'trailhead_welcome_gate_seen_v1';
 export const WELCOME_WALKTHROUGH_SEEN_KEY = 'trailhead_first_run_onboarding_seen_v3';
@@ -64,8 +64,8 @@ export async function saveWelcomeSetupPreferences(preferences: WelcomeSetupPrefe
     completedAt: preferences.completedAt ?? Date.now(),
     skippedAt: undefined,
   };
-  await storage.set(WELCOME_SETUP_PREFS_KEY, JSON.stringify(saved));
-  await storage.set(WELCOME_SETUP_STATUS_KEY, 'completed');
+  await accountStorage.set(WELCOME_SETUP_PREFS_KEY, JSON.stringify(saved));
+  await accountStorage.set(WELCOME_SETUP_STATUS_KEY, 'completed');
 }
 
 export async function markWelcomeSetupSkipped(preferences?: Partial<WelcomeSetupPreferences>) {
@@ -74,13 +74,13 @@ export async function markWelcomeSetupSkipped(preferences?: Partial<WelcomeSetup
       ...normalizeWelcomeSetupPreferences(preferences),
       skippedAt: Date.now(),
     };
-    await storage.set(WELCOME_SETUP_PREFS_KEY, JSON.stringify(saved));
+    await accountStorage.set(WELCOME_SETUP_PREFS_KEY, JSON.stringify(saved));
   }
-  await storage.set(WELCOME_SETUP_STATUS_KEY, 'skipped');
+  await accountStorage.set(WELCOME_SETUP_STATUS_KEY, 'skipped');
 }
 
 export async function loadWelcomeSetupPreferences() {
-  const raw = await storage.get(WELCOME_SETUP_PREFS_KEY).catch(() => null);
+  const raw = await accountStorage.get(WELCOME_SETUP_PREFS_KEY).catch(() => null);
   if (!raw) return null;
   try {
     return normalizeWelcomeSetupPreferences(JSON.parse(raw) as WelcomeSetupPreferences);

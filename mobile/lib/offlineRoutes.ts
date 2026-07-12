@@ -1,9 +1,9 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { api } from './api';
+import { accountStorage } from './storage';
 
 const DIR = FileSystem.documentDirectory + 'offline_routes/';
 const INDEX_PATH = DIR + '_index.json';
-const MAX_SAVED_ROUTES = 3;
 
 export interface SavedRouteGeometry {
   coords: [number, number][];
@@ -42,19 +42,22 @@ export async function getSavedRouteIndex(): Promise<string[]> {
 
 export async function saveRouteGeometry(tripId: string | null | undefined, data: Omit<SavedRouteGeometry, 'tripId' | 'ts'> & { tripId?: string | null; ts?: number }) {
   if (!tripId || !Array.isArray(data.coords) || data.coords.length < 2) return;
+  const epoch = accountStorage.epoch();
   try {
-    await ensureDir();
     const payload: SavedRouteGeometry = {
       ...data,
       tripId,
       ts: data.ts ?? Date.now(),
     };
-    await FileSystem.writeAsStringAsync(routePath(tripId), JSON.stringify(payload));
-    const index = await getSavedRouteIndex();
-    const updated = [tripId, ...index.filter(id => id !== tripId)].slice(0, MAX_SAVED_ROUTES);
-    const evicted = index.filter(id => !updated.includes(id));
-    await Promise.all(evicted.map(id => FileSystem.deleteAsync(routePath(id), { idempotent: true }).catch(() => {})));
-    await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(updated));
+    const stored = await accountStorage.run(async () => {
+      await ensureDir();
+      await FileSystem.writeAsStringAsync(routePath(tripId), JSON.stringify(payload));
+      const index = await getSavedRouteIndex();
+      const updated = [tripId, ...index.filter(id => id !== tripId)];
+      await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(updated));
+      return true;
+    }, epoch);
+    if (!stored) return;
     api.saveTripGeometry(tripId, payload).catch(() => {});
   } catch {
     // Route geometry is a convenience cache; never crash navigation for it.
@@ -73,10 +76,13 @@ export async function loadRouteGeometry(tripId: string | null | undefined): Prom
 
 export async function deleteRouteGeometry(tripId: string | null | undefined) {
   if (!tripId) return;
+  const epoch = accountStorage.epoch();
   try {
-    await FileSystem.deleteAsync(routePath(tripId), { idempotent: true });
-    const index = await getSavedRouteIndex();
-    await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(index.filter(id => id !== tripId)));
+    await accountStorage.run(async () => {
+      await FileSystem.deleteAsync(routePath(tripId), { idempotent: true });
+      const index = await getSavedRouteIndex();
+      await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(index.filter(id => id !== tripId)));
+    }, epoch);
   } catch {
     // Route geometry is a convenience cache; never block trip edits on cleanup.
   }

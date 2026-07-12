@@ -16,6 +16,7 @@ import { diagnoseValhalla, routeValhalla } from 'expo-valhalla-routing';
 import { ROUTING_REGIONS } from '../../lib/useOfflineFiles';
 import { api } from '../../lib/api';
 import { TRAILHEAD_API_BASE } from '../../lib/apiBase';
+import { accountStorage, type AccountStorageEpoch } from '../../lib/storage';
 
 export interface RouteResult {
   coords:        [number, number][];
@@ -144,18 +145,20 @@ function routeMatchesRequest(parsed: any, pairs: string[]): boolean {
   return minDistanceToRouteM(reqStart, coords) <= LAST_ROUTE_START_TOLERANCE_M;
 }
 
-async function saveRoute(pairs: string[], result: RouteResult) {
+async function saveRoute(pairs: string[], result: RouteResult, epoch: AccountStorageEpoch) {
   try {
-    await ensureCacheDir();
-    const key  = cacheKey(pairs);
-    const path = `${CACHE_DIR}${key}.json`;
-    const json = JSON.stringify({ ...result, coords: cleanRouteCoords(result.coords), requestedPairs: pairs, routeCacheVersion: ROUTE_CACHE_VERSION, savedAt: Date.now() });
-    // Save keyed route + always overwrite last_route (the "I was just navigating" fallback)
-    await Promise.all([
-      FileSystem.writeAsStringAsync(path, json),
-      FileSystem.writeAsStringAsync(LAST_ROUTE_PATH, json),
-    ]);
-    console.log('[RouteCache] saved key:', key);
+    await accountStorage.run(async () => {
+      await ensureCacheDir();
+      const key  = cacheKey(pairs);
+      const path = `${CACHE_DIR}${key}.json`;
+      const json = JSON.stringify({ ...result, coords: cleanRouteCoords(result.coords), requestedPairs: pairs, routeCacheVersion: ROUTE_CACHE_VERSION, savedAt: Date.now() });
+      // Save keyed route and the most recent navigation fallback together.
+      await Promise.all([
+        FileSystem.writeAsStringAsync(path, json),
+        FileSystem.writeAsStringAsync(LAST_ROUTE_PATH, json),
+      ]);
+      console.log('[RouteCache] saved key:', key);
+    }, epoch);
   } catch (e) {
     console.warn('[RouteCache] save failed', e);
   }
@@ -241,6 +244,7 @@ export async function fetchRoute(
   routeOpts:   RouteOpts,
   providerMode: RouteProviderMode = 'trailhead',
 ): Promise<RouteResult> {
+  const routeStorageEpoch = accountStorage.epoch();
   pairs = normalizePairs(pairs);
   console.log('[fetchRoute] pairs:', pairs);
   if (pairs.length < 2) return buildNoRoute(pairs, 'Route needs two valid points.');
@@ -252,7 +256,7 @@ export async function fetchRoute(
     if (!offline) return null;
     const sourced = sourceRoute(offline, 'offline-valhalla', `offline valhalla${offline.debug ? ` · ${offline.debug}` : ''}`);
     console.log('[fetchRoute] native offline Valhalla route — saving to cache');
-    await saveRoute(pairs, sourced);
+    await saveRoute(pairs, sourced, routeStorageEpoch);
     return sourced;
   };
 
@@ -264,7 +268,7 @@ export async function fetchRoute(
     if (!offline) return null;
     const sourced = sourceRoute(offline, 'offline-js-router', 'offline JS router');
     console.log('[fetchRoute] offline JS route — saving to cache');
-    await saveRoute(pairs, sourced);
+    await saveRoute(pairs, sourced, routeStorageEpoch);
     return sourced;
   };
 
@@ -320,7 +324,7 @@ export async function fetchRoute(
     try {
       const route = await fetchExtremeMapbox(pairs, fromIdx, routeOpts);
       console.log('[fetchRoute] Explorer Mapbox route — saving to cache');
-      await saveRoute(pairs, route);
+      await saveRoute(pairs, route, routeStorageEpoch);
       return route;
     } catch (e) {
       console.warn('[fetchRoute] Explorer Mapbox route failed', e);
@@ -347,7 +351,7 @@ export async function fetchRoute(
     try {
       const route = await engine();
       console.log('[fetchRoute] online route — saving to cache');
-      await saveRoute(pairs, route);
+      await saveRoute(pairs, route, routeStorageEpoch);
       return route;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);

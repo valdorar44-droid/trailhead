@@ -255,8 +255,8 @@ function geocodeOptionsQuery(options: GeocodeRequestOptions = {}) {
   };
 }
 
-async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
-  const token = await getToken();
+async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverride?: string): Promise<T> {
+  const token = tokenOverride === undefined ? await getToken() : tokenOverride;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
     ...(opts.headers as Record<string, string> ?? {}),
@@ -274,6 +274,10 @@ async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
     throw new ApiError(msg, res.status, detail);
   }
   return res.json();
+}
+
+async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
+  return reqWithToken(path, opts);
 }
 
 function appendExploreExperienceOptions(qs: URLSearchParams, options: ExploreExperienceQueryOptions = {}) {
@@ -317,6 +321,28 @@ export const api = {
       method: 'POST', body: JSON.stringify({ email }),
     }),
   me: () => req<User>('/api/auth/me'),
+  productFeatures: () => req<ProductFeatures>('/api/product/features'),
+  getCommunicationPreferences: () =>
+    req<CommunicationPreferences>('/api/communication-preferences'),
+  updateCommunicationPreferences: (preferences: CommunicationPreferencesUpdate) =>
+    req<CommunicationPreferences>('/api/communication-preferences', {
+      method: 'PUT',
+      body: JSON.stringify(preferences),
+    }),
+  unsubscribeAllCommunications: () =>
+    req<CommunicationPreferences>('/api/communication-preferences/unsubscribe-all', { method: 'POST' }),
+  createCommunityPublication: (publication: CommunityPublicationCreatePayload) =>
+    req<CommunityPublication>('/api/community/publications', {
+      method: 'POST',
+      body: JSON.stringify(publication),
+    }),
+  listCommunityPublications: (options: { limit?: number; cursor?: string } = {}) => {
+    const query = new URLSearchParams({ limit: String(options.limit ?? 50) });
+    if (options.cursor) query.set('cursor', options.cursor);
+    return req<CommunityPublicationPage>(`/api/community/publications?${query.toString()}`);
+  },
+  retractCommunityPublication: (publicationId: string) =>
+    req<CommunityPublication>(`/api/community/publications/${encodeURIComponent(publicationId)}/retract`, { method: 'POST' }),
 
   plan: (request: string, sessionId = '', options: PlanRequestOptions = {}) =>
     req<{ job_id: string; status: string }>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId, ...options }) }),
@@ -345,6 +371,8 @@ export const api = {
 
   registerPushToken: (token: string) =>
     req('/api/push-token', { method: 'POST', body: JSON.stringify({ token }) }),
+  deletePushToken: (authToken?: string) =>
+    reqWithToken<{ ok: boolean }>('/api/push-token', { method: 'DELETE' }, authToken),
   getSupportInbox: () =>
     req<{ threads: SupportThread[]; unread_count: number }>('/api/support/inbox'),
   getSupportThread: (threadId: number) =>
@@ -357,6 +385,80 @@ export const api = {
     req<ChatResponse>('/api/chat', { method: 'POST', body: JSON.stringify({ message, session_id: sessionId, current_trip: currentTrip ?? undefined, rig_context: rigContext ?? undefined }) }),
   getTrip: (id: string) => req<TripResult>(`/api/trip/${id}`),
   listTrips: (limit = 25) => req<{ trips: AccountTripSummary[] }>(`/api/trips?limit=${limit}`),
+  listLibrary: (options: AccountLibraryListOptions = {}) => {
+    const query = new URLSearchParams();
+    query.set('limit', String(options.limit ?? 50));
+    if (options.cursor) query.set('cursor', options.cursor);
+    if (options.entityType) query.set('entity_type', options.entityType);
+    if (options.includeArchived) query.set('include_archived', 'true');
+    return req<AccountLibraryPage>(`/api/library?${query.toString()}`);
+  },
+  createLibraryItem: (payload: AccountLibraryWritePayload) =>
+    req<AccountLibraryItem>('/api/library', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+  getLibraryItem: (canonicalId: string) =>
+    req<AccountLibraryItem>(`/api/library/${encodeURIComponent(canonicalId)}`),
+  updateLibraryItem: (canonicalId: string, payload: AccountLibraryWritePayload) =>
+    req<AccountLibraryItem>(`/api/library/${encodeURIComponent(canonicalId)}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+  archiveLibraryItem: (canonicalId: string, expectedRevision: number) =>
+    req<AccountLibraryItem>(`/api/library/${encodeURIComponent(canonicalId)}/archive`, {
+      method: 'POST',
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  restoreLibraryItem: (canonicalId: string, expectedRevision: number) =>
+    req<AccountLibraryItem>(`/api/library/${encodeURIComponent(canonicalId)}/restore`, {
+      method: 'POST',
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  deleteLibraryItem: (canonicalId: string, expectedRevision: number) =>
+    req<{ deleted: boolean; canonical_id: string; revision: number }>(
+      `/api/library/${encodeURIComponent(canonicalId)}?expected_revision=${expectedRevision}`,
+      { method: 'DELETE' },
+    ),
+  listTripDocumentsV2: (options: AccountTripDocumentListOptions = {}) => {
+    const query = new URLSearchParams();
+    query.set('limit', String(options.limit ?? 50));
+    if (options.cursor) query.set('cursor', options.cursor);
+    if (options.status) query.set('status', options.status);
+    if (options.includeArchived) query.set('include_archived', 'true');
+    return req<AccountTripDocumentPage>(`/api/trips/v2?${query.toString()}`);
+  },
+  createTripDocumentV2: (payload: AccountTripDocumentWritePayload, idempotencyKey: string) =>
+    req<AccountTripDocumentV2>('/api/trips/v2', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  getTripDocumentV2: (tripId: string) =>
+    req<AccountTripDocumentV2>(`/api/trips/v2/${encodeURIComponent(tripId)}`),
+  updateTripDocumentV2: (tripId: string, payload: AccountTripDocumentWritePayload, idempotencyKey: string) =>
+    req<AccountTripDocumentV2>(`/api/trips/v2/${encodeURIComponent(tripId)}`, {
+      method: 'PUT',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(payload),
+    }),
+  archiveTripDocumentV2: (tripId: string, expectedRevision: number, idempotencyKey: string) =>
+    req<AccountTripDocumentV2>(`/api/trips/v2/${encodeURIComponent(tripId)}/archive`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  restoreTripDocumentV2: (tripId: string, expectedRevision: number, idempotencyKey: string) =>
+    req<AccountTripDocumentV2>(`/api/trips/v2/${encodeURIComponent(tripId)}/restore`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_revision: expectedRevision }),
+    }),
+  deleteTripDocumentV2: (tripId: string, expectedRevision: number, idempotencyKey: string) =>
+    req<{ deleted: boolean; trip_id: string; revision: number }>(
+      `/api/trips/v2/${encodeURIComponent(tripId)}?expected_revision=${expectedRevision}`,
+      { method: 'DELETE', headers: { 'Idempotency-Key': idempotencyKey } },
+    ),
   saveTrip: (trip: TripResult, route_geometry?: SavedRouteGeometryPayload | null, builder_state?: Record<string, unknown> | null, source: string = Platform.OS) =>
     req<TripResult>(`/api/trip/${encodeURIComponent(trip.trip_id)}`, {
       method: 'PUT',
@@ -1100,9 +1202,27 @@ export const api = {
     return req<PlaceReservationStatus>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/reservation-status${suffix}`);
   },
   savePlaceReservationAlert: (trailheadPlaceId: string, data: PlaceReservationAlertPayload) =>
-    req<{ ok: boolean; alert: PlaceReservationAlert }>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/reservation-alerts`, {
+    req<{ ok: boolean; alert?: PlaceReservationAlert | null; monitor?: AvailabilityMonitor | null }>(`/api/places/${encodeURIComponent(trailheadPlaceId)}/reservation-alerts`, {
       method: 'POST', body: JSON.stringify(data),
     }),
+  getAvailabilityMonitorPolicy: () =>
+    req<AvailabilityMonitorPolicy>('/api/availability-monitors/status'),
+  listAvailabilityMonitors: (options: { limit?: number; cursor?: string; status?: AvailabilityMonitorStatus } = {}) => {
+    const qs = new URLSearchParams({ limit: String(options.limit ?? 50) });
+    if (options.cursor) qs.set('cursor', options.cursor);
+    if (options.status) qs.set('status', options.status);
+    return req<AvailabilityMonitorPage>(`/api/availability-monitors?${qs.toString()}`);
+  },
+  createAvailabilityMonitor: (data: AvailabilityMonitorCreatePayload, idempotencyKey: string) =>
+    req<AvailabilityMonitor>('/api/availability-monitors', {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify(data),
+    }),
+  getAvailabilityMonitor: (monitorId: string) =>
+    req<AvailabilityMonitor>(`/api/availability-monitors/${encodeURIComponent(monitorId)}`),
+  cancelAvailabilityMonitor: (monitorId: string) =>
+    req<AvailabilityMonitor>(`/api/availability-monitors/${encodeURIComponent(monitorId)}/cancel`, { method: 'POST' }),
   discoverTrails: (params: TrailDiscoverParams) => {
     const qs = new URLSearchParams({ mode: params.mode ?? 'nearby', limit: String(params.limit ?? 60) });
     if (params.lat != null) qs.set('lat', String(params.lat));
@@ -2126,6 +2246,131 @@ export interface GeocodeResolveResponse {
   countrycodes?: string;
   retry_of?: string;
 }
+export interface ProductFeatures {
+  trip_graph_v2: boolean;
+  trips_tab: boolean;
+  availability_monitors?: boolean;
+  trip_packs?: boolean;
+  community_publications?: boolean;
+  digest_preferences?: boolean;
+}
+export interface CommunicationPreferences {
+  weekly_digest: boolean;
+  trip_window_briefs: boolean;
+  deal_alerts: boolean;
+  timezone: string;
+  locale: string;
+  unsubscribed_all: boolean;
+  updated_at: number;
+}
+export type CommunicationPreferencesUpdate = Partial<Pick<
+  CommunicationPreferences,
+  'weekly_digest' | 'trip_window_briefs' | 'deal_alerts' | 'timezone' | 'locale'
+>>;
+export type CommunityPublicationType = 'trip_recap' | 'place_update' | 'correction';
+export type CommunityPublicationStatus = 'pending_review' | 'approved' | 'rejected' | 'retracted' | string;
+export interface CommunityPublicationCreatePayload {
+  trip_id: string;
+  note_id: string;
+  publication_type: CommunityPublicationType;
+  title: string;
+  body: string;
+  place_id?: string;
+}
+export interface CommunityPublication {
+  id: string;
+  publication_type: CommunityPublicationType;
+  title: string;
+  body: string;
+  place_id?: string | null;
+  status: CommunityPublicationStatus;
+  moderation_note?: string | null;
+  submitted_at: number;
+  updated_at: number;
+  moderated_at?: number | null;
+  retracted_at?: number | null;
+}
+export interface CommunityPublicationPage {
+  items: CommunityPublication[];
+  next_cursor?: string | null;
+}
+export type AccountLibraryEntityType = 'place' | 'camp' | 'trail' | 'activity' | 'water' | 'pack';
+export interface AccountLibraryItem {
+  user_id: number;
+  canonical_id: string;
+  entity_type: AccountLibraryEntityType;
+  title: string;
+  status: 'active' | 'archived' | 'deleted';
+  data: Record<string, unknown>;
+  revision: number;
+  created_at: number;
+  updated_at: number;
+  archived_at?: number | null;
+  deleted_at?: number | null;
+}
+export interface AccountLibraryWritePayload {
+  canonical_id?: string;
+  entity_type: AccountLibraryEntityType;
+  title: string;
+  status?: 'active' | 'archived';
+  data: Record<string, unknown>;
+  expected_revision: number;
+}
+export interface AccountLibraryListOptions {
+  limit?: number;
+  cursor?: string;
+  entityType?: AccountLibraryEntityType;
+  includeArchived?: boolean;
+}
+export interface AccountLibraryPage {
+  items: AccountLibraryItem[];
+  next_cursor?: string | null;
+}
+export type AccountTripDocumentStatus = 'draft' | 'active' | 'completed' | 'archived' | 'deleted';
+export interface AccountTripDocumentV2 {
+  schema_version: 2;
+  trip_id: string;
+  revision: number;
+  status: AccountTripDocumentStatus;
+  title: string;
+  summary?: string;
+  starts_on?: string;
+  ends_on?: string;
+  dates: Record<string, unknown>;
+  regions?: string[];
+  rig_snapshot: Record<string, unknown>;
+  days: Array<Record<string, unknown>>;
+  items: Array<Record<string, unknown>>;
+  notes: Array<Record<string, unknown>>;
+  readiness: Record<string, unknown>;
+  bookings: Array<Record<string, unknown>>;
+  alerts: Array<Record<string, unknown>>;
+  offline: Record<string, unknown>;
+  route?: Record<string, unknown>;
+  visibility: 'private' | 'shared' | 'public';
+  source: string;
+  legacy_v1?: Record<string, unknown> | null;
+  created_at: number;
+  updated_at: number;
+  archived_at?: number | null;
+  deleted_at?: number | null;
+}
+export interface AccountTripDocumentWritePayload {
+  trip_id?: string;
+  expected_revision: number;
+  document: Omit<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at'>
+    & Partial<Pick<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at'>>;
+}
+export interface AccountTripDocumentListOptions {
+  limit?: number;
+  cursor?: string;
+  status?: Exclude<AccountTripDocumentStatus, 'deleted'>;
+  includeArchived?: boolean;
+}
+export interface AccountTripDocumentPage {
+  items: AccountTripDocumentV2[];
+  next_cursor?: string | null;
+}
 export interface TripResult {
   trip_id: string; plan: TripPlan; campsites: Campsite[]; gas_stations: GasStation[];
   route_pois?: OsmPoi[];
@@ -3044,6 +3289,59 @@ export interface PlaceReservationAlertPayload {
   start_date?: string;
   end_date?: string;
   party_size?: number;
+}
+export type AvailabilityMonitorType = 'campground' | 'permit' | 'tour' | 'route_reopening' | 'closure' | 'safety';
+export type AvailabilityMonitorStatus = 'active' | 'expired' | 'cancelled' | 'failed';
+export interface AvailabilityMonitor {
+  id: string;
+  target_id: string;
+  target_label: string;
+  monitor_type: AvailabilityMonitorType;
+  start_date?: string | null;
+  end_date?: string | null;
+  party_size: number;
+  source: string;
+  booking_url?: string | null;
+  criteria: Record<string, unknown>;
+  status: AvailabilityMonitorStatus;
+  billing_kind: 'trial' | 'explorer' | 'credits' | 'safety_free' | 'legacy' | string;
+  credits_charged: number;
+  duration_days: number;
+  expires_at: number;
+  remaining_seconds: number;
+  quota_exempt: boolean;
+  reservation_alert_id?: number | null;
+  created_at: number;
+  updated_at: number;
+  cancelled_at?: number | null;
+  refunded_at?: number | null;
+  failure_reason?: string | null;
+  replayed?: boolean;
+}
+export interface AvailabilityMonitorCreatePayload {
+  target_id: string;
+  target_label: string;
+  monitor_type: AvailabilityMonitorType;
+  start_date?: string;
+  end_date?: string;
+  party_size?: number;
+  source?: string;
+  booking_url?: string;
+  criteria?: Record<string, unknown>;
+}
+export interface AvailabilityMonitorPolicy {
+  trial: { available: boolean; used: boolean; duration_days: number };
+  explorer: { active: boolean; included_limit: number; included_active: number; included_remaining: number };
+  extra_monitor: { credits: number; duration_days: number };
+  safety_and_legal_alerts: { free: boolean; quota_exempt: boolean };
+  active_total: number;
+  paid_active: number;
+  safety_active: number;
+  credit_balance: number;
+}
+export interface AvailabilityMonitorPage {
+  items: AvailabilityMonitor[];
+  next_cursor?: string | null;
 }
 export interface PlaceReservationStatus {
   trailhead_place_id: string;

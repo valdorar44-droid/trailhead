@@ -7,13 +7,13 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import * as ImagePicker from 'expo-image-picker';
 import * as Notifications from 'expo-notifications';
-import { storage } from '@/lib/storage';
+import { accountStorage, type AccountStorageEpoch } from '@/lib/storage';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
-import { api, Report, ReportPayload, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
+import { api, Report, ReportPayload, ReportResponse, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
@@ -25,7 +25,7 @@ import Reanimated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 // Seen IDs: { [reportId]: expiresAt (unix sec) } — auto-prune on load
 async function loadSeenAlertIds(): Promise<Record<string, number>> {
   try {
-    const raw = await storage.get('trailhead_alert_seen');
+    const raw = await accountStorage.get('trailhead_alert_seen');
     if (!raw) return {};
     const parsed: Record<string, number> = JSON.parse(raw);
     const now = Date.now() / 1000;
@@ -36,18 +36,18 @@ async function loadSeenAlertIds(): Promise<Record<string, number>> {
     return pruned;
   } catch { return {}; }
 }
-async function saveSeenAlertIds(seen: Record<string, number>): Promise<void> {
-  try { await storage.set('trailhead_alert_seen', JSON.stringify(seen)); } catch {}
+async function saveSeenAlertIds(seen: Record<string, number>, epoch: AccountStorageEpoch): Promise<void> {
+  try { await accountStorage.set('trailhead_alert_seen', JSON.stringify(seen), epoch); } catch {}
 }
 // Prefs: { [type]: boolean } — true = notify (default), false = muted
 async function loadAlertPrefs(): Promise<Record<string, boolean>> {
   try {
-    const raw = await storage.get('trailhead_alert_prefs');
+    const raw = await accountStorage.get('trailhead_alert_prefs');
     return raw ? JSON.parse(raw) : {};
   } catch { return {}; }
 }
-async function saveAlertPrefs(prefs: Record<string, boolean>): Promise<void> {
-  try { await storage.set('trailhead_alert_prefs', JSON.stringify(prefs)); } catch {}
+async function saveAlertPrefs(prefs: Record<string, boolean>, epoch: AccountStorageEpoch): Promise<void> {
+  try { await accountStorage.set('trailhead_alert_prefs', JSON.stringify(prefs), epoch); } catch {}
 }
 
 // Semantic category colors — chosen to read well on both light and dark backgrounds
@@ -108,6 +108,62 @@ type QueuedReport = {
   had_photo: boolean;
 };
 
+type ReportAccountScope = {
+  epoch: AccountStorageEpoch;
+  accountId: string;
+};
+
+type ReportAuthSession = ReportAccountScope & {
+  token: string;
+};
+
+function currentReportAccountScope(): ReportAccountScope {
+  return {
+    epoch: accountStorage.epoch(),
+    accountId: String(useStore.getState().user?.id ?? ''),
+  };
+}
+
+function reportAccountScopeIsCurrent(scope: ReportAccountScope) {
+  return !accountStorage.isCleaning()
+    && accountStorage.epoch() === scope.epoch
+    && String(useStore.getState().user?.id ?? '') === scope.accountId;
+}
+
+function currentReportAuthSession(): ReportAuthSession | null {
+  const state = useStore.getState();
+  if (!state.user || !state.token || accountStorage.isCleaning()) return null;
+  return {
+    epoch: accountStorage.epoch(),
+    accountId: String(state.user.id),
+    token: state.token,
+  };
+}
+
+function reportAuthSessionIsCurrent(session: ReportAuthSession) {
+  const state = useStore.getState();
+  return reportAccountScopeIsCurrent(session)
+    && state.token === session.token;
+}
+
+async function submitReportForSession(payload: ReportPayload, session: ReportAuthSession): Promise<ReportResponse> {
+  if (!reportAuthSessionIsCurrent(session)) throw new Error('Account session changed');
+  const response = await fetch(`${TRAILHEAD_API_BASE}/api/reports`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${session.token}`,
+    },
+    body: JSON.stringify(payload),
+  });
+  if (!response.ok) {
+    const body = await response.json().catch(() => ({}));
+    const detail = body?.detail;
+    throw new Error(typeof detail === 'string' ? detail : detail?.message || response.statusText || 'Request failed');
+  }
+  return response.json();
+}
+
 function tripWaypointsForConditions(activeTrip: ReturnType<typeof useStore.getState>['activeTrip']) {
   return activeTrip?.plan.waypoints.filter(wp => wp.lat != null && wp.lng != null) ?? [];
 }
@@ -127,7 +183,7 @@ function isOvernightWaypoint(type: string | null | undefined) {
 
 async function loadQueuedReports(): Promise<QueuedReport[]> {
   try {
-    const raw = await storage.get(OFFLINE_REPORT_QUEUE_KEY);
+    const raw = await accountStorage.get(OFFLINE_REPORT_QUEUE_KEY);
     const parsed = raw ? JSON.parse(raw) : [];
     return Array.isArray(parsed) ? parsed.filter(item => item?.payload?.lat != null && item?.payload?.lng != null) : [];
   } catch {
@@ -135,10 +191,10 @@ async function loadQueuedReports(): Promise<QueuedReport[]> {
   }
 }
 
-async function saveQueuedReports(items: QueuedReport[]) {
+async function saveQueuedReports(items: QueuedReport[], epoch: AccountStorageEpoch = accountStorage.epoch()) {
   try {
-    await storage.set(OFFLINE_REPORT_QUEUE_KEY, JSON.stringify(items.slice(-20)));
-  } catch {}
+    return await accountStorage.set(OFFLINE_REPORT_QUEUE_KEY, JSON.stringify(items.slice(-20)), epoch);
+  } catch { return false; }
 }
 
 function isOfflineSubmitError(error: any) {
@@ -291,12 +347,14 @@ function ReportScreenContent() {
   const seenIdsRef = useRef<Record<string, number>>({});
   const notifPrefsRef = useRef<Record<string, boolean>>({});
   const locRef = useRef<{ lat: number; lng: number } | null>(null);
+  const queueFlushInFlightRef = useRef<ReportAuthSession | null>(null);
 
   useEffect(() => { notifPrefsRef.current = notifPrefs; }, [notifPrefs]);
   useEffect(() => { locRef.current = loc; }, [loc]);
 
   // Fire deduplicated notifications for unseen critical reports
   async function checkAndNotify(reports: Report[]) {
+    const scope = currentReportAccountScope();
     const critical = reports.filter(r => r.severity === 'critical');
     if (critical.length === 0) return;
     const seen = seenIdsRef.current;
@@ -321,17 +379,18 @@ function ReportScreenContent() {
     for (const r of fresh) {
       updated[String(r.id)] = r.expires_at || (Date.now() / 1000 + 86400);
     }
+    if (!reportAccountScopeIsCurrent(scope)) return;
     seenIdsRef.current = updated;
-    saveSeenAlertIds(updated);
+    saveSeenAlertIds(updated, scope.epoch);
   }
 
-  async function refreshQueuedReports() {
-    const items = await loadQueuedReports();
-    setQueuedReports(items);
-    return items;
-  }
-
-  async function queueReportForRetry(payload: ReportPayload, label: string, hadPhoto: boolean) {
+  async function queueReportForRetry(
+    payload: ReportPayload,
+    label: string,
+    hadPhoto: boolean,
+    session: ReportAuthSession,
+  ) {
+    if (!reportAuthSessionIsCurrent(session)) return;
     const queuedPayload = { ...payload, photo_data: undefined };
     const item: QueuedReport = {
       id: `${Date.now()}-${Math.random().toString(36).slice(2)}`,
@@ -340,17 +399,27 @@ function ReportScreenContent() {
       created_at: Date.now() / 1000,
       had_photo: hadPhoto,
     };
-    const next = [...await loadQueuedReports(), item].slice(-20);
-    await saveQueuedReports(next);
-    setQueuedReports(next);
+    const existing = await loadQueuedReports();
+    if (!reportAuthSessionIsCurrent(session)) return;
+    const next = [...existing, item].slice(-20);
+    if (await saveQueuedReports(next, session.epoch) && reportAuthSessionIsCurrent(session)) {
+      setQueuedReports(next);
+    }
   }
 
   async function flushQueuedReports(showResult = false) {
-    if (!user || queueFlushing) return;
+    const session = currentReportAuthSession();
+    if (!session || queueFlushInFlightRef.current) return;
+    queueFlushInFlightRef.current = session;
     const items = await loadQueuedReports();
+    if (!reportAuthSessionIsCurrent(session)) {
+      if (queueFlushInFlightRef.current === session) queueFlushInFlightRef.current = null;
+      return;
+    }
     if (items.length === 0) {
       setQueuedReports([]);
       if (showResult) Alert.alert('Queue empty', 'Saved reports are all clear.');
+      if (queueFlushInFlightRef.current === session) queueFlushInFlightRef.current = null;
       return;
     }
     setQueueFlushing(true);
@@ -359,9 +428,11 @@ function ReportScreenContent() {
     let remaining: QueuedReport[] = [];
     try {
       for (let i = 0; i < items.length; i += 1) {
+        if (!reportAuthSessionIsCurrent(session)) return;
         const item = items[i];
         try {
-          const res = await api.submitReport(item.payload);
+          const res = await submitReportForSession(item.payload, session);
+          if (!reportAuthSessionIsCurrent(session)) return;
           sent += 1;
           addLiveReport({
             id: res.report_id,
@@ -376,7 +447,7 @@ function ReportScreenContent() {
             confirmations: 0,
             has_photo: 0,
             cluster_count: 1,
-            username: user?.username ?? 'me',
+            username: useStore.getState().user?.username ?? 'me',
             created_at: Date.now() / 1000,
             expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
           });
@@ -388,12 +459,16 @@ function ReportScreenContent() {
           dropped += 1;
         }
       }
-      await saveQueuedReports(remaining);
-      setQueuedReports(remaining);
-      if (locRef.current && sent > 0) {
-        api.getNearbyAlerts(locRef.current.lat, locRef.current.lng).then(setNearby).catch(() => {});
+      if (!reportAuthSessionIsCurrent(session)) return;
+      if (await saveQueuedReports(remaining, session.epoch) && reportAuthSessionIsCurrent(session)) {
+        setQueuedReports(remaining);
       }
-      if (showResult) {
+      if (locRef.current && sent > 0) {
+        api.getNearbyAlerts(locRef.current.lat, locRef.current.lng).then(reports => {
+          if (reportAuthSessionIsCurrent(session)) setNearby(reports);
+        }).catch(() => {});
+      }
+      if (showResult && reportAuthSessionIsCurrent(session)) {
         const parts = [
           sent ? `${sent} sent` : '',
           remaining.length ? `${remaining.length} still waiting` : '',
@@ -402,18 +477,13 @@ function ReportScreenContent() {
         Alert.alert('Offline queue', parts.join(' · ') || 'Queue is already current.');
       }
     } finally {
-      setQueueFlushing(false);
+      if (queueFlushInFlightRef.current === session) queueFlushInFlightRef.current = null;
+      if (reportAuthSessionIsCurrent(session)) setQueueFlushing(false);
     }
   }
 
-  // Load prefs + seen IDs, then request location once on mount
+  // Request location once on mount. Account-local state is restored separately.
   useEffect(() => {
-    loadAlertPrefs().then(prefs => {
-      setNotifPrefs(prefs);
-      notifPrefsRef.current = prefs;
-    });
-    loadSeenAlertIds().then(seen => { seenIdsRef.current = seen; });
-
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
       if (status !== 'granted') return;
       Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
@@ -434,10 +504,75 @@ function ReportScreenContent() {
   }, []);
 
   useEffect(() => {
-    refreshQueuedReports().then(items => {
-      if (user && items.length > 0) flushQueuedReports(false);
-    });
+    const scope = currentReportAccountScope();
+    setQueuedReports([]);
+    setQueueFlushing(false);
+    queueFlushInFlightRef.current = null;
+    setNotifPrefs({});
+    notifPrefsRef.current = {};
+    seenIdsRef.current = {};
+    setSelectedContributor(null);
+    setSelectedType(null);
+    setSelectedSubtype('');
+    setDescription('');
+    setPhotoBase64(null);
+    setSubmitting(false);
+    setSubmitted(false);
+    setCreditsGained(0);
+    setSourceConfidence('observed');
+    setCampsiteRating(0);
+    setTopUsers([]);
+    setContributorLoading(false);
+    setShowNotifSettings(false);
+    successAnim.stopAnimation();
+    successAnim.setValue(0);
+
+    if (accountStorage.isCleaning()) return;
+    Promise.all([loadAlertPrefs(), loadSeenAlertIds(), loadQueuedReports()]).then(([prefs, seen, items]) => {
+      if (!reportAccountScopeIsCurrent(scope)) return;
+      setNotifPrefs(prefs);
+      notifPrefsRef.current = prefs;
+      seenIdsRef.current = seen;
+      setQueuedReports(items);
+      if (useStore.getState().user && items.length > 0) flushQueuedReports(false);
+    }).catch(() => {});
   }, [user?.id]);
+
+  useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
+    setQueuedReports([]);
+    setQueueFlushing(false);
+    queueFlushInFlightRef.current = null;
+    setNotifPrefs({});
+    notifPrefsRef.current = {};
+    seenIdsRef.current = {};
+    setSelectedContributor(null);
+    setSelectedType(null);
+    setSelectedSubtype('');
+    setDescription('');
+    setPhotoBase64(null);
+    setSubmitting(false);
+    setSubmitted(false);
+    setCreditsGained(0);
+    setSourceConfidence('observed');
+    setCampsiteRating(0);
+    setTopUsers([]);
+    setContributorLoading(false);
+    setShowNotifSettings(false);
+    successAnim.stopAnimation();
+    successAnim.setValue(0);
+    if (cleaning) return;
+
+    const scope = currentReportAccountScope();
+    if (scope.epoch !== epoch) return;
+    Promise.all([loadAlertPrefs(), loadSeenAlertIds(), loadQueuedReports()]).then(([prefs, seen, items]) => {
+      if (!reportAccountScopeIsCurrent(scope)) return;
+      setNotifPrefs(prefs);
+      notifPrefsRef.current = prefs;
+      seenIdsRef.current = seen;
+      setQueuedReports(items);
+      if (useStore.getState().user && items.length > 0) flushQueuedReports(false);
+    }).catch(() => {});
+  }), []);
 
   useEffect(() => {
     if (view === 'route' && routeWaypoints.length === 0) setView('nearby');
@@ -511,10 +646,12 @@ function ReportScreenContent() {
   }
 
   async function toggleNotifPref(type: string, enabled: boolean) {
+    const scope = currentReportAccountScope();
+    if (!reportAccountScopeIsCurrent(scope)) return;
     const updated = { ...notifPrefsRef.current, [type]: enabled };
     setNotifPrefs(updated);
     notifPrefsRef.current = updated;
-    saveAlertPrefs(updated);
+    saveAlertPrefs(updated, scope.epoch);
   }
 
   function patchReport(reportId: Report['id'], updater: (report: Report) => Report) {
@@ -603,24 +740,33 @@ function ReportScreenContent() {
   }
 
   async function pickPhoto() {
+    const scope = currentReportAccountScope();
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (!reportAccountScopeIsCurrent(scope)) return;
     if (status !== 'granted') { Alert.alert('Photo access required'); return; }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true, quality: 0.5, base64: true,
     });
-    if (!result.canceled && result.assets[0].base64) setPhotoBase64(result.assets[0].base64);
+    if (reportAccountScopeIsCurrent(scope) && !result.canceled && result.assets[0].base64) {
+      setPhotoBase64(result.assets[0].base64);
+    }
   }
 
   async function takePhoto() {
+    const scope = currentReportAccountScope();
     const { status } = await ImagePicker.requestCameraPermissionsAsync();
+    if (!reportAccountScopeIsCurrent(scope)) return;
     if (status !== 'granted') { Alert.alert('Camera access required'); return; }
     const result = await ImagePicker.launchCameraAsync({ allowsEditing: true, quality: 0.5, base64: true });
-    if (!result.canceled && result.assets[0].base64) setPhotoBase64(result.assets[0].base64);
+    if (reportAccountScopeIsCurrent(scope) && !result.canceled && result.assets[0].base64) {
+      setPhotoBase64(result.assets[0].base64);
+    }
   }
 
   async function submit() {
-    if (!user) { Alert.alert('Sign in required', 'Create an account to earn credits.'); return; }
+    const session = currentReportAuthSession();
+    if (!session) { Alert.alert('Sign in required', 'Create an account to earn credits.'); return; }
     if (!selectedType) { Alert.alert('Select a report type first'); return; }
     if (!loc) { Alert.alert('Location unavailable'); return; }
     setSubmitting(true);
@@ -636,7 +782,8 @@ function ReportScreenContent() {
         description: fullDesc, severity,
         photo_data: photoBase64 ?? undefined,
       };
-      const res = await api.submitReport(payload);
+      const res = await submitReportForSession(payload, session);
+      if (!reportAuthSessionIsCurrent(session)) return;
       setCreditsGained(res.credits_earned);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       setSubmitted(true);
@@ -647,19 +794,30 @@ function ReportScreenContent() {
         description: fullDesc ?? '', severity,
         upvotes: 0, downvotes: 0, confirmations: 0,
         has_photo: photoBase64 ? 1 : 0, cluster_count: 1,
-        username: user?.username ?? 'me',
+        username: useStore.getState().user?.username ?? 'me',
         created_at: Date.now() / 1000,
         expires_at: Date.now() / 1000 + res.ttl_hours * 3600,
       });
       Animated.spring(successAnim, { toValue: 1, tension: 60, friction: 7, useNativeDriver: true }).start();
       setTimeout(() => {
+        if (!reportAuthSessionIsCurrent(session)) return;
         Animated.timing(successAnim, { toValue: 0, duration: 300, useNativeDriver: true }).start(() => setSubmitted(false));
         setSelectedType(null); setSelectedSubtype('');
         setDescription(''); setPhotoBase64(null); setSourceConfidence('observed');
       }, 3000);
-      api.me().then(async u => setAuth(await getToken(), u)).catch(() => {});
-      if (loc) api.getNearbyAlerts(loc.lat, loc.lng).then(setNearby).catch(() => {});
+      fetch(`${TRAILHEAD_API_BASE}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${session.token}` },
+      }).then(async response => {
+        if (!response.ok) return null;
+        return response.json();
+      }).then(u => {
+        if (u && reportAuthSessionIsCurrent(session)) setAuth(session.token, u);
+      }).catch(() => {});
+      if (loc) api.getNearbyAlerts(loc.lat, loc.lng).then(reports => {
+        if (reportAuthSessionIsCurrent(session)) setNearby(reports);
+      }).catch(() => {});
     } catch (e: any) {
+      if (!reportAuthSessionIsCurrent(session)) return;
       const fullDesc = (campsiteRating > 0 && selectedType.type === 'campsite')
         ? `${campsiteRating}/5 stars. ${descriptionWithSource}`
         : descriptionWithSource;
@@ -669,18 +827,20 @@ function ReportScreenContent() {
         description: fullDesc, severity,
       };
       if (isOfflineSubmitError(e)) {
-        await queueReportForRetry(payload, reportLabel, Boolean(photoBase64));
-        Alert.alert(
-          'Saved for retry',
-          photoBase64
-            ? 'The report was queued without the photo and will retry when the app has signal.'
-            : 'The report will retry when the app has signal.',
-        );
+        await queueReportForRetry(payload, reportLabel, Boolean(photoBase64), session);
+        if (reportAuthSessionIsCurrent(session)) {
+          Alert.alert(
+            'Saved for retry',
+            photoBase64
+              ? 'The report was queued without the photo and will retry when the app has signal.'
+              : 'The report will retry when the app has signal.',
+          );
+        }
       } else {
         Alert.alert('Report not submitted', e?.message ?? 'Something interrupted the submission. Try again in a moment.');
       }
     } finally {
-      setSubmitting(false);
+      if (reportAuthSessionIsCurrent(session)) setSubmitting(false);
     }
   }
 
@@ -1267,10 +1427,6 @@ export default function ReportScreen() {
   const pathname = usePathname();
   if (!pathname.includes('/report')) return null;
   return <ReportScreenContent />;
-}
-
-async function getToken() {
-  return (await storage.get('trailhead_token')) ?? '';
 }
 
 function ContributorProfileModal({ profile, onClose }:

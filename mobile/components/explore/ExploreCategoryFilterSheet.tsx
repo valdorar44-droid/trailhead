@@ -18,7 +18,7 @@ export function ExploreCategoryFilterSheet({ visible, selected, counts, onSelect
   const insets = useSafeAreaInsets();
   const categories = EXPLORE_CATEGORY_CHIPS.filter(item => {
     if (item.key === 'nearby' || item.key === 'tours') return false;
-    if (item.key === 'all' || item.key === selected) return true;
+    if (item.key === 'all' || item.key === selected || item.key === 'fuel' || item.key === 'resupply') return true;
     return Number(counts[item.key] ?? 0) > 0;
   });
   return (

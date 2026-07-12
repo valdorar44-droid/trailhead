@@ -44,7 +44,7 @@ const USE_NATIVE_MAP = true;
 // narration uses Trailhead TTS so it does not depend on the live WebRTC session.
 const ENABLE_REALTIME_NARRATOR = true;
 import * as Location from 'expo-location';
-import { storage } from '@/lib/storage';
+import { accountStorage, storage } from '@/lib/storage';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -1242,13 +1242,21 @@ async function loadSavedTripAi<T extends SavedAiPayload>(trip: TripResult, kind:
   }
 }
 
-async function saveTripAi(trip: TripResult, kind: SavedAiKind, data: SavedAiPayload): Promise<void> {
+async function saveTripAi(
+  trip: TripResult,
+  kind: SavedAiKind,
+  data: SavedAiPayload,
+  epoch = accountStorage.epoch(),
+): Promise<void> {
   try {
-    await FileSystem.writeAsStringAsync(tripAiCachePath(trip.trip_id, kind), JSON.stringify({
-      fingerprint: tripAiFingerprint(trip, kind),
-      saved_at: Date.now(),
-      data,
-    }));
+    await accountStorage.run(
+      () => FileSystem.writeAsStringAsync(tripAiCachePath(trip.trip_id, kind), JSON.stringify({
+        fingerprint: tripAiFingerprint(trip, kind),
+        saved_at: Date.now(),
+        data,
+      })),
+      epoch,
+    );
   } catch {}
 }
 
@@ -6130,6 +6138,7 @@ function MapScreen() {
   const mapMissionSpeedRef = useRef<number>(DEFAULT_PREVIEW_SPEED);
   const [mapMissionNotice, setMapMissionNotice] = useState<string | null>(null);
   const mapMissionCinematicRef = useRef<MissionCinematic | null>(null);
+  const mapMissionOperationRef = useRef(0);
   const mapMissionPlayerRef = useRef<NativeMissionBriefPlayer | null>(null);
   const mapMissionNativeSubsRef = useRef<Array<{ remove: () => void }>>([]);
   const mapMissionPlaybackModeRef = useRef<'js' | 'native'>('js');
@@ -6327,6 +6336,42 @@ function MapScreen() {
   const routeScoutOperationRef = useRef(0);
   const routeScoutTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
   const recentRouteScoutActionRef = useRef<{ at: number; action: 'start' | 'save' } | null>(null);
+
+  useEffect(() => {
+    routeScoutOperationRef.current += 1;
+    mapMissionOperationRef.current += 1;
+    routeScoutTimersRef.current.forEach(clearTimeout);
+    routeScoutTimersRef.current = [];
+    missionRunningRef.current = false;
+    mapMissionPlayerRef.current?.stop();
+    mapMissionPlayerRef.current = null;
+    clearMissionNativeListeners();
+    void stopMissionAnimation();
+    void clearMissionAnimation();
+    setExtremeCopilotSessionId(null);
+    setExtremeCopilotMessages([]);
+    setExtremeCopilotInput('');
+    setExtremeCopilotBusy(false);
+    setShowExtremeCopilot(false);
+    setPendingCopilotAction(null);
+    setCopilotResults([]);
+    setCopilotResultScope(null);
+    setCopilotDebugTranscript('');
+    setRouteScout(null);
+    setRouteScoutDayAction(null);
+    setMapMissionBrief(null);
+    setMapMissionCinematic(null);
+    setMapMissionScene(null);
+    setMapMissionCaptionText('');
+    setMapMissionVisible(false);
+    setMapMissionPreparing(false);
+    setMapMissionPlaying(false);
+    setMapMissionPaused(false);
+    setMapMissionComplete(false);
+    setMapMissionError(false);
+    setMapMissionProgress(0);
+    try { stopTrailheadVoice(); } catch {}
+  }, [user?.id]);
   const mapCardResolveCacheRef = useRef(new Map<string, { at: number; response: MapCardResolveResponse }>());
   const selectedPlaceResolveKeyRef = useRef('');
   const [campDetail,    setCampDetail]    = useState<CampsiteDetail | null>(null);
@@ -7641,6 +7686,10 @@ function MapScreen() {
   // Geocode any waypoints that are missing lat/lng (backend geocoding sometimes partial)
   useEffect(() => {
     if (!activeTrip) return;
+    let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = activeTrip.trip_id;
     const missing = usableTripWaypoints(activeTrip.plan.waypoints).filter(w => !w.lat || !w.lng);
     if (missing.length > 0) {
       Promise.all(missing.map(async wp => {
@@ -7653,14 +7702,29 @@ function MapScreen() {
           if (d[0]) { wp.lat = parseFloat(d[0].lat); wp.lng = parseFloat(d[0].lon); }
         } catch {}
       })).then(() => {
+        if (
+          cancelled
+          || accountStorage.epoch() !== requestEpoch
+          || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
+          || useStore.getState().activeTrip?.trip_id !== requestTripId
+        ) return;
         // Force useMemo to re-evaluate by creating a shallow clone of activeTrip
         useStore.getState().setActiveTrip({ ...activeTrip, plan: { ...activeTrip.plan, waypoints: [...activeTrip.plan.waypoints] } });
       }).catch(() => {});
     }
+    return () => { cancelled = true; };
   }, [activeTrip?.trip_id, activeTrip?.updated_at, activeTrip?.version]);
 
   useEffect(() => {
     if (!activeTrip) return;
+    let cancelled = false;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = activeTrip.trip_id;
+    const requestIsCurrent = () => !cancelled
+      && accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && useStore.getState().activeTrip?.trip_id === requestTripId;
     const wps = usableTripWaypoints(activeTrip.plan.waypoints).filter(w => w.lat && w.lng);
     if (!wps.length) return;
     setNavIdx(0); setNavMode(false); setRouteSteps([]); setIsRouted(false); setRouteProgress(null);
@@ -7672,6 +7736,7 @@ function MapScreen() {
         refreshCommunityPins({ lat: center.lat!, lng: center.lng! }, 3.0, true);
       }
       api.getAlertsAlongRoute(wps).then(alerts => {
+        if (!requestIsCurrent()) return;
         const prioritized = prioritizeRouteAlerts(alerts);
         setRouteAlerts(prioritized);
         setShowAlerts(shouldAutoOpenRouteAlerts(prioritized, wps as WP[], userLoc));
@@ -7691,10 +7756,13 @@ function MapScreen() {
       if (activeTrip.audio_guide) {
         setAudioGuide(activeTrip.audio_guide);
       } else {
-        api.getAudioGuide(activeTrip.trip_id, false).then(setAudioGuide).catch(() => {});
+        api.getAudioGuide(activeTrip.trip_id, false).then(guide => {
+          if (requestIsCurrent()) setAudioGuide(guide);
+        }).catch(() => {});
       }
     }, 2200);
     return () => {
+      cancelled = true;
       clearTimeout(timer);
       clearTimeout(placesTimer);
       clearTimeout(poiTimer);
@@ -13962,8 +14030,14 @@ function MapScreen() {
   }, []);
 
   async function refreshMapMissionControl(route: [number, number][], tripId: string | null) {
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = useStore.getState().activeTrip?.trip_id ?? null;
+    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && (useStore.getState().activeTrip?.trip_id ?? null) === requestTripId;
     const sessionId = await ensureCopilotSession();
-    if (!sessionId || route.length < 2) return null;
+    if (!requestIsCurrent() || !sessionId || route.length < 2) return null;
     setMapMissionLoading(true);
     try {
       const cps = checkpointsFromScout(routeScout);
@@ -14022,9 +14096,11 @@ function MapScreen() {
         },
         metadata: { source: Platform.OS, surface: 'cinematic_mission_brief' },
       });
+      if (!requestIsCurrent()) return null;
       setMapMissionBrief(brief);
       return brief;
     } catch (error: any) {
+      if (!requestIsCurrent()) return null;
       if (!mapMissionBrief) {
         setMapMissionBrief({
           ok: false,
@@ -14042,7 +14118,7 @@ function MapScreen() {
       }
       return mapMissionBrief;
     } finally {
-      setMapMissionLoading(false);
+      if (requestIsCurrent()) setMapMissionLoading(false);
     }
   }
 
@@ -14052,6 +14128,7 @@ function MapScreen() {
   }
 
   function stopMapMissionBrief() {
+    mapMissionOperationRef.current += 1;
     missionRunningRef.current = false;
     missionRouteOverrideRef.current = null;
     missionPrimedSceneIndexRef.current = -1;
@@ -14684,7 +14761,16 @@ function MapScreen() {
 
   async function startMapMissionBrief(options: { source?: 'manual' | 'auto_scout' | 'trail_builder'; skipDirected?: boolean; routeName?: string; flyoverMode?: MapMissionFlyoverMode } = {}) {
     if (missionRunningRef.current || mapMissionVisible) return true;
+    const missionOperation = ++mapMissionOperationRef.current;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = useStore.getState().activeTrip?.trip_id ?? null;
+    const missionIsCurrent = () => mapMissionOperationRef.current === missionOperation
+      && accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && (useStore.getState().activeTrip?.trip_id ?? null) === requestTripId;
     await stopTrailheadVoice();
+    if (!missionIsCurrent()) return false;
     const flyoverMode: MapMissionFlyoverMode = options.flyoverMode ?? (options.source === 'trail_builder' ? 'trail_builder' : 'copilot');
     const shouldNarrateFlyover = flyoverMode === 'copilot';
     mapMissionFlyoverModeRef.current = flyoverMode;
@@ -14696,6 +14782,7 @@ function MapScreen() {
       isMissionAnimatorCinematicOrbitAvailable(),
       isMissionAnimatorScenePacingAvailable(),
     ]);
+    if (!missionIsCurrent()) return false;
     const nativeAnimatorAllowed = Platform.OS === 'ios' && nativeAvailable && nativeScenePacingAvailable && useNativeMapSurface;
     const playbackMode = resolveMissionPlaybackMode(undefined, nativeAnimatorAllowed);
     mapMissionPlaybackModeRef.current = playbackMode;
@@ -14755,6 +14842,7 @@ function MapScreen() {
         timeoutMs: 2000,
         settleMs: 300,
       });
+      if (!missionIsCurrent()) return false;
     }
 
     // AI-directed storyboard: reuse the scout-handoff prefetch, else start one
@@ -14791,6 +14879,7 @@ function MapScreen() {
       cinematicRouteRankPromise.catch(() => [] as StoryboardPlace[]),
       directorVoicePromise,
     ]);
+    if (!missionIsCurrent()) return false;
     const scoutLiveCinematic = options.source === 'trail_builder' ? null : buildScoutLiveCinematic({
       tripId: activeTrip?.trip_id ?? null,
       tripName,
@@ -14870,6 +14959,7 @@ function MapScreen() {
         clearMissionNativeListeners();
         mapMissionNativeSubsRef.current = [
           addMissionSceneStartListener(({ index }) => {
+            if (!missionIsCurrent()) return;
             const scene = mapMissionCinematicRef.current?.scenes[index];
             if (scene) {
               if (shouldNarrateFlyover) beginMissionSceneBeat(scene, index);
@@ -14877,6 +14967,7 @@ function MapScreen() {
             }
           }),
           addMissionSceneEndListener(({ index }) => {
+            if (!missionIsCurrent()) return;
             const scene = mapMissionCinematicRef.current?.scenes[index] ?? null;
             playbackDebug.sceneEnd({
               scene_id: scene?.id ?? null,
@@ -14885,13 +14976,16 @@ function MapScreen() {
             });
           }),
           addMissionSceneProgressListener(({ progress }) => {
+            if (!missionIsCurrent()) return;
             setMapMissionProgress(Math.max(0, Math.min(1, Number(progress) || 0)));
           }),
           addMissionDebugListener(({ kind }) => {
+            if (!missionIsCurrent()) return;
             if (kind === 'camera') playbackDebug.cameraTick();
             else if (kind === 'overlay') playbackDebug.overlayTick();
           }),
           addMissionCompleteListener(() => {
+            if (!missionIsCurrent()) return;
             clearMissionNativeListeners();
             setMapMissionPlaying(false);
             setMapMissionPaused(false);
@@ -14907,6 +15001,7 @@ function MapScreen() {
             focusMapMissionCompletionOverview();
           }),
           addMissionErrorListener(({ message }) => {
+            if (!missionIsCurrent()) return;
             failMapMissionBrief(message || 'Flyover failed.');
           }),
         ];
@@ -14934,6 +15029,11 @@ function MapScreen() {
             playbackDebug.sessionStart({ playback_mode: 'native', replay: true });
             installNativeMissionListeners();
             const replayStarted = await startMissionAnimation(nativePayload);
+            if (!missionIsCurrent()) {
+              void stopMissionAnimation();
+              void clearMissionAnimation();
+              return;
+            }
             if (!replayStarted) {
               failMapMissionBrief('Flyover could not restart.');
               return;
@@ -14974,6 +15074,11 @@ function MapScreen() {
         markNarrationDone: () => { void markMissionAnimationNarrationDone(); },
       };
       const nativeStarted = await startMissionAnimation(nativePayload);
+      if (!missionIsCurrent()) {
+        void stopMissionAnimation();
+        void clearMissionAnimation();
+        return false;
+      }
       if (nativeStarted) {
         setMapMissionPreparing(false);
         setMapMissionPlaying(true);
@@ -14986,7 +15091,7 @@ function MapScreen() {
           mapMissionPresenceAfterSpeechRef.current = 'flying';
         }
         briefPromise.then(brief => {
-          if (!brief || !missionRunningRef.current) return;
+          if (!brief || !missionRunningRef.current || !missionIsCurrent()) return;
           setMapMissionBrief(brief);
         }).catch(() => null);
         return true;
@@ -15016,6 +15121,7 @@ function MapScreen() {
           || String(scene.subtitle || scene.title || '').trim();
       },
       onNotice: message => {
+        if (!missionIsCurrent()) return;
         setMapMissionNotice(message);
         setTimeout(() => setMapMissionNotice(null), 4200);
       },
@@ -15026,26 +15132,32 @@ function MapScreen() {
         }
       },
       onFullRoute: fullRoute => {
+        if (!missionIsCurrent()) return;
         patchMissionBriefOverlay({ active: true, fullRoute });
       },
       onProgressRoute: progressRoute => {
+        if (!missionIsCurrent()) return;
         patchMissionBriefOverlay({ progressRoute });
       },
       onMarkerMove: marker => {
+        if (!missionIsCurrent()) return;
         patchMissionBriefOverlay({ marker });
       },
       onCallouts: callouts => {
+        if (!missionIsCurrent()) return;
         patchMissionBriefOverlay({ callouts });
       },
       onWarningChange: warning => {
+        if (!missionIsCurrent()) return;
         patchMissionBriefOverlay({ warning });
       },
       onDebugTick: kind => {
         if (kind === 'camera') playbackDebug.cameraTick();
         else playbackDebug.overlayTick();
       },
-      onReady: () => setCopilotBriefPresence('building'),
+      onReady: () => { if (missionIsCurrent()) setCopilotBriefPresence('building'); },
       onStarted: () => {
+        if (!missionIsCurrent()) return;
         setMapMissionPreparing(false);
         setMapMissionPlaying(true);
         setMapMissionPaused(false);
@@ -15058,10 +15170,12 @@ function MapScreen() {
         }
       },
       onSceneStarted: (scene, index) => {
+        if (!missionIsCurrent()) return;
         if (shouldNarrateFlyover) beginMissionSceneBeat(scene, index);
         else beginSilentFlyoverScene(scene, index);
       },
       onSceneFinished: index => {
+        if (!missionIsCurrent()) return;
         const scene = mapMissionCinematicRef.current?.scenes[index] ?? null;
         playbackDebug.sceneEnd({
           scene_id: scene?.id ?? null,
@@ -15070,12 +15184,15 @@ function MapScreen() {
         });
       },
       onSeekScene: (scene, index) => {
+        if (!missionIsCurrent()) return;
         updateMissionScenePreview(scene, index);
       },
       onProgressRatio: ratio => {
+        if (!missionIsCurrent()) return;
         setMapMissionProgress(ratio);
       },
       onPaused: () => {
+        if (!missionIsCurrent()) return;
         clearNarrationFallbackTimer();
         stopTrailheadVoice();
         try { Speech.stop(); } catch {}
@@ -15083,6 +15200,7 @@ function MapScreen() {
         setCopilotBriefPresence('paused');
       },
       onResumed: () => {
+        if (!missionIsCurrent()) return;
         setMapMissionPaused(false);
         const scene = mapMissionCinematicRef.current?.scenes[mapMissionSceneIndex] ?? null;
         setCopilotBriefPresence(scene?.layers?.warning ? 'warning' : 'flying');
@@ -15091,6 +15209,7 @@ function MapScreen() {
         if (narrationBeatOpenRef.current) finishMissionNarrationBeat('pause_release');
       },
       onComplete: () => {
+        if (!missionIsCurrent()) return;
         setMapMissionPlaying(false);
         setMapMissionPaused(false);
         setMapMissionComplete(true);
@@ -15105,6 +15224,7 @@ function MapScreen() {
         focusMapMissionCompletionOverview();
       },
       onError: message => {
+        if (!missionIsCurrent()) return;
         failMapMissionBrief(message || 'Flyover failed.');
       },
     });
@@ -15131,7 +15251,7 @@ function MapScreen() {
 
     // Enrich the trip overview without blocking the flyover.
     briefPromise.then(brief => {
-      if (!brief || !missionRunningRef.current) return;
+      if (!brief || !missionRunningRef.current || !missionIsCurrent()) return;
       setMapMissionBrief(brief);
     }).catch(() => null);
 
@@ -16372,10 +16492,15 @@ function MapScreen() {
   async function submitCopilotMessage(raw?: string) {
     const text = (raw ?? extremeCopilotInput).trim();
     if (!text || extremeCopilotBusy) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '');
     setExtremeCopilotInput('');
     appendCopilotMessage({ id: `copilot-user-${Date.now()}`, role: 'user', text });
 
     if (await consumePendingFlyoverAffirmation(text)) return;
+    if (!requestIsCurrent()) return;
 
     const localMission = (() => {
       const clean = text.toLowerCase();
@@ -16403,6 +16528,7 @@ function MapScreen() {
     setExtremeCopilotBusy(true);
     try {
       const sessionId = await ensureCopilotSession();
+      if (!requestIsCurrent()) return;
       const res = await api.extremeCopilotMessage({
         session_id: sessionId,
         trip_id: activeTrip?.trip_id ?? null,
@@ -16411,6 +16537,7 @@ function MapScreen() {
         context: buildCopilotContext(),
         provider: 'trailhead_openai',
       });
+      if (!requestIsCurrent()) return;
       appendCopilotMessage({
         id: `copilot-assistant-${Date.now()}`,
         role: 'assistant',
@@ -16420,13 +16547,14 @@ function MapScreen() {
       if (res.action.requires_confirmation) setPendingCopilotAction(res.action);
       else await runCopilotAction(res.action, true);
     } catch (e: any) {
+      if (!requestIsCurrent()) return;
       appendCopilotMessage({
         id: `copilot-error-${Date.now()}`,
         role: 'assistant',
         text: e?.message ? `Copilot unavailable: ${e.message}` : 'Copilot unavailable.',
       });
     } finally {
-      setExtremeCopilotBusy(false);
+      if (requestIsCurrent()) setExtremeCopilotBusy(false);
     }
   }
 
@@ -16535,8 +16663,15 @@ function MapScreen() {
 
   async function fetchRouteBrief(forceRefresh = false) {
     if (!activeTrip) return;
+    const requestTrip = activeTrip;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && useStore.getState().activeTrip?.trip_id === requestTrip.trip_id;
     if (!forceRefresh) {
-      const saved = routeBrief ?? await loadSavedTripAi<RouteBrief>(activeTrip, 'route_brief');
+      const saved = routeBrief ?? await loadSavedTripAi<RouteBrief>(requestTrip, 'route_brief');
+      if (!requestIsCurrent()) return;
       if (saved) {
         setRouteBrief(saved);
         setRouteBriefSaved(true);
@@ -16556,46 +16691,55 @@ function MapScreen() {
         return true;
       });
       const brief = await api.getRouteBrief({
-        trip_name: activeTrip.plan.trip_name,
-        waypoints: usableTripWaypoints(activeTrip.plan.waypoints),
+        trip_name: requestTrip.plan.trip_name,
+        waypoints: usableTripWaypoints(requestTrip.plan.waypoints),
         reports: briefReports,
       });
-      const normalized = normalizeRouteBrief(brief, activeTrip, routeAlerts);
+      if (!requestIsCurrent()) return;
+      const normalized = normalizeRouteBrief(brief, requestTrip, routeAlerts);
       trackPhase0Event('phase0_route_brief_generated', {
-        trip_id: activeTrip.trip_id,
+        trip_id: requestTrip.trip_id,
         source: 'ai',
         alert_count: briefReports.length,
         readiness_score: normalized.readiness_score,
       });
       setRouteBrief(normalized);
       setRouteBriefSaved(true);
-      saveTripAi(activeTrip, 'route_brief', normalized).catch(() => {});
+      saveTripAi(requestTrip, 'route_brief', normalized, requestEpoch).catch(() => {});
       setShowRouteBrief(true);
     } catch (e: any) {
+      if (!requestIsCurrent()) return;
       if (e instanceof PaywallError) {
         setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
       } else {
-        const fallback = localRouteBrief(activeTrip, routeAlerts);
+        const fallback = localRouteBrief(requestTrip, routeAlerts);
         trackPhase0Event('phase0_route_brief_generated', {
-          trip_id: activeTrip.trip_id,
+          trip_id: requestTrip.trip_id,
           source: 'fallback',
           alert_count: routeAlerts.length,
           readiness_score: fallback.readiness_score,
         });
         setRouteBrief(fallback);
         setRouteBriefSaved(true);
-        saveTripAi(activeTrip, 'route_brief', fallback).catch(() => {});
+        saveTripAi(requestTrip, 'route_brief', fallback, requestEpoch).catch(() => {});
         setShowRouteBrief(true);
       }
     } finally {
-      setLoadingBrief(false);
+      if (requestIsCurrent()) setLoadingBrief(false);
     }
   }
 
   async function fetchPackingList(forceRefresh = false) {
     if (!activeTrip) return;
+    const requestTrip = activeTrip;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && useStore.getState().activeTrip?.trip_id === requestTrip.trip_id;
     if (!forceRefresh) {
-      const saved = packingList ?? await loadSavedTripAi<PackingList>(activeTrip, 'packing_list');
+      const saved = packingList ?? await loadSavedTripAi<PackingList>(requestTrip, 'packing_list');
+      if (!requestIsCurrent()) return;
       if (saved) {
         setPackingList(saved);
         setPackingListSaved(true);
@@ -16606,18 +16750,19 @@ function MapScreen() {
     setLoadingPacking(true);
     try {
       const list = await api.getPackingList({
-        trip_name: activeTrip.plan.trip_name,
-        duration_days: activeTrip.plan.duration_days,
-        road_types: [...new Set(activeTrip.plan.daily_itinerary.map(d => d.road_type))],
-        land_types: [...new Set(usableTripWaypoints(activeTrip.plan.waypoints).map(w => w.land_type))],
-        states: activeTrip.plan.states,
+        trip_name: requestTrip.plan.trip_name,
+        duration_days: requestTrip.plan.duration_days,
+        road_types: [...new Set(requestTrip.plan.daily_itinerary.map(d => d.road_type))],
+        land_types: [...new Set(usableTripWaypoints(requestTrip.plan.waypoints).map(w => w.land_type))],
+        states: requestTrip.plan.states,
       });
+      if (!requestIsCurrent()) return;
       setPackingList(list);
       setPackingListSaved(true);
-      saveTripAi(activeTrip, 'packing_list', list).catch(() => {});
+      saveTripAi(requestTrip, 'packing_list', list, requestEpoch).catch(() => {});
       setShowPacking(true);
     } catch {}
-    setLoadingPacking(false);
+    if (requestIsCurrent()) setLoadingPacking(false);
   }
 
   function tripDayAnchors(day: number) {
@@ -16819,7 +16964,7 @@ function MapScreen() {
     setRouteLegs([]);
     setLastRouteCoords([]);
     setRouteProgress(null);
-    storage.del('trailhead_active_route').catch(() => {});
+    accountStorage.del('trailhead_active_route').catch(() => {});
     deleteRouteGeometry(activeTrip.trip_id).catch(() => {});
     saveOfflineTrip(nextTrip).catch(() => {});
     setCampPickerVisible(false);
@@ -16831,7 +16976,7 @@ function MapScreen() {
   async function saveActiveRouteSnapshot() {
     if (activeTrip) await saveOfflineTrip(activeTrip);
     if (activeTrip?.trip_id) {
-      await storage.get('trailhead_active_route').then(raw => {
+      await accountStorage.get('trailhead_active_route').then(raw => {
         if (!raw) return;
         const cached = JSON.parse(raw);
         if (cached.tripId === activeTrip.trip_id) return saveRouteGeometry(activeTrip.trip_id, cached);
@@ -17237,6 +17382,12 @@ function MapScreen() {
 
   function restoreCachedActiveRoute(target: 'web' | 'native') {
     if (!activeTrip?.trip_id) return;
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const requestTripId = activeTrip.trip_id;
+    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+      && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
+      && useStore.getState().activeTrip?.trip_id === requestTripId;
     const shouldRefreshForMapboxMode = (route: any) => {
       if (!mapboxRoutePreferred || !route) return false;
       const source = String(
@@ -17280,6 +17431,7 @@ function MapScreen() {
       return;
     }
     loadRouteGeometry(activeTrip.trip_id).then(saved => {
+      if (!requestIsCurrent()) return;
       if (!saved || !Array.isArray(saved.coords) || saved.coords.length < 2) return;
       if (shouldRefreshForMapboxMode(saved)) return;
       const steps = saved.steps ?? [];
@@ -17303,7 +17455,8 @@ function MapScreen() {
       }));
     }).catch(() => {});
 
-    storage.get('trailhead_active_route').then(raw => {
+    accountStorage.get('trailhead_active_route').then(raw => {
+      if (!requestIsCurrent()) return;
       if (!raw) return;
       try {
         const cached = JSON.parse(raw);
@@ -17469,7 +17622,7 @@ function MapScreen() {
           ts: Date.now(),
         };
         if (payload.route_source) setRouteSourceDebug(String(payload.route_source));
-        storage.set('trailhead_active_route', JSON.stringify(payload)).catch(() => {});
+        accountStorage.set('trailhead_active_route', JSON.stringify(payload)).catch(() => {});
         saveRouteGeometry(activeTrip?.trip_id, payload).catch(() => {});
       }
       if (msg.type === 'route_ready') {
@@ -18499,7 +18652,7 @@ function MapScreen() {
     setRouteLegs([]);
     setLastRouteCoords([]);
     setRouteProgress(null);
-    storage.del('trailhead_active_route').catch(() => {});
+    accountStorage.del('trailhead_active_route').catch(() => {});
     deleteRouteGeometry(tripId).catch(() => {});
   }
 
@@ -21900,7 +22053,7 @@ function MapScreen() {
             }
           }}
           onRoutePersist={data => {
-            storage.set('trailhead_active_route', JSON.stringify({ ...data, ts: Date.now() })).catch(() => {});
+            accountStorage.set('trailhead_active_route', JSON.stringify({ ...data, ts: Date.now() })).catch(() => {});
           }}
           onOffRoute={(lat, lng, dist) => onWebMessage({ nativeEvent: { data: JSON.stringify({ type: 'off_route', lat, lng, dist }) } })}
           onOffRouteWarn={(lat, lng, dist) => onWebMessage({ nativeEvent: { data: JSON.stringify({ type: 'off_route_warn', lat, lng, dist }) } })}

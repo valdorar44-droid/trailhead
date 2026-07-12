@@ -1,21 +1,83 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
+import { beginAccountStorageCleanup, endAccountStorageCleanup } from './storage';
 import { User, TripResult, Report, CampsitePin, OsmPoi, TrailProfile } from './api';
+import {
+  createSavedEntity,
+  getSavedEntity,
+  getTrip,
+  getTripRepositorySnapshot,
+  listTrips,
+  removeEntity,
+  saveEntity,
+  subscribeTripRepository,
+  upsertTrip,
+  type SavedEntityV1,
+  type SavedEntityKind,
+  type TripDocumentV2,
+} from './tripRepository';
+import { canonicalSavedEntityId, tripDocumentFromTripResult } from './tripCompatibility';
+
+let accountLocalWriteBlockDepth = 0;
+let accountLocalWriteTail: Promise<unknown> = Promise.resolve();
+let accountLocalCleanupTail: Promise<unknown> = Promise.resolve();
+let pendingAuthPersistence: { token: string; user: User } | null = null;
+
+function accountLocalWrite<T>(operation: () => Promise<T>): Promise<T | undefined> {
+  if (accountLocalWriteBlockDepth > 0) return Promise.resolve(undefined);
+  const result = accountLocalWriteTail.then(operation);
+  accountLocalWriteTail = result.catch(() => undefined);
+  return result;
+}
+
+function accountLocalMutationAllowed() {
+  return accountLocalWriteBlockDepth === 0;
+}
+
+export async function prepareAccountLocalDataErase() {
+  accountLocalWriteBlockDepth += 1;
+  await accountLocalWriteTail.catch(() => undefined);
+}
+
+export function resumeAccountLocalWrites() {
+  accountLocalWriteBlockDepth = Math.max(0, accountLocalWriteBlockDepth - 1);
+  if (accountLocalWriteBlockDepth > 0) return;
+  const pending = pendingAuthPersistence;
+  pendingAuthPersistence = null;
+  if (pending) {
+    accountSet('trailhead_token', pending.token);
+    accountSet('trailhead_user', JSON.stringify(pending.user));
+  }
+}
+
+function serializeAccountLocalCleanup<T>(operation: () => Promise<T>): Promise<T> {
+  const result = accountLocalCleanupTail.then(operation, operation);
+  accountLocalCleanupTail = result.catch(() => undefined);
+  return result;
+}
 
 // File-based trip storage — no 2KB SecureStore limit
 const TRIP_FILE = () => `${FileSystem.documentDirectory}active_trip.json`;
-const saveTripFile  = (trip: TripResult) => FileSystem.writeAsStringAsync(TRIP_FILE(), JSON.stringify(trip)).catch(() => {});
+const saveTripFile = (trip: TripResult) => accountLocalWrite(
+  () => FileSystem.writeAsStringAsync(TRIP_FILE(), JSON.stringify(trip)),
+).catch(() => {});
 const loadTripFile  = async (): Promise<TripResult | null> => {
   try { const raw = await FileSystem.readAsStringAsync(TRIP_FILE()); return JSON.parse(raw); } catch { return null; }
 };
-const deleteTripFile = () => FileSystem.deleteAsync(TRIP_FILE(), { idempotent: true }).catch(() => {});
+const deleteTripFile = () => accountLocalWrite(
+  () => FileSystem.deleteAsync(TRIP_FILE(), { idempotent: true }),
+).catch(() => {});
 const RIG_FILE = () => `${FileSystem.documentDirectory}rig_profile.json`;
-const saveRigFile = (rig: RigProfile) => FileSystem.writeAsStringAsync(RIG_FILE(), JSON.stringify(rig)).catch(() => {});
+const saveRigFile = (rig: RigProfile) => accountLocalWrite(
+  () => FileSystem.writeAsStringAsync(RIG_FILE(), JSON.stringify(rig)),
+).catch(() => {});
 const loadRigFile = async (): Promise<RigProfile | null> => {
   try { const raw = await FileSystem.readAsStringAsync(RIG_FILE()); return JSON.parse(raw); } catch { return null; }
 };
-const deleteRigFile = () => FileSystem.deleteAsync(RIG_FILE(), { idempotent: true }).catch(() => {});
+const deleteRigFile = () => accountLocalWrite(
+  () => FileSystem.deleteAsync(RIG_FILE(), { idempotent: true }),
+).catch(() => {});
 const PLAN_KEY = 'trailhead_plan';
 
 // Keep all keychain items on this device only — prevents iOS from prompting
@@ -40,7 +102,355 @@ const sd = (key: string) => {
   }
   return SecureStore.deleteItemAsync(key, KCO);
 };
+const accountSet = (key: string, value: string) => accountLocalWrite(() => ss(key, value));
 const newSessionId = () => 'sess_' + Math.random().toString(36).slice(2, 12);
+const ACCOUNT_LOCAL_KEYS = [
+  'trailhead_rig',
+  'trailhead_history',
+  'trailhead_favorites',
+  'trailhead_active_trip',
+  'trailhead_active_route',
+  'trailhead_saved_places',
+  'trailhead_saved_explore_places_v1',
+  'trailhead_water_spots',
+  'trailhead_catch_logs',
+  'trailhead_water_routes',
+  'trailhead_marker_groups',
+  'trailhead_search_history',
+  'trailhead_booked_tours_v1',
+  'trailhead_checklist',
+  'trailhead_copilot_route_builder_draft_v1',
+  'trailhead_report_queue_v1',
+  'trailhead_alert_seen',
+  'trailhead_alert_prefs',
+  'trailhead_push_token',
+  'trailhead_map_recent_viewport_v1',
+  'trailhead_welcome_setup_prefs_v1',
+  'trailhead_welcome_setup_status_v1',
+];
+const ANONYMOUS_LEGACY_STASH_KEY = 'trailhead_anonymous_legacy_stash_v1';
+const ANONYMOUS_LEGACY_STASH_DIR = 'anonymous_legacy_stash_v1';
+const PRIVATE_DIRECTORIES = ['offline_trips', 'offline_routes', 'offline_place_packs', 'offline_trails', 'routes'];
+
+function isPrivateRootFile(name: string) {
+  return name === 'active_trip.json'
+    || name === 'rig_profile.json'
+    || name === 'last_background_location.json'
+    || name === 'notified_wps.json'
+    || name === 'gpx_import_batches.json'
+    || /^weather_.+\.json$/i.test(name)
+    || /^guide_.+\.json$/i.test(name)
+    || /^trip_ai_.+\.json$/i.test(name)
+    || /\.gpx$/i.test(name);
+}
+
+async function erasePrivateFiles() {
+  const root = FileSystem.documentDirectory;
+  if (!root) return;
+  const rootEntries = await FileSystem.readDirectoryAsync(root);
+  const privateFiles = rootEntries.filter(isPrivateRootFile);
+  await Promise.all([
+    ...PRIVATE_DIRECTORIES.map(name => FileSystem.deleteAsync(`${root}${name}/`, { idempotent: true })),
+    ...privateFiles.map(name => FileSystem.deleteAsync(`${root}${name}`, { idempotent: true })),
+  ]);
+}
+
+async function eraseLegacyAccountData() {
+  await Promise.all([
+    ...ACCOUNT_LOCAL_KEYS.map(key => sd(key)),
+    ...(hasWebStorage() ? [] : [erasePrivateFiles()]),
+  ]);
+}
+
+type AnonymousLegacyStash = {
+  schemaVersion: 1;
+  values: Record<string, string>;
+  entries: string[];
+};
+
+async function readAccountLocalValues() {
+  const pairs = await Promise.all(ACCOUNT_LOCAL_KEYS.map(async key => [key, await sg(key)] as const));
+  return Object.fromEntries(pairs.filter((pair): pair is readonly [string, string] => pair[1] != null));
+}
+
+async function stashAnonymousLegacyData() {
+  const values = await readAccountLocalValues();
+  if (hasWebStorage()) {
+    if (!window.localStorage.getItem(ANONYMOUS_LEGACY_STASH_KEY)) {
+      window.localStorage.setItem(ANONYMOUS_LEGACY_STASH_KEY, JSON.stringify({ schemaVersion: 1, values, entries: [] }));
+    }
+    await Promise.all(ACCOUNT_LOCAL_KEYS.map(key => sd(key)));
+    return;
+  }
+
+  const root = FileSystem.documentDirectory;
+  if (!root) return;
+  const stashRoot = `${root}${ANONYMOUS_LEGACY_STASH_DIR}/`;
+  const existing = await FileSystem.getInfoAsync(stashRoot);
+  if (!existing.exists) {
+    const rootEntries = await FileSystem.readDirectoryAsync(root);
+    const entries = rootEntries.filter(name => PRIVATE_DIRECTORIES.includes(name) || isPrivateRootFile(name));
+    await FileSystem.makeDirectoryAsync(stashRoot, { intermediates: true });
+    const manifest: AnonymousLegacyStash = { schemaVersion: 1, values, entries };
+    await FileSystem.writeAsStringAsync(`${stashRoot}manifest.json`, JSON.stringify(manifest));
+    const moved: string[] = [];
+    try {
+      for (const name of entries) {
+        await FileSystem.moveAsync({ from: `${root}${name}`, to: `${stashRoot}${name}` });
+        moved.push(name);
+      }
+    } catch (error) {
+      for (const name of moved.reverse()) {
+        await FileSystem.moveAsync({ from: `${stashRoot}${name}`, to: `${root}${name}` }).catch(() => {});
+      }
+      await FileSystem.deleteAsync(stashRoot, { idempotent: true }).catch(() => {});
+      throw error;
+    }
+  }
+  await Promise.all(ACCOUNT_LOCAL_KEYS.map(key => sd(key)));
+}
+
+async function restoreAnonymousLegacyData() {
+  if (hasWebStorage()) {
+    const raw = window.localStorage.getItem(ANONYMOUS_LEGACY_STASH_KEY);
+    if (!raw) return false;
+    const stash = JSON.parse(raw) as AnonymousLegacyStash;
+    await Promise.all(Object.entries(stash.values ?? {}).map(([key, value]) => ss(key, value)));
+    window.localStorage.removeItem(ANONYMOUS_LEGACY_STASH_KEY);
+    return true;
+  }
+
+  const root = FileSystem.documentDirectory;
+  if (!root) return false;
+  const stashRoot = `${root}${ANONYMOUS_LEGACY_STASH_DIR}/`;
+  const manifestPath = `${stashRoot}manifest.json`;
+  const manifestInfo = await FileSystem.getInfoAsync(manifestPath);
+  if (!manifestInfo.exists) return false;
+  const stash = JSON.parse(await FileSystem.readAsStringAsync(manifestPath)) as AnonymousLegacyStash;
+  await Promise.all(Object.entries(stash.values ?? {}).map(([key, value]) => ss(key, value)));
+  for (const name of stash.entries ?? []) {
+    const source = `${stashRoot}${name}`;
+    if (!(await FileSystem.getInfoAsync(source)).exists) continue;
+    await FileSystem.deleteAsync(`${root}${name}`, { idempotent: true }).catch(() => {});
+    await FileSystem.moveAsync({ from: source, to: `${root}${name}` });
+  }
+  await FileSystem.deleteAsync(stashRoot, { idempotent: true });
+  return true;
+}
+
+async function hasAnonymousLegacyStash() {
+  if (hasWebStorage()) return Boolean(window.localStorage.getItem(ANONYMOUS_LEGACY_STASH_KEY));
+  const root = FileSystem.documentDirectory;
+  if (!root) return false;
+  return (await FileSystem.getInfoAsync(`${root}${ANONYMOUS_LEGACY_STASH_DIR}/manifest.json`)).exists;
+}
+
+function mirrorSavedEntity(input: {
+  id: string;
+  title: string;
+  kind: SavedEntityKind;
+  lat?: number;
+  lng?: number;
+  summary?: string;
+  category?: string;
+  note?: string;
+  source?: string;
+  sourceUrl?: string;
+  media?: Array<{ url: string; kind: 'image'; credit?: string; caption?: string; source?: string }>;
+  facts?: Record<string, unknown>;
+}) {
+  const id = canonicalSavedEntityId(input.id, 'place');
+  const existing = getSavedEntity(id);
+  const coordinates = Number.isFinite(input.lat) && Number.isFinite(input.lng)
+    ? { lat: Number(input.lat), lng: Number(input.lng) }
+    : undefined;
+  const next = createSavedEntity({
+    ...(existing ?? {}),
+    id,
+    title: input.title,
+    kind: input.kind,
+    coordinates,
+    summary: input.summary,
+    category: input.category,
+    note: input.note,
+    source: input.source,
+    sourceUrl: input.sourceUrl,
+    media: input.media ?? existing?.media ?? [],
+    facts: { ...(existing?.facts ?? {}), ...(input.facts ?? {}) },
+    createdAt: existing?.createdAt,
+  });
+  saveEntity(next, existing ? { expectedRevision: existing.revision } : undefined).catch(() => {});
+}
+
+function removeMirroredEntity(id: string) {
+  const canonicalId = canonicalSavedEntityId(id, 'place');
+  const existing = getSavedEntity(canonicalId);
+  if (existing) removeEntity(existing.id, { expectedRevision: existing.revision }).catch(() => {});
+}
+
+function savedPlaceKind(place: SavedPlace): SavedEntityKind {
+  if (place.icon === 'camp') return 'camp';
+  if (place.icon === 'water') return 'water';
+  if (place.icon === 'fuel') return 'fuel';
+  if (place.trailId) return 'trail';
+  return 'place';
+}
+
+function legacyCampFromEntity(entity: SavedEntityV1): CampsitePin {
+  const legacy = entity.facts?.legacy && typeof entity.facts.legacy === 'object'
+    ? entity.facts.legacy as Partial<CampsitePin>
+    : {};
+  return {
+    ...legacy,
+    id: entity.id,
+    name: entity.title,
+    lat: entity.coordinates?.lat ?? Number(legacy.lat ?? 0),
+    lng: entity.coordinates?.lng ?? Number(legacy.lng ?? 0),
+    tags: Array.isArray(legacy.tags) ? legacy.tags : [],
+    land_type: entity.category || legacy.land_type || 'Camp',
+    description: entity.summary || entity.note || legacy.description || '',
+    photos: entity.media.map(item => ({ url: item.url, credit: item.credit, caption: item.caption, source: item.source })),
+    reservable: Boolean(entity.bookingUrl || legacy.reservable),
+    booking_url: entity.bookingUrl || legacy.booking_url,
+    url: entity.sourceUrl || legacy.url || '',
+    official_url: entity.sourceUrl || legacy.official_url,
+    source_badge: entity.source || legacy.source_badge,
+    ada: Boolean(legacy.ada),
+  };
+}
+
+function legacySavedPlaceFromEntity(entity: SavedEntityV1): SavedPlace {
+  const icon: SavedPlace['icon'] = entity.kind === 'camp'
+    ? 'camp'
+    : entity.kind === 'water'
+      ? 'water'
+      : entity.kind === 'fuel'
+        ? 'fuel'
+        : 'pin';
+  return {
+    id: entity.id,
+    name: entity.title,
+    lat: entity.coordinates?.lat ?? 0,
+    lng: entity.coordinates?.lng ?? 0,
+    icon,
+    note: entity.note || entity.summary,
+    trailId: entity.kind === 'trail' ? entity.sourceId || entity.id : undefined,
+    sourceLabel: entity.source,
+    createdAt: entity.createdAt,
+  };
+}
+
+let activeTripMirrorTimer: ReturnType<typeof setTimeout> | null = null;
+let activeTripMirrorWrite: Promise<void> | null = null;
+let activeTripMirrorGeneration = 0;
+let pendingActiveTripMirror: TripResult | null | undefined;
+let pendingPreviousTripId: string | null = null;
+let pendingActiveTripOwnerScope: string | null = null;
+
+function sameTripItem(left: TripDocumentV2['items'][number], right: TripDocumentV2['items'][number]) {
+  if (left.entityId && right.entityId && left.entityId === right.entityId) return true;
+  if (left.title.trim().toLowerCase() !== right.title.trim().toLowerCase()) return false;
+  if (!left.coordinates || !right.coordinates) return true;
+  return Math.abs(left.coordinates.lat - right.coordinates.lat) < 0.0001
+    && Math.abs(left.coordinates.lng - right.coordinates.lng) < 0.0001;
+}
+
+function mergeActiveTripDocument(current: TripDocumentV2, converted: TripDocumentV2): TripDocumentV2 {
+  const items = converted.items.map(item => {
+    const existing = current.items.find(candidate => sameTripItem(candidate, item));
+    return existing ? { ...item, id: existing.id, entityId: existing.entityId, createdAt: existing.createdAt } : item;
+  });
+  return {
+    ...current,
+    ...converted,
+    ownerScope: current.ownerScope,
+    revision: current.revision,
+    items,
+    notes: current.notes,
+    bookings: converted.bookings.length ? converted.bookings : current.bookings,
+    alerts: current.alerts,
+    offline: { ...current.offline, ...converted.offline },
+    createdAt: current.createdAt,
+    archivedAt: undefined,
+  };
+}
+
+async function writeActiveTripMirror(
+  trip: TripResult | null,
+  previousTripId: string | null,
+  ownerScope: string,
+  generation: number,
+) {
+  const stillCurrent = () => (
+    generation === activeTripMirrorGeneration
+    && getTripRepositorySnapshot().initialized
+    && getTripRepositorySnapshot().ownerScope === ownerScope
+  );
+  if (!stillCurrent()) return;
+  if (!trip) {
+    if (!previousTripId) return;
+    const previous = getTrip(previousTripId);
+    if (previous?.status === 'active' && stillCurrent()) {
+      await upsertTrip({ ...previous, status: 'draft' }, { expectedRevision: previous.revision }).catch(() => {});
+    }
+    return;
+  }
+
+  for (const other of listTrips({ includeArchived: true })) {
+    if (!stillCurrent()) return;
+    if (other.id !== trip.trip_id && other.status === 'active') {
+      await upsertTrip({ ...other, status: 'draft' }, { expectedRevision: other.revision }).catch(() => {});
+    }
+  }
+  const converted = tripDocumentFromTripResult(trip);
+  const current = getTrip(converted.id);
+  const next = current ? mergeActiveTripDocument(current, converted) : converted;
+  if (!stillCurrent()) return;
+  try {
+    await upsertTrip(next, current ? { expectedRevision: current.revision } : undefined);
+  } catch {
+    if (!stillCurrent()) return;
+    const latest = getTrip(converted.id);
+    if (latest) {
+      await upsertTrip(mergeActiveTripDocument(latest, converted), { expectedRevision: latest.revision }).catch(() => {});
+    }
+  }
+}
+
+function scheduleActiveTripMirror(trip: TripResult | null, previousTripId: string | null) {
+  const snapshot = getTripRepositorySnapshot();
+  const generation = ++activeTripMirrorGeneration;
+  pendingActiveTripMirror = trip;
+  pendingPreviousTripId = previousTripId;
+  pendingActiveTripOwnerScope = snapshot.initialized ? snapshot.ownerScope : null;
+  if (activeTripMirrorTimer) clearTimeout(activeTripMirrorTimer);
+  activeTripMirrorTimer = setTimeout(() => {
+    activeTripMirrorTimer = null;
+    const pending = pendingActiveTripMirror;
+    const previous = pendingPreviousTripId;
+    const ownerScope = pendingActiveTripOwnerScope;
+    pendingActiveTripMirror = undefined;
+    pendingPreviousTripId = null;
+    pendingActiveTripOwnerScope = null;
+    if (pending === undefined || !ownerScope || generation !== activeTripMirrorGeneration) return;
+    const write = writeActiveTripMirror(pending, previous, ownerScope, generation).catch(() => {});
+    activeTripMirrorWrite = write;
+    void write.finally(() => {
+      if (activeTripMirrorWrite === write) activeTripMirrorWrite = null;
+    });
+  }, trip ? 250 : 0);
+}
+
+export async function cancelActiveTripMirror() {
+  activeTripMirrorGeneration += 1;
+  if (activeTripMirrorTimer) clearTimeout(activeTripMirrorTimer);
+  activeTripMirrorTimer = null;
+  pendingActiveTripMirror = undefined;
+  pendingPreviousTripId = null;
+  pendingActiveTripOwnerScope = null;
+  const running = activeTripMirrorWrite;
+  if (running) await running.catch(() => {});
+}
 
 export interface SavedPlace {
   id: string;
@@ -259,8 +669,8 @@ interface AppState {
   welcomeSetupRunId: number;
   tourTargets: Record<string, TourTargetRect>;
   setAuth: (token: string, user: User) => void;
-  signOut: () => void;
-  clearAuthAndLocalData: () => void;
+  signOut: () => Promise<void>;
+  clearAuthAndLocalData: () => Promise<void>;
   setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
   setTabBarHidden: (hidden: boolean) => void;
   setRigProfile: (rig: RigProfile) => void;
@@ -343,8 +753,11 @@ export const useStore = create<AppState>((set) => ({
   tourTargets: {},
 
   setAuth: (token, user) => {
-    ss('trailhead_token', token);
-    ss('trailhead_user', JSON.stringify(user));
+    if (accountLocalWriteBlockDepth > 0) pendingAuthPersistence = { token, user };
+    else {
+      accountSet('trailhead_token', token);
+      accountSet('trailhead_user', JSON.stringify(user));
+    }
     set((state) => ({
       token, user,
       activeTrip: state.activeTrip,
@@ -354,59 +767,107 @@ export const useStore = create<AppState>((set) => ({
     }));
   },
 
-  signOut: () => {
+  signOut: async () => {
+    pendingAuthPersistence = null;
+    const writesDrained = prepareAccountLocalDataErase();
+    const externalWritesDrained = beginAccountStorageCleanup();
     const freshSession = newSessionId();
-    sd('trailhead_token');
-    sd('trailhead_user');
-    sd(PLAN_KEY);
-    sd('trailhead_iap_pending');
-    ss('trailhead_session', freshSession);
-    set({
-      token: null,
-      user: null,
-      pendingMapSelection: null,
-      pendingStartCopilotVoice: false,
-      sessionId: freshSession,
-      hasPlan: false,
-      planExpiresAt: null,
-    });
-  },
-
-  clearAuthAndLocalData: () => {
-    const freshSession = newSessionId();
-    sd('trailhead_token');
-    sd('trailhead_user');
-    sd('trailhead_rig');
-    sd('trailhead_history');
-    sd('trailhead_favorites');
-    sd('trailhead_active_trip');
-    sd('trailhead_active_route');
-    sd('trailhead_water_spots');
-    sd('trailhead_catch_logs');
-    sd('trailhead_water_routes');
-    sd(PLAN_KEY);
-    sd('trailhead_iap_pending');
-    ss('trailhead_session', freshSession);
-    deleteTripFile(); // clear file-based trip storage too
-    deleteRigFile();
     set({
       token: null,
       user: null,
       activeTrip: null,
+      activeTripFromCache: false,
       rigProfile: null,
       tripHistory: [],
       favoriteCamps: [],
+      savedPlaces: [],
       waterSpots: [],
       catchLogs: [],
       waterRoutes: [],
+      markerGroups: [],
+      searchHistory: [],
+      offlineTripIds: [],
+      pendingSavedTrailId: null,
+      pendingRouteFlyover: null,
+      pendingNavigatePlace: null,
       pendingMapSelection: null,
+      pendingStartCopilotVoice: false,
+      pendingOpenOfflineModal: false,
+      userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
       planExpiresAt: null,
     });
+    await serializeAccountLocalCleanup(async () => {
+      await Promise.all([writesDrained, externalWritesDrained]);
+      try {
+        await Promise.all([
+          sd('trailhead_token'),
+          sd('trailhead_user'),
+          eraseLegacyAccountData(),
+          sd(PLAN_KEY),
+          sd('trailhead_iap_pending'),
+          ss('trailhead_session', freshSession),
+        ]);
+      } finally {
+        endAccountStorageCleanup();
+        resumeAccountLocalWrites();
+      }
+    });
+  },
+
+  clearAuthAndLocalData: async () => {
+    pendingAuthPersistence = null;
+    const writesDrained = prepareAccountLocalDataErase();
+    const externalWritesDrained = beginAccountStorageCleanup();
+    const freshSession = newSessionId();
+    set({
+      token: null,
+      user: null,
+      activeTrip: null,
+      activeTripFromCache: false,
+      rigProfile: null,
+      tripHistory: [],
+      favoriteCamps: [],
+      savedPlaces: [],
+      waterSpots: [],
+      catchLogs: [],
+      waterRoutes: [],
+      markerGroups: [],
+      searchHistory: [],
+      offlineTripIds: [],
+      pendingSavedTrailId: null,
+      pendingRouteFlyover: null,
+      pendingNavigatePlace: null,
+      pendingMapSelection: null,
+      pendingStartCopilotVoice: false,
+      pendingOpenOfflineModal: false,
+      userLoc: null,
+      sessionId: freshSession,
+      hasPlan: false,
+      planExpiresAt: null,
+    });
+    await serializeAccountLocalCleanup(async () => {
+      await Promise.all([writesDrained, externalWritesDrained]);
+      try {
+        await Promise.all([
+          sd('trailhead_token'),
+          sd('trailhead_user'),
+          eraseLegacyAccountData(),
+          sd(PLAN_KEY),
+          sd('trailhead_iap_pending'),
+          ss('trailhead_session', freshSession),
+        ]);
+      } finally {
+        endAccountStorageCleanup();
+        resumeAccountLocalWrites();
+      }
+    });
   },
 
   setActiveTrip: (trip, fromCache = false) => {
+    if (!accountLocalMutationAllowed()) return;
+    const previousTripId = useStore.getState().activeTrip?.trip_id ?? null;
     if (trip) saveTripFile(trip);
     else {
       deleteTripFile();
@@ -414,31 +875,39 @@ export const useStore = create<AppState>((set) => ({
       sd('trailhead_active_route');
     }
     set({ activeTrip: trip, activeTripFromCache: fromCache });
+    scheduleActiveTripMirror(trip, previousTripId);
   },
 
   setTabBarHidden: (hidden) => set({ tabBarHidden: hidden }),
 
   setRigProfile: (rig) => {
-    ss('trailhead_rig', JSON.stringify(rig));
+    if (!accountLocalMutationAllowed()) return;
+    accountSet('trailhead_rig', JSON.stringify(rig));
     saveRigFile(rig);
     set({ rigProfile: rig });
   },
 
-  addTripToHistory: (item) => set((state) => {
-    const updated = [item, ...state.tripHistory.filter(t => t.trip_id !== item.trip_id)].slice(0, 10);
-    ss('trailhead_history', JSON.stringify(updated));
-    return { tripHistory: updated };
-  }),
+  addTripToHistory: (item) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = [item, ...state.tripHistory.filter(t => t.trip_id !== item.trip_id)];
+      accountSet('trailhead_history', JSON.stringify(updated));
+      return { tripHistory: updated };
+    });
+  },
 
-  removeTripFromHistory: (tripId) => set((state) => {
-    const updated = state.tripHistory.filter(t => t.trip_id !== tripId);
-    ss('trailhead_history', JSON.stringify(updated));
-    return {
-      tripHistory: updated,
-      activeTrip: state.activeTrip?.trip_id === tripId ? null : state.activeTrip,
-      activeTripFromCache: state.activeTrip?.trip_id === tripId ? false : state.activeTripFromCache,
-    };
-  }),
+  removeTripFromHistory: (tripId) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = state.tripHistory.filter(t => t.trip_id !== tripId);
+      accountSet('trailhead_history', JSON.stringify(updated));
+      return {
+        tripHistory: updated,
+        activeTrip: state.activeTrip?.trip_id === tripId ? null : state.activeTrip,
+        activeTripFromCache: state.activeTrip?.trip_id === tripId ? false : state.activeTripFromCache,
+      };
+    });
+  },
 
   setThemeMode: (mode) => {
     ss('trailhead_theme', mode);
@@ -450,7 +919,10 @@ export const useStore = create<AppState>((set) => ({
     set({ weatherUnitMode: clean });
   },
 
-  setUserLoc: (loc) => set({ userLoc: loc }),
+  setUserLoc: (loc) => {
+    if (!accountLocalMutationAllowed()) return;
+    set({ userLoc: loc });
+  },
   setMapboxToken: (token) => set({ mapboxToken: token }),
   addLiveReport: (report) => set(state => ({
     liveReports: [report, ...state.liveReports.filter(r => r.id !== report.id)].slice(0, 100),
@@ -471,14 +943,15 @@ export const useStore = create<AppState>((set) => ({
     set({ sessionId: id });
   },
 
-  setOfflineTripIds: (ids) => set({ offlineTripIds: ids }),
-  setPendingSavedTrailId: (id) => set({ pendingSavedTrailId: id }),
-  setPendingRouteFlyover: (request) => set({ pendingRouteFlyover: request }),
-  setPendingNavigatePlace: (place) => set({ pendingNavigatePlace: place }),
-  setPendingMapSelection: (selection) => set({ pendingMapSelection: selection }),
-  setPendingStartCopilotVoice: (start) => set({ pendingStartCopilotVoice: start }),
-  setPendingOpenOfflineModal: (open) => set({ pendingOpenOfflineModal: open }),
+  setOfflineTripIds: (ids) => { if (accountLocalMutationAllowed()) set({ offlineTripIds: ids }); },
+  setPendingSavedTrailId: (id) => { if (accountLocalMutationAllowed()) set({ pendingSavedTrailId: id }); },
+  setPendingRouteFlyover: (request) => { if (accountLocalMutationAllowed()) set({ pendingRouteFlyover: request }); },
+  setPendingNavigatePlace: (place) => { if (accountLocalMutationAllowed()) set({ pendingNavigatePlace: place }); },
+  setPendingMapSelection: (selection) => { if (accountLocalMutationAllowed()) set({ pendingMapSelection: selection }); },
+  setPendingStartCopilotVoice: (start) => { if (accountLocalMutationAllowed()) set({ pendingStartCopilotVoice: start }); },
+  setPendingOpenOfflineModal: (open) => { if (accountLocalMutationAllowed()) set({ pendingOpenOfflineModal: open }); },
   setPlan: (active, expiresAt = null) => {
+    if (!accountLocalMutationAllowed()) return;
     sd(PLAN_KEY);
     set({ hasPlan: active, planExpiresAt: expiresAt });
   },
@@ -494,103 +967,184 @@ export const useStore = create<AppState>((set) => ({
   }),
 
   restoreActiveTrip: async () => {
+    if (!accountLocalMutationAllowed()) return;
     const trip = await loadTripFile();
-    if (trip) set({ activeTrip: trip });
+    if (trip && accountLocalMutationAllowed()) set({ activeTrip: trip });
   },
 
-  toggleFavorite: (camp) => set((state) => {
+  toggleFavorite: (camp) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
     const exists = state.favoriteCamps.some(f => f.id === camp.id);
     const updated = exists
       ? state.favoriteCamps.filter(f => f.id !== camp.id)
-      : [camp, ...state.favoriteCamps].slice(0, 50);
-    ss('trailhead_favorites', JSON.stringify(updated));
-    return { favoriteCamps: updated };
-  }),
+      : [camp, ...state.favoriteCamps];
+    if (exists) {
+      removeMirroredEntity(camp.id);
+    } else {
+      const photos = (camp.photos ?? []).flatMap(photo => {
+        if (typeof photo === 'string') return photo ? [{ url: photo, kind: 'image' as const }] : [];
+        return photo?.url ? [{ url: photo.url, kind: 'image' as const, credit: photo.credit, caption: photo.caption, source: photo.source }] : [];
+      });
+      mirrorSavedEntity({
+        id: camp.id,
+        title: camp.name,
+        kind: 'camp',
+        lat: camp.lat,
+        lng: camp.lng,
+        summary: camp.description,
+        category: camp.land_type || 'Camp',
+        source: camp.source_badge || camp.verified_source || camp.source,
+        sourceUrl: camp.official_url || camp.url,
+        media: photos,
+        facts: { reservable: camp.reservable, booking_url: camp.booking_url, amenities: camp.amenities },
+      });
+    }
+      return { favoriteCamps: updated };
+    });
+  },
 
-  addSavedPlace: (p) => set((state) => {
-    const updated = [p, ...state.savedPlaces.filter(x => x.id !== p.id)].slice(0, 200);
-    ss('trailhead_saved_places', JSON.stringify(updated));
-    return { savedPlaces: updated };
-  }),
-  removeSavedPlace: (id) => set((state) => {
-    const updated = state.savedPlaces.filter(x => x.id !== id);
-    ss('trailhead_saved_places', JSON.stringify(updated));
-    return { savedPlaces: updated };
-  }),
+  addSavedPlace: (p) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+    const updated = [p, ...state.savedPlaces.filter(x => x.id !== p.id)];
+    const kind = savedPlaceKind(p);
+    mirrorSavedEntity({
+      id: p.id,
+      title: p.name,
+      kind,
+      lat: p.lat,
+      lng: p.lng,
+      summary: p.note,
+      category: p.icon,
+      note: p.note,
+      source: p.sourceLabel,
+      facts: { trail_id: p.trailId, geometry_ref: p.geometryRef },
+    });
+      return { savedPlaces: updated };
+    });
+  },
+  removeSavedPlace: (id) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = state.savedPlaces.filter(x => x.id !== id);
+      removeMirroredEntity(id);
+      return { savedPlaces: updated };
+    });
+  },
 
-  addWaterSpot: (spot) => set((state) => {
-    const updated = [spot, ...state.waterSpots.filter(x => x.id !== spot.id)].slice(0, 500);
-    ss('trailhead_water_spots', JSON.stringify(updated));
-    return { waterSpots: updated };
-  }),
-  removeWaterSpot: (id) => set((state) => {
-    const updated = state.waterSpots.filter(x => x.id !== id);
-    ss('trailhead_water_spots', JSON.stringify(updated));
-    return { waterSpots: updated };
-  }),
+  addWaterSpot: (spot) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = [spot, ...state.waterSpots.filter(x => x.id !== spot.id)];
+      accountSet('trailhead_water_spots', JSON.stringify(updated));
+      mirrorSavedEntity({
+        id: spot.id,
+        title: spot.name,
+        kind: 'water',
+        lat: spot.lat,
+        lng: spot.lng,
+        category: spot.kind,
+        note: spot.note,
+        source: spot.source,
+        facts: { depth_range_ft: spot.depthRangeFt, structure: spot.structure, species: spot.speciesTargets },
+      });
+      return { waterSpots: updated };
+    });
+  },
+  removeWaterSpot: (id) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = state.waterSpots.filter(x => x.id !== id);
+      accountSet('trailhead_water_spots', JSON.stringify(updated));
+      removeMirroredEntity(id);
+      return { waterSpots: updated };
+    });
+  },
 
-  addCatchLog: (log) => set((state) => {
-    const updated = [log, ...state.catchLogs.filter(x => x.id !== log.id)].slice(0, 1000);
-    ss('trailhead_catch_logs', JSON.stringify(updated));
-    return { catchLogs: updated };
-  }),
-  removeCatchLog: (id) => set((state) => {
-    const updated = state.catchLogs.filter(x => x.id !== id);
-    ss('trailhead_catch_logs', JSON.stringify(updated));
-    return { catchLogs: updated };
-  }),
+  addCatchLog: (log) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = [log, ...state.catchLogs.filter(x => x.id !== log.id)].slice(0, 1000);
+      accountSet('trailhead_catch_logs', JSON.stringify(updated));
+      return { catchLogs: updated };
+    });
+  },
+  removeCatchLog: (id) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = state.catchLogs.filter(x => x.id !== id);
+      accountSet('trailhead_catch_logs', JSON.stringify(updated));
+      return { catchLogs: updated };
+    });
+  },
 
-  addWaterRoute: (route) => set((state) => {
-    const updated = [route, ...state.waterRoutes.filter(x => x.id !== route.id)].slice(0, 100);
-    ss('trailhead_water_routes', JSON.stringify(updated));
-    return { waterRoutes: updated };
-  }),
-  removeWaterRoute: (id) => set((state) => {
-    const updated = state.waterRoutes.filter(x => x.id !== id);
-    ss('trailhead_water_routes', JSON.stringify(updated));
-    return { waterRoutes: updated };
-  }),
+  addWaterRoute: (route) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = [route, ...state.waterRoutes.filter(x => x.id !== route.id)].slice(0, 100);
+      accountSet('trailhead_water_routes', JSON.stringify(updated));
+      return { waterRoutes: updated };
+    });
+  },
+  removeWaterRoute: (id) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = state.waterRoutes.filter(x => x.id !== id);
+      accountSet('trailhead_water_routes', JSON.stringify(updated));
+      return { waterRoutes: updated };
+    });
+  },
 
-  addMarkerGroup: (g) => set((state) => {
-    const updated = [...state.markerGroups, g];
-    ss('trailhead_marker_groups', JSON.stringify(updated));
-    return { markerGroups: updated };
-  }),
-  updateMarkerGroup: (id, updates) => set((state) => {
-    const updated = state.markerGroups.map(g => g.id === id ? { ...g, ...updates } : g);
-    ss('trailhead_marker_groups', JSON.stringify(updated));
-    return { markerGroups: updated };
-  }),
-  removeMarkerGroup: (id) => set((state) => {
-    const updated = state.markerGroups.filter(g => g.id !== id);
-    ss('trailhead_marker_groups', JSON.stringify(updated));
-    return { savedPlaces: state.savedPlaces.filter(p => p.groupId !== id), markerGroups: updated };
-  }),
+  addMarkerGroup: (g) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = [...state.markerGroups, g];
+      accountSet('trailhead_marker_groups', JSON.stringify(updated));
+      return { markerGroups: updated };
+    });
+  },
+  updateMarkerGroup: (id, updates) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = state.markerGroups.map(g => g.id === id ? { ...g, ...updates } : g);
+      accountSet('trailhead_marker_groups', JSON.stringify(updated));
+      return { markerGroups: updated };
+    });
+  },
+  removeMarkerGroup: (id) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const updated = state.markerGroups.filter(g => g.id !== id);
+      accountSet('trailhead_marker_groups', JSON.stringify(updated));
+      return { savedPlaces: state.savedPlaces.filter(p => p.groupId !== id), markerGroups: updated };
+    });
+  },
 
-  addSearchHistory: (item) => set((state) => {
-    const deduped = state.searchHistory.filter(h => h.name !== item.name);
-    const updated = [item, ...deduped].slice(0, 30);
-    ss('trailhead_search_history', JSON.stringify(updated));
-    return { searchHistory: updated };
-  }),
+  addSearchHistory: (item) => {
+    if (!accountLocalMutationAllowed()) return;
+    set((state) => {
+      const deduped = state.searchHistory.filter(h => h.name !== item.name);
+      const updated = [item, ...deduped].slice(0, 30);
+      accountSet('trailhead_search_history', JSON.stringify(updated));
+      return { searchHistory: updated };
+    });
+  },
   clearSearchHistory: () => {
-    sd('trailhead_search_history');
+    if (!accountLocalMutationAllowed()) return;
+    accountLocalWrite(() => sd('trailhead_search_history'));
     set({ searchHistory: [] });
   },
 }));
 
-// Load persisted data on startup
-(async () => {
+// Account-local state is restored only after RootLayout resolves who owns it.
+export async function restoreLegacyAccountState() {
   try {
-    const [rigRaw, historyRaw, themeRaw, weatherUnitsRaw, sessionRaw, favRaw, cachedRegionsRaw, activeTripRaw, planRaw,
-           savedPlacesRaw, waterSpotsRaw, catchLogsRaw, waterRoutesRaw, markerGroupsRaw, searchHistoryRaw, tokenRaw, userRaw] = await Promise.all([
+    const [rigRaw, historyRaw, favRaw, activeTripRaw, planRaw, savedPlacesRaw,
+           waterSpotsRaw, catchLogsRaw, waterRoutesRaw, markerGroupsRaw, searchHistoryRaw] = await Promise.all([
       sg('trailhead_rig'),
       sg('trailhead_history'),
-      sg('trailhead_theme'),
-      sg('trailhead_weather_units'),
-      sg('trailhead_session'),
       sg('trailhead_favorites'),
-      sg('trailhead_cached_regions'),
       sg('trailhead_active_trip'),
       sg(PLAN_KEY),
       sg('trailhead_saved_places'),
@@ -599,13 +1153,8 @@ export const useStore = create<AppState>((set) => ({
       sg('trailhead_water_routes'),
       sg('trailhead_marker_groups'),
       sg('trailhead_search_history'),
-      sg('trailhead_token'),
-      sg('trailhead_user'),
     ]);
     const patch: Partial<AppState> = {};
-    // Restore auth session — keeps user logged in across app launches
-    if (tokenRaw) patch.token = tokenRaw;
-    if (userRaw) { try { patch.user = JSON.parse(userRaw); } catch {} }
     const rigFromFile = !rigRaw ? await loadRigFile() : null;
     if (rigRaw) {
       const rig = JSON.parse(rigRaw) as RigProfile;
@@ -613,20 +1162,16 @@ export const useStore = create<AppState>((set) => ({
       saveRigFile(rig);
     } else if (rigFromFile) {
       patch.rigProfile = rigFromFile;
-      ss('trailhead_rig', JSON.stringify(rigFromFile));
+      accountSet('trailhead_rig', JSON.stringify(rigFromFile));
     }
     if (historyRaw) patch.tripHistory = JSON.parse(historyRaw);
-    patch.themeMode = themeRaw === 'dark' ? 'dark' : 'light';
-    patch.weatherUnitMode = weatherUnitsRaw === 'imperial' || weatherUnitsRaw === 'metric' ? weatherUnitsRaw : 'auto';
     if (favRaw) patch.favoriteCamps = JSON.parse(favRaw);
-    if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
     if (savedPlacesRaw) patch.savedPlaces = JSON.parse(savedPlacesRaw);
     if (waterSpotsRaw) patch.waterSpots = JSON.parse(waterSpotsRaw);
     if (catchLogsRaw) patch.catchLogs = JSON.parse(catchLogsRaw);
     if (waterRoutesRaw) patch.waterRoutes = JSON.parse(waterRoutesRaw);
     if (markerGroupsRaw) patch.markerGroups = JSON.parse(markerGroupsRaw);
     if (searchHistoryRaw) patch.searchHistory = JSON.parse(searchHistoryRaw);
-    if (sessionRaw) patch.sessionId = sessionRaw;
     if (planRaw) sd(PLAN_KEY);
     const tripFromFile = await loadTripFile();
     if (tripFromFile) {
@@ -640,11 +1185,103 @@ export const useStore = create<AppState>((set) => ({
         saveTripFile(trip);
       } catch {}
     }
-    if (!sessionRaw) {
-      // First run — persist the generated ID
-      const id = useStore.getState().sessionId;
-      ss('trailhead_session', id);
-    }
     if (Object.keys(patch).length > 0) useStore.setState(patch);
   } catch {}
+}
+
+function clearLegacyAccountStateFromMemory() {
+  useStore.setState({
+    activeTrip: null,
+    activeTripFromCache: false,
+    rigProfile: null,
+    tripHistory: [],
+    favoriteCamps: [],
+    savedPlaces: [],
+    waterSpots: [],
+    catchLogs: [],
+    waterRoutes: [],
+    markerGroups: [],
+    searchHistory: [],
+    offlineTripIds: [],
+    pendingSavedTrailId: null,
+    pendingRouteFlyover: null,
+    pendingNavigatePlace: null,
+    pendingMapSelection: null,
+    pendingStartCopilotVoice: false,
+    pendingOpenOfflineModal: false,
+    userLoc: null,
+  });
+}
+
+export async function separateAnonymousLegacyState() {
+  const writesDrained = prepareAccountLocalDataErase();
+  const externalWritesDrained = beginAccountStorageCleanup();
+  await cancelActiveTripMirror();
+  await serializeAccountLocalCleanup(async () => {
+    await Promise.all([writesDrained, externalWritesDrained]);
+    try {
+      await stashAnonymousLegacyData();
+      clearLegacyAccountStateFromMemory();
+    } finally {
+      endAccountStorageCleanup();
+      resumeAccountLocalWrites();
+    }
+  });
+}
+
+export async function restoreSeparatedAnonymousLegacyState(_clearCurrent = false) {
+  return serializeAccountLocalCleanup(async () => {
+    const hasStash = await hasAnonymousLegacyStash();
+    if (!hasStash) return false;
+    const externalWritesDrained = beginAccountStorageCleanup();
+    await Promise.all([prepareAccountLocalDataErase(), externalWritesDrained]);
+    try {
+      await eraseLegacyAccountData();
+      clearLegacyAccountStateFromMemory();
+      const restored = await restoreAnonymousLegacyData();
+      if (restored) await restoreLegacyAccountState();
+      return restored;
+    } finally {
+      endAccountStorageCleanup();
+      resumeAccountLocalWrites();
+    }
+  });
+}
+
+// Device preferences and downloaded map regions do not belong to an account.
+void (async () => {
+  try {
+    const [themeRaw, weatherUnitsRaw, sessionRaw, cachedRegionsRaw] = await Promise.all([
+      sg('trailhead_theme'),
+      sg('trailhead_weather_units'),
+      sg('trailhead_session'),
+      sg('trailhead_cached_regions'),
+    ]);
+    const patch: Partial<AppState> = {
+      themeMode: themeRaw === 'dark' ? 'dark' : 'light',
+      weatherUnitMode: weatherUnitsRaw === 'imperial' || weatherUnitsRaw === 'metric' ? weatherUnitsRaw : 'auto',
+    };
+    if (cachedRegionsRaw) patch.cachedRegions = JSON.parse(cachedRegionsRaw);
+    if (sessionRaw) patch.sessionId = sessionRaw;
+    else await ss('trailhead_session', useStore.getState().sessionId);
+    useStore.setState(patch);
+  } catch {}
 })();
+
+let mirroredLibrarySignature = '';
+subscribeTripRepository(() => {
+  const snapshot = getTripRepositorySnapshot();
+  if (!snapshot.initialized) return;
+  const signature = `${snapshot.ownerScope}:${snapshot.savedEntities.map(entity => `${entity.id}:${entity.revision}`).join('|')}`;
+  if (signature === mirroredLibrarySignature) return;
+  mirroredLibrarySignature = signature;
+  const camps = snapshot.savedEntities
+    .filter(entity => entity.kind === 'camp' && entity.coordinates)
+    .map(legacyCampFromEntity);
+  const places = snapshot.savedEntities
+    .filter(entity => entity.kind !== 'camp' && entity.coordinates)
+    .map(legacySavedPlaceFromEntity);
+  useStore.setState({ favoriteCamps: camps, savedPlaces: places });
+  sd('trailhead_favorites');
+  sd('trailhead_saved_places');
+});

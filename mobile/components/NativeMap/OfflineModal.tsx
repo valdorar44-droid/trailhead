@@ -38,9 +38,28 @@ import {
 import { TrailheadSheet } from '@/components/TrailheadUI';
 import { deleteOfflineTrip, getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
 import type { TripResult } from '@/lib/api';
+import { accountStorage, type AccountStorageEpoch } from '@/lib/storage';
 
 
 interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
+
+type OfflineAccountScope = {
+  epoch: AccountStorageEpoch;
+  accountId: string;
+};
+
+function currentOfflineAccountScope(): OfflineAccountScope {
+  return {
+    epoch: accountStorage.epoch(),
+    accountId: String(useStore.getState().user?.id ?? ''),
+  };
+}
+
+function offlineAccountScopeIsCurrent(scope: OfflineAccountScope) {
+  return !accountStorage.isCleaning()
+    && accountStorage.epoch() === scope.epoch
+    && String(useStore.getState().user?.id ?? '') === scope.accountId;
+}
 
 export interface OfflineAreaSelection {
   id: string;
@@ -576,23 +595,46 @@ export default function OfflineModal({
     FileSystem.getFreeDiskStorageAsync().then(setFreeDiskBytes).catch(() => setFreeDiskBytes(null));
   }, [visible]);
 
-  const reloadPlacePacks = useCallback(async () => {
+  const reloadPlacePacks = useCallback(async (scope = currentOfflineAccountScope()) => {
     const packs = await listOfflinePlacePacks().catch(() => []);
-    setPlacePacks(packs);
+    if (offlineAccountScopeIsCurrent(scope)) setPlacePacks(packs);
   }, []);
 
   useEffect(() => {
-    if (visible) reloadPlacePacks();
-  }, [visible, reloadPlacePacks]);
+    if (!visible || accountStorage.isCleaning()) return;
+    reloadPlacePacks(currentOfflineAccountScope());
+  }, [visible, reloadPlacePacks, user?.id]);
 
-  const reloadOfflineTrips = useCallback(async () => {
+  const reloadOfflineTrips = useCallback(async (scope = currentOfflineAccountScope()) => {
     const trips = await getOfflineTripSummaries().catch(() => []);
-    setOfflineTrips(trips);
+    if (offlineAccountScopeIsCurrent(scope)) setOfflineTrips(trips);
   }, []);
 
   useEffect(() => {
-    if (visible) reloadOfflineTrips();
-  }, [visible, reloadOfflineTrips]);
+    if (!visible || accountStorage.isCleaning()) return;
+    reloadOfflineTrips(currentOfflineAccountScope());
+  }, [visible, reloadOfflineTrips, user?.id]);
+
+  useEffect(() => {
+    setPlacePacks([]);
+    setOfflineTrips([]);
+    setPlaceBusy(false);
+    setPlaceError(null);
+    setAuthorizing(null);
+  }, [user?.id]);
+
+  useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
+    setPlacePacks([]);
+    setOfflineTrips([]);
+    setPlaceBusy(false);
+    setPlaceError(null);
+    setAuthorizing(null);
+    if (cleaning || !visible) return;
+    const scope = currentOfflineAccountScope();
+    if (scope.epoch !== epoch) return;
+    reloadPlacePacks(scope);
+    reloadOfflineTrips(scope);
+  }), [reloadOfflineTrips, reloadPlacePacks, visible]);
 
   useEffect(() => {
     if (!visible) return;
@@ -637,18 +679,22 @@ export default function OfflineModal({
     action: () => void | Promise<void>,
   ) => {
     if (authorizing) return;
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     setAuthorizing(key);
     try {
       await api.authorizeOfflineDownload(assetType, regionId, label);
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       await action();
     } catch (e: any) {
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       if (e instanceof PaywallError) {
         Alert.alert('Save unavailable', e.message);
       } else {
         Alert.alert('Save unavailable', e?.message ?? 'Could not start this save.');
       }
     } finally {
-      setAuthorizing(null);
+      if (offlineAccountScopeIsCurrent(scope)) setAuthorizing(null);
     }
   }, [authorizing]);
 
@@ -659,6 +705,8 @@ export default function OfflineModal({
 
   const downloadTripEssentials = useCallback(async () => {
     if (placeBusy) return;
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     const mappedWaypoints = waypoints.filter(w => Number.isFinite(w.lat) && Number.isFinite(w.lng));
     const usableRoute = routeCoords.filter(c => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]));
     if (mappedWaypoints.length < 2 && usableRoute.length < 2) {
@@ -674,24 +722,30 @@ export default function OfflineModal({
         waypoints: mappedWaypoints.map(w => ({ lat: w.lat, lng: w.lng, name: w.name, day: w.day, type: w.type })),
         route_coords: usableRoute,
       });
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       await saveOfflinePlacePack(pack, placePacks.filter(item => item.trip_id === tripId || item.region_id === selectedState).map(item => item.pack_id));
-      await reloadPlacePacks();
+      if (!offlineAccountScopeIsCurrent(scope)) return;
+      await reloadPlacePacks(scope);
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       onOfflinePlacesChanged?.();
       Alert.alert('Trip places saved', `${pack.points.length} fuel, camp, and place pins are saved with this trip.`);
     } catch (e: any) {
-      setPlaceError(e?.message ?? 'Could not save trip essentials.');
+      if (offlineAccountScopeIsCurrent(scope)) setPlaceError(e?.message ?? 'Could not save trip essentials.');
     } finally {
-      setPlaceBusy(false);
+      if (offlineAccountScopeIsCurrent(scope)) setPlaceBusy(false);
     }
   }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks, routeCoords, selectedState, tripId, tripName, waypoints]);
 
   const downloadTripBundle = useCallback(async () => {
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     if (!waypoints.length) {
       setPlaceError('Plan a trip first, then Trailhead can save its map, navigation, and places.');
       return;
     }
     const name = (tripName ?? 'Trip') + '-corridor';
     await authorizeAndRun(`trip:${name}`, 'trip_corridor', name, tripName ?? 'Trip area', () => startTripCorridor(name));
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     await downloadTripEssentials();
   }, [authorizeAndRun, downloadTripEssentials, startTripCorridor, tripName, waypoints.length]);
 
@@ -741,23 +795,32 @@ export default function OfflineModal({
   }, [deleteMlnPack, onDeleteArea, onWebClearRegion]);
 
   const deleteTripEssentials = useCallback(async (packId: string) => {
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     await deleteOfflinePlacePack(packId);
-    await reloadPlacePacks();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
+    await reloadPlacePacks(scope);
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     onOfflinePlacesChanged?.();
   }, [onOfflinePlacesChanged, reloadPlacePacks]);
 
   const openOfflineTrip = useCallback(async (tripId: string) => {
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     const trip = await loadOfflineTrip(tripId);
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     if (!trip) {
       Alert.alert('Saved route unavailable', 'That saved route is no longer on this device.');
-      await reloadOfflineTrips();
+      await reloadOfflineTrips(scope);
       return;
     }
     setActiveTrip({ ...trip, updated_at: Date.now() }, true);
-    onClose();
+    if (offlineAccountScopeIsCurrent(scope)) onClose();
   }, [onClose, reloadOfflineTrips, setActiveTrip]);
 
   const deleteOfflineTripCopy = useCallback((trip: TripResult & { cached_at: number }) => {
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     Alert.alert(
       'Delete saved route?',
       `${trip.plan.trip_name || trip.trip_id} will be removed from saved areas on this device.`,
@@ -767,8 +830,10 @@ export default function OfflineModal({
           text: 'Delete',
           style: 'destructive',
           onPress: async () => {
+            if (!offlineAccountScopeIsCurrent(scope)) return;
             await deleteOfflineTrip(trip.trip_id);
-            await reloadOfflineTrips();
+            if (!offlineAccountScopeIsCurrent(scope)) return;
+            await reloadOfflineTrips(scope);
           },
         },
       ],
@@ -804,23 +869,30 @@ export default function OfflineModal({
 
   const downloadRegionPlacePack = useCallback(async (packId: string) => {
     if (placeBusy) return;
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     setPlaceBusy(true);
     setPlaceError(null);
     try {
       const pack = await api.getPlacePack(selectedState, packId);
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       await saveOfflinePlacePack(pack, placePacks.filter(item => item.trip_id === tripId || item.region_id === selectedState).map(item => item.pack_id));
-      await reloadPlacePacks();
+      if (!offlineAccountScopeIsCurrent(scope)) return;
+      await reloadPlacePacks(scope);
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       onOfflinePlacesChanged?.();
       Alert.alert('Places saved', `${pack.name} saved ${pack.points.length} places on this device.`);
     } catch (e: any) {
-      setPlaceError(e?.message ?? 'Could not save these places.');
+      if (offlineAccountScopeIsCurrent(scope)) setPlaceError(e?.message ?? 'Could not save these places.');
     } finally {
-      setPlaceBusy(false);
+      if (offlineAccountScopeIsCurrent(scope)) setPlaceBusy(false);
     }
   }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks, selectedState, tripId]);
 
   const downloadRegionBundle = useCallback(async (regionId: string) => {
     if (authorizing) return;
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     const region = FILE_REGIONS[regionId as keyof typeof FILE_REGIONS];
     if (!region) return;
     const label = region.name;
@@ -831,8 +903,11 @@ export default function OfflineModal({
       action: () => void | Promise<void>,
     ) => {
       await api.authorizeOfflineDownload(assetType, regionId, assetLabel);
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       void Promise.resolve(action()).catch((e: any) => {
-        Alert.alert('Save unavailable', e?.message ?? `Could not start ${assetLabel}.`);
+        if (offlineAccountScopeIsCurrent(scope)) {
+          Alert.alert('Save unavailable', e?.message ?? `Could not start ${assetLabel}.`);
+        }
       });
     };
     try {
@@ -842,6 +917,7 @@ export default function OfflineModal({
       if (isFilePublished(regionId)) {
         if (mapState.status === 'idle' || mapState.status === 'error') {
           await scheduleFile('state_map', `${label} map`, () => startDownload(regionId));
+          if (!offlineAccountScopeIsCurrent(scope)) return;
         } else if (mapState.status === 'paused') {
           resumeDownload(regionId);
         }
@@ -849,6 +925,7 @@ export default function OfflineModal({
       if (isRoutingPublished(regionId)) {
         if (routingState.status === 'idle' || routingState.status === 'error') {
           await scheduleFile('state_route', `${label} navigation`, () => startRoutingDownload(regionId));
+          if (!offlineAccountScopeIsCurrent(scope)) return;
         } else if (routingState.status === 'paused') {
           resumeRoutingDownload(regionId);
         }
@@ -856,6 +933,7 @@ export default function OfflineModal({
       if (isTrailPublished(regionId)) {
         if (trailState.status === 'idle' || trailState.status === 'error') {
           await scheduleFile('state_trails', `${label} trails`, () => startTrailDownload(regionId));
+          if (!offlineAccountScopeIsCurrent(scope)) return;
         } else if (trailState.status === 'paused') {
           resumeTrailDownload(regionId);
         }
@@ -865,31 +943,38 @@ export default function OfflineModal({
         !placePacks.some(pack => pack.region_id === regionId && pack.pack_id === `${regionId}-${entry.pack_id}`)
       ));
       if (missingPlaceEntries.length && !placeBusy) {
+        if (!offlineAccountScopeIsCurrent(scope)) return;
         setPlaceBusy(true);
         setPlaceError(null);
         void (async () => {
           try {
             for (const entry of missingPlaceEntries) {
               const pack = await api.getPlacePack(regionId, entry.pack_id);
+              if (!offlineAccountScopeIsCurrent(scope)) return;
               await saveOfflinePlacePack(pack, []);
+              if (!offlineAccountScopeIsCurrent(scope)) return;
             }
-            await reloadPlacePacks();
+            await reloadPlacePacks(scope);
+            if (!offlineAccountScopeIsCurrent(scope)) return;
             onOfflinePlacesChanged?.();
           } catch (e: any) {
-            setPlaceError(e?.message ?? 'Could not save places for this region.');
+            if (offlineAccountScopeIsCurrent(scope)) {
+              setPlaceError(e?.message ?? 'Could not save places for this region.');
+            }
           } finally {
-            setPlaceBusy(false);
+            if (offlineAccountScopeIsCurrent(scope)) setPlaceBusy(false);
           }
         })();
       }
     } catch (e: any) {
+      if (!offlineAccountScopeIsCurrent(scope)) return;
       if (e instanceof PaywallError) {
         Alert.alert('Save unavailable', e.message);
       } else {
         Alert.alert('Save unavailable', e?.message ?? `Could not start saves for ${label}.`);
       }
     } finally {
-      setAuthorizing(null);
+      if (offlineAccountScopeIsCurrent(scope)) setAuthorizing(null);
     }
   }, [
     authorizing,

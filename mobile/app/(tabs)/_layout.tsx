@@ -1,14 +1,16 @@
 import { Tabs } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
-import { PremiumTabBar } from '@/components/premium';
 import GuidedTourOverlay from '@/components/GuidedTourOverlay';
 import PreviewRunOnboarding from '@/components/PreviewRunOnboarding';
+import TripsTabBar from '@/components/trips/TripsTabBar';
+import { useProductFeatures } from '@/lib/useProductFeatures';
 
 export const unstable_settings = {
   initialRouteName: 'guide',
 };
 
 export default function TabLayout() {
+  const { features } = useProductFeatures();
+  const tripsEnabled = Boolean(features?.trips_tab);
   return (
     <>
       <Tabs
@@ -19,7 +21,7 @@ export default function TabLayout() {
           tabBarActiveTintColor: '#F5F5F7',
           tabBarInactiveTintColor: 'rgba(245,245,247,0.45)',
         }}
-        tabBar={(props) => <PremiumTabBar {...props} />}
+        tabBar={(props) => <TripsTabBar {...props} tripsEnabled={tripsEnabled} />}
       >
         <Tabs.Screen
           name="index"
@@ -28,45 +30,46 @@ export default function TabLayout() {
           }}
         />
         <Tabs.Screen
+          name="guide"
+          options={{
+            title: 'Explore',
+          }}
+        />
+        <Tabs.Screen
           name="plan"
           options={{
-            title: 'PLAN',
-            tabBarIcon: ({ color, size }) => <Ionicons name="compass-outline" size={size} color={color} />,
+            title: 'Plan',
           }}
         />
         <Tabs.Screen
           name="map"
           options={{
-            title: 'MAP',
-            tabBarIcon: ({ color, size }) => <Ionicons name="map-outline" size={size} color={color} />,
+            title: 'Map',
           }}
         />
         <Tabs.Screen
-          name="route-builder"
+          name="trips"
           options={{
-            title: 'ROUTE',
-            tabBarIcon: ({ color, size }) => <Ionicons name="trail-sign-outline" size={size} color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="report"
-          options={{
-            title: 'REPORT',
-            tabBarIcon: ({ color, size }) => <Ionicons name="warning-outline" size={size} color={color} />,
-          }}
-        />
-        <Tabs.Screen
-          name="guide"
-          options={{
-            title: 'EXPLORE',
-            tabBarIcon: ({ color, size }) => <Ionicons name="compass-outline" size={size} color={color} />,
+            title: 'Trips',
+            href: tripsEnabled ? undefined : null,
           }}
         />
         <Tabs.Screen
           name="profile"
           options={{
-            title: 'PROFILE',
-            tabBarIcon: ({ color, size }) => <Ionicons name="person-outline" size={size} color={color} />,
+            title: 'Profile',
+          }}
+        />
+        <Tabs.Screen
+          name="route-builder"
+          options={{
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="report"
+          options={{
+            href: null,
           }}
         />
       </Tabs>

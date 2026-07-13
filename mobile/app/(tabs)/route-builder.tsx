@@ -59,6 +59,7 @@ import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
+import { routeGeometryMatchesWaypointsInOrder, routeWaypointSignature } from '@/lib/routeWaypointSignature';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
   buildRouteBuilderSearchStop,
@@ -67,11 +68,16 @@ import {
   buildRouteLocationsForShape,
   computeDaySegmentsFromRouteGeometry,
   filterDurableNavigationStops,
+  filterPersistableGasStops,
   fmtDistance as fmtUnitDistance,
   fmtFuelVolumeFromMiles,
+  mergePersistedRouteStops,
+  orderRouteBuilderStops,
   providerGeometryFromRoute,
+  readPersistedRouteBuilderState,
   rebalanceAfterCampSelection,
   routeUnitsParam,
+  samePersistedStopIdentity,
   savedGeometryFromCoords,
   resolveRouteBuilderSearchResults,
   searchRouteBuilderFallbackPois,
@@ -82,6 +88,7 @@ import {
   type RouteFitCard,
   type ProviderRouteGeometry,
   type RouteBuilderIntent,
+  type PersistedRouteBuilderStop,
 } from '@/lib/routeBuilder';
 
 const API_BASE_URL = TRAILHEAD_API_BASE;
@@ -170,6 +177,7 @@ type BuilderStop = {
   campWindowEnd?: number;
   campWindowLabel?: string;
   routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
+  routeProgressMi?: number;
 };
 type SearchPlace = RouteBuilderSearchPlace;
 type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'private' | 'any';
@@ -1123,24 +1131,37 @@ function closeEnough(a: { lat?: number; lng?: number }, b: { lat?: number; lng?:
   return Math.abs((a.lat ?? 0) - (b.lat ?? 0)) < 0.0008 && Math.abs((a.lng ?? 0) - (b.lng ?? 0)) < 0.0008;
 }
 
-function campsiteToPin(camp: Campsite): CampsitePin {
+function builderStopFromPersisted(stop: PersistedRouteBuilderStop): BuilderStop {
   return {
-    id: camp.id,
-    name: camp.name,
-    lat: camp.lat,
-    lng: camp.lng,
-    tags: [],
-    land_type: 'camp',
-    description: camp.description || 'Trip camp.',
-    reservable: camp.reservable,
-    cost: undefined,
-    url: camp.url,
-    ada: false,
-    route_distance_mi: camp.route_distance_mi,
-    route_fit: camp.route_fit,
-    recommended_day: camp.recommended_day,
-    verified_source: camp.verified_source,
+    ...stop,
+    camp: stop.camp as CampsitePin | undefined,
+    gas: stop.gas as GasStation | undefined,
+    poi: stop.poi as OsmPoi | undefined,
   };
+}
+
+function campsiteToPin(camp: Campsite): CampsitePin {
+  const saved = camp as Campsite & Partial<CampsitePin>;
+  return {
+    ...saved,
+    id: saved.id,
+    name: saved.name,
+    lat: saved.lat,
+    lng: saved.lng,
+    tags: saved.tags ?? [],
+    land_type: saved.land_type || 'camp',
+    description: saved.description || 'Trip camp.',
+    reservable: saved.reservable,
+    url: saved.url,
+    ada: saved.ada ?? false,
+  };
+}
+
+function legacyTripShapeFromPlan(trip: TripResult): TripShapeMode | null {
+  const permits = String(trip.plan.logistics?.permits_needed || '').trim().toLowerCase();
+  if (permits.startsWith('loop route.')) return 'loop';
+  if (permits.startsWith('there-and-back route.')) return 'there_and_back';
+  return null;
 }
 
 function campMediaUrl(value: unknown): string {
@@ -1285,22 +1306,8 @@ function isFrameworkManagedStop(stop: BuilderStop) {
   return isFrameworkTarget(stop);
 }
 
-function stopRouteOrderWeight(stop: BuilderStop) {
-  if (stop.routeShapeRole === 'start') return 0;
-  if (stop.type === 'start') return 2;
-  if (stop.routeShapeRole === 'destination') return 60;
-  if (stop.routeShapeRole === 'outbound_anchor') return 65;
-  if (stop.routeShapeRole === 'overnight') return 80;
-  if (stop.routeShapeRole === 'return_anchor') return 100;
-  return 50;
-}
-
 function orderBuilderStops(stops: BuilderStop[]) {
-  return [...stops].sort((a, b) => (
-    a.day - b.day
-    || stopRouteOrderWeight(a) - stopRouteOrderWeight(b)
-    || stops.indexOf(a) - stops.indexOf(b)
-  ));
+  return orderRouteBuilderStops(stops);
 }
 
 function builderStopFromCopilotDraft(stop: string | TrailheadRouteBuilderDraftStop, index: number, dayCount: number): BuilderStop | null {
@@ -1613,7 +1620,7 @@ function RouteBuilderScreenContent() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
+  const { width: windowWidth, height: windowHeight } = useWindowDimensions();
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 0 : 0);
   const bottomSheetPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
   const blurTint: 'dark' | 'light' = C.bg === '#050505' ? 'dark' : 'light';
@@ -1795,6 +1802,7 @@ function RouteBuilderScreenContent() {
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits to open full campsite profiles. You can still add this camp to your route from the free preview.');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const wizardStepScrollRef = useRef<ScrollView>(null);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
   const trailheadContext = useMemo(
@@ -1936,6 +1944,14 @@ function RouteBuilderScreenContent() {
       hideSub.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!keyboardVisible || wizardStep > 1) return;
+    const frame = requestAnimationFrame(() => {
+      wizardStepScrollRef.current?.scrollTo({ y: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [keyboardVisible, wizardStep]);
 
   useEffect(() => {
     setTabBarHidden(stops.length >= 2 || keyboardVisible);
@@ -2085,14 +2101,30 @@ function RouteBuilderScreenContent() {
       || !activeTrip
       || importedTripId === activeTrip.trip_id
       || stops.length > 0) return;
-    const importedStops: BuilderStop[] = activeTrip.plan.waypoints
+    const savedBuilderState = readPersistedRouteBuilderState(activeTrip.builder_state);
+    const savedDayCount = Math.max(
+      Number(savedBuilderState?.plannedDays) || 0,
+      ...(savedBuilderState?.days ?? [0]),
+      ...(savedBuilderState?.stops.map(stop => stop.day) ?? [0]),
+      ...(savedBuilderState?.restDays ?? [0]),
+      ...Object.keys(savedBuilderState?.dayDriveTargets ?? {}).map(Number),
+    );
+    const maxTripDay = Math.max(1, Math.min(30, Math.round(Math.max(activeTrip.plan.duration_days || 1, savedDayCount))));
+    const savedItemDay = (item: { lat?: number; lng?: number; recommended_day?: number }) => {
+      const recommended = Math.round(Number(item.recommended_day));
+      if (Number.isFinite(recommended) && recommended >= 1) return Math.min(maxTripDay, recommended);
+      const matchingWaypoint = activeTrip.plan.waypoints.find(wp => closeEnough(wp, item));
+      return Math.max(1, Math.min(maxTripDay, Math.round(Number(matchingWaypoint?.day) || 1)));
+    };
+    const campsites = activeTrip.campsites.map(campsiteToPin);
+    const importedWaypointStops: BuilderStop[] = activeTrip.plan.waypoints
       .filter(wp => Number.isFinite(wp.lat) && Number.isFinite(wp.lng))
       .map((wp, idx) => {
+        const day = Math.max(1, Math.min(maxTripDay, Math.round(Number(wp.day) || 1)));
         const type = stopTypeFromWaypoint(wp.type);
         const camp = type === 'camp'
-          ? activeTrip.campsites
-              .map(campsiteToPin)
-              .find(c => c.recommended_day === wp.day && (closeEnough(c, wp) || c.name === wp.name)) ?? {
+          ? campsites
+              .find(c => savedItemDay(c) === day && closeEnough(c, wp)) ?? {
                 id: `wp_${idx}`,
                 name: wp.name || 'Camp',
                 lat: wp.lat!,
@@ -2108,7 +2140,7 @@ function RouteBuilderScreenContent() {
               }
           : undefined;
         const station = type === 'fuel'
-          ? activeTrip.gas_stations.find(g => g.recommended_day === wp.day && (closeEnough(g, wp) || g.name === wp.name)) ?? {
+          ? activeTrip.gas_stations.find(g => savedItemDay(g) === day && closeEnough(g, wp)) ?? {
             id: `wp_${idx}`,
             name: wp.name || 'Fuel stop',
             lat: wp.lat!,
@@ -2119,11 +2151,11 @@ function RouteBuilderScreenContent() {
           }
           : undefined;
         const poi = type === 'waypoint'
-          ? activeTrip.route_pois?.find(p => closeEnough(p, wp) || p.name === wp.name)
+          ? activeTrip.route_pois?.find(p => savedItemDay(p as OsmPoi & { recommended_day?: number }) === day && closeEnough(p, wp))
           : undefined;
         return {
-          id: `import_${idx}_${Math.random().toString(36).slice(2, 7)}`,
-          day: wp.day || 1,
+          id: `import_waypoint_${idx}`,
+          day,
           name: wp.name || stopLabel(type),
           lat: wp.lat!,
           lng: wp.lng!,
@@ -2135,17 +2167,140 @@ function RouteBuilderScreenContent() {
           gas: station,
           poi,
           routePointType: wp.route_point_type,
+          routeShapeRole: type === 'start' ? 'start' : undefined,
         };
       });
+    const importedFuelStops: BuilderStop[] = activeTrip.gas_stations
+      .filter(station => Number.isFinite(station.lat) && Number.isFinite(station.lng))
+      .map((station, idx) => ({
+        id: `import_gas_${String(station.id)}_${idx}`,
+        day: savedItemDay(station),
+        name: station.name || 'Fuel stop',
+        lat: station.lat,
+        lng: station.lng,
+        type: 'fuel',
+        description: station.address || 'Fuel stop saved with this trip.',
+        land_type: 'town',
+        source: 'gas',
+        gas: station,
+        routePointType: 'side_stop',
+        routeShapeRole: 'side_stop',
+      }));
+    const importedPoiStops: BuilderStop[] = (activeTrip.route_pois ?? [])
+      .filter(poi => Number.isFinite(poi.lat) && Number.isFinite(poi.lng))
+      .map((poi, idx) => ({
+        id: `import_poi_${String(poi.id)}_${idx}`,
+        day: savedItemDay(poi as OsmPoi & { recommended_day?: number }),
+        name: poi.name || 'Route stop',
+        lat: poi.lat,
+        lng: poi.lng,
+        type: builderTypeForPoi(poi.type),
+        description: poi.summary || poi.description || poi.address || 'Place saved with this trip.',
+        land_type: poi.subtype || poi.type || 'route',
+        source: 'poi',
+        poi,
+        routePointType: builderTypeForPoi(poi.type) === 'waypoint' ? 'side_stop' : 'break',
+        routeShapeRole: builderTypeForPoi(poi.type) === 'waypoint' ? 'side_stop' : undefined,
+      }));
+    const importedCampStops: BuilderStop[] = campsites
+      .filter(camp => Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
+      .map((camp, idx) => ({
+        id: `import_camp_${String(camp.id)}_${idx}`,
+        day: savedItemDay(camp),
+        name: camp.name || 'Camp',
+        lat: camp.lat,
+        lng: camp.lng,
+        type: 'camp',
+        description: camp.description || 'Camp saved with this trip.',
+        land_type: camp.land_type || 'camp',
+        source: 'camp',
+        camp,
+        routePointType: 'break',
+        routeShapeRole: 'overnight',
+      }));
+    const legacyStops = mergePersistedRouteStops(
+      mergePersistedRouteStops(
+        mergePersistedRouteStops(importedWaypointStops, importedFuelStops),
+        importedPoiStops,
+      ),
+      importedCampStops,
+    );
+    const persistedStops = (savedBuilderState?.stops ?? []).map(builderStopFromPersisted);
+    const enrichedPersistedStops = persistedStops.map(stop => {
+      const legacy = legacyStops.find(candidate => samePersistedStopIdentity(stop, candidate));
+      if (!legacy) return stop;
+      return {
+        ...legacy,
+        ...stop,
+        camp: stop.camp ?? legacy.camp,
+        gas: stop.gas ?? legacy.gas,
+        poi: stop.poi ?? legacy.poi,
+      };
+    });
+    const importedStops = orderBuilderStops(mergePersistedRouteStops(enrichedPersistedStops, legacyStops));
     if (!importedStops.length) return;
-    const importedDays = Array.from(new Set([
-      ...activeTrip.plan.daily_itinerary.map(day => day.day),
+    const legacyDays = activeTrip.plan.daily_itinerary.map(day => day.day);
+    if (!legacyDays.length) {
+      legacyDays.push(...Array.from({ length: maxTripDay }, (_, idx) => idx + 1));
+    }
+    const persistedDays = savedBuilderState?.days?.length ? savedBuilderState.days : legacyDays;
+    const importedDays = Array.from(new Set<number>([
+      ...persistedDays,
       ...importedStops.map(stop => stop.day),
-    ])).filter(Number.isFinite).sort((a, b) => a - b);
+      ...(savedBuilderState?.restDays ?? []),
+      ...Object.keys(savedBuilderState?.dayDriveTargets ?? {}).map(Number),
+    ])).filter(day => Number.isFinite(day) && day >= 1 && day <= 30).sort((a, b) => a - b);
     setStops(importedStops);
     setDays(importedDays.length ? importedDays : [1]);
     setActiveDay(importedStops[0]?.day ?? 1);
     setRouteName(activeTrip.plan.trip_name || '');
+    const restoredStart = importedStops.find(stop => stop.routeShapeRole === 'start')
+      ?? importedStops.find(stop => stop.type === 'start')
+      ?? importedStops[0];
+    const restoredTripShape = savedBuilderState?.tripShapeMode ?? legacyTripShapeFromPlan(activeTrip);
+    const durableImportedStops = filterDurableNavigationStops(importedStops);
+    const inferredTurnaround = restoredStart && restoredTripShape !== 'one_way'
+      ? durableImportedStops.reduce<BuilderStop | undefined>((farthest, stop) => {
+          if (stop.routeShapeRole === 'return_anchor') return farthest;
+          if (!farthest) return stop;
+          return haversineMi(restoredStart, stop) > haversineMi(restoredStart, farthest) ? stop : farthest;
+        }, undefined)
+      : undefined;
+    const restoredDestination = importedStops.find(stop => stop.routeShapeRole === 'destination')
+      ?? inferredTurnaround
+      ?? [...durableImportedStops].reverse().find(stop => stop.routeShapeRole !== 'return_anchor')
+      ?? importedStops[importedStops.length - 1];
+    setStartQuery(restoredStart?.name ?? '');
+    setEndQuery(restoredDestination?.name ?? '');
+
+    const routePreferences = activeTrip.plan.route_preferences;
+    if (restoredTripShape) applyTripShapeMode(restoredTripShape);
+    const savedRouteStyle = savedBuilderState?.routeStyle ?? routePreferences?.route_style;
+    if (savedRouteStyle) setRouteStyle(savedRouteStyle);
+    const savedCampPreference = savedBuilderState?.campPreferenceMode
+      ?? (['public', 'developed', 'rv', 'private', 'any'].includes(routePreferences?.camp_preference ?? '')
+        ? routePreferences?.camp_preference as CampPreferenceMode
+        : undefined);
+    if (savedCampPreference) setCampPreferenceMode(savedCampPreference);
+    const savedCampReusePolicy = savedBuilderState?.campReusePolicy ?? routePreferences?.camp_reuse_policy;
+    if (savedCampReusePolicy) setCampReusePolicy(savedCampReusePolicy);
+    const savedDriveHours = savedBuilderState?.driveHoursPerDay
+      ?? (routePreferences?.max_daily_drive_hours ? String(routePreferences.max_daily_drive_hours) : undefined);
+    if (savedDriveHours) setDriveHoursPerDayValue(savedDriveHours);
+    setPlannedDaysValue(savedBuilderState?.plannedDays ?? String(importedDays.length || maxTripDay));
+    if (savedBuilderState?.targetMiles) setTargetMilesValue(savedBuilderState.targetMiles);
+    if (savedBuilderState?.tripBuildMode) setTripBuildMode(savedBuilderState.tripBuildMode);
+    if (savedBuilderState?.distanceMode) setDistanceMode(savedBuilderState.distanceMode);
+    if (savedBuilderState?.restDays) setRestDays(savedBuilderState.restDays);
+    if (savedBuilderState?.dayDriveTargets) setDayDriveTargets(savedBuilderState.dayDriveTargets);
+    if (savedBuilderState?.activePlaceFilters) setActivePlaceFilters(savedBuilderState.activePlaceFilters);
+    if (typeof savedBuilderState?.campPhotoOnly === 'boolean') {
+      setCampPhotoOnly(savedBuilderState.campPhotoOnly);
+    } else if (typeof routePreferences?.require_photos === 'boolean') {
+      setCampPhotoOnly(routePreferences.require_photos);
+    }
+    if (savedBuilderState?.campCadenceMode) setCampCadenceMode(savedBuilderState.campCadenceMode);
+    setWelcomeDefaultsApplied(true);
     const saved = activeTrip.route_geometry;
     if (saved?.coords?.length) {
       setRouteGeometry(savedGeometryFromCoords(
@@ -4083,7 +4238,7 @@ function RouteBuilderScreenContent() {
       );
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return null;
       const geometry = providerGeometryFromRoute(routed, units);
-      if (geometry.coords.length < 2) return null;
+      if (geometry.coords.length < 2 || !routeGeometryMatchesWaypointsInOrder(geometry.coords, navStops)) return null;
       setRouteGeometry(geometry);
       return {
         coords: geometry.coords,
@@ -4091,6 +4246,7 @@ function RouteBuilderScreenContent() {
         totalDuration: geometry.totalDurationHours * 3600,
         source: geometry.engine ?? 'route-builder',
         ts: Date.now(),
+        routeWaypointSignature: routeWaypointSignature(navStops),
       };
     } catch (err) {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
@@ -4161,6 +4317,7 @@ function RouteBuilderScreenContent() {
           source: 'camp' as const,
           camp: { ...best, name: displayName },
           routeShapeRole: 'overnight' as const,
+          routeProgressMi: targetMi,
         },
         strong: strong && weakRouteCampNamePenalty(best.name) === 0,
         found: scored.length,
@@ -4179,6 +4336,7 @@ function RouteBuilderScreenContent() {
         land_type: 'route',
         source: 'map' as const,
         routeShapeRole: 'outbound_anchor' as const,
+        routeProgressMi: targetMi,
       },
       strong: false,
       found: 0,
@@ -4223,6 +4381,7 @@ function RouteBuilderScreenContent() {
           campWindowEnd: win.end,
           campWindowLabel: win.label,
           routeShapeRole: 'overnight' as const,
+          routeProgressMi: win.target_mi,
         },
         strong: false,
         found: 0,
@@ -4247,6 +4406,7 @@ function RouteBuilderScreenContent() {
       );
       return result.windows.map(originalWin => {
         const win = originalWin;
+        const routeProgressMi = windows.find(window => window.day === win.day)?.target_mi;
         const candidatePool = [win.selected, win.camp, ...(win.candidates ?? [])]
           .filter((camp): camp is CampsitePin => !!camp && Number.isFinite(camp.lat) && Number.isFinite(camp.lng))
           .filter((camp, idx, arr) => arr.findIndex(other => String(other.id ?? `${other.lat},${other.lng}`) === String(camp.id ?? `${camp.lat},${camp.lng}`)) === idx);
@@ -4278,6 +4438,7 @@ function RouteBuilderScreenContent() {
               campWindowEnd: win.end,
               campWindowLabel: win.label,
               routeShapeRole: 'overnight' as const,
+              routeProgressMi,
             },
             strong: !needsReview,
             found: win.found ?? win.candidates?.length ?? 1,
@@ -4306,6 +4467,7 @@ function RouteBuilderScreenContent() {
             campWindowEnd: win.end,
             campWindowLabel: win.label,
             routeShapeRole: 'outbound_anchor' as const,
+            routeProgressMi,
           },
           strong: false,
           found: win.found,
@@ -4347,6 +4509,7 @@ function RouteBuilderScreenContent() {
         campWindowEnd: window.end,
         campWindowLabel: window.label,
         routeShapeRole: 'overnight' as const,
+        routeProgressMi: targetMi,
       };
     });
   }
@@ -4420,7 +4583,8 @@ function RouteBuilderScreenContent() {
         land_type: 'town',
         source: 'gas',
         gas: best,
-        routePointType: 'break',
+        routeProgressMi: targetMi,
+        routePointType: 'side_stop',
       });
     }
     return stops;
@@ -4451,7 +4615,7 @@ function RouteBuilderScreenContent() {
       const count = Math.max(1, Math.min(30, Math.round(distanceMode === 'miles' ? milesCount : plannedCount)));
       const nextDays = Array.from({ length: count }, (_, i) => i + 1);
       const framework: BuilderStop[] = [
-        { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type, routeShapeRole: 'start' },
+        { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type, routeShapeRole: 'start', routeProgressMi: 0 },
       ];
 
       const spineBuild = await buildRouteSpine(first, last);
@@ -4490,6 +4654,7 @@ function RouteBuilderScreenContent() {
             : 'Turnaround destination before returning to the start.',
           source: last.source ?? 'search',
           routeShapeRole: 'destination',
+          routeProgressMi: routeMiles / 2,
         });
         framework.push({
           ...first,
@@ -4502,9 +4667,10 @@ function RouteBuilderScreenContent() {
             : 'There-and-back return to the route start.',
           source: 'map',
           routeShapeRole: 'return_anchor',
+          routeProgressMi: routeMiles,
         });
       } else {
-        framework.push({ ...last, day: count, routeShapeRole: 'destination' });
+        framework.push({ ...last, day: count, routeShapeRole: 'destination', routeProgressMi: routeMiles });
       }
       const shapeLabel = tripShapeMode === 'loop' ? 'Loop' : tripShapeMode === 'there_and_back' ? 'There and Back' : '';
       const nextName = routeName.trim() || (tripLoop ? `${first.name.split(',')[0]} to ${last.name.split(',')[0]} ${shapeLabel}` : `${first.name.split(',')[0]} to ${last.name.split(',')[0]}`);
@@ -4672,6 +4838,29 @@ function RouteBuilderScreenContent() {
     };
   }
 
+  function buildPersistedBuilderState(inputStops: BuilderStop[], inputDays: number[]) {
+    return {
+      stops: inputStops,
+      days: inputDays,
+      routeStyle,
+      tripShapeMode,
+      tripLoop,
+      driveHoursPerDay: driveHoursPerDayRef.current,
+      plannedDays: plannedDaysRef.current,
+      tripBuildMode,
+      distanceMode,
+      targetMiles: targetMilesRef.current,
+      restDays,
+      dayDriveTargets,
+      activePlaceFilters,
+      campPreferenceMode,
+      campPhotoOnly,
+      campCadenceMode,
+      campReusePolicy,
+      tripPreferences: tripPreferenceContext,
+    };
+  }
+
   function buildTrip(
     inputStops: BuilderStop[] = orderedStops,
     inputDays: number[] = days,
@@ -4752,7 +4941,7 @@ function RouteBuilderScreenContent() {
       land_type: displayCampFeature(st.camp?.land_type || st.land_type) || st.camp?.land_type || st.land_type,
       recommended_day: st.day,
     }));
-    const gas_stations = navStops.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
+    const gas_stations = filterPersistableGasStops(sorted).map(st => ({ ...st.gas!, recommended_day: st.day }));
     const routePois = sorted.filter(st => st.poi).map(st => ({ ...st.poi!, recommended_day: st.day }));
     return {
       trip_id: importedTripId || routeSessionIdRef.current,
@@ -4807,17 +4996,30 @@ function RouteBuilderScreenContent() {
     const requestToken = useStore.getState().token;
     setRouteSaving(true);
     const knownGoodGeometry = fallbackGeometry?.coords?.length ? fallbackGeometry : routeGeometry;
+    const durableStops = filterDurableNavigationStops(orderBuilderStops(inputStops));
+    const knownGoodMatchesStops = !!knownGoodGeometry?.coords?.length
+      && routeGeometryMatchesWaypointsInOrder(knownGoodGeometry.coords, durableStops);
     const routeGeometryPayload = await buildSavedRouteGeometry(inputStops)
-      ?? (knownGoodGeometry?.coords?.length
+      ?? (knownGoodMatchesStops && knownGoodGeometry?.coords?.length
         ? {
             coords: knownGoodGeometry.coords,
             totalDistance: knownGoodGeometry.totalDistanceMi * 1609.344,
             totalDuration: knownGoodGeometry.totalDurationHours * 3600,
             source: knownGoodGeometry.engine ?? knownGoodGeometry.source,
             ts: Date.now(),
+            routeWaypointSignature: routeWaypointSignature(durableStops),
           } satisfies SavedRouteGeometryPayload
         : null);
     if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+      setRouteSaving(false);
+      return;
+    }
+    if (openMap && !routeGeometryPayload) {
+      setRouteSaving(false);
+      Alert.alert(
+        'Route line not ready',
+        'Your camps and stops are still here. Check your signal, shorten the route, or adjust a stop before opening the map.',
+      );
       return;
     }
     const geometryForTrip = routeGeometryPayload?.coords?.length
@@ -4836,41 +5038,23 @@ function RouteBuilderScreenContent() {
         ? { ...rebuiltTrip.plan, total_est_miles: Math.round(savedMiles) }
         : rebuiltTrip.plan,
     } : rebuiltTrip;
-    const builderState = {
-      stops: inputStops,
-      days: inputDays,
-      routeStyle,
-      tripShapeMode,
-      tripLoop,
-      driveHoursPerDay,
-      plannedDays,
-      tripBuildMode,
-      distanceMode,
-      targetMiles: targetMilesRef.current,
-      restDays,
-      dayDriveTargets,
-      activePlaceFilters,
-      campPreferenceMode,
-      campPhotoOnly,
-      campCadenceMode,
-      campReusePolicy,
-      tripPreferences: tripPreferenceContext,
-    };
+    const builderState = buildPersistedBuilderState(inputStops, inputDays);
+    const persistedTripToSave: TripResult = { ...tripToSave, builder_state: builderState };
     try {
-      setRouteName(tripToSave.plan.trip_name);
-      setActiveTrip(tripToSave);
+      setRouteName(persistedTripToSave.plan.trip_name);
+      setActiveTrip(persistedTripToSave);
       addTripToHistory({
-        trip_id: tripToSave.trip_id,
-        trip_name: tripToSave.plan.trip_name,
+        trip_id: persistedTripToSave.trip_id,
+        trip_name: persistedTripToSave.plan.trip_name,
         states: [],
-        duration_days: tripToSave.plan.duration_days,
-        est_miles: tripToSave.plan.total_est_miles,
+        duration_days: persistedTripToSave.plan.duration_days,
+        est_miles: persistedTripToSave.plan.total_est_miles,
         planned_at: Date.now(),
       });
-      await saveOfflineTrip(tripToSave);
+      await saveOfflineTrip(persistedTripToSave);
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (requestAccountId && requestToken) {
-        api.saveTrip(tripToSave, routeGeometryPayload, builderState, 'mobile-route-builder').catch(err => {
+        api.saveTrip(persistedTripToSave, routeGeometryPayload, builderState, 'mobile-route-builder').catch(err => {
           console.warn('Route Builder server save failed', err?.message ?? err);
         });
       }
@@ -5103,8 +5287,27 @@ function RouteBuilderScreenContent() {
     const requestToken = useStore.getState().token;
     setRouteSaving(true);
     try {
-      const geometryPayload = orderedStops.length >= 2 ? await buildSavedRouteGeometry(orderedStops) : null;
+      const rebuiltGeometry = orderedStops.length >= 2 ? await buildSavedRouteGeometry(orderedStops) : null;
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      const durableStops = filterDurableNavigationStops(orderBuilderStops(orderedStops));
+      const activeGeometryMatches = !!activeTrip?.route_geometry?.coords?.length
+        && routeGeometryMatchesWaypointsInOrder(activeTrip.route_geometry.coords, durableStops);
+      const localGeometryMatches = !!routeGeometry?.coords?.length
+        && routeGeometryMatchesWaypointsInOrder(routeGeometry.coords, durableStops);
+      const geometryPayload = rebuiltGeometry?.coords?.length
+        ? rebuiltGeometry
+        : activeGeometryMatches && activeTrip?.route_geometry?.coords?.length
+          ? activeTrip.route_geometry
+          : localGeometryMatches && routeGeometry?.coords?.length
+            ? {
+                coords: routeGeometry.coords,
+                totalDistance: routeGeometry.totalDistanceMi * 1609.344,
+                totalDuration: routeGeometry.totalDurationHours * 3600,
+                source: routeGeometry.engine ?? routeGeometry.source,
+                ts: Date.now(),
+                routeWaypointSignature: routeWaypointSignature(durableStops),
+              } satisfies SavedRouteGeometryPayload
+            : null;
       const geometryForDraft = geometryPayload?.coords?.length
         ? savedGeometryFromCoords(
             geometryPayload.coords,
@@ -5114,12 +5317,16 @@ function RouteBuilderScreenContent() {
         : routeGeometry;
       const draftTrip = orderedStops.length >= 2 ? buildTrip(orderedStops, days, undefined, geometryForDraft) : activeTrip;
       if (draftTrip) {
-        const tripToSave = geometryPayload ? { ...draftTrip, route_geometry: geometryPayload } : draftTrip;
+        const builderState = orderedStops.length >= 2
+          ? buildPersistedBuilderState(orderedStops, days)
+          : draftTrip.builder_state ?? null;
+        const tripWithGeometry = geometryPayload ? { ...draftTrip, route_geometry: geometryPayload } : draftTrip;
+        const tripToSave: TripResult = builderState ? { ...tripWithGeometry, builder_state: builderState } : tripWithGeometry;
         setActiveTrip(tripToSave);
         await saveOfflineTrip(tripToSave).catch(() => {});
         if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         if (requestAccountId && requestToken) {
-          api.saveTrip(tripToSave, geometryPayload, null, 'mobile-route-builder-close').catch(err => {
+          api.saveTrip(tripToSave, geometryPayload, builderState, 'mobile-route-builder-close').catch(err => {
             console.warn('Route Builder close save failed', err?.message ?? err);
           });
         }
@@ -5568,10 +5775,10 @@ function RouteBuilderScreenContent() {
     );
   }
 
-  function renderPlanNavigation(inWizard = false) {
+  function renderPlanNavigation(inWizard = false, compact = false) {
     return (
-      <View style={[s.planNavigation, inWizard && s.planNavigationWizard]}>
-        <Text style={s.planPageTitle}>Plan</Text>
+      <View style={[s.planNavigation, inWizard && s.planNavigationWizard, compact && s.planNavigationCompact]}>
+        {!compact ? <Text style={s.planPageTitle}>Plan</Text> : null}
         <PlanWorkspaceSwitcher
           active="manual"
           style={s.planWorkspaceSwitcherInline}
@@ -5612,6 +5819,8 @@ function RouteBuilderScreenContent() {
   function renderWizardSetup(fullScreen = false) {
     const steps = ['Start', 'Destination', 'Style', 'Camp', 'Pace'];
     const stepMeta = steps[wizardStep];
+    const compactWizardLayout = fullScreen && (keyboardVisible || windowHeight <= 620);
+    const hideStartExtras = fullScreen && (keyboardVisible || windowHeight <= 500);
     const canMoveNext = wizardStep === 0
       ? !!(startQuery.trim() || orderedStops[0])
       : wizardStep === 1
@@ -5623,18 +5832,18 @@ function RouteBuilderScreenContent() {
       <TrailheadSheet
         handle={false}
         style={[s.wizardCard, fullScreen && s.wizardCardFull]}
-        contentStyle={[s.routeSheetContent, fullScreen && s.routeSheetFullContent]}
+        contentStyle={[s.routeSheetContent, fullScreen && s.routeSheetFullContent, compactWizardLayout && s.routeSheetFullContentCompact]}
       >
-        <View style={s.wizardProgressHeader}>
-          <View style={s.wizardProgressTop}>
+        <View style={[s.wizardProgressHeader, compactWizardLayout && s.wizardProgressHeaderCompact]}>
+          <View style={[s.wizardProgressTop, compactWizardLayout && s.wizardProgressTopCompact]}>
             <Text style={s.wizardProgressTitle}>{stepMeta}</Text>
             <Text style={s.wizardProgressCount}>{wizardStep + 1} of {steps.length}</Text>
           </View>
-          <View style={s.wizardProgressTrack}>
+          <View style={[s.wizardProgressTrack, compactWizardLayout && s.wizardProgressTrackCompact]}>
             {steps.map((step, index) => (
               <TouchableOpacity
                 key={step}
-                style={s.wizardProgressStep}
+                style={[s.wizardProgressStep, compactWizardLayout && s.wizardProgressStepCompact]}
                 onPress={() => setWizardStep(index)}
                 accessibilityRole="button"
                 accessibilityLabel={`${step}, step ${index + 1} of ${steps.length}`}
@@ -5648,27 +5857,28 @@ function RouteBuilderScreenContent() {
         </View>
 
         <ScrollView
+          ref={wizardStepScrollRef}
           style={s.wizardStepScroll}
-          contentContainerStyle={[s.wizardStepScrollContent, { paddingBottom: keyboardVisible ? 26 : 10 }]}
+          contentContainerStyle={[s.wizardStepScrollContent, { paddingBottom: compactWizardLayout ? 8 : 10 }]}
           showsVerticalScrollIndicator={false}
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
           <View style={s.wizardAnimatedPane}>
           {wizardStep === 0 ? (
-            <View style={s.wizardPane}>
+            <View style={[s.wizardPane, compactWizardLayout && s.wizardPaneCompact]}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>Where are you starting?</Text>
+              <Text style={[s.wizardTitle, compactWizardLayout && s.wizardTitleCompact]}>Where are you starting?</Text>
             </View>
-            <View style={[s.setupInputWrap, s.startSearchField]}>
-              <View style={[s.setupInputRow, s.startSearchRow]}>
+            <View style={[s.setupInputWrap, s.startSearchField, compactWizardLayout && s.startSearchFieldCompact]}>
+              <View style={[s.setupInputRow, s.startSearchRow, compactWizardLayout && s.startSearchRowCompact]}>
                 <View style={s.setupSearchIcon}>
                   <Ionicons name="search-outline" size={19} color={C.text2} />
                 </View>
                 <TextInput
                   value={startQuery}
                   onChangeText={setStartQuery}
-                  placeholder={orderedStops[0]?.name ?? 'City, address, or trailhead'}
+                  placeholder={orderedStops[0]?.name ?? 'City or trailhead'}
                   placeholderTextColor={C.text3}
                   style={[s.setupInput, s.setupInputInline]}
                   returnKeyType="next"
@@ -5688,8 +5898,8 @@ function RouteBuilderScreenContent() {
                 </TouchableOpacity>
               </View>
             </View>
-            {rigRouteSummary.ready ? (
-              <View style={s.startVehicleRow}>
+            {!hideStartExtras && (rigRouteSummary.ready ? (
+              <View style={[s.startVehicleRow, compactWizardLayout && s.startVehicleRowCompact]}>
                 <View style={s.startVehicleIcon}>
                   <Ionicons name="car-sport-outline" size={20} color={C.green} />
                 </View>
@@ -5700,7 +5910,7 @@ function RouteBuilderScreenContent() {
               </View>
             ) : (
               <TouchableOpacity
-                style={s.startVehicleRow}
+                style={[s.startVehicleRow, compactWizardLayout && s.startVehicleRowCompact]}
                 onPress={() => router.push('/(tabs)/profile')}
                 accessibilityRole="button"
                 accessibilityLabel="Add vehicle details"
@@ -5715,8 +5925,8 @@ function RouteBuilderScreenContent() {
                 </View>
                 <Ionicons name="chevron-forward" size={17} color={C.text3} />
               </TouchableOpacity>
-            )}
-            {recentRouteStarts.length > 0 ? (
+            ))}
+            {!hideStartExtras && recentRouteStarts.length > 0 ? (
               <View style={s.recentStarts}>
                 <Text style={s.recentStartsTitle}>Recent</Text>
                 {recentRouteStarts.map(recent => (
@@ -5737,9 +5947,9 @@ function RouteBuilderScreenContent() {
             ) : null}
             </View>
           ) : wizardStep === 1 ? (
-            <View style={s.wizardPane}>
+            <View style={[s.wizardPane, compactWizardLayout && s.wizardPaneCompact]}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>Where are you headed?</Text>
+              <Text style={[s.wizardTitle, compactWizardLayout && s.wizardTitleCompact]}>Where are you headed?</Text>
             </View>
             <View style={s.setupInputWrap}>
               <Text style={s.setupLabel}>DESTINATION</Text>
@@ -5761,9 +5971,9 @@ function RouteBuilderScreenContent() {
             </View>
             </View>
           ) : wizardStep === 2 ? (
-            <View style={s.wizardPane}>
+            <View style={[s.wizardPane, compactWizardLayout && s.wizardPaneCompact]}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>How do you want to build it?</Text>
+              <Text style={[s.wizardTitle, compactWizardLayout && s.wizardTitleCompact]}>How do you want to build it?</Text>
             </View>
             <View style={s.premiumModeControl}>
               {([
@@ -5812,9 +6022,9 @@ function RouteBuilderScreenContent() {
             </View>
             </View>
           ) : wizardStep === 3 ? (
-            <View style={s.wizardPane}>
+            <View style={[s.wizardPane, compactWizardLayout && s.wizardPaneCompact]}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>What kind of camps?</Text>
+              <Text style={[s.wizardTitle, compactWizardLayout && s.wizardTitleCompact]}>What kind of camps?</Text>
             </View>
             <View style={s.campPreferenceGrid}>
               {CAMP_PREFERENCE_OPTIONS.map(option => {
@@ -5879,9 +6089,9 @@ function RouteBuilderScreenContent() {
             </View>
             </View>
           ) : (
-            <View style={s.wizardPane}>
+            <View style={[s.wizardPane, compactWizardLayout && s.wizardPaneCompact]}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>Set your pace</Text>
+              <Text style={[s.wizardTitle, compactWizardLayout && s.wizardTitleCompact]}>Set your pace</Text>
             </View>
             <View style={s.setupGridPair}>
               <View style={s.setupInputWrap}>
@@ -5920,19 +6130,19 @@ function RouteBuilderScreenContent() {
           )}
         </ScrollView>
 
-        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, wizardStep === 0 && s.wizardNavStepOne, { marginBottom: dockMarginBottom }]]}>
+        <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, wizardStep === 0 && s.wizardNavStepOne, compactWizardLayout && s.wizardNavCompact, { marginBottom: dockMarginBottom }]]}>
           {wizardStep > 0 ? (
-            <TouchableOpacity style={s.wizardNavBtn} onPress={() => setWizardStep(step => Math.max(0, step - 1))}>
+            <TouchableOpacity style={[s.wizardNavBtn, compactWizardLayout && s.wizardNavBtnCompact]} onPress={() => setWizardStep(step => Math.max(0, step - 1))}>
               <Ionicons name="chevron-back" size={16} color={C.text2} />
               <Text style={s.wizardNavText}>Back</Text>
             </TouchableOpacity>
           ) : null}
           {wizardStep < 4 ? (
-            <TouchableOpacity style={[s.wizardNextBtn, !canMoveNext && s.wizardNextBtnDisabled]} onPress={nextStep} disabled={!canMoveNext}>
+            <TouchableOpacity style={[s.wizardNextBtn, compactWizardLayout && s.wizardNextBtnCompact, !canMoveNext && s.wizardNextBtnDisabled]} onPress={nextStep} disabled={!canMoveNext}>
               <Text style={[s.wizardNextText, !canMoveNext && s.wizardNextTextDisabled]}>Next</Text>
             </TouchableOpacity>
           ) : (
-            <TouchableOpacity style={s.wizardNextBtn} onPress={buildRouteFramework} disabled={buildingFramework}>
+            <TouchableOpacity style={[s.wizardNextBtn, compactWizardLayout && s.wizardNextBtnCompact]} onPress={buildRouteFramework} disabled={buildingFramework}>
               {buildingFramework ? <ActivityIndicator size="small" color={C.bg} /> : <Ionicons name="map-outline" size={16} color={C.bg} />}
               <Text style={s.wizardNextText}>{hasBaseRoute ? 'Update route' : 'Build route'}</Text>
             </TouchableOpacity>
@@ -5969,10 +6179,11 @@ function RouteBuilderScreenContent() {
   }
 
   if (!hasBaseRoute) {
+    const compactWizardLayout = keyboardVisible || windowHeight <= 620;
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <SafeAreaView style={s.wizardScreen}>
-          {renderPlanNavigation(true)}
+          {renderPlanNavigation(true, compactWizardLayout)}
           {renderWizardSetup(true)}
           {renderRouteExitConfirmation()}
           <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
@@ -6714,6 +6925,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   wizardScreen: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 14, paddingTop: 4 },
   planNavigation: { paddingTop: 10, paddingBottom: 4 },
   planNavigationWizard: { marginHorizontal: -14 },
+  planNavigationCompact: { paddingTop: 0, paddingBottom: 0 },
   planPageTitle: { color: C.text, fontSize: 30, lineHeight: 36, fontWeight: '700', paddingHorizontal: 20, marginBottom: 4 },
   planWorkspaceSwitcherInline: { marginBottom: 0 },
   wizardScreenTop: {
@@ -6814,6 +7026,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   routeSheetContent: { padding: 14, gap: 13 },
   routeSheetFullContent: { flex: 1 },
+  routeSheetFullContentCompact: { paddingTop: 8, paddingBottom: 8 },
   header: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingHorizontal: 16, paddingVertical: 8, borderBottomWidth: 1, borderColor: C.border, backgroundColor: C.glassStrong,
@@ -7172,24 +7385,32 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     shadowOpacity: 0,
   },
   wizardProgressHeader: { gap: 11, paddingBottom: 4 },
+  wizardProgressHeaderCompact: { gap: 5, paddingBottom: 0 },
   wizardProgressTop: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  wizardProgressTopCompact: { minHeight: 22 },
   wizardProgressTitle: { color: C.text, fontSize: 16, lineHeight: 21, fontWeight: '800' },
   wizardProgressCount: { color: C.text2, fontSize: 13, lineHeight: 18, fontWeight: '500' },
-  wizardProgressTrack: { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  wizardProgressStep: { flex: 1, minHeight: 14, justifyContent: 'center' },
+  wizardProgressTrack: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 14 },
+  wizardProgressTrackCompact: { gap: 12 },
+  wizardProgressStep: { flex: 1, minHeight: 44, justifyContent: 'center' },
+  wizardProgressStepCompact: { minHeight: 44 },
   wizardProgressLine: { height: 3, borderRadius: 2, backgroundColor: C.border },
   wizardProgressLineActive: { backgroundColor: C.orange },
   wizardStepScroll: { flex: 1, minHeight: 0 },
   wizardStepScrollContent: { flexGrow: 1 },
   wizardAnimatedPane: { minHeight: 0 },
   wizardPane: { gap: 14, minHeight: 218, justifyContent: 'flex-start', marginTop: 22 },
+  wizardPaneCompact: { gap: 10, minHeight: 0, marginTop: 8 },
   wizardQuestion: { paddingTop: 2 },
   wizardTitle: { color: C.text, fontSize: 25, fontWeight: '800', lineHeight: 31 },
+  wizardTitleCompact: { fontSize: 22, lineHeight: 27 },
   wizardHelp: { color: C.text3, fontSize: 14, lineHeight: 20, marginTop: 2 },
   wizardNav: { flexDirection: 'row', gap: 9, marginTop: 16, paddingBottom: 6 },
   wizardNavDock: { marginTop: 'auto', paddingTop: 10, paddingBottom: 0 },
   wizardNavStepOne: { borderTopWidth: 1, borderColor: C.border, paddingTop: 14 },
+  wizardNavCompact: { marginTop: 8, paddingTop: 8 },
   wizardNavBtn: { minHeight: 52, minWidth: 96, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 8, backgroundColor: C.s1 },
+  wizardNavBtnCompact: { minHeight: 48 },
   wizardNavText: { color: C.text2, fontSize: 14, fontWeight: '700' },
   wizardNextBtn: {
     flex: 1,
@@ -7202,6 +7423,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.text,
   },
   wizardNextBtnDisabled: { backgroundColor: C.s2 },
+  wizardNextBtnCompact: { minHeight: 48 },
   wizardNextText: { color: C.bg, fontSize: 14, fontWeight: '800' },
   wizardNextTextDisabled: { color: C.text3 },
   premiumModeControl: {
@@ -7314,7 +7536,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   setupInputRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2, overflow: 'hidden' },
   setupInputInline: { flex: 1, minWidth: 0, flexShrink: 1 },
   startSearchField: { minHeight: 58, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 0, backgroundColor: C.s1 },
+  startSearchFieldCompact: { minHeight: 52 },
   startSearchRow: { minHeight: 56, marginTop: 0 },
+  startSearchRowCompact: { minHeight: 50 },
   startVehicleRow: {
     minHeight: 68,
     flexDirection: 'row',
@@ -7325,6 +7549,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingHorizontal: 4,
     paddingVertical: 8,
   },
+  startVehicleRowCompact: { minHeight: 58, paddingVertical: 4 },
   startVehicleIcon: { width: 30, alignItems: 'center', justifyContent: 'center' },
   startVehicleCopy: { flex: 1, minWidth: 0 },
   startVehicleTitle: { color: C.text, fontSize: 16, lineHeight: 21, fontWeight: '800' },

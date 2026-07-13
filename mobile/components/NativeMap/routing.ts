@@ -43,7 +43,7 @@ const CACHE_DIR      = `${FileSystem.documentDirectory}routes/`;
 const LAST_ROUTE_PATH = `${FileSystem.documentDirectory}routes/last_route.json`;
 const LAST_ROUTE_DEST_TOLERANCE_M = 150;
 const LAST_ROUTE_START_TOLERANCE_M = 5_000;
-const ROUTE_CACHE_VERSION = 'valhalla-proxy-v2';
+const ROUTE_CACHE_VERSION = 'valhalla-proxy-v3';
 const ROUTER_DEBUG_MARKER = 'DBGv4';
 
 async function ensureCacheDir() {
@@ -57,8 +57,28 @@ function normCoord(coord: string): string {
   return `${lng},${lat}`;
 }
 
-function cacheKey(pairs: string[]): string {
-  return `${ROUTE_CACHE_VERSION}|${pairs.map(normCoord).join('|')}`.replace(/\./g, '_').slice(0, 170);
+function requestSettingsKey(opts: RouteOpts, providerMode: RouteProviderMode): string {
+  return [
+    providerMode,
+    opts.avoidTolls ? 't1' : 't0',
+    opts.avoidHighways ? 'h1' : 'h0',
+    opts.backRoads ? 'b1' : 'b0',
+    opts.noFerries ? 'f1' : 'f0',
+  ].join(':');
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619) >>> 0;
+  }
+  return hash.toString(16).padStart(8, '0');
+}
+
+function cacheKey(pairs: string[], opts: RouteOpts, providerMode: RouteProviderMode): string {
+  const fullIdentity = `${ROUTE_CACHE_VERSION}|${requestSettingsKey(opts, providerMode)}|${pairs.map(normCoord).join('|')}`;
+  return `${ROUTE_CACHE_VERSION.replace(/[^a-z0-9-]/gi, '_')}_${pairs.length}_${stableHash(fullIdentity)}`;
 }
 
 function parsePair(pair: string): [number, number] | null {
@@ -104,19 +124,30 @@ function coordDistanceM(a: [number, number], b: [number, number]): number {
   return 2 * R * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
 }
 
-function minDistanceToRouteM(point: [number, number], coords: [number, number][]): number {
-  if (!coords.length) return Infinity;
-  let best = Infinity;
-  const step = Math.max(1, Math.floor(coords.length / 500));
-  for (let i = 0; i < coords.length; i += step) {
-    best = Math.min(best, coordDistanceM(point, coords[i]));
-    if (best < 50) break;
+function routeContainsPairsInOrder(pairs: string[], coords: [number, number][]): boolean {
+  if (pairs.length < 2 || coords.length < 2) return false;
+  let searchStart = 0;
+  for (let pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
+    const requested = parsePair(pairs[pairIndex]);
+    if (!requested) return false;
+    const tolerance = pairIndex === 0 ? LAST_ROUTE_START_TOLERANCE_M : LAST_ROUTE_DEST_TOLERANCE_M;
+    let bestIndex = -1;
+    for (let coordIndex = searchStart; coordIndex < coords.length; coordIndex += 1) {
+      const distance = coordDistanceM(requested, coords[coordIndex]);
+      if (distance <= tolerance) {
+        bestIndex = coordIndex;
+        break;
+      }
+    }
+    if (bestIndex < 0) return false;
+    searchStart = bestIndex;
   }
-  return best;
+  return true;
 }
 
-function routeMatchesRequest(parsed: any, pairs: string[]): boolean {
+function routeMatchesRequest(parsed: any, pairs: string[], opts: RouteOpts, providerMode: RouteProviderMode): boolean {
   if (parsed.routeCacheVersion !== ROUTE_CACHE_VERSION) return false;
+  if (parsed.requestSettings !== requestSettingsKey(opts, providerMode)) return false;
   const reqStart = parsePair(pairs[0]);
   const reqEnd = parsePair(pairs[pairs.length - 1]);
   if (!reqStart || !reqEnd) return false;
@@ -135,23 +166,31 @@ function routeMatchesRequest(parsed: any, pairs: string[]): boolean {
         const b = parsePair(savedPairs[i + 1]);
         return !!a && !!b && coordDistanceM(a, b) <= LAST_ROUTE_DEST_TOLERANCE_M;
       });
-    if (sameStops) return true;
+    return sameStops;
   }
-
-  const coords = Array.isArray(parsed.coords) ? parsed.coords as [number, number][] : [];
-  const cachedEnd = coords[coords.length - 1];
-  if (!cachedEnd || coordDistanceM(reqEnd, cachedEnd) > LAST_ROUTE_DEST_TOLERANCE_M) return false;
-
-  return minDistanceToRouteM(reqStart, coords) <= LAST_ROUTE_START_TOLERANCE_M;
+  return false;
 }
 
-async function saveRoute(pairs: string[], result: RouteResult, epoch: AccountStorageEpoch) {
+async function saveRoute(
+  pairs: string[],
+  result: RouteResult,
+  epoch: AccountStorageEpoch,
+  opts: RouteOpts,
+  providerMode: RouteProviderMode,
+) {
   try {
     await accountStorage.run(async () => {
       await ensureCacheDir();
-      const key  = cacheKey(pairs);
+      const key  = cacheKey(pairs, opts, providerMode);
       const path = `${CACHE_DIR}${key}.json`;
-      const json = JSON.stringify({ ...result, coords: cleanRouteCoords(result.coords), requestedPairs: pairs, routeCacheVersion: ROUTE_CACHE_VERSION, savedAt: Date.now() });
+      const json = JSON.stringify({
+        ...result,
+        coords: cleanRouteCoords(result.coords),
+        requestedPairs: pairs,
+        requestSettings: requestSettingsKey(opts, providerMode),
+        routeCacheVersion: ROUTE_CACHE_VERSION,
+        savedAt: Date.now(),
+      });
       // Save keyed route and the most recent navigation fallback together.
       await Promise.all([
         FileSystem.writeAsStringAsync(path, json),
@@ -164,14 +203,18 @@ async function saveRoute(pairs: string[], result: RouteResult, epoch: AccountSto
   }
 }
 
-async function loadKeyedRoute(pairs: string[]): Promise<RouteResult | null> {
+async function loadKeyedRoute(pairs: string[], opts: RouteOpts, providerMode: RouteProviderMode): Promise<RouteResult | null> {
   try {
-    const key  = cacheKey(pairs);
+    const key  = cacheKey(pairs, opts, providerMode);
     const path = `${CACHE_DIR}${key}.json`;
     console.log('[RouteCache] keyed check, key:', key);
     const info = await FileSystem.getInfoAsync(path);
     if (info.exists) {
       const parsed = JSON.parse(await FileSystem.readAsStringAsync(path));
+      if (!routeMatchesRequest(parsed, pairs, opts, providerMode)) {
+        console.log('[RouteCache] keyed mismatch — ignoring');
+        return null;
+      }
       console.log('[RouteCache] keyed hit — coords:', parsed.coords?.length);
       return { ...parsed, fromCache: true, routeSource: parsed.routeSource ?? 'cache-keyed', routeSourceLabel: parsed.routeSourceLabel ?? 'Cached route' };
     }
@@ -181,12 +224,12 @@ async function loadKeyedRoute(pairs: string[]): Promise<RouteResult | null> {
   return null;
 }
 
-async function loadLastRoute(pairs: string[]): Promise<RouteResult | null> {
+async function loadLastRoute(pairs: string[], opts: RouteOpts, providerMode: RouteProviderMode): Promise<RouteResult | null> {
   try {
     const info = await FileSystem.getInfoAsync(LAST_ROUTE_PATH);
     if (info.exists) {
       const parsed = JSON.parse(await FileSystem.readAsStringAsync(LAST_ROUTE_PATH));
-      if (routeMatchesRequest(parsed, pairs)) {
+      if (routeMatchesRequest(parsed, pairs, opts, providerMode)) {
         console.log('[RouteCache] last_route hit — coords:', parsed.coords?.length);
         return { ...parsed, fromCache: true, routeSource: parsed.routeSource ?? 'cache-last', routeSourceLabel: parsed.routeSourceLabel ?? 'Last route cache' };
       }
@@ -256,7 +299,7 @@ export async function fetchRoute(
     if (!offline) return null;
     const sourced = sourceRoute(offline, 'offline-valhalla', `offline valhalla${offline.debug ? ` · ${offline.debug}` : ''}`);
     console.log('[fetchRoute] native offline Valhalla route — saving to cache');
-    await saveRoute(pairs, sourced, routeStorageEpoch);
+    await saveRoute(pairs, sourced, routeStorageEpoch, routeOpts, providerMode);
     return sourced;
   };
 
@@ -268,7 +311,7 @@ export async function fetchRoute(
     if (!offline) return null;
     const sourced = sourceRoute(offline, 'offline-js-router', 'offline JS router');
     console.log('[fetchRoute] offline JS route — saving to cache');
-    await saveRoute(pairs, sourced, routeStorageEpoch);
+    await saveRoute(pairs, sourced, routeStorageEpoch, routeOpts, providerMode);
     return sourced;
   };
 
@@ -280,7 +323,7 @@ export async function fetchRoute(
   // A. Offline keyed cache — exact/near-exact same route, no network/local graph work.
   // Online deliberately skips this so online → offline → online refreshes geometry.
   if (!online) {
-    const cached = await loadKeyedRoute(pairs);
+    const cached = await loadKeyedRoute(pairs, routeOpts, providerMode);
     if (cached) {
       console.log('[fetchRoute] returning keyed cached route');
       return cached;
@@ -308,7 +351,7 @@ export async function fetchRoute(
       const nativeDebug = nativeOfflineErrors.length ? `native valhalla: ${nativeOfflineErrors.join(' | ')}; ` : '';
       return buildFallbackRoute(pairs, `${nativeDebug}offline router exception: ${msg}`);
     }
-    const last = await loadLastRoute(pairs);
+    const last = await loadLastRoute(pairs, routeOpts, providerMode);
     if (last) {
       console.log('[fetchRoute] returning matching last_route fallback');
       return last;
@@ -324,7 +367,7 @@ export async function fetchRoute(
     try {
       const route = await fetchExtremeMapbox(pairs, fromIdx, routeOpts);
       console.log('[fetchRoute] Explorer Mapbox route — saving to cache');
-      await saveRoute(pairs, route, routeStorageEpoch);
+      await saveRoute(pairs, route, routeStorageEpoch, routeOpts, providerMode);
       return route;
     } catch (e) {
       console.warn('[fetchRoute] Explorer Mapbox route failed', e);
@@ -351,7 +394,7 @@ export async function fetchRoute(
     try {
       const route = await engine();
       console.log('[fetchRoute] online route — saving to cache');
-      await saveRoute(pairs, route, routeStorageEpoch);
+      await saveRoute(pairs, route, routeStorageEpoch, routeOpts, providerMode);
       return route;
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -383,7 +426,7 @@ export async function fetchRoute(
   }
 
   // E. Only after keyed cache + online + JS router fail, use matching last_route.
-  const last = await loadLastRoute(pairs);
+  const last = await loadLastRoute(pairs, routeOpts, providerMode);
   if (last) {
     console.log('[fetchRoute] returning matching last_route fallback');
     return last;

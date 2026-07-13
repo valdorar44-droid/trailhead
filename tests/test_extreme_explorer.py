@@ -20,6 +20,7 @@ from dashboard.server import (
     _canonical_landmark_geocode,
     _countrycodes_for_query,
     _geocode_prefer_search_center,
+    _rank_geocode_candidates,
     _explore_catalog_geocode_candidates,
     resolve_geocode_place,
     extreme_authorize_navigation,
@@ -309,6 +310,37 @@ class ExtremeExplorerTests(unittest.TestCase):
         self.assertEqual(result["status"], "resolved")
         self.assertEqual(result["selected"]["name"], "Moab, Utah, United States")
         self.assertEqual(result["selected"]["source"], "mapbox")
+
+    def test_geocode_ranking_prefers_exact_city_name_over_longer_prefix(self):
+        candidates = [
+            {
+                "name": "Denver City, Texas, United States",
+                "lat": 32.9658,
+                "lng": -102.8306,
+                "source": "mapbox",
+                "place_id": "place.denver-city",
+                "feature_type": "place",
+                "place_types": ["place"],
+                "country_code": "us",
+                "relevance": 1.0,
+            },
+            {
+                "name": "Denver, Colorado, United States",
+                "lat": 39.7392,
+                "lng": -104.9903,
+                "source": "mapbox",
+                "place_id": "place.denver",
+                "feature_type": "place",
+                "place_types": ["place"],
+                "country_code": "us",
+                "relevance": 1.0,
+            },
+        ]
+        ranked = _rank_geocode_candidates("Denver", candidates, prefer_search_center=True)
+        specific_ranked = _rank_geocode_candidates("Denver City", candidates, prefer_search_center=True)
+
+        self.assertEqual(ranked[0]["name"], "Denver, Colorado, United States")
+        self.assertEqual(specific_ranked[0]["name"], "Denver City, Texas, United States")
 
     def test_geocode_resolver_prefers_specific_place_over_country_center(self):
         result = _resolve_geocode_candidates("skardu pakistan", [

@@ -2,6 +2,8 @@ export * from './audit';
 export * from './discoveryProviders';
 export * from './geometry';
 export * from './model';
+export * from './ordering';
+export * from './persistence';
 export * from './readiness';
 export * from './routeFit';
 export * from './searchFlow';

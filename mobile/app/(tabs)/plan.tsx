@@ -110,6 +110,48 @@ function appendAiMessage(messages: Message[], text?: string): Message[] {
   return [...messages, { role: 'ai', text: clean }];
 }
 
+function plannerFailureMessage(
+  error: unknown,
+  context: 'conversation' | 'edit' | 'build',
+) {
+  const apiError = error instanceof ApiError ? error : null;
+  const raw = error instanceof Error ? error.message : '';
+  const lower = raw.toLowerCase();
+
+  if (apiError?.status === 429 || lower.includes('rate limit')) {
+    return 'The planner is busy. Try again in about 30 seconds.';
+  }
+  if (
+    (apiError?.status != null && apiError.status >= 500)
+    || /anthropic|openai|api key|credit balance|billing|error code|provider|non-json|```/i.test(lower)
+  ) {
+    return 'Trip Planner is temporarily unavailable. Try again shortly.';
+  }
+  if (
+    (!apiError || apiError.status === 400 || apiError.status === 422)
+    && /outside Trail ?head|supported planning regions|too far apart|correct the start|cross-ocean|unsupported (?:long jump|route|planning region)|required route stops could not be located/i.test(raw)
+  ) {
+    return raw;
+  }
+  if (lower.includes('network') || lower.includes('failed to fetch') || lower.includes('connection')) {
+    return context === 'build'
+      ? 'Signal dropped while planning. Check your connection and tap Retry.'
+      : 'Connection lost. Check your signal and try again.';
+  }
+  if (lower.includes('taking longer') || lower.includes('timeout')) {
+    return context === 'build'
+      ? 'This trip is taking longer than usual to plan. Tap Retry to keep the route tighter.'
+      : 'This route is taking longer than usual. Try again in a moment.';
+  }
+  if (context === 'edit') {
+    return 'That change could not be applied. Check the start, stops, and destination, then try again.';
+  }
+  if (context === 'build') {
+    return 'Trailhead could not finish that route. Tap Retry to try again.';
+  }
+  return 'Trip Planner could not respond right now. Try again shortly.';
+}
+
 function PlanScreenContent() {
   const C  = useTheme();
   const s  = useMemo(() => makeStyles(C), [C]);
@@ -237,10 +279,6 @@ function PlanScreenContent() {
     return e instanceof PaywallError || e?.message?.includes('402') || e?.message?.includes('Not enough credits');
   }
 
-  function isRouteValidationMessage(message = '') {
-    return /outside Trail Head|supported planning|too far apart|correct the start|cross-ocean|unsupported/i.test(message);
-  }
-
   // ── Resolve location reference in text ──────────────────────────────────────
   async function resolveLocation(text: string): Promise<string> {
     if (!/\b(my location|from here|current location|where i am|starting from here|starting here)\b/i.test(text)) return text;
@@ -283,8 +321,8 @@ function PlanScreenContent() {
     }
 
     // ── If route is ready and user types a build phrase, build directly ───────
-    // Prevents Claude from returning raw JSON in the chat bubble instead of
-    // going through the proper buildTrip() flow.
+    // Keep structured planner output out of the conversation view and use the
+    // normal trip-build flow.
     const BUILD_PHRASES = /^(build|go|yes|do it|let's go|build it|sounds good|perfect|do that|make it|create it|generate|start building)/i;
     if (planPhase === 'ready' && BUILD_PHRASES.test(text.trim())) {
       setLoading(false);
@@ -319,10 +357,7 @@ function PlanScreenContent() {
         if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         if (isOutOfCredits(e)) handleOutOfCredits();
         else {
-          const message = e instanceof ApiError || isRouteValidationMessage(e?.message)
-            ? e.message
-            : 'That change could not be applied. Include the start, stops, and destination, then try again.';
-          setMessages(m => [...m, { role: 'ai', text: message }]);
+          setMessages(m => [...m, { role: 'ai', text: plannerFailureMessage(e, 'edit') }]);
         }
         setPlanPhase('active');
       } finally {
@@ -356,16 +391,7 @@ function PlanScreenContent() {
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (isOutOfCredits(e)) { handleOutOfCredits(); setPlanPhase('idle'); }
       else {
-        // Keep raw responses and JSON out of the visible chat.
-        const raw = e?.message ?? '';
-        const isTimeout = raw.includes('taking longer') || raw.includes('timeout');
-        const isNetwork = raw.includes('Network') || raw.includes('fetch');
-        const friendly = isTimeout
-          ? 'This route is taking longer than usual. Try again in a moment.'
-          : isNetwork
-          ? 'Connection lost. Check your signal and try again.'
-          : 'That request was not clear enough. Shorten it and try again.';
-        setMessages(m => [...m, { role: 'ai', text: friendly }]);
+        setMessages(m => [...m, { role: 'ai', text: plannerFailureMessage(e, 'conversation') }]);
         setPlanPhase('ready'); // stay in ready so they can retry
       }
     } finally {
@@ -465,23 +491,11 @@ function PlanScreenContent() {
         setMessages(m => m); // keep messages unchanged
         setPlanPhase('ready'); // let user try again after buying
       } else {
-        const isRateLimit = e.message?.includes('429') || e.message?.toLowerCase().includes('rate limit');
-        const isRouteValidation = isRouteValidationMessage(e.message);
         setMessages(m => [
           ...m,
           {
             role: 'ai',
-            text: isRateLimit
-              ? 'The planner is busy. Try again in about 30 seconds.'
-              : isRouteValidation
-              ? e.message
-              : e.message?.includes('taking longer')
-              ? 'This trip is taking longer than usual to plan. Tap Retry to keep the route tighter.'
-              : e.message?.includes('non-JSON') || e.message?.includes('```')
-              ? 'The route outline needs a cleaner rebuild. Tap Retry to try again.'
-              : e.message?.includes('Network') || e.message?.includes('fetch')
-              ? 'Signal dropped while planning. Check your connection and tap Retry.'
-              : 'Trailhead could not finish that route. Tap Retry to try again.',
+            text: plannerFailureMessage(e, 'build'),
             outline: '__retry__',
           },
         ]);

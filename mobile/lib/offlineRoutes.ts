@@ -17,6 +17,12 @@ export interface SavedRouteGeometry {
   routeSourceLabel?: string | null;
   route_source?: string | null;
   route_source_label?: string | null;
+  routeWaypointSignature?: string;
+  route_waypoint_signature?: string;
+  waypointSignature?: string;
+  waypoint_signature?: string;
+  routableWaypointSignature?: string;
+  routable_waypoint_signature?: string;
   tripId: string | null;
   ts: number;
 }

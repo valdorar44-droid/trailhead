@@ -2,6 +2,7 @@ import { storage } from './storage';
 import { Platform } from 'react-native';
 import { TRAILHEAD_API_BASE, TRAILHEAD_PRODUCTION_API_BASE } from './apiBase';
 import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } from './requestGuard';
+import { withRouteWaypointIdentity } from './routeWaypointSignature';
 
 const BASE = TRAILHEAD_API_BASE;
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
@@ -464,7 +465,9 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({
         trip,
-        route_geometry,
+        route_geometry: route_geometry
+          ? withRouteWaypointIdentity(route_geometry, trip.plan?.waypoints)
+          : route_geometry,
         builder_state,
         source,
         request: `${source} route: ${trip.plan?.trip_name ?? trip.trip_id}`,
@@ -2396,6 +2399,12 @@ export interface SavedRouteGeometryPayload {
   tripId?: string | null;
   ts?: number;
   source?: string;
+  routeWaypointSignature?: string;
+  route_waypoint_signature?: string;
+  waypointSignature?: string;
+  waypoint_signature?: string;
+  routableWaypointSignature?: string;
+  routable_waypoint_signature?: string;
 }
 export interface TripPlan {
   trip_name: string; overview: string; duration_days: number;

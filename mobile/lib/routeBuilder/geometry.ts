@@ -119,26 +119,32 @@ export function decodePolyline6(shape: string): [number, number][] {
   let index = 0;
   let lat = 0;
   let lng = 0;
-  while (index < shape.length) {
+
+  function readValue() {
     let shift = 0;
     let result = 0;
-    let byte = 0;
-    do {
-      byte = shape.charCodeAt(index++) - 63;
+    while (true) {
+      if (index >= shape.length) return null;
+      const byte = shape.charCodeAt(index) - 63;
+      index += 1;
+      if (byte < 0) return null;
       result |= (byte & 0x1f) << shift;
+      if (byte < 0x20) return (result & 1) ? ~(result >> 1) : (result >> 1);
       shift += 5;
-    } while (byte >= 0x20 && index <= shape.length);
-    lat += (result & 1) ? ~(result >> 1) : (result >> 1);
-    shift = 0;
-    result = 0;
-    do {
-      byte = shape.charCodeAt(index++) - 63;
-      result |= (byte & 0x1f) << shift;
-      shift += 5;
-    } while (byte >= 0x20 && index <= shape.length);
-    lng += (result & 1) ? ~(result >> 1) : (result >> 1);
+      if (shift > 30) return null;
+    }
+  }
+
+  while (index < shape.length) {
+    const latDelta = readValue();
+    const lngDelta = readValue();
+    if (latDelta == null || lngDelta == null) return [];
+    lat += latDelta;
+    lng += lngDelta;
     const coord: [number, number] = [lng / 1e6, lat / 1e6];
-    if (Number.isFinite(coord[0]) && Number.isFinite(coord[1])) coords.push(coord);
+    if (!Number.isFinite(coord[0]) || !Number.isFinite(coord[1]) || Math.abs(coord[0]) > 180 || Math.abs(coord[1]) > 90) return [];
+    const previous = coords[coords.length - 1];
+    if (!previous || Math.abs(previous[0] - coord[0]) >= 1e-7 || Math.abs(previous[1] - coord[1]) >= 1e-7) coords.push(coord);
   }
   return coords;
 }
@@ -234,16 +240,26 @@ export function computeDaySegmentsFromRouteGeometry(input: {
 export function isTemporaryRouteAnchor(stop: RouteBuilderStopLike) {
   if (stop.routePointType === 'side_stop' || stop.routeShapeRole === 'side_stop') return false;
   if (stop.routeShapeRole === 'outbound_anchor' && stop.source === 'map') return true;
+  if (stop.source === 'map' && stop.type === 'waypoint' && /review area/i.test(`${stop.name} ${stop.description ?? ''}`)) return true;
   if (/target area|camp search area|overnight area|route sketch/i.test(`${stop.name} ${stop.description ?? ''}`)) return true;
   return false;
 }
 
-export function filterDurableNavigationStops<T extends RouteBuilderStopLike>(stops: T[]) {
+export function filterDurableNavigationStops<T extends RouteBuilderStopLike>(stops: readonly T[]) {
   return stops.filter(stop => {
     if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lng)) return false;
     if (isTemporaryRouteAnchor(stop)) return false;
     if (stop.routePointType === 'side_stop') return false;
     return true;
+  });
+}
+
+export function filterPersistableGasStops<T extends RouteBuilderStopLike>(stops: readonly T[]) {
+  return stops.filter(stop => {
+    if (!Number.isFinite(stop.lat) || !Number.isFinite(stop.lng) || !stop.gas || typeof stop.gas !== 'object') return false;
+    const gas = stop.gas as { lat?: unknown; lng?: unknown };
+    return typeof gas.lat === 'number' && Number.isFinite(gas.lat)
+      && typeof gas.lng === 'number' && Number.isFinite(gas.lng);
   });
 }
 

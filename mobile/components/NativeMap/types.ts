@@ -43,4 +43,6 @@ export interface RouteResult {
   routeSource?: string;
   routeSourceLabel?: string;
   debug?: string;
+  routeWaypointSignature?: string;
+  keptExistingRoute?: boolean;
 }

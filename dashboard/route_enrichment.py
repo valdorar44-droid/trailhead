@@ -28,11 +28,73 @@ from ingestors.nps import get_nps_places, nps_enabled
 from ingestors.usfs import get_usfs_recreation_sites
 
 
+_ENRICHMENT_ROUTE_SAMPLE_MI = 0.1
+_ENRICHMENT_ROUTE_MAX_POINTS = 2048
+
+
+class _IndexedRoute(list[dict]):
+    """Bounded route copy with segment distances cached for corridor scoring."""
+
+    def __init__(self, points: Iterable[dict]):
+        super().__init__(points)
+        self.segment_lengths_mi: list[float] = []
+        self.cumulative_mi: list[float] = [0.0] if self else []
+        for a, b in zip(self, self[1:]):
+            segment_mi = _haversine_mi((a["lat"], a["lng"]), (b["lat"], b["lng"]))
+            self.segment_lengths_mi.append(segment_mi)
+            self.cumulative_mi.append(self.cumulative_mi[-1] + segment_mi)
+        self.total_mi = self.cumulative_mi[-1] if self.cumulative_mi else 0.0
+
+
 def _valid_points(waypoints: list[dict]) -> list[dict]:
     return [
         wp for wp in waypoints
         if isinstance(wp.get("lat"), (int, float)) and isinstance(wp.get("lng"), (int, float))
     ]
+
+
+def _cap_route_points(points: list[dict], max_points: int = _ENRICHMENT_ROUTE_MAX_POINTS) -> list[dict]:
+    if len(points) <= max_points:
+        return points
+    step = (len(points) - 1) / (max_points - 1)
+    return [points[round(index * step)] for index in range(max_points)]
+
+
+def _route_geometry_points(route_geometry: dict | None) -> _IndexedRoute:
+    """Build a bounded enrichment copy from full-resolution saved geometry."""
+    if not isinstance(route_geometry, dict):
+        return _IndexedRoute([])
+    clean: list[dict] = []
+    for coord in route_geometry.get("coords") or []:
+        if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+            continue
+        try:
+            lng = float(coord[0])
+            lat = float(coord[1])
+        except (TypeError, ValueError):
+            continue
+        if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+            continue
+        if clean and abs(clean[-1]["lat"] - lat) < 1e-7 and abs(clean[-1]["lng"] - lng) < 1e-7:
+            continue
+        clean.append({"lat": lat, "lng": lng})
+    if len(clean) < 3:
+        return _IndexedRoute(clean)
+
+    sampled = [clean[0]]
+    distance_since_sample = 0.0
+    previous = clean[0]
+    for point in clean[1:-1]:
+        distance_since_sample += _haversine_mi(
+            (previous["lat"], previous["lng"]),
+            (point["lat"], point["lng"]),
+        )
+        if distance_since_sample >= _ENRICHMENT_ROUTE_SAMPLE_MI:
+            sampled.append(point)
+            distance_since_sample = 0.0
+        previous = point
+    sampled.append(clean[-1])
+    return _IndexedRoute(_cap_route_points(sampled))
 
 
 def _haversine_mi(a: tuple[float, float], b: tuple[float, float]) -> float:
@@ -47,6 +109,7 @@ def _point_segment_projection(
     point: tuple[float, float],
     a: tuple[float, float],
     b: tuple[float, float],
+    segment_mi: float | None = None,
 ) -> dict:
     """Approximate point projection onto a route segment in miles."""
     plat, plng = point
@@ -57,7 +120,8 @@ def _point_segment_projection(
     ax, ay = alng * math.cos(ref_lat), alat
     bx, by = blng * math.cos(ref_lat), blat
     dx, dy = bx - ax, by - ay
-    segment_mi = _haversine_mi(a, b)
+    if segment_mi is None:
+        segment_mi = _haversine_mi(a, b)
     if dx == 0 and dy == 0:
         return {"distance_mi": _haversine_mi(point, a), "progress": 0.0, "progress_mi": 0.0}
     t = max(0, min(1, ((x - ax) * dx + (y - ay) * dy) / (dx * dx + dy * dy)))
@@ -78,14 +142,20 @@ def _route_projection(item: dict, route: list[dict]) -> dict:
             "route_progress_mi": 0.0,
             "route_segment_index": 0,
         }
+    indexed = route if isinstance(route, _IndexedRoute) else _IndexedRoute(route)
     point = (float(item["lat"]), float(item["lng"]))
-    cumulative = 0.0
-    total = sum(_haversine_mi((a["lat"], a["lng"]), (b["lat"], b["lng"])) for a, b in zip(route, route[1:]))
+    total = indexed.total_mi
     best: dict | None = None
-    for idx, (a, b) in enumerate(zip(route, route[1:])):
+    for idx, (a, b) in enumerate(zip(indexed, indexed[1:])):
         seg_a = (a["lat"], a["lng"])
         seg_b = (b["lat"], b["lng"])
-        projection = _point_segment_projection(point, seg_a, seg_b)
+        projection = _point_segment_projection(
+            point,
+            seg_a,
+            seg_b,
+            indexed.segment_lengths_mi[idx],
+        )
+        cumulative = indexed.cumulative_mi[idx]
         candidate = {
             "route_distance_mi": float(projection["distance_mi"]),
             "route_progress": ((cumulative + float(projection["progress_mi"])) / total) if total > 0 else 0.0,
@@ -94,7 +164,6 @@ def _route_projection(item: dict, route: list[dict]) -> dict:
         }
         if best is None or candidate["route_distance_mi"] < best["route_distance_mi"]:
             best = candidate
-        cumulative += _haversine_mi(seg_a, seg_b)
     return best or {
         "route_distance_mi": 0.0,
         "route_progress": 0.0,
@@ -135,7 +204,7 @@ def _nearest_day(item: dict, waypoints: list[dict], types: Iterable[str] | None 
 
 def _route_samples(route: list[dict], max_samples: int = 8) -> list[dict]:
     if len(route) <= max_samples:
-        return route
+        return list(route)
     step = (len(route) - 1) / (max_samples - 1)
     return [route[round(i * step)] for i in range(max_samples)]
 
@@ -281,24 +350,7 @@ def annotate_waypoint_verification(
     return annotated
 
 
-async def _route_camps(waypoints: list[dict], route: list[dict], style: str = "balanced") -> list[dict]:
-    camp_targets = [wp for wp in waypoints if wp.get("type") in ("camp", "motel") and wp.get("lat") and wp.get("lng")]
-    targets = _merge_targets(camp_targets, _route_samples(route, max_samples=8), max_targets=14)
-
-    async def fetch_for(wp: dict) -> list[dict]:
-        ridb, blm, osm = await asyncio.gather(
-            get_campsites_search(wp["lat"], wp["lng"], radius_miles=45),
-            get_blm_campsites(wp["lat"], wp["lng"], radius_miles=45),
-            get_osm_campsites(wp["lat"], wp["lng"], radius_m=72000),
-        )
-        return [*ridb, *blm, *osm]
-
-    batches = await asyncio.gather(*[fetch_for(wp) for wp in targets], return_exceptions=True)
-    camps: list[dict] = []
-    for batch in batches:
-        if isinstance(batch, list):
-            camps.extend(batch)
-
+def _score_route_camps(camps: list[dict], waypoints: list[dict], route: list[dict], style: str) -> list[dict]:
     scored = []
     for camp in _dedupe(camps):
         if not camp.get("lat") or not camp.get("lng"):
@@ -326,23 +378,7 @@ async def _route_camps(waypoints: list[dict], route: list[dict], style: str = "b
     return [camp for _, camp in sorted(scored, key=lambda row: row[0])[:70]]
 
 
-async def _route_gas(waypoints: list[dict], route: list[dict]) -> list[dict]:
-    fuel_targets = [wp for wp in waypoints if wp.get("type") == "fuel" and wp.get("lat") and wp.get("lng")]
-    targets = _merge_targets(fuel_targets, _route_samples(route, max_samples=10), max_targets=16)
-
-    osm_batches = await asyncio.gather(
-        *[get_fuel_stations(wp["lat"], wp["lng"], radius_m=24000) for wp in targets],
-        return_exceptions=True,
-    )
-    stations: list[dict] = []
-    for batch in osm_batches:
-        if isinstance(batch, list):
-            stations.extend(batch)
-    try:
-        stations.extend(await get_gas_along_route(waypoints))
-    except Exception:
-        pass
-
+def _score_route_gas(stations: list[dict], waypoints: list[dict], route: list[dict]) -> list[dict]:
     scored = []
     for station in _dedupe(stations):
         if not station.get("lat") or not station.get("lng"):
@@ -354,6 +390,58 @@ async def _route_gas(waypoints: list[dict], route: list[dict]) -> list[dict]:
         station["recommended_day"] = _nearest_day(station, waypoints)
         scored.append((route_mi, station))
     return [station for _, station in sorted(scored, key=lambda row: row[0])[:45]]
+
+
+def _score_route_pois(pois: list[dict], waypoints: list[dict], route: list[dict]) -> list[dict]:
+    scored = []
+    for poi in _dedupe(pois):
+        if not poi.get("lat") or not poi.get("lng"):
+            continue
+        raw_route_mi = _annotate_route_position(poi, route)
+        if raw_route_mi > 18:
+            continue
+        route_mi = raw_route_mi
+        if (poi.get("name") or "").lower() in ("viewpoint", "trailhead", "water source", "natural spring", "peak"):
+            route_mi += 5
+        if poi.get("type") == "hot_spring":
+            route_mi -= 6
+        route_mi += _source_rank(poi) * 0.6
+        poi["route_fit"] = "on_route" if raw_route_mi <= 3 else "short_detour"
+        poi["recommended_day"] = _nearest_day(poi, waypoints)
+        scored.append((route_mi, poi))
+    return [poi for _, poi in sorted(scored, key=lambda row: row[0])[:50]]
+
+
+async def _route_camps(waypoints: list[dict], route: list[dict], style: str = "balanced") -> list[dict]:
+    camp_targets = [wp for wp in waypoints if wp.get("type") in ("camp", "motel") and wp.get("lat") and wp.get("lng")]
+    targets = _merge_targets(camp_targets, _route_samples(route, max_samples=8), max_targets=14)
+
+    async def fetch_for(wp: dict) -> list[dict]:
+        ridb, blm, osm = await asyncio.gather(
+            get_campsites_search(wp["lat"], wp["lng"], radius_miles=45),
+            get_blm_campsites(wp["lat"], wp["lng"], radius_miles=45),
+            get_osm_campsites(wp["lat"], wp["lng"], radius_m=72000),
+        )
+        return [*ridb, *blm, *osm]
+
+    batches = await asyncio.gather(*[fetch_for(wp) for wp in targets], return_exceptions=True)
+    camps = [item for batch in batches if isinstance(batch, list) for item in batch]
+    return await asyncio.to_thread(_score_route_camps, camps, waypoints, route, style)
+
+
+async def _route_gas(waypoints: list[dict], route: list[dict]) -> list[dict]:
+    fuel_targets = [wp for wp in waypoints if wp.get("type") == "fuel" and wp.get("lat") and wp.get("lng")]
+    targets = _merge_targets(fuel_targets, _route_samples(route, max_samples=10), max_targets=16)
+    osm_batches = await asyncio.gather(
+        *[get_fuel_stations(wp["lat"], wp["lng"], radius_m=24000) for wp in targets],
+        return_exceptions=True,
+    )
+    stations = [item for batch in osm_batches if isinstance(batch, list) for item in batch]
+    try:
+        stations.extend(await get_gas_along_route(waypoints))
+    except Exception:
+        pass
+    return await asyncio.to_thread(_score_route_gas, stations, waypoints, route)
 
 
 async def _route_pois(waypoints: list[dict], route: list[dict]) -> list[dict]:
@@ -378,39 +466,25 @@ async def _route_pois(waypoints: list[dict], route: list[dict]) -> list[dict]:
         if nps_enabled():
             tasks.append(get_nps_places(wp["lat"], wp["lng"], radius_m=52000, categories=categories, limit=40))
         batches = await asyncio.gather(*tasks, return_exceptions=True)
-        merged: list[dict] = []
-        for batch in batches:
-            if isinstance(batch, list):
-                merged.extend(batch)
-        return merged
+        return [item for batch in batches if isinstance(batch, list) for item in batch]
 
     batches = await asyncio.gather(*[fetch_for(wp) for wp in samples], return_exceptions=True)
-    pois: list[dict] = []
-    for batch in batches:
-        if isinstance(batch, list):
-            pois.extend(batch)
-
-    scored = []
-    for poi in _dedupe(pois):
-        if not poi.get("lat") or not poi.get("lng"):
-            continue
-        raw_route_mi = _annotate_route_position(poi, route)
-        if raw_route_mi > 18:
-            continue
-        route_mi = raw_route_mi
-        if (poi.get("name") or "").lower() in ("viewpoint", "trailhead", "water source", "natural spring", "peak"):
-            route_mi += 5
-        if poi.get("type") == "hot_spring":
-            route_mi -= 6
-        route_mi += _source_rank(poi) * 0.6
-        poi["route_fit"] = "on_route" if raw_route_mi <= 3 else "short_detour"
-        poi["recommended_day"] = _nearest_day(poi, waypoints)
-        scored.append((route_mi, poi))
-    return [poi for _, poi in sorted(scored, key=lambda row: row[0])[:50]]
+    pois = [item for batch in batches if isinstance(batch, list) for item in batch]
+    return await asyncio.to_thread(_score_route_pois, pois, waypoints, route)
 
 
-async def enrich_trip_along_route(waypoints: list[dict], route_style: str = "balanced") -> dict:
-    route = _valid_points(waypoints)
+async def enrich_trip_along_route(
+    waypoints: list[dict],
+    route_style: str = "balanced",
+    route_geometry: dict | None = None,
+) -> dict:
+    route = (
+        await asyncio.to_thread(_route_geometry_points, route_geometry)
+        if isinstance(route_geometry, dict)
+        else _IndexedRoute([])
+    )
+    if not route:
+        route = _IndexedRoute(_valid_points(waypoints))
     if len(route) < 2:
         return {"campsites": [], "gas_stations": [], "route_pois": []}
     style = "wild" if str(route_style).lower() in {"wild", "adventure"} else str(route_style or "balanced").lower()

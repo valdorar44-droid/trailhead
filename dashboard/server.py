@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -17,6 +17,9 @@ from typing import Any, Literal, Optional
 import httpx
 import bcrypt as _bcrypt_lib
 from jose import jwt, JWTError
+
+
+logger = logging.getLogger(__name__)
 
 from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
@@ -396,6 +399,7 @@ def _validate_route_waypoints(waypoints: list[dict], context: str = "") -> dict:
         )
 
     points: list[dict] = []
+    missing_required: list[str] = []
     for wp in waypoints:
         if not isinstance(wp, dict):
             continue
@@ -405,9 +409,21 @@ def _validate_route_waypoints(waypoints: list[dict], context: str = "") -> dict:
             lat = float(lat)
             lng = float(lng)
         except (TypeError, ValueError):
+            if _planner_route_point_type(wp) != "side_stop":
+                missing_required.append(str(wp.get("name") or "Route stop"))
             continue
-        if -90 <= lat <= 90 and -180 <= lng <= 180:
+        if -90 <= lat <= 90 and -180 <= lng <= 180 and _planner_route_point_type(wp) != "side_stop":
             points.append({"lat": lat, "lng": lng, "name": str(wp.get("name", "stop"))})
+        elif _planner_route_point_type(wp) != "side_stop":
+            missing_required.append(str(wp.get("name") or "Route stop"))
+
+    if missing_required:
+        names = ", ".join(dict.fromkeys(missing_required[:4]))
+        return _route_validation_result(
+            False,
+            "Some required route stops could not be located.",
+            [f"Check the spelling or add a nearby city for: {names}."],
+        )
 
     for a, b in zip(points, points[1:]):
         miles = _haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) / 1609.344
@@ -9462,6 +9478,23 @@ class PlanRequest(BaseModel):
     max_daily_drive_hours: Optional[float] = None
     trip_preferences: Optional[dict] = None
 
+
+TRIP_PLANNER_UNAVAILABLE = "Trip Planner is temporarily unavailable. Try again shortly."
+
+
+class PlannerRouteUnavailable(RuntimeError):
+    pass
+
+
+def _log_planner_failure(context: str, exc: Exception) -> None:
+    """Record actionable failure context without provider messages or payloads."""
+    logger.warning(
+        "planner_failure context=%s exception_class=%s",
+        context,
+        type(exc).__name__,
+    )
+
+
 class ChatRequest(BaseModel):
     message: str
     session_id: str
@@ -9520,25 +9553,43 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
     if len(body.message) > 2000:
         raise HTTPException(400, "Message exceeds 2000 characters")
     if not settings.anthropic_api_key:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
+    existing_trip = None
     if body.current_trip:
         current_trip_id = str(body.current_trip.get("trip_id") or "").strip()
         existing_trip = get_trip(current_trip_id) if current_trip_id else None
         expected_owner = user["id"] if user else None
         if existing_trip and existing_trip.get("user_id") != expected_owner:
             raise HTTPException(403, "Not authorized to update this trip")
+        client_version = body.current_trip.get("version")
+        server_version = existing_trip.get("version") if isinstance(existing_trip, dict) else None
+        if client_version is not None and server_version is not None:
+            try:
+                if int(client_version) != int(server_version):
+                    raise HTTPException(409, "This trip changed on another device. Reopen it before editing.")
+            except (TypeError, ValueError):
+                raise HTTPException(409, "Reopen this trip before editing it.")
 
+    edit_clarification = _trip_edit_clarification(body.message) if body.current_trip else None
+    paid_edit_cost = 0
+    paid_chat_cost = 0
     if user:
         if has_active_plan(user):
             from db.store import get_plan_action_count_today, log_ai_usage
-            if body.current_trip and get_plan_action_count_today(user["id"], "trip_edit") >= PLAN_DAILY_EDITS:
+            if body.current_trip and not edit_clarification and get_plan_action_count_today(user["id"], "trip_edit") >= PLAN_DAILY_EDITS:
                 raise HTTPException(429, "Daily trip edit limit reached. Resets at midnight UTC.")
             cost = 0
-            log_ai_usage(user["id"], "trip_edit" if body.current_trip else "chat")
+            if not edit_clarification:
+                log_ai_usage(user["id"], "trip_edit" if body.current_trip else "chat")
         else:
             cost = AI_COSTS["chat_edit"] if body.current_trip else AI_COSTS["chat"]
-            _check_credits(user, cost, "Trip guidance")
+            if body.current_trip:
+                # Charge only when a complete edit is ready to be saved. This
+                # avoids taking credits for clarification or provider failures.
+                paid_edit_cost = cost
+            else:
+                paid_chat_cost = cost
     else:
         _anon_check(_client_ip(request), "chat")
 
@@ -9594,22 +9645,19 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
     # ── Edit mode: active trip exists ──────────────────────────────────────────
     if body.current_trip:
         import anthropic as _anthropic
-        clarification = _trip_edit_clarification(body.message)
-        if clarification:
+        if edit_clarification:
             messages.append({"role": "user", "content": body.message})
-            messages.append({"role": "assistant", "content": clarification})
+            messages.append({"role": "assistant", "content": edit_clarification})
             save_conversation(conversation_key, messages[-30:])
-            return {"type": "message", "content": clarification, "trail_dna": trail_dna}
+            return {"type": "message", "content": edit_clarification, "trail_dna": trail_dna}
         try:
-            result = edit_trip(body.current_trip, body.message)
+            editable_trip = existing_trip if isinstance(existing_trip, dict) else body.current_trip
+            result = await asyncio.to_thread(edit_trip, editable_trip, body.message)
         except _anthropic.RateLimitError:
             raise HTTPException(429, "Rate limit hit — please wait 30 seconds and try again")
-        except Exception as e:
-            raise HTTPException(500, f"Edit failed: {e}")
-
-        messages.append({"role": "user", "content": body.message})
-        messages.append({"role": "assistant", "content": result.get("message", "")})
-        save_conversation(conversation_key, messages[-30:])
+        except Exception as exc:
+            _log_planner_failure("chat_edit_model", exc)
+            raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
         edited_plan = result.get("trip")
         if edited_plan:
@@ -9618,10 +9666,72 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
             validation = _validate_route_waypoints(geocoded, body.message)
             if not validation["ok"]:
                 content = f"{validation['reason']} " + " ".join(validation["details"])
+                messages.append({"role": "user", "content": body.message})
                 messages.append({"role": "assistant", "content": content})
                 save_conversation(conversation_key, messages[-30:])
                 return {"type": "message", "content": content, "route_validation": validation, "trail_dna": trail_dna}
-            enrichment = await enrich_trip_along_route(geocoded)
+            prior_plan = existing_trip.get("plan") if isinstance(existing_trip, dict) and isinstance(existing_trip.get("plan"), dict) else {}
+            if not prior_plan and isinstance(body.current_trip.get("plan"), dict):
+                prior_plan = body.current_trip["plan"]
+            route_preferences = edited_plan.get("route_preferences") if isinstance(edited_plan.get("route_preferences"), dict) else {}
+            prior_preferences = prior_plan.get("route_preferences") if isinstance(prior_plan.get("route_preferences"), dict) else {}
+            route_style = _normalized_planner_route_style(
+                route_preferences.get("route_style")
+                or prior_preferences.get("route_style")
+                or "balanced"
+            )
+            prior_geometry = existing_trip.get("route_geometry") if isinstance(existing_trip, dict) else None
+            if not _planner_geometry_is_valid(prior_geometry):
+                prior_geometry = body.current_trip.get("route_geometry")
+            prior_route_style = _normalized_planner_route_style(
+                prior_geometry.get("routeStyle")
+                if isinstance(prior_geometry, dict) and prior_geometry.get("routeStyle")
+                else prior_preferences.get("route_style") or "balanced"
+            )
+            prior_anchor_signature = _planner_waypoint_signature(
+                prior_plan.get("waypoints") if isinstance(prior_plan.get("waypoints"), list) else [],
+                routable_only=True,
+            )
+            edited_anchor_signature = _planner_waypoint_signature(geocoded, routable_only=True)
+            prior_semantic_signature = _planner_waypoint_semantic_signature(
+                prior_plan.get("waypoints") if isinstance(prior_plan.get("waypoints"), list) else [],
+            )
+            edited_semantic_signature = _planner_waypoint_semantic_signature(geocoded)
+            can_preserve_geometry = (
+                _planner_geometry_matches_waypoints(
+                    prior_geometry,
+                    prior_plan.get("waypoints") if isinstance(prior_plan.get("waypoints"), list) else [],
+                )
+                and bool(prior_anchor_signature)
+                and prior_anchor_signature == edited_anchor_signature
+                and prior_route_style == route_style
+            )
+            can_preserve_builder_state = (
+                can_preserve_geometry
+                and bool(prior_semantic_signature)
+                and prior_semantic_signature == edited_semantic_signature
+            )
+            if can_preserve_geometry:
+                route_geometry = dict(prior_geometry)
+                route_geometry["routeStyle"] = route_style
+                route_geometry["waypointSignature"] = _planner_waypoint_signature(geocoded)
+                route_geometry["routableWaypointSignature"] = edited_anchor_signature
+            else:
+                try:
+                    route_geometry = await asyncio.wait_for(
+                        _planner_route_geometry(geocoded, route_style=route_style),
+                        timeout=45,
+                    )
+                except Exception as exc:
+                    _log_planner_failure("chat_edit_routing", exc)
+                    route_geometry = None
+                if not _planner_geometry_is_valid(route_geometry):
+                    raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
+            enrichment = await enrich_trip_along_route(
+                geocoded,
+                route_style=route_style,
+                route_geometry=route_geometry,
+            )
             edited_plan["waypoints"] = enrichment.get("waypoints", geocoded)
             timeline = _build_trip_timeline(
                 edited_plan,
@@ -9631,30 +9741,103 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
                 body.message,
             )
             edited_plan["timeline"] = timeline
-            trip_id = body.current_trip.get("trip_id", uuid.uuid4().hex)
+            trip_id = str(existing_trip.get("trip_id") or body.current_trip.get("trip_id") or uuid.uuid4().hex) if isinstance(existing_trip, dict) else str(body.current_trip.get("trip_id") or uuid.uuid4().hex)
             updated = {"trip_id": trip_id, "plan": edited_plan,
                        "campsites": enrichment["campsites"][:70],
                        "gas_stations": enrichment["gas_stations"][:45],
                        "route_pois": enrichment["route_pois"][:50],
                        "timeline": timeline}
+            prior_builder_state = existing_trip.get("builder_state") if isinstance(existing_trip, dict) else None
+            if not isinstance(prior_builder_state, dict):
+                prior_builder_state = body.current_trip.get("builder_state")
+            prior_audio_guide = existing_trip.get("audio_guide") if isinstance(existing_trip, dict) else None
+            if not isinstance(prior_audio_guide, dict):
+                prior_audio_guide = body.current_trip.get("audio_guide")
+            if can_preserve_builder_state and isinstance(prior_builder_state, dict):
+                updated["builder_state"] = prior_builder_state
+            if can_preserve_builder_state and isinstance(prior_audio_guide, dict):
+                updated["audio_guide"] = prior_audio_guide
+            stored = dict(updated)
+            edit_charge_applied = False
             try:
-                save_trip(trip_id, body.message, updated, user_id=user["id"] if user else None)
+                save_kwargs = {"route_geometry": route_geometry}
+                if can_preserve_builder_state:
+                    if isinstance(prior_builder_state, dict):
+                        save_kwargs["builder_state"] = prior_builder_state
+                    if isinstance(prior_audio_guide, dict):
+                        save_kwargs["audio_guide"] = prior_audio_guide
+                else:
+                    # Any waypoint/style change invalidates Route Builder state
+                    # and narration, even when a side stop can reuse the line.
+                    save_kwargs["builder_state"] = None
+                    save_kwargs["audio_guide"] = None
+                if user and paid_edit_cost > 0:
+                    _check_credits(user, paid_edit_cost, "Trip guidance")
+                    edit_charge_applied = not bool(user.get("is_admin"))
+                synced_v2_revision = save_trip(
+                    trip_id,
+                    body.message,
+                    stored,
+                    user_id=user["id"] if user else None,
+                    expected_version=int(existing_trip.get("version")) if isinstance(existing_trip, dict) and existing_trip.get("version") is not None else None,
+                    **save_kwargs,
+                )
             except PermissionError:
+                if edit_charge_applied and user:
+                    add_credits(user["id"], paid_edit_cost, "Refund - trip update was not saved")
                 raise HTTPException(403, "Not authorized to update this trip")
+            except RevisionConflictError:
+                if edit_charge_applied and user:
+                    add_credits(user["id"], paid_edit_cost, "Refund - trip changed before saving")
+                raise HTTPException(409, "This trip changed on another device. Reopen it before editing.")
+            except HTTPException:
+                if edit_charge_applied and user:
+                    add_credits(user["id"], paid_edit_cost, "Refund - trip update was not saved")
+                raise
+            except Exception as exc:
+                if edit_charge_applied and user:
+                    add_credits(user["id"], paid_edit_cost, "Refund - trip update was not saved")
+                _log_planner_failure("chat_edit_save", exc)
+                raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
+            updated["route_geometry"] = route_geometry
+            if isinstance(synced_v2_revision, int):
+                updated["v2_revision"] = synced_v2_revision
+            messages.append({"role": "user", "content": body.message})
+            messages.append({"role": "assistant", "content": result.get("message", "")})
+            save_conversation(conversation_key, messages[-30:])
             return {"type": "trip_update", "content": result.get("message", "Route updated."),
                     "trip": updated, "trail_dna": trail_dna}
 
+        messages.append({"role": "user", "content": body.message})
+        messages.append({"role": "assistant", "content": result.get("message", "")})
+        save_conversation(conversation_key, messages[-30:])
         return {"type": "message", "content": result.get("message", ""), "trail_dna": trail_dna}
 
     # ── Conversational planning mode ───────────────────────────────────────────
     messages.append({"role": "user", "content": body.message})
+    import anthropic as _anthropic
     try:
-        response = chat_guide(messages, trail_dna)
-    except Exception as e:
-        raise HTTPException(500, f"Chat failed: {e}")
+        response = await asyncio.to_thread(chat_guide, messages, trail_dna)
+    except _anthropic.RateLimitError:
+        raise HTTPException(429, "Rate limit hit — please wait 30 seconds and try again")
+    except Exception as exc:
+        _log_planner_failure("chat_guide_model", exc)
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     messages.append({"role": "assistant", "content": response["content"]})
-    save_conversation(conversation_key, messages[-30:])
+    chat_charge_applied = False
+    try:
+        if user and paid_chat_cost > 0:
+            _check_credits(user, paid_chat_cost, "Trip guidance")
+            chat_charge_applied = not bool(user.get("is_admin"))
+        save_conversation(conversation_key, messages[-30:])
+    except HTTPException:
+        raise
+    except Exception as exc:
+        if chat_charge_applied and user:
+            add_credits(user["id"], paid_chat_cost, "Refund - trip guidance was not delivered")
+        _log_planner_failure("chat_guide_save", exc)
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     return {"type": response["type"], "content": response["content"],
             "outline": response.get("outline"), "trail_dna": trail_dna}
@@ -9763,24 +9946,36 @@ async def _send_admin_push_campaign(body: AdminPushCampaignBody, admin: dict) ->
     }
 
 
+def _mark_plan_job_failed(job_id: str, error: str) -> None:
+    for attempt in range(2):
+        try:
+            update_plan_job(job_id, "failed", error=error)
+            return
+        except Exception as exc:
+            _log_planner_failure(f"plan_job_failure_status_{attempt + 1}", exc)
+
+
 async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, cost: int) -> None:
     """Background task: generate the trip, geocode, enrich, save, notify."""
     import anthropic as _anthropic
     import re as _re
     started_at = time.time()
-    update_plan_job(job_id, "running")
+    refundable_cost = cost
+    trip_saved = False
     try:
+        update_plan_job(job_id, "running")
         update_plan_job(job_id, "ai")
-        route_style = (body.route_style or "balanced").strip().lower()
-        if route_style == "adventure":
-            route_style = "wild"
+        route_style = _normalized_planner_route_style(body.route_style)
         if body.session_id:
             msgs = get_conversation(_ai_conversation_key(body.session_id, user))
-            plan_data = plan_trip_from_conversation(msgs) if msgs else plan_trip(body.request or "")
+            plan_data = await asyncio.to_thread(
+                plan_trip_from_conversation if msgs else plan_trip,
+                msgs if msgs else body.request or "",
+            )
         else:
-            plan_data = plan_trip(body.request or "")
+            plan_data = await asyncio.to_thread(plan_trip, body.request or "")
         plan_data["route_preferences"] = {
-            "route_style": route_style if route_style in {"direct", "balanced", "wild"} else "balanced",
+            "route_style": route_style,
             "camp_preference": (body.camp_preference or "public").strip().lower(),
             "camp_reuse_policy": (body.camp_reuse_policy or "different_each_night").strip().lower(),
             "region_hint": (body.region_hint or "").strip(),
@@ -9795,44 +9990,71 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
             actual_cost = _plan_credit_cost(actual_days)
             estimated_cost = _plan_credit_cost(day_hint)
-            if actual_cost != estimated_cost:
-                add_credits(user["id"], estimated_cost - actual_cost,
-                            f"Credit adjustment — actual trip is {actual_days} days")
+            if actual_cost < estimated_cost:
+                add_credits(
+                    user["id"],
+                    estimated_cost - actual_cost,
+                    f"Credit adjustment - actual trip is {actual_days} days",
+                )
+            elif actual_cost > estimated_cost:
+                extra_cost = actual_cost - estimated_cost
+                if not deduct_credits(
+                    user["id"],
+                    extra_cost,
+                    f"Trip plan adjustment - actual trip is {actual_days} days",
+                ):
+                    if refundable_cost > 0:
+                        add_credits(user["id"], refundable_cost, "Refund - trip length changed")
+                        refundable_cost = 0
+                    _mark_plan_job_failed(
+                        job_id,
+                        "This longer trip needs more credits. Add credits or shorten the trip and try again.",
+                    )
+                    return
+            refundable_cost = actual_cost
 
         trip_id = uuid.uuid4().hex
-        result_stub = {"trip_id": trip_id, "plan": plan_data, "campsites": [], "gas_stations": [], "route_pois": [], "timeline": _build_trip_timeline(plan_data, request_context=body.request or "")}
-        save_trip(trip_id, body.request, result_stub, user_id=user["id"] if user else None)
-
-        actual_days = plan_data.get("duration_days", 7)
-        log_event(
-            user["id"] if user else None, body.session_id, "plan_generated",
-            {"trip_id": trip_id, "days": actual_days,
-             "states": plan_data.get("states", []),
-             "difficulty": plan_data.get("difficulty", ""),
-             "waypoint_count": len(plan_data.get("waypoints", [])),
-             "platform": "mobile"},
-        )
 
         is_long_trip = int(plan_data.get("duration_days") or 0) >= 10 or len(plan_data.get("waypoints", [])) >= 28
 
         update_plan_job(job_id, "geocoding")
         try:
-            geocode_timeout = 25 if is_long_trip else 45
+            geocode_timeout = 60 if is_long_trip else 50
             geocoded = await asyncio.wait_for(_geocode_waypoints(plan_data.get("waypoints", [])), timeout=geocode_timeout)
         except Exception:
             geocoded = plan_data.get("waypoints", [])
         plan_data["waypoints"] = geocoded
         validation = _validate_route_waypoints(geocoded, body.request or "")
         if not validation["ok"]:
-            if user and cost > 0:
-                add_credits(user["id"], cost, "Refund — unsupported route")
-            update_plan_job(job_id, "failed", error=f"{validation['reason']} {' '.join(validation['details'])}")
+            if user and refundable_cost > 0:
+                add_credits(user["id"], refundable_cost, "Refund — unsupported route")
+                refundable_cost = 0
+            _mark_plan_job_failed(job_id, f"{validation['reason']} {' '.join(validation['details'])}")
             return
+
+        update_plan_job(job_id, "routing")
+        try:
+            route_geometry = await asyncio.wait_for(
+                _planner_route_geometry(geocoded, route_style=route_style),
+                timeout=45,
+            )
+        except Exception as exc:
+            _log_planner_failure("plan_job_routing", exc)
+            route_geometry = None
+        if not _planner_geometry_is_valid(route_geometry):
+            raise PlannerRouteUnavailable()
 
         update_plan_job(job_id, "enriching")
         try:
             enrich_timeout = 10 if is_long_trip or (time.time() - started_at) > 70 else 28
-            enrichment = await asyncio.wait_for(enrich_trip_along_route(geocoded, route_style=route_style), timeout=enrich_timeout)
+            enrichment = await asyncio.wait_for(
+                enrich_trip_along_route(
+                    geocoded,
+                    route_style=route_style,
+                    route_geometry=route_geometry,
+                ),
+                timeout=enrich_timeout,
+            )
         except Exception:
             enrichment = {"waypoints": geocoded, "campsites": [], "gas_stations": [], "route_pois": []}
         plan_data["waypoints"] = enrichment.get("waypoints", geocoded)
@@ -9849,37 +10071,87 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
                   "gas_stations": enrichment["gas_stations"][:45],
                   "route_pois": enrichment["route_pois"][:50],
                   "timeline": timeline}
-        save_trip(trip_id, body.request, result, user_id=user["id"] if user else None)
+        result["route_geometry"] = route_geometry
+        stored = dict(result)
+        stored.pop("route_geometry", None)
+        serialized_result = json.dumps(result)
+        # Keep the finished payload with the job before saving the trip. If the
+        # final status write fails, polling can verify the saved trip and recover.
+        update_plan_job(job_id, "saving", result=serialized_result)
+        save_trip(
+            trip_id,
+            body.request,
+            stored,
+            user_id=user["id"] if user else None,
+            route_geometry=route_geometry,
+        )
+        trip_saved = True
+        refundable_cost = 0
 
-        update_plan_job(job_id, "done", result=json.dumps(result))
+        actual_days = plan_data.get("duration_days", 7)
+        try:
+            log_event(
+                user["id"] if user else None, body.session_id, "plan_generated",
+                {"trip_id": trip_id, "days": actual_days,
+                 "states": plan_data.get("states", []),
+                 "difficulty": plan_data.get("difficulty", ""),
+                 "waypoint_count": len(plan_data.get("waypoints", [])),
+                 "platform": "mobile"},
+            )
+        except Exception as exc:
+            _log_planner_failure("plan_job_analytics", exc)
+
+        try:
+            update_plan_job(job_id, "done", result=serialized_result)
+        except Exception as exc:
+            _log_planner_failure("plan_job_completion", exc)
+            await asyncio.sleep(0.15)
+            try:
+                update_plan_job(job_id, "done", result=serialized_result)
+            except Exception as retry_exc:
+                _log_planner_failure("plan_job_completion_retry", retry_exc)
 
         # Push notification — send whether or not app is foregrounded
         if user:
-            push_token = get_push_token(user["id"])
-            if push_token:
-                trip_name = plan_data.get("trip_name", "Your trip")
-                days = plan_data.get("duration_days", 0)
-                await _send_expo_push(
-                    push_token,
-                    title="Your route is ready Map",
-                    body_text=f"{trip_name} — {days} days planned. Tap to explore.",
-                    data={"type": "trip_ready", "job_id": job_id, "trip_id": trip_id},
-                )
+            try:
+                push_token = get_push_token(user["id"])
+                if push_token:
+                    trip_name = plan_data.get("trip_name", "Your trip")
+                    days = plan_data.get("duration_days", 0)
+                    await _send_expo_push(
+                        push_token,
+                        title="Your route is ready",
+                        body_text=f"{trip_name} — {days} days planned. Tap to explore.",
+                        data={"type": "trip_ready", "job_id": job_id, "trip_id": trip_id},
+                    )
+            except Exception as exc:
+                _log_planner_failure("plan_job_push", exc)
 
+    except asyncio.CancelledError:
+        if not trip_saved and user and refundable_cost > 0:
+            add_credits(user["id"], refundable_cost, "Refund - trip planning was interrupted")
+            refundable_cost = 0
+        _mark_plan_job_failed(job_id, TRIP_PLANNER_UNAVAILABLE)
+        raise
     except _anthropic.RateLimitError:
-        if user and cost > 0:
-            add_credits(user["id"], cost, "Refund — rate limit during planning")
-        update_plan_job(job_id, "failed", error="Rate limit hit — please try again in 30 seconds")
-    except Exception as e:
-        if user and cost > 0:
-            add_credits(user["id"], cost, "Refund — planning error")
-        update_plan_job(job_id, "failed", error=f"Trip planning failed: {e}")
+        if not trip_saved and user and refundable_cost > 0:
+            add_credits(user["id"], refundable_cost, "Refund — rate limit during planning")
+            refundable_cost = 0
+        _mark_plan_job_failed(job_id, "Rate limit hit — please try again in 30 seconds")
+    except Exception as exc:
+        _log_planner_failure("plan_job", exc)
+        if trip_saved:
+            return
+        if not trip_saved and user and refundable_cost > 0:
+            add_credits(user["id"], refundable_cost, "Refund — planning error")
+            refundable_cost = 0
+        _mark_plan_job_failed(job_id, TRIP_PLANNER_UNAVAILABLE)
 
 
 @app.post("/api/plan")
 async def plan(request: Request, body: PlanRequest, user: dict = Depends(_optional_user)):
     if not settings.anthropic_api_key:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     import re as _re
     day_hint = int((_re.search(r'\b(\d+)\s*-?\s*day', body.request or '', _re.I) or [None, 7])[1])
@@ -9892,8 +10164,8 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
             cost = 0
             log_ai_usage(user["id"], "trip_plan")
         else:
-            cost = _plan_credit_cost(day_hint)
-            if not user.get("is_admin") and not deduct_credits(user["id"], cost, f"Trip plan (~{day_hint}d)"):
+            cost = 0 if user.get("is_admin") else _plan_credit_cost(day_hint)
+            if cost > 0 and not deduct_credits(user["id"], cost, f"Trip plan (~{day_hint}d)"):
                 raise HTTPException(402, detail={
                     "code": "insufficient_credits",
                     "message": f"A {day_hint}-day plan costs {cost} credits.",
@@ -9910,7 +10182,13 @@ async def plan(request: Request, body: PlanRequest, user: dict = Depends(_option
         raise HTTPException(400, "Request cannot be empty")
 
     job_id = str(uuid.uuid4())[:12]
-    create_plan_job(job_id, user["id"] if user else None, body.session_id or "", body.request or "")
+    try:
+        create_plan_job(job_id, user["id"] if user else None, body.session_id or "", body.request or "")
+    except Exception as exc:
+        _log_planner_failure("plan_job_create", exc)
+        if user and cost > 0:
+            add_credits(user["id"], cost, "Refund - trip planning could not start")
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
     asyncio.create_task(_execute_plan_job(job_id, body, user, cost))
     return {"job_id": job_id, "status": "pending"}
 
@@ -9925,7 +10203,16 @@ async def plan_job_status(job_id: str, user: dict | None = Depends(_optional_use
     if job_owner and (not user or user["id"] != job_owner):
         raise HTTPException(403, "Not authorized to view this plan job")
     result = json.loads(job["result"]) if job.get("result") else None
-    return {"job_id": job_id, "status": job["status"], "result": result, "error": job.get("error")}
+    status = job["status"]
+    if status == "saving" and isinstance(result, dict):
+        saved_trip = get_trip(str(result.get("trip_id") or ""))
+        if saved_trip:
+            status = "done"
+            try:
+                update_plan_job(job_id, "done", result=job["result"])
+            except Exception as exc:
+                _log_planner_failure("plan_job_poll_recovery", exc)
+    return {"job_id": job_id, "status": status, "result": result if status == "done" else None, "error": job.get("error")}
 
 
 class PushTokenRequest(BaseModel):
@@ -10885,6 +11172,450 @@ async def route_proxy(body: RouteRequest):
         detail = f"{valhalla_error}; OSRM fallback failed: {e}" if valhalla_error else f"OSRM fallback failed: {e}"
         raise HTTPException(502, detail)
 
+
+def _decode_polyline6(shape: str) -> list[list[float]]:
+    """Decode Valhalla/OSRM precision-6 polyline coordinates as [lng, lat]."""
+    if not isinstance(shape, str) or not shape:
+        return []
+    coords: list[list[float]] = []
+    index = 0
+    lat = 0
+    lng = 0
+
+    def read_value() -> int:
+        nonlocal index
+        result = 0
+        shift = 0
+        while True:
+            if index >= len(shape):
+                raise ValueError("Truncated polyline6 geometry")
+            byte = ord(shape[index]) - 63
+            index += 1
+            if byte < 0:
+                raise ValueError("Invalid polyline6 geometry")
+            result |= (byte & 0x1f) << shift
+            if byte < 0x20:
+                break
+            shift += 5
+            if shift > 60:
+                raise ValueError("Invalid polyline6 geometry")
+        return ~(result >> 1) if result & 1 else result >> 1
+
+    try:
+        while index < len(shape):
+            lat += read_value()
+            lng += read_value()
+            decoded = [lng / 1_000_000, lat / 1_000_000]
+            if not (-180 <= decoded[0] <= 180 and -90 <= decoded[1] <= 90):
+                return []
+            if not coords or abs(coords[-1][0] - decoded[0]) >= 1e-7 or abs(coords[-1][1] - decoded[1]) >= 1e-7:
+                coords.append(decoded)
+    except ValueError:
+        return []
+    return coords
+
+
+def _normalized_planner_route_style(route_style: object) -> str:
+    style = str(route_style or "balanced").strip().lower()
+    if style in {"adventure", "adventurous", "wild_but_safe", "backroads", "rough"}:
+        return "wild"
+    return style if style in {"direct", "balanced", "wild"} else "balanced"
+
+
+def _planner_route_point_type(waypoint: dict) -> str:
+    role = str(
+        waypoint.get("route_point_type") or waypoint.get("routePointType") or "break"
+    ).strip().lower()
+    return role if role in {"break", "through", "side_stop"} else "break"
+
+
+def _planner_waypoints_from_trip_items(items: list[dict]) -> list[dict]:
+    """Normalize legacy waypoints and canonical V2 items for route validation."""
+    normalized: list[dict] = []
+    for index, raw_item in enumerate(items):
+        if not isinstance(raw_item, dict):
+            continue
+        item = dict(raw_item)
+        coordinates = item.get("coordinates") if isinstance(item.get("coordinates"), dict) else {}
+        facts = item.get("facts") if isinstance(item.get("facts"), dict) else {}
+        legacy = facts.get("legacy_waypoint") or facts.get("legacyWaypoint")
+        legacy = dict(legacy) if isinstance(legacy, dict) else {}
+        canonical = bool(item.get("title") or coordinates or item.get("kind"))
+        if not canonical:
+            normalized.append(item)
+            continue
+
+        kind = str(item.get("kind") or legacy.get("type") or "place").strip().lower()
+        if kind == "note":
+            continue
+        waypoint = {**legacy}
+        waypoint["name"] = str(
+            item.get("title") or item.get("name") or legacy.get("name") or f"Route stop {index + 1}"
+        )
+        waypoint["day"] = item.get("day") or legacy.get("day") or 1
+        type_by_kind = {
+            "start": "start",
+            "destination": "waypoint",
+            "camp": "camp",
+            "fuel": "fuel",
+            "trail": "waypoint",
+            "activity": "waypoint",
+            "water": "waypoint",
+            "food": "town",
+            "service": "waypoint",
+            "place": "waypoint",
+        }
+        waypoint["type"] = str(legacy.get("type") or item.get("type") or type_by_kind.get(kind, "waypoint"))
+        waypoint["description"] = str(
+            item.get("summary") or item.get("description") or legacy.get("description") or ""
+        )
+        if coordinates:
+            waypoint["lat"] = coordinates.get("lat")
+            waypoint["lng"] = coordinates.get("lng")
+        else:
+            waypoint["lat"] = item.get("lat", legacy.get("lat"))
+            waypoint["lng"] = item.get("lng", legacy.get("lng"))
+
+        role = (
+            legacy.get("route_point_type")
+            or legacy.get("routePointType")
+            or item.get("route_point_type")
+            or item.get("routePointType")
+            or facts.get("route_point_type")
+            or facts.get("routePointType")
+        )
+        if str(role or "").strip().lower() not in {"break", "through", "side_stop"}:
+            role = "break" if kind in {"start", "destination", "camp"} else "side_stop"
+        waypoint["route_point_type"] = str(role).strip().lower()
+        if waypoint["lat"] is None or waypoint["lng"] is None:
+            if waypoint["route_point_type"] == "side_stop":
+                continue
+        normalized.append(waypoint)
+    return normalized
+
+
+def _planner_waypoint_signature(waypoints: list[dict], *, routable_only: bool = False) -> str:
+    parts: list[str] = []
+    for waypoint in waypoints:
+        if not isinstance(waypoint, dict):
+            continue
+        role = _planner_route_point_type(waypoint)
+        if routable_only and role == "side_stop":
+            continue
+        try:
+            lat = float(waypoint.get("lat"))
+            lng = float(waypoint.get("lng"))
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
+        try:
+            day_number = float(waypoint.get("day") or 1)
+            day = str(int(day_number)) if day_number.is_integer() else str(day_number)
+        except (TypeError, ValueError):
+            day = "1"
+        waypoint_type = str(waypoint.get("type") or "waypoint").strip().lower()
+        parts.append(f"{lng:.5f},{lat:.5f}:{day}:{waypoint_type}:{role}")
+    return "|".join(parts)
+
+
+def _planner_waypoint_semantic_signature(waypoints: list[dict]) -> str:
+    normalized: list[dict] = []
+    for waypoint in waypoints:
+        if not isinstance(waypoint, dict):
+            continue
+        try:
+            lat = float(waypoint.get("lat"))
+            lng = float(waypoint.get("lng"))
+            coordinate = (round(lng, 5), round(lat, 5)) if -90 <= lat <= 90 and -180 <= lng <= 180 else (None, None)
+        except (TypeError, ValueError):
+            coordinate = (None, None)
+        normalized.append({
+            "lng": coordinate[0],
+            "lat": coordinate[1],
+            "day": waypoint.get("day") or 1,
+            "type": str(waypoint.get("type") or "waypoint").strip().lower(),
+            "route_point_type": _planner_route_point_type(waypoint),
+            "name": str(waypoint.get("name") or "").strip(),
+            "description": str(waypoint.get("description") or waypoint.get("notes") or "").strip(),
+            "land_type": str(waypoint.get("land_type") or "").strip().lower(),
+        })
+    payload = json.dumps(normalized, ensure_ascii=True, separators=(",", ":"), sort_keys=True)
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest() if normalized else ""
+
+
+def _planner_geometry_is_valid(route_geometry: object) -> bool:
+    if not isinstance(route_geometry, dict):
+        return False
+    coords = route_geometry.get("coords")
+    if not isinstance(coords, list) or len(coords) < 2:
+        return False
+    previous: tuple[float, float] | None = None
+    route_length_m = 0.0
+    for coord in coords:
+        if not isinstance(coord, (list, tuple)) or len(coord) < 2:
+            return False
+        try:
+            lng, lat = float(coord[0]), float(coord[1])
+        except (TypeError, ValueError):
+            return False
+        if not (-180 <= lng <= 180 and -90 <= lat <= 90):
+            return False
+        if previous is not None:
+            segment_m = _haversine_m(previous[1], previous[0], lat, lng)
+            # Provider road geometry is dense. A continent-scale jump between
+            # adjacent points is an incomplete line that can destabilize map fit.
+            if segment_m > 1_000_000:
+                return False
+            route_length_m += segment_m
+        previous = (lng, lat)
+    return route_length_m >= 10
+
+
+def _planner_geometry_covers_waypoints(route_geometry: object, waypoints: list[dict]) -> bool:
+    if not _planner_geometry_is_valid(route_geometry):
+        return False
+    assert isinstance(route_geometry, dict)
+    coords = route_geometry["coords"]
+    required: list[tuple[float, float]] = []
+    for waypoint in waypoints:
+        if not isinstance(waypoint, dict) or _planner_route_point_type(waypoint) == "side_stop":
+            continue
+        try:
+            lat = float(waypoint.get("lat"))
+            lng = float(waypoint.get("lng"))
+        except (TypeError, ValueError):
+            return False
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return False
+        required.append((lng, lat))
+    if len(required) < 2:
+        return False
+
+    first = (float(coords[0][0]), float(coords[0][1]))
+    last = (float(coords[-1][0]), float(coords[-1][1]))
+    if _haversine_m(required[0][1], required[0][0], first[1], first[0]) > 8_000:
+        return False
+    if _haversine_m(required[-1][1], required[-1][0], last[1], last[0]) > 8_000:
+        return False
+
+    stride = max(1, math.ceil(len(coords) / 8192))
+    sampled = [(float(coord[0]), float(coord[1])) for coord in coords[::stride]]
+    final = (float(coords[-1][0]), float(coords[-1][1]))
+    if sampled[-1] != final:
+        sampled.append(final)
+    search_start = 0
+    for lng, lat in required:
+        best_index = search_start
+        best_distance = float("inf")
+        for index in range(search_start, len(sampled)):
+            coord_lng, coord_lat = sampled[index]
+            distance = _haversine_m(lat, lng, coord_lat, coord_lng)
+            if distance < best_distance:
+                best_distance = distance
+                best_index = index
+        if best_distance > 8_000:
+            return False
+        search_start = best_index
+    return True
+
+
+def _planner_geometry_matches_waypoints(route_geometry: object, waypoints: list[dict]) -> bool:
+    if not _planner_geometry_is_valid(route_geometry):
+        return False
+    assert isinstance(route_geometry, dict)
+    expected = _planner_waypoint_signature(waypoints, routable_only=True)
+    embedded = route_geometry.get("routableWaypointSignature") or route_geometry.get("routable_waypoint_signature")
+    if isinstance(embedded, str) and embedded and (not expected or embedded != expected):
+        return False
+    return _planner_geometry_covers_waypoints(route_geometry, waypoints)
+
+
+_PLANNER_TURN_MODIFIERS = {
+    0: "", 1: "", 2: "left", 3: "right", 4: "arrive",
+    5: "sharp left", 6: "sharp right", 7: "left", 8: "right",
+    9: "uturn", 10: "slight left", 11: "slight right",
+}
+
+
+def _planner_leg_steps(leg: dict, leg_coords: list[list[float]]) -> list[dict]:
+    steps: list[dict] = []
+    maneuvers = leg.get("maneuvers") if isinstance(leg.get("maneuvers"), list) else []
+    for maneuver in maneuvers:
+        if not isinstance(maneuver, dict):
+            continue
+        try:
+            maneuver_type = int(maneuver.get("type"))
+        except (TypeError, ValueError):
+            maneuver_type = 0
+        try:
+            shape_index = max(0, min(len(leg_coords) - 1, int(maneuver.get("begin_shape_index") or 0)))
+        except (TypeError, ValueError):
+            shape_index = 0
+        coordinate = leg_coords[shape_index] if leg_coords else [None, None]
+        try:
+            distance_m = max(0.0, float(maneuver.get("length") or 0)) * 1609.344
+        except (TypeError, ValueError):
+            distance_m = 0.0
+        try:
+            duration_s = max(0.0, float(maneuver.get("time") or 0))
+        except (TypeError, ValueError):
+            duration_s = 0.0
+        street_names = maneuver.get("street_names") if isinstance(maneuver.get("street_names"), list) else []
+        instruction = str(maneuver.get("instruction") or "")
+        steps.append({
+            "type": "arrive" if maneuver_type == 4 else "depart" if maneuver_type == 1 else "turn",
+            "modifier": _PLANNER_TURN_MODIFIERS.get(maneuver_type, ""),
+            "name": str(street_names[0]) if street_names else "",
+            "distance": round(distance_m),
+            "duration": duration_s,
+            "lat": coordinate[1],
+            "lng": coordinate[0],
+            "instruction": instruction,
+            "verbalPre": str(
+                maneuver.get("verbal_pre_transition_instruction")
+                or maneuver.get("verbal_transition_alert_instruction")
+                or instruction
+            ),
+            "verbalPost": str(maneuver.get("verbal_post_transition_instruction") or ""),
+            "roundaboutExit": maneuver.get("roundabout_exit_count")
+            if isinstance(maneuver.get("roundabout_exit_count"), (int, float))
+            else None,
+        })
+    return steps
+
+
+async def _planner_route_geometry(waypoints: list[dict], route_style: str = "balanced") -> dict | None:
+    """Build validated planner geometry through the same contract as ``/api/route``."""
+    waypoint_signature = _planner_waypoint_signature(waypoints)
+    routable_signature = _planner_waypoint_signature(waypoints, routable_only=True)
+    locations: list[dict] = []
+    for waypoint in waypoints:
+        if not isinstance(waypoint, dict):
+            continue
+        route_point_type = _planner_route_point_type(waypoint)
+        if route_point_type == "side_stop":
+            continue
+        try:
+            lat = float(waypoint.get("lat"))
+            lon = float(waypoint.get("lng"))
+        except (TypeError, ValueError):
+            return None
+        if not (-90 <= lat <= 90 and -180 <= lon <= 180):
+            return None
+        if locations and abs(locations[-1]["lat"] - lat) < 1e-7 and abs(locations[-1]["lon"] - lon) < 1e-7:
+            continue
+        locations.append({
+            "lat": lat,
+            "lon": lon,
+            "type": "through" if route_point_type == "through" else "break",
+        })
+    if len(locations) < 2 or locations[0]["type"] != "break" or locations[-1]["type"] != "break":
+        return None
+
+    style = _normalized_planner_route_style(route_style)
+    options = RouteOptions(
+        avoidTolls=True,
+        avoidHighways=style == "wild",
+        backRoads=style == "wild",
+        noFerries=False,
+    )
+    try:
+        routed = await route_proxy(RouteRequest(locations=locations, options=options, units="miles"))
+    except Exception as exc:
+        _log_planner_failure("route_proxy", exc)
+        return None
+
+    trip = routed.get("trip") if isinstance(routed, dict) else None
+    if not isinstance(trip, dict) or trip.get("status") != 0:
+        return None
+    trailhead_meta = routed.get("_trailhead") if isinstance(routed.get("_trailhead"), dict) else {}
+    fallback_meta = routed.get("_fallback") if isinstance(routed.get("_fallback"), dict) else {}
+    engine = str(trailhead_meta.get("engine") or fallback_meta.get("engine") or "trailhead")
+    legs = trip.get("legs") if isinstance(trip.get("legs"), list) else []
+    if not legs:
+        return None
+    expected_valhalla_legs = sum(1 for location in locations if location["type"] == "break") - 1
+    if "osrm" not in engine.lower() and len(legs) != expected_valhalla_legs:
+        return None
+
+    coords: list[list[float]] = []
+    steps: list[dict] = []
+    maneuver_legs: list[list[dict]] = []
+    previous_leg_end: list[float] | None = None
+    for leg in legs:
+        if not isinstance(leg, dict):
+            return None
+        leg_coords = _decode_polyline6(leg.get("shape") or "")
+        if len(leg_coords) < 2:
+            return None
+        if previous_leg_end and _haversine_m(
+            previous_leg_end[1], previous_leg_end[0], leg_coords[0][1], leg_coords[0][0]
+        ) > 160.934:
+            return None
+        leg_steps = _planner_leg_steps(leg, leg_coords)
+        maneuver_legs.append(leg_steps)
+        steps.extend(leg_steps)
+        for coord in leg_coords:
+            if coords and abs(coords[-1][0] - coord[0]) < 1e-7 and abs(coords[-1][1] - coord[1]) < 1e-7:
+                continue
+            coords.append(coord)
+        previous_leg_end = leg_coords[-1]
+    if len(coords) < 2:
+        return None
+
+    # A successful response must cover every ordered routing anchor. Sampling
+    # caps validation work while retaining sub-mile spacing on supported trips.
+    stride = max(1, math.ceil(len(coords) / 8192))
+    sampled_coords = coords[::stride]
+    if sampled_coords[-1] != coords[-1]:
+        sampled_coords.append(coords[-1])
+    search_start = 0
+    for location in locations:
+        best_index = search_start
+        best_distance = float("inf")
+        for index in range(search_start, len(sampled_coords)):
+            coord = sampled_coords[index]
+            distance = _haversine_m(location["lat"], location["lon"], coord[1], coord[0])
+            if distance < best_distance:
+                best_distance = distance
+                best_index = index
+        if best_distance > 8_000:
+            return None
+        search_start = best_index
+
+    summary = trip.get("summary") if isinstance(trip.get("summary"), dict) else {}
+    try:
+        distance_m = max(0.0, float(summary.get("length") or 0)) * 1609.344
+    except (TypeError, ValueError):
+        distance_m = 0.0
+    if distance_m <= 0:
+        distance_m = sum(
+            _haversine_m(a[1], a[0], b[1], b[0])
+            for a, b in zip(coords, coords[1:])
+        )
+    try:
+        duration_s = max(0.0, float(summary.get("time") or 0))
+    except (TypeError, ValueError):
+        duration_s = 0.0
+    if duration_s <= 0 and distance_m > 0:
+        duration_s = (distance_m / 1609.344) / 42 * 3600
+    return {
+        "coords": coords,
+        "steps": steps,
+        "legs": maneuver_legs,
+        "totalDistance": distance_m,
+        "totalDuration": duration_s,
+        "source": engine,
+        "engine": engine,
+        "confidence": "medium" if "osrm" in engine.lower() else "high",
+        "routeStyle": style,
+        "waypointSignature": waypoint_signature,
+        "routableWaypointSignature": routable_signature,
+        "ts": int(time.time() * 1000),
+    }
+
+
 @app.get("/api/trip/{trip_id}")
 async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_user)):
     trip = get_trip(trip_id)
@@ -10909,14 +11640,18 @@ async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_cu
     if existing and existing.get("user_id") != user["id"]:
         raise HTTPException(403, "Not authorized to update this trip")
     try:
+        optional_fields = {}
+        if "route_geometry" in body.model_fields_set:
+            optional_fields["route_geometry"] = body.route_geometry
+        if "builder_state" in body.model_fields_set:
+            optional_fields["builder_state"] = body.builder_state
         saved = save_account_trip(
             trip_id,
             trip,
             user["id"],
             request=body.request,
-            route_geometry=body.route_geometry,
-            builder_state=body.builder_state,
             source=body.source or "web",
+            **optional_fields,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -11581,14 +12316,18 @@ async def update_account_trip(trip_id: str, body: AccountTripRequest, user: dict
     trip = dict(body.trip or {})
     trip["trip_id"] = trip_id
     try:
+        optional_fields = {}
+        if "route_geometry" in body.model_fields_set:
+            optional_fields["route_geometry"] = body.route_geometry
+        if "builder_state" in body.model_fields_set:
+            optional_fields["builder_state"] = body.builder_state
         saved = save_account_trip(
             trip_id,
             trip,
             user["id"],
             request=body.request,
-            route_geometry=body.route_geometry,
-            builder_state=body.builder_state,
             source=body.source or "web",
+            **optional_fields,
         )
     except Exception as exc:
         _raise_account_store_error(exc)
@@ -11596,6 +12335,27 @@ async def update_account_trip(trip_id: str, body: AccountTripRequest, user: dict
 
 @app.put("/api/trip/{trip_id}/geometry")
 async def update_trip_geometry(trip_id: str, body: RouteGeometryRequest, user: dict = Depends(_current_user)):
+    if not _planner_geometry_is_valid(body.route_geometry):
+        raise HTTPException(422, "Route line is incomplete. Rebuild the route and try again.")
+    existing = get_trip(trip_id)
+    if existing and existing.get("user_id") != user["id"]:
+        raise HTTPException(403, "Not authorized to update this trip")
+    document = get_trip_document_v2(user["id"], trip_id)
+    if isinstance(document, dict):
+        legacy = document.get("legacy_v1") if isinstance(document.get("legacy_v1"), dict) else {}
+        legacy_trip = legacy.get("trip") if isinstance(legacy.get("trip"), dict) else {}
+        legacy_plan = legacy_trip.get("plan") if isinstance(legacy_trip.get("plan"), dict) else {}
+        document_items = document.get("items") if isinstance(document.get("items"), list) else []
+        source_items = document_items if "items" in document else (
+            legacy_plan.get("waypoints") if isinstance(legacy_plan.get("waypoints"), list) else []
+        )
+        waypoints = _planner_waypoints_from_trip_items(source_items if isinstance(source_items, list) else [])
+    elif isinstance(existing, dict) and isinstance(existing.get("plan"), dict):
+        waypoints = existing["plan"].get("waypoints", [])
+    else:
+        waypoints = []
+    if waypoints and not _planner_geometry_matches_waypoints(body.route_geometry, waypoints):
+        raise HTTPException(422, "Route line does not match this trip. Rebuild the route and try again.")
     try:
         saved = save_trip_geometry(trip_id, user["id"], body.route_geometry)
     except PermissionError:
@@ -14694,12 +15454,16 @@ def _geocode_place_matches_country(place: dict, country_filter: str) -> bool:
 
 def _geocode_candidate_score(query: str, place: dict, country_filter: str = "", prefer_search_center: bool = False) -> float:
     needle = _normalize_geocode_text(query)
-    name = _normalize_geocode_text(str(place.get("name") or ""))
+    raw_name = str(place.get("name") or "")
+    name = _normalize_geocode_text(raw_name)
+    primary_name = _normalize_geocode_text(raw_name.split(",", 1)[0])
     tokens = _geocode_candidate_type_tokens(place)
     types = " ".join(sorted(tokens))
     score = 0.0
     if needle and name:
-        if name == needle:
+        if primary_name == needle:
+            score -= 30
+        elif name == needle:
             score -= 20
         elif name.startswith(needle) or needle.startswith(name):
             score -= 10
@@ -15167,7 +15931,7 @@ async def geocode_places(q: str, limit: int = 8, countrycodes: str = "", prefer:
                     return _rank_geocode_candidates(query, merged, country_filter, prefer_search_center, limit) if prefer_search_center else merged
                 raise HTTPException(502, f"Geocode failed: {e}")
 
-    cache_key = f"geocode:v2:{query.lower()}:{country_filter}:{limit}:{_normalize_geocode_text(prefer)}"
+    cache_key = f"geocode:v3:{query.lower()}:{country_filter}:{limit}:{_normalize_geocode_text(prefer)}"
     return await runtime_cached_call(
         cache_key,
         10 * 60,
@@ -29505,15 +30269,15 @@ async def _geocode_one(client: httpx.AsyncClient, wp: dict, sem: asyncio.Semapho
 
 
 async def _geocode_waypoints(waypoints: list[dict]) -> list[dict]:
-    # Cap at 45 waypoints (covers 14-day trips); Mapbox has no per-second limit
-    capped = waypoints[:45]
+    # Planner normalization permits four stops per day across a 14-day trip.
+    capped = waypoints[:56]
     sem = asyncio.Semaphore(8)
     try:
         async with httpx.AsyncClient(timeout=10) as client:
             results = await asyncio.wait_for(
                 asyncio.gather(*[_geocode_one(client, wp, sem) for wp in capped]),
-                timeout=45,
+                timeout=55,
             )
-            return list(results) + waypoints[45:]
+            return list(results) + waypoints[56:]
     except asyncio.TimeoutError:
-        return capped + waypoints[45:]
+        return capped + waypoints[56:]

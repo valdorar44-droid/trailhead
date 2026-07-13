@@ -31,6 +31,13 @@ import { campMarkerVisual } from '@/lib/campMarkerVisual';
 import { buildOfflineTrailGraphSelection } from '@/lib/trailGraph';
 import { CACHE_OFFLINE_DIR, CONTOUR_DIR, OFFLINE_DIR, FILE_REGIONS } from '@/lib/useOfflineFiles';
 import { saveRouteGeometry } from '@/lib/offlineRoutes';
+import {
+  routeCoordinateSignature,
+  routeGeometryMatchesWaypointsInOrder,
+  routeWaypointSignature as buildRouteWaypointSignature,
+} from '@/lib/routeWaypointSignature';
+import { isFullTripRouteRequest, shouldPersistTripRoute } from '@/lib/routePersistencePolicy';
+import { mapLoadFailureIsFatal } from '@/lib/mapSurfaceLifecycle';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Location from 'expo-location';
 
@@ -202,7 +209,7 @@ export interface NativeMapHandle {
   getVisibleMapCandidates: () => Promise<MapSelectableFeature[]>;
   getVisibleCenter: () => Promise<[number, number] | null>;
   getVisibleBounds: () => Promise<MapBounds | null>;
-  restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
+  restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number, waypointSignature?: string) => void;
   setNavTarget:   (idx: number) => void;
 }
 
@@ -232,6 +239,7 @@ export interface NativeMapProps {
   // Config
   mapLayer:  MapMode;
   premiumMapStyle?: PremiumMapStyle;
+  rendererMode?: 'mapbox' | 'maplibre';
   routeProviderMode?: RouteProviderMode;
   routeOpts: RouteOpts;
   traceMode?: boolean;
@@ -286,7 +294,7 @@ export interface NativeMapProps {
   onTrailTap:       (name: string, lat: number, lng: number) => void;
   onWaypointTap:    (idx: number, name: string) => void;
   onRouteReady:     (result: RouteResult & { fromIdx: number }) => void;
-  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null; routeSource?: string | null; routeSourceLabel?: string | null }) => void;
+  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null; routeSource?: string | null; routeSourceLabel?: string | null; routeWaypointSignature: string }) => void;
   onOffRoute?:      (lat: number, lng: number, distanceM: number) => void;
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;
@@ -808,7 +816,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
     waypoints, camps, gas, pois, waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
-    mapLayer, routeProviderMode = 'trailhead', routeOpts,
+    mapLayer, routeProviderMode = 'trailhead', routeOpts, rendererMode,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
     suppressFeatureTaps = false,
@@ -923,8 +931,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   useEffect(() => {
     setCustomMapFallback(false);
   }, [mapLayer]);
-  const isExtremeMapbox = (mapLayer === 'extreme' || customMapFallback) && !!mapboxToken;
-  const MapGL: any = isExtremeMapbox ? MapboxGL : MapLibreGL;
+  const isMapboxRenderer = rendererMode ? rendererMode === 'mapbox' : !!mapboxToken;
+  const isExtremeMapbox = (mapLayer === 'extreme' || customMapFallback) && isMapboxRenderer;
+  // Keep one native renderer mounted while switching basemaps. RNMapbox can
+  // render Trailhead's inline style JSON as well as Mapbox Standard, avoiding
+  // a full MapView teardown each time the user changes map layers.
+  const MapGL: any = isMapboxRenderer ? MapboxGL : MapLibreGL;
   const routeArrowFont = isExtremeMapbox
     ? ['DIN Pro Medium', 'Arial Unicode MS Regular']
     : ['Noto Sans Medium'];
@@ -951,7 +963,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       at: Date.now(),
       kind,
       details: {
-        provider: isExtremeMapbox ? 'rnmapbox' : 'maplibre',
+        provider: isMapboxRenderer ? 'rnmapbox' : 'maplibre',
         navMode,
         navCameraFollow,
         mapLayer,
@@ -964,7 +976,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         ...details,
       },
     });
-  }, [isExtremeMapbox, localContours, localTiles, localTrails, mapLayer, navCameraFollow, navMode, props.premiumMapStyle, showTerrain, tileDebug]);
+  }, [isMapboxRenderer, localContours, localTiles, localTrails, mapLayer, navCameraFollow, navMode, props.premiumMapStyle, showTerrain, tileDebug]);
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyFC());
   const campSourceRef = useRef<any>(null);
   const lastTracePointRef = useRef(0);
@@ -1154,8 +1166,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }, []);
 
   // Switch the active region file. Idempotent — no-ops if already the active file.
-  const switchFile = useCallback(async (path: string, sizeMb: number) => {
-    if (loadedStateRef.current === path || switchingRef.current) return;
+  const switchFile = useCallback(async (path: string, sizeMb: number, shouldApply: () => boolean = () => true) => {
+    if (!shouldApply() || loadedStateRef.current === path || switchingRef.current) return;
     if (!tileServer?.switchState) { setTileDebug('switch unavailable'); return; }
     switchingRef.current = true;
     const nativePath = path.replace(/^file:\/\//, '');
@@ -1164,24 +1176,30 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     setTileDebug(`Loading ${stateDisplayName(fileName)} maps`);
     try {
       await tileServer!.switchState(nativePath);
+      if (!shouldApply()) return;
       loadedStateRef.current = path;
       setLocalTiles(true);
       setTileSession(Date.now());
       emitDebugEvent('source:switch-state:applied', { fileName, sizeMb });
       setTimeout(async () => {
+        if (!shouldApply()) return;
         try {
           const health = await fetch('http://127.0.0.1:57832/health');
+          if (!shouldApply()) return;
           if (!health.ok) {
             setTileDebug(`${stateDisplayName(fileName)} maps ready`);
             return;
           }
           await fetch('http://127.0.0.1:57832/api/tiles/12/928/1572.pbf').catch(() => null);
+          if (!shouldApply()) return;
           setTileDebug(`${stateDisplayName(fileName)} maps ready`);
         } catch (e: any) {
+          if (!shouldApply()) return;
           setTileDebug(`${stateDisplayName(fileName)} maps loaded`);
         }
       }, 600);
     } catch (e: any) {
+      if (!shouldApply()) return;
       loadedStateRef.current = null;
       if (onlineTilesRef.current) setLocalTiles(false);
       setTileDebug(`${stateDisplayName(fileName)} maps unavailable`);
@@ -1249,8 +1267,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     setLocalTrails(false);
   }, []);
 
-  const ensureRouteTileFile = useCallback(async (pairs: string[]) => {
-    if (!tileServer?.switchState || pairs.length < 2) return;
+  const ensureRouteTileFile = useCallback(async (pairs: string[], requestIsCurrent: () => boolean) => {
+    if (!requestIsCurrent() || !tileServer?.switchState || pairs.length < 2) return;
     const parsed = pairs
       .map(pair => {
         const [lng, lat] = pair.split(',').map(Number);
@@ -1260,9 +1278,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     if (parsed.length < 2) return;
 
     const files = await getDownloadedFiles();
+    if (!requestIsCurrent()) return;
     if (!files) {
       const found = await firstExistingPath(offlinePathCandidates('conus', `${OFFLINE_DIR}conus.pmtiles`));
-      if (found) await switchFile(found.path, found.sizeMb);
+      if (found && requestIsCurrent()) await switchFile(found.path, found.sizeMb, requestIsCurrent);
       return;
     }
 
@@ -1279,7 +1298,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     const destMatch = files.find(f => covers(f.bounds, dest));
     const startMatch = files.find(f => covers(f.bounds, start));
     const chosen = both ?? destMatch ?? startMatch;
-    if (chosen) await switchFile(chosen.path, chosen.sizeMb);
+    if (chosen && requestIsCurrent()) await switchFile(chosen.path, chosen.sizeMb, requestIsCurrent);
   }, [getDownloadedFiles, switchFile]);
 
   // Start server, load base file, then load best offline region file.
@@ -1402,10 +1421,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   useEffect(() => {
     trailHighlightRef.current = trailHighlight;
   }, [trailHighlight]);
-  const waypointSignature = useMemo(
-    () => waypoints.map(w => `${w.lng.toFixed(5)},${w.lat.toFixed(5)}:${w.type}:${w.day}:${w.route_point_type ?? 'break'}`).join('|'),
-    [waypoints],
-  );
+  const waypointSignature = useMemo(() => buildRouteWaypointSignature(waypoints), [waypoints]);
   const routableWaypoints = useMemo(
     () => waypoints.filter(w => w.route_point_type !== 'side_stop'),
     [waypoints],
@@ -1423,6 +1439,39 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     passedProgressM: 0,
   }), []);
   const routeRef = useRef(makeRouteState([]));
+  const routeSnapshotRef = useRef<{
+    coords: [number, number][];
+    steps: RouteStep[];
+    legs: RouteStep[][];
+    totalDistance: number;
+    totalDuration: number;
+    waypointSignature: string | null;
+  }>({ coords: [], steps: [], legs: [], totalDistance: 0, totalDuration: 0, waypointSignature: null });
+
+  const applyRouteSnapshot = useCallback((snapshot: {
+    coords: [number, number][];
+    steps: RouteStep[];
+    legs: RouteStep[][];
+    totalDistance: number;
+    totalDuration: number;
+    waypointSignature: string | null;
+  }) => {
+    routeSnapshotRef.current = snapshot;
+    routeRef.current = makeRouteState(snapshot.coords);
+    setRouteCoords(snapshot.coords);
+    setRouteSteps(snapshot.steps);
+  }, [makeRouteState]);
+
+  const clearRouteSnapshot = useCallback(() => {
+    applyRouteSnapshot({
+      coords: [],
+      steps: [],
+      legs: [],
+      totalDistance: 0,
+      totalDuration: 0,
+      waypointSignature: null,
+    });
+  }, [applyRouteSnapshot]);
 
   // MLRN v10 uses `mapStyle` — accepts string (style URL) or object (inline JSON).
   const effectiveMapLayer: MapMode = mapLayer === 'extreme' ? 'extreme' : showTerrain && mapboxToken ? 'hybrid' : mapLayer;
@@ -1653,14 +1702,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     loadRouteFrom(lat, lng, fromIdx) {
       const rem = waypoints.slice(fromIdx).filter(w => w.route_point_type !== 'side_stop');
       const pairs = [`${lng},${lat}`, ...routePairsForWaypoints(rem)];
-      doFetchRoute(pairs, fromIdx);
+      const requestSignature = routeCoordinateSignature(
+        pairs.map(pair => pair.split(',').map(Number) as [number, number]),
+      );
+      const isFullTripRequest = isFullTripRouteRequest(requestSignature, waypointSignature);
+      doFetchRoute(pairs, isFullTripRequest ? 0 : fromIdx, isFullTripRequest ? 'matching' : 'navigation');
     },
     loadRouteSegmentFrom(lat, lng, fromIdx, toIdx) {
       const start = Math.max(0, Math.min(fromIdx, waypoints.length - 1));
       const end = Math.max(start, Math.min(toIdx, waypoints.length - 1));
       const rem = waypoints.slice(start, end + 1).filter(w => w.route_point_type !== 'side_stop');
       const pairs = [`${lng},${lat}`, ...routePairsForWaypoints(rem)];
-      if (pairs.length >= 2) doFetchRoute(pairs, start);
+      if (pairs.length >= 2) doFetchRoute(pairs, start, 'navigation');
     },
     rerouteFrom(lat, lng, fromIdx) {
       setPassedCoords([]);
@@ -1670,17 +1723,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const pairs = rem.length
         ? [`${lng},${lat}`, ...routePairsForWaypoints(rem)]
         : searchDest ? [`${lng},${lat}`, `${searchDest.lng},${searchDest.lat}`] : [];
-      if (pairs.length >= 2) doFetchRoute(pairs, fromIdx);
+      if (pairs.length >= 2) doFetchRoute(pairs, fromIdx, 'navigation');
     },
     routeToSearch(lat, lng, name, userLat, userLng) {
       setSearchDest({ lat, lng });
-      doFetchRoute([`${userLng},${userLat}`, `${lng},${lat}`], 0);
+      doFetchRoute([`${userLng},${userLat}`, `${lng},${lat}`], 0, 'never');
     },
     resetRoute() {
       routeRequestRef.current++;
       isRoutingRef.current = false;
-      setRouteCoords([]); setRouteSteps([]); setPassedCoords([]); setBreadcrumb([]);
-      routeRef.current = makeRouteState([]);
+      clearRouteSnapshot();
+      setPassedCoords([]); setBreadcrumb([]);
       setSearchDest(null); setNavTargetIdx(-1);
     },
     stopNavigation() {
@@ -1961,15 +2014,33 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         return null;
       }
     },
-    restoreRoute(coords, steps, legs, td, tt) {
+    restoreRoute(coords, steps, legs, td, tt, restoredWaypointSignature) {
       const clean = cleanLineCoords(coords);
-      setRouteCoords(clean);
-      setRouteSteps(steps);
-      routeRef.current = makeRouteState(clean);
-      onRouteReady({ coords: clean, steps, legs, totalDistance: td, totalDuration: tt, isProper: true, fromCache: true, fromIdx: 0 });
+      if (clean.length < 2) return;
+      routeRequestRef.current += 1;
+      isRoutingRef.current = false;
+      applyRouteSnapshot({
+        coords: clean,
+        steps,
+        legs,
+        totalDistance: td,
+        totalDuration: tt,
+        waypointSignature: restoredWaypointSignature ?? null,
+      });
+      onRouteReady({
+        coords: clean,
+        steps,
+        legs,
+        totalDistance: td,
+        totalDuration: tt,
+        isProper: true,
+        fromCache: true,
+        fromIdx: 0,
+        routeWaypointSignature: restoredWaypointSignature,
+      });
     },
     setNavTarget(idx) { setNavTargetIdx(idx); },
-  }), [applyLocateCamera, clearLocateSettleTimers, emitDebugEvent, waypoints, routePairsForWaypoints, searchDest, mapboxToken, makeRouteState, navMode, rememberFreeCamera, showTerrain]);
+  }), [applyLocateCamera, applyRouteSnapshot, clearLocateSettleTimers, clearRouteSnapshot, emitDebugEvent, waypoints, routePairsForWaypoints, searchDest, mapboxToken, navMode, rememberFreeCamera, routeOpts, routeProviderMode, showTerrain]);
 
   const emitTracePoint = useCallback(async (
     x: number,
@@ -2003,80 +2074,143 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   }), [emitTracePoint, onTraceEnd, traceMode]);
 
   // ── Routing ─────────────────────────────────────────────────────────────────
-  const doFetchRoute = useCallback(async (pairs: string[], fromIdx: number) => {
+  const doFetchRoute = useCallback(async (
+    pairs: string[],
+    fromIdx: number,
+    preserveExisting: 'matching' | 'navigation' | 'never' = 'matching',
+  ) => {
     const requestId = ++routeRequestRef.current;
     const requestEpoch = accountStorage.epoch();
+    const requestWaypointSignature = routeCoordinateSignature(
+      pairs.map(pair => pair.split(',').map(Number) as [number, number]),
+    );
+    const persistenceScope = preserveExisting === 'matching'
+      ? 'trip'
+      : preserveExisting === 'navigation'
+        ? 'navigation'
+        : 'search';
+    const persistAsTripRoute = shouldPersistTripRoute({
+      scope: persistenceScope,
+      tripId: activeTrip?.trip_id,
+      requestWaypointSignature,
+      tripWaypointSignature: waypointSignature,
+    });
+    const requestIsCurrent = () => requestId === routeRequestRef.current
+      && accountStorage.epoch() === requestEpoch;
     isRoutingRef.current = true;
+    if (preserveExisting === 'never') clearRouteSnapshot();
     onRouteProgress?.(null);
     offRouteStreakRef.current = 0;
     wasOffRouteRef.current = false;
     try {
       const online = await probeTileCdn();
-      onlineTilesRef.current = online;
-      if (online) {
-        setLocalTiles(false);
-        setTileDebug('Online maps');
-      } else {
-        await ensureRouteTileFile(pairs);
-      }
-      if (requestId !== routeRequestRef.current || accountStorage.epoch() !== requestEpoch) return;
+      if (!requestIsCurrent()) return;
+      if (!online) await ensureRouteTileFile(pairs, requestIsCurrent);
+      if (!requestIsCurrent()) return;
       const result = await fetchRoute(pairs, fromIdx, mapboxToken || '', routeOpts, routeProviderMode);
-      if (requestId !== routeRequestRef.current || accountStorage.epoch() !== requestEpoch) return;
+      if (!requestIsCurrent()) return;
       const cleanCoords = cleanLineCoords(result.coords);
-      const cleanResult = { ...result, coords: cleanCoords };
-      setRouteCoords(cleanCoords);
-      setRouteSteps(result.steps);
-      routeRef.current = makeRouteState(cleanCoords);
-      onRouteReady({ ...cleanResult, fromIdx });
-      // Persist for offline relaunch
-      onRoutePersist({
-        coords: cleanCoords, steps: result.steps, legs: result.legs,
-        totalDistance: result.totalDistance, totalDuration: result.totalDuration,
-        tripId: activeTrip?.trip_id ?? null,
-        routeSource: (result as any).routeSource ?? null,
-        routeSourceLabel: (result as any).routeSourceLabel ?? null,
+      const existing = routeSnapshotRef.current;
+      const requestWaypoints = pairs.map(pair => {
+        const [lng, lat] = pair.split(',').map(Number);
+        return { lng, lat };
       });
-      const routePayload = {
-        coords: cleanCoords, steps: result.steps, legs: result.legs,
-        totalDistance: result.totalDistance, totalDuration: result.totalDuration,
-        tripId: activeTrip?.trip_id ?? null, ts: Date.now(),
-        routeSource: (result as any).routeSource ?? null,
-        routeSourceLabel: (result as any).routeSourceLabel ?? null,
+      const resultMatchesRequest = result.isProper
+        && cleanCoords.length >= 2
+        && routeGeometryMatchesWaypointsInOrder(cleanCoords, requestWaypoints);
+      const canKeepExisting = preserveExisting === 'navigation'
+        || (preserveExisting === 'matching' && existing.waypointSignature === requestWaypointSignature);
+      const keptExistingRoute = !resultMatchesRequest && canKeepExisting && existing.coords.length >= 2;
+      const acceptedResult = resultMatchesRequest ? result : {
+        ...result,
+        isProper: false,
+        debug: result.debug || 'Route line did not match the requested stops.',
       };
-      accountStorage.set('trailhead_active_route', JSON.stringify(routePayload), requestEpoch).catch(() => {});
-      saveRouteGeometry(activeTrip?.trip_id, routePayload).catch(() => {});
+      const cleanResult = keptExistingRoute
+        ? {
+            ...acceptedResult,
+            coords: existing.coords,
+            steps: existing.steps,
+            legs: existing.legs,
+            totalDistance: existing.totalDistance,
+            totalDuration: existing.totalDuration,
+            routeWaypointSignature: existing.waypointSignature ?? undefined,
+            keptExistingRoute: true,
+          }
+        : { ...acceptedResult, coords: cleanCoords, routeWaypointSignature: requestWaypointSignature };
+      if (resultMatchesRequest) {
+        applyRouteSnapshot({
+          coords: cleanCoords,
+          steps: result.steps,
+          legs: result.legs,
+          totalDistance: result.totalDistance,
+          totalDuration: result.totalDuration,
+          waypointSignature: requestWaypointSignature,
+        });
+      }
+      onRouteReady({ ...cleanResult, fromIdx });
+      if (!resultMatchesRequest) return;
+      if (persistAsTripRoute) {
+        const routePayload = {
+          coords: cleanCoords, steps: result.steps, legs: result.legs,
+          totalDistance: result.totalDistance, totalDuration: result.totalDuration,
+          tripId: activeTrip?.trip_id ?? null, ts: Date.now(),
+          routeSource: (result as any).routeSource ?? null,
+          routeSourceLabel: (result as any).routeSourceLabel ?? null,
+          routeWaypointSignature: requestWaypointSignature,
+        };
+        onRoutePersist(routePayload);
+        accountStorage.set('trailhead_active_route', JSON.stringify(routePayload), requestEpoch).catch(() => {});
+        saveRouteGeometry(activeTrip?.trip_id, routePayload).catch(() => {});
+      }
     } catch {
-      if (requestId !== routeRequestRef.current || accountStorage.epoch() !== requestEpoch) return;
+      if (!requestIsCurrent()) return;
       const fb = buildFallbackRoute(pairs);
       const cleanCoords = cleanLineCoords(fb.coords);
-      const cleanFallback = { ...fb, coords: cleanCoords };
-      setRouteCoords(cleanCoords);
-      setRouteSteps(fb.steps);
-      routeRef.current = makeRouteState(cleanCoords);
+      const existing = routeSnapshotRef.current;
+      const canKeepExisting = preserveExisting === 'navigation'
+        || (preserveExisting === 'matching' && existing.waypointSignature === requestWaypointSignature);
+      const keptExistingRoute = canKeepExisting && existing.coords.length >= 2;
+      const cleanFallback = keptExistingRoute
+        ? {
+            ...fb,
+            coords: existing.coords,
+            steps: existing.steps,
+            legs: existing.legs,
+            totalDistance: existing.totalDistance,
+            totalDuration: existing.totalDuration,
+            routeWaypointSignature: existing.waypointSignature ?? undefined,
+            keptExistingRoute: true,
+          }
+        : { ...fb, coords: cleanCoords, routeWaypointSignature: requestWaypointSignature };
       onRouteReady({ ...cleanFallback, fromIdx });
     } finally {
       if (requestId === routeRequestRef.current) isRoutingRef.current = false;
     }
-  }, [mapboxToken, routeOpts, routeProviderMode, waypoints, activeTrip, onRouteReady, onRoutePersist, ensureRouteTileFile, makeRouteState]);
+  }, [activeTrip, applyRouteSnapshot, ensureRouteTileFile, mapboxToken, onRoutePersist, onRouteReady, routeOpts, routeProviderMode, waypointSignature]);
 
   // When a new trip is planned: auto-route + fit camera to show all waypoints
   useEffect(() => {
     routeRequestRef.current++;
     isRoutingRef.current = false;
-    setRouteCoords([]);
-    setRouteSteps([]);
+    const snapshot = routeSnapshotRef.current;
+    const hasAuthoritativeRoute = snapshot.coords.length >= 2 && (
+      snapshot.waypointSignature
+        ? snapshot.waypointSignature === waypointSignature
+        : routeGeometryMatchesWaypointsInOrder(snapshot.coords, routableWaypoints)
+    );
+    if (!hasAuthoritativeRoute) {
+      clearRouteSnapshot();
+    }
     setPassedCoords([]);
     setBreadcrumb([]);
-    routeRef.current = makeRouteState([]);
     onRouteProgress?.(null);
     if (routableWaypoints.length < 2) return;
-    if (!navMode && routableWaypoints.length > 10) {
-      const previewCoords = cleanLineCoords(routableWaypoints.map(w => [w.lng, w.lat] as [number, number]));
-      setRouteCoords(previewCoords);
-      setRouteSteps([]);
-      routeRef.current = makeRouteState(previewCoords);
+    if (hasAuthoritativeRoute) {
+      // Route Builder and the planner already supplied provider geometry. Do
+      // not replace it by independently routing camps and fuel pins again.
     } else {
-      doFetchRoute(routePairsForWaypoints(routableWaypoints), 0);
+      doFetchRoute(routePairsForWaypoints(routableWaypoints), 0, 'matching');
     }
     // Fit camera to the trip bounding box (skip if actively navigating)
     if (!navMode) {
@@ -2274,6 +2408,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   // ── Map event handlers ───────────────────────────────────────────────────────
   const handleMapReady = useCallback(() => {
+    if (mapReadyRef.current) {
+      emitDebugEvent('map:ready-repeat');
+      return;
+    }
     mapReadyRef.current = true;
     emitDebugEvent('map:ready');
     onMapReady();
@@ -2283,13 +2421,17 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const handleMapLoadFail = useCallback((event?: any) => {
     const afterReady = mapReadyRef.current;
     emitDebugEvent('map:load-failed', { afterReady, message: event?.message ?? event?.nativeEvent?.message ?? null });
-    if (afterReady) return;
-    if (!isExtremeMapbox && mapboxToken) {
+    if (!mapLoadFailureIsFatal(afterReady)) {
+      if (!isExtremeMapbox && isMapboxRenderer) setCustomMapFallback(true);
+      return;
+    }
+    mapReadyRef.current = false;
+    if (!isExtremeMapbox && isMapboxRenderer) {
       setCustomMapFallback(true);
       return;
     }
     onError?.('map-load-failed');
-  }, [emitDebugEvent, isExtremeMapbox, mapboxToken, onError]);
+  }, [emitDebugEvent, isExtremeMapbox, isMapboxRenderer, onError]);
 
   const handleRegionIsChanging = useCallback((feat: any) => {
     if (!isUserCameraEvent(feat)) return;
@@ -2627,7 +2769,11 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       <MapGL.MapView
         ref={mapRef}
         style={StyleSheet.absoluteFillObject}
-        {...(isExtremeMapbox ? { styleURL: mapboxStyleURL } : { mapStyle: mapStyleObj })}
+        {...(isExtremeMapbox
+          ? { styleURL: mapboxStyleURL }
+          : isMapboxRenderer
+            ? { styleJSON: JSON.stringify(mapStyleObj) }
+            : { mapStyle: mapStyleObj })}
         projection={isExtremeMapbox ? 'mercator' : undefined}
         onPress={handlePress}
         onTouchStart={() => markUserCameraGesture('touch-start', {}, false)}

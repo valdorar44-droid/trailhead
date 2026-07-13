@@ -57,6 +57,14 @@ import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, loadRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
+import {
+  routeGeometryContentSignature,
+  routeGeometryMatchesWaypointIdentity,
+  plannerWaypointSignature,
+  routeWaypointSignature as buildRouteWaypointSignature,
+  savedRouteWaypointSignature,
+} from '@/lib/routeWaypointSignature';
+import { shouldPersistTripRoute, type RoutePersistenceScope } from '@/lib/routePersistencePolicy';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
 import { trailRouteGraphLocalPath } from '@/lib/useOfflineFiles';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
@@ -4369,11 +4377,12 @@ const buildMapHtml = (
   // proxy at apiBase + '/api/tiles/'.
   var protomapsKey='';
   var userMarker=null,wpMarkers=[],searchMarker=null;
-  var allCamps=[],allGas=[],allPois=[],allReports=[];
+  var allCamps=[],allGas=[],allPois=[],communityPins=[],allReports=[];
   var reportMarkers=[];
   var lastSpeed=null;
   var _routeLoading=false;
   var routeIsProper=false;
+  var _routeRequestSeq=0,_routeAbortController=null;
   var trailCaptureMode=false;
   var showLandOverlay=false,showUsgsOverlay=false;
   var showTerrainLayer=false,showNaipLayer=false,showFireLayer=false,showAvaLayer=false,showRadarLayer=false,showMvumLayer=false,showRoadsLayer=false,showNauticalLayer=false;
@@ -4382,6 +4391,7 @@ const buildMapHtml = (
   var routeOpts={avoidTolls:false,avoidHighways:false,backRoads:false,noFerries:false};
   var preferMapboxRoutes=${preferMapboxRoutes ? 'true' : 'false'};
   var _routeCoords=[],routePts=[],breadcrumbPts=[];
+  var _activeRouteSignature='';
   var lastOffCheck=0,downloadActive=false,mapReady=false,pendingMsgs=[];
   var _searchDest=null; // {lat,lng} for single-dest nav so reroute works
 
@@ -5091,7 +5101,7 @@ const buildMapHtml = (
 
   function updateCampSrc(){if(!map||!map.getSource('camps'))return;map.getSource('camps').setData({type:'FeatureCollection',features:allCamps.map(campFeat)});}
   function updateGasSrc(){if(!map||!map.getSource('gas'))return;map.getSource('gas').setData({type:'FeatureCollection',features:allGas.map(function(g){return{type:'Feature',geometry:{type:'Point',coordinates:[g.lng,g.lat]},properties:{name:g.name}};})});}
-  function updatePoiSrc(){if(!map||!map.getSource('pois'))return;map.getSource('pois').setData({type:'FeatureCollection',features:allPois.map(function(p){var props=Object.assign({},p,{type:p.type||'pin',raw:JSON.stringify(p)});return{type:'Feature',geometry:{type:'Point',coordinates:[p.lng,p.lat]},properties:props};})});}
+  function updatePoiSrc(){if(!map||!map.getSource('pois'))return;var merged=allPois.concat(communityPins);map.getSource('pois').setData({type:'FeatureCollection',features:merged.map(function(p){var props=Object.assign({},p,{type:p.type||'pin',raw:JSON.stringify(p)});return{type:'Feature',geometry:{type:'Point',coordinates:[p.lng,p.lat]},properties:props};})});}
   var _routeCum=[];
   function routeDistM(a,b){var lat=((a[1]+b[1])/2)*Math.PI/180;var dx=(b[0]-a[0])*111320*Math.cos(lat);var dy=(b[1]-a[1])*110540;return Math.sqrt(dx*dx+dy*dy);}
   function rebuildRouteCum(){_routeCum=new Array(_routeCoords.length).fill(0);for(var i=1;i<_routeCoords.length;i++)_routeCum[i]=_routeCum[i-1]+routeDistM(_routeCoords[i-1],_routeCoords[i]);}
@@ -5257,34 +5267,73 @@ const buildMapHtml = (
     var required=locs.filter(function(loc){return loc.type!=='side_stop';});
     return required.length>=2?required:locs;
   }
+  function _routeWaypointSignature(locs){return'rwp1:'+_routeRequiredLocs(locs).map(function(loc){return String(loc.lng)+','+String(loc.lat);}).join('|');}
   function _hasThrough(locs){return locs.some(function(loc){return loc.type==='through';});}
-  function _fallback(routeInputs,fromIdx){
+  function _routeDistanceM(a,b){var dLat=(b[1]-a[1])*Math.PI/180,dLng=(b[0]-a[0])*Math.PI/180,la1=a[1]*Math.PI/180,la2=b[1]*Math.PI/180;var h=Math.sin(dLat/2)*Math.sin(dLat/2)+Math.cos(la1)*Math.cos(la2)*Math.sin(dLng/2)*Math.sin(dLng/2);return 12742000*Math.atan2(Math.sqrt(h),Math.sqrt(1-h));}
+  function _routeCoversLocs(coords,locs){
+    var required=_routeRequiredLocs(locs);
+    if(!Array.isArray(coords)||coords.length<2||required.length<2)return false;
+    var first=[required[0].lng,required[0].lat],last=[required[required.length-1].lng,required[required.length-1].lat];
+    if(_routeDistanceM(coords[0],first)>8000||_routeDistanceM(coords[coords.length-1],last)>8000)return false;
+    var searchStart=0;
+    for(var wi=1;wi<required.length-1;wi++){
+      var target=[required[wi].lng,required[wi].lat],best=-1,bestDistance=Infinity;
+      for(var ci=searchStart;ci<coords.length;ci++){
+        var distance=_routeDistanceM(coords[ci],target);
+        if(distance<bestDistance){bestDistance=distance;best=ci;}
+      }
+      if(best<0||bestDistance>8000)return false;
+      searchStart=best;
+    }
+    return true;
+  }
+  function _beginRouteRequest(){
+    _routeRequestSeq+=1;
+    if(_routeAbortController){try{_routeAbortController.abort();}catch(e){}}
+    _routeAbortController=null;
+    return _routeRequestSeq;
+  }
+  function _invalidateRouteRequest(){_beginRouteRequest();_routeLoading=false;}
+  function _routeRequestCurrent(requestId){return requestId===_routeRequestSeq;}
+  function _routeController(requestId){
+    if(!_routeRequestCurrent(requestId))return null;
+    if(_routeAbortController){try{_routeAbortController.abort();}catch(e){}}
+    _routeAbortController=new AbortController();
+    return _routeAbortController;
+  }
+  function _fallback(routeInputs,fromIdx,preserveExisting,requestId){
+    if(requestId==null)requestId=_beginRouteRequest();
+    if(!_routeRequestCurrent(requestId))return;
     // If we already have a valid cached route, do NOT overwrite it with straight lines.
     // This preserves the stored route when the Directions API is unreachable offline.
-    if(routeIsProper&&_routeCoords.length){_routeLoading=false;return;}
-    routeIsProper=false;_routeLoading=false;
     var locs=_routeRequiredLocs(_normalizeRouteLocs(routeInputs));
+    var requestSignature=_routeWaypointSignature(locs);
+    var canKeep=preserveExisting==='navigation'||(preserveExisting==='matching'&&_activeRouteSignature===requestSignature);
+    if(canKeep&&routeIsProper&&_routeCoords.length){_routeLoading=false;postRN({type:'route_ready',routed:true,keptExistingRoute:true,fromIdx:fromIdx||0,route_source:'existing-route'});return;}
+    routeIsProper=false;_routeLoading=false;_activeRouteSignature='';
     if(!locs.length){postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0,route_source:'fallback-line'});return;}
-    var coords=locs.map(function(loc){return[loc.lng,loc.lat];});
-    _routeCoords=coords;routePts=coords;updateRoute();
+    _routeCoords=[];routePts=[];updateRoute();
     postRN({type:'route_ready',routed:false,steps:[],legs:[],fromIdx:fromIdx||0,route_source:'fallback-line'});
   }
 
-  async function _fetchRoute(routeInputs,fromIdx){
+  async function _fetchRoute(routeInputs,fromIdx,preserveExisting){
+    var requestId=_beginRouteRequest();
     _routeLoading=true;
     var locs=_normalizeRouteLocs(routeInputs);
-    if(locs.length<2)return _fallback(locs,fromIdx);
-    if(!preferMapboxRoutes||!mapboxToken)return _fetchValhalla(locs,fromIdx);
+    if(locs.length<2)return _fallback(locs,fromIdx,preserveExisting,requestId);
+    if(!preferMapboxRoutes||!mapboxToken)return _fetchValhalla(locs,fromIdx,preserveExisting,requestId);
     var excl=[];if(routeOpts.avoidTolls)excl.push('toll');if(routeOpts.avoidHighways)excl.push('motorway');if(routeOpts.noFerries)excl.push('ferry');
     var profile=(routeOpts.avoidHighways)?'driving':'driving-traffic';
     var pairs=_routePairs(locs);
     var url='https://api.mapbox.com/directions/v5/mapbox/'+profile+'/'+pairs.join(';')+'?access_token='+mapboxToken+'&steps=true&geometries=geojson&overview=full&annotations=maxspeed&banner_instructions=true'+(excl.length?'&exclude='+excl.join(','):'');
     try{
-      var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},10000);
+      var ctrl=_routeController(requestId);if(!ctrl)return;var tid=setTimeout(function(){ctrl.abort();},10000);
       var data=await(await fetch(url,{signal:ctrl.signal})).json();clearTimeout(tid);
-      if(!data.routes||!data.routes[0])return _fetchValhalla(locs,fromIdx);
+      if(!_routeRequestCurrent(requestId))return;
+      if(!data.routes||!data.routes[0])return _fetchValhalla(locs,fromIdx,preserveExisting,requestId);
       var route=data.routes[0];
-      _routeCoords=route.geometry.coordinates;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
+      var candidateCoords=route.geometry&&Array.isArray(route.geometry.coordinates)?route.geometry.coordinates:[];
+      if(!_routeCoversLocs(candidateCoords,locs))return _fetchValhalla(locs,fromIdx,preserveExisting,requestId);
       var steps=[],legs=[];
       (route.legs||[]).forEach(function(leg){
         var ls=[];
@@ -5311,35 +5360,40 @@ const buildMapHtml = (
         });
         legs.push(ls);
       });
-      routeIsProper=true;_routeLoading=false;
-      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0,route_source:'mapbox'});
-      // Persist for offline replay (RN side caches in SecureStore)
-      postRN({type:'route_persist',coords:_routeCoords,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,route_source:'mapbox'});
-    }catch(e){return _fetchValhalla(locs,fromIdx);}
+      if(!_routeRequestCurrent(requestId))return;
+      _routeCoords=candidateCoords;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
+      routeIsProper=true;_routeLoading=false;_activeRouteSignature=_routeWaypointSignature(locs);
+      postRN({type:'route_ready',routed:true,coords:_routeCoords,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,fromIdx:fromIdx||0,route_source:'mapbox',route_waypoint_signature:_activeRouteSignature});
+      if(preserveExisting==='matching')postRN({type:'route_persist',route_scope:'trip',coords:_routeCoords,steps:steps,legs:legs,total_distance:route.distance,total_duration:route.duration,route_source:'mapbox',route_waypoint_signature:_activeRouteSignature});
+    }catch(e){if(_routeRequestCurrent(requestId))return _fetchValhalla(locs,fromIdx,preserveExisting,requestId);}
   }
 
-  async function _fetchValhalla(routeInputs,fromIdx){
+  async function _fetchValhalla(routeInputs,fromIdx,preserveExisting,requestId){
     var locs=_normalizeRouteLocs(routeInputs);
-    if(locs.length<2)return _fallback(locs,fromIdx);
+    if(!_routeRequestCurrent(requestId))return;
+    if(locs.length<2)return _fallback(locs,fromIdx,preserveExisting,requestId);
     var body={locations:locs.map(function(loc){return{lon:loc.lng,lat:loc.lat,type:loc.type||'break'};}),options:routeOpts,units:'miles'};
     try{
-      var ctrl=new AbortController();var tid=setTimeout(function(){ctrl.abort();},20000);
+      var ctrl=_routeController(requestId);if(!ctrl)return;var tid=setTimeout(function(){ctrl.abort();},20000);
       var res=await fetch(apiBase+'/api/route',{method:'POST',signal:ctrl.signal,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
       var data=await res.json();clearTimeout(tid);
-      if(!res.ok)return _fallback(locs,fromIdx);
-      if(!data.trip||data.trip.status!==0)return _fallback(locs,fromIdx);
+      if(!_routeRequestCurrent(requestId))return;
+      if(!res.ok)return _fallback(locs,fromIdx,preserveExisting,requestId);
+      if(!data.trip||data.trip.status!==0)return _fallback(locs,fromIdx,preserveExisting,requestId);
       var all=[],steps=[],legs=[];
       (data.trip.legs||[]).forEach(function(leg){var c=decodeP6(leg.shape||'');all=all.concat(c);var ls=[];(leg.maneuvers||[]).forEach(function(m){var dist=Math.round((m.length||0)*1609.34);var shp=c[m.begin_shape_index];var st={type:m.type===4?'arrive':m.type===1?'depart':'turn',modifier:{0:'',1:'',2:'left',3:'right',4:'arrive',5:'sharp left',6:'sharp right',7:'left',8:'right',9:'uturn',10:'slight left',11:'slight right'}[m.type]||'',name:m.street_names&&m.street_names[0]||'',distance:dist,duration:m.time||0,lat:shp?shp[1]:undefined,lng:shp?shp[0]:undefined,instruction:m.instruction||'',verbalPre:m.verbal_pre_transition_instruction||m.verbal_transition_alert_instruction||'',verbalPost:m.verbal_post_transition_instruction||'',roundaboutExit:Number.isFinite(m.roundabout_exit_count)?m.roundabout_exit_count:null};steps.push(st);ls.push(st);});legs.push(ls);});
+      if(!_routeCoversLocs(all,locs))return _fallback(locs,fromIdx,preserveExisting,requestId);
+      if(!_routeRequestCurrent(requestId))return;
       _routeCoords=all;routePts=all.filter(function(_,i){return i%3===0;});updateRoute();
-      routeIsProper=true;_routeLoading=false;
+      routeIsProper=true;_routeLoading=false;_activeRouteSignature=_routeWaypointSignature(locs);
       var src=data._trailhead&&data._trailhead.repair?'trailhead-valhalla-repaired':'trailhead-valhalla';
-      postRN({type:'route_ready',routed:true,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0,route_source:src});
-      postRN({type:'route_persist',coords:all,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,route_source:src});
-    }catch(e){_fallback(locs,fromIdx);}
+      postRN({type:'route_ready',routed:true,coords:all,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,fromIdx:fromIdx||0,route_source:src,route_waypoint_signature:_activeRouteSignature});
+      if(preserveExisting==='matching')postRN({type:'route_persist',route_scope:'trip',coords:all,steps:steps,legs:legs,total_distance:Math.round((data.trip.summary.length||0)*1609.34),total_duration:data.trip.summary.time||0,route_source:src,route_waypoint_signature:_activeRouteSignature});
+    }catch(e){if(_routeRequestCurrent(requestId))_fallback(locs,fromIdx,preserveExisting,requestId);}
   }
 
-  async function loadRoute(){if(wps.length<2)return;await _fetchRoute(wps.map(function(w){return{lng:w.lng,lat:w.lat,type:w.route_point_type||'break'};}).filter(function(loc){return loc.type!=='side_stop';}),0);}
-  async function loadRouteFrom(lat,lng,fromIdx){var rem=wps.slice(fromIdx).filter(function(w){return w.route_point_type!=='side_stop';});if(!rem.length){_fallback([],fromIdx);return;}await _fetchRoute([{lng:lng,lat:lat,type:'break'}].concat(rem.map(function(w){return{lng:w.lng,lat:w.lat,type:w.route_point_type||'break'};})),fromIdx);}
+  async function loadRoute(){if(wps.length<2)return;await _fetchRoute(wps.map(function(w){return{lng:w.lng,lat:w.lat,type:w.route_point_type||'break'};}).filter(function(loc){return loc.type!=='side_stop';}),0,'matching');}
+  async function loadRouteFrom(lat,lng,fromIdx){var rem=wps.slice(fromIdx).filter(function(w){return w.route_point_type!=='side_stop';});if(!rem.length){_fallback([],fromIdx,'navigation');return;}await _fetchRoute([{lng:lng,lat:lat,type:'break'}].concat(rem.map(function(w){return{lng:w.lng,lat:w.lat,type:w.route_point_type||'break'};})),fromIdx,'navigation');}
 
   // ── Message handler ───────────────────────────────────────────────────────────
   function handleMsgData(msg){
@@ -5351,6 +5405,7 @@ const buildMapHtml = (
       if(typeof msg.protomapsKey==='string')protomapsKey=msg.protomapsKey;
       if(typeof msg.token==='string')mapboxToken=msg.token;
       if(typeof msg.premiumStyle==='string')currentPremiumStyle=msg.premiumStyle;
+      if(typeof msg.preferMapboxRoutes==='boolean')preferMapboxRoutes=msg.preferMapboxRoutes;
       var nextStyle=msg.style||currentStyle||'extreme';
       if(map){
         currentStyle=nextStyle;
@@ -5386,11 +5441,12 @@ const buildMapHtml = (
     if(msg.type==='nav_center'&&msg.lat){lastSpeed=msg.speed!=null?msg.speed:lastSpeed;setUserPos(msg.lat,msg.lng,true,msg.zoom||17,msg.heading);}
     if(msg.type==='locate'&&msg.lat)setUserPos(msg.lat,msg.lng,true,13);
     if(msg.type==='nav_target')setNavTarget(msg.idx);
-    if(msg.type==='nav_reset'){setNavTarget(-1);_routeCoords=[];routePts=[];_searchDest=null;updateRoute();resetPassedRoute();}
+    if(msg.type==='nav_reset'){_invalidateRouteRequest();setNavTarget(-1);_routeCoords=[];routePts=[];_activeRouteSignature='';_searchDest=null;updateRoute();resetPassedRoute();}
     if(msg.type==='restore_route'&&Array.isArray(msg.coords)){
       // Hydrate a previously-fetched route so nav works offline without re-fetching
+      _invalidateRouteRequest();
       _routeCoords=msg.coords;routePts=_routeCoords.filter(function(_,i){return i%3===0;});updateRoute();
-      routeIsProper=true;
+      routeIsProper=true;_activeRouteSignature=msg.route_waypoint_signature||msg.routeWaypointSignature||'';
       postRN({type:'route_ready',routed:true,steps:msg.steps||[],legs:msg.legs||[],total_distance:msg.total_distance,total_duration:msg.total_duration,fromIdx:0,fromCache:true,route_source:'restored-cache'});
     }
     if(msg.type==='route_scout_clear'){clearRouteScoutPreview();}
@@ -5428,19 +5484,22 @@ const buildMapHtml = (
     if(msg.type==='set_nearby_camps'){allCamps=msg.pins||[];updateCampSrc();}
     if(msg.type==='clear_nearby_camps'){allCamps=[];updateCampSrc();}
     if(msg.type==='set_gas'){allGas=msg.gas||[];updateGasSrc();}
+    if(msg.type==='set_community_pins'){communityPins=msg.pins||[];updatePoiSrc();}
     if(msg.type==='set_pois'){allPois=msg.pois||[];updatePoiSrc();}
     if(msg.type==='clear_pois'){allPois=[];updatePoiSrc();}
     if(msg.type==='set_route_opts')Object.assign(routeOpts,msg.opts||{});
+    if(msg.type==='set_route_provider')preferMapboxRoutes=!!msg.preferMapboxRoutes;
+    if(msg.type==='rebuild_route')loadRoute();
     if(msg.type==='start_route_from'&&msg.lat)loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);
-    if(msg.type==='route_refresh_from'&&msg.lat){lastOffCheck=Date.now();resetPassedRoute();_offRouteStreak=0;if(msg.dest){_searchDest=msg.dest;_fetchRoute([msg.lng+','+msg.lat,msg.dest.lng+','+msg.dest.lat],0);}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
-    if(msg.type==='reroute_from'&&msg.lat){_routeCoords=[];routePts=[];routeIsProper=false;lastOffCheck=Date.now();resetPassedRoute();_offRouteStreak=0;if(!wps.length&&_searchDest){_fetchRoute([msg.lng+','+msg.lat,_searchDest.lng+','+_searchDest.lat],0);}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
+    if(msg.type==='route_refresh_from'&&msg.lat){lastOffCheck=Date.now();resetPassedRoute();_offRouteStreak=0;if(msg.dest){_searchDest=msg.dest;_fetchRoute([msg.lng+','+msg.lat,msg.dest.lng+','+msg.dest.lat],0,'navigation');}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
+    if(msg.type==='reroute_from'&&msg.lat){lastOffCheck=Date.now();resetPassedRoute();_offRouteStreak=0;if(!wps.length&&_searchDest){_fetchRoute([msg.lng+','+msg.lat,_searchDest.lng+','+_searchDest.lat],0,'navigation');}else{loadRouteFrom(msg.lat,msg.lng,msg.fromIdx||0);}}
     if(msg.type==='route_to_search'&&msg.lat){
       if(searchMarker){searchMarker.remove();searchMarker=null;}
       var el2=document.createElement('div');el2.className='mk-search';el2.textContent='PIN';
       searchMarker=new GL.Marker({element:el2}).setLngLat([msg.lng,msg.lat]).setPopup(new GL.Popup({offset:18,closeButton:false}).setHTML('<div class="pt">'+(msg.name||'Destination')+'</div>')).addTo(map);
       searchMarker.togglePopup();
       _searchDest={lat:msg.lat,lng:msg.lng};
-      _fetchRoute([msg.userLng+','+msg.userLat,msg.lng+','+msg.lat],0);
+      _fetchRoute([msg.userLng+','+msg.userLat,msg.lng+','+msg.lat],0,'never');
     }
     if(msg.type==='set_reports'){allReports=msg.reports||[];updateReportMarkers();}
     if(msg.type==='add_report'){allReports=allReports.filter(function(r){return r.id!==msg.report.id;});allReports.push(msg.report);updateReportMarkers();}
@@ -6075,12 +6134,6 @@ function MapScreen() {
   const [extremeTrafficEnabled, setExtremeTrafficEnabled] = useState(false);
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
   const extremeMapLayerActive = mapLayer === 'extreme';
-  const mapboxLayerRoutePreferred = Boolean(
-    mapLayer === 'extreme' ||
-    mapLayer === 'satellite' ||
-    mapLayer === 'hybrid' ||
-    extremeTrafficEnabled
-  );
   const extremeCopilotAvailable = !!extremeConfig?.enabled && !!extremeConfig?.feature_flags?.copilot;
   const extremeCopilotUnavailable = !!user && extremeConfigLoaded && (
     extremeConfigLoadFailed
@@ -6284,12 +6337,22 @@ function MapScreen() {
   const offlineAreaBoxRef = useRef(offlineAreaBox);
   const offlineAreaDragStartRef = useRef(offlineAreaBox);
   const offlineSaved = cachedRegions.length > 0;
-  const [mapboxToken,   setMapboxToken]   = useState('');
+  const initialMapboxToken = useStore.getState().mapboxToken || '';
+  const [mapboxToken,   setMapboxToken]   = useState(initialMapboxToken);
   const [protomapsKey,  setProtomapsKey]  = useState('');
-  const mapboxRoutePreferred = Boolean(mapboxToken || mapboxLayerRoutePreferred);
+  const [mapRendererMode, setMapRendererMode] = useState<'mapbox' | 'maplibre' | null>(
+    initialMapboxToken ? 'mapbox' : null,
+  );
+  const [mapCredentialsReady, setMapCredentialsReady] = useState(() => Boolean(initialMapboxToken));
+  // Basemap rendering and route calculation are separate choices. A Mapbox
+  // token must not silently replace a Trailhead route with a traffic route.
+  const mapboxRoutePreferred = Boolean(
+    extremeTrafficEnabled
+    || (extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation)
+  );
   const activeRouteProviderMode = extremeMapLayerActive && !!extremeConfig?.feature_flags?.navigation
     ? 'extreme-mapbox'
-    : mapboxRoutePreferred
+    : extremeTrafficEnabled
       ? 'traffic'
       : 'trailhead';
   const [showFilterSheet, setShowFilterSheet] = useState(false);
@@ -6748,13 +6811,22 @@ function MapScreen() {
   const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
   const [mapSurfaceReady, setMapSurfaceReady] = useState(false);
+  const [mapSurfaceGeneration, setMapSurfaceGeneration] = useState(0);
   const [mapLoadFailed, setMapLoadFailed] = useState(false);
+  const activeRouteRestoreSeqRef = useRef(0);
+  const lastAppliedRouteRestoreRef = useRef('');
+  const persistedRouteIdentityRef = useRef(new Set<string>());
   const useNativeMapSurface = USE_NATIVE_MAP && !mapLoadFailed;
   const [showLocDisclosure, setShowLocDisclosure] = useState(false);
 
   useEffect(() => {
     nativeMapSurfaceActiveRef.current = useNativeMapSurface;
   }, [useNativeMapSurface]);
+
+  useEffect(() => {
+    activeRouteRestoreSeqRef.current += 1;
+    lastAppliedRouteRestoreRef.current = '';
+  }, [activeTrip?.trip_id]);
 
   const [nearbyLoading,   setNearbyLoading]   = useState(false);
   const [nearbyNarration, setNearbyNarration] = useState<string | null>(null);
@@ -7086,9 +7158,27 @@ function MapScreen() {
   // Fetch Mapbox token + Protomaps key once on mount; fall back to cached when offline
   useEffect(() => {
     let cancelled = false;
+    let cachedConfigSettled = false;
+    let remoteConfigSettled = false;
+    let configuredToken = initialMapboxToken;
+    let rendererLocked = Boolean(initialMapboxToken);
+    const lockRenderer = () => {
+      if (cancelled || rendererLocked) return;
+      rendererLocked = true;
+      setMapRendererMode(configuredToken ? 'mapbox' : 'maplibre');
+      setMapCredentialsReady(true);
+    };
+    const finishWhenSettled = () => {
+      if (cachedConfigSettled && remoteConfigSettled) lockRenderer();
+    };
     function applyConfig(token: string, pmKey: string) {
       if (cancelled) return;
-      if (token) { setMapboxToken(token); setStoreToken(token); }
+      if (token) {
+        configuredToken = token;
+        setMapboxToken(token);
+        setStoreToken(token);
+        lockRenderer();
+      }
       if (pmKey) setProtomapsKey(pmKey);
       if (webLoadedRef.current) {
         postWebMessage(JSON.stringify({
@@ -7097,13 +7187,20 @@ function MapScreen() {
           premiumStyle: premiumMapStyle,
           apiBase: API_BASE_URL,
           protomapsKey: pmKey,
+          preferMapboxRoutes: mapboxRoutePreferred,
         }));
       }
     }
+    const readinessTimer = setTimeout(lockRenderer, 2500);
     Promise.all([
       storage.get('trailhead_mapbox_token').catch(() => null),
       storage.get('trailhead_protomaps_key').catch(() => null),
-    ]).then(([t, k]) => applyConfig(t || '', k || ''));
+    ]).then(([t, k]) => {
+      applyConfig(t || '', k || '');
+    }).finally(() => {
+      cachedConfigSettled = true;
+      finishWhenSettled();
+    });
     api.getConfig().then(c => {
       const token = c.mapbox_token || '';
       const pmKey = c.protomaps_key || '';
@@ -7114,8 +7211,14 @@ function MapScreen() {
     }).catch(() => {
       if (cancelled) return;
       setIsActuallyOffline(true);
+    }).finally(() => {
+      remoteConfigSettled = true;
+      finishWhenSettled();
     });
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+      clearTimeout(readinessTimer);
+    };
   }, []);
 
   // Load cached route weather from FileSystem when active trip changes
@@ -7300,14 +7403,20 @@ function MapScreen() {
     setNavigationFollow(navCameraFollow).then(applyNativeNavigationState).catch(() => {});
   }, [navMode, navCameraFollow, applyNativeNavigationState]);
 
-  // Recompute when trip changes OR when geocoding populates lat/lng on waypoints
-  const geocodedCount = usableTripWaypoints(activeTrip?.plan.waypoints).filter(w => w.lat && w.lng).length ?? 0;
+  // Recompute for coordinate, order, type, and routing-role edits. Point count
+  // alone leaves stale geometry when a stop is replaced in-place.
+  const activeTripWaypoints = usableTripWaypoints(activeTrip?.plan.waypoints);
+  const activeTripRoutableWaypointSignature = buildRouteWaypointSignature(activeTripWaypoints);
+  const activeTripPlannerWaypointSignature = plannerWaypointSignature(activeTripWaypoints);
+  const activeTripPlannerRoutableWaypointSignature = plannerWaypointSignature(activeTripWaypoints, true);
+  const tripWaypointSignature = activeTripWaypoints
+    .map(w => `${String(w.lng)},${String(w.lat)}:${w.day}:${w.type}:${w.route_point_type ?? 'break'}:${w.name}`)
+    .join('|');
   const waypoints: WP[] = useMemo(() =>
     usableTripWaypoints(activeTrip?.plan.waypoints)
       .filter(w => w.lat != null && w.lng != null && isFinite(w.lat) && isFinite(w.lng))
       .map(w => ({ lat: w.lat!, lng: w.lng!, name: w.name, day: w.day, type: w.type, route_point_type: w.route_point_type })),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [activeTrip?.trip_id, geocodedCount]
+    [activeTrip?.trip_id, tripWaypointSignature]
   );
 
   useEffect(() => { navRef.current.wps = waypoints; }, [waypoints]);
@@ -17380,112 +17489,173 @@ function MapScreen() {
     return null;
   }
 
-  function restoreCachedActiveRoute(target: 'web' | 'native') {
+  function syncActiveTripRouteGeometry(tripId: string, routeGeometry: NonNullable<TripResult['route_geometry']>) {
+    const currentTrip = useStore.getState().activeTrip;
+    if (!currentTrip || currentTrip.trip_id !== tripId) return;
+    const nextTrip = { ...currentTrip, route_geometry: routeGeometry };
+    setActiveTrip(nextTrip);
+    saveOfflineTrip(nextTrip).catch(() => {});
+  }
+
+  async function restoreCachedActiveRoute(target: 'web' | 'native', surfaceGeneration: number) {
     if (!activeTrip?.trip_id) return;
+    const restoreSeq = ++activeRouteRestoreSeqRef.current;
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
     const requestTripId = activeTrip.trip_id;
-    const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
+    const requestWaypoints = activeTripWaypoints;
+    const expectedWaypointSignature = activeTripRoutableWaypointSignature;
+    const requestIsCurrent = () => restoreSeq === activeRouteRestoreSeqRef.current
+      && accountStorage.epoch() === requestEpoch
       && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
-      && useStore.getState().activeTrip?.trip_id === requestTripId;
-    const shouldRefreshForMapboxMode = (route: any) => {
-      if (!mapboxRoutePreferred || !route) return false;
-      const source = String(
-        route.routeSource
-        ?? route.route_source
-        ?? route.routeSourceLabel
+      && useStore.getState().activeTrip?.trip_id === requestTripId
+      && nativeMapSurfaceActiveRef.current === (target === 'native');
+    const isUsable = (route: any) => Array.isArray(route?.coords)
+      && route.coords.length >= 2
+      && routeGeometryMatchesWaypointIdentity(route, requestWaypoints, expectedWaypointSignature);
+    const applyRestoredRoute = (route: any, source: 'server' | 'trip-cache' | 'active-cache') => {
+      if (!requestIsCurrent() || !isUsable(route)) return false;
+      const coords = route.coords
+        .map((coord: unknown) => Array.isArray(coord) ? [Number(coord[0]), Number(coord[1])] as [number, number] : null)
+        .filter((coord: [number, number] | null): coord is [number, number] => !!coord && coord.every(Number.isFinite));
+      if (coords.length < 2) return false;
+      const steps = Array.isArray(route.steps) ? route.steps : [];
+      const legs = Array.isArray(route.legs) ? route.legs : [];
+      const totalDistance = Number(route.totalDistance ?? route.total_distance) || 0;
+      const totalDuration = Number(route.totalDuration ?? route.total_duration) || 0;
+      const geometrySignature = routeGeometryContentSignature(coords);
+      const applicationKey = [
+        target,
+        requestTripId,
+        surfaceGeneration,
+        expectedWaypointSignature,
+        geometrySignature,
+        Number(route.ts) || 0,
+        totalDistance,
+        totalDuration,
+        steps.length,
+        legs.length,
+      ].join(':');
+      if (lastAppliedRouteRestoreRef.current === applicationKey) return true;
+      lastAppliedRouteRestoreRef.current = applicationKey;
+
+      setIsRouted(true);
+      setRouteFromCache(source !== 'server');
+      setRouteSteps(steps);
+      setRouteLegs(legs);
+      setRouteProgress(null);
+      setLastRouteCoords(coords);
+      lastRouteCoordsRef.current = coords;
+      routeCumulativeRef.current = routeCumulativeDistances(coords);
+      routeOverlayReadyRef.current = true;
+      const routeSource = String(
+        route.routeSourceLabel
         ?? route.route_source_label
-        ?? route.debug
-        ?? ''
-      ).toLowerCase();
-      if (!source) return true;
-      return !source.includes('mapbox');
-    };
-    const serverRoute = activeTrip.route_geometry;
-    if (serverRoute && Array.isArray(serverRoute.coords) && serverRoute.coords.length >= 2) {
-      if (shouldRefreshForMapboxMode(serverRoute)) return;
-      const steps = serverRoute.steps ?? [];
-      const legs = serverRoute.legs ?? [];
-      const totalDistance = serverRoute.totalDistance ?? serverRoute.total_distance ?? 0;
-      const totalDuration = serverRoute.totalDuration ?? serverRoute.total_duration ?? 0;
+        ?? route.routeSource
+        ?? route.route_source
+        ?? (source === 'server' ? 'Saved route' : 'Offline route')
+      ).trim();
+      setRouteSourceDebug(routeSource);
+      if (routeSource) setRouteDebug(routeSource);
+
       if (target === 'native') {
-        nativeMapRef.current?.restoreRoute(serverRoute.coords, steps, legs, totalDistance, totalDuration);
-        setLastRouteCoords(serverRoute.coords);
+        nativeMapRef.current?.restoreRoute(
+          coords,
+          steps,
+          legs,
+          totalDistance,
+          totalDuration,
+          expectedWaypointSignature,
+        );
       } else {
         postWebMessage(JSON.stringify({
           type: 'restore_route',
-          coords: serverRoute.coords,
+          coords,
           steps,
           legs,
           total_distance: totalDistance,
           total_duration: totalDuration,
+          route_waypoint_signature: expectedWaypointSignature,
         }));
       }
-      saveRouteGeometry(activeTrip.trip_id, {
-        ...serverRoute,
-        steps,
-        legs,
-        totalDistance,
-        totalDuration,
-      }).catch(() => {});
+
+      const identityKey = `${requestTripId}:${geometrySignature}:${expectedWaypointSignature}`;
+      const mobileIdentity = route.routeWaypointSignature ?? route.route_waypoint_signature;
+      const needsIdentityBackfill = typeof mobileIdentity !== 'string' || !mobileIdentity.startsWith('rwp1:');
+      if ((source === 'server' || needsIdentityBackfill) && !persistedRouteIdentityRef.current.has(identityKey)) {
+        persistedRouteIdentityRef.current.add(identityKey);
+        const stamped = {
+          ...route,
+          coords,
+          steps,
+          legs,
+          totalDistance,
+          totalDuration,
+          tripId: requestTripId,
+          ts: Number(route.ts) || Date.now(),
+          routeWaypointSignature: expectedWaypointSignature,
+          waypointSignature: activeTripPlannerWaypointSignature,
+          routableWaypointSignature: activeTripPlannerRoutableWaypointSignature,
+        };
+        accountStorage.set('trailhead_active_route', JSON.stringify(stamped), requestEpoch).catch(() => {});
+        saveRouteGeometry(requestTripId, stamped).catch(() => {});
+      }
+      return true;
+    };
+
+    const serverRoute = activeTrip.route_geometry;
+    if (isUsable(serverRoute)) {
+      applyRestoredRoute(serverRoute, 'server');
       return;
     }
-    loadRouteGeometry(activeTrip.trip_id).then(saved => {
-      if (!requestIsCurrent()) return;
-      if (!saved || !Array.isArray(saved.coords) || saved.coords.length < 2) return;
-      if (shouldRefreshForMapboxMode(saved)) return;
-      const steps = saved.steps ?? [];
-      const legs = saved.legs ?? [];
-      const totalDistance = saved.totalDistance ?? saved.total_distance ?? 0;
-      const totalDuration = saved.totalDuration ?? saved.total_duration ?? 0;
 
-      if (target === 'native') {
-        nativeMapRef.current?.restoreRoute(saved.coords, steps, legs, totalDistance, totalDuration);
-        setLastRouteCoords(saved.coords);
-        return;
-      }
-
-      postWebMessage(JSON.stringify({
-        type: 'restore_route',
-        coords: saved.coords,
-        steps,
-        legs,
-        total_distance: totalDistance,
-        total_duration: totalDuration,
-      }));
-    }).catch(() => {});
-
-    accountStorage.get('trailhead_active_route').then(raw => {
-      if (!requestIsCurrent()) return;
-      if (!raw) return;
+    const [tripCache, rawActiveCache] = await Promise.all([
+      loadRouteGeometry(requestTripId).catch(() => null),
+      accountStorage.get('trailhead_active_route').catch(() => null),
+    ]);
+    if (!requestIsCurrent()) return;
+    let activeCache: any = null;
+    if (rawActiveCache) {
       try {
-        const cached = JSON.parse(raw);
-        if (cached.tripId !== activeTrip.trip_id) return;
-        if (!Array.isArray(cached.coords) || cached.coords.length < 2) return;
-        if (shouldRefreshForMapboxMode(cached)) return;
-
-        const steps = cached.steps ?? [];
-        const legs = cached.legs ?? [];
-        const totalDistance = cached.totalDistance ?? cached.total_distance ?? 0;
-        const totalDuration = cached.totalDuration ?? cached.total_duration ?? 0;
-
-        if (target === 'native') {
-          nativeMapRef.current?.restoreRoute(cached.coords, steps, legs, totalDistance, totalDuration);
-          setLastRouteCoords(cached.coords);
-          return;
-        }
-
-        postWebMessage(JSON.stringify({
-          type: 'restore_route',
-          coords: cached.coords,
-          steps,
-          legs,
-          total_distance: totalDistance,
-          total_duration: totalDuration,
-        }));
+        const parsed = JSON.parse(rawActiveCache);
+        if (parsed?.tripId === requestTripId) activeCache = parsed;
       } catch {}
-    }).catch(() => {});
+    }
+    const candidates = [
+      isUsable(tripCache) ? { route: tripCache, source: 'trip-cache' as const, priority: 1 } : null,
+      isUsable(activeCache) ? { route: activeCache, source: 'active-cache' as const, priority: 0 } : null,
+    ].filter(Boolean) as Array<{ route: any; source: 'trip-cache' | 'active-cache'; priority: number }>;
+    candidates.sort((left, right) => {
+      const freshness = (Number(right.route.ts) || 0) - (Number(left.route.ts) || 0);
+      return freshness || right.priority - left.priority;
+    });
+    if (candidates[0]) applyRestoredRoute(candidates[0].route, candidates[0].source);
   }
+
+  const activeRouteGeometrySignature = useMemo(() => {
+    const route = activeTrip?.route_geometry;
+    if (!route?.coords?.length) return `${activeTrip?.trip_id ?? ''}:none`;
+    return [
+      activeTrip?.trip_id ?? '',
+      routeGeometryContentSignature(route.coords),
+      savedRouteWaypointSignature(route) ?? '',
+      route.totalDistance ?? route.total_distance ?? '',
+      route.totalDuration ?? route.total_duration ?? '',
+      route.ts ?? '',
+    ].join(':');
+  }, [activeTrip?.trip_id, activeTrip?.route_geometry]);
+  useEffect(() => {
+    if (!mapSurfaceReady || !activeTrip?.trip_id) return;
+    restoreCachedActiveRoute(useNativeMapSurface ? 'native' : 'web', mapSurfaceGeneration).catch(() => {});
+  }, [
+    activeRouteGeometrySignature,
+    activeTrip?.trip_id,
+    activeTripPlannerRoutableWaypointSignature,
+    activeTripRoutableWaypointSignature,
+    mapSurfaceGeneration,
+    mapSurfaceReady,
+    useNativeMapSurface,
+  ]);
 
   // ── WebView message handler ──────────────────────────────────────────────────
 
@@ -17582,10 +17752,13 @@ function MapScreen() {
         setTimeout(() => setQuickToast(''), 2800);
       }
       if (msg.type === 'map_ready') {
+        setMapSurfaceReady(true);
+        setMapSurfaceGeneration(generation => generation + 1);
+        postWebMessage(JSON.stringify({ type: 'set_gas', gas }));
+        postWebMessage(JSON.stringify({ type: 'set_community_pins', pins: pinList }));
+        if (areaCamps.length === 0) postWebMessage(JSON.stringify({ type: 'set_camps', pins: campsites }));
+        postWebMessage(JSON.stringify({ type: 'set_route_provider', preferMapboxRoutes: mapboxRoutePreferred }));
         if (viewportRef.current) loadCampsInArea(viewportRef.current, activeFilters);
-        // If we restored a trip from cache (offline relaunch), replay its route geometry
-        // into the WebView so navigation works without re-fetching from Mapbox Directions.
-        restoreCachedActiveRoute('web');
       }
       if (msg.type === 'map_bounds') {
         const bounds = { n: msg.n, s: msg.s, e: msg.e, w: msg.w, zoom: msg.zoom };
@@ -17613,32 +17786,73 @@ function MapScreen() {
         setTappedTrail(null);
       }
       if (msg.type === 'route_persist' && Array.isArray(msg.coords)) {
-        // Cache the freshly-routed geometry + steps so we can replay offline
+        const routeScope: RoutePersistenceScope = msg.route_scope === 'trip'
+          ? 'trip'
+          : msg.route_scope === 'navigation'
+            ? 'navigation'
+            : 'search';
         const payload = {
           coords: msg.coords, steps: msg.steps ?? [], legs: msg.legs ?? [],
           total_distance: msg.total_distance, total_duration: msg.total_duration,
           route_source: msg.route_source ?? msg.routeSource ?? null,
+          routeWaypointSignature: msg.routeWaypointSignature ?? msg.route_waypoint_signature ?? null,
           tripId: activeTrip?.trip_id ?? null,
           ts: Date.now(),
         };
-        if (payload.route_source) setRouteSourceDebug(String(payload.route_source));
-        accountStorage.set('trailhead_active_route', JSON.stringify(payload)).catch(() => {});
-        saveRouteGeometry(activeTrip?.trip_id, payload).catch(() => {});
+        const persistTripRoute = shouldPersistTripRoute({
+          scope: routeScope,
+          tripId: activeTrip?.trip_id,
+          requestWaypointSignature: payload.routeWaypointSignature,
+          tripWaypointSignature: activeTripRoutableWaypointSignature,
+        }) && routeGeometryMatchesWaypointIdentity(
+          payload,
+          activeTripWaypoints,
+          activeTripRoutableWaypointSignature,
+        );
+        if (persistTripRoute) {
+          if (payload.route_source) setRouteSourceDebug(String(payload.route_source));
+          accountStorage.set('trailhead_active_route', JSON.stringify(payload)).catch(() => {});
+          saveRouteGeometry(activeTrip?.trip_id, payload).catch(() => {});
+          syncActiveTripRouteGeometry(activeTrip!.trip_id, payload);
+        }
       }
       if (msg.type === 'route_ready') {
-        setIsRouted(msg.routed);
+        const keptExistingRoute = msg.keptExistingRoute === true || msg.kept_existing_route === true;
+        const readyCoords = Array.isArray(msg.coords)
+          ? msg.coords
+              .map((coord: unknown) => Array.isArray(coord) ? [Number(coord[0]), Number(coord[1])] as [number, number] : null)
+              .filter((coord: [number, number] | null): coord is [number, number] => !!coord && coord.every(Number.isFinite))
+          : [];
+        setIsRouted(msg.routed || keptExistingRoute);
         setRouteFromCache(!!msg.fromCache);
         const source = String(msg.routeSource ?? msg.route_source ?? msg.routeSourceLabel ?? msg.route_source_label ?? '').trim();
         setRouteSourceDebug(source);
-        if (source) setRouteDebug(source);
-        setRouteSteps(msg.steps ?? []);
-        setRouteLegs(msg.legs ?? []);
+        setRouteDebug(msg.routed || keptExistingRoute ? source : 'Route could not be built. Check your stops and try again.');
+        if (!keptExistingRoute) {
+          setRouteSteps(msg.steps ?? []);
+          setRouteLegs(msg.legs ?? []);
+          if (msg.routed && readyCoords.length >= 2) {
+            setLastRouteCoords(readyCoords);
+            lastRouteCoordsRef.current = readyCoords;
+            routeCumulativeRef.current = routeCumulativeDistances(readyCoords);
+            routeOverlayReadyRef.current = true;
+          } else if (!msg.routed) {
+            setLastRouteCoords([]);
+            lastRouteCoordsRef.current = [];
+            routeCumulativeRef.current = [];
+            routeOverlayReadyRef.current = false;
+          }
+        }
         setRouteProgress(null);
         if (msg.fromIdx !== undefined) setRouteLegOffset(msg.fromIdx);
         setIsRerouting(false);
         isReroutingRef.current = false;
         reconnectRouteRefreshRef.current = false;
         if (rerouteTimeoutRef.current) { clearTimeout(rerouteTimeoutRef.current); rerouteTimeoutRef.current = null; }
+        if (keptExistingRoute) {
+          setQuickToast('Could not refresh the route. Keeping your current route.');
+          setTimeout(() => setQuickToast(''), 6500);
+        }
       }
       if (msg.type === 'route_progress') {
         if (isReroutingRef.current) return;
@@ -18925,9 +19139,32 @@ function MapScreen() {
   const centerLng = waypoints[0]?.lng ?? -98.5;
 
   const mapHtml = useMemo(() =>
-    buildMapHtml(centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred),
-    [centerLat, centerLng, waypoints, campsites, gas, pinList, mapboxRoutePreferred]
+    buildMapHtml(centerLat, centerLng, waypoints, [], [], [], false),
+    [centerLat, centerLng, waypoints]
   );
+
+  // Mutable map data is sent into the fallback surface. Rebuilding the whole
+  // HTML document for every camp or community-pin response causes the visible
+  // map flash reported during route planning.
+  useEffect(() => {
+    if (useNativeMapSurface) return;
+    postWebMessage(JSON.stringify({ type: 'set_gas', gas }));
+  }, [gas, useNativeMapSurface]);
+
+  useEffect(() => {
+    if (useNativeMapSurface) return;
+    postWebMessage(JSON.stringify({ type: 'set_community_pins', pins: pinList }));
+  }, [pinList, useNativeMapSurface]);
+
+  useEffect(() => {
+    if (useNativeMapSurface || areaCamps.length > 0) return;
+    postWebMessage(JSON.stringify({ type: 'set_camps', pins: campsites }));
+  }, [areaCamps.length, campsites, useNativeMapSurface]);
+
+  useEffect(() => {
+    if (useNativeMapSurface) return;
+    postWebMessage(JSON.stringify({ type: 'set_route_provider', preferMapboxRoutes: mapboxRoutePreferred }));
+  }, [mapboxRoutePreferred, useNativeMapSurface]);
 
   useEffect(() => {
     if (useNativeMapSurface) return;
@@ -18943,12 +19180,13 @@ function MapScreen() {
       premiumStyle: premiumMapStyle,
       apiBase: API_BASE_URL,
       protomapsKey,
+      preferMapboxRoutes: mapboxRoutePreferred,
     });
     const timers = [250, 900, 1800, 3200].map(delay => setTimeout(() => {
       postWebMessage(configMessage);
     }, delay));
     return () => timers.forEach(timer => clearTimeout(timer));
-  }, [mapboxToken, mapLayer, premiumMapStyle, protomapsKey, mapHtml]);
+  }, [mapboxToken, mapLayer, premiumMapStyle, protomapsKey, mapboxRoutePreferred, mapHtml]);
 
   // ── Nav HUD values ──────────────────────────────────────────────────────────
 
@@ -21790,7 +22028,9 @@ function MapScreen() {
 
   return (
     <View style={s.container}>
-      {useNativeMapSurface ? (
+      {!mapCredentialsReady ? (
+        <View style={s.map} />
+      ) : useNativeMapSurface ? (
         // ── Native MapLibre SDK (new binary required) ───────────────────────
         <NativeMap
           ref={nativeMapRef}
@@ -21814,6 +22054,7 @@ function MapScreen() {
           navSpeed={userSpeed}
           mapLayer={mapLayer}
           premiumMapStyle={premiumMapStyle}
+          rendererMode={mapRendererMode ?? 'maplibre'}
           routeProviderMode={activeRouteProviderMode}
           routeOpts={routeOpts}
           traceMode={trailTraceMode}
@@ -21843,7 +22084,7 @@ function MapScreen() {
           onMapReady={() => {
             webLoadedRef.current = true;
             setMapSurfaceReady(true);
-            setMapLoadFailed(false);
+            setMapSurfaceGeneration(generation => generation + 1);
             // Load camps in the current area — this is what the WebView did on map_ready.
             // Without this, no camp/POI pins show on the native map until user pans.
             const vp = viewportRef.current;
@@ -21861,7 +22102,6 @@ function MapScreen() {
               // Also load nearby POIs
               fetchPois(center);
             }
-            restoreCachedActiveRoute('native');
           }}
           onBoundsChange={b => {
             viewportRef.current = b;
@@ -22022,19 +22262,36 @@ function MapScreen() {
           }}
           onWaypointTap={(idx, name) => { setTappedWp({ idx, wp: waypoints[idx] }); }}
           onRouteReady={result => {
-            setIsRouted(result.isProper);
+            const keptExistingRoute = result.keptExistingRoute === true && result.coords?.length >= 2;
+            setIsRouted(result.isProper || keptExistingRoute);
             setRouteFromCache(!!result.fromCache);
             const source = String((result as any).routeSourceLabel ?? (result as any).routeSource ?? result.debug ?? '').trim();
             setRouteSourceDebug(source);
-            setRouteDebug(result.debug ?? source);
+            setRouteDebug(
+              result.isProper || keptExistingRoute
+                ? (result.debug ?? source)
+                : 'Route could not be built. Check your stops and try again.'
+            );
             setRouteSteps(result.steps ?? []);
             setRouteLegs(result.legs ?? []);
             setRouteProgress(null);
             if (result.fromIdx !== undefined) setRouteLegOffset(result.fromIdx);
             setIsRerouting(false); isReroutingRef.current = false;
             reconnectRouteRefreshRef.current = false;
-            if (result.coords?.length) setLastRouteCoords(result.coords);
+            if ((result.isProper || keptExistingRoute) && result.coords?.length >= 2) {
+              setLastRouteCoords(result.coords);
+              lastRouteCoordsRef.current = result.coords;
+            } else if (!keptExistingRoute) {
+              setLastRouteCoords([]);
+              lastRouteCoordsRef.current = [];
+              routeCumulativeRef.current = [];
+            }
             if (!result.isProper && result.debug) {
+              if (keptExistingRoute) {
+                setQuickToast('Could not refresh the route. Keeping your current route.');
+                setTimeout(() => setQuickToast(''), 6500);
+                return;
+              }
               const longOffline = result.debug.includes('confidence limit');
               const nativeValhallaDebug = result.debug.includes('native valhalla') || result.debug.includes('diag ');
               setQuickToast(longOffline && !nativeValhallaDebug
@@ -22053,7 +22310,21 @@ function MapScreen() {
             }
           }}
           onRoutePersist={data => {
-            accountStorage.set('trailhead_active_route', JSON.stringify({ ...data, ts: Date.now() })).catch(() => {});
+            const payload = { ...data, ts: Date.now() };
+            const persistTripRoute = shouldPersistTripRoute({
+              scope: 'trip',
+              tripId: data.tripId,
+              requestWaypointSignature: data.routeWaypointSignature,
+              tripWaypointSignature: activeTripRoutableWaypointSignature,
+            }) && routeGeometryMatchesWaypointIdentity(
+              payload,
+              activeTripWaypoints,
+              activeTripRoutableWaypointSignature,
+            );
+            if (!persistTripRoute) return;
+            accountStorage.set('trailhead_active_route', JSON.stringify(payload)).catch(() => {});
+            if (Platform.OS === 'web' && data.tripId) saveRouteGeometry(data.tripId, payload).catch(() => {});
+            syncActiveTripRouteGeometry(data.tripId!, payload);
           }}
           onOffRoute={(lat, lng, dist) => onWebMessage({ nativeEvent: { data: JSON.stringify({ type: 'off_route', lat, lng, dist }) } })}
           onOffRouteWarn={(lat, lng, dist) => onWebMessage({ nativeEvent: { data: JSON.stringify({ type: 'off_route_warn', lat, lng, dist }) } })}
@@ -22083,13 +22354,13 @@ function MapScreen() {
           onMessage={onWebMessage}
           onLoad={() => {
             webLoadedRef.current = true;
-            setMapLoadFailed(false);
             const configMessage = JSON.stringify({
               type: 'set_token', token: mapboxToken,
               style: MAP_MODES[mapLayer] ?? MAP_MODES.satellite,
               premiumStyle: premiumMapStyle,
               apiBase: API_BASE_URL,
               protomapsKey,
+              preferMapboxRoutes: mapboxRoutePreferred,
             });
             postWebMessage(configMessage);
             syncTrailCaptureModeToWeb(trailPinCaptureMode);
@@ -22344,15 +22615,14 @@ function MapScreen() {
         <View style={[s.noRouteCard, topChromeLaneStyle]}>
           <View style={s.noRouteTop}>
             <Ionicons name="alert-circle-outline" size={14} color={C.red} />
-            <Text style={s.noRouteTitle}>NO DRAWABLE ROUTE</Text>
+            <Text style={s.noRouteTitle}>ROUTE UNAVAILABLE</Text>
             <TouchableOpacity style={s.noRouteClose} onPress={() => setRouteDebug('')}>
               <Ionicons name="close" size={14} color={OVR.text3} />
             </TouchableOpacity>
           </View>
           <Text style={s.noRouteText}>
-            Trailhead could not build a navigable route from these stops. Download the routing pack, simplify stops, or retry with signal.
+            Check the stops, shorten the route, or try again with a connection.
           </Text>
-          <Text style={s.noRouteDebug} numberOfLines={2}>{routeDebug}</Text>
         </View>
       )}
 
@@ -25578,7 +25848,17 @@ function MapScreen() {
             ))}
             <TouchableOpacity style={s.routeOptsApply} onPress={() => {
               setShowRouteOpts(false);
-              if (searchRouteCard && userLoc) navigateToSearch();
+              if (searchRouteCard && userLoc) {
+                navigateToSearch();
+                return;
+              }
+              const first = activeTripWaypoints[0];
+              if (!first || activeTripWaypoints.length < 2) return;
+              if (useNativeMapSurface) {
+                nativeMapRef.current?.loadRouteFrom(first.lat!, first.lng!, 1);
+              } else {
+                postWebMessage(JSON.stringify({ type: 'rebuild_route' }));
+              }
             }}>
               <Text style={s.routeOptsApplyText}>APPLY & ROUTE</Text>
             </TouchableOpacity>
@@ -31174,7 +31454,6 @@ const makeStyles = (C: ColorPalette) => {
   noRouteTitle: { color: C.red, fontSize: 10, fontFamily: mono, fontWeight: '900', letterSpacing: 0.8, flex: 1 },
   noRouteClose: { width: 24, height: 24, borderRadius: 12, alignItems: 'center', justifyContent: 'center', backgroundColor: OVR.border2 },
   noRouteText: { color: OVR.text2, fontSize: 11, lineHeight: 16 },
-  noRouteDebug: { color: OVR.text3, fontSize: 9, fontFamily: mono, lineHeight: 13 },
 
   syncToast: {
     position: 'absolute', bottom: 110, alignSelf: 'center',

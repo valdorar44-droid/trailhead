@@ -158,6 +158,7 @@ Use this exact schema:
       "day": number,
       "name": "Specific Named Location, State/Province/Country (geocodeable — use real town/landmark names)",
       "type": "start|camp|motel|waypoint|town|shower|fuel",
+      "route_point_type": "break|through|side_stop",
       "description": "1-2 sentences about this stop",
       "land_type": "BLM|USFS|NPS|private|town",
       "difficulty": "easy|moderate|difficult|extreme",
@@ -203,6 +204,12 @@ WAYPOINT TYPES:
 - motel: overnight stay at a motel/hotel/lodge in a town — use this when user requests budget stops, motels, hotels, or town stays
 - town: pass-through town for resupply, shower, food (not overnight)
 - shower: truck stop, rec center, or campground with showers
+
+ROUTING ROLES:
+- break: a required route anchor. Always use this for the start, destination, camp, motel, and any stop the drive must reach.
+- through: a road, pass, town, or junction used to shape the route without ending a navigation leg.
+- side_stop: a nearby fuel, viewpoint, trailhead, attraction, or optional visit that should stay on the trip without pulling the main route off course.
+- Every waypoint must include route_point_type. When uncertain, use break. Never mark an overnight stop or the first waypoint as side_stop.
 
 DAILY FLOW RULES — every day must follow this logical sequence:
 1. Depart from previous night's camp/motel
@@ -679,16 +686,21 @@ def edit_trip(current_trip: dict, edit_request: str) -> dict:
     raw = re.sub(r'^```\s*', '', raw)
     raw = re.sub(r'\s*```$', '', raw).strip()
 
+    parsed = None
     try:
-        return json.loads(raw)
+        parsed = json.loads(raw)
     except json.JSONDecodeError:
         match = re.search(r'\{.*\}', raw, re.DOTALL)
         if match:
             try:
-                return json.loads(match.group())
+                parsed = json.loads(match.group())
             except json.JSONDecodeError:
                 pass
-        return {"message": raw, "trip": trip_plan}
+    if not isinstance(parsed, dict):
+        return {"message": raw, "trip": None}
+    if isinstance(parsed.get("trip"), dict):
+        parsed["trip"] = _normalize_plan(parsed["trip"])
+    return parsed
 
 
 def plan_trip_from_conversation(messages: list[dict]) -> dict:
@@ -847,17 +859,31 @@ def _normalize_plan(plan: dict) -> dict:
         wp_type = str(wp.get("type") or ("start" if idx == 0 else "waypoint")).strip().lower()
         if wp_type not in {"start", "camp", "motel", "waypoint", "town", "shower", "fuel"}:
             wp_type = "waypoint"
+        route_point_type = str(
+            wp.get("route_point_type") or wp.get("routePointType") or "break"
+        ).strip().lower()
+        if route_point_type not in {"break", "through", "side_stop"}:
+            route_point_type = "break"
+        if idx == 0 or wp_type in {"start", "camp", "motel"}:
+            route_point_type = "break"
+        normalized_waypoint = {key: value for key, value in wp.items() if key != "routePointType"}
         normalized_wps.append({
-            **wp,
+            **normalized_waypoint,
             "day": max(1, min(duration, day)),
             "name": name,
             "type": wp_type,
+            "route_point_type": route_point_type,
             "description": str(wp.get("description") or ""),
             "land_type": str(wp.get("land_type") or ("town" if wp_type in {"fuel", "town", "motel", "shower"} else "route")),
         })
     if len(normalized_wps) < 2:
         raise ValueError("Planner returned too few usable waypoints")
     normalized_wps[0]["type"] = "start"
+    normalized_wps[0]["route_point_type"] = "break"
+    for waypoint in reversed(normalized_wps):
+        if waypoint["route_point_type"] != "side_stop":
+            waypoint["route_point_type"] = "break"
+            break
     plan["waypoints"] = normalized_wps
 
     normalized_days = []

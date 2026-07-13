@@ -5,6 +5,8 @@ import {
   computeDaySegmentsFromRouteGeometry,
   computeTripReadiness,
   filterDurableNavigationStops,
+  filterPersistableGasStops,
+  persistedTripShape,
   rebalanceAfterCampSelection,
   ROUTE_BUILDER_AUDIT_MATRIX,
 } from '@/lib/routeBuilder';
@@ -39,14 +41,34 @@ assertRouteBuilderContract(
   'route coordinate cleanup keeps valid there-and-back geometry',
 );
 
-const durableStops = filterDurableNavigationStops([
+const stopsForPersistence = [
   { day: 1, name: 'Moab', lat: moab.lat, lng: moab.lng, type: 'start', routeShapeRole: 'start' },
   { day: 1, name: 'Day 1 overnight area', lat: 38, lng: -110, type: 'waypoint', source: 'map', routeShapeRole: 'outbound_anchor' },
+  { day: 2, name: 'Day 2 review area', lat: 37.95, lng: -110.8, type: 'waypoint', source: 'map', routePointType: 'break' },
   { day: 1, name: 'Fuel', lat: 38.2, lng: -110.1, type: 'fuel' },
+  {
+    day: 1,
+    name: 'Auto fuel',
+    lat: 38.25,
+    lng: -110.15,
+    type: 'fuel',
+    routePointType: 'side_stop',
+    gas: { id: 'auto-fuel', name: 'Auto fuel', lat: 38.25, lng: -110.15, fuel_types: '', address: '' },
+  },
   { day: 1, name: 'Viewpoint', lat: 38.3, lng: -110.2, type: 'waypoint', routePointType: 'side_stop' },
   { day: 2, name: 'Camp', lat: 37.9, lng: -111, type: 'camp' },
-]);
+] as const;
+const durableStops = filterDurableNavigationStops(stopsForPersistence);
 assertRouteBuilderContract(durableStops.map(stop => stop.name).join('|') === 'Moab|Fuel|Camp', 'durable stop filtering');
+assertRouteBuilderContract(
+  filterPersistableGasStops(stopsForPersistence).map(stop => stop.name).join('|') === 'Auto fuel',
+  'side-stop fuel stays available for saved trip metadata',
+);
+
+assertRouteBuilderContract(persistedTripShape({ tripShapeMode: 'one_way' }) === 'one_way', 'one-way builder shape hydration');
+assertRouteBuilderContract(persistedTripShape({ tripShapeMode: 'loop' }) === 'loop', 'loop builder shape hydration');
+assertRouteBuilderContract(persistedTripShape({ tripShapeMode: 'there_and_back' }) === 'there_and_back', 'there-and-back builder shape hydration');
+assertRouteBuilderContract(persistedTripShape({ tripLoop: true }) === null, 'ambiguous legacy loop flag is not treated as an explicit shape');
 
 const daySegments = computeDaySegmentsFromRouteGeometry({
   geometry: {

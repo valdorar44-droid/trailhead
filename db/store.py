@@ -86,6 +86,47 @@ def _remove_legacy_rows_for_deleted_trip_documents(db: sqlite3.Connection) -> No
              )"""
     )
 
+
+def _backfill_embedded_trip_payloads(db: sqlite3.Connection) -> None:
+    """Move large trip fields into their dedicated columns once, in place."""
+    rows = db.execute(
+        """SELECT id,plan,route_geometry,builder_state,audio_guide FROM trips
+           WHERE plan LIKE '%\"route_geometry\"%'
+              OR plan LIKE '%\"builder_state\"%'
+              OR plan LIKE '%\"audio_guide\"%'"""
+    ).fetchall()
+    for row in rows:
+        try:
+            stored = json.loads(row["plan"])
+        except (TypeError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(stored, dict):
+            continue
+        changed = False
+        promoted: dict[str, str | None] = {
+            "route_geometry": row["route_geometry"],
+            "builder_state": row["builder_state"],
+            "audio_guide": row["audio_guide"],
+        }
+        for field in promoted:
+            if field not in stored:
+                continue
+            embedded = stored.pop(field)
+            changed = True
+            if promoted[field] is None and embedded is not None:
+                promoted[field] = json.dumps(embedded)
+        if changed:
+            db.execute(
+                """UPDATE trips SET plan=?,route_geometry=?,builder_state=?,audio_guide=? WHERE id=?""",
+                (
+                    json.dumps(stored),
+                    promoted["route_geometry"],
+                    promoted["builder_state"],
+                    promoted["audio_guide"],
+                    row["id"],
+                ),
+            )
+
 def init_db():
     db = _conn()
     db.executescript("""
@@ -1671,6 +1712,7 @@ def init_db():
         )
     except Exception:
         pass
+    _backfill_embedded_trip_payloads(db)
     db.commit()
     db.close()
     try:
@@ -1701,6 +1743,13 @@ def cleanup_stale_data():
         # Keep analytics for 90 days
         cutoff = now - 90 * 86400
         db.execute("DELETE FROM analytics_events WHERE created_at < ?", (cutoff,))
+        # Completed planner payloads can contain full route geometry. Trips are
+        # already persisted separately, so old job envelopes need not live forever.
+        plan_job_cutoff = now - 7 * 86400
+        db.execute(
+            "DELETE FROM plan_jobs WHERE status IN ('done','failed') AND updated_at < ?",
+            (plan_job_cutoff,),
+        )
         db.commit(); db.close()
     except Exception:
         pass
@@ -1744,7 +1793,305 @@ def clear_conversation(session_id: str):
 
 # ── Trips ─────────────────────────────────────────────────────────────────────
 
-def save_trip(trip_id: str, request: str, plan: dict, user_id: int | None = None):
+_ROUTE_GEOMETRY_UNSET = object()
+_BUILDER_STATE_UNSET = object()
+_AUDIO_GUIDE_UNSET = object()
+_ACCOUNT_TRIP_FIELD_UNSET = object()
+
+
+def _legacy_waypoint_item_kind(waypoint: dict) -> str:
+    waypoint_type = str(waypoint.get("type") or waypoint.get("kind") or "place").strip().lower()
+    if waypoint_type == "start":
+        return "start"
+    if waypoint_type in {"destination", "finish", "end"}:
+        return "destination"
+    if waypoint_type in {"camp", "motel", "lodging", "stay"}:
+        return "camp"
+    if waypoint_type in {"trail", "trailhead", "hike"}:
+        return "trail"
+    if waypoint_type in {"activity", "attraction", "experience", "bookable_experience", "tour"}:
+        return "activity"
+    if waypoint_type in {"fuel", "gas"}:
+        return "fuel"
+    if waypoint_type == "water":
+        return "water"
+    if waypoint_type in {"food", "grocery", "restaurant"}:
+        return "food"
+    if waypoint_type in {"service", "shower", "mechanic", "dump", "propane"}:
+        return "service"
+    if waypoint_type == "note":
+        return "note"
+    return "place"
+
+
+def _legacy_waypoint_coordinates(waypoint: dict) -> dict | None:
+    coordinates = waypoint.get("coordinates") if isinstance(waypoint.get("coordinates"), dict) else {}
+    try:
+        lat = float(waypoint.get("lat") if waypoint.get("lat") is not None else coordinates.get("lat"))
+        lng = float(waypoint.get("lng") if waypoint.get("lng") is not None else coordinates.get("lng"))
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    return {"lat": lat, "lng": lng}
+
+
+def _legacy_source_waypoint(item: dict) -> dict:
+    facts = item.get("facts") if isinstance(item.get("facts"), dict) else {}
+    waypoint = facts.get("legacyWaypoint") or facts.get("legacy_waypoint")
+    return waypoint if isinstance(waypoint, dict) else {}
+
+
+def _v2_item_is_legacy_route_owned(item: dict, trip_id: str) -> bool:
+    if not isinstance(item, dict):
+        return True
+    if _legacy_source_waypoint(item):
+        return True
+    if item.get("name") and not item.get("title"):
+        return True
+    item_id = str(item.get("id") or "")
+    if item_id.startswith(f"{trip_id}:waypoint:"):
+        return True
+    return str(item.get("kind") or "").strip().lower() in {"start", "destination"}
+
+
+def _legacy_waypoint_match_key(waypoint: dict) -> tuple[str, float | None, float | None]:
+    title = str(waypoint.get("name") or waypoint.get("title") or "").strip().casefold()
+    coordinates = _legacy_waypoint_coordinates(waypoint)
+    return (
+        title,
+        round(float(coordinates["lat"]), 5) if coordinates else None,
+        round(float(coordinates["lng"]), 5) if coordinates else None,
+    )
+
+
+def _canonical_v2_items_from_legacy_waypoints(
+    trip_id: str,
+    waypoints: list[dict],
+    existing_items: list[dict],
+    now: int,
+) -> list[dict]:
+    """Project route waypoints into V2 items without dropping V2-only itinerary items."""
+    existing = [dict(item) for item in existing_items if isinstance(item, dict)]
+    used_existing: set[int] = set()
+    known_route_indices = [
+        index for index, item in enumerate(existing)
+        if _v2_item_is_legacy_route_owned(item, trip_id)
+    ]
+
+    def source_id(value: dict) -> str:
+        return str(value.get("id") or value.get("entity_id") or "").strip()
+
+    def find_match(waypoint: dict, route_position: int) -> int | None:
+        waypoint_id = source_id(waypoint)
+        if waypoint_id:
+            for index, item in enumerate(existing):
+                if index in used_existing:
+                    continue
+                legacy = _legacy_source_waypoint(item)
+                if waypoint_id in {source_id(legacy), str(item.get("entity_id") or "").strip()}:
+                    return index
+
+        match_key = _legacy_waypoint_match_key(waypoint)
+        for index, item in enumerate(existing):
+            if index in used_existing or str(item.get("kind") or "").lower() in {"activity", "note"}:
+                continue
+            if _legacy_waypoint_match_key({
+                "name": item.get("title"),
+                "coordinates": item.get("coordinates"),
+            }) == match_key:
+                return index
+
+        ordered_route_indices = [
+            *known_route_indices[route_position:],
+            *known_route_indices[:route_position],
+        ]
+        for index in ordered_route_indices:
+            if index not in used_existing:
+                return index
+        return None
+
+    route_items: list[dict] = []
+    occupied_ids = {str(item.get("id") or "") for item in existing if item.get("id")}
+    for route_position, raw_waypoint in enumerate(waypoints):
+        if not isinstance(raw_waypoint, dict):
+            continue
+        waypoint = dict(raw_waypoint)
+        title = str(waypoint.get("name") or waypoint.get("title") or "").strip()
+        if not title:
+            continue
+        matched_index = find_match(waypoint, route_position)
+        matched = existing[matched_index] if matched_index is not None else {}
+        if matched_index is not None:
+            used_existing.add(matched_index)
+
+        item_id = str(matched.get("id") or "").strip()
+        if not item_id:
+            identity = source_id(waypoint) or "|".join(map(str, _legacy_waypoint_match_key(waypoint)))
+            digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:12]
+            item_id = f"{trip_id}:waypoint:{digest}"[:240]
+            suffix = 2
+            base_id = item_id
+            while item_id in occupied_ids:
+                item_id = f"{base_id[:235]}:{suffix}"
+                suffix += 1
+        occupied_ids.add(item_id)
+
+        facts = dict(matched.get("facts")) if isinstance(matched.get("facts"), dict) else {}
+        facts.pop("legacyWaypoint", None)
+        facts["legacy_waypoint"] = waypoint
+        try:
+            day = max(1, int(waypoint.get("day") or 1))
+        except (TypeError, ValueError):
+            day = 1
+        item = {
+            **matched,
+            "schema_version": 1,
+            "id": item_id,
+            "kind": _legacy_waypoint_item_kind(waypoint),
+            "title": title,
+            "summary": str(waypoint.get("description") or waypoint.get("summary") or "").strip() or None,
+            "day": day,
+            "order": route_position,
+            "facts": facts,
+            "created_at": matched.get("created_at") or now,
+            "updated_at": now,
+        }
+        for legacy_key in ("name", "type", "lat", "lng", "route_point_type", "routePointType"):
+            item.pop(legacy_key, None)
+        coordinates = _legacy_waypoint_coordinates(waypoint)
+        if coordinates:
+            item["coordinates"] = coordinates
+        else:
+            item.pop("coordinates", None)
+        waypoint_id = source_id(waypoint)
+        if waypoint_id:
+            item["entity_id"] = str(matched.get("entity_id") or waypoint_id)
+        if waypoint.get("notes") is not None:
+            item["note"] = waypoint.get("notes")
+        route_items.append(item)
+
+    preserved_items = [
+        item for index, item in enumerate(existing)
+        if index not in used_existing and not _v2_item_is_legacy_route_owned(item, trip_id)
+    ]
+    combined = [*route_items, *preserved_items]
+    return sorted(
+        combined,
+        key=lambda item: (
+            max(1, int(item.get("day") or 1)) if str(item.get("day") or "1").isdigit() else 1,
+            int(item.get("order") or 0) if str(item.get("order") or "0").lstrip("-").isdigit() else 0,
+            str(item.get("id") or ""),
+        ),
+    )
+
+
+def _canonical_v2_days_from_legacy(days: list[dict], existing_days: list[dict]) -> list[dict]:
+    existing_by_day = {
+        int(day.get("day")): day
+        for day in existing_days
+        if isinstance(day, dict) and str(day.get("day") or "").isdigit()
+    }
+    normalized: list[dict] = []
+    for index, raw_day in enumerate(days, start=1):
+        if not isinstance(raw_day, dict):
+            continue
+        try:
+            day_number = max(1, int(raw_day.get("day") or index))
+        except (TypeError, ValueError):
+            day_number = index
+        existing = existing_by_day.get(day_number, {})
+        normalized.append({
+            **existing,
+            "day": day_number,
+            "title": str(raw_day.get("title") or existing.get("title") or f"Day {day_number}"),
+            "summary": str(raw_day.get("summary") or raw_day.get("description") or existing.get("summary") or "").strip() or None,
+            "date": raw_day.get("date") or existing.get("date"),
+        })
+    return normalized
+
+
+def _sync_v2_trip_from_legacy_write(
+    db: sqlite3.Connection,
+    user_id: int | None,
+    trip_id: str,
+    trip: dict,
+    request: str,
+    route_geometry: dict | None | object,
+    builder_state: dict | None | object,
+    replace_route_geometry: bool,
+    replace_builder_state: bool,
+    now: int,
+    sync_plan: bool = True,
+) -> int | None:
+    if user_id is None:
+        return None
+    row = db.execute(
+        "SELECT status,revision,document_json FROM trip_documents_v2 WHERE user_id=? AND id=?",
+        (user_id, trip_id),
+    ).fetchone()
+    if not row or row["status"] == "deleted":
+        return None
+    try:
+        document = json.loads(row["document_json"] or "{}")
+    except Exception:
+        document = {}
+    if not isinstance(document, dict):
+        document = {}
+    plan = trip.get("plan") if isinstance(trip.get("plan"), dict) else {}
+    legacy_days = plan.get("daily_itinerary") if isinstance(plan.get("daily_itinerary"), list) else None
+    legacy_waypoints = plan.get("waypoints") if isinstance(plan.get("waypoints"), list) else None
+    document.update({"schema_version": 2, "trip_id": trip_id})
+    if sync_plan:
+        document.update({
+            "title": str(plan.get("trip_name") or document.get("title") or "Untitled route")[:200],
+            "summary": plan.get("overview") or document.get("summary"),
+            "regions": plan.get("states") if isinstance(plan.get("states"), list) else document.get("regions", []),
+            "days": _canonical_v2_days_from_legacy(
+                legacy_days,
+                document.get("days") if isinstance(document.get("days"), list) else [],
+            ) if legacy_days is not None else document.get("days", []),
+            "items": _canonical_v2_items_from_legacy_waypoints(
+                trip_id,
+                legacy_waypoints,
+                document.get("items") if isinstance(document.get("items"), list) else [],
+                now,
+            ) if legacy_waypoints is not None else document.get("items", []),
+        })
+    if replace_route_geometry:
+        document["route"] = route_geometry if isinstance(route_geometry, dict) else {}
+    legacy = document.get("legacy_v1") if isinstance(document.get("legacy_v1"), dict) else {}
+    legacy.update({"request": request, "trip": trip})
+    if replace_route_geometry:
+        legacy["route_geometry"] = route_geometry if isinstance(route_geometry, dict) else None
+    if replace_builder_state:
+        legacy["builder_state"] = builder_state if isinstance(builder_state, dict) else None
+    document["legacy_v1"] = legacy
+    new_revision = int(row["revision"] or 1) + 1
+    db.execute(
+        """UPDATE trip_documents_v2
+           SET revision=?,document_json=?,updated_at=?
+           WHERE user_id=? AND id=? AND status!='deleted'""",
+        (new_revision, json.dumps(document, separators=(",", ":")), now, user_id, trip_id),
+    )
+    return new_revision
+
+
+def save_trip(
+    trip_id: str,
+    request: str,
+    plan: dict,
+    user_id: int | None = None,
+    route_geometry: dict | None | object = _ROUTE_GEOMETRY_UNSET,
+    builder_state: dict | None | object = _BUILDER_STATE_UNSET,
+    audio_guide: dict | None | object = _AUDIO_GUIDE_UNSET,
+    expected_version: int | None = None,
+) -> int | None:
+    stored_plan = dict(plan)
+    stored_plan.pop("route_geometry", None)
+    stored_plan.pop("builder_state", None)
+    stored_plan.pop("audio_guide", None)
+    stored_plan_json = json.dumps(stored_plan)
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -1757,23 +2104,73 @@ def save_trip(trip_id: str, request: str, plan: dict, user_id: int | None = None
             ).fetchone()
             if deleted_v2:
                 raise RevisionConflictError(int(deleted_v2["revision"] or 1))
-        existing = db.execute("SELECT user_id FROM trips WHERE id=?", (trip_id,)).fetchone()
+        existing = db.execute("SELECT user_id,version FROM trips WHERE id=?", (trip_id,)).fetchone()
         if existing and existing["user_id"] != user_id:
             raise PermissionError("Not authorized")
+        if existing and expected_version is not None and int(existing["version"] or 1) != int(expected_version):
+            raise RevisionConflictError(int(existing["version"] or 1))
         if existing:
+            replace_route_geometry = route_geometry is not _ROUTE_GEOMETRY_UNSET
+            replace_builder_state = builder_state is not _BUILDER_STATE_UNSET
+            replace_audio_guide = audio_guide is not _AUDIO_GUIDE_UNSET
             db.execute(
-                """UPDATE trips SET request=?,plan=?,updated_at=?,version=COALESCE(version,1)+1
+                """UPDATE trips SET request=?,plan=?,
+                          route_geometry=CASE WHEN ? THEN ? ELSE route_geometry END,
+                          builder_state=CASE WHEN ? THEN ? ELSE builder_state END,
+                          audio_guide=CASE WHEN ? THEN ? ELSE audio_guide END,
+                          updated_at=?,version=COALESCE(version,1)+1
                    WHERE id=? AND user_id IS ?""",
-                (request, json.dumps(plan), now, trip_id, user_id),
+                (
+                    request,
+                    stored_plan_json,
+                    replace_route_geometry,
+                    json.dumps(route_geometry) if replace_route_geometry and route_geometry is not None else None,
+                    replace_builder_state,
+                    json.dumps(builder_state) if replace_builder_state and builder_state is not None else None,
+                    replace_audio_guide,
+                    json.dumps(audio_guide) if replace_audio_guide and audio_guide is not None else None,
+                    now,
+                    trip_id,
+                    user_id,
+                ),
             )
         else:
             db.execute(
                 """INSERT INTO trips
-                   (id,user_id,created_at,updated_at,request,plan,version)
-                   VALUES (?,?,?,?,?,?,1)""",
-                (trip_id, user_id, now, now, request, json.dumps(plan)),
+                   (id,user_id,created_at,updated_at,request,plan,route_geometry,builder_state,audio_guide,version)
+                   VALUES (?,?,?,?,?,?,?,?,?,1)""",
+                (
+                    trip_id,
+                    user_id,
+                    now,
+                    now,
+                    request,
+                    stored_plan_json,
+                    json.dumps(route_geometry)
+                    if route_geometry is not _ROUTE_GEOMETRY_UNSET and route_geometry is not None
+                    else None,
+                    json.dumps(builder_state)
+                    if builder_state is not _BUILDER_STATE_UNSET and builder_state is not None
+                    else None,
+                    json.dumps(audio_guide)
+                    if audio_guide is not _AUDIO_GUIDE_UNSET and audio_guide is not None
+                    else None,
+                ),
             )
+        synced_v2_revision = _sync_v2_trip_from_legacy_write(
+            db,
+            user_id,
+            trip_id,
+            stored_plan,
+            request,
+            route_geometry,
+            builder_state,
+            route_geometry is not _ROUTE_GEOMETRY_UNSET,
+            builder_state is not _BUILDER_STATE_UNSET,
+            now,
+        )
         db.commit()
+        return synced_v2_revision
     except Exception:
         db.rollback()
         raise
@@ -1810,10 +2207,25 @@ def save_account_trip(
     trip: dict,
     user_id: int,
     request: str = "",
-    route_geometry: dict | None = None,
-    builder_state: dict | None = None,
+    route_geometry: dict | None | object = _ACCOUNT_TRIP_FIELD_UNSET,
+    builder_state: dict | None | object = _ACCOUNT_TRIP_FIELD_UNSET,
     source: str = "web",
 ) -> dict:
+    stored_trip = dict(trip)
+    embedded_route_present = "route_geometry" in stored_trip
+    embedded_builder_present = "builder_state" in stored_trip
+    embedded_audio_present = "audio_guide" in stored_trip
+    embedded_route_geometry = stored_trip.pop("route_geometry", None)
+    embedded_builder_state = stored_trip.pop("builder_state", None)
+    embedded_audio_guide = stored_trip.pop("audio_guide", None)
+    if route_geometry is _ACCOUNT_TRIP_FIELD_UNSET and embedded_route_present:
+        route_geometry = embedded_route_geometry
+    if builder_state is _ACCOUNT_TRIP_FIELD_UNSET and embedded_builder_present:
+        builder_state = embedded_builder_state
+    replace_route_geometry = route_geometry is not _ACCOUNT_TRIP_FIELD_UNSET
+    replace_builder_state = builder_state is not _ACCOUNT_TRIP_FIELD_UNSET
+    replace_audio_guide = embedded_audio_present or replace_route_geometry
+    stored_trip_json = json.dumps(stored_trip)
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
@@ -1832,13 +2244,21 @@ def save_account_trip(
             raise PermissionError("Not authorized")
         if existing:
             db.execute(
-                """UPDATE trips SET request=?,plan=?,route_geometry=?,builder_state=?,source=?,
+                """UPDATE trips SET request=?,plan=?,
+                          route_geometry=CASE WHEN ? THEN ? ELSE route_geometry END,
+                          builder_state=CASE WHEN ? THEN ? ELSE builder_state END,
+                          audio_guide=CASE WHEN ? THEN ? ELSE audio_guide END,
+                          source=?,
                           updated_at=?,version=COALESCE(version,1)+1
                    WHERE id=? AND user_id=?""",
                 (
-                    request, json.dumps(trip),
-                    json.dumps(route_geometry) if route_geometry is not None else None,
-                    json.dumps(builder_state) if builder_state is not None else None,
+                    request, stored_trip_json,
+                    replace_route_geometry,
+                    json.dumps(route_geometry) if replace_route_geometry and route_geometry is not None else None,
+                    replace_builder_state,
+                    json.dumps(builder_state) if replace_builder_state and builder_state is not None else None,
+                    replace_audio_guide,
+                    json.dumps(embedded_audio_guide) if embedded_audio_present and embedded_audio_guide is not None else None,
                     source, now, trip_id, user_id,
                 ),
             )
@@ -1846,15 +2266,28 @@ def save_account_trip(
             db.execute(
                 """INSERT INTO trips
                    (id,user_id,created_at,updated_at,request,plan,route_geometry,
-                    builder_state,source,version)
-                   VALUES (?,?,?,?,?,?,?,?,?,1)""",
+                    builder_state,audio_guide,source,version)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
                 (
-                    trip_id, user_id, now, now, request, json.dumps(trip),
-                    json.dumps(route_geometry) if route_geometry is not None else None,
-                    json.dumps(builder_state) if builder_state is not None else None,
+                    trip_id, user_id, now, now, request, stored_trip_json,
+                    json.dumps(route_geometry) if replace_route_geometry and route_geometry is not None else None,
+                    json.dumps(builder_state) if replace_builder_state and builder_state is not None else None,
+                    json.dumps(embedded_audio_guide) if embedded_audio_present and embedded_audio_guide is not None else None,
                     source,
                 ),
             )
+        synced_v2_revision = _sync_v2_trip_from_legacy_write(
+            db,
+            user_id,
+            trip_id,
+            stored_trip,
+            request,
+            route_geometry,
+            builder_state,
+            replace_route_geometry,
+            replace_builder_state,
+            now,
+        )
         db.commit()
     except Exception:
         db.rollback()
@@ -1862,6 +2295,8 @@ def save_account_trip(
     finally:
         db.close()
     saved = get_trip(trip_id)
+    if saved and synced_v2_revision is not None:
+        saved["v2_revision"] = synced_v2_revision
     return saved if saved else trip
 
 def list_user_trips(user_id: int, limit: int = 25) -> list[dict]:
@@ -1895,20 +2330,56 @@ def list_user_trips(user_id: int, limit: int = 25) -> list[dict]:
 
 def save_trip_geometry(trip_id: str, user_id: int, route_geometry: dict) -> dict | None:
     db = _conn()
-    row = db.execute("SELECT user_id FROM trips WHERE id=?", (trip_id,)).fetchone()
-    if not row:
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute("SELECT user_id,plan,request FROM trips WHERE id=?", (trip_id,)).fetchone()
+        v2 = db.execute(
+            "SELECT status,document_json FROM trip_documents_v2 WHERE id=? AND user_id=?",
+            (trip_id, user_id),
+        ).fetchone()
+        if row and row["user_id"] != user_id:
+            raise PermissionError("Not authorized")
+        if not row and not v2:
+            db.rollback()
+            db.close()
+            return None
+        now = int(time.time())
+        if row:
+            db.execute(
+                """UPDATE trips SET route_geometry=?, updated_at=?, version=COALESCE(version,1)+1
+                   WHERE id=? AND user_id=?""",
+                (json.dumps(route_geometry), now, trip_id, user_id),
+            )
+            trip = json.loads(row["plan"] or "{}")
+            request = row["request"] or ""
+        else:
+            document = json.loads(v2["document_json"] or "{}") if v2 else {}
+            legacy = document.get("legacy_v1") if isinstance(document.get("legacy_v1"), dict) else {}
+            trip = legacy.get("trip") if isinstance(legacy.get("trip"), dict) else {
+                "trip_id": trip_id,
+                "plan": {
+                    "trip_name": document.get("title") or "Untitled route",
+                    "overview": document.get("summary") or "",
+                    "states": document.get("regions") or [],
+                    "daily_itinerary": document.get("days") or [],
+                    "waypoints": document.get("items") or [],
+                },
+            }
+            request = str(legacy.get("request") or "")
+        synced_v2_revision = _sync_v2_trip_from_legacy_write(
+            db, user_id, trip_id, trip, request, route_geometry,
+            _BUILDER_STATE_UNSET, True, False, now, sync_plan=False,
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
         db.close()
-        return None
-    if row["user_id"] != user_id:
-        db.close()
-        raise PermissionError("Not authorized")
-    db.execute(
-        """UPDATE trips SET route_geometry=?, updated_at=?, version=COALESCE(version,1)+1
-           WHERE id=? AND user_id=?""",
-        (json.dumps(route_geometry), int(time.time()), trip_id, user_id)
-    )
-    db.commit(); db.close()
-    return get_trip(trip_id)
+        raise
+    db.close()
+    saved = get_trip(trip_id) or get_trip_document_v2(user_id, trip_id)
+    if saved and synced_v2_revision is not None:
+        saved["v2_revision"] = synced_v2_revision
+    return saved
 
 def save_audio_guide(trip_id: str, guide: dict, user_id: int | None = None):
     db = _conn()
@@ -5759,8 +6230,11 @@ def get_plan_job(job_id: str) -> dict | None:
 def update_plan_job(job_id: str, status: str, result: str | None = None, error: str | None = None) -> None:
     db = _conn()
     db.execute(
-        "UPDATE plan_jobs SET status=?, result=?, error=?, updated_at=? WHERE id=?",
-        (status, result, error, time.time(), job_id)
+        """UPDATE plan_jobs
+           SET status=?, result=CASE WHEN ? IS NULL THEN result ELSE ? END,
+               error=?, updated_at=?
+           WHERE id=? AND (status NOT IN ('done','failed') OR status=?)""",
+        (status, result, result, error, time.time(), job_id, status)
     )
     db.commit(); db.close()
 

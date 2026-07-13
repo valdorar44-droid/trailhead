@@ -1,4 +1,4 @@
-import React, { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import React, { forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { CampsitePin, MapSelectableFeature, Pin, Report, SuggestedWaterCorridorResponse, WaterSpotCard } from '@/lib/api';
@@ -10,6 +10,11 @@ import type { RouteProviderMode } from './types';
 import type { PremiumMapStyle } from './mapStyle';
 import { campMarkerVisual } from '@/lib/campMarkerVisual';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
+import {
+  routeGeometryMatchesWaypointsInOrder,
+  routeWaypointSignature as buildRouteWaypointSignature,
+} from '@/lib/routeWaypointSignature';
+import { isFullTripRouteRequest, routeMatchesTripContext } from '@/lib/routePersistencePolicy';
 
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
 
@@ -44,7 +49,7 @@ export interface NativeMapHandle {
   getVisibleMapCandidates: () => Promise<MapSelectableFeature[]>;
   getVisibleCenter: () => Promise<[number, number] | null>;
   getVisibleBounds: () => Promise<MapBounds | null>;
-  restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number) => void;
+  restoreRoute:   (coords: [number,number][], steps: RouteStep[], legs: RouteStep[][], td: number, tt: number, waypointSignature?: string) => void;
   setNavTarget:   (idx: number) => void;
 }
 
@@ -67,6 +72,7 @@ export interface NativeMapProps {
   navSpeed:      number | null;
   mapLayer:      string;
   premiumMapStyle?: string;
+  rendererMode?: 'mapbox' | 'maplibre';
   routeProviderMode?: RouteProviderMode;
   routeOpts:     RouteOpts;
   traceMode?: boolean;
@@ -95,7 +101,7 @@ export interface NativeMapProps {
   onTrailTap:       (name: string, lat: number, lng: number) => void;
   onWaypointTap:    (idx: number, name: string) => void;
   onRouteReady:     (result: RouteResult & { fromIdx: number }) => void;
-  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null; routeSource?: string | null; routeSourceLabel?: string | null }) => void;
+  onRoutePersist:   (data: { coords: [number,number][]; steps: RouteStep[]; legs: RouteStep[][]; totalDistance: number; totalDuration: number; tripId: string | null; routeSource?: string | null; routeSourceLabel?: string | null; routeWaypointSignature: string }) => void;
   onOffRoute?:      (lat: number, lng: number, distanceM: number) => void;
   onOffRouteWarn?:  (lat: number, lng: number, distanceM: number) => void;
   onBackOnRoute?:   () => void;
@@ -427,11 +433,48 @@ function premiumStyleLabel(style: PremiumMapStyle) {
   }
 }
 
-function syncWebRoute(map: any, waypoints: WP[]) {
+function decodePolyline6(encoded: string): [number, number][] {
+  const coords: [number, number][] = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  function readValue() {
+    let shift = 0;
+    let result = 0;
+    while (true) {
+      if (index >= encoded.length) return null;
+      const byte = encoded.charCodeAt(index) - 63;
+      index += 1;
+      if (byte < 0) return null;
+      result |= (byte & 0x1f) << shift;
+      if (byte < 0x20) return (result & 1) ? ~(result >> 1) : (result >> 1);
+      shift += 5;
+      if (shift > 30) return null;
+    }
+  }
+
+  while (index < encoded.length) {
+    const latDelta = readValue();
+    const lngDelta = readValue();
+    if (latDelta == null || lngDelta == null) return [];
+    lat += latDelta;
+    lng += lngDelta;
+    const coord: [number, number] = [lng / 1e6, lat / 1e6];
+    if (!Number.isFinite(coord[0]) || !Number.isFinite(coord[1]) || Math.abs(coord[0]) > 180 || Math.abs(coord[1]) > 90) return [];
+    const previous = coords[coords.length - 1];
+    if (!previous || Math.abs(previous[0] - coord[0]) >= 1e-7 || Math.abs(previous[1] - coord[1]) >= 1e-7) coords.push(coord);
+  }
+  return coords;
+}
+
+function routableWebWaypoints(waypoints: WP[]) {
+  return waypoints.filter(waypoint => waypoint.route_point_type !== 'side_stop')
+    .filter(waypoint => Number.isFinite(waypoint.lat) && Number.isFinite(waypoint.lng));
+}
+
+function syncWebRoute(map: any, coords: [number, number][]) {
   if (!map?.getStyle?.()) return;
-  const coords = waypoints
-    .filter(p => Number.isFinite(p.lat) && Number.isFinite(p.lng))
-    .map(p => [p.lng, p.lat]);
   const data: GeoJSON.FeatureCollection = {
     type: 'FeatureCollection',
     features: coords.length > 1 ? [{
@@ -894,13 +937,22 @@ function syncWebLandOverlay(map: any, visible: boolean) {
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const C = useTheme();
   const mapboxToken = useStore(st => st.mapboxToken);
-  const isMapboxWeb = !!mapboxToken;
+  const isMapboxWeb = props.rendererMode ? props.rendererMode === 'mapbox' : !!mapboxToken;
+  const rendererToken = isMapboxWeb ? mapboxToken : '';
   const isWebMap = true;
   const mapElRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<any>(null);
   const mapboxGlRef = useRef<any>(null);
   const markerRefs = useRef<any[]>([]);
   const routeReadyRef = useRef(false);
+  const authoritativeRouteRef = useRef<{
+    coords: [number, number][];
+    waypointSignature: string;
+    tripContextSignature: string;
+    scope: 'trip' | 'navigation' | 'search';
+  } | null>(null);
+  const routeRequestRef = useRef(0);
+  const routeAbortRef = useRef<AbortController | null>(null);
   const trailHighlightRef = useRef<GeoJSON.FeatureCollection>(emptyTrailHighlight());
   const suppressFeatureTapsRef = useRef(props.suppressFeatureTaps);
   const onMapTapRef = useRef(props.onMapTap);
@@ -909,6 +961,128 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const [mapboxError, setMapboxError] = useState('');
   const initialCenter = useMemo(() => firstUsableCenter(props), [props.userLoc, props.searchMarker, props.waypoints, props.camps]);
   const premiumStyle = (props.premiumMapStyle as PremiumMapStyle | undefined) ?? 'standard';
+  const waypointSignature = useMemo(() => buildRouteWaypointSignature(props.waypoints), [props.waypoints]);
+  const currentRouteCoords = useCallback(() => {
+    const authoritative = authoritativeRouteRef.current;
+    const tripContextSignature = buildRouteWaypointSignature(latestPropsRef.current.waypoints);
+    if (authoritative && routeMatchesTripContext(authoritative, tripContextSignature)) {
+      return authoritative.coords;
+    }
+    return [] as [number, number][];
+  }, []);
+
+  const loadWebRoute = useCallback(async (
+    requestedWaypoints: WP[],
+    fromIdx: number,
+    scope: 'trip' | 'navigation' | 'search',
+  ) => {
+    const waypoints = routableWebWaypoints(requestedWaypoints);
+    if (waypoints.length < 2) return;
+    const requestId = ++routeRequestRef.current;
+    routeAbortRef.current?.abort();
+    const controller = new AbortController();
+    routeAbortRef.current = controller;
+    const requestSignature = buildRouteWaypointSignature(waypoints);
+    const propsAtRequest = latestPropsRef.current;
+    const tripContextSignature = buildRouteWaypointSignature(propsAtRequest.waypoints);
+    const requestIsCurrent = () => requestId === routeRequestRef.current
+      && tripContextSignature === buildRouteWaypointSignature(latestPropsRef.current.waypoints);
+    try {
+      const response = await fetch(`${TRAILHEAD_API_BASE}/api/route`, {
+        method: 'POST',
+        signal: controller.signal,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          locations: waypoints.map(waypoint => ({
+            lat: waypoint.lat,
+            lon: waypoint.lng,
+            type: waypoint.route_point_type === 'through' ? 'through' : 'break',
+          })),
+          options: propsAtRequest.routeOpts,
+          units: 'miles',
+        }),
+      });
+      const data = await response.json();
+      if (!requestIsCurrent()) return;
+      if (!response.ok || data?.trip?.status !== 0) throw new Error('route-unavailable');
+
+      const legs: RouteStep[][] = [];
+      const steps: RouteStep[] = [];
+      const coords: [number, number][] = [];
+      for (const leg of data.trip.legs ?? []) {
+        const legCoords = decodePolyline6(String(leg.shape ?? ''));
+        coords.push(...legCoords);
+        const legSteps = (leg.maneuvers ?? []).map((maneuver: any) => {
+          const point = legCoords[Number(maneuver.begin_shape_index) || 0];
+          const step: RouteStep = {
+            type: Number(maneuver.type) === 4 ? 'arrive' : Number(maneuver.type) === 1 ? 'depart' : 'turn',
+            modifier: '',
+            name: maneuver.street_names?.[0] ?? '',
+            distance: Math.round((Number(maneuver.length) || 0) * 1609.344),
+            duration: Number(maneuver.time) || 0,
+            lat: point?.[1],
+            lng: point?.[0],
+            instruction: maneuver.instruction ?? '',
+            verbalPre: maneuver.verbal_pre_transition_instruction ?? maneuver.verbal_transition_alert_instruction ?? '',
+            verbalPost: maneuver.verbal_post_transition_instruction ?? '',
+            roundaboutExit: Number.isFinite(Number(maneuver.roundabout_exit_count))
+              ? Number(maneuver.roundabout_exit_count)
+              : null,
+          };
+          steps.push(step);
+          return step;
+        });
+        legs.push(legSteps);
+      }
+      if (!routeGeometryMatchesWaypointsInOrder(coords, waypoints)) throw new Error('route-incomplete');
+      if (!requestIsCurrent()) return;
+
+      const totalDistance = Math.round((Number(data.trip.summary?.length) || 0) * 1609.344);
+      const totalDuration = Number(data.trip.summary?.time) || 0;
+      authoritativeRouteRef.current = { coords, waypointSignature: requestSignature, tripContextSignature, scope };
+      if (mapRef.current && routeReadyRef.current) syncWebRoute(mapRef.current, coords);
+      latestPropsRef.current.onRouteReady?.({
+        coords,
+        steps,
+        legs,
+        totalDistance,
+        totalDuration,
+        isProper: true,
+        fromIdx,
+        routeSource: 'trailhead',
+        routeWaypointSignature: requestSignature,
+      });
+      const tripSignature = buildRouteWaypointSignature(latestPropsRef.current.waypoints);
+      if (scope === 'trip' && requestSignature === tripSignature) {
+        latestPropsRef.current.onRoutePersist?.({
+          coords,
+          steps,
+          legs,
+          totalDistance,
+          totalDuration,
+          tripId: useStore.getState().activeTrip?.trip_id ?? null,
+          routeSource: 'trailhead',
+          routeWaypointSignature: requestSignature,
+        });
+      }
+    } catch (error) {
+      if (!requestIsCurrent() || controller.signal.aborted) return;
+      const existingCoords = currentRouteCoords();
+      latestPropsRef.current.onRouteReady?.({
+        coords: existingCoords,
+        steps: [],
+        legs: [],
+        totalDistance: 0,
+        totalDuration: 0,
+        isProper: false,
+        keptExistingRoute: existingCoords.length >= 2,
+        fromIdx,
+        debug: 'Route could not be built. Check your stops and try again.',
+      });
+    } finally {
+      if (routeAbortRef.current === controller) routeAbortRef.current = null;
+    }
+  }, [currentRouteCoords]);
 
   useEffect(() => {
     latestPropsRef.current = props;
@@ -969,16 +1143,47 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       return nextZoom;
     },
     locate: (lat: number, lng: number) => mapRef.current?.flyTo?.({ center: [lng, lat], zoom: 13, essential: true }),
-    loadRouteFrom: noop,
-    rerouteFrom: noop,
-    routeToSearch: (lat: number, lng: number) => mapRef.current?.flyTo?.({
-      center: [lng, lat],
-      zoom: 12,
-      ...(isMapboxWeb && props.showTerrain ? { pitch: 58 } : { pitch: 0 }),
-      duration: isMapboxWeb && props.showTerrain ? 620 : 300,
-      essential: true,
-    }),
-    resetRoute: noop,
+    loadRouteFrom: (lat, lng, fromIdx) => {
+      const current = latestPropsRef.current.waypoints;
+      const requested = [
+        { lat, lng, name: 'Current location', day: 0, type: 'start' },
+        ...current.slice(fromIdx),
+      ];
+      const scope = isFullTripRouteRequest(
+        buildRouteWaypointSignature(requested),
+        buildRouteWaypointSignature(current),
+      )
+        ? 'trip'
+        : 'navigation';
+      void loadWebRoute(requested, scope === 'trip' ? 0 : fromIdx, scope);
+    },
+    rerouteFrom: (lat, lng, fromIdx) => {
+      const requested = [
+        { lat, lng, name: 'Current location', day: 0, type: 'start' },
+        ...latestPropsRef.current.waypoints.slice(fromIdx),
+      ];
+      void loadWebRoute(requested, fromIdx, 'navigation');
+    },
+    routeToSearch: (lat, lng, name, userLat, userLng) => {
+      mapRef.current?.flyTo?.({
+        center: [lng, lat],
+        zoom: 12,
+        ...(isMapboxWeb && props.showTerrain ? { pitch: 58 } : { pitch: 0 }),
+        duration: isMapboxWeb && props.showTerrain ? 620 : 300,
+        essential: true,
+      });
+      void loadWebRoute([
+        { lat: userLat, lng: userLng, name: 'Current location', day: 0, type: 'start' },
+        { lat, lng, name, day: 0, type: 'waypoint' },
+      ], 0, 'search');
+    },
+    resetRoute: () => {
+      routeRequestRef.current += 1;
+      routeAbortRef.current?.abort();
+      routeAbortRef.current = null;
+      authoritativeRouteRef.current = null;
+      if (mapRef.current && routeReadyRef.current) syncWebRoute(mapRef.current, []);
+    },
     stopNavigation: noop,
     highlightTrail: (lat: number, lng: number, name?: string) => {
       const map = mapRef.current;
@@ -1075,9 +1280,53 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const ne = bounds.getNorthEast();
       return { w: sw.lng, s: sw.lat, e: ne.lng, n: ne.lat, zoom: mapRef.current?.getZoom?.() ?? 0 };
     },
-    restoreRoute: noop,
+    restoreRoute: (coords, steps, legs, totalDistance, totalDuration, restoredWaypointSignature) => {
+      const clean = coords
+        .map(coord => [Number(coord?.[0]), Number(coord?.[1])] as [number, number])
+        .filter(coord => coord.every(Number.isFinite));
+      if (clean.length < 2) return;
+      routeRequestRef.current += 1;
+      routeAbortRef.current?.abort();
+      routeAbortRef.current = null;
+      const signature = restoredWaypointSignature ?? buildRouteWaypointSignature(latestPropsRef.current.waypoints);
+      authoritativeRouteRef.current = {
+        coords: clean,
+        waypointSignature: signature,
+        tripContextSignature: buildRouteWaypointSignature(latestPropsRef.current.waypoints),
+        scope: 'trip',
+      };
+      if (mapRef.current && routeReadyRef.current) syncWebRoute(mapRef.current, clean);
+      latestPropsRef.current.onRouteReady?.({
+        coords: clean,
+        steps,
+        legs,
+        totalDistance,
+        totalDuration,
+        isProper: true,
+        fromCache: true,
+        fromIdx: 0,
+        routeWaypointSignature: signature,
+      });
+    },
     setNavTarget: noop,
   }));
+
+  useEffect(() => {
+    const routable = routableWebWaypoints(props.waypoints);
+    if (routable.length < 2) {
+      routeRequestRef.current += 1;
+      routeAbortRef.current?.abort();
+      routeAbortRef.current = null;
+      authoritativeRouteRef.current = null;
+      if (mapRef.current && routeReadyRef.current) syncWebRoute(mapRef.current, []);
+      return;
+    }
+    const current = authoritativeRouteRef.current;
+    if (routeMatchesTripContext(current, waypointSignature) && current?.scope === 'trip') return;
+    authoritativeRouteRef.current = null;
+    if (mapRef.current && routeReadyRef.current) syncWebRoute(mapRef.current, []);
+    void loadWebRoute(routable, 0, 'trip');
+  }, [loadWebRoute, waypointSignature]);
 
   useEffect(() => {
     if (!isWebMap || !mapElRef.current || mapRef.current) return;
@@ -1111,7 +1360,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           routeReadyRef.current = true;
           props.onMapReady?.();
           props.onBoundsChange?.(currentBounds(mapRef.current));
-          syncWebRoute(mapRef.current, props.waypoints);
+          syncWebRoute(mapRef.current, currentRouteCoords());
           syncWebTrailHighlight(mapRef.current, trailHighlightRef.current);
           syncWebLandOverlay(mapRef.current, !!props.showLandOverlay);
           syncWebMarkers(mapgl, mapRef.current, props, markerRefs);
@@ -1156,7 +1405,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         delete (window as any).__trailheadWebMap;
       }
     };
-  }, [isWebMap, isMapboxWeb, mapboxToken]);
+  }, [currentRouteCoords, isWebMap, isMapboxWeb, rendererToken]);
 
   useEffect(() => {
     if (!isWebMap || !mapRef.current) return;
@@ -1168,7 +1417,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     }
     mapRef.current.once('style.load', () => {
       routeReadyRef.current = true;
-      syncWebRoute(mapRef.current, props.waypoints);
+      syncWebRoute(mapRef.current, currentRouteCoords());
       syncWebTrailHighlight(mapRef.current, trailHighlightRef.current);
       syncWebLandOverlay(mapRef.current, !!latestPropsRef.current.showLandOverlay);
       if (isMapboxWeb && mapRef.current?.setConfigProperty) {
@@ -1177,7 +1426,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         });
       }
     });
-  }, [isWebMap, isMapboxWeb, premiumStyle, props.showTerrain]);
+  }, [currentRouteCoords, isWebMap, isMapboxWeb, premiumStyle, props.showTerrain]);
 
   useEffect(() => {
     if (!isWebMap || !mapRef.current || !routeReadyRef.current) return;
@@ -1186,8 +1435,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
 
   useEffect(() => {
     if (!isWebMap || !mapRef.current || !routeReadyRef.current) return;
-    syncWebRoute(mapRef.current, props.waypoints);
-  }, [isWebMap, props.waypoints]);
+    const authoritative = authoritativeRouteRef.current;
+    if (authoritative && !routeMatchesTripContext(authoritative, waypointSignature)) {
+      authoritativeRouteRef.current = null;
+    }
+    syncWebRoute(mapRef.current, currentRouteCoords());
+  }, [currentRouteCoords, isWebMap, waypointSignature]);
 
   useEffect(() => {
     if (!isWebMap || !mapRef.current || !mapboxGlRef.current) return;

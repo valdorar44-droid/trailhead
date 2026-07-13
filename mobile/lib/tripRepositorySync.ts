@@ -34,6 +34,12 @@ import {
   processTripRepositoryOutbox,
   retryEligibleTripRepositoryEntryIds,
 } from './tripRepository/syncEngine';
+import {
+  deleteRemoteTripWithRevisionRebase,
+  isOutboxEntrySupersededByDelete,
+} from './tripRepository/deleteSync';
+
+export { deleteRemoteTripWithRevisionRebase } from './tripRepository/deleteSync';
 
 export type TripRepositorySyncResult = {
   completed: number;
@@ -403,6 +409,13 @@ function expectedServerRevision(entry: RepositoryOutboxEntryV1): number {
   return Math.max(0, Number(entry.revision ?? 1) - 1);
 }
 
+function tripDeleteRebaseMode(entry: RepositoryOutboxEntryV1) {
+  const payload = record(entry.payload);
+  return payload.kind === 'trip_deletion' && payload.mode === 'explicit'
+    ? 'explicit' as const
+    : 'draft-only' as const;
+}
+
 async function syncSavedEntity(session: ActiveSyncSession, entry: RepositoryOutboxEntryV1) {
   const expectedRevision = expectedServerRevision(entry);
   const encodedId = encodeURIComponent(entry.entityId);
@@ -433,14 +446,20 @@ async function syncSavedEntity(session: ActiveSyncSession, entry: RepositoryOutb
 }
 
 async function syncTrip(session: ActiveSyncSession, entry: RepositoryOutboxEntryV1) {
+  const currentOutbox = getTripRepositoryOutbox();
+  const currentEntry = currentOutbox.find(candidate => candidate.id === entry.id) ?? entry;
+  if (isOutboxEntrySupersededByDelete(currentEntry, currentOutbox)) return;
   const expectedRevision = expectedServerRevision(entry);
   const encodedId = encodeURIComponent(entry.entityId);
   const headers = { 'Idempotency-Key': entry.idempotencyKey };
   if (entry.operation === 'delete') {
-    await syncRequest(session, `/api/trips/v2/${encodedId}?expected_revision=${expectedRevision}`, {
-      method: 'DELETE',
-      headers,
-    });
+    await deleteRemoteTripWithRevisionRebase(
+      entry.entityId,
+      expectedRevision,
+      entry.idempotencyKey,
+      (path, options) => syncRequest(session, path, options),
+      { mode: tripDeleteRebaseMode(entry) },
+    );
     return;
   }
   const trip = entry.payload as TripDocumentV2 | undefined;
@@ -612,8 +631,23 @@ async function runSync(session: ActiveSyncSession): Promise<TripRepositorySyncRe
     acknowledge: entry => acknowledgeTripRepositoryOutbox([entry.id]),
     fail: (entry, message) => failTripRepositoryOutbox([entry.id], message),
     resolveFailure: async (entry, error) => {
+      const currentOutbox = getTripRepositoryOutbox();
+      const currentEntry = currentOutbox.find(candidate => candidate.id === entry.id) ?? entry;
+      if (isOutboxEntrySupersededByDelete(currentEntry, currentOutbox)) {
+        return { resolved: true, conflict: false, message: 'A newer deletion replaced this change.' };
+      }
       const failure = publicSyncError(error);
       if (failure.conflict) {
+        if (entry.entityType === 'trip' && entry.operation === 'delete') {
+          const draftCleanup = tripDeleteRebaseMode(entry) === 'draft-only';
+          return {
+            resolved: false,
+            conflict: true,
+            message: draftCleanup
+              ? 'This draft changed on another device. Trailhead will retry deleting it.'
+              : 'This trip changed on another device. Trailhead will retry deleting it.',
+          };
+        }
         try {
           await preserveRemoteConflict(session, entry);
           return { resolved: true, conflict: true, message: 'Changes from both devices were kept as separate copies.' };

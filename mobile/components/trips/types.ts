@@ -1,5 +1,6 @@
 import type { TripResult } from '@/lib/api';
 import type { SavedEntityV1, TripDocumentV2 } from '@/lib/tripRepository';
+import type { TripPreviewPin } from './tripPreview';
 
 export type TripLibraryFilter = 'draft' | 'saved' | 'archived';
 
@@ -20,6 +21,8 @@ export type TripLibraryItem = {
   activeMonitorCount: number;
   monitorState: 'active' | 'attention' | 'inactive' | null;
   noteCount: number | null;
+  previewImageUrl?: string;
+  previewPins: TripPreviewPin[];
   document: TripDocumentV2;
   compatibilityTrip?: TripResult;
 };

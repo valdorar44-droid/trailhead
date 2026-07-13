@@ -342,6 +342,74 @@ class TripGraphV2StoreTests(unittest.TestCase):
         self.assertEqual(migrated["revision"], projected["revision"] + 1)
         self.assertEqual(migrated["title"], "Migrated route")
 
+    def test_v2_delete_removes_legacy_row_and_blocks_legacy_resurrection(self):
+        store.save_account_trip(
+            "legacy_deleted_trip",
+            {
+                "trip_id": "legacy_deleted_trip",
+                "plan": {"trip_name": "Delete this route"},
+            },
+            self.user_one,
+            source="mobile-route-builder",
+        )
+        projected = store.get_trip_document_v2(self.user_one, "legacy_deleted_trip")
+        deleted_document = dict(projected)
+        deleted_document["status"] = "deleted"
+        deleted = store.upsert_trip_document_v2(
+            self.user_one,
+            "legacy_deleted_trip",
+            deleted_document,
+            projected["revision"],
+            "delete-legacy-pair",
+        )
+
+        self.assertEqual(deleted["status"], "deleted")
+        self.assertIsNone(store.get_trip("legacy_deleted_trip"))
+        self.assertEqual(store.list_user_trips(self.user_one), [])
+        self.assertEqual(
+            store.get_trip_document_v2(
+                self.user_one, "legacy_deleted_trip", include_deleted=True,
+            )["revision"],
+            deleted["revision"],
+        )
+        replay = store.upsert_trip_document_v2(
+            self.user_one,
+            "legacy_deleted_trip",
+            deleted_document,
+            projected["revision"],
+            "delete-legacy-pair",
+        )
+        self.assertEqual(replay, deleted)
+        self.assertIsNone(store.get_trip("legacy_deleted_trip"))
+        with self.assertRaises(store.RevisionConflictError):
+            store.save_account_trip(
+                "legacy_deleted_trip",
+                {
+                    "trip_id": "legacy_deleted_trip",
+                    "plan": {"trip_name": "Old client restore"},
+                },
+                self.user_one,
+            )
+
+        db = store._conn()
+        db.execute(
+            """INSERT INTO trips
+               (id,user_id,created_at,updated_at,request,plan,source,version)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (
+                "legacy_deleted_trip", self.user_one, 1, 1, "",
+                json.dumps({
+                    "trip_id": "legacy_deleted_trip",
+                    "plan": {"trip_name": "Stale legacy copy"},
+                }),
+                "old-client", 1,
+            ),
+        )
+        db.commit()
+        db.close()
+        store.init_db()
+        self.assertIsNone(store.get_trip("legacy_deleted_trip"))
+
     def test_account_deletion_removes_library_trip_and_idempotency_records(self):
         store.upsert_saved_entity(
             self.user_one, "thp_delete", "place", "Delete me", {}, 0,

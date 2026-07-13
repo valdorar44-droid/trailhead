@@ -15,16 +15,13 @@ import { api, ApiError, PaywallError, TripResult } from '@/lib/api';
 import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import TourTarget from '@/components/TourTarget';
-import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
 import CopilotBriefCard from '@/components/copilot/CopilotBriefCard';
-import PlannerStarterRow from '@/components/planning/PlannerStarterRow';
 import PlanWorkspaceSwitcher from '@/components/plan/PlanWorkspaceSwitcher';
 import AiReportModal from '@/components/AiReportModal';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
 import { saveOfflineTrip, loadOfflineTrip } from '@/lib/offlineTrips';
 import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
-import { CREDIT_REWARDS } from '@/lib/credits';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { mergeTripPreferencesIntoRigContext, tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 import { accountStorage } from '@/lib/storage';
@@ -36,29 +33,27 @@ const STARTER_PROMPTS = [
   {
     title: 'Plan 3 days from Moab to Telluride',
     icon: 'trail-sign-outline',
-    body: 'Scenic roads, camp options, fuel checks.',
+    body: 'Scenic roads · Camps · Fuel',
     text: 'Plan a 3-day trip from Moab to Telluride with scenic roads, camp options, fuel checks, and realistic first-day pacing.',
   },
   {
     title: 'Find a quiet weekend near Asheville',
     icon: 'moon-outline',
-    body: 'Short drives, legal camps, easy morning exit.',
+    body: 'Short drives · Quiet camps · Easy exit',
     text: 'Find a quiet weekend trip near Asheville with short drives, legal camps, and an easy morning exit.',
   },
 ];
 
 const CHAT_STAGES  = [
-  'Reading your trip notes...',
-  'Checking the route shape...',
-  'Preparing the next step...',
+  'Reviewing the route',
+  'Checking stops and timing',
+  'Preparing an update',
 ];
-// Long trips (7+ days) can take 1-2 minutes — we surface an extra stage at ~20s
 const PLAN_STAGES_LONG = [
-  'Drafting the route...',
-  'Longer trips can take a minute. Keeping the days realistic.',
-  'Balancing drive time, fuel, and camp nights...',
-  'Checking towns, trailheads, and backup options...',
-  'Polishing the trip plan...',
+  'Drafting the route',
+  'Balancing drive time and camp nights',
+  'Checking fuel and backup stops',
+  'Reviewing each day',
 ];
 
 type PlanPhase = 'idle' | 'chatting' | 'ready' | 'planning' | 'active' | 'editing';
@@ -72,11 +67,40 @@ interface Message {
 
 function userFacingPlannerText(text?: string) {
   const clean = (text ?? '').trim();
-  if (!clean) return 'I updated the trip. Review the map pins and daily route before you head out.';
+  if (!clean) return 'Trip updated. Review the route and stops before you leave.';
   if (/(lat\/lng|latitude|longitude|coordinates|geocod|added .*coord|debug|internal)/i.test(clean)) {
-    return 'I updated the trip stops and map pins. Review the route, camps, and fuel stops on the map.';
+    return 'Trip stops updated. Review the route, camps, and fuel stops on the map.';
   }
   return clean;
+}
+
+function savedPlaceKind(icon: string) {
+  if (icon === 'camp') return 'Camp';
+  if (icon === 'fuel') return 'Fuel';
+  if (icon === 'water') return 'Water';
+  if (icon === 'flag') return 'Stop';
+  return 'Saved place';
+}
+
+function savedPlaceIcon(icon: string): keyof typeof Ionicons.glyphMap {
+  if (icon === 'camp') return 'bookmark-outline';
+  if (icon === 'fuel') return 'car-outline';
+  if (icon === 'water') return 'water-outline';
+  if (icon === 'flag') return 'flag-outline';
+  if (icon === 'star') return 'star-outline';
+  return 'location-outline';
+}
+
+function recentDate(timestamp: number) {
+  const value = timestamp < 1_000_000_000_000 ? timestamp * 1000 : timestamp;
+  const date = new Date(value);
+  const now = new Date();
+  const dayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const dateStart = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const dayDifference = Math.round((dayStart - dateStart) / 86_400_000);
+  if (dayDifference === 0) return 'Today';
+  if (dayDifference === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 function appendAiMessage(messages: Message[], text?: string): Message[] {
@@ -105,6 +129,8 @@ function PlanScreenContent() {
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const userLoc          = useStore(st => st.userLoc);
   const activeTrip       = useStore(st => st.activeTrip);
+  const tripHistory      = useStore(st => st.tripHistory);
+  const savedPlaces      = useStore(st => st.savedPlaces);
   const sessionId        = useStore(st => st.sessionId);
   const user             = useStore(st => st.user);
   const rigProfile       = useStore(st => st.rigProfile);
@@ -237,8 +263,8 @@ function PlanScreenContent() {
 
   const sendRef = useRef(false);
   // ── Main send handler ───────────────────────────────────────────────────────
-  async function send() {
-    const text = input.trim();
+  async function send(draft = input) {
+    const text = draft.trim();
     if (!text || loading || sendRef.current) return;
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
@@ -295,7 +321,7 @@ function PlanScreenContent() {
         else {
           const message = e instanceof ApiError || isRouteValidationMessage(e?.message)
             ? e.message
-            : 'I could not safely apply that route change. Try one clearer edit with the start, stops, and destination.';
+            : 'That change could not be applied. Include the start, stops, and destination, then try again.';
           setMessages(m => [...m, { role: 'ai', text: message }]);
         }
         setPlanPhase('active');
@@ -335,10 +361,10 @@ function PlanScreenContent() {
         const isTimeout = raw.includes('taking longer') || raw.includes('timeout');
         const isNetwork = raw.includes('Network') || raw.includes('fetch');
         const friendly = isTimeout
-              ? 'This route is taking longer than usual. Give it one more try and Trailhead will keep the plan tighter.'
+          ? 'This route is taking longer than usual. Try again in a moment.'
           : isNetwork
-          ? 'I lost the signal for a second. Check your connection and send it again.'
-          : 'That route note did not land clearly. Try one shorter sentence, or say “build it” again.';
+          ? 'Connection lost. Check your signal and try again.'
+          : 'That request was not clear enough. Shorten it and try again.';
         setMessages(m => [...m, { role: 'ai', text: friendly }]);
         setPlanPhase('ready'); // stay in ready so they can retry
       }
@@ -446,7 +472,7 @@ function PlanScreenContent() {
           {
             role: 'ai',
             text: isRateLimit
-              ? 'The planner is busy for a moment. Tap Retry in about 30 seconds and I’ll pick it back up.'
+              ? 'The planner is busy. Try again in about 30 seconds.'
               : isRouteValidation
               ? e.message
               : e.message?.includes('taking longer')
@@ -472,58 +498,52 @@ function PlanScreenContent() {
   function keepRefining() {
     setMessages(m => [
       ...m.filter(msg => !msg.outline),
-      { role: 'ai', text: 'What would you like to change? Trailhead can adjust the route, camp style, days, or area.' },
+      { role: 'ai', text: 'What would you like to change about the route, camps, days, or area?' },
     ]);
     setPlanPhase('chatting');
   }
 
   // ── Input hint text ──────────────────────────────────────────────────────
   const inputPlaceholder = planPhase === 'active' || planPhase === 'editing'
-    ? 'Change the trip...'
+    ? 'Add a stop or change the route'
     : planPhase === 'ready'
-      ? 'Refine it, or say "build it"...'
+      ? 'Add changes or build the trip'
       : planPhase === 'planning'
-        ? 'Building the route...'
-        : 'Ask for a route, camp, or change...';
+        ? 'Building route'
+        : 'Where do you want to go?';
 
   const currentStages = planPhase === 'planning' ? PLAN_STAGES_LONG : CHAT_STAGES;
+  const welcomeSavedPlaces = savedPlaces.slice(0, activeTrip ? 1 : 2);
+  const recentTrips = tripHistory
+    .filter(trip => trip.trip_id !== activeTrip?.trip_id)
+    .slice(0, 2);
+  const showStarterRoutes = !activeTrip && welcomeSavedPlaces.length === 0 && recentTrips.length === 0;
 
   // ── Login gate ───────────────────────────────────────────────────────────
   if (!user) return (
     <SafeAreaView style={s.container}>
+      <View style={s.planHeader}>
+        <Text style={s.planTitle}>Plan</Text>
+      </View>
       <PlanWorkspaceSwitcher active="assisted" />
       <View style={s.loginGate}>
         <View style={s.loginGateLogo}>
           <Image source={TRAILHEAD_LOGO} style={s.loginGateLogoImage} resizeMode="cover" />
         </View>
-        <Text style={s.loginGateTitle}>Assisted planning</Text>
-        <Text style={s.loginGateSub}>
-          Build multi-day routes with fuel, camp options, weather, land context, saved trips, and road-condition reports.
-        </Text>
-        <View style={s.loginGatePerks}>
-          {[
-            ['flash',          `${CREDIT_REWARDS.signup} trip credits to start`],
-            ['map-outline',    'Route days, fuel, camps, and weather'],
-            ['download-outline', 'Saved trips and maps for later'],
-            ['shield-checkmark-outline', 'Private trips with community reports when useful'],
-          ].map(([icon, text]) => (
-            <View key={text} style={s.loginGatePerk}>
-              <Ionicons name={icon as any} size={16} color={C.orange} />
-              <Text style={s.loginGatePerkText}>{text}</Text>
-            </View>
-          ))}
-        </View>
+        <Text style={s.loginGateTitle}>Trip Planner</Text>
+        <Text style={s.loginGateSub}>Sign in to plan and save trips.</Text>
         <TouchableOpacity style={s.loginGateBtn} onPress={() => router.push('/(tabs)/profile')}>
-          <Text style={s.loginGateBtnText}>SIGN IN OR CREATE ACCOUNT</Text>
+          <Text style={s.loginGateBtnText}>Sign in or create account</Text>
         </TouchableOpacity>
-        <Text style={s.loginGateNote}>Browse camps, report conditions, and navigate for free.</Text>
       </View>
     </SafeAreaView>
   );
 
   return (
     <SafeAreaView style={s.container}>
-      <PlannerAmbientBackground C={C} />
+      <View style={s.planHeader}>
+        <Text style={s.planTitle}>Plan</Text>
+      </View>
       <PlanWorkspaceSwitcher active="assisted" />
       {/* ── Paywall modal (IAP) ── */}
       <PaywallModal
@@ -545,29 +565,6 @@ function PlanScreenContent() {
         tripId={activeTrip?.trip_id ?? null}
       />
 
-      {/* ── Header ── */}
-      <View style={s.header}>
-        <View style={s.logoBadge}>
-          <Image source={TRAILHEAD_LOGO} style={s.logoBadgeImage} resizeMode="cover" />
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={s.logoName}>Trailhead</Text>
-          <Text style={s.logoTag}>PLANNER</Text>
-        </View>
-        {user && (
-          <TouchableOpacity style={s.creditPill} onPress={() => setPaywallVisible(true)}>
-            <Ionicons name="flash" size={12} color={C.orange} />
-            <Text style={s.creditPillText}>{user.credits}</Text>
-          </TouchableOpacity>
-        )}
-        {(planPhase === 'active' || planPhase === 'editing') && (
-          <View style={s.editBadge}>
-            <Ionicons name="pencil" size={11} color={C.gold} />
-            <Text style={s.editBadgeText}>EDIT</Text>
-          </View>
-        )}
-      </View>
-
       {/* ── Offline saved toast ── */}
       {offlineToast && (
         <View style={s.offlineToast}>
@@ -580,73 +577,139 @@ function PlanScreenContent() {
       <ScrollView
         ref={scrollRef}
         style={s.messages}
-        contentContainerStyle={[s.messagesContent, { paddingBottom: 148 + bottomInset }]}
+        contentContainerStyle={[
+          s.messagesContent,
+          { paddingBottom: (messages.length === 0 ? 32 : 148) + bottomInset },
+        ]}
         keyboardShouldPersistTaps="handled"
       >
         {/* Welcome screen */}
         {messages.length === 0 && (
           <View style={s.welcome}>
+            <Text style={s.welcomeHeading}>Where are you headed?</Text>
+            <TourTarget id="plan.input">
+              <View style={s.destinationField}>
+                <Ionicons name="search-outline" size={20} color={C.text2} />
+                <TextInput
+                  accessibilityLabel="Trip destination"
+                  style={s.destinationInput}
+                  value={input}
+                  onChangeText={setInput}
+                  placeholder="City, park, or trailhead"
+                  placeholderTextColor={C.text2}
+                  returnKeyType="go"
+                  onSubmitEditing={() => { void send(); }}
+                  maxLength={500}
+                  editable={!loading}
+                />
+              </View>
+            </TourTarget>
 
-            {/* ── Resume saved trip card ─────────────────────────────────── */}
-            {activeTrip && (
-              <TrailheadCard style={s.resumeCard}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 8 }}>
-                  <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange }} />
-                  <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 }}>SAVED TRIP</Text>
-                </View>
-                <Text style={{ color: C.text, fontSize: 15, fontFamily: mono, fontWeight: '900', marginBottom: 4 }} numberOfLines={2}>
-                  {activeTrip.plan.trip_name}
-                </Text>
-                <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, marginBottom: 14 }}>
-                  {(activeTrip.plan.states ?? []).join(' · ')}
-                  {!!activeTrip.plan.duration_days && `  ·  ${activeTrip.plan.duration_days} days`}
-                </Text>
-                <TrailheadButtonDock>
-                  <TrailheadButton
-                    label="Resume Trip"
-                    variant="primary"
+            {(welcomeSavedPlaces.length > 0 || activeTrip) && (
+              <View style={s.welcomeSection}>
+                <Text style={s.welcomeSectionTitle}>Saved places</Text>
+                {welcomeSavedPlaces.map(place => (
+                  <TouchableOpacity
+                    key={place.id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Plan a trip to ${place.name}`}
+                    activeOpacity={0.72}
+                    style={s.welcomeRow}
+                    onPress={() => { void send(`Plan a trip to ${place.name}.`); }}
+                  >
+                    <View style={s.welcomeRowIcon}>
+                      <Ionicons name={savedPlaceIcon(place.icon)} size={21} color={C.orange} />
+                    </View>
+                    <View style={s.welcomeRowCopy}>
+                      <Text style={s.welcomeRowTitle} numberOfLines={1}>{place.name}</Text>
+                      <Text style={s.welcomeRowMeta}>{savedPlaceKind(place.icon)}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                  </TouchableOpacity>
+                ))}
+                {activeTrip && (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Resume ${activeTrip.plan.trip_name}`}
+                    activeOpacity={0.72}
+                    style={s.welcomeRow}
                     onPress={() => {
                       setMessages([{ role: 'ai', trip: activeTrip }]);
                       setPlanPhase('active');
                     }}
-                    style={{ flex: 1 }}
-                  />
-                  <TrailheadButton
-                    label="New Trip"
-                    variant="secondary"
-                    onPress={() => setActiveTrip(null)}
-                    style={{ flex: 1 }}
-                  />
-                </TrailheadButtonDock>
-              </TrailheadCard>
+                  >
+                    <View style={s.welcomeRowIcon}>
+                      <Ionicons name="git-branch-outline" size={21} color={C.orange} />
+                    </View>
+                    <View style={s.welcomeRowCopy}>
+                      <Text style={s.welcomeRowTitle} numberOfLines={1}>{activeTrip.plan.trip_name}</Text>
+                      <Text style={s.welcomeRowMeta}>
+                        {activeTrip.plan.duration_days ? `${activeTrip.plan.duration_days} days · ` : ''}In progress
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
 
-            <Text style={s.welcomeHeading}>
-              {'Where are you\nheaded?'}
-            </Text>
-            <Text style={s.welcomeSub}>
-              Tell Trailhead the start, timing, and travel style. It will turn that into a route outline you can review before building.
-            </Text>
-            <View style={s.starterList}>
-              {STARTER_PROMPTS.map(prompt => (
-                <PlannerStarterRow
-                  key={prompt.title}
-                  title={prompt.title}
-                  body={prompt.body}
-                  icon={prompt.icon as keyof typeof Ionicons.glyphMap}
-                  onPress={() => setInput(prompt.text)}
-                />
-              ))}
-            </View>
+            {recentTrips.length > 0 && (
+              <View style={s.welcomeSection}>
+                <Text style={s.welcomeSectionTitle}>Recent</Text>
+                {recentTrips.map(trip => (
+                  <TouchableOpacity
+                    key={trip.trip_id}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open ${trip.trip_name}`}
+                    activeOpacity={0.72}
+                    style={s.welcomeRow}
+                    onPress={() => { void openHistoryTrip(trip.trip_id); }}
+                  >
+                    <View style={s.welcomeRowIcon}>
+                      <Ionicons name="trail-sign-outline" size={21} color={C.orange} />
+                    </View>
+                    <View style={s.welcomeRowCopy}>
+                      <Text style={s.welcomeRowTitle} numberOfLines={1}>{trip.trip_name}</Text>
+                      <Text style={s.welcomeRowMeta}>
+                        {trip.duration_days ? `${trip.duration_days} days · ` : ''}{recentDate(trip.planned_at)}
+                      </Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
+
+            {showStarterRoutes && (
+              <View style={s.welcomeSection}>
+                <Text style={s.welcomeSectionTitle}>Start here</Text>
+                {STARTER_PROMPTS.map(prompt => (
+                  <TouchableOpacity
+                    key={prompt.title}
+                    accessibilityRole="button"
+                    accessibilityLabel={prompt.title}
+                    activeOpacity={0.72}
+                    style={s.welcomeRow}
+                    onPress={() => { void send(prompt.text); }}
+                  >
+                    <View style={s.welcomeRowIcon}>
+                      <Ionicons name={prompt.icon as keyof typeof Ionicons.glyphMap} size={21} color={C.orange} />
+                    </View>
+                    <View style={s.welcomeRowCopy}>
+                      <Text style={s.welcomeRowTitle} numberOfLines={1}>{prompt.title}</Text>
+                      <Text style={s.welcomeRowMeta} numberOfLines={1}>{prompt.body}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={18} color={C.text3} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            )}
           </View>
         )}
 
         {/* Message list */}
         {messages.map((msg, i) => (
           <View key={i} style={[s.msg, msg.role === 'user' ? s.msgUser : s.msgAi]}>
-            {msg.role === 'ai'   && <Text style={s.msgLabel}>TRAILHEAD</Text>}
-            {msg.role === 'user' && <Text style={[s.msgLabel, { textAlign: 'right' }]}>YOU</Text>}
-
             {msg.trip ? (
               <TripCard
                 trip={msg.trip}
@@ -673,58 +736,59 @@ function PlanScreenContent() {
         {/* Thinking indicator */}
         {loading && (
           <View style={s.msgAi}>
-            <Text style={s.msgLabel}>TRAILHEAD</Text>
             <View style={s.thinkingBubble}>
               <View style={s.thinkingOrb}>
                 <ThinkingDots C={C} />
               </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.thinkingKicker}>WORKING ON IT</Text>
-                <Text style={[s.bubbleText, s.thinkingText]}>{currentStages[stageIdx]}</Text>
-              </View>
+              <Text style={[s.bubbleText, s.thinkingText]}>{currentStages[stageIdx]}</Text>
             </View>
           </View>
         )}
       </ScrollView>
 
       {/* ── Input ── */}
-      <KeyboardAvoidingView style={[s.inputDock, { bottom: 94 + bottomInset }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-        <TourTarget id="plan.input">
-          <View style={s.inputWrap}>
-            <TouchableOpacity
-              style={s.reportIconBtn}
-              accessibilityRole="button"
-              accessibilityLabel="Report planner response"
-              onPress={() => {
-                setAiReportKind('bug');
-                setAiReportVisible(true);
-              }}
-            >
-              <Ionicons name="flag-outline" size={17} color={C.text2} />
-            </TouchableOpacity>
-            <TextInput
-              style={[s.input, (planPhase === 'active' || planPhase === 'editing') && s.inputEdit]}
-              value={input}
-              onChangeText={setInput}
-              placeholder={inputPlaceholder}
-              placeholderTextColor={C.text3}
-              multiline
-              textAlignVertical="top"
-              onFocus={scrollToEnd}
-              onContentSizeChange={scrollToEnd}
-              maxLength={500}
-              editable={!loading || planPhase === 'active'}
-            />
-            <TouchableOpacity
-              style={[s.sendBtn, loading && s.sendBtnDisabled]}
-              onPress={send}
-              disabled={loading}
-            >
-              <Ionicons name="send" size={18} color="#fff" />
-            </TouchableOpacity>
-          </View>
-        </TourTarget>
-      </KeyboardAvoidingView>
+      {messages.length > 0 && (
+        <KeyboardAvoidingView style={[s.inputDock, { bottom: 94 + bottomInset }]} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <TourTarget id="plan.input">
+            <View style={s.inputWrap}>
+              <TouchableOpacity
+                style={s.reportIconBtn}
+                accessibilityRole="button"
+                accessibilityLabel="Report planner response"
+                onPress={() => {
+                  setAiReportKind('bug');
+                  setAiReportVisible(true);
+                }}
+              >
+                <Ionicons name="flag-outline" size={17} color={C.text2} />
+              </TouchableOpacity>
+              <TextInput
+                accessibilityLabel="Trip notes"
+                style={[s.input, (planPhase === 'active' || planPhase === 'editing') && s.inputEdit]}
+                value={input}
+                onChangeText={setInput}
+                placeholder={inputPlaceholder}
+                placeholderTextColor={C.text3}
+                multiline
+                textAlignVertical="top"
+                onFocus={scrollToEnd}
+                onContentSizeChange={scrollToEnd}
+                maxLength={500}
+                editable={!loading || planPhase === 'active'}
+              />
+              <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Send trip notes"
+                style={[s.sendBtn, loading && s.sendBtnDisabled]}
+                onPress={() => { void send(); }}
+                disabled={loading}
+              >
+                <Ionicons name="send" size={18} color="#fff" />
+              </TouchableOpacity>
+            </View>
+          </TourTarget>
+        </KeyboardAvoidingView>
+      )}
       {!!weatherToast && (
         <View style={[s.weatherToast, { bottom: 176 + bottomInset }]}>
           <Ionicons name="cloud-download-outline" size={14} color={C.text} />
@@ -825,107 +889,6 @@ function RichText({ text, baseColor }: { text: string; baseColor: string }) {
   return <>{parts}</>;
 }
 
-function PlannerAmbientBackground({ C }: { C: ColorPalette }) {
-  const waveA = useRef(new Animated.Value(0)).current;
-  const waveB = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    const loopA = Animated.loop(
-      Animated.timing(waveA, { toValue: 1, duration: 5600, useNativeDriver: true })
-    );
-    const loopB = Animated.loop(
-      Animated.sequence([
-        Animated.delay(1700),
-        Animated.timing(waveB, { toValue: 1, duration: 6400, useNativeDriver: true }),
-      ])
-    );
-    loopA.start();
-    loopB.start();
-    return () => {
-      loopA.stop();
-      loopB.stop();
-    };
-  }, [waveA, waveB]);
-
-  const lineColor = C.bg === '#050505' ? 'rgba(229,231,235,0.10)' : 'rgba(15,23,42,0.055)';
-  const glowColor = C.bg === '#050505' ? 'rgba(249,115,22,0.09)' : 'rgba(184,92,56,0.055)';
-  const accentColor = C.bg === '#050505' ? 'rgba(148,163,184,0.12)' : 'rgba(71,85,105,0.07)';
-  const txA = waveA.interpolate({ inputRange: [0, 0.55, 1], outputRange: [-70, 22, 96] });
-  const tyA = waveA.interpolate({ inputRange: [0, 0.55, 1], outputRange: [14, -8, 12] });
-  const scaleA = waveA.interpolate({ inputRange: [0, 0.5, 1], outputRange: [0.96, 1.075, 1.0] });
-  const opacityA = waveA.interpolate({ inputRange: [0, 0.16, 0.62, 1], outputRange: [0.06, 0.30, 0.18, 0.03] });
-  const txB = waveB.interpolate({ inputRange: [0, 0.5, 1], outputRange: [-130, -8, 126] });
-  const tyB = waveB.interpolate({ inputRange: [0, 0.6, 1], outputRange: [-12, 10, -2] });
-  const scaleB = waveB.interpolate({ inputRange: [0, 0.52, 1], outputRange: [0.9, 1.16, 1.02] });
-  const opacityB = waveB.interpolate({ inputRange: [0, 0.18, 0.64, 1], outputRange: [0, 0.18, 0.13, 0] });
-
-  return (
-    <View pointerEvents="none" style={sAmbient.wrap}>
-      <Animated.View style={[sAmbient.gridPlane, { opacity: opacityA, transform: [{ translateX: txA }, { translateY: tyA }, { scale: scaleA }] }]}>
-        <PlannerGridLines lineColor={lineColor} glowColor={glowColor} />
-      </Animated.View>
-      <Animated.View style={[sAmbient.gridPlaneSoft, { opacity: opacityB, transform: [{ translateX: txB }, { translateY: tyB }, { scale: scaleB }] }]}>
-        <PlannerGridLines lineColor={accentColor} glowColor={glowColor} />
-      </Animated.View>
-    </View>
-  );
-}
-
-function PlannerGridLines({ lineColor, glowColor }: { lineColor: string; glowColor: string }) {
-  return (
-    <View style={StyleSheet.absoluteFillObject}>
-      <View style={[sAmbient.gridGlow, { backgroundColor: glowColor }]} />
-      {Array.from({ length: 12 }).map((_, i) => (
-        <View key={`v-${i}`} style={[sAmbient.gridLineV, { left: `${i * 9.1}%`, backgroundColor: lineColor }]} />
-      ))}
-      {Array.from({ length: 16 }).map((_, i) => (
-        <View key={`h-${i}`} style={[sAmbient.gridLineH, { top: `${i * 6.66}%`, backgroundColor: lineColor }]} />
-      ))}
-    </View>
-  );
-}
-
-const sAmbient = StyleSheet.create({
-  wrap: {
-    ...StyleSheet.absoluteFillObject,
-    overflow: 'hidden',
-  },
-  gridPlane: {
-    position: 'absolute',
-    left: -90,
-    right: -90,
-    top: -90,
-    bottom: -90,
-  },
-  gridPlaneSoft: {
-    position: 'absolute',
-    left: -120,
-    right: -120,
-    top: -120,
-    bottom: -120,
-  },
-  gridGlow: {
-    position: 'absolute',
-    left: '12%',
-    right: '8%',
-    top: '18%',
-    height: '44%',
-    borderRadius: 180,
-  },
-  gridLineV: {
-    position: 'absolute',
-    top: 0,
-    bottom: 0,
-    width: 1,
-  },
-  gridLineH: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    height: 1,
-  },
-});
-
 function ThinkingDots({ C }: { C: ColorPalette }) {
   const dots = [useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current, useRef(new Animated.Value(0)).current];
   useEffect(() => {
@@ -957,15 +920,13 @@ function OutlineCard({ outline, onBuild, onRefine, loading }: {
   if (isRetry) {
     return (
       <CopilotBriefCard
-        kicker="ROUTE REVIEW"
+        kicker="ROUTE"
         title="Retry the route"
-        summary="The trip notes are still here. Retry will rebuild from the same conversation."
+        summary="Your trip details are ready to retry."
         tone="review"
         icon="alert-circle-outline"
-        sourceLabel="Trip notes"
-        reason="A cleaner pass can keep stops and daily pacing easier to review."
         actions={[{
-          label: 'RETRY',
+          label: 'Retry',
           icon: 'refresh',
           variant: 'primary',
           onPress: onBuild,
@@ -977,23 +938,21 @@ function OutlineCard({ outline, onBuild, onRefine, loading }: {
 
   return (
     <CopilotBriefCard
-      kicker="ROUTE OUTLINE"
+      kicker="TRIP"
       title="Build this trip"
       summary={outline}
       tone="ready"
       icon="map-outline"
-      sourceLabel="Review first"
-      reason="Build turns the outline into route days, camps, fuel stops, and map pins."
       actions={[
         {
-          label: 'BUILD TRIP',
+          label: 'Build trip',
           icon: 'navigate',
           variant: 'primary',
           onPress: onBuild,
           loading,
         },
         {
-          label: 'REFINE',
+          label: 'Make changes',
           icon: 'create-outline',
           variant: 'secondary',
           onPress: onRefine,
@@ -1149,84 +1108,107 @@ export default function PlanScreen() {
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
 
+  planHeader: {
+    paddingHorizontal: 20,
+    paddingTop: 10,
+  },
+  planTitle: {
+    color: C.text,
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+
   // Login gate
-  loginGate: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center', gap: 16 },
-  loginGateLogo: { width: 72, height: 72, borderRadius: 24, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', marginBottom: 4, overflow: 'hidden' },
-  loginGateLogoImage: { width: 72, height: 72 },
-  loginGateTitle: { color: C.text, fontSize: 28, fontWeight: '800', letterSpacing: 0 },
-  loginGateSub: { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 21, maxWidth: 300 },
-  loginGatePerks: { gap: 10, alignSelf: 'stretch', marginVertical: 4 },
-  loginGatePerk: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingHorizontal: 4 },
-  loginGatePerkText: { color: C.text2, fontSize: 13, flex: 1 },
-  loginGateBtn: { backgroundColor: C.bg === '#050505' ? C.silverBright : C.orange, borderRadius: 16, paddingVertical: 15, alignSelf: 'stretch', alignItems: 'center', marginTop: 8, shadowColor: C.orange, shadowOpacity: 0.16, shadowRadius: 18 },
-  loginGateBtnText: { color: C.bg === '#050505' ? '#050505' : '#fff', fontFamily: mono, fontSize: 11, fontWeight: '800', letterSpacing: 1 },
-  loginGateNote: { color: C.text3, fontSize: 11, textAlign: 'center', fontFamily: mono },
-
-  // Credit pill in header
-  creditPill: { flexDirection: 'row', alignItems: 'center', gap: 3, backgroundColor: C.s2, borderRadius: 20, paddingHorizontal: 10, paddingVertical: 5, borderWidth: 1, borderColor: C.border },
-  creditPillText: { color: C.orange, fontSize: 12, fontWeight: '700', fontFamily: mono },
-
-  // Header
-  header: {
-    flexDirection: 'row', alignItems: 'center', gap: 12,
-    marginHorizontal: 14,
-    marginTop: 8,
-    marginBottom: 4,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderRadius: 18,
-    borderWidth: 1,
-    borderColor: C.border2,
-    backgroundColor: C.bg === '#050505' ? 'rgba(17,20,24,0.88)' : C.glassStrong,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 10 },
-  },
-  logoBadge: {
-    width: 36, height: 36, borderRadius: 14,
-    backgroundColor: C.s2, borderWidth: 1, borderColor: C.border2, alignItems: 'center', justifyContent: 'center', overflow: 'hidden',
-    shadowColor: '#E5E7EB', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.18, shadowRadius: 14,
-  },
-  logoBadgeImage: { width: 36, height: 36 },
-  logoName: {
-    color: C.text, fontSize: 17, fontWeight: '900',
-    letterSpacing: 0, lineHeight: 20,
-  },
-  logoTag: { color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 1, letterSpacing: 1 },
-  editBadge: {
-    flexDirection: 'row', alignItems: 'center', gap: 4,
-    backgroundColor: 'rgba(200,149,58,0.1)', borderWidth: 1, borderColor: 'rgba(200,149,58,0.25)',
-    borderRadius: 5, paddingHorizontal: 8, paddingVertical: 4,
-  },
-  editBadgeText: { color: C.gold, fontSize: 8.5, fontFamily: mono, letterSpacing: 0.8 },
+  loginGate: { flex: 1, padding: 28, justifyContent: 'center', alignItems: 'center', gap: 14 },
+  loginGateLogo: { width: 64, height: 64, borderRadius: 18, backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center', marginBottom: 4, overflow: 'hidden' },
+  loginGateLogoImage: { width: 64, height: 64 },
+  loginGateTitle: { color: C.text, fontSize: 24, lineHeight: 29, fontWeight: '700', letterSpacing: 0 },
+  loginGateSub: { color: C.text2, fontSize: 14, textAlign: 'center', lineHeight: 20, maxWidth: 300 },
+  loginGateBtn: { backgroundColor: C.orange, borderRadius: 8, minHeight: 50, paddingHorizontal: 20, alignSelf: 'stretch', alignItems: 'center', justifyContent: 'center', marginTop: 8 },
+  loginGateBtnText: { color: '#fff', fontSize: 15, fontWeight: '700', letterSpacing: 0 },
 
   // Messages
   messages: { flex: 1 },
-  messagesContent: { padding: 16, paddingBottom: 148, gap: 14, flexGrow: 1 },
+  messagesContent: { paddingHorizontal: 20, paddingTop: 22, paddingBottom: 148, gap: 14, flexGrow: 1 },
 
   // Welcome
-  welcome: { gap: 10 },
-  resumeCard: {
-    backgroundColor: 'rgba(255,255,255,0.055)', borderRadius: 22, padding: 16,
-    borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
-    marginBottom: 4,
-    shadowColor: '#000', shadowOpacity: 0.32, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
-  },
+  welcome: { width: '100%' },
   welcomeHeading: {
-    color: C.text, fontSize: 34, fontWeight: '800',
-    letterSpacing: 0, lineHeight: 38, marginBottom: 8,
+    color: C.text, fontSize: 24, fontWeight: '700',
+    letterSpacing: 0, lineHeight: 29, marginBottom: 16,
   },
-  welcomeSub: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 6 },
-  starterList: { gap: 10, marginTop: 2 },
+  destinationField: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 8,
+    backgroundColor: C.s1,
+  },
+  destinationInput: {
+    flex: 1,
+    minWidth: 0,
+    color: C.text,
+    fontSize: 15,
+    lineHeight: 20,
+    paddingVertical: 0,
+  },
+  welcomeSection: {
+    marginTop: 28,
+  },
+  welcomeSectionTitle: {
+    color: C.text,
+    fontSize: 17,
+    lineHeight: 21,
+    fontWeight: '700',
+    letterSpacing: 0,
+    marginBottom: 8,
+  },
+  welcomeRow: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingHorizontal: 4,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  welcomeRowIcon: {
+    width: 30,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  welcomeRowCopy: {
+    flex: 1,
+    minWidth: 0,
+    gap: 2,
+  },
+  welcomeRowTitle: {
+    color: C.text,
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  welcomeRowMeta: {
+    color: C.text2,
+    fontSize: 13,
+    lineHeight: 17,
+    letterSpacing: 0,
+  },
 
   // Messages
   msg:     { gap: 4 },
   msgUser: { alignItems: 'flex-end' },
   msgAi:   { alignItems: 'flex-start' },
-  msgLabel: { color: C.text3, fontSize: 8.5, fontFamily: mono, paddingHorizontal: 4, letterSpacing: 1 },
 
-  bubble:     { borderRadius: 16, padding: 12, maxWidth: '90%', flexDirection: 'row', alignItems: 'center' },
+  bubble:     { borderRadius: 12, padding: 12, maxWidth: '90%', flexDirection: 'row', alignItems: 'center' },
   bubbleUser: { backgroundColor: C.orange, borderBottomRightRadius: 4 },
   bubbleAi:   { backgroundColor: C.s2, borderWidth: 1, borderColor: C.border, borderBottomLeftRadius: 4 },
   bubbleText: { color: C.text, fontSize: 13.5, lineHeight: 21, flex: 1 },
@@ -1234,10 +1216,9 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   thinkingBubble: {
     flexDirection: 'row', alignItems: 'center',
     gap: 11,
-    backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border,
-    borderRadius: 18,
+    backgroundColor: C.s1, borderWidth: 1, borderColor: C.border,
+    borderRadius: 8,
     paddingHorizontal: 13, paddingVertical: 12, maxWidth: '94%',
-    shadowColor: C.orange, shadowOpacity: 0.1, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
   },
   thinkingOrb: {
     width: 34, height: 34, borderRadius: 17,
@@ -1245,8 +1226,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderWidth: 1, borderColor: C.orange + '40',
     backgroundColor: C.orange + '12',
   },
-  thinkingKicker: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9, marginBottom: 3 },
-  thinkingText: { color: C.text2, fontSize: 12, fontFamily: mono, flexShrink: 1, lineHeight: 17 },
+  thinkingText: { color: C.text2, fontSize: 13, flexShrink: 1, lineHeight: 18 },
 
   // Input
   inputDock: {
@@ -1266,18 +1246,18 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingVertical: 10,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 22,
+    borderRadius: 8,
     alignItems: 'flex-end',
-    backgroundColor: C.glassStrong,
+    backgroundColor: C.s1,
     shadowColor: '#000',
-    shadowOpacity: 0.22,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.12,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
   },
   reportIconBtn: {
     width: 42,
     height: 42,
-    borderRadius: 13,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
@@ -1285,12 +1265,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     justifyContent: 'center',
   },
   input: {
-    flex: 1, backgroundColor: 'rgba(255,255,255,0.06)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
-    borderRadius: 16, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10, color: C.text, fontSize: 14, minHeight: 42, maxHeight: 108,
+    flex: 1, backgroundColor: C.bg, borderWidth: 1, borderColor: C.border,
+    borderRadius: 8, paddingHorizontal: 12, paddingTop: 11, paddingBottom: 10, color: C.text, fontSize: 14, minHeight: 42, maxHeight: 108,
   },
   inputEdit: { borderColor: `rgba(184,92,56,0.4)` },
   sendBtn: {
-    width: 42, height: 42, borderRadius: 13, backgroundColor: C.orange,
+    width: 42, height: 42, borderRadius: 8, backgroundColor: C.orange,
     alignItems: 'center', justifyContent: 'center',
     shadowColor: C.orange, shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.35, shadowRadius: 6,
   },
@@ -1309,7 +1289,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     position: 'absolute', bottom: 116, alignSelf: 'center',
     flexDirection: 'row', alignItems: 'center', gap: 7,
     backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    borderRadius: 20, paddingHorizontal: 14, paddingVertical: 8,
+    borderRadius: 8, paddingHorizontal: 14, paddingVertical: 8,
     shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.25, shadowRadius: 6,
     zIndex: 90,
     elevation: 44,

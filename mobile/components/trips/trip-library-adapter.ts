@@ -12,11 +12,12 @@ import {
   type TripResult,
   type Waypoint,
 } from '@/lib/api';
-import { deleteOfflineTrip, getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
+import { deleteOfflineTrip, deleteOfflineTrips, getOfflineTripIndex, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore, type TripHistoryItem } from '@/lib/store';
 import { tripDocumentFromTripResult } from '@/lib/tripCompatibility';
 import {
   archiveTrip,
+  deleteDraftTrips,
   deleteTrip,
   duplicateTrip,
   getTrip,
@@ -26,12 +27,15 @@ import {
   deleteTripNote,
   TripRepositoryConflictError,
   upsertTrip,
+  type SavedEntityV1,
   type TripDocumentV2,
   type TripNoteInput,
   type TripNoteV1,
   type TripRepositoryUserScope,
 } from '@/lib/tripRepository';
 import type { TripLibraryFilter, TripLibraryItem, TripLibrarySnapshot } from './types';
+import { tripPreviewMedia } from './tripPreview';
+import { assertTripOperationOwnerScope } from './tripOperationScope';
 
 type TripLibraryInput = {
   activeTrip: TripResult | null;
@@ -274,9 +278,11 @@ function itemFromDocument(
   activeId: string | null,
   offlineIds: Set<string>,
   activeTrip: TripResult | null,
+  savedEntitiesById: ReadonlyMap<string, SavedEntityV1>,
 ): TripLibraryItem {
   const legacy = legacyTripResult(document);
   const monitors = availabilityMonitorSummary(document.alerts);
+  const preview = tripPreviewMedia(document, savedEntitiesById);
   return {
     id: document.id,
     name: document.title || 'Untitled trip',
@@ -300,6 +306,8 @@ function itemFromDocument(
     activeMonitorCount: monitors.active,
     monitorState: monitors.state,
     noteCount: document.notes.length + document.items.filter(item => Boolean(item.note?.trim())).length,
+    previewImageUrl: preview.imageUrl,
+    previewPins: preview.pins,
     document,
     compatibilityTrip: activeTrip?.trip_id === document.id ? activeTrip : undefined,
   };
@@ -345,13 +353,20 @@ export async function loadTripLibrarySnapshot(input: TripLibraryInput): Promise<
   const [offlineIndex] = await Promise.all([getOfflineTripIndex()]);
   const repository = getTripRepositorySnapshot();
   const offlineIds = new Set(offlineIndex);
+  const savedEntitiesById = new Map(repository.savedEntities.map(entity => [entity.id, entity]));
   const documents = [...repository.trips].sort((left, right) => right.updatedAt - left.updatedAt);
   const activeFromStore = input.activeTrip?.trip_id
     ? documents.find(document => document.id === input.activeTrip?.trip_id && document.status !== 'archived')
     : null;
   const activeDocument = activeFromStore ?? documents.find(document => document.status === 'active') ?? null;
   const activeId = activeDocument?.id ?? null;
-  const allTrips = documents.map(document => itemFromDocument(document, activeId, offlineIds, input.activeTrip));
+  const allTrips = documents.map(document => itemFromDocument(
+    document,
+    activeId,
+    offlineIds,
+    input.activeTrip,
+    savedEntitiesById,
+  ));
   const activeTrip = allTrips.find(item => item.isActive) ?? null;
   const trips = allTrips.filter(item => !item.isActive);
   const counts: Record<TripLibraryFilter, number> = { draft: 0, saved: 0, archived: 0 };
@@ -412,10 +427,17 @@ function publicTripError(error: unknown, fallback: string) {
 }
 
 function captureAccountOperation() {
+  const accountId = useStore.getState().user?.id;
+  const snapshot = getTripRepositorySnapshot();
+  const ownerScope = snapshot.ownerScope;
+  const expectedOwnerScope = normalizeTripRepositoryScope(accountId);
+  if (!snapshot.initialized || ownerScope !== expectedOwnerScope) {
+    throw new Error('Your trips are still loading for this account. Try again.');
+  }
   return {
     epoch: accountStorage.epoch(),
-    ownerScope: getTripRepositorySnapshot().ownerScope,
-    accountId: useStore.getState().user?.id,
+    ownerScope,
+    accountId,
   };
 }
 
@@ -600,15 +622,45 @@ export async function restoreLibraryTrip(item: TripLibraryItem) {
 export async function deleteLibraryTrip(item: TripLibraryItem) {
   const operation = captureAccountOperation();
   try {
+    assertTripOperationOwnerScope(item, operation.ownerScope);
     const current = freshDocument(item);
-    await deleteTrip(item.id, { expectedRevision: current.revision });
+    await deleteTrip(item.id, {
+      expectedRevision: current.revision,
+      expectedOwnerScope: item.document.ownerScope,
+    });
     requireCurrentAccount(operation);
     if (useStore.getState().activeTrip?.trip_id === item.id) useStore.getState().setActiveTrip(null);
-    useStore.getState().removeTripFromHistory(item.id);
+    await useStore.getState().removeTripsFromHistory([item.id], operation.ownerScope);
+    requireCurrentAccount(operation);
     await deleteOfflineTrip(item.id);
     requireCurrentAccount(operation);
   } catch (error) {
     throw publicTripError(error, 'This trip could not be deleted. Try again.');
+  }
+}
+
+export async function deleteLibraryDrafts(items: TripLibraryItem[]) {
+  const operation = captureAccountOperation();
+  try {
+    const requests = items.map(item => {
+      if (item.document.ownerScope !== operation.ownerScope) {
+        throw new Error('One of these trips belongs to a different account.');
+      }
+      const current = freshDocument(item);
+      if (current.status !== 'draft') throw new Error('One of these trips is no longer a draft.');
+      return { id: current.id, expectedRevision: current.revision };
+    });
+    const deletedIds = await deleteDraftTrips(requests, { expectedOwnerScope: operation.ownerScope });
+    requireCurrentAccount(operation);
+    const activeTripId = useStore.getState().activeTrip?.trip_id;
+    if (activeTripId && deletedIds.includes(activeTripId)) useStore.getState().setActiveTrip(null);
+    await useStore.getState().removeTripsFromHistory(deletedIds, operation.ownerScope);
+    requireCurrentAccount(operation);
+    await deleteOfflineTrips(deletedIds);
+    requireCurrentAccount(operation);
+    return deletedIds;
+  } catch (error) {
+    throw publicTripError(error, 'These drafts could not be deleted. Refresh and try again.');
   }
 }
 

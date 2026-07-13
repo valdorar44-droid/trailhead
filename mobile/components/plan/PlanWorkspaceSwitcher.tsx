@@ -1,5 +1,4 @@
 import { StyleProp, StyleSheet, Text, TouchableOpacity, View, ViewStyle } from 'react-native';
-import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/lib/design';
 
@@ -16,28 +15,24 @@ const WORKSPACES: Array<{
   id: PlanWorkspace;
   label: string;
   accessibilityLabel: string;
-  icon: keyof typeof Ionicons.glyphMap;
   href: PlanWorkspaceHref;
 }> = [
   {
     id: 'assisted',
-    label: 'Assisted',
-    accessibilityLabel: 'Assisted planning workspace',
-    icon: 'sparkles-outline',
+    label: 'Trip Planner',
+    accessibilityLabel: 'Trip Planner',
     href: '/(tabs)/plan',
   },
   {
     id: 'manual',
-    label: 'Manual',
-    accessibilityLabel: 'Manual route builder workspace',
-    icon: 'construct-outline',
+    label: 'Route Builder',
+    accessibilityLabel: 'Route Builder',
     href: '/(tabs)/route-builder',
   },
   {
     id: 'trips',
     label: 'Trips',
-    accessibilityLabel: 'Trips workspace',
-    icon: 'map-outline',
+    accessibilityLabel: 'Trips',
     href: '/(tabs)/trips',
   },
 ];
@@ -48,7 +43,10 @@ export default function PlanWorkspaceSwitcher({ active, style, onSelect }: PlanW
 
   return (
     <View style={[styles.shell, style]}>
-      <View style={[styles.track, { backgroundColor: C.s1, borderColor: C.border }]}>
+      <View
+        accessibilityRole="tablist"
+        style={[styles.track, { borderBottomColor: C.border }]}
+      >
         {WORKSPACES.map(workspace => {
           const selected = workspace.id === active;
           return (
@@ -63,28 +61,19 @@ export default function PlanWorkspaceSwitcher({ active, style, onSelect }: PlanW
                 if (onSelect) onSelect(workspace.id, workspace.href);
                 else router.replace(workspace.href);
               }}
-              style={[
-                styles.segment,
-                selected && {
-                  backgroundColor: C.text,
-                  shadowColor: '#000000',
-                },
-              ]}
+              style={styles.segment}
             >
-              <Ionicons
-                name={workspace.icon}
-                size={15}
-                color={selected ? C.orange : C.text3}
-              />
               <Text
                 numberOfLines={1}
                 style={[
                   styles.label,
-                  { color: selected ? C.bg : C.text2 },
+                  { color: selected ? C.text : C.text2 },
+                  selected && styles.labelSelected,
                 ]}
               >
                 {workspace.label}
               </Text>
+              {selected && <View style={[styles.activeIndicator, { backgroundColor: C.orange }]} />}
             </TouchableOpacity>
           );
         })}
@@ -96,40 +85,41 @@ export default function PlanWorkspaceSwitcher({ active, style, onSelect }: PlanW
 const styles = StyleSheet.create({
   shell: {
     width: '100%',
-    paddingHorizontal: 14,
+    paddingHorizontal: 20,
   },
   track: {
     width: '100%',
     maxWidth: 520,
-    minHeight: 44,
+    minHeight: 46,
     alignSelf: 'center',
     flexDirection: 'row',
     alignItems: 'stretch',
-    gap: 3,
-    padding: 3,
-    borderWidth: 1,
-    borderRadius: 8,
+    justifyContent: 'space-between',
+    borderBottomWidth: 1,
   },
   segment: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 36,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingHorizontal: 8,
-    borderRadius: 5,
-    shadowOpacity: 0.12,
-    shadowRadius: 5,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 0,
+    minHeight: 46,
+    minWidth: 44,
+    alignItems: 'flex-start',
+    justifyContent: 'flex-end',
+    paddingBottom: 12,
+    position: 'relative',
   },
   label: {
-    flexShrink: 1,
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '800',
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '400',
     letterSpacing: 0,
+  },
+  labelSelected: {
+    fontWeight: '700',
+  },
+  activeIndicator: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: -1,
+    height: 3,
+    borderRadius: 2,
   },
 });

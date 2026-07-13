@@ -72,6 +72,20 @@ def _migrate_trip_documents_to_account_scope(db: sqlite3.Connection) -> None:
         db.rollback()
         raise
 
+
+def _remove_legacy_rows_for_deleted_trip_documents(db: sqlite3.Connection) -> None:
+    """Keep soft-deleted v2 trips out of the legacy account-trip surface."""
+    db.execute(
+        """DELETE FROM trips
+           WHERE user_id IS NOT NULL
+             AND EXISTS (
+               SELECT 1 FROM trip_documents_v2 v2
+               WHERE v2.user_id=trips.user_id
+                 AND v2.id=trips.id
+                 AND v2.status='deleted'
+             )"""
+    )
+
 def init_db():
     db = _conn()
     db.executescript("""
@@ -867,6 +881,7 @@ def init_db():
         );
     """)
     _migrate_trip_documents_to_account_scope(db)
+    _remove_legacy_rows_for_deleted_trip_documents(db)
     # Performance indexes (IF NOT EXISTS is safe to re-run)
     for idx_sql in [
         "CREATE INDEX IF NOT EXISTS idx_reports_geo ON reports(lat, lng, expires_at)",
@@ -1734,6 +1749,14 @@ def save_trip(trip_id: str, request: str, plan: dict, user_id: int | None = None
     try:
         db.execute("BEGIN IMMEDIATE")
         now = int(time.time())
+        if user_id is not None:
+            deleted_v2 = db.execute(
+                """SELECT revision FROM trip_documents_v2
+                   WHERE user_id=? AND id=? AND status='deleted'""",
+                (user_id, trip_id),
+            ).fetchone()
+            if deleted_v2:
+                raise RevisionConflictError(int(deleted_v2["revision"] or 1))
         existing = db.execute("SELECT user_id FROM trips WHERE id=?", (trip_id,)).fetchone()
         if existing and existing["user_id"] != user_id:
             raise PermissionError("Not authorized")
@@ -1795,6 +1818,13 @@ def save_account_trip(
     try:
         db.execute("BEGIN IMMEDIATE")
         now = int(time.time())
+        deleted_v2 = db.execute(
+            """SELECT revision FROM trip_documents_v2
+               WHERE user_id=? AND id=? AND status='deleted'""",
+            (user_id, trip_id),
+        ).fetchone()
+        if deleted_v2:
+            raise RevisionConflictError(int(deleted_v2["revision"] or 1))
         existing = db.execute(
             "SELECT user_id FROM trips WHERE id=?", (trip_id,),
         ).fetchone()
@@ -2338,6 +2368,8 @@ def upsert_trip_document_v2(
             if replay["request_hash"] != request_hash:
                 raise ValueError("Idempotency-Key was already used for a different request")
             result = json.loads(replay["response_json"])
+            if result.get("status") == "deleted":
+                db.execute("DELETE FROM trips WHERE id=? AND user_id=?", (trip_id, user_id))
             db.commit()
             return result
 
@@ -2375,6 +2407,8 @@ def upsert_trip_document_v2(
                  deleted_at=excluded.deleted_at""",
             (trip_id, user_id, status, revision, document_json, created_at, now, archived_at, deleted_at),
         )
+        if status == "deleted":
+            db.execute("DELETE FROM trips WHERE id=? AND user_id=?", (trip_id, user_id))
         saved = db.execute(
             "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
         ).fetchone()

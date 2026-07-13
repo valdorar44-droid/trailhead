@@ -1,25 +1,49 @@
-import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/lib/design';
-import TripStatusGrid from './TripStatusGrid';
+import { StaticMapboxPreview } from '@/components/explore/StaticMapboxPreview';
 import type { TripLibraryItem } from './types';
 
-function formatMiles(value: number) {
-  const miles = Math.max(0, Math.round(value));
-  if (miles >= 1000) return `${(miles / 1000).toFixed(miles >= 10_000 ? 0 : 1)}k`;
-  return miles.toLocaleString();
-}
-
-function formatDate(value: number) {
+function formatUpdatedAt(value: number) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return 'Recently updated';
-  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  if (Number.isNaN(date.getTime())) return 'Recently';
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const dayDifference = Math.round((startToday - startDate) / 86_400_000);
+  if (dayDifference <= 0) return 'Today';
+  if (dayDifference === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function regionLabel(trip: TripLibraryItem) {
-  if (trip.regions.length === 0) return 'Route details available when opened';
-  if (trip.regions.length <= 3) return trip.regions.join(' / ');
-  return `${trip.regions.slice(0, 2).join(' / ')} +${trip.regions.length - 2}`;
+function tripMeta(trip: TripLibraryItem) {
+  const stops = `${trip.stopCount} ${trip.stopCount === 1 ? 'stop' : 'stops'}`;
+  return `${stops} · ${formatUpdatedAt(trip.updatedAt)}`;
+}
+
+export function TripPreview({ trip, height }: { trip: TripLibraryItem; height: number }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => setImageFailed(false), [trip.previewImageUrl]);
+
+  return trip.previewImageUrl && !imageFailed ? (
+    <Image
+      source={{ uri: trip.previewImageUrl }}
+      accessibilityLabel={`${trip.name} preview`}
+      resizeMode="cover"
+      style={styles.previewFill}
+      onError={() => setImageFailed(true)}
+    />
+  ) : (
+    <StaticMapboxPreview
+      pins={trip.previewPins}
+      title={trip.name}
+      height={height}
+      showBadge={false}
+      showCopy={false}
+      style={styles.previewFill}
+    />
+  );
 }
 
 export default function TripCard({
@@ -34,232 +58,162 @@ export default function TripCard({
   onMore: (trip: TripLibraryItem) => void;
 }) {
   const C = useTheme();
-  return (
-    <View
-      style={[
-        styles.card,
-        {
-          backgroundColor: C.s1,
-          borderColor: active ? C.orange + '88' : C.border,
-          boxShadow: C.bg === '#F7F8F6'
-            ? '0 3px 14px rgba(17,20,18,0.07)'
-            : '0 4px 18px rgba(0,0,0,0.22)',
-        },
-      ]}
-    >
-      {active ? <View style={[styles.activeRail, { backgroundColor: C.orange }]} /> : null}
-      <View style={styles.headingRow}>
+
+  if (active) {
+    return (
+      <View style={[styles.activeBlock, { borderBottomColor: C.border }]}>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel={`Open ${trip.name}`}
-          activeOpacity={0.76}
+          accessibilityLabel={`Open ${trip.name}. ${tripMeta(trip)}`}
+          activeOpacity={0.82}
           onPress={() => onOpen(trip)}
-          style={styles.headingAction}
+          style={styles.activeOpenArea}
         >
-          <View style={[styles.tripIcon, { backgroundColor: active ? C.orange + '15' : C.s2, borderColor: active ? C.orange + '55' : C.border }] }>
-            <Ionicons name={active ? 'navigate-outline' : 'trail-sign-outline'} size={19} color={active ? C.orange : C.text2} />
+          <View style={[styles.activeMedia, { borderColor: C.border, backgroundColor: C.s2 }]}>
+            <TripPreview trip={trip} height={146} />
           </View>
-          <View style={styles.headingCopy}>
-            {active ? <Text style={[styles.eyebrow, { color: C.orange }]}>ACTIVE TRIP</Text> : null}
-            <Text style={[styles.title, active && styles.activeTitle, { color: C.text }]} numberOfLines={2}>{trip.name}</Text>
-            <Text style={[styles.meta, { color: C.text2 }]} numberOfLines={1}>{regionLabel(trip)} | {formatDate(trip.updatedAt)}</Text>
+          <View style={styles.activeCopyRow}>
+            <View style={styles.copy}>
+              <Text style={[styles.activeTitle, { color: C.text }]} numberOfLines={2}>{trip.name}</Text>
+              <Text style={[styles.meta, { color: C.text2 }]} numberOfLines={1}>{tripMeta(trip)}</Text>
+            </View>
+            <Ionicons name="chevron-forward" size={19} color={C.text3} />
           </View>
         </TouchableOpacity>
         <TouchableOpacity
           accessibilityRole="button"
           accessibilityLabel={`More actions for ${trip.name}`}
-          hitSlop={10}
-          activeOpacity={0.72}
+          activeOpacity={0.76}
           onPress={() => onMore(trip)}
-          style={[styles.moreButton, { borderColor: C.border }]}
+          style={[styles.activeMoreButton, { backgroundColor: C.s1, borderColor: C.border }]}
         >
-          <Ionicons name="ellipsis-horizontal" size={19} color={C.text2} />
+          <Ionicons name="ellipsis-horizontal" size={19} color={C.text} />
         </TouchableOpacity>
       </View>
+    );
+  }
 
-      <View style={[styles.metrics, { borderTopColor: C.border, borderBottomColor: C.border }] }>
-        <Metric label="Days" value={`${Math.max(0, Math.round(trip.days))}`} />
-        <View style={[styles.metricDivider, { backgroundColor: C.border }]} />
-        <Metric label="Miles" value={formatMiles(trip.miles)} />
-        <View style={[styles.metricDivider, { backgroundColor: C.border }]} />
-        <Metric label="Stops" value={`${trip.stopCount}`} />
-      </View>
-
-      <TripStatusGrid trip={trip} compact={!active} />
-
-      <View style={styles.actions}>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={`Open ${trip.name} on map`}
-          activeOpacity={0.82}
-          onPress={() => onOpen(trip)}
-          style={[styles.openButton, { backgroundColor: active ? C.orange : C.s2, borderColor: active ? C.orange : C.border2 }]}
-        >
-          <Ionicons name="map-outline" size={17} color={active ? '#FFFFFF' : C.text} />
-          <Text style={[styles.openLabel, { color: active ? '#FFFFFF' : C.text }]}>Open map</Text>
-        </TouchableOpacity>
-        <TouchableOpacity
-          accessibilityRole="button"
-          accessibilityLabel={`Manage ${trip.name}`}
-          activeOpacity={0.78}
-          onPress={() => onMore(trip)}
-          style={[styles.manageButton, { borderColor: C.border2 }]}
-        >
-          <Ionicons name="options-outline" size={17} color={C.text2} />
-          <Text style={[styles.manageLabel, { color: C.text2 }]}>Manage</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
-}
-
-function Metric({ label, value }: { label: string; value: string }) {
-  const C = useTheme();
   return (
-    <View style={styles.metric} accessible accessibilityLabel={`${label}: ${value}`}>
-      <Text style={[styles.metricValue, { color: C.text }]}>{value}</Text>
-      <Text style={[styles.metricLabel, { color: C.text2 }]}>{label}</Text>
+    <View style={[styles.row, { borderBottomColor: C.border }]}>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`Open ${trip.name}. ${tripMeta(trip)}`}
+        activeOpacity={0.72}
+        onPress={() => onOpen(trip)}
+        style={styles.openArea}
+      >
+        <View style={[styles.thumbnail, { borderColor: C.border, backgroundColor: C.s2 }]}>
+          <TripPreview trip={trip} height={58} />
+        </View>
+        <View style={styles.copy}>
+          <Text style={[styles.title, { color: C.text }]} numberOfLines={2}>
+            {trip.name}
+          </Text>
+          <Text style={[styles.meta, { color: C.text2 }]} numberOfLines={1}>{tripMeta(trip)}</Text>
+        </View>
+        <Ionicons name="chevron-forward" size={18} color={C.text3} />
+      </TouchableOpacity>
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel={`More actions for ${trip.name}`}
+        hitSlop={6}
+        activeOpacity={0.72}
+        onPress={() => onMore(trip)}
+        style={styles.moreButton}
+      >
+        <Ionicons name="ellipsis-horizontal" size={18} color={C.text2} />
+      </TouchableOpacity>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
+  activeBlock: {
     position: 'relative',
-    overflow: 'hidden',
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 16,
-    gap: 15,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingBottom: 13,
   },
-  activeRail: {
-    position: 'absolute',
-    left: 0,
-    top: 0,
-    bottom: 0,
-    width: 3,
-  },
-  headingRow: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 10,
-  },
-  headingAction: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'flex-start',
+  activeOpenArea: {
     gap: 11,
   },
-  tripIcon: {
-    width: 38,
-    height: 38,
-    borderWidth: 1,
+  activeMedia: {
+    width: '100%',
+    height: 146,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
     borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
-  headingCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  eyebrow: {
-    fontSize: 9,
-    lineHeight: 12,
-    fontWeight: '900',
-    letterSpacing: 0,
-    marginBottom: 2,
-  },
-  title: {
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  activeTitle: {
-    fontSize: 20,
-    lineHeight: 25,
-  },
-  meta: {
-    marginTop: 3,
-    fontSize: 11.5,
-    lineHeight: 16,
-    fontWeight: '600',
-    letterSpacing: 0,
-  },
-  moreButton: {
-    width: 38,
-    height: 38,
-    borderWidth: 1,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  metrics: {
-    minHeight: 54,
+  activeCopyRow: {
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: 10,
   },
-  metric: {
-    flex: 1,
+  activeMoreButton: {
+    position: 'absolute',
+    right: 10,
+    top: 10,
+    width: 38,
+    height: 38,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  metricValue: {
+  row: {
+    minHeight: 78,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  openArea: {
+    minWidth: 0,
+    flex: 1,
+    minHeight: 78,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingVertical: 10,
+  },
+  thumbnail: {
+    width: 58,
+    height: 58,
+    flexShrink: 0,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 7,
+  },
+  copy: {
+    minWidth: 0,
+    flex: 1,
+  },
+  title: {
     fontSize: 15,
     lineHeight: 19,
-    fontWeight: '800',
-    letterSpacing: 0,
-    fontVariant: ['tabular-nums'],
-  },
-  metricLabel: {
-    fontSize: 9.5,
-    lineHeight: 13,
     fontWeight: '700',
     letterSpacing: 0,
   },
-  metricDivider: {
-    width: StyleSheet.hairlineWidth,
-    height: 28,
+  activeTitle: {
+    fontSize: 18,
+    lineHeight: 23,
+    fontWeight: '700',
+    letterSpacing: 0,
   },
-  actions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  openButton: {
-    minHeight: 44,
-    flex: 1,
-    borderWidth: 1,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    paddingHorizontal: 12,
-  },
-  openLabel: {
-    fontSize: 13,
+  meta: {
+    marginTop: 3,
+    fontSize: 12.5,
     lineHeight: 17,
-    fontWeight: '800',
+    fontWeight: '500',
     letterSpacing: 0,
+    fontVariant: ['tabular-nums'],
   },
-  manageButton: {
-    minHeight: 44,
-    borderWidth: 1,
-    borderRadius: 8,
-    flexDirection: 'row',
+  moreButton: {
+    width: 40,
+    minHeight: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 7,
-    paddingHorizontal: 13,
   },
-  manageLabel: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '800',
-    letterSpacing: 0,
+  previewFill: {
+    ...StyleSheet.absoluteFillObject,
   },
 });

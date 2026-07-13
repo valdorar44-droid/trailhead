@@ -4,11 +4,14 @@ import { readLegacyTripRepositoryData } from './legacy';
 import { createDefaultTripRepositoryStorage } from './storage';
 import type {
   AddEntityToTripOptions,
+  DraftTripDeletionOptions,
+  DraftTripDeletionRequest,
   LegacyMigrationInput,
   ListSavedEntitiesOptions,
   ListTripsOptions,
   RepositoryMutationOptions,
   SavedEntityV1,
+  TripDeletionOptions,
   TripDocumentV2,
   TripNoteInput,
   TripRepositoryUserScope,
@@ -65,8 +68,15 @@ export function archiveTrip(id: string, options?: RepositoryMutationOptions) {
   return repository.archiveTrip(id, options);
 }
 
-export function deleteTrip(id: string, options?: RepositoryMutationOptions) {
+export function deleteTrip(id: string, options?: TripDeletionOptions) {
   return repository.deleteTrip(id, options);
+}
+
+export function deleteDraftTrips(
+  requests: DraftTripDeletionRequest[],
+  options?: DraftTripDeletionOptions,
+) {
+  return repository.deleteDraftTrips(requests, options);
 }
 
 export function duplicateTrip(id: string, title?: string) {

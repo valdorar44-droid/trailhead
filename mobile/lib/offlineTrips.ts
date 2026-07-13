@@ -62,6 +62,22 @@ export async function deleteOfflineTrip(tripId: string): Promise<void> {
   } catch {}
 }
 
+export async function deleteOfflineTrips(tripIds: string[]): Promise<void> {
+  const epoch = accountStorage.epoch();
+  const ids = [...new Set(tripIds.map(id => String(id || '').trim()).filter(Boolean))];
+  if (ids.length === 0) return;
+  try {
+    await accountStorage.run(async () => {
+      await Promise.all(ids.map(id => FileSystem.deleteAsync(DIR + id + '.json', { idempotent: true })));
+      const deleted = new Set(ids);
+      const index = await getOfflineTripIndex();
+      await FileSystem.writeAsStringAsync(INDEX_PATH, JSON.stringify(index.filter(id => !deleted.has(id))));
+    }, epoch);
+  } catch {
+    // Offline copies are a cache; the repository deletion remains authoritative.
+  }
+}
+
 export async function deleteAllOfflineTrips(): Promise<void> {
   await accountStorage.run(() => FileSystem.deleteAsync(DIR, { idempotent: true }));
 }

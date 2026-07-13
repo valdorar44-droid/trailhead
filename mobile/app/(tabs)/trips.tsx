@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Linking,
+  Modal,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -26,11 +28,12 @@ import {
 import AvailabilityWatchManager from '@/components/trips/AvailabilityWatchManager';
 import SavedItemsSection from '@/components/trips/SavedItemsSection';
 import TripActionSheet from '@/components/trips/TripActionSheet';
-import TripCard from '@/components/trips/TripCard';
+import TripCard, { TripPreview } from '@/components/trips/TripCard';
 import TripFilterSegment from '@/components/trips/TripFilterSegment';
 import TripNotesSheet from '@/components/trips/TripNotesSheet';
 import {
   archiveLibraryTrip,
+  deleteLibraryDrafts,
   deleteLibraryTrip,
   deleteLibraryTripNote,
   duplicateLibraryTrip,
@@ -67,9 +70,10 @@ export default function TripsScreen() {
   const activeTripId = useStore(state => state.activeTrip?.trip_id ?? '');
   const userId = useStore(state => state.user?.id ?? '');
   const setPendingMapSelection = useStore(state => state.setPendingMapSelection);
+  const setTabBarHidden = useStore(state => state.setTabBarHidden);
 
   const [snapshot, setSnapshot] = useState<TripLibrarySnapshot>(EMPTY_SNAPSHOT);
-  const [filter, setFilter] = useState<TripLibraryFilter>('saved');
+  const [filter, setFilter] = useState<TripLibraryFilter>('draft');
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedTrip, setSelectedTrip] = useState<TripLibraryItem | null>(null);
@@ -78,6 +82,10 @@ export default function TripsScreen() {
   const [notesTripId, setNotesTripId] = useState<string | null>(null);
   const [visibleTripCount, setVisibleTripCount] = useState(TRIP_RENDER_BATCH);
   const [notice, setNotice] = useState('');
+  const [selectingDrafts, setSelectingDrafts] = useState(false);
+  const [selectedDraftIds, setSelectedDraftIds] = useState<Set<string>>(() => new Set());
+  const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
+  const [deletingDrafts, setDeletingDrafts] = useState(false);
   const requestSequence = useRef(0);
   const expectedOwnerScope = userId ? `account:${String(userId)}` : 'anonymous';
   const repositoryReady = repository.initialized && repository.ownerScope === expectedOwnerScope;
@@ -129,6 +137,9 @@ export default function TripsScreen() {
       setSnapshot(EMPTY_SNAPSHOT);
       setActionSheetVisible(false);
       setNotesTripId(null);
+      setSelectingDrafts(false);
+      setSelectedDraftIds(new Set());
+      setDeleteConfirmationVisible(false);
       return;
     }
     const timer = setTimeout(() => {
@@ -150,14 +161,6 @@ export default function TripsScreen() {
     }
   }, [refresh, repositoryReady]);
 
-  const syncMessage = useMemo(() => {
-    const sync = repository.sync;
-    if (sync.state === 'offline' && sync.pendingCount > 0) {
-      return 'Changes are saved here and will sync when you are back online.';
-    }
-    return '';
-  }, [repository.sync]);
-
   const filteredTrips = useMemo(
     () => snapshot.trips.filter(trip => trip.status === filter),
     [filter, snapshot.trips],
@@ -169,6 +172,27 @@ export default function TripsScreen() {
   useEffect(() => {
     setVisibleTripCount(TRIP_RENDER_BATCH);
   }, [filter, expectedOwnerScope]);
+  useEffect(() => {
+    setTabBarHidden(selectingDrafts);
+    return () => setTabBarHidden(false);
+  }, [selectingDrafts, setTabBarHidden]);
+  const draftTrips = useMemo(
+    () => snapshot.trips.filter(trip => trip.status === 'draft'),
+    [snapshot.trips],
+  );
+  const selectedDrafts = useMemo(
+    () => draftTrips.filter(trip => selectedDraftIds.has(trip.id)),
+    [draftTrips, selectedDraftIds],
+  );
+  useEffect(() => {
+    const availableIds = new Set(draftTrips.map(trip => trip.id));
+    setSelectedDraftIds(current => {
+      const next = new Set([...current].filter(id => availableIds.has(id)));
+      return next.size === current.size && [...current].every(id => next.has(id))
+        ? current
+        : next;
+    });
+  }, [draftTrips]);
   const notesTrip = useMemo(
     () => notesTripId ? repository.trips.find(trip => trip.id === notesTripId) ?? null : null,
     [notesTripId, repository.trips],
@@ -251,7 +275,7 @@ export default function TripsScreen() {
     setActionSheetVisible(false);
     Alert.alert(
       'Delete trip?',
-      `${trip.name} will be removed from your trips. This cannot be undone.`,
+      `${trip.name} will be permanently removed from your Trailhead account.`,
       [
         { text: 'Cancel', style: 'cancel' },
         { text: 'Delete', style: 'destructive', onPress: () => void performAction('delete', trip) },
@@ -310,15 +334,158 @@ export default function TripsScreen() {
     router.push('/(tabs)/guide');
   }, [router, setPendingMapSelection]);
 
-  const startPlanning = useCallback(() => router.push({
-    pathname: '/(tabs)/route-builder',
-    params: { intent: 'new', request: String(Date.now()) },
-  }), [router]);
   const browseExplore = useCallback(() => router.push('/(tabs)/guide'), [router]);
+
+  const beginDraftSelection = useCallback(() => {
+    setFilter('draft');
+    setSelectedDraftIds(new Set());
+    setSelectingDrafts(true);
+  }, []);
+
+  const cancelDraftSelection = useCallback(() => {
+    if (deletingDrafts) return;
+    setDeleteConfirmationVisible(false);
+    setSelectedDraftIds(new Set());
+    setSelectingDrafts(false);
+  }, [deletingDrafts]);
+
+  const toggleDraftSelection = useCallback((id: string) => {
+    setSelectedDraftIds(current => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
+
+  const selectAllDrafts = useCallback(() => {
+    setSelectedDraftIds(current => current.size === draftTrips.length
+      ? new Set()
+      : new Set(draftTrips.map(trip => trip.id)));
+  }, [draftTrips]);
+
+  const deleteSelectedDrafts = useCallback(async () => {
+    if (selectedDrafts.length === 0 || deletingDrafts) return;
+    setDeletingDrafts(true);
+    try {
+      const deletedIds = await deleteLibraryDrafts(selectedDrafts);
+      setDeleteConfirmationVisible(false);
+      setSelectedDraftIds(new Set());
+      setSelectingDrafts(false);
+      setNotice(`${deletedIds.length} ${deletedIds.length === 1 ? 'draft' : 'drafts'} deleted.`);
+      await refresh('silent');
+    } catch (error: any) {
+      setDeleteConfirmationVisible(false);
+      Alert.alert('Drafts not deleted', error?.message || 'Refresh and try again.');
+      await refresh('silent');
+    } finally {
+      setDeletingDrafts(false);
+    }
+  }, [deletingDrafts, refresh, selectedDrafts]);
+
+  if (selectingDrafts) {
+    const selectedCount = selectedDrafts.length;
+    const allSelected = draftTrips.length > 0 && selectedCount === draftTrips.length;
+    return (
+      <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: C.bg }]}>
+        <View style={[styles.selectionHeader, { borderBottomColor: C.border }]}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={allSelected ? 'Clear draft selection' : 'Select all drafts'}
+            activeOpacity={0.7}
+            disabled={deletingDrafts || draftTrips.length === 0}
+            onPress={selectAllDrafts}
+            style={styles.selectionHeaderAction}
+          >
+            <Text style={[styles.selectionHeaderActionText, { color: C.orange }]}>
+              {allSelected ? 'Clear' : 'Select all'}
+            </Text>
+          </TouchableOpacity>
+          <Text
+            accessibilityLiveRegion="polite"
+            style={[styles.selectionCount, { color: C.text }]}
+          >
+            {selectedCount} selected
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Cancel draft selection"
+            activeOpacity={0.7}
+            disabled={deletingDrafts}
+            onPress={cancelDraftSelection}
+            style={[styles.selectionHeaderAction, styles.selectionCancel]}
+          >
+            <Text style={[styles.selectionHeaderActionText, { color: C.orange }]}>Cancel</Text>
+          </TouchableOpacity>
+        </View>
+        <FlatList
+          data={draftTrips}
+          keyExtractor={trip => trip.id}
+          extraData={selectedDraftIds}
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.selectionList,
+            { paddingBottom: Math.max(insets.bottom + 108, 124) },
+          ]}
+          renderItem={({ item }) => (
+            <DraftSelectionRow
+              trip={item}
+              selected={selectedDraftIds.has(item.id)}
+              disabled={deletingDrafts}
+              onPress={() => toggleDraftSelection(item.id)}
+            />
+          )}
+        />
+        <View style={[
+          styles.selectionTray,
+          {
+            backgroundColor: C.s1,
+            borderTopColor: C.border,
+            paddingBottom: Math.max(insets.bottom, 14),
+          },
+        ]}>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={selectedCount > 0
+              ? `Delete ${selectedCount} ${selectedCount === 1 ? 'draft' : 'drafts'}`
+              : 'Select drafts to delete'}
+            accessibilityState={{ disabled: selectedCount === 0 || deletingDrafts }}
+            activeOpacity={0.82}
+            disabled={selectedCount === 0 || deletingDrafts}
+            onPress={() => setDeleteConfirmationVisible(true)}
+            style={[
+              styles.deleteSelectionButton,
+              { backgroundColor: selectedCount > 0 ? C.red : C.border2 },
+            ]}
+          >
+            {deletingDrafts ? (
+              <ActivityIndicator size="small" color="#FFFFFF" />
+            ) : (
+              <Ionicons name="trash-outline" size={18} color={selectedCount > 0 ? '#FFFFFF' : C.text3} />
+            )}
+            <Text style={[
+              styles.deleteSelectionLabel,
+              { color: selectedCount > 0 ? '#FFFFFF' : C.text3 },
+            ]}>
+              {selectedCount > 0
+                ? `Delete ${selectedCount} ${selectedCount === 1 ? 'draft' : 'drafts'}`
+                : 'Delete drafts'}
+            </Text>
+          </TouchableOpacity>
+        </View>
+        <DeleteDraftsConfirmation
+          count={selectedCount}
+          visible={deleteConfirmationVisible}
+          busy={deletingDrafts}
+          onCancel={() => !deletingDrafts && setDeleteConfirmationVisible(false)}
+          onDelete={() => void deleteSelectedDrafts()}
+        />
+      </SafeAreaView>
+    );
+  }
 
   return (
     <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: C.bg }]}>
-      <PlanWorkspaceSwitcher active="trips" style={styles.planWorkspaceSwitcher} />
       <ScrollView
         style={styles.screen}
         contentInsetAdjustmentBehavior="automatic"
@@ -341,114 +508,75 @@ export default function TripsScreen() {
       >
         <View style={styles.content}>
           <View style={styles.pageHeader}>
-            <View style={styles.pageHeaderCopy}>
-              <Text style={[styles.pageTitle, { color: C.text }]}>Trips</Text>
-              <Text style={[styles.pageSubtitle, { color: C.text2 }]}>Plans, places, and bookings in one place</Text>
-            </View>
+            <Text style={[styles.pageTitle, { color: C.text }]}>Plan</Text>
+          </View>
+          <PlanWorkspaceSwitcher active="trips" style={styles.planWorkspaceSwitcher} />
+
+          {notice ? (
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel="Create a new route"
-              activeOpacity={0.78}
-              onPress={startPlanning}
-              style={[styles.createButton, { backgroundColor: C.orange, borderColor: C.orange }]}
+              accessibilityLabel={`${notice} Dismiss`}
+              activeOpacity={0.76}
+              onPress={() => setNotice('')}
+              style={[styles.notice, { borderTopColor: C.border, borderBottomColor: C.border }]}
             >
-              <Ionicons name="add" size={20} color="#FFFFFF" />
+              <Ionicons name="checkmark-circle-outline" size={17} color={C.green} />
+              <Text style={[styles.noticeText, { color: C.text2 }]}>{notice}</Text>
+              <Ionicons name="close" size={16} color={C.text3} />
             </TouchableOpacity>
-        </View>
+          ) : null}
 
-        {notice ? (
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel={`${notice} Dismiss`}
-            activeOpacity={0.76}
-            onPress={() => setNotice('')}
-            style={[styles.notice, { borderTopColor: C.border, borderBottomColor: C.border }]}
-          >
-            <Ionicons name="checkmark-circle-outline" size={17} color={C.green} />
-            <Text style={[styles.noticeText, { color: C.text2 }]}>{notice}</Text>
-            <Ionicons name="close" size={16} color={C.text3} />
-          </TouchableOpacity>
-        ) : null}
-
-        {syncMessage ? (
-          <View
-            accessibilityLiveRegion="polite"
-            style={[styles.syncNotice, { borderTopColor: C.border, borderBottomColor: C.border }]}
-          >
-            <Ionicons
-              name="cloud-offline-outline"
-              size={17}
-              color={C.text3}
-            />
-            <Text style={[styles.syncNoticeText, { color: C.text2 }]}>{syncMessage}</Text>
-          </View>
-        ) : null}
-
-        <View style={styles.section}>
-          <SectionHeading title="Underway" subtitle="The trip Trailhead opens across Plan and Map" />
-          {loading ? (
-            <LoadingTrip />
-          ) : snapshot.activeTrip ? (
-            <TripCard trip={snapshot.activeTrip} active onOpen={openTrip} onMore={openActions} />
-          ) : (
-            <View style={[styles.noActive, { borderTopColor: C.border, borderBottomColor: C.border }] }>
-              <View style={[styles.noActiveIcon, { backgroundColor: C.s2, borderColor: C.border }] }>
-                <Ionicons name="navigate-outline" size={20} color={C.text3} />
-              </View>
-              <View style={styles.noActiveCopy}>
-                <Text style={[styles.noActiveTitle, { color: C.text }]}>No trip underway</Text>
-                <Text style={[styles.noActiveBody, { color: C.text2 }]}>Open a saved trip or begin a new plan.</Text>
-              </View>
-              <TouchableOpacity
-                accessibilityRole="button"
-                accessibilityLabel="Open Route Builder"
-                activeOpacity={0.76}
-                onPress={startPlanning}
-                style={[styles.inlineAction, { borderColor: C.border2 }]}
-              >
-                <Ionicons name="add" size={16} color={C.orange} />
-                <Text style={[styles.inlineActionText, { color: C.text }]}>Build</Text>
-              </TouchableOpacity>
-            </View>
-          )}
-        </View>
-
-        <View style={styles.section}>
-          <SectionHeading title="Trip library" subtitle="Keep unfinished work separate from saved routes" />
-          <TripFilterSegment value={filter} counts={snapshot.counts} onChange={setFilter} />
-          {loading ? (
-            <LoadingTrip />
-          ) : filteredTrips.length > 0 ? (
-            <View style={styles.tripList}>
-              {visibleTrips.map(trip => (
-                <TripCard key={trip.id} trip={trip} onOpen={openTrip} onMore={openActions} />
-              ))}
-              {visibleTrips.length < filteredTrips.length ? (
-                <TouchableOpacity
-                  accessibilityRole="button"
-                  accessibilityLabel={`Show more ${filter} trips`}
-                  activeOpacity={0.74}
-                  onPress={() => setVisibleTripCount(count => count + TRIP_RENDER_BATCH)}
-                  style={[styles.showMoreButton, { borderColor: C.border2 }]}
-                >
-                  <Text style={[styles.showMoreText, { color: C.text2 }]}>Show more trips</Text>
-                  <Ionicons name="chevron-down" size={16} color={C.text2} />
-                </TouchableOpacity>
+          {loading || snapshot.activeTrip ? (
+            <View style={styles.section}>
+              <Text style={[styles.sectionTitle, { color: C.text }]}>In progress</Text>
+              {loading ? (
+                <LoadingTrip />
+              ) : snapshot.activeTrip ? (
+                <TripCard trip={snapshot.activeTrip} active onOpen={openTrip} onMore={openActions} />
               ) : null}
             </View>
-          ) : (
-            <LibraryMessage filter={filter} onPlan={startPlanning} />
-          )}
-        </View>
+          ) : null}
 
-        {repositoryReady ? (
-          <>
-            {availabilityEnabled ? (
-              <AvailabilityWatchManager signedIn={Boolean(userId)} knownActiveCount={knownActiveWatchCount} />
+          <View style={styles.section}>
+            <TripFilterSegment
+              value={filter}
+              counts={snapshot.counts}
+              onChange={setFilter}
+              onSelectDrafts={beginDraftSelection}
+            />
+            {loading ? (
+              <LoadingTrip />
+            ) : filteredTrips.length > 0 ? (
+              <View style={styles.tripList}>
+                {visibleTrips.map(trip => (
+                  <TripCard key={trip.id} trip={trip} onOpen={openTrip} onMore={openActions} />
+                ))}
+                {visibleTrips.length < filteredTrips.length ? (
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel={`Show more ${filter} trips`}
+                    activeOpacity={0.74}
+                    onPress={() => setVisibleTripCount(count => count + TRIP_RENDER_BATCH)}
+                    style={styles.showMoreButton}
+                  >
+                    <Text style={[styles.showMoreText, { color: C.text2 }]}>Show more</Text>
+                    <Ionicons name="chevron-down" size={16} color={C.text2} />
+                  </TouchableOpacity>
+                ) : null}
+              </View>
             ) : null}
-            <SavedItemsSection items={snapshot.savedItems} onOpen={openSavedItem} onBrowse={browseExplore} />
-          </>
-        ) : null}
+          </View>
+
+          {repositoryReady ? (
+            <>
+              {availabilityEnabled ? (
+                <AvailabilityWatchManager signedIn={Boolean(userId)} knownActiveCount={knownActiveWatchCount} />
+              ) : null}
+              {snapshot.savedItems.length > 0 ? (
+                <SavedItemsSection items={snapshot.savedItems} onOpen={openSavedItem} onBrowse={browseExplore} />
+              ) : null}
+            </>
+          ) : null}
         </View>
 
       <TripActionSheet
@@ -471,16 +599,6 @@ export default function TripsScreen() {
   );
 }
 
-function SectionHeading({ title, subtitle }: { title: string; subtitle: string }) {
-  const C = useTheme();
-  return (
-    <View>
-      <Text style={[styles.sectionTitle, { color: C.text }]}>{title}</Text>
-      <Text style={[styles.sectionSubtitle, { color: C.text2 }]}>{subtitle}</Text>
-    </View>
-  );
-}
-
 function LoadingTrip() {
   const C = useTheme();
   return (
@@ -491,34 +609,129 @@ function LoadingTrip() {
   );
 }
 
-function LibraryMessage({ filter, onPlan }: { filter: TripLibraryFilter; onPlan: () => void }) {
+function draftUpdatedLabel(value: number) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return 'Recently';
+  const now = new Date();
+  const startToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const startDate = new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+  const dayDifference = Math.round((startToday - startDate) / 86_400_000);
+  if (dayDifference <= 0) return 'Today';
+  if (dayDifference === 1) return 'Yesterday';
+  return date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function DraftSelectionRow({
+  trip,
+  selected,
+  disabled,
+  onPress,
+}: {
+  trip: TripLibraryItem;
+  selected: boolean;
+  disabled: boolean;
+  onPress: () => void;
+}) {
   const C = useTheme();
-  const copy = filter === 'draft'
-    ? 'Trips you duplicate or leave unfinished will stay here.'
-    : filter === 'archived'
-      ? 'Archived trips stay out of the way until you restore them.'
-      : 'Your active trip is shown above. Save another route when it is ready.';
+  const stopLabel = `${trip.stopCount} ${trip.stopCount === 1 ? 'stop' : 'stops'}`;
   return (
-    <View style={[styles.libraryMessage, { borderTopColor: C.border, borderBottomColor: C.border }] }>
-      <Ionicons
-        name={filter === 'archived' ? 'archive-outline' : filter === 'draft' ? 'create-outline' : 'bookmark-outline'}
-        size={18}
-        color={C.text3}
-      />
-      <Text style={[styles.libraryMessageText, { color: C.text2 }]}>{copy}</Text>
-      {filter !== 'archived' ? (
+    <TouchableOpacity
+      accessibilityRole="checkbox"
+      accessibilityLabel={`${trip.name}. ${stopLabel}. ${draftUpdatedLabel(trip.updatedAt)}`}
+      accessibilityState={{ checked: selected, disabled }}
+      activeOpacity={0.72}
+      disabled={disabled}
+      onPress={onPress}
+      style={[styles.selectionRow, { borderBottomColor: C.border }]}
+    >
+      <View style={[
+        styles.checkbox,
+        {
+          backgroundColor: selected ? C.orange : 'transparent',
+          borderColor: selected ? C.orange : C.text2,
+        },
+      ]}>
+        {selected ? <Ionicons name="checkmark" size={15} color="#FFFFFF" /> : null}
+      </View>
+      <View style={[styles.selectionThumbnail, { borderColor: C.border, backgroundColor: C.s2 }]}>
+        <TripPreview trip={trip} height={52} />
+      </View>
+      <View style={styles.selectionRowCopy}>
+        <Text style={[styles.selectionRowTitle, { color: C.text }]} numberOfLines={2}>{trip.name}</Text>
+        <Text style={[styles.selectionRowMeta, { color: C.text2 }]} numberOfLines={1}>
+          {stopLabel} · {draftUpdatedLabel(trip.updatedAt)}
+        </Text>
+      </View>
+    </TouchableOpacity>
+  );
+}
+
+function DeleteDraftsConfirmation({
+  count,
+  visible,
+  busy,
+  onCancel,
+  onDelete,
+}: {
+  count: number;
+  visible: boolean;
+  busy: boolean;
+  onCancel: () => void;
+  onDelete: () => void;
+}) {
+  const C = useTheme();
+  const insets = useSafeAreaInsets();
+  const label = count === 1 ? 'draft' : 'drafts';
+  return (
+    <Modal
+      animationType="slide"
+      transparent
+      visible={visible}
+      statusBarTranslucent
+      onRequestClose={onCancel}
+    >
+      <View style={styles.confirmationRoot}>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="Open Route Builder"
-          activeOpacity={0.74}
-          onPress={onPlan}
-          style={styles.textAction}
-        >
-          <Text style={[styles.textActionLabel, { color: C.orange }]}>Build</Text>
-          <Ionicons name="arrow-forward" size={14} color={C.orange} />
-        </TouchableOpacity>
-      ) : null}
-    </View>
+          accessibilityLabel="Cancel deletion"
+          activeOpacity={1}
+          disabled={busy}
+          onPress={onCancel}
+          style={styles.confirmationScrim}
+        />
+        <View style={[
+          styles.confirmationSheet,
+          { backgroundColor: C.s1, paddingBottom: Math.max(insets.bottom, 18) },
+        ]}>
+          <View style={[styles.sheetHandle, { backgroundColor: C.border2 }]} />
+          <Text style={[styles.confirmationTitle, { color: C.text }]}>Delete {count} {label}?</Text>
+          <Text style={[styles.confirmationBody, { color: C.text2 }]}>
+            They&apos;ll be permanently removed from your Trailhead account. Saved and archived trips stay in your library.
+          </Text>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Cancel"
+            activeOpacity={0.78}
+            disabled={busy}
+            onPress={onCancel}
+            style={[styles.confirmationCancel, { backgroundColor: C.s2, borderColor: C.border }]}
+          >
+            <Text style={[styles.confirmationCancelLabel, { color: C.text }]}>Cancel</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${count} ${label}`}
+            activeOpacity={0.82}
+            disabled={busy}
+            onPress={onDelete}
+            style={[styles.confirmationDelete, { backgroundColor: C.red }]}
+          >
+            {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : null}
+            <Text style={styles.confirmationDeleteLabel}>Delete {count} {label}</Text>
+          </TouchableOpacity>
+        </View>
+      </View>
+    </Modal>
   );
 }
 
@@ -533,22 +746,17 @@ const styles = StyleSheet.create({
     width: '100%',
     maxWidth: 760,
     alignSelf: 'center',
-    gap: 30,
+    gap: 24,
   },
   planWorkspaceSwitcher: {
-    paddingHorizontal: 16,
-    marginTop: 8,
-    marginBottom: 4,
+    paddingHorizontal: 0,
+    marginTop: -8,
+    marginBottom: 2,
   },
   pageHeader: {
-    minHeight: 58,
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-  },
-  pageHeaderCopy: {
-    flex: 1,
-    minWidth: 0,
   },
   pageTitle: {
     fontSize: 30,
@@ -556,24 +764,8 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
   },
-  pageSubtitle: {
-    marginTop: 2,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: '600',
-    letterSpacing: 0,
-  },
-  createButton: {
-    width: 44,
-    height: 44,
-    borderRadius: 8,
-    borderWidth: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
   notice: {
     minHeight: 44,
-    marginTop: -15,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
     flexDirection: 'row',
@@ -588,23 +780,6 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     letterSpacing: 0,
   },
-  syncNotice: {
-    minHeight: 48,
-    marginTop: -15,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 9,
-    paddingVertical: 7,
-  },
-  syncNoticeText: {
-    flex: 1,
-    fontSize: 12,
-    lineHeight: 17,
-    fontWeight: '600',
-    letterSpacing: 0,
-  },
   section: {
     gap: 12,
   },
@@ -614,70 +789,11 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
   },
-  sectionSubtitle: {
-    marginTop: 2,
-    fontSize: 11.5,
-    lineHeight: 16,
-    fontWeight: '600',
-    letterSpacing: 0,
-  },
-  noActive: {
-    minHeight: 72,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    paddingVertical: 11,
-  },
-  noActiveIcon: {
-    width: 40,
-    height: 40,
-    borderWidth: 1,
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  noActiveCopy: {
-    flex: 1,
-    minWidth: 0,
-  },
-  noActiveTitle: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  noActiveBody: {
-    marginTop: 2,
-    fontSize: 11.5,
-    lineHeight: 16,
-    fontWeight: '600',
-    letterSpacing: 0,
-  },
-  inlineAction: {
-    minHeight: 40,
-    borderWidth: 1,
-    borderRadius: 8,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    paddingHorizontal: 11,
-  },
-  inlineActionText: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
   tripList: {
-    gap: 12,
+    gap: 0,
   },
   showMoreButton: {
     minHeight: 44,
-    borderWidth: 1,
-    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -689,38 +805,10 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 0,
   },
-  libraryMessage: {
-    minHeight: 58,
+  loadingTrip: {
+    minHeight: 78,
     borderTopWidth: StyleSheet.hairlineWidth,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-  },
-  libraryMessageText: {
-    flex: 1,
-    fontSize: 11.5,
-    lineHeight: 16,
-    fontWeight: '600',
-    letterSpacing: 0,
-  },
-  textAction: {
-    minHeight: 34,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-  },
-  textActionLabel: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: '800',
-    letterSpacing: 0,
-  },
-  loadingTrip: {
-    minHeight: 92,
-    borderWidth: 1,
-    borderRadius: 8,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
@@ -729,6 +817,175 @@ const styles = StyleSheet.create({
   loadingText: {
     fontSize: 12,
     lineHeight: 16,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  selectionHeader: {
+    minHeight: 62,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+  },
+  selectionHeaderAction: {
+    width: 92,
+    minHeight: 44,
+    justifyContent: 'center',
+  },
+  selectionCancel: {
+    alignItems: 'flex-end',
+  },
+  selectionHeaderActionText: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  selectionCount: {
+    flex: 1,
+    textAlign: 'center',
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: '700',
+    letterSpacing: 0,
+    fontVariant: ['tabular-nums'],
+  },
+  selectionList: {
+    width: '100%',
+    maxWidth: 760,
+    alignSelf: 'center',
+    paddingHorizontal: 16,
+  },
+  selectionRow: {
+    minHeight: 74,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    paddingVertical: 10,
+  },
+  checkbox: {
+    width: 22,
+    height: 22,
+    flexShrink: 0,
+    borderRadius: 5,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  selectionThumbnail: {
+    width: 52,
+    height: 52,
+    flexShrink: 0,
+    overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 7,
+  },
+  selectionRowCopy: {
+    minWidth: 0,
+    flex: 1,
+  },
+  selectionRowTitle: {
+    fontSize: 15,
+    lineHeight: 19,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  selectionRowMeta: {
+    marginTop: 3,
+    fontSize: 12.5,
+    lineHeight: 17,
+    fontWeight: '500',
+    letterSpacing: 0,
+    fontVariant: ['tabular-nums'],
+  },
+  selectionTray: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+  },
+  deleteSelectionButton: {
+    minHeight: 52,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  deleteSelectionLabel: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  confirmationRoot: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  confirmationScrim: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(0,0,0,0.42)',
+  },
+  confirmationSheet: {
+    width: '100%',
+    maxWidth: 560,
+    alignSelf: 'center',
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 22,
+    paddingTop: 12,
+  },
+  sheetHandle: {
+    width: 38,
+    height: 4,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 20,
+  },
+  confirmationTitle: {
+    fontSize: 23,
+    lineHeight: 30,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  confirmationBody: {
+    marginTop: 8,
+    fontSize: 15,
+    lineHeight: 21,
+    fontWeight: '400',
+    letterSpacing: 0,
+  },
+  confirmationCancel: {
+    minHeight: 52,
+    marginTop: 24,
+    borderWidth: 1,
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  confirmationCancelLabel: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
+    letterSpacing: 0,
+  },
+  confirmationDelete: {
+    minHeight: 52,
+    marginTop: 12,
+    borderRadius: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+  },
+  confirmationDeleteLabel: {
+    color: '#FFFFFF',
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '700',
     letterSpacing: 0,
   },

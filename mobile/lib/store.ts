@@ -676,6 +676,7 @@ interface AppState {
   setRigProfile: (rig: RigProfile) => void;
   addTripToHistory: (item: TripHistoryItem) => void;
   removeTripFromHistory: (tripId: string) => void;
+  removeTripsFromHistory: (tripIds: string[], expectedOwnerScope: string) => Promise<void>;
   setThemeMode: (mode: 'light' | 'dark') => void;
   setWeatherUnitMode: (mode: WeatherUnitMode) => void;
   setUserLoc: (loc: { lat: number; lng: number } | null) => void;
@@ -907,6 +908,32 @@ export const useStore = create<AppState>((set) => ({
         activeTripFromCache: state.activeTrip?.trip_id === tripId ? false : state.activeTripFromCache,
       };
     });
+  },
+
+  removeTripsFromHistory: async (tripIds, expectedOwnerScope) => {
+    const ids = new Set(tripIds.map(id => String(id || '').trim()).filter(Boolean));
+    if (ids.size === 0) return;
+    const completed = await accountLocalWrite(async () => {
+      if (getTripRepositorySnapshot().ownerScope !== expectedOwnerScope) {
+        throw new Error('The active account changed while trips were being removed.');
+      }
+      const state = useStore.getState();
+      const updated = state.tripHistory.filter(item => !ids.has(item.trip_id));
+      const activeWasRemoved = Boolean(state.activeTrip?.trip_id && ids.has(state.activeTrip.trip_id));
+      useStore.setState({
+        tripHistory: updated,
+        activeTrip: activeWasRemoved ? null : state.activeTrip,
+        activeTripFromCache: activeWasRemoved ? false : state.activeTripFromCache,
+      });
+      await ss('trailhead_history', JSON.stringify(updated));
+      if (getTripRepositorySnapshot().ownerScope !== expectedOwnerScope) {
+        throw new Error('The active account changed while trips were being removed.');
+      }
+      return true;
+    });
+    if (completed !== true) {
+      throw new Error('Trip history is unavailable while account data is changing.');
+    }
   },
 
   setThemeMode: (mode) => {

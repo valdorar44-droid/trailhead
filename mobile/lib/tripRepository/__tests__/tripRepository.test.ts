@@ -12,6 +12,7 @@ import {
   processTripRepositoryOutbox,
   retryEligibleTripRepositoryEntryIds,
 } from '../syncEngine';
+import { isOutboxEntrySupersededByDelete } from '../deleteSync';
 import type { RepositoryOutboxEntryV1 } from '../types';
 
 function deterministicRepository(storage = new MemoryTripRepositoryStorage()) {
@@ -72,6 +73,33 @@ class DelayedEraseStorage extends MemoryTripRepositoryStorage {
     this.markEraseStarted();
     await this.eraseReleased;
     await super.erase(ownerScopeKey);
+  }
+}
+
+class DelayedReadStorage extends MemoryTripRepositoryStorage {
+  private blockedKey: string | null = null;
+  private releaseRead: (() => void) | null = null;
+  private markReadStarted: (() => void) | null = null;
+  private readReleased: Promise<void> | null = null;
+  readStarted: Promise<void> = Promise.resolve();
+
+  blockNextRead(ownerScopeKey: string) {
+    this.blockedKey = ownerScopeKey;
+    this.readStarted = new Promise<void>(resolve => { this.markReadStarted = resolve; });
+    this.readReleased = new Promise<void>(resolve => { this.releaseRead = resolve; });
+  }
+
+  release() {
+    this.releaseRead?.();
+  }
+
+  override async read(ownerScopeKey: string): Promise<string | null> {
+    if (ownerScopeKey === this.blockedKey && this.readReleased) {
+      this.blockedKey = null;
+      this.markReadStarted?.();
+      await this.readReleased;
+    }
+    return super.read(ownerScopeKey);
   }
 }
 
@@ -162,6 +190,162 @@ async function tripAndLibraryOperations() {
   assert.equal(await repository.removeEntity(entity.id), true);
 }
 
+async function bulkDraftDeletionIsAtomicAndDurable() {
+  const { storage, repository } = deterministicRepository();
+  await repository.initialize('bulk-delete');
+  const first = await repository.upsertTrip(createTripDocument({ id: 'draft-a', title: 'Draft A', status: 'draft' }), { enqueueSync: false });
+  const second = await repository.upsertTrip(createTripDocument({ id: 'draft-b', title: 'Draft B', status: 'draft' }), { enqueueSync: false });
+  const saved = await repository.upsertTrip(createTripDocument({ id: 'saved-trip', title: 'Saved', status: 'completed' }), { enqueueSync: false });
+  const archived = await repository.upsertTrip(createTripDocument({ id: 'archived-trip', title: 'Archived', status: 'archived' }), { enqueueSync: false });
+
+  const deleted = await repository.deleteDraftTrips([
+    { id: first.id, expectedRevision: first.revision },
+    { id: second.id, expectedRevision: second.revision },
+    { id: first.id, expectedRevision: first.revision },
+  ]);
+  assert.deepEqual(deleted, ['draft-a', 'draft-b']);
+  assert.equal(repository.getTrip(first.id), null);
+  assert.equal(repository.getTrip(second.id), null);
+  assert.equal(repository.getTrip(saved.id)?.status, 'completed');
+  assert.equal(repository.getTrip(archived.id)?.status, 'archived');
+  assert.deepEqual(
+    repository.getOutbox().map(entry => [entry.entityId, entry.operation, entry.revision]),
+    [['draft-a', 'delete', 2], ['draft-b', 'delete', 2]],
+  );
+
+  const restored = deterministicRepository(storage).repository;
+  await restored.initialize('bulk-delete');
+  assert.equal(restored.getTrip(first.id), null);
+  assert.equal(restored.getTrip(second.id), null);
+  assert.equal(restored.getTrip(saved.id)?.status, 'completed');
+  assert.equal(restored.getTrip(archived.id)?.status, 'archived');
+  assert.equal(restored.getOutbox().filter(entry => entry.operation === 'delete').length, 2);
+  await restored.applyRemoteTrip({ ...first, ownerScope: 'account:bulk-delete' });
+  assert.equal(restored.getTrip(first.id), null, 'an older server draft cannot return after bulk deletion');
+
+  const third = await restored.upsertTrip(createTripDocument({ id: 'draft-c', title: 'Draft C', status: 'draft' }), { enqueueSync: false });
+  await assert.rejects(
+    restored.deleteDraftTrips([
+      { id: third.id, expectedRevision: third.revision },
+      { id: saved.id, expectedRevision: saved.revision },
+    ]),
+    /is no longer a draft/,
+  );
+  assert.equal(restored.getTrip(third.id)?.status, 'draft', 'a mixed-status request deletes nothing');
+  assert.equal(restored.getTrip(saved.id)?.status, 'completed');
+}
+
+async function queuedScopeSwitchCannotDeleteAnotherAccountsDrafts() {
+  const storage = new DelayedReadStorage();
+  const { repository } = deterministicRepository(storage);
+  await repository.initialize('scope-b');
+  const scopeB = await repository.upsertTrip(
+    createTripDocument({ id: 'shared-draft', title: 'Scope B draft', status: 'draft' }),
+    { enqueueSync: false },
+  );
+  await repository.initialize('scope-a');
+  const scopeA = await repository.upsertTrip(
+    createTripDocument({ id: 'shared-draft', title: 'Scope A draft', status: 'draft' }),
+    { enqueueSync: false },
+  );
+
+  storage.blockNextRead(tripRepositoryScopeKey('account:scope-b'));
+  const switching = repository.initialize('scope-b');
+  await storage.readStarted;
+  const deleting = repository.deleteDraftTrips(
+    [{ id: scopeA.id, expectedRevision: scopeA.revision }],
+    { expectedOwnerScope: 'account:scope-a' },
+  );
+  storage.release();
+  await switching;
+  await assert.rejects(deleting, /owner scope changed/);
+  assert.equal(repository.getSnapshot().ownerScope, 'account:scope-b');
+  assert.equal(repository.getTrip(scopeB.id)?.title, 'Scope B draft');
+}
+
+async function queuedScopeSwitchCannotDeleteAnotherAccountsSavedTrip() {
+  const storage = new DelayedReadStorage();
+  const { repository } = deterministicRepository(storage);
+  await repository.initialize('saved-scope-b');
+  const scopeB = await repository.upsertTrip(
+    createTripDocument({ id: 'shared-saved-trip', title: 'Scope B saved trip', status: 'completed' }),
+    { enqueueSync: false },
+  );
+  await repository.initialize('saved-scope-a');
+  const scopeA = await repository.upsertTrip(
+    createTripDocument({ id: 'shared-saved-trip', title: 'Scope A saved trip', status: 'completed' }),
+    { enqueueSync: false },
+  );
+
+  storage.blockNextRead(tripRepositoryScopeKey('account:saved-scope-b'));
+  const switching = repository.initialize('saved-scope-b');
+  await storage.readStarted;
+  const deleting = repository.deleteTrip(scopeA.id, {
+    expectedRevision: scopeA.revision,
+    expectedOwnerScope: 'account:saved-scope-a',
+  });
+  storage.release();
+  await switching;
+  await assert.rejects(deleting, /owner scope changed/);
+  assert.equal(repository.getSnapshot().ownerScope, 'account:saved-scope-b');
+  assert.equal(repository.getTrip(scopeB.id)?.title, 'Scope B saved trip');
+}
+
+async function batchDeletePrunesSupersededOutboxEntries() {
+  const { repository } = deterministicRepository();
+  await repository.initialize('outbox-pruning');
+  const first = await repository.upsertTrip(createTripDocument({ id: 'pruned-draft', title: 'First', status: 'draft' }));
+  const second = await repository.upsertTrip(
+    { ...first, title: 'Second' },
+    { expectedRevision: first.revision },
+  );
+  const [syncing] = repository.getOutbox();
+  await repository.markOutboxSyncing([syncing.id]);
+
+  await repository.deleteDraftTrips(
+    [{ id: second.id, expectedRevision: second.revision }],
+    { expectedOwnerScope: 'account:outbox-pruning' },
+  );
+  const remaining = repository.getOutbox().filter(entry => entry.entityId === second.id);
+  assert.equal(remaining.length, 2);
+  assert.equal(remaining[0]?.id, syncing.id);
+  assert.equal(remaining[0]?.status, 'syncing');
+  assert.equal(remaining[0]?.operation, 'upsert');
+  assert.equal(remaining[1]?.status, 'pending');
+  assert.equal(remaining[1]?.operation, 'delete');
+  assert.equal(remaining[1]?.revision, second.revision + 1);
+  assert.deepEqual(remaining[1]?.payload, {
+    kind: 'trip_deletion',
+    mode: 'draft_cleanup',
+    originalStatus: 'draft',
+  });
+}
+
+async function singleDeletePersistsExplicitIntent() {
+  const { storage, repository } = deterministicRepository();
+  await repository.initialize('single-delete-intent');
+  const saved = await repository.upsertTrip(createTripDocument({
+    id: 'saved-delete-intent',
+    title: 'Saved trip',
+    status: 'completed',
+  }), { enqueueSync: false });
+  await repository.deleteTrip(saved.id, {
+    expectedRevision: saved.revision,
+    expectedOwnerScope: 'account:single-delete-intent',
+  });
+
+  const entry = repository.getOutbox().find(candidate => candidate.entityId === saved.id);
+  assert.deepEqual(entry?.payload, {
+    kind: 'trip_deletion',
+    mode: 'explicit',
+    originalStatus: 'completed',
+  });
+
+  const restored = deterministicRepository(storage).repository;
+  await restored.initialize('single-delete-intent');
+  assert.deepEqual(restored.getOutbox()[0]?.payload, entry?.payload, 'delete intent survives restart');
+}
+
 async function optimisticRevisionContract() {
   const { repository } = deterministicRepository();
   await repository.initialize();
@@ -245,6 +429,58 @@ async function legacyMigrationAndQuarantine() {
   const second = await repository.migrateLegacy(input);
   assert.ok(second.receipts.some(receipt => receipt.source === 'trip_history' && receipt.status === 'skipped'));
   assert.equal(repository.listTrips({ includeArchived: true }).length, 1);
+}
+
+async function legacyMigrationDoesNotResurrectDeletedTrips() {
+  const { repository } = deterministicRepository();
+  await repository.initialize('legacy-deletions');
+  const historyTrip = await repository.upsertTrip(createTripDocument({
+    id: 'deleted-history-trip',
+    title: 'Deleted history trip',
+    status: 'draft',
+  }), { enqueueSync: false });
+  const activeTrip = await repository.upsertTrip(createTripDocument({
+    id: 'deleted-active-trip',
+    title: 'Deleted active trip',
+    status: 'draft',
+  }), { enqueueSync: false });
+  await repository.deleteDraftTrips([
+    { id: historyTrip.id, expectedRevision: historyTrip.revision },
+    { id: activeTrip.id, expectedRevision: activeTrip.revision },
+  ], { expectedOwnerScope: 'account:legacy-deletions' });
+
+  const migrated = await repository.migrateLegacy({
+    tripHistory: [{
+      trip_id: historyTrip.id,
+      trip_name: 'History copy',
+      states: ['UT'],
+      duration_days: 2,
+      planned_at: 100,
+    }],
+    activeTrip: {
+      trip_id: activeTrip.id,
+      updated_at: 200,
+      version: 3,
+      plan: {
+        trip_name: 'Active copy',
+        duration_days: 1,
+        states: ['AZ'],
+        waypoints: [{ day: 1, name: 'Start', type: 'start', lat: 34, lng: -112 }],
+      },
+    },
+  });
+
+  assert.equal(repository.getTrip(historyTrip.id), null);
+  assert.equal(repository.getTrip(activeTrip.id), null);
+  assert.deepEqual(migrated.importedTripIds, []);
+  assert.ok(migrated.receipts.some(receipt => receipt.source === 'trip_history'
+    && receipt.status === 'skipped'
+    && receipt.skippedCount === 1));
+  assert.ok(migrated.receipts.some(receipt => receipt.source === 'active_trip'
+    && receipt.status === 'skipped'
+    && receipt.skippedCount === 1));
+  assert.ok(!repository.getOutbox().some(entry => entry.operation === 'upsert'
+    && (entry.entityId === historyTrip.id || entry.entityId === activeTrip.id)));
 }
 
 async function corruptRepositoryRecovery() {
@@ -471,6 +707,66 @@ async function failedRevisionBlocksOnlyItsEntity() {
   assert.deepEqual(retryEligibleTripRepositoryEntryIds(entries, 3_000), ['failed-first']);
 }
 
+async function supersededSyncingUpsertCannotBlockDelete() {
+  const syncing = {
+    ...outboxEntry('syncing-upsert', 'deleted-trip', 'pending'),
+    status: 'syncing' as const,
+    revision: 2,
+  };
+  const deletion = {
+    ...outboxEntry('following-delete', 'deleted-trip'),
+    operation: 'delete' as const,
+    revision: 3,
+    payload: undefined,
+  };
+  const entries = [syncing, deletion];
+  const sent: string[] = [];
+  const acknowledged: string[] = [];
+  const result = await processTripRepositoryOutbox(entries, {
+    isSessionCurrent: () => true,
+    markSyncing: async () => {},
+    syncEntry: async entry => {
+      if (isOutboxEntrySupersededByDelete(entry, entries)) return;
+      sent.push(entry.id);
+    },
+    acknowledge: async entry => { acknowledged.push(entry.id); },
+    fail: async () => {},
+    resolveFailure: async () => ({ resolved: false, conflict: false, message: 'failed' }),
+  });
+
+  assert.deepEqual(sent, ['following-delete']);
+  assert.deepEqual(acknowledged, ['syncing-upsert', 'following-delete']);
+  assert.equal(result.completed, 2);
+  assert.equal(result.blockedByConflict, false);
+
+  const failed: string[] = [];
+  const acknowledgedAfterFailure: string[] = [];
+  const failurePass = await processTripRepositoryOutbox([syncing], {
+    isSessionCurrent: () => true,
+    markSyncing: async () => {},
+    syncEntry: async () => { throw new Error('request failed'); },
+    acknowledge: async entry => { acknowledgedAfterFailure.push(entry.id); },
+    fail: async entry => { failed.push(entry.id); },
+    resolveFailure: async entry => isOutboxEntrySupersededByDelete(entry, entries)
+      ? { resolved: true, conflict: false, message: 'superseded' }
+      : { resolved: false, conflict: false, message: 'failed' },
+  });
+  assert.deepEqual(acknowledgedAfterFailure, ['syncing-upsert']);
+  assert.deepEqual(failed, []);
+  assert.equal(failurePass.canceled, false);
+
+  const sentOnNextPass: string[] = [];
+  await processTripRepositoryOutbox([deletion], {
+    isSessionCurrent: () => true,
+    markSyncing: async () => {},
+    syncEntry: async entry => { sentOnNextPass.push(entry.id); },
+    acknowledge: async () => {},
+    fail: async () => {},
+    resolveFailure: async () => ({ resolved: false, conflict: false, message: 'failed' }),
+  });
+  assert.deepEqual(sentOnNextPass, ['following-delete']);
+}
+
 async function tombstonesPreserveRevisionAcrossResave() {
   const { storage, repository } = deterministicRepository();
   await repository.initialize(808);
@@ -483,6 +779,39 @@ async function tombstonesPreserveRevisionAcrossResave() {
   const restored = deterministicRepository(storage).repository;
   await restored.initialize(808);
   assert.equal(restored.getSavedEntity(saved.id)?.revision, 3);
+}
+
+async function equalRevisionTombstonesBeatRemoteRows() {
+  const { repository } = deterministicRepository();
+  await repository.initialize('equal-tombstones');
+  const trip = await repository.upsertTrip(
+    createTripDocument({ id: 'equal-trip', title: 'Deleted trip' }),
+    { enqueueSync: false },
+  );
+  const entity = await repository.saveEntity(
+    createSavedEntity({ id: 'equal-place', title: 'Deleted place', kind: 'place' }),
+    { enqueueSync: false },
+  );
+  await repository.deleteTrip(trip.id, { expectedRevision: trip.revision, enqueueSync: false });
+  await repository.removeEntity(entity.id, { expectedRevision: entity.revision, enqueueSync: false });
+  const revisionBeforeRemoteRows = repository.getSnapshot().revision;
+
+  await repository.applyRemoteTrip({
+    ...trip,
+    ownerScope: 'account:equal-tombstones',
+    revision: trip.revision + 1,
+    title: 'Equal revision server trip',
+  });
+  await repository.applyRemoteSavedEntity({
+    ...entity,
+    ownerScope: 'account:equal-tombstones',
+    revision: entity.revision + 1,
+    title: 'Equal revision server place',
+  });
+
+  assert.equal(repository.getTrip(trip.id), null);
+  assert.equal(repository.getSavedEntity(entity.id), null);
+  assert.equal(repository.getSnapshot().revision, revisionBeforeRemoteRows);
 }
 
 async function staleRemoteRevisionsCannotMoveLocalStateBackward() {
@@ -599,9 +928,15 @@ async function run() {
   await accountIsolationAndPersistence();
   await uncappedCollectionsAndFiltering();
   await tripAndLibraryOperations();
+  await bulkDraftDeletionIsAtomicAndDurable();
+  await queuedScopeSwitchCannotDeleteAnotherAccountsDrafts();
+  await queuedScopeSwitchCannotDeleteAnotherAccountsSavedTrip();
+  await batchDeletePrunesSupersededOutboxEntries();
+  await singleDeletePersistsExplicitIntent();
   await optimisticRevisionContract();
   await persistentOutboxContract();
   await legacyMigrationAndQuarantine();
+  await legacyMigrationDoesNotResurrectDeletedTrips();
   await corruptRepositoryRecovery();
   await explicitAnonymousMerge();
   await changedScopeMergeUpdatesOnlyChangedRecords();
@@ -609,7 +944,9 @@ async function run() {
   await remoteReconciliation();
   await authChangeCancelsOutboxBeforeNextMutation();
   await failedRevisionBlocksOnlyItsEntity();
+  await supersededSyncingUpsertCannotBlockDelete();
   await tombstonesPreserveRevisionAcrossResave();
+  await equalRevisionTombstonesBeatRemoteRows();
   await staleRemoteRevisionsCannotMoveLocalStateBackward();
   await erasureClearsMemoryBeforeDurableDeleteCompletes();
   await scopedErasure();

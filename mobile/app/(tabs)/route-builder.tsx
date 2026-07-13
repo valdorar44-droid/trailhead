@@ -36,7 +36,6 @@ import useRouteBuilderDiscoveryState, {
   type DiscoveryTab,
   type LegSearchContext,
 } from '@/components/routeBuilder/useRouteBuilderDiscoveryState';
-import RouteWizardProgressHeader from '@/components/routeBuilder/RouteWizardProgressHeader';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, ExtremeConfig, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
@@ -200,6 +199,15 @@ type RouteDayPlan = {
 type TripBuildMode = 'recommended' | 'blank';
 type DistanceMode = 'hours' | 'miles';
 type RouteTabMode = 'hub' | 'wizard';
+type RecentRouteStart = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+};
+type PendingRouteExit =
+  | { kind: 'map' }
+  | { kind: 'workspace'; href: PlanWorkspaceHref };
 type RouteSpineBuild = {
   spine: Array<{ lat: number; lng: number }>;
   geometry: ProviderRouteGeometry;
@@ -255,12 +263,12 @@ const CAMP_PREFERENCE_OPTIONS: Array<{ id: CampPreferenceMode; label: string; su
 const CAMP_CADENCE_OPTIONS: Array<{ id: CampCadenceMode; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [
   { id: 'nightly', label: 'Every night', sub: 'Overnight each route day', icon: 'moon-outline' },
   { id: 'alternate', label: 'Every other', sub: 'Overnight on alternating days', icon: 'swap-horizontal-outline' },
-  { id: 'manual', label: 'Manual', sub: 'Choose each overnight', icon: 'hand-left-outline' },
+  { id: 'manual', label: 'Choose nights', sub: 'Pick overnight days', icon: 'hand-left-outline' },
 ];
 const CAMP_REUSE_OPTIONS: Array<{ id: CampReusePolicy; label: string; sub: string; icon: keyof typeof Ionicons.glyphMap }> = [
   { id: 'different_each_night', label: 'Different camps', sub: 'Move each drive day', icon: 'git-branch-outline' },
   { id: 'same_camp_window', label: 'Same camp area', sub: 'Stay put for a few nights', icon: 'bed-outline' },
-  { id: 'manual', label: 'Manual reuse', sub: 'Choose night by night', icon: 'hand-left-outline' },
+  { id: 'manual', label: 'Choose each stay', sub: 'Set camp night by night', icon: 'hand-left-outline' },
 ];
 const BUILD_STATUS_LINES = [
   'Tracing the route line',
@@ -268,6 +276,10 @@ const BUILD_STATUS_LINES = [
   'Adding fuel and useful stops',
   'Saving the route preview',
 ];
+
+function createRouteSessionId() {
+  return `manual_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
 
 function normalizedWaterSubtype(place: Pick<OsmPoi, 'type' | 'subtype'> & Record<string, any>) {
   if (String(place.type || '') !== 'water') return '';
@@ -1327,7 +1339,7 @@ function builderStopFromCopilotDraft(stop: string | TrailheadRouteBuilderDraftSt
     lat,
     lng,
     type,
-    description: stop.description || (type === 'camp' ? 'Scout-picked overnight option. Check access, rules, and fit before you head out.' : 'Scout-added route stop. Review it before you lock the trip.'),
+    description: stop.description || (type === 'camp' ? 'Overnight option. Check access, rules, and fit before you head out.' : 'Route stop. Review it before saving the trip.'),
     land_type: stop.label || '',
     source: stop.source === 'camp' || stop.source === 'gas' || stop.source === 'poi' || stop.source === 'search' || stop.source === 'map'
       ? stop.source
@@ -1605,8 +1617,6 @@ function RouteBuilderScreenContent() {
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 0 : 0);
   const bottomSheetPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
   const blurTint: 'dark' | 'light' = C.bg === '#050505' ? 'dark' : 'light';
-  const wizardFade = useRef(new Animated.Value(1)).current;
-  const wizardSlide = useRef(new Animated.Value(0)).current;
   const buildPulse = useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const routeParams = useLocalSearchParams();
@@ -1646,7 +1656,10 @@ function RouteBuilderScreenContent() {
   }), []);
 
   const [activeDay, setActiveDay] = useState(1);
-  const [routeTabMode, setRouteTabMode] = useState<RouteTabMode>('hub');
+  const [routeTabMode, setRouteTabMode] = useState<RouteTabMode>('wizard');
+  const routeSessionIdRef = useRef(createRouteSessionId());
+  const [pendingRouteExit, setPendingRouteExit] = useState<PendingRouteExit | null>(null);
+  const [recentRouteStarts, setRecentRouteStarts] = useState<RecentRouteStart[]>([]);
   const [routeTours, setRouteTours] = useState<BookableExperience[]>([]);
   const [routeToursLoading, setRouteToursLoading] = useState(false);
   const [routeToursLoadedFor, setRouteToursLoadedFor] = useState('');
@@ -1912,34 +1925,22 @@ function RouteBuilderScreenContent() {
   }, [selectedCamp]);
 
   useEffect(() => {
-    wizardFade.setValue(0);
-    wizardSlide.setValue(10);
-    Animated.parallel([
-      Animated.timing(wizardFade, { toValue: 1, duration: 220, useNativeDriver: true }),
-      Animated.spring(wizardSlide, { toValue: 0, tension: 82, friction: 12, useNativeDriver: true }),
-    ]).start();
-  }, [wizardFade, wizardSlide, wizardStep]);
-
-  useEffect(() => {
     const showSub = Keyboard.addListener('keyboardDidShow', () => {
       setKeyboardVisible(true);
-      setTabBarHidden(true);
     });
     const hideSub = Keyboard.addListener('keyboardDidHide', () => {
       setKeyboardVisible(false);
-      setTabBarHidden(routeTabMode !== 'hub');
     });
     return () => {
       showSub.remove();
       hideSub.remove();
-      setTabBarHidden(false);
     };
-  }, [routeTabMode, setTabBarHidden]);
+  }, []);
 
   useEffect(() => {
-    setTabBarHidden(routeTabMode !== 'hub' || keyboardVisible);
+    setTabBarHidden(stops.length >= 2 || keyboardVisible);
     return () => setTabBarHidden(false);
-  }, [keyboardVisible, routeTabMode, setTabBarHidden]);
+  }, [keyboardVisible, setTabBarHidden, stops.length]);
 
   useEffect(consumeCopilotRouteBuilderDraft, [consumeCopilotRouteBuilderDraft]);
   useFocusEffect(consumeCopilotRouteBuilderDraft);
@@ -2038,27 +2039,52 @@ function RouteBuilderScreenContent() {
     const routes = tripHistory.slice(0, 10);
     if (!routes.length) {
       setRouteTripCards({});
+      setRecentRouteStarts([]);
       return;
     }
     Promise.all(routes.map(async route => {
       const trip = activeTrip?.trip_id === route.trip_id
         ? activeTrip
         : await loadOfflineTrip(route.trip_id).catch(() => null);
-      return [route.trip_id, tripCardData(route, trip, offlinePlaces)] as const;
+      return {
+        id: route.trip_id,
+        card: tripCardData(route, trip, offlinePlaces),
+        trip,
+      };
     })).then(entries => {
       if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
-        setRouteTripCards(Object.fromEntries(entries));
+        setRouteTripCards(Object.fromEntries(entries.map(entry => [entry.id, entry.card])));
+        const seen = new Set<string>();
+        const starts = entries.flatMap(entry => {
+          const waypoint = entry.trip?.plan.waypoints?.find(point => Number.isFinite(point.lat) && Number.isFinite(point.lng));
+          if (!waypoint?.name || waypoint.lat == null || waypoint.lng == null) return [];
+          const key = `${waypoint.name.trim().toLowerCase()}:${waypoint.lat.toFixed(3)}:${waypoint.lng.toFixed(3)}`;
+          if (seen.has(key)) return [];
+          seen.add(key);
+          return [{
+            id: entry.id,
+            name: waypoint.name,
+            lat: waypoint.lat,
+            lng: waypoint.lng,
+          } satisfies RecentRouteStart];
+        }).slice(0, 3);
+        setRecentRouteStarts(starts);
       }
     }).catch(() => {
       if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
         setRouteTripCards(Object.fromEntries(routes.map(route => [route.trip_id, tripCardData(route, null, offlinePlaces)])));
+        setRecentRouteStarts([]);
       }
     });
     return () => { cancelled = true; };
   }, [activeTrip, offlinePlaces, tripHistory, user?.id]);
 
   useEffect(() => {
-    if (routeTabMode !== 'wizard' || !activeTrip || importedTripId === activeTrip.trip_id || stops.length > 0) return;
+    if (routeBuilderIntent !== 'edit-active'
+      || routeTabMode !== 'wizard'
+      || !activeTrip
+      || importedTripId === activeTrip.trip_id
+      || stops.length > 0) return;
     const importedStops: BuilderStop[] = activeTrip.plan.waypoints
       .filter(wp => Number.isFinite(wp.lat) && Number.isFinite(wp.lng))
       .map((wp, idx) => {
@@ -2129,7 +2155,7 @@ function RouteBuilderScreenContent() {
       ));
     }
     setImportedTripId(activeTrip.trip_id);
-  }, [activeTrip, importedTripId, routeTabMode, stops.length]);
+  }, [activeTrip, importedTripId, routeBuilderIntent, routeTabMode, stops.length]);
 
   const dayStops = stops.filter(st => st.day === activeDay);
   const selectedInsertStop = stops.find(st => st.id === insertAfterId) ?? null;
@@ -2406,6 +2432,14 @@ function RouteBuilderScreenContent() {
     })
   ), [days, orderedStops, dayMileage, routeDaySegments, restDays, campCadenceMode]);
   const hasBaseRoute = orderedStops.length >= 2;
+  const routeSetupIsPristine = !hasBaseRoute
+    && wizardStep === 0
+    && stops.length === 0
+    && !startQuery.trim()
+    && !endQuery.trim()
+    && !routeName.trim()
+    && !importedTripId
+    && !copilotScoutSummary;
   const realOvernights = routeDayPlans.filter(day => day.complete).length;
   const setupProgress = useMemo(() => {
     let score = 0;
@@ -2416,13 +2450,13 @@ function RouteBuilderScreenContent() {
   }, [endQuery, orderedStops.length, plannedDays, startQuery, userLoc]);
   const baseRouteSummary = hasBaseRoute
     ? `${orderedStops[0].name.split(',')[0]} to ${orderedStops[orderedStops.length - 1].name.split(',')[0]}`
-    : 'Build a base route first';
+    : 'Add a start and destination';
   const copilotScoutMeta = useMemo(() => {
     if (!copilotScoutSummary) return '';
     const parts = [
       Number.isFinite(Number(copilotScoutSummary.totalMiles)) ? `${Math.round(Number(copilotScoutSummary.totalMiles)).toLocaleString()} mi` : '',
-      Number.isFinite(Number(copilotScoutSummary.lockedStopCount)) ? `${Math.round(Number(copilotScoutSummary.lockedStopCount))} locked` : '',
-      copilotScoutSummary.reviewDays?.length ? `review day${copilotScoutSummary.reviewDays.length === 1 ? '' : 's'} ${copilotScoutSummary.reviewDays.join(', ')}` : '',
+      Number.isFinite(Number(copilotScoutSummary.lockedStopCount)) ? `${Math.round(Number(copilotScoutSummary.lockedStopCount))} confirmed stops` : '',
+      copilotScoutSummary.reviewDays?.length ? `${copilotScoutSummary.reviewDays.length} day${copilotScoutSummary.reviewDays.length === 1 ? '' : 's'} to check` : '',
     ].filter(Boolean);
     return parts.join(' · ');
   }, [copilotScoutSummary]);
@@ -2656,6 +2690,29 @@ function RouteBuilderScreenContent() {
     setPendingType('waypoint');
     fly(start.lat, start.lng, 10);
     return true;
+  }
+
+  function setWizardStartFromRecent(recent: RecentRouteStart) {
+    const start: BuilderStop = {
+      id: `start_recent_${recent.id}`,
+      day: 1,
+      name: recent.name,
+      lat: recent.lat,
+      lng: recent.lng,
+      type: 'start',
+      description: 'Route start.',
+      land_type: 'route',
+      source: 'search',
+      routeShapeRole: 'start',
+    };
+    setStops(prev => [
+      start,
+      ...prev.filter(stop => stop.type !== 'start' && stop.routeShapeRole !== 'start'),
+    ]);
+    setStartQuery('');
+    setPendingType('waypoint');
+    fly(start.lat, start.lng, 10);
+    setWizardStep(1);
   }
 
   function rebalanceFrameworkTargets(prev: BuilderStop[], anchor: BuilderStop): BuilderStop[] {
@@ -4529,7 +4586,7 @@ function RouteBuilderScreenContent() {
     const last = orderedStops[orderedStops.length - 1]?.name?.split(',')[0]?.trim();
     if (first && last && first !== last) return `${first} to ${last}`;
     if (last) return `${last} Route`;
-    return 'Manual Route';
+    return 'Untitled route';
   }
 
   function buildBuilderTimeline(navStops: BuilderStop[], inputDays: number[], dailyItinerary: Array<{ day: number; title: string; description: string; est_miles: number; road_type: string; highlights: string[] }>): TripTimeline {
@@ -4650,7 +4707,7 @@ function RouteBuilderScreenContent() {
       lat: st.lat,
       lng: st.lng,
       route_point_type: st.routePointType ?? (st.source === 'poi' && st.type === 'waypoint' ? 'side_stop' : 'break'),
-      verified_source: st.source === 'camp' ? st.camp?.verified_source ?? 'manual' : 'manual',
+      verified_source: st.source === 'camp' ? st.camp?.verified_source ?? 'Trailhead route' : 'Trailhead route',
       verified_match: true,
       camp_window_start: st.campWindowStart ?? campWindowFor(st.day, inputDays).start,
       camp_window_end: st.campWindowEnd ?? campWindowFor(st.day, inputDays).end,
@@ -4698,7 +4755,7 @@ function RouteBuilderScreenContent() {
     const gas_stations = navStops.filter(st => st.gas).map(st => ({ ...st.gas!, recommended_day: st.day }));
     const routePois = sorted.filter(st => st.poi).map(st => ({ ...st.poi!, recommended_day: st.day }));
     return {
-      trip_id: importedTripId ? `${importedTripId}_edited_${Date.now()}` : `manual_${Date.now()}`,
+      trip_id: importedTripId || routeSessionIdRef.current,
       plan: {
         trip_name: nameOverride ?? resolvedRouteName(),
         overview: importedTripId
@@ -4721,8 +4778,8 @@ function RouteBuilderScreenContent() {
           trip_preferences: tripPreferenceContext,
         },
         logistics: {
-          vehicle_recommendation: `User-built ${routeStyle} route. Review road surfaces against your vehicle before departure.`,
-          fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(inputMiles, planningStats.mpg, weatherUnitMode)} / $${Math.round(tripFuelCost)}. Fuel stops are manually selected.`,
+          vehicle_recommendation: `${routeStyle[0].toUpperCase()}${routeStyle.slice(1)} route. Review road surfaces against your vehicle before departure.`,
+          fuel_strategy: `Estimated fuel: ${fmtFuelVolumeFromMiles(inputMiles, planningStats.mpg, weatherUnitMode)} / $${Math.round(tripFuelCost)}. Fuel stops are selected on the route.`,
           water_strategy: 'Carry water for each day and add water stops where needed.',
           permits_needed: `${tripShapeMode === 'loop' ? 'Loop route. ' : tripShapeMode === 'there_and_back' ? 'There-and-back route. ' : ''}Check local land manager rules for selected camps and trailheads.`,
           best_season: `Check seasonal closures and weather before departure. Daily drive max: ${fmtHours(planningStats.driveLimit)}.`,
@@ -4823,7 +4880,7 @@ function RouteBuilderScreenContent() {
           if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
         }
         if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-        setRouteTabMode('hub');
+        setRouteTabMode('wizard');
         router.replace('/(tabs)/map');
       }
     } finally {
@@ -4890,6 +4947,7 @@ function RouteBuilderScreenContent() {
   }
 
   function resetRouteDraft() {
+    routeSessionIdRef.current = createRouteSessionId();
     setActiveDay(1);
     setDays(defaultRouteDays());
     setStops([]);
@@ -4916,6 +4974,7 @@ function RouteBuilderScreenContent() {
     setSearchResults([]);
     resetDiscoveryResults();
     setSelectedRoutePlace(null);
+    setPendingRouteExit(null);
   }
 
   useEffect(() => {
@@ -4924,7 +4983,7 @@ function RouteBuilderScreenContent() {
     routeBuilderAccountScopeRef.current = nextScope;
     consumedRouteBuilderDraftRef.current = '';
     resetRouteDraft();
-    setRouteTabMode('hub');
+    setRouteTabMode('wizard');
     setRouteTours([]);
     setRouteToursLoading(false);
     setRouteToursLoadedFor('');
@@ -4971,15 +5030,10 @@ function RouteBuilderScreenContent() {
 
   function beginCleanNewRoute() {
     resetRouteDraft();
-    setActiveTrip(null);
     setRouteTabMode('wizard');
   }
 
   function startNewRoute() {
-    if (activeTrip) {
-      setShowNewRouteConfirm(true);
-      return;
-    }
     beginCleanNewRoute();
   }
 
@@ -4996,43 +5050,50 @@ function RouteBuilderScreenContent() {
     startNewRoute();
   }, [activeTrip?.trip_id, routeBuilderIntent, routeBuilderRequest]));
 
-  async function saveAndOpenPlanWorkspace(href: PlanWorkspaceHref) {
-    await commitTrip(buildTrip(), false);
-    setRouteTabMode('hub');
-    router.replace(href);
-  }
-
   function openPlanWorkspace(href: PlanWorkspaceHref) {
-    if (routeTabMode === 'hub') {
+    if (routeSaving) return;
+    Keyboard.dismiss();
+    if (routeSetupIsPristine) {
+      resetRouteDraft();
       router.replace(href);
       return;
     }
-    if (routeSaving) return;
-    const discardAndSwitch = () => {
-      resetRouteDraft();
-      setRouteTabMode('hub');
-      router.replace(href);
-    };
-    const destination = href === '/(tabs)/trips' ? 'Trips' : 'Assisted planning';
-    const canSave = orderedStops.length >= 2;
-    Alert.alert(
-      `Switch to ${destination}?`,
-      canSave
-        ? 'Save this route before switching, or discard the changes in the builder.'
-        : 'This route does not have enough stops to save yet. Discard it to switch workspaces.',
-      [
-        { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard & switch', style: 'destructive', onPress: discardAndSwitch },
-        ...(canSave ? [{
-          text: 'Save & switch',
-          onPress: () => {
-            saveAndOpenPlanWorkspace(href).catch(() => {
-              Alert.alert('Route not saved', 'The route could not be saved. Your builder is still open.');
-            });
-          },
-        }] : []),
-      ],
-    );
+    setPendingRouteExit({ kind: 'workspace', href });
+  }
+
+  function finishRouteExit(target: PendingRouteExit) {
+    setRouteTabMode('wizard');
+    if (target.kind === 'map') router.replace('/(tabs)/map');
+    if (target.kind === 'workspace') router.replace(target.href);
+  }
+
+  function keepEditingRoute() {
+    setPendingRouteExit(null);
+  }
+
+  function discardPendingRouteChanges() {
+    const target = pendingRouteExit;
+    if (!target) return;
+    setPendingRouteExit(null);
+    resetRouteDraft();
+    finishRouteExit(target);
+  }
+
+  async function savePendingRouteChanges() {
+    const target = pendingRouteExit;
+    if (!target || orderedStops.length < 2 || routeSaving) return;
+    setPendingRouteExit(null);
+    try {
+      if (target.kind === 'map') {
+        await saveRoute(true);
+        return;
+      }
+      await commitTrip(buildTrip(), false);
+      finishRouteExit(target);
+    } catch {
+      setPendingRouteExit(target);
+      Alert.alert('Route not saved', 'Try again. Your changes are still here.');
+    }
   }
 
   async function saveCloseAndStartNewRoute() {
@@ -5110,24 +5171,16 @@ function RouteBuilderScreenContent() {
     discardCloseAndStartNewRoute();
   }
 
-  function discardAndExitRouteBuilder() {
-    resetRouteDraft();
-    setActiveTrip(null);
-    setRouteTabMode('hub');
-    router.replace('/(tabs)/map');
-  }
-
   function exitRouteBuilder() {
     if (routeSaving) return;
-    Alert.alert(
-      'Exit route builder?',
-      'Save this route before leaving, or discard the builder draft.',
-      [
-        { text: 'Keep editing', style: 'cancel' },
-        { text: 'Discard & exit', style: 'destructive', onPress: discardAndExitRouteBuilder },
-        { text: 'Save & exit', onPress: () => { saveRoute(true).catch(() => {}); } },
-      ],
-    );
+    Keyboard.dismiss();
+    setRouteActionSheet(null);
+    if (routeSetupIsPristine) {
+      resetRouteDraft();
+      router.replace('/(tabs)/map');
+      return;
+    }
+    setPendingRouteExit({ kind: 'map' });
   }
 
   function applyRouteRename() {
@@ -5143,7 +5196,7 @@ function RouteBuilderScreenContent() {
     if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
     if (trip) {
       setActiveTrip(trip, activeTrip?.trip_id !== tripId);
-      setRouteTabMode('hub');
+      setRouteTabMode('wizard');
       router.replace('/(tabs)/map');
       return;
     }
@@ -5158,7 +5211,7 @@ function RouteBuilderScreenContent() {
       await saveOfflineTrip(serverTrip).catch(() => {});
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setActiveTrip(serverTrip, false);
-      setRouteTabMode('hub');
+      setRouteTabMode('wizard');
       router.replace('/(tabs)/map');
       return;
     }
@@ -5460,11 +5513,79 @@ function RouteBuilderScreenContent() {
     if (selected) api.trackOutdoorOfferEvent('dismiss', rentalEventPayload(selected)).catch(() => {});
   }
 
+  function renderRouteExitConfirmation() {
+    const canSave = orderedStops.length >= 2;
+    return (
+      <Modal
+        visible={pendingRouteExit !== null}
+        transparent
+        animationType="slide"
+        onRequestClose={keepEditingRoute}
+      >
+        <View style={s.exitOverlay}>
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            onPress={keepEditingRoute}
+            accessibilityRole="button"
+            accessibilityLabel="Keep editing"
+          />
+          <TrailheadSheet
+            style={s.exitSheet}
+            contentStyle={[s.exitSheetContent, { paddingBottom: bottomSheetPad + 8 }]}
+          >
+            <Text style={s.exitSheetTitle}>Save your changes before leaving?</Text>
+            <TouchableOpacity
+              style={[s.exitSaveButton, !canSave && s.exitSaveButtonDisabled]}
+              disabled={!canSave || routeSaving}
+              onPress={() => { savePendingRouteChanges().catch(() => {}); }}
+              accessibilityRole="button"
+              accessibilityState={{ disabled: !canSave || routeSaving }}
+              activeOpacity={0.84}
+            >
+              {routeSaving
+                ? <ActivityIndicator size="small" color={C.bg} />
+                : <Text style={[s.exitSaveText, !canSave && s.exitSaveTextDisabled]}>Save changes</Text>}
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.exitKeepButton}
+              onPress={keepEditingRoute}
+              accessibilityRole="button"
+              activeOpacity={0.84}
+            >
+              <Text style={s.exitKeepText}>Keep editing</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={s.exitDiscardButton}
+              onPress={discardPendingRouteChanges}
+              accessibilityRole="button"
+              activeOpacity={0.84}
+            >
+              <Text style={s.exitDiscardText}>Discard changes</Text>
+            </TouchableOpacity>
+          </TrailheadSheet>
+        </View>
+      </Modal>
+    );
+  }
+
+  function renderPlanNavigation(inWizard = false) {
+    return (
+      <View style={[s.planNavigation, inWizard && s.planNavigationWizard]}>
+        <Text style={s.planPageTitle}>Plan</Text>
+        <PlanWorkspaceSwitcher
+          active="manual"
+          style={s.planWorkspaceSwitcherInline}
+          onSelect={(_, href) => openPlanWorkspace(href)}
+        />
+      </View>
+    );
+  }
+
   function renderRouteHub() {
     const savedRoutes = tripHistory.slice(0, 10);
     return (
       <RouteBuilderHub
-        header={<PlanWorkspaceSwitcher active="manual" style={s.planWorkspaceHubHeader} onSelect={(_, href) => openPlanWorkspace(href)} />}
+        header={renderPlanNavigation()}
         bottomInset={bottomInset}
         routeSaving={routeSaving}
         rigRouteSummary={rigRouteSummary}
@@ -5492,25 +5613,39 @@ function RouteBuilderScreenContent() {
     const steps = ['Start', 'Destination', 'Style', 'Camp', 'Pace'];
     const stepMeta = steps[wizardStep];
     const canMoveNext = wizardStep === 0
-      ? !!(startQuery.trim() || orderedStops[0] || userLoc)
+      ? !!(startQuery.trim() || orderedStops[0])
       : wizardStep === 1
       ? !!(endQuery.trim() || orderedStops.length > 1)
       : true;
     const nextStep = () => setWizardStep(step => Math.min(4, step + 1));
-    const dockMarginBottom = keyboardVisible ? 10 + bottomInset : 18 + bottomInset;
+    const dockMarginBottom = keyboardVisible ? 10 + bottomInset : 94 + bottomInset;
     return (
       <TrailheadSheet
         handle={false}
         style={[s.wizardCard, fullScreen && s.wizardCardFull]}
         contentStyle={[s.routeSheetContent, fullScreen && s.routeSheetFullContent]}
       >
-        <RouteWizardProgressHeader
-          steps={steps}
-          currentStep={wizardStep}
-          title={stepMeta}
-          onStepPress={setWizardStep}
-          onClose={() => setRouteTabMode('hub')}
-        />
+        <View style={s.wizardProgressHeader}>
+          <View style={s.wizardProgressTop}>
+            <Text style={s.wizardProgressTitle}>{stepMeta}</Text>
+            <Text style={s.wizardProgressCount}>{wizardStep + 1} of {steps.length}</Text>
+          </View>
+          <View style={s.wizardProgressTrack}>
+            {steps.map((step, index) => (
+              <TouchableOpacity
+                key={step}
+                style={s.wizardProgressStep}
+                onPress={() => setWizardStep(index)}
+                accessibilityRole="button"
+                accessibilityLabel={`${step}, step ${index + 1} of ${steps.length}`}
+                accessibilityState={{ selected: index === wizardStep }}
+                activeOpacity={0.72}
+              >
+                <View style={[s.wizardProgressLine, index <= wizardStep && s.wizardProgressLineActive]} />
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         <ScrollView
           style={s.wizardStepScroll}
@@ -5519,55 +5654,92 @@ function RouteBuilderScreenContent() {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
         >
-          <Animated.View style={[
-            s.wizardAnimatedPane,
-            { opacity: wizardFade, transform: [{ translateY: wizardSlide }] },
-          ]}>
+          <View style={s.wizardAnimatedPane}>
           {wizardStep === 0 ? (
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you starting?</Text>
-              <Text style={s.wizardHelp}>Use current location or search a known city, trailhead, address, campsite, or map point.</Text>
             </View>
-            <View style={[s.routeHubRig, rigRouteSummary.ready && s.routeHubRigReady]}>
-              <View style={s.routeHubRigIcon}>
-                <Ionicons name={rigRouteSummary.ready ? 'car-sport-outline' : 'alert-circle-outline'} size={17} color={rigRouteSummary.ready ? C.green : C.yellow} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={s.routeHubRigTitle}>{rigRouteSummary.ready ? 'Planning with your vehicle' : 'Vehicle details missing'}</Text>
-                <Text style={s.routeHubRigMeta} numberOfLines={2}>{rigRouteSummary.ready ? rigRouteSummary.meta : 'Using safer fuel and drive estimates for now.'}</Text>
-              </View>
-            </View>
-            <View style={s.setupInputWrap}>
-              <Text style={s.setupLabel}>START</Text>
-              <View style={s.setupInputRow}>
+            <View style={[s.setupInputWrap, s.startSearchField]}>
+              <View style={[s.setupInputRow, s.startSearchRow]}>
                 <View style={s.setupSearchIcon}>
-                  <Ionicons name="search-outline" size={16} color={C.text3} />
+                  <Ionicons name="search-outline" size={19} color={C.text2} />
                 </View>
                 <TextInput
                   value={startQuery}
                   onChangeText={setStartQuery}
-                  placeholder={orderedStops[0]?.name?.split(',')[0] ?? 'Search city, address, trailhead'}
+                  placeholder={orderedStops[0]?.name ?? 'City, address, or trailhead'}
                   placeholderTextColor={C.text3}
                   style={[s.setupInput, s.setupInputInline]}
                   returnKeyType="next"
                   blurOnSubmit
                   onSubmitEditing={() => { Keyboard.dismiss(); if (canMoveNext) nextStep(); }}
                 />
-                <TouchableOpacity style={s.currentLocationBtn} onPress={async () => {
-                  if (await setWizardStartFromLocation()) setWizardStep(1);
-                }}>
-                  <Ionicons name="locate-outline" size={13} color={C.orange} />
-                  <Text style={s.currentLocationText}>CURRENT</Text>
+                <TouchableOpacity
+                  style={s.currentLocationBtn}
+                  onPress={async () => {
+                    if (await setWizardStartFromLocation()) setWizardStep(1);
+                  }}
+                  accessibilityRole="button"
+                  accessibilityLabel="Use current location"
+                  activeOpacity={0.76}
+                >
+                  <Ionicons name="locate-outline" size={20} color={C.orange} />
                 </TouchableOpacity>
               </View>
             </View>
+            {rigRouteSummary.ready ? (
+              <View style={s.startVehicleRow}>
+                <View style={s.startVehicleIcon}>
+                  <Ionicons name="car-sport-outline" size={20} color={C.green} />
+                </View>
+                <View style={s.startVehicleCopy}>
+                  <Text style={s.startVehicleTitle} numberOfLines={1}>{rigRouteSummary.title}</Text>
+                  <Text style={s.startVehicleMeta} numberOfLines={1}>{rigRouteSummary.meta}</Text>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                style={s.startVehicleRow}
+                onPress={() => router.push('/(tabs)/profile')}
+                accessibilityRole="button"
+                accessibilityLabel="Add vehicle details"
+                activeOpacity={0.76}
+              >
+                <View style={s.startVehicleIcon}>
+                  <Ionicons name="warning-outline" size={20} color={C.orange} />
+                </View>
+                <View style={s.startVehicleCopy}>
+                  <Text style={s.startVehicleTitle}>Add vehicle</Text>
+                  <Text style={s.startVehicleMeta}>Fuel and range estimates</Text>
+                </View>
+                <Ionicons name="chevron-forward" size={17} color={C.text3} />
+              </TouchableOpacity>
+            )}
+            {recentRouteStarts.length > 0 ? (
+              <View style={s.recentStarts}>
+                <Text style={s.recentStartsTitle}>Recent</Text>
+                {recentRouteStarts.map(recent => (
+                  <TouchableOpacity
+                    key={`${recent.id}:${recent.name}`}
+                    style={s.recentStartRow}
+                    onPress={() => setWizardStartFromRecent(recent)}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Start from ${recent.name}`}
+                    activeOpacity={0.76}
+                  >
+                    <Ionicons name="location-outline" size={20} color={C.orange} />
+                    <Text style={s.recentStartName} numberOfLines={1}>{recent.name}</Text>
+                    <Ionicons name="chevron-forward" size={17} color={C.text3} />
+                  </TouchableOpacity>
+                ))}
+              </View>
+            ) : null}
             </View>
           ) : wizardStep === 1 ? (
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
               <Text style={s.wizardTitle}>Where are you headed?</Text>
-              <Text style={s.wizardHelp}>Pick the final destination first. Trailhead will set up the route, days, and camp search.</Text>
             </View>
             <View style={s.setupInputWrap}>
               <Text style={s.setupLabel}>DESTINATION</Text>
@@ -5591,13 +5763,12 @@ function RouteBuilderScreenContent() {
           ) : wizardStep === 2 ? (
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>Choose how to build it</Text>
-              <Text style={s.wizardHelp}>Let Trailhead place camp options along the route, or shape each day by hand.</Text>
+              <Text style={s.wizardTitle}>How do you want to build it?</Text>
             </View>
             <View style={s.premiumModeControl}>
               {([
-                { id: 'recommended' as TripBuildMode, label: 'Camp planner', icon: 'bonfire-outline' as const, sub: 'Guided route' },
-                { id: 'blank' as TripBuildMode, label: 'Build by hand', icon: 'construct-outline' as const, sub: 'Manual days' },
+                { id: 'recommended' as TripBuildMode, label: 'Camp planner', icon: 'bonfire-outline' as const, sub: 'Find camps by day' },
+                { id: 'blank' as TripBuildMode, label: 'Build by hand', icon: 'construct-outline' as const, sub: 'Choose each day' },
               ]).map(mode => {
                 const active = tripBuildMode === mode.id;
                 return (
@@ -5613,9 +5784,9 @@ function RouteBuilderScreenContent() {
             </View>
             <View style={s.loopChoiceRow}>
               {([
-                { id: 'one_way' as TripShapeMode, icon: 'arrow-forward-outline' as const, title: 'One way', text: 'Start and finish can be different places.' },
-                { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Take a different way back.' },
-                { id: 'there_and_back' as TripShapeMode, icon: 'repeat-outline' as const, title: 'There and back', text: 'Return to the start and reuse overnight areas by default.' },
+                { id: 'one_way' as TripShapeMode, icon: 'arrow-forward-outline' as const, title: 'One way', text: 'Finish somewhere else' },
+                { id: 'loop' as TripShapeMode, icon: 'sync-outline' as const, title: 'Loop', text: 'Return by a different route' },
+                { id: 'there_and_back' as TripShapeMode, icon: 'repeat-outline' as const, title: 'There and back', text: 'Return along the same route' },
               ]).map(shape => {
                 const active = tripShapeMode === shape.id;
                 return (
@@ -5643,8 +5814,7 @@ function RouteBuilderScreenContent() {
           ) : wizardStep === 3 ? (
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>Choose camp style</Text>
-              <Text style={s.wizardHelp}>Choose the kind of overnight stops you want for this route.</Text>
+              <Text style={s.wizardTitle}>What kind of camps?</Text>
             </View>
             <View style={s.campPreferenceGrid}>
               {CAMP_PREFERENCE_OPTIONS.map(option => {
@@ -5711,8 +5881,7 @@ function RouteBuilderScreenContent() {
           ) : (
             <View style={s.wizardPane}>
             <View style={s.wizardQuestion}>
-              <Text style={s.wizardTitle}>Set the daily pace</Text>
-              <Text style={s.wizardHelp}>Hours per day is the max you want to drive. Trailhead should not force every day to hit that limit.</Text>
+              <Text style={s.wizardTitle}>Set your pace</Text>
             </View>
             <View style={s.setupGridPair}>
               <View style={s.setupInputWrap}>
@@ -5740,32 +5909,32 @@ function RouteBuilderScreenContent() {
             </View>
             </View>
           )}
-          </Animated.View>
+          </View>
 
           {buildingFramework && (
             <ActivityStatusCard
               title={frameworkStatus}
               fallbackLines={BUILD_STATUS_LINES}
-              helper="This should only take a moment."
               tone={C.orange}
             />
           )}
         </ScrollView>
 
         <View style={[s.wizardNav, fullScreen && [s.wizardNavDock, wizardStep === 0 && s.wizardNavStepOne, { marginBottom: dockMarginBottom }]]}>
-          <TouchableOpacity style={[s.wizardNavBtn, wizardStep === 0 && { opacity: 0.45 }]} onPress={() => setWizardStep(step => Math.max(0, step - 1))} disabled={wizardStep === 0}>
-            <Ionicons name="chevron-back" size={13} color={C.text3} />
-            <Text style={s.wizardNavText}>BACK</Text>
-          </TouchableOpacity>
+          {wizardStep > 0 ? (
+            <TouchableOpacity style={s.wizardNavBtn} onPress={() => setWizardStep(step => Math.max(0, step - 1))}>
+              <Ionicons name="chevron-back" size={16} color={C.text2} />
+              <Text style={s.wizardNavText}>Back</Text>
+            </TouchableOpacity>
+          ) : null}
           {wizardStep < 4 ? (
-            <TouchableOpacity style={[s.wizardNextBtn, !canMoveNext && { opacity: 0.55 }]} onPress={nextStep} disabled={!canMoveNext}>
-              <Text style={s.wizardNextText}>NEXT</Text>
-              <Ionicons name="chevron-forward" size={13} color="#fff" />
+            <TouchableOpacity style={[s.wizardNextBtn, !canMoveNext && s.wizardNextBtnDisabled]} onPress={nextStep} disabled={!canMoveNext}>
+              <Text style={[s.wizardNextText, !canMoveNext && s.wizardNextTextDisabled]}>Next</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={s.wizardNextBtn} onPress={buildRouteFramework} disabled={buildingFramework}>
-              {buildingFramework ? <ActivityIndicator size="small" color="#fff" /> : <Ionicons name="map-outline" size={13} color="#fff" />}
-              <Text style={s.wizardNextText}>{hasBaseRoute ? 'REBUILD ON MAP' : 'BUILD ON MAP'}</Text>
+              {buildingFramework ? <ActivityIndicator size="small" color={C.bg} /> : <Ionicons name="map-outline" size={16} color={C.bg} />}
+              <Text style={s.wizardNextText}>{hasBaseRoute ? 'Update route' : 'Build route'}</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -5779,15 +5948,10 @@ function RouteBuilderScreenContent() {
         <View style={s.draftLoadingCard}>
           <ActivityIndicator size="small" color={C.orange} />
           <Text style={s.draftLoadingTitle}>Opening route</Text>
-          <Text style={s.draftLoadingText}>Loading your Co-Pilot draft.</Text>
         </View>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
       </SafeAreaView>
     );
-  }
-
-  if (routeTabMode === 'hub') {
-    return renderRouteHub();
   }
 
   if (buildingFramework) {
@@ -5808,8 +5972,9 @@ function RouteBuilderScreenContent() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <SafeAreaView style={s.wizardScreen}>
-          <PlanWorkspaceSwitcher active="manual" style={s.planWorkspaceSwitcherInline} onSelect={(_, href) => openPlanWorkspace(href)} />
+          {renderPlanNavigation(true)}
           {renderWizardSetup(true)}
+          {renderRouteExitConfirmation()}
           <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
         </SafeAreaView>
       </KeyboardAvoidingView>
@@ -5818,7 +5983,7 @@ function RouteBuilderScreenContent() {
 
   return (
     <SafeAreaView style={s.wizardScreen}>
-      <PlanWorkspaceSwitcher active="manual" style={s.planWorkspaceSwitcherInline} onSelect={(_, href) => openPlanWorkspace(href)} />
+      {renderPlanNavigation(true)}
       <View style={s.wizardCompactTop}>
         <TouchableOpacity style={s.headerBtn} onPress={exitRouteBuilder} accessibilityLabel="Exit route builder" activeOpacity={0.82}>
           <Ionicons name="close" size={17} color={C.orange} />
@@ -5843,16 +6008,13 @@ function RouteBuilderScreenContent() {
                 <Ionicons name="scan-outline" size={16} color={C.orange} />
               </View>
               <View style={s.flex}>
-                <Text style={s.copilotScoutTitle}>Co-Pilot scout loaded</Text>
+                <Text style={s.copilotScoutTitle}>Route details loaded</Text>
                 {!!copilotScoutMeta && <Text style={s.copilotScoutMeta} numberOfLines={1}>{copilotScoutMeta}</Text>}
               </View>
-              <TouchableOpacity style={s.copilotScoutDismiss} onPress={() => setCopilotScoutSummary(null)} accessibilityLabel="Dismiss Co-Pilot scout summary">
+              <TouchableOpacity style={s.copilotScoutDismiss} onPress={() => setCopilotScoutSummary(null)} accessibilityLabel="Dismiss route details">
                 <Ionicons name="close" size={14} color={C.text3} />
               </TouchableOpacity>
             </View>
-            {!!copilotScoutSummary.message && (
-              <Text style={s.copilotScoutMessage} numberOfLines={3}>{copilotScoutSummary.message}</Text>
-            )}
             {copilotScoutDays.length > 0 ? (
               <View style={s.copilotScoutDays}>
                 {copilotScoutDays.map(plan => {
@@ -5862,8 +6024,8 @@ function RouteBuilderScreenContent() {
                     <View key={`copilot-scout-day-${plan.day}`} style={s.copilotScoutDay}>
                       <View style={[s.copilotScoutDayDot, { backgroundColor: tone }]} />
                       <View style={s.flex}>
-                        <Text style={s.copilotScoutDayTitle} numberOfLines={1}>Day {plan.day} · {String(plan.campStatus || plan.status || 'review').replace(/_/g, ' ')}</Text>
-                        <Text style={s.copilotScoutDayMeta} numberOfLines={1}>{plan.campName || plan.title || 'Route window'}</Text>
+                        <Text style={s.copilotScoutDayTitle} numberOfLines={1}>Day {plan.day}</Text>
+                        <Text style={s.copilotScoutDayMeta} numberOfLines={1}>{plan.campName || plan.title || 'Stop details'}</Text>
                       </View>
                     </View>
                   );
@@ -6432,7 +6594,6 @@ function RouteBuilderScreenContent() {
               <>
                 <View style={s.filterSheetTop}>
                   <View>
-                    <Text style={s.kicker}>ROUTE BUILDER</Text>
                     <Text style={s.filterSheetTitle}>Rename route</Text>
                   </View>
                   <TouchableOpacity style={s.quickCardClose} onPress={() => setRouteActionSheet(null)}>
@@ -6440,7 +6601,7 @@ function RouteBuilderScreenContent() {
                   </TouchableOpacity>
                 </View>
                 <View style={s.routeRenameField}>
-                  <Text style={s.setupLabel}>ROUTE NAME</Text>
+                  <Text style={s.setupLabel}>Route name</Text>
                   <TextInput
                     style={s.routeNameInput}
                     value={routeNameDraft}
@@ -6454,11 +6615,11 @@ function RouteBuilderScreenContent() {
                 </View>
                 <View style={s.routeActionFooter}>
                   <TouchableOpacity style={s.routeActionSecondaryBtn} onPress={() => setRouteActionSheet('actions')} activeOpacity={0.84}>
-                    <Text style={s.routeActionSecondaryText}>CANCEL</Text>
+                    <Text style={s.routeActionSecondaryText}>Cancel</Text>
                   </TouchableOpacity>
                   <TouchableOpacity style={s.routeActionPrimaryBtn} onPress={applyRouteRename} activeOpacity={0.84}>
                     <Ionicons name="checkmark" size={15} color="#fff" />
-                    <Text style={s.routeActionPrimaryText}>DONE</Text>
+                    <Text style={s.routeActionPrimaryText}>Done</Text>
                   </TouchableOpacity>
                 </View>
               </>
@@ -6466,7 +6627,6 @@ function RouteBuilderScreenContent() {
               <>
                 <View style={s.filterSheetTop}>
                   <View>
-                    <Text style={s.kicker}>ROUTE BUILDER</Text>
                     <Text style={s.filterSheetTitle}>Route actions</Text>
                   </View>
                   <TouchableOpacity style={s.quickCardClose} onPress={() => setRouteActionSheet(null)}>
@@ -6477,14 +6637,12 @@ function RouteBuilderScreenContent() {
                   <Ionicons name="save-outline" size={18} color={C.orange} />
                   <View style={s.routeActionRowText}>
                     <Text style={s.routeActionTitle}>Save</Text>
-                    <Text style={s.routeActionSub}>Keep editing this route</Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.routeActionRow} onPress={saveCloseRouteFromActions} disabled={routeSaving} activeOpacity={0.84}>
                   <Ionicons name="checkmark-done-outline" size={18} color={C.orange} />
                   <View style={s.routeActionRowText}>
-                    <Text style={s.routeActionTitle}>Save & close</Text>
-                    <Text style={s.routeActionSub}>Save this route and start a new one</Text>
+                    <Text style={s.routeActionTitle}>Save and start another</Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.routeActionRow} onPress={flyRouteFromActions} disabled={routeSaving} activeOpacity={0.84}>
@@ -6497,8 +6655,7 @@ function RouteBuilderScreenContent() {
                 <TouchableOpacity style={s.routeActionRow} onPress={() => { setRouteActionSheet(null); exitRouteBuilder(); }} disabled={routeSaving} activeOpacity={0.84}>
                   <Ionicons name="exit-outline" size={18} color={C.orange} />
                   <View style={s.routeActionRowText}>
-                    <Text style={s.routeActionTitle}>Exit route builder</Text>
-                    <Text style={s.routeActionSub}>Save or discard before returning to the map</Text>
+                    <Text style={s.routeActionTitle}>Return to map</Text>
                   </View>
                 </TouchableOpacity>
                 <TouchableOpacity style={s.routeActionRow} onPress={openRouteRenameSheet} activeOpacity={0.84}>
@@ -6511,8 +6668,7 @@ function RouteBuilderScreenContent() {
                 <TouchableOpacity style={[s.routeActionRow, s.routeActionDangerRow]} onPress={discardRouteFromActions} activeOpacity={0.84}>
                   <Ionicons name="trash-outline" size={18} color={C.red} />
                   <View style={s.routeActionRowText}>
-                    <Text style={[s.routeActionTitle, { color: C.red }]}>Discard route</Text>
-                    <Text style={s.routeActionSub}>Close without saving changes</Text>
+                    <Text style={[s.routeActionTitle, { color: C.red }]}>Discard changes</Text>
                   </View>
                 </TouchableOpacity>
               </>
@@ -6520,6 +6676,8 @@ function RouteBuilderScreenContent() {
           </TrailheadSheet>
         </TouchableOpacity>
       </Modal>
+
+      {renderRouteExitConfirmation()}
 
       <PremiumPlaceSheet
         place={selectedRoutePlace?.place ?? null}
@@ -6553,9 +6711,11 @@ export default function RouteBuilderScreen() {
 
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
-  wizardScreen: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 14, paddingTop: 8 },
-  planWorkspaceHubHeader: { marginTop: 8, marginBottom: 4 },
-  planWorkspaceSwitcherInline: { marginBottom: 8, paddingHorizontal: 0 },
+  wizardScreen: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 14, paddingTop: 4 },
+  planNavigation: { paddingTop: 10, paddingBottom: 4 },
+  planNavigationWizard: { marginHorizontal: -14 },
+  planPageTitle: { color: C.text, fontSize: 30, lineHeight: 36, fontWeight: '700', paddingHorizontal: 20, marginBottom: 4 },
+  planWorkspaceSwitcherInline: { marginBottom: 0 },
   wizardScreenTop: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: 6, paddingBottom: 14,
@@ -6601,12 +6761,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontSize: 16,
     fontWeight: '900',
     marginTop: 4,
-  },
-  draftLoadingText: {
-    color: C.text2,
-    fontSize: 12,
-    fontWeight: '700',
-    textAlign: 'center',
   },
   routeTourCard: {
     minHeight: 104,
@@ -6706,7 +6860,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   copilotScoutTitle: { color: C.text, fontSize: 13, fontWeight: '900' },
   copilotScoutMeta: { color: C.orange, fontSize: 10, lineHeight: 14, fontFamily: mono, fontWeight: '900', marginTop: 2 },
-  copilotScoutMessage: { color: C.text2, fontSize: 12, lineHeight: 17 },
   copilotScoutDays: { gap: 7 },
   copilotScoutDay: {
     minHeight: 38,
@@ -7007,26 +7160,37 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   loopChoiceTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
   loopChoiceText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
   wizardCard: {
-    borderRadius: 24,
+    borderRadius: 8,
   },
   wizardCardFull: {
     flex: 1,
-    borderRadius: 24,
+    borderRadius: 0,
+    borderWidth: 0,
+    backgroundColor: C.bg,
     justifyContent: 'flex-start',
-    marginTop: 8,
+    marginTop: 0,
+    shadowOpacity: 0,
   },
+  wizardProgressHeader: { gap: 11, paddingBottom: 4 },
+  wizardProgressTop: { minHeight: 28, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12 },
+  wizardProgressTitle: { color: C.text, fontSize: 16, lineHeight: 21, fontWeight: '800' },
+  wizardProgressCount: { color: C.text2, fontSize: 13, lineHeight: 18, fontWeight: '500' },
+  wizardProgressTrack: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  wizardProgressStep: { flex: 1, minHeight: 14, justifyContent: 'center' },
+  wizardProgressLine: { height: 3, borderRadius: 2, backgroundColor: C.border },
+  wizardProgressLineActive: { backgroundColor: C.orange },
   wizardStepScroll: { flex: 1, minHeight: 0 },
   wizardStepScrollContent: { flexGrow: 1 },
   wizardAnimatedPane: { minHeight: 0 },
-  wizardPane: { gap: 12, minHeight: 218, justifyContent: 'flex-start', marginTop: 18 },
-  wizardQuestion: { paddingTop: 2, gap: 5 },
-  wizardTitle: { color: C.text, fontSize: 30, fontWeight: '800', lineHeight: 35 },
+  wizardPane: { gap: 14, minHeight: 218, justifyContent: 'flex-start', marginTop: 22 },
+  wizardQuestion: { paddingTop: 2 },
+  wizardTitle: { color: C.text, fontSize: 25, fontWeight: '800', lineHeight: 31 },
   wizardHelp: { color: C.text3, fontSize: 14, lineHeight: 20, marginTop: 2 },
   wizardNav: { flexDirection: 'row', gap: 9, marginTop: 16, paddingBottom: 6 },
   wizardNavDock: { marginTop: 'auto', paddingTop: 10, paddingBottom: 0 },
   wizardNavStepOne: { borderTopWidth: 1, borderColor: C.border, paddingTop: 14 },
-  wizardNavBtn: { minHeight: 50, minWidth: 96, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 16, backgroundColor: C.s2 },
-  wizardNavText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  wizardNavBtn: { minHeight: 52, minWidth: 96, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 8, backgroundColor: C.s1 },
+  wizardNavText: { color: C.text2, fontSize: 14, fontWeight: '700' },
   wizardNextBtn: {
     flex: 1,
     minHeight: 52,
@@ -7034,13 +7198,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
-    borderRadius: 17,
-    backgroundColor: C.orange,
-    shadowColor: C.orange,
-    shadowOpacity: 0.22,
-    shadowRadius: 16,
+    borderRadius: 8,
+    backgroundColor: C.text,
   },
-  wizardNextText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
+  wizardNextBtnDisabled: { backgroundColor: C.s2 },
+  wizardNextText: { color: C.bg, fontSize: 14, fontWeight: '800' },
+  wizardNextTextDisabled: { color: C.text3 },
   premiumModeControl: {
     flexDirection: 'row',
     gap: 7,
@@ -7107,8 +7270,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   setupGrid: { gap: 8 },
   setupGridPair: { flexDirection: 'row', gap: 8 },
   setupLabelRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  currentLocationBtn: { minWidth: 88, height: 36, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4, borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 10, backgroundColor: C.orange + '10', flexShrink: 0 },
-  currentLocationText: { color: C.orange, fontSize: 7.5, fontFamily: mono, fontWeight: '900' },
+  currentLocationBtn: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center', flexShrink: 0 },
   preferenceBlock: { gap: 7 },
   prefLabel: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', letterSpacing: 0.9 },
   segmentRow: { flexDirection: 'row', gap: 7 },
@@ -7151,6 +7313,34 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   setupInputRow: { minHeight: 38, flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 2, overflow: 'hidden' },
   setupInputInline: { flex: 1, minWidth: 0, flexShrink: 1 },
+  startSearchField: { minHeight: 58, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 0, backgroundColor: C.s1 },
+  startSearchRow: { minHeight: 56, marginTop: 0 },
+  startVehicleRow: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    paddingHorizontal: 4,
+    paddingVertical: 8,
+  },
+  startVehicleIcon: { width: 30, alignItems: 'center', justifyContent: 'center' },
+  startVehicleCopy: { flex: 1, minWidth: 0 },
+  startVehicleTitle: { color: C.text, fontSize: 16, lineHeight: 21, fontWeight: '800' },
+  startVehicleMeta: { color: C.text2, fontSize: 13, lineHeight: 18, marginTop: 2 },
+  recentStarts: { marginTop: 10 },
+  recentStartsTitle: { color: C.text, fontSize: 17, lineHeight: 22, fontWeight: '800', marginBottom: 8 },
+  recentStartRow: {
+    minHeight: 62,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+    paddingHorizontal: 4,
+  },
+  recentStartName: { flex: 1, minWidth: 0, color: C.text, fontSize: 16, lineHeight: 21, fontWeight: '700' },
   tripStats: { flexDirection: 'row', gap: 8 },
   tripStat: { flex: 1, minHeight: 34, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5, borderWidth: 1, borderColor: C.border, borderRadius: 10, backgroundColor: C.s1, paddingHorizontal: 7 },
   tripStatText: { color: C.text2, fontSize: 9, fontFamily: mono, fontWeight: '800' },
@@ -7194,6 +7384,37 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   replaceCancel: { alignSelf: 'flex-start', borderWidth: 1, borderColor: C.orange + '55', borderRadius: 999, paddingHorizontal: 8, paddingVertical: 5, backgroundColor: C.orange + '10' },
   replaceCancelText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.55)' },
+  exitOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.42)' },
+  exitSheet: {
+    borderBottomLeftRadius: 0,
+    borderBottomRightRadius: 0,
+    borderTopLeftRadius: 22,
+    borderTopRightRadius: 22,
+  },
+  exitSheetContent: { paddingHorizontal: 22, paddingTop: 10, gap: 12 },
+  exitSheetTitle: { color: C.text, fontSize: 24, lineHeight: 29, fontWeight: '800', maxWidth: 310 },
+  exitSaveButton: {
+    minHeight: 52,
+    borderRadius: 8,
+    backgroundColor: C.text,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exitSaveButtonDisabled: { backgroundColor: C.s2 },
+  exitSaveText: { color: C.bg, fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  exitSaveTextDisabled: { color: C.text3 },
+  exitKeepButton: {
+    minHeight: 52,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  exitKeepText: { color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  exitDiscardButton: { minHeight: 52, alignItems: 'center', justifyContent: 'center' },
+  exitDiscardText: { color: C.red, fontSize: 15, lineHeight: 20, fontWeight: '800' },
   filterSheet: {
     maxHeight: '78%',
     borderTopLeftRadius: 20,

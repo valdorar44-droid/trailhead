@@ -154,6 +154,13 @@ export interface SavedEntityV1 {
 export type OutboxEntityType = 'trip' | 'saved_entity';
 export type OutboxOperation = 'upsert' | 'archive' | 'delete';
 export type OutboxEntryStatus = 'pending' | 'syncing' | 'failed';
+export type TripDeletionMode = 'explicit' | 'draft_cleanup';
+
+export interface TripDeletionOutboxPayloadV1 {
+  kind: 'trip_deletion';
+  mode: TripDeletionMode;
+  originalStatus: TripStatus;
+}
 
 export interface RepositoryOutboxEntryV1 {
   id: string;
@@ -219,6 +226,20 @@ export interface ListSavedEntitiesOptions {
 export interface RepositoryMutationOptions {
   expectedRevision?: number;
   enqueueSync?: boolean;
+}
+
+export interface DraftTripDeletionRequest {
+  id: string;
+  expectedRevision?: number;
+}
+
+export interface DraftTripDeletionOptions {
+  enqueueSync?: boolean;
+  expectedOwnerScope?: string;
+}
+
+export interface TripDeletionOptions extends RepositoryMutationOptions {
+  expectedOwnerScope?: string;
 }
 
 export interface AddEntityToTripOptions extends RepositoryMutationOptions {

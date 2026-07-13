@@ -1,5 +1,7 @@
 import {
   AddEntityToTripOptions,
+  DraftTripDeletionOptions,
+  DraftTripDeletionRequest,
   LegacyMigrationInput,
   LegacyMigrationResult,
   ListSavedEntitiesOptions,
@@ -11,6 +13,9 @@ import {
   SavedEntityV1,
   SAVED_ENTITY_SCHEMA_VERSION,
   TripDocumentV2,
+  TripDeletionMode,
+  TripDeletionOptions,
+  TripDeletionOutboxPayloadV1,
   TripItemKind,
   TripItemV1,
   TripNoteInput,
@@ -326,6 +331,10 @@ function assertExpectedRevision(
   if (expectedRevision != null && expectedRevision !== actualRevision) {
     throw new TripRepositoryConflictError(entityId, expectedRevision, actualRevision);
   }
+}
+
+function tripDeletionPayload(mode: TripDeletionMode, originalStatus: TripStatus): TripDeletionOutboxPayloadV1 {
+  return { kind: 'trip_deletion', mode, originalStatus };
 }
 
 export class TripRepository {
@@ -820,6 +829,15 @@ export class TripRepository {
     this.state.outbox.push(entry);
   }
 
+  private pruneOutboxBeforeDelete(
+    entityType: RepositoryOutboxEntryV1['entityType'],
+    entityId: string,
+  ) {
+    this.state.outbox = this.state.outbox.filter(entry => entry.entityType !== entityType
+      || entry.entityId !== entityId
+      || entry.status === 'syncing');
+  }
+
   async upsertTrip(input: TripDocumentV2, options: RepositoryMutationOptions = {}): Promise<TripDocumentV2> {
     return this.serialize(async () => {
       if (!text(input.id)) throw new Error('Trip id is required');
@@ -852,8 +870,12 @@ export class TripRepository {
     });
   }
 
-  async deleteTrip(id: string, options: RepositoryMutationOptions = {}): Promise<boolean> {
+  async deleteTrip(id: string, options: TripDeletionOptions = {}): Promise<boolean> {
+    const expectedOwnerScope = normalizeTripRepositoryScope(options.expectedOwnerScope ?? this.ownerScope);
     return this.serialize(async () => {
+      if (this.ownerScope !== expectedOwnerScope) {
+        throw new Error(`Trip repository owner scope changed from ${expectedOwnerScope} to ${this.ownerScope}`);
+      }
       const current = this.state.trips[id];
       if (!current) return false;
       assertExpectedRevision(id, current.revision, options.expectedRevision);
@@ -866,9 +888,59 @@ export class TripRepository {
         deletedAt: this.now(),
       };
       this.state.revision += 1;
-      if (options.enqueueSync !== false) this.enqueueOutbox('trip', id, 'delete', undefined, revision);
+      this.pruneOutboxBeforeDelete('trip', id);
+      if (options.enqueueSync !== false) {
+        this.enqueueOutbox('trip', id, 'delete', tripDeletionPayload('explicit', current.status), revision);
+      }
       await this.persist();
       return true;
+    });
+  }
+
+  async deleteDraftTrips(
+    requests: DraftTripDeletionRequest[],
+    options: DraftTripDeletionOptions = {},
+  ): Promise<string[]> {
+    const expectedOwnerScope = normalizeTripRepositoryScope(options.expectedOwnerScope ?? this.ownerScope);
+    return this.serialize(async () => {
+      if (this.ownerScope !== expectedOwnerScope) {
+        throw new Error(`Trip repository owner scope changed from ${expectedOwnerScope} to ${this.ownerScope}`);
+      }
+      const requestsById = new Map<string, DraftTripDeletionRequest>();
+      requests.forEach(request => {
+        const id = text(request.id);
+        if (id && !requestsById.has(id)) requestsById.set(id, { ...request, id });
+      });
+      const uniqueRequests = [...requestsById.values()];
+      const drafts = uniqueRequests.flatMap(request => {
+        const current = this.state.trips[request.id];
+        if (!current) return [];
+        if (current.status !== 'draft') {
+          throw new Error(`Trip ${request.id} is no longer a draft`);
+        }
+        assertExpectedRevision(request.id, current.revision, request.expectedRevision);
+        return [current];
+      });
+      if (drafts.length === 0) return [];
+
+      const deletedAt = this.now();
+      for (const draft of drafts) {
+        const revision = draft.revision + 1;
+        delete this.state.trips[draft.id];
+        this.state.tombstones[tombstoneKey('trip', draft.id)] = {
+          entityType: 'trip',
+          entityId: draft.id,
+          revision,
+          deletedAt,
+        };
+        this.pruneOutboxBeforeDelete('trip', draft.id);
+        if (options.enqueueSync !== false) {
+          this.enqueueOutbox('trip', draft.id, 'delete', tripDeletionPayload('draft_cleanup', 'draft'), revision);
+        }
+      }
+      this.state.revision += 1;
+      await this.persist();
+      return drafts.map(draft => draft.id);
     });
   }
 
@@ -958,7 +1030,7 @@ export class TripRepository {
       const local = this.state.trips[remote.id];
       const localTombstone = this.state.tombstones[tombstoneKey('trip', remote.id)];
       const localRevision = Math.max(local?.revision ?? 0, localTombstone?.revision ?? 0);
-      if (localRevision > remote.revision) {
+      if (localRevision > remote.revision || Boolean(localTombstone && localTombstone.revision === remote.revision)) {
         return { record: local ?? remote };
       }
       const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'trip'
@@ -1001,7 +1073,7 @@ export class TripRepository {
       const local = this.state.savedEntities[remote.id];
       const localTombstone = this.state.tombstones[tombstoneKey('saved_entity', remote.id)];
       const localRevision = Math.max(local?.revision ?? 0, localTombstone?.revision ?? 0);
-      if (localRevision > remote.revision) {
+      if (localRevision > remote.revision || Boolean(localTombstone && localTombstone.revision === remote.revision)) {
         return { record: local ?? remote };
       }
       const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'saved_entity'
@@ -1477,6 +1549,10 @@ export class TripRepository {
           }
           if (target === 'trip') {
             const trip = converted as TripDocumentV2;
+            if (this.state.tombstones[tombstoneKey('trip', trip.id)]) {
+              skipped += 1;
+              continue;
+            }
             const existing = this.state.trips[trip.id];
             if (existing && existing.items.length >= trip.items.length) {
               skipped += 1;
@@ -1556,13 +1632,17 @@ export class TripRepository {
               receipts.push(this.receipt('active_trip', sourceKey, 'quarantined', { corrupt: 1 }, 'Legacy active trip record was invalid', preservedRef));
             } else {
               const existing = this.state.trips[trip.id];
-              const migrated = { ...trip, ownerScope: this.ownerScope, revision: (existing?.revision ?? 0) + 1 };
-              this.state.trips[trip.id] = migrated;
-              if (this.ownerScope.startsWith('account:')) {
-                this.enqueueOutbox('trip', trip.id, 'upsert', migrated, migrated.revision);
+              if (this.state.tombstones[tombstoneKey('trip', trip.id)]) {
+                receipts.push(this.receipt('active_trip', sourceKey, 'skipped', { skipped: 1 }, 'Deleted trip was not restored from legacy storage'));
+              } else {
+                const migrated = { ...trip, ownerScope: this.ownerScope, revision: (existing?.revision ?? 0) + 1 };
+                this.state.trips[trip.id] = migrated;
+                if (this.ownerScope.startsWith('account:')) {
+                  this.enqueueOutbox('trip', trip.id, 'upsert', migrated, migrated.revision);
+                }
+                importedTripIds.push(trip.id);
+                receipts.push(this.receipt('active_trip', sourceKey, 'imported', { imported: 1 }));
               }
-              importedTripIds.push(trip.id);
-              receipts.push(this.receipt('active_trip', sourceKey, 'imported', { imported: 1 }));
             }
             this.state.migrationKeys[sourceKey] = this.now();
           }

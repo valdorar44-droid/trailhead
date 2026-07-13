@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Alert,
   Linking,
-  Platform,
   RefreshControl,
   ScrollView,
   StyleSheet,
@@ -12,11 +11,12 @@ import {
   View,
 } from 'react-native';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/lib/design';
 import { useStore, type SavedPlace } from '@/lib/store';
 import { useProductFeatures } from '@/lib/useProductFeatures';
+import PlanWorkspaceSwitcher from '@/components/plan/PlanWorkspaceSwitcher';
 import {
   useTripRepositorySnapshot,
   type SavedEntityV1,
@@ -81,14 +81,9 @@ export default function TripsScreen() {
   const requestSequence = useRef(0);
   const expectedOwnerScope = userId ? `account:${String(userId)}` : 'anonymous';
   const repositoryReady = repository.initialized && repository.ownerScope === expectedOwnerScope;
-  const { features, loading: featuresLoading } = useProductFeatures();
-  const tripsEnabled = Boolean(features?.trips_tab);
+  const { features } = useProductFeatures();
   const publicationEnabled = Boolean(userId && features?.community_publications);
   const availabilityEnabled = Boolean(userId && features?.availability_monitors);
-
-  useEffect(() => {
-    if (!featuresLoading && !tripsEnabled) router.replace('/(tabs)/guide');
-  }, [featuresLoading, router, tripsEnabled]);
 
   const refresh = useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'loading') => {
     const request = ++requestSequence.current;
@@ -111,7 +106,6 @@ export default function TripsScreen() {
   }, []);
 
   useFocusEffect(useCallback(() => {
-    if (!tripsEnabled) return undefined;
     let cancelled = false;
     void (async () => {
       try {
@@ -127,10 +121,9 @@ export default function TripsScreen() {
       }
     })();
     return () => { cancelled = true; };
-  }, [refresh, tripsEnabled, userId]));
+  }, [refresh, userId]));
 
   useEffect(() => {
-    if (!tripsEnabled) return;
     if (!repositoryReady) {
       setLoading(true);
       setSnapshot(EMPTY_SNAPSHOT);
@@ -144,7 +137,7 @@ export default function TripsScreen() {
         .then(() => refresh('silent'));
     }, 60);
     return () => clearTimeout(timer);
-  }, [activeTripId, refresh, repository.ownerScope, repository.revision, repositoryReady, tripsEnabled]);
+  }, [activeTripId, refresh, repository.ownerScope, repository.revision, repositoryReady]);
 
   const pullToRefresh = useCallback(async () => {
     setRefreshing(true);
@@ -317,49 +310,50 @@ export default function TripsScreen() {
     router.push('/(tabs)/guide');
   }, [router, setPendingMapSelection]);
 
-  const startPlanning = useCallback(() => router.push('/(tabs)/plan'), [router]);
+  const startPlanning = useCallback(() => router.push({
+    pathname: '/(tabs)/route-builder',
+    params: { intent: 'new', request: String(Date.now()) },
+  }), [router]);
   const browseExplore = useCallback(() => router.push('/(tabs)/guide'), [router]);
 
-  if (!tripsEnabled) {
-    return <View style={[styles.screen, { backgroundColor: C.bg }]} />;
-  }
-
   return (
-    <ScrollView
-      style={[styles.screen, { backgroundColor: C.bg }]}
-      contentInsetAdjustmentBehavior="automatic"
-      showsVerticalScrollIndicator={false}
-      refreshControl={(
-        <RefreshControl
-          refreshing={refreshing}
-          onRefresh={() => void pullToRefresh()}
-          tintColor={C.orange}
-          colors={[C.orange]}
-        />
-      )}
-      contentContainerStyle={[
-        styles.scrollContent,
-        {
-          paddingTop: Platform.OS === 'ios' ? 14 : Math.max(insets.top, 18) + 8,
-          paddingBottom: Math.max(insets.bottom + 106, 122),
-        },
-      ]}
-    >
-      <View style={styles.content}>
-        <View style={styles.pageHeader}>
-          <View style={styles.pageHeaderCopy}>
-            <Text style={[styles.pageTitle, { color: C.text }]}>Trips</Text>
-            <Text style={[styles.pageSubtitle, { color: C.text2 }]}>Plans, places, and bookings in one place</Text>
-          </View>
-          <TouchableOpacity
-            accessibilityRole="button"
-            accessibilityLabel="Create a new trip"
-            activeOpacity={0.78}
-            onPress={startPlanning}
-            style={[styles.createButton, { backgroundColor: C.orange, borderColor: C.orange }]}
-          >
-            <Ionicons name="add" size={20} color="#FFFFFF" />
-          </TouchableOpacity>
+    <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: C.bg }]}>
+      <PlanWorkspaceSwitcher active="trips" style={styles.planWorkspaceSwitcher} />
+      <ScrollView
+        style={styles.screen}
+        contentInsetAdjustmentBehavior="automatic"
+        showsVerticalScrollIndicator={false}
+        refreshControl={(
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={() => void pullToRefresh()}
+            tintColor={C.orange}
+            colors={[C.orange]}
+          />
+        )}
+        contentContainerStyle={[
+          styles.scrollContent,
+          {
+            paddingTop: 14,
+            paddingBottom: Math.max(insets.bottom + 106, 122),
+          },
+        ]}
+      >
+        <View style={styles.content}>
+          <View style={styles.pageHeader}>
+            <View style={styles.pageHeaderCopy}>
+              <Text style={[styles.pageTitle, { color: C.text }]}>Trips</Text>
+              <Text style={[styles.pageSubtitle, { color: C.text2 }]}>Plans, places, and bookings in one place</Text>
+            </View>
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Create a new route"
+              activeOpacity={0.78}
+              onPress={startPlanning}
+              style={[styles.createButton, { backgroundColor: C.orange, borderColor: C.orange }]}
+            >
+              <Ionicons name="add" size={20} color="#FFFFFF" />
+            </TouchableOpacity>
         </View>
 
         {notice ? (
@@ -407,13 +401,13 @@ export default function TripsScreen() {
               </View>
               <TouchableOpacity
                 accessibilityRole="button"
-                accessibilityLabel="Start planning a trip"
+                accessibilityLabel="Open Route Builder"
                 activeOpacity={0.76}
                 onPress={startPlanning}
                 style={[styles.inlineAction, { borderColor: C.border2 }]}
               >
                 <Ionicons name="add" size={16} color={C.orange} />
-                <Text style={[styles.inlineActionText, { color: C.text }]}>Start</Text>
+                <Text style={[styles.inlineActionText, { color: C.text }]}>Build</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -455,7 +449,7 @@ export default function TripsScreen() {
             <SavedItemsSection items={snapshot.savedItems} onOpen={openSavedItem} onBrowse={browseExplore} />
           </>
         ) : null}
-      </View>
+        </View>
 
       <TripActionSheet
         trip={selectedTrip}
@@ -472,7 +466,8 @@ export default function TripsScreen() {
         onSave={saveNote}
         onDelete={deleteNote}
       />
-    </ScrollView>
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
@@ -514,12 +509,12 @@ function LibraryMessage({ filter, onPlan }: { filter: TripLibraryFilter; onPlan:
       {filter !== 'archived' ? (
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="Open Plan"
+          accessibilityLabel="Open Route Builder"
           activeOpacity={0.74}
           onPress={onPlan}
           style={styles.textAction}
         >
-          <Text style={[styles.textActionLabel, { color: C.orange }]}>Plan</Text>
+          <Text style={[styles.textActionLabel, { color: C.orange }]}>Build</Text>
           <Ionicons name="arrow-forward" size={14} color={C.orange} />
         </TouchableOpacity>
       ) : null}
@@ -539,6 +534,11 @@ const styles = StyleSheet.create({
     maxWidth: 760,
     alignSelf: 'center',
     gap: 30,
+  },
+  planWorkspaceSwitcher: {
+    paddingHorizontal: 16,
+    marginTop: 8,
+    marginBottom: 4,
   },
   pageHeader: {
     minHeight: 58,

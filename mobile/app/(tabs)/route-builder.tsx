@@ -6,7 +6,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, usePathname, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
@@ -30,6 +30,7 @@ import {
 } from '@/components/routeBuilder/RouteBuilderStopPreviewCards';
 import RouteBuilderTimelineActions from '@/components/routeBuilder/RouteBuilderTimelineActions';
 import RouteBuilderTimelineDayCard from '@/components/routeBuilder/RouteBuilderTimelineDayCard';
+import PlanWorkspaceSwitcher, { type PlanWorkspaceHref } from '@/components/plan/PlanWorkspaceSwitcher';
 import RentalSuggestionModule from '@/components/trip/RentalSuggestionModule';
 import useRouteBuilderDiscoveryState, {
   type DiscoveryTab,
@@ -1608,6 +1609,9 @@ function RouteBuilderScreenContent() {
   const wizardSlide = useRef(new Animated.Value(0)).current;
   const buildPulse = useRef(new Animated.Value(0)).current;
   const router = useRouter();
+  const routeParams = useLocalSearchParams();
+  const routeBuilderIntent = Array.isArray(routeParams.intent) ? routeParams.intent[0] : routeParams.intent;
+  const routeBuilderRequest = Array.isArray(routeParams.request) ? routeParams.request[0] : routeParams.request;
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const user = useStore(st => st.user);
@@ -1648,6 +1652,7 @@ function RouteBuilderScreenContent() {
   const [routeToursLoadedFor, setRouteToursLoadedFor] = useState('');
   const [routeToursStatus, setRouteToursStatus] = useState('');
   const consumedRouteBuilderDraftRef = useRef('');
+  const consumedRouteBuilderIntentRef = useRef('');
   const [routeBuilderDraftLoading, setRouteBuilderDraftLoading] = useState(true);
   const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
@@ -1880,6 +1885,10 @@ function RouteBuilderScreenContent() {
   }
 
   const consumeCopilotRouteBuilderDraft = useCallback(() => {
+    if (routeBuilderIntent === 'new' || routeBuilderIntent === 'edit-active') {
+      setRouteBuilderDraftLoading(false);
+      return () => {};
+    }
     let cancelled = false;
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
@@ -1895,7 +1904,7 @@ function RouteBuilderScreenContent() {
       if (!cancelled && accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteBuilderDraftLoading(false);
     });
     return () => { cancelled = true; };
-  }, [sessionId, user?.id]);
+  }, [routeBuilderIntent, sessionId, user?.id]);
 
   useEffect(() => {
     selectedCampRef.current = selectedCamp;
@@ -4974,6 +4983,58 @@ function RouteBuilderScreenContent() {
     beginCleanNewRoute();
   }
 
+  useFocusEffect(useCallback(() => {
+    if (routeBuilderIntent !== 'new' && routeBuilderIntent !== 'edit-active') return;
+    const requestKey = `${routeBuilderIntent}:${routeBuilderRequest || 'default'}`;
+    if (consumedRouteBuilderIntentRef.current === requestKey) return;
+    consumedRouteBuilderIntentRef.current = requestKey;
+    if (routeBuilderIntent === 'edit-active') {
+      resetRouteDraft();
+      setRouteTabMode('wizard');
+      return;
+    }
+    startNewRoute();
+  }, [activeTrip?.trip_id, routeBuilderIntent, routeBuilderRequest]));
+
+  async function saveAndOpenPlanWorkspace(href: PlanWorkspaceHref) {
+    await commitTrip(buildTrip(), false);
+    setRouteTabMode('hub');
+    router.replace(href);
+  }
+
+  function openPlanWorkspace(href: PlanWorkspaceHref) {
+    if (routeTabMode === 'hub') {
+      router.replace(href);
+      return;
+    }
+    if (routeSaving) return;
+    const discardAndSwitch = () => {
+      resetRouteDraft();
+      setRouteTabMode('hub');
+      router.replace(href);
+    };
+    const destination = href === '/(tabs)/trips' ? 'Trips' : 'Assisted planning';
+    const canSave = orderedStops.length >= 2;
+    Alert.alert(
+      `Switch to ${destination}?`,
+      canSave
+        ? 'Save this route before switching, or discard the changes in the builder.'
+        : 'This route does not have enough stops to save yet. Discard it to switch workspaces.',
+      [
+        { text: 'Keep editing', style: 'cancel' },
+        { text: 'Discard & switch', style: 'destructive', onPress: discardAndSwitch },
+        ...(canSave ? [{
+          text: 'Save & switch',
+          onPress: () => {
+            saveAndOpenPlanWorkspace(href).catch(() => {
+              Alert.alert('Route not saved', 'The route could not be saved. Your builder is still open.');
+            });
+          },
+        }] : []),
+      ],
+    );
+  }
+
   async function saveCloseAndStartNewRoute() {
     if (routeSaving) return;
     const requestEpoch = accountStorage.epoch();
@@ -5403,6 +5464,7 @@ function RouteBuilderScreenContent() {
     const savedRoutes = tripHistory.slice(0, 10);
     return (
       <RouteBuilderHub
+        header={<PlanWorkspaceSwitcher active="manual" style={s.planWorkspaceHubHeader} onSelect={(_, href) => openPlanWorkspace(href)} />}
         bottomInset={bottomInset}
         routeSaving={routeSaving}
         rigRouteSummary={rigRouteSummary}
@@ -5746,6 +5808,7 @@ function RouteBuilderScreenContent() {
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <SafeAreaView style={s.wizardScreen}>
+          <PlanWorkspaceSwitcher active="manual" style={s.planWorkspaceSwitcherInline} onSelect={(_, href) => openPlanWorkspace(href)} />
           {renderWizardSetup(true)}
           <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
         </SafeAreaView>
@@ -5755,6 +5818,7 @@ function RouteBuilderScreenContent() {
 
   return (
     <SafeAreaView style={s.wizardScreen}>
+      <PlanWorkspaceSwitcher active="manual" style={s.planWorkspaceSwitcherInline} onSelect={(_, href) => openPlanWorkspace(href)} />
       <View style={s.wizardCompactTop}>
         <TouchableOpacity style={s.headerBtn} onPress={exitRouteBuilder} accessibilityLabel="Exit route builder" activeOpacity={0.82}>
           <Ionicons name="close" size={17} color={C.orange} />
@@ -6490,6 +6554,8 @@ export default function RouteBuilderScreen() {
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   container: { flex: 1, backgroundColor: C.bg },
   wizardScreen: { flex: 1, backgroundColor: C.bg, paddingHorizontal: 14, paddingTop: 8 },
+  planWorkspaceHubHeader: { marginTop: 8, marginBottom: 4 },
+  planWorkspaceSwitcherInline: { marginBottom: 8, paddingHorizontal: 0 },
   wizardScreenTop: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
     paddingTop: 6, paddingBottom: 14,

@@ -4049,7 +4049,10 @@ function GuideScreenContent() {
       setActiveTrip(starterTripResult(document, saved));
       setSelectedExplore(null);
       closeExperienceDetail();
-      router.push('/(tabs)/route-builder');
+      router.push({
+        pathname: '/(tabs)/route-builder',
+        params: { intent: 'edit-active', request: String(Date.now()) },
+      });
     } catch {
       Alert.alert('Trip not started', 'Your saved items are unchanged. Try starting the trip again.');
     }

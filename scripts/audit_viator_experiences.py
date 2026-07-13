@@ -64,7 +64,7 @@ def main() -> int:
         client = TestClient(server.app)
 
         os.environ.pop("VIATOR_ENABLE_FIXTURE_DATA", None)
-        disabled = client.get("/api/explore/places/explore:parks:yosemite-national-park/experiences?limit=4")
+        disabled = client.get("/api/explore/places/place:nps:yose/experiences?limit=4")
         if disabled.status_code != 200:
             fail(f"disabled place endpoint returned HTTP {disabled.status_code}")
         disabled_payload = disabled.json()
@@ -74,7 +74,7 @@ def main() -> int:
             fail(f"expected live_status disabled without live config, got {disabled_payload.get('live_status')}")
 
         os.environ["VIATOR_ENABLE_FIXTURE_DATA"] = "true"
-        yosemite = client.get("/api/explore/places/explore:parks:yosemite-national-park/experiences?limit=4")
+        yosemite = client.get("/api/explore/places/place:nps:yose/experiences?limit=4")
         moab = client.get("/api/explore/experiences?q=Moab&limit=4")
         detail = client.get("/api/explore/experiences/viator:yose-hike-001")
         for label, response in (("Yosemite", yosemite), ("Moab", moab), ("detail", detail)):

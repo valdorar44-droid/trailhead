@@ -18,6 +18,7 @@ import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadButtonDock, TrailheadCard } from '@/components/TrailheadUI';
 import CopilotBriefCard from '@/components/copilot/CopilotBriefCard';
 import PlannerStarterRow from '@/components/planning/PlannerStarterRow';
+import PlanWorkspaceSwitcher from '@/components/plan/PlanWorkspaceSwitcher';
 import AiReportModal from '@/components/AiReportModal';
 import { useStore } from '@/lib/store';
 import { useTheme, useTag, mono, ColorPalette } from '@/lib/design';
@@ -490,11 +491,12 @@ function PlanScreenContent() {
   // ── Login gate ───────────────────────────────────────────────────────────
   if (!user) return (
     <SafeAreaView style={s.container}>
+      <PlanWorkspaceSwitcher active="assisted" />
       <View style={s.loginGate}>
         <View style={s.loginGateLogo}>
           <Image source={TRAILHEAD_LOGO} style={s.loginGateLogoImage} resizeMode="cover" />
         </View>
-        <Text style={s.loginGateTitle}>Trip Planning</Text>
+        <Text style={s.loginGateTitle}>Assisted planning</Text>
         <Text style={s.loginGateSub}>
           Build multi-day routes with fuel, camp options, weather, land context, saved trips, and road-condition reports.
         </Text>
@@ -522,6 +524,7 @@ function PlanScreenContent() {
   return (
     <SafeAreaView style={s.container}>
       <PlannerAmbientBackground C={C} />
+      <PlanWorkspaceSwitcher active="assisted" />
       {/* ── Paywall modal (IAP) ── */}
       <PaywallModal
         visible={paywallVisible}

@@ -19,6 +19,7 @@ type RigRouteSummary = {
 };
 
 type RouteBuilderHubProps = {
+  header?: ReactNode;
   bottomInset: number;
   routeSaving: boolean;
   rigRouteSummary: RigRouteSummary;
@@ -41,6 +42,7 @@ type RouteBuilderHubProps = {
 };
 
 export default function RouteBuilderHub({
+  header,
   bottomInset,
   routeSaving,
   rigRouteSummary,
@@ -66,6 +68,7 @@ export default function RouteBuilderHub({
 
   return (
     <SafeAreaView style={s.screen}>
+      {header}
       <ScrollView
         style={s.body}
         contentContainerStyle={[s.content, { paddingBottom: 120 + bottomInset }]}

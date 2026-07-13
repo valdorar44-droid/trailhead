@@ -10,13 +10,14 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
   guide: 'compass-outline',
   plan: 'trail-sign-outline',
   map: 'map-outline',
-  trips: 'calendar-outline',
+  report: 'warning-outline',
   profile: 'person-outline',
 };
 
-type TripsTabBarProps = BottomTabBarProps & { tripsEnabled: boolean };
+const VISIBLE_ROUTE_NAMES = ['guide', 'plan', 'map', 'report', 'profile'] as const;
+const PLAN_CHILD_ROUTES = new Set(['route-builder', 'trips']);
 
-export default function TripsTabBar({ state, descriptors, navigation, tripsEnabled }: TripsTabBarProps) {
+export default function TripsTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const C = useTheme();
   const hidden = useStore(store => store.tabBarHidden);
   const insets = useSafeAreaInsets();
@@ -34,8 +35,10 @@ export default function TripsTabBar({ state, descriptors, navigation, tripsEnabl
   }, []);
 
   if (hidden || keyboardOpen) return null;
-  const visibleRouteNames = new Set(['guide', 'plan', 'map', 'profile', ...(tripsEnabled ? ['trips'] : [])]);
-  const visibleRoutes = state.routes.filter(route => visibleRouteNames.has(route.name));
+  const activeRoute = state.routes[state.index];
+  const visibleRoutes = VISIBLE_ROUTE_NAMES
+    .map(name => state.routes.find(route => route.name === name))
+    .filter((route): route is NonNullable<typeof route> => Boolean(route));
 
   return (
     <View
@@ -55,7 +58,9 @@ export default function TripsTabBar({ state, descriptors, navigation, tripsEnabl
       <View style={styles.inner}>
         {visibleRoutes.map(route => {
           const options = descriptors[route.key]?.options as { title?: string };
-          const focused = state.routes[state.index]?.key === route.key;
+          const isCurrentRoute = activeRoute?.key === route.key;
+          const focused = isCurrentRoute
+            || (route.name === 'plan' && PLAN_CHILD_ROUTES.has(activeRoute?.name ?? ''));
           const label = options?.title || route.name;
           const color = focused ? C.orange : C.text2;
           return (
@@ -67,7 +72,7 @@ export default function TripsTabBar({ state, descriptors, navigation, tripsEnabl
               activeOpacity={0.78}
               onPress={() => {
                 const event = navigation.emit({ type: 'tabPress', target: route.key, canPreventDefault: true });
-                if (!focused && !event.defaultPrevented) navigation.navigate(route.name);
+                if (!isCurrentRoute && !event.defaultPrevented) navigation.navigate(route.name);
               }}
               onLongPress={() => navigation.emit({ type: 'tabLongPress', target: route.key })}
               style={styles.item}

@@ -1973,14 +1973,14 @@ export default function ProfileScreen() {
         {(() => {
           const actions = profileSection === 'account'
             ? [
-                { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
+                { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
                 { icon: 'mail-outline', label: 'INBOX', color: '#3b82f6', onPress: () => openSupportInbox() },
                 { icon: 'help-buoy-outline', label: 'CONTACT', color: '#3b82f6', onPress: () => contactSupport('Trailhead question') },
                 { icon: 'people', label: 'REFER', color: C.orange, onPress: shareReferral },
               ]
             : profileSection === 'trips'
               ? [
-                  { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => { setActiveTrip(null); router.push('/(tabs)/plan' as any); } },
+                  { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
                   { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
                   { icon: 'cloud-download-outline', label: 'SAVED AREAS', color: C.green, onPress: openOfflineMapsManager },
                   { icon: 'ticket-outline', label: 'TOURS', color: '#0f766e', onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
@@ -2041,7 +2041,7 @@ export default function ProfileScreen() {
             importedRouteCount={importedRouteCount}
             importedPinCount={importedPinCount}
             onOpenDownloads={openOfflineMapsManager}
-            onPlanTrip={() => { setActiveTrip(null); router.push('/(tabs)/plan' as any); }}
+            onPlanTrip={() => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any)}
           />
 
           <View style={s.bookedScreen}>

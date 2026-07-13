@@ -21,6 +21,12 @@ const checks = [
     args: ['scripts/user-facing-copy-audit.mjs'],
   },
   {
+    label: 'Plan workspace navigation audit',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/plan-workspace-regression-audit.mjs'],
+  },
+  {
     label: 'Explore feed audit',
     cwd: mobileRoot,
     cmd: 'node',

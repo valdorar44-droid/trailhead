@@ -2,15 +2,12 @@ import { Tabs } from 'expo-router';
 import GuidedTourOverlay from '@/components/GuidedTourOverlay';
 import PreviewRunOnboarding from '@/components/PreviewRunOnboarding';
 import TripsTabBar from '@/components/trips/TripsTabBar';
-import { useProductFeatures } from '@/lib/useProductFeatures';
 
 export const unstable_settings = {
   initialRouteName: 'guide',
 };
 
 export default function TabLayout() {
-  const { features } = useProductFeatures();
-  const tripsEnabled = Boolean(features?.trips_tab);
   return (
     <>
       <Tabs
@@ -21,7 +18,7 @@ export default function TabLayout() {
           tabBarActiveTintColor: '#F5F5F7',
           tabBarInactiveTintColor: 'rgba(245,245,247,0.45)',
         }}
-        tabBar={(props) => <TripsTabBar {...props} tripsEnabled={tripsEnabled} />}
+        tabBar={(props) => <TripsTabBar {...props} />}
       >
         <Tabs.Screen
           name="index"
@@ -51,7 +48,13 @@ export default function TabLayout() {
           name="trips"
           options={{
             title: 'Trips',
-            href: tripsEnabled ? undefined : null,
+            href: null,
+          }}
+        />
+        <Tabs.Screen
+          name="report"
+          options={{
+            title: 'Reports',
           }}
         />
         <Tabs.Screen
@@ -62,12 +65,6 @@ export default function TabLayout() {
         />
         <Tabs.Screen
           name="route-builder"
-          options={{
-            href: null,
-          }}
-        />
-        <Tabs.Screen
-          name="report"
           options={{
             href: null,
           }}

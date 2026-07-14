@@ -28643,6 +28643,142 @@ def _route_tour_points(body: RouteTourRequest) -> list[dict]:
     return unique[:24]
 
 
+def _route_tour_anchor_points(body: RouteTourRequest) -> list[dict]:
+    anchors: list[dict] = []
+    for idx, anchor in enumerate(body.anchors[:24]):
+        lat = float(anchor.lat)
+        lng = float(anchor.lng)
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
+        anchors.append({
+            "lat": lat,
+            "lng": lng,
+            "name": anchor.name or f"Stop {idx + 1}",
+            "day": anchor.day,
+            "leg_index": anchor.leg_index,
+        })
+    return anchors
+
+
+def _route_tour_geometry_points(route: list[list[float]], max_points: int = 256) -> list[dict]:
+    points = _route_points_from_lonlat(route)
+    safe_max = max(2, min(int(max_points or 256), 512))
+    if len(points) <= safe_max:
+        return points
+    sampled: list[dict] = []
+    for sample_idx in range(safe_max):
+        point_idx = round((len(points) - 1) * (sample_idx / (safe_max - 1)))
+        sampled.append(points[point_idx])
+    return sampled
+
+
+def _route_activity_provider(item: dict) -> dict | None:
+    source = str(item.get("source") or "").strip().lower()
+    name = str(item.get("source_badge") or item.get("source") or "").strip()
+    if not source and not name:
+        return None
+    provider = {
+        "id": source or re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_"),
+        "name": name or source.title(),
+    }
+    attribution = str(item.get("attribution") or "").strip()
+    if attribution:
+        provider["attribution"] = attribution
+    return provider
+
+
+def _annotate_route_activity_result(
+    item: dict,
+    anchors: list[dict],
+    geometry_points: list[dict],
+) -> dict:
+    enriched = dict(item)
+    try:
+        item_lat = float(enriched["lat"])
+        item_lng = float(enriched["lng"])
+    except Exception:
+        return enriched
+
+    nearest_anchor: dict | None = None
+    nearest_anchor_distance = math.inf
+    for anchor in anchors:
+        distance_mi = _haversine_m(
+            item_lat,
+            item_lng,
+            float(anchor["lat"]),
+            float(anchor["lng"]),
+        ) / 1609.344
+        if distance_mi < nearest_anchor_distance:
+            nearest_anchor = anchor
+            nearest_anchor_distance = distance_mi
+
+    projection = _route_projection_for_item(enriched, geometry_points)
+    detour_mi = (
+        float(projection["route_distance_mi"])
+        if projection is not None
+        else nearest_anchor_distance
+    )
+    if not math.isfinite(detour_mi):
+        return enriched
+
+    route_match: dict = {
+        "detour_mi": round(detour_mi, 2),
+        "matched_by": "geometry" if projection is not None else "anchor",
+    }
+    if projection is not None:
+        route_match["route_progress"] = projection.get("route_progress")
+    if nearest_anchor is not None:
+        route_match["anchor_name"] = nearest_anchor.get("name")
+        if nearest_anchor.get("day") is not None:
+            route_match["day"] = nearest_anchor.get("day")
+        if nearest_anchor.get("leg_index") is not None:
+            route_match["leg_index"] = nearest_anchor.get("leg_index")
+
+    enriched["distance_mi"] = route_match["detour_mi"]
+    enriched["route_match"] = route_match
+    enriched["route_anchor"] = {
+        "name": route_match.get("anchor_name"),
+        "day": route_match.get("day"),
+        "leg_index": route_match.get("leg_index"),
+        "distance_mi": route_match["detour_mi"],
+    }
+    provider = _route_activity_provider(enriched)
+    if provider:
+        enriched["provider"] = provider
+    return enriched
+
+
+def _rank_route_activity_results(
+    items: list[dict],
+    anchors: list[dict],
+    geometry_points: list[dict],
+    radius_mi: float,
+) -> list[dict]:
+    ranked: list[dict] = []
+    for item in items:
+        enriched = _annotate_route_activity_result(item, anchors, geometry_points)
+        route_match = enriched.get("route_match") if isinstance(enriched.get("route_match"), dict) else {}
+        try:
+            detour_mi = float(route_match.get("detour_mi"))
+        except Exception:
+            continue
+        if detour_mi <= radius_mi:
+            ranked.append(enriched)
+    return sorted(
+        ranked,
+        key=lambda item: (
+            float(
+                (item.get("route_match") or {}).get("detour_mi")
+                if (item.get("route_match") or {}).get("detour_mi") is not None
+                else 9999
+            ),
+            -float(item.get("rating") or 0),
+            -int(item.get("review_count") or 0),
+            str(item.get("title") or ""),
+        ),
+    )
+
+
 def _viator_provider_status(payload: dict | None) -> dict:
     if not isinstance(payload, dict):
         return {"status": "empty"}
@@ -29525,11 +29661,19 @@ async def explore_guided_destination(
 async def route_tour_suggestions(body: RouteTourRequest):
     payload = _load_explore_experiences()
     source = (body.source or "viator").lower()
+    points = _route_tour_points(body)
+    anchors = _route_tour_anchor_points(body)
+    match_anchors = anchors or points
+    geometry_points = _route_tour_geometry_points(body.route)
     experiences = [
         item for item in payload.get("experiences") or []
         if source in {"", "all"} or str(item.get("source") or "").lower() == source
     ]
-    experiences = _filter_experiences_by_query(experiences, body.q or "")
+    # Route names often combine the trip title and both endpoints. Treat that text
+    # as provider search context, not a requirement that every word appear in a
+    # product. Coordinates are the authoritative relevance constraint here.
+    if not points:
+        experiences = _filter_experiences_by_query(experiences, body.q or "")
     min_price = _clean_experience_price(body.lowest_price)
     max_price = _clean_experience_price(body.highest_price)
     experiences = _filter_experiences_for_destination_page(
@@ -29539,7 +29683,6 @@ async def route_tour_suggestions(body: RouteTourRequest):
         lowest_price=min_price,
         highest_price=max_price,
     )
-    points = _route_tour_points(body)
     radius_mi = max(5.0, min(float(body.radius or 45), 120.0))
     ranked_by_key: dict[str, dict] = {}
     for point in points:
@@ -29557,13 +29700,11 @@ async def route_tour_suggestions(body: RouteTourRequest):
             if not current or float(enriched.get("distance_mi") or 9999) < float(current.get("distance_mi") or 9999):
                 ranked_by_key[key] = enriched
     ranked = _sort_experiences(
-        sorted(
-            ranked_by_key.values(),
-            key=lambda item: (
-                float(item.get("distance_mi") or 9999),
-                -float(item.get("rating") or 0),
-                str(item.get("title") or ""),
-            ),
+        _rank_route_activity_results(
+            list(ranked_by_key.values()),
+            match_anchors,
+            geometry_points,
+            radius_mi,
         ),
         body.sort,
         body.order,
@@ -29642,9 +29783,11 @@ async def route_tour_suggestions(body: RouteTourRequest):
             if key not in existing:
                 ranked.append(item)
                 existing.add(key)
-            if len(ranked) >= max(1, min(int(body.limit or 8), 48)):
-                break
-        ranked = _sort_experiences(ranked, body.sort, body.order)[:max(1, min(int(body.limit or 8), 48))]
+        ranked = _sort_experiences(
+            _rank_route_activity_results(ranked, match_anchors, geometry_points, radius_mi),
+            body.sort,
+            body.order,
+        )[:max(1, min(int(body.limit or 8), 48))]
     return {
         **_experience_response(source, ranked, cache_status="fresh" if payload.get("generated_at") else "empty"),
         "route_anchor_count": len(points),

@@ -61,7 +61,7 @@ export function buildPendingRouteActivityOffer(
 }
 
 export function routeActivityDay(experience: BookableExperience, fallbackDay = 1) {
-  const day = Math.round(Number(experience.route_anchor?.day));
+  const day = Math.round(Number(experience.route_match?.day ?? experience.route_anchor?.day));
   return Number.isFinite(day) && day > 0 ? day : Math.max(1, Math.round(fallbackDay) || 1);
 }
 

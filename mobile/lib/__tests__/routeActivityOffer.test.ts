@@ -61,3 +61,24 @@ test('converts the booked activity into a route-ready place on its matched day',
   assert.equal(place.booking_url, selected.booking_url);
   assert.equal(routeActivityDay(selected, 1), 2);
 });
+
+test('uses the route match day from the route-search contract', () => {
+  const selected = experience({
+    provider: { id: 'viator', name: 'Viator' },
+    route_match: {
+      anchor_name: 'Canyonlands',
+      day: 3,
+      leg_index: 2,
+      detour_mi: 1.4,
+      matched_by: 'geometry',
+    },
+    route_anchor: { day: 1, name: 'Legacy anchor' },
+  });
+
+  const offer = buildPendingRouteActivityOffer('trip-1', [selected], 1234);
+
+  assert.ok(offer);
+  assert.equal(offer.experiences[0].provider?.name, 'Viator');
+  assert.equal(offer.experiences[0].route_match?.detour_mi, 1.4);
+  assert.equal(routeActivityDay(offer.experiences[0], 1), 3);
+});

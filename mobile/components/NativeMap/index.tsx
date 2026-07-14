@@ -189,6 +189,7 @@ export type NativeMapDebugEvent = {
 export interface NativeMapHandle {
   flyTo:          (lat: number, lng: number, zoom?: number, name?: string) => void;
   flyToCamera:    (options: NativeMapCameraOptions) => void;
+  fitCoordinates: (coords: [number, number][], padding?: [number, number, number, number], duration?: number) => void;
   setZoom:        (zoom: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
   zoomBy:         (delta: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
   locate:         (lat: number, lng: number) => void;
@@ -249,6 +250,18 @@ export interface NativeMapProps {
   trailPreviewCoords?: [number, number][];
   trailPreviewProgress?: number;
   trailPreviewTone?: 'cyan' | 'gold';
+  routeBuildActive?: boolean;
+  routeBuildCoords?: [number, number][];
+  routeBuildReveal?: number;
+  routeBuildStops?: Array<{
+    id: string;
+    lat: number;
+    lng: number;
+    day: number;
+    type: 'start' | 'destination' | 'camp' | 'overnight_review' | 'fuel';
+    name: string;
+    needsReview?: boolean;
+  }>;
   suppressFeatureTaps?: boolean;
 
   // Overlay visibility
@@ -819,6 +832,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     mapLayer, routeProviderMode = 'trailhead', routeOpts, rendererMode,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
+    routeBuildActive = false, routeBuildCoords = [], routeBuildReveal = 1, routeBuildStops = [],
     suppressFeatureTaps = false,
     showLandOverlay = false, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
     missionBriefActive = false, missionBriefFullRoute = [], missionBriefProgressRoute = [],
@@ -1632,6 +1646,18 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         animationMode: Platform.OS === 'web' ? 'moveTo' : options.mode || 'flyTo',
       } as any);
     },
+    fitCoordinates(coords, padding = [92, 44, 230, 44], duration = 900) {
+      const clean = cleanLineCoords(coords);
+      if (clean.length < 2) return;
+      const lngs = clean.map(coord => coord[0]);
+      const lats = clean.map(coord => coord[1]);
+      const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
+      const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
+      lastCamRef.current = Date.now();
+      programmaticCameraUntilRef.current = Date.now() + Math.max(900, duration + 450);
+      emitDebugEvent('camera:set:fitCoordinates', { points: clean.length, ne, sw, padding, duration });
+      camRef.current?.fitBounds(ne, sw, padding, Platform.OS === 'web' ? 0 : duration);
+    },
     async setZoom(zoom, focus) {
       const nextZoom = clampMapZoom(Number(zoom), 12);
       const lat = Number(focus?.lat);
@@ -2193,6 +2219,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   useEffect(() => {
     routeRequestRef.current++;
     isRoutingRef.current = false;
+    if (routeBuildActive) return;
     const snapshot = routeSnapshotRef.current;
     const hasAuthoritativeRoute = snapshot.coords.length >= 2 && (
       snapshot.waypointSignature
@@ -2219,11 +2246,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       const ne: [number, number] = [Math.max(...lngs), Math.max(...lats)];
       const sw: [number, number] = [Math.min(...lngs), Math.min(...lats)];
       // Small delay lets the map finish loading the tile layer first
-      setTimeout(() => {
+      const fitTimer = setTimeout(() => {
         camRef.current?.fitBounds(ne, sw, [80, 50, 120, 50], 900);
       }, 400);
+      return () => clearTimeout(fitTimer);
     }
-  }, [waypointSignature]);
+  }, [routeBuildActive, waypointSignature]);
 
   // ── Nav: track user on route + update passed overlay ────────────────────────
   useEffect(() => {
@@ -2371,6 +2399,42 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       completed: split.completed.length >= 2 ? split.completed : [],
     };
   }, [trailPreviewCoords, trailPreviewProgress, trailPreviewTone]);
+
+  const routeBuildVisual = useMemo(() => {
+    const split = splitLineAtProgress(routeBuildCoords, routeBuildReveal);
+    return {
+      active: routeBuildActive && routeBuildCoords.length >= 2,
+      completed: split.completed.length >= 2 ? split.completed : [],
+      remaining: split.remaining.length >= 2 ? split.remaining : [],
+      marker: split.marker,
+    };
+  }, [routeBuildActive, routeBuildCoords, routeBuildReveal]);
+
+  const routeBuildStopsFC = useMemo(() => {
+    if (!routeBuildActive || !routeBuildStops.length) return emptyFC();
+    return pointFC(routeBuildStops
+      .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
+      .map(stop => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [stop.lng, stop.lat] },
+        properties: {
+          id: stop.id,
+          name: stop.name,
+          type: stop.type,
+          day: stop.day,
+          needsReview: stop.needsReview ? 1 : 0,
+          label: stop.type === 'camp'
+            ? String(Math.max(1, stop.day))
+            : stop.type === 'overnight_review'
+              ? '?'
+              : stop.type === 'fuel'
+                ? 'F'
+                : stop.type === 'start'
+                  ? 'S'
+                  : 'D',
+        },
+      })));
+  }, [routeBuildActive, routeBuildStops]);
 
   const missionBriefCalloutFC = useMemo(() => {
     if (!missionBriefActive || !missionBriefCallouts.length) return emptyFC();
@@ -3038,8 +3102,116 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapGL.ShapeSource>
       )}
 
+      {routeBuildVisual.active && (
+        <>
+          {routeBuildVisual.remaining.length > 1 && (
+            <MapGL.ShapeSource id="route-build-remaining" shape={lineFC(routeBuildVisual.remaining)}>
+              <MapGL.LineLayer
+                id="route-build-remaining-casing"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: 'rgba(17,20,18,0.5)', lineWidth: 8, lineCap: 'round', lineJoin: 'round' }}
+              />
+              <MapGL.LineLayer
+                id="route-build-remaining-line"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: 'rgba(217,119,69,0.34)', lineWidth: 4.5, lineCap: 'round', lineJoin: 'round' }}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {routeBuildVisual.completed.length > 1 && (
+            <MapGL.ShapeSource id="route-build-completed" shape={lineFC(routeBuildVisual.completed)}>
+              <MapGL.LineLayer
+                id="route-build-completed-casing"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: 'rgba(17,20,18,0.72)', lineWidth: 9, lineCap: 'round', lineJoin: 'round' }}
+              />
+              <MapGL.LineLayer
+                id="route-build-completed-line"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: '#D97745', lineWidth: 5.5, lineCap: 'round', lineJoin: 'round', lineOpacity: 1 }}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {routeBuildVisual.marker && routeBuildReveal < 1 && (
+            <MapGL.ShapeSource
+              id="route-build-marker"
+              shape={pointFC([{
+                type: 'Feature' as const,
+                geometry: { type: 'Point' as const, coordinates: routeBuildVisual.marker },
+                properties: {},
+              }])}
+            >
+              <MapGL.CircleLayer
+                id="route-build-marker-halo"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: 14,
+                  circleColor: 'rgba(217,119,69,0.22)',
+                  circleStrokeColor: 'rgba(255,255,255,0.72)',
+                  circleStrokeWidth: 1,
+                }}
+              />
+              <MapGL.CircleLayer
+                id="route-build-marker-core"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: 5.5,
+                  circleColor: '#D97745',
+                  circleStrokeColor: '#FFFFFF',
+                  circleStrokeWidth: 2,
+                }}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {routeBuildStopsFC.features.length > 0 && (
+            <MapGL.ShapeSource id="route-build-stops" shape={routeBuildStopsFC}>
+              <MapGL.CircleLayer
+                id="route-build-stop-halo"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: 10,
+                  circleColor: 'rgba(255,255,255,0.96)',
+                  circleStrokeColor: 'rgba(17,20,18,0.2)',
+                  circleStrokeWidth: 1,
+                }}
+              />
+              <MapGL.CircleLayer
+                id="route-build-stop-core"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: 7,
+                  circleColor: [
+                    'match', ['get', 'type'],
+                    'camp', '#0F8F5E',
+                    'fuel', '#D97745',
+                    'start', '#111412',
+                    'destination', '#111412',
+                    '#AD5A33',
+                  ],
+                  circleStrokeColor: '#FFFFFF',
+                  circleStrokeWidth: 1.5,
+                } as any}
+              />
+              <MapGL.SymbolLayer
+                id="route-build-stop-label"
+                {...mapboxTopSlotProps}
+                style={{
+                  textField: ['get', 'label'],
+                  textSize: 10,
+                  textColor: '#FFFFFF',
+                  textFont: ['Open Sans Bold'],
+                  textAllowOverlap: true,
+                  textIgnorePlacement: true,
+                  textLetterSpacing: 0,
+                } as any}
+              />
+            </MapGL.ShapeSource>
+          )}
+        </>
+      )}
+
       {/* ── Route line ────────────────────────────────────────────────── */}
-      {routeCoords.length > 0 && !waterRouteVisualActive && (
+      {routeCoords.length > 0 && !waterRouteVisualActive && !routeBuildActive && (
         <MapGL.ShapeSource id="route" shape={lineFC(routeCoords)}>
           <MapGL.LineLayer
             id="route-shadow"
@@ -3155,7 +3327,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapGL.ShapeSource>
       )}
 
-      {routeTurnFC.features.length > 0 && !waterRouteVisualActive && (
+      {routeTurnFC.features.length > 0 && !waterRouteVisualActive && !routeBuildActive && (
         <MapGL.ShapeSource id="route-turns" shape={routeTurnFC}>
           <MapGL.SymbolLayer
             id="route-turn-shadows"
@@ -3188,7 +3360,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Passed route dimmed overlay ───────────────────────────────── */}
-      {passedCoords.length > 1 && !waterRouteVisualActive && (
+      {passedCoords.length > 1 && !waterRouteVisualActive && !routeBuildActive && (
         <MapGL.ShapeSource id="route-passed" shape={lineFC(passedCoords)}>
           <MapGL.LineLayer
             id="route-passed-line"
@@ -3198,7 +3370,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Breadcrumb trail ──────────────────────────────────────────── */}
-      {breadcrumb.length > 1 && !waterRouteVisualActive && (
+      {breadcrumb.length > 1 && !waterRouteVisualActive && !routeBuildActive && (
         <MapGL.ShapeSource id="breadcrumb" shape={lineFC(breadcrumb)}>
           <MapGL.LineLayer
             id="breadcrumb-line"
@@ -3889,7 +4061,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Waypoint markers ──────────────────────────────────────────── */}
-      {waypoints.map((wp, i) => (
+      {!routeBuildActive && waypoints.map((wp, i) => (
         <MapGL.MarkerView
           key={`wp-${i}-${wp.lat}-${wp.lng}`}
           id={`wp-${i}`}

@@ -15,7 +15,6 @@ import ActivityStatusCard from '@/components/planning/ActivityStatusCard';
 import RouteBuilderActiveDayControls, { RouteBuilderEmptyDayGuidance } from '@/components/routeBuilder/RouteBuilderActiveDayControls';
 import RouteBuilderActiveDayStopList from '@/components/routeBuilder/RouteBuilderActiveDayStopList';
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
-import RouteBuilderBuildLoader from '@/components/routeBuilder/RouteBuilderBuildLoader';
 import RouteActivityOfferSheet from '@/components/routeBuilder/RouteActivityOfferSheet';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteBuilderInlineResults, {
@@ -42,7 +41,7 @@ import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/
 import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, ExtremeConfig, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
-import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
+import { deleteOfflineTrip, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore, type TripHistoryItem } from '@/lib/store';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
@@ -62,6 +61,13 @@ import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib
 import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
 import { routeGeometryMatchesWaypointsInOrder, routeWaypointSignature } from '@/lib/routeWaypointSignature';
 import { buildPendingRouteActivityOffer, routeActivityDay } from '@/lib/routeActivityOffer';
+import {
+  createRouteBuildRequestId,
+  routeBuildRequestSignal,
+  routeBuildSessionIsRunning,
+  waitForRouteBuildActivityChoice,
+  type RouteBuildPreviewStop,
+} from '@/lib/routeBuildSession';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
   buildRouteBuilderSearchStop,
@@ -94,7 +100,6 @@ import {
 } from '@/lib/routeBuilder';
 
 const API_BASE_URL = TRAILHEAD_API_BASE;
-const ROUTE_BUILDER_MAP_SETTLE_MS = 2800;
 const ROUTE_CAMP_WINDOW_TIMEOUT_MS = 42000;
 const ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S = 36;
 const ROUTE_CAMP_WINDOW_ANY_TIMEOUT_MS = 42000;
@@ -222,6 +227,35 @@ type RouteSpineBuild = {
   spine: Array<{ lat: number; lng: number }>;
   geometry: ProviderRouteGeometry;
 };
+type CampAwareAnchor = {
+  stop: BuilderStop;
+  strong: boolean;
+  found: number;
+};
+
+function routeBuildPreviewStops(
+  inputStops: BuilderStop[],
+  reviewStopIds: ReadonlySet<string> = new Set(),
+): RouteBuildPreviewStop[] {
+  return inputStops.flatMap((stop, index) => {
+    let type: RouteBuildPreviewStop['type'] | null = null;
+    if (stop.type === 'start' || stop.routeShapeRole === 'start') type = 'start';
+    else if (stop.type === 'camp' || stop.type === 'motel') type = 'camp';
+    else if (stop.type === 'fuel') type = 'fuel';
+    else if (stop.routeShapeRole === 'destination' || stop.routeShapeRole === 'return_anchor' || index === inputStops.length - 1) type = 'destination';
+    else if (stop.routeShapeRole === 'overnight' || stop.routeShapeRole === 'outbound_anchor' || stop.campWindowLabel) type = 'overnight_review';
+    if (!type || !Number.isFinite(stop.lat) || !Number.isFinite(stop.lng)) return [];
+    return [{
+      id: stop.id,
+      lat: stop.lat,
+      lng: stop.lng,
+      day: stop.day,
+      type,
+      name: stop.name,
+      needsReview: reviewStopIds.has(stop.id) || type === 'overnight_review',
+    }];
+  });
+}
 
 const PLACE_FILTER_TYPES = [
   { id: 'fuel', label: 'Fuel', icon: 'flash-outline', color: '#ea580c' },
@@ -652,23 +686,37 @@ function withAbortableTimeout<T>(
   run: (signal?: AbortSignal) => Promise<T>,
   ms: number,
   code: string,
+  parentSignal?: AbortSignal,
 ): Promise<T> {
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let settled = false;
   return new Promise<T>((resolve, reject) => {
+    const cleanup = () => {
+      if (timer) clearTimeout(timer);
+      parentSignal?.removeEventListener?.('abort', handleParentAbort);
+    };
     const finishResolve = (value: T) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      cleanup();
       resolve(value);
     };
     const finishReject = (error: Error) => {
       if (settled) return;
       settled = true;
-      if (timer) clearTimeout(timer);
+      cleanup();
       reject(error);
     };
+    const handleParentAbort = () => {
+      controller?.abort();
+      finishReject(new Error('route-build-cancelled'));
+    };
+    if (parentSignal?.aborted) {
+      handleParentAbort();
+      return;
+    }
+    parentSignal?.addEventListener?.('abort', handleParentAbort, { once: true });
     timer = setTimeout(() => {
       controller?.abort();
       finishReject(new Error(code));
@@ -1638,6 +1686,16 @@ function RouteBuilderScreenContent() {
   function accountRequestIsCurrent(epoch: number, accountId: string | number | null | undefined) {
     return accountStorage.epoch() === epoch
       && String(useStore.getState().user?.id ?? '') === String(accountId ?? '');
+  }
+
+  function routeBuildRequestIsCurrent(
+    requestId: string,
+    epoch: number,
+    accountId: string | number | null | undefined,
+  ) {
+    return accountRequestIsCurrent(epoch, accountId)
+      && routeBuildSessionIsRunning(useStore.getState().routeBuildSession, requestId)
+      && !routeBuildRequestSignal(requestId)?.aborted;
   }
   const [extremeConfig, setExtremeConfig] = useState<ExtremeConfig | null>(null);
   const addTripToHistory = useStore(st => st.addTripToHistory);
@@ -2728,18 +2786,22 @@ function RouteBuilderScreenContent() {
   async function loadRouteToursForStops(
     inputStops: BuilderStop[],
     geometry?: ProviderRouteGeometry | null,
-    retryingLive = false,
+    livePollAttempt = 0,
     offerTripId = importedTripId || routeSessionIdRef.current,
+    routeBuildRequestId?: string,
   ): Promise<BookableExperience[]> {
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
+    const requestIsCurrent = () => accountRequestIsCurrent(requestEpoch, requestAccountId)
+      && (!routeBuildRequestId || routeBuildRequestIsCurrent(routeBuildRequestId, requestEpoch, requestAccountId));
     const anchors = inputStops
       .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
       .slice(0, 18)
       .map((stop, idx) => ({ lat: stop.lat, lng: stop.lng, name: stop.name, day: stop.day, leg_index: idx }));
     if (anchors.length === 0) return [];
     const key = routeTourKey(inputStops);
-    if (!retryingLive && key && key === routeToursLoadedFor && routeTours.length > 0) {
+    if (livePollAttempt === 0 && key && key === routeToursLoadedFor && routeTours.length > 0) {
+      if (!requestIsCurrent()) return [];
       const pendingOffer = buildPendingRouteActivityOffer(offerTripId, routeTours);
       if (pendingOffer) setPendingRouteActivityOffer(pendingOffer);
       return routeTours;
@@ -2755,27 +2817,47 @@ function RouteBuilderScreenContent() {
         source: 'viator',
         q: [routeName, inputStops[0]?.name, inputStops[inputStops.length - 1]?.name].filter(Boolean).join(' '),
       });
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return [];
+      if (!requestIsCurrent()) return [];
       const results = response.results ?? [];
       setRouteTours(results);
       setRouteToursStatus(response.live_message || '');
       const pendingOffer = buildPendingRouteActivityOffer(offerTripId, results);
       if (pendingOffer) setPendingRouteActivityOffer(pendingOffer);
-      if (!retryingLive && results.length === 0 && response.live_status === 'processing') {
-        setTimeout(() => {
-          if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-          loadRouteToursForStops(inputStops, geometry, true, offerTripId).catch(() => {});
-        }, 6500);
+      const pollDelays = [4500, 6500, 8500, 10500, 12500];
+      if (results.length === 0 && response.live_status === 'processing' && livePollAttempt < pollDelays.length) {
+        const signal = routeBuildRequestId ? routeBuildRequestSignal(routeBuildRequestId) : undefined;
+        await new Promise<void>(resolve => {
+          if (signal?.aborted) {
+            resolve();
+            return;
+          }
+          let timer: ReturnType<typeof setTimeout> | null = null;
+          const done = () => {
+            if (timer) clearTimeout(timer);
+            signal?.removeEventListener('abort', done);
+            resolve();
+          };
+          timer = setTimeout(done, pollDelays[livePollAttempt]);
+          signal?.addEventListener('abort', done, { once: true });
+        });
+        if (!requestIsCurrent()) return [];
+        return await loadRouteToursForStops(
+          inputStops,
+          geometry,
+          livePollAttempt + 1,
+          offerTripId,
+          routeBuildRequestId,
+        );
       }
       return results;
     } catch {
-      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+      if (requestIsCurrent()) {
         setRouteTours([]);
         setRouteToursStatus('');
       }
       return [];
     } finally {
-      if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteToursLoading(false);
+      if (requestIsCurrent()) setRouteToursLoading(false);
     }
   }
 
@@ -4331,7 +4413,7 @@ function RouteBuilderScreenContent() {
     }
   }
 
-  async function findCampAwareAnchor(day: number, count: number, spine: Array<{ lat: number; lng: number }>, totalMi: number) {
+  async function findCampAwareAnchor(day: number, count: number, spine: Array<{ lat: number; lng: number }>, totalMi: number): Promise<CampAwareAnchor> {
     const targetMi = routeTargetMile(day, count, totalMi, routeStyle);
     const target = pointAtRouteMile(spine, targetMi) ?? spine[Math.min(spine.length - 1, Math.max(0, Math.round((day / count) * (spine.length - 1))))];
     const searchWindowMi = Math.max(24, Math.min(70, totalMi / Math.max(2, count) * 0.55));
@@ -4418,7 +4500,16 @@ function RouteBuilderScreenContent() {
     };
   }
 
-  async function findCampAwareAnchors(count: number, sourceDays: number[], spine: Array<{ lat: number; lng: number }>, totalMi: number) {
+  async function findCampAwareAnchors(
+    count: number,
+    sourceDays: number[],
+    spine: Array<{ lat: number; lng: number }>,
+    totalMi: number,
+    buildSession?: {
+      signal?: AbortSignal;
+      onAnchor?: (anchor: CampAwareAnchor, completed: number, total: number) => void;
+    },
+  ): Promise<CampAwareAnchor[]> {
     const campDays = sourceDays.filter(day => dayNeedsCampFor(day, sourceDays));
     const windows = campDays.map(day => {
       const targetMi = routeTargetMile(day, count, totalMi, routeStyle);
@@ -4438,7 +4529,7 @@ function RouteBuilderScreenContent() {
     const broadCampWindow = campPreferenceMode === 'any';
     const campWindowDeadline = broadCampWindow ? ROUTE_CAMP_WINDOW_ANY_RESPONSE_DEADLINE_S : ROUTE_CAMP_WINDOW_RESPONSE_DEADLINE_S;
     const campWindowTimeout = broadCampWindow ? ROUTE_CAMP_WINDOW_ANY_TIMEOUT_MS : ROUTE_CAMP_WINDOW_TIMEOUT_MS;
-    const reviewAnchors = () => windows.map(win => {
+    const reviewAnchors = (): CampAwareAnchor[] => windows.map(win => {
       const fallbackPoint = pointAtRouteMile(spine, win.target_mi)
         ?? spine[Math.min(spine.length - 1, Math.max(0, Math.round((win.day / count) * (spine.length - 1))))];
       return {
@@ -4478,8 +4569,9 @@ function RouteBuilderScreenContent() {
         }, { signal }),
         campWindowTimeout,
         'route-camp-window-timeout',
+        buildSession?.signal,
       );
-      return result.windows.map(originalWin => {
+      const resolved: CampAwareAnchor[] = result.windows.map(originalWin => {
         const win = originalWin;
         const routeProgressMi = windows.find(window => window.day === win.day)?.target_mi;
         const candidatePool = [win.selected, win.camp, ...(win.candidates ?? [])]
@@ -4548,17 +4640,29 @@ function RouteBuilderScreenContent() {
           found: win.found,
         };
       });
+      resolved.forEach((anchor, index) => buildSession?.onAnchor?.(anchor, index + 1, windows.length));
+      return resolved;
     } catch (err) {
+      if (buildSession?.signal?.aborted || (err instanceof Error && err.message === 'route-build-cancelled')) throw err;
       if (err instanceof Error && err.message === 'route-camp-window-timeout') {
         setFrameworkStatus('Opening the route for review...');
-        return reviewAnchors();
+        const resolved = reviewAnchors();
+        resolved.forEach((anchor, index) => buildSession?.onAnchor?.(anchor, index + 1, windows.length));
+        return resolved;
       }
-      const anchors = [];
+      const anchors: CampAwareAnchor[] = [];
       for (const day of campDays) {
+        if (buildSession?.signal?.aborted) throw new Error('route-build-cancelled');
         setFrameworkStatus(`Finding overnight options for ${campWindowFor(day, sourceDays).label}...`);
-        anchors.push(await findCampAwareAnchor(day, count, spine, totalMi));
+        const anchor = await findCampAwareAnchor(day, count, spine, totalMi);
+        if (buildSession?.signal?.aborted) throw new Error('route-build-cancelled');
+        anchors.push(anchor);
+        buildSession?.onAnchor?.(anchor, anchors.length, campDays.length);
       }
-      return anchors.length ? anchors : reviewAnchors();
+      if (anchors.length) return anchors;
+      const resolved = reviewAnchors();
+      resolved.forEach((anchor, index) => buildSession?.onAnchor?.(anchor, index + 1, windows.length));
+      return resolved;
     }
   }
 
@@ -4589,53 +4693,77 @@ function RouteBuilderScreenContent() {
     });
   }
 
-  async function findFuelStopsForRoute(count: number, spine: Array<{ lat: number; lng: number }>, totalMi: number) {
+  async function findFuelStopsForRoute(
+    count: number,
+    spine: Array<{ lat: number; lng: number }>,
+    totalMi: number,
+    buildSession?: {
+      signal?: AbortSignal;
+      onPlan?: (total: number) => void;
+      onRequestComplete?: (completed: number, total: number) => void;
+    },
+  ) {
     const rigRange = parsePositiveNumber(rigProfile?.fuel_range_miles);
     const inferredRange = Math.max(180, Math.min(320, planningStats.mpg * 15));
     const usableRange = Math.max(120, Math.min(500, rigRange ?? inferredRange));
-    if (totalMi < usableRange * 0.75) return [] as BuilderStop[];
+    if (totalMi < usableRange * 0.75) {
+      buildSession?.onPlan?.(0);
+      return [] as BuilderStop[];
+    }
     const intervalMi = Math.max(95, Math.min(260, usableRange * 0.68));
     const targetMiles: number[] = [];
     for (let mile = intervalMi; mile < totalMi - Math.min(60, intervalMi * 0.45); mile += intervalMi) {
       targetMiles.push(mile);
       if (targetMiles.length >= 8) break;
     }
+    buildSession?.onPlan?.(targetMiles.length);
     setFrameworkStatus('Checking fuel along the route...');
+    let completedFuelRequests = 0;
     const fuelGroups = await Promise.all(targetMiles.map(async targetMi => {
-      const target = pointAtRouteMile(spine, targetMi);
-      if (!target) return null;
-      const radius = Math.max(28, Math.min(55, intervalMi * 0.22));
-      let liveFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
-        center: target,
-        radius,
-        categories: ['fuel', 'propane'],
-        scope_id: `fuel-anchor-${Math.round(targetMi)}`,
-        route_scope: 'area',
-        max_samples: 1,
-        include_stale: true,
-        limit: 60,
-      }).catch(() => null));
-      if (liveFuel.length === 0) {
-        const [liveGas, osmFuel] = await Promise.all([
-          api.getGas(target.lat, target.lng, radius).catch(() => [] as GasStation[]),
-          api.getOsmPois(target.lat, target.lng, radius, FUEL_POI_TYPES).catch(() => [] as OsmPoi[]),
-        ]);
-        liveFuel = uniqueByGeo([...liveGas, ...osmFuel.map(poiToGasStation)]);
+      try {
+        if (buildSession?.signal?.aborted) throw new Error('route-build-cancelled');
+        const target = pointAtRouteMile(spine, targetMi);
+        if (!target) return null;
+        const radius = Math.max(28, Math.min(55, intervalMi * 0.22));
+        let liveFuel = routeIntelligenceFuel(await api.getRouteIntelligence({
+          center: target,
+          radius,
+          categories: ['fuel', 'propane'],
+          scope_id: `fuel-anchor-${Math.round(targetMi)}`,
+          route_scope: 'area',
+          max_samples: 1,
+          include_stale: true,
+          limit: 60,
+        }).catch(() => null));
+        if (buildSession?.signal?.aborted) throw new Error('route-build-cancelled');
+        if (liveFuel.length === 0) {
+          const [liveGas, osmFuel] = await Promise.all([
+            api.getGas(target.lat, target.lng, radius).catch(() => [] as GasStation[]),
+            api.getOsmPois(target.lat, target.lng, radius, FUEL_POI_TYPES).catch(() => [] as OsmPoi[]),
+          ]);
+          if (buildSession?.signal?.aborted) throw new Error('route-build-cancelled');
+          liveFuel = uniqueByGeo([...liveGas, ...osmFuel.map(poiToGasStation)]);
+        }
+        const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], radius + 12).map(poiToGasStation);
+        const candidates = uniqueByGeo([
+          ...liveFuel,
+          ...offlineFuel,
+        ])
+          .map(station => ({
+            ...station,
+            route_distance_mi: haversineMi(station, target),
+            route_progress: totalMi > 0 ? targetMi / totalMi : 0,
+            route_progress_mi: targetMi,
+          }))
+          .filter(station => (station.route_distance_mi ?? 999) <= radius + 8)
+          .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
+        return { targetMi, candidates };
+      } finally {
+        if (!buildSession?.signal?.aborted) {
+          completedFuelRequests += 1;
+          buildSession?.onRequestComplete?.(completedFuelRequests, targetMiles.length);
+        }
       }
-      const offlineFuel = areaScopedOfflinePlaces(offlinePlaces, target, ['fuel', 'propane'], radius + 12).map(poiToGasStation);
-      const candidates = uniqueByGeo([
-        ...liveFuel,
-        ...offlineFuel,
-      ])
-        .map(station => ({
-          ...station,
-          route_distance_mi: haversineMi(station, target),
-          route_progress: totalMi > 0 ? targetMi / totalMi : 0,
-          route_progress_mi: targetMi,
-        }))
-        .filter(station => (station.route_distance_mi ?? 999) <= radius + 8)
-        .sort((a, b) => (a.route_distance_mi ?? 999) - (b.route_distance_mi ?? 999));
-      return { targetMi, candidates };
     }));
 
     const placed: GasStation[] = [];
@@ -4668,19 +4796,53 @@ function RouteBuilderScreenContent() {
   async function buildRouteFramework() {
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
+    const requestId = createRouteBuildRequestId();
+    const tripId = importedTripId || routeSessionIdRef.current;
+    const initialDestination = endQuery.trim() || orderedStops[orderedStops.length - 1]?.name || 'Destination';
+    const initialRouteName = routeName.trim()
+      || [orderedStops[0]?.name?.split(',')[0], initialDestination.split(',')[0]].filter(Boolean).join(' to ')
+      || 'New trip';
     setPendingRouteActivityOffer(null);
     setBuildingFramework(true);
-    setFrameworkStatus('Setting up your trip...');
+    setFrameworkStatus('Finding your route...');
+    useStore.getState().startRouteBuildSession({
+      requestId,
+      tripId,
+      routeName: initialRouteName,
+      tripShape: tripShapeMode,
+      previewStops: routeBuildPreviewStops(orderedStops),
+    });
+    setRouteTabMode('wizard');
+    router.replace('/(tabs)/map');
+
+    const publish = (patch: Parameters<ReturnType<typeof useStore.getState>['updateRouteBuildSession']>[1]) => {
+      useStore.getState().updateRouteBuildSession(requestId, patch);
+    };
+    const canContinue = () => routeBuildRequestIsCurrent(requestId, requestEpoch, requestAccountId);
+    const stopIfCancelled = () => {
+      if (!canContinue()) throw new Error('route-build-cancelled');
+    };
+    const failBuild = (message: string, errorMessage = message) => publish({
+      phase: 'failed',
+      status: 'failed',
+      message,
+      errorMessage,
+    });
+
     let base = orderedStops;
     try {
       if (endQuery.trim()) {
         const next = await addDestinationFromSetup(false);
-        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-        if (!next) return;
+        stopIfCancelled();
+        if (!next) {
+          failBuild('Check the start and destination');
+          return;
+        }
         base = next;
       }
       if (base.length < 2) {
         Alert.alert('Start and end needed', 'Add a start and destination first. Trailhead will split the route into practical day areas from there.');
+        failBuild('Add a start and destination');
         return;
       }
       const first = base[0];
@@ -4695,29 +4857,82 @@ function RouteBuilderScreenContent() {
       ];
 
       setFrameworkStatus('Drawing the route...');
+      publish({
+        phase: 'routing',
+        message: 'Finding your route',
+        routeName: initialRouteName,
+        previewStops: routeBuildPreviewStops(base),
+      });
       const spineBuild = await buildRouteSpine(first, last);
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-      if (!spineBuild || spineBuild.spine.length < 2) return;
+      stopIfCancelled();
+      if (!spineBuild || spineBuild.spine.length < 2) {
+        failBuild('Route needs another stop');
+        return;
+      }
       const { spine, geometry: buildGeometry } = spineBuild;
       const routeMiles = routeDistanceMi(spine) || roughMiles;
       let strongAnchors = 0;
       let weakAnchors = 0;
+      let campTargetCount = 0;
+      const reviewStopIds = new Set<string>();
+      const resolvedCampStops: BuilderStop[] = [];
 
       if (tripBuildMode === 'recommended') {
         setFrameworkStatus('Finding overnight options...');
-        const anchors = await findCampAwareAnchors(count, nextDays, spine, routeMiles);
-        if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+        const campTotal = nextDays.filter(day => dayNeedsCampFor(day, nextDays)).length;
+        campTargetCount = campTotal;
+        publish({
+          phase: 'camps',
+          message: campTotal === 1 ? 'Finding an overnight stop' : 'Finding overnight stops',
+          routeCoords: buildGeometry.coords,
+          totalDistanceMi: buildGeometry.totalDistanceMi,
+          totalDurationHours: buildGeometry.totalDurationHours,
+          camps: { completed: 0, total: campTotal },
+          previewStops: routeBuildPreviewStops(base),
+        });
+        const anchors = await findCampAwareAnchors(count, nextDays, spine, routeMiles, {
+          signal: routeBuildRequestSignal(requestId),
+          onAnchor: (anchor, completed, total) => {
+            if (!canContinue()) return;
+            resolvedCampStops.push(anchor.stop);
+            if (!anchor.strong) reviewStopIds.add(anchor.stop.id);
+            publish({
+              camps: { completed, total },
+              previewStops: routeBuildPreviewStops([framework[0], ...resolvedCampStops, last], reviewStopIds),
+            });
+          },
+        });
+        stopIfCancelled();
         for (const anchor of anchors) {
           framework.push(anchor.stop);
           if (anchor.strong) strongAnchors += 1;
-          else weakAnchors += 1;
+          else {
+            weakAnchors += 1;
+            reviewStopIds.add(anchor.stop.id);
+          }
         }
       } else {
         framework.push(...buildManualDayAnchors(count, nextDays, spine, routeMiles));
       }
       setFrameworkStatus('Checking fuel range and resupply...');
-      const fuelStops = await findFuelStopsForRoute(count, spine, routeMiles);
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      publish({
+        phase: 'fuel',
+        message: 'Checking fuel range',
+        routeCoords: buildGeometry.coords,
+        totalDistanceMi: buildGeometry.totalDistanceMi,
+        totalDurationHours: buildGeometry.totalDurationHours,
+        previewStops: routeBuildPreviewStops([...framework, last], reviewStopIds),
+      });
+      const fuelStops = await findFuelStopsForRoute(count, spine, routeMiles, {
+        signal: routeBuildRequestSignal(requestId),
+        onPlan: total => {
+          if (canContinue()) publish({ fuel: { completed: 0, total } });
+        },
+        onRequestComplete: (completed, total) => {
+          if (canContinue()) publish({ fuel: { completed, total } });
+        },
+      });
+      stopIfCancelled();
       framework.push(...fuelStops);
 
       if (tripLoop) {
@@ -4769,21 +4984,81 @@ function RouteBuilderScreenContent() {
       setInsertAfterId(null);
       setInsertTargetDay(null);
       setRouteName(nextName);
-      setFrameworkStatus('Finding activities near your route...');
-      loadRouteToursForStops(framework, buildGeometry).catch(() => {});
-      await new Promise(resolve => setTimeout(resolve, 160));
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-      setFrameworkStatus('Route built. Preparing your trip overview...');
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-      await commitTrip(
-        buildTrip(framework, nextDays, nextName, buildGeometry),
-        true,
-        ROUTE_BUILDER_MAP_SETTLE_MS,
+      const completedPreviewStops = routeBuildPreviewStops(framework, reviewStopIds);
+      publish({
+        phase: 'activities',
+        message: 'Add a guided stop?',
+        routeName: nextName,
+        routeCoords: buildGeometry.coords,
+        totalDistanceMi: buildGeometry.totalDistanceMi,
+        totalDurationHours: buildGeometry.totalDurationHours,
+        previewStops: completedPreviewStops,
+        camps: {
+          completed: tripBuildMode === 'recommended' ? strongAnchors + weakAnchors : 0,
+          total: tripBuildMode === 'recommended' ? campTargetCount : 0,
+        },
+      });
+
+      const activityChoice = await waitForRouteBuildActivityChoice(requestId);
+      if (activityChoice === 'cancelled') return;
+      stopIfCancelled();
+      if (activityChoice === 'browse') {
+        publish({ message: 'Finding guided stops along your route' });
+        await loadRouteToursForStops(framework, buildGeometry, 0, tripId, requestId);
+        stopIfCancelled();
+        const offer = useStore.getState().pendingRouteActivityOffer;
+        if (offer?.tripId === tripId) {
+          publish({
+            activityOfferTripId: offer.tripId,
+            activityOfferCreatedAt: offer.createdAt,
+          });
+        }
+      }
+
+      setFrameworkStatus('Saving your trip...');
+      publish({ phase: 'saving', message: 'Saving your trip' });
+      const builtTrip = buildTrip(framework, nextDays, nextName, buildGeometry);
+      const persistedTrip = await commitTrip(
+        builtTrip,
+        false,
+        0,
         framework,
         nextDays,
         nextName,
         buildGeometry,
+        false,
+        requestId,
       );
+      stopIfCancelled();
+      if (!persistedTrip) {
+        failBuild('Could not save this trip');
+        return;
+      }
+      const finalCoords = persistedTrip.route_geometry?.coords?.length
+        ? persistedTrip.route_geometry.coords
+        : buildGeometry.coords;
+      const finalDistance = Number(persistedTrip.route_geometry?.totalDistance ?? persistedTrip.route_geometry?.total_distance);
+      const finalDuration = Number(persistedTrip.route_geometry?.totalDuration ?? persistedTrip.route_geometry?.total_duration);
+      const offer = useStore.getState().pendingRouteActivityOffer;
+      publish({
+        phase: 'complete',
+        status: 'complete',
+        message: 'Trip ready',
+        routeCoords: finalCoords,
+        totalDistanceMi: Number.isFinite(finalDistance) ? finalDistance / 1609.344 : buildGeometry.totalDistanceMi,
+        totalDurationHours: Number.isFinite(finalDuration) ? finalDuration / 3600 : buildGeometry.totalDurationHours,
+        previewStops: completedPreviewStops,
+        finalTripId: persistedTrip.trip_id,
+        activityOfferTripId: offer?.tripId === persistedTrip.trip_id ? offer.tripId : null,
+        activityOfferCreatedAt: offer?.tripId === persistedTrip.trip_id ? offer.createdAt : null,
+        errorMessage: null,
+      });
+    } catch (error) {
+      if (error instanceof Error && error.message === 'route-build-cancelled') return;
+      if (canContinue()) {
+        console.warn('Route Builder session failed', error instanceof Error ? error.message : error);
+        failBuild('Could not finish this route');
+      }
     } finally {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setBuildingFramework(false);
     }
@@ -4872,7 +5147,7 @@ function RouteBuilderScreenContent() {
           title: stop.name,
           description: stop.description,
           day,
-          source: stop.id.startsWith('manual_anchor_') ? 'Route point' : stop.camp?.verified_source || stop.poi?.source_label || sourceLabel(stop.source),
+          source: stop.id.startsWith('manual_anchor_') ? 'Planned stop' : stop.camp?.verified_source || stop.poi?.source_label || sourceLabel(stop.source),
           warning_level: isFrameworkTarget(stop) ? 'warn' : 'info',
           point: { lat: stop.lat, lng: stop.lng },
           quick_actions: stop.type === 'camp' ? ['swap_camp', 'add_rest_day'] : ['open', 'swap_stop'],
@@ -5069,6 +5344,7 @@ function RouteBuilderScreenContent() {
     nameOverride?: string,
     fallbackGeometry?: ProviderRouteGeometry | null,
     preserveExistingGeometryOnFailure = false,
+    routeBuildRequestId?: string,
   ) {
     if (routeSaving) return;
     const requestEpoch = accountStorage.epoch();
@@ -5090,16 +5366,19 @@ function RouteBuilderScreenContent() {
             routeWaypointSignature: routeWaypointSignature(durableStops),
           } satisfies SavedRouteGeometryPayload
         : null);
-    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+    if (!accountRequestIsCurrent(requestEpoch, requestAccountId)
+      || (routeBuildRequestId && !routeBuildRequestIsCurrent(routeBuildRequestId, requestEpoch, requestAccountId))) {
       setRouteSaving(false);
       return;
     }
-    if (openMap && !routeGeometryPayload) {
+    if ((openMap || routeBuildRequestId) && !routeGeometryPayload) {
       setRouteSaving(false);
-      Alert.alert(
-        'Route line not ready',
-        'Your camps and stops are still here. Check your signal, shorten the route, or adjust a stop before opening the map.',
-      );
+      if (!routeBuildRequestId) {
+        Alert.alert(
+          'Route line not ready',
+          'Your camps and stops are still here. Check your signal, shorten the route, or adjust a stop before opening the map.',
+        );
+      }
       return;
     }
     const geometryForTrip = routeGeometryPayload?.coords?.length
@@ -5124,6 +5403,21 @@ function RouteBuilderScreenContent() {
     const builderState = buildPersistedBuilderState(inputStops, inputDays);
     const persistedTripToSave: TripResult = { ...tripToSave, builder_state: builderState };
     try {
+      if (routeBuildRequestId) {
+        const previousOfflineTrip = await loadOfflineTrip(persistedTripToSave.trip_id).catch(() => null);
+        if (!routeBuildRequestIsCurrent(routeBuildRequestId, requestEpoch, requestAccountId)) return;
+        await saveOfflineTrip(persistedTripToSave);
+        if (!routeBuildRequestIsCurrent(routeBuildRequestId, requestEpoch, requestAccountId)) {
+          const currentSession = useStore.getState().routeBuildSession;
+          const newerBuildOwnsTrip = currentSession?.requestId !== routeBuildRequestId
+            && currentSession?.tripId === persistedTripToSave.trip_id;
+          if (accountRequestIsCurrent(requestEpoch, requestAccountId) && !newerBuildOwnsTrip) {
+            if (previousOfflineTrip) await saveOfflineTrip(previousOfflineTrip);
+            else await deleteOfflineTrip(persistedTripToSave.trip_id);
+          }
+          return;
+        }
+      }
       setRouteName(persistedTripToSave.plan.trip_name);
       setActiveTrip(persistedTripToSave);
       addTripToHistory({
@@ -5134,8 +5428,9 @@ function RouteBuilderScreenContent() {
         est_miles: persistedTripToSave.plan.total_est_miles,
         planned_at: Date.now(),
       });
-      await saveOfflineTrip(persistedTripToSave);
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      if (!routeBuildRequestId) await saveOfflineTrip(persistedTripToSave);
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)
+        || (routeBuildRequestId && !routeBuildRequestIsCurrent(routeBuildRequestId, requestEpoch, requestAccountId))) return;
       if (requestAccountId && requestToken) {
         const serverRouteGeometry = routeGeometryPayload
           ?? (preserveExistingGeometryOnFailure ? undefined : null);
@@ -5152,6 +5447,7 @@ function RouteBuilderScreenContent() {
         setRouteTabMode('wizard');
         router.replace('/(tabs)/map');
       }
+      return persistedTripToSave;
     } finally {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteSaving(false);
     }
@@ -6247,26 +6543,6 @@ function RouteBuilderScreenContent() {
         </View>
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
       </SafeAreaView>
-    );
-  }
-
-  if (buildingFramework) {
-    return (
-      <View style={s.buildingLoaderScreen}>
-        <RouteBuilderBuildLoader
-          status={frameworkStatus}
-          topInset={insets.top}
-          bottomInset={insets.bottom}
-          points={orderedStops.map(stop => ({
-            id: stop.id,
-            name: stop.name,
-            lat: stop.lat,
-            lng: stop.lng,
-            type: stop.type,
-          }))}
-        />
-        <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
-      </View>
     );
   }
 

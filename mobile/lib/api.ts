@@ -4139,6 +4139,19 @@ export interface BookableExperience {
   secondary_actions?: string[];
   raw?: Record<string, any>;
   distance_mi?: number;
+  provider?: {
+    id: string;
+    name: string;
+    attribution?: string;
+  };
+  route_match?: {
+    anchor_name?: string;
+    day?: number | null;
+    leg_index?: number | null;
+    detour_mi?: number | null;
+    route_progress?: number | null;
+    matched_by?: 'geometry' | 'anchor' | string;
+  };
   route_anchor?: {
     name?: string;
     day?: number | null;

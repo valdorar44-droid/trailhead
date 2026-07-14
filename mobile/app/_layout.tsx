@@ -47,10 +47,10 @@ import {
   startTripRepositoryAutoSync,
   synchronizeTripRepository,
 } from '@/lib/tripRepositorySync';
+import { accountRecoveryContext } from '@/lib/tripRepository/accountRecovery';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
-const TRIP_REPOSITORY_ACCOUNT_DECISION_PREFIX = 'trailhead_trip_repository_account_decision_v1';
 
 function askToAddSignedOutTrips(count: number): Promise<boolean> {
   return new Promise(resolve => {
@@ -102,6 +102,7 @@ export default function RootLayout() {
     const parsedAccountId = user?.id == null ? NaN : Number(user.id);
     const accountId = Number.isFinite(parsedAccountId) ? parsedAccountId : null;
     const previousAccountId = lastRepositoryAccountId.current;
+    const startedInAnonymousScope = getTripRepositorySnapshot().ownerScope === 'anonymous';
     if (accountId != null) lastRepositoryAccountId.current = accountId;
 
     const transition = async () => {
@@ -152,20 +153,34 @@ export default function RootLayout() {
         + local.catchLogs.length
         + local.waterRoutes.length
         + local.markerGroups.length;
-      const signedOutCount = Math.max(anonymousCount, legacyCount);
-      const decisionKey = `${TRIP_REPOSITORY_ACCOUNT_DECISION_PREFIX}:${accountId}:${anonymous.revision}:${legacyCount}`;
-      const priorDecision = signedOutCount > 0 ? await storage.get(decisionKey).catch(() => null) : null;
-      let merge = priorDecision === 'merge';
-      if (signedOutCount > 0 && priorDecision == null) {
-        merge = await askToAddSignedOutTrips(signedOutCount);
-        await storage.set(decisionKey, merge ? 'merge' : 'separate').catch(() => {});
+      const recovery = accountRecoveryContext({
+        accountId,
+        anonymousRevision: anonymous.revision,
+        anonymousCount,
+        legacyCount,
+        startedInAnonymousScope,
+      });
+      const priorDecision = recovery.count > 0
+        ? await storage.get(recovery.decisionKey).catch(() => null)
+        : null;
+      let decision = priorDecision === 'merge' || priorDecision === 'separate'
+        ? priorDecision
+        : null;
+      if (recovery.count > 0 && decision == null) {
+        decision = await askToAddSignedOutTrips(recovery.count) ? 'merge' : 'separate';
       }
       if (run !== repositoryTransitionRun.current) return;
-      if (signedOutCount > 0 && merge) {
-        await mergeTripRepositoryScope(null, accountId);
+      if (recovery.count > 0 && decision === 'merge') {
+        if (priorDecision === 'merge') await switchTripRepositoryScope(accountId);
+        else await mergeTripRepositoryScope(null, accountId);
       } else {
-        if (signedOutCount > 0) await separateAnonymousLegacyState();
+        if (decision === 'separate' && recovery.legacyCount > 0) {
+          await separateAnonymousLegacyState();
+        }
         await switchTripRepositoryScope(accountId);
+      }
+      if (recovery.count > 0 && priorDecision == null && decision) {
+        await storage.set(recovery.decisionKey, decision).catch(() => {});
       }
 
       const features = await api.productFeatures().catch(() => null);

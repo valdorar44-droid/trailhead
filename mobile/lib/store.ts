@@ -5,6 +5,19 @@ import { beginAccountStorageCleanup, endAccountStorageCleanup } from './storage'
 import { User, TripResult, Report, CampsitePin, OsmPoi, TrailProfile } from './api';
 import type { PendingRouteActivityOffer } from './routeActivityOffer';
 import {
+  cancelRouteBuildSessionState,
+  closeAllRouteBuildRequests,
+  closeRouteBuildRequest,
+  createRouteBuildSession,
+  openRouteBuildRequest,
+  resolveRouteBuildActivityChoice,
+  updateRouteBuildSessionState,
+  type RouteBuildSession,
+  type RouteBuildSessionPatch,
+  type RouteBuildActivityChoice,
+  type StartRouteBuildSessionInput,
+} from './routeBuildSession';
+import {
   createSavedEntity,
   getSavedEntity,
   getTrip,
@@ -663,6 +676,7 @@ interface AppState {
   pendingOpenOfflineModal: boolean;
   pendingOfflineTrip: TripResult | null;
   pendingRouteActivityOffer: PendingRouteActivityOffer | null;
+  routeBuildSession: RouteBuildSession | null;
   tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
@@ -712,6 +726,11 @@ interface AppState {
   setPendingOpenOfflineModal: (open: boolean) => void;
   setPendingOfflineTrip: (trip: TripResult | null) => void;
   setPendingRouteActivityOffer: (offer: PendingRouteActivityOffer | null) => void;
+  startRouteBuildSession: (input: StartRouteBuildSessionInput) => void;
+  updateRouteBuildSession: (requestId: string, patch: RouteBuildSessionPatch) => void;
+  cancelRouteBuildSession: (requestId?: string) => void;
+  clearRouteBuildSession: (requestId?: string) => void;
+  chooseRouteBuildActivities: (requestId: string, choice: Exclude<RouteBuildActivityChoice, 'pending'>) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
   setGuidedTourActive: (active: boolean) => void;
@@ -751,6 +770,7 @@ export const useStore = create<AppState>((set) => ({
   pendingOpenOfflineModal: false,
   pendingOfflineTrip: null,
   pendingRouteActivityOffer: null,
+  routeBuildSession: null,
   tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
@@ -776,6 +796,7 @@ export const useStore = create<AppState>((set) => ({
   },
 
   signOut: async () => {
+    closeAllRouteBuildRequests();
     pendingAuthPersistence = null;
     const writesDrained = prepareAccountLocalDataErase();
     const externalWritesDrained = beginAccountStorageCleanup();
@@ -803,6 +824,7 @@ export const useStore = create<AppState>((set) => ({
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
       pendingRouteActivityOffer: null,
+      routeBuildSession: null,
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -827,6 +849,7 @@ export const useStore = create<AppState>((set) => ({
   },
 
   clearAuthAndLocalData: async () => {
+    closeAllRouteBuildRequests();
     pendingAuthPersistence = null;
     const writesDrained = prepareAccountLocalDataErase();
     const externalWritesDrained = beginAccountStorageCleanup();
@@ -854,6 +877,7 @@ export const useStore = create<AppState>((set) => ({
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
       pendingRouteActivityOffer: null,
+      routeBuildSession: null,
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -989,7 +1013,62 @@ export const useStore = create<AppState>((set) => ({
   setPendingStartCopilotVoice: (start) => { if (accountLocalMutationAllowed()) set({ pendingStartCopilotVoice: start }); },
   setPendingOpenOfflineModal: (open) => { if (accountLocalMutationAllowed()) set({ pendingOpenOfflineModal: open }); },
   setPendingOfflineTrip: (trip) => { if (accountLocalMutationAllowed()) set({ pendingOfflineTrip: trip }); },
-  setPendingRouteActivityOffer: (offer) => { if (accountLocalMutationAllowed()) set({ pendingRouteActivityOffer: offer }); },
+  setPendingRouteActivityOffer: (offer) => {
+    if (!accountLocalMutationAllowed()) return;
+    set(state => {
+      const session = state.routeBuildSession;
+      const linkedSession = offer
+        && session
+        && session.tripId === offer.tripId
+        && session.status !== 'cancelled'
+        && session.status !== 'failed'
+        ? {
+            ...session,
+            activityOfferTripId: offer.tripId,
+            activityOfferCreatedAt: offer.createdAt,
+            updatedAt: Date.now(),
+          }
+        : session;
+      return { pendingRouteActivityOffer: offer, routeBuildSession: linkedSession };
+    });
+  },
+  startRouteBuildSession: (input) => {
+    if (!accountLocalMutationAllowed()) return;
+    const previous = useStore.getState().routeBuildSession;
+    if (previous?.status === 'running') closeRouteBuildRequest(previous.requestId, true);
+    openRouteBuildRequest(input.requestId);
+    set({ routeBuildSession: createRouteBuildSession(input) });
+  },
+  updateRouteBuildSession: (requestId, patch) => {
+    if (!accountLocalMutationAllowed()) return;
+    set(state => {
+      const next = updateRouteBuildSessionState(state.routeBuildSession, requestId, patch);
+      if (next?.requestId === requestId && next.status !== 'running') closeRouteBuildRequest(requestId);
+      return next === state.routeBuildSession ? state : { routeBuildSession: next };
+    });
+  },
+  cancelRouteBuildSession: (requestId) => {
+    const current = useStore.getState().routeBuildSession;
+    if (!current || (requestId && current.requestId !== requestId)) return;
+    closeRouteBuildRequest(current.requestId, true);
+    set(state => ({ routeBuildSession: cancelRouteBuildSessionState(state.routeBuildSession, requestId) }));
+  },
+  clearRouteBuildSession: (requestId) => {
+    const current = useStore.getState().routeBuildSession;
+    if (!current || (requestId && current.requestId !== requestId)) return;
+    closeRouteBuildRequest(current.requestId, true);
+    set({ routeBuildSession: null });
+  },
+  chooseRouteBuildActivities: (requestId, choice) => {
+    const current = useStore.getState().routeBuildSession;
+    if (!current
+      || current.requestId !== requestId
+      || current.status !== 'running'
+      || current.phase !== 'activities'
+      || current.activityChoice !== 'pending') return;
+    set({ routeBuildSession: { ...current, activityChoice: choice, updatedAt: Date.now() } });
+    resolveRouteBuildActivityChoice(requestId, choice);
+  },
   setPlan: (active, expiresAt = null) => {
     if (!accountLocalMutationAllowed()) return;
     sd(PLAN_KEY);
@@ -1230,6 +1309,7 @@ export async function restoreLegacyAccountState() {
 }
 
 function clearLegacyAccountStateFromMemory() {
+  closeAllRouteBuildRequests();
   useStore.setState({
     activeTrip: null,
     activeTripFromCache: false,
@@ -1251,6 +1331,7 @@ function clearLegacyAccountStateFromMemory() {
     pendingOpenOfflineModal: false,
     pendingOfflineTrip: null,
     pendingRouteActivityOffer: null,
+    routeBuildSession: null,
     userLoc: null,
   });
 }

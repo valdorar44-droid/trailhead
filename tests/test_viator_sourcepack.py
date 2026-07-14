@@ -8,6 +8,7 @@ import unittest
 import urllib.error
 import urllib.parse
 from pathlib import Path
+from unittest import mock
 
 import dashboard.server as server
 from config.settings import settings
@@ -235,6 +236,83 @@ class ViatorSourcePackTests(unittest.TestCase):
         self.assertIn("K2 Base Camp", results[0]["title"])
         self.assertEqual((opener.bodies[0].get("filtering") or {}).get("destination"), "51603")
         self.assertEqual(statuses[0]["destination_id"], "51603")
+
+    def test_route_suggestions_use_geometry_instead_of_requiring_every_query_term(self):
+        old_experiences = server.EXPLORE_BOOKABLE_EXPERIENCES
+        old_tours = server.EXPLORE_TOURS_VIATOR
+        try:
+            with tempfile.TemporaryDirectory() as tmp:
+                tmp_path = Path(tmp)
+                server.EXPLORE_BOOKABLE_EXPERIENCES = tmp_path / "experiences.json"
+                server.EXPLORE_TOURS_VIATOR = tmp_path / "missing.json"
+                experiences = [item.to_dict() for item in import_viator_fixture(MOAB, fetched_at=123)]
+                server.EXPLORE_BOOKABLE_EXPERIENCES.write_text(json.dumps({
+                    "schema_version": 1,
+                    "source": "viator",
+                    "generated_at": 123,
+                    "experiences": experiences,
+                }))
+                request = server.RouteTourRequest(
+                    anchors=[
+                        {"lat": 38.54, "lng": -109.63, "name": "Friday camp", "day": 1, "leg_index": 0},
+                        {"lat": 38.62, "lng": -109.50, "name": "Sunday return", "day": 2, "leg_index": 1},
+                    ],
+                    route=[[-109.63, 38.54], [-109.58, 38.57], [-109.50, 38.62]],
+                    radius=20,
+                    limit=8,
+                    source="viator",
+                    q="Moab weekend Friday camp Sunday return",
+                )
+                with mock.patch.object(server, "ViatorClient") as client_class:
+                    client_class.return_value.ready.return_value = False
+                    response = asyncio.run(server.route_tour_suggestions(request))
+            self.assertEqual(response["count"], 2)
+            result = response["results"][0]
+            self.assertEqual(result["provider"]["id"], "viator")
+            self.assertEqual(result["provider"]["name"], "Viator")
+            self.assertIn(result["route_match"]["day"], {1, 2})
+            self.assertLess(result["route_match"]["detour_mi"], 5)
+            self.assertEqual(result["route_match"]["matched_by"], "geometry")
+            self.assertEqual(result["route_anchor"]["distance_mi"], result["route_match"]["detour_mi"])
+        finally:
+            server.EXPLORE_BOOKABLE_EXPERIENCES = old_experiences
+            server.EXPLORE_TOURS_VIATOR = old_tours
+
+    def test_route_activity_ranking_prefers_a_smaller_detour_over_rating(self):
+        anchors = [
+            {"lat": 38.57, "lng": -109.64, "name": "Start", "day": 1, "leg_index": 0},
+            {"lat": 38.57, "lng": -109.46, "name": "Camp", "day": 1, "leg_index": 1},
+        ]
+        geometry = server._route_tour_geometry_points([
+            [-109.64, 38.57],
+            [-109.55, 38.57],
+            [-109.46, 38.57],
+        ])
+        ranked = server._rank_route_activity_results([
+            {
+                "id": "viator:far",
+                "source": "viator",
+                "source_badge": "Viator",
+                "title": "Highly rated distant tour",
+                "lat": 38.70,
+                "lng": -109.55,
+                "rating": 5,
+                "review_count": 1000,
+            },
+            {
+                "id": "viator:near",
+                "source": "viator",
+                "source_badge": "Viator",
+                "title": "Tour beside the route",
+                "lat": 38.571,
+                "lng": -109.55,
+                "rating": 4.2,
+                "review_count": 20,
+            },
+        ], anchors, geometry, radius_mi=20)
+
+        self.assertEqual([item["id"] for item in ranked], ["viator:near", "viator:far"])
+        self.assertLess(ranked[0]["route_match"]["detour_mi"], ranked[1]["route_match"]["detour_mi"])
 
     def test_experience_detail_finds_live_cache_result(self):
         old_cache = dict(server._viator_route_live_cache)

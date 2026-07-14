@@ -22,6 +22,7 @@
     "audit:prepreview": "node scripts/pre-preview-check.mjs",
     "test:trip-repository": "node --import tsx lib/tripRepository/__tests__/tripRepository.test.ts",
     "test:account-storage": "node --import tsx lib/__tests__/accountStorageLifecycle.test.ts",
+    "test:report-alert-preferences": "node --import tsx lib/__tests__/reportAlertPreferences.test.ts",
     "ota": "eas update --channel preview --auto",
     "ota:production": "eas update --channel production --auto",
     "postinstall": "node scripts/patch-expo-modules.js && patch-package"

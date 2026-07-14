@@ -19,6 +19,11 @@ import { useStore } from '@/lib/store';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { trackPhase0Once } from '@/lib/telemetry';
+import {
+  loadReportAlertPreferences,
+  saveReportAlertPreferences,
+  type ReportAlertPreferences,
+} from '@/lib/reportAlertPreferences';
 import Reanimated, { FadeInDown, ZoomIn } from 'react-native-reanimated';
 
 // ── Alert notification helpers ────────────────────────────────────────────────
@@ -39,17 +44,6 @@ async function loadSeenAlertIds(): Promise<Record<string, number>> {
 async function saveSeenAlertIds(seen: Record<string, number>, epoch: AccountStorageEpoch): Promise<void> {
   try { await accountStorage.set('trailhead_alert_seen', JSON.stringify(seen), epoch); } catch {}
 }
-// Prefs: { [type]: boolean } — true = notify (default), false = muted
-async function loadAlertPrefs(): Promise<Record<string, boolean>> {
-  try {
-    const raw = await accountStorage.get('trailhead_alert_prefs');
-    return raw ? JSON.parse(raw) : {};
-  } catch { return {}; }
-}
-async function saveAlertPrefs(prefs: Record<string, boolean>, epoch: AccountStorageEpoch): Promise<void> {
-  try { await accountStorage.set('trailhead_alert_prefs', JSON.stringify(prefs), epoch); } catch {}
-}
-
 // Semantic category colors — chosen to read well on both light and dark backgrounds
 const REPORT_TYPES = [
   { type: 'road_condition', label: 'ROAD', icon: 'trail-sign-outline', color: '#f97316', ttl: '7d',
@@ -333,7 +327,7 @@ function ReportScreenContent() {
   const [selectedContributor, setSelectedContributor] = useState<ContributorProfile | null>(null);
   const [contributorLoading, setContributorLoading] = useState(false);
   const [view, setView] = useState<TabView>('route');
-  const [notifPrefs, setNotifPrefs] = useState<Record<string, boolean>>({});
+  const [notifPrefs, setNotifPrefs] = useState<ReportAlertPreferences>({});
   const [showNotifSettings, setShowNotifSettings] = useState(false);
 
   const [detailReport, setDetailReport] = useState<Report | null>(null);
@@ -345,7 +339,10 @@ function ReportScreenContent() {
   const tonightAnchor = useMemo(() => tonightAnchorForTrip(activeTrip, loc), [activeTrip?.trip_id, activeTrip?.updated_at, loc?.lat, loc?.lng]);
   // Refs so async callbacks always read latest values without stale closures
   const seenIdsRef = useRef<Record<string, number>>({});
-  const notifPrefsRef = useRef<Record<string, boolean>>({});
+  const notifPrefsRef = useRef<ReportAlertPreferences>({});
+  const notifPrefsLoadRef = useRef(0);
+  const notifPrefsMutationRef = useRef(0);
+  const notifPrefsWriteRef = useRef<Promise<void>>(Promise.resolve());
   const locRef = useRef<{ lat: number; lng: number } | null>(null);
   const queueFlushInFlightRef = useRef<ReportAuthSession | null>(null);
 
@@ -528,10 +525,14 @@ function ReportScreenContent() {
     successAnim.setValue(0);
 
     if (accountStorage.isCleaning()) return;
-    Promise.all([loadAlertPrefs(), loadSeenAlertIds(), loadQueuedReports()]).then(([prefs, seen, items]) => {
+    const loadId = ++notifPrefsLoadRef.current;
+    const mutationAtStart = notifPrefsMutationRef.current;
+    Promise.all([loadReportAlertPreferences(accountStorage), loadSeenAlertIds(), loadQueuedReports()]).then(([prefs, seen, items]) => {
       if (!reportAccountScopeIsCurrent(scope)) return;
-      setNotifPrefs(prefs);
-      notifPrefsRef.current = prefs;
+      if (loadId === notifPrefsLoadRef.current && mutationAtStart === notifPrefsMutationRef.current) {
+        setNotifPrefs(prefs);
+        notifPrefsRef.current = prefs;
+      }
       seenIdsRef.current = seen;
       setQueuedReports(items);
       if (useStore.getState().user && items.length > 0) flushQueuedReports(false);
@@ -564,10 +565,14 @@ function ReportScreenContent() {
 
     const scope = currentReportAccountScope();
     if (scope.epoch !== epoch) return;
-    Promise.all([loadAlertPrefs(), loadSeenAlertIds(), loadQueuedReports()]).then(([prefs, seen, items]) => {
+    const loadId = ++notifPrefsLoadRef.current;
+    const mutationAtStart = notifPrefsMutationRef.current;
+    Promise.all([loadReportAlertPreferences(accountStorage), loadSeenAlertIds(), loadQueuedReports()]).then(([prefs, seen, items]) => {
       if (!reportAccountScopeIsCurrent(scope)) return;
-      setNotifPrefs(prefs);
-      notifPrefsRef.current = prefs;
+      if (loadId === notifPrefsLoadRef.current && mutationAtStart === notifPrefsMutationRef.current) {
+        setNotifPrefs(prefs);
+        notifPrefsRef.current = prefs;
+      }
       seenIdsRef.current = seen;
       setQueuedReports(items);
       if (useStore.getState().user && items.length > 0) flushQueuedReports(false);
@@ -648,10 +653,22 @@ function ReportScreenContent() {
   async function toggleNotifPref(type: string, enabled: boolean) {
     const scope = currentReportAccountScope();
     if (!reportAccountScopeIsCurrent(scope)) return;
+    const revision = ++notifPrefsMutationRef.current;
     const updated = { ...notifPrefsRef.current, [type]: enabled };
     setNotifPrefs(updated);
     notifPrefsRef.current = updated;
-    saveAlertPrefs(updated, scope.epoch);
+    const save = notifPrefsWriteRef.current.then(() => (
+      saveReportAlertPreferences(accountStorage, updated, scope.epoch)
+    ));
+    notifPrefsWriteRef.current = save.then(() => undefined, () => undefined);
+    const saved = await save;
+    if (saved || revision !== notifPrefsMutationRef.current || !reportAccountScopeIsCurrent(scope)) return;
+
+    const persisted = await loadReportAlertPreferences(accountStorage);
+    if (revision !== notifPrefsMutationRef.current || !reportAccountScopeIsCurrent(scope)) return;
+    setNotifPrefs(persisted);
+    notifPrefsRef.current = persisted;
+    Alert.alert('Setting not saved', 'Try again in a moment.');
   }
 
   function patchReport(reportId: Report['id'], updater: (report: Report) => Report) {

@@ -44,7 +44,7 @@ const PAGES: OnboardingPage[] = [
     cards: [
       { title: 'Daily plan', body: 'Turn a destination into days, stops, and overnight windows.', icon: 'navigate-outline', tone: '#22c55e' },
       { title: 'Vehicle fit', body: 'Fuel range, clearance, towing, and comfort help shape the route.', icon: 'car-sport-outline', tone: '#f97316' },
-      { title: 'Saved areas', body: 'Keep important regions and trip stops ready without signal.', icon: 'cloud-download-outline', tone: '#8b5cf6' },
+      { title: 'Offline', body: 'Keep important regions and trip stops ready without signal.', icon: 'cloud-download-outline', tone: '#8b5cf6' },
     ],
   },
   {

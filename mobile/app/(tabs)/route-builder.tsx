@@ -1650,6 +1650,8 @@ function RouteBuilderScreenContent() {
   const sessionId = useStore(st => st.sessionId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
   const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
+  const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
+  const setPendingOfflineTrip = useStore(st => st.setPendingOfflineTrip);
   const routeBuilderAccountScopeRef = useRef(`${accountEpoch}:${String(user?.id ?? '')}`);
   const {
     getState: getOfflineMapState,
@@ -6286,6 +6288,24 @@ function RouteBuilderScreenContent() {
           checks={routeFitCards}
           offlineRows={routeOfflineReadiness.rows}
           showOfflineRows={routeOfflineReadiness.regionNames.length > 0}
+          onOpenOffline={() => {
+            let trip: TripResult | null = null;
+            const offlineGeometry = routeGeometry;
+            if (offlineGeometry && offlineGeometry.coords.length >= 2) {
+              trip = buildTrip();
+              trip.route_geometry = {
+                coords: offlineGeometry.coords,
+                totalDistance: offlineGeometry.totalDistanceMi * 1609.344,
+                totalDuration: offlineGeometry.totalDurationHours * 3600,
+                tripId: trip.trip_id,
+                ts: Date.now(),
+                source: offlineGeometry.engine ?? offlineGeometry.source,
+              };
+            }
+            setPendingOfflineTrip(trip);
+            setPendingOpenOfflineModal(true);
+            router.push('/(tabs)/map');
+          }}
         />
 
         <RouteBuilderActiveDayControls

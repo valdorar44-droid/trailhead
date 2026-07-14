@@ -106,8 +106,8 @@ export async function getInstalledPacks(): Promise<InstalledPack[]> {
       const status = p.status;
       return {
         name:       p.name ?? 'unknown',
-        percentage: status?.percentage ?? 100,
-        complete:   (status?.percentage ?? 100) >= 100,
+        percentage: status?.percentage ?? 0,
+        complete:   (status?.percentage ?? 0) >= 100,
         sizeMb:     Math.round((status?.completedResourceSize ?? 0) / 1_048_576 * 10) / 10,
       };
     });

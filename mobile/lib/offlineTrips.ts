@@ -50,6 +50,19 @@ export async function getOfflineTripSummaries(): Promise<Array<TripResult & { ca
   } catch { return []; }
 }
 
+export async function getOfflineTripStorageBytes(): Promise<Record<string, number>> {
+  try {
+    const index = await getOfflineTripIndex();
+    const rows = await Promise.all(index.map(async id => {
+      const info = await FileSystem.getInfoAsync(DIR + id + '.json').catch(() => null);
+      return [id, info?.exists ? Number((info as any).size ?? 0) : 0] as const;
+    }));
+    return Object.fromEntries(rows);
+  } catch {
+    return {};
+  }
+}
+
 export async function deleteOfflineTrip(tripId: string): Promise<void> {
   const epoch = accountStorage.epoch();
   try {

@@ -24,6 +24,7 @@ function actionsForTrip(trip: TripLibraryItem): ActionRow[] {
       : [{ id: 'archive', label: 'Archive', icon: 'archive-outline' }];
   return [
     { id: 'open', label: 'Open on map', icon: 'map-outline' },
+    { id: 'offline', label: 'Offline', icon: 'cloud-download-outline' },
     { id: 'notes', label: 'Private notes', icon: 'document-text-outline' },
     { id: 'duplicate', label: 'Duplicate', icon: 'copy-outline' },
     ...statusActions,

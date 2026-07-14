@@ -660,6 +660,7 @@ interface AppState {
     | null;
   pendingStartCopilotVoice: boolean;
   pendingOpenOfflineModal: boolean;
+  pendingOfflineTrip: TripResult | null;
   tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
@@ -707,6 +708,7 @@ interface AppState {
   setPendingMapSelection: (selection: AppState['pendingMapSelection']) => void;
   setPendingStartCopilotVoice: (start: boolean) => void;
   setPendingOpenOfflineModal: (open: boolean) => void;
+  setPendingOfflineTrip: (trip: TripResult | null) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
   setGuidedTourActive: (active: boolean) => void;
@@ -744,6 +746,7 @@ export const useStore = create<AppState>((set) => ({
   pendingMapSelection: null,
   pendingStartCopilotVoice: false,
   pendingOpenOfflineModal: false,
+  pendingOfflineTrip: null,
   tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
@@ -794,6 +797,7 @@ export const useStore = create<AppState>((set) => ({
       pendingMapSelection: null,
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
+      pendingOfflineTrip: null,
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -843,6 +847,7 @@ export const useStore = create<AppState>((set) => ({
       pendingMapSelection: null,
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
+      pendingOfflineTrip: null,
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -977,6 +982,7 @@ export const useStore = create<AppState>((set) => ({
   setPendingMapSelection: (selection) => { if (accountLocalMutationAllowed()) set({ pendingMapSelection: selection }); },
   setPendingStartCopilotVoice: (start) => { if (accountLocalMutationAllowed()) set({ pendingStartCopilotVoice: start }); },
   setPendingOpenOfflineModal: (open) => { if (accountLocalMutationAllowed()) set({ pendingOpenOfflineModal: open }); },
+  setPendingOfflineTrip: (trip) => { if (accountLocalMutationAllowed()) set({ pendingOfflineTrip: trip }); },
   setPlan: (active, expiresAt = null) => {
     if (!accountLocalMutationAllowed()) return;
     sd(PLAN_KEY);
@@ -1236,6 +1242,7 @@ function clearLegacyAccountStateFromMemory() {
     pendingMapSelection: null,
     pendingStartCopilotVoice: false,
     pendingOpenOfflineModal: false,
+    pendingOfflineTrip: null,
     userLoc: null,
   });
 }

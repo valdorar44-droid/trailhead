@@ -1,47 +1,77 @@
-/**
- * Saved Maps
- *
- * Two-track save system:
- *   1. FILE DOWNLOAD  — single HTTP stream of full PMTiles file (conus.pmtiles)
- *      Fast: 1 GB in ~2 min on wifi. Uses expo-file-system resumable download.
- *      Full offline tile serving requires the next binary build (local tile server).
- *   2. MLN PACK       — per-tile download via MapLibre offline manager.
- *      Best for regions / trip corridors (small enough to complete quickly).
- */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Alert, Modal, View, Text, TouchableOpacity, ScrollView, TextInput,
-  StyleSheet, Animated, Easing, Platform, useWindowDimensions,
+  Alert,
+  Modal,
+  Platform,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  TouchableOpacity,
+  View,
+  useWindowDimensions,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import { useStore } from '@/lib/store';
-import { useTheme, mono, type ColorPalette } from '@/lib/design';
+import { useTheme, type ColorPalette } from '@/lib/design';
 import {
-  useOfflineFiles, FILE_REGIONS, ROUTING_REGIONS, CONTOUR_REGIONS, TRAIL_REGIONS, fmtBytes, fmtSpeed, fmtEta,
+  CONTOUR_REGIONS,
+  FILE_REGIONS,
+  ROUTING_REGIONS,
+  TRAIL_REGIONS,
+  fmtBytes,
+  useOfflineFiles,
   type FileDownloadState,
 } from '@/lib/useOfflineFiles';
 import {
-  downloadPack, deletePack, getInstalledPacks, pausePack,
-  routeCorridorBounds, US_STATE_PACKS,
-  type InstalledPack, type PackProgress,
+  deletePack,
+  downloadPack,
+  getInstalledPacks,
+  pausePack,
+  resumePack,
+  routeCorridorBounds,
+  type InstalledPack,
+  type PackProgress,
 } from './offlineManager';
 import type { WP } from './types';
-import { api, PaywallError, type OfflineAssetType, type PlacePackManifest } from '@/lib/api';
+import { api, PaywallError, type OfflineAssetType, type PlacePackManifest, type TripResult } from '@/lib/api';
 import {
   deleteOfflinePlacePack,
+  getOfflinePlacePackStorageBytes,
   listOfflinePlacePacks,
   saveOfflinePlacePack,
   type OfflinePlacePackSummary,
 } from '@/lib/offlinePlacePacks';
-import { TrailheadSheet } from '@/components/TrailheadUI';
-import { deleteOfflineTrip, getOfflineTripSummaries, loadOfflineTrip } from '@/lib/offlineTrips';
-import type { TripResult } from '@/lib/api';
+import {
+  deleteOfflineTrip,
+  getOfflineTripStorageBytes,
+  getOfflineTripSummaries,
+  loadOfflineTrip,
+  saveOfflineTrip,
+} from '@/lib/offlineTrips';
 import { accountStorage, type AccountStorageEpoch } from '@/lib/storage';
+import {
+  displayOfflineDownloadName,
+  offlineRegionIdsForPoints,
+  offlineStateStoredBytes,
+  summarizeOfflineRegion,
+  type OfflineRegionSummary,
+} from './offlineHubModel';
 
-
-interface WebDownloadOpts { bufferKm?: number; minZ?: number; maxZ?: number; vectorOnly?: boolean; label: string; n?: number; s?: number; e?: number; w?: number; }
+interface WebDownloadOpts {
+  bufferKm?: number;
+  minZ?: number;
+  maxZ?: number;
+  vectorOnly?: boolean;
+  label: string;
+  routeCoords?: [number, number][];
+  n?: number;
+  s?: number;
+  e?: number;
+  w?: number;
+}
 
 type OfflineAccountScope = {
   epoch: AccountStorageEpoch;
@@ -80,74 +110,105 @@ export interface OfflineAreaSelection {
   updatedAt?: number;
 }
 
-type RegionGroupKey = 'west' | 'central' | 'southeast' | 'northeastMidwest' | 'international' | 'europe';
+interface Props {
+  visible: boolean;
+  onClose: () => void;
+  waypoints: WP[];
+  routeCoords?: [number, number][];
+  requestedTrip?: TripResult | null;
+  tripId?: string | null;
+  tripName: string | null;
+  useNativeMap: boolean;
+  onOfflinePlacesChanged?: () => void;
+  onWebDownloadBbox?: (opts: WebDownloadOpts) => void;
+  onWebDownloadRoute?: (opts: WebDownloadOpts) => void;
+  onWebCancelDownload?: () => void;
+  onWebClearRegion?: (label: string) => void;
+  webIsDownloading?: boolean;
+  webDownloadProgress?: number;
+  webDownloadSaved?: number;
+  webDownloadTotal?: number;
+  webDownloadMB?: string;
+  webCachedRegions?: string[];
+  webDownloadLabel?: string;
+  selectedArea?: OfflineAreaSelection | null;
+  savedAreas?: OfflineAreaSelection[];
+  onStartAreaSelect?: (area?: OfflineAreaSelection | null) => void;
+  onSelectArea?: (area: OfflineAreaSelection) => void;
+  onRenameArea?: (areaId: string, label: string) => void;
+  onSaveArea?: (area: OfflineAreaSelection) => void;
+  onDeleteArea?: (areaId: string) => void;
+  onOpenRegion?: (target: { lat: number; lng: number; zoom: number; label: string }) => void;
+}
+
+type OfflineView = 'home' | 'regions' | 'region' | 'area' | 'trip' | 'storage';
+type IconName = keyof typeof Ionicons.glyphMap;
+
+type TripTarget = {
+  id: string;
+  name: string;
+  waypoints: WP[];
+  routeCoords: [number, number][];
+  trip?: TripResult;
+};
+
+type TripRuntime = {
+  target: TripTarget;
+  pack?: InstalledPack;
+  placePacks: OfflinePlacePackSummary[];
+  hasDownload: boolean;
+  mapReady: boolean;
+  directionsReady: boolean;
+  notesReady: boolean;
+  placesReady: boolean;
+  trailsReady: boolean;
+  ready: boolean;
+  active: boolean;
+  progress: number;
+  storedBytes: number;
+  status: string;
+};
+
+type DeviceItem = {
+  id: string;
+  kind: 'region' | 'trip' | 'area' | 'map' | 'places';
+  title: string;
+  status: string;
+  bytes: number;
+  active: boolean;
+  progress?: number;
+  icon: IconName;
+  onPress: () => void;
+};
+
+const REGION_GROUPS = [
+  { title: 'Full country', ids: ['conus', 'canada', 'mexico'] },
+  { title: 'West', ids: ['ak', 'az', 'ca', 'co', 'hi', 'id', 'mt', 'nm', 'nv', 'or', 'ut', 'wa', 'wy'] },
+  { title: 'Central', ids: ['ks', 'mn', 'mo', 'nd', 'ne', 'ok', 'sd', 'tx'] },
+  { title: 'Southeast', ids: ['al', 'ar', 'fl', 'ga', 'ky', 'la', 'ms', 'nc', 'sc', 'tn', 'va', 'wv'] },
+  { title: 'Northeast & Midwest', ids: ['ct', 'de', 'ia', 'il', 'in', 'ma', 'md', 'me', 'mi', 'nh', 'nj', 'ny', 'oh', 'pa', 'ri', 'vt', 'wi'] },
+  { title: 'International', ids: ['fi', 'pk'] },
+] as const;
+
 const PLACE_PACK_ORDER = ['essentials', 'services', 'outdoors', 'camps', 'water'];
 
-const REGION_GROUPS: Array<{
-  key: RegionGroupKey;
-  label: string;
-  title: string;
-  subtitle: string;
-  ids: string[];
-}> = [
-  {
-    key: 'west',
-    label: 'West',
-    title: 'Western U.S.',
-    subtitle: 'Mountain states, coast, desert, Alaska, Hawaii',
-    ids: ['ak', 'az', 'ca', 'co', 'hi', 'id', 'mt', 'nm', 'nv', 'or', 'ut', 'wa', 'wy'],
-  },
-  {
-    key: 'central',
-    label: 'Central',
-    title: 'Central / Plains / South',
-    subtitle: 'Great Plains, Texas, Ozarks, upper Mississippi',
-    ids: ['ks', 'mn', 'mo', 'nd', 'ne', 'ok', 'sd', 'tx'],
-  },
-  {
-    key: 'southeast',
-    label: 'Southeast',
-    title: 'Southeast / Appalachia',
-    subtitle: 'Gulf states, Appalachians, Atlantic South',
-    ids: ['al', 'ar', 'fl', 'ga', 'ky', 'la', 'ms', 'nc', 'sc', 'tn', 'va', 'wv'],
-  },
-  {
-    key: 'northeastMidwest',
-    label: 'NE / Midwest',
-    title: 'Northeast / Midwest',
-    subtitle: 'Great Lakes, New England, Mid-Atlantic',
-    ids: ['ct', 'de', 'ia', 'il', 'in', 'ma', 'md', 'me', 'mi', 'nh', 'nj', 'ny', 'oh', 'pa', 'ri', 'vt', 'wi'],
-  },
-  {
-    key: 'international',
-    label: 'Global',
-    title: 'International',
-    subtitle: 'Canada, Mexico, Pakistan, and more regions',
-    ids: ['canada', 'mexico', 'pk'],
-  },
-  {
-    key: 'europe',
-    label: 'Europe',
-    title: 'Europe',
-    subtitle: 'Finland first, more countries next',
-    ids: ['fi'],
-  },
-];
-
-function offlinePlacePackDescription(packId: string, fallback?: string) {
-  if (packId === 'essentials') return 'Core road-trip services, outdoor stops, lodging, and useful town stops.';
-  if (packId === 'services') return 'Fuel, water, dump stations, showers, groceries, food, repairs, medical stops, and other practical support.';
-  if (packId === 'outdoors') return 'Trailheads, viewpoints, peaks, hot springs, and other outdoor stops.';
-  if (packId === 'camps') return 'Campgrounds and campsites saved for trip planning. Confirm fees, closures, and availability before you go.';
-  if (packId === 'water') return 'Water access, fill points, boat ramps, paddle launches, and hazard markers where available.';
-  return fallback || 'Saved places for searching nearby.';
+function safePackId(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'download';
 }
 
-function regionGroupFor(id: string): RegionGroupKey {
-  return REGION_GROUPS.find(group => group.ids.includes(id))?.key ?? 'west';
+function tripPackKey(target: Pick<TripTarget, 'id' | 'name'>) {
+  return `trailhead-trip-${safePackId(target.id || target.name)}`;
 }
 
-function regionCodeFor(id: string) {
+function legacyTripPackKey(name: string) {
+  return `${name || 'Trip'}-corridor`;
+}
+
+function areaPackKey(area: OfflineAreaSelection) {
+  return `trailhead-area-${safePackId(area.id)}`;
+}
+
+function regionCode(id: string) {
   if (id === 'canada') return 'CAN';
   if (id === 'mexico') return 'MEX';
   if (id === 'fi') return 'FIN';
@@ -156,479 +217,420 @@ function regionCodeFor(id: string) {
   return id.toUpperCase();
 }
 
-interface Props {
-  visible:     boolean;
-  onClose:     () => void;
-  waypoints:   WP[];
-  routeCoords?: [number, number][];
-  tripId?:      string | null;
-  tripName:    string | null;
-  useNativeMap: boolean;
-  onOfflinePlacesChanged?: () => void;
-  onWebDownloadBbox?:   (opts: WebDownloadOpts) => void;
-  onWebDownloadRoute?:  (opts: WebDownloadOpts) => void;
-  onWebCancelDownload?: () => void;
-  onWebClearRegion?:    (label: string) => void;
-  webIsDownloading?:    boolean;
-  webDownloadProgress?: number;
-  webDownloadSaved?:    number;
-  webDownloadTotal?:    number;
-  webDownloadMB?:       string;
-  webCachedRegions?:    string[];
-  webDownloadLabel?:    string;
-  selectedArea?:         OfflineAreaSelection | null;
-  savedAreas?:           OfflineAreaSelection[];
-  onStartAreaSelect?:    (area?: OfflineAreaSelection | null) => void;
-  onSelectArea?:         (area: OfflineAreaSelection) => void;
-  onRenameArea?:         (areaId: string, label: string) => void;
-  onDeleteArea?:         (areaId: string) => void;
+function validCoords(coords?: [number, number][]) {
+  return (coords ?? []).filter(coord => (
+    Array.isArray(coord)
+    && Number.isFinite(coord[0])
+    && Number.isFinite(coord[1])
+  ));
 }
 
-// ── Shimmer animation for active progress bar ────────────────────────────────
-function ShimmerBar({ pct }: { pct: number }) {
+function validWaypoints(points?: Array<Partial<WP>>) {
+  return (points ?? []).filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lng)).map(point => ({
+    lat: Number(point.lat),
+    lng: Number(point.lng),
+    name: String(point.name || 'Stop'),
+    day: Number(point.day || 1),
+    type: String(point.type || 'waypoint'),
+  }));
+}
+
+function targetFromTrip(trip: TripResult): TripTarget {
+  return {
+    id: trip.trip_id,
+    name: trip.plan.trip_name || 'Saved trip',
+    waypoints: validWaypoints(trip.plan.waypoints),
+    routeCoords: validCoords(trip.route_geometry?.coords),
+    trip,
+  };
+}
+
+function tripDays(target: TripTarget) {
+  const planDays = target.trip?.plan.duration_days || target.trip?.plan.daily_itinerary?.length || 0;
+  if (planDays > 0) return planDays;
+  return target.waypoints.reduce((max, point) => Math.max(max, Number(point.day || 0)), 0);
+}
+
+function tripMiles(target: TripTarget) {
+  return Math.round(Number(target.trip?.plan.total_est_miles || 0));
+}
+
+function formatTripMeta(target: TripTarget) {
+  const days = tripDays(target);
+  const miles = tripMiles(target);
+  return [days > 0 ? `${days} days` : null, miles > 0 ? `${miles.toLocaleString()} mi` : null]
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function artifactStatus(state: FileDownloadState) {
+  if (state.status === 'complete') return 'Downloaded';
+  if (state.status === 'downloading') return `Downloading ${Math.round(state.progress)}%`;
+  if (state.status === 'paused') return 'Paused';
+  if (state.status === 'error') return 'Download incomplete';
+  return 'Not downloaded';
+}
+
+function artifactActionLabel(state: FileDownloadState) {
+  if (state.status === 'complete') return '';
+  if (state.status === 'downloading') return 'Pause';
+  if (state.status === 'paused') return 'Resume';
+  if (state.status === 'error') return 'Retry';
+  return 'Download';
+}
+
+function statusColor(C: ColorPalette, status: string) {
+  if (status === 'Ready offline' || status === 'Downloaded') return C.green;
+  if (/incomplete/i.test(status)) return C.red;
+  if (/Downloading|Paused/i.test(status)) return C.orange;
+  return C.text2;
+}
+
+function SectionHeading({ label, actionLabel, onAction }: { label: string; actionLabel?: string; onAction?: () => void }) {
   const C = useTheme();
-  const anim = useRef(new Animated.Value(0)).current;
-  useEffect(() => {
-    const loop = Animated.loop(
-      Animated.timing(anim, { toValue: 1, duration: 1400, useNativeDriver: true, easing: Easing.linear })
-    );
-    loop.start();
-    return () => loop.stop();
-  }, []);
-  const translateX = anim.interpolate({ inputRange: [0, 1], outputRange: [-80, 200] });
   return (
-    <View style={{ height: 6, backgroundColor: C.border, borderRadius: 3, overflow: 'hidden' }}>
-      <View style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${pct}%`, backgroundColor: C.orange, borderRadius: 3 }} />
-      <Animated.View style={{
-        position: 'absolute', top: 0, bottom: 0, width: 80,
-        transform: [{ translateX }],
-        backgroundColor: 'rgba(255,255,255,0.10)',
-      }} />
+    <View style={shared.sectionHeading}>
+      <Text style={[shared.sectionLabel, { color: C.text }]}>{label}</Text>
+      {actionLabel && onAction ? (
+        <TouchableOpacity style={shared.sectionAction} onPress={onAction} accessibilityRole="button">
+          <Text style={[shared.sectionActionText, { color: C.orange }]}>{actionLabel}</Text>
+        </TouchableOpacity>
+      ) : null}
     </View>
   );
 }
 
-// ── Static progress bar ───────────────────────────────────────────────────────
-function StaticBar({ pct, accent }: { pct: number; accent?: string }) {
+function MapArtwork({ height = 58, route = false, wide = false }: { height?: number; route?: boolean; wide?: boolean }) {
   const C = useTheme();
   return (
-    <View style={{ height: 4, backgroundColor: C.border, borderRadius: 2 }}>
-      <View style={{ height: 4, width: `${pct}%`, backgroundColor: accent ?? C.orange, borderRadius: 2 }} />
-    </View>
-  );
-}
-
-// ── Section header ────────────────────────────────────────────────────────────
-function Section({ label }: { label: string }) {
-  const C = useTheme();
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 20, marginBottom: 10 }}>
-      <View style={{ width: 3, height: 12, backgroundColor: C.orange, borderRadius: 1 }} />
-      <Text style={{ color: C.text3, fontSize: 11, fontWeight: '800', letterSpacing: 0 }}>
-        {label}
-      </Text>
-      <View style={{ flex: 1, height: 1, backgroundColor: C.border }} />
-    </View>
-  );
-}
-
-// ── Status chip ───────────────────────────────────────────────────────────────
-function StatusChip({ label, color }: { label: string; color: string }) {
-  return (
-    <View style={{ paddingHorizontal: 7, paddingVertical: 3, borderRadius: 3, borderWidth: 1, borderColor: color + '60', backgroundColor: color + '18' }}>
-      <Text style={{ color, fontSize: 9, fontWeight: '800', letterSpacing: 0 }}>{label}</Text>
-    </View>
-  );
-}
-
-function ReadinessRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyphMap; label: string; ready: boolean }) {
-  const C = useTheme();
-  const color = ready ? C.green : C.text3;
-  return (
-    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, flexGrow: 1, flexBasis: '47%', minWidth: 132, backgroundColor: C.s2, borderRadius: 8, borderWidth: 1, borderColor: ready ? C.green + '30' : C.border, paddingHorizontal: 8, paddingVertical: 7 }}>
-      <Ionicons name={ready ? 'checkmark-circle' : icon} size={13} color={color} />
-      <Text style={{ color, fontSize: 9, fontFamily: mono, fontWeight: '800', flexShrink: 1 }} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.85}>
-        {label}
-      </Text>
-    </View>
-  );
-}
-
-function displayDownloadName(name: string) {
-  return name.replace(/-corridor\b/i, ' saved area').replace(/\bcorridor\b/gi, 'saved area');
-}
-
-function StateReadinessPanel({
-  regionCode, regionName, mapReady, routeReady, contourReady, contourAvailable, trailReady, trailAvailable, placeReady, placeAvailable, placeLabel, mapBusy, routeBusy, contourBusy, trailBusy, available, onDownloadMissing,
-}: {
-  regionCode: string;
-  regionName: string;
-  mapReady: boolean;
-  routeReady: boolean;
-  contourReady: boolean;
-  contourAvailable: boolean;
-  trailReady: boolean;
-  trailAvailable: boolean;
-  placeReady: boolean;
-  placeAvailable: boolean;
-  placeLabel: string;
-  mapBusy: boolean;
-  routeBusy: boolean;
-  contourBusy: boolean;
-  trailBusy: boolean;
-  available: boolean;
-  onDownloadMissing: () => void;
-}) {
-  const C = useTheme();
-  const navReady = mapReady && routeReady;
-  const ready = navReady && (!trailAvailable || trailReady) && (!placeAvailable || placeReady);
-  const busy = mapBusy || routeBusy || contourBusy || trailBusy;
-  const statusParts = [
-    mapReady ? 'Map saved' : available ? 'Map ready to save' : 'Map pending',
-    routeReady ? 'Routes saved' : available ? 'Routes ready to save' : 'Routes pending',
-    trailAvailable ? (trailReady ? 'Trails saved' : 'Trails optional') : null,
-    contourAvailable ? (contourReady ? 'Topo saved' : 'Topo optional') : null,
-    placeAvailable ? placeLabel : null,
-  ].filter(Boolean);
-  return (
-    <View style={{ backgroundColor: ready ? C.green + '10' : C.s1, borderColor: ready ? C.green + '35' : C.border, borderWidth: 1, borderRadius: 12, padding: 12, marginBottom: 12 }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-        <View style={{ width: 64, height: 58, borderRadius: 12, backgroundColor: C.s2, borderWidth: 1, borderColor: ready ? C.green + '55' : C.orange + '45', alignItems: 'center', justifyContent: 'center' }}>
-          <Text style={{ color: ready ? C.green : C.orange, fontSize: regionCode.length > 2 ? 20 : 24, fontFamily: mono, fontWeight: '900', letterSpacing: 1 }}>
-            {regionCode}
-          </Text>
-        </View>
-        <View style={{ flex: 1, minWidth: 0 }}>
-          <Text style={{ color: C.text, fontSize: 14, fontFamily: mono, fontWeight: '900' }} numberOfLines={1}>
-            {regionName}
-          </Text>
-          <Text style={{ color: C.text3, fontSize: 10, marginTop: 4, lineHeight: 14 }} numberOfLines={2}>
-            {statusParts.join(' · ')}
-          </Text>
-        </View>
-        {!ready && available && (
-          <TouchableOpacity
-            disabled={busy}
-            onPress={onDownloadMissing}
-            style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 8, backgroundColor: busy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: busy ? C.border : C.orange + '55' }}
-          >
-            <Text style={{ color: busy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-              {busy ? 'Busy' : 'Save'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-    </View>
-  );
-}
-
-// ── File download card (used for CONUS + all states) ─────────────────────────
-function ConusCard({
-  state, totalBytes, region: regionProp, code,
-  onStart, onPause, onResume, onDelete,
-  completeTitle, completeText,
-}: {
-  state:       FileDownloadState;
-  totalBytes:  number;
-  region?:     { name: string; description: string; estimatedGb: number };
-  code?:       string;
-  onStart:     () => void;
-  onPause:     () => void;
-  onResume:    () => void;
-  onDelete:    () => void;
-  completeTitle?: string;
-  completeText?:  string;
-}) {
-  const C = useTheme();
-  const region = regionProp ?? FILE_REGIONS.conus;
-  const isActive   = state.status === 'downloading';
-  const isPaused   = state.status === 'paused';
-  const isComplete = state.status === 'complete';
-  const isError    = state.status === 'error';
-  const accentColor = isComplete ? C.green : isActive || isPaused ? C.orange : C.border;
-  const iconBorderColor = code ? (accentColor === C.border ? C.orange + '40' : accentColor + '80') : C.border;
-  const sizeText = isComplete
-    ? `${fmtBytes(state.fileSizeMb * 1_048_576)} saved`
-    : totalBytes > 0 ? fmtBytes(totalBytes) : `~${region.estimatedGb} GB`;
-
-  return (
-    <View style={{ borderLeftWidth: 3, borderLeftColor: accentColor, backgroundColor: C.s1, borderRadius: 10, overflow: 'hidden' }}>
-      {/* Header row */}
-      <View style={{ flexDirection: 'row', alignItems: 'flex-start', padding: 14, paddingBottom: isActive || isPaused ? 8 : 14 }}>
-        <View style={{ width: 58, height: 52, backgroundColor: C.s2, borderRadius: 10, alignItems: 'center', justifyContent: 'center', marginRight: 12, borderWidth: 1, borderColor: iconBorderColor }}>
-          {code ? (
-            <Text style={{ fontSize: code.length > 2 ? 19 : 23, fontFamily: mono, fontWeight: '900', color: isComplete ? C.green : C.orange, letterSpacing: 1 }}>{code}</Text>
-          ) : (
-            <Ionicons name="earth-outline" size={22} color={C.text2} />
-          )}
-        </View>
-
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 3 }}>
-            <Text style={{ color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' }}>{region.name}</Text>
-            {isComplete && <StatusChip label="Saved" color={C.green} />}
-            {isActive   && <StatusChip label="Saving"        color={C.orange} />}
-            {isPaused   && <StatusChip label="Paused"        color={C.orange} />}
-            {isError    && <StatusChip label="Error"         color={C.red} />}
-          </View>
-          <Text style={{ color: isComplete ? C.green : C.text3, fontSize: 10, fontFamily: mono, fontWeight: isComplete ? '700' : '500' }}>{sizeText}</Text>
-          {state.details ? (
-            <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3 }} numberOfLines={2}>
-              {state.details}
-            </Text>
-          ) : null}
-        </View>
-
-        {/* Action buttons */}
-        <View style={{ gap: 8 }}>
-          {isComplete ? (
-            <TouchableOpacity onPress={onDelete} style={{ padding: 6 }}>
-              <Ionicons name="trash-outline" size={16} color={C.red} />
-            </TouchableOpacity>
-          ) : isActive ? (
-            <TouchableOpacity onPress={onPause} style={{ padding: 6 }}>
-              <Ionicons name="pause-circle-outline" size={22} color={C.orange} />
-            </TouchableOpacity>
-          ) : isPaused ? (
-            <TouchableOpacity onPress={onResume} style={{ backgroundColor: C.orangeGlow, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7 }}>
-              <Text style={{ color: C.orange, fontSize: 10, fontWeight: '900' }}>Resume</Text>
-            </TouchableOpacity>
-          ) : (
-            <View style={{ alignItems: 'flex-end', gap: 4 }}>
-              <TouchableOpacity onPress={onStart} style={{ backgroundColor: C.orangeGlow, borderRadius: 8, paddingHorizontal: 12, paddingVertical: 7, borderWidth: 1, borderColor: C.orange + '55' }}>
-                <Text style={{ color: C.orange, fontSize: 10, fontWeight: '900' }}>Save</Text>
-              </TouchableOpacity>
-              <Text style={{ color: C.text3, fontSize: 8, fontWeight: '700' }}>Wi-Fi recommended</Text>
-            </View>
-          )}
-        </View>
-      </View>
-
-      {/* Progress row */}
-      {(isActive || isPaused) && (
-        <View style={{ paddingHorizontal: 14, paddingBottom: 14 }}>
-          <View style={{ marginBottom: 8 }}>
-            {isActive ? <ShimmerBar pct={state.progress} /> : <StaticBar pct={state.progress} />}
-          </View>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
-            <View>
-              <Text style={{ color: C.orange, fontSize: 20, fontFamily: mono, fontWeight: '900', lineHeight: 22 }}>
-                {isActive ? fmtSpeed(state.speedBps).split('/')[0].trim() : '─'}
-              </Text>
-              <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 1 }}>
-                {isActive ? (fmtSpeed(state.speedBps).includes('MB') ? 'MB/s' : 'KB/s') : 'Paused'}
-              </Text>
-            </View>
-            <View style={{ width: 1, height: 28, backgroundColor: C.border }} />
-            {isActive && (
-              <View>
-                <Text style={{ color: C.text, fontSize: 14, fontFamily: mono, fontWeight: '700', lineHeight: 16 }}>
-                  {fmtEta(state.etaSec)}
-                </Text>
-                <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, letterSpacing: 1 }}>ETA</Text>
-              </View>
-            )}
-            <View style={{ flex: 1, alignItems: 'flex-end' }}>
-              <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono }}>
-                {fmtBytes(state.downloadedBytes)} / {fmtBytes(state.totalBytes || totalBytes || region.estimatedGb * 1_073_741_824)}
-              </Text>
-              <Text style={{ color: C.orange, fontSize: 10, fontFamily: mono, fontWeight: '700' }}>
-                {state.progress.toFixed(1)}%
-              </Text>
-            </View>
-          </View>
-          {isActive && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: C.s2, borderRadius: 6, padding: 8 }}>
-              <Ionicons name="flash-outline" size={12} color={C.orange} />
-              <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, flex: 1, lineHeight: 13 }}>
-                Keep the app open and screen on while saving. If it stops, tap Resume.
-              </Text>
-            </View>
-          )}
-          {isPaused && (
-            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 8, backgroundColor: C.orangeGlow, borderRadius: 6, padding: 8 }}>
-              <Ionicons name="pause-outline" size={12} color={C.orange} />
-              <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, flex: 1, lineHeight: 13 }}>
-                Paused at {state.progress.toFixed(1)}%. Tap Resume to continue from this point.
-              </Text>
-            </View>
-          )}
-        </View>
-      )}
-
-      {isError && (
-        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, padding: 10, paddingTop: 0 }}>
-          <Ionicons name="alert-circle-outline" size={12} color={C.red} />
-          <Text style={{ color: C.red, fontSize: 10, fontFamily: mono, flex: 1 }}>{state.error}</Text>
-          <TouchableOpacity onPress={onStart}>
-            <Text style={{ color: C.orange, fontSize: 10, fontWeight: '700' }}>Retry</Text>
-          </TouchableOpacity>
-        </View>
-      )}
-
-      {isComplete && (
-        <View style={{ margin: 12, marginTop: 0, padding: 10, backgroundColor: C.green + '15', borderRadius: 6, borderWidth: 1, borderColor: C.green + '30' }}>
-          <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '700', letterSpacing: 0.5 }}>
-            {completeTitle ?? 'Saved'}
-          </Text>
-          <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 2 }}>
-            {completeText ?? 'Saved on this device for later.'}
-          </Text>
-        </View>
+    <View style={[shared.mapArtwork, wide && shared.mapArtworkWide, { height, backgroundColor: C.s2 }]}>
+      <View style={[shared.mapRoad, shared.mapRoadOne, { backgroundColor: C.border2 }]} />
+      <View style={[shared.mapRoad, shared.mapRoadTwo, { backgroundColor: C.border2 }]} />
+      <View style={[shared.mapRoad, shared.mapRoadThree, { backgroundColor: C.border }]} />
+      {route ? (
+        <>
+          <View style={[shared.routeLine, { backgroundColor: C.orange }]} />
+          <View style={[shared.routeDot, shared.routeDotStart, { borderColor: C.orange, backgroundColor: C.s1 }]} />
+          <View style={[shared.routeDot, shared.routeDotEnd, { borderColor: C.orange, backgroundColor: C.s1 }]} />
+        </>
+      ) : (
+        <Ionicons name="map-outline" size={20} color={C.text3} />
       )}
     </View>
   );
 }
 
-// ── State pack row ────────────────────────────────────────────────────────────
-function StateRow({ code, st, isCached, isDownloading, isActive, progress, onDownload, onDelete }: {
-  code:          string;
-  st:            { name: string; bounds: [[number,number],[number,number]]; icon: string };
-  isCached:      boolean;
-  isDownloading: boolean;
-  isActive?:     boolean;
-  progress?:     number;
-  onDownload:    () => void;
-  onDelete?:     () => void;
+function StatusLine({ label, icon }: { label: string; icon?: IconName }) {
+  const C = useTheme();
+  const color = statusColor(C, label);
+  return (
+    <View style={shared.statusLine}>
+      <Ionicons
+        name={icon ?? (label === 'Ready offline' ? 'checkmark-circle' : /incomplete/i.test(label) ? 'alert-circle' : 'ellipse')}
+        size={label === 'Ready offline' || icon ? 16 : 8}
+        color={color}
+      />
+      <Text style={[shared.statusText, { color }]}>{label}</Text>
+    </View>
+  );
+}
+
+function ProgressBar({ progress }: { progress: number }) {
+  const C = useTheme();
+  return (
+    <View style={[shared.progressTrack, { backgroundColor: C.border }]}>
+      <View style={[shared.progressFill, { backgroundColor: C.orange, width: `${Math.max(0, Math.min(100, progress))}%` }]} />
+    </View>
+  );
+}
+
+function IconButton({ icon, label, onPress, disabled, danger }: {
+  icon: IconName;
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  danger?: boolean;
 }) {
   const C = useTheme();
   return (
-    <View style={{ borderBottomWidth: 1, borderBottomColor: C.border }}>
-      <View style={{ flexDirection: 'row', alignItems: 'center', paddingVertical: 9, paddingHorizontal: 4 }}>
-        <Ionicons name={st.icon as keyof typeof Ionicons.glyphMap} size={15} color={C.text2} style={{ width: 28 }} />
-        <Text style={{ color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '700', width: 26, marginRight: 6 }}>{code}</Text>
-        <Text style={{ flex: 1, color: C.text2, fontSize: 10, fontFamily: mono }}>{st.name}</Text>
-        {isCached ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Ionicons name="checkmark-circle" size={12} color={C.green} />
-            <Text style={{ color: C.green, fontSize: 9, fontWeight: '700' }}>Saved</Text>
-            <TouchableOpacity onPress={onDelete} style={{ padding: 4 }}>
-              <Ionicons name="trash-outline" size={14} color={C.red} />
-            </TouchableOpacity>
-          </View>
-        ) : isActive ? (
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-              {Math.round(progress ?? 0)}%
-            </Text>
-            <View style={{ width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange }} />
-          </View>
-        ) : (
-          <TouchableOpacity
-            disabled={isDownloading}
-            onPress={onDownload}
-            style={{ paddingHorizontal: 10, paddingVertical: 5, borderRadius: 4, borderWidth: 1, borderColor: isDownloading ? C.border : C.orange + '55', backgroundColor: isDownloading ? 'transparent' : C.orangeGlow }}
-          >
-            <Text style={{ color: isDownloading ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '700' }}>
-              {isDownloading ? 'Busy' : 'Get'}
-            </Text>
-          </TouchableOpacity>
-        )}
-      </View>
-      {isActive && (
-        <View style={{ paddingHorizontal: 4, paddingBottom: 8 }}>
-          <ShimmerBar pct={progress ?? 0} />
-          <Text style={{ color: C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-            Saving. Keep the app open.
-          </Text>
+    <TouchableOpacity
+      style={[shared.iconButton, { backgroundColor: C.s2, borderColor: C.border }, disabled && shared.disabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+      accessibilityLabel={label}
+    >
+      <Ionicons name={icon} size={21} color={danger ? C.red : C.text} />
+    </TouchableOpacity>
+  );
+}
+
+function PrimaryButton({ label, onPress, disabled, icon }: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  icon?: IconName;
+}) {
+  const C = useTheme();
+  return (
+    <TouchableOpacity
+      style={[shared.primaryButton, { backgroundColor: C.text }, disabled && shared.disabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+    >
+      {icon ? <Ionicons name={icon} size={18} color={C.bg} /> : null}
+      <Text style={[shared.primaryButtonText, { color: C.bg }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function SecondaryButton({ label, onPress, disabled, danger }: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+  danger?: boolean;
+}) {
+  const C = useTheme();
+  return (
+    <TouchableOpacity
+      style={[shared.secondaryButton, { borderColor: danger ? C.red + '66' : C.border2 }, disabled && shared.disabled]}
+      onPress={onPress}
+      disabled={disabled}
+      accessibilityRole="button"
+    >
+      <Text style={[shared.secondaryButtonText, { color: danger ? C.red : C.text }]}>{label}</Text>
+    </TouchableOpacity>
+  );
+}
+
+function DeviceRow({ item, selected, selectionMode, onToggle }: {
+  item: DeviceItem;
+  selected?: boolean;
+  selectionMode?: boolean;
+  onToggle?: () => void;
+}) {
+  const C = useTheme();
+  const rowPress = selectionMode ? onToggle : item.onPress;
+  return (
+    <TouchableOpacity
+      style={[shared.deviceRow, { borderBottomColor: C.border }]}
+      onPress={rowPress}
+      disabled={selectionMode && item.active}
+      activeOpacity={0.78}
+    >
+      {selectionMode ? (
+        <View style={[shared.selectionBox, { borderColor: selected ? C.green : C.border2, backgroundColor: selected ? C.green : 'transparent' }]}>
+          {selected ? <Ionicons name="checkmark" size={15} color="#fff" /> : null}
         </View>
+      ) : (
+        <MapArtwork height={54} route={item.kind === 'trip' || item.kind === 'area'} />
       )}
+      <View style={shared.deviceCopy}>
+        <Text style={[shared.deviceTitle, { color: C.text }]} numberOfLines={1}>{item.title}</Text>
+        <Text style={[shared.deviceMeta, { color: statusColor(C, item.status) }]} numberOfLines={1}>
+          {[item.status, item.bytes > 0 ? fmtBytes(item.bytes) : null].filter(Boolean).join(' · ')}
+        </Text>
+        {item.active && item.progress != null ? <ProgressBar progress={item.progress} /> : null}
+      </View>
+      {!selectionMode ? <Ionicons name="chevron-forward" size={19} color={C.text3} /> : null}
+    </TouchableOpacity>
+  );
+}
+
+function CheckRow({ label, ready }: { label: string; ready: boolean }) {
+  const C = useTheme();
+  return (
+    <View style={shared.checkRow}>
+      <Ionicons name={ready ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={ready ? C.green : C.text3} />
+      <Text style={[shared.checkLabel, { color: ready ? C.text : C.text2 }]}>{label}</Text>
     </View>
   );
 }
 
-// ── Main component ────────────────────────────────────────────────────────────
+function ArtifactRow({ label, state, onAction, available = true }: {
+  label: string;
+  state: FileDownloadState;
+  onAction: () => void;
+  available?: boolean;
+}) {
+  const C = useTheme();
+  const action = available ? artifactActionLabel(state) : '';
+  const status = available ? artifactStatus(state) : 'Not available';
+  return (
+    <View style={[shared.artifactRow, { borderBottomColor: C.border }]}>
+      <Ionicons name={state.status === 'complete' ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={state.status === 'complete' ? C.green : C.text3} />
+      <View style={shared.artifactCopy}>
+        <Text style={[shared.artifactTitle, { color: C.text }]}>{label}</Text>
+        <Text style={[shared.artifactStatus, { color: statusColor(C, status) }]}>{status}</Text>
+        {state.status === 'downloading' ? <ProgressBar progress={state.progress} /> : null}
+      </View>
+      {action ? (
+        <TouchableOpacity style={shared.textAction} onPress={onAction} accessibilityRole="button">
+          <Text style={[shared.textActionLabel, { color: C.orange }]}>{action}</Text>
+        </TouchableOpacity>
+      ) : null}
+    </View>
+  );
+}
+
 export default function OfflineModal({
-  visible, onClose, waypoints, routeCoords = [], tripId, tripName, useNativeMap,
+  visible,
+  onClose,
+  waypoints,
+  routeCoords = [],
+  requestedTrip,
+  tripId,
+  tripName,
+  useNativeMap,
   onOfflinePlacesChanged,
-  onWebDownloadBbox, onWebDownloadRoute, onWebCancelDownload, onWebClearRegion,
-  webIsDownloading, webDownloadProgress, webDownloadMB, webCachedRegions, webDownloadLabel,
-  selectedArea, savedAreas = [], onStartAreaSelect, onSelectArea, onRenameArea, onDeleteArea,
+  onWebDownloadBbox,
+  onWebDownloadRoute,
+  onWebCancelDownload,
+  onWebClearRegion,
+  webIsDownloading,
+  webDownloadProgress,
+  webDownloadMB,
+  webCachedRegions = [],
+  webDownloadLabel,
+  selectedArea,
+  savedAreas = [],
+  onStartAreaSelect,
+  onSelectArea,
+  onRenameArea,
+  onSaveArea,
+  onDeleteArea,
+  onOpenRegion,
 }: Props) {
-  const user        = useStore(st => st.user);
-  const mapboxToken = useStore(st => st.mapboxToken);
-  const setActiveTrip = useStore(st => st.setActiveTrip);
-  const C           = useTheme();
-  const s           = makeStyles(C);
-  const insets      = useSafeAreaInsets();
-  const { height }  = useWindowDimensions();
-  const bottomPad   = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
-  const sheetMaxHeight = Math.min(height * 0.91, height - Math.max(insets.top + 28, 64));
+  const C = useTheme();
+  const s = makeStyles(C);
+  const insets = useSafeAreaInsets();
+  const { height } = useWindowDimensions();
+  const user = useStore(state => state.user);
+  const userLoc = useStore(state => state.userLoc);
+  const mapboxToken = useStore(state => state.mapboxToken);
+  const activeTrip = useStore(state => state.activeTrip);
+  const setActiveTrip = useStore(state => state.setActiveTrip);
+  const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
+  const sheetMaxHeight = Math.min(height * 0.94, height - Math.max(insets.top + 16, 48));
 
-  // File-based download (CONUS + all states)
   const {
-    getState, startDownload, pauseDownload, resumeDownload, deleteDownload, getTotalBytes,
-    getRoutingState, startRoutingDownload, pauseRoutingDownload, resumeRoutingDownload,
-    deleteRoutingDownload, getRoutingTotalBytes,
-    getContourState, startContourDownload, pauseContourDownload, resumeContourDownload,
-    deleteContourDownload, getContourTotalBytes,
-    getTrailState, startTrailDownload, pauseTrailDownload, resumeTrailDownload,
-    deleteTrailDownload, getTrailTotalBytes,
-    isFilePublished, isRoutingPublished, isContourPublished, isTrailPublished,
+    states,
+    routingStates,
+    contourStates,
+    trailStates,
+    getState,
+    getRoutingState,
+    getContourState,
+    getTrailState,
+    startDownload,
+    pauseDownload,
+    resumeDownload,
+    deleteDownload,
+    startRoutingDownload,
+    pauseRoutingDownload,
+    resumeRoutingDownload,
+    deleteRoutingDownload,
+    startContourDownload,
+    pauseContourDownload,
+    resumeContourDownload,
+    deleteContourDownload,
+    startTrailDownload,
+    pauseTrailDownload,
+    resumeTrailDownload,
+    deleteTrailDownload,
+    getTotalBytes,
+    getRoutingTotalBytes,
+    getContourTotalBytes,
+    getTrailTotalBytes,
+    isFilePublished,
+    isRoutingPublished,
+    isContourPublished,
+    isTrailPublished,
   } = useOfflineFiles();
-  const conusState      = getState('conus');
-  const conusTotalBytes = getTotalBytes('conus');
 
-  // MLN packs still used for legacy corridor fallback (can be removed later)
-  const [mlnPacks,       setMlnPacks]       = useState<InstalledPack[]>([]);
-  const [packError,      setPackError]      = useState<string | null>(null);
-  const [activePackName, setActivePackName] = useState<string | null>(null);
-  const [packProgress,   setPackProgress]   = useState<PackProgress | null>(null);
-  const [activeTab,      setActiveTab]      = useState<'files' | 'areas' | 'regions'>('files');
-  const [downloadSearch, setDownloadSearch] = useState('');
-  const [selectedState,  setSelectedState]  = useState('ks');
-  const [selectedRegionGroup, setSelectedRegionGroup] = useState<RegionGroupKey>('central');
-  const [authorizing,    setAuthorizing]    = useState<string | null>(null);
-  const [placePacks,     setPlacePacks]     = useState<OfflinePlacePackSummary[]>([]);
-  const [offlineTrips,   setOfflineTrips]   = useState<Array<TripResult & { cached_at: number }>>([]);
-  const [placeManifest,  setPlaceManifest]  = useState<PlacePackManifest | null>(null);
-  const [placeBusy,      setPlaceBusy]      = useState(false);
-  const [placeError,     setPlaceError]     = useState<string | null>(null);
-  const [freeDiskBytes,  setFreeDiskBytes]  = useState<number | null>(null);
+  const [view, setView] = useState<OfflineView>('home');
+  const [selectedRegionId, setSelectedRegionId] = useState('');
+  const [selectedTripId, setSelectedTripId] = useState('');
+  const [search, setSearch] = useState('');
+  const [regionSearch, setRegionSearch] = useState('');
+  const [selectedForRemoval, setSelectedForRemoval] = useState<string[]>([]);
+  const [confirmRemoval, setConfirmRemoval] = useState<{ ids: string[]; bytes: number } | null>(null);
+  const [mlnPacks, setMlnPacks] = useState<InstalledPack[]>([]);
+  const [activePackName, setActivePackName] = useState('');
+  const [activePackLabel, setActivePackLabel] = useState('');
+  const [activePackProgress, setActivePackProgress] = useState<PackProgress | null>(null);
+  const [activePackPaused, setActivePackPaused] = useState(false);
+  const [packError, setPackError] = useState<{ key: string; message: string } | null>(null);
+  const [authorizing, setAuthorizing] = useState('');
+  const [placePacks, setPlacePacks] = useState<OfflinePlacePackSummary[]>([]);
+  const [offlineTrips, setOfflineTrips] = useState<Array<TripResult & { cached_at: number }>>([]);
+  const [placeManifest, setPlaceManifest] = useState<PlacePackManifest | null>(null);
+  const [placeBusy, setPlaceBusy] = useState(false);
+  const [placeError, setPlaceError] = useState('');
+  const [freeDiskBytes, setFreeDiskBytes] = useState<number | null>(null);
+  const [tripStorageBytes, setTripStorageBytes] = useState<Record<string, number>>({});
+  const [placeStorageBytes, setPlaceStorageBytes] = useState<Record<string, number>>({});
+  const wasVisible = useRef(false);
 
-  useEffect(() => {
-    if (visible) getInstalledPacks().then(setMlnPacks).catch(() => {});
-  }, [visible]);
-
-  useEffect(() => {
-    if (!visible) return;
-    FileSystem.getFreeDiskStorageAsync().then(setFreeDiskBytes).catch(() => setFreeDiskBytes(null));
-  }, [visible]);
+  const reloadNativePacks = useCallback(async () => {
+    const packs = await getInstalledPacks().catch(() => []);
+    setMlnPacks(packs);
+  }, []);
 
   const reloadPlacePacks = useCallback(async (scope = currentOfflineAccountScope()) => {
-    const packs = await listOfflinePlacePacks().catch(() => []);
-    if (offlineAccountScopeIsCurrent(scope)) setPlacePacks(packs);
+    const [packs, bytes] = await Promise.all([
+      listOfflinePlacePacks().catch(() => []),
+      getOfflinePlacePackStorageBytes().catch(() => ({})),
+    ]);
+    if (!offlineAccountScopeIsCurrent(scope)) return;
+    setPlacePacks(packs);
+    setPlaceStorageBytes(bytes);
   }, []);
-
-  useEffect(() => {
-    if (!visible || accountStorage.isCleaning()) return;
-    reloadPlacePacks(currentOfflineAccountScope());
-  }, [visible, reloadPlacePacks, user?.id]);
 
   const reloadOfflineTrips = useCallback(async (scope = currentOfflineAccountScope()) => {
-    const trips = await getOfflineTripSummaries().catch(() => []);
-    if (offlineAccountScopeIsCurrent(scope)) setOfflineTrips(trips);
+    const [trips, bytes] = await Promise.all([
+      getOfflineTripSummaries().catch(() => []),
+      getOfflineTripStorageBytes().catch(() => ({})),
+    ]);
+    if (!offlineAccountScopeIsCurrent(scope)) return;
+    setOfflineTrips(trips);
+    setTripStorageBytes(bytes);
+  }, []);
+
+  const reloadStorage = useCallback(async () => {
+    const bytes = await FileSystem.getFreeDiskStorageAsync().catch(() => null);
+    setFreeDiskBytes(bytes);
   }, []);
 
   useEffect(() => {
-    if (!visible || accountStorage.isCleaning()) return;
-    reloadOfflineTrips(currentOfflineAccountScope());
-  }, [visible, reloadOfflineTrips, user?.id]);
-
-  useEffect(() => {
-    setPlacePacks([]);
-    setOfflineTrips([]);
-    setPlaceBusy(false);
-    setPlaceError(null);
-    setAuthorizing(null);
-  }, [user?.id]);
+    if (!visible) {
+      wasVisible.current = false;
+      return;
+    }
+    if (!wasVisible.current) {
+      const recentArea = selectedArea?.updatedAt && Date.now() - selectedArea.updatedAt < 15_000;
+      setSelectedTripId(requestedTrip?.trip_id ?? '');
+      setView(requestedTrip ? 'trip' : recentArea ? 'area' : 'home');
+      setSearch('');
+      setRegionSearch('');
+      setSelectedForRemoval([]);
+      setConfirmRemoval(null);
+    }
+    wasVisible.current = true;
+    const scope = currentOfflineAccountScope();
+    reloadNativePacks();
+    reloadPlacePacks(scope);
+    reloadOfflineTrips(scope);
+    reloadStorage();
+    api.getPlacePackManifest().then(setPlaceManifest).catch(() => setPlaceManifest(null));
+  }, [reloadNativePacks, reloadOfflineTrips, reloadPlacePacks, reloadStorage, requestedTrip, selectedArea?.updatedAt, visible]);
 
   useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
     setPlacePacks([]);
     setOfflineTrips([]);
-    setPlaceBusy(false);
-    setPlaceError(null);
-    setAuthorizing(null);
+    setPlaceStorageBytes({});
+    setTripStorageBytes({});
     if (cleaning || !visible) return;
     const scope = currentOfflineAccountScope();
     if (scope.epoch !== epoch) return;
@@ -636,40 +638,22 @@ export default function OfflineModal({
     reloadOfflineTrips(scope);
   }), [reloadOfflineTrips, reloadPlacePacks, visible]);
 
-  useEffect(() => {
-    if (!visible) return;
-    api.getPlacePackManifest().then(setPlaceManifest).catch(() => setPlaceManifest(null));
-  }, [visible]);
-
-  const startMlnPack = useCallback(async (
-    name: string, bounds: [[number,number],[number,number]], minZoom: number, maxZoom: number
-  ) => {
-    setActivePackName(name);
-    setPackProgress(null);
-    setPackError(null);
-    await downloadPack(
-      name, bounds, minZoom, maxZoom, mapboxToken || '',
-      p  => setPackProgress({ ...p }),
-      () => { setActivePackName(null); setPackProgress(null); getInstalledPacks().then(setMlnPacks).catch(() => {}); },
-      msg => { setPackError(msg); setActivePackName(null); setPackProgress(null); },
-    );
-  }, [mapboxToken]);
-
-  const startTripCorridor = useCallback((name: string) => {
-    if (!useNativeMap) {
-      onWebDownloadRoute?.({ bufferKm: 16, minZ: 10, maxZ: 15, vectorOnly: true, label: name });
-      return;
+  const currentTripTarget = useMemo<TripTarget | null>(() => {
+    if (requestedTrip) return targetFromTrip(requestedTrip);
+    if (activeTrip && (!tripId || activeTrip.trip_id === tripId)) {
+      const target = targetFromTrip(activeTrip);
+      if (routeCoords.length > target.routeCoords.length) target.routeCoords = validCoords(routeCoords);
+      if (waypoints.length > target.waypoints.length) target.waypoints = validWaypoints(waypoints);
+      return target;
     }
-
-    const routePoints = routeCoords.map(([lng, lat]) => ({ lat, lng }));
-    const points = routePoints.length >= 2 ? routePoints : waypoints;
-    const bounds = routeCorridorBounds(points, 0.22);
-    if (!bounds) {
-      setPackError('Trip needs at least two mapped points.');
-      return;
-    }
-    startMlnPack(name, bounds, 10, 15);
-  }, [onWebDownloadRoute, routeCoords, startMlnPack, useNativeMap, waypoints]);
+    if (!tripId && !tripName && waypoints.length === 0) return null;
+    return {
+      id: String(tripId || safePackId(tripName || 'current-trip')),
+      name: tripName || 'Current trip',
+      waypoints: validWaypoints(waypoints),
+      routeCoords: validCoords(routeCoords),
+    };
+  }, [activeTrip, requestedTrip, routeCoords, tripId, tripName, waypoints]);
 
   const authorizeAndRun = useCallback(async (
     key: string,
@@ -678,317 +662,273 @@ export default function OfflineModal({
     label: string,
     action: () => void | Promise<void>,
   ) => {
-    if (authorizing) return;
+    if (!user) {
+      Alert.alert('Sign in required', 'Sign in from Profile to download maps and trips.');
+      return false;
+    }
+    if (authorizing) return false;
     const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
+    if (!offlineAccountScopeIsCurrent(scope)) return false;
     setAuthorizing(key);
     try {
       await api.authorizeOfflineDownload(assetType, regionId, label);
-      if (!offlineAccountScopeIsCurrent(scope)) return;
+      if (!offlineAccountScopeIsCurrent(scope)) return false;
       await action();
-    } catch (e: any) {
-      if (!offlineAccountScopeIsCurrent(scope)) return;
-      if (e instanceof PaywallError) {
-        Alert.alert('Save unavailable', e.message);
-      } else {
-        Alert.alert('Save unavailable', e?.message ?? 'Could not start this save.');
-      }
+      return true;
+    } catch (error: any) {
+      if (!offlineAccountScopeIsCurrent(scope)) return false;
+      const message = error instanceof PaywallError ? error.message : error?.message || 'Could not start this download.';
+      Alert.alert('Download unavailable', message);
+      return false;
     } finally {
-      if (offlineAccountScopeIsCurrent(scope)) setAuthorizing(null);
+      if (offlineAccountScopeIsCurrent(scope)) setAuthorizing('');
     }
-  }, [authorizing]);
+  }, [authorizing, user]);
+
+  const startMlnPack = useCallback(async (
+    key: string,
+    label: string,
+    bounds: [[number, number], [number, number]],
+    minZoom: number,
+    maxZoom: number,
+    onComplete?: () => void,
+  ) => {
+    setActivePackName(key);
+    setActivePackLabel(label);
+    setActivePackProgress(null);
+    setActivePackPaused(false);
+    setPackError(null);
+    await downloadPack(
+      key,
+      bounds,
+      minZoom,
+      maxZoom,
+      mapboxToken || '',
+      progress => setActivePackProgress({ ...progress }),
+      () => {
+        setActivePackName('');
+        setActivePackLabel('');
+        setActivePackProgress(null);
+        setActivePackPaused(false);
+        reloadNativePacks();
+        onComplete?.();
+      },
+      message => {
+        setPackError({ key, message });
+        setActivePackName('');
+        setActivePackLabel('');
+        setActivePackProgress(null);
+        setActivePackPaused(false);
+        reloadNativePacks();
+      },
+    );
+  }, [mapboxToken, reloadNativePacks]);
+
+  const pauseActivePack = useCallback(async () => {
+    if (!activePackName) return;
+    await pausePack(activePackName);
+    setActivePackPaused(true);
+  }, [activePackName]);
+
+  const resumeActivePack = useCallback(async () => {
+    if (!activePackName) return;
+    await resumePack(activePackName);
+    setActivePackPaused(false);
+  }, [activePackName]);
 
   const deleteMlnPack = useCallback(async (name: string) => {
-    await deletePack(name);
-    setMlnPacks(prev => prev.filter(p => p.name !== name));
-  }, []);
+    if (activePackName === name) return;
+    await deletePack(name).catch(() => {});
+    setMlnPacks(previous => previous.filter(pack => pack.name !== name));
+  }, [activePackName]);
 
-  const downloadTripEssentials = useCallback(async () => {
-    if (placeBusy) return;
-    const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    const mappedWaypoints = waypoints.filter(w => Number.isFinite(w.lat) && Number.isFinite(w.lng));
-    const usableRoute = routeCoords.filter(c => Array.isArray(c) && Number.isFinite(c[0]) && Number.isFinite(c[1]));
-    if (mappedWaypoints.length < 2 && usableRoute.length < 2) {
-      setPlaceError('Essentials need at least two mapped trip points.');
+  const tripPackFor = useCallback((target: TripTarget) => {
+    const names = [tripPackKey(target), legacyTripPackKey(target.name)];
+    return mlnPacks.find(pack => names.includes(pack.name));
+  }, [mlnPacks]);
+
+  const startTripCorridor = useCallback((target: TripTarget) => {
+    const coords = validCoords(target.routeCoords);
+    const points = coords.length >= 2
+      ? coords.map(([lng, lat]) => ({ lat, lng }))
+      : target.waypoints;
+    if (points.length < 2) {
+      setPackError({ key: tripPackKey(target), message: 'This trip needs at least two mapped stops.' });
       return;
     }
+    if (!useNativeMap) {
+      onWebDownloadRoute?.({
+        bufferKm: 16,
+        minZ: 10,
+        maxZ: 15,
+        vectorOnly: true,
+        label: target.name,
+        routeCoords: coords,
+      });
+      return;
+    }
+    const bounds = routeCorridorBounds(points, 0.22);
+    if (!bounds) return;
+    void startMlnPack(tripPackKey(target), target.name, bounds, 10, 15);
+  }, [onWebDownloadRoute, startMlnPack, useNativeMap]);
+
+  const downloadTripPlaces = useCallback(async (target: TripTarget) => {
+    if (placeBusy) return;
+    const mappedWaypoints = validWaypoints(target.waypoints);
+    const coords = validCoords(target.routeCoords);
+    if (mappedWaypoints.length < 2 && coords.length < 2) {
+      setPlaceError('This trip needs at least two mapped stops.');
+      return;
+    }
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
     setPlaceBusy(true);
-    setPlaceError(null);
+    setPlaceError('');
     try {
       const pack = await api.buildTripEssentialsPack({
-        trip_id: tripId ?? '',
-        trip_name: tripName ?? 'Current Trip',
-        waypoints: mappedWaypoints.map(w => ({ lat: w.lat, lng: w.lng, name: w.name, day: w.day, type: w.type })),
-        route_coords: usableRoute,
+        trip_id: target.id,
+        trip_name: target.name,
+        waypoints: mappedWaypoints.map(point => ({
+          lat: point.lat,
+          lng: point.lng,
+          name: point.name,
+          day: point.day,
+          type: point.type,
+        })),
+        route_coords: coords,
       });
       if (!offlineAccountScopeIsCurrent(scope)) return;
-      await saveOfflinePlacePack(pack, placePacks.filter(item => item.trip_id === tripId || item.region_id === selectedState).map(item => item.pack_id));
+      await saveOfflinePlacePack(pack, placePacks.filter(item => item.trip_id === target.id).map(item => item.pack_id));
       if (!offlineAccountScopeIsCurrent(scope)) return;
       await reloadPlacePacks(scope);
-      if (!offlineAccountScopeIsCurrent(scope)) return;
       onOfflinePlacesChanged?.();
-      Alert.alert('Trip places saved', `${pack.points.length} fuel, camp, and place pins are saved with this trip.`);
-    } catch (e: any) {
-      if (offlineAccountScopeIsCurrent(scope)) setPlaceError(e?.message ?? 'Could not save trip essentials.');
+    } catch (error: any) {
+      if (offlineAccountScopeIsCurrent(scope)) setPlaceError(error?.message || 'Could not download camps and essentials.');
     } finally {
       if (offlineAccountScopeIsCurrent(scope)) setPlaceBusy(false);
     }
-  }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks, routeCoords, selectedState, tripId, tripName, waypoints]);
+  }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks]);
 
-  const downloadTripBundle = useCallback(async () => {
-    const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    if (!waypoints.length) {
-      setPlaceError('Plan a trip first, then Trailhead can save its map, navigation, and places.');
-      return;
+  const downloadTripBundle = useCallback(async (target: TripTarget) => {
+    if (target.trip) {
+      await saveOfflineTrip(target.trip);
+      await reloadOfflineTrips(currentOfflineAccountScope());
     }
-    const name = (tripName ?? 'Trip') + '-corridor';
-    await authorizeAndRun(`trip:${name}`, 'trip_corridor', name, tripName ?? 'Trip area', () => startTripCorridor(name));
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    await downloadTripEssentials();
-  }, [authorizeAndRun, downloadTripEssentials, startTripCorridor, tripName, waypoints.length]);
+    const key = tripPackKey(target);
+    const started = await authorizeAndRun(key, 'trip_corridor', target.id, target.name, () => startTripCorridor(target));
+    if (!started) return;
+    void downloadTripPlaces(target);
+    setView('home');
+  }, [authorizeAndRun, downloadTripPlaces, reloadOfflineTrips, startTripCorridor]);
 
   const downloadSelectedArea = useCallback(async () => {
     if (!selectedArea) return;
-    await authorizeAndRun(
-      `area:${selectedArea.label}`,
-      'trip_corridor',
-      selectedArea.label.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'selected-area',
-      selectedArea.label,
-      () => {
-        if (!useNativeMap) {
-          onWebDownloadBbox?.({
-            label: selectedArea.label,
-            n: selectedArea.n,
-            s: selectedArea.s,
-            e: selectedArea.e,
-            w: selectedArea.w,
-            minZ: selectedArea.minZoom,
-            maxZ: selectedArea.maxZoom,
-            vectorOnly: true,
-          });
-          return;
-        }
-        return startMlnPack(selectedArea.label, selectedArea.bounds, selectedArea.minZoom, selectedArea.maxZoom);
-      },
-    );
-  }, [authorizeAndRun, onWebDownloadBbox, selectedArea, startMlnPack, useNativeMap]);
-
-  const confirmDeleteArea = useCallback((area: OfflineAreaSelection) => {
-    Alert.alert(
-      'Delete saved area?',
-      `${area.label} will be removed from your saved area list.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () => {
-            onWebClearRegion?.(area.label);
-            deleteMlnPack(area.label).catch(() => {});
-            onDeleteArea?.(area.id);
-          },
-        },
-      ],
-    );
-  }, [deleteMlnPack, onDeleteArea, onWebClearRegion]);
-
-  const deleteTripEssentials = useCallback(async (packId: string) => {
-    const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    await deleteOfflinePlacePack(packId);
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    await reloadPlacePacks(scope);
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    onOfflinePlacesChanged?.();
-  }, [onOfflinePlacesChanged, reloadPlacePacks]);
-
-  const openOfflineTrip = useCallback(async (tripId: string) => {
-    const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    const trip = await loadOfflineTrip(tripId);
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    if (!trip) {
-      Alert.alert('Saved route unavailable', 'That saved route is no longer on this device.');
-      await reloadOfflineTrips(scope);
-      return;
-    }
-    setActiveTrip({ ...trip, updated_at: Date.now() }, true);
-    if (offlineAccountScopeIsCurrent(scope)) onClose();
-  }, [onClose, reloadOfflineTrips, setActiveTrip]);
-
-  const deleteOfflineTripCopy = useCallback((trip: TripResult & { cached_at: number }) => {
-    const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
-    Alert.alert(
-      'Delete saved route?',
-      `${trip.plan.trip_name || trip.trip_id} will be removed from saved areas on this device.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: async () => {
-            if (!offlineAccountScopeIsCurrent(scope)) return;
-            await deleteOfflineTrip(trip.trip_id);
-            if (!offlineAccountScopeIsCurrent(scope)) return;
-            await reloadOfflineTrips(scope);
-          },
-        },
-      ],
-    );
-  }, [reloadOfflineTrips]);
-
-  const formatOfflineTripDate = useCallback((timestamp?: number | null) => {
-    if (!timestamp || !Number.isFinite(timestamp)) return 'Saved on device';
-    return `Saved ${new Date(timestamp).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}`;
-  }, []);
-  const formatSavedTripMeta = useCallback((trip: TripResult & { cached_at: number }) => {
-    const days = trip.plan.duration_days || trip.plan.daily_itinerary?.length || 0;
-    const miles = Math.round(trip.plan.total_est_miles || 0);
-    return [
-      days > 0 ? `${days} days` : 'Saved route',
-      miles > 0 ? `${miles} mi` : null,
-      formatOfflineTripDate((trip as any).cached_at),
-    ].filter(Boolean).join(' · ');
-  }, [formatOfflineTripDate]);
-
-  const currentPlacePack = placePacks.find(pack => tripId && pack.trip_id === tripId);
-  const currentManifestPlacePacks = Object.entries(placeManifest?.packs ?? {})
-    .filter(([, entry]) => entry.region_id === selectedState)
-    .sort(([, a], [, b]) => {
-      const ai = PLACE_PACK_ORDER.indexOf(a.pack_id);
-      const bi = PLACE_PACK_ORDER.indexOf(b.pack_id);
-      return (ai < 0 ? 999 : ai) - (bi < 0 ? 999 : bi) || a.pack_id.localeCompare(b.pack_id);
+    const key = areaPackKey(selectedArea);
+    const started = await authorizeAndRun(key, 'trip_corridor', selectedArea.id, selectedArea.label, () => {
+      if (!useNativeMap) {
+        onWebDownloadBbox?.({
+          label: selectedArea.label,
+          n: selectedArea.n,
+          s: selectedArea.s,
+          e: selectedArea.e,
+          w: selectedArea.w,
+          minZ: selectedArea.minZoom,
+          maxZ: selectedArea.maxZoom,
+          vectorOnly: true,
+        });
+        return;
+      }
+      return startMlnPack(
+        key,
+        selectedArea.label,
+        selectedArea.bounds,
+        selectedArea.minZoom,
+        selectedArea.maxZoom,
+        () => onSaveArea?.(selectedArea),
+      );
     });
-  const selectRegion = useCallback((id: string) => {
-    setSelectedState(id);
-    setSelectedRegionGroup(regionGroupFor(id));
-  }, []);
+    if (started) setView('home');
+  }, [authorizeAndRun, onSaveArea, onWebDownloadBbox, selectedArea, startMlnPack, useNativeMap]);
 
-  const downloadRegionPlacePack = useCallback(async (packId: string) => {
+  const downloadRegionPlaces = useCallback(async (regionId: string) => {
     if (placeBusy) return;
+    const entries = Object.values(placeManifest?.packs ?? {})
+      .filter(entry => entry.region_id === regionId)
+      .sort((a, b) => PLACE_PACK_ORDER.indexOf(a.pack_id) - PLACE_PACK_ORDER.indexOf(b.pack_id));
+    const missing = entries.filter(entry => !placePacks.some(pack => (
+      pack.region_id === regionId && pack.pack_id === `${regionId}-${entry.pack_id}`
+    )));
+    if (!missing.length) return;
     const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
     setPlaceBusy(true);
-    setPlaceError(null);
+    setPlaceError('');
     try {
-      const pack = await api.getPlacePack(selectedState, packId);
-      if (!offlineAccountScopeIsCurrent(scope)) return;
-      await saveOfflinePlacePack(pack, placePacks.filter(item => item.trip_id === tripId || item.region_id === selectedState).map(item => item.pack_id));
-      if (!offlineAccountScopeIsCurrent(scope)) return;
+      for (const entry of missing) {
+        const pack = await api.getPlacePack(regionId, entry.pack_id);
+        if (!offlineAccountScopeIsCurrent(scope)) return;
+        await saveOfflinePlacePack(pack, []);
+      }
       await reloadPlacePacks(scope);
-      if (!offlineAccountScopeIsCurrent(scope)) return;
       onOfflinePlacesChanged?.();
-      Alert.alert('Places saved', `${pack.name} saved ${pack.points.length} places on this device.`);
-    } catch (e: any) {
-      if (offlineAccountScopeIsCurrent(scope)) setPlaceError(e?.message ?? 'Could not save these places.');
+    } catch (error: any) {
+      if (offlineAccountScopeIsCurrent(scope)) setPlaceError(error?.message || 'Could not download camps and essentials.');
     } finally {
       if (offlineAccountScopeIsCurrent(scope)) setPlaceBusy(false);
     }
-  }, [onOfflinePlacesChanged, placeBusy, placePacks, reloadPlacePacks, selectedState, tripId]);
+  }, [onOfflinePlacesChanged, placeBusy, placeManifest, placePacks, reloadPlacePacks]);
 
   const downloadRegionBundle = useCallback(async (regionId: string) => {
     if (authorizing) return;
-    const scope = currentOfflineAccountScope();
-    if (!offlineAccountScopeIsCurrent(scope)) return;
     const region = FILE_REGIONS[regionId as keyof typeof FILE_REGIONS];
     if (!region) return;
-    const label = region.name;
-    setAuthorizing(`bundle:${regionId}`);
-    const scheduleFile = async (
-      assetType: OfflineAssetType,
-      assetLabel: string,
-      action: () => void | Promise<void>,
-    ) => {
-      await api.authorizeOfflineDownload(assetType, regionId, assetLabel);
-      if (!offlineAccountScopeIsCurrent(scope)) return;
-      void Promise.resolve(action()).catch((e: any) => {
-        if (offlineAccountScopeIsCurrent(scope)) {
-          Alert.alert('Save unavailable', e?.message ?? `Could not start ${assetLabel}.`);
-        }
-      });
+    const scope = currentOfflineAccountScope();
+    if (!offlineAccountScopeIsCurrent(scope)) return;
+    const schedule = async (assetType: OfflineAssetType, label: string, action: () => void | Promise<void>) => {
+      await api.authorizeOfflineDownload(assetType, regionId, label);
+      if (offlineAccountScopeIsCurrent(scope)) void Promise.resolve(action()).catch(() => {});
     };
+    setAuthorizing(`region:${regionId}`);
     try {
       const mapState = getState(regionId);
       const routingState = getRoutingState(regionId);
       const trailState = getTrailState(regionId);
       if (isFilePublished(regionId)) {
         if (mapState.status === 'idle' || mapState.status === 'error') {
-          await scheduleFile('state_map', `${label} map`, () => startDownload(regionId));
-          if (!offlineAccountScopeIsCurrent(scope)) return;
+          await schedule(regionId === 'conus' ? 'conus_map' : 'state_map', `${region.name} map`, () => startDownload(regionId));
         } else if (mapState.status === 'paused') {
           resumeDownload(regionId);
         }
       }
-      if (isRoutingPublished(regionId)) {
+      if (regionId !== 'conus' && isRoutingPublished(regionId)) {
         if (routingState.status === 'idle' || routingState.status === 'error') {
-          await scheduleFile('state_route', `${label} navigation`, () => startRoutingDownload(regionId));
-          if (!offlineAccountScopeIsCurrent(scope)) return;
+          await schedule('state_route', `${region.name} directions`, () => startRoutingDownload(regionId));
         } else if (routingState.status === 'paused') {
           resumeRoutingDownload(regionId);
         }
       }
-      if (isTrailPublished(regionId)) {
+      if (regionId !== 'conus' && isTrailPublished(regionId)) {
         if (trailState.status === 'idle' || trailState.status === 'error') {
-          await scheduleFile('state_trails', `${label} trails`, () => startTrailDownload(regionId));
-          if (!offlineAccountScopeIsCurrent(scope)) return;
+          await schedule('state_trails', `${region.name} trails`, () => startTrailDownload(regionId));
         } else if (trailState.status === 'paused') {
           resumeTrailDownload(regionId);
         }
       }
-      const placeEntries = Object.values(placeManifest?.packs ?? {}).filter(entry => entry.region_id === regionId);
-      const missingPlaceEntries = placeEntries.filter(entry => (
-        !placePacks.some(pack => pack.region_id === regionId && pack.pack_id === `${regionId}-${entry.pack_id}`)
-      ));
-      if (missingPlaceEntries.length && !placeBusy) {
-        if (!offlineAccountScopeIsCurrent(scope)) return;
-        setPlaceBusy(true);
-        setPlaceError(null);
-        void (async () => {
-          try {
-            for (const entry of missingPlaceEntries) {
-              const pack = await api.getPlacePack(regionId, entry.pack_id);
-              if (!offlineAccountScopeIsCurrent(scope)) return;
-              await saveOfflinePlacePack(pack, []);
-              if (!offlineAccountScopeIsCurrent(scope)) return;
-            }
-            await reloadPlacePacks(scope);
-            if (!offlineAccountScopeIsCurrent(scope)) return;
-            onOfflinePlacesChanged?.();
-          } catch (e: any) {
-            if (offlineAccountScopeIsCurrent(scope)) {
-              setPlaceError(e?.message ?? 'Could not save places for this region.');
-            }
-          } finally {
-            if (offlineAccountScopeIsCurrent(scope)) setPlaceBusy(false);
-          }
-        })();
-      }
-    } catch (e: any) {
-      if (!offlineAccountScopeIsCurrent(scope)) return;
-      if (e instanceof PaywallError) {
-        Alert.alert('Save unavailable', e.message);
-      } else {
-        Alert.alert('Save unavailable', e?.message ?? `Could not start saves for ${label}.`);
-      }
+      void downloadRegionPlaces(regionId);
+    } catch (error: any) {
+      const message = error instanceof PaywallError ? error.message : error?.message || `Could not start ${region.name}.`;
+      Alert.alert('Download unavailable', message);
     } finally {
-      if (offlineAccountScopeIsCurrent(scope)) setAuthorizing(null);
+      if (offlineAccountScopeIsCurrent(scope)) setAuthorizing('');
     }
   }, [
     authorizing,
+    downloadRegionPlaces,
     getRoutingState,
     getState,
     getTrailState,
     isFilePublished,
     isRoutingPublished,
     isTrailPublished,
-    onOfflinePlacesChanged,
-    placeBusy,
-    placeManifest,
-    placePacks,
-    reloadPlacePacks,
     resumeDownload,
     resumeRoutingDownload,
     resumeTrailDownload,
@@ -997,1143 +937,1036 @@ export default function OfflineModal({
     startTrailDownload,
   ]);
 
-  const explorerStats = useMemo(() => {
-    const regionIds = Object.keys(FILE_REGIONS).filter(id => id !== 'conus');
-    const savedMaps = regionIds.filter(id => getState(id).status === 'complete').length;
-    const savedRoutes = regionIds.filter(id => getRoutingState(id).status === 'complete').length;
-    const savedTrails = regionIds.filter(id => getTrailState(id).status === 'complete').length;
-    const placeCount = placePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
-    return {
-      regionIds,
-      savedMaps,
-      savedRoutes,
-      savedTrails,
-      placeCount,
-      corridorCount: savedAreas.length + mlnPacks.filter(pack => pack.complete).length + offlineTrips.length,
-    };
-  }, [getRoutingState, getState, getTrailState, mlnPacks, offlineTrips.length, placePacks, savedAreas.length]);
+  const regionSummaries = useMemo(() => {
+    const summaries: Record<string, OfflineRegionSummary> = {};
+    Object.keys(FILE_REGIONS).forEach(id => {
+      const placeCount = placePacks
+        .filter(pack => pack.region_id === id)
+        .reduce((total, pack) => total + pack.point_count, 0);
+      summaries[id] = summarizeOfflineRegion({
+        map: states[id] ?? getState(id),
+        routing: id === 'conus' ? undefined : routingStates[id] ?? getRoutingState(id),
+        contour: id === 'conus' ? undefined : contourStates[id] ?? getContourState(id),
+        trails: id === 'conus' ? undefined : trailStates[id] ?? getTrailState(id),
+        placeCount,
+        requiresRouting: id !== 'conus',
+      });
+    });
+    return summaries;
+  }, [contourStates, getContourState, getRoutingState, getState, getTrailState, placePacks, routingStates, states, trailStates]);
 
-  const explorerSearchResults = useMemo(() => {
-    const query = downloadSearch.trim().toLowerCase();
-    if (!query) return [];
-    const rows: Array<{
-      id: string;
-      title: string;
-      detail: string;
-      icon: keyof typeof Ionicons.glyphMap;
-      status?: string;
-      onPress: () => void;
-    }> = [];
-    rows.push(
-      { id: 'countries', title: 'Regions', detail: 'Browse states and countries', icon: 'folder-outline', onPress: () => setActiveTab('regions') },
-      { id: 'corridors', title: 'Route areas', detail: 'Saved route areas and custom map boxes', icon: 'git-branch-outline', onPress: () => setActiveTab('areas') },
-      { id: 'places', title: 'Camps & Places', detail: `${explorerStats.placeCount} saved pins`, icon: 'location-outline', onPress: () => setActiveTab('regions') },
-      { id: 'trails', title: 'Trails', detail: `${explorerStats.savedTrails} regions saved`, icon: 'trail-sign-outline', onPress: () => setActiveTab('regions') },
-      { id: 'gpx', title: 'Imported routes', detail: 'Imported routes and tracks', icon: 'document-attach-outline', onPress: () => setActiveTab('areas') },
-      { id: 'photos', title: 'Photos', detail: 'Saved trip and place photos', icon: 'images-outline', onPress: () => setActiveTab('areas') },
+  const inferredRegionIds = useMemo(() => {
+    const routePoints = currentTripTarget?.routeCoords.map(([lng, lat]) => ({ lat, lng })) ?? [];
+    const tripPoints = currentTripTarget?.waypoints ?? [];
+    const location = userLoc ? [userLoc] : [];
+    return offlineRegionIdsForPoints([...routePoints, ...tripPoints, ...location], FILE_REGIONS);
+  }, [currentTripTarget, userLoc]);
+
+  const tripRuntime = useCallback((target: TripTarget): TripRuntime => {
+    const pack = tripPackFor(target);
+    const matchingPlacePacks = placePacks.filter(item => item.trip_id === target.id);
+    const storedTrip = offlineTrips.find(trip => trip.trip_id === target.id);
+    const active = Boolean(
+      activePackName === tripPackKey(target)
+      || (!useNativeMap && webIsDownloading && webDownloadLabel === target.name),
     );
-    Object.entries(FILE_REGIONS).forEach(([id, region]) => {
-      if (id === 'conus') return;
+    const progress = useNativeMap
+      ? activePackProgress?.percentage ?? 0
+      : webDownloadProgress ?? 0;
+    const routeRegions = offlineRegionIdsForPoints(
+      (target.routeCoords.length ? target.routeCoords.map(([lng, lat]) => ({ lat, lng })) : target.waypoints),
+      FILE_REGIONS,
+    );
+    const conusCoversRoute = routeRegions.length > 0
+      && routeRegions.every(id => id.length === 2 && id !== 'ak' && id !== 'hi')
+      && getState('conus').status === 'complete';
+    const regionMapsCoverRoute = routeRegions.length > 0
+      && routeRegions.every(id => getState(id).status === 'complete');
+    const webMapReady = !useNativeMap && webCachedRegions.includes(target.name);
+    const mapReady = Boolean(pack?.complete) || conusCoversRoute || regionMapsCoverRoute || webMapReady;
+    const storedCoords = validCoords(storedTrip?.route_geometry?.coords ?? target.trip?.route_geometry?.coords);
+    const directionsReady = Boolean(storedTrip && storedCoords.length >= 2);
+    const notesReady = Boolean(storedTrip);
+    const placesReady = matchingPlacePacks.length > 0;
+    const hasDownload = Boolean(pack || matchingPlacePacks.length > 0 || active || webMapReady);
+    const trailsReady = routeRegions.length > 0 && routeRegions.every(id => getTrailState(id).status === 'complete');
+    const ready = mapReady && directionsReady && notesReady && placesReady;
+    const storedBytes = (pack?.sizeMb ?? 0) * 1_048_576
+      + Number(tripStorageBytes[target.id] ?? 0)
+      + matchingPlacePacks.reduce((total, item) => total + Number(placeStorageBytes[item.pack_id] ?? 0), 0);
+    let status = '';
+    if (active) status = activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`;
+    else if (packError?.key === tripPackKey(target)) status = 'Download incomplete';
+    else if (ready) status = 'Ready offline';
+    else if (mapReady && placesReady) status = 'Map and places saved';
+    else if (mapReady) status = 'Map saved';
+    else if (placesReady) status = 'Places saved';
+    else if (notesReady) status = 'Trip saved';
+    else status = 'Not downloaded';
+    return {
+      target,
+      pack,
+      placePacks: matchingPlacePacks,
+      hasDownload,
+      mapReady,
+      directionsReady,
+      notesReady,
+      placesReady,
+      trailsReady,
+      ready,
+      active,
+      progress,
+      storedBytes,
+      status,
+    };
+  }, [
+    activePackName,
+    activePackPaused,
+    activePackProgress?.percentage,
+    getState,
+    getTrailState,
+    offlineTrips,
+    packError?.key,
+    placePacks,
+    placeStorageBytes,
+    tripPackFor,
+    tripStorageBytes,
+    useNativeMap,
+    webCachedRegions,
+    webDownloadLabel,
+    webDownloadProgress,
+    webIsDownloading,
+  ]);
+
+  const currentTripRuntime = useMemo(
+    () => currentTripTarget ? tripRuntime(currentTripTarget) : null,
+    [currentTripTarget, tripRuntime],
+  );
+
+  const areaCatalog = useMemo(() => {
+    const candidates = selectedArea && !savedAreas.some(area => area.id === selectedArea.id)
+      ? [selectedArea, ...savedAreas]
+      : savedAreas;
+    return candidates.map(area => {
+      const key = areaPackKey(area);
+      const pack = mlnPacks.find(item => item.name === key || item.name === area.label);
+      const active = Boolean(activePackName === key || (!useNativeMap && webIsDownloading && webDownloadLabel === area.label));
+      const ready = Boolean(pack?.complete) || (!useNativeMap && webCachedRegions.includes(area.label));
+      return {
+        area,
+        pack,
+        active,
+        ready,
+        progress: useNativeMap ? activePackProgress?.percentage ?? 0 : webDownloadProgress ?? 0,
+        bytes: (pack?.sizeMb ?? 0) * 1_048_576,
+      };
+    }).filter(item => item.pack || item.active || item.ready);
+  }, [
+    activePackName,
+    activePackProgress?.percentage,
+    mlnPacks,
+    savedAreas,
+    selectedArea,
+    useNativeMap,
+    webCachedRegions,
+    webDownloadLabel,
+    webDownloadProgress,
+    webIsDownloading,
+  ]);
+
+  const linkedPackNames = useMemo(() => {
+    const names = new Set<string>();
+    offlineTrips.forEach(trip => {
+      const target = targetFromTrip(trip);
+      names.add(tripPackKey(target));
+      names.add(legacyTripPackKey(target.name));
+    });
+    if (currentTripTarget) {
+      names.add(tripPackKey(currentTripTarget));
+      names.add(legacyTripPackKey(currentTripTarget.name));
+    }
+    savedAreas.forEach(area => {
+      names.add(areaPackKey(area));
+      names.add(area.label);
+    });
+    return names;
+  }, [currentTripTarget, offlineTrips, savedAreas]);
+
+  const deviceItems = useMemo<DeviceItem[]>(() => {
+    const rows: DeviceItem[] = [];
+    Object.entries(regionSummaries).forEach(([id, summary]) => {
+      if (!summary.hasContent) return;
+      const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
       rows.push({
         id: `region:${id}`,
+        kind: 'region',
         title: region.name,
-        detail: `${regionCodeFor(id)} · map, navigation, places, and trails`,
-        icon: id.length === 2 ? 'map-outline' : 'earth-outline',
-        status: getState(id).status === 'complete' && getRoutingState(id).status === 'complete' ? 'Saved' : 'Available',
+        status: summary.status,
+        bytes: summary.storedBytes + placePacks.filter(pack => pack.region_id === id).reduce((total, pack) => total + Number(placeStorageBytes[pack.pack_id] ?? 0), 0),
+        active: summary.active,
+        progress: summary.active ? summary.progress : undefined,
+        icon: 'map-outline',
         onPress: () => {
-          selectRegion(id);
-          setActiveTab('regions');
+          setSelectedRegionId(id);
+          setView('region');
         },
       });
     });
-    savedAreas.forEach(area => rows.push({
-      id: `area:${area.id}`,
-      title: area.label,
-      detail: `${Math.round(area.areaSqMi).toLocaleString()} sq mi · custom area`,
+    offlineTrips.forEach(trip => {
+      const runtime = tripRuntime(targetFromTrip(trip));
+      if (!runtime.hasDownload) return;
+      rows.push({
+        id: `trip:${trip.trip_id}`,
+        kind: 'trip',
+        title: runtime.target.name,
+        status: runtime.status,
+        bytes: runtime.storedBytes,
+        active: runtime.active,
+        progress: runtime.active ? runtime.progress : undefined,
+        icon: 'navigate-outline',
+        onPress: () => {
+          setSelectedTripId(trip.trip_id);
+          setView('trip');
+        },
+      });
+    });
+    areaCatalog.forEach(item => rows.push({
+      id: `area:${item.area.id}`,
+      kind: 'area',
+      title: item.area.label,
+      status: item.active ? `Downloading ${Math.round(item.progress)}%` : item.ready ? 'Map saved' : 'Download incomplete',
+      bytes: item.bytes,
+      active: item.active,
+      progress: item.active ? item.progress : undefined,
       icon: 'scan-outline',
-      status: 'Area',
       onPress: () => {
-        onSelectArea?.(area);
-        setActiveTab('areas');
+        onSelectArea?.(item.area);
+        setView('area');
       },
     }));
-    offlineTrips.forEach(trip => rows.push({
-      id: `route:${trip.trip_id}`,
-      title: trip.plan.trip_name || trip.trip_id,
-      detail: formatSavedTripMeta(trip),
+    mlnPacks.filter(pack => !linkedPackNames.has(pack.name)).forEach(pack => rows.push({
+      id: `map:${pack.name}`,
+      kind: 'map',
+      title: displayOfflineDownloadName(pack.name),
+      status: pack.complete ? 'Map saved' : 'Download incomplete',
+      bytes: pack.sizeMb * 1_048_576,
+      active: activePackName === pack.name,
+      progress: pack.percentage,
       icon: 'map-outline',
-      status: 'Route',
-      onPress: () => openOfflineTrip(trip.trip_id),
+      onPress: () => {},
     }));
-    placePacks.forEach(pack => rows.push({
-      id: `place:${pack.pack_id}`,
+    placePacks.filter(pack => !pack.region_id && !pack.trip_id).forEach(pack => rows.push({
+      id: `places:${pack.pack_id}`,
+      kind: 'places',
       title: pack.name,
-      detail: `${pack.point_count} places · ${(pack.categories || []).slice(0, 3).join(', ') || 'saved places'}`,
+      status: `${pack.point_count.toLocaleString()} places saved`,
+      bytes: Number(placeStorageBytes[pack.pack_id] ?? 0),
+      active: false,
       icon: 'location-outline',
-      status: 'Saved',
-      onPress: () => setActiveTab('regions'),
+      onPress: () => {},
     }));
-    return rows.filter(row => `${row.title} ${row.detail} ${row.status ?? ''}`.toLowerCase().includes(query)).slice(0, 30);
+    return rows.sort((a, b) => Number(b.active) - Number(a.active) || a.title.localeCompare(b.title));
   }, [
-    downloadSearch,
-    explorerStats.placeCount,
-    explorerStats.savedTrails,
-    getRoutingState,
-    getState,
-    onSelectArea,
+    activePackName,
+    areaCatalog,
+    linkedPackNames,
+    mlnPacks,
     offlineTrips,
-    openOfflineTrip,
+    onSelectArea,
     placePacks,
-    savedAreas,
-    selectRegion,
-    formatSavedTripMeta,
+    placeStorageBytes,
+    regionSummaries,
+    tripRuntime,
   ]);
 
-  const renderExplorerRow = (row: {
-    id: string;
-    title: string;
-    detail: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    status?: string;
-    onPress?: () => void;
-  }) => (
-    <TouchableOpacity key={row.id} style={s.explorerRow} onPress={row.onPress} activeOpacity={row.onPress ? 0.82 : 1}>
-      <View style={s.explorerIcon}>
-        <Ionicons name={row.icon} size={18} color={C.orange} />
-      </View>
-      <View style={s.explorerText}>
-        <Text style={s.explorerTitle} numberOfLines={1}>{row.title}</Text>
-        <Text style={s.explorerDetail} numberOfLines={2}>{row.detail}</Text>
-      </View>
-      {row.status ? <Text style={s.explorerStatus} numberOfLines={1}>{row.status}</Text> : null}
-      {row.onPress ? <Ionicons name="chevron-forward" size={16} color={C.text3} /> : null}
-    </TouchableOpacity>
+  const visibleDeviceItems = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    if (!query) return deviceItems;
+    return deviceItems.filter(item => `${item.title} ${item.status}`.toLowerCase().includes(query));
+  }, [deviceItems, search]);
+
+  const totalStoredBytes = useMemo(
+    () => deviceItems.reduce((total, item) => total + item.bytes, 0),
+    [deviceItems],
   );
+  const activeCount = deviceItems.filter(item => item.active).length;
+
+  const selectedTripRuntime = useMemo(() => {
+    if (selectedTripId && currentTripTarget?.id === selectedTripId) return currentTripRuntime;
+    const trip = offlineTrips.find(item => item.trip_id === selectedTripId);
+    return trip ? tripRuntime(targetFromTrip(trip)) : currentTripRuntime;
+  }, [currentTripRuntime, currentTripTarget?.id, offlineTrips, selectedTripId, tripRuntime]);
+
+  const openOfflineTrip = useCallback(async (target: TripTarget) => {
+    if (activeTrip?.trip_id === target.id) {
+      onClose();
+      return;
+    }
+    const scope = currentOfflineAccountScope();
+    const trip = await loadOfflineTrip(target.id);
+    if (!offlineAccountScopeIsCurrent(scope)) return;
+    if (!trip) {
+      Alert.alert('Trip unavailable', 'This offline copy is no longer on this device.');
+      await reloadOfflineTrips(scope);
+      return;
+    }
+    setActiveTrip({ ...trip, updated_at: Date.now() }, true);
+    onClose();
+  }, [activeTrip?.trip_id, onClose, reloadOfflineTrips, setActiveTrip]);
+
+  const openRegion = useCallback((id: string) => {
+    const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
+    if (!region) return;
+    onOpenRegion?.({
+      lat: (region.bounds.n + region.bounds.s) / 2,
+      lng: (region.bounds.e + region.bounds.w) / 2,
+      zoom: id === 'conus' || id.length > 2 ? 4 : 6,
+      label: region.name,
+    });
+    onClose();
+  }, [onClose, onOpenRegion]);
+
+  const artifactAction = useCallback((state: FileDownloadState, actions: {
+    start: () => void;
+    pause: () => void;
+    resume: () => void;
+  }) => {
+    if (state.status === 'downloading') actions.pause();
+    else if (state.status === 'paused') actions.resume();
+    else if (state.status !== 'complete') actions.start();
+  }, []);
+
+  const removeRegionNow = useCallback(async (id: string) => {
+    const summary = regionSummaries[id];
+    if (summary?.active) return;
+    await Promise.all([
+      deleteDownload(id),
+      id === 'conus' ? Promise.resolve() : deleteRoutingDownload(id),
+      id === 'conus' ? Promise.resolve() : deleteContourDownload(id),
+      id === 'conus' ? Promise.resolve() : deleteTrailDownload(id),
+      ...placePacks.filter(pack => pack.region_id === id).map(pack => deleteOfflinePlacePack(pack.pack_id)),
+    ]);
+    await reloadPlacePacks(currentOfflineAccountScope());
+    onOfflinePlacesChanged?.();
+  }, [
+    deleteContourDownload,
+    deleteDownload,
+    deleteRoutingDownload,
+    deleteTrailDownload,
+    onOfflinePlacesChanged,
+    placePacks,
+    regionSummaries,
+    reloadPlacePacks,
+  ]);
+
+  const removeTripNow = useCallback(async (target: TripTarget) => {
+    const runtime = tripRuntime(target);
+    if (runtime.active) return;
+    if (runtime.pack) await deleteMlnPack(runtime.pack.name);
+    await Promise.all([
+      deleteOfflineTrip(target.id),
+      ...runtime.placePacks.map(pack => deleteOfflinePlacePack(pack.pack_id)),
+    ]);
+    await Promise.all([
+      reloadOfflineTrips(currentOfflineAccountScope()),
+      reloadPlacePacks(currentOfflineAccountScope()),
+    ]);
+    onOfflinePlacesChanged?.();
+  }, [deleteMlnPack, onOfflinePlacesChanged, reloadOfflineTrips, reloadPlacePacks, tripRuntime]);
+
+  const removeAreaNow = useCallback(async (area: OfflineAreaSelection) => {
+    const entry = areaCatalog.find(item => item.area.id === area.id);
+    if (entry?.active) return;
+    if (entry?.pack) await deleteMlnPack(entry.pack.name);
+    onWebClearRegion?.(area.label);
+    onDeleteArea?.(area.id);
+  }, [areaCatalog, deleteMlnPack, onDeleteArea, onWebClearRegion]);
+
+  const removeDeviceItem = useCallback(async (id: string) => {
+    const separator = id.indexOf(':');
+    const kind = separator >= 0 ? id.slice(0, separator) : id;
+    const value = separator >= 0 ? id.slice(separator + 1) : '';
+    if (kind === 'region') return removeRegionNow(value);
+    if (kind === 'trip') {
+      const trip = offlineTrips.find(item => item.trip_id === value);
+      if (trip) return removeTripNow(targetFromTrip(trip));
+      return;
+    }
+    if (kind === 'area') {
+      const area = savedAreas.find(item => item.id === value);
+      if (area) return removeAreaNow(area);
+      return;
+    }
+    if (kind === 'map') return deleteMlnPack(value);
+    if (kind === 'places') {
+      await deleteOfflinePlacePack(value);
+      await reloadPlacePacks(currentOfflineAccountScope());
+      onOfflinePlacesChanged?.();
+    }
+  }, [deleteMlnPack, offlineTrips, onOfflinePlacesChanged, reloadPlacePacks, removeAreaNow, removeRegionNow, removeTripNow, savedAreas]);
+
+  const removeConfirmedItems = useCallback(async () => {
+    const pending = confirmRemoval;
+    if (!pending) return;
+    setConfirmRemoval(null);
+    for (const id of pending.ids) await removeDeviceItem(id);
+    setSelectedForRemoval([]);
+    await Promise.all([reloadNativePacks(), reloadStorage()]);
+  }, [confirmRemoval, reloadNativePacks, reloadStorage, removeDeviceItem]);
+
+  const askToRemoveTrip = useCallback((runtime: TripRuntime) => {
+    if (runtime.active) return;
+    Alert.alert(
+      `Remove ${runtime.target.name}?`,
+      'The trip stays in your plans. Its downloaded maps, route details, and places are removed from this device.',
+      [
+        { text: 'Keep download', style: 'cancel' },
+        { text: 'Remove download', style: 'destructive', onPress: () => void removeTripNow(runtime.target) },
+      ],
+    );
+  }, [removeTripNow]);
+
+  const askToRemoveRegion = useCallback((id: string) => {
+    const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
+    if (!region || regionSummaries[id]?.active) return;
+    Alert.alert(
+      `Remove ${region.name}?`,
+      'Its downloaded map, directions, trails, and places are removed from this device.',
+      [
+        { text: 'Keep download', style: 'cancel' },
+        { text: 'Remove download', style: 'destructive', onPress: () => void removeRegionNow(id) },
+      ],
+    );
+  }, [regionSummaries, removeRegionNow]);
+
+  const headerTitle = view === 'home'
+    ? 'Offline'
+    : view === 'regions'
+      ? 'Choose a region'
+      : view === 'region'
+        ? FILE_REGIONS[selectedRegionId as keyof typeof FILE_REGIONS]?.name || 'Region'
+        : view === 'area'
+          ? selectedArea && areaCatalog.some(item => item.area.id === selectedArea.id) ? selectedArea.label : 'Download this area'
+          : view === 'trip'
+            ? selectedTripRuntime?.target.name || 'Trip download'
+            : 'Offline storage';
+
+  const renderHeader = () => (
+    <View style={s.header}>
+      {view !== 'home' ? (
+        <IconButton icon="chevron-back" label="Back" onPress={() => setView('home')} />
+      ) : null}
+      <Text style={s.title} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{headerTitle}</Text>
+      {view === 'home' ? (
+        <IconButton icon="add" label="Download an area" onPress={() => onStartAreaSelect?.(null)} />
+      ) : <View style={shared.iconButtonSpacer} />}
+      <IconButton icon="close" label="Close" onPress={onClose} />
+    </View>
+  );
+
+  const renderHome = () => {
+    const suggestedRegions = inferredRegionIds.filter(id => !regionSummaries[id]?.ready).slice(0, 2);
+    const storageMeta = [
+      totalStoredBytes > 0 ? `${fmtBytes(totalStoredBytes)} stored` : null,
+      freeDiskBytes != null ? `${fmtBytes(freeDiskBytes)} free` : null,
+    ].filter(Boolean).join(' · ');
+    return (
+      <>
+        {deviceItems.length > 0 ? (
+          <Text style={s.summary}>
+            {activeCount > 0
+              ? `${activeCount} active · ${fmtBytes(totalStoredBytes)} on this device`
+              : `${deviceItems.length} download${deviceItems.length === 1 ? '' : 's'} · ${fmtBytes(totalStoredBytes)}`}
+          </Text>
+        ) : null}
+
+        {!user ? (
+          <View style={s.signInRow}>
+            <Ionicons name="person-outline" size={20} color={C.text2} />
+            <Text style={s.signInText}>Sign in from Profile to download maps and trips.</Text>
+          </View>
+        ) : null}
+
+        {currentTripRuntime ? (
+          <>
+            <SectionHeading label="Upcoming trips" />
+            <TouchableOpacity
+              style={s.tripFeature}
+              onPress={() => {
+                setSelectedTripId(currentTripRuntime.target.id);
+                setView('trip');
+              }}
+              activeOpacity={0.86}
+            >
+              <MapArtwork height={122} route wide />
+              <View style={s.tripFeatureInfo}>
+                <View style={s.tripFeatureCopy}>
+                  <Text style={s.tripFeatureTitle}>{currentTripRuntime.target.name}</Text>
+                  {formatTripMeta(currentTripRuntime.target) ? (
+                    <Text style={s.tripFeatureMeta}>{formatTripMeta(currentTripRuntime.target)}</Text>
+                  ) : null}
+                  <StatusLine label={currentTripRuntime.status} />
+                </View>
+                <Ionicons name="chevron-forward" size={20} color={C.text3} />
+              </View>
+            </TouchableOpacity>
+          </>
+        ) : null}
+
+        {deviceItems.length > 0 ? (
+          <>
+            <SectionHeading
+              label="On this device"
+              actionLabel={deviceItems.length > 4 ? 'View all' : undefined}
+              onAction={deviceItems.length > 4 ? () => setView('storage') : undefined}
+            />
+            {deviceItems.slice(0, 4).map(item => <DeviceRow key={item.id} item={item} />)}
+          </>
+        ) : null}
+
+        <SectionHeading label="Suggested downloads" />
+        {suggestedRegions.map(id => {
+          const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
+          const bytes = getTotalBytes(id) + getRoutingTotalBytes(id);
+          return (
+            <TouchableOpacity
+              key={id}
+              style={[s.suggestionRow, { borderBottomColor: C.border }]}
+              onPress={() => {
+                setSelectedRegionId(id);
+                setView('region');
+              }}
+            >
+              <MapArtwork height={46} />
+              <View style={s.suggestionCopy}>
+                <Text style={s.suggestionTitle}>{region.name}</Text>
+                <Text style={s.suggestionMeta}>About {fmtBytes(bytes)}</Text>
+              </View>
+              <Ionicons name="download-outline" size={21} color={C.orange} />
+            </TouchableOpacity>
+          );
+        })}
+        <TouchableOpacity style={[s.suggestionRow, { borderBottomColor: C.border }]} onPress={() => onStartAreaSelect?.(null)}>
+          <MapArtwork height={46} route />
+          <View style={s.suggestionCopy}>
+            <Text style={s.suggestionTitle}>Current map area</Text>
+            <Text style={s.suggestionMeta}>Choose the exact area</Text>
+          </View>
+          <Ionicons name="download-outline" size={21} color={C.orange} />
+        </TouchableOpacity>
+        <TouchableOpacity style={[s.suggestionRow, { borderBottomColor: C.border }]} onPress={() => setView('regions')}>
+          <MapArtwork height={46} />
+          <View style={s.suggestionCopy}>
+            <Text style={s.suggestionTitle}>Browse regions</Text>
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={C.text3} />
+        </TouchableOpacity>
+
+        <TouchableOpacity style={[s.storageLink, { borderTopColor: C.border }]} onPress={() => setView('storage')}>
+          <Ionicons name="phone-portrait-outline" size={22} color={C.text2} />
+          <View style={s.storageLinkCopy}>
+            <Text style={s.storageLinkTitle}>Offline storage</Text>
+            {storageMeta ? <Text style={s.storageLinkMeta}>{storageMeta}</Text> : null}
+          </View>
+          <Ionicons name="chevron-forward" size={20} color={C.text3} />
+        </TouchableOpacity>
+      </>
+    );
+  };
+
+  const renderRegionBrowser = () => {
+    const query = regionSearch.trim().toLowerCase();
+    return (
+      <>
+        <View style={s.searchBox}>
+          <Ionicons name="search-outline" size={19} color={C.text3} />
+          <TextInput
+            value={regionSearch}
+            onChangeText={setRegionSearch}
+            placeholder="Search regions"
+            placeholderTextColor={C.text3}
+            style={s.searchInput}
+            autoCorrect={false}
+            returnKeyType="search"
+          />
+          {query ? (
+            <TouchableOpacity style={shared.clearButton} onPress={() => setRegionSearch('')} accessibilityLabel="Clear search">
+              <Ionicons name="close" size={17} color={C.text3} />
+            </TouchableOpacity>
+          ) : null}
+        </View>
+        {REGION_GROUPS.map(group => {
+          const ids = group.ids.filter(id => {
+            const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
+            return region && (!query || `${region.name} ${regionCode(id)}`.toLowerCase().includes(query));
+          });
+          if (!ids.length) return null;
+          return (
+            <View key={group.title}>
+              <SectionHeading label={group.title} />
+              {ids.map(id => {
+                const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
+                const summary = regionSummaries[id];
+                const status = summary?.status || `About ${fmtBytes(getTotalBytes(id) + getRoutingTotalBytes(id))}`;
+                return (
+                  <TouchableOpacity
+                    key={id}
+                    style={[s.regionRow, { borderBottomColor: C.border }]}
+                    onPress={() => {
+                      setSelectedRegionId(id);
+                      setView('region');
+                    }}
+                  >
+                    <View style={s.regionCodeBox}><Text style={s.regionCode}>{regionCode(id)}</Text></View>
+                    <View style={s.regionCopy}>
+                      <Text style={s.regionTitle}>{region.name}</Text>
+                      <Text style={[s.regionMeta, { color: statusColor(C, status) }]}>{status}</Text>
+                    </View>
+                    <Ionicons name="chevron-forward" size={19} color={C.text3} />
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          );
+        })}
+      </>
+    );
+  };
+
+  const renderRegionDetail = () => {
+    const id = selectedRegionId;
+    const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
+    if (!region) return null;
+    const mapState = getState(id);
+    const routingState = getRoutingState(id);
+    const contourState = getContourState(id);
+    const trailsState = getTrailState(id);
+    const summary = regionSummaries[id];
+    const regionPlacePacks = placePacks.filter(pack => pack.region_id === id);
+    const regionPlaceCount = regionPlacePacks.reduce((total, pack) => total + pack.point_count, 0);
+    const placesAvailable = Object.values(placeManifest?.packs ?? {}).some(entry => entry.region_id === id);
+    const regionBusy = Boolean(summary?.active || authorizing === `region:${id}` || placeBusy);
+    return (
+      <>
+        <MapArtwork height={184} wide />
+        <View style={s.detailIntro}>
+          <Text style={s.detailTitle}>{region.name}</Text>
+          <StatusLine label={summary?.status || 'Not downloaded'} />
+        </View>
+
+        <SectionHeading label="Offline content" />
+        <ArtifactRow
+          label="Map & terrain"
+          state={mapState}
+          available={isFilePublished(id)}
+          onAction={() => artifactAction(mapState, {
+            start: () => void authorizeAndRun(`map:${id}`, id === 'conus' ? 'conus_map' : 'state_map', id, `${region.name} map`, () => startDownload(id)),
+            pause: () => void pauseDownload(id),
+            resume: () => void resumeDownload(id),
+          })}
+        />
+        {id !== 'conus' ? (
+          <ArtifactRow
+            label="Directions"
+            state={routingState}
+            available={isRoutingPublished(id)}
+            onAction={() => artifactAction(routingState, {
+              start: () => void authorizeAndRun(`route:${id}`, 'state_route', id, `${region.name} directions`, () => startRoutingDownload(id)),
+              pause: () => void pauseRoutingDownload(id),
+              resume: () => void resumeRoutingDownload(id),
+            })}
+          />
+        ) : null}
+        {id !== 'conus' && isTrailPublished(id) ? (
+          <ArtifactRow
+            label="Trails"
+            state={trailsState}
+            onAction={() => artifactAction(trailsState, {
+              start: () => void authorizeAndRun(`trails:${id}`, 'state_trails', id, `${region.name} trails`, () => startTrailDownload(id)),
+              pause: () => void pauseTrailDownload(id),
+              resume: () => void resumeTrailDownload(id),
+            })}
+          />
+        ) : null}
+        {placesAvailable || regionPlacePacks.length > 0 ? (
+          <View style={[shared.artifactRow, { borderBottomColor: C.border }]}>
+            <Ionicons name={regionPlacePacks.length ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={regionPlacePacks.length ? C.green : C.text3} />
+            <View style={shared.artifactCopy}>
+              <Text style={[shared.artifactTitle, { color: C.text }]}>Camps & essentials</Text>
+              <Text style={[shared.artifactStatus, { color: regionPlacePacks.length ? C.green : C.text2 }]}>
+                {placeBusy ? 'Downloading' : regionPlacePacks.length ? `${regionPlaceCount.toLocaleString()} places downloaded` : 'Not downloaded'}
+              </Text>
+            </View>
+            {!regionPlacePacks.length ? (
+              <TouchableOpacity style={shared.textAction} onPress={() => void downloadRegionPlaces(id)} disabled={placeBusy}>
+                <Text style={[shared.textActionLabel, { color: C.orange }]}>Download</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+        {id !== 'conus' && isContourPublished(id) ? (
+          <ArtifactRow
+            label="Topographic lines"
+            state={contourState}
+            onAction={() => artifactAction(contourState, {
+              start: () => void authorizeAndRun(`topo:${id}`, 'state_contours', id, `${region.name} topographic lines`, () => startContourDownload(id)),
+              pause: () => void pauseContourDownload(id),
+              resume: () => void resumeContourDownload(id),
+            })}
+          />
+        ) : null}
+        {placeError ? <Text style={s.errorText}>{placeError}</Text> : null}
+
+        <View style={s.detailActions}>
+          {summary?.ready ? (
+            <PrimaryButton label="Open map" icon="map-outline" onPress={() => openRegion(id)} />
+          ) : (
+            <PrimaryButton
+              label={regionBusy ? 'Downloading' : 'Download'}
+              icon="download-outline"
+              onPress={() => void downloadRegionBundle(id)}
+              disabled={regionBusy}
+            />
+          )}
+          {summary?.hasContent ? (
+            <SecondaryButton label="Remove download" danger disabled={regionBusy} onPress={() => askToRemoveRegion(id)} />
+          ) : null}
+        </View>
+      </>
+    );
+  };
+
+  const renderAreaDetail = () => {
+    if (!selectedArea) {
+      return (
+        <View style={s.areaStart}>
+          <MapArtwork height={210} route wide />
+          <PrimaryButton label="Choose an area" icon="scan-outline" onPress={() => onStartAreaSelect?.(null)} />
+        </View>
+      );
+    }
+    const entry = areaCatalog.find(item => item.area.id === selectedArea.id);
+    const isActive = entry?.active || activePackName === areaPackKey(selectedArea);
+    const isReady = entry?.ready;
+    const progress = entry?.progress ?? activePackProgress?.percentage ?? 0;
+    return (
+      <>
+        <MapArtwork height={210} route wide />
+        <View style={s.areaSheet}>
+          {!isReady ? (
+            <TextInput
+              value={selectedArea.label}
+              onChangeText={value => onRenameArea?.(selectedArea.id, value)}
+              style={s.areaNameInput}
+              placeholder="Area name"
+              placeholderTextColor={C.text3}
+              maxLength={42}
+            />
+          ) : <Text style={s.detailTitle}>{selectedArea.label}</Text>}
+          <Text style={s.areaMeta}>
+            {`${Math.round(selectedArea.areaSqMi).toLocaleString()} sq mi · about ${Math.max(1, Math.round(selectedArea.estimatedMb)).toLocaleString()} MB`}
+          </Text>
+          <View style={s.detailChoice}>
+            <Text style={s.detailChoiceLabel}>Detail</Text>
+            <Text style={s.detailChoiceValue}>{selectedArea.detail === 'high' ? 'High detail' : 'Standard'}</Text>
+            {!isReady && !isActive ? (
+              <TouchableOpacity style={shared.textAction} onPress={() => onStartAreaSelect?.(selectedArea)}>
+                <Text style={[shared.textActionLabel, { color: C.orange }]}>Adjust</Text>
+              </TouchableOpacity>
+            ) : null}
+          </View>
+          <SectionHeading label={isReady ? 'Available offline' : 'Download includes'} />
+          <CheckRow label="Map & terrain" ready={Boolean(isReady)} />
+          {isActive ? (
+            <View style={s.activeArea}>
+              <StatusLine label={activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`} />
+              <ProgressBar progress={progress} />
+              <TouchableOpacity style={shared.textAction} onPress={activePackPaused ? resumeActivePack : pauseActivePack}>
+                <Text style={[shared.textActionLabel, { color: C.orange }]}>{activePackPaused ? 'Resume' : 'Pause'}</Text>
+              </TouchableOpacity>
+            </View>
+          ) : null}
+          {packError?.key === areaPackKey(selectedArea) ? (
+            <Text style={s.errorText}>{packError.message}</Text>
+          ) : null}
+          <View style={s.detailActions}>
+            {isReady ? (
+              <PrimaryButton label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+            ) : (
+              <PrimaryButton
+                label={isActive ? 'Downloading' : 'Download'}
+                icon="download-outline"
+                onPress={() => void downloadSelectedArea()}
+                disabled={Boolean(isActive || authorizing)}
+              />
+            )}
+            {isReady ? (
+              <SecondaryButton label="Remove download" danger onPress={() => {
+                Alert.alert(
+                  `Remove ${selectedArea.label}?`,
+                  'The downloaded map is removed from this device.',
+                  [
+                    { text: 'Keep download', style: 'cancel' },
+                    { text: 'Remove download', style: 'destructive', onPress: () => void removeAreaNow(selectedArea) },
+                  ],
+                );
+              }} />
+            ) : null}
+          </View>
+        </View>
+      </>
+    );
+  };
+
+  const renderTripDetail = () => {
+    const runtime = selectedTripRuntime;
+    if (!runtime) return null;
+    const meta = formatTripMeta(runtime.target);
+    return (
+      <>
+        <MapArtwork height={220} route wide />
+        <View style={s.detailIntro}>
+          <Text style={s.detailTitle}>{runtime.target.name}</Text>
+          {meta ? <Text style={s.detailMeta}>{meta}</Text> : null}
+          <StatusLine label={runtime.status} />
+          {runtime.active ? <ProgressBar progress={runtime.progress} /> : null}
+        </View>
+        <SectionHeading label={runtime.ready ? 'Available offline' : 'Offline content'} />
+        <CheckRow label="Map & terrain" ready={runtime.mapReady} />
+        <CheckRow label="Directions" ready={runtime.directionsReady} />
+        {runtime.trailsReady ? <CheckRow label="Trails" ready /> : null}
+        <CheckRow label="Camps & essentials" ready={runtime.placesReady} />
+        <CheckRow label="Trip notes & saved places" ready={runtime.notesReady} />
+        {packError?.key === tripPackKey(runtime.target) ? <Text style={s.errorText}>{packError.message}</Text> : null}
+        {placeError ? <Text style={s.errorText}>{placeError}</Text> : null}
+        <View style={s.detailActions}>
+          {runtime.active ? (
+            <PrimaryButton
+              label={activePackPaused ? 'Resume' : 'Pause'}
+              icon={activePackPaused ? 'play-outline' : 'pause-outline'}
+              onPress={activePackPaused ? resumeActivePack : pauseActivePack}
+            />
+          ) : runtime.ready ? (
+            <PrimaryButton label="Open map" icon="map-outline" onPress={() => void openOfflineTrip(runtime.target)} />
+          ) : (
+            <PrimaryButton
+              label={placeBusy || authorizing ? 'Downloading' : 'Download'}
+              icon="download-outline"
+              onPress={() => void downloadTripBundle(runtime.target)}
+              disabled={Boolean(placeBusy || authorizing)}
+            />
+          )}
+          {runtime.notesReady ? (
+            <SecondaryButton label="Open trip" onPress={() => void openOfflineTrip(runtime.target)} />
+          ) : null}
+          {runtime.hasDownload ? (
+            <SecondaryButton label="Remove download" danger disabled={runtime.active} onPress={() => askToRemoveTrip(runtime)} />
+          ) : null}
+        </View>
+      </>
+    );
+  };
+
+  const renderStorage = () => {
+    const selectedBytes = deviceItems
+      .filter(item => selectedForRemoval.includes(item.id))
+      .reduce((total, item) => total + item.bytes, 0);
+    return (
+      <>
+        <View style={s.storageSummary}>
+          <View>
+            <Text style={s.storageValue}>{fmtBytes(totalStoredBytes)}</Text>
+            <Text style={s.storageCaption}>Trailhead downloads</Text>
+          </View>
+          <View style={s.storageSummaryRight}>
+            <Text style={s.storageValue}>{freeDiskBytes != null ? fmtBytes(freeDiskBytes) : '—'}</Text>
+            <Text style={s.storageCaption}>Free on device</Text>
+          </View>
+        </View>
+        {deviceItems.length > 7 ? (
+          <View style={s.searchBox}>
+            <Ionicons name="search-outline" size={19} color={C.text3} />
+            <TextInput
+              value={search}
+              onChangeText={setSearch}
+              placeholder="Search downloads"
+              placeholderTextColor={C.text3}
+              style={s.searchInput}
+              autoCorrect={false}
+              returnKeyType="search"
+            />
+            {search ? (
+              <TouchableOpacity style={shared.clearButton} onPress={() => setSearch('')} accessibilityLabel="Clear search">
+                <Ionicons name="close" size={17} color={C.text3} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        ) : null}
+        {visibleDeviceItems.length > 0 ? <SectionHeading label="Manage downloads" /> : null}
+        {visibleDeviceItems.map(item => (
+          <DeviceRow
+            key={item.id}
+            item={item}
+            selectionMode
+            selected={selectedForRemoval.includes(item.id)}
+            onToggle={() => setSelectedForRemoval(previous => (
+              previous.includes(item.id) ? previous.filter(id => id !== item.id) : [...previous, item.id]
+            ))}
+          />
+        ))}
+        <View style={s.storageActions}>
+          <SecondaryButton
+            label={selectedForRemoval.length
+              ? `Remove ${selectedForRemoval.length} download${selectedForRemoval.length === 1 ? '' : 's'} · ${fmtBytes(selectedBytes)}`
+              : 'Select downloads to remove'}
+            danger={selectedForRemoval.length > 0}
+            disabled={!selectedForRemoval.length}
+            onPress={() => setConfirmRemoval({ ids: selectedForRemoval, bytes: selectedBytes })}
+          />
+        </View>
+      </>
+    );
+  };
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
       <View style={s.overlay}>
         <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+        <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
+          {renderHeader()}
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={[s.content, { paddingBottom: bottomPad + 30 }]}
+          >
+            {view === 'home' ? renderHome() : null}
+            {view === 'regions' ? renderRegionBrowser() : null}
+            {view === 'region' ? renderRegionDetail() : null}
+            {view === 'area' ? renderAreaDetail() : null}
+            {view === 'trip' ? renderTripDetail() : null}
+            {view === 'storage' ? renderStorage() : null}
+          </ScrollView>
+        </View>
 
-        <TrailheadSheet handle={false} style={[s.sheet, { maxHeight: sheetMaxHeight }]} contentStyle={[s.sheetContent, { paddingBottom: bottomPad }]}>
-          {/* ── Header ───────────────────────────────────────────────────── */}
-          <View style={s.header}>
-            <View style={s.headerAccent} />
-            <View style={{ flex: 1 }}>
-              <Text style={s.title}>Saved areas</Text>
-              <Text style={s.subtitle}>Maps, routes, places, and trails saved for later</Text>
-            </View>
-            <TouchableOpacity onPress={onClose} style={s.closeBtn}>
-              <Ionicons name="close" size={18} color={C.text3} />
-            </TouchableOpacity>
-          </View>
-
-          {/* ── Tabs ─────────────────────────────────────────────────────── */}
-          <View style={s.tabs}>
-            {(['files', 'areas', 'regions'] as const).map(tab => (
-              <TouchableOpacity
-                key={tab}
-                style={[s.tab, activeTab === tab && s.tabActive]}
-                onPress={() => setActiveTab(tab)}
-              >
-                <Text style={[s.tabText, activeTab === tab && s.tabTextActive]}>
-                  {tab === 'files' ? 'Saved' : tab === 'areas' ? 'Areas' : 'Regions'}
-                </Text>
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {!user ? (
-            <View style={s.noUser}>
-              <Ionicons name="lock-closed-outline" size={24} color={C.text3} />
-              <Text style={s.noUserText}>Sign in to save maps, routes, and places.</Text>
-            </View>
-          ) : (
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: bottomPad + 28 }}>
-              <View style={s.storageCard}>
-                <Ionicons name="phone-portrait-outline" size={16} color={C.text2} />
-                <View style={{ flex: 1 }}>
-                  <Text style={s.storageTitle}>Device storage</Text>
-                  <Text style={s.storageText}>
-                    {freeDiskBytes != null ? `${fmtBytes(freeDiskBytes)} free before install` : 'Storage estimate appears on device'}
-                  </Text>
-                </View>
-                <Text style={s.storageEstimate}>
-                  {freeDiskBytes != null ? `After selected region: ~${fmtBytes(Math.max(0, freeDiskBytes - getTotalBytes(selectedState)))}` : 'Select a region'}
-                </Text>
+        {confirmRemoval ? (
+          <View style={s.confirmOverlay}>
+            <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setConfirmRemoval(null)} />
+            <View style={[s.confirmSheet, { paddingBottom: bottomPad + 8 }]}>
+              <Text style={s.confirmTitle}>
+                Remove {confirmRemoval.ids.length} download{confirmRemoval.ids.length === 1 ? '' : 's'}?
+              </Text>
+              <Text style={s.confirmText}>
+                {fmtBytes(confirmRemoval.bytes)} will be removed from this device. Trips and saved places remain in your account.
+              </Text>
+              <View style={s.confirmActions}>
+                <SecondaryButton label="Keep downloads" onPress={() => setConfirmRemoval(null)} />
+                <TouchableOpacity style={[shared.primaryButton, { backgroundColor: C.red }]} onPress={() => void removeConfirmedItems()}>
+                  <Text style={[shared.primaryButtonText, { color: '#fff' }]}>Remove downloads</Text>
+                </TouchableOpacity>
               </View>
-
-              {activeTab === 'files' && (
-                <>
-                  <View style={s.explorerSearch}>
-                    <Ionicons name="search-outline" size={16} color={C.text3} />
-                    <TextInput
-                      value={downloadSearch}
-                      onChangeText={setDownloadSearch}
-                      placeholder="Search saved areas"
-                      placeholderTextColor={C.text3}
-                      style={s.explorerSearchInput}
-                      autoCapitalize="none"
-                      autoCorrect={false}
-                      returnKeyType="search"
-                    />
-                    {downloadSearch.trim() ? (
-                      <TouchableOpacity onPress={() => setDownloadSearch('')} style={s.explorerClear}>
-                        <Ionicons name="close" size={14} color={C.text3} />
-                      </TouchableOpacity>
-                    ) : null}
-                  </View>
-
-                  {downloadSearch.trim() ? (
-                    <>
-                      <Section label="Search results" />
-                      {explorerSearchResults.length > 0 ? explorerSearchResults.map(renderExplorerRow) : (
-                        <View style={s.explorerEmpty}>
-                          <Ionicons name="file-tray-outline" size={22} color={C.text3} />
-                          <Text style={s.explorerEmptyText}>Try a different saved area search.</Text>
-                        </View>
-                      )}
-                    </>
-                  ) : (
-                    <>
-                      <Section label="Saved" />
-                      {renderExplorerRow({
-                        id: 'countries',
-	                        title: 'Regions',
-	                        detail: explorerStats.savedMaps + explorerStats.savedRoutes > 0
-	                          ? `${explorerStats.savedMaps} maps · ${explorerStats.savedRoutes} routes saved`
-	                          : 'Regions are ready when you need them',
-                        icon: 'folder-outline',
-                        status: 'Open',
-                        onPress: () => setActiveTab('regions'),
-                      })}
-                      {renderExplorerRow({
-                        id: 'corridors',
-	                        title: 'Route areas',
-	                        detail: explorerStats.corridorCount > 0
-	                          ? `${explorerStats.corridorCount} saved route areas and custom areas`
-	                          : 'Route areas and custom areas will appear here',
-                        icon: 'git-branch-outline',
-                        status: 'Open',
-                        onPress: () => setActiveTab('areas'),
-                      })}
-                      {renderExplorerRow({
-                        id: 'favorites',
-                        title: 'Saved favorites',
-                        detail: explorerStats.placeCount > 0
-                          ? `${explorerStats.placeCount} saved camps and places`
-                          : 'Saved camps and places appear here',
-                        icon: 'star-outline',
-	                        status: explorerStats.placeCount > 0 ? `${explorerStats.placeCount}` : 'Open',
-                        onPress: () => setActiveTab('regions'),
-                      })}
-                      {renderExplorerRow({
-                        id: 'places',
-                        title: 'Camps & Places',
-                        detail: 'Campgrounds, water, fuel, trailheads, viewpoints, and services',
-                        icon: 'location-outline',
-	                        status: placePacks.length > 0 ? `${placePacks.length} saved` : 'Open',
-                        onPress: () => setActiveTab('regions'),
-                      })}
-                      {renderExplorerRow({
-                        id: 'trails',
-                        title: 'Trails',
-	                        detail: 'Saved trail lines and trail previews by region',
-                        icon: 'trail-sign-outline',
-	                        status: explorerStats.savedTrails > 0 ? `${explorerStats.savedTrails} saved` : 'Open',
-                        onPress: () => setActiveTab('regions'),
-                      })}
-                      {renderExplorerRow({
-                        id: 'gpx',
-	                        title: 'Imported routes',
-	                        detail: 'Imported routes and tracks are grouped here',
-                        icon: 'document-attach-outline',
-	                        status: 'Saved',
-                        onPress: () => setActiveTab('areas'),
-                      })}
-                      {renderExplorerRow({
-                        id: 'photos',
-                        title: 'Photos',
-                        detail: 'Saved trip, campground, and trail photos available on this device',
-                        icon: 'images-outline',
-                        status: 'Media',
-                        onPress: () => setActiveTab('areas'),
-                      })}
-
-                      <Section label="Regions" />
-                      {renderExplorerRow({
-                        id: 'country:us',
-                        title: 'United States',
-                        detail: 'State folders with map, routes, places, trails, and topo packs',
-                        icon: 'map-outline',
-                        status: `${explorerStats.regionIds.filter(id => id.length === 2).length} states`,
-                        onPress: () => {
-                          setSelectedRegionGroup('west');
-                          setActiveTab('regions');
-                        },
-                      })}
-                      {(['canada', 'mexico', 'fi', 'pk'] as const).map(id => {
-                        const region = FILE_REGIONS[id];
-                        if (!region) return null;
-                        return renderExplorerRow({
-                          id: `country:${id}`,
-                          title: region.name,
-	                          detail: `${regionCodeFor(id)} · maps and routes`,
-                          icon: 'earth-outline',
-                          status: getState(id).status === 'complete' && getRoutingState(id).status === 'complete' ? 'Saved' : 'Available',
-                          onPress: () => {
-                            selectRegion(id);
-                            setActiveTab('regions');
-                          },
-                        });
-                      })}
-                    </>
-                  )}
-                </>
-              )}
-
-              {/* ── Active MLN pack progress ────────────────────────────── */}
-              {activePackName && (
-                <View style={s.packProgressCard}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-                    <View style={s.pingDot} />
-                    <Text style={{ color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '700', flex: 1 }}>
-                      {displayDownloadName(activePackName).toUpperCase()}
-                    </Text>
-                    <Text style={{ color: C.orange, fontSize: 13, fontFamily: mono, fontWeight: '900' }}>
-                      {Math.round(packProgress?.percentage ?? 0)}%
-                    </Text>
-                    <TouchableOpacity onPress={() => { activePackName && pausePack(activePackName); setActivePackName(null); }}>
-                      <Text style={{ color: C.red, fontSize: 9, fontWeight: '900' }}>Stop</Text>
-                    </TouchableOpacity>
-                  </View>
-                  <ShimmerBar pct={packProgress?.percentage ?? 0} />
-                  <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
-                    {packProgress?.completedTiles ?? 0} / {packProgress?.expectedTiles ?? '?'} items
-                    {(packProgress?.sizeMb ?? 0) > 0 ? `  ·  ${packProgress?.sizeMb.toFixed(1)} MB` : ''}
-                  </Text>
-                </View>
-              )}
-
-              {packError && (
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: C.red + '18', borderRadius: 6, padding: 10, marginBottom: 10 }}>
-                  <Ionicons name="alert-circle-outline" size={12} color={C.red} />
-                  <Text style={{ color: C.red, fontSize: 10, fontFamily: mono, flex: 1 }}>{packError}</Text>
-                </View>
-              )}
-
-              {/* ══════════════════ AREAS TAB ═══════════════════════════ */}
-              {activeTab === 'areas' && (
-                <>
-                  <Section label="Select an area" />
-                  <View style={s.customAreaCard}>
-                    <View style={s.customAreaTop}>
-                      <View style={s.customAreaIcon}>
-                        <Ionicons name="scan-outline" size={20} color={C.orange} />
-                      </View>
-                      <View style={{ flex: 1, minWidth: 0 }}>
-                        <Text style={s.customAreaTitle}>{selectedArea ? selectedArea.label : 'Choose an area'}</Text>
-                        <Text style={s.customAreaText}>
-                          {selectedArea
-                            ? `${selectedArea.detail === 'high' ? 'High' : 'Standard'} detail · ${Math.round(selectedArea.areaSqMi).toLocaleString()} sq mi · about ${Math.max(1, Math.round(selectedArea.estimatedMb))} MB`
-                            : 'Pick a small area on the map, resize it, then save full map detail for that box.'}
-                        </Text>
-                      </View>
-                      <StatusChip label={selectedArea ? 'Selected' : 'Map'} color={selectedArea ? C.green : C.orange} />
-                    </View>
-                    {selectedArea && (
-                      <View style={s.customAreaNameRow}>
-                        <Ionicons name="pencil-outline" size={13} color={C.text3} />
-                        <TextInput
-                          value={selectedArea.label}
-                          onChangeText={text => onRenameArea?.(selectedArea.id, text)}
-                          placeholder="Area name"
-                          placeholderTextColor={C.text3}
-                          style={s.customAreaNameInput}
-                          maxLength={42}
-                          returnKeyType="done"
-                        />
-                      </View>
-                    )}
-                    <View style={s.customAreaActions}>
-                      {selectedArea && (
-                        <TouchableOpacity style={s.customAreaSecondary} onPress={() => onStartAreaSelect?.(null)}>
-                          <Ionicons name="add-outline" size={13} color={C.text2} />
-                          <Text style={s.customAreaSecondaryText}>New area</Text>
-                        </TouchableOpacity>
-                      )}
-                      <TouchableOpacity style={s.customAreaSecondary} onPress={() => onStartAreaSelect?.(selectedArea ?? null)}>
-                        <Ionicons name={selectedArea ? 'resize-outline' : 'expand-outline'} size={13} color={C.text2} />
-                        <Text style={s.customAreaSecondaryText}>{selectedArea ? 'Adjust' : 'Choose area'}</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        disabled={!selectedArea || !!activePackName || !!webIsDownloading}
-                        style={[s.customAreaPrimary, (!selectedArea || activePackName || webIsDownloading) && { opacity: 0.55 }]}
-                        onPress={downloadSelectedArea}
-                      >
-                        <Ionicons name="cloud-download-outline" size={13} color="#fff" />
-                        <Text style={s.customAreaPrimaryText}>{activePackName || webIsDownloading ? 'Saving' : 'Save'}</Text>
-                      </TouchableOpacity>
-                      {selectedArea && (
-                        <TouchableOpacity style={s.customAreaDeleteBtn} onPress={() => confirmDeleteArea(selectedArea)}>
-                          <Ionicons name="trash-outline" size={15} color={C.red} />
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </View>
-
-                  {savedAreas.length > 0 && (
-                    <>
-                      <Section label="Saved areas" />
-                      {savedAreas.map(area => {
-                        const active = selectedArea?.id === area.id;
-                        return (
-                          <View key={area.id} style={[s.savedAreaRow, active && s.savedAreaRowActive]}>
-                            <TouchableOpacity style={s.savedAreaMain} onPress={() => onSelectArea?.(area)}>
-                              <Text style={s.savedAreaTitle} numberOfLines={1}>{area.label}</Text>
-                              <Text style={s.savedAreaMeta} numberOfLines={1}>
-                                {area.detail === 'high' ? 'High detail' : 'Standard'} · {Math.round(area.areaSqMi).toLocaleString()} sq mi · ~{Math.max(1, Math.round(area.estimatedMb))} MB
-                              </Text>
-                            </TouchableOpacity>
-                            {active ? <StatusChip label="Selected" color={C.green} /> : (
-                              <TouchableOpacity style={s.savedAreaAction} onPress={() => onSelectArea?.(area)}>
-                                <Text style={s.savedAreaActionText}>Select</Text>
-                              </TouchableOpacity>
-                            )}
-                            <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => { onSelectArea?.(area); onStartAreaSelect?.(area); }}>
-                              <Ionicons name="resize-outline" size={14} color={C.text2} />
-                            </TouchableOpacity>
-                            <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => confirmDeleteArea(area)}>
-                              <Ionicons name="trash-outline" size={14} color={C.red} />
-                            </TouchableOpacity>
-                          </View>
-                        );
-                      })}
-                    </>
-                  )}
-
-                  <Section label="Save this trip" />
-                  {waypoints.length > 0 ? (
-                    <TouchableOpacity
-                      disabled={placeBusy || !!activePackName || !!webIsDownloading}
-                      style={[s.tripBundleCard, (currentPlacePack || activePackName || webIsDownloading) && { borderColor: C.green + '44' }]}
-                      onPress={downloadTripBundle}
-                    >
-                      <View style={s.tripBundleIcon}>
-                        <Ionicons name="cloud-download-outline" size={22} color={C.orange} />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text style={s.tripBundleTitle}>{tripName ?? 'Current trip'}</Text>
-                        <Text style={s.tripBundleText}>Saves route coverage plus fuel, camps, and places on this device.</Text>
-                      </View>
-                      <StatusChip label={placeBusy || activePackName || webIsDownloading ? 'Busy' : currentPlacePack ? 'Refresh' : 'Save'} color={placeBusy || activePackName || webIsDownloading ? C.text3 : C.orange} />
-                    </TouchableOpacity>
-                  ) : (
-                    <View style={s.noTrip}>
-                      <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
-                        Plan a trip first to save it.
-                      </Text>
-                    </View>
-                  )}
-
-                  {offlineTrips.length > 0 && (
-                    <>
-                      <Section label="Route files" />
-                      {offlineTrips.map(trip => (
-                        <View key={`route-file-${trip.trip_id}`} style={s.savedAreaRow}>
-                          <TouchableOpacity style={s.savedAreaMain} onPress={() => openOfflineTrip(trip.trip_id)}>
-                            <Text style={s.savedAreaTitle} numberOfLines={1}>{trip.plan.trip_name || trip.trip_id}</Text>
-                            <Text style={s.savedAreaMeta} numberOfLines={1}>
-	                              {formatSavedTripMeta(trip)}
-                            </Text>
-                          </TouchableOpacity>
-                          <StatusChip label="Route" color={C.green} />
-                          <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => openOfflineTrip(trip.trip_id)}>
-                            <Ionicons name="open-outline" size={14} color={C.text2} />
-                          </TouchableOpacity>
-                          <TouchableOpacity style={s.savedAreaIconBtn} onPress={() => deleteOfflineTripCopy(trip)}>
-                            <Ionicons name="trash-outline" size={14} color={C.red} />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </>
-                  )}
-	                  <Section label="Continental US · Map" />
-	                  <Text style={s.hint}>
-	                    Save large map coverage before remote travel. Use Wi-Fi for big regions and keep the app open for the fastest transfer.
-                  </Text>
-                  <ConusCard
-                    state={conusState}
-                    totalBytes={conusTotalBytes}
-                    region={FILE_REGIONS.conus}
-                    onStart={() => authorizeAndRun('conus_map', 'conus_map', 'conus', 'Continental US', () => startDownload('conus'))}
-                    onPause={() => pauseDownload('conus')}
-                    onResume={() => resumeDownload('conus')}
-                    onDelete={() => deleteDownload('conus')}
-                  />
-
-                  {/* Trip corridor */}
-	                  <Section label="Trip map and routes" />
-                  {waypoints.length > 0 ? (() => {
-                    const name   = (tripName ?? 'Trip') + '-corridor';
-                    const cached = useNativeMap
-                      ? mlnPacks.some(pack => pack.name === name && pack.complete)
-                      : webCachedRegions?.includes(name) ?? false;
-                    const busy   = useNativeMap ? activePackName === name : !!webIsDownloading;
-                    return (
-                      <TouchableOpacity
-                        disabled={busy}
-                        style={[s.corridorCard, cached && { borderLeftColor: C.green }]}
-                        onPress={() => {
-	                          authorizeAndRun(`corridor:${name}`, 'trip_corridor', name, tripName ?? 'Trip area', () => startTripCorridor(name));
-                        }}
-                      >
-                        <View style={{ flex: 1 }}>
-                          <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                            {tripName ?? 'Current trip'}
-                          </Text>
-                          <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2 }}>
-                            Route map and navigation coverage around your planned drive.
-                          </Text>
-                          {busy && (
-                            <Text style={{ color: C.orange, fontSize: 9, fontFamily: mono, marginTop: 3 }}>
-	                              {`${useNativeMap ? Math.round(packProgress?.percentage ?? 0) : webDownloadProgress ?? 0}% saved`}
-                            </Text>
-                          )}
-                        </View>
-                        {cached
-                          ? <StatusChip label="Saved" color={C.green} />
-                          : <StatusChip label={busy ? 'Busy' : 'Save'} color={busy ? C.text3 : C.orange} />
-                        }
-                      </TouchableOpacity>
-                    );
-                  })() : (
-                    <View style={s.noTrip}>
-                      <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
-                        Plan a trip first to save it.
-                      </Text>
-                    </View>
-                  )}
-
-	                  <Section label="Trip places" />
-                  {waypoints.length > 0 ? (
-                    <View style={[s.corridorCard, currentPlacePack && { borderLeftColor: C.green }]}>
-                      <View style={{ flex: 1 }}>
-                        <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                          {tripName ?? 'Current trip'} places
-                        </Text>
-                        <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                          Camps, fuel, water, trailheads, viewpoints, peaks, and hot springs near the route.
-                        </Text>
-                        {currentPlacePack && (
-                          <Text style={{ color: C.green, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
-                            {currentPlacePack.point_count} places saved · {currentPlacePack.categories.slice(0, 4).join(', ')}
-                          </Text>
-                        )}
-                        {placeError && (
-                          <Text style={{ color: C.red, fontSize: 9, fontFamily: mono, marginTop: 4 }}>{placeError}</Text>
-                        )}
-                      </View>
-                      <View style={{ gap: 8, alignItems: 'flex-end' }}>
-                        {currentPlacePack && <StatusChip label="Saved" color={C.green} />}
-                        <TouchableOpacity
-                          disabled={placeBusy}
-                          onPress={downloadTripEssentials}
-                          style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
-                        >
-                          <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-                            {placeBusy ? 'Saving' : currentPlacePack ? 'Refresh' : 'Save'}
-                          </Text>
-                        </TouchableOpacity>
-                        {currentPlacePack && (
-                          <TouchableOpacity onPress={() => deleteTripEssentials(currentPlacePack.pack_id)} style={{ padding: 4 }}>
-                            <Ionicons name="trash-outline" size={16} color={C.red} />
-                          </TouchableOpacity>
-                        )}
-                      </View>
-                    </View>
-                  ) : (
-                    <View style={s.noTrip}>
-                      <Text style={{ color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center' }}>
-	                        Plan a trip first to save its places.
-                      </Text>
-                    </View>
-                  )}
-
-	                  {/* Saved packs */}
-                  {mlnPacks.length > 0 && (
-                    <>
-                      <Section label="Saved packs" />
-                      {mlnPacks.map(pack => (
-                        <View key={pack.name} style={s.packRow}>
-                          <Ionicons name="checkmark-circle" size={12} color={C.green} />
-                          <Text style={s.packName} numberOfLines={1}>{displayDownloadName(pack.name)}</Text>
-                          {pack.sizeMb > 0 && (
-                            <Text style={s.packSize}>{pack.sizeMb.toFixed(0)} MB</Text>
-                          )}
-                          <TouchableOpacity onPress={() => deleteMlnPack(pack.name)} style={{ padding: 4 }}>
-                            <Ionicons name="close-circle" size={16} color={C.red} />
-                          </TouchableOpacity>
-                        </View>
-                      ))}
-                    </>
-                  )}
-                </>
-              )}
-
-              {/* ══════════════════ REGIONS TAB ═════════════════════════ */}
-              {activeTab === 'regions' && (
-                <>
-                  <Section label="Regions" />
-                  <Text style={s.hint}>
-	                    Pick a region, then save the coverage you want for remote travel.
-                  </Text>
-
-                  <View style={s.featuredRegionRow}>
-                    {(['canada', 'mexico'] as const).map(id => {
-                      const region = FILE_REGIONS[id];
-                      const mapDone = getState(id).status === 'complete';
-                      const routeDone = getRoutingState(id).status === 'complete';
-                      const contourDone = getContourState(id).status === 'complete';
-                      const selected = selectedState === id;
-                      const code = regionCodeFor(id);
-                      return (
-                        <TouchableOpacity
-                          key={id}
-                          onPress={() => selectRegion(id)}
-                          style={[s.featuredRegionCard, selected && s.featuredRegionCardActive]}
-                        >
-                          <View style={s.featuredRegionIcon}>
-                            <Text style={[s.featuredRegionCode, selected && { color: C.orange }]}>{code}</Text>
-                          </View>
-                          <View style={{ flex: 1 }}>
-                            <Text style={s.featuredRegionTitle}>{region.name}</Text>
-                            <Text style={s.featuredRegionSub} numberOfLines={1}>
-                              {mapDone && routeDone ? 'Saved on this device' : `~${region.estimatedGb} GB`}
-                            </Text>
-                            <Text style={[s.featuredRegionStatus, mapDone && routeDone && { color: C.green }]}>
-                              {mapDone && routeDone ? `Saved${contourDone ? ' · Topo' : ''}` : 'Save'}
-                            </Text>
-                          </View>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </View>
-
-                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.regionGroupTabs}>
-                    {REGION_GROUPS.map(group => {
-                      const active = selectedRegionGroup === group.key;
-                      return (
-                        <TouchableOpacity
-                          key={group.key}
-                          onPress={() => {
-                            setSelectedRegionGroup(group.key);
-                            if (!group.ids.includes(selectedState)) setSelectedState(group.ids[0]);
-                          }}
-                          style={[s.regionGroupTab, active && s.regionGroupTabActive]}
-                        >
-                          <Text style={[s.regionGroupTabText, active && { color: C.orange }]}>{group.label}</Text>
-                        </TouchableOpacity>
-                      );
-                    })}
-                  </ScrollView>
-
-                  {(() => {
-                    const group = REGION_GROUPS.find(g => g.key === selectedRegionGroup) ?? REGION_GROUPS[0];
-                    return (
-                      <View style={s.regionPickerPanel}>
-                        <View style={s.regionPickerHead}>
-                          <View>
-                            <Text style={s.regionPickerTitle}>{group.title}</Text>
-                            <Text style={s.regionPickerSub}>{group.subtitle}</Text>
-                          </View>
-                          <Text style={s.regionPickerCount}>{group.ids.length} regions</Text>
-                        </View>
-                        <View style={s.stateGrid}>
-                          {group.ids.map(id => {
-                            const region = FILE_REGIONS[id as keyof typeof FILE_REGIONS];
-                            if (!region) return null;
-                            const mapDone = getState(id).status === 'complete';
-                            const routeDone = getRoutingState(id).status === 'complete';
-                            const contourDone = getContourState(id).status === 'complete';
-                            const trailDone = getTrailState(id).status === 'complete';
-                            const placesDone = placePacks.some(pack => pack.region_id === id);
-                            const placesPublished = Object.values(placeManifest?.packs ?? {}).some(entry => entry.region_id === id);
-                            const mapPublished = isFilePublished(id);
-                            const routePublished = isRoutingPublished(id);
-                            const contourPublished = isContourPublished(id);
-                            const trailPublished = isTrailPublished(id);
-                            const available = mapPublished && routePublished;
-                            const selected = selectedState === id;
-                            const code = regionCodeFor(id);
-                            return (
-                              <TouchableOpacity
-                                key={id}
-                                onPress={() => selectRegion(id)}
-                                style={[
-                                  s.statePick,
-                                  !available && { opacity: 0.72 },
-                                  selected && { borderColor: C.orange, backgroundColor: C.orangeGlow },
-                                ]}
-                              >
-                                <View style={s.statePickTop}>
-                                  <Text style={[s.statePickCode, selected && { color: C.orange }]}>{code}</Text>
-                                  {(mapDone || routeDone) && <Ionicons name="checkmark-circle" size={13} color={C.green} />}
-                                </View>
-                                <Text style={s.statePickName} numberOfLines={1}>{region.name}</Text>
-                                <Text style={{ color: mapDone && routeDone ? C.green : C.text3, fontSize: 8, fontFamily: mono, marginTop: 4 }}>
-	                                  {mapDone && routeDone ? 'Saved' : available ? `~${region.estimatedGb} GB` : 'Soon'}
-                                </Text>
-                              </TouchableOpacity>
-                            );
-                          })}
-                        </View>
-                      </View>
-                    );
-                  })()}
-
-                  {(() => {
-                    const mapRegion = FILE_REGIONS[selectedState as keyof typeof FILE_REGIONS];
-                    const routingRegion = ROUTING_REGIONS[selectedState as keyof typeof ROUTING_REGIONS];
-                    const contourRegion = CONTOUR_REGIONS[selectedState as keyof typeof CONTOUR_REGIONS];
-                    const trailRegion = TRAIL_REGIONS[selectedState];
-                    const mapState = getState(selectedState);
-                    const routingState = getRoutingState(selectedState);
-                    const contourState = getContourState(selectedState);
-                    const trailState = getTrailState(selectedState);
-                    const mapPublished = isFilePublished(selectedState);
-                    const routePublished = isRoutingPublished(selectedState);
-                    const contourPublished = isContourPublished(selectedState);
-                    const trailPublished = isTrailPublished(selectedState);
-                    const regionAvailable = mapPublished && routePublished;
-                    const mapBusy = mapState.status === 'downloading' || mapState.status === 'paused';
-                    const routeBusy = routingState.status === 'downloading' || routingState.status === 'paused';
-                    const contourBusy = contourState.status === 'downloading' || contourState.status === 'paused';
-                    const trailBusy = trailState.status === 'downloading' || trailState.status === 'paused';
-                    const selectedCode = regionCodeFor(selectedState);
-                    const savedRegionPlacePacks = placePacks.filter(pack => pack.region_id === selectedState);
-                    const savedRegionPlaceCount = savedRegionPlacePacks.reduce((sum, pack) => sum + (pack.point_count || 0), 0);
-                    const waterPlacePackAvailable = currentManifestPlacePacks.some(([, entry]) => entry.pack_id === 'water');
-                    const waterPlacePackDefinition = selectedState.length === 2 ? placeManifest?.definitions?.water : undefined;
-                    const regionPlacesAvailable = currentManifestPlacePacks.length > 0 || !!waterPlacePackDefinition;
-                    const regionPlacesReady = savedRegionPlacePacks.length > 0;
-                    const regionPlacesLabel = regionPlacesReady
-                      ? `${savedRegionPlaceCount} places`
-                      : regionPlacesAvailable ? 'Places ready to save' : 'Places planned';
-                    return (
-                      <>
-                        <StateReadinessPanel
-                          regionCode={selectedCode}
-                          regionName={mapRegion.name}
-                          mapReady={mapState.status === 'complete'}
-                          routeReady={routingState.status === 'complete'}
-                          contourReady={contourState.status === 'complete'}
-                          contourAvailable={contourPublished}
-                          trailReady={trailState.status === 'complete'}
-                          trailAvailable={trailPublished}
-                          placeReady={regionPlacesReady}
-                          placeAvailable={regionPlacesAvailable}
-                          placeLabel={regionPlacesLabel}
-                          mapBusy={mapBusy}
-                          routeBusy={routeBusy}
-                          contourBusy={contourBusy}
-                          trailBusy={trailBusy}
-                          available={regionAvailable}
-                          onDownloadMissing={() => downloadRegionBundle(selectedState)}
-                        />
-                        {!regionAvailable ? (
-                          <View style={{ backgroundColor: C.s1, borderRadius: 10, borderWidth: 1, borderColor: C.border, padding: 14 }}>
-                            <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
-                              <View style={{ width: 40, height: 40, borderRadius: 8, backgroundColor: C.s2, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: C.orange + '35' }}>
-                                <Text style={{ color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>{selectedCode}</Text>
-                              </View>
-                              <View style={{ flex: 1 }}>
-                                <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' }}>
-	                                  {mapRegion.name} is being prepared
-                                </Text>
-                                <Text style={{ color: C.text3, fontSize: 10, marginTop: 3, lineHeight: 14 }}>
-	                                Save buttons will appear as soon as this region is ready.
-                                </Text>
-                              </View>
-                            </View>
-                            <View style={{ flexDirection: 'row', gap: 8, marginTop: 12 }}>
-                              <StatusChip label={mapPublished ? 'Map ready' : `Map ${mapRegion.estimatedGb} GB`} color={mapPublished ? C.green : C.text3} />
-                              <StatusChip label={routePublished ? 'Routes ready' : `Routes ${routingRegion?.estimatedGb ?? 0} GB`} color={routePublished ? C.green : C.text3} />
-                            </View>
-                            {'storageNote' in mapRegion && (
-                              <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 10 }}>
-                                {(mapRegion as any).storageNote}
-                              </Text>
-                            )}
-                          </View>
-                        ) : (
-                          <>
-                        <Section label={`${mapRegion.name} · Map`} />
-                        <ConusCard
-                          state={mapState}
-                          totalBytes={getTotalBytes(selectedState)}
-                          region={mapRegion as any}
-                          code={selectedCode}
-                          onStart={() => authorizeAndRun(`map:${selectedState}`, 'state_map', selectedState, `${mapRegion.name} map`, () => startDownload(selectedState))}
-                          onPause={() => pauseDownload(selectedState)}
-                          onResume={() => resumeDownload(selectedState)}
-                          onDelete={() => deleteDownload(selectedState)}
-                          completeTitle="Map saved"
-	                          completeText="Roads, trails, towns, parks, and labels are saved for this region."
-                        />
-
-                        <Section label={`${mapRegion.name} · Routes`} />
-                        <ConusCard
-                          state={routingState}
-                          totalBytes={getRoutingTotalBytes(selectedState)}
-                          region={routingRegion as any}
-                          code={selectedCode}
-                          onStart={() => authorizeAndRun(`route:${selectedState}`, 'state_route', selectedState, `${mapRegion.name} navigation`, () => startRoutingDownload(selectedState))}
-                          onPause={() => pauseRoutingDownload(selectedState)}
-                          onResume={() => resumeRoutingDownload(selectedState)}
-                          onDelete={() => deleteRoutingDownload(selectedState)}
-                          completeTitle="Routes saved"
-	                          completeText="Driving routes can use this region without needing signal."
-                        />
-                        <Section label={`${mapRegion.name} · Trails`} />
-                        {trailPublished ? (
-                          <ConusCard
-                            state={trailState}
-                            totalBytes={getTrailTotalBytes(selectedState)}
-                            region={trailRegion as any}
-                            code={selectedCode}
-                            onStart={() => authorizeAndRun(`trail:${selectedState}`, 'state_trails' as OfflineAssetType, selectedState, `${mapRegion.name} trail systems`, () => startTrailDownload(selectedState))}
-                            onPause={() => pauseTrailDownload(selectedState)}
-                            onResume={() => resumeTrailDownload(selectedState)}
-                            onDelete={() => deleteTrailDownload(selectedState)}
-                            completeTitle="Trails saved"
-	                            completeText="Trail lines and follow mode are saved for this region."
-                          />
-                        ) : (
-                          <View style={s.contourPlannedCard}>
-                            <View style={s.contourIcon}>
-                              <Ionicons name="trail-sign-outline" size={18} color={C.orange} />
-                            </View>
-                            <View style={{ flex: 1 }}>
-	                              <Text style={s.contourPlannedTitle}>Trails planned</Text>
-	                              <Text style={s.contourPlannedText}>
-	                                Trail lines for this region are coming soon. MVUM can still help check motorized access where available.
-                              </Text>
-                              <Text style={s.contourPlannedMeta}>Estimated starting size: ~{trailRegion?.estimatedGb ?? 0.1} GB</Text>
-                            </View>
-                          </View>
-                        )}
-                          </>
-                        )}
-                        {(currentManifestPlacePacks.length > 0 || waterPlacePackDefinition) && (
-                          <>
-                            <Section label={`${mapRegion.name} · Places`} />
-                            {currentManifestPlacePacks.map(([manifestKey, manifestEntry]) => {
-                              const saved = placePacks.find(pack => pack.region_id === selectedState && pack.pack_id === `${selectedState}-${manifestEntry.pack_id}`);
-                              const def = placeManifest?.definitions?.[manifestEntry.pack_id];
-                              return (
-                                <View key={manifestKey} style={[s.corridorCard, { marginBottom: 10 }, saved && { borderLeftColor: C.green }]}>
-                                  <View style={{ flex: 1 }}>
-                                    <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                      {manifestEntry.pack_id === 'camps' ? 'Camps' : manifestEntry.pack_id === 'water' ? 'Water' : `${def?.name ?? manifestEntry.pack_id} places`}
-                                    </Text>
-                                    <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                                      {offlinePlacePackDescription(manifestEntry.pack_id, def?.description)}
-                                    </Text>
-                                    <Text style={{ color: saved ? C.green : C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
-                                      {saved
-                                        ? `${saved.point_count} places on device`
-                                        : `${manifestEntry.point_count} places · ${fmtBytes(manifestEntry.size)}`}
-                                    </Text>
-                                    {placeError && (
-                                      <Text style={{ color: C.red, fontSize: 9, fontFamily: mono, marginTop: 4 }}>{placeError}</Text>
-                                    )}
-                                  </View>
-                                  <View style={{ gap: 8, alignItems: 'flex-end' }}>
-                                    {saved && <StatusChip label="Saved" color={C.green} />}
-                                    <TouchableOpacity
-                                      disabled={placeBusy}
-                                      onPress={() => downloadRegionPlacePack(manifestEntry.pack_id)}
-                                      style={{ borderRadius: 8, paddingHorizontal: 10, paddingVertical: 7, backgroundColor: placeBusy ? C.s2 : C.orangeGlow, borderWidth: 1, borderColor: placeBusy ? C.border : C.orange + '55' }}
-                                    >
-                                      <Text style={{ color: placeBusy ? C.text3 : C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' }}>
-                                        {placeBusy ? 'Saving' : saved ? 'Refresh' : 'Save'}
-                                      </Text>
-                                    </TouchableOpacity>
-                                    {saved && (
-                                      <TouchableOpacity onPress={() => deleteTripEssentials(saved.pack_id)} style={{ padding: 4 }}>
-                                        <Ionicons name="trash-outline" size={16} color={C.red} />
-                                      </TouchableOpacity>
-                                    )}
-                                  </View>
-                                </View>
-                              );
-                            })}
-                            {!waterPlacePackAvailable && waterPlacePackDefinition && (
-                              <View style={[s.corridorCard, { marginBottom: 10, opacity: 0.72 }]}>
-                                <View style={{ flex: 1 }}>
-                                  <Text style={{ color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800' }}>
-                                    Water
-                                  </Text>
-                                  <Text style={{ color: C.text2, fontSize: 10, fontFamily: mono, marginTop: 2, lineHeight: 14 }}>
-                                    {offlinePlacePackDescription('water', waterPlacePackDefinition.description)}
-                                  </Text>
-                                  <Text style={{ color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 4 }}>
-	                                    Save will appear when {mapRegion.name} is ready.
-                                  </Text>
-                                </View>
-                                <StatusChip label="Preparing" color={C.orange} />
-                              </View>
-                            )}
-                          </>
-                        )}
-                        <Section label={`${mapRegion.name} · Topo`} />
-                        {contourPublished ? (
-                          <ConusCard
-                            state={contourState}
-                            totalBytes={getContourTotalBytes(selectedState)}
-                            region={contourRegion as any}
-                            code={selectedCode}
-                            onStart={() => authorizeAndRun(`contour:${selectedState}`, 'state_contours', selectedState, `${mapRegion.name} contours`, () => startContourDownload(selectedState))}
-                            onPause={() => pauseContourDownload(selectedState)}
-                            onResume={() => resumeContourDownload(selectedState)}
-                            onDelete={() => deleteContourDownload(selectedState)}
-                            completeTitle="Topo saved"
-                            completeText="Topo contour lines are saved for this map."
-                          />
-                        ) : (
-                          <View style={s.contourPlannedCard}>
-                            <View style={s.contourIcon}>
-                              <Ionicons name="analytics-outline" size={18} color={C.orange} />
-                            </View>
-                            <View style={{ flex: 1 }}>
-	                              <Text style={s.contourPlannedTitle}>Topo planned</Text>
-	                              <Text style={s.contourPlannedText}>
-	                                Topo lines for this region are coming soon.
-                              </Text>
-                              <Text style={s.contourPlannedMeta}>Estimated starting size: ~{contourRegion?.estimatedGb ?? 0.1} GB</Text>
-                            </View>
-                          </View>
-                        )}
-                      </>
-                    );
-                  })()}
-                </>
-              )}
-
-            </ScrollView>
-          )}
-        </TrailheadSheet>
+            </View>
+          </View>
+        ) : null}
       </View>
     </Modal>
   );
 }
 
-// ── Styles — built with C from useTheme() in main component ──────────────────
+const shared = StyleSheet.create({
+  sectionHeading: { minHeight: 44, flexDirection: 'row', alignItems: 'center', marginTop: 12 },
+  sectionLabel: { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  sectionAction: { minHeight: 44, justifyContent: 'center', paddingLeft: 16 },
+  sectionActionText: { fontSize: 13, fontWeight: '700' },
+  mapArtwork: { width: 78, borderRadius: 4, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  mapArtworkWide: { width: '100%' },
+  mapRoad: { position: 'absolute', height: 2, borderRadius: 2 },
+  mapRoadOne: { width: '130%', top: '32%', left: '-15%', transform: [{ rotate: '-13deg' }] },
+  mapRoadTwo: { width: '105%', top: '66%', left: '-4%', transform: [{ rotate: '16deg' }] },
+  mapRoadThree: { width: '82%', top: '48%', left: '24%', transform: [{ rotate: '62deg' }] },
+  routeLine: { position: 'absolute', width: '82%', height: 3, left: '8%', top: '53%', borderRadius: 2, transform: [{ rotate: '-8deg' }] },
+  routeDot: { position: 'absolute', width: 9, height: 9, borderRadius: 5, borderWidth: 2 },
+  routeDotStart: { left: '7%', top: '55%' },
+  routeDotEnd: { right: '8%', top: '40%' },
+  statusLine: { minHeight: 22, flexDirection: 'row', alignItems: 'center', gap: 6 },
+  statusText: { fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  progressTrack: { height: 4, borderRadius: 2, overflow: 'hidden', marginTop: 7 },
+  progressFill: { height: 4, borderRadius: 2 },
+  iconButton: { width: 44, height: 44, borderRadius: 18, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
+  iconButtonSpacer: { width: 44, height: 44 },
+  disabled: { opacity: 0.45 },
+  primaryButton: { minHeight: 48, borderRadius: 6, alignItems: 'center', justifyContent: 'center', flexDirection: 'row', gap: 8, paddingHorizontal: 18 },
+  primaryButtonText: { fontSize: 14, lineHeight: 20, fontWeight: '700', textAlign: 'center' },
+  secondaryButton: { minHeight: 46, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 18 },
+  secondaryButtonText: { fontSize: 13, lineHeight: 18, fontWeight: '700', textAlign: 'center' },
+  deviceRow: { minHeight: 70, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, paddingVertical: 8 },
+  deviceCopy: { flex: 1, minWidth: 0 },
+  deviceTitle: { fontSize: 15, lineHeight: 20, fontWeight: '700' },
+  deviceMeta: { fontSize: 12, lineHeight: 17, marginTop: 3 },
+  selectionBox: { width: 28, height: 28, borderRadius: 6, borderWidth: 1, alignItems: 'center', justifyContent: 'center', marginHorizontal: 8 },
+  checkRow: { minHeight: 42, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  checkLabel: { flex: 1, fontSize: 13, lineHeight: 18, fontWeight: '600' },
+  artifactRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 10, borderBottomWidth: 1, paddingVertical: 10 },
+  artifactCopy: { flex: 1, minWidth: 0 },
+  artifactTitle: { fontSize: 14, lineHeight: 19, fontWeight: '700' },
+  artifactStatus: { fontSize: 12, lineHeight: 17, marginTop: 2 },
+  textAction: { minWidth: 44, minHeight: 44, alignItems: 'flex-end', justifyContent: 'center' },
+  textActionLabel: { fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  clearButton: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+});
+
 function makeStyles(C: ColorPalette) {
   return StyleSheet.create({
-    overlay:       { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
-    sheet: {
-      borderTopLeftRadius: 20, borderTopRightRadius: 20,
-    },
-    sheetContent: { paddingHorizontal: 16, paddingTop: 16 },
-    header:        { flexDirection: 'row', alignItems: 'center', gap: 12, marginBottom: 14 },
-    headerAccent:  { width: 4, height: 32, backgroundColor: C.orange, borderRadius: 2 },
-    title:         { color: C.text, fontSize: 15, fontFamily: mono, fontWeight: '900', letterSpacing: 1.5 },
-    subtitle:      { color: C.text3, fontSize: 9, fontFamily: mono, letterSpacing: 0.5, marginTop: 2 },
-    closeBtn:      { padding: 6 },
-    tabs: {
-      flexDirection: 'row', backgroundColor: C.s1, borderRadius: 8, padding: 3, marginBottom: 4, borderWidth: 1, borderColor: C.border,
-    },
-    tab:           { flex: 1, paddingVertical: 7, alignItems: 'center', borderRadius: 6 },
-    tabActive:     { backgroundColor: C.s2 },
-    tabText:       { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 1 },
-    tabTextActive: { color: C.orange },
-    noUser:        { alignItems: 'center', paddingVertical: 40, gap: 12 },
-    noUserText:    { color: C.text3, fontSize: 10, fontFamily: mono, letterSpacing: 1 },
-    hint: {
-      color: C.text3, fontSize: 9, fontFamily: mono, lineHeight: 14,
-      marginBottom: 10, paddingLeft: 4,
-    },
-    storageCard: {
-      flexDirection: 'row', alignItems: 'center', gap: 10,
-      backgroundColor: C.s1, borderRadius: 10, padding: 11, marginBottom: 10,
-      borderWidth: 1, borderColor: C.border,
-    },
-    storageTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
-    storageText: { color: C.text3, fontSize: 9.5, fontFamily: mono, marginTop: 2 },
-    storageEstimate: { color: C.text3, fontSize: 9, fontFamily: mono, maxWidth: 126, textAlign: 'right', lineHeight: 13 },
-    explorerSearch: {
-      minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 9,
-      borderRadius: 12, borderWidth: 1, borderColor: C.border,
-      backgroundColor: C.s1, paddingHorizontal: 12, marginTop: 2, marginBottom: 2,
-    },
-    explorerSearchInput: {
-      flex: 1, color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '700',
-      paddingVertical: Platform.OS === 'ios' ? 11 : 8,
-    },
-    explorerClear: {
-      width: 26, height: 26, borderRadius: 13, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    },
-    explorerRow: {
-      minHeight: 64, flexDirection: 'row', alignItems: 'center', gap: 11,
-      backgroundColor: C.s1, borderRadius: 13, borderWidth: 1, borderColor: C.border,
-      paddingHorizontal: 12, paddingVertical: 10, marginBottom: 8,
-    },
-    explorerIcon: {
-      width: 38, height: 38, borderRadius: 11, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '42',
-    },
-    explorerText: { flex: 1, minWidth: 0 },
-    explorerTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
-    explorerDetail: { color: C.text3, fontSize: 9.5, lineHeight: 13, marginTop: 3 },
-    explorerStatus: {
-      maxWidth: 84, color: C.text2, fontSize: 9, fontFamily: mono,
-      fontWeight: '900', textAlign: 'right',
-    },
-    explorerEmpty: {
-      alignItems: 'center', justifyContent: 'center', gap: 8,
-      backgroundColor: C.s1, borderRadius: 13, borderWidth: 1,
-      borderColor: C.border, borderStyle: 'dashed', padding: 18,
-    },
-    explorerEmptyText: {
-      color: C.text3, fontSize: 10, fontFamily: mono, textAlign: 'center',
-    },
-    customAreaCard: {
-      backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '38',
-      padding: 14, marginBottom: 10,
-    },
-    customAreaTop: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-    customAreaIcon: {
-      width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '55',
-    },
-    customAreaTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900', letterSpacing: 0.4 },
-    customAreaText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
-    customAreaNameRow: {
-      flexDirection: 'row', alignItems: 'center', gap: 8,
-      minHeight: 42, borderRadius: 11, borderWidth: 1, borderColor: C.border,
-      backgroundColor: C.s2, paddingHorizontal: 10, marginTop: 12,
-    },
-    customAreaNameInput: {
-      flex: 1, color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '800',
-      paddingVertical: Platform.OS === 'ios' ? 10 : 7,
-    },
-    customAreaActions: { flexDirection: 'row', flexWrap: 'wrap', gap: 9, marginTop: 12 },
-    customAreaSecondary: {
-      flexGrow: 1, flexBasis: 112, minHeight: 40, borderRadius: 11, borderWidth: 1, borderColor: C.border,
-      backgroundColor: C.s2, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    },
-    customAreaSecondaryText: { color: C.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
-    customAreaPrimary: {
-      flexGrow: 1, flexBasis: 120, minHeight: 40, borderRadius: 11, backgroundColor: C.orange,
-      flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7,
-    },
-    customAreaPrimaryText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
-    customAreaDeleteBtn: {
-      width: 44, minHeight: 40, borderRadius: 11, borderWidth: 1, borderColor: C.red + '40',
-      backgroundColor: C.red + '12', alignItems: 'center', justifyContent: 'center',
-    },
-    savedAreaRow: {
-      flexDirection: 'row', alignItems: 'center', gap: 8,
-      backgroundColor: C.s1, borderRadius: 12, borderWidth: 1, borderColor: C.border,
-      padding: 10, marginBottom: 8,
-    },
-    savedAreaRowActive: { borderColor: C.green + '55', backgroundColor: C.green + '10' },
-    savedAreaMain: { flex: 1, minWidth: 0 },
-    savedAreaTitle: { color: C.text, fontSize: 11, fontFamily: mono, fontWeight: '900' },
-    savedAreaMeta: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3 },
-    savedAreaAction: {
-      borderRadius: 8, borderWidth: 1, borderColor: C.orange + '45',
-      backgroundColor: C.orangeGlow, paddingHorizontal: 9, paddingVertical: 7,
-    },
-    savedAreaActionText: { color: C.orange, fontSize: 8, fontFamily: mono, fontWeight: '900' },
-    savedAreaIconBtn: {
-      width: 32, height: 32, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: C.s2, borderWidth: 1, borderColor: C.border,
-    },
-    packProgressCard: {
-      backgroundColor: C.s1, borderRadius: 10, padding: 12, marginBottom: 10,
-      borderWidth: 1, borderColor: C.orange + '40', borderLeftWidth: 3, borderLeftColor: C.orange,
-    },
-    pingDot: {
-      width: 6, height: 6, borderRadius: 3, backgroundColor: C.orange,
-    },
-    corridorCard: {
-      flexDirection: 'row', alignItems: 'center', gap: 12, padding: 14,
-      backgroundColor: C.s1, borderRadius: 10, borderLeftWidth: 3, borderLeftColor: C.orange,
-    },
-    tripBundleCard: {
-      minHeight: 82, flexDirection: 'row', alignItems: 'center', gap: 12,
-      backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.orange + '44',
-      padding: 14, marginBottom: 10,
-    },
-    tripBundleIcon: {
-      width: 46, height: 46, borderRadius: 14, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '55',
-    },
-    tripBundleTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
-    tripBundleText: { color: C.text3, fontSize: 10, lineHeight: 14, marginTop: 3 },
-    noTrip: {
-      padding: 20, backgroundColor: C.s1, borderRadius: 10, alignItems: 'center',
-      borderWidth: 1, borderColor: C.border, borderStyle: 'dashed',
-    },
-    packRow: {
-      flexDirection: 'row', alignItems: 'center', gap: 8,
-      paddingVertical: 9, paddingHorizontal: 4, borderBottomWidth: 1, borderBottomColor: C.border,
-    },
-    packName:      { flex: 1, color: C.text2, fontSize: 11, fontFamily: mono },
-    packSize:      { color: C.text3, fontSize: 10, fontFamily: mono },
-    featuredRegionRow: { flexDirection: 'row', gap: 10, marginBottom: 12 },
-    featuredRegionCard: {
-      flex: 1, minHeight: 104, flexDirection: 'row', gap: 10,
-      borderWidth: 1, borderColor: C.border, borderRadius: 12,
-      backgroundColor: C.s1, padding: 12,
-    },
-    featuredRegionCardActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
-    featuredRegionIcon: {
-      width: 58, height: 52, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-      borderWidth: 1, borderColor: C.orange + '45', backgroundColor: C.s2,
-    },
-    featuredRegionCode: { color: C.text, fontSize: 19, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-    featuredRegionTitle: { color: C.text, fontSize: 12, fontFamily: mono, fontWeight: '900' },
-    featuredRegionSub: { color: C.text3, fontSize: 9, fontFamily: mono, lineHeight: 13, marginTop: 3 },
-    featuredRegionStatus: { color: C.text3, fontSize: 8, fontFamily: mono, fontWeight: '900', marginTop: 6 },
-    regionGroupTabs: { gap: 8, paddingBottom: 10 },
-    regionGroupTab: {
-      paddingHorizontal: 12, paddingVertical: 8, borderRadius: 999,
-      borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
-    },
-    regionGroupTabActive: { borderColor: C.orange, backgroundColor: C.orangeGlow },
-    regionGroupTabText: { color: C.text3, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
-    regionPickerPanel: {
-      borderWidth: 1, borderColor: C.border, borderRadius: 14,
-      backgroundColor: C.s1, padding: 12, marginBottom: 12,
-    },
-    regionPickerHead: { flexDirection: 'row', justifyContent: 'space-between', gap: 10, marginBottom: 10 },
-    regionPickerTitle: { color: C.text, fontSize: 13, fontFamily: mono, fontWeight: '900' },
-    regionPickerSub: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 3 },
-    regionPickerCount: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900' },
-    stateGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-    statePick: {
-      width: '31%', minWidth: 86, paddingVertical: 9, paddingHorizontal: 8,
-      borderRadius: 8, borderWidth: 1, borderColor: C.border, backgroundColor: C.s1,
-    },
-    statePickTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 6 },
-    statePickCode: { color: C.text, fontSize: 20, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
-    statePickName: { color: C.text2, fontSize: 9, fontFamily: mono, marginTop: 2 },
-    contourPlannedCard: {
-      flexDirection: 'row', gap: 12, padding: 14,
-      borderRadius: 12, borderWidth: 1, borderColor: C.orange + '30',
-      backgroundColor: C.orangeGlow,
-    },
-    contourIcon: {
-      width: 40, height: 40, borderRadius: 10, alignItems: 'center', justifyContent: 'center',
-      backgroundColor: C.s1, borderWidth: 1, borderColor: C.orange + '45',
-    },
-    contourPlannedTitle: { color: C.orange, fontSize: 11, fontFamily: mono, fontWeight: '900', letterSpacing: 0.6 },
-    contourPlannedText: { color: C.text2, fontSize: 10, fontFamily: mono, lineHeight: 14, marginTop: 4 },
-    contourPlannedMeta: { color: C.text3, fontSize: 9, fontFamily: mono, marginTop: 6 },
+    overlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.48)' },
+    sheet: { width: '100%', minHeight: 420, borderTopLeftRadius: 16, borderTopRightRadius: 16, backgroundColor: C.s1, overflow: 'hidden' },
+    header: { minHeight: 76, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14, paddingTop: 10, borderBottomWidth: 1, borderBottomColor: C.border },
+    title: { flex: 1, color: C.text, fontSize: 26, lineHeight: 32, fontWeight: '800' },
+    content: { paddingHorizontal: 20 },
+    summary: { color: C.text2, fontSize: 13, lineHeight: 18, marginTop: 12 },
+    signInRow: { minHeight: 58, flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.s2, borderRadius: 6, paddingHorizontal: 14, marginTop: 16 },
+    signInText: { flex: 1, color: C.text2, fontSize: 13, lineHeight: 18 },
+    tripFeature: { borderBottomWidth: 1, borderBottomColor: C.border, paddingBottom: 16 },
+    tripFeatureInfo: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingTop: 10 },
+    tripFeatureCopy: { flex: 1, minWidth: 0 },
+    tripFeatureTitle: { color: C.text, fontSize: 18, lineHeight: 24, fontWeight: '700' },
+    tripFeatureMeta: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 3 },
+    suggestionRow: { minHeight: 62, flexDirection: 'row', alignItems: 'center', gap: 14, borderBottomWidth: 1, paddingVertical: 8 },
+    suggestionCopy: { flex: 1, minWidth: 0 },
+    suggestionTitle: { color: C.text, fontSize: 14, lineHeight: 19, fontWeight: '700' },
+    suggestionMeta: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 2 },
+    storageLink: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderTopWidth: 1, marginTop: 14 },
+    storageLinkCopy: { flex: 1 },
+    storageLinkTitle: { color: C.text, fontSize: 14, lineHeight: 20, fontWeight: '700' },
+    storageLinkMeta: { color: C.text2, fontSize: 12, lineHeight: 16, marginTop: 2 },
+    searchBox: { minHeight: 48, flexDirection: 'row', alignItems: 'center', borderWidth: 1, borderColor: C.border, borderRadius: 6, backgroundColor: C.s2, paddingLeft: 13, marginTop: 10 },
+    searchInput: { flex: 1, minHeight: 46, color: C.text, fontSize: 14, paddingHorizontal: 10, paddingVertical: 0 },
+    regionRow: { minHeight: 68, flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, paddingVertical: 8 },
+    regionCodeBox: { width: 54, height: 48, borderRadius: 4, alignItems: 'center', justifyContent: 'center', backgroundColor: C.s2, borderWidth: 1, borderColor: C.border },
+    regionCode: { color: C.orange, fontSize: 16, lineHeight: 20, fontWeight: '800' },
+    regionCopy: { flex: 1, minWidth: 0 },
+    regionTitle: { color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '700' },
+    regionMeta: { fontSize: 12, lineHeight: 17, marginTop: 3 },
+    detailIntro: { paddingVertical: 16, borderBottomWidth: 1, borderBottomColor: C.border },
+    detailTitle: { color: C.text, fontSize: 22, lineHeight: 28, fontWeight: '800' },
+    detailMeta: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 4 },
+    detailActions: { gap: 10, marginTop: 24 },
+    errorText: { color: C.red, fontSize: 12, lineHeight: 17, marginTop: 10 },
+    areaStart: { gap: 18, paddingTop: 12 },
+    areaSheet: { paddingTop: 18 },
+    areaNameInput: { color: C.text, fontSize: 22, lineHeight: 28, fontWeight: '800', borderBottomWidth: 1, borderBottomColor: C.border, paddingVertical: 8 },
+    areaMeta: { color: C.text2, fontSize: 12, lineHeight: 17, marginTop: 7 },
+    detailChoice: { minHeight: 58, flexDirection: 'row', alignItems: 'center', borderBottomWidth: 1, borderBottomColor: C.border, marginTop: 8 },
+    detailChoiceLabel: { color: C.text2, fontSize: 12, fontWeight: '600', width: 72 },
+    detailChoiceValue: { flex: 1, color: C.text, fontSize: 13, fontWeight: '700' },
+    activeArea: { marginTop: 14, padding: 14, borderRadius: 6, backgroundColor: C.s2 },
+    storageSummary: { minHeight: 98, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: C.s2, borderRadius: 6, paddingHorizontal: 16, marginTop: 10 },
+    storageSummaryRight: { alignItems: 'flex-end' },
+    storageValue: { color: C.text, fontSize: 20, lineHeight: 26, fontWeight: '800' },
+    storageCaption: { color: C.text2, fontSize: 11, lineHeight: 16, marginTop: 2 },
+    storageActions: { marginTop: 20 },
+    confirmOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 20, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.45)' },
+    confirmSheet: { backgroundColor: C.s1, borderTopLeftRadius: 16, borderTopRightRadius: 16, padding: 20 },
+    confirmTitle: { color: C.text, fontSize: 20, lineHeight: 26, fontWeight: '800' },
+    confirmText: { color: C.text2, fontSize: 13, lineHeight: 19, marginTop: 8 },
+    confirmActions: { gap: 10, marginTop: 22 },
   });
 }

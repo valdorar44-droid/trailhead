@@ -4708,7 +4708,7 @@ const buildMapHtml = (
   }
 
   async function _runDl(coords,vectorOnly){
-    var total=coords.length,saved=0,bytes=0,BATCH=20;
+    var total=coords.length,saved=0,failed=0,bytes=0,BATCH=20;
     var manifestKeys=[];
     // Cache style/glyphs/sprites first so map can initialize fully offline
     await _preCacheMapResources();
@@ -4718,15 +4718,22 @@ const buildMapHtml = (
       var batch=coords.slice(i,i+BATCH);
       await Promise.allSettled(batch.map(async function(t){
         var urls=_mbUrls(t.z,t.x,t.y,vectorOnly);
+        var tileKeys=[];
+        var tileOk=true;
         for(var ui=0;ui<urls.length;ui++){
           var ck=urls[ui].replace(/access_token=[^&]*/,'access_token=_');
-          manifestKeys.push(ck);
-          try{await fetch(urls[ui]);}catch(e){}
+          try{
+            var response=await fetch(urls[ui]);
+            if(!response.ok)throw new Error('HTTP '+response.status);
+            tileKeys.push(ck);
+          }catch(e){tileOk=false;break;}
         }
-        saved++;bytes+=_kbPer(t.z,vectorOnly)*1024;
-        postRN({type:'download_progress',percent:Math.round(saved/total*100),saved:saved,total:total,mb:(bytes/1048576).toFixed(1)});
+        if(tileOk){manifestKeys.push.apply(manifestKeys,tileKeys);saved++;bytes+=_kbPer(t.z,vectorOnly)*1024;}
+        else failed++;
+        postRN({type:'download_progress',percent:Math.round((saved+failed)/Math.max(1,total)*100),saved:saved,total:total,failed:failed,mb:(bytes/1048576).toFixed(1)});
       }));
     }
+    var cancelled=!downloadActive&&saved+failed<total;
     // Store manifest so delete can find exactly which keys belong to this region
     if(_currentDlLabel){
       try{
@@ -4735,7 +4742,9 @@ const buildMapHtml = (
       }catch(e){}
     }
     downloadActive=false;
-    postRN({type:'download_complete',saved:saved,total:total});
+    if(cancelled)postRN({type:'download_cancelled',saved:saved,total:total});
+    else if(failed>0||saved!==total||total===0)postRN({type:'download_failed',saved:saved,total:total,failed:failed});
+    else postRN({type:'download_complete',saved:saved,total:total});
   }
 
   // Bbox download (used for state-level downloads)
@@ -4751,13 +4760,14 @@ const buildMapHtml = (
   }
 
   // Route-corridor download: buffers around actual route coords — far fewer tiles than bbox
-  async function _dlTilesRoute(bufferKm,minZ,maxZ,vectorOnly){
-    if(!_routeCoords||!_routeCoords.length){postRN({type:'download_complete',saved:0,total:0});return;}
+  async function _dlTilesRoute(bufferKm,minZ,maxZ,vectorOnly,requestedRoute){
+    var routeInput=Array.isArray(requestedRoute)&&requestedRoute.length?requestedRoute:_routeCoords;
+    if(!routeInput||routeInput.length<2){postRN({type:'download_failed',saved:0,total:0,failed:0});downloadActive=false;return;}
     var tileSet=new Set();
-    var step=Math.max(1,Math.floor(_routeCoords.length/400));
+    var step=Math.max(1,Math.floor(routeInput.length/400));
     for(var z=minZ;z<=maxZ;z++){
-      for(var i=0;i<_routeCoords.length;i+=step){
-        var lon=_routeCoords[i][0],lat=_routeCoords[i][1];
+      for(var i=0;i<routeInput.length;i+=step){
+        var lon=routeInput[i][0],lat=routeInput[i][1];
         var bufLat=bufferKm/111.0;
         var bufLng=bufferKm/(111.0*Math.max(0.05,Math.cos(lat*Math.PI/180)));
         var nw=_ll2t(lat+bufLat,lon-bufLng,z),se=_ll2t(lat-bufLat,lon+bufLng,z),cap=Math.pow(2,z)-1;
@@ -5513,7 +5523,7 @@ const buildMapHtml = (
     if(msg.type==='set_water_nav_lines'&&map.getSource('water-nav-lines')){map.getSource('water-nav-lines').setData(msg.data||{type:'FeatureCollection',features:[]});}
     if(msg.type==='set_layer'){var _s=!!msg.show;if(msg.layer==='terrain')setTerrainLayer(_s);else if(msg.layer==='naip')setNaipLayer(_s);else if(msg.layer==='fire')setFireLayer(_s);else if(msg.layer==='ava')setAvaLayer(_s);else if(msg.layer==='radar')setRadarLayer(_s);else if(msg.layer==='nautical')setNauticalLayer(_s);else if(msg.layer==='mvum')setMvumLayer(_s);else if(msg.layer==='roads')setRoadsLayer(_s);}
     if(msg.type==='download_tiles_bbox'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTiles(msg.n,msg.s,msg.e,msg.w,msg.minZ||10,msg.maxZ||12,!!msg.vectorOnly);}}
-    if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly);}}
+    if(msg.type==='download_tiles_route'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';_dlTilesRoute(msg.bufferKm||20,msg.minZ||10,msg.maxZ||16,!!msg.vectorOnly,msg.routeCoords);}}
     if(msg.type==='download_tiles'){if(!downloadActive){downloadActive=true;_currentDlLabel=msg.label||'';var b=map.getBounds();_dlTiles(b.getNorth(),b.getSouth(),b.getEast(),b.getWest(),msg.minZ||10,msg.maxZ||15,!!msg.vectorOnly);}}
     if(msg.type==='cancel_download'){downloadActive=false;}
     if(msg.type==='clear_cached_region'&&msg.label){(async function(){
@@ -5982,6 +5992,8 @@ function MapScreen() {
   const setPendingStartCopilotVoice = useStore(st => st.setPendingStartCopilotVoice);
   const pendingOpenOfflineModal = useStore(st => st.pendingOpenOfflineModal);
   const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
+  const pendingOfflineTrip = useStore(st => st.pendingOfflineTrip);
+  const setPendingOfflineTrip = useStore(st => st.setPendingOfflineTrip);
   const user = useStore(st => st.user);
   const hasPlan = useStore(st => st.hasPlan);
   const setStoreLoc = useStore(st => st.setUserLoc);
@@ -6336,6 +6348,7 @@ function MapScreen() {
   const [offlineAreaEditingId, setOfflineAreaEditingId] = useState<string | null>(null);
   const offlineAreaBoxRef = useRef(offlineAreaBox);
   const offlineAreaDragStartRef = useRef(offlineAreaBox);
+  const pendingOfflineAreaSaveRef = useRef<OfflineAreaSelection | null>(null);
   const offlineSaved = cachedRegions.length > 0;
   const initialMapboxToken = useStore.getState().mapboxToken || '';
   const [mapboxToken,   setMapboxToken]   = useState(initialMapboxToken);
@@ -6571,6 +6584,7 @@ function MapScreen() {
 
   // Offline state modal
   const [showOfflineModal,  setShowOfflineModal]  = useState(false);
+  const [offlineTripContext, setOfflineTripContext] = useState<TripResult | null>(null);
   const [offlineWarning,    setOfflineWarning]    = useState(false);
   const [isActuallyOffline, setIsActuallyOffline] = useState(false);
 
@@ -6980,8 +6994,10 @@ function MapScreen() {
 
   const startOfflineAreaPicker = useCallback((areaToEdit?: OfflineAreaSelection | null) => {
     setShowOfflineModal(false);
+    setOfflineTripContext(null);
     setShowMapDrawer(false);
     setOfflineAreaEditingId(areaToEdit?.id ?? null);
+    setOfflineAreaDetail(areaToEdit?.detail ?? 'standard');
     if (areaToEdit) {
       setSelectedOfflineArea(areaToEdit);
       const restoredBox = boxForSavedOfflineArea(areaToEdit);
@@ -7029,13 +7045,17 @@ function MapScreen() {
       createdAt: prior?.createdAt ?? offlineAreaSelection.createdAt ?? Date.now(),
       updatedAt: Date.now(),
     };
-    const next = [savedArea, ...savedOfflineAreas.filter(area => area.id !== savedArea.id)].slice(0, 20);
-    persistSavedOfflineAreas(next);
     setSelectedOfflineArea(savedArea);
     setOfflineAreaEditingId(savedArea.id);
     setOfflineAreaPicker(false);
     setShowOfflineModal(true);
-  }, [offlineAreaSelection, offlineAreaTooLarge, persistSavedOfflineAreas, savedOfflineAreas]);
+  }, [offlineAreaSelection, offlineAreaTooLarge, savedOfflineAreas]);
+
+  const saveDownloadedOfflineArea = useCallback((area: OfflineAreaSelection) => {
+    const next = [area, ...savedOfflineAreas.filter(saved => saved.id !== area.id)].slice(0, 20);
+    persistSavedOfflineAreas(next);
+    setSelectedOfflineArea(area);
+  }, [persistSavedOfflineAreas, savedOfflineAreas]);
 
   useEffect(() => {
     trailTraceDraftRef.current = trailTraceDraft;
@@ -9185,9 +9205,11 @@ function MapScreen() {
 
   useEffect(() => {
     if (!pendingOpenOfflineModal) return;
+    setOfflineTripContext(pendingOfflineTrip);
+    setPendingOfflineTrip(null);
     setPendingOpenOfflineModal(false);
     setShowOfflineModal(true);
-  }, [pendingOpenOfflineModal, setPendingOpenOfflineModal]);
+  }, [pendingOfflineTrip, pendingOpenOfflineModal, setPendingOfflineTrip, setPendingOpenOfflineModal]);
 
   function beginCommunityPinDrop(useCurrentLocation = false) {
     setQuickReport(false);
@@ -17932,7 +17954,15 @@ function MapScreen() {
         setIsDownloading(false);
         setDownloadProgress(100);
         setDownloadLabel(prev => { if (prev) addCachedRegion(prev); return prev; });
+        const completedArea = pendingOfflineAreaSaveRef.current;
+        pendingOfflineAreaSaveRef.current = null;
+        if (completedArea) saveDownloadedOfflineArea(completedArea);
         setTimeout(() => { setDownloadProgress(0); setDownloadSaved(0); setDownloadMB('0'); }, 3000);
+      }
+      if (msg.type === 'download_failed' || msg.type === 'download_cancelled') {
+        setIsDownloading(false);
+        setDownloadLabel('');
+        pendingOfflineAreaSaveRef.current = null;
       }
       if (msg.type === 'campsite_tapped') {
         const camp = (msg.camp as CampsitePin) || null;
@@ -22445,7 +22475,7 @@ function MapScreen() {
           { label: 'Layers', sub: 'Styles, 3D, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
           { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
           { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, onPress: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
-          { label: 'Saved areas', sub: 'Maps, trails, places', icon: 'cloud-download-outline', tone: '#a3e635', onPress: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
+          { label: 'Offline', sub: 'Maps, trips, and places', icon: 'cloud-download-outline', tone: '#a3e635', onPress: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
           { label: 'Trail builder', sub: 'Drop points along a trail', icon: 'git-branch-outline', tone: '#22c55e', onPress: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
           { label: nearbyLoading ? 'Loading audio' : 'Nearby audio', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, onPress: () => { handleNearbyAudio(); } },
         ]}
@@ -22489,7 +22519,7 @@ function MapScreen() {
         <View style={s.offlineAreaOverlay} pointerEvents="box-none">
           <View style={s.offlineAreaTopPill} pointerEvents="auto">
             <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.offlineAreaTitle}>Saved area</Text>
+              <Text style={s.offlineAreaTitle}>Download area</Text>
               <Text style={s.offlineAreaSub} numberOfLines={1}>
                 {offlineAreaSelection
                   ? `${offlineAreaDetail === 'high' ? 'High detail' : 'Standard'} · ${formatOfflineAreaSqMi(offlineAreaSelection.areaSqMi)} · ~${Math.max(1, Math.round(offlineAreaSelection.estimatedMb))} MB`
@@ -22538,7 +22568,7 @@ function MapScreen() {
             )}
             <View style={s.offlineAreaActions}>
               <TouchableOpacity style={s.offlineAreaSecondaryBtn} onPress={() => setOfflineAreaPicker(false)}>
-                <Text style={s.offlineAreaSecondaryText}>CANCEL</Text>
+                <Text style={s.offlineAreaSecondaryText}>Cancel</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={[s.offlineAreaPrimaryBtn, offlineAreaTooLarge && { opacity: 0.55 }]}
@@ -22546,7 +22576,7 @@ function MapScreen() {
                 onPress={confirmOfflineAreaPicker}
               >
                 <Ionicons name="checkmark-outline" size={14} color="#fff" />
-                <Text style={s.offlineAreaPrimaryText}>SAVE AREA</Text>
+                <Text style={s.offlineAreaPrimaryText}>Continue</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -22564,7 +22594,7 @@ function MapScreen() {
           <View style={[s.topBarDot, safeWaterPlanningActive && { backgroundColor: '#67e8f9' }]} />
           <Text style={s.topBarText} numberOfLines={1}>
             {isDownloading
-              ? `CACHING ${downloadProgress}% · ${downloadSaved.toLocaleString()} COORDS · ${downloadMB} MB`
+              ? `Downloading ${downloadProgress}% · ${downloadMB} MB`
               : isRerouting
               ? 'RECALCULATING ROUTE...'
               : safeWaterPlanningActive && waterRouteReview
@@ -25903,11 +25933,15 @@ function MapScreen() {
       {/* ── Offline Map Download Modal — native MLN pack system ── */}
       <OfflineModal
         visible={showOfflineModal}
-        onClose={() => setShowOfflineModal(false)}
+        onClose={() => {
+          setShowOfflineModal(false);
+          setOfflineTripContext(null);
+        }}
         waypoints={waypoints}
         routeCoords={lastRouteCoords}
-        tripId={activeTrip?.trip_id ?? null}
-        tripName={activeTrip?.plan?.trip_name ?? null}
+        requestedTrip={offlineTripContext}
+        tripId={offlineTripContext?.trip_id ?? activeTrip?.trip_id ?? null}
+        tripName={offlineTripContext?.plan.trip_name ?? activeTrip?.plan?.trip_name ?? null}
         useNativeMap={useNativeMapSurface}
         onOfflinePlacesChanged={reloadOfflinePlacePois}
         selectedArea={selectedOfflineArea}
@@ -25915,16 +25949,33 @@ function MapScreen() {
         onStartAreaSelect={startOfflineAreaPicker}
         onSelectArea={selectSavedOfflineArea}
         onRenameArea={renameSavedOfflineArea}
+        onSaveArea={saveDownloadedOfflineArea}
         onDeleteArea={deleteSavedOfflineArea}
+        onOpenRegion={target => {
+          setShowOfflineModal(false);
+          setOfflineTripContext(null);
+          viewportRef.current = {
+            n: target.lat + 1,
+            s: target.lat - 1,
+            e: target.lng + 1,
+            w: target.lng - 1,
+            zoom: target.zoom,
+          };
+          nativeMapRef.current?.flyTo(target.lat, target.lng, target.zoom, target.label);
+          postWebMessage(JSON.stringify({ type: 'fly_to', lat: target.lat, lng: target.lng, zoom: target.zoom, name: target.label }));
+        }}
         onWebDownloadBbox={opts => {
+          pendingOfflineAreaSaveRef.current = selectedOfflineArea;
           postWebMessage(JSON.stringify({ type: 'download_tiles_bbox', ...opts }));
           setIsDownloading(true); setDownloadLabel(opts.label);
         }}
         onWebDownloadRoute={opts => {
+          pendingOfflineAreaSaveRef.current = null;
           postWebMessage(JSON.stringify({ type: 'download_tiles_route', ...opts }));
           setIsDownloading(true); setDownloadLabel(opts.label);
         }}
         onWebCancelDownload={() => {
+          pendingOfflineAreaSaveRef.current = null;
           postWebMessage(JSON.stringify({ type: 'cancel_download' }));
           setIsDownloading(false);
         }}
@@ -26171,6 +26222,10 @@ function MapScreen() {
             mapStyleOptions={mapStyleOptions}
             activeMapLayer={mapLayer}
             onSelectMapLayer={id => applyMapLayer(id as MapLayer)}
+            onOpenOffline={() => {
+              setShowLayerSheet(false);
+              setShowOfflineModal(true);
+            }}
             extremeMapLayerActive={extremeMapLayerActive}
             layerItems={layerSheetItems}
             mapboxStylesVisible={extremeMapboxSupported && !!mapboxToken}

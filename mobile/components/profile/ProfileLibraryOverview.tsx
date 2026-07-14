@@ -69,7 +69,7 @@ export default function ProfileLibraryOverview({
         <View style={s.actionRow}>
           <TouchableOpacity style={s.primaryAction} onPress={onOpenDownloads} activeOpacity={0.84}>
             <Ionicons name="cloud-download-outline" size={15} color="#fff" />
-            <Text style={s.primaryActionText}>{offlineTotal > 0 ? `SAVED AREAS (${offlineTotal})` : 'SAVED AREAS'}</Text>
+            <Text style={s.primaryActionText}>{offlineTotal > 0 ? `OFFLINE (${offlineTotal})` : 'OFFLINE'}</Text>
           </TouchableOpacity>
           <TouchableOpacity style={s.secondaryAction} onPress={onPlanTrip} activeOpacity={0.84}>
             <Ionicons name="compass-outline" size={15} color={C.orange} />

@@ -8,8 +8,9 @@
  *   const conus = getState('conus');
  *   if (conus.status === 'complete') { // file is at conus.localPath }
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import * as FileSystem from 'expo-file-system/legacy';
+import { create } from 'zustand';
 import { storage } from './storage';
 
 const BASE = 'https://tiles.gettrailhead.app';
@@ -268,6 +269,50 @@ const EMPTY_TRAIL = (id: string): FileDownloadState => {
 export const trailGraphLocalPath = (id: string) => `${TRAIL_PACK_DIR}${id}.graph.json`;
 export const trailRouteGraphLocalPath = (id: string) => `${TRAIL_PACK_DIR}${id}.route.jsonl.gz`;
 
+type DownloadStateMap = Record<string, FileDownloadState>;
+type DownloadStateUpdater = (previous: DownloadStateMap) => DownloadStateMap;
+
+type OfflineFileStore = {
+  states: DownloadStateMap;
+  routingStates: DownloadStateMap;
+  contourStates: DownloadStateMap;
+  trailStates: DownloadStateMap;
+  setStates: (update: DownloadStateUpdater) => void;
+  setRoutingStates: (update: DownloadStateUpdater) => void;
+  setContourStates: (update: DownloadStateUpdater) => void;
+  setTrailStates: (update: DownloadStateUpdater) => void;
+};
+
+const useOfflineFileStore = create<OfflineFileStore>((set) => ({
+  states: Object.fromEntries(
+    Object.keys(FILE_REGIONS).map(id => [id, EMPTY(id as FileRegionId)]),
+  ),
+  routingStates: Object.fromEntries(
+    Object.keys(ROUTING_REGIONS).map(id => [id, EMPTY_ROUTING(id)]),
+  ),
+  contourStates: Object.fromEntries(
+    Object.keys(CONTOUR_REGIONS).map(id => [id, EMPTY_CONTOUR(id)]),
+  ),
+  trailStates: Object.fromEntries(
+    Object.keys(TRAIL_REGIONS).map(id => [id, EMPTY_TRAIL(id)]),
+  ),
+  setStates: update => set(current => ({ states: update(current.states) })),
+  setRoutingStates: update => set(current => ({ routingStates: update(current.routingStates) })),
+  setContourStates: update => set(current => ({ contourStates: update(current.contourStates) })),
+  setTrailStates: update => set(current => ({ trailStates: update(current.trailStates) })),
+}));
+
+// Downloads must outlive an individual screen. Keeping the resumable handles and
+// speed samples at module scope lets every useOfflineFiles() consumer observe and
+// control the same in-flight work.
+const dlRefs = { current: {} as Record<string, FileSystem.DownloadResumable | null> };
+const routingDlRefs = { current: {} as Record<string, FileSystem.DownloadResumable | null> };
+const contourDlRefs = { current: {} as Record<string, FileSystem.DownloadResumable | null> };
+const trailDlRefs = { current: {} as Record<string, FileSystem.DownloadResumable | null> };
+const speedBuf = { current: {} as Record<string, Array<{ b: number; t: number }>> };
+const prevSpeed = { current: {} as Record<string, number> };
+let offlineFileHydrationStarted = false;
+
 async function migrateCachedFile(cachePath: string, persistentPath: string) {
   const target = await FileSystem.getInfoAsync(persistentPath).catch(() => null);
   if (target?.exists) return;
@@ -305,26 +350,14 @@ export function fmtEta(sec: number): string {
 
 // ── Hook ──────────────────────────────────────────────────────────────────────
 export function useOfflineFiles() {
-  const [states, setStates] = useState<Record<string, FileDownloadState>>(
-    () => Object.fromEntries(
-      Object.keys(FILE_REGIONS).map(id => [id, EMPTY(id as FileRegionId)])
-    )
-  );
-  const [routingStates, setRoutingStates] = useState<Record<string, FileDownloadState>>(
-    () => Object.fromEntries(
-      Object.keys(ROUTING_REGIONS).map(id => [id, EMPTY_ROUTING(id)])
-    )
-  );
-  const [contourStates, setContourStates] = useState<Record<string, FileDownloadState>>(
-    () => Object.fromEntries(
-      Object.keys(CONTOUR_REGIONS).map(id => [id, EMPTY_CONTOUR(id)])
-    )
-  );
-  const [trailStates, setTrailStates] = useState<Record<string, FileDownloadState>>(
-    () => Object.fromEntries(
-      Object.keys(TRAIL_REGIONS).map(id => [id, EMPTY_TRAIL(id)])
-    )
-  );
+  const states = useOfflineFileStore(store => store.states);
+  const routingStates = useOfflineFileStore(store => store.routingStates);
+  const contourStates = useOfflineFileStore(store => store.contourStates);
+  const trailStates = useOfflineFileStore(store => store.trailStates);
+  const setStates = useOfflineFileStore(store => store.setStates);
+  const setRoutingStates = useOfflineFileStore(store => store.setRoutingStates);
+  const setContourStates = useOfflineFileStore(store => store.setContourStates);
+  const setTrailStates = useOfflineFileStore(store => store.setTrailStates);
   // Real file sizes fetched from CF manifest (overrides estimatedGb)
   const [manifestSizes, setManifestSizes] = useState<Record<string, number>>({});
   const [routingManifestSizes, setRoutingManifestSizes] = useState<Record<string, number>>({});
@@ -332,13 +365,6 @@ export function useOfflineFiles() {
   const [trailManifestSizes, setTrailManifestSizes] = useState<Record<string, number>>({});
   const [trailSelectionGraphManifestSizes, setTrailSelectionGraphManifestSizes] = useState<Record<string, number>>({});
   const [trailRouteGraphManifestSizes, setTrailRouteGraphManifestSizes] = useState<Record<string, number>>({});
-
-  const dlRefs    = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
-  const routingDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
-  const contourDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
-  const trailDlRefs = useRef<Record<string, FileSystem.DownloadResumable | null>>({});
-  const speedBuf  = useRef<Record<string, Array<{ b: number; t: number }>>>({});
-  const prevSpeed = useRef<Record<string, number>>({});
 
   // Fetch real file sizes from CF manifest
   useEffect(() => {
@@ -412,6 +438,8 @@ export function useOfflineFiles() {
 
   // On mount: check which files already exist, and which have paused resume data
   useEffect(() => {
+    if (offlineFileHydrationStarted) return;
+    offlineFileHydrationStarted = true;
     (async () => {
       await FileSystem.makeDirectoryAsync(OFFLINE_DIR, { intermediates: true }).catch(() => {});
       await FileSystem.makeDirectoryAsync(ROUTING_DIR, { intermediates: true }).catch(() => {});
@@ -419,6 +447,7 @@ export function useOfflineFiles() {
       await FileSystem.makeDirectoryAsync(TRAIL_PACK_DIR, { intermediates: true }).catch(() => {});
 
       for (const [id, region] of Object.entries(FILE_REGIONS)) {
+        if (useOfflineFileStore.getState().states[id]?.status === 'downloading') continue;
         const fileName = id === 'conus' ? 'conus.pmtiles' : `${id}.pmtiles`;
         await migrateCachedFile(`${CACHE_OFFLINE_DIR}${fileName}`, region.localPath);
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
@@ -438,6 +467,7 @@ export function useOfflineFiles() {
       }
 
       for (const [id, region] of Object.entries(ROUTING_REGIONS)) {
+        if (useOfflineFileStore.getState().routingStates[id]?.status === 'downloading') continue;
         await migrateCachedFile(`${CACHE_ROUTING_DIR}${id}.tar`, region.localPath);
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
         if (info?.exists) {
@@ -455,6 +485,7 @@ export function useOfflineFiles() {
       }
 
       for (const [id, region] of Object.entries(CONTOUR_REGIONS)) {
+        if (useOfflineFileStore.getState().contourStates[id]?.status === 'downloading') continue;
         await migrateCachedFile(`${CACHE_CONTOUR_DIR}${id}.pmtiles`, region.localPath);
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
         if (info?.exists) {
@@ -472,6 +503,7 @@ export function useOfflineFiles() {
       }
 
       for (const [id, region] of Object.entries(TRAIL_REGIONS)) {
+        if (useOfflineFileStore.getState().trailStates[id]?.status === 'downloading') continue;
         await migrateCachedFile(`${CACHE_TRAIL_PACK_DIR}${id}.pmtiles`, region.localPath);
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
         if (info?.exists) {
@@ -496,6 +528,8 @@ export function useOfflineFiles() {
     if (Object.keys(manifestSizes).length === 0) return;
     (async () => {
       for (const [id, region] of Object.entries(FILE_REGIONS)) {
+        const status = useOfflineFileStore.getState().states[id]?.status;
+        if (status === 'downloading' || status === 'paused') continue;
         const expected = manifestSizes[id];
         if (!expected) continue;
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
@@ -514,6 +548,8 @@ export function useOfflineFiles() {
     if (Object.keys(routingManifestSizes).length === 0) return;
     (async () => {
       for (const [id, region] of Object.entries(ROUTING_REGIONS)) {
+        const status = useOfflineFileStore.getState().routingStates[id]?.status;
+        if (status === 'downloading' || status === 'paused') continue;
         const expected = routingManifestSizes[id];
         if (!expected) continue;
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
@@ -532,6 +568,8 @@ export function useOfflineFiles() {
     if (Object.keys(contourManifestSizes).length === 0) return;
     (async () => {
       for (const [id, region] of Object.entries(CONTOUR_REGIONS)) {
+        const status = useOfflineFileStore.getState().contourStates[id]?.status;
+        if (status === 'downloading' || status === 'paused') continue;
         const expected = contourManifestSizes[id];
         if (!expected) continue;
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
@@ -550,6 +588,8 @@ export function useOfflineFiles() {
     if (Object.keys(trailManifestSizes).length === 0) return;
     (async () => {
       for (const [id, region] of Object.entries(TRAIL_REGIONS)) {
+        const status = useOfflineFileStore.getState().trailStates[id]?.status;
+        if (status === 'downloading' || status === 'paused') continue;
         const expected = trailManifestSizes[id];
         if (!expected) continue;
         const info = await FileSystem.getInfoAsync(region.localPath).catch(() => null);
@@ -568,6 +608,8 @@ export function useOfflineFiles() {
     if (Object.keys(trailRouteGraphManifestSizes).length === 0) return;
     (async () => {
       for (const id of Object.keys(TRAIL_REGIONS)) {
+        const status = useOfflineFileStore.getState().trailStates[id]?.status;
+        if (status === 'downloading' || status === 'paused') continue;
         const expected = trailRouteGraphManifestSizes[id];
         if (!expected) continue;
         const path = trailRouteGraphLocalPath(id);

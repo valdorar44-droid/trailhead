@@ -74,7 +74,7 @@ const NEED_OPTIONS: Array<Choice<WelcomeTravelNeed>> = [
   { id: 'pets', title: 'Pets', icon: 'paw-outline' },
   { id: 'kids', title: 'Kids', icon: 'happy-outline' },
   { id: 'towing', title: 'Towing', icon: 'swap-horizontal-outline' },
-  { id: 'downloads', title: 'Offline maps', icon: 'cloud-download-outline' },
+  { id: 'downloads', title: 'Offline', icon: 'cloud-download-outline' },
 ];
 
 const VEHICLE_TYPES = ['Truck', 'Jeep', 'SUV', 'Van/Camper', 'Moto', 'Other'];

@@ -36,6 +36,7 @@ export type TripLibrarySnapshot = {
 
 export type TripAction =
   | 'open'
+  | 'offline'
   | 'notes'
   | 'duplicate'
   | 'save'

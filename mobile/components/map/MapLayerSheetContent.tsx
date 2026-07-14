@@ -51,6 +51,7 @@ type Props = {
   mapStyleOptions: readonly LayerMapStyleOption[];
   activeMapLayer: string;
   onSelectMapLayer: (id: string) => void;
+  onOpenOffline: () => void;
   extremeMapLayerActive: boolean;
   layerItems: readonly LayerToggleItem[];
   mapboxStylesVisible: boolean;
@@ -73,6 +74,7 @@ export default function MapLayerSheetContent({
   mapStyleOptions,
   activeMapLayer,
   onSelectMapLayer,
+  onOpenOffline,
   extremeMapLayerActive,
   layerItems,
   mapboxStylesVisible,
@@ -221,6 +223,14 @@ export default function MapLayerSheetContent({
 
   return (
     <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.sheetContent}>
+      <TouchableOpacity style={s.offlineRow} onPress={onOpenOffline} activeOpacity={0.78}>
+        <View style={s.offlineIcon}>
+          <Ionicons name="cloud-download-outline" size={20} color={C.orange} />
+        </View>
+        <Text style={s.offlineLabel}>Offline</Text>
+        <Ionicons name="chevron-forward" size={19} color={C.text3} />
+      </TouchableOpacity>
+
       <Text style={s.sectionHead}>Map style</Text>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.carousel}>
         {primaryMapStyleOptions.map(option => {
@@ -397,6 +407,27 @@ export default function MapLayerSheetContent({
 const makeStyles = (C: ColorPalette) => StyleSheet.create({
   sheetContent: {
     paddingBottom: 16,
+  },
+  offlineRow: {
+    minHeight: 58,
+    marginHorizontal: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  offlineIcon: {
+    width: 36,
+    height: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  offlineLabel: {
+    flex: 1,
+    color: C.text,
+    fontSize: 15,
+    fontWeight: '700',
   },
   sectionHead: {
     color: C.text3,

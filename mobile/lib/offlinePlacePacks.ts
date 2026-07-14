@@ -87,6 +87,19 @@ export async function listOfflinePlacePacks(): Promise<OfflinePlacePackSummary[]
   }));
 }
 
+export async function getOfflinePlacePackStorageBytes(): Promise<Record<string, number>> {
+  try {
+    const index = await getIndex();
+    const rows = await Promise.all(index.map(async id => {
+      const info = await FileSystem.getInfoAsync(packPath(id)).catch(() => null);
+      return [id, info?.exists ? Number((info as any).size ?? 0) : 0] as const;
+    }));
+    return Object.fromEntries(rows);
+  } catch {
+    return {};
+  }
+}
+
 export async function deleteOfflinePlacePack(packId: string): Promise<void> {
   const epoch = accountStorage.epoch();
   await accountStorage.run(async () => {

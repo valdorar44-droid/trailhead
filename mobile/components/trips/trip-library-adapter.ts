@@ -398,6 +398,18 @@ async function resolveTrip(item: TripLibraryItem): Promise<TripResult> {
   return tripResultFromDocument(item.document);
 }
 
+export async function resolveLibraryTrip(item: TripLibraryItem) {
+  const operation = captureAccountOperation();
+  try {
+    freshDocument(item);
+    const trip = await resolveTrip(item);
+    requireCurrentAccount(operation);
+    return trip;
+  } catch (error) {
+    throw publicTripError(error, 'This trip could not be loaded. Check your connection and try again.');
+  }
+}
+
 function historyItemFromTrip(trip: TripResult): TripHistoryItem {
   return {
     trip_id: trip.trip_id,

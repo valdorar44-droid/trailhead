@@ -41,6 +41,7 @@ import {
   initializeTripLibrary,
   loadTripLibrarySnapshot,
   openLibraryTrip,
+  resolveLibraryTrip,
   refreshTripLibraryFromSource,
   restoreLibraryTrip,
   saveLibraryTrip,
@@ -70,6 +71,8 @@ export default function TripsScreen() {
   const activeTripId = useStore(state => state.activeTrip?.trip_id ?? '');
   const userId = useStore(state => state.user?.id ?? '');
   const setPendingMapSelection = useStore(state => state.setPendingMapSelection);
+  const setPendingOpenOfflineModal = useStore(state => state.setPendingOpenOfflineModal);
+  const setPendingOfflineTrip = useStore(state => state.setPendingOfflineTrip);
   const setTabBarHidden = useStore(state => state.setTabBarHidden);
 
   const [snapshot, setSnapshot] = useState<TripLibrarySnapshot>(EMPTY_SNAPSHOT);
@@ -220,6 +223,21 @@ export default function TripsScreen() {
     }
   }, [router]);
 
+  const openOffline = useCallback(async (trip: TripLibraryItem) => {
+    setBusy(true);
+    try {
+      const resolved = await resolveLibraryTrip(trip);
+      setActionSheetVisible(false);
+      setPendingOfflineTrip(resolved);
+      setPendingOpenOfflineModal(true);
+      router.push('/(tabs)/map');
+    } catch (error: any) {
+      Alert.alert('Trip unavailable', error?.message || 'This trip could not be loaded. Check your connection and try again.');
+    } finally {
+      setBusy(false);
+    }
+  }, [router, setPendingOfflineTrip, setPendingOpenOfflineModal]);
+
   const performAction = useCallback(async (action: TripAction, trip: TripLibraryItem) => {
     if (action === 'open') {
       await openTrip(trip);
@@ -263,6 +281,10 @@ export default function TripsScreen() {
   }, [openTrip, refresh]);
 
   const handleAction = useCallback((action: TripAction, trip: TripLibraryItem) => {
+    if (action === 'offline') {
+      void openOffline(trip);
+      return;
+    }
     if (action === 'notes') {
       setActionSheetVisible(false);
       setNotesTripId(trip.id);
@@ -281,7 +303,7 @@ export default function TripsScreen() {
         { text: 'Delete', style: 'destructive', onPress: () => void performAction('delete', trip) },
       ],
     );
-  }, [performAction]);
+  }, [openOffline, performAction]);
 
   const saveNote = useCallback(async (input: TripNoteInput) => {
     if (!notesTrip) throw new Error('This trip is no longer in your library.');

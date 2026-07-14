@@ -1614,7 +1614,7 @@ export default function ProfileScreen() {
     const localRows: Array<{
       icon: keyof typeof Ionicons.glyphMap;
       title: string;
-      detail: string;
+      detail?: string;
       onPress: () => void;
     }> = [
       {
@@ -1631,8 +1631,10 @@ export default function ProfileScreen() {
       },
       {
         icon: 'download-outline',
-        title: 'Offline maps',
-        detail: offlineTripCount ? `${offlineTripCount} trip ${offlineTripCount === 1 ? 'pack' : 'packs'}` : 'Manage downloads',
+        title: 'Offline',
+        ...(offlineTripCount > 0
+          ? { detail: `${offlineTripCount} trip ${offlineTripCount === 1 ? 'pack' : 'packs'}` }
+          : {}),
         onPress: openOfflineMapsManager,
       },
     ];
@@ -1680,7 +1682,7 @@ export default function ProfileScreen() {
         </View>
         <View style={s.guestRowCopy}>
           <Text style={s.guestRowTitle}>{row.title}</Text>
-          <Text style={s.guestRowDetail}>{row.detail}</Text>
+          {row.detail ? <Text style={s.guestRowDetail}>{row.detail}</Text> : null}
         </View>
         <Ionicons name="chevron-forward" size={18} color={C.text3} />
       </TouchableOpacity>
@@ -1982,7 +1984,7 @@ export default function ProfileScreen() {
               ? [
                   { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
                   { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
-                  { icon: 'cloud-download-outline', label: 'SAVED AREAS', color: C.green, onPress: openOfflineMapsManager },
+                  { icon: 'cloud-download-outline', label: 'OFFLINE', color: C.green, onPress: openOfflineMapsManager },
                   { icon: 'ticket-outline', label: 'TOURS', color: '#0f766e', onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
                   ...(upcomingBookedTour ? [{ icon: 'calendar-outline', label: 'CALENDAR', color: '#3b82f6', onPress: () => addBookedTourToCalendar(upcomingBookedTour) }] : []),
                 ]

@@ -24,6 +24,7 @@ import MapWeatherPeek from '@/components/map/MapWeatherPeek';
 import MapWeatherSheet from '@/components/map/MapWeatherSheet';
 import RouteAlertsPanel from '@/components/map/RouteAlertsPanel';
 import RouteScoutPanel, { type RouteScoutDayActionItem, type RouteScoutDayActionKind, type RouteScoutDayActionState } from '@/components/map/RouteScoutPanel';
+import RouteActivityOfferSheet from '@/components/routeBuilder/RouteActivityOfferSheet';
 import TrailPreviewPlayer from '@/components/trails/TrailPreviewPlayer';
 import TourTarget from '@/components/TourTarget';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -122,6 +123,7 @@ import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
 import { startRealtimeCopilotSession, type RealtimeCopilotHandle } from '@/lib/realtimeCopilot';
 import { waitForRouteRenderReady, waitForRealtimeConnected } from '@/lib/cinematicDirector';
 import type { CopilotPresenceState } from '@/components/copilot/CopilotPresenceOrb';
+import { TrailheadWayfinder, type TrailheadWayfinderState } from '@/components/copilot/TrailheadWayfinder';
 import { TripPreviewCaption } from '@/components/copilot/TripPreviewCaption';
 import { TripPreviewControls, DEFAULT_PREVIEW_SPEED, clampPreviewSpeed } from '@/components/copilot/TripPreviewControls';
 import type { MissionCinematic, MissionScene, StoryboardPlace } from '@/lib/copilotStoryboard';
@@ -144,6 +146,7 @@ import {
   type MissionBriefCallout,
 } from '@/lib/mapMissionBrief';
 import { startNativeMissionBriefPlayer, type NativeMissionBriefPlayer } from '@/lib/missionBriefNativePlayer';
+import { routeActivityDay, routeActivityPlace } from '@/lib/routeActivityOffer';
 import {
   createMissionPlaybackDebug,
   missionNarrationWatchdogMs,
@@ -296,12 +299,6 @@ const WebMapPlaceholder = forwardRef<any, WebMapPlaceholderProps>(function WebMa
   );
 });
 const WebView: any = Platform.OS === 'web' ? WebMapPlaceholder : require('react-native-webview').WebView;
-let LottieView: any = null;
-try {
-  LottieView = Platform.OS === 'web' ? null : require('lottie-react-native').default;
-} catch {
-  LottieView = null;
-}
 
 function safelyRemoveSubscription(subscription: { remove?: () => unknown } | null | undefined) {
   try {
@@ -314,19 +311,6 @@ const STADIA_API_KEY = process.env.EXPO_PUBLIC_STADIA_API_KEY ?? '4d2b6230-f506-
 const API_BASE_URL = TRAILHEAD_API_BASE;
 const LOCATION_WARMUP_PROMPT_KEY = 'trailhead_foreground_location_prompt_v1';
 const LIVE_CONDITION_SOURCE = 'pro' + 'vider';
-
-type TrailGuideAvatarState = 'idle' | 'listening' | 'userSpeaking' | 'thinking' | 'speaking' | 'error' | 'noMicPermission' | 'disconnected';
-
-const TRAIL_GUIDE_LOTTIE: Record<TrailGuideAvatarState, any> = {
-  idle: require('../../assets/trail-guide/idle.json'),
-  listening: require('../../assets/trail-guide/listening.json'),
-  userSpeaking: require('../../assets/trail-guide/user-speaking.json'),
-  thinking: require('../../assets/trail-guide/thinking.json'),
-  speaking: require('../../assets/trail-guide/speaking.json'),
-  error: require('../../assets/trail-guide/error.json'),
-  noMicPermission: require('../../assets/trail-guide/no-mic-permission.json'),
-  disconnected: require('../../assets/trail-guide/disconnected.json'),
-};
 
 function mediaUrl(url?: string | null) {
   if (!url) return '';
@@ -778,14 +762,15 @@ type CopilotChatMessage = {
   action?: MapActionRequest | null;
 };
 const COPILOT_QUICK_ACTIONS: Array<{
+  id: 'flyover' | 'camps' | 'fuel' | 'around';
   label: string;
   prompt: string;
   icon: keyof typeof Ionicons.glyphMap;
 }> = [
-  { label: 'Flyover', prompt: 'open flyover', icon: 'play-outline' },
-  { label: 'Camps', prompt: 'show camps near my route', icon: 'bonfire-outline' },
-  { label: 'Fuel', prompt: 'find fuel nearby', icon: 'flash-outline' },
-  { label: 'Public land', prompt: 'turn on public land', icon: 'layers-outline' },
+  { id: 'flyover', label: 'Flyover', prompt: 'open flyover', icon: 'play-outline' },
+  { id: 'camps', label: 'Camps', prompt: 'show camps near my route', icon: 'bonfire-outline' },
+  { id: 'fuel', label: 'Fuel', prompt: 'find fuel nearby', icon: 'flash-outline' },
+  { id: 'around', label: 'Around me', prompt: '', icon: 'headset-outline' },
 ];
 
 function copilotActionDisplayLabel(action?: MapActionRequest | null) {
@@ -3234,7 +3219,7 @@ const FULL_MAP_SEARCH_QUICK_ACTIONS: MapSearchQuickAction[] = [
   { label: 'Camps', query: 'camps near me', icon: 'bonfire-outline' },
   { label: 'Fuel', query: 'fuel near me', icon: 'car-sport-outline' },
   { label: 'Water', query: 'water near me', icon: 'water-outline' },
-  { label: 'Trails', query: 'trails near me', icon: 'trail-sign-outline' },
+  { id: 'trails-in-view', label: 'Trails', query: 'trails near me', icon: 'trail-sign-outline' },
   { label: 'Groceries', query: 'grocery near me', icon: 'cart-outline' },
 ];
 
@@ -5611,32 +5596,6 @@ class MapErrorBoundary extends Component<{ children: React.ReactNode }, { error:
   }
 }
 
-function trailGuideTone(state: TrailGuideAvatarState, C: ColorPalette) {
-  switch (state) {
-    case 'listening': return C.green;
-    case 'userSpeaking': return C.blueGlow;
-    case 'thinking': return C.yellow;
-    case 'speaking': return C.orange;
-    case 'error': return C.red;
-    case 'noMicPermission': return C.text3;
-    case 'disconnected': return C.border2;
-    default: return C.orange;
-  }
-}
-
-function trailGuideStateLabel(state: TrailGuideAvatarState) {
-  switch (state) {
-    case 'listening': return 'Listening';
-    case 'userSpeaking': return 'Listening';
-    case 'thinking': return 'Thinking';
-    case 'speaking': return 'Speaking';
-    case 'error': return 'Error';
-    case 'noMicPermission': return 'No mic';
-    case 'disconnected': return 'Offline';
-    default: return '';
-  }
-}
-
 function trailGuideStateFromVoice(args: {
   available: boolean;
   voiceEnabled: boolean;
@@ -5644,7 +5603,7 @@ function trailGuideStateFromVoice(args: {
   voiceBusy: boolean;
   copilotBusy: boolean;
   status: string;
-}): TrailGuideAvatarState {
+}): TrailheadWayfinderState {
   if (!args.available) return 'disconnected';
   const status = args.status.toLowerCase();
   if (/microphone|mic|permission/.test(status) && /denied|unavailable|blocked|no mic|not allowed/.test(status)) return 'noMicPermission';
@@ -5656,135 +5615,21 @@ function trailGuideStateFromVoice(args: {
   return 'idle';
 }
 
-function TrailGuideAvatar({
-  state,
-  colors,
-  size = 'dock',
-  label,
-}: {
-  state: TrailGuideAvatarState;
-  colors: ColorPalette;
-  size?: 'dock' | 'sheet';
-  label?: string;
-}) {
-  const pulse = useRef(new Animated.Value(0)).current;
-  const active = state !== 'idle' && state !== 'disconnected';
-  const tone = trailGuideTone(state, colors);
-  const dim = size === 'sheet' ? 54 : 68;
-
-  useEffect(() => {
-    pulse.stopAnimation();
-    if (!active) {
-      pulse.setValue(0);
-      return;
-    }
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(pulse, { toValue: 1, duration: 880, useNativeDriver: true }),
-        Animated.timing(pulse, { toValue: 0, duration: 880, useNativeDriver: true }),
-      ]),
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [active, pulse]);
-
-  const ringScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [1, 1.18] });
-  const ringOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.22, 0.62] });
-
-  return (
-    <View style={{ alignItems: 'center', gap: 4 }}>
-      <View style={{ width: dim, height: dim, alignItems: 'center', justifyContent: 'center' }}>
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            width: dim + 14,
-            height: dim + 14,
-            borderRadius: (dim + 14) / 2,
-            backgroundColor: tone,
-            opacity: active ? ringOpacity.interpolate({ inputRange: [0.22, 0.62], outputRange: [0.10, 0.22] }) : 0.08,
-            transform: [{ scale: active ? ringScale : 1 }],
-          }}
-        />
-        <Animated.View
-          pointerEvents="none"
-          style={{
-            position: 'absolute',
-            width: dim + 4,
-            height: dim + 4,
-            borderRadius: (dim + 4) / 2,
-            borderWidth: 2,
-            borderColor: tone,
-            opacity: active ? ringOpacity : 0.18,
-            transform: [{ scale: active ? ringScale : 1 }],
-          }}
-        />
-        <View
-          style={{
-            width: dim,
-            height: dim,
-            borderRadius: dim / 2,
-            overflow: 'hidden',
-            alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: '#0b1117',
-            borderWidth: 1.5,
-            borderColor: active ? tone : 'rgba(255,255,255,0.16)',
-            shadowColor: tone,
-            shadowOpacity: active ? 0.38 : 0.18,
-            shadowRadius: active ? 24 : 14,
-            shadowOffset: { width: 0, height: 8 },
-            elevation: 16,
-          }}
-        >
-	          {LottieView ? (
-	            <LottieView
-	              source={TRAIL_GUIDE_LOTTIE[state]}
-	              autoPlay
-	              loop
-	              style={{ width: dim + 2, height: dim + 2 }}
-	            />
-	          ) : (
-	            <View style={{ width: dim - 12, height: dim - 12, borderRadius: (dim - 12) / 2, borderWidth: 2, borderColor: tone, alignItems: 'center', justifyContent: 'center', backgroundColor: colors.s1 }}>
-	              <View style={{ position: 'absolute', top: 6, width: 14, height: 14, borderRadius: 7, backgroundColor: colors.silverBright, shadowColor: colors.silverBright, shadowOpacity: active ? 0.55 : 0.22, shadowRadius: 8 }} />
-	              <View style={{ position: 'absolute', top: 18, left: 11, right: 11, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.75, transform: [{ rotate: '-8deg' }] }} />
-	              <View style={{ position: 'absolute', top: 25, left: 10, right: 10, height: 1.5, borderRadius: 1, backgroundColor: colors.silverBright, opacity: 0.54, transform: [{ rotate: '5deg' }] }} />
-	              <View style={{ position: 'absolute', top: 32, left: 14, right: 14, height: 1.5, borderRadius: 1, backgroundColor: colors.green, opacity: 0.58, transform: [{ rotate: '-5deg' }] }} />
-	              <Ionicons name="compass-outline" size={dim === 54 ? 27 : 34} color={tone} />
-	            </View>
-	          )}
-	          <View pointerEvents="none" style={{ position: 'absolute', width: dim - 10, height: dim - 10, borderRadius: (dim - 10) / 2, alignItems: 'center', justifyContent: 'center' }}>
-	            <View style={{ position: 'absolute', width: dim - 18, height: dim - 18, borderRadius: (dim - 18) / 2, borderWidth: 1.4, borderColor: tone, opacity: 0.72 }} />
-	            <View style={{ position: 'absolute', top: dim * 0.21, width: 0, height: 0, borderLeftWidth: dim * 0.16, borderRightWidth: dim * 0.16, borderBottomWidth: dim * 0.24, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: colors.silverBright, opacity: 0.92 }} />
-	            <View style={{ position: 'absolute', top: dim * 0.28, left: dim * 0.18, width: 0, height: 0, borderLeftWidth: dim * 0.14, borderRightWidth: dim * 0.14, borderBottomWidth: dim * 0.20, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderBottomColor: '#24342e', opacity: 0.96 }} />
-	            <View style={{ position: 'absolute', top: dim * 0.54, width: dim * 0.34, height: 3, borderRadius: 3, backgroundColor: tone, transform: [{ rotate: '-18deg' }] }} />
-	            <View style={{ position: 'absolute', top: dim * 0.63, width: dim * 0.26, height: 3, borderRadius: 3, backgroundColor: colors.silverBright, opacity: 0.86, transform: [{ rotate: '16deg' }] }} />
-	            <Ionicons name="navigate" size={dim === 54 ? 15 : 18} color={tone} style={{ position: 'absolute', top: dim * 0.16, right: dim * 0.18, transform: [{ rotate: '28deg' }] }} />
-	          </View>
-	          <View style={{ position: 'absolute', right: 4, bottom: 4, width: 18, height: 18, borderRadius: 9, backgroundColor: tone, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#0b1117' }}>
-	            <Ionicons name={state === 'listening' || state === 'userSpeaking' ? 'mic' : state === 'noMicPermission' ? 'mic-off' : 'radio-outline'} size={10} color="#0b1117" />
-	          </View>
-        </View>
-      </View>
-      {!!label && (
-        <Text
-          style={{
-            maxWidth: 72,
-            color: tone,
-            fontSize: 8,
-            lineHeight: 10,
-            fontFamily: mono,
-            fontWeight: '900',
-            textAlign: 'center',
-            letterSpacing: 0,
-          }}
-          numberOfLines={1}
-        >
-          {label}
-        </Text>
-      )}
-    </View>
-  );
+function trailGuideAccessibilityLabel(state: TrailheadWayfinderState) {
+  switch (state) {
+    case 'listening': return 'Co-Pilot, listening';
+    case 'userSpeaking': return 'Co-Pilot, hearing you';
+    case 'thinking':
+    case 'building': return 'Co-Pilot, working';
+    case 'speaking': return 'Co-Pilot, speaking';
+    case 'error': return 'Co-Pilot needs attention';
+    case 'noMicPermission': return 'Co-Pilot microphone access needed';
+    case 'flying': return 'Co-Pilot flyover in progress';
+    case 'warning': return 'Co-Pilot route warning';
+    case 'paused': return 'Co-Pilot paused';
+    case 'complete': return 'Co-Pilot finished';
+    default: return 'Open Co-Pilot';
+  }
 }
 
 function PremiumActionSheetHeader({
@@ -5994,6 +5839,8 @@ function MapScreen() {
   const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
   const pendingOfflineTrip = useStore(st => st.pendingOfflineTrip);
   const setPendingOfflineTrip = useStore(st => st.setPendingOfflineTrip);
+  const pendingRouteActivityOffer = useStore(st => st.pendingRouteActivityOffer);
+  const setPendingRouteActivityOffer = useStore(st => st.setPendingRouteActivityOffer);
   const user = useStore(st => st.user);
   const hasPlan = useStore(st => st.hasPlan);
   const setStoreLoc = useStore(st => st.setUserLoc);
@@ -6013,6 +5860,17 @@ function MapScreen() {
     () => buildTrailheadUserContext({ preferences: welcomeSetupPreferences, rigProfile, activeTrip }),
     [welcomeSetupPreferences, rigProfile, activeTrip],
   );
+  useEffect(() => {
+    if (!pendingRouteActivityOffer || pendingRouteActivityOffer.tripId !== activeTrip?.trip_id) return;
+    trackPhase0Once(
+      `route-activity-offer:${pendingRouteActivityOffer.tripId}:${pendingRouteActivityOffer.createdAt}`,
+      'phase0_route_activity_offer_viewed',
+      {
+        trip_id: pendingRouteActivityOffer.tripId,
+        result_count: pendingRouteActivityOffer.experiences.length,
+      },
+    );
+  }, [activeTrip?.trip_id, pendingRouteActivityOffer]);
   const tripPreferenceContext = trailheadContext.tripPreferences;
   const webRef       = useRef<any>(null);
   const nativeMapRef = useRef<NativeMapHandle>(null);
@@ -6259,10 +6117,6 @@ function MapScreen() {
     extremeCopilotVoiceBusy,
     extremeCopilotVoiceStatus,
   ]);
-  const trailGuideDockLabel = trailGuideStateLabel(trailGuideAvatarState);
-  const trailGuideSheetSub = extremeConfig?.copilot?.voice_enabled
-    ? (trailGuideDockLabel || extremeCopilotVoiceStatus || 'Text and push-to-talk')
-    : 'Text Co-Pilot';
   const copilotAccentText = themeMode === 'light' ? '#ffffff' : '#050505';
   useEffect(() => () => {
     realtimeCopilotRef.current?.stop();
@@ -6369,7 +6223,6 @@ function MapScreen() {
       ? 'traffic'
       : 'trailhead';
   const [showFilterSheet, setShowFilterSheet] = useState(false);
-  const [mapControlsCollapsed, setMapControlsCollapsed] = useState(false);
   const [showMapLegendSheet, setShowMapLegendSheet] = useState(false);
   const [activeMapModePreset, setActiveMapModePreset] = useState<MapModePresetId>('default');
   const [activeFilters, setActiveFilters] = useState<string[]>(DEFAULT_CAMP_FILTERS);
@@ -6819,8 +6672,6 @@ function MapScreen() {
   const [campDiscoveryResultKey, setCampDiscoveryResultKey] = useState('');
   const [campDiscoveryWideActive, setCampDiscoveryWideActive] = useState(false);
   const [campDiscoverySheetDismissed, setCampDiscoverySheetDismissed] = useState(true);
-  const [campDiscoveryHintDismissed, setCampDiscoveryHintDismissed] = useState(false);
-  const [campDiscoveryHintArmed, setCampDiscoveryHintArmed] = useState(false);
   const [mapMoved, setMapMoved] = useState(false);
   const [mapZoom, setMapZoom] = useState(10);
   const [searchResult, setSearchResult] = useState<{ count: number } | null>(null);
@@ -8313,10 +8164,6 @@ function MapScreen() {
     return String((camp as any)?.official_url || (camp as any)?.booking_url || (camp as any)?.url || '').trim();
   }
 
-  function dismissCampDiscoveryHint() {
-    setCampDiscoveryHintDismissed(true);
-  }
-
   function closeSelectedCampProfile() {
     setSelectedCamp(null);
     setShowCampDetail(false);
@@ -9769,7 +9616,6 @@ function MapScreen() {
   }
 
   async function searchCampDiscoveryArea() {
-    dismissCampDiscoveryHint();
     const liveBounds = await syncCopilotVisibleBounds();
     const base = liveBounds || viewportRef.current || userLocationCampBounds();
     if (!base) {
@@ -16699,12 +16545,19 @@ function MapScreen() {
   function copilotHitsReservedUi(args: Record<string, unknown>) {
     const point = copilotScreenPoint(args);
     if (!point) return false;
-    const inRightControls = point.x >= windowWidth - 104 && point.y >= Math.max(82, insets.top + 72) && point.y <= Math.min(windowHeight - bottomInset - 80, 560);
-    const inTrailGuideDock = point.x >= windowWidth - 128
-      && point.y >= windowHeight - (bottomInset + 220)
-      && point.y <= windowHeight - (bottomInset + 86);
+    const chromeTop = Math.max(insets.top + 6, 14);
+    const searchFitsBesideCompass = userHeading === null || windowWidth >= 380;
+    const controlsTop = searchFitsBesideCompass ? chromeTop + 54 : chromeTop + 104;
+    const controlsHeight = waterFollowActive ? 44 : 148;
+    const inRightControls = point.x >= windowWidth - 72
+      && point.y >= controlsTop - 8
+      && point.y <= controlsTop + controlsHeight + 8;
+    const dockTop = windowHeight - bottomInset - 156;
+    const inTrailGuideDock = point.x >= windowWidth - 88
+      && point.y >= dockTop - 8
+      && point.y <= windowHeight - bottomInset - 84;
     const inBottomTabs = point.y >= windowHeight - (bottomInset + 130);
-    const inTopLeftControls = point.x <= 104 && point.y <= Math.max(124, insets.top + 96);
+    const inTopLeftControls = point.x <= 112 && point.y <= chromeTop + 52;
     return inRightControls || inTrailGuideDock || inBottomTabs || inTopLeftControls;
   }
 
@@ -16749,12 +16602,6 @@ function MapScreen() {
     setSafeWaterPanelCollapsed(false);
     setActivePlaceFilters(prev => Array.from(new Set([...prev, ...WATER_NAV_PLACE_FILTER_IDS])));
     setShowMapDrawer(false);
-  }
-
-  function openTrailDiscoveryFromDrawer() {
-    setDiscoveryMode('trails');
-    setShowMapDrawer(false);
-    runTrailDiscoverySearch('view');
   }
 
   async function openCampInsight(camp: CampsitePin, detail?: CampsiteDetail | null): Promise<boolean> {
@@ -21768,6 +21615,7 @@ function MapScreen() {
   const inlineSearchSideBySide = userHeading === null || windowWidth >= 380;
   const inlineSearchTop = inlineSearchSideBySide ? compassTop : compassTop + 52;
   const inlineSearchLeft = inlineSearchOpen ? 16 : userHeading !== null && inlineSearchSideBySide ? 176 : 68;
+  const mapControlsTop = inlineSearchSideBySide ? compassTop + 54 : compassTop + 104;
   const inlineSearchResultsMaxHeight = androidInlineSearchKeyboardActive
     ? Math.max(128, windowHeight - keyboardHeight - inlineSearchTop - 28)
     : undefined;
@@ -21861,34 +21709,6 @@ function MapScreen() {
     !tappedGas &&
     !tappedTileSpot &&
     !tappedTrail &&
-    !showMapDrawer &&
-    !showFilterSheet &&
-    !showLayerSheet &&
-    !showMapStyleSheet &&
-    !offlineAreaPicker &&
-    !trailRouteBuilderOpen
-  );
-  const showCampDiscoveryHint = Boolean(
-    showCampPins &&
-    !campDiscoveryHintDismissed &&
-    campDiscoveryHintArmed &&
-    mapMoved &&
-    !mapControlsCollapsed &&
-    !waterFollowActive &&
-    !showCampDiscoverySheet &&
-    !navMode &&
-    !safeWaterPlanningActive &&
-    !androidInlineSearchKeyboardActive &&
-    !scopedMapSearchActive &&
-    !showSearch &&
-    !showFullMapSearch &&
-    !inlineSearchOpen &&
-    !showDiscoveryPanel &&
-    !routeScout &&
-    !selectedCamp &&
-    !selectedPlace &&
-    !selectedTrail &&
-    !selectedCommunityPin &&
     !showMapDrawer &&
     !showFilterSheet &&
     !showLayerSheet &&
@@ -22164,7 +21984,6 @@ function MapScreen() {
           onMapGesture={() => {
             const now = Date.now();
             if (trailPreviewOpen) setTrailPreviewPauseSignal(v => v + 1);
-            setCampDiscoveryHintArmed(true);
             if (navModeStateRef.current) {
               const recentlyHandled = now - lastNavMapGestureRef.current < 1200;
               if (navCameraFollowStateRef.current && !recentlyHandled) {
@@ -22458,6 +22277,8 @@ function MapScreen() {
             onPress={openMapDrawer}
             activeOpacity={0.84}
             hitSlop={10}
+            accessibilityRole="button"
+            accessibilityLabel="Open map menu"
           >
             <Ionicons name="menu-outline" size={21} color={mapChrome.text} />
           </TouchableOpacity>
@@ -22469,16 +22290,17 @@ function MapScreen() {
         topInset={insets.top}
         bottomInset={bottomInset}
         onClose={() => setShowMapDrawer(false)}
-        items={[
-          { label: 'Search places', sub: 'Find camps, trails, fuel, and stops', icon: 'search-outline', tone: '#60a5fa', onPress: openFullMapSearch },
-          { label: 'Trails', sub: 'Trails in this view', icon: 'trail-sign-outline', tone: '#22c55e', onPress: openTrailDiscoveryFromDrawer },
-          { label: 'Layers', sub: 'Styles, 3D, weather', icon: 'layers-outline', tone: C.silverBright, onPress: () => { setShowMapDrawer(false); setShowLayerSheet(true); } },
-          { label: 'Weather', sub: 'Forecast at map center', icon: 'cloud-outline', tone: '#38bdf8', onPress: openMapWeatherTool },
-          { label: 'Filters', sub: 'Camps, places, community pins', icon: 'filter-outline', tone: C.orange, onPress: () => { setShowMapDrawer(false); setShowFilterSheet(true); } },
-          { label: 'Offline', sub: 'Maps, trips, and places', icon: 'cloud-download-outline', tone: '#a3e635', onPress: () => { setShowMapDrawer(false); setShowOfflineModal(true); } },
-          { label: 'Trail builder', sub: 'Drop points along a trail', icon: 'git-branch-outline', tone: '#22c55e', onPress: () => { setShowMapDrawer(false); trailPinCaptureMode ? clearTrailPinCapture() : beginTrailPinCapture(); } },
-          { label: nearbyLoading ? 'Loading audio' : 'Nearby audio', sub: nearbyNarration ? 'Replay nearby context' : 'What is around me', icon: 'headset-outline', tone: C.orange, onPress: () => { handleNearbyAudio(); } },
-        ]}
+        onOpenSearch={openFullMapSearch}
+        onFindCamps={() => { void searchCampDiscoveryArea(); }}
+        onAddPin={() => beginCommunityPinDrop(false)}
+        onOpenWeather={openMapWeatherTool}
+        onOpenLayers={() => setShowLayerSheet(true)}
+        onOpenFilters={() => setShowFilterSheet(true)}
+        onOpenOffline={() => setShowOfflineModal(true)}
+        onOpenTrailBuilder={() => {
+          if (trailPinCaptureMode) clearTrailPinCapture();
+          else beginTrailPinCapture();
+        }}
       />
 
       {(() => {
@@ -23288,40 +23110,27 @@ function MapScreen() {
         </View>
       )}
 
-      {/* Controls — hidden during nav (panel covers them and they serve no purpose while driving) */}
-      <ScrollView
+      {/* Controls stay below the search chrome and reduce to Locate during water follow. */}
+      <View
         pointerEvents={mapControlsBlocked ? 'none' : 'auto'}
         style={[
           s.controls,
+          { top: mapControlsTop },
           mapControlsBlocked && { opacity: 0, display: 'none' },
         ]}
-        contentContainerStyle={s.controlsInner}
-        showsVerticalScrollIndicator={false}
-        bounces={false}
       >
         {!waterFollowActive && (
-          <TouchableOpacity
-            style={[s.ctrlBtn, mapChrome.button]}
-            onPress={() => setMapControlsCollapsed(value => !value)}
-            activeOpacity={0.84}
-            accessibilityLabel={mapControlsCollapsed ? 'Expand map tools' : 'Collapse map tools'}
-          >
-            <Ionicons name={mapControlsCollapsed ? 'ellipsis-vertical' : 'chevron-up'} size={18} color={mapChrome.text} />
-          </TouchableOpacity>
-        )}
-
-        {!mapControlsCollapsed && !waterFollowActive && (
           <TouchableOpacity
             style={[s.ctrlBtn, mapChrome.button]}
             onPress={() => setShowLayerSheet(true)}
             activeOpacity={0.84}
             accessibilityLabel="Open layers"
           >
-            <Ionicons name="layers-outline" size={17} color={mapChrome.text} />
+            <Ionicons name="layers-outline" size={18} color={mapChrome.text} />
           </TouchableOpacity>
         )}
 
-        {!mapControlsCollapsed && !waterFollowActive && (
+        {!waterFollowActive && (
           <TouchableOpacity
             style={[s.ctrlBtn, mapChrome.button, map3dEnabled && s.ctrlBtnActive, map3dEnabled && mapChrome.buttonActive]}
             onPress={toggleMap3d}
@@ -23334,66 +23143,15 @@ function MapScreen() {
           </TouchableOpacity>
         )}
 
-        {!mapControlsCollapsed && (
-          <TouchableOpacity
-            style={[s.ctrlBtn, mapChrome.button, !userLoc && { opacity: 0.82 }]}
-            onPress={centerMapOnUser}
-            activeOpacity={0.84}
-            accessibilityLabel="Locate me"
-          >
-            <Ionicons name="locate" size={20} color={userLoc ? mapChrome.text : mapChrome.textMuted} />
-          </TouchableOpacity>
-        )}
-
-        {!mapControlsCollapsed && !waterFollowActive && <TourTarget id="map.search" pointerEvents="box-none">
-          <View style={s.campCoachWrap}>
-            {showCampDiscoveryHint ? (
-              <View style={s.campCoachBubble} pointerEvents="auto">
-                <Text style={s.campCoachText}>Zoom in and tap me for camp discovery.</Text>
-                <TouchableOpacity style={s.campCoachClose} onPress={dismissCampDiscoveryHint} accessibilityLabel="Dismiss camp discovery hint">
-                  <Ionicons name="close" size={14} color="#101820" />
-                </TouchableOpacity>
-                <View style={s.campCoachPointer} />
-              </View>
-            ) : null}
-            <TouchableOpacity
-              style={[s.ctrlBtn, mapChrome.button, campDiscoveryWideActive && mapChrome.buttonActive]}
-              onPress={searchCampDiscoveryArea}
-              activeOpacity={0.84}
-              accessibilityLabel="Search camps and stays in this area"
-            >
-              <Ionicons name="bonfire-outline" size={20} color={campDiscoveryWideActive ? mapChrome.activeText : mapChrome.text} />
-            </TouchableOpacity>
-          </View>
-        </TourTarget>}
-
-        {!mapControlsCollapsed && !waterFollowActive && (
-          <TourTarget id="map.pinReport" pointerEvents="box-none">
-            <TouchableOpacity
-              style={[s.ctrlBtn, mapChrome.button, pinDropMode && mapChrome.buttonActive]}
-              onPress={() => beginCommunityPinDrop(false)}
-              activeOpacity={0.84}
-              accessibilityLabel={pinDropMode ? 'Cancel or continue placing community pin' : 'Drop community pin'}
-            >
-              <Ionicons name="location-outline" size={20} color={pinDropMode ? mapChrome.activeText : mapChrome.text} />
-            </TouchableOpacity>
-          </TourTarget>
-        )}
-
-        {!mapControlsCollapsed && !waterFollowActive && waypoints.length > 0 && (
-          <TouchableOpacity
-            style={[s.ctrlBtn, mapChrome.button, navMode && s.ctrlBtnActive, navMode && mapChrome.buttonActive]}
-            onPress={() => {
-              if (navMode) { endNavigation(); return; }
-              const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
-              if (days.length <= 1) { startDayNav('all'); return; }
-              setShowDayModal(true);
-            }}
-          >
-            <Ionicons name="navigate" size={20} color={navMode ? mapChrome.activeText : mapChrome.text} />
-          </TouchableOpacity>
-        )}
-      </ScrollView>
+        <TouchableOpacity
+          style={[s.ctrlBtn, mapChrome.button, !userLoc && { opacity: 0.82 }]}
+          onPress={centerMapOnUser}
+          activeOpacity={0.84}
+          accessibilityLabel="Locate me"
+        >
+          <Ionicons name="locate" size={20} color={userLoc ? mapChrome.text : mapChrome.textMuted} />
+        </TouchableOpacity>
+      </View>
 
       {safeWaterPlanningActive && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
         <View style={[s.safeWaterPanel, safeWaterSheetOwnsPage && s.safeWaterPanelTakeover]} pointerEvents="auto">
@@ -24366,6 +24124,11 @@ function MapScreen() {
             previewSearchRoute({ name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true }, place as SearchPlace);
           }}
           onQuickAction={action => {
+            if (action.id === 'trails-in-view') {
+              closeFullMapSearch(false);
+              void runTrailDiscoverySearch('view');
+              return;
+            }
             setSearchQuery(action.query);
             searchMap(action.query);
           }}
@@ -24450,17 +24213,41 @@ function MapScreen() {
         tripId={activeTrip?.trip_id ?? null}
       />
 
+      <RouteActivityOfferSheet
+        activeTripId={activeTrip?.trip_id}
+        bottomInset={insets.bottom}
+        offer={pendingRouteActivityOffer}
+        onDismiss={() => setPendingRouteActivityOffer(null)}
+        onOpen={experience => {
+          trackPhase0Event('phase0_route_activity_offer_opened', {
+            trip_id: activeTrip?.trip_id ?? null,
+            experience_id: experience.source_id || experience.id,
+            source: experience.source || 'viator',
+          });
+        }}
+        onAdd={experience => {
+          const place = routeActivityPlace(experience);
+          if (!place) return;
+          const lastDay = Math.max(1, activeTrip?.plan.duration_days || 1);
+          const day = Math.min(lastDay, routeActivityDay(experience));
+          addPlaceToActiveTripDay(place, day);
+          trackPhase0Event('phase0_route_activity_booking_confirmed', {
+            trip_id: activeTrip?.trip_id ?? null,
+            experience_id: experience.source_id || experience.id,
+            day,
+            source: experience.source || 'viator',
+          });
+        }}
+      />
+
       <Modal visible={showExtremeCopilot && !navMode && !aiReportVisible} animationType="slide" transparent statusBarTranslucent onRequestClose={() => setShowExtremeCopilot(false)}>
         <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={s.extremeCopilotOverlay}>
           <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setShowExtremeCopilot(false)} />
           <View style={[s.extremeCopilotSheet, { paddingBottom: bottomInset + 14 }]}>
             <View style={s.extremeCopilotHeader}>
-              <TrailGuideAvatar state={trailGuideAvatarState} colors={C} size="sheet" />
+              <TrailheadWayfinder state={trailGuideAvatarState} colors={C} size={52} />
               <View style={{ flex: 1, minWidth: 0 }}>
                 <Text style={s.extremeCopilotTitle}>Co-Pilot</Text>
-                <Text style={s.extremeCopilotSub} numberOfLines={1}>
-                  {trailGuideSheetSub}
-                </Text>
               </View>
               {Boolean(user?.is_admin) && (
                 <TouchableOpacity
@@ -24517,8 +24304,15 @@ function MapScreen() {
                 <TouchableOpacity
                   key={action.label}
                   style={s.extremeCopilotQuickAction}
-                  onPress={() => submitCopilotMessage(action.prompt)}
-                  disabled={extremeCopilotBusy}
+                  onPress={() => {
+                    if (action.id === 'around') {
+                      setShowExtremeCopilot(false);
+                      void handleNearbyAudio();
+                      return;
+                    }
+                    submitCopilotMessage(action.prompt);
+                  }}
+                  disabled={extremeCopilotBusy || (action.id === 'around' && nearbyLoading)}
                   accessibilityLabel={action.label}
                 >
                   <Ionicons name={action.icon} size={18} color={C.orange} />
@@ -26541,7 +26335,7 @@ function MapScreen() {
             onLongPress={handleTrailGuideDockLongPress}
             onPress={handleTrailGuideDockPress}
             accessibilityLabel={extremeCopilotAvailable
-              ? 'Open Co-Pilot'
+              ? trailGuideAccessibilityLabel(trailGuideAvatarState)
               : extremeCopilotUnavailable
                 ? 'Co-Pilot unavailable'
                 : user
@@ -26550,7 +26344,7 @@ function MapScreen() {
             accessibilityHint={extremeCopilotAvailable && extremeConfig?.copilot?.voice_enabled ? 'Long press to start or stop Co-Pilot voice.' : undefined}
           >
             <View>
-              <TrailGuideAvatar state={trailGuideAvatarState} colors={C} label={extremeCopilotAvailable ? trailGuideDockLabel : 'Co-Pilot'} />
+              <TrailheadWayfinder state={trailGuideAvatarState} colors={C} size={56} />
               {!extremeCopilotAvailable ? (
                 <View style={[s.extremeCopilotLockBadge, extremeCopilotUnavailable && s.extremeCopilotUnavailableBadge]}>
                   <Ionicons name={extremeCopilotUnavailable ? 'cloud-offline-outline' : 'lock-closed'} size={10} color="#fff" />
@@ -28084,7 +27878,14 @@ const makeStyles = (C: ColorPalette) => {
   },
   pinCaptureActionText: { color: OVR.text2, fontSize: 10, fontFamily: mono, fontWeight: '900' },
 
-  controls: { position: 'absolute', top: 106, right: 16, bottom: 100, maxHeight: '80%' as any, zIndex: 90, elevation: 42 },
+  controls: {
+    position: 'absolute',
+    right: 16,
+    gap: 8,
+    alignItems: 'flex-end',
+    zIndex: 90,
+    elevation: 42,
+  },
   mapTourTarget: {
     position: 'absolute',
     left: 16,
@@ -28092,59 +27893,14 @@ const makeStyles = (C: ColorPalette) => {
     top: 104,
     height: 260,
   },
-  controlsInner: { gap: 8, paddingBottom: 8, alignItems: 'flex-end' },
-  campCoachWrap: { alignItems: 'flex-end', overflow: 'visible' },
-  campCoachBubble: {
-    position: 'absolute',
-    right: 54,
-    top: -3,
-    width: 204,
-    minHeight: 48,
-    paddingLeft: 14,
-    paddingRight: 34,
-    paddingVertical: 10,
-    borderRadius: 16,
-    backgroundColor: '#fffaf0',
-    borderWidth: 1,
-    borderColor: 'rgba(16,24,32,0.12)',
-    shadowColor: '#000',
-    shadowOpacity: 0.16,
-    shadowRadius: 18,
-    shadowOffset: { width: 0, height: 8 },
-    elevation: 22,
-  },
-  campCoachText: { color: '#101820', fontSize: 13, lineHeight: 17, fontWeight: '900' },
-  campCoachClose: {
-    position: 'absolute',
-    right: 8,
-    top: 8,
-    width: 24,
-    height: 24,
-    borderRadius: 12,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: 'rgba(16,24,32,0.06)',
-  },
-  campCoachPointer: {
-    position: 'absolute',
-    right: -7,
-    top: 17,
-    width: 14,
-    height: 14,
-    backgroundColor: '#fffaf0',
-    borderRightWidth: 1,
-    borderTopWidth: 1,
-    borderColor: 'rgba(16,24,32,0.12)',
-    transform: [{ rotate: '45deg' }],
-  },
   ctrlBtn: {
-    width: 44, height: 44, borderRadius: 22,
+    width: 44, height: 44, borderRadius: 8,
     backgroundColor: 'rgba(5,5,5,0.52)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.09)',
     alignItems: 'center', justifyContent: 'center',
-    shadowColor: '#E5E7EB',
-    shadowOpacity: 0.12,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 0 },
+    shadowColor: '#000',
+    shadowOpacity: 0.22,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 4 },
     elevation: 12,
   },
   ctrlBtnActive: {
@@ -28155,9 +27911,8 @@ const makeStyles = (C: ColorPalette) => {
   map3dToggleText: {
     color: OVR.text,
     fontSize: 11,
-    fontFamily: mono,
-    fontWeight: '900',
-    letterSpacing: 0.4,
+    fontWeight: '800',
+    letterSpacing: 0,
   },
   map3dToggleTextActive: {
     color: '#fff',
@@ -28173,7 +27928,7 @@ const makeStyles = (C: ColorPalette) => {
   mapDrawerToggle: {
     width: 44,
     height: 44,
-    borderRadius: 22,
+    borderRadius: 8,
     backgroundColor: OVR.bg,
     borderWidth: 1,
     borderColor: OVR.border,
@@ -31653,12 +31408,6 @@ const makeStyles = (C: ColorPalette) => {
     fontFamily: mono,
     fontWeight: '900',
     letterSpacing: 0,
-  },
-  extremeCopilotSub: {
-    color: C.text3,
-    fontSize: 10,
-    fontFamily: mono,
-    marginTop: 2,
   },
   extremeCopilotClose: {
     width: 34,

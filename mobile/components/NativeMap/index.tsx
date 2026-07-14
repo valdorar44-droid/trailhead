@@ -2734,7 +2734,8 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     onCampTap(raw);
   }, [campClusterMaxZoom, drawableCamps, isExtremeMapbox, navMode, onCampTap, onMapTap, refreshMapSourcesForBounds, rememberFreeCamera, shouldClusterCamps, showTerrain, suppressFeatureTaps]);
 
-  const mapStatusLabel = localTiles ? compactMapStatus(tileDebug) : 'Online maps';
+  const mapStatusLabel = compactMapStatus(tileDebug);
+  const showMapStatusBadge = !hideMapStatusBadge && localTiles;
   const publicLandBelowLayerID = traceDraftCoords.length > 1
     ? 'trail-trace-draft-glow'
     : traceRouteCoords.length > 1
@@ -2802,6 +2803,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         compassEnabled={false}
         attributionEnabled={false}
         logoEnabled={false}
+        {...(isMapboxRenderer ? { scaleBarEnabled: false } : {})}
         scrollEnabled
         zoomEnabled
         rotateEnabled
@@ -3909,7 +3911,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           {...tracePanResponder.panHandlers}
         />
       )}
-      {!hideMapStatusBadge && (
+      {showMapStatusBadge && (
         <View pointerEvents="none" style={styles.tileDebugWrap}>
           <View style={[styles.tileDebug, localTiles ? styles.tileDebugLocal : styles.tileDebugRemote]}>
             <Ionicons

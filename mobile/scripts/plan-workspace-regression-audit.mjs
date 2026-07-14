@@ -59,9 +59,9 @@ assert(routeBuilder.includes("if (routeBuilderIntent !== 'edit-active'")
 assert(!routeBuilder.includes("setRouteTabMode('hub')") && !routeBuilder.includes("if (routeTabMode === 'hub')"),
   'Route Builder never returns to the retired hub');
 assert(
-  routeBuilder.includes('setTabBarHidden(stops.length >= 2 || keyboardVisible)')
+  routeBuilder.includes('setTabBarHidden(buildingFramework || stops.length >= 2 || keyboardVisible)')
     && routeBuilder.includes('const dockMarginBottom = keyboardVisible ? 10 + bottomInset : 94 + bottomInset'),
-  'Route Builder keeps the global tabs visible and clear of setup controls',
+  'Route Builder keeps setup controls clear of global tabs and hides them during the full-screen route scan',
 );
 assert(!routeBuilder.includes('opacity: wizardFade') && !routeBuilder.includes('translateY: wizardSlide'),
   'Route Builder setup cannot remain dimmed by an interrupted entrance animation');

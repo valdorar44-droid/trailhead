@@ -35,6 +35,7 @@ export type MapSearchResultItem = {
 };
 
 export type MapSearchQuickAction = {
+  id?: string;
   label: string;
   query: string;
   icon: keyof typeof Ionicons.glyphMap;

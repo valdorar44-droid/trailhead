@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
-  ActivityIndicator, Animated, Easing, Keyboard, Modal, Alert, Image, Platform,
+  ActivityIndicator, Keyboard, Modal, Alert, Image, Platform,
   useWindowDimensions, KeyboardAvoidingView, Linking,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,6 +16,7 @@ import RouteBuilderActiveDayControls, { RouteBuilderEmptyDayGuidance } from '@/c
 import RouteBuilderActiveDayStopList from '@/components/routeBuilder/RouteBuilderActiveDayStopList';
 import RouteBuilderFooterDock from '@/components/routeBuilder/RouteBuilderFooterDock';
 import RouteBuilderBuildLoader from '@/components/routeBuilder/RouteBuilderBuildLoader';
+import RouteActivityOfferSheet from '@/components/routeBuilder/RouteActivityOfferSheet';
 import RouteBuilderHub from '@/components/routeBuilder/RouteBuilderHub';
 import RouteBuilderInlineResults, {
   RouteBuilderInlineCampCard,
@@ -45,7 +46,7 @@ import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { useStore, type TripHistoryItem } from '@/lib/store';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
-import { trackPhase0Once } from '@/lib/telemetry';
+import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { buildRentalSuggestionFit } from '@/lib/outdoorRentals';
 import {
   clearTrailheadRouteBuilderDraft,
@@ -60,6 +61,7 @@ import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
 import { routeGeometryMatchesWaypointsInOrder, routeWaypointSignature } from '@/lib/routeWaypointSignature';
+import { buildPendingRouteActivityOffer, routeActivityDay } from '@/lib/routeActivityOffer';
 import {
   ROUTE_BUILDER_AUDIT_MATRIX,
   buildRouteBuilderSearchStop,
@@ -1624,7 +1626,6 @@ function RouteBuilderScreenContent() {
   const bottomInset = Math.max(insets.bottom, Platform.OS === 'android' ? 0 : 0);
   const bottomSheetPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
   const blurTint: 'dark' | 'light' = C.bg === '#050505' ? 'dark' : 'light';
-  const buildPulse = useRef(new Animated.Value(0)).current;
   const router = useRouter();
   const routeParams = useLocalSearchParams();
   const routeBuilderIntent = Array.isArray(routeParams.intent) ? routeParams.intent[0] : routeParams.intent;
@@ -1652,6 +1653,8 @@ function RouteBuilderScreenContent() {
   const setPendingRouteFlyover = useStore(st => st.setPendingRouteFlyover);
   const setPendingOpenOfflineModal = useStore(st => st.setPendingOpenOfflineModal);
   const setPendingOfflineTrip = useStore(st => st.setPendingOfflineTrip);
+  const pendingRouteActivityOffer = useStore(st => st.pendingRouteActivityOffer);
+  const setPendingRouteActivityOffer = useStore(st => st.setPendingRouteActivityOffer);
   const routeBuilderAccountScopeRef = useRef(`${accountEpoch}:${String(user?.id ?? '')}`);
   const {
     getState: getOfflineMapState,
@@ -1737,28 +1740,17 @@ function RouteBuilderScreenContent() {
   useEffect(() => {
     if (!buildingFramework) {
       deactivateKeepAwake('route-builder-build').catch(() => {});
-      buildPulse.stopAnimation();
-      buildPulse.setValue(0);
       return;
     }
     activateKeepAwakeAsync('route-builder-build').catch(() => {});
-    const loop = Animated.loop(
-      Animated.timing(buildPulse, {
-        toValue: 1,
-        duration: 1800,
-        easing: Easing.inOut(Easing.cubic),
-        useNativeDriver: Platform.OS !== 'web',
-      }),
-    );
-    loop.start();
     return () => {
-      loop.stop();
       deactivateKeepAwake('route-builder-build').catch(() => {});
     };
-  }, [buildPulse, buildingFramework]);
+  }, [buildingFramework]);
   const [fuelEstimate, setFuelEstimate] = useState<FuelEstimate | null>(null);
   const [routeGeometry, setRouteGeometry] = useState<ProviderRouteGeometry | null>(null);
   const [importedTripId, setImportedTripId] = useState<string | null>(null);
+  const routeActivityOfferTripId = importedTripId || routeSessionIdRef.current;
   const [query, setQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [routeName, setRouteName] = useState('');
@@ -1956,9 +1948,9 @@ function RouteBuilderScreenContent() {
   }, [keyboardVisible, wizardStep]);
 
   useEffect(() => {
-    setTabBarHidden(stops.length >= 2 || keyboardVisible);
+    setTabBarHidden(buildingFramework || stops.length >= 2 || keyboardVisible);
     return () => setTabBarHidden(false);
-  }, [keyboardVisible, setTabBarHidden, stops.length]);
+  }, [buildingFramework, keyboardVisible, setTabBarHidden, stops.length]);
 
   useEffect(consumeCopilotRouteBuilderDraft, [consumeCopilotRouteBuilderDraft]);
   useFocusEffect(consumeCopilotRouteBuilderDraft);
@@ -2589,6 +2581,20 @@ function RouteBuilderScreenContent() {
     })
   ), [days, orderedStops, dayMileage, routeDaySegments, restDays, campCadenceMode]);
   const hasBaseRoute = orderedStops.length >= 2;
+  useEffect(() => {
+    if (buildingFramework
+      || !hasBaseRoute
+      || !pendingRouteActivityOffer
+      || pendingRouteActivityOffer.tripId !== routeActivityOfferTripId) return;
+    trackPhase0Once(
+      `route-activity-offer:${pendingRouteActivityOffer.tripId}:${pendingRouteActivityOffer.createdAt}`,
+      'phase0_route_activity_offer_viewed',
+      {
+        trip_id: pendingRouteActivityOffer.tripId,
+        result_count: pendingRouteActivityOffer.experiences.length,
+      },
+    );
+  }, [buildingFramework, hasBaseRoute, pendingRouteActivityOffer, routeActivityOfferTripId]);
   const routeSetupIsPristine = !hasBaseRoute
     && wizardStep === 0
     && stops.length === 0
@@ -2719,16 +2725,25 @@ function RouteBuilderScreenContent() {
       .join('|');
   }
 
-  async function loadRouteToursForStops(inputStops: BuilderStop[], geometry?: ProviderRouteGeometry | null, retryingLive = false) {
+  async function loadRouteToursForStops(
+    inputStops: BuilderStop[],
+    geometry?: ProviderRouteGeometry | null,
+    retryingLive = false,
+    offerTripId = importedTripId || routeSessionIdRef.current,
+  ): Promise<BookableExperience[]> {
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
     const anchors = inputStops
       .filter(stop => Number.isFinite(stop.lat) && Number.isFinite(stop.lng))
       .slice(0, 18)
       .map((stop, idx) => ({ lat: stop.lat, lng: stop.lng, name: stop.name, day: stop.day, leg_index: idx }));
-    if (anchors.length === 0) return;
+    if (anchors.length === 0) return [];
     const key = routeTourKey(inputStops);
-    if (!retryingLive && key && key === routeToursLoadedFor && routeTours.length > 0) return;
+    if (!retryingLive && key && key === routeToursLoadedFor && routeTours.length > 0) {
+      const pendingOffer = buildPendingRouteActivityOffer(offerTripId, routeTours);
+      if (pendingOffer) setPendingRouteActivityOffer(pendingOffer);
+      return routeTours;
+    }
     setRouteToursLoading(true);
     setRouteToursLoadedFor(key);
     try {
@@ -2740,37 +2755,42 @@ function RouteBuilderScreenContent() {
         source: 'viator',
         q: [routeName, inputStops[0]?.name, inputStops[inputStops.length - 1]?.name].filter(Boolean).join(' '),
       });
-      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return [];
       const results = response.results ?? [];
       setRouteTours(results);
       setRouteToursStatus(response.live_message || '');
+      const pendingOffer = buildPendingRouteActivityOffer(offerTripId, results);
+      if (pendingOffer) setPendingRouteActivityOffer(pendingOffer);
       if (!retryingLive && results.length === 0 && response.live_status === 'processing') {
         setTimeout(() => {
           if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-          loadRouteToursForStops(inputStops, geometry, true).catch(() => {});
+          loadRouteToursForStops(inputStops, geometry, true, offerTripId).catch(() => {});
         }, 6500);
       }
+      return results;
     } catch {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
         setRouteTours([]);
         setRouteToursStatus('');
       }
+      return [];
     } finally {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setRouteToursLoading(false);
     }
   }
 
-  function addTourToRoute(tour: BookableExperience) {
+  function routeStopForTour(tour: BookableExperience): BuilderStop | null {
     const lat = Number(tour.lat);
     const lng = Number(tour.lng);
     if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
-      const url = tour.booking_url || tour.affiliate_url || tour.source_url;
-      if (url) Linking.openURL(url).catch(() => {});
-      return;
+      return null;
     }
-    const day = Number(tour.route_anchor?.day) || activeDay;
+    const requestedDay = routeActivityDay(tour, activeDay);
+    const day = days.includes(requestedDay)
+      ? requestedDay
+      : Math.max(1, Math.min(Math.max(...days, 1), requestedDay));
     const poi: OsmPoi = {
-      id: tour.id,
+      id: String(tour.id || tour.source_id),
       name: tour.title,
       lat,
       lng,
@@ -2783,19 +2803,72 @@ function RouteBuilderScreenContent() {
       rating: tour.rating ?? undefined,
       review_count: tour.review_count ?? undefined,
     };
-    setReplaceStopId(null);
-    addStop({
+    return {
+      id: `tour_${String(tour.id || tour.source_id)}_${Date.now()}`,
       day,
       name: tour.title,
       lat,
       lng,
       type: 'waypoint',
-      description: [tour.duration_label, tour.summary].filter(Boolean).join(' · ') || 'Bookable tour near this route.',
+      description: [tour.duration_label, tour.summary].filter(Boolean).join(' · ') || 'Booked on Viator.',
       land_type: 'experience',
       source: 'poi',
       poi,
       routePointType: 'side_stop',
+    };
+  }
+
+  function routeAlreadyHasTour(inputStops: BuilderStop[], candidate: BuilderStop) {
+    const candidateIds = new Set([
+      String(candidate.poi?.id || '').trim().toLowerCase(),
+      String(candidate.poi?.provider_place_id || '').trim().toLowerCase(),
+    ].filter(Boolean));
+    const candidateName = candidate.name.trim().toLowerCase();
+    return inputStops.some(stop => {
+      if (stop.day !== candidate.day || !stop.poi) return false;
+      const stopIds = [stop.poi.id, stop.poi.provider_place_id]
+        .map(value => String(value || '').trim().toLowerCase())
+        .filter(Boolean);
+      const sameId = stopIds.some(id => candidateIds.has(id));
+      const samePlace = stop.name.trim().toLowerCase() === candidateName
+        && haversineMi(stop, candidate) < 0.08;
+      return sameId || samePlace;
     });
+  }
+
+  function addTourToRoute(tour: BookableExperience) {
+    const stop = routeStopForTour(tour);
+    if (!stop) {
+      const url = tour.booking_url || tour.affiliate_url || tour.source_url;
+      if (url) Linking.openURL(url).catch(() => {});
+      return;
+    }
+    if (routeAlreadyHasTour(stops, stop)) return;
+    setReplaceStopId(null);
+    addStop(stop);
+  }
+
+  async function addBookedTourToRoute(tour: BookableExperience) {
+    const stop = routeStopForTour(tour);
+    if (!stop || routeAlreadyHasTour(stops, stop)) return;
+    const nextStops = [...stops, stop];
+    setReplaceStopId(null);
+    setStops(nextStops);
+    setActiveDay(stop.day);
+    const nextTrip = buildTrip(nextStops, days);
+    const tripWithFallbackGeometry: TripResult = activeTrip?.trip_id === nextTrip.trip_id && activeTrip.route_geometry
+      ? { ...nextTrip, route_geometry: activeTrip.route_geometry }
+      : nextTrip;
+    await commitTrip(
+      tripWithFallbackGeometry,
+      false,
+      0,
+      nextStops,
+      days,
+      undefined,
+      routeGeometry,
+      true,
+    );
   }
 
   function addPlace(place: SearchPlace, type = pendingType) {
@@ -4595,6 +4668,7 @@ function RouteBuilderScreenContent() {
   async function buildRouteFramework() {
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
+    setPendingRouteActivityOffer(null);
     setBuildingFramework(true);
     setFrameworkStatus('Setting up your trip...');
     let base = orderedStops;
@@ -4620,6 +4694,7 @@ function RouteBuilderScreenContent() {
         { ...first, day: 1, type: first.type === 'start' ? 'start' : first.type, routeShapeRole: 'start', routeProgressMi: 0 },
       ];
 
+      setFrameworkStatus('Drawing the route...');
       const spineBuild = await buildRouteSpine(first, last);
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (!spineBuild || spineBuild.spine.length < 2) return;
@@ -4694,8 +4769,10 @@ function RouteBuilderScreenContent() {
       setInsertAfterId(null);
       setInsertTargetDay(null);
       setRouteName(nextName);
-      setFrameworkStatus('Checking tours along your route...');
+      setFrameworkStatus('Finding activities near your route...');
       loadRouteToursForStops(framework, buildGeometry).catch(() => {});
+      await new Promise(resolve => setTimeout(resolve, 160));
+      if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setFrameworkStatus('Route built. Preparing your trip overview...');
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       await commitTrip(
@@ -4991,6 +5068,7 @@ function RouteBuilderScreenContent() {
     inputDays: number[] = days,
     nameOverride?: string,
     fallbackGeometry?: ProviderRouteGeometry | null,
+    preserveExistingGeometryOnFailure = false,
   ) {
     if (routeSaving) return;
     const requestEpoch = accountStorage.epoch();
@@ -5033,13 +5111,16 @@ function RouteBuilderScreenContent() {
       : routeGeometry;
     const rebuiltTrip = buildTrip(inputStops, inputDays, nameOverride ?? trip.plan.trip_name, geometryForTrip);
     const savedMiles = routeGeometryPayload?.totalDistance ? routeGeometryPayload.totalDistance / 1609.344 : null;
+    const preservedRouteGeometry = preserveExistingGeometryOnFailure
+      ? trip.route_geometry ?? (activeTrip?.trip_id === trip.trip_id ? activeTrip.route_geometry : undefined)
+      : undefined;
     const tripToSave: TripResult = routeGeometryPayload ? {
       ...rebuiltTrip,
       route_geometry: routeGeometryPayload,
       plan: savedMiles
         ? { ...rebuiltTrip.plan, total_est_miles: Math.round(savedMiles) }
         : rebuiltTrip.plan,
-    } : rebuiltTrip;
+    } : preservedRouteGeometry ? { ...rebuiltTrip, route_geometry: preservedRouteGeometry } : rebuiltTrip;
     const builderState = buildPersistedBuilderState(inputStops, inputDays);
     const persistedTripToSave: TripResult = { ...tripToSave, builder_state: builderState };
     try {
@@ -5056,7 +5137,9 @@ function RouteBuilderScreenContent() {
       await saveOfflineTrip(persistedTripToSave);
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       if (requestAccountId && requestToken) {
-        api.saveTrip(persistedTripToSave, routeGeometryPayload, builderState, 'mobile-route-builder').catch(err => {
+        const serverRouteGeometry = routeGeometryPayload
+          ?? (preserveExistingGeometryOnFailure ? undefined : null);
+        api.saveTrip(persistedTripToSave, serverRouteGeometry, builderState, 'mobile-route-builder').catch(err => {
           console.warn('Route Builder server save failed', err?.message ?? err);
         });
       }
@@ -5133,6 +5216,7 @@ function RouteBuilderScreenContent() {
   }
 
   function resetRouteDraft() {
+    setPendingRouteActivityOffer(null);
     routeSessionIdRef.current = createRouteSessionId();
     setActiveDay(1);
     setDays(defaultRouteDays());
@@ -6168,15 +6252,21 @@ function RouteBuilderScreenContent() {
 
   if (buildingFramework) {
     return (
-      <SafeAreaView style={s.buildingLoaderScreen}>
+      <View style={s.buildingLoaderScreen}>
         <RouteBuilderBuildLoader
-          pulse={buildPulse}
           status={frameworkStatus}
           topInset={insets.top}
           bottomInset={insets.bottom}
+          points={orderedStops.map(stop => ({
+            id: stop.id,
+            name: stop.name,
+            lat: stop.lat,
+            lng: stop.lng,
+            type: stop.type,
+          }))}
         />
         <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
-      </SafeAreaView>
+      </View>
     );
   }
 
@@ -6929,6 +7019,33 @@ function RouteBuilderScreenContent() {
         }}
       />
 
+      <RouteActivityOfferSheet
+        activeTripId={routeActivityOfferTripId}
+        bottomInset={insets.bottom}
+        offer={pendingRouteActivityOffer}
+        onDismiss={() => setPendingRouteActivityOffer(null)}
+        onOpen={experience => {
+          trackPhase0Event('phase0_route_activity_offer_opened', {
+            trip_id: routeActivityOfferTripId,
+            experience_id: experience.source_id || experience.id,
+            source: experience.source || 'viator',
+          });
+        }}
+        onAdd={experience => {
+          const requestedDay = routeActivityDay(experience, activeDay);
+          const day = days.includes(requestedDay)
+            ? requestedDay
+            : Math.max(1, Math.min(Math.max(...days, 1), requestedDay));
+          addBookedTourToRoute(experience).catch(() => {});
+          trackPhase0Event('phase0_route_activity_booking_confirmed', {
+            trip_id: routeActivityOfferTripId,
+            experience_id: experience.source_id || experience.id,
+            day,
+            source: experience.source || 'viator',
+          });
+        }}
+      />
+
       <PaywallModal visible={paywallVisible} code={paywallCode} message={paywallMessage} onClose={() => setPaywallVisible(false)} />
     </SafeAreaView>
   );
@@ -6962,7 +7079,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   },
   buildingLoaderScreen: {
     flex: 1,
-    backgroundColor: '#07100f',
+    backgroundColor: C.bg,
     overflow: 'hidden',
   },
   draftLoadingScreen: {

@@ -1,169 +1,199 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  AccessibilityInfo,
   Animated,
-  Image,
-  ImageBackground,
+  Easing,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 
-const TRAILHEAD_MARK = require('../../assets/trailhead-mark.png');
-const LAUNCH_CAMO = require('../../assets/launch-camo.png');
+import { TrailheadWayfinder } from '@/components/copilot/TrailheadWayfinder';
+import { StaticMapboxPreview, type StaticMapboxPin } from '@/components/explore/StaticMapboxPreview';
+import { useTheme } from '@/lib/design';
+
+export type RouteBuildMapPoint = {
+  id: string;
+  name: string;
+  lat: number;
+  lng: number;
+  type?: string;
+};
 
 type RouteBuilderBuildLoaderProps = {
-  pulse: Animated.Value;
   status?: string;
   topInset: number;
   bottomInset: number;
+  points?: RouteBuildMapPoint[];
 };
 
-const STATUS_MAP: Array<[RegExp, string]> = [
-  [/setting|setup|start|trip/i, 'Starting route'],
-  [/overnight|camp|stay/i, 'Finding stays'],
-  [/fuel|resupply|range/i, 'Checking fuel'],
-  [/tour|guided|stop|poi|place/i, 'Checking stops'],
-  [/built|prepar|opening|saving/i, 'Opening route'],
+type BuildProgress = {
+  label: string;
+  percent: number;
+};
+
+const BUILD_PROGRESS: Array<[RegExp, BuildProgress]> = [
+  [/built|prepar|opening|saving|review/i, { label: 'Finishing your route', percent: 92 }],
+  [/activit|tour|guided|poi|place|stop/i, { label: 'Finding things to do', percent: 84 }],
+  [/fuel|resupply|range/i, { label: 'Checking fuel', percent: 72 }],
+  [/overnight|camp|stay/i, { label: 'Finding overnight stops', percent: 54 }],
+  [/trace|draw|spine|road|routing/i, { label: 'Drawing the route', percent: 32 }],
+  [/setting|setup|start|trip/i, { label: 'Starting route', percent: 16 }],
 ];
 
-function cleanBuildStatus(status?: string) {
+function buildProgress(status?: string): BuildProgress {
   const value = String(status || '').trim();
-  const matched = STATUS_MAP.find(([test]) => test.test(value));
-  return matched?.[1] || 'Building route';
+  return BUILD_PROGRESS.find(([test]) => test.test(value))?.[1]
+    ?? { label: 'Building route', percent: 24 };
 }
 
 export default function RouteBuilderBuildLoader({
-  pulse,
   status,
   topInset,
   bottomInset,
+  points = [],
 }: RouteBuilderBuildLoaderProps) {
-  const cleanStatus = useMemo(() => cleanBuildStatus(status), [status]);
-  const logoMotion = {
-    opacity: pulse.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [0.92, 1, 0.92],
-    }),
-    transform: [
-      {
-        scale: pulse.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [0.96, 1.04, 0.96],
+  const C = useTheme();
+  const { height: viewportHeight } = useWindowDimensions();
+  const scanProgress = useRef(new Animated.Value(0)).current;
+  const [reduceMotion, setReduceMotion] = useState(false);
+  const progress = useMemo(() => buildProgress(status), [status]);
+  const mapPins = useMemo<StaticMapboxPin[]>(() => points
+    .filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lng))
+    .map((point, index, source) => ({
+      id: point.id,
+      title: point.name,
+      lat: point.lat,
+      lng: point.lng,
+      kind: point.type || 'route',
+      active: index === 0 || index === source.length - 1,
+    })), [points]);
+  const dark = C.bg === '#050505';
+  const scanTop = Math.max(topInset + 58, 72);
+  const scanBottom = Math.max(scanTop + 120, viewportHeight - Math.max(bottomInset, 12) - 152);
+
+  useEffect(() => {
+    let active = true;
+    AccessibilityInfo.isReduceMotionEnabled()
+      .then(enabled => {
+        if (active) setReduceMotion(enabled);
+      })
+      .catch(() => {});
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => {
+      active = false;
+      subscription.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    scanProgress.stopAnimation();
+    scanProgress.setValue(reduceMotion ? 0.5 : 0);
+    if (reduceMotion) return;
+    const scan = Animated.loop(
+      Animated.sequence([
+        Animated.timing(scanProgress, {
+          toValue: 1,
+          duration: 1900,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
         }),
-      },
-      {
-        translateY: pulse.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [4, -4, 4],
+        Animated.delay(180),
+        Animated.timing(scanProgress, {
+          toValue: 0,
+          duration: 1900,
+          easing: Easing.inOut(Easing.cubic),
+          useNativeDriver: true,
         }),
-      },
-    ],
-  };
-  const glowMotion = {
-    opacity: pulse.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [0.18, 0.34, 0.18],
-    }),
-    transform: [
-      {
-        scale: pulse.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [0.82, 1.12, 0.82],
-        }),
-      },
-    ],
-  };
-  const orbitMotion = {
-    opacity: pulse.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [0.45, 0.95, 0.45],
-    }),
-    transform: [
-      {
-        rotate: pulse.interpolate({
-          inputRange: [0, 1],
-          outputRange: ['-18deg', '342deg'],
-        }),
-      },
-    ],
-  };
-  const beadMotion = {
-    opacity: pulse.interpolate({
-      inputRange: [0, 0.5, 1],
-      outputRange: [0.55, 1, 0.55],
-    }),
-    transform: [
-      {
-        translateX: pulse.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [-90, 94, -90],
-        }),
-      },
-      {
-        translateY: pulse.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [42, -52, 42],
-        }),
-      },
-    ],
-  };
-  const progressMotion = {
-    transform: [
-      {
-        scaleX: pulse.interpolate({
-          inputRange: [0, 0.5, 1],
-          outputRange: [0.18, 0.72, 0.18],
-        }),
-      },
-    ],
-  };
+        Animated.delay(180),
+      ]),
+    );
+    scan.start();
+    return () => scan.stop();
+  }, [reduceMotion, scanProgress]);
+
+  const scanTranslateY = scanProgress.interpolate({
+    inputRange: [0, 1],
+    outputRange: [scanTop, scanBottom],
+  });
 
   return (
-    <View style={styles.screen}>
-      <ImageBackground source={LAUNCH_CAMO} style={StyleSheet.absoluteFillObject} resizeMode="cover" />
-      <View style={styles.scrim} />
-      <View style={styles.terrain}>
-        {Array.from({ length: 8 }).map((_, index) => (
-          <View
-            key={index}
-            style={[
-              styles.terrainLine,
-              {
-                top: 120 + index * 58,
-                transform: [{ rotate: index % 2 === 0 ? '-8deg' : '7deg' }],
-              },
-            ]}
-          />
-        ))}
-      </View>
+    <View style={[styles.screen, { backgroundColor: C.bg }]}>
+      <StaticMapboxPreview
+        pins={mapPins}
+        title="Route preview"
+        mapboxStyle={dark ? 'mapbox/dark-v11' : 'mapbox/outdoors-v12'}
+        showBadge={false}
+        showCopy={false}
+        showFallbackIcon={false}
+        fallbackVariant="route"
+        height={Math.max(320, viewportHeight)}
+        style={StyleSheet.absoluteFillObject}
+      />
       <View
+        pointerEvents="none"
         style={[
-          styles.content,
+          StyleSheet.absoluteFillObject,
+          { backgroundColor: dark ? 'rgba(5,5,5,0.24)' : 'rgba(247,248,246,0.10)' },
+        ]}
+      />
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          styles.scanLine,
           {
-            paddingTop: Math.max(topInset, 12) + 18,
-            paddingBottom: Math.max(bottomInset, 18) + 22,
+            backgroundColor: C.orange,
+            opacity: dark ? 0.72 : 0.78,
+            transform: [{ translateY: scanTranslateY }],
           },
         ]}
       >
-        <View style={styles.centerStage}>
-          <Animated.View style={[styles.glow, glowMotion]} />
-          <Animated.View style={[styles.orbit, orbitMotion]}>
-            <View style={styles.orbitDash} />
-          </Animated.View>
-          <Animated.View style={[styles.routeBead, beadMotion]} />
-          <View style={styles.fixedBeadOne} />
-          <View style={styles.fixedBeadTwo} />
-          <Animated.View style={[styles.logoWrap, logoMotion]}>
-            <Image source={TRAILHEAD_MARK} style={styles.logo} resizeMode="contain" />
-          </Animated.View>
-        </View>
+        <View style={[styles.scanLead, { backgroundColor: C.orange }]} />
+      </Animated.View>
 
-        <View style={styles.statusBlock}>
-          <Text style={styles.statusText} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.86}>
-            {cleanStatus}
-          </Text>
-          <View style={styles.progressTrack}>
-            <Animated.View style={[styles.progressFill, progressMotion]} />
+      <View
+        pointerEvents="none"
+        style={[
+          styles.statusDock,
+          {
+            top: Math.max(topInset, 12) + 16,
+            bottom: Math.max(bottomInset, 12) + 20,
+          },
+        ]}
+      >
+        <View
+          style={[
+            styles.statusPanel,
+            {
+              backgroundColor: dark ? 'rgba(16,17,20,0.94)' : 'rgba(255,255,255,0.94)',
+              borderColor: C.border2,
+              shadowColor: dark ? '#000' : '#111412',
+            },
+          ]}
+          accessible
+          accessibilityRole="progressbar"
+          accessibilityLabel={progress.label}
+          accessibilityValue={{ min: 0, max: 100, now: progress.percent, text: progress.label }}
+        >
+          <TrailheadWayfinder state="building" size={58} colors={C} />
+          <View style={styles.statusCopy}>
+            <Text
+              style={[styles.statusText, { color: C.text }]}
+              numberOfLines={1}
+              adjustsFontSizeToFit
+              minimumFontScale={0.86}
+            >
+              {progress.label}
+            </Text>
+            <View style={[styles.progressTrack, { backgroundColor: C.border2 }]}>
+              <View
+                style={[
+                  styles.progressFill,
+                  { width: `${progress.percent}%`, backgroundColor: C.orange },
+                ]}
+              />
+            </View>
           </View>
         </View>
       </View>
@@ -175,133 +205,65 @@ const styles = StyleSheet.create({
   screen: {
     flex: 1,
     overflow: 'hidden',
-    backgroundColor: '#07100f',
   },
-  scrim: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.30)',
-  },
-  terrain: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.8,
-    pointerEvents: 'none',
-  },
-  terrainLine: {
+  statusDock: {
     position: 'absolute',
-    left: -64,
-    right: -64,
+    left: 0,
+    right: 0,
+    justifyContent: 'flex-end',
+    alignItems: 'center',
+    paddingHorizontal: 18,
+  },
+  scanLine: {
+    position: 'absolute',
+    top: 0,
+    left: 20,
+    right: 20,
     height: 1,
-    backgroundColor: 'rgba(247,239,225,0.055)',
   },
-  content: {
+  scanLead: {
+    position: 'absolute',
+    right: 0,
+    top: -3,
+    width: 7,
+    height: 7,
+    borderRadius: 4,
+  },
+  statusPanel: {
+    width: '100%',
+    minHeight: 82,
+    maxWidth: 420,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderRadius: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    shadowOpacity: 0.2,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 9 },
+    elevation: 12,
+  },
+  statusCopy: {
     flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 28,
-  },
-  centerStage: {
-    width: 300,
-    height: 300,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  glow: {
-    position: 'absolute',
-    width: 286,
-    height: 286,
-    borderRadius: 143,
-    backgroundColor: '#f97316',
-    shadowColor: '#f97316',
-    shadowOpacity: 0.55,
-    shadowRadius: 42,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  orbit: {
-    position: 'absolute',
-    width: 224,
-    height: 224,
-    borderRadius: 112,
-    borderWidth: 2,
-    borderColor: 'rgba(249,115,22,0.70)',
-    borderStyle: 'dashed',
-  },
-  orbitDash: {
-    position: 'absolute',
-    top: -5,
-    left: 104,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#f7efe1',
-  },
-  routeBead: {
-    position: 'absolute',
-    width: 18,
-    height: 18,
-    borderRadius: 9,
-    backgroundColor: '#f97316',
-    shadowColor: '#f97316',
-    shadowOpacity: 0.7,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 0 },
-  },
-  fixedBeadOne: {
-    position: 'absolute',
-    left: 60,
-    top: 154,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: 'rgba(247,239,225,0.92)',
-  },
-  fixedBeadTwo: {
-    position: 'absolute',
-    right: 58,
-    bottom: 78,
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: 'rgba(247,239,225,0.82)',
-  },
-  logoWrap: {
-    width: 132,
-    height: 132,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOpacity: 0.34,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 16 },
-  },
-  logo: {
-    width: '100%',
-    height: '100%',
-  },
-  statusBlock: {
-    width: '100%',
-    alignItems: 'center',
-    gap: 18,
-    marginTop: 12,
+    minWidth: 0,
+    gap: 10,
   },
   statusText: {
-    maxWidth: 270,
-    color: '#f7efe1',
-    fontSize: 17,
-    lineHeight: 22,
+    fontSize: 16,
+    lineHeight: 21,
     fontWeight: '800',
-    textAlign: 'center',
+    letterSpacing: 0,
   },
   progressTrack: {
-    width: 108,
+    width: '100%',
     height: 3,
     borderRadius: 2,
     overflow: 'hidden',
-    backgroundColor: 'rgba(247,239,225,0.20)',
   },
   progressFill: {
-    width: '100%',
     height: '100%',
     borderRadius: 2,
-    backgroundColor: '#f97316',
   },
 });

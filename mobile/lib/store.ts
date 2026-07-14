@@ -3,6 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
 import { beginAccountStorageCleanup, endAccountStorageCleanup } from './storage';
 import { User, TripResult, Report, CampsitePin, OsmPoi, TrailProfile } from './api';
+import type { PendingRouteActivityOffer } from './routeActivityOffer';
 import {
   createSavedEntity,
   getSavedEntity,
@@ -661,6 +662,7 @@ interface AppState {
   pendingStartCopilotVoice: boolean;
   pendingOpenOfflineModal: boolean;
   pendingOfflineTrip: TripResult | null;
+  pendingRouteActivityOffer: PendingRouteActivityOffer | null;
   tabBarHidden: boolean;
   hasPlan: boolean;
   planExpiresAt: number | null;
@@ -709,6 +711,7 @@ interface AppState {
   setPendingStartCopilotVoice: (start: boolean) => void;
   setPendingOpenOfflineModal: (open: boolean) => void;
   setPendingOfflineTrip: (trip: TripResult | null) => void;
+  setPendingRouteActivityOffer: (offer: PendingRouteActivityOffer | null) => void;
   setPlan: (active: boolean, expiresAt?: number | null) => void;
   startGuidedTour: () => void;
   setGuidedTourActive: (active: boolean) => void;
@@ -747,6 +750,7 @@ export const useStore = create<AppState>((set) => ({
   pendingStartCopilotVoice: false,
   pendingOpenOfflineModal: false,
   pendingOfflineTrip: null,
+  pendingRouteActivityOffer: null,
   tabBarHidden: false,
   hasPlan: false,
   planExpiresAt: null,
@@ -798,6 +802,7 @@ export const useStore = create<AppState>((set) => ({
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
+      pendingRouteActivityOffer: null,
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -848,6 +853,7 @@ export const useStore = create<AppState>((set) => ({
       pendingStartCopilotVoice: false,
       pendingOpenOfflineModal: false,
       pendingOfflineTrip: null,
+      pendingRouteActivityOffer: null,
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -983,6 +989,7 @@ export const useStore = create<AppState>((set) => ({
   setPendingStartCopilotVoice: (start) => { if (accountLocalMutationAllowed()) set({ pendingStartCopilotVoice: start }); },
   setPendingOpenOfflineModal: (open) => { if (accountLocalMutationAllowed()) set({ pendingOpenOfflineModal: open }); },
   setPendingOfflineTrip: (trip) => { if (accountLocalMutationAllowed()) set({ pendingOfflineTrip: trip }); },
+  setPendingRouteActivityOffer: (offer) => { if (accountLocalMutationAllowed()) set({ pendingRouteActivityOffer: offer }); },
   setPlan: (active, expiresAt = null) => {
     if (!accountLocalMutationAllowed()) return;
     sd(PLAN_KEY);
@@ -1243,6 +1250,7 @@ function clearLegacyAccountStateFromMemory() {
     pendingStartCopilotVoice: false,
     pendingOpenOfflineModal: false,
     pendingOfflineTrip: null,
+    pendingRouteActivityOffer: null,
     userLoc: null,
   });
 }

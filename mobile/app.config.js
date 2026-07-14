@@ -2,8 +2,8 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.6',
-    runtimeVersion: 'native-202607-mission-animator-1',
+    version: '1.0.7',
+    runtimeVersion: 'native-1.0.7',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',

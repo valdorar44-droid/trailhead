@@ -298,3 +298,10 @@ export interface TripRepositoryRemoteResult<T> {
   record: T;
   conflictCopy?: T;
 }
+
+export interface TripRepositoryLegacyAcknowledgementResult {
+  record: TripDocumentV2 | null;
+  applied: boolean;
+  blockedByPendingWrites?: boolean;
+  ignoredAsStale?: boolean;
+}

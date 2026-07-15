@@ -22,6 +22,7 @@ import {
   TRIP_DOCUMENT_SCHEMA_VERSION,
   TRIP_ITEM_SCHEMA_VERSION,
   TripRepositorySnapshot,
+  TripRepositoryLegacyAcknowledgementResult,
   TripRepositoryRemoteResult,
   TripRepositoryScopeMergeResult,
   TripRepositorySyncStatus,
@@ -1058,6 +1059,57 @@ export class TripRepository {
       this.state.revision += 1;
       await this.persist();
       return { record: stored, conflictCopy };
+    });
+  }
+
+  async acknowledgeLegacyTrip(
+    remote: TripDocumentV2,
+    expectedBaseRevision?: number,
+  ): Promise<TripRepositoryLegacyAcknowledgementResult> {
+    return this.serialize(async () => {
+      if (!isTripDocument(remote)) throw new Error('Acknowledged trip is invalid');
+      if (remote.ownerScope !== this.ownerScope) {
+        throw new Error(`Acknowledged trip owner scope ${remote.ownerScope} does not match ${this.ownerScope}`);
+      }
+      const acknowledgedRevision = finiteNumber(remote.revision);
+      if (acknowledgedRevision == null || acknowledgedRevision < 1) {
+        throw new Error('Acknowledged trip revision is required');
+      }
+      const pendingWrites = this.state.outbox.some(entry => (
+        entry.entityType === 'trip' && entry.entityId === remote.id
+      ));
+      if (pendingWrites) {
+        return {
+          record: this.state.trips[remote.id] ?? null,
+          applied: false,
+          blockedByPendingWrites: true,
+        };
+      }
+      const current = this.state.trips[remote.id];
+      const tombstone = this.state.tombstones[tombstoneKey('trip', remote.id)];
+      const currentRevision = Math.max(current?.revision ?? 0, tombstone?.revision ?? 0);
+      const cleanExpectedBase = finiteNumber(expectedBaseRevision);
+      if (
+        currentRevision > acknowledgedRevision
+        || (cleanExpectedBase != null && currentRevision > cleanExpectedBase)
+        || Boolean(tombstone && tombstone.revision >= acknowledgedRevision)
+      ) {
+        return {
+          record: current ?? null,
+          applied: false,
+          ignoredAsStale: true,
+        };
+      }
+      const stored = {
+        ...remote,
+        ownerScope: this.ownerScope,
+        revision: Math.max(1, Math.round(acknowledgedRevision)),
+      };
+      this.state.trips[remote.id] = stored;
+      delete this.state.tombstones[tombstoneKey('trip', remote.id)];
+      this.state.revision += 1;
+      await this.persist();
+      return { record: stored, applied: true };
     });
   }
 

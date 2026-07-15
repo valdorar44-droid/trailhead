@@ -731,6 +731,33 @@ export function syncTripRepositoryOutbox(): Promise<TripRepositorySyncResult> {
   return beginTripRepositorySync(false);
 }
 
+export async function syncTripRepositoryWritesForTrip(
+  tripId: string,
+  ownerScope: string,
+): Promise<{ synced: boolean; unavailable?: boolean; error?: string }> {
+  const cleanTripId = String(tripId || '').trim();
+  const relevantEntries = () => getTripRepositoryOutbox().filter(entry => (
+    entry.ownerScope === ownerScope
+    && entry.entityType === 'trip'
+    && entry.entityId === cleanTripId
+  ));
+  if (!cleanTripId || relevantEntries().length === 0) return { synced: true };
+  if (!configuredIdentity || configuredIdentity.ownerScope !== ownerScope) {
+    return { synced: false, unavailable: true, error: 'Trip sync is not available for this account.' };
+  }
+  for (let pass = 0; pass < 3; pass += 1) {
+    const before = relevantEntries();
+    if (before.length === 0) return { synced: true };
+    const result = await beginTripRepositorySync(false);
+    const after = relevantEntries();
+    if (after.length === 0) return { synced: true };
+    if (result.canceled || result.error || result.blockedByConflict) {
+      return { synced: false, error: result.error };
+    }
+  }
+  return { synced: relevantEntries().length === 0, error: 'Trip changes are waiting to sync.' };
+}
+
 export async function synchronizeTripRepository(): Promise<TripRepositorySyncResult> {
   return beginTripRepositorySync(true);
 }

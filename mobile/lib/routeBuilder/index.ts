@@ -1,6 +1,7 @@
 export * from './audit';
 export * from './discoveryProviders';
 export * from './geometry';
+export * from './timeout';
 export * from './model';
 export * from './ordering';
 export * from './persistence';

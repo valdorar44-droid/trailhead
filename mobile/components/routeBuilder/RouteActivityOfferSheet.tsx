@@ -16,12 +16,14 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { TrailheadSheet } from '@/components/TrailheadUI';
+import { tripsTabBarWebClearance } from '@/components/trips/TripsTabBar';
 import type { BookableExperience } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { useTheme } from '@/lib/design';
 import {
   isUsableViatorRouteActivity,
   routeActivityBookingUrl,
+  routeActivityHasExactCoordinates,
   type PendingRouteActivityOffer,
 } from '@/lib/routeActivityOffer';
 
@@ -31,7 +33,7 @@ export type RouteActivityOfferSheetProps = {
   activeTripId?: string | null;
   bottomInset?: number;
   offer: PendingRouteActivityOffer | null;
-  onAdd: (experience: BookableExperience) => void;
+  onAdd: (experience: BookableExperience) => void | Promise<void>;
   onOpen?: (experience: BookableExperience) => void;
   onDismiss: () => void;
   onBrowse?: () => void;
@@ -72,7 +74,7 @@ function routeMatchLabel(experience: BookableExperience) {
   const detour = Number(experience.route_match?.detour_mi);
   const parts: string[] = [];
   if (Number.isFinite(day) && day > 0) parts.push(`Day ${day}`);
-  if (Number.isFinite(detour) && detour >= 0) {
+  if (routeActivityHasExactCoordinates(experience) && Number.isFinite(detour) && detour >= 0) {
     parts.push(detour <= 0.1 ? 'Along the route' : `${detour.toFixed(detour >= 10 ? 0 : 1)} mi detour`);
   }
   return parts.join(' · ');
@@ -112,6 +114,7 @@ export default function RouteActivityOfferSheet({
   const { height } = useWindowDimensions();
   const [mode, setMode] = useState<OfferMode>('results');
   const [selected, setSelected] = useState<BookableExperience | null>(null);
+  const [adding, setAdding] = useState(false);
   const didLeaveAppRef = useRef(false);
   const fallbackRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const experiences = useMemo(
@@ -128,6 +131,7 @@ export default function RouteActivityOfferSheet({
   useEffect(() => {
     setMode('results');
     setSelected(null);
+    setAdding(false);
     didLeaveAppRef.current = false;
     if (fallbackRef.current) clearTimeout(fallbackRef.current);
     fallbackRef.current = null;
@@ -153,6 +157,7 @@ export default function RouteActivityOfferSheet({
     didLeaveAppRef.current = false;
     setSelected(null);
     setMode('results');
+    setAdding(false);
   }
 
   async function openExperience(experience: BookableExperience) {
@@ -183,18 +188,28 @@ export default function RouteActivityOfferSheet({
     else onDismiss();
   }
 
-  function confirmBooking() {
-    if (!selected) return;
-    onAdd(selected);
-    dismiss();
+  async function confirmBooking() {
+    if (!selected || adding) return;
+    setAdding(true);
+    try {
+      await onAdd(selected);
+      dismiss();
+    } catch {
+      setAdding(false);
+      Alert.alert('Could not add booking', 'Open the trip and try again.');
+    }
   }
 
   if (!visible || mode === 'away') return null;
 
   const confirming = mode === 'confirm' && selected;
+  const selectedHasExactCoordinates = Boolean(selected && routeActivityHasExactCoordinates(selected));
   const showPrompt = !confirming && promptVisible;
   const showResults = !confirming && !showPrompt && hasMatchingOffer;
   const showSearching = !confirming && !showPrompt && !showResults && searching;
+  const footerInset = Platform.OS === 'web'
+    ? tripsTabBarWebClearance(bottomInset)
+    : bottomInset;
   const content = (
     <View
       style={[styles.overlay, Platform.OS === 'web' && styles.webOverlay]}
@@ -210,7 +225,7 @@ export default function RouteActivityOfferSheet({
       />
       <TrailheadSheet
         style={styles.sheet}
-        contentStyle={[styles.sheetContent, { paddingBottom: Math.max(18, bottomInset + 12) }]}
+        contentStyle={[styles.sheetContent, { paddingBottom: Math.max(18, footerInset + 12) }]}
         maxHeight={Math.min(640, height - 64)}
         scroll={showResults}
       >
@@ -257,12 +272,21 @@ export default function RouteActivityOfferSheet({
             <TouchableOpacity
               style={[styles.primaryButton, { backgroundColor: C.orange }]}
               activeOpacity={0.84}
-              onPress={confirmBooking}
+              onPress={() => { confirmBooking().catch(() => {}); }}
+              disabled={adding}
               accessibilityRole="button"
-              accessibilityLabel={`Add ${selected.title} to route`}
+              accessibilityLabel={selectedHasExactCoordinates
+                ? adding ? `Adding ${selected.title} to route` : `Add ${selected.title} to route`
+                : adding ? `Saving ${selected.title} to trip` : `Save ${selected.title} to trip`}
             >
-              <Ionicons name="add" size={19} color={C.bg} />
-              <Text style={[styles.primaryText, { color: C.bg }]}>Add to route</Text>
+              {adding
+                ? <ActivityIndicator size="small" color={C.bg} />
+                : <Ionicons name={selectedHasExactCoordinates ? 'add' : 'bookmark-outline'} size={19} color={C.bg} />}
+              <Text style={[styles.primaryText, { color: C.bg }]}>
+                {selectedHasExactCoordinates
+                  ? adding ? 'Adding' : 'Add to route'
+                  : adding ? 'Saving' : 'Save to trip'}
+              </Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.textButton}
@@ -307,8 +331,9 @@ export default function RouteActivityOfferSheet({
                 activeOpacity={0.72}
                 onPress={onCancelSearch}
                 accessibilityRole="button"
+                accessibilityLabel="Skip tours"
               >
-                <Text style={[styles.textButtonLabel, { color: C.text2 }]}>Cancel trip setup</Text>
+                <Text style={[styles.textButtonLabel, { color: C.text2 }]}>Skip tours</Text>
               </TouchableOpacity>
             ) : null}
           </View>

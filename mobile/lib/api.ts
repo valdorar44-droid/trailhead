@@ -2,7 +2,26 @@ import { storage } from './storage';
 import { Platform } from 'react-native';
 import { TRAILHEAD_API_BASE, TRAILHEAD_PRODUCTION_API_BASE } from './apiBase';
 import { guardedRequest, normalizeRequestText, stableNumber, stableRouteKey } from './requestGuard';
+import { getTripRepositoryOutbox } from './tripRepository';
+import {
+  acknowledgeBackendTripRevision,
+  cancelActiveTripMirror,
+  captureLegacyTripSaveContext,
+  legacyTripSaveContextStillCurrent,
+  queueActiveTripMirrorIfChanged,
+  queueCurrentActiveTripMirror,
+} from './store';
 import { withRouteWaypointIdentity } from './routeWaypointSignature';
+import {
+  beginTripWriteBarrier,
+  clearTripWriteBarrier,
+  tripWriteBarrierPending,
+  tripWriteBlockedByOutbox,
+} from './tripWriteBarrier';
+import {
+  reconcileLegacyTripSaveResponse,
+  resolveLegacyTripSaveToken,
+} from './legacyTripSaveContext';
 
 const BASE = TRAILHEAD_API_BASE;
 export type WeatherUnitMode = 'auto' | 'imperial' | 'metric';
@@ -17,18 +36,6 @@ function isLocalWebProductionApi() {
 
 function isLocalManualTripId(tripId: string) {
   return /^manual[_-]/i.test(String(tripId || ''));
-}
-
-function emptyRouteToursResponse(source = 'viator'): ExploreExperiencesResponse {
-  return {
-    source,
-    results: [],
-    count: 0,
-    live_enabled: false,
-    live_status: 'disabled',
-    live_message: '',
-    route_anchor_count: 0,
-  };
 }
 
 function optionalStringId(value: unknown): string | undefined {
@@ -127,6 +134,7 @@ export class ApiError extends Error {
 export type GeocodeRequestOptions = {
   countrycodes?: string;
   prefer?: 'search_center' | 'center' | 'locality' | 'place' | string;
+  signal?: AbortSignal;
 };
 
 export type OutdoorOfferImage = {
@@ -256,7 +264,7 @@ function geocodeOptionsQuery(options: GeocodeRequestOptions = {}) {
   };
 }
 
-async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverride?: string): Promise<T> {
+async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverride?: string | null): Promise<T> {
   const token = tokenOverride === undefined ? await getToken() : tokenOverride;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
@@ -279,6 +287,76 @@ async function reqWithToken<T>(path: string, opts: RequestInit = {}, tokenOverri
 
 async function req<T>(path: string, opts: RequestInit = {}): Promise<T> {
   return reqWithToken(path, opts);
+}
+
+async function saveTripRequest(
+  trip: TripResult,
+  route_geometry?: SavedRouteGeometryPayload | null,
+  builder_state?: Record<string, unknown> | null,
+  source: string = Platform.OS,
+  tokenOverride?: string | null,
+) {
+  const saveContext = captureLegacyTripSaveContext();
+  await cancelActiveTripMirror();
+  if (!legacyTripSaveContextStillCurrent(saveContext)) {
+    throw new ApiError('Account changed before the trip could be saved.', 409, { code: 'account_changed' });
+  }
+  const requestToken = await resolveLegacyTripSaveToken(
+    tokenOverride,
+    getToken,
+    () => legacyTripSaveContextStillCurrent(saveContext),
+  );
+  if (requestToken === undefined) {
+    throw new ApiError('Account changed before the trip could be saved.', 409, { code: 'account_changed' });
+  }
+  const expectedVersion = Number(trip.version);
+  if (
+    tripWriteBarrierPending(trip.trip_id)
+    || tripWriteBlockedByOutbox(trip.trip_id, expectedVersion, getTripRepositoryOutbox())
+  ) {
+    return Promise.reject(new ApiError(
+      'Your latest trip change is still being saved. Try again in a moment.',
+      425,
+      { code: 'trip_write_pending' },
+    ));
+  }
+  const request = reqWithToken<TripResult>(`/api/trip/${encodeURIComponent(trip.trip_id)}`, {
+    method: 'PUT',
+    body: JSON.stringify({
+      trip,
+      route_geometry: route_geometry
+        ? withRouteWaypointIdentity(route_geometry, trip.plan?.waypoints)
+        : route_geometry,
+      builder_state,
+      ...(Number.isInteger(expectedVersion) && expectedVersion >= 1
+        ? { expected_version: expectedVersion }
+        : {}),
+      source,
+      request: `${source} route: ${trip.plan?.trip_name ?? trip.trip_id}`,
+    }),
+  }, requestToken);
+  const barrierId = beginTripWriteBarrier(trip.trip_id);
+  let acknowledged = false;
+  try {
+    const savedTrip = await request;
+    if (!legacyTripSaveContextStillCurrent(saveContext)) {
+      throw new ApiError('Account changed before the trip save finished.', 409, { code: 'account_changed' });
+    }
+    const reconciliation = await reconcileLegacyTripSaveResponse(
+      () => legacyTripSaveContextStillCurrent(saveContext),
+      cancelActiveTripMirror,
+      () => acknowledgeBackendTripRevision(trip, savedTrip, saveContext),
+    );
+    if (!reconciliation) {
+      throw new ApiError('Account changed before the trip save finished.', 409, { code: 'account_changed' });
+    }
+    acknowledged = reconciliation.applied;
+    return savedTrip;
+  } finally {
+    clearTripWriteBarrier(trip.trip_id, barrierId);
+    if (acknowledged) queueActiveTripMirrorIfChanged(trip, saveContext);
+    else queueCurrentActiveTripMirror(trip.trip_id, saveContext);
+  }
 }
 
 function appendExploreExperienceOptions(qs: URLSearchParams, options: ExploreExperienceQueryOptions = {}) {
@@ -461,23 +539,17 @@ export const api = {
       { method: 'DELETE', headers: { 'Idempotency-Key': idempotencyKey } },
     ),
   saveTrip: (trip: TripResult, route_geometry?: SavedRouteGeometryPayload | null, builder_state?: Record<string, unknown> | null, source: string = Platform.OS) =>
-    req<TripResult>(`/api/trip/${encodeURIComponent(trip.trip_id)}`, {
-      method: 'PUT',
-      body: JSON.stringify({
-        trip,
-        route_geometry: route_geometry
-          ? withRouteWaypointIdentity(route_geometry, trip.plan?.waypoints)
-          : route_geometry,
-        builder_state,
-        source,
-        request: `${source} route: ${trip.plan?.trip_name ?? trip.trip_id}`,
-      }),
-    }),
-  saveTripGeometry: (tripId: string, route_geometry: SavedRouteGeometryPayload) =>
-    req<TripResult>(`/api/trip/${encodeURIComponent(tripId)}/geometry`, {
+    saveTripRequest(trip, route_geometry, builder_state, source),
+  saveTripWithToken: (trip: TripResult, route_geometry: SavedRouteGeometryPayload | null | undefined, builder_state: Record<string, unknown> | null | undefined, source: string, authToken: string | null) =>
+    saveTripRequest(trip, route_geometry, builder_state, source, authToken),
+  saveTripGeometry: async (tripId: string, route_geometry: SavedRouteGeometryPayload) => {
+    const token = await getToken();
+    if (!token) return null;
+    return reqWithToken<TripResult>(`/api/trip/${encodeURIComponent(tripId)}/geometry`, {
       method: 'PUT',
       body: JSON.stringify({ route_geometry }),
-    }),
+    }, token);
+  },
 
   submitReport: (data: ReportPayload) =>
     req<ReportResponse>('/api/reports', { method: 'POST', body: JSON.stringify(data) }),
@@ -539,16 +611,22 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ session_id, reason }),
     }),
-  logExplorerLedger: (data: ExtremeLedgerRequest) =>
-    req<{ ok: boolean; event_id: number }>('/api/explorer/ledger', {
+  logExplorerLedger: async (data: ExtremeLedgerRequest) => {
+    const token = await getToken();
+    if (!token) return { ok: false, event_id: 0 };
+    return reqWithToken<{ ok: boolean; event_id: number }>('/api/explorer/ledger', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
-  logExtremeLedger: (data: ExtremeLedgerRequest) =>
-    req<{ ok: boolean; event_id: number }>('/api/extreme/ledger', {
+    }, token);
+  },
+  logExtremeLedger: async (data: ExtremeLedgerRequest) => {
+    const token = await getToken();
+    if (!token) return { ok: false, event_id: 0 };
+    return reqWithToken<{ ok: boolean; event_id: number }>('/api/extreme/ledger', {
       method: 'POST',
       body: JSON.stringify(data),
-    }),
+    }, token);
+  },
   authorizeExplorerNavigation: (data: ExtremeNavigationAuthorizeRequest) =>
     req<ExtremeNavigationAuthorizeResponse>('/api/explorer/navigation/authorize', {
       method: 'POST',
@@ -635,17 +713,23 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(data),
     }),
-  mapContextResolve: (data: MapContextResolveRequest) => {
+  mapContextResolve: (
+    data: MapContextResolveRequest,
+    requestOptions: Pick<RequestInit, 'signal'> = {},
+  ) => {
     const normalized = normalizeRequestText(data.q || '');
     if (normalized.length < 2) return Promise.resolve({ ok: true, provider: 'mapbox', temporary_use_only: true, places: [], selected: null } as MapContextResolveResponse);
     const center = data.snapshot?.center;
+    const run = () => req<MapContextResolveResponse>('/api/map-context/resolve', {
+        ...requestOptions,
+        method: 'POST',
+        body: JSON.stringify(data),
+      });
+    if (requestOptions.signal) return run();
     return guardedRequest(
       `mapctx-resolve:${normalized}:${data.limit ?? 8}:${data.country ?? ''}:${data.types ?? ''}:${data.proximity ?? ''}:${data.bbox ?? ''}:${center ? `${stableNumber(center.lat)}:${stableNumber(center.lng)}` : ''}`,
       3 * 60_000,
-      () => req<MapContextResolveResponse>('/api/map-context/resolve', {
-        method: 'POST',
-        body: JSON.stringify(data),
-      }),
+      run,
     );
   },
   mapContextSearch: (data: MapContextSearchRequest) => {
@@ -691,41 +775,55 @@ export const api = {
         body: JSON.stringify(data),
       }),
     ),
-  mapContextRouteBuild: (locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>, options: RouteBuildOptions = {}, units: 'miles' | 'kilometers' = 'miles') =>
-    guardedRequest(
+  mapContextRouteBuild: (
+    locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>,
+    options: RouteBuildOptions = {},
+    units: 'miles' | 'kilometers' = 'miles',
+    requestOptions: Pick<RequestInit, 'signal'> = {},
+  ) => {
+    const run = () => req<MapContextRouteResponse>('/api/map-context/route', {
+      ...requestOptions,
+      method: 'POST',
+      body: JSON.stringify({
+        coordinates: locations.map(loc => [loc.lng, loc.lat]),
+        profile: options.backRoads ? 'mapbox/driving' : 'mapbox/driving-traffic',
+        steps: true,
+        alternatives: false,
+        overview: 'full',
+        annotations: 'congestion,duration,distance',
+        exclude: [
+          options.avoidTolls ? 'toll' : '',
+          options.avoidHighways ? 'motorway' : '',
+          options.noFerries ? 'ferry' : '',
+        ].filter(Boolean).join(','),
+        units,
+        metadata: { source: 'mobile_route_builder' },
+      } satisfies MapContextRouteRequest),
+    }).then(res => {
+      if (!res.route_build) throw new Error('Mapbox route build unavailable');
+      return res.route_build;
+    });
+    if (requestOptions.signal) return run();
+    return guardedRequest(
       `mapctx-route-build:${locations.map(loc => `${stableNumber(loc.lat, 4)},${stableNumber(loc.lng, 4)},${loc.type ?? 'break'}`).join('|')}:${options.backRoads ? 'wild' : 'traffic'}:${options.avoidHighways ? 'nohw' : ''}:${options.avoidTolls ? 'notoll' : ''}:${options.noFerries ? 'noferry' : ''}:${units}`,
       2 * 60_000,
-      () => req<MapContextRouteResponse>('/api/map-context/route', {
-        method: 'POST',
-        body: JSON.stringify({
-          coordinates: locations.map(loc => [loc.lng, loc.lat]),
-          profile: options.backRoads ? 'mapbox/driving' : 'mapbox/driving-traffic',
-          steps: true,
-          alternatives: false,
-          overview: 'full',
-          annotations: 'congestion,duration,distance',
-          exclude: [
-            options.avoidTolls ? 'toll' : '',
-            options.avoidHighways ? 'motorway' : '',
-            options.noFerries ? 'ferry' : '',
-          ].filter(Boolean).join(','),
-          units,
-          metadata: { source: 'mobile_route_builder' },
-        } satisfies MapContextRouteRequest),
-      }).then(res => {
-        if (!res.route_build) throw new Error('Mapbox route build unavailable');
-        return res.route_build;
-      }),
-    ),
+      run,
+    );
+  },
   geocodePlaces: (query: string, limit = 8, options: GeocodeRequestOptions = {}) => {
     const normalized = normalizeRequestText(query);
     if (normalized.length < 2) return Promise.resolve([]);
     const safeLimit = Math.max(1, Math.min(Math.round(limit || 8), 10));
     const optionParams = geocodeOptionsQuery(options);
+    const run = () => req<GeocodePlace[]>(
+      `/api/geocode?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`,
+      { signal: options.signal },
+    );
+    if (options.signal) return run();
     return guardedRequest(
       `geocode:${normalized}:${safeLimit}:${optionParams.cacheKey}`,
       10 * 60_000,
-      () => req<GeocodePlace[]>(`/api/geocode?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`),
+      run,
     );
   },
   resolveGeocodePlace: (query: string, limit = 8, options: GeocodeRequestOptions = {}) => {
@@ -950,13 +1048,12 @@ export const api = {
       method: 'POST',
       body: JSON.stringify({ payload }),
     }),
-  getRouteTours: (data: RouteTourSuggestionRequest) =>
-    isLocalWebProductionApi()
-      ? Promise.resolve<ExploreExperiencesResponse>(emptyRouteToursResponse(data.source))
-      : req<ExploreExperiencesResponse>('/api/tours/route', {
-          method: 'POST',
-          body: JSON.stringify(data),
-        }),
+  getRouteTours: (data: RouteTourSuggestionRequest, requestOptions: Pick<RequestInit, 'signal'> = {}) =>
+    req<ExploreExperiencesResponse>('/api/tours/route', {
+      ...requestOptions,
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
   getRentalOffers: (params: RentalOffersQuery = {}) => {
     const qs = new URLSearchParams({ provider: params.provider || 'outdoorsy', limit: String(params.limit ?? 12) });
     if (params.lat != null) qs.set('lat', String(params.lat));
@@ -1002,11 +1099,15 @@ export const api = {
   getWeather: (lat: number, lng: number, days = 7, units: WeatherUnitMode = 'auto') =>
     req<WeatherForecast>(`/api/weather?lat=${lat}&lng=${lng}&days=${days}&units=${encodeURIComponent(units)}`),
   getRouteWeather: (tripId: string, waypoints: Waypoint[], units: WeatherUnitMode = 'auto') =>
-    isLocalWebProductionApi() && isLocalManualTripId(tripId)
-      ? Promise.resolve<RouteWeatherResult>({ trip_id: tripId, forecasts: {} })
-      : req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints, units }) }),
-  buildRoute: (locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>, options: RouteBuildOptions = {}, units: 'miles' | 'kilometers' = 'miles') =>
+    req<RouteWeatherResult>('/api/weather/route', { method: 'POST', body: JSON.stringify({ trip_id: tripId, waypoints, units }) }),
+  buildRoute: (
+    locations: Array<{ lat: number; lng: number; type?: 'break' | 'through' }>,
+    options: RouteBuildOptions = {},
+    units: 'miles' | 'kilometers' = 'miles',
+    requestOptions: Pick<RequestInit, 'signal'> = {},
+  ) =>
     req<RouteBuildResult>('/api/route', {
+      ...requestOptions,
       method: 'POST',
       body: JSON.stringify({
         locations: locations.map(loc => ({ lat: loc.lat, lon: loc.lng, type: loc.type ?? 'break' })),
@@ -4114,6 +4215,9 @@ export interface BookableExperience {
   subcategories?: string[];
   lat?: number | null;
   lng?: number | null;
+  coordinate_source?: string;
+  coordinate_precision?: string;
+  route_stop_eligible?: boolean;
   region?: string;
   country?: string;
   summary?: string;
@@ -4236,6 +4340,7 @@ export interface ExploreExperiencesResponse {
   live_enabled?: boolean;
   live_status?: 'disabled' | 'processing' | 'cache_hit' | 'ok' | string;
   live_message?: string;
+  live_poll_timeout_seconds?: number;
   route_anchor_count?: number;
 }
 export interface RouteTourSuggestionRequest {
@@ -4335,6 +4440,8 @@ export interface PackingList {
 }
 export interface WeatherForecast {
   available?: boolean;
+  latitude?: number;
+  longitude?: number;
   trailhead_units?: {
     mode: 'imperial' | 'metric';
     temperature_label: string;
@@ -4403,8 +4510,25 @@ export interface RouteBuildOptions {
 export interface RouteBuildResult {
   trip?: {
     status?: number;
+    units?: 'miles' | 'kilometers';
     summary?: { length?: number; time?: number };
-    legs?: Array<{ shape?: string; summary?: { length?: number; time?: number } }>;
+    legs?: Array<{
+      shape?: string;
+      summary?: { length?: number; time?: number };
+      maneuvers?: Array<{
+        type?: number;
+        instruction?: string;
+        verbal_pre_transition_instruction?: string;
+        verbal_transition_alert_instruction?: string;
+        verbal_post_transition_instruction?: string;
+        street_names?: string[];
+        length?: number;
+        time?: number;
+        begin_shape_index?: number;
+        end_shape_index?: number;
+        roundabout_exit_count?: number | null;
+      }>;
+    }>;
   };
   _trailhead?: { engine?: string; cache?: string; cache_key?: string };
 }

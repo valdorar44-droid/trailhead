@@ -86,6 +86,7 @@ type Props = {
   onShowArea: () => void;
   onRoute: () => void;
   routeLabel?: string;
+  routeDisabled?: boolean;
   onToggleSave: () => void;
   onNearbyAction?: (module: ExploreNearbyModule) => void;
   onSourcePackItem?: (item: ExploreSourcePackItem) => void;
@@ -419,6 +420,7 @@ export function ExploreDetailSheet({
   onShowArea,
   onRoute,
   routeLabel = 'Route',
+  routeDisabled = false,
   onToggleSave,
   onNearbyAction,
   onSourcePackItem,
@@ -731,13 +733,29 @@ export function ExploreDetailSheet({
     setSelectedItem(item);
   }
 
-  function renderAction(label: string, icon: keyof typeof Ionicons.glyphMap, onPress: () => void, highlighted = false) {
+  function renderAction(
+    label: string,
+    icon: keyof typeof Ionicons.glyphMap,
+    onPress: () => void,
+    highlighted = false,
+    disabled = false,
+  ) {
     return (
       <TouchableOpacity
         key={label}
-        style={[styles.detailAction, { borderColor: highlighted ? accent + '66' : C.border, backgroundColor: highlighted ? accent + '16' : C.s1 }]}
+        style={[
+          styles.detailAction,
+          {
+            borderColor: highlighted ? accent + '66' : C.border,
+            backgroundColor: highlighted ? accent + '16' : C.s1,
+            opacity: disabled ? 0.55 : 1,
+          },
+        ]}
         activeOpacity={0.86}
         onPress={onPress}
+        disabled={disabled}
+        accessibilityRole="button"
+        accessibilityState={{ disabled, selected: disabled }}
       >
         <Ionicons name={icon} size={18} color={highlighted ? accent : C.text2} />
         <Text style={[styles.detailActionText, { color: highlighted ? accent : C.text }]}>{label}</Text>
@@ -1217,7 +1235,7 @@ export function ExploreDetailSheet({
           })}
           <View style={styles.mapActions}>
             {renderAction('Show Area', 'map-outline', onShowArea, true)}
-            {renderAction(routeLabel, 'navigate-outline', onRoute)}
+            {renderAction(routeLabel, routeDisabled ? 'checkmark-circle' : 'navigate-outline', onRoute, false, routeDisabled)}
             {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}
           </View>
         </View>
@@ -1387,7 +1405,7 @@ export function ExploreDetailSheet({
         {!activeModuleDef && (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.actionRail}>
           {renderAction('Area', 'map-outline', onShowArea, true)}
-          {renderAction(routeLabel, 'navigate-outline', onRoute)}
+          {renderAction(routeLabel, routeDisabled ? 'checkmark-circle' : 'navigate-outline', onRoute, false, routeDisabled)}
           {renderAction('Weather', 'partly-sunny-outline', () => openModule('weather'))}
           {renderAction(isPlaying ? 'Stop' : 'Audio', isPlaying ? 'stop' : 'play', onPlayAudio)}
           {renderAction(saved ? 'Saved' : 'Save', saved ? 'bookmark' : 'bookmark-outline', onToggleSave)}

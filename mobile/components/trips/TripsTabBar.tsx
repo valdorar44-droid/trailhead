@@ -16,6 +16,12 @@ const ICONS: Record<string, keyof typeof Ionicons.glyphMap> = {
 
 const VISIBLE_ROUTE_NAMES = ['guide', 'plan', 'map', 'report', 'profile'] as const;
 const PLAN_CHILD_ROUTES = new Set(['route-builder', 'trips']);
+const TAB_BAR_CONTENT_HEIGHT = 64;
+const TAB_BAR_WEB_BOTTOM_PADDING = 10;
+
+export function tripsTabBarWebClearance(bottomInset: number) {
+  return TAB_BAR_CONTENT_HEIGHT + Math.max(bottomInset, TAB_BAR_WEB_BOTTOM_PADDING);
+}
 
 export default function TripsTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const C = useTheme();
@@ -100,7 +106,7 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   inner: {
-    minHeight: 64,
+    minHeight: TAB_BAR_CONTENT_HEIGHT,
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 7,

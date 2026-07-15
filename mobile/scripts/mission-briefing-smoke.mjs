@@ -70,6 +70,7 @@ const nativeMapSource = readFileSync(join(root, 'components/NativeMap/index.tsx'
 assert(nativeMapSource.includes('mission-brief-progress-line'), 'NativeMap renders mission briefing progress layer');
 
 const mapSource = readFileSync(join(root, 'app/(tabs)/map.tsx'), 'utf8');
+const playerSource = readFileSync(join(root, 'lib/missionBriefNativePlayer.ts'), 'utf8');
 const realtimeSource = readFileSync(join(root, 'lib/realtimeCopilot.ts'), 'utf8');
 assert(!mapSource.includes('handoffScoutToCinematic') && !mapSource.includes('AUTO_FLY_AFTER_SCOUT'),
   'route scout does not auto-start the flyover');
@@ -83,10 +84,20 @@ assert(mapSource.includes('enterDirectorMode') || mapSource.includes('ensureMiss
 assert(mapSource.includes('missionBeatCaption'), 'map uses runtime beat text for caption and voice');
 assert(mapSource.includes('shouldSpeakMissionScene'), 'scene narration gated for live scout beats');
 assert(mapSource.includes('speakFlyoverBeat'), 'map uses flyover voice with device fallback');
-assert(mapSource.includes("command: 'markNarrationDone'"), 'WebView flyover receives narration completion');
+assert(mapSource.includes('mapMissionPlayerRef.current?.markNarrationDone()'),
+  'shared JS flyover player receives narration completion');
 assert(!mapSource.includes('startMissionBriefFromMsg(msg)'), 'WebView flyover does not call removed inline player');
-assert(mapSource.includes("msg.type==='cinematic_camera'") && mapSource.includes('map.easeTo(camOpts)'),
-  'WebView flyover camera moves without creating search pins');
+assert(!mapSource.includes("type: 'mission_brief_start'") &&
+  playerSource.includes("type: 'mission_brief_route'") &&
+  mapSource.includes("msg.type==='mission_brief_route'") &&
+  mapSource.includes("msg.type==='mission_brief_progress'") &&
+  mapSource.includes('mapMissionPlayerRef.current.replay()'),
+  'WebView flyover starts the shared JS player and mirrors its route progress');
+assert(!mapSource.includes("postWebMessage(JSON.stringify({ type: 'mission_brief_cmd'"),
+  'flyover controls use the shared JS player on every map surface');
+assert(mapSource.includes("msg.type==='cinematic_camera'") &&
+  mapSource.includes('camOpts.easing=function(progress){return progress;};map.easeTo(camOpts)'),
+  'WebView flyover camera uses direct linear easing without creating search pins');
 assert(mapSource.includes('patchMissionBriefOverlay'), 'map batches mission overlay updates');
 assert(mapSource.includes('captionText={mapMissionCaptionText}'), 'map passes runtime caption text to TripPreviewCaption');
 assert(mapSource.includes('fetchDirectedCinematic') && mapSource.includes('startDirectedCinematicFetch'),
@@ -110,12 +121,42 @@ assert(mapBriefSource.includes("scene.type !== 'route_rejoin'"),
   'route_rejoin transitions are silent and never wait on voice');
 assert(mapSource.includes('useNativeOverlays: useNativeMapSurface'), 'native player uses NativeMap overlays on main map');
 const webMissionPlayerSource = readFileSync(join(root, 'lib/missionBriefMapPlayerScript.ts'), 'utf8');
+assert(webMissionPlayerSource.includes('function clearMissionBriefOverlay()')
+  && mapSource.includes("typeof clearMissionBriefOverlay==='function'"),
+  'stopping a WebView flyover clears both mission route overlays');
+const webMessageHandler = mapSource.match(/function handleMsgData\(msg\)\{[\s\S]*?if\(msg.type==='nav_active'/)?.[0] ?? '';
+assert(
+  webMessageHandler.indexOf('if(!mapReady){pendingMsgs.push(msg);return;}') >= 0
+    && webMessageHandler.indexOf('if(!mapReady){pendingMsgs.push(msg);return;}')
+      < webMessageHandler.indexOf("msg.type==='mission_brief_route'"),
+  'cold WebView flyover messages wait until the map style is ready',
+);
+assert(
+  mapSource.includes('mapMissionTerrainEnabledRef.current')
+    && mapSource.includes('function enableMission3d()')
+    && mapSource.includes('if (mapMissionTerrainEnabledRef.current) return;'),
+  'flyover terrain activation is idempotent across scenes',
+);
+assert(
+  mapSource.includes('mapMissionCurrentSurfaceRef.current')
+    && mapSource.includes('function restoreMapMissionSurface()')
+    && mapSource.includes('stopMapMissionBriefRef.current();'),
+  'flyover teardown restores the latest map surface through the shared cleanup path',
+);
+assert(
+  !mapSource.includes('mapMission3dSnapshotRef.current !== map3dEnabled')
+    && mapSource.includes('nativeMapSurfaceActiveRef.current'),
+  'flyover teardown does not compare snapshots against a stale render',
+);
 assert(webMissionPlayerSource.includes('markNarrationDone') && webMissionPlayerSource.includes('narrationCapMs'),
   'WebView flyover waits for narration with a cap');
 assert(webMissionPlayerSource.includes('duration: 120') && webMissionPlayerSource.includes('now - cine.lastCameraTs >= 80'),
   'WebView follow camera uses throttled smooth retargets');
 assert(webMissionPlayerSource.includes('sweepDeg') && webMissionPlayerSource.includes('Math.min(360'),
   'WebView orbit scenes honor storyboard sweep');
+assert(webMissionPlayerSource.includes('coordsBetweenRatios')
+  && webMissionPlayerSource.includes('coordinateAtDistance'),
+  'WebView flyover overlays use distance-based route slices');
 
 const voiceSource = readFileSync(join(root, 'lib/voice.ts'), 'utf8');
 assert(voiceSource.includes('playTrailheadVoice'), 'speakCopilotNarration uses Trailhead voice');
@@ -142,7 +183,6 @@ assert(serverSource.includes('if clean == "flyover"'),
   'backend accepts flyover TTS mode');
 
 // --- Cinematic camera engine ---
-const playerSource = readFileSync(join(root, 'lib/missionBriefNativePlayer.ts'), 'utf8');
 assert(playerSource.includes('effectiveDuration'), 'player computes an effective scene duration');
 assert(playerSource.includes('/ Math.max(0.1, speed)'), 'speed divides base scene duration down to 0.1x');
 assert(playerSource.includes('cumulativeDistances') && playerSource.includes('pointAtDistance'),
@@ -205,6 +245,11 @@ assert(mapSource.includes('returnFromMissionToTripOverview') && mapSource.includ
   'map can leave flyover and reframe the trip overview camera');
 assert(mapSource.includes("flyoverMode === 'copilot'") && mapSource.includes("mapMissionFlyoverModeRef.current === 'trail_builder'"),
   'Trail Builder flyover stays visual-only');
+assert(mapSource.includes("callouts: mode === 'trail_builder' ? [] : scene.callouts") &&
+  mapSource.includes("narration: mode === 'trail_builder' ? '' : scene.narration"),
+  'Route and Trail Builder flyovers remove narration and off-route callouts');
+assert(mapSource.includes('ROUTE_ANCHORED_COPILOT_SCENES') && mapSource.includes("mode: 'follow' as const"),
+  'Co-Pilot keeps camps, fuel, and route checks on the route-follow camera');
 assert(mapSource.includes('consumePendingFlyoverAffirmation') && mapSource.includes("Preparing flyover."),
   'Co-Pilot can start the flyover from a voice/text yes');
 assert(mapSource.includes('mapMissionBriefTop'), 'map renders the top cinematic caption');
@@ -246,6 +291,10 @@ assert(mapSource.includes('resolveMissionPlaybackMode'), 'map resolves js vs nat
 assert(mapSource.includes('isMissionAnimatorAvailable'), 'map probes native animator availability');
 assert(mapSource.includes('isMissionAnimatorCinematicOrbitAvailable') && mapSource.includes('native_animator_orbit_available'),
   'map requires native orbit support before using native cinematic playback');
+assert(mapSource.includes('NATIVE_MISSION_ANIMATOR_CAMERA_PARITY = false'),
+  'incomplete native camera path stays disabled until it matches the shared player');
+assert(!mapSource.includes('const focusStop = stops.find'),
+  'route scout keeps the completed route framed instead of departing for the first stop');
 
 const animatorSource = readFileSync(join(root, 'modules/mission-animator/src/index.ts'), 'utf8');
 assert(animatorSource.includes('startMissionAnimation'), 'native animator module exposes startMissionAnimation');

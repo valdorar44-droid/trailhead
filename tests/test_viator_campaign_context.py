@@ -58,6 +58,60 @@ class ViatorCampaignContextTests(unittest.TestCase):
         self.assertTrue(client.campaigns)
         self.assertEqual({value for _, value in client.campaigns}, {"trip-day"})
 
+    def test_route_refresh_timeout_matches_the_mobile_polling_contract(self):
+        self.assertEqual(
+            server._viator_route_refresh_timeout_seconds(SimpleNamespace(request_timeout_seconds=10.0)),
+            15.0,
+        )
+        self.assertEqual(
+            server._viator_route_refresh_timeout_seconds(SimpleNamespace(request_timeout_seconds=120.0)),
+            125.0,
+        )
+
+    def test_route_suggestion_marks_destination_centroid_as_approximate(self):
+        results = server._normalize_live_viator_experiences(
+            {
+                "products": [{
+                    "productCode": "NO-MEETING-POINT",
+                    "title": "Canyon tour",
+                    "productUrl": "https://www.viator.com/tours/example",
+                }],
+            },
+            {"lat": 38.57, "lng": -109.55, "name": "Route stop", "day": 2},
+            {"name": "Moab", "lat": 38.5733, "lng": -109.5498},
+            1,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["coordinate_source"], "destination_centroid")
+        self.assertEqual(results[0]["coordinate_precision"], "approximate")
+        self.assertFalse(results[0]["route_stop_eligible"])
+        self.assertEqual(results[0]["lat"], 38.5733)
+        self.assertEqual(results[0]["lng"], -109.5498)
+
+    def test_route_suggestion_marks_product_coordinates_as_routable(self):
+        results = server._normalize_live_viator_experiences(
+            {
+                "products": [{
+                    "productCode": "EXACT-MEETING-POINT",
+                    "title": "Canyon tour",
+                    "productUrl": "https://www.viator.com/tours/example",
+                    "lat": 38.58,
+                    "lng": -109.54,
+                }],
+            },
+            {"lat": 38.57, "lng": -109.55, "name": "Route stop", "day": 2},
+            {"name": "Moab", "lat": 38.5733, "lng": -109.5498},
+            1,
+        )
+
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["coordinate_source"], "product")
+        self.assertEqual(results[0]["coordinate_precision"], "product")
+        self.assertTrue(results[0]["route_stop_eligible"])
+        self.assertEqual(results[0]["lat"], 38.58)
+        self.assertEqual(results[0]["lng"], -109.54)
+
     def test_guided_destination_uses_explore_guided_only(self):
         client = _FakeViatorClient()
         server._fetch_viator_guided_destination_live(

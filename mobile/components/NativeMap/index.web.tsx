@@ -15,6 +15,8 @@ import {
   routeWaypointSignature as buildRouteWaypointSignature,
 } from '@/lib/routeWaypointSignature';
 import { isFullTripRouteRequest, routeMatchesTripContext } from '@/lib/routePersistencePolicy';
+import { valhallaManeuverPresentation } from '@/lib/valhallaManeuvers';
+import { applyWebCameraTransition } from './webCameraTransition';
 
 export type { WP, RouteOpts, MapBounds, RouteResult, RouteStep } from './types';
 
@@ -31,6 +33,7 @@ export type NativeMapCameraOptions = {
 export interface NativeMapHandle {
   flyTo:          (lat: number, lng: number, zoom?: number, name?: string) => void;
   flyToCamera:    (options: NativeMapCameraOptions) => void;
+  fitCoordinates: (coords: [number, number][], padding?: [number, number, number, number], duration?: number) => void;
   setZoom:        (zoom: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
   zoomBy:         (delta: number, focus?: { lat?: number; lng?: number } | null) => Promise<number | null>;
   locate:         (lat: number, lng: number) => void;
@@ -1014,9 +1017,10 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         coords.push(...legCoords);
         const legSteps = (leg.maneuvers ?? []).map((maneuver: any) => {
           const point = legCoords[Number(maneuver.begin_shape_index) || 0];
+          const presentation = valhallaManeuverPresentation(maneuver.type);
           const step: RouteStep = {
-            type: Number(maneuver.type) === 4 ? 'arrive' : Number(maneuver.type) === 1 ? 'depart' : 'turn',
-            modifier: '',
+            type: presentation.type,
+            modifier: presentation.modifier,
             name: maneuver.street_names?.[0] ?? '',
             distance: Math.round((Number(maneuver.length) || 0) * 1609.344),
             duration: Number(maneuver.time) || 0,
@@ -1115,8 +1119,29 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       if (Number.isFinite(Number(options.zoom))) camera.zoom = clampMapZoom(Number(options.zoom));
       if (Number.isFinite(Number(options.pitch))) camera.pitch = Math.max(0, Math.min(75, Number(options.pitch)));
       if (Number.isFinite(Number(options.bearing))) camera.bearing = Number(options.bearing);
-      if (options.mode === 'easeTo' && map.easeTo) map.easeTo(camera);
-      else map.flyTo?.(camera);
+      applyWebCameraTransition(map, camera, options.mode);
+    },
+    fitCoordinates: (coords, padding = [92, 44, 230, 44], duration = 900) => {
+      const map = mapRef.current;
+      if (!map?.fitBounds) return;
+      const clean = coords
+        .map(coord => [Number(coord?.[0]), Number(coord?.[1])] as [number, number])
+        .filter(coord => coord.every(Number.isFinite));
+      if (clean.length < 2) return;
+      const lngs = clean.map(coord => coord[0]);
+      const lats = clean.map(coord => coord[1]);
+      const [top, right, bottom, left] = padding;
+      map.fitBounds(
+        [
+          [Math.min(...lngs), Math.min(...lats)],
+          [Math.max(...lngs), Math.max(...lats)],
+        ],
+        {
+          padding: { top, right, bottom, left },
+          duration,
+          essential: true,
+        },
+      );
     },
     setZoom: async (zoom: number, focus?: { lat?: number; lng?: number } | null) => {
       const map = mapRef.current;

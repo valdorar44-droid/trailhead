@@ -21,9 +21,11 @@ import {
   deleteTrip,
   duplicateTrip,
   getTrip,
+  getTripRepositoryOutbox,
   getTripRepositorySnapshot,
   normalizeTripRepositoryScope,
   saveTripNote,
+  subscribeTripRepository,
   deleteTripNote,
   TripRepositoryConflictError,
   upsertTrip,
@@ -33,6 +35,17 @@ import {
   type TripNoteV1,
   type TripRepositoryUserScope,
 } from '@/lib/tripRepository';
+import {
+  coalesceTripRevisionReconciliation,
+  tripRevisionCanReconcile,
+  tripWithReconciledRevision,
+  type TripRevisionReconciliationSnapshot,
+} from '@/lib/tripRevisionReconciliation';
+import { syncTripRepositoryWritesForTrip } from '@/lib/tripRepositorySync';
+import {
+  beginTripWriteBarrier,
+  clearTripWriteBarrier,
+} from '@/lib/tripWriteBarrier';
 import type { TripLibraryFilter, TripLibraryItem, TripLibrarySnapshot } from './types';
 import { tripPreviewMedia } from './tripPreview';
 import { assertTripOperationOwnerScope } from './tripOperationScope';
@@ -439,7 +452,8 @@ function publicTripError(error: unknown, fallback: string) {
 }
 
 function captureAccountOperation() {
-  const accountId = useStore.getState().user?.id;
+  const store = useStore.getState();
+  const accountId = store.user?.id;
   const snapshot = getTripRepositorySnapshot();
   const ownerScope = snapshot.ownerScope;
   const expectedOwnerScope = normalizeTripRepositoryScope(accountId);
@@ -450,6 +464,7 @@ function captureAccountOperation() {
     epoch: accountStorage.epoch(),
     ownerScope,
     accountId,
+    activeTrip: store.activeTrip,
   };
 }
 
@@ -470,6 +485,97 @@ function currentNoteDocument(document: TripDocumentV2) {
   return current;
 }
 
+type PendingNoteRevisionReconciliation = {
+  snapshot: TripRevisionReconciliationSnapshot;
+  savedDocument: TripDocumentV2;
+  barrierId: number;
+};
+
+const pendingNoteRevisionReconciliations = new Map<string, PendingNoteRevisionReconciliation>();
+let noteRevisionReconciliationUnsubscribe: (() => void) | null = null;
+
+function flushPendingNoteRevisionReconciliations() {
+  const repository = getTripRepositorySnapshot();
+  const outbox = getTripRepositoryOutbox();
+  const store = useStore.getState();
+  for (const [tripId, pending] of pendingNoteRevisionReconciliations) {
+    const { snapshot, savedDocument } = pending;
+    const identityChanged = accountStorage.epoch() !== snapshot.accountEpoch
+      || repository.ownerScope !== snapshot.ownerScope
+      || String(store.user?.id ?? '') !== String(snapshot.accountId ?? '');
+    if (identityChanged) {
+      pendingNoteRevisionReconciliations.delete(tripId);
+      clearTripWriteBarrier(tripId, pending.barrierId);
+      continue;
+    }
+    const waitingForServer = outbox.some(entry => (
+      entry.ownerScope === snapshot.ownerScope
+      && entry.entityType === 'trip'
+      && entry.entityId === tripId
+      && Number(entry.revision ?? Number.MAX_SAFE_INTEGER) <= savedDocument.revision
+    ));
+    if (waitingForServer) continue;
+    pendingNoteRevisionReconciliations.delete(tripId);
+    clearTripWriteBarrier(tripId, pending.barrierId);
+    const currentDocument = getTrip(tripId);
+    if (!tripRevisionCanReconcile(snapshot, {
+      accountEpoch: accountStorage.epoch(),
+      accountId: store.user?.id == null ? null : String(store.user.id),
+      ownerScope: repository.ownerScope,
+      activeTrip: store.activeTrip,
+      document: currentDocument,
+    }, savedDocument)) {
+      continue;
+    }
+    const reconciled = tripWithReconciledRevision(snapshot.activeTrip, savedDocument);
+    useStore.getState().setActiveTrip(
+      reconciled,
+      useStore.getState().activeTripFromCache,
+      { mirrorRepository: false },
+    );
+    void saveOfflineTrip(reconciled);
+  }
+}
+
+async function settleNoteRevisionReconciliation(tripId: string, ownerScope: string) {
+  const sync = syncTripRepositoryWritesForTrip(tripId, ownerScope).catch(() => ({ synced: false }));
+  let cancelTimeout = () => {};
+  await Promise.race([
+    sync,
+    new Promise(resolve => {
+      const timeoutId = setTimeout(resolve, 6000);
+      cancelTimeout = () => clearTimeout(timeoutId);
+    }),
+  ]);
+  cancelTimeout();
+  flushPendingNoteRevisionReconciliations();
+}
+
+function queueNoteRevisionReconciliation(
+  operation: ReturnType<typeof captureAccountOperation>,
+  previousDocument: TripDocumentV2,
+  savedDocument: TripDocumentV2,
+) {
+  const activeTrip = operation.activeTrip;
+  if (!activeTrip || activeTrip.trip_id !== previousDocument.id) return;
+  const existing = pendingNoteRevisionReconciliations.get(previousDocument.id);
+  const snapshot = coalesceTripRevisionReconciliation(existing?.snapshot, {
+    accountEpoch: operation.epoch,
+    accountId: operation.accountId == null ? null : String(operation.accountId),
+    ownerScope: operation.ownerScope,
+    tripId: previousDocument.id,
+    expectedDocumentRevision: previousDocument.revision,
+    activeTrip,
+  });
+  if (!snapshot) return;
+  const barrierId = existing?.barrierId ?? beginTripWriteBarrier(previousDocument.id);
+  pendingNoteRevisionReconciliations.set(previousDocument.id, { snapshot, savedDocument, barrierId });
+  if (!noteRevisionReconciliationUnsubscribe) {
+    noteRevisionReconciliationUnsubscribe = subscribeTripRepository(flushPendingNoteRevisionReconciliations);
+  }
+  flushPendingNoteRevisionReconciliations();
+}
+
 export async function saveLibraryTripNote(document: TripDocumentV2, input: TripNoteInput) {
   const operation = captureAccountOperation();
   try {
@@ -487,16 +593,22 @@ export async function saveLibraryTripNote(document: TripDocumentV2, input: TripN
         }, { expectedRevision: withoutOldNote.revision });
       } catch (error) {
         requireCurrentAccount(operation);
-        await saveTripNote(current.id, {
+        const restored = await saveTripNote(current.id, {
           body: existing.body,
           day: existing.day,
           entityId: existing.entityId,
         }, { expectedRevision: withoutOldNote.revision }).catch(() => {});
+        requireCurrentAccount(operation);
+        queueNoteRevisionReconciliation(operation, current, restored ?? withoutOldNote);
+        await settleNoteRevisionReconciliation(current.id, operation.ownerScope);
         throw error;
       }
     } else {
       saved = await saveTripNote(current.id, input, { expectedRevision: current.revision });
     }
+    requireCurrentAccount(operation);
+    queueNoteRevisionReconciliation(operation, current, saved);
+    await settleNoteRevisionReconciliation(current.id, operation.ownerScope);
     requireCurrentAccount(operation);
     return saved;
   } catch (error) {
@@ -513,6 +625,9 @@ export async function deleteLibraryTripNote(document: TripDocumentV2, note: Trip
       throw new Error('This note is no longer available.');
     }
     const saved = await deleteTripNote(current.id, note.id, { expectedRevision: current.revision });
+    requireCurrentAccount(operation);
+    queueNoteRevisionReconciliation(operation, current, saved);
+    await settleNoteRevisionReconciliation(current.id, operation.ownerScope);
     requireCurrentAccount(operation);
     return saved;
   } catch (error) {

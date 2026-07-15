@@ -1,6 +1,7 @@
 import type { ExplorePlaceProfile } from './api';
 import type { StoryboardPlace } from './copilotStoryboard';
 import { relatedThingToSeeCanShow } from './exploreContextFilters';
+import { distanceBetweenLngLatMeters, routeRatioForPoint } from './routeProjection';
 import { sourceConfidenceFromRecord } from './sourceConfidence';
 
 export const CINEMATIC_ROUTE_RANK_CATEGORIES = [
@@ -27,6 +28,14 @@ export const CINEMATIC_ROUTE_RANK_CATEGORIES = [
   'scenic',
   'tourism',
 ];
+
+export function cinematicRouteCorridorMiles(route: [number, number][]) {
+  let routeMiles = 0;
+  for (let index = 1; index < route.length; index += 1) {
+    routeMiles += distanceBetweenLngLatMeters(route[index - 1], route[index]) / 1609.344;
+  }
+  return Math.max(2.5, Math.min(6, routeMiles * 0.08));
+}
 
 const SCENIC_KIND_SCORE: Array<[RegExp, number, string]> = [
   [/\b(waterfalls?|falls?)\b/i, 34, 'waterfall'],
@@ -60,21 +69,7 @@ function firstSentence(value: unknown, max = 170) {
   return (match ? match[0] : clean).slice(0, max).trim();
 }
 
-export function routeRatioForCinematic(route: [number, number][], lat: number, lng: number): number {
-  if (route.length < 2) return 0.5;
-  let bestIdx = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < route.length; i += 1) {
-    const dLng = route[i][0] - lng;
-    const dLat = route[i][1] - lat;
-    const dist = dLng * dLng + dLat * dLat;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestIdx = i;
-    }
-  }
-  return bestIdx / (route.length - 1);
-}
+export const routeRatioForCinematic = routeRatioForPoint;
 
 function scenicKindScore(place: Pick<StoryboardPlace, 'type' | 'title' | 'note'>) {
   const haystack = `${place.type || ''} ${place.title || ''} ${place.note || ''}`;
@@ -129,11 +124,18 @@ export function rankCinematicPlaces(input: {
   route: [number, number][];
   places: StoryboardPlace[];
   max?: number;
+  maxRouteDistanceMi?: number;
 }): StoryboardPlace[] {
   const max = input.max ?? 5;
   const route = input.route;
+  const maxRouteDistanceMi = input.maxRouteDistanceMi ?? cinematicRouteCorridorMiles(route);
   const scored = input.places
-    .filter(place => finiteCoord(place.lat, place.lng) && isCinematicScenicPlace(place))
+    .filter(place => {
+      const routeDistanceMi = Number(place.route_distance_mi);
+      return finiteCoord(place.lat, place.lng)
+        && isCinematicScenicPlace(place)
+        && (!Number.isFinite(routeDistanceMi) || routeDistanceMi <= maxRouteDistanceMi);
+    })
     .map(place => {
       const ratio = routeRatioForCinematic(route, Number(place.lat), Number(place.lng));
       const scenic = scenicKindScore(place);

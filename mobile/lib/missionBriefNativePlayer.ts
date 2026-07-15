@@ -1,7 +1,7 @@
 import type { MutableRefObject } from 'react';
 import type { NativeMapHandle } from '@/components/NativeMap';
 import type { MissionCinematic, MissionScene } from './copilotStoryboard';
-import { progressRouteFromRatio } from './mapMissionBrief';
+import { progressRouteFromRatio, routeSliceFromRatios } from './mapMissionBrief';
 import type { MissionBriefCallout } from './mapMissionBrief';
 
 type Point = { lat: number; lng: number };
@@ -78,15 +78,6 @@ export function scenePacingDurationMs(scene: MissionScene, speed = 1, routeDista
   }
   const clampedBase = Math.max(minDurationMs, Math.min(maxDurationMs, base));
   return Math.max(1500, Math.max(clampedBase, groundSpeedFloorMs) / Math.max(0.1, speed));
-}
-
-function sliceRoute(route: [number, number][], slice: [number, number] = [0, 1]): [number, number][] {
-  if (route.length < 2) return route;
-  const s = Math.max(0, Math.min(1, slice[0] ?? 0));
-  const e = Math.max(s, Math.min(1, slice[1] ?? 1));
-  const si = Math.floor(s * (route.length - 1));
-  const ei = Math.max(si + 1, Math.ceil(e * (route.length - 1)));
-  return route.slice(si, ei + 1);
 }
 
 /** Great-circle distance in metres between two [lng, lat] points. */
@@ -167,7 +158,7 @@ function destinationPoint(p: Point, bearingDeg: number, distM: number): Point {
 /** Follow zoom picked from the length of the flown slice — kept close enough that
  *  terrain relief reads cinematically (the camera tracks the marker, so it need not
  *  frame the whole slice at once). */
-function zoomForSliceLengthKm(km: number) {
+export function flyoverFollowZoomForDistanceKm(km: number) {
   if (km > 140) return 11.4;
   if (km > 70) return 12.2;
   if (km > 35) return 12.9;
@@ -384,7 +375,7 @@ export function startNativeMissionBriefPlayer(opts: {
   function emitProgress(ratio: number, sceneCoords?: [number, number][] | null) {
     const clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
     onProgressRatio?.(clamped);
-    const progressCoords = downsample(progressRouteFromRatio(route, clamped), PROGRESS_MAX_POINTS);
+    const progressCoords = downsample(progressRouteFromRatio(route, clamped, routeCum), PROGRESS_MAX_POINTS);
     onProgressRoute?.(progressCoords);
     if (sceneCoords && sceneCoords.length >= 2) {
       onSceneRoute?.(sceneCoords);
@@ -450,7 +441,7 @@ export function startNativeMissionBriefPlayer(opts: {
    */
   function applySceneCamera(scene: MissionScene): number {
     const cam = scene.camera || { mode: 'fit' };
-    const coords = sliceRoute(route, scene.routeSlice ?? [0, 1]);
+    const coords = routeSliceFromRatios(route, scene.routeSlice ?? [0, 1], routeCum);
     smoothedBearing = null;
     lowPassPath = null;
     if (freeCamera) return 0;
@@ -557,7 +548,7 @@ export function startNativeMissionBriefPlayer(opts: {
       }
       smoothedBearing = bearing;
       const sliceLenKm = (sliceEndDist - sliceStartDist) / 1000;
-      const zoom = Math.max(cameraSettings.minZoom, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), cameraSettings.maxZoom));
+      const zoom = Math.max(cameraSettings.minZoom, Math.min(cam.zoom ?? flyoverFollowZoomForDistanceKm(sliceLenKm), cameraSettings.maxZoom));
       // Establishing duration scales with how far the camera has to travel.
       const kmToTarget = lastCamPoint
         ? haversine([lastCamPoint.lng, lastCamPoint.lat], [start.lng, start.lat]) / 1000
@@ -594,7 +585,7 @@ export function startNativeMissionBriefPlayer(opts: {
   }
 
   function applySceneOverlays(scene: MissionScene) {
-    const coords = scene.routeSlice ? sliceRoute(route, scene.routeSlice) : route;
+    const coords = scene.routeSlice ? routeSliceFromRatios(route, scene.routeSlice, routeCum) : route;
     onSceneRoute?.(coords);
     onCallouts?.(sceneCallouts(scene));
     onWarningChange?.(isWarningScene(scene));
@@ -618,7 +609,7 @@ export function startNativeMissionBriefPlayer(opts: {
     const startDist = routeTotal * (scene.routeSlice?.[0] ?? 0);
     const endDist = routeTotal * (scene.routeSlice?.[1] ?? 1);
     const sliceLenKm = Math.max(0, (endDist - startDist)) / 1000;
-    const followZoom = Math.max(cameraSettings.minZoom, Math.min(cam.zoom ?? zoomForSliceLengthKm(sliceLenKm), cameraSettings.maxZoom));
+    const followZoom = Math.max(cameraSettings.minZoom, Math.min(cam.zoom ?? flyoverFollowZoomForDistanceKm(sliceLenKm), cameraSettings.maxZoom));
     const lookaheadM = lookaheadForSlice(startDist, endDist);
     // Orbit starts from the storyboard's bearing, else the camera's current
     // heading — never from a fixed north, so there's no rotational jump.
@@ -671,7 +662,7 @@ export function startNativeMissionBriefPlayer(opts: {
               if (overlayDue) {
                 lastOverlayTs = now;
                 onDebugTick?.('overlay');
-                emitProgress(routeTotal > 0 ? d / routeTotal : t, sliceRoute(route, scene.routeSlice));
+                emitProgress(routeTotal > 0 ? d / routeTotal : t, routeSliceFromRatios(route, scene.routeSlice, routeCum));
               }
             } else if (!holdSettled) {
               // Settle frame: glide onto the exact final lead point and finish
@@ -684,7 +675,7 @@ export function startNativeMissionBriefPlayer(opts: {
               smoothedBearing = smoothAngle(smoothedBearing, bearingLngLat([finalPt.lng, finalPt.lat], [aheadPt.lng, aheadPt.lat]), BEARING_EASE);
               followCamera(scene, finalPt, smoothedBearing, followZoom);
               lastOverlayTs = now;
-              emitProgress(routeTotal > 0 ? endDist / routeTotal : 1, sliceRoute(route, scene.routeSlice));
+              emitProgress(routeTotal > 0 ? endDist / routeTotal : 1, routeSliceFromRatios(route, scene.routeSlice, routeCum));
             } else if (lastCamPoint) {
               // Narration hold: drift the bearing gently around the final lead
               // point instead of freezing the frame.
@@ -848,6 +839,7 @@ export function startNativeMissionBriefPlayer(opts: {
     onFullRoute?.(route);
     onProgressRoute?.([route[0]]);
     onWarningChange?.(false);
+    postWeb({ type: 'mission_brief_route', route });
     onReady();
     onStarted();
     startScene(0);
@@ -939,7 +931,7 @@ export function startNativeMissionBriefPlayer(opts: {
     camBusyUntil = 0;
     lastOverlayTs = 0;
     applySceneOverlays(scene);
-    emitProgress(clamped, scene.routeSlice ? sliceRoute(route, scene.routeSlice) : null);
+    emitProgress(clamped, scene.routeSlice ? routeSliceFromRatios(route, scene.routeSlice, routeCum) : null);
     const point = pointAtDistance(route, routeCum, clamped * routeTotal);
     const ahead = pointAtDistance(route, routeCum, Math.min(routeTotal, clamped * routeTotal + 500));
     const bearing = bearingLngLat([point.lng, point.lat], [ahead.lng, ahead.lat]);

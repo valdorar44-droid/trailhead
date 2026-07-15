@@ -14,6 +14,7 @@ import {
   type StoryboardPlace,
 } from './copilotStoryboard';
 import { buildCinematicHighlights } from './cinematicHighlights';
+import { distanceBetweenLngLatMeters, routeRatioForPoint } from './routeProjection';
 
 export type MapMissionBriefPhase = 'idle' | 'loading' | 'playing' | 'paused' | 'done';
 
@@ -403,22 +404,6 @@ function firstSentence(text?: string | null) {
   return match ? match[0].trim() : clean.slice(0, 180);
 }
 
-function routeRatioAlong(route: [number, number][], lat: number, lng: number): number {
-  if (route.length < 2) return 0.5;
-  let bestIdx = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < route.length; i += 1) {
-    const dLng = route[i][0] - lng;
-    const dLat = route[i][1] - lat;
-    const dist = dLng * dLng + dLat * dLat;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestIdx = i;
-    }
-  }
-  return bestIdx / (route.length - 1);
-}
-
 function clampRouteRatio(value: number) {
   return Math.max(0, Math.min(1, value));
 }
@@ -490,7 +475,7 @@ export function buildScoutLiveCinematic(input: {
       })
       .map(stop => ({
         stop,
-        ratio: clampRouteRatio(routeRatioAlong(route, Number(stop.lat), Number(stop.lng))),
+        ratio: clampRouteRatio(routeRatioForPoint(route, Number(stop.lat), Number(stop.lng))),
         type: stopSceneType(stop),
       }))
       .sort((a, b) => a.ratio - b.ratio);
@@ -517,7 +502,7 @@ export function buildScoutLiveCinematic(input: {
     const campLat = campStop?.lat ?? plan.camp?.lat;
     const campLng = campStop?.lng ?? plan.camp?.lng;
     let endRatio = finiteCoord(campLat, campLng)
-      ? clampRouteRatio(routeRatioAlong(route, Number(campLat), Number(campLng)))
+      ? clampRouteRatio(routeRatioForPoint(route, Number(campLat), Number(campLng)))
       : clampRouteRatio(day / dayPlans.length);
     endRatio = Math.max(cursor + 0.05, endRatio);
 
@@ -772,9 +757,84 @@ export function postMissionBriefMapMessage(
   post({ type, ...payload });
 }
 
-export function progressRouteFromRatio(route: [number, number][], ratio: number): [number, number][] {
+function routeCumulativeDistances(
+  route: [number, number][],
+  cached?: number[],
+): number[] {
+  if (
+    cached?.length === route.length
+    && cached[0] === 0
+    && cached.every((distance, index) => Number.isFinite(distance) && (index === 0 || distance >= cached[index - 1]))
+  ) {
+    return cached;
+  }
+  const cumulative = [0];
+  for (let index = 1; index < route.length; index += 1) {
+    const segment = distanceBetweenLngLatMeters(route[index - 1], route[index]);
+    cumulative[index] = cumulative[index - 1] + (Number.isFinite(segment) ? segment : 0);
+  }
+  return cumulative;
+}
+
+function coordinateAtRouteDistance(
+  route: [number, number][],
+  cumulative: number[],
+  distance: number,
+): [number, number] {
+  if (route.length <= 1) return route[0] ?? [0, 0];
+  const total = cumulative[cumulative.length - 1] ?? 0;
+  if (distance <= 0 || total <= 0) return route[0];
+  if (distance >= total) return route[route.length - 1];
+
+  let endIndex = 1;
+  while (endIndex < cumulative.length && cumulative[endIndex] < distance) endIndex += 1;
+  const startIndex = Math.max(0, endIndex - 1);
+  const segmentDistance = cumulative[endIndex] - cumulative[startIndex];
+  const fraction = segmentDistance > 0
+    ? (distance - cumulative[startIndex]) / segmentDistance
+    : 0;
+  const start = route[startIndex];
+  const end = route[Math.min(endIndex, route.length - 1)];
+  return [
+    start[0] + (end[0] - start[0]) * fraction,
+    start[1] + (end[1] - start[1]) * fraction,
+  ];
+}
+
+function sameCoordinate(a: [number, number], b: [number, number]) {
+  return Math.abs(a[0] - b[0]) < 1e-10 && Math.abs(a[1] - b[1]) < 1e-10;
+}
+
+/** Slice a route using metric-distance ratios and interpolate both boundaries. */
+export function routeSliceFromRatios(
+  route: [number, number][],
+  slice: [number, number] = [0, 1],
+  cachedCumulative?: number[],
+): [number, number][] {
   if (route.length < 2) return route;
-  const t = Math.max(0, Math.min(1, ratio));
-  const endIdx = Math.max(1, Math.ceil(t * (route.length - 1)));
-  return route.slice(0, endIdx + 1);
+  const startRatio = Math.max(0, Math.min(1, Number(slice[0]) || 0));
+  const endRatio = Math.max(startRatio, Math.min(1, Number(slice[1]) || 0));
+  const cumulative = routeCumulativeDistances(route, cachedCumulative);
+  const total = cumulative[cumulative.length - 1] ?? 0;
+  if (total <= 0) return startRatio >= 1 ? [route[route.length - 1]] : [route[0]];
+
+  const startDistance = startRatio * total;
+  const endDistance = endRatio * total;
+  const result: [number, number][] = [coordinateAtRouteDistance(route, cumulative, startDistance)];
+  for (let index = 1; index < route.length - 1; index += 1) {
+    if (cumulative[index] > startDistance && cumulative[index] < endDistance) {
+      if (!sameCoordinate(result[result.length - 1], route[index])) result.push(route[index]);
+    }
+  }
+  const end = coordinateAtRouteDistance(route, cumulative, endDistance);
+  if (!sameCoordinate(result[result.length - 1], end)) result.push(end);
+  return result;
+}
+
+export function progressRouteFromRatio(
+  route: [number, number][],
+  ratio: number,
+  cachedCumulative?: number[],
+): [number, number][] {
+  return routeSliceFromRatios(route, [0, Math.max(0, Math.min(1, Number(ratio) || 0))], cachedCumulative);
 }

@@ -72,6 +72,7 @@ export type RouteBuildSessionPatch = Partial<Omit<
 >>;
 
 const requestControllers = new Map<string, AbortController>();
+const activitySearchControllers = new Map<string, AbortController>();
 const activityChoiceWaiters = new Map<string, (choice: RouteBuildActivityChoice | 'cancelled') => void>();
 
 export function createRouteBuildRequestId(now = Date.now()) {
@@ -149,10 +150,28 @@ export function routeBuildRequestSignal(requestId: string) {
   return requestControllers.get(requestId)?.signal;
 }
 
+export function openRouteBuildActivitySearch(requestId: string) {
+  cancelRouteBuildActivitySearch(requestId);
+  if (typeof AbortController === 'undefined') return undefined;
+  const controller = new AbortController();
+  activitySearchControllers.set(requestId, controller);
+  return controller.signal;
+}
+
+export function routeBuildActivitySearchSignal(requestId: string) {
+  return activitySearchControllers.get(requestId)?.signal;
+}
+
+export function cancelRouteBuildActivitySearch(requestId: string) {
+  activitySearchControllers.get(requestId)?.abort();
+  activitySearchControllers.delete(requestId);
+}
+
 export function closeRouteBuildRequest(requestId: string, abort = false) {
   const controller = requestControllers.get(requestId);
   if (abort) controller?.abort();
   requestControllers.delete(requestId);
+  cancelRouteBuildActivitySearch(requestId);
   activityChoiceWaiters.get(requestId)?.('cancelled');
   activityChoiceWaiters.delete(requestId);
 }
@@ -160,6 +179,8 @@ export function closeRouteBuildRequest(requestId: string, abort = false) {
 export function closeAllRouteBuildRequests() {
   for (const controller of requestControllers.values()) controller.abort();
   requestControllers.clear();
+  for (const controller of activitySearchControllers.values()) controller.abort();
+  activitySearchControllers.clear();
   for (const resolve of activityChoiceWaiters.values()) resolve('cancelled');
   activityChoiceWaiters.clear();
 }

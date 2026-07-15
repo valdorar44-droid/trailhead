@@ -223,6 +223,38 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(server._explore_category_hint_from_query("Glacier campgrounds"), "campground")
         self.assertEqual(server._explore_query_terms_for_category("Glacier campgrounds", "campground"), ["glacier"])
 
+    def test_guided_destination_search_query_resolves_to_real_nearby_trails(self):
+        destination = server._explore_guided_destination_for_exact_query("Moab Utah")
+        self.assertEqual(destination["id"], "guided:moab")
+
+        payload = asyncio.run(server.explore_catalog_index(q="Moab Utah", category="trails", limit=8))
+        titles = [item["title"] for item in payload["places"]]
+
+        self.assertGreater(payload["count"], 0)
+        self.assertIn("Hidden Valley Trail", titles)
+        self.assertIn("Corona Arch Trail", titles)
+        for item in payload["places"]:
+            self.assertIn(item["category"], {"Trail", "Trailhead"})
+            self.assertIsNotNone(item.get("lat"))
+            self.assertIsNotNone(item.get("lng"))
+            distance_m = server._haversine_m(38.5733, -109.5498, item["lat"], item["lng"])
+            self.assertLessEqual(distance_m, 55 * 1609.344)
+
+    def test_guided_destination_search_query_uses_exact_alias_and_destination_radius(self):
+        destination = server._explore_guided_destination_for_exact_query("sedona ARIZONA")
+        self.assertEqual(destination["id"], "guided:sedona")
+        self.assertIsNone(server._explore_guided_destination_for_exact_query("weekend near Sedona Arizona"))
+
+        payload = asyncio.run(server.explore_catalog_index(q="Sedona Arizona", category="trails", limit=8))
+
+        self.assertGreater(payload["count"], 0)
+        for item in payload["places"]:
+            self.assertIn(item["category"], {"Trail", "Trailhead"})
+            self.assertIsNotNone(item.get("lat"))
+            self.assertIsNotNone(item.get("lng"))
+            distance_m = server._haversine_m(34.8697, -111.761, item["lat"], item["lng"])
+            self.assertLessEqual(distance_m, 35 * 1609.344)
+
     def test_explore_section_filters_reject_mislabeled_activity_and_ticket_records(self):
         self.assertFalse(server._explore_place_matches_category_request({
             "id": "place:nps-child:yose:thingstodo:ride-a-bike",
@@ -414,6 +446,7 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(len(titles), len(set(titles)))
 
     def test_explore_places_exact_trail_title_prefers_usable_location(self):
+        self.assertIsNone(server._explore_guided_destination_for_exact_query("Moab Rim Trail"))
         payload = asyncio.run(server.explore_places(q="Moab Rim Trail", category="trail", limit=12))
         titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
 
@@ -439,19 +472,34 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertIn("Switzerland", visible)
         self.assertNotRegex(visible, r"\b(API|database|download|undefined|null|0 results|source-backed|Open global|Wikidata)\b")
 
-    def test_empty_category_search_relaxes_to_backed_destination_card(self):
+    def test_empty_category_search_does_not_relax_requested_category(self):
         payload = asyncio.run(server.explore_catalog_index(q="Dolomites trails", category="trail", limit=8))
         titles = [item["title"] for item in payload["places"]]
-        visible_tags = " ".join(
-            str(tag)
-            for item in payload.get("places") or []
-            for tag in item.get("tags") or []
-        )
 
-        self.assertGreater(payload["count"], 0)
-        self.assertIn("World Heritage Dolomites", titles)
-        self.assertTrue(any(item["category"] in {"Historic Site", "Park", "Viewpoint", "Place"} for item in payload["places"]))
-        self.assertNotRegex(visible_tags, r"\bQ\d{3,}\b")
+        self.assertNotIn("World Heritage Dolomites", titles)
+        self.assertTrue(all(server._explore_place_matches_category_request(item, {"trail"}) for item in payload["places"]))
+
+        old_loader = server._load_explore_catalog
+        server._load_explore_catalog = lambda: {
+            "places": [
+                {
+                    "id": "trail:dolomites-ridge",
+                    "category": "trail",
+                    "summary": {"title": "Dolomites Ridge Trail", "category": "Trail", "explore_group": "trails", "rank": 1, "lat": 46.54, "lng": 11.86},
+                },
+                {
+                    "id": "park:dolomites",
+                    "category": "park",
+                    "summary": {"title": "Dolomites National Park", "category": "Park", "explore_group": "parks", "rank": 2, "lat": 46.55, "lng": 11.87},
+                },
+            ],
+        }
+        try:
+            relaxed = server._explore_relaxed_destination_profiles(q="Dolomites trails", category="trail", limit=8)
+        finally:
+            server._load_explore_catalog = old_loader
+
+        self.assertEqual([place["id"] for place in relaxed], ["trail:dolomites-ridge"])
 
     def test_global_seed_scenic_search_uses_clean_public_labels(self):
         payload = asyncio.run(server.explore_places(q="Norway scenic", category="viewpoint", limit=8))

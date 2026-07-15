@@ -4,6 +4,8 @@ import {
   getCurrentMissionRoute,
   liveMissionBeatBrief,
   missionBeatCaption,
+  progressRouteFromRatio,
+  routeSliceFromRatios,
   sceneNarrationWatchdogMs,
   shouldSpeakLiveScoutScene,
   shouldSpeakMissionScene,
@@ -95,10 +97,12 @@ const rankedHighlights = rankCinematicPlaces({
     { id: 'boring-camp', type: 'camp', title: 'Canyon Camp', note: 'Camp logistics only.', lat: 37.4, lng: -113.8, source: 'trip_camp', confidence: 'high' },
     { id: 'random-desert', type: 'locality', title: 'Dry Desert', note: 'Generic desert label near the route.', lat: 37.5, lng: -113.9, source: 'osm', confidence: 'medium' },
     { id: 'summary-missing', type: 'viewpoint', title: 'Source Only View', lat: 37.6, lng: -114.0, source: 'nps', confidence: 'high' },
+    { id: 'far-view', type: 'viewpoint', title: 'Far Canyon View', note: 'A dramatic canyon overlook far away from this route.', lat: 37.7, lng: -114.1, source: 'nps', confidence: 'high', route_distance_mi: 20 },
     { id: 'real-view', type: 'viewpoint', title: 'Canyon Overlook', note: 'Wide view over the canyon.', lat: 37.8, lng: -114.2, source: 'nps', confidence: 'high' },
   ],
 });
 assert(rankedHighlights.length === 1 && rankedHighlights[0].title === 'Canyon Overlook', 'cinematic highlight scorer keeps scenic places and rejects fuel/roads');
+assert(!rankedHighlights.some(place => place.title === 'Far Canyon View'), 'cinematic highlights stay inside the route corridor');
 assert(isCinematicScenicPlace({ type: 'waterfall', title: 'Falls viewpoint', note: 'Waterfall overlook with a clear source.', source: 'nps' }), 'source-backed waterfall viewpoints are scenic');
 assert(!isCinematicScenicPlace({ type: 'viewpoint', title: 'Unnamed View', note: 'Short', source: 'osm' }), 'scenic places require a real summary');
 
@@ -108,6 +112,14 @@ const routePick = getCurrentMissionRoute({
   routeScout: null,
 });
 assert(routePick?.source === 'visible_route', 'prefers visible route when it matches trip');
+
+const unevenRoute: [number, number][] = [[0, 0], [1, 0], [4, 0]];
+const halfProgress = progressRouteFromRatio(unevenRoute, 0.5);
+const halfProgressEnd = halfProgress[halfProgress.length - 1];
+assert(Math.abs(halfProgressEnd[0] - 2) < 0.002, 'progress line ends at half the traveled distance on uneven geometry');
+const middleSlice = routeSliceFromRatios(unevenRoute, [0.25, 0.75]);
+assert(Math.abs(middleSlice[0][0] - 1) < 0.002, 'scene slice interpolates its metric start boundary');
+assert(Math.abs(middleSlice[middleSlice.length - 1][0] - 3) < 0.002, 'scene slice interpolates its metric end boundary');
 
 const majorScene: MissionScene = { id: 's1', type: 'day_flyover', title: 'Day 1', subtitle: '', durationMs: 10000, camera: { mode: 'follow' }, layers: {}, narration: '', callouts: [] };
 const campScene: MissionScene = { id: 's2', type: 'camp_arrival', title: 'Camp', subtitle: '', durationMs: 8000, camera: { mode: 'orbit' }, layers: {}, narration: '', callouts: [] };
@@ -131,9 +143,9 @@ const scoutLive = buildScoutLiveCinematic({
       { day: 2, startName: 'Desert camp', endName: 'Flagstaff', campName: 'Pines camp', campStatus: 'locked', driveSummary: '~200 mi', campMeta: 'NF campground' },
     ],
     stops: [
-      { day: 1, type: 'camp', name: 'Desert camp', lat: 37.2, lng: -113.5 },
-      { day: 1, type: 'viewpoint', name: 'Canyon overlook', description: 'Wide canyon view.', lat: 37.8, lng: -114.2 },
-      { day: 2, type: 'camp', name: 'Pines camp', lat: 35.2, lng: -111.6 },
+      { day: 1, type: 'camp', name: 'Desert camp', lat: 37.6, lng: -113.8 },
+      { day: 1, type: 'viewpoint', name: 'Canyon overlook', description: 'Wide canyon view.', lat: 37.9, lng: -112.8 },
+      { day: 2, type: 'camp', name: 'Pines camp', lat: 36.8, lng: -118.0 },
     ],
   },
 });

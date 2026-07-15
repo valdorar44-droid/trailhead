@@ -158,6 +158,13 @@ export function applyTripRepositoryRemoteTrip(trip: TripDocumentV2) {
   return repository.applyRemoteTrip(trip);
 }
 
+export function acknowledgeTripRepositoryLegacyTrip(
+  trip: TripDocumentV2,
+  expectedBaseRevision?: number,
+) {
+  return repository.acknowledgeLegacyTrip(trip, expectedBaseRevision);
+}
+
 export function applyTripRepositoryRemoteSavedEntity(entity: SavedEntityV1) {
   return repository.applyRemoteSavedEntity(entity);
 }

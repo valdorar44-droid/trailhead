@@ -658,6 +658,58 @@ async function remoteReconciliation() {
   assert.equal(repository.getTrip('wrong-owner'), null);
 }
 
+async function legacyAcknowledgementDoesNotDualWrite() {
+  const { repository } = deterministicRepository();
+  await repository.initialize(77);
+  const local = await repository.upsertTrip(
+    createTripDocument({ id: 'legacy-save', title: 'Route before save' }),
+    { enqueueSync: false },
+  );
+  assert.equal(local.revision, 1);
+  assert.equal(repository.getOutbox().length, 0);
+
+  const result = await repository.acknowledgeLegacyTrip({
+    ...local,
+    ownerScope: 'account:77',
+    revision: 2,
+    title: 'Route acknowledged by server',
+    updatedAt: local.updatedAt + 10,
+  }, local.revision);
+
+  assert.equal(result.applied, true);
+  assert.equal(result.record?.revision, 2);
+  assert.equal(repository.getTrip('legacy-save')?.title, 'Route acknowledged by server');
+  assert.equal(repository.listTrips({ includeArchived: true }).length, 1, 'acknowledgement never creates a conflict copy');
+  assert.equal(repository.getOutbox().length, 0, 'acknowledgement never enqueues a second v2 write');
+
+  const pending = await repository.upsertTrip({
+    ...result.record!,
+    title: 'Newer local route',
+  }, { expectedRevision: 2 });
+  const blocked = await repository.acknowledgeLegacyTrip({
+    ...pending,
+    revision: 4,
+    title: 'Stale legacy response',
+  }, 2);
+  assert.equal(blocked.applied, false);
+  assert.equal(blocked.blockedByPendingWrites, true);
+  assert.equal(repository.getTrip('legacy-save')?.title, 'Newer local route');
+  assert.equal(repository.listTrips({ includeArchived: true }).length, 1, 'pending writes do not create conflict drafts');
+  assert.equal(repository.getOutbox().filter(entry => entry.entityId === 'legacy-save').length, 1);
+
+  await repository.initialize(88);
+  await assert.rejects(
+    repository.acknowledgeLegacyTrip({
+      ...result.record!,
+      ownerScope: 'account:77',
+      revision: 3,
+    }, 2),
+    /does not match account:88/,
+  );
+  assert.equal(repository.listTrips({ includeArchived: true }).length, 0, 'an old response cannot write into the next account scope');
+  assert.equal(repository.getOutbox().length, 0);
+}
+
 async function authChangeCancelsOutboxBeforeNextMutation() {
   const entries = [outboxEntry('entry-a', 'trip-a'), outboxEntry('entry-b', 'trip-b')];
   const sent: string[] = [];
@@ -942,6 +994,7 @@ async function run() {
   await changedScopeMergeUpdatesOnlyChangedRecords();
   await identicalScopeMergeDeduplicatesCanonicalIds();
   await remoteReconciliation();
+  await legacyAcknowledgementDoesNotDualWrite();
   await authChangeCancelsOutboxBeforeNextMutation();
   await failedRevisionBlocksOnlyItsEntity();
   await supersededSyncingUpsertCannotBlockDelete();

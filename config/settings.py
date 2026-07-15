@@ -10,6 +10,8 @@ class Settings:
     cartesia_model_id: str = os.environ.get("CARTESIA_MODEL_ID", "sonic-3.5")
     cartesia_version: str = os.environ.get("CARTESIA_VERSION", "2026-03-01")
     openai_api_key: str = os.environ.get("OPENAI_API_KEY", "")
+    openai_planner_fast_model: str = os.environ.get("OPENAI_PLANNER_FAST_MODEL", "gpt-5.4-mini")
+    openai_planner_model: str = os.environ.get("OPENAI_PLANNER_MODEL", "gpt-5.4")
     openai_realtime_model: str = os.environ.get("OPENAI_REALTIME_MODEL", "gpt-realtime-2")
     openai_realtime_fallback_model: str = os.environ.get("OPENAI_REALTIME_FALLBACK_MODEL", "gpt-realtime-mini")
     audio_cache_dir: str = os.environ.get("AUDIO_CACHE_DIR", "/data/audio_cache" if os.path.isdir("/data") else "./audio_cache")

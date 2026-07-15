@@ -35,11 +35,27 @@ export type RouteBuilderIntent = {
 
 export type ProviderRouteGeometry = {
   coords: [number, number][];
+  steps?: ProviderRouteStep[];
+  legs?: ProviderRouteStep[][];
   totalDistanceMi: number;
   totalDurationHours: number;
   source: 'provider' | 'saved' | 'sketch' | 'none';
   confidence: 'high' | 'medium' | 'low' | 'none';
   engine?: string;
+};
+
+export type ProviderRouteStep = {
+  type: string;
+  modifier: string;
+  name: string;
+  distance: number;
+  duration: number;
+  lat?: number;
+  lng?: number;
+  instruction?: string;
+  verbalPre?: string;
+  verbalPost?: string;
+  roundaboutExit?: number | null;
 };
 
 export type RouteShapeDayRole = 'outbound' | 'turnaround' | 'return' | 'one_way';

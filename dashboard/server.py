@@ -5699,6 +5699,29 @@ def _explore_trail_destination_query(q: str) -> str:
     cleaned = [term for term in terms if term not in intent]
     return " ".join(cleaned) or re.sub(r"\s+", " ", str(q or "").strip())
 
+
+def _explore_destination_lookup_key(value: object) -> str:
+    return " ".join(_explore_query_terms(str(value or "")))
+
+
+def _explore_guided_destination_for_exact_query(query: str) -> dict | None:
+    wanted = _explore_destination_lookup_key(query)
+    if not wanted:
+        return None
+    for destination in _load_explore_guided_destinations():
+        candidates = [
+            destination.get("name"),
+            destination.get("search_query"),
+            *(destination.get("aliases") or []),
+        ]
+        if wanted in {
+            _explore_destination_lookup_key(candidate)
+            for candidate in candidates
+            if str(candidate or "").strip()
+        }:
+            return destination
+    return None
+
 def _explore_stay_destination_search_queries(destination_query: str) -> list[str]:
     destination = re.sub(r"\s+", " ", str(destination_query or "").strip().lower())
     if not destination:
@@ -5819,6 +5842,49 @@ def _explore_stay_destination_hint_profiles(destination_query: str) -> list[dict
 def _explore_trail_destination_hint_profiles(destination_query: str) -> list[dict]:
     profiles: list[dict] = []
     seen: set[str] = set()
+    guided_destination = _explore_guided_destination_for_exact_query(destination_query)
+    if guided_destination:
+        title = _explore_clean_display_title(guided_destination.get("name") or destination_query)
+        try:
+            lat = float(guided_destination.get("lat"))
+            lng = float(guided_destination.get("lng"))
+        except (TypeError, ValueError):
+            lat = lng = None
+        if title and lat is not None and lng is not None:
+            radius_keys = [
+                guided_destination.get("name"),
+                guided_destination.get("search_query"),
+                *(guided_destination.get("aliases") or []),
+            ]
+            radius_mi = 65
+            for value in radius_keys:
+                radius_key = _explore_destination_lookup_key(value)
+                if radius_key in EXPLORE_TRAIL_DESTINATION_RADIUS_MILES:
+                    radius_mi = EXPLORE_TRAIL_DESTINATION_RADIUS_MILES[radius_key]
+                    break
+            key = title.lower()
+            seen.add(key)
+            slug = re.sub(r"[^a-z0-9]+", "-", key).strip("-")
+            profiles.append({
+                "id": f"explore:trail-destination:{slug}",
+                "summary": {
+                    "title": title,
+                    "category": "Destination",
+                    "explore_group": "parks",
+                    "region": title,
+                    "lat": lat,
+                    "lng": lng,
+                    "rank": 699400,
+                    "hero_rank": 699400,
+                    "tags": ["trails"],
+                    "hook": title,
+                    "short_description": f"Trails around {title}.",
+                    "trail_radius_mi": radius_mi,
+                },
+                "category": "parks",
+                "subcategories": ["destination", "trails"],
+                "search_aliases": [title, destination_query],
+            })
     search_queries = _explore_stay_destination_search_queries(destination_query)
     search_queries.extend([re.sub(r"\s+", " ", str(destination_query or "").strip().lower())])
     for query in search_queries:
@@ -6449,11 +6515,13 @@ def _explore_relaxed_destination_profiles(q: str = "", category: str = "", limit
     query_terms = _explore_relaxed_destination_terms(q, category)
     if not query_terms:
         return []
+    requested = {_normalize_place_category(category)} if str(category or "").strip() else set()
     places = [
         place for place in _load_explore_catalog().get("places") or []
         if isinstance(place, dict)
         and _explore_query_terms_match(place, query_terms)
         and not _explore_skip_for_broad_search(place, query_terms)
+        and (not requested or _explore_place_matches_category_request(place, requested))
     ]
     places = sorted(places, key=lambda p: _explore_query_sort_key(p, query_terms))
     return _dedupe_ranked_explore_profiles(places)[: max(1, min(int(limit or 24), 120))]
@@ -9482,6 +9550,10 @@ class PlanRequest(BaseModel):
 TRIP_PLANNER_UNAVAILABLE = "Trip Planner is temporarily unavailable. Try again shortly."
 
 
+def _planner_provider_configured() -> bool:
+    return bool(settings.anthropic_api_key or settings.openai_api_key)
+
+
 class PlannerRouteUnavailable(RuntimeError):
     pass
 
@@ -9552,7 +9624,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
         raise HTTPException(400, "Message cannot be empty")
     if len(body.message) > 2000:
         raise HTTPException(400, "Message exceeds 2000 characters")
-    if not settings.anthropic_api_key:
+    if not _planner_provider_configured():
         raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     existing_trip = None
@@ -9774,7 +9846,7 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
                 if user and paid_edit_cost > 0:
                     _check_credits(user, paid_edit_cost, "Trip guidance")
                     edit_charge_applied = not bool(user.get("is_admin"))
-                synced_v2_revision = save_trip(
+                saved_version = save_trip(
                     trip_id,
                     body.message,
                     stored,
@@ -9800,8 +9872,8 @@ async def chat_endpoint(request: Request, body: ChatRequest, user: dict = Depend
                 _log_planner_failure("chat_edit_save", exc)
                 raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
             updated["route_geometry"] = route_geometry
-            if isinstance(synced_v2_revision, int):
-                updated["v2_revision"] = synced_v2_revision
+            if isinstance(saved_version, int):
+                updated["version"] = saved_version
             messages.append({"role": "user", "content": body.message})
             messages.append({"role": "assistant", "content": result.get("message", "")})
             save_conversation(conversation_key, messages[-30:])
@@ -9965,7 +10037,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
     try:
         update_plan_job(job_id, "running")
         update_plan_job(job_id, "ai")
-        route_style = _normalized_planner_route_style(body.route_style)
+        msgs: list[dict] = []
         if body.session_id:
             msgs = get_conversation(_ai_conversation_key(body.session_id, user))
             plan_data = await asyncio.to_thread(
@@ -9974,12 +10046,16 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
             )
         else:
             plan_data = await asyncio.to_thread(plan_trip, body.request or "")
+        preference_messages = msgs or [{"role": "user", "content": body.request or ""}]
+        route_style = _planner_route_style_from_conversation(preference_messages, body.route_style)
+        camp_preference = _planner_camp_preference_from_conversation(preference_messages, body.camp_preference)
+        max_daily_drive_hours = _planner_drive_hours_from_conversation(preference_messages, body.max_daily_drive_hours)
         plan_data["route_preferences"] = {
             "route_style": route_style,
-            "camp_preference": (body.camp_preference or "public").strip().lower(),
+            "camp_preference": camp_preference,
             "camp_reuse_policy": (body.camp_reuse_policy or "different_each_night").strip().lower(),
             "region_hint": (body.region_hint or "").strip(),
-            "max_daily_drive_hours": body.max_daily_drive_hours,
+            "max_daily_drive_hours": max_daily_drive_hours,
             "trip_preferences": body.trip_preferences,
             "rental_interest": (body.trip_preferences or {}).get("rental_interest") if isinstance(body.trip_preferences, dict) else None,
         }
@@ -10078,15 +10154,21 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
         # Keep the finished payload with the job before saving the trip. If the
         # final status write fails, polling can verify the saved trip and recover.
         update_plan_job(job_id, "saving", result=serialized_result)
-        save_trip(
+        saved_version = save_trip(
             trip_id,
             body.request,
             stored,
             user_id=user["id"] if user else None,
             route_geometry=route_geometry,
         )
+        if isinstance(saved_version, int):
+            result["version"] = saved_version
+        serialized_result = json.dumps(result)
         trip_saved = True
         refundable_cost = 0
+        # Replace the recovery payload with the committed revision before the
+        # final status transition. Polling can now resume with a writable trip.
+        update_plan_job(job_id, "saving", result=serialized_result)
 
         actual_days = plan_data.get("duration_days", 7)
         try:
@@ -10150,7 +10232,7 @@ async def _execute_plan_job(job_id: str, body: PlanRequest, user: dict | None, c
 
 @app.post("/api/plan")
 async def plan(request: Request, body: PlanRequest, user: dict = Depends(_optional_user)):
-    if not settings.anthropic_api_key:
+    if not _planner_provider_configured():
         raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     import re as _re
@@ -10208,8 +10290,12 @@ async def plan_job_status(job_id: str, user: dict | None = Depends(_optional_use
         saved_trip = get_trip(str(result.get("trip_id") or ""))
         if saved_trip:
             status = "done"
+            saved_version = saved_trip.get("version")
+            if isinstance(saved_version, int):
+                result["version"] = saved_version
+            recovered_result = json.dumps(result)
             try:
-                update_plan_job(job_id, "done", result=job["result"])
+                update_plan_job(job_id, "done", result=recovered_result)
             except Exception as exc:
                 _log_planner_failure("plan_job_poll_recovery", exc)
     return {"job_id": job_id, "status": status, "result": result if status == "done" else None, "error": job.get("error")}
@@ -10397,6 +10483,7 @@ class AccountTripRequest(BaseModel):
     request: str = ""
     route_geometry: Optional[dict] = None
     builder_state: Optional[dict] = None
+    expected_version: Optional[int] = Field(default=None, ge=1)
     source: str = "web"
 
 
@@ -10763,25 +10850,45 @@ def _polyline6_point_count(shape: str) -> int:
     return count
 
 def _osrm_maneuver_type(step: dict, is_first: bool, is_last: bool) -> int:
+    maneuver = step.get("maneuver") if isinstance(step.get("maneuver"), dict) else {}
+    maneuver_kind = str(maneuver.get("type") or "").lower()
+    modifier = str(maneuver.get("modifier") or "").lower()
     if is_first:
-        return 1
-    if is_last or step.get("maneuver", {}).get("type") == "arrive":
-        return 4
-    modifier = str(step.get("maneuver", {}).get("modifier") or "").lower()
-    if "sharp left" in modifier:
-        return 5
-    if "sharp right" in modifier:
-        return 6
-    if "slight left" in modifier:
-        return 10
-    if "slight right" in modifier:
-        return 11
-    if "left" in modifier:
-        return 2
-    if "right" in modifier:
-        return 3
+        return 2 if "right" in modifier else 3 if "left" in modifier else 1
+    if is_last or maneuver_kind == "arrive":
+        return 5 if "right" in modifier else 6 if "left" in modifier else 4
+    if maneuver_kind in {"exit roundabout", "exit rotary"}:
+        return 27
+    if maneuver_kind in {"roundabout", "rotary", "roundabout turn"}:
+        return 26
+    if maneuver_kind == "on ramp":
+        return 18 if "right" in modifier else 19 if "left" in modifier else 17
+    if maneuver_kind == "off ramp":
+        return 20 if "right" in modifier else 21 if "left" in modifier else 8
+    if maneuver_kind == "merge":
+        return 37 if "right" in modifier else 38 if "left" in modifier else 25
+    if maneuver_kind == "fork":
+        return 23 if "right" in modifier else 24 if "left" in modifier else 22
+    if maneuver_kind == "new name":
+        return 7
+    if maneuver_kind == "continue" and not modifier:
+        return 8
     if "uturn" in modifier:
+        return 12
+    if "sharp left" in modifier:
+        return 14
+    if "sharp right" in modifier:
+        return 11
+    if "slight left" in modifier:
+        return 16
+    if "slight right" in modifier:
         return 9
+    if "left" in modifier:
+        return 15
+    if "right" in modifier:
+        return 10
+    if modifier == "straight":
+        return 8
     return 0
 
 def _osrm_instruction(step: dict, is_first: bool, is_last: bool) -> str:
@@ -10823,7 +10930,9 @@ def _osrm_to_valhalla(data: dict, units: str) -> dict:
             "time": float(step.get("duration") or 0),
             "begin_shape_index": begin_index,
             "end_shape_index": begin_index + step_points - 1,
-            "roundabout_exit_count": None,
+            "roundabout_exit_count": int(maneuver["exit"])
+            if isinstance(maneuver.get("exit"), (int, float)) and maneuver["exit"] > 0
+            else None,
             "_osrm": {
                 "type": maneuver.get("type"),
                 "modifier": maneuver.get("modifier"),
@@ -10845,9 +10954,38 @@ def _osrm_to_valhalla(data: dict, units: str) -> dict:
         },
         "_fallback": {
             "engine": "osrm",
+            "maneuver_schema": "valhalla-v1",
             "warning": "Valhalla unavailable; used emergency car-routing fallback. Off-road/backroad weighting may be limited.",
         },
     }
+
+
+def _normalize_osrm_fallback_maneuvers(data: dict) -> dict:
+    fallback = data.get("_fallback") if isinstance(data.get("_fallback"), dict) else {}
+    if fallback.get("engine") != "osrm" or fallback.get("maneuver_schema") == "valhalla-v1":
+        return data
+    legs = data.get("trip", {}).get("legs") if isinstance(data.get("trip"), dict) else []
+    maneuvers = [
+        maneuver
+        for leg in legs or []
+        if isinstance(leg, dict)
+        for maneuver in (leg.get("maneuvers") or [])
+        if isinstance(maneuver, dict)
+    ]
+    normalized_count = 0
+    for index, maneuver in enumerate(maneuvers):
+        osrm_maneuver = maneuver.get("_osrm")
+        if not isinstance(osrm_maneuver, dict):
+            continue
+        maneuver["type"] = _osrm_maneuver_type(
+            {"maneuver": osrm_maneuver},
+            index == 0,
+            index == len(maneuvers) - 1,
+        )
+        normalized_count += 1
+    if not maneuvers or normalized_count == len(maneuvers):
+        fallback["maneuver_schema"] = "valhalla-v1"
+    return data
 
 async def _route_with_osrm(client: httpx.AsyncClient, locations: list[dict], units: str) -> tuple[dict, str]:
     coords = ";".join(f"{loc['lon']:.6f},{loc['lat']:.6f}" for loc in locations)
@@ -11022,7 +11160,10 @@ async def route_health():
         checks.append({"engine": "osrm", "ok": False, "error": str(e)})
     return {"ok": False, "engine": "none", "checks": checks}
 
-@app.post("/api/route")
+ROUTE_ENDPOINT_TIMEOUT_SECONDS = 40.0
+ROUTE_ENDPOINT_TIMEOUT_DETAIL = "Route took too long. Try again or use fewer stops."
+
+
 async def route_proxy(body: RouteRequest):
     if len(body.locations) < 2:
         raise HTTPException(400, "At least two locations are required")
@@ -11083,6 +11224,7 @@ async def route_proxy(body: RouteRequest):
         valhalla_error = f"Valhalla route failed: {e}"
 
     if cached_osrm_fallback and cached:
+        _normalize_osrm_fallback_maneuvers(cached)
         cached["_trailhead"] = {
             "engine": "osrm-fallback",
             "cache": "stale-fallback-hit",
@@ -11173,6 +11315,17 @@ async def route_proxy(body: RouteRequest):
         raise HTTPException(502, detail)
 
 
+@app.post("/api/route")
+async def route_endpoint(body: RouteRequest):
+    try:
+        return await asyncio.wait_for(
+            route_proxy(body),
+            timeout=ROUTE_ENDPOINT_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as exc:
+        raise HTTPException(504, ROUTE_ENDPOINT_TIMEOUT_DETAIL) from exc
+
+
 def _decode_polyline6(shape: str) -> list[list[float]]:
     """Decode Valhalla/OSRM precision-6 polyline coordinates as [lng, lat]."""
     if not isinstance(shape, str) or not shape:
@@ -11220,6 +11373,112 @@ def _normalized_planner_route_style(route_style: object) -> str:
     if style in {"adventure", "adventurous", "wild_but_safe", "backroads", "rough"}:
         return "wild"
     return style if style in {"direct", "balanced", "wild"} else "balanced"
+
+
+def _planner_user_request_texts(messages: list[dict]) -> list[str]:
+    return [
+        str(message.get("content") or "").lower()
+        for message in messages[-12:]
+        if str(message.get("role") or "").lower() == "user"
+    ]
+
+
+def _planner_latest_preference_match(request_text: str, choices: list[tuple[str, str]]) -> str | None:
+    matches = [
+        (match.start(), match.end(), value)
+        for value, pattern in choices
+        for match in re.finditer(pattern, request_text)
+    ]
+    semantic_matches = [
+        candidate
+        for candidate in matches
+        if not any(
+            other[2] != candidate[2]
+            and other[0] <= candidate[0]
+            and other[1] >= candidate[1]
+            and (other[0], other[1]) != (candidate[0], candidate[1])
+            for other in matches
+        )
+    ]
+    return max(semantic_matches, default=(0, 0, None), key=lambda item: item[0])[2]
+
+
+def _planner_route_style_from_conversation(messages: list[dict], fallback: object) -> str:
+    avoid_route_pattern = (
+        r"\b(?:(?:avoid|skip|exclude)(?: (?:taking|using|driving(?: on)?))?|without|no|not|anything except|"
+        r"do not want(?: to (?:take|use|drive(?: on)?))?|don't want(?: to (?:take|use|drive(?: on)?))?|"
+        r"do not (?:take|use|drive(?: on)?)|don't (?:take|use|drive(?: on)?)|"
+        r"(?:cannot|can't) (?:take|use|drive(?: on)?)|(?:i'm |i am )?not interested in|"
+        r"would rather not (?:take|use|drive(?: on)?)|rather not (?:take|use|drive(?: on)?))"
+        r"\s+(?:an? |the |any )?"
+        r"(?:dirt roads?|gravel roads?|off[- ]road(?: routes?)?|rough roads?|forest roads?|back ?roads?|adventure routes?|wild routes?)\b"
+    )
+    for request_text in reversed(_planner_user_request_texts(messages)):
+        preference = _planner_latest_preference_match(request_text, [
+            ("direct", rf"(?:\b(?:fastest|most direct|highways? only|paved only|(?:keep|make) (?:(?:the )?route|it) paved|stay on pavement|paved roads? rather than dirt roads?|instead of dirt roads?,? (?:use|take|choose) paved roads?)\b|{avoid_route_pattern})"),
+            ("balanced", r"\b(?:balanced(?: route)?(?: with paved and forest roads?)?|mix(?:ed)? (?:roads?|pavement and dirt)|easier but scenic(?:,? with (?:a few )?dirt roads?)?)\b"),
+            ("wild", r"\b(?:dirt roads?|back ?roads?|forest roads?|off[- ]road|wild route|rough roads?|adventure route)\b"),
+        ])
+        if preference:
+            return preference
+    return _normalized_planner_route_style(fallback)
+
+
+def _planner_camp_preference_from_conversation(messages: list[dict], fallback: object) -> str:
+    avoid_camp_pattern = (
+        r"\b(?:(?:avoid|skip|exclude)(?: (?:using|staying in))?|without|no|not|anything except|"
+        r"do not want(?: to (?:use|stay in))?|don't want(?: to (?:use|stay in))?|"
+        r"no longer want(?: to (?:use|stay in))?|do not (?:use|stay in)|don't (?:use|stay in)|"
+        r"(?:i'm |i am )?not interested in|(?:i'd )?rather not (?:use|stay in)|would rather not (?:use|stay in))"
+        r"\s+(?:to )?(?:an? |the |any )?"
+        r"(?:dispersed camp(?:ing|s)?|boondock(?:ing)?|free camps?|primitive camps?|"
+        r"public[- ]land camp(?:ing|s)?|blm camp(?:ing|s)?|usfs camp(?:ing|s)?)\b"
+    )
+    avoid_other_camp_pattern = (
+        r"\b(?:(?:avoid|skip|exclude)(?: (?:using|staying in))?|without|no|not|anything except|"
+        r"do not want(?: to (?:use|stay in))?|don't want(?: to (?:use|stay in))?|"
+        r"no longer want(?: to (?:use|stay in))?|do not (?:use|stay in)|don't (?:use|stay in)|"
+        r"(?:i'm |i am )?not interested in|(?:i'd )?rather not (?:use|stay in)|would rather not (?:use|stay in))"
+        r"\s+(?:an? |the |any )?"
+        r"(?:private camps?|farm stays?|ranch stays?|winery stays?|glamping|developed campgrounds?|"
+        r"hookups?|reservable campgrounds?|rv parks?)\b"
+    )
+    for request_text in reversed(_planner_user_request_texts(messages)):
+        preference = _planner_latest_preference_match(request_text, [
+            ("any", r"\b(?:mix(?:ed)? camps?(?:,? including developed and dispersed)?|mix of camps?(?:,? including developed and dispersed)?|any camp(?:ing)?|camping mix)\b"),
+            ("public", avoid_other_camp_pattern),
+            ("developed", rf"(?:{avoid_camp_pattern}|\b(?:developed campgrounds? instead of dispersed camp(?:ing|s)?|prefer developed campgrounds? (?:over|to) dispersed camp(?:ing|s)?)\b)"),
+            ("private", r"\b(?<!no )(?<!no any )(?<!avoid )(?<!without )(?:private camps?|farm stays?|ranch stays?|winery stays?|glamping)\b"),
+            ("developed", r"\b(?<!no )(?<!no any )(?<!avoid )(?<!without )(?:developed campgrounds?|hookups?|reservable campgrounds?|rv parks?)\b"),
+            ("public", r"\b(?:dispersed camps? instead of developed campgrounds?|dispersed|boondock|free camps?|primitive camps?|public[- ]land camps?|blm camps?|usfs camps?)\b"),
+        ])
+        if preference:
+            return preference
+    preference = str(fallback or "public").strip().lower()
+    return preference if preference in {"any", "public", "developed", "private"} else "public"
+
+
+def _planner_drive_hours_from_conversation(messages: list[dict], fallback: object) -> float | None:
+    patterns = (
+        r"(?:no more than|max(?:imum)?|up to|under)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:of driving|driving)?\s*(?:per day|a day|daily)",
+        r"(?:limit|cap)\s+(?:the\s+)?(?:daily\s+)?driving\s+(?:to|at)\s+(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:per day|a day|daily)?",
+        r"(\d+(?:\.\d+)?)\s*(?:hours?|hrs?)\s*(?:of driving|driving)\s*(?:per day|a day|daily)",
+    )
+    for request_text in reversed(_planner_user_request_texts(messages)):
+        matches: list[tuple[int, float]] = []
+        for pattern in patterns:
+            matches.extend(
+                (match.start(), float(match.group(1)))
+                for match in re.finditer(pattern, request_text)
+            )
+        if matches:
+            value = max(matches, key=lambda item: item[0])[1]
+            return max(1.0, min(value, 14.0))
+    try:
+        value = float(fallback)
+    except (TypeError, ValueError):
+        return None
+    return max(1.0, min(value, 14.0))
 
 
 def _planner_route_point_type(waypoint: dict) -> str:
@@ -11431,10 +11690,51 @@ def _planner_geometry_matches_waypoints(route_geometry: object, waypoints: list[
     return _planner_geometry_covers_waypoints(route_geometry, waypoints)
 
 
-_PLANNER_TURN_MODIFIERS = {
-    0: "", 1: "", 2: "left", 3: "right", 4: "arrive",
-    5: "sharp left", 6: "sharp right", 7: "left", 8: "right",
-    9: "uturn", 10: "slight left", 11: "slight right",
+_VALHALLA_MANEUVER_PRESENTATIONS = {
+    0: ("turn", ""),
+    1: ("depart", ""),
+    2: ("depart", "right"),
+    3: ("depart", "left"),
+    4: ("arrive", ""),
+    5: ("arrive", "right"),
+    6: ("arrive", "left"),
+    7: ("continue", "straight"),
+    8: ("continue", "straight"),
+    9: ("turn", "slight right"),
+    10: ("turn", "right"),
+    11: ("turn", "sharp right"),
+    12: ("turn", "uturn"),
+    13: ("turn", "uturn"),
+    14: ("turn", "sharp left"),
+    15: ("turn", "left"),
+    16: ("turn", "slight left"),
+    17: ("on ramp", "straight"),
+    18: ("on ramp", "right"),
+    19: ("on ramp", "left"),
+    20: ("off ramp", "right"),
+    21: ("off ramp", "left"),
+    22: ("continue", "straight"),
+    23: ("fork", "right"),
+    24: ("fork", "left"),
+    25: ("merge", "straight"),
+    26: ("roundabout", ""),
+    27: ("exit roundabout", ""),
+    28: ("ferry", ""),
+    29: ("exit ferry", ""),
+    30: ("transit", ""),
+    31: ("transit transfer", ""),
+    32: ("transit remain on", ""),
+    33: ("transit connection", ""),
+    34: ("transit connection transfer", ""),
+    35: ("transit connection destination", ""),
+    36: ("post-transit connection destination", ""),
+    37: ("merge", "right"),
+    38: ("merge", "left"),
+    39: ("elevator", ""),
+    40: ("steps", ""),
+    41: ("escalator", ""),
+    42: ("enter building", ""),
+    43: ("exit building", ""),
 }
 
 
@@ -11463,9 +11763,13 @@ def _planner_leg_steps(leg: dict, leg_coords: list[list[float]]) -> list[dict]:
             duration_s = 0.0
         street_names = maneuver.get("street_names") if isinstance(maneuver.get("street_names"), list) else []
         instruction = str(maneuver.get("instruction") or "")
+        presentation = _VALHALLA_MANEUVER_PRESENTATIONS.get(
+            maneuver_type,
+            _VALHALLA_MANEUVER_PRESENTATIONS[0],
+        )
         steps.append({
-            "type": "arrive" if maneuver_type == 4 else "depart" if maneuver_type == 1 else "turn",
-            "modifier": _PLANNER_TURN_MODIFIERS.get(maneuver_type, ""),
+            "type": presentation[0],
+            "modifier": presentation[1],
             "name": str(street_names[0]) if street_names else "",
             "distance": round(distance_m),
             "duration": duration_s,
@@ -11631,6 +11935,31 @@ async def get_trip_route(trip_id: str, user: dict | None = Depends(_optional_use
 async def user_trips(limit: int = 25, user: dict = Depends(_current_user)):
     return {"trips": list_user_trips(user["id"], max(1, min(limit, 100)))}
 
+
+def _account_trip_expected_version(
+    body: AccountTripRequest,
+    trip: dict,
+    current: dict | None,
+) -> int:
+    if body.expected_version is not None:
+        return int(body.expected_version)
+    nested_version = trip.get("version")
+    if not isinstance(nested_version, bool):
+        try:
+            parsed_version = int(nested_version)
+        except (TypeError, ValueError):
+            parsed_version = 0
+        if parsed_version >= 1:
+            return parsed_version
+    if current:
+        # Released clients did not send a revision. Snapshot the revision at
+        # request entry and let the transactional compare-and-swap enforce it;
+        # a concurrent write after this read still receives a 409.
+        current_revision = current.get("version", current.get("revision", 1))
+        return int(current_revision or 1)
+    return 0
+
+
 @app.post("/api/trips")
 async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_current_user)):
     trip = dict(body.trip or {})
@@ -11639,6 +11968,13 @@ async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_cu
     existing = get_trip(trip_id)
     if existing and existing.get("user_id") != user["id"]:
         raise HTTPException(403, "Not authorized to update this trip")
+    current = existing
+    if not current:
+        try:
+            current = get_trip_document_v2(user["id"], trip_id, include_deleted=True)
+        except ValueError:
+            current = None
+    expected_version = _account_trip_expected_version(body, trip, current)
     try:
         optional_fields = {}
         if "route_geometry" in body.model_fields_set:
@@ -11651,6 +11987,7 @@ async def create_account_trip(body: AccountTripRequest, user: dict = Depends(_cu
             user["id"],
             request=body.request,
             source=body.source or "web",
+            expected_version=expected_version,
             **optional_fields,
         )
     except Exception as exc:
@@ -12315,6 +12652,13 @@ async def update_account_trip(trip_id: str, body: AccountTripRequest, user: dict
         raise HTTPException(403, "Not authorized to update this trip")
     trip = dict(body.trip or {})
     trip["trip_id"] = trip_id
+    current = existing
+    if not current:
+        try:
+            current = get_trip_document_v2(user["id"], trip_id, include_deleted=True)
+        except ValueError:
+            current = None
+    expected_version = _account_trip_expected_version(body, trip, current)
     try:
         optional_fields = {}
         if "route_geometry" in body.model_fields_set:
@@ -12327,6 +12671,7 @@ async def update_account_trip(trip_id: str, body: AccountTripRequest, user: dict
             user["id"],
             request=body.request,
             source=body.source or "web",
+            expected_version=expected_version,
             **optional_fields,
         )
     except Exception as exc:
@@ -12382,8 +12727,8 @@ async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(
     if not generate:
         return {}
 
-    if not settings.anthropic_api_key:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    if not _planner_provider_configured():
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     cost = AI_COSTS["audio_guide"]
     charged_audio_guide = False
@@ -12401,7 +12746,7 @@ async def trip_guide(trip_id: str, generate: bool = False, user: dict = Depends(
     trip_name = trip.get("plan", {}).get("trip_name", "Adventure")
 
     try:
-        guide = generate_audio_guide(waypoints, trip_name)
+        guide = await asyncio.to_thread(generate_audio_guide, waypoints, trip_name)
     except Exception as e:
         if charged_audio_guide:
             add_credits(user["id"], cost, "Refund — audio guide error")
@@ -12422,6 +12767,30 @@ class RouteWeatherRequest(BaseModel):
     waypoints: list[dict]
     trip_id: str
     units: str = "auto"
+
+
+def _route_weather_cache_key(body: RouteWeatherRequest) -> str:
+    unit_key = (body.units or "auto").lower()
+    if unit_key not in {"auto", "imperial", "metric"}:
+        unit_key = "auto"
+    normalized_waypoints: list[dict] = []
+    for waypoint in body.waypoints:
+        try:
+            lat = float(waypoint.get("lat"))
+            lng = float(waypoint.get("lng"))
+        except (TypeError, ValueError):
+            continue
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
+        normalized_waypoints.append({
+            "name": str(waypoint.get("name") or "").strip(),
+            "lat": round(lat, 5),
+            "lng": round(lng, 5),
+        })
+    signature = hashlib.sha1(
+        json.dumps(normalized_waypoints, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:20]
+    return f"route_weather:v2:{body.trip_id}:{unit_key}:{signature}"
 
 def _weather_units_for(lat: float, lng: float, mode: str = "auto") -> dict:
     """Return Open-Meteo params + display metadata for a coordinate."""
@@ -12463,8 +12832,7 @@ def _weather_units_for(lat: float, lng: float, mode: str = "auto") -> dict:
 async def route_weather(body: RouteWeatherRequest):
     """Download 7-day forecasts for all waypoints in a trip for offline use.
     Deduplicates waypoints within 0.1° and caches the full result for 3 hours."""
-    unit_key = (body.units or "auto").lower()
-    cache_key = f"route_weather:{body.trip_id}:{unit_key}"
+    cache_key = _route_weather_cache_key(body)
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=10800)
     if cached:
         return cached
@@ -12472,28 +12840,48 @@ async def route_weather(body: RouteWeatherRequest):
     # Filter to waypoints with valid coords, deduplicate within 0.1°
     seen_coords: list[tuple[float, float]] = []
     unique_wps: list[dict] = []
+    waypoint_aliases: list[list[str]] = []
     for wp in body.waypoints:
-        lat = wp.get("lat")
-        lng = wp.get("lng")
-        if lat is None or lng is None:
+        try:
+            lat = float(wp.get("lat"))
+            lng = float(wp.get("lng"))
+        except (TypeError, ValueError):
             continue
-        is_dup = any(abs(lat - slat) < 0.1 and abs(lng - slng) < 0.1 for slat, slng in seen_coords)
-        if not is_dup:
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            continue
+        alias = wp.get("name") or f"{lat:.2f},{lng:.2f}"
+        duplicate_index = next(
+            (
+                index
+                for index, (slat, slng) in enumerate(seen_coords)
+                if abs(lat - slat) < 0.1 and abs(lng - slng) < 0.1
+            ),
+            None,
+        )
+        if duplicate_index is None:
             seen_coords.append((lat, lng))
-            unique_wps.append(wp)
+            unique_wps.append({**wp, "lat": lat, "lng": lng})
+            waypoint_aliases.append([alias])
+        else:
+            waypoint_aliases[duplicate_index].append(alias)
 
     sem = asyncio.Semaphore(5)
 
-    async def _fetch_one(wp: dict) -> tuple[str, dict | None]:
+    async def _fetch_one(index: int, wp: dict) -> tuple[int, dict | None]:
         async with sem:
             try:
                 data = await weather_forecast(wp["lat"], wp["lng"], days=7, units=body.units)
-                return (wp.get("name", f"{wp['lat']:.2f},{wp['lng']:.2f}"), data)
+                return (index, data)
             except Exception:
-                return (wp.get("name", ""), None)
+                return (index, None)
 
-    results = await asyncio.gather(*[_fetch_one(wp) for wp in unique_wps])
-    forecasts = {name: data for name, data in results if data is not None}
+    results = await asyncio.gather(*[_fetch_one(index, wp) for index, wp in enumerate(unique_wps)])
+    forecasts = {
+        alias: data
+        for index, data in results
+        if data is not None
+        for alias in waypoint_aliases[index]
+    }
     response = {"trip_id": body.trip_id, "forecasts": forecasts}
     set_cached("campsite_cache", cache_key, response)
     return response
@@ -12840,8 +13228,8 @@ async def prepare_tts_session(body: TtsSessionRequest, user: dict = Depends(_cur
 
 @app.post("/api/audio/nearby")
 async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_user)):
-    if not settings.anthropic_api_key:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    if not _planner_provider_configured():
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
     cache_key = f"nearby_audio:{body.lat:.3f},{body.lng:.3f}:{(body.location_name or '').strip().lower()[:60]}"
     cached = get_cached("campsite_cache", cache_key, ttl_seconds=3600 * 24)
     if cached:
@@ -12867,7 +13255,12 @@ async def nearby_audio(body: NearbyAudioRequest, user: dict = Depends(_current_u
             nearby = ", ".join(h.get("title", "") for h in wiki_hits[:3] if h.get("title"))
             land_label = " ".join(x for x in [land.get("land_type", ""), land.get("admin_name", "")] if x).strip()
             location_name = "; ".join(x for x in [land_label, nearby] if x)
-        narration = generate_location_narration(body.lat, body.lng, location_name)
+        narration = await asyncio.to_thread(
+            generate_location_narration,
+            body.lat,
+            body.lng,
+            location_name,
+        )
     except Exception as e:
         if charged_nearby_audio:
             add_credits(user["id"], cost, "Refund — nearby audio error")
@@ -21874,6 +22267,15 @@ def _route_distance_mi(points: list[dict]) -> float:
         total += _haversine_m(a["lat"], a["lng"], b["lat"], b["lng"]) / 1609.344
     return total
 
+def _clamped_route_target_mi(target_mi: object, total_mi: float) -> float:
+    try:
+        requested = float(target_mi)
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(requested):
+        return 0.0
+    return max(0.0, min(requested, max(0.0, float(total_mi or 0))))
+
 def _route_points_from_any(route: object, limit: int = 400) -> list[dict]:
     points: list[dict] = []
     if not isinstance(route, list):
@@ -22292,11 +22694,12 @@ async def _select_camp_for_window(
     user: dict | None = None,
 ) -> dict:
     label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
-    target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
+    clamped_target_mi = _clamped_route_target_mi(window.target_mi, total_mi)
+    target = _point_at_route_mile(points, clamped_target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
     route_style_normalized = "wild" if str(route_style or "").lower() in {"wild", "adventure", "adventurous", "wild_but_safe", "backroads", "rough"} else str(route_style or "balanced").lower()
     camp_preference_normalized = str(camp_preference or "public").lower()
     sample_count = 1 if camp_preference_normalized == "private" else 2 if camp_preference_normalized == "any" else 2 if route_style_normalized == "wild" else 3
-    samples = _route_window_samples(points, window.target_mi, max(12.0, window.search_window_mi), max_samples=sample_count)
+    samples = _route_window_samples(points, clamped_target_mi, max(12.0, window.search_window_mi), max_samples=sample_count)
     base_radius = max(24.0, min(max_radius, window.search_window_mi * 0.75))
     filter_key = sorted(type_filters)
     any_broad_preference = str(camp_preference or "").lower() == "any" and not type_filters
@@ -22328,7 +22731,7 @@ async def _select_camp_for_window(
     key_payload = {
         "v": 39,
         "route": [[round(p["lat"], 3), round(p["lng"], 3)] for p in samples],
-        "window": [window.day, window.start, window.end, round(window.target_mi, 1), round(window.search_window_mi, 1)],
+        "window": [window.day, window.start, window.end, round(clamped_target_mi, 1), round(window.search_window_mi, 1)],
         "filters": filter_key,
         "style": route_style,
         "camp_preference": camp_preference,
@@ -22392,8 +22795,8 @@ async def _select_camp_for_window(
                     **camp,
                     "route_distance_mi": round(route_distance, 2),
                     "route_fit": _route_fit_label(route_distance),
-                    "route_progress": round(window.target_mi / total_mi, 4) if total_mi > 0 else 0,
-                    "route_progress_mi": round(window.target_mi, 1),
+                    "route_progress": round(clamped_target_mi / total_mi, 4) if total_mi > 0 else 0,
+                    "route_progress_mi": round(clamped_target_mi, 1),
                     "endpoint_distance_mi": round(endpoint_distance, 2),
                     "recommended_day": window.day,
                     "search_pass": pass_def["name"],
@@ -22463,7 +22866,7 @@ async def _select_camp_for_window(
             "start": window.start,
             "end": window.end,
             "label": label,
-            "target_mi": window.target_mi,
+            "target_mi": clamped_target_mi,
             "search_window_mi": window.search_window_mi,
             "camp": selected_best,
             "selected": selected_best,
@@ -22490,7 +22893,7 @@ async def _select_camp_for_window(
             "start": window.start,
             "end": window.end,
             "label": label,
-            "target_mi": window.target_mi,
+            "target_mi": clamped_target_mi,
             "search_window_mi": window.search_window_mi,
             "camp": None,
             "selected": None,
@@ -22518,13 +22921,15 @@ async def _select_camp_for_window(
 
 def _route_camp_window_review_response(window: RouteCampWindow, points: list[dict], reason: str = "") -> dict:
     label = window.label or (f"Day {window.day}" if window.start == window.end else f"Days {window.start}-{window.end}")
-    target = _point_at_route_mile(points, window.target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
+    total_mi = _route_distance_mi(points)
+    clamped_target_mi = _clamped_route_target_mi(window.target_mi, total_mi)
+    target = _point_at_route_mile(points, clamped_target_mi) or points[min(len(points) - 1, max(0, window.day - 1))]
     return {
         "day": window.day,
         "start": window.start,
         "end": window.end,
         "label": label,
-        "target_mi": window.target_mi,
+        "target_mi": clamped_target_mi,
         "search_window_mi": window.search_window_mi,
         "camp": None,
         "selected": None,
@@ -27355,7 +27760,6 @@ def _explore_serving_query(
     query_terms = _explore_query_terms_for_category(q, effective_category)
     global_profiles: list[dict] = []
     global_profile_ids: set[str] = set()
-    global_relaxed_ids: set[str] = set()
     pakistan_profiles: list[dict] = []
     if str(q or "").strip() and not guided_request:
         legacy_matches = [
@@ -27390,14 +27794,12 @@ def _explore_serving_query(
             place for place in global_profiles
             if not effective_category or _explore_place_matches_category_request(place, {_normalize_place_category(effective_category)})
         ]
-        selected_global = category_matches or (global_profiles if not places else [])
-        if not category_matches and effective_category and not places:
-            global_relaxed_ids = {str(place.get("id") or "") for place in selected_global}
+        selected_global = category_matches if effective_category else global_profiles
         places = _merge_explore_profile_lists(places, selected_global)
     direct_catalog_ids = {str(place.get("id") or "") for place in places}
     strict_category_only = bool(str(category or "").strip() and not str(q or "").strip())
     if (q or category) and not guided_request and (not strict_category_only or not places) and (
-        stay_request or trail_request or not places or bool(global_relaxed_ids) or bool(q and category)
+        stay_request or trail_request or not places or bool(q and category)
     ):
         stay_include_lodging = normalized_category in {"lodging", "huts_lodging", "cabin", "private_stay", "stay", "stays"}
         stay_first_profiles = (
@@ -27463,14 +27865,12 @@ def _explore_serving_query(
         elif trail_request:
             places = [
                 place for place in places
-                if str(place.get("id") or "") in global_relaxed_ids
-                or _explore_place_matches_category_request(place, {"trail"})
+                if _explore_place_matches_category_request(place, {"trail"})
             ]
         elif effective_category:
             places = [
                 place for place in places
-                if str(place.get("id") or "") in global_relaxed_ids
-                or _explore_place_matches_category_request(place, requested)
+                if _explore_place_matches_category_request(place, requested)
             ]
     if lat is not None and lng is not None and safe_mode in {"nearby", "trip"} and not guided_request:
         nearby_profiles = [
@@ -29023,6 +29423,10 @@ def _fresh_viator_route_cache(cache_key: str) -> dict | None:
         return None
     return cached
 
+def _viator_route_refresh_timeout_seconds(config) -> float:
+    return max(6.0, min(float(getattr(config, "request_timeout_seconds", 120.0)) + 5.0, 125.0))
+
+
 def _queue_viator_route_refresh(
     cache_key: str,
     client: ViatorClient,
@@ -29035,7 +29439,8 @@ def _queue_viator_route_refresh(
 ) -> bool:
     now = int(time.time())
     job = _viator_route_live_jobs.get(cache_key)
-    if job and job.get("status") in {"queued", "running"} and now - int(job.get("started_at") or now) < 90:
+    job_stale_seconds = int(_viator_route_refresh_timeout_seconds(client.config)) + 10
+    if job and job.get("status") in {"queued", "running"} and now - int(job.get("started_at") or now) < job_stale_seconds:
         return False
     stale_error = _viator_route_live_cache.get(cache_key)
     if stale_error and stale_error.get("status") in {"error", "provider_error", "timeout"} and now - int(stale_error.get("fetched_at") or 0) < VIATOR_LIVE_ERROR_RETRY_SECONDS:
@@ -29059,7 +29464,7 @@ async def _refresh_viator_route_cache(
 ) -> None:
     now = int(time.time())
     _viator_route_live_jobs[cache_key] = {"status": "running", "started_at": now}
-    timeout = max(6.0, min(float(getattr(config, "request_timeout_seconds", 120.0)) + 5.0, 125.0))
+    timeout = _viator_route_refresh_timeout_seconds(config)
     try:
         def run_live() -> tuple[list[dict], list[dict]]:
             client = ViatorClient(config)
@@ -29122,13 +29527,34 @@ def _normalize_live_viator_experiences(payload: dict, point: dict, destination: 
             experience = item.to_dict()
         except AttributeError:
             experience = dict(item)
-        if destination:
+        try:
+            lat = float(experience.get("lat"))
+            lng = float(experience.get("lng"))
+            has_product_coordinates = -90 <= lat <= 90 and -180 <= lng <= 180
+        except (TypeError, ValueError):
+            has_product_coordinates = False
+        if has_product_coordinates:
+            experience["coordinate_source"] = experience.get("coordinate_source") or "product"
+            experience["coordinate_precision"] = experience.get("coordinate_precision") or "product"
+            experience["route_stop_eligible"] = True
+        elif destination:
             experience.setdefault("region", destination.get("name"))
-            if not experience.get("lat"):
-                experience["lat"] = destination.get("lat")
-            if not experience.get("lng"):
-                experience["lng"] = destination.get("lng")
-        if experience.get("lat") and experience.get("lng"):
+            try:
+                destination_lat = float(destination.get("lat"))
+                destination_lng = float(destination.get("lng"))
+                has_destination_coordinates = (
+                    -90 <= destination_lat <= 90
+                    and -180 <= destination_lng <= 180
+                )
+            except (TypeError, ValueError):
+                has_destination_coordinates = False
+            if has_destination_coordinates:
+                experience["lat"] = destination_lat
+                experience["lng"] = destination_lng
+                experience["coordinate_source"] = "destination_centroid"
+                experience["coordinate_precision"] = "approximate"
+                experience["route_stop_eligible"] = False
+        if experience.get("lat") is not None and experience.get("lng") is not None:
             try:
                 experience["distance_mi"] = round(
                     _haversine_m(float(point["lat"]), float(point["lng"]), float(experience["lat"]), float(experience["lng"])) / 1609.344,
@@ -29794,6 +30220,7 @@ async def route_tour_suggestions(body: RouteTourRequest):
         "live_enabled": client.ready(),
         "live_status": live_status,
         "live_message": live_message,
+        "live_poll_timeout_seconds": _viator_route_refresh_timeout_seconds(client.config),
         "provider_status": provider_status,
     }
 
@@ -30245,8 +30672,8 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
     """Generate AI-enriched campsite description with nearby context.
     Costs credits or active plan before any cached/generated brief is returned.
     Permanent cache by facility_id; coordinate cache fallback for community pins."""
-    if not settings.anthropic_api_key:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    if not _planner_provider_configured():
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
     # Full camp briefs are a paid/token feature even when the AI text is cached.
     if user:
@@ -30292,7 +30719,8 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
 
     from ai.planner import generate_campsite_insight
     try:
-        result = generate_campsite_insight(
+        result = await asyncio.to_thread(
+            generate_campsite_insight,
             name=body.name, lat=body.lat, lng=body.lng,
             description=body.description, land_type=body.land_type,
             amenities=body.amenities, wiki_context=wiki_ctx, weather_context=weather_ctx,
@@ -30317,13 +30745,18 @@ class RouteBriefRequest(BaseModel):
 @app.post("/api/ai/route-brief")
 async def route_brief(body: RouteBriefRequest, user: dict = Depends(_current_user)):
     """AI safety and readiness briefing for an active trip."""
-    if not settings.anthropic_api_key:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    if not _planner_provider_configured():
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
     cost = AI_COSTS["route_brief"]
     _check_credits(user, cost, f"Route brief — {body.trip_name}")
     from ai.planner import generate_route_brief
     try:
-        return generate_route_brief(body.trip_name, body.waypoints, body.reports)
+        return await asyncio.to_thread(
+            generate_route_brief,
+            body.trip_name,
+            body.waypoints,
+            body.reports,
+        )
     except Exception as e:
         add_credits(user["id"], cost, "Refund — route brief error")
         raise HTTPException(500, str(e))
@@ -30338,14 +30771,20 @@ class PackingRequest(BaseModel):
 @app.post("/api/ai/packing-list")
 async def packing_list(body: PackingRequest, user: dict = Depends(_current_user)):
     """Generate a smart packing list based on trip parameters."""
-    if not settings.anthropic_api_key:
-        raise HTTPException(500, "ANTHROPIC_API_KEY not configured")
+    if not _planner_provider_configured():
+        raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
     cost = AI_COSTS["packing_list"]
     _check_credits(user, cost, f"Packing list — {body.trip_name}")
     from ai.planner import generate_packing_list
     try:
-        return generate_packing_list(body.trip_name, body.duration_days,
-                                     body.road_types, body.land_types, body.states)
+        return await asyncio.to_thread(
+            generate_packing_list,
+            body.trip_name,
+            body.duration_days,
+            body.road_types,
+            body.land_types,
+            body.states,
+        )
     except Exception as e:
         add_credits(user["id"], cost, "Refund — packing list error")
         raise HTTPException(500, str(e))

@@ -74,6 +74,10 @@ import {
   sourcePackThingToSeeCanShow,
   uniqueRelatedPlaces,
 } from '@/lib/exploreContextFilters';
+import {
+  resolveExploreNearbySearchCenter,
+  serviceDestinationQueryFromExploreQuery,
+} from '@/lib/exploreNearbyContext';
 
 const EXPLORE_CACHE_KEY = 'trailhead_explore_catalog_index_v3';
 const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
@@ -568,10 +572,12 @@ function exploreFacetCountsFromPlaces(places: ExplorePlaceProfile[]) {
 
 function exploreRankReason(
   place: ExplorePlaceProfile,
-  context: { mode: 'featured' | 'nearby' | 'trip'; query: string; distance?: number | null; day?: number; sort: ExploreSortMode },
+  context: { mode: 'featured' | 'nearby' | 'trip'; query: string; distance?: number | null; day?: number; sort: ExploreSortMode; nearbyName?: string },
 ) {
   if (context.day != null) return `Close to day ${context.day} of your trip`;
-  if (context.mode === 'nearby' && context.distance != null) return `${fmtMi(context.distance)} from your location`;
+  if (context.mode === 'nearby' && context.distance != null) {
+    return `${fmtMi(context.distance)} from ${context.nearbyName || 'your location'}`;
+  }
   const query = placeQueryFromExploreQuery(context.query).trim();
   if (query) return `Matches ${query}`;
   const expectedSort = context.sort === 'source' ? 'ready' : context.sort;
@@ -604,6 +610,27 @@ function normalizeExploreText(value: string) {
     .replace(/[^a-z0-9]+/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function exploreCatalogQueryForDestinationContext(
+  visibleQuery: string,
+  category: ExploreCategoryKey,
+  guidedQuery: string,
+  destinationKey: string | null,
+  center: GuidedSearchCenter | null,
+) {
+  const query = visibleQuery.trim();
+  if (
+    !query
+    || category === 'guided'
+    || category === 'tours'
+    || !destinationKey
+    || !center?.name.trim()
+    || normalizeExploreText(query) !== normalizeExploreText(guidedQuery)
+  ) {
+    return query;
+  }
+  return center.name.trim();
 }
 
 function destinationRootFromTitle(title?: string | null) {
@@ -1945,6 +1972,7 @@ function isPakistanCuratedExplorePlace(place: ExplorePlaceProfile) {
 function isLocalCuratedExplorePlace(place: ExplorePlaceProfile) {
   return place.id === 'place:nps:yose'
     || place.id === 'explore:trails:yosemite-trails'
+    || place.id.startsWith('guided:')
     || isPakistanCuratedExplorePlace(place)
     || place.id.startsWith('explore:waterfalls:');
 }
@@ -2109,6 +2137,11 @@ function GuideScreenContent() {
   const [guidedFallbackExplorePlaces, setGuidedFallbackExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
   const [exploreSavedOnly, setExploreSavedOnly] = useState(false);
   const [exploreQuery, setExploreQuery] = useState('');
+  const [exploreServiceDestinationResolution, setExploreServiceDestinationResolution] = useState<{
+    query: string;
+    status: 'resolving' | 'resolved' | 'failed';
+    center: GuidedSearchCenter | null;
+  }>({ query: '', status: 'failed', center: null });
   const [exploreVisibleLimit, setExploreVisibleLimit] = useState(EXPLORE_INITIAL_VISIBLE);
   const [profileReadMode, setProfileReadMode] = useState<ExploreDetailTab>('summary');
   const [explorePlaces, setExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
@@ -2197,19 +2230,105 @@ function GuideScreenContent() {
   const storyScrollRef = useRef<ScrollView | null>(null);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
+  const guidedDestinationContextActive = !!guidedTourSelectedDestinationKey
+    && !!guidedTourSelectedCenter
+    && normalizeExploreText(exploreQuery) === normalizeExploreText(guidedTourSearchQuery);
+  const exploreServiceDestinationQuery = serviceDestinationQueryFromExploreQuery(exploreQuery, exploreCategory);
+  const knownServiceDestinationCenter = exploreServiceDestinationQuery
+    ? guidedTourKnownDestinationCenter(exploreServiceDestinationQuery)
+    : null;
+  const serviceResolutionMatchesQuery = !!exploreServiceDestinationQuery
+    && normalizeExploreText(exploreServiceDestinationResolution.query) === normalizeExploreText(exploreServiceDestinationQuery);
+  const resolvedServiceDestinationCenter = knownServiceDestinationCenter
+    ?? (serviceResolutionMatchesQuery && exploreServiceDestinationResolution.status === 'resolved'
+      ? exploreServiceDestinationResolution.center
+      : null);
+  const exploreServiceDestinationResolving = !!exploreServiceDestinationQuery
+    && !knownServiceDestinationCenter
+    && (!serviceResolutionMatchesQuery || exploreServiceDestinationResolution.status === 'resolving');
+  const exploreServiceDestinationFailed = !!exploreServiceDestinationQuery
+    && !knownServiceDestinationCenter
+    && serviceResolutionMatchesQuery
+    && exploreServiceDestinationResolution.status === 'failed';
+  const preferredNearbyDestinationCenter = guidedDestinationContextActive
+    ? guidedTourSelectedCenter
+    : resolvedServiceDestinationCenter;
+  const exploreNearbySearchCenter = resolveExploreNearbySearchCenter(
+    exploreCategory,
+    guidedDestinationContextActive || !!resolvedServiceDestinationCenter,
+    preferredNearbyDestinationCenter,
+    exploreServiceDestinationQuery ? null : userLoc,
+  );
+
+  useEffect(() => {
+    const query = exploreServiceDestinationQuery;
+    if (
+      tab !== 'explore'
+      || exploreMode !== 'nearby'
+      || guidedDestinationContextActive
+      || !query
+      || knownServiceDestinationCenter
+    ) return;
+
+    let cancelled = false;
+    setExploreServiceDestinationResolution({ query, status: 'resolving', center: null });
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const resolved = await api.resolveGeocodePlace(query, 5, { prefer: 'search_center' });
+          let candidate = resolved.selected ?? resolved.alternatives?.[0] ?? null;
+          if (!candidate) {
+            const fallback = await api.geocodePlaces(query, 1, { prefer: 'search_center' });
+            candidate = fallback[0] ?? null;
+          }
+          if (cancelled) return;
+          if (candidate && Number.isFinite(candidate.lat) && Number.isFinite(candidate.lng)) {
+            setExploreServiceDestinationResolution({
+              query,
+              status: 'resolved',
+              center: { lat: candidate.lat, lng: candidate.lng, name: candidate.name || query },
+            });
+          } else {
+            setExploreServiceDestinationResolution({ query, status: 'failed', center: null });
+          }
+        } catch {
+          if (!cancelled) setExploreServiceDestinationResolution({ query, status: 'failed', center: null });
+        }
+      })();
+    }, 240);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+  }, [
+    exploreLocationRequestId,
+    exploreMode,
+    exploreServiceDestinationQuery,
+    guidedDestinationContextActive,
+    knownServiceDestinationCenter?.lat,
+    knownServiceDestinationCenter?.lng,
+    tab,
+  ]);
+  const exploreCatalogRequestQuery = useMemo(() => exploreCatalogQueryForDestinationContext(
+    exploreQuery,
+    exploreCategory,
+    guidedTourSearchQuery,
+    guidedTourSelectedDestinationKey,
+    guidedTourSelectedCenter,
+  ), [exploreCategory, exploreQuery, guidedTourSearchQuery, guidedTourSelectedCenter, guidedTourSelectedDestinationKey]);
   const activeExploreCatalogPageSpec = useMemo(() => {
     if (tab !== 'explore' || exploreMode !== 'featured' || exploreSavedOnly) return null;
-    const query = exploreQuery.trim();
-    const category = exploreCategoryFetchParamFromQuery(query, exploreCategory);
+    const visibleQuery = exploreQuery.trim();
+    const category = exploreCategoryFetchParamFromQuery(visibleQuery, exploreCategory);
     if (category === 'guided' || category === 'tours') return null;
     return exploreCatalogPageSpec(
-      query,
+      exploreCatalogRequestQuery,
       category,
       exploreSortMode,
       userLoc?.lat,
       userLoc?.lng,
     );
-  }, [exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, exploreSortMode, tab, userLoc?.lat, userLoc?.lng]);
+  }, [exploreCatalogRequestQuery, exploreCategory, exploreMode, exploreQuery, exploreSavedOnly, exploreSortMode, tab, userLoc?.lat, userLoc?.lng]);
   const activeExploreCatalogPage = activeExploreCatalogPageSpec
     ? exploreCatalogPages[activeExploreCatalogPageSpec.key]
     : undefined;
@@ -2423,12 +2542,13 @@ function GuideScreenContent() {
 
 
   useEffect(() => {
-    const query = exploreQuery.trim();
-    const category = exploreCategoryFetchParamFromQuery(query, exploreCategory);
+    const visibleQuery = exploreQuery.trim();
+    const requestQuery = exploreCatalogRequestQuery;
+    const category = exploreCategoryFetchParamFromQuery(visibleQuery, exploreCategory);
     const shouldFetch = tab === 'explore'
       && exploreMode === 'featured'
       && !exploreSavedOnly
-      && (query.length >= 2 || !!category);
+      && (visibleQuery.length >= 2 || !!category);
     if (!shouldFetch) {
       setExploreSearchResolving(false);
       return;
@@ -2437,14 +2557,14 @@ function GuideScreenContent() {
     let cancelled = false;
     const pageSpec = category === 'guided' || category === 'tours'
       ? null
-      : exploreCatalogPageSpec(query, category, exploreSortMode, userLoc?.lat, userLoc?.lng);
+      : exploreCatalogPageSpec(requestQuery, category, exploreSortMode, userLoc?.lat, userLoc?.lng);
     if (pageSpec) {
       updateExploreCatalogPage(pageSpec.key, { nextCursor: null, totalCount: 0, loading: true });
     }
     setExploreSearchResolving(true);
     const timer = setTimeout(() => {
       withExploreTimeout(api.getExploreCatalogIndex({
-        q: query.length >= 2 ? query : undefined,
+        q: requestQuery.length >= 2 ? requestQuery : undefined,
         category: category || undefined,
         mode: 'featured',
         sort: exploreSortMode === 'source' ? 'ready' : exploreSortMode,
@@ -2455,7 +2575,7 @@ function GuideScreenContent() {
       }), 12000)
         .then(catalog => {
           if (cancelled) return;
-          const matchedQuery = normalizeExploreText(query);
+          const matchedQuery = normalizeExploreText(visibleQuery);
           const remotePlaces = (catalog.places ?? []).map((item, index) => ({
             ...exploreIndexItemToProfile(item),
             matched_explore_query: matchedQuery,
@@ -2492,12 +2612,13 @@ function GuideScreenContent() {
       clearTimeout(timer);
       if (pageSpec) updateExploreCatalogPage(pageSpec.key, current => ({ ...current, loading: false }));
     };
-  }, [tab, exploreMode, exploreQuery, exploreCategory, exploreSavedOnly, exploreSortMode, updateExploreCatalogPage, userLoc?.lat, userLoc?.lng]);
+  }, [tab, exploreMode, exploreQuery, exploreCatalogRequestQuery, exploreCategory, exploreSavedOnly, exploreSortMode, updateExploreCatalogPage, userLoc?.lat, userLoc?.lng]);
 
   useEffect(() => {
-    if (exploreMode !== 'nearby' || !userLoc) {
+    if (exploreMode !== 'nearby' || !exploreNearbySearchCenter) {
       setLiveExplorePlaces([]);
       setLiveExploreError('');
+      setLiveExploreLoading(false);
       return;
     }
     let cancelled = false;
@@ -2513,7 +2634,7 @@ function GuideScreenContent() {
     (async () => {
       let places: OsmPoi[] = [];
       for (const radius of radii) {
-        const candidates = await api.getNearbyPlaces(userLoc.lat, userLoc.lng, radius, categories);
+        const candidates = await api.getNearbyPlaces(exploreNearbySearchCenter.lat, exploreNearbySearchCenter.lng, radius, categories);
         places = serviceCategory
           ? candidates.filter(place => livePlaceMatchesCategory(place, serviceCategory))
           : candidates;
@@ -2534,10 +2655,15 @@ function GuideScreenContent() {
         if (!cancelled) setLiveExploreLoading(false);
       });
     return () => { cancelled = true; };
-  }, [exploreCategory, exploreMode, exploreLocationRequestId, userLoc?.lat, userLoc?.lng]);
+  }, [exploreCategory, exploreMode, exploreLocationRequestId, exploreNearbySearchCenter?.lat, exploreNearbySearchCenter?.lng]);
 
   useEffect(() => {
-    if (tab !== 'explore' || exploreMode !== 'nearby' || userLoc) return;
+    if (
+      tab !== 'explore'
+      || exploreMode !== 'nearby'
+      || exploreNearbySearchCenter
+      || exploreServiceDestinationQuery
+    ) return;
     let cancelled = false;
     setExploreLocationState('requesting');
     setExploreHomeWeatherError('');
@@ -2564,7 +2690,7 @@ function GuideScreenContent() {
       }
     })();
     return () => { cancelled = true; };
-  }, [tab, exploreMode, exploreLocationRequestId, userLoc?.lat, userLoc?.lng, setUserLoc]);
+  }, [tab, exploreMode, exploreLocationRequestId, exploreNearbySearchCenter?.lat, exploreNearbySearchCenter?.lng, exploreServiceDestinationQuery, setUserLoc]);
 
   async function openExploreLocationSettings() {
     const permission = await Location.getForegroundPermissionsAsync().catch(() => null);
@@ -2584,16 +2710,16 @@ function GuideScreenContent() {
   }
 
   useEffect(() => {
-    if (tab !== 'explore' || exploreMode !== 'nearby' || !userLoc) {
+    if (tab !== 'explore' || exploreMode !== 'nearby' || !exploreNearbySearchCenter) {
       setExploreHomeWeather(null);
-      setExploreHomeWeatherError(userLoc ? '' : '');
+      setExploreHomeWeatherError('');
       setExploreHomeWeatherLoading(false);
       return;
     }
     let cancelled = false;
     setExploreHomeWeatherLoading(true);
     setExploreHomeWeatherError('');
-    api.getWeather(userLoc.lat, userLoc.lng, 3, weatherUnitMode)
+    api.getWeather(exploreNearbySearchCenter.lat, exploreNearbySearchCenter.lng, 3, weatherUnitMode)
       .then(weather => {
         if (!cancelled) setExploreHomeWeather(weather);
       })
@@ -2604,7 +2730,7 @@ function GuideScreenContent() {
         if (!cancelled) setExploreHomeWeatherLoading(false);
       });
     return () => { cancelled = true; };
-  }, [tab, userLoc?.lat, userLoc?.lng, weatherUnitMode]);
+  }, [tab, exploreMode, exploreNearbySearchCenter?.lat, exploreNearbySearchCenter?.lng, weatherUnitMode]);
 
   useEffect(() => {
     setSelectedExplore(null);
@@ -3065,9 +3191,11 @@ function GuideScreenContent() {
   const tourSearchPaused = !BOOKABLE_EXPERIENCES_ENABLED && ((exploreCategory === 'guided' || exploreCategory === 'tours') || isExplicitTourOnlyQuery(exploreQuery));
   const browseExploreCategory: ExploreCategoryKey = tourSearchPaused ? 'things' : ((exploreCategory === 'guided' || exploreCategory === 'tours') && guidedVisibleExperiences.length === 0) ? 'all' : exploreCategory;
   const exploreTripNeedsRoute = exploreMode === 'trip' && waypoints.length === 0;
-  const exploreNearbyNeedsLocation = exploreMode === 'nearby' && !userLoc;
+  const exploreNearbyNeedsLocation = exploreMode === 'nearby'
+    && !exploreNearbySearchCenter
+    && !exploreServiceDestinationQuery;
   const rankedExplore = useMemo(() => {
-    if (exploreNearbyNeedsLocation) return [];
+    if (exploreNearbyNeedsLocation || exploreServiceDestinationResolving || exploreServiceDestinationFailed) return [];
     if (exploreMode === 'trip' && waypoints.length === 0) return [];
     if ((exploreCategory === 'guided' || exploreCategory === 'tours') && guidedTourSearchRunId <= 0 && !isExplicitTourOnlyQuery(exploreQuery)) return [];
     if (!tourSearchPaused
@@ -3081,8 +3209,9 @@ function GuideScreenContent() {
         : null;
       let distance: number | null = null;
       let day: number | undefined;
-      if (loc && userLoc && (exploreMode === 'nearby' || exploreSortMode === 'nearest')) {
-        distance = distMi(userLoc, loc);
+      const distanceCenter = exploreMode === 'nearby' ? exploreNearbySearchCenter : userLoc;
+      if (loc && distanceCenter && (exploreMode === 'nearby' || exploreSortMode === 'nearest')) {
+        distance = distMi(distanceCenter, loc);
       }
       if (loc && exploreMode === 'trip' && waypoints.length > 0) {
         let best = Infinity;
@@ -3285,7 +3414,7 @@ function GuideScreenContent() {
         return aDist - bDist;
       });
     return dedupeRankedExploreItems(sorted);
-  }, [browseExploreCategory, enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreQuery, exploreSavedOnly, exploreSortMode, guidedTourSearchRunId, guidedVisibleExperiences.length, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
+  }, [browseExploreCategory, enrichedExplorePlaces, exploreCategory, exploreHubMeta, exploreMode, exploreNearbyNeedsLocation, exploreNearbySearchCenter?.lat, exploreNearbySearchCenter?.lng, exploreNearbySearchCenter?.name, exploreQuery, exploreSavedOnly, exploreServiceDestinationFailed, exploreServiceDestinationResolving, exploreSortMode, guidedTourSearchRunId, guidedVisibleExperiences.length, savedExploreIds, showExperienceSearch, tourSearchPaused, userLoc?.lat, userLoc?.lng, waypoints]);
 
   useEffect(() => {
     setExploreVisibleLimit(EXPLORE_INITIAL_VISIBLE);
@@ -4105,7 +4234,7 @@ function GuideScreenContent() {
     router.push('/(tabs)/map');
   }
 
-  function routeExploreTrail(place: ExplorePlaceProfile, trail: ExploreTrailCard) {
+  function directionsToExploreTrailhead(place: ExplorePlaceProfile, trail: ExploreTrailCard) {
     const target = trail.trekking_only && trail.route_target ? trail.route_target : null;
     const lat = target?.lat ?? trail.lat ?? place.summary.lat;
     const lng = target?.lng ?? trail.lng ?? place.summary.lng;
@@ -4231,6 +4360,15 @@ function GuideScreenContent() {
   }
 
   async function openExplorePlace(place: ExplorePlaceProfile, initialTab: ExploreDetailTab = 'summary') {
+    if (place.id.startsWith('guided:')) {
+      const destination = [...guidedDestinations, ...GUIDED_DESTINATIONS]
+        .find(item => item.id === place.id);
+      if (destination) {
+        setSelectedExplore(null);
+        selectGuidedDestination(destination);
+        return;
+      }
+    }
     const parentTab = initialTab === 'summary' ? exploreTabForNestedPlace(place) : initialTab;
     const resolvesBeforeOpen = shouldResolveExploreWrapperBeforeOpen(place);
     const parentHubId = exploreHubMeta.parentByChildId.get(place.id);
@@ -4441,6 +4579,7 @@ function GuideScreenContent() {
           distance,
           day,
           sort: exploreSortMode,
+          nearbyName: exploreNearbySearchCenter?.source === 'destination' ? exploreNearbySearchCenter.name : undefined,
         })}
         onOpen={() => openExplorePlace(place, exploreTabForResultCardOpen(place))}
         onPrimary={() => activeTrip ? addExplorePlaceToTrip(place) : startTripFromExplore(place)}
@@ -4640,7 +4779,7 @@ function GuideScreenContent() {
         limit: 180,
         cursor,
       }), 12000);
-      const matchedQuery = normalizeExploreText(spec.q);
+      const matchedQuery = normalizeExploreText(exploreQuery);
       const remotePlaces = (catalog.places ?? []).map((item, index) => ({
         ...exploreIndexItemToProfile(item),
         ...(matchedQuery ? {
@@ -4955,46 +5094,52 @@ function GuideScreenContent() {
     );
   }
 
-	  function selectExploreHomeCategory(key: ExploreCategoryKey) {
-	    setExploreSavedOnly(false);
-	    if (key !== 'guided' && key !== 'tours') setGuidedTourSelectedDestinationKey(null);
-	    if (exploreQuery.trim()) {
-	      setExploreQuery('');
-	    }
-	    if (key === 'nearby') {
+  function selectExploreHomeCategory(key: ExploreCategoryKey) {
+    setExploreSavedOnly(false);
+    if (key === 'nearby') {
       setExploreCategory('all');
       setExploreMode('nearby');
       return;
     }
-	    if (key === 'fuel' || key === 'resupply') {
-	      setExploreCategory(exploreCategory === key ? 'all' : key);
-	      setExploreMode('nearby');
-	      return;
-	    }
-	    if ((key === 'guided' || key === 'tours') && exploreCategory !== key) {
-	      setGuidedTourDraft('');
-	      setGuidedTourSearchQuery('');
-	      setGuidedTourSelectedCenter(null);
-	      setGuidedTourSelectedDestinationKey(null);
-	      setGuidedTourSearchRunId(0);
-	    }
+    if (key === 'fuel' || key === 'resupply') {
+      setExploreCategory(exploreCategory === key ? 'all' : key);
+      setExploreMode('nearby');
+      return;
+    }
+    if ((key === 'guided' || key === 'tours') && exploreCategory !== key && !guidedDestinationContextActive) {
+      setGuidedTourDraft('');
+      setGuidedTourSearchQuery('');
+      setGuidedTourSelectedCenter(null);
+      setGuidedTourSelectedDestinationKey(null);
+      setGuidedTourSearchRunId(0);
+    }
     if (key === 'all') {
       setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
       setExploreCategory('all');
       return;
     }
-	    setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
-	    setExploreCategory(exploreCategory === key ? 'all' : key);
-	  }
+    setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
+    setExploreCategory(exploreCategory === key ? 'all' : key);
+  }
 
-	  function handleExploreQueryChange(value: string) {
-	    setExploreQuery(value);
-	    const nextCategory = exploreCategoryFetchParamFromQuery(value, 'all');
-	    if (nextCategory && exploreCategory !== 'all' && exploreCategory !== nextCategory) {
-	      setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
-	      setExploreCategory(nextCategory);
-	    }
-	  }
+  function handleExploreQueryChange(value: string) {
+    setExploreQuery(value);
+    const keepsGuidedDestination = !!guidedTourSelectedDestinationKey
+      && !!guidedTourSelectedCenter
+      && normalizeExploreText(value) === normalizeExploreText(guidedTourSearchQuery);
+    if (!keepsGuidedDestination) {
+      setGuidedTourDraft('');
+      setGuidedTourSearchQuery('');
+      setGuidedTourSelectedCenter(null);
+      setGuidedTourSelectedDestinationKey(null);
+      setGuidedTourSearchRunId(0);
+    }
+    const nextCategory = exploreCategoryFetchParamFromQuery(value, 'all');
+    if (nextCategory && exploreCategory !== 'all' && exploreCategory !== nextCategory) {
+      setExploreMode(exploreMode === 'nearby' ? 'featured' : exploreMode);
+      setExploreCategory(nextCategory);
+    }
+  }
 
   function renderLandingHeader() {
     return (
@@ -5010,9 +5155,9 @@ function GuideScreenContent() {
           weather={heroWeather}
           hideSearch={guidedCategoryActive}
 	          hideCategories
-	          showWeather={exploreMode === 'nearby' && !!userLoc}
+	          showWeather={exploreMode === 'nearby' && !!exploreNearbySearchCenter}
 	          onQueryChange={handleExploreQueryChange}
-          onClearQuery={() => setExploreQuery('')}
+          onClearQuery={() => handleExploreQueryChange('')}
           onCategorySelect={selectExploreHomeCategory}
         />
       </View>
@@ -5156,8 +5301,14 @@ function GuideScreenContent() {
             {exploreMode === 'nearby' && (
               <View style={s.livePlacesBlock}>
                 <View style={s.livePlacesTop}>
-                  <Text style={s.livePlacesTitle}>Places near you</Text>
-                  {liveExploreLoading && <ActivityIndicator color={C.orange} size="small" />}
+                  <Text style={s.livePlacesTitle} numberOfLines={1}>
+                    {exploreNearbySearchCenter?.source === 'destination' && exploreNearbySearchCenter.name
+                      ? `Near ${exploreNearbySearchCenter.name}`
+                      : exploreServiceDestinationQuery
+                        ? `Near ${exploreServiceDestinationQuery}`
+                      : 'Places near you'}
+                  </Text>
+                  {(liveExploreLoading || exploreServiceDestinationResolving) && <ActivityIndicator color={C.orange} size="small" />}
                 </View>
                 {exploreNearbyNeedsLocation ? (
                   <View style={s.nearbyPermissionState}>
@@ -5184,7 +5335,15 @@ function GuideScreenContent() {
                       </TouchableOpacity>
                     ) : null}
                   </View>
-                ) : liveExploreLoading && filteredLiveExplorePlaces.length === 0 ? (
+                ) : exploreServiceDestinationFailed ? (
+                  <View style={s.nearbyPermissionState}>
+                    <Text style={s.livePlacesEmpty}>That destination could not be found.</Text>
+                    <TouchableOpacity style={s.stateAction} onPress={() => setExploreLocationRequestId(value => value + 1)} activeOpacity={0.84}>
+                      <Ionicons name="refresh" size={15} color="#fff" />
+                      <Text style={s.stateActionText}>Try again</Text>
+                    </TouchableOpacity>
+                  </View>
+                ) : (liveExploreLoading || exploreServiceDestinationResolving) && filteredLiveExplorePlaces.length === 0 ? (
                   <>
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
                     <TrailheadCardSkeleton media lines={2} style={s.livePlaceSkeleton} />
@@ -5341,7 +5500,7 @@ function GuideScreenContent() {
                   </TouchableOpacity>
                 ) : null}
               </>
-            ) : !tourSearchPaused && !showExperienceSearch && ((!exploreLoading && !exploreSearchResolving) || exploreNearbyNeedsLocation) && rankedExplore.length === 0 && filteredLiveExplorePlaces.length === 0 ? (
+            ) : !exploreError && !tourSearchPaused && !showExperienceSearch && !exploreServiceDestinationResolving && !exploreServiceDestinationFailed && ((!exploreLoading && !exploreSearchResolving) || exploreNearbyNeedsLocation) && rankedExplore.length === 0 && filteredLiveExplorePlaces.length === 0 ? (
               <View style={s.emptyState}>
                 <Ionicons name={exploreSavedOnly ? 'bookmark-outline' : exploreTripNeedsRoute ? 'map-outline' : 'search-outline'} size={44} color={C.text3} />
                 <Text style={s.emptyTitle}>
@@ -5661,11 +5820,12 @@ function GuideScreenContent() {
             onShowArea={() => showExploreOnMap(selectedExplore)}
             onRoute={() => activeTrip ? addExplorePlaceToTrip(selectedExplore) : startTripFromExplore(selectedExplore)}
             routeLabel={activeTrip ? (isExploreAddedToTrip(selectedExplore) ? 'Added to trip' : 'Add to trip') : 'Start trip'}
+            routeDisabled={!!activeTrip && isExploreAddedToTrip(selectedExplore)}
             onToggleSave={() => toggleSavedExplore(selectedExplore)}
             onNearbyAction={module => handleExploreNearbyAction(selectedExplore, module)}
             onSourcePackItem={showSourcePackItemOnMap}
             onTrailMap={trail => showExploreTrailOnMap(selectedExplore, trail)}
-            onTrailRoute={trail => routeExploreTrail(selectedExplore, trail)}
+            onTrailRoute={trail => directionsToExploreTrailhead(selectedExplore, trail)}
             mediaUrl={mediaUrl}
           />
         )}

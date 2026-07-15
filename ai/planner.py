@@ -1,7 +1,10 @@
 """Claude AI trip planning engine."""
 from __future__ import annotations
-import json, re, time
+import json, logging, re, time
+from types import SimpleNamespace
+
 import anthropic
+import httpx
 from config.settings import settings
 
 CHAT_SYSTEM = """You are Trailhead — a personal overland trip guide and trail expert for supported overland regions. You've driven these roads and camped these spots. Your job is to help the user plan their perfect trip through natural conversation.
@@ -382,6 +385,8 @@ RESPOND TO REQUESTS INTELLIGENTLY:
 client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 HAIKU_MODEL = "claude-haiku-4-5-20251001"
 SONNET_MODEL = "claude-sonnet-4-6"
+logger = logging.getLogger(__name__)
+_anthropic_disabled_until = 0.0
 
 
 def _daily_mile_cap(day: int, road_type: str) -> int:
@@ -414,6 +419,156 @@ def _claude(fn, max_attempts: int = 3):
                 raise
 
 
+def _anthropic_can_fall_back(exc: Exception) -> bool:
+    if not settings.openai_api_key:
+        return False
+    if isinstance(exc, anthropic.APIConnectionError):
+        return True
+    if isinstance(exc, anthropic.RateLimitError):
+        return True
+    if not isinstance(exc, anthropic.APIStatusError):
+        return False
+    message = str(exc).lower()
+    return (
+        exc.status_code in {401, 403, 404, 429}
+        or exc.status_code >= 500
+        or "credit balance" in message
+        or "billing" in message
+        or "model" in message and ("not found" in message or "access" in message)
+    )
+
+
+def _openai_message(
+    *,
+    model: str,
+    max_tokens: int,
+    messages: list[dict],
+    system: str | None = None,
+    temperature: float | None = None,
+    max_attempts: int = 3,
+):
+    if not settings.openai_api_key:
+        raise RuntimeError("No trip-planning provider is configured")
+
+    openai_model = (
+        settings.openai_planner_model
+        if model == SONNET_MODEL
+        else settings.openai_planner_fast_model
+    )
+    openai_messages: list[dict[str, str]] = []
+    if system:
+        openai_messages.append({"role": "system", "content": system})
+    for message in messages:
+        role = str(message.get("role") or "user")
+        if role not in {"system", "user", "assistant"}:
+            role = "user"
+        content = message.get("content")
+        if not isinstance(content, str):
+            content = json.dumps(content, ensure_ascii=True)
+        openai_messages.append({"role": role, "content": content})
+
+    payload: dict[str, object] = {
+        "model": openai_model,
+        "messages": openai_messages,
+        "max_completion_tokens": max_tokens,
+    }
+    if temperature is not None and not openai_model.startswith("gpt-5"):
+        payload["temperature"] = temperature
+
+    attempts = max(1, int(max_attempts))
+    delays = [3, 8]
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            response = httpx.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {settings.openai_api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+                timeout=180,
+            )
+        except httpx.HTTPError as exc:
+            last_error = exc
+            if attempt < attempts - 1:
+                time.sleep(delays[min(attempt, len(delays) - 1)])
+                continue
+            raise RuntimeError("Trip-planning provider could not be reached") from exc
+
+        if response.status_code == 429 or response.status_code >= 500:
+            if attempt < attempts - 1:
+                time.sleep(delays[min(attempt, len(delays) - 1)])
+                continue
+        if response.status_code >= 400:
+            raise RuntimeError(f"Trip-planning provider rejected the request ({response.status_code})")
+
+        data = response.json()
+        choices = data.get("choices") if isinstance(data, dict) else None
+        choice = choices[0] if isinstance(choices, list) and choices else None
+        message = choice.get("message") if isinstance(choice, dict) else None
+        text = message.get("content") if isinstance(message, dict) else None
+        if not isinstance(text, str) or not text.strip():
+            raise RuntimeError("Trip-planning provider returned an empty response")
+        return SimpleNamespace(
+            model=str(data.get("model") or openai_model),
+            content=[SimpleNamespace(text=text)],
+        )
+
+    raise RuntimeError("Trip-planning provider could not complete the request") from last_error
+
+
+def _create_message(
+    *,
+    model: str,
+    max_tokens: int,
+    messages: list[dict],
+    system: str | None = None,
+    temperature: float | None = None,
+    max_attempts: int = 2,
+):
+    global _anthropic_disabled_until
+
+    if settings.anthropic_api_key and time.monotonic() >= _anthropic_disabled_until:
+        try:
+            return _claude(
+                lambda: client.messages.create(
+                    model=model,
+                    max_tokens=max_tokens,
+                    system=system or anthropic.NOT_GIVEN,
+                    messages=messages,
+                    temperature=temperature if temperature is not None else anthropic.NOT_GIVEN,
+                ),
+                max_attempts=max(1, int(max_attempts)),
+            )
+        except Exception as exc:
+            if not _anthropic_can_fall_back(exc):
+                raise
+            logger.warning(
+                "planner_provider_fallback primary=anthropic status=%s",
+                getattr(exc, "status_code", "unavailable"),
+            )
+            fallback = _openai_message(
+                model=model,
+                max_tokens=max_tokens,
+                messages=messages,
+                system=system,
+                temperature=temperature,
+                max_attempts=max_attempts,
+            )
+            _anthropic_disabled_until = time.monotonic() + 3600
+            return fallback
+
+    return _openai_message(
+        model=model,
+        max_tokens=max_tokens,
+        messages=messages,
+        system=system,
+        temperature=temperature,
+        max_attempts=max_attempts,
+    )
+
+
 def generate_audio_guide(waypoints: list[dict], trip_name: str) -> dict:
     """Generate spoken narration for each geocoded waypoint."""
     geocoded = [w for w in waypoints if w.get("lat") and w.get("lng")]
@@ -426,8 +581,8 @@ def generate_audio_guide(waypoints: list[dict], trip_name: str) -> dict:
     )
 
     # Haiku handles creative prose narrations well and is 10x cheaper than Sonnet
-    msg = _claude(lambda: client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = _create_message(
+        model=HAIKU_MODEL,
         max_tokens=4096,
         messages=[{"role": "user", "content": f"""You are a trail guide riding along on the overlanding trip "{trip_name}".
 
@@ -439,7 +594,7 @@ Conversational and vivid — you're in the passenger seat. No markdown, no heade
 
 Return ONLY valid JSON. Keys are exact waypoint names, values are narration strings:
 {{"Waypoint Name": "narration...", ...}}"""}]
-    ))
+    )
 
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
@@ -456,14 +611,14 @@ Return ONLY valid JSON. Keys are exact waypoint names, values are narration stri
 def generate_location_narration(lat: float, lng: float, location_name: str = "") -> str:
     """Generate on-demand narration for any location."""
     loc_desc = location_name if location_name else f"lat {lat:.4f}, lng {lng:.4f}"
-    msg = _claude(lambda: client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = _create_message(
+        model=HAIKU_MODEL,
         max_tokens=300,
         messages=[{"role": "user", "content": f"""You are a trail guide. The user is currently at: {loc_desc}
 Write a 3-4 sentence spoken narration about this specific location: nearby road or place names, local landscape, land use, history, wildlife, or what to look for.
 Use only the location clues provided. Do not invent deserts, canyons, mountains, public lands, or Western scenery unless the context clearly supports it. If the context is sparse, say what is known from the coordinates and keep it grounded.
 Conversational tone, no markdown."""}]
-    ))
+    )
     return msg.content[0].text.strip()
 
 
@@ -499,11 +654,11 @@ Return ONLY valid JSON with this exact schema:
   "coordinates_dms": "convert lat/lng to degrees-minutes-seconds format (e.g. 37°52'30''N 109°23'15''W)"
 }}"""
 
-    msg = _claude(lambda: client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = _create_message(
+        model=HAIKU_MODEL,
         max_tokens=900,
         messages=[{"role": "user", "content": prompt}]
-    ))
+    )
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -562,11 +717,11 @@ Return ONLY valid JSON:
   "briefing_summary": "1-2 sentence field assessment — no heading, no label, no markdown. Prefer direct wording like: This route is usable, but confirm camps, fuel, offline maps, and current closures before you roll."
 }}"""
 
-    msg = _claude(lambda: client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = _create_message(
+        model=HAIKU_MODEL,
         max_tokens=1600,
         messages=[{"role": "user", "content": prompt}]
-    ))
+    )
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -608,11 +763,11 @@ Return ONLY valid JSON:
   "leave_at_home": ["things people usually pack but don't need for this trip"]
 }}"""
 
-    msg = _claude(lambda: client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = _create_message(
+        model=HAIKU_MODEL,
         max_tokens=1600,
         messages=[{"role": "user", "content": prompt}]
-    ))
+    )
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -640,12 +795,12 @@ def chat_guide(messages: list[dict], trail_dna: dict | None = None) -> dict:
             system += "\n\nUSER PROFILE (personalize without asking them to repeat):\n" + "\n".join(lines)
 
     # Haiku handles conversational turns well — Sonnet only needed for final JSON generation
-    msg = _claude(lambda: client.messages.create(
-        model="claude-haiku-4-5-20251001",
+    msg = _create_message(
+        model=HAIKU_MODEL,
         max_tokens=2000,
         system=system,
         messages=messages,
-    ))
+    )
     raw = msg.content[0].text.strip()
 
     # Scan entire response for _ready signal (not just last N lines)
@@ -674,13 +829,13 @@ def edit_trip(current_trip: dict, edit_request: str) -> dict:
     trip_plan = current_trip.get("plan", current_trip)
     trip_json = json.dumps(trip_plan, indent=2)
 
-    msg = _claude(lambda: client.messages.create(
-        model="claude-sonnet-4-6",
+    msg = _create_message(
+        model=SONNET_MODEL,
         max_tokens=8192,
         system=EDIT_SYSTEM,
         messages=[{"role": "user", "content":
             f"Current trip:\n{trip_json}\n\nEdit request: {edit_request}"}],
-    ))
+    )
     raw = msg.content[0].text.strip()
     raw = re.sub(r'^```json\s*', '', raw)
     raw = re.sub(r'^```\s*', '', raw)
@@ -777,14 +932,12 @@ def _parse_plan_json(raw: str) -> dict:
 
 
 def _call_plan_model(model: str, prompt: str, max_tokens: int, max_attempts: int = 3) -> str:
-    msg = _claude(
-        lambda: client.messages.create(
-            model=model,
-            max_tokens=max_tokens,
-            temperature=0,
-            system=SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
-        ),
+    msg = _create_message(
+        model=model,
+        max_tokens=max_tokens,
+        temperature=0,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}],
         max_attempts=max_attempts,
     )
     return msg.content[0].text.strip()

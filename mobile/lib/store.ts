@@ -1,11 +1,12 @@
 import { create } from 'zustand';
 import * as SecureStore from 'expo-secure-store';
 import * as FileSystem from 'expo-file-system/legacy';
-import { beginAccountStorageCleanup, endAccountStorageCleanup } from './storage';
-import { User, TripResult, Report, CampsitePin, OsmPoi, TrailProfile } from './api';
+import { accountStorage, beginAccountStorageCleanup, endAccountStorageCleanup } from './storage';
+import type { User, TripResult, Report, CampsitePin, OsmPoi, TrailProfile } from './api';
 import type { PendingRouteActivityOffer } from './routeActivityOffer';
 import {
   cancelRouteBuildSessionState,
+  cancelRouteBuildActivitySearch,
   closeAllRouteBuildRequests,
   closeRouteBuildRequest,
   createRouteBuildSession,
@@ -18,6 +19,7 @@ import {
   type StartRouteBuildSessionInput,
 } from './routeBuildSession';
 import {
+  acknowledgeTripRepositoryLegacyTrip,
   createSavedEntity,
   getSavedEntity,
   getTrip,
@@ -32,6 +34,12 @@ import {
   type TripDocumentV2,
 } from './tripRepository';
 import { canonicalSavedEntityId, tripDocumentFromTripResult } from './tripCompatibility';
+import { saveOfflineTrip } from './offlineTrips';
+import { tripWriteBarrierPending } from './tripWriteBarrier';
+import {
+  legacyTripSaveContextIsCurrent,
+  type LegacyTripSaveContext,
+} from './legacyTripSaveContext';
 
 let accountLocalWriteBlockDepth = 0;
 let accountLocalWriteTail: Promise<unknown> = Promise.resolve();
@@ -401,6 +409,10 @@ async function writeActiveTripMirror(
     && getTripRepositorySnapshot().ownerScope === ownerScope
   );
   if (!stillCurrent()) return;
+  if (trip && tripWriteBarrierPending(trip.trip_id)) {
+    scheduleActiveTripMirror(trip, previousTripId);
+    return;
+  }
   if (!trip) {
     if (!previousTripId) return;
     const previous = getTrip(previousTripId);
@@ -464,6 +476,74 @@ export async function cancelActiveTripMirror() {
   pendingActiveTripOwnerScope = null;
   const running = activeTripMirrorWrite;
   if (running) await running.catch(() => {});
+}
+
+export function captureLegacyTripSaveContext(): LegacyTripSaveContext {
+  const repository = getTripRepositorySnapshot();
+  const accountId = useStore.getState().user?.id;
+  return {
+    accountEpoch: accountStorage.epoch(),
+    accountId: accountId == null ? null : String(accountId),
+    ownerScope: repository.ownerScope,
+    repositoryInitialized: repository.initialized,
+  };
+}
+
+export function legacyTripSaveContextStillCurrent(context: LegacyTripSaveContext) {
+  return legacyTripSaveContextIsCurrent(context, captureLegacyTripSaveContext());
+}
+
+export function queueCurrentActiveTripMirror(tripId?: string, context?: LegacyTripSaveContext) {
+  if (context && !legacyTripSaveContextStillCurrent(context)) return false;
+  const current = useStore.getState().activeTrip;
+  if (!current || (tripId && current.trip_id !== tripId)) return false;
+  scheduleActiveTripMirror(current, current.trip_id);
+  return true;
+}
+
+export function queueActiveTripMirrorIfChanged(
+  submittedTrip: TripResult,
+  context?: LegacyTripSaveContext,
+) {
+  if (context && !legacyTripSaveContextStillCurrent(context)) return false;
+  const current = useStore.getState().activeTrip;
+  if (!current || current.trip_id !== submittedTrip.trip_id || current === submittedTrip) return false;
+  scheduleActiveTripMirror(current, current.trip_id);
+  return true;
+}
+
+export async function acknowledgeBackendTripRevision(
+  submittedTrip: TripResult,
+  acknowledgedTrip: TripResult,
+  context: LegacyTripSaveContext,
+) {
+  if (!legacyTripSaveContextStillCurrent(context)) {
+    return { record: null, applied: false, ignoredAsStale: true } as const;
+  }
+  if (!submittedTrip.trip_id || acknowledgedTrip.trip_id !== submittedTrip.trip_id) {
+    return { record: null, applied: false, ignoredAsStale: true } as const;
+  }
+  const acknowledgedRevision = Number(acknowledgedTrip.version);
+  if (!Number.isInteger(acknowledgedRevision) || acknowledgedRevision < 1) {
+    return { record: null, applied: false, ignoredAsStale: true } as const;
+  }
+  const snapshot = getTripRepositorySnapshot();
+  if (!snapshot.initialized || snapshot.ownerScope !== context.ownerScope) {
+    return { record: null, applied: false, ignoredAsStale: true } as const;
+  }
+  const converted = tripDocumentFromTripResult(acknowledgedTrip);
+  const current = getTrip(converted.id);
+  const merged = current ? mergeActiveTripDocument(current, converted) : converted;
+  return acknowledgeTripRepositoryLegacyTrip({
+    ...merged,
+    ownerScope: snapshot.ownerScope,
+    revision: acknowledgedRevision,
+  }, Number(submittedTrip.version) || undefined);
+}
+
+export async function applyBackendAcknowledgedActiveTrip(trip: TripResult) {
+  useStore.getState().setActiveTrip(trip, false, { mirrorRepository: false });
+  await saveOfflineTrip(trip);
 }
 
 export interface SavedPlace {
@@ -688,7 +768,11 @@ interface AppState {
   setAuth: (token: string, user: User) => void;
   signOut: () => Promise<void>;
   clearAuthAndLocalData: () => Promise<void>;
-  setActiveTrip: (trip: TripResult | null, fromCache?: boolean) => void;
+  setActiveTrip: (
+    trip: TripResult | null,
+    fromCache?: boolean,
+    options?: { mirrorRepository?: boolean },
+  ) => void;
   setTabBarHidden: (hidden: boolean) => void;
   setRigProfile: (rig: RigProfile) => void;
   addTripToHistory: (item: TripHistoryItem) => void;
@@ -901,7 +985,7 @@ export const useStore = create<AppState>((set) => ({
     });
   },
 
-  setActiveTrip: (trip, fromCache = false) => {
+  setActiveTrip: (trip, fromCache = false, options) => {
     if (!accountLocalMutationAllowed()) return;
     const previousTripId = useStore.getState().activeTrip?.trip_id ?? null;
     if (trip) saveTripFile(trip);
@@ -911,7 +995,7 @@ export const useStore = create<AppState>((set) => ({
       sd('trailhead_active_route');
     }
     set({ activeTrip: trip, activeTripFromCache: fromCache });
-    scheduleActiveTripMirror(trip, previousTripId);
+    if (options?.mirrorRepository !== false) scheduleActiveTripMirror(trip, previousTripId);
   },
 
   setTabBarHidden: (hidden) => set({ tabBarHidden: hidden }),
@@ -1064,8 +1148,13 @@ export const useStore = create<AppState>((set) => ({
     if (!current
       || current.requestId !== requestId
       || current.status !== 'running'
-      || current.phase !== 'activities'
-      || current.activityChoice !== 'pending') return;
+      || current.phase !== 'activities') return;
+    if (current.activityChoice === 'browse' && choice === 'skip') {
+      cancelRouteBuildActivitySearch(requestId);
+      set({ routeBuildSession: { ...current, activityChoice: 'skip', updatedAt: Date.now() } });
+      return;
+    }
+    if (current.activityChoice !== 'pending') return;
     set({ routeBuildSession: { ...current, activityChoice: choice, updatedAt: Date.now() } });
     resolveRouteBuildActivityChoice(requestId, choice);
   },

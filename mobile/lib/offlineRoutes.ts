@@ -7,8 +7,8 @@ const INDEX_PATH = DIR + '_index.json';
 
 export interface SavedRouteGeometry {
   coords: [number, number][];
-  steps: any[];
-  legs: any[];
+  steps?: any[];
+  legs?: any[];
   totalDistance?: number;
   totalDuration?: number;
   total_distance?: number;
@@ -46,7 +46,11 @@ export async function getSavedRouteIndex(): Promise<string[]> {
   }
 }
 
-export async function saveRouteGeometry(tripId: string | null | undefined, data: Omit<SavedRouteGeometry, 'tripId' | 'ts'> & { tripId?: string | null; ts?: number }) {
+export async function saveRouteGeometry(
+  tripId: string | null | undefined,
+  data: Omit<SavedRouteGeometry, 'tripId' | 'ts'> & { tripId?: string | null; ts?: number },
+  options: { syncBackend?: boolean } = {},
+) {
   if (!tripId || !Array.isArray(data.coords) || data.coords.length < 2) return;
   const epoch = accountStorage.epoch();
   try {
@@ -64,7 +68,7 @@ export async function saveRouteGeometry(tripId: string | null | undefined, data:
       return true;
     }, epoch);
     if (!stored) return;
-    api.saveTripGeometry(tripId, payload).catch(() => {});
+    if (options.syncBackend === true) api.saveTripGeometry(tripId, payload).catch(() => {});
   } catch {
     // Route geometry is a convenience cache; never crash navigation for it.
   }

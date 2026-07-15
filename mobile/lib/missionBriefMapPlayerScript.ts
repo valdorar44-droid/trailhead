@@ -17,6 +17,9 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     freeCamera: false,
     narrationDone: true,
     lastCameraTs: 0,
+    routeRef: null,
+    routeCum: [0],
+    routeTotal: 0,
     markers: []
   };
   function cinePost(type, extra) {
@@ -45,15 +48,75 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     if (data.route && data.route.length > 1) return data.route;
     return _routeCoords || [];
   }
-  function sliceCoords(slice) {
+  function cineDistance(a, b) {
+    var R = 6371000;
+    var toRad = function(value) { return value * Math.PI / 180; };
+    var dLat = toRad(b[1] - a[1]);
+    var dLng = toRad(b[0] - a[0]);
+    var lat1 = toRad(a[1]);
+    var lat2 = toRad(b[1]);
+    var h = Math.sin(dLat / 2) * Math.sin(dLat / 2)
+      + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLng / 2) * Math.sin(dLng / 2);
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(h)));
+  }
+  function cineRouteMetrics() {
     var coords = cineRoute();
+    if (cine.routeRef === coords && cine.routeCum.length === coords.length) {
+      return { coords: coords, cumulative: cine.routeCum, total: cine.routeTotal };
+    }
+    var cumulative = [0];
+    for (var i = 1; i < coords.length; i++) {
+      var segment = cineDistance(coords[i - 1], coords[i]);
+      cumulative[i] = cumulative[i - 1] + (isFinite(segment) ? segment : 0);
+    }
+    cine.routeRef = coords;
+    cine.routeCum = cumulative;
+    cine.routeTotal = cumulative[cumulative.length - 1] || 0;
+    return { coords: coords, cumulative: cumulative, total: cine.routeTotal };
+  }
+  function coordinateAtDistance(metrics, distance) {
+    var coords = metrics.coords;
+    if (!coords.length) return null;
+    if (coords.length === 1 || metrics.total <= 0 || distance <= 0) return coords[0];
+    if (distance >= metrics.total) return coords[coords.length - 1];
+    var endIndex = 1;
+    while (endIndex < metrics.cumulative.length && metrics.cumulative[endIndex] < distance) endIndex++;
+    var startIndex = Math.max(0, endIndex - 1);
+    var segmentDistance = metrics.cumulative[endIndex] - metrics.cumulative[startIndex];
+    var fraction = segmentDistance > 0 ? (distance - metrics.cumulative[startIndex]) / segmentDistance : 0;
+    var start = coords[startIndex];
+    var end = coords[Math.min(endIndex, coords.length - 1)];
+    return [
+      start[0] + (end[0] - start[0]) * fraction,
+      start[1] + (end[1] - start[1]) * fraction
+    ];
+  }
+  function coordsBetweenRatios(startRatio, endRatio) {
+    var metrics = cineRouteMetrics();
+    var coords = metrics.coords;
     if (coords.length < 2) return coords;
+    var start = Math.max(0, Math.min(1, Number(startRatio) || 0));
+    var end = Math.max(start, Math.min(1, Number(endRatio) || 0));
+    if (metrics.total <= 0) return [coords[0]];
+    var startDistance = start * metrics.total;
+    var endDistance = end * metrics.total;
+    var sliced = [coordinateAtDistance(metrics, startDistance)];
+    for (var i = 1; i < coords.length - 1; i++) {
+      if (metrics.cumulative[i] > startDistance && metrics.cumulative[i] < endDistance) {
+        var previous = sliced[sliced.length - 1];
+        if (Math.abs(previous[0] - coords[i][0]) > 1e-10 || Math.abs(previous[1] - coords[i][1]) > 1e-10) sliced.push(coords[i]);
+      }
+    }
+    var endCoord = coordinateAtDistance(metrics, endDistance);
+    var tail = sliced[sliced.length - 1];
+    if (!tail || Math.abs(tail[0] - endCoord[0]) > 1e-10 || Math.abs(tail[1] - endCoord[1]) > 1e-10) sliced.push(endCoord);
+    return sliced;
+  }
+  function sliceCoords(slice) {
     var s = Math.max(0, Math.min(1, (slice && slice[0]) || 0));
     var rawEnd = slice && slice[1] != null ? slice[1] : 1;
     var e = Math.max(s, Math.min(1, rawEnd));
-    var si = Math.floor(s * (coords.length - 1));
-    var ei = Math.max(si + 1, Math.ceil(e * (coords.length - 1)));
-    return coords.slice(si, ei + 1);
+    return coordsBetweenRatios(s, e);
   }
   function ensureCineRouteLayers() {
     var coords = cineRoute();
@@ -73,21 +136,27 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
     var coords = cineRoute();
     if (coords.length < 2) return;
     var clamped = Math.max(0, Math.min(1, ratio));
-    var count = Math.max(2, Math.ceil(clamped * coords.length));
-    map.getSource('route-anim')?.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: coords.slice(0, count) } });
+    var progress = coordsBetweenRatios(0, clamped);
+    if (progress.length === 1) progress = [progress[0], progress[0]];
+    map.getSource('route-anim')?.setData({ type: 'Feature', geometry: { type: 'LineString', coordinates: progress } });
     cinePost('cinematic_progress', { ratio: clamped });
   }
+  function clearMissionBriefOverlay() {
+    window.__missionBriefData = Object.assign({}, window.__missionBriefData || {}, { route: [] });
+    cine.routeRef = null;
+    cine.routeCum = [0];
+    cine.routeTotal = 0;
+    var empty = { type: 'FeatureCollection', features: [] };
+    var fullSource = map && map.getSource('route-full');
+    var progressSource = map && map.getSource('route-anim');
+    if (fullSource && typeof fullSource.setData === 'function') fullSource.setData(empty);
+    if (progressSource && typeof progressSource.setData === 'function') progressSource.setData(empty);
+  }
   function pointAtRatio(ratio) {
-    var coords = cineRoute();
-    if (!coords.length) return null;
-    if (coords.length === 1) return coords[0];
+    var metrics = cineRouteMetrics();
+    if (!metrics.coords.length) return null;
     var clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
-    var pos = clamped * (coords.length - 1);
-    var i = Math.floor(pos);
-    var frac = pos - i;
-    var c0 = coords[Math.min(i, coords.length - 1)];
-    var c1 = coords[Math.min(i + 1, coords.length - 1)];
-    return [c0[0] + (c1[0] - c0[0]) * frac, c0[1] + (c1[1] - c0[1]) * frac];
+    return coordinateAtDistance(metrics, clamped * metrics.total);
   }
   function sceneForRatio(ratio) {
     var clamped = Math.max(0, Math.min(1, Number(ratio) || 0));
@@ -199,19 +268,17 @@ export function getMissionBriefMapPlayerScript(mapTopPadding = 180, mapBottomPad
         } else if (scene.type === 'mission_recap') {
           setProgressLine(1);
         } else if (cam.mode === 'follow' && coords && coords.length > 1 && slice) {
-          setProgressLine(slice[0] + (slice[1] - slice[0]) * t);
+          var routeRatio = slice[0] + (slice[1] - slice[0]) * t;
+          setProgressLine(routeRatio);
           if (elapsed > 700 && now - cine.lastCameraTs >= 80) {
             cine.lastCameraTs = now;
-            var fpos = t * (coords.length - 1);
-            var fi = Math.floor(fpos);
-            var frac = fpos - fi;
-            var c0 = coords[Math.min(fi, coords.length - 1)];
-            var c1 = coords[Math.min(fi + 1, coords.length - 1)];
-            var lng = c0[0] + (c1[0] - c0[0]) * frac;
-            var lat = c0[1] + (c1[1] - c0[1]) * frac;
+            var current = pointAtRatio(routeRatio);
+            var ahead = pointAtRatio(Math.min(slice[1], routeRatio + 0.002));
+            var lng = current[0];
+            var lat = current[1];
             var bearing = 0;
-            if (fi + 1 < coords.length) {
-              var dx = c1[0] - c0[0], dy = c1[1] - c0[1];
+            if (ahead) {
+              var dx = ahead[0] - current[0], dy = ahead[1] - current[1];
               bearing = (Math.atan2(dx, dy) * 180 / Math.PI + 360) % 360;
             }
             if (!cine.freeCamera) {

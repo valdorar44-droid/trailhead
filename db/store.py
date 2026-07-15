@@ -2022,6 +2022,7 @@ def _sync_v2_trip_from_legacy_write(
     replace_route_geometry: bool,
     replace_builder_state: bool,
     now: int,
+    target_revision: int | None = None,
     sync_plan: bool = True,
 ) -> int | None:
     if user_id is None:
@@ -2067,7 +2068,10 @@ def _sync_v2_trip_from_legacy_write(
     if replace_builder_state:
         legacy["builder_state"] = builder_state if isinstance(builder_state, dict) else None
     document["legacy_v1"] = legacy
-    new_revision = int(row["revision"] or 1) + 1
+    new_revision = max(
+        int(row["revision"] or 1) + 1,
+        int(target_revision or 0),
+    )
     db.execute(
         """UPDATE trip_documents_v2
            SET revision=?,document_json=?,updated_at=?
@@ -2096,30 +2100,35 @@ def save_trip(
     try:
         db.execute("BEGIN IMMEDIATE")
         now = int(time.time())
+        v2 = None
         if user_id is not None:
-            deleted_v2 = db.execute(
-                """SELECT revision FROM trip_documents_v2
-                   WHERE user_id=? AND id=? AND status='deleted'""",
+            v2 = db.execute(
+                """SELECT status,revision FROM trip_documents_v2
+                   WHERE user_id=? AND id=?""",
                 (user_id, trip_id),
             ).fetchone()
-            if deleted_v2:
-                raise RevisionConflictError(int(deleted_v2["revision"] or 1))
+            if v2 and v2["status"] == "deleted":
+                raise RevisionConflictError(int(v2["revision"] or 1))
         existing = db.execute("SELECT user_id,version FROM trips WHERE id=?", (trip_id,)).fetchone()
         if existing and existing["user_id"] != user_id:
             raise PermissionError("Not authorized")
-        if existing and expected_version is not None and int(existing["version"] or 1) != int(expected_version):
-            raise RevisionConflictError(int(existing["version"] or 1))
+        legacy_revision = int(existing["version"] or 1) if existing else 0
+        v2_revision = int(v2["revision"] or 1) if v2 else 0
+        current_revision = max(legacy_revision, v2_revision)
+        if expected_version is not None and current_revision != int(expected_version):
+            raise RevisionConflictError(current_revision)
+        next_revision = current_revision + 1
         if existing:
             replace_route_geometry = route_geometry is not _ROUTE_GEOMETRY_UNSET
             replace_builder_state = builder_state is not _BUILDER_STATE_UNSET
             replace_audio_guide = audio_guide is not _AUDIO_GUIDE_UNSET
-            db.execute(
+            cursor = db.execute(
                 """UPDATE trips SET request=?,plan=?,
                           route_geometry=CASE WHEN ? THEN ? ELSE route_geometry END,
                           builder_state=CASE WHEN ? THEN ? ELSE builder_state END,
                           audio_guide=CASE WHEN ? THEN ? ELSE audio_guide END,
-                          updated_at=?,version=COALESCE(version,1)+1
-                   WHERE id=? AND user_id IS ?""",
+                          updated_at=?,version=?
+                   WHERE id=? AND user_id IS ? AND COALESCE(version,1)=?""",
                 (
                     request,
                     stored_plan_json,
@@ -2130,15 +2139,19 @@ def save_trip(
                     replace_audio_guide,
                     json.dumps(audio_guide) if replace_audio_guide and audio_guide is not None else None,
                     now,
+                    next_revision,
                     trip_id,
                     user_id,
+                    legacy_revision,
                 ),
             )
+            if cursor.rowcount != 1:
+                raise RevisionConflictError(current_revision)
         else:
             db.execute(
                 """INSERT INTO trips
                    (id,user_id,created_at,updated_at,request,plan,route_geometry,builder_state,audio_guide,version)
-                   VALUES (?,?,?,?,?,?,?,?,?,1)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trip_id,
                     user_id,
@@ -2155,9 +2168,10 @@ def save_trip(
                     json.dumps(audio_guide)
                     if audio_guide is not _AUDIO_GUIDE_UNSET and audio_guide is not None
                     else None,
+                    next_revision,
                 ),
             )
-        synced_v2_revision = _sync_v2_trip_from_legacy_write(
+        _sync_v2_trip_from_legacy_write(
             db,
             user_id,
             trip_id,
@@ -2168,26 +2182,19 @@ def save_trip(
             route_geometry is not _ROUTE_GEOMETRY_UNSET,
             builder_state is not _BUILDER_STATE_UNSET,
             now,
+            target_revision=next_revision,
         )
         db.commit()
-        return synced_v2_revision
+        return next_revision
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
 
-def get_trip(trip_id: str) -> dict | None:
-    db = _conn()
-    row = db.execute(
-        """SELECT user_id, created_at, updated_at, plan, audio_guide, route_geometry,
-                  builder_state, source, version
-           FROM trips WHERE id=?""",
-        (trip_id,)
-    ).fetchone()
-    db.close()
+def _trip_from_row(row: sqlite3.Row | dict) -> dict:
     if not row:
-        return None
+        raise ValueError("Trip row is required")
     result = json.loads(row["plan"])
     result["user_id"] = row["user_id"]  # used for ownership check in the route
     result["created_at"] = row["created_at"]
@@ -2202,6 +2209,22 @@ def get_trip(trip_id: str) -> dict | None:
         result["audio_guide"] = json.loads(row["audio_guide"])
     return result
 
+
+def get_trip(trip_id: str) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        """SELECT t.user_id,t.created_at,t.updated_at,t.plan,t.audio_guide,
+                  t.route_geometry,t.builder_state,t.source,
+                  MAX(COALESCE(t.version,1),COALESCE(v2.revision,0)) AS version
+           FROM trips t
+           LEFT JOIN trip_documents_v2 v2
+             ON v2.user_id=t.user_id AND v2.id=t.id AND v2.status!='deleted'
+           WHERE t.id=?""",
+        (trip_id,),
+    ).fetchone()
+    db.close()
+    return _trip_from_row(row) if row else None
+
 def save_account_trip(
     trip_id: str,
     trip: dict,
@@ -2210,6 +2233,7 @@ def save_account_trip(
     route_geometry: dict | None | object = _ACCOUNT_TRIP_FIELD_UNSET,
     builder_state: dict | None | object = _ACCOUNT_TRIP_FIELD_UNSET,
     source: str = "web",
+    expected_version: int | None = None,
 ) -> dict:
     stored_trip = dict(trip)
     embedded_route_present = "route_geometry" in stored_trip
@@ -2225,55 +2249,66 @@ def save_account_trip(
     replace_route_geometry = route_geometry is not _ACCOUNT_TRIP_FIELD_UNSET
     replace_builder_state = builder_state is not _ACCOUNT_TRIP_FIELD_UNSET
     replace_audio_guide = embedded_audio_present or replace_route_geometry
-    stored_trip_json = json.dumps(stored_trip)
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
         now = int(time.time())
-        deleted_v2 = db.execute(
-            """SELECT revision FROM trip_documents_v2
-               WHERE user_id=? AND id=? AND status='deleted'""",
+        v2 = db.execute(
+            """SELECT status,revision FROM trip_documents_v2
+               WHERE user_id=? AND id=?""",
             (user_id, trip_id),
         ).fetchone()
-        if deleted_v2:
-            raise RevisionConflictError(int(deleted_v2["revision"] or 1))
+        if v2 and v2["status"] == "deleted":
+            raise RevisionConflictError(int(v2["revision"] or 1))
         existing = db.execute(
-            "SELECT user_id FROM trips WHERE id=?", (trip_id,),
+            "SELECT user_id,version FROM trips WHERE id=?", (trip_id,),
         ).fetchone()
         if existing and existing["user_id"] != user_id:
             raise PermissionError("Not authorized")
+        legacy_revision = int(existing["version"] or 1) if existing else 0
+        v2_revision = int(v2["revision"] or 1) if v2 else 0
+        current_revision = max(legacy_revision, v2_revision)
+        if expected_version is not None and current_revision != int(expected_version):
+            raise RevisionConflictError(current_revision)
+        next_revision = current_revision + 1
+        stored_trip["trip_id"] = trip_id
+        stored_trip_json = json.dumps(stored_trip)
         if existing:
-            db.execute(
+            params = (
+                request, stored_trip_json,
+                replace_route_geometry,
+                json.dumps(route_geometry) if replace_route_geometry and route_geometry is not None else None,
+                replace_builder_state,
+                json.dumps(builder_state) if replace_builder_state and builder_state is not None else None,
+                replace_audio_guide,
+                json.dumps(embedded_audio_guide) if embedded_audio_present and embedded_audio_guide is not None else None,
+                source, now, next_revision, trip_id, user_id, legacy_revision,
+            )
+            cursor = db.execute(
                 """UPDATE trips SET request=?,plan=?,
                           route_geometry=CASE WHEN ? THEN ? ELSE route_geometry END,
                           builder_state=CASE WHEN ? THEN ? ELSE builder_state END,
                           audio_guide=CASE WHEN ? THEN ? ELSE audio_guide END,
                           source=?,
-                          updated_at=?,version=COALESCE(version,1)+1
-                   WHERE id=? AND user_id=?""",
-                (
-                    request, stored_trip_json,
-                    replace_route_geometry,
-                    json.dumps(route_geometry) if replace_route_geometry and route_geometry is not None else None,
-                    replace_builder_state,
-                    json.dumps(builder_state) if replace_builder_state and builder_state is not None else None,
-                    replace_audio_guide,
-                    json.dumps(embedded_audio_guide) if embedded_audio_present and embedded_audio_guide is not None else None,
-                    source, now, trip_id, user_id,
-                ),
+                          updated_at=?,version=?
+                   WHERE id=? AND user_id=? AND COALESCE(version,1)=?""",
+                params,
             )
+            if cursor.rowcount != 1:
+                raise RevisionConflictError(current_revision)
         else:
             db.execute(
                 """INSERT INTO trips
                    (id,user_id,created_at,updated_at,request,plan,route_geometry,
                     builder_state,audio_guide,source,version)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,1)""",
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
                 (
                     trip_id, user_id, now, now, request, stored_trip_json,
                     json.dumps(route_geometry) if replace_route_geometry and route_geometry is not None else None,
                     json.dumps(builder_state) if replace_builder_state and builder_state is not None else None,
                     json.dumps(embedded_audio_guide) if embedded_audio_present and embedded_audio_guide is not None else None,
                     source,
+                    next_revision,
                 ),
             )
         synced_v2_revision = _sync_v2_trip_from_legacy_write(
@@ -2287,26 +2322,38 @@ def save_account_trip(
             replace_route_geometry,
             replace_builder_state,
             now,
+            target_revision=next_revision,
         )
+        saved_row = db.execute(
+            """SELECT user_id,created_at,updated_at,plan,audio_guide,route_geometry,
+                      builder_state,source,version
+               FROM trips WHERE id=? AND user_id=?""",
+            (trip_id, user_id),
+        ).fetchone()
+        if not saved_row:
+            raise RuntimeError("Trip save did not produce a stored row")
+        saved = _trip_from_row(saved_row)
+        if synced_v2_revision is not None:
+            saved["v2_revision"] = synced_v2_revision
         db.commit()
     except Exception:
         db.rollback()
         raise
     finally:
         db.close()
-    saved = get_trip(trip_id)
-    if saved and synced_v2_revision is not None:
-        saved["v2_revision"] = synced_v2_revision
-    return saved if saved else trip
+    return saved
 
 def list_user_trips(user_id: int, limit: int = 25) -> list[dict]:
     db = _conn()
     rows = db.execute(
-        """SELECT id, created_at, COALESCE(updated_at, created_at) AS updated_at,
-                  request, plan, source, version
-           FROM trips
-           WHERE user_id=?
-           ORDER BY COALESCE(updated_at, created_at) DESC
+        """SELECT t.id,t.created_at,COALESCE(t.updated_at,t.created_at) AS updated_at,
+                  t.request,t.plan,t.source,
+                  MAX(COALESCE(t.version,1),COALESCE(v2.revision,0)) AS version
+           FROM trips t
+           LEFT JOIN trip_documents_v2 v2
+             ON v2.user_id=t.user_id AND v2.id=t.id AND v2.status!='deleted'
+           WHERE t.user_id=?
+           ORDER BY COALESCE(t.updated_at,t.created_at) DESC
            LIMIT ?""",
         (user_id, limit)
     ).fetchall()
@@ -2332,23 +2379,33 @@ def save_trip_geometry(trip_id: str, user_id: int, route_geometry: dict) -> dict
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
-        row = db.execute("SELECT user_id,plan,request FROM trips WHERE id=?", (trip_id,)).fetchone()
+        row = db.execute(
+            "SELECT user_id,plan,request,version FROM trips WHERE id=?", (trip_id,),
+        ).fetchone()
         v2 = db.execute(
-            "SELECT status,document_json FROM trip_documents_v2 WHERE id=? AND user_id=?",
+            """SELECT status,revision,document_json FROM trip_documents_v2
+               WHERE id=? AND user_id=?""",
             (trip_id, user_id),
         ).fetchone()
         if row and row["user_id"] != user_id:
             raise PermissionError("Not authorized")
+        if v2 and v2["status"] == "deleted":
+            raise RevisionConflictError(int(v2["revision"] or 1))
         if not row and not v2:
             db.rollback()
             db.close()
             return None
         now = int(time.time())
+        current_revision = max(
+            int(row["version"] or 1) if row else 0,
+            int(v2["revision"] or 1) if v2 else 0,
+        )
+        next_revision = current_revision + 1
         if row:
             db.execute(
-                """UPDATE trips SET route_geometry=?, updated_at=?, version=COALESCE(version,1)+1
+                """UPDATE trips SET route_geometry=?,updated_at=?,version=?
                    WHERE id=? AND user_id=?""",
-                (json.dumps(route_geometry), now, trip_id, user_id),
+                (json.dumps(route_geometry), now, next_revision, trip_id, user_id),
             )
             trip = json.loads(row["plan"] or "{}")
             request = row["request"] or ""
@@ -2368,7 +2425,8 @@ def save_trip_geometry(trip_id: str, user_id: int, route_geometry: dict) -> dict
             request = str(legacy.get("request") or "")
         synced_v2_revision = _sync_v2_trip_from_legacy_write(
             db, user_id, trip_id, trip, request, route_geometry,
-            _BUILDER_STATE_UNSET, True, False, now, sync_plan=False,
+            _BUILDER_STATE_UNSET, True, False, now,
+            target_revision=next_revision, sync_plan=False,
         )
         db.commit()
     except Exception:
@@ -2841,21 +2899,29 @@ def upsert_trip_document_v2(
             result = json.loads(replay["response_json"])
             if result.get("status") == "deleted":
                 db.execute("DELETE FROM trips WHERE id=? AND user_id=?", (trip_id, user_id))
+            elif int(result.get("revision") or 0) > 0:
+                db.execute(
+                    """UPDATE trips
+                       SET version=MAX(COALESCE(version,1),?)
+                       WHERE id=? AND user_id=?""",
+                    (int(result["revision"]), trip_id, user_id),
+                )
             db.commit()
             return result
 
         current = db.execute(
             "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
         ).fetchone()
-        legacy = None
-        if not current:
-            legacy = db.execute(
-                """SELECT id,user_id,created_at,COALESCE(updated_at,created_at) AS updated_at,
-                          request,plan,route_geometry,builder_state,source,version AS revision
-                   FROM trips WHERE id=? AND user_id=?""",
-                (trip_id, user_id),
-            ).fetchone()
-        current_revision = int(current["revision"] or 1) if current else int(legacy["revision"] or 1) if legacy else 0
+        legacy = db.execute(
+            """SELECT id,user_id,created_at,COALESCE(updated_at,created_at) AS updated_at,
+                      request,plan,route_geometry,builder_state,source,version AS revision
+               FROM trips WHERE id=? AND user_id=?""",
+            (trip_id, user_id),
+        ).fetchone()
+        current_revision = max(
+            int(current["revision"] or 1) if current else 0,
+            int(legacy["revision"] or 1) if legacy else 0,
+        )
         if expected_revision != current_revision:
             raise RevisionConflictError(current_revision)
 
@@ -2880,6 +2946,12 @@ def upsert_trip_document_v2(
         )
         if status == "deleted":
             db.execute("DELETE FROM trips WHERE id=? AND user_id=?", (trip_id, user_id))
+        elif legacy:
+            db.execute(
+                """UPDATE trips SET version=?,updated_at=?
+                   WHERE id=? AND user_id=?""",
+                (revision, now, trip_id, user_id),
+            )
         saved = db.execute(
             "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
         ).fetchone()

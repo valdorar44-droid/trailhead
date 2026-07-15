@@ -186,9 +186,10 @@ function downsample(points, target = 700) {
   return out;
 }
 
-function campWindows(days, cadence, miles) {
+function campWindows(days, cadence, miles, shape) {
   const required = [];
   for (let day = 1; day <= days; day += 1) {
+    if (day === days) continue;
     if (cadence === 'alternate') {
       const start = Math.floor((day - 1) / 2) * 2 + 1;
       const end = Math.min(start + 1, days);
@@ -274,7 +275,7 @@ async function runCase(item) {
   if (legs.length === 0 || report.shape_chars < 100) report.issues.push('missing provider geometry');
   if (!base.campMatrix) return report;
   const points = downsample(legs.flatMap(leg => decodePolyline6(leg.shape || '')));
-  const windows = campWindows(item.days, item.cadence, report.miles);
+  const windows = campWindows(item.days, item.cadence, report.miles, item.shape);
   const result = await postJson('/api/route/camp-windows', {
     route: points,
     windows,

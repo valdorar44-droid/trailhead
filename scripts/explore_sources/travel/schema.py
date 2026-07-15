@@ -22,6 +22,9 @@ class BookableExperience:
     subcategories: list[str] = field(default_factory=list)
     lat: float | None = None
     lng: float | None = None
+    coordinate_source: str = ""
+    coordinate_precision: str = ""
+    route_stop_eligible: bool = False
     region: str = ""
     country: str = ""
     summary: str = ""
@@ -67,4 +70,3 @@ def planner_stop_from_experience(experience: BookableExperience | dict[str, Any]
         "price_from": item.get("price_from") or "",
         "status": "needs_booking",
     }
-

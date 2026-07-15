@@ -1,5 +1,6 @@
 import type { ExplorerCheckpoint, MissionControlBrief, MissionControlRisk } from './api';
-import { buildCinematicHighlights, isCinematicScenicPlace, routeRatioForCinematic } from './cinematicHighlights';
+import { buildCinematicHighlights, isCinematicScenicPlace } from './cinematicHighlights';
+import { distanceBetweenLngLatMeters, routeRatioForPoint } from './routeProjection';
 
 export type MissionSceneType =
   | 'intro'
@@ -149,23 +150,6 @@ function routeMidpoint(route: [number, number][]): { lat: number; lng: number } 
   return { lat: mid[1], lng: mid[0] };
 }
 
-/** Approximate a point's fractional position along the route (0..1) by nearest vertex. */
-function routeRatioFor(route: [number, number][], lat: number, lng: number): number {
-  if (route.length < 2) return 0.5;
-  let bestIdx = 0;
-  let bestDist = Infinity;
-  for (let i = 0; i < route.length; i += 1) {
-    const dLng = route[i][0] - lng;
-    const dLat = route[i][1] - lat;
-    const dist = dLng * dLng + dLat * dLat;
-    if (dist < bestDist) {
-      bestDist = dist;
-      bestIdx = i;
-    }
-  }
-  return bestIdx / (route.length - 1);
-}
-
 function clampRatio(value: number) {
   return Math.max(0, Math.min(1, value));
 }
@@ -251,7 +235,7 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
   const validCheckpoints = (input.checkpoints ?? []).filter(cp => finite(cp.lat, cp.lng));
   const out: MissionScene[] = [];
   const ratioOfScene = (s: MissionScene): number => {
-    if (s.focus) return routeRatioFor(route, s.focus.lat, s.focus.lng);
+    if (s.focus) return routeRatioForPoint(route, s.focus.lat, s.focus.lng);
     if (s.routeSlice) return (s.routeSlice[0] + s.routeSlice[1]) / 2;
     return 0.5;
   };
@@ -262,15 +246,30 @@ export function assembleForwardPass(input: ForwardPassInput): MissionScene[] {
     .filter(s => !NON_BEATS.includes(s.type)) // legs are regenerated contiguously
     .map(s => ({ ratio: clampRatio(ratioOfScene(s)), scene: s }))
     .sort((a, b) => (a.ratio - b.ratio) || (beatOrder(a.scene.type) - beatOrder(b.scene.type)));
-  // Drop beats that land on top of an earlier one (within ~2% of the route) so the
-  // camera doesn't stop twice at the same place.
+  const samePlace = (a: MissionScene, b: MissionScene) => {
+    if (a.id === b.id) return true;
+    const aCalloutIds = new Set(a.callouts.map(callout => callout.id).filter(Boolean));
+    if (b.callouts.some(callout => aCalloutIds.has(callout.id))) return true;
+    if (!a.focus || !b.focus) return false;
+    return distanceBetweenLngLatMeters(
+      [a.focus.lng, a.focus.lat],
+      [b.focus.lng, b.focus.lat],
+    ) <= 100;
+  };
+  // Only collapse beats that resolve to the same physical place. Nearby route
+  // fractions can still represent distinct camps, overlooks, or access points.
   const beats: typeof beatsRaw = [];
   for (const b of beatsRaw) {
-    if (beats.length && Math.abs(b.ratio - beats[beats.length - 1].ratio) < 0.02) continue;
-    beats.push(b);
+    const duplicateIndex = beats.findIndex(existing => samePlace(existing.scene, b.scene));
+    if (duplicateIndex < 0) {
+      beats.push(b);
+    } else if (beatOrder(b.scene.type) < beatOrder(beats[duplicateIndex].scene.type)) {
+      beats[duplicateIndex] = b;
+    }
   }
+  beats.sort((a, b) => (a.ratio - b.ratio) || (beatOrder(a.scene.type) - beatOrder(b.scene.type)));
 
-  const cpRatios = validCheckpoints.map(cp => ({ r: routeRatioFor(route, cp.lat, cp.lng), cp }));
+  const cpRatios = validCheckpoints.map(cp => ({ r: routeRatioForPoint(route, cp.lat, cp.lng), cp }));
   const dayForRange = (a: number, b: number): number | undefined => {
     const inSeg = cpRatios.filter(x => x.r >= a - 0.001 && x.r <= b + 0.001);
     const days = Array.from(new Set(inSeg.map(x => Number(x.cp.day || 0)).filter(d => d > 0)));
@@ -403,7 +402,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
   for (const day of dayNumbers.slice(0, MAX_DAY_SCENES)) {
     const dayCheckpoints = validCheckpoints.filter(cp => Number(cp.day || 0) === day);
     if (!dayCheckpoints.length) continue;
-    const ratios = dayCheckpoints.map(cp => routeRatioFor(cleanRoute, cp.lat, cp.lng)).sort((a, b) => a - b);
+    const ratios = dayCheckpoints.map(cp => routeRatioForPoint(cleanRoute, cp.lat, cp.lng)).sort((a, b) => a - b);
     const start = clampRatio(day === dayNumbers[0] ? 0 : ratios[0] - 0.02);
     const end = clampRatio(day === maxDay ? 1 : ratios[ratios.length - 1] + 0.02);
     const dayFocus = dayCheckpoints[Math.floor(dayCheckpoints.length / 2)];
@@ -525,7 +524,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
   // --- cinematic scenic highlights ---
   for (const scenic of scenicPlaces) {
     const kind = String(scenic.type || '').toLowerCase();
-    const ratio = routeRatioForCinematic(cleanRoute, scenic.lat, scenic.lng);
+    const ratio = routeRatioForPoint(cleanRoute, scenic.lat, scenic.lng);
     const isDriveBy = /\b(scenic_drive|trail)\b/.test(kind);
     const summary = firstSentence(scenic.note) || 'A real scenic highlight close to this route.';
     middle.push({
@@ -602,7 +601,7 @@ export function buildMissionCinematic(input: BuildMissionCinematicInput): Missio
         day: monument.day,
         durationMs: 9800,
         focus: { lat: monument.lat, lng: monument.lng },
-        rejoinRatio: routeRatioForCinematic(cleanRoute, monument.lat, monument.lng),
+        rejoinRatio: routeRatioForPoint(cleanRoute, monument.lat, monument.lng),
         camera: { mode: 'orbit', zoom: 12.6, pitch: 66, orbit: { direction: 'cw', sweepDeg: 360 } },
         layers: { terrain: true },
         pacing: { kind: 'scenic_orbit', minDurationMs: 14000, maxDurationMs: 24000 },

@@ -326,6 +326,7 @@ class PlannerRouteGeometryTests(unittest.IsolatedAsyncioTestCase):
 
         def capture_save(_id, _request, value, user_id=None, route_geometry=None):
             saved.append({"trip": value, "route_geometry": route_geometry})
+            return 7
 
         with (
             patch.object(server, "update_plan_job", side_effect=capture_job),
@@ -344,6 +345,7 @@ class PlannerRouteGeometryTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertEqual(completed["result"]["route_geometry"], route_geometry)
+        self.assertEqual(completed["result"]["version"], 7)
         self.assertNotIn("route_geometry", saved[-1]["trip"])
         self.assertEqual(saved[-1]["route_geometry"], route_geometry)
         self.assertEqual(enrich_mock.await_args.kwargs["route_geometry"], route_geometry)
@@ -531,7 +533,7 @@ class PlannerRouteGeometryTests(unittest.IsolatedAsyncioTestCase):
             patch.object(server, "_planner_route_geometry", AsyncMock()) as route_mock,
             patch.object(server, "enrich_trip_along_route", AsyncMock(return_value=enrichment)),
             patch.object(server, "_build_trip_timeline", return_value=[]),
-            patch.object(server, "save_trip") as save_mock,
+            patch.object(server, "save_trip", return_value=9) as save_mock,
         ):
             response = await server.chat_endpoint(
                 request,
@@ -540,6 +542,7 @@ class PlannerRouteGeometryTests(unittest.IsolatedAsyncioTestCase):
             )
 
         route_mock.assert_not_awaited()
+        self.assertEqual(response["trip"]["version"], 9)
         self.assertEqual(response["trip"]["route_geometry"]["coords"], prior_geometry["coords"])
         self.assertNotIn("route_geometry", save_mock.call_args.args[2])
         self.assertEqual(save_mock.call_args.kwargs["route_geometry"]["coords"], prior_geometry["coords"])
@@ -895,14 +898,19 @@ class PlannerRouteGeometryTests(unittest.IsolatedAsyncioTestCase):
         }
         with (
             patch.object(server, "get_plan_job", return_value=job),
-            patch.object(server, "get_trip", return_value={"trip_id": "saved-plan-trip", "user_id": 42}),
+            patch.object(server, "get_trip", return_value={
+                "trip_id": "saved-plan-trip",
+                "user_id": 42,
+                "version": 4,
+            }),
             patch.object(server, "update_plan_job") as update_mock,
         ):
             response = await server.plan_job_status("saving-job", {"id": 42})
 
         self.assertEqual(response["status"], "done")
-        self.assertEqual(response["result"], result)
-        update_mock.assert_called_once_with("saving-job", "done", result=serialized)
+        expected = {**result, "version": 4}
+        self.assertEqual(response["result"], expected)
+        update_mock.assert_called_once_with("saving-job", "done", result=json.dumps(expected))
 
     async def test_direct_geometry_update_rejects_malformed_and_mismatched_routes(self):
         user = {"id": 42}

@@ -27,8 +27,11 @@ const mapPreview = read(join(mobileRoot, 'components/explore/StaticMapboxPreview
 const guidedBrowser = read(join(mobileRoot, 'components/explore/GuidedDestinationBrowser.tsx'));
 const categoryChips = read(join(mobileRoot, 'components/explore/ExploreCategoryChips.tsx'));
 const categorySheet = read(join(mobileRoot, 'components/explore/ExploreCategoryFilterSheet.tsx'));
+const detailSheet = read(join(mobileRoot, 'components/explore/ExploreDetailSheet.tsx'));
+const trailArea = read(join(mobileRoot, 'components/explore/ExploreTrailArea.tsx'));
 const rootLayout = read(join(mobileRoot, 'app/_layout.tsx'));
 const server = read(join(repoRoot, 'dashboard/server.py'));
+const nearbyContext = read(join(mobileRoot, 'lib/exploreNearbyContext.ts'));
 
 assert(
   server.includes('class ExplorePlacesBulkRequest') && server.includes('@app.post("/api/explore/places/bulk")'),
@@ -129,8 +132,79 @@ assert(
     && categorySheet.includes("item.key === 'fuel' || item.key === 'resupply'")
     && guide.includes('const radii = serviceCategory ? [35, 100, 250] : [35]')
     && guide.includes("candidates.filter(place => livePlaceMatchesCategory(place, serviceCategory))")
-    && guide.includes("setExploreMode('nearby')"),
-  'Fuel and Supplies filters must stay reachable and use widening, category-specific nearby searches.',
+    && guide.includes("setExploreMode('nearby')")
+    && guide.includes('resolveExploreNearbySearchCenter(')
+    && guide.includes("exploreNearbySearchCenter?.source === 'destination'"),
+  'Fuel and Supplies filters must retain selected destinations and use widening, category-specific nearby searches.',
+);
+assert(
+  nearbyContext.includes('serviceDestinationQueryFromExploreQuery')
+    && nearbyContext.includes('SERVICE_DESTINATION_ONLY_TERMS')
+    && guide.includes("api.resolveGeocodePlace(query, 5, { prefer: 'search_center' })")
+    && guide.includes('guidedDestinationContextActive || !!resolvedServiceDestinationCenter')
+    && guide.includes('exploreServiceDestinationQuery ? null : userLoc'),
+  'Fuel and Supplies must resolve ordinary destination searches before using device location.',
+);
+assert(
+  guide.includes('|| exploreServiceDestinationQuery\n    ) return;')
+    && guide.includes('exploreServiceDestinationResolving')
+    && guide.includes('exploreServiceDestinationFailed'),
+  'Explore must not request location while resolving an ordinary service destination.',
+);
+assert(
+  server.includes('and (not requested or _explore_place_matches_category_request(place, requested))')
+    && server.includes('selected_global = category_matches if effective_category else global_profiles')
+    && !server.includes('global_relaxed_ids'),
+  'Explore destination fallbacks must preserve the requested category.',
+);
+const categorySelection = guide.match(
+  /function selectExploreHomeCategory\(key: ExploreCategoryKey\) \{([\s\S]*?)\n  \}\n\n  function handleExploreQueryChange/,
+)?.[1] ?? '';
+assert(
+  categorySelection.length > 0 && !categorySelection.includes("setExploreQuery('')"),
+  'Explore category changes must preserve the typed destination.',
+);
+assert(
+  guide.includes('function exploreCatalogQueryForDestinationContext(')
+    && guide.includes("normalizeExploreText(query) !== normalizeExploreText(guidedQuery)")
+    && guide.includes('return center.name.trim();')
+    && guide.includes('const exploreCatalogRequestQuery = useMemo(')
+    && guide.includes('q: requestQuery.length >= 2 ? requestQuery : undefined')
+    && guide.includes('const matchedQuery = normalizeExploreText(visibleQuery);')
+    && guide.includes('const matchedQuery = normalizeExploreText(exploreQuery);'),
+  'Explore must use the selected Guided destination name for catalog requests while preserving the visible query.',
+);
+assert(
+  categorySelection.includes('guidedDestinationContextActive')
+    && !categorySelection.includes("if (key !== 'guided' && key !== 'tours') setGuidedTourSelectedDestinationKey(null)"),
+  'Explore category changes must retain the selected Guided destination context.',
+);
+const queryChange = guide.match(
+  /function handleExploreQueryChange\(value: string\) \{([\s\S]*?)\n  \}\n\n  function renderLandingHeader/,
+)?.[1] ?? '';
+assert(
+  queryChange.includes('keepsGuidedDestination')
+    && queryChange.includes('setGuidedTourSelectedCenter(null)')
+    && queryChange.includes('setGuidedTourSelectedDestinationKey(null)')
+    && queryChange.includes('setGuidedTourSearchRunId(0)')
+    && guide.includes("onClearQuery={() => handleExploreQueryChange('')}"),
+  'Editing or clearing an Explore destination must clear stale Guided destination context.',
+);
+assert(
+  guide.includes(") : !exploreError && !tourSearchPaused && !showExperienceSearch"),
+  'Explore must not stack its normal empty view beneath a loading error.',
+);
+assert(
+  guide.includes('routeDisabled={!!activeTrip && isExploreAddedToTrip(selectedExplore)}')
+    && detailSheet.includes('disabled={disabled}')
+    && detailSheet.includes('accessibilityState={{ disabled, selected: disabled }}'),
+  'Places already added to the active trip must expose a disabled completed action.',
+);
+assert(
+  trailArea.includes('Directions to trailhead')
+    && !trailArea.includes('Route preview')
+    && !trailArea.includes('TrailMiniMap'),
+  'Trail actions must offer directions to the trailhead without a decorative route preview.',
 );
 
 console.log('Explore feed audit passed.');

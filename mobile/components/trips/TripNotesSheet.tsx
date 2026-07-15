@@ -126,6 +126,26 @@ export default function TripNotesSheet({
   };
 
   const confirmDelete = (note: TripNoteV1) => {
+    const removeNote = () => {
+      setBusy(true);
+      void onDelete(note)
+        .then(() => {
+          if (notes.length === 1) beginCreate();
+        })
+        .catch((error: any) => {
+          Alert.alert('Note not deleted', error?.message || 'This note could not be deleted. Try again.');
+        })
+        .finally(() => setBusy(false));
+    };
+
+    if (Platform.OS === 'web') {
+      if (typeof globalThis.confirm === 'function'
+        && globalThis.confirm('Delete this private note?')) {
+        removeNote();
+      }
+      return;
+    }
+
     Alert.alert(
       'Delete note?',
       'This private note will be removed from the trip.',
@@ -134,17 +154,7 @@ export default function TripNotesSheet({
         {
           text: 'Delete',
           style: 'destructive',
-          onPress: () => {
-            setBusy(true);
-            void onDelete(note)
-              .then(() => {
-                if (notes.length === 1) beginCreate();
-              })
-              .catch((error: any) => {
-                Alert.alert('Note not deleted', error?.message || 'This note could not be deleted. Try again.');
-              })
-              .finally(() => setBusy(false));
-          },
+          onPress: removeNote,
         },
       ],
     );

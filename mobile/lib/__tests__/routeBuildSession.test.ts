@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import {
+  cancelRouteBuildActivitySearch,
   cancelRouteBuildSessionState,
   closeRouteBuildRequest,
   createRouteBuildSession,
   openRouteBuildRequest,
+  openRouteBuildActivitySearch,
   resolveRouteBuildActivityChoice,
   routeBuildSessionIsRunning,
   updateRouteBuildSessionState,
@@ -43,12 +45,23 @@ assert.equal(cancelled?.status, 'cancelled');
 assert.equal(routeBuildSessionIsRunning(cancelled, 'request-1'), false);
 assert.equal(updateRouteBuildSessionState(cancelled, 'request-1', { phase: 'complete' }, 500), cancelled);
 
+const stoppedBuildSignal = openRouteBuildRequest('request-stopped');
+assert.equal(stoppedBuildSignal?.aborted, false);
+closeRouteBuildRequest('request-stopped', true);
+assert.equal(stoppedBuildSignal?.aborted, true);
+
 async function testActivityChoiceResume() {
   openRouteBuildRequest('request-2');
   const choice = waitForRouteBuildActivityChoice('request-2');
   assert.equal(resolveRouteBuildActivityChoice('request-2', 'browse'), true);
   assert.equal(await choice, 'browse');
   closeRouteBuildRequest('request-2');
+
+  openRouteBuildRequest('request-3');
+  const skipped = waitForRouteBuildActivityChoice('request-3');
+  assert.equal(resolveRouteBuildActivityChoice('request-3', 'skip'), true);
+  assert.equal(await skipped, 'skip');
+  closeRouteBuildRequest('request-3');
 }
 
 testActivityChoiceResume()
@@ -57,3 +70,8 @@ testActivityChoiceResume()
     console.error(error);
     process.exitCode = 1;
   });
+
+const activitySignal = openRouteBuildActivitySearch('request-activity');
+assert.equal(activitySignal?.aborted, false);
+cancelRouteBuildActivitySearch('request-activity');
+assert.equal(activitySignal?.aborted, true);

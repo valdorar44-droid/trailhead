@@ -17,6 +17,7 @@ import { ROUTING_REGIONS } from '../../lib/useOfflineFiles';
 import { api } from '../../lib/api';
 import { TRAILHEAD_API_BASE } from '../../lib/apiBase';
 import { accountStorage, type AccountStorageEpoch } from '../../lib/storage';
+import { valhallaManeuverPresentation } from '../../lib/valhallaManeuvers';
 
 export interface RouteResult {
   coords:        [number, number][];
@@ -43,7 +44,7 @@ const CACHE_DIR      = `${FileSystem.documentDirectory}routes/`;
 const LAST_ROUTE_PATH = `${FileSystem.documentDirectory}routes/last_route.json`;
 const LAST_ROUTE_DEST_TOLERANCE_M = 150;
 const LAST_ROUTE_START_TOLERANCE_M = 5_000;
-const ROUTE_CACHE_VERSION = 'valhalla-proxy-v3';
+const ROUTE_CACHE_VERSION = 'valhalla-proxy-v4';
 const ROUTER_DEBUG_MARKER = 'DBGv4';
 
 async function ensureCacheDir() {
@@ -583,10 +584,6 @@ async function fetchValhalla(
 }
 
 function parseValhallaRoute(data: any): RouteResult {
-  const TURN: Record<number, string> = {
-    0:'', 1:'', 2:'left', 3:'right', 4:'arrive', 5:'sharp left',
-    6:'sharp right', 7:'left', 8:'right', 9:'uturn', 10:'slight left', 11:'slight right',
-  };
   const all: [number, number][] = [];
   const steps: RouteStep[] = [];
   const legs:  RouteStep[][] = [];
@@ -597,8 +594,9 @@ function parseValhallaRoute(data: any): RouteResult {
     const ls: RouteStep[] = [];
     for (const m of leg.maneuvers ?? []) {
       const shp = c[m.begin_shape_index];
-      ls.push({ type: m.type === 4 ? 'arrive' : m.type === 1 ? 'depart' : 'turn',
-                modifier: TURN[m.type] ?? '', name: m.street_names?.[0] ?? '',
+      const presentation = valhallaManeuverPresentation(m.type);
+      ls.push({ type: presentation.type,
+                modifier: presentation.modifier, name: m.street_names?.[0] ?? '',
                 distance: Math.round((m.length ?? 0) * 1609.34),
                 duration: m.time ?? 0, lat: shp?.[1], lng: shp?.[0],
                 instruction: m.instruction ?? '',

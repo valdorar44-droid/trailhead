@@ -39,8 +39,16 @@ def normalize_viator_product(product: dict[str, Any], *, fetched_at: int | None 
     pricing_summary = pricing.get("summary") if isinstance(pricing, dict) else {}
     destination_refs = product.get("destinations") if isinstance(product.get("destinations"), list) else []
     region = compact_text(product.get("region") or product.get("destinationName") or primary_destination_ref(destination_refs))
-    lat = as_float(product.get("lat") or product.get("latitude"))
-    lng = as_float(product.get("lng") or product.get("longitude"))
+    raw_lat = product.get("lat") if product.get("lat") is not None else product.get("latitude")
+    raw_lng = product.get("lng") if product.get("lng") is not None else product.get("longitude")
+    lat = as_float(raw_lat)
+    lng = as_float(raw_lng)
+    has_product_coordinates = (
+        lat is not None
+        and lng is not None
+        and -90 <= lat <= 90
+        and -180 <= lng <= 180
+    )
     image = primary_image(product)
     flags = [compact_text(flag) for flag in product.get("flags") or [] if compact_text(flag)]
     tags = [str(tag) for tag in product.get("tags") or [] if str(tag).strip()]
@@ -64,6 +72,9 @@ def normalize_viator_product(product: dict[str, Any], *, fetched_at: int | None 
         subcategories=subcategories,
         lat=lat,
         lng=lng,
+        coordinate_source="product" if has_product_coordinates else "",
+        coordinate_precision="product" if has_product_coordinates else "",
+        route_stop_eligible=has_product_coordinates,
         region=region,
         country=compact_text(product.get("country")),
         summary=summary_from_product(product),

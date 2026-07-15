@@ -144,15 +144,6 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                   <Text style={[styles.description, { color: C.text2 }]}>
                     {description}
                   </Text>
-                  <View style={[styles.previewPanel, { borderColor: C.border, backgroundColor: C.s1 }]}>
-                    <TrailMiniMap accent={C.orange} />
-                    <View style={styles.previewCopy}>
-                      <Text style={[styles.previewTitle, { color: C.text }]}>Route preview</Text>
-                      <Text style={[styles.previewText, { color: C.text2 }]}>
-                        {routePreviewText(trail, routeType)}
-                      </Text>
-                    </View>
-                  </View>
                   {details.length > 0 && (
                     <View style={[styles.planRows, { borderColor: C.border }]}>
                       {details.map(row => (
@@ -175,8 +166,8 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
                   )}
                   <View style={styles.actions}>
                     <TouchableOpacity style={[styles.action, { backgroundColor: C.orange }]} onPress={() => onTrailRoute?.(trail)}>
-                      <Ionicons name="navigate" size={16} color="#fff" />
-                      <Text style={styles.actionPrimaryText}>Route</Text>
+                      <Ionicons name="navigate-outline" size={16} color="#fff" />
+                      <Text style={styles.actionPrimaryText}>Directions to trailhead</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.actionSecondary, { borderColor: C.border, backgroundColor: C.s1 }]} onPress={() => onTrailMap?.(trail)}>
                       <Ionicons name="map-outline" size={16} color={C.text2} />
@@ -229,18 +220,6 @@ function TrailDetailRow({ label, value }: { label: string; value: string }) {
     <View style={[styles.detailRow, { borderTopColor: C.border }]}>
       <Text style={[styles.detailLabel, { color: C.text2 }]}>{label}</Text>
       <Text style={[styles.detailValue, { color: C.text }]}>{value}</Text>
-    </View>
-  );
-}
-
-function TrailMiniMap({ accent }: { accent: string }) {
-  return (
-    <View style={styles.miniMap}>
-      <View style={styles.mapContourA} />
-      <View style={styles.mapContourB} />
-      <View style={[styles.mapRoute, { borderColor: accent, borderRightColor: 'transparent' }]} />
-      <View style={[styles.mapDot, styles.mapDotStart]} />
-      <View style={[styles.mapDot, styles.mapDotEnd, { backgroundColor: accent }]} />
     </View>
   );
 }
@@ -305,14 +284,6 @@ function trailDescription(trail: ExploreTrailCard) {
     || cleanTrailCopy(trail.summary)
     || `${trail.title}. Check current access, weather, daylight, and local rules before starting.`
   );
-}
-
-function routePreviewText(trail: ExploreTrailCard, routeType: string) {
-  const area = cleanTrailCopy(trail.area);
-  const route = cleanTrailCopy(routeType);
-  if (area && route) return `${route} near ${area}. Check access and conditions before starting.`;
-  if (route) return `${route}. Check access and conditions before starting.`;
-  return 'Check access and conditions before starting.';
 }
 
 function trailPlanRows(trail: ExploreTrailCard, featureLabel: string, routeType: string) {
@@ -411,17 +382,6 @@ const styles = StyleSheet.create({
   photoCredit: { fontSize: 10.5, lineHeight: 15, fontWeight: '700' },
   warningBox: { flexDirection: 'row', alignItems: 'flex-start', gap: 8, borderWidth: 1, borderRadius: 12, padding: 10 },
   warningText: { flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
-  previewPanel: { borderWidth: 1, borderRadius: 14, overflow: 'hidden' },
-  previewCopy: { padding: 12, gap: 4 },
-  previewTitle: { fontSize: 15, lineHeight: 19, fontWeight: '900' },
-  previewText: { fontSize: 13, lineHeight: 18, fontWeight: '600' },
-  miniMap: { height: 134, overflow: 'hidden', backgroundColor: '#dfe9d8' },
-  mapContourA: { position: 'absolute', left: -20, top: 8, width: 220, height: 120, borderWidth: 1, borderColor: 'rgba(22,101,52,0.2)', borderRadius: 80, transform: [{ rotate: '-14deg' }] },
-  mapContourB: { position: 'absolute', right: -34, top: 28, width: 210, height: 118, borderWidth: 1, borderColor: 'rgba(37,99,235,0.18)', borderRadius: 90, transform: [{ rotate: '18deg' }] },
-  mapRoute: { position: 'absolute', left: 70, top: 42, width: 190, height: 58, borderWidth: 4, borderRightColor: 'transparent', borderRadius: 70, transform: [{ rotate: '-8deg' }], backgroundColor: 'transparent' },
-  mapDot: { position: 'absolute', width: 14, height: 14, borderRadius: 999, backgroundColor: '#166534', borderWidth: 3, borderColor: '#fff' },
-  mapDotStart: { left: 66, top: 88 },
-  mapDotEnd: { right: 82, top: 36 },
   planRows: { borderWidth: 1, borderRadius: 13, overflow: 'hidden' },
   detailRow: { borderTopWidth: 1, minHeight: 42, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 12, paddingHorizontal: 12, paddingVertical: 9 },
   detailLabel: { fontSize: 12, fontWeight: '800' },

@@ -312,10 +312,10 @@ export default function RouteBuildProgressSheet({
                   activeOpacity={0.78}
                   onPress={onCancel}
                   accessibilityRole="button"
-                  accessibilityLabel="Cancel trip setup"
+                  accessibilityLabel={session.phase === 'activities' ? 'Skip tours' : 'Stop trip setup'}
                 >
                   <Ionicons name="close" size={17} color={C.text2} />
-                  <Text style={styles.secondaryButtonText}>Cancel</Text>
+                  <Text style={styles.secondaryButtonText}>{session.phase === 'activities' ? 'Skip tours' : 'Stop'}</Text>
                 </TouchableOpacity>
               ) : null}
               {failed && onDismiss ? (

@@ -69,7 +69,7 @@ function userFacingPlannerText(text?: string) {
   const clean = (text ?? '').trim();
   if (!clean) return 'Trip updated. Review the route and stops before you leave.';
   if (/(lat\/lng|latitude|longitude|coordinates|geocod|added .*coord|debug|internal)/i.test(clean)) {
-    return 'Trip stops updated. Review the route, camps, and fuel stops on the map.';
+    return 'Trip stops updated. Review the route, camps, and fuel stops.';
   }
   return clean;
 }
@@ -392,7 +392,7 @@ function PlanScreenContent() {
       if (isOutOfCredits(e)) { handleOutOfCredits(); setPlanPhase('idle'); }
       else {
         setMessages(m => [...m, { role: 'ai', text: plannerFailureMessage(e, 'conversation') }]);
-        setPlanPhase('ready'); // stay in ready so they can retry
+        setPlanPhase('chatting');
       }
     } finally {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) {
@@ -410,7 +410,7 @@ function PlanScreenContent() {
     const endLocation = lastWp?.name ?? activeTrip.plan?.trip_name ?? 'your last stop';
     Alert.alert(
       'Start Next Leg?',
-      `This will clear your current trip plan and start a new conversation from ${endLocation.split(',')[0]}.`,
+      `This will clear the current plan and start the next trip from ${endLocation.split(',')[0]}.`,
       [
         { text: 'Cancel', style: 'cancel' },
         {
@@ -419,7 +419,7 @@ function PlanScreenContent() {
             setActiveTrip(null);
             setMessages([{
               role: 'ai',
-              text: `Ready for leg 2! Picking up from ${endLocation.split(',')[0]}. Where do you want to head next, and how many days do you have?`,
+              text: `Starting from ${endLocation.split(',')[0]}. Where are you going next, and how many days do you have?`,
             }]);
             setInput(`Continue from ${endLocation.split(',')[0]} — `);
             setPlanPhase('chatting');
@@ -768,7 +768,7 @@ function PlanScreenContent() {
               <TouchableOpacity
                 style={s.reportIconBtn}
                 accessibilityRole="button"
-                accessibilityLabel="Report planner response"
+                accessibilityLabel="Report this message"
                 onPress={() => {
                   setAiReportKind('bug');
                   setAiReportVisible(true);
@@ -777,7 +777,7 @@ function PlanScreenContent() {
                 <Ionicons name="flag-outline" size={17} color={C.text2} />
               </TouchableOpacity>
               <TextInput
-                accessibilityLabel="Trip notes"
+                accessibilityLabel={planPhase === 'active' || planPhase === 'editing' ? 'Trip changes' : 'Trip request'}
                 style={[s.input, (planPhase === 'active' || planPhase === 'editing') && s.inputEdit]}
                 value={input}
                 onChangeText={setInput}
@@ -792,7 +792,7 @@ function PlanScreenContent() {
               />
               <TouchableOpacity
                 accessibilityRole="button"
-                accessibilityLabel="Send trip notes"
+                accessibilityLabel={planPhase === 'active' || planPhase === 'editing' ? 'Send trip changes' : 'Send trip request'}
                 style={[s.sendBtn, loading && s.sendBtnDisabled]}
                 onPress={() => { void send(); }}
                 disabled={loading}

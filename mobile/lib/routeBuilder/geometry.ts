@@ -1,5 +1,12 @@
 import type { RouteBuildResult, RouteStyleMode, TripShapeMode } from '@/lib/api';
-import type { DayRouteSegment, ProviderRouteGeometry, RouteBuilderStopLike, RouteShapeDayRole } from './model';
+import type {
+  DayRouteSegment,
+  ProviderRouteGeometry,
+  ProviderRouteStep,
+  RouteBuilderStopLike,
+  RouteShapeDayRole,
+} from './model';
+import { valhallaManeuverPresentation } from '../valhallaManeuvers';
 
 const MI_PER_METER = 1 / 1609.344;
 
@@ -10,6 +17,52 @@ export function haversineMi(a: { lat: number; lng: number }, b: { lat: number; l
   const x = Math.sin(dLat / 2) ** 2
     + Math.cos(a.lat * Math.PI / 180) * Math.cos(b.lat * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.atan2(Math.sqrt(x), Math.sqrt(1 - x));
+}
+
+export function routeTargetMileForDay(
+  day: number,
+  count: number,
+  totalMi: number,
+  style: RouteStyleMode,
+) {
+  const safeTotalMi = Math.max(0, Number.isFinite(totalMi) ? totalMi : 0);
+  if (count <= 1) return safeTotalMi;
+  const equal = safeTotalMi / count;
+  const firstCap = style === 'wild' ? 130 : style === 'direct' ? 220 : 180;
+  const firstDay = Math.min(
+    safeTotalMi,
+    safeTotalMi * 0.42,
+    Math.max(Math.min(45, safeTotalMi * 0.42), Math.min(equal, firstCap)),
+  );
+  if (day <= 1) return firstDay;
+  const remainingDays = Math.max(1, count - 1);
+  const remainingMi = Math.max(0, safeTotalMi - firstDay);
+  return Math.max(0, Math.min(safeTotalMi, firstDay + (remainingMi * (day - 1)) / remainingDays));
+}
+
+export function routeDayNeedsDefaultOvernight(input: {
+  shape: TripShapeMode;
+  day: number;
+  days: readonly number[];
+  hasExplicitFinalNight?: boolean;
+}) {
+  const orderedDays = input.days.length ? [...input.days].sort((a, b) => a - b) : [input.day];
+  const finalDay = orderedDays[orderedDays.length - 1] ?? input.day;
+  if (input.day === finalDay && !input.hasExplicitFinalNight) return false;
+  return true;
+}
+
+export function coalesceAdjacentRoutableStops<T extends { lat: number; lng: number }>(
+  stops: readonly T[],
+  toleranceMi = 0.015,
+) {
+  const coalesced: T[] = [];
+  for (const stop of stops) {
+    const previous = coalesced[coalesced.length - 1];
+    if (previous && haversineMi(previous, stop) <= toleranceMi) continue;
+    coalesced.push(stop);
+  }
+  return coalesced;
 }
 
 export function coordsToPoints(coords: [number, number][]) {
@@ -149,17 +202,67 @@ export function decodePolyline6(shape: string): [number, number][] {
   return coords;
 }
 
+function providerLegSteps(
+  leg: NonNullable<NonNullable<RouteBuildResult['trip']>['legs']>[number],
+  legCoords: [number, number][],
+  units: 'miles' | 'kilometers',
+): ProviderRouteStep[] {
+  return (leg.maneuvers ?? []).map(maneuver => {
+    const maneuverType = Number.isFinite(Number(maneuver.type)) ? Number(maneuver.type) : 0;
+    const presentation = valhallaManeuverPresentation(maneuverType);
+    const rawIndex = Number(maneuver.begin_shape_index);
+    const shapeIndex = Number.isFinite(rawIndex)
+      ? Math.max(0, Math.min(legCoords.length - 1, Math.trunc(rawIndex)))
+      : 0;
+    const coordinate = legCoords[shapeIndex];
+    const distance = Number(maneuver.length);
+    const duration = Number(maneuver.time);
+    const instruction = String(maneuver.instruction || '').trim();
+    const streetNames = Array.isArray(maneuver.street_names) ? maneuver.street_names : [];
+    return {
+      type: presentation.type,
+      modifier: presentation.modifier,
+      name: String(streetNames[0] || ''),
+      distance: Number.isFinite(distance) && distance > 0
+        ? distance * (units === 'kilometers' ? 1000 : 1609.344)
+        : 0,
+      duration: Number.isFinite(duration) && duration > 0 ? duration : 0,
+      ...(coordinate ? { lng: coordinate[0], lat: coordinate[1] } : {}),
+      instruction,
+      verbalPre: String(
+        maneuver.verbal_pre_transition_instruction
+        || maneuver.verbal_transition_alert_instruction
+        || instruction,
+      ),
+      verbalPost: String(maneuver.verbal_post_transition_instruction || ''),
+      roundaboutExit: maneuver.roundabout_exit_count != null
+        && Number.isFinite(Number(maneuver.roundabout_exit_count))
+        ? Number(maneuver.roundabout_exit_count)
+        : null,
+    };
+  });
+}
+
 export function providerGeometryFromRoute(result: RouteBuildResult | null | undefined, units: 'miles' | 'kilometers' = 'miles'): ProviderRouteGeometry {
-  const coords = cleanRouteCoords((result?.trip?.legs ?? []).flatMap(leg => typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : []));
+  const resultUnits = result?.trip?.units === 'kilometers' ? 'kilometers' : units;
+  const decodedLegs = (result?.trip?.legs ?? []).map(leg => ({
+    leg,
+    coords: typeof leg.shape === 'string' ? decodePolyline6(leg.shape) : [],
+  }));
+  const coords = cleanRouteCoords(decodedLegs.flatMap(item => item.coords));
+  const legs = decodedLegs.map(item => providerLegSteps(item.leg, item.coords, resultUnits));
+  const steps = legs.flat();
   const summaryLength = Number(result?.trip?.summary?.length);
   const summaryTime = Number(result?.trip?.summary?.time);
   const engine = result?._trailhead?.engine;
   const fallbackEngine = engine === 'osrm-fallback' || (result as any)?._fallback?.engine === 'osrm';
   const totalDistanceMi = Number.isFinite(summaryLength) && summaryLength > 0
-    ? summaryLength * (units === 'kilometers' ? 0.621371 : 1)
+    ? summaryLength * (resultUnits === 'kilometers' ? 0.621371 : 1)
     : routeDistanceMi(coordsToPoints(coords));
   return {
     coords,
+    steps,
+    legs,
     totalDistanceMi,
     totalDurationHours: Number.isFinite(summaryTime) && summaryTime > 0 ? summaryTime / 3600 : Math.max(0, totalDistanceMi / 42),
     source: coords.length >= 2 ? 'provider' : 'none',

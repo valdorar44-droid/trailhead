@@ -1,12 +1,22 @@
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 import json
 import os
 import tempfile
+import threading
 import unittest
 from unittest.mock import patch
 
 from config.settings import settings
-from dashboard.server import TripDocumentPayload, product_features
+from fastapi import HTTPException
+
+from dashboard.server import (
+    AccountTripRequest,
+    TripDocumentPayload,
+    create_account_trip,
+    product_features,
+    update_account_trip,
+)
 from db import store
 
 
@@ -341,6 +351,289 @@ class TripGraphV2StoreTests(unittest.TestCase):
         )
         self.assertEqual(migrated["revision"], projected["revision"] + 1)
         self.assertEqual(migrated["title"], "Migrated route")
+
+    def test_legacy_trip_write_rejects_a_stale_expected_version(self):
+        created = store.save_account_trip(
+            "versioned_trip",
+            {
+                "trip_id": "versioned_trip",
+                "plan": {"trip_name": "First version"},
+            },
+            self.user_one,
+            source="mobile",
+        )
+        self.assertEqual(created["version"], 1)
+
+        updated = store.save_account_trip(
+            "versioned_trip",
+            {
+                "trip_id": "versioned_trip",
+                "plan": {"trip_name": "Second version"},
+            },
+            self.user_one,
+            source="mobile",
+            expected_version=1,
+        )
+        self.assertEqual(updated["version"], 2)
+
+        with self.assertRaises(store.RevisionConflictError) as conflict:
+            store.save_account_trip(
+                "versioned_trip",
+                {
+                    "trip_id": "versioned_trip",
+                    "plan": {"trip_name": "Stale overwrite"},
+                },
+                self.user_one,
+                source="mobile",
+                expected_version=1,
+            )
+
+        self.assertEqual(conflict.exception.current_revision, 2)
+        self.assertEqual(store.get_trip("versioned_trip")["plan"]["trip_name"], "Second version")
+
+    def test_account_trip_compare_and_swap_is_atomic_between_writers(self):
+        store.save_account_trip(
+            "atomic_trip",
+            {"trip_id": "atomic_trip", "plan": {"trip_name": "First version"}},
+            self.user_one,
+        )
+        ready = threading.Barrier(2)
+
+        def write(title: str):
+            ready.wait(timeout=2)
+            try:
+                saved = store.save_account_trip(
+                    "atomic_trip",
+                    {"trip_id": "atomic_trip", "plan": {"trip_name": title}},
+                    self.user_one,
+                    expected_version=1,
+                )
+                return "saved", saved
+            except store.RevisionConflictError as exc:
+                return "conflict", exc.current_revision
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            results = list(executor.map(write, ("Writer one", "Writer two")))
+
+        self.assertEqual(sorted(result[0] for result in results), ["conflict", "saved"])
+        saved_result = next(result[1] for result in results if result[0] == "saved")
+        conflict_revision = next(result[1] for result in results if result[0] == "conflict")
+        self.assertEqual(saved_result["version"], 2)
+        self.assertEqual(conflict_revision, 2)
+        self.assertEqual(store.get_trip("atomic_trip")["version"], 2)
+
+    def test_expected_zero_is_create_only_and_saved_version_comes_from_transaction(self):
+        with patch.object(store, "get_trip", side_effect=AssertionError("post-commit read")):
+            created = store.save_account_trip(
+                "create_only_trip",
+                {"trip_id": "create_only_trip", "plan": {"trip_name": "Created"}},
+                self.user_one,
+                expected_version=0,
+            )
+        self.assertEqual(created["version"], 1)
+
+        with self.assertRaises(store.RevisionConflictError) as conflict:
+            store.save_account_trip(
+                "create_only_trip",
+                {"trip_id": "create_only_trip", "plan": {"trip_name": "Overwrite"}},
+                self.user_one,
+                expected_version=0,
+            )
+        self.assertEqual(conflict.exception.current_revision, 1)
+        self.assertEqual(store.get_trip("create_only_trip")["plan"]["trip_name"], "Created")
+
+    def test_planner_save_returns_the_exact_committed_legacy_version(self):
+        first_version = store.save_trip(
+            "planner_version_trip",
+            "Build a route",
+            {"trip_id": "planner_version_trip", "plan": {"trip_name": "First route"}},
+            user_id=self.user_one,
+        )
+        second_version = store.save_trip(
+            "planner_version_trip",
+            "Edit the route",
+            {"trip_id": "planner_version_trip", "plan": {"trip_name": "Second route"}},
+            user_id=self.user_one,
+            expected_version=first_version,
+        )
+
+        self.assertEqual(first_version, 1)
+        self.assertEqual(second_version, 2)
+        self.assertEqual(store.get_trip("planner_version_trip")["version"], 2)
+
+    def test_legacy_and_v2_writes_share_one_revision_counter(self):
+        legacy = store.save_account_trip(
+            "synced_trip",
+            {"trip_id": "synced_trip", "plan": {"trip_name": "Legacy title"}},
+            self.user_one,
+        )
+        projected = store.get_trip_document_v2(self.user_one, "synced_trip")
+        migrated = store.upsert_trip_document_v2(
+            self.user_one,
+            "synced_trip",
+            {**projected, "title": "V2 title"},
+            projected["revision"],
+            "sync-v2-write",
+        )
+
+        self.assertEqual(legacy["version"], 1)
+        self.assertEqual(migrated["revision"], 2)
+        self.assertEqual(store.get_trip("synced_trip")["version"], 2)
+        self.assertEqual(store.list_user_trips(self.user_one)[0]["version"], 2)
+
+        saved = store.save_account_trip(
+            "synced_trip",
+            {"trip_id": "synced_trip", "plan": {"trip_name": "Legacy title updated"}},
+            self.user_one,
+            expected_version=2,
+        )
+        self.assertEqual(saved["version"], 3)
+        self.assertEqual(saved["v2_revision"], 3)
+        synced_document = store.get_trip_document_v2(self.user_one, "synced_trip")
+        self.assertEqual(synced_document["revision"], 3)
+        self.assertEqual(synced_document["title"], "Legacy title updated")
+
+    def test_v2_only_trip_accepts_one_versionless_legacy_compatibility_write(self):
+        document = store.upsert_trip_document_v2(
+            self.user_one,
+            "v2_only_trip",
+            _trip_document("v2_only_trip", "V2 only"),
+            0,
+            "v2-only-create",
+        )
+
+        saved = asyncio.run(update_account_trip(
+            "v2_only_trip",
+            AccountTripRequest(trip={
+                "trip_id": "v2_only_trip",
+                "plan": {"trip_name": "Compatibility write"},
+            }),
+            user={"id": self.user_one},
+        ))
+        self.assertEqual(document["revision"], 1)
+        self.assertEqual(saved["version"], 2)
+        self.assertEqual(saved["v2_revision"], 2)
+
+    def test_create_and_update_routes_share_the_legacy_version_contract(self):
+        created = asyncio.run(create_account_trip(
+            AccountTripRequest(trip={
+                "trip_id": "endpoint_compat_trip",
+                "plan": {"trip_name": "Created by POST"},
+            }),
+            user={"id": self.user_one},
+        ))
+        self.assertEqual(created["version"], 1)
+
+        post_updated = asyncio.run(create_account_trip(
+            AccountTripRequest(trip={
+                "trip_id": "endpoint_compat_trip",
+                "plan": {"trip_name": "Updated by POST"},
+            }),
+            user={"id": self.user_one},
+        ))
+        self.assertEqual(post_updated["version"], 2)
+
+        put_updated = asyncio.run(update_account_trip(
+            "endpoint_compat_trip",
+            AccountTripRequest(
+                trip={"plan": {"trip_name": "Updated by PUT"}},
+                expected_version=post_updated["version"],
+            ),
+            user={"id": self.user_one},
+        ))
+        self.assertEqual(put_updated["version"], 3)
+
+    def test_account_trip_endpoint_accepts_legacy_writes_and_enforces_explicit_versions(self):
+        store.save_account_trip(
+            "endpoint_versioned_trip",
+            {
+                "trip_id": "endpoint_versioned_trip",
+                "plan": {"trip_name": "First version"},
+            },
+            self.user_one,
+        )
+
+        saved = asyncio.run(update_account_trip(
+            "endpoint_versioned_trip",
+            AccountTripRequest(
+                trip={
+                    "trip_id": "endpoint_versioned_trip",
+                    "plan": {"trip_name": "Second version"},
+                },
+                expected_version=1,
+            ),
+            user={"id": self.user_one},
+        ))
+        self.assertEqual(saved["version"], 2)
+
+        with self.assertRaises(HTTPException) as stale:
+            asyncio.run(update_account_trip(
+                "endpoint_versioned_trip",
+                AccountTripRequest(
+                    trip={
+                        "trip_id": "endpoint_versioned_trip",
+                        "plan": {"trip_name": "Stale overwrite"},
+                    },
+                    expected_version=1,
+                ),
+                user={"id": self.user_one},
+            ))
+        self.assertEqual(stale.exception.status_code, 409)
+        self.assertEqual(stale.exception.detail["code"], "revision_conflict")
+
+        legacy_saved = asyncio.run(update_account_trip(
+            "endpoint_versioned_trip",
+            AccountTripRequest(trip={
+                "trip_id": "endpoint_versioned_trip",
+                "plan": {"trip_name": "Legacy client update"},
+            }),
+            user={"id": self.user_one},
+        ))
+        self.assertEqual(legacy_saved["version"], 3)
+
+    def test_versionless_compatibility_write_rejects_a_race_after_its_snapshot(self):
+        store.save_account_trip(
+            "legacy_race_trip",
+            {
+                "trip_id": "legacy_race_trip",
+                "plan": {"trip_name": "First version"},
+            },
+            self.user_one,
+        )
+        original_save = store.save_account_trip
+        raced = False
+
+        def save_after_concurrent_write(*args, **kwargs):
+            nonlocal raced
+            if not raced:
+                raced = True
+                original_save(
+                    "legacy_race_trip",
+                    {
+                        "trip_id": "legacy_race_trip",
+                        "plan": {"trip_name": "Concurrent update"},
+                    },
+                    self.user_one,
+                    expected_version=kwargs["expected_version"],
+                )
+            return original_save(*args, **kwargs)
+
+        with patch("dashboard.server.save_account_trip", side_effect=save_after_concurrent_write):
+            with self.assertRaises(HTTPException) as conflict:
+                asyncio.run(update_account_trip(
+                    "legacy_race_trip",
+                    AccountTripRequest(trip={
+                        "trip_id": "legacy_race_trip",
+                        "plan": {"trip_name": "Versionless stale update"},
+                    }),
+                    user={"id": self.user_one},
+                ))
+
+        self.assertEqual(conflict.exception.status_code, 409)
+        self.assertEqual(conflict.exception.detail["code"], "revision_conflict")
+        current = store.get_trip("legacy_race_trip")
+        self.assertEqual(current["version"], 2)
+        self.assertEqual(current["plan"]["trip_name"], "Concurrent update")
 
     def test_v2_delete_removes_legacy_row_and_blocks_legacy_resurrection(self):
         store.save_account_trip(

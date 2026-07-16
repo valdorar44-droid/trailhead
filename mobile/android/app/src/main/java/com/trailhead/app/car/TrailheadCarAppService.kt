@@ -15,6 +15,7 @@ import android.os.Looper
 import android.os.SystemClock
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
+import android.util.Log
 import androidx.car.app.CarAppService
 import androidx.car.app.CarToast
 import androidx.car.app.Screen
@@ -66,13 +67,21 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   private var snapshotObserver: FileObserver? = null
   private var snapshotRemovalObserved = false
   private var routeReplacementRequestedUntilElapsedMs = 0L
+  private var destroyed = false
   private val locationListener: (Location) -> Unit = { location ->
-    mainHandler.post { handleLocation(location) }
+    mainHandler.post { if (!destroyed) handleLocation(location) }
   }
-  private val snapshotReload = Runnable { reloadSnapshotFromDisk() }
+  private val snapshotReload = Runnable { if (!destroyed) reloadSnapshotFromDisk() }
+  private val optionalSessionSetup = Runnable {
+    if (destroyed || !::mapSurface.isInitialized) return@Runnable
+    runOptionalSetup("report queue") { CarReportManager.scheduleFlush(carContext) }
+    runOptionalSetup("trip updates") { startSnapshotObserver() }
+    runOptionalSetup("voice guidance") { initializeSpeech() }
+  }
   private val audioFocusChangeListener = AudioManager.OnAudioFocusChangeListener { change ->
     if (change == AudioManager.AUDIOFOCUS_LOSS || change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
       mainHandler.post {
+        if (destroyed) return@post
         activeSpeechId = null
         tts?.stop()
         abandonSpeechAudioFocus()
@@ -94,16 +103,20 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   private val navigationCallback = object : NavigationManagerCallback {
     override fun onStopNavigation() {
       mainHandler.post {
+        if (destroyed) return@post
         endGuidance()
         carContext.getCarService(ScreenManager::class.java).popToRoot()
       }
     }
 
     override fun onAutoDriveEnabled() {
-      autoDriveEnabled = true
-      if (!navigating) startGuidance()
-      mainHandler.removeCallbacks(autoDriveStep)
-      mainHandler.post(autoDriveStep)
+      mainHandler.post {
+        if (destroyed) return@post
+        autoDriveEnabled = true
+        if (!navigating) startGuidance()
+        mainHandler.removeCallbacks(autoDriveStep)
+        mainHandler.post(autoDriveStep)
+      }
     }
   }
 
@@ -119,22 +132,24 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   init {
     lifecycle.addObserver(object : DefaultLifecycleObserver {
       override fun onDestroy(owner: LifecycleOwner) {
+        destroyed = true
         snapshotObserver?.stopWatching()
         snapshotObserver = null
         TrailheadCarLocationService.removeListener(locationListener)
-        TrailheadCarLocationService.stop(carContext)
+        runCatching { TrailheadCarLocationService.stop(carContext) }
         if (::navigationManager.isInitialized) {
           if (navigating) runCatching { navigationManager.navigationEnded() }
-          navigationManager.clearNavigationManagerCallback()
+          runCatching { navigationManager.clearNavigationManagerCallback() }
         }
         if (::mapSurface.isInitialized) mapSurface.release()
         navigating = false
         autoDriveEnabled = false
         mainHandler.removeCallbacks(autoDriveStep)
         mainHandler.removeCallbacks(snapshotReload)
+        mainHandler.removeCallbacks(optionalSessionSetup)
         activeSpeechId = null
         tts?.stop()
-        abandonSpeechAudioFocus()
+        runCatching { abandonSpeechAudioFocus() }
         tts?.shutdown()
         tts = null
       }
@@ -142,16 +157,16 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   }
 
   override fun onCreateScreen(intent: Intent): Screen {
+    destroyed = false
     snapshot = TrailheadCarRepository.load(carContext)
     mapSurface = TrailheadCarMapSurface(carContext)
     mapSurface.setSnapshot(snapshot)
     guidanceScreen = TrailheadCarGuidanceScreen(carContext, this)
     navigationManager = carContext.getCarService(NavigationManager::class.java)
     navigationManager.setNavigationManagerCallback(navigationCallback)
-    CarReportManager.scheduleFlush(carContext)
     TrailheadCarLocationService.addListener(locationListener)
-    startSnapshotObserver()
-    initializeSpeech()
+    mainHandler.removeCallbacks(optionalSessionSetup)
+    mainHandler.post(optionalSessionSetup)
     val navigationRequest = TrailheadCarNavigationIntent.parse(intent)
     setRouteReplacementRequest(navigationRequest)
 
@@ -201,8 +216,8 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   }
 
   override fun onCarConfigurationChanged(newConfiguration: Configuration) {
-    mapSurface.onCarConfigurationChanged()
-    guidanceScreen.invalidate()
+    if (::mapSurface.isInitialized) mapSurface.onCarConfigurationChanged()
+    if (::guidanceScreen.isInitialized) guidanceScreen.invalidate()
   }
 
   override fun startGuidance() {
@@ -495,8 +510,17 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     }.also(FileObserver::startWatching)
   }
 
+  private inline fun runOptionalSetup(name: String, block: () -> Unit) {
+    try {
+      block()
+    } catch (error: Throwable) {
+      if (error is ThreadDeath || error is VirtualMachineError) throw error
+      Log.w(TAG, "Android Auto $name setup unavailable", error)
+    }
+  }
+
   private fun reloadSnapshotFromDisk() {
-    if (!::mapSurface.isInitialized) return
+    if (destroyed || !::mapSurface.isInitialized) return
     val previous = snapshot
     val removalObserved = snapshotRemovalObserved
     snapshotRemovalObserved = false
@@ -557,6 +581,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   }
 
   private companion object {
+    const val TAG = "TrailheadCarSession"
     const val MAX_NAVIGATION_LOCATION_AGE_MS = 2L * 60L * 1_000L
     const val ROUTE_REPLACEMENT_WINDOW_MS = 10L * 60L * 1_000L
   }

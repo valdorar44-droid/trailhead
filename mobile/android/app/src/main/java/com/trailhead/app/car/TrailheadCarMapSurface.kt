@@ -10,6 +10,7 @@ import android.hardware.display.DisplayManager
 import android.hardware.display.VirtualDisplay
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.Surface
 import android.view.ViewGroup
 import androidx.car.app.AppManager
@@ -37,6 +38,8 @@ import com.mapbox.maps.extension.style.sources.generated.GeoJsonSource
 import com.mapbox.maps.extension.style.sources.getSource
 import com.mapbox.maps.plugin.animation.MapAnimationOptions
 import com.mapbox.maps.plugin.animation.easeTo
+import java.util.Collections
+import java.util.IdentityHashMap
 import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.ln
@@ -72,10 +75,35 @@ class TrailheadCarMapSurface(
   private var fallbackScale = 1.0
   private var fallbackPanX = 0f
   private var fallbackPanY = 0f
+  private var surfaceGeneration = 0L
+  @Volatile private var released = false
+  private var pendingMapboxAttach: Runnable? = null
+  @Volatile private var latestSurfaceCandidate: Surface? = null
+  private val releasedSurfaces = Collections.newSetFromMap(IdentityHashMap<Surface, Boolean>())
 
   val callback = object : SurfaceCallback {
     override fun onSurfaceAvailable(surfaceContainer: SurfaceContainer) {
-      attachSurface(surfaceContainer)
+      val nextSurface = surfaceContainer.surface ?: return
+      if (released) {
+        mainHandler.post { releaseSurfaceInstance(nextSurface) }
+        return
+      }
+      val nextWidth = surfaceContainer.width.coerceAtLeast(1)
+      val nextHeight = surfaceContainer.height.coerceAtLeast(1)
+      val nextDpi = surfaceContainer.dpi.coerceAtLeast(1)
+      visibleArea = null
+      stableArea = null
+      latestSurfaceCandidate = nextSurface
+      val generation = ++surfaceGeneration
+      mainHandler.post {
+        if (released || generation != surfaceGeneration) {
+          if (nextSurface !== latestSurfaceCandidate && nextSurface !== surface) {
+            releaseSurfaceInstance(nextSurface)
+          }
+          return@post
+        }
+        attachSurface(nextSurface, nextWidth, nextHeight, nextDpi, generation)
+      }
     }
 
     override fun onVisibleAreaChanged(visibleArea: Rect) {
@@ -89,10 +117,15 @@ class TrailheadCarMapSurface(
     }
 
     override fun onSurfaceDestroyed(surfaceContainer: SurfaceContainer) {
-      if (surface === surfaceContainer.surface) {
-        releaseSurface()
-      } else {
-        surfaceContainer.surface?.release()
+      val destroyedSurface = surfaceContainer.surface
+      surfaceGeneration += 1L
+      val candidateSurface = latestSurfaceCandidate
+      latestSurfaceCandidate = null
+      val currentSurface = surface
+      releaseSurface()
+      if (candidateSurface !== currentSurface) candidateSurface?.let(::releaseSurfaceInstance)
+      if (destroyedSurface !== currentSurface && destroyedSurface !== candidateSurface) {
+        destroyedSurface?.let(::releaseSurfaceInstance)
       }
     }
 
@@ -114,14 +147,20 @@ class TrailheadCarMapSurface(
   }
 
   init {
-    carContext.getCarService(AppManager::class.java).setSurfaceCallback(callback)
+    try {
+      carContext.getCarService(AppManager::class.java).setSurfaceCallback(callback)
+    } catch (error: RuntimeException) {
+      Log.e(TAG, "Unable to register the car map surface", error)
+    }
   }
 
   fun setSnapshot(next: TrailheadCarSnapshot) {
     if (snapshot.route?.routeId != next.route?.routeId) resetFallbackViewport()
     snapshot = next
     mainHandler.post {
-      if (mapView == null && surface != null) attachMapboxOrFallback()
+      if (mapView == null && surface != null && pendingMapboxAttach == null) {
+        scheduleMapboxAttach(surfaceGeneration)
+      }
       renderRoute()
       renderProgress()
       if (progress == null) frameRoute()
@@ -159,14 +198,27 @@ class TrailheadCarMapSurface(
   }
 
   fun release() {
-    if (Looper.myLooper() == Looper.getMainLooper()) releaseSurface() else mainHandler.post(::releaseSurface)
+    released = true
+    surfaceGeneration += 1L
+    val pendingSurface = latestSurfaceCandidate
+    latestSurfaceCandidate = null
+    pendingMapboxAttach?.let(mainHandler::removeCallbacks)
+    pendingMapboxAttach = null
+    val cleanup = Runnable {
+      val currentSurface = surface
+      releaseSurface()
+      if (pendingSurface !== currentSurface) pendingSurface?.let(::releaseSurfaceInstance)
+    }
+    if (Looper.myLooper() == Looper.getMainLooper()) cleanup.run() else mainHandler.post(cleanup)
   }
 
-  private fun attachSurface(container: SurfaceContainer) {
-    val nextSurface = container.surface
-    val nextWidth = container.width.coerceAtLeast(1)
-    val nextHeight = container.height.coerceAtLeast(1)
-    val nextDpi = container.dpi.coerceAtLeast(1)
+  private fun attachSurface(
+    nextSurface: Surface,
+    nextWidth: Int,
+    nextHeight: Int,
+    nextDpi: Int,
+    generation: Long,
+  ) {
     if (surface === nextSurface) {
       val sizeChanged = surfaceWidth != nextWidth || surfaceHeight != nextHeight || surfaceDpi != nextDpi
       surfaceWidth = nextWidth
@@ -178,9 +230,12 @@ class TrailheadCarMapSurface(
         } == true
       ) {
         releaseMapbox()
-        attachMapboxOrFallback()
+        fallbackActive = true
+        renderFallback()
+        scheduleMapboxAttach(generation)
         return
       }
+      if (mapView == null) scheduleMapboxAttach(generation)
       refreshCameraForInsets()
       return
     }
@@ -189,19 +244,35 @@ class TrailheadCarMapSurface(
     surfaceWidth = nextWidth
     surfaceHeight = nextHeight
     surfaceDpi = nextDpi
-    visibleArea = null
-    stableArea = null
-    attachMapboxOrFallback()
+    fallbackActive = true
+    renderFallback()
+    scheduleMapboxAttach(generation)
+  }
+
+  private fun scheduleMapboxAttach(generation: Long) {
+    pendingMapboxAttach?.let(mainHandler::removeCallbacks)
+    val task = Runnable {
+      pendingMapboxAttach = null
+      if (released || generation != surfaceGeneration || surface == null) return@Runnable
+      attachMapboxOrFallback()
+    }
+    pendingMapboxAttach = task
+    mainHandler.postDelayed(task, MAPBOX_ATTACH_DELAY_MS)
   }
 
   private fun attachMapboxOrFallback() {
     val token = snapshot.mapboxAccessToken
-    if (surface == null || token.isBlank() || !MapView.isRenderingSupported()) {
+    if (surface == null || token.isBlank()) {
       fallbackActive = true
       renderFallback()
       return
     }
     try {
+      if (!MapView.isRenderingSupported()) {
+        fallbackActive = true
+        renderFallback()
+        return
+      }
       MapboxOptions.accessToken = token
       val displayManager = carContext.getSystemService(DisplayManager::class.java)
       val nextVirtualDisplay = displayManager.createVirtualDisplay(
@@ -230,19 +301,30 @@ class TrailheadCarMapSurface(
       nextMap.onResume()
       fallbackActive = false
       loadMapStyle(nextMap)
-    } catch (_: Exception) {
+    } catch (error: Throwable) {
+      if (error is ThreadDeath || error is VirtualMachineError) throw error
+      Log.e(TAG, "Mapbox car renderer unavailable; using the route fallback", error)
       activateFallback()
     }
   }
 
   private fun releaseSurface() {
+    pendingMapboxAttach?.let(mainHandler::removeCallbacks)
+    pendingMapboxAttach = null
     releaseMapbox()
-    surface?.release()
+    val currentSurface = surface
+    currentSurface?.let(::releaseSurfaceInstance)
+    if (latestSurfaceCandidate === currentSurface) latestSurfaceCandidate = null
     surface = null
     surfaceWidth = 0
     surfaceHeight = 0
     surfaceDpi = 160
     fallbackActive = false
+  }
+
+  @Synchronized
+  private fun releaseSurfaceInstance(target: Surface) {
+    if (releasedSurfaces.add(target)) runCatching { target.release() }
   }
 
   private fun releaseMapbox() {
@@ -267,8 +349,12 @@ class TrailheadCarMapSurface(
     styleLoaded = false
     val errorSubscription = target.mapboxMap.subscribeMapLoadingError { error ->
       if (error.type == MapLoadingErrorType.STYLE && mapView === target && !styleLoaded) {
-        clearStyleErrorSubscription()
-        activateFallback()
+        mainHandler.post {
+          if (mapView === target && !styleLoaded) {
+            clearStyleErrorSubscription()
+            activateFallback()
+          }
+        }
       }
     }
     cancelStyleErrorSubscription = { errorSubscription.cancel() }
@@ -277,12 +363,20 @@ class TrailheadCarMapSurface(
       object : Style.OnStyleLoaded {
         override fun onStyleLoaded(style: Style) {
           if (mapView === target) {
-            clearStyleErrorSubscription()
-            styleLoaded = true
-            installLayers(style)
-            renderRoute()
-            renderProgress()
-            if (progress == null) frameRoute() else progress?.let(::follow)
+            try {
+              clearStyleErrorSubscription()
+              styleLoaded = true
+              installLayers(style)
+              renderRoute()
+              renderProgress()
+              if (progress == null) frameRoute() else progress?.let(::follow)
+            } catch (error: Throwable) {
+              if (error is ThreadDeath || error is VirtualMachineError) throw error
+              Log.e(TAG, "Mapbox car style unavailable; using the route fallback", error)
+              mainHandler.post {
+                if (mapView === target) activateFallback()
+              }
+            }
           }
         }
       },
@@ -427,6 +521,7 @@ class TrailheadCarMapSurface(
     bearing: Double?,
     durationMs: Long,
   ) {
+    val map = mapView?.mapboxMap ?: return
     val options = CameraOptions.Builder()
       .center(Point.fromLngLat(center.lng, center.lat))
       .zoom(zoom)
@@ -435,7 +530,7 @@ class TrailheadCarMapSurface(
       .apply { if (bearing != null) bearing(bearing) }
       .build()
     val animation = MapAnimationOptions.Builder().duration(durationMs).build()
-    mapView?.mapboxMap?.easeTo(options, animation)
+    map.easeTo(options, animation)
   }
 
   private fun panMap(distanceX: Float, distanceY: Float) {
@@ -591,6 +686,8 @@ class TrailheadCarMapSurface(
   }
 
   private companion object {
+    const val TAG = "TrailheadCarMap"
+    const val MAPBOX_ATTACH_DELAY_MS = 350L
     const val ROUTE_SOURCE = "trailhead-car-route-source"
     const val PROGRESS_SOURCE = "trailhead-car-progress-source"
     const val LOCATION_SOURCE = "trailhead-car-location-source"

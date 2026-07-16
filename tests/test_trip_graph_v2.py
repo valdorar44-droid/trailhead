@@ -923,6 +923,7 @@ class TripGraphV2StoreTests(unittest.TestCase):
             "TRAILHEAD_TRIPS_TAB_ENABLED": "0",
             "TRAILHEAD_AVAILABILITY_MONITORS_ENABLED": "0",
             "TRAILHEAD_TRIP_PACKS_ENABLED": "0",
+            "TRAILHEAD_ORIGINALS_ENABLED": "0",
             "TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED": "0",
             "TRAILHEAD_DIGEST_PREFERENCES_ENABLED": "0",
         }):
@@ -936,6 +937,7 @@ class TripGraphV2StoreTests(unittest.TestCase):
             "trips_tab": False,
             "availability_monitors": False,
             "trip_packs": False,
+            "originals": False,
             "community_publications": False,
             "digest_preferences": False,
         })

@@ -176,6 +176,75 @@ td.name{color:var(--text);font-weight:600;}
 #toast.show{transform:translateY(0);opacity:1;}
 #toast.ok{border-color:var(--green);color:var(--green);}
 #toast.err{border-color:var(--red);color:var(--red);}
+#toast.originals-ok{border-color:var(--orange);color:var(--orange);}
+
+/* Originals Studio */
+.originals-shell{display:grid;grid-template-columns:280px minmax(0,1fr);gap:16px;align-items:start;}
+.originals-sidebar{position:sticky;top:0;max-height:calc(100vh - 112px);overflow:auto;}
+.originals-list{display:flex;flex-direction:column;gap:8px;}
+.originals-group{color:var(--text3);font:700 10px var(--mono);letter-spacing:1px;margin:12px 2px 6px;}
+.originals-item{width:100%;text-align:left;background:var(--s3);border:1px solid var(--border);border-radius:11px;padding:11px;color:var(--text);cursor:pointer;}
+.originals-item:hover,.originals-item.active{border-color:var(--orange);}
+.originals-item.active{box-shadow:inset 3px 0 0 var(--orange);}
+.originals-item-title{font-size:13px;font-weight:800;line-height:18px;}
+.originals-item-meta{color:var(--text3);font:10px var(--mono);margin-top:6px;}
+.originals-editor{display:flex;flex-direction:column;gap:14px;min-width:0;}
+.originals-topline{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}
+.originals-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
+.originals-editor .btn:disabled{opacity:.35;cursor:not-allowed;}
+.originals-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.originals-field{display:flex;flex-direction:column;gap:6px;min-width:0;}
+.originals-field.wide{grid-column:1/-1;}
+.originals-field label{color:var(--text3);font:700 10px var(--mono);letter-spacing:.7px;}
+.originals-input,.originals-select,.originals-textarea{background:var(--s3);border:1px solid var(--border);border-radius:9px;padding:10px 11px;color:var(--text);font-size:13px;outline:none;width:100%;}
+.originals-input:focus,.originals-select:focus,.originals-textarea:focus{border-color:var(--orange);}
+.originals-textarea{resize:vertical;min-height:84px;line-height:1.5;}
+.originals-json{min-height:310px;font:11px/1.55 var(--mono);tab-size:2;white-space:pre;}
+.originals-json-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
+.originals-metrics{display:grid;grid-template-columns:repeat(5,minmax(100px,1fr));gap:8px;}
+.originals-metric{background:var(--s3);border:1px solid var(--border);border-radius:10px;padding:11px;}
+.originals-metric strong{display:block;color:var(--orange);font:800 17px var(--mono);}
+.originals-metric span{display:block;color:var(--text3);font:9px var(--mono);letter-spacing:.7px;margin-top:4px;}
+.originals-preview-grid{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(280px,.75fr);gap:12px;align-items:start;}
+.originals-route{height:270px;border:1px solid var(--border);border-radius:12px;background:#090a0c;overflow:hidden;}
+.originals-route.editable{cursor:crosshair;}
+.originals-route svg{display:block;width:100%;height:100%;}
+.originals-route-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
+.originals-route-hint{color:var(--text3);font:10px/1.45 var(--mono);flex:1;min-width:220px;}
+.originals-simulator{display:flex;align-items:center;gap:8px;min-width:min(100%,360px);}
+.originals-simulator input{accent-color:var(--orange);flex:1;min-width:120px;}
+.originals-simulator-output{color:var(--orange);font:800 10px var(--mono);min-width:136px;text-align:right;}
+.originals-stop-list{display:flex;flex-direction:column;gap:7px;max-height:270px;overflow:auto;}
+.originals-stop{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;background:var(--s3);border:1px solid var(--border);border-radius:9px;padding:9px;cursor:pointer;}
+.originals-stop{width:100%;text-align:left;font:inherit;}
+.originals-stop:hover,.originals-stop.active{border-color:var(--orange);}
+.originals-stop-number{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--orange);color:#fff;font:800 10px var(--mono);}
+.originals-stop-title{font-size:12px;font-weight:700;color:var(--text);}
+.originals-stop-meta{font:9px var(--mono);color:var(--text3);margin-top:3px;}
+.originals-stop-editor{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
+.originals-stop-editor .wide{grid-column:1/-1;}
+.originals-stop-editor .half{grid-column:span 2;}
+.originals-review-grid{display:grid;grid-template-columns:repeat(3,minmax(180px,1fr));gap:8px;}
+.originals-check{display:flex;gap:8px;align-items:center;background:var(--s3);border:1px solid var(--border);border-radius:8px;padding:9px;color:var(--text2);font-size:11px;}
+.originals-check input{accent-color:var(--orange);}
+.originals-readiness{border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--s3);}
+.originals-readiness.ready{border-color:var(--orange);}
+.originals-readiness-title{color:var(--orange);font:800 12px var(--mono);}
+.originals-issues{display:flex;flex-direction:column;gap:6px;margin-top:9px;}
+.originals-issue{color:var(--text2);font-size:11px;line-height:1.45;padding-left:13px;position:relative;}
+.originals-issue:before{content:'—';position:absolute;left:0;color:var(--red);}
+.originals-audio{width:100%;height:34px;margin-top:8px;filter:grayscale(1);}
+.originals-place-status{color:var(--text3);font:10px/1.4 var(--mono);min-height:14px;}
+.originals-version-list{display:flex;flex-direction:column;gap:7px;}
+.originals-version{display:grid;grid-template-columns:58px 1fr auto;gap:10px;align-items:center;width:100%;text-align:left;background:var(--s3);border:1px solid var(--border);border-radius:9px;padding:10px;color:var(--text);cursor:pointer;}
+.originals-version:hover,.originals-version.active{border-color:var(--orange);}
+.originals-version-number{color:var(--orange);font:900 11px var(--mono);}
+.originals-version-meta{color:var(--text3);font:10px var(--mono);}
+.originals-version-diff{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px;}
+.originals-version-chip{border:1px solid var(--border);border-radius:999px;padding:6px 9px;color:var(--text2);font:10px var(--mono);}
+.originals-empty{color:var(--text3);font-size:12px;padding:18px;text-align:center;border:1px dashed var(--border);border-radius:10px;}
+@media(max-width:1050px){.originals-shell{grid-template-columns:1fr}.originals-sidebar{position:static;max-height:none}.originals-json-grid,.originals-preview-grid{grid-template-columns:1fr}.originals-metrics{grid-template-columns:repeat(3,1fr)}}
+@media(max-width:720px){.originals-form,.originals-review-grid{grid-template-columns:1fr}.originals-stop-editor{grid-template-columns:1fr 1fr}.originals-metrics{grid-template-columns:1fr 1fr}}
 </style>
 </head>
 <body>
@@ -226,6 +295,9 @@ td.name{color:var(--text);font-weight:600;}
       </div>
       <div class="nav-item" onclick="showPage('audio-guides',this)">
         <span class="nav-icon">AG</span><span class="nav-label">Audio Guides</span>
+      </div>
+      <div class="nav-item" onclick="showPage('originals',this)">
+        <span class="nav-icon">OR</span><span class="nav-label">Originals</span>
       </div>
       <div class="nav-item" onclick="showPage('contest',this)">
         <span class="nav-icon">CT</span><span class="nav-label">Contest</span>
@@ -682,6 +754,170 @@ td.name{color:var(--text);font-weight:600;}
         </div>
       </div>
 
+      <!-- Originals Studio -->
+      <div class="page" id="page-originals">
+        <div class="page-title">Originals Studio</div>
+        <div class="page-sub">Author, review, and publish GPS audio drives.</div>
+        <div class="originals-shell">
+          <aside class="card originals-sidebar">
+            <div class="originals-topline" style="margin-bottom:12px;">
+              <div class="section-label" style="margin:0;">ORIGINALS</div>
+              <div class="originals-actions">
+                <button class="btn btn-primary btn-sm" onclick="startNewOriginal()">New</button>
+                <button class="btn btn-ghost btn-sm" onclick="document.getElementById('originals-import').click()">Import</button>
+                <input id="originals-import" type="file" accept="application/json,.json" style="display:none;" onchange="importOriginalJson(event)">
+              </div>
+            </div>
+            <div id="originals-list" class="originals-list">
+              <div class="originals-empty">Loading…</div>
+            </div>
+          </aside>
+
+          <section class="originals-editor">
+            <div id="originals-editor-empty" class="card originals-empty">Select an Original or create a draft.</div>
+            <div id="originals-editor" style="display:none;flex-direction:column;gap:14px;">
+              <div class="originals-topline">
+                <div>
+                  <div id="originals-current-title" style="font-size:18px;font-weight:800;">Untitled Original</div>
+                  <div id="originals-current-meta" style="color:var(--text3);font:10px var(--mono);margin-top:5px;">NEW DRAFT</div>
+                </div>
+                <div class="originals-actions">
+                  <button class="btn btn-ghost" onclick="saveOriginalDraft()">Save draft</button>
+                  <button class="btn btn-ghost" onclick="validateOriginalDraft()">Validate</button>
+                  <button class="btn btn-primary" id="originals-publish-btn" onclick="publishOriginal()" disabled>Publish</button>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="section-label">DETAILS</div>
+                <div class="originals-form">
+                  <div class="originals-field"><label>ID</label><input id="originals-id" class="originals-input" placeholder="Generated when blank"></div>
+                  <div class="originals-field"><label>SLUG</label><input id="originals-slug" class="originals-input" placeholder="moab-canyons-to-the-sky"></div>
+                  <div class="originals-field wide"><label>TITLE</label><input id="originals-title" class="originals-input" maxlength="200"></div>
+                  <div class="originals-field wide"><label>SUMMARY</label><textarea id="originals-summary" class="originals-textarea" maxlength="2000"></textarea></div>
+                  <div class="originals-field"><label>PRICE</label><select id="originals-price" class="originals-select"><option value="0">Free</option><option value="250">250 credits</option><option value="500">500 credits</option><option value="900">900 credits</option></select></div>
+                  <div class="originals-field"><label>COVERAGE</label><select id="originals-coverage" class="originals-select"><option value="north_america">North America</option><option value="global">Global</option></select></div>
+                  <div class="originals-field wide"><label>PUBLIC METADATA · JSON</label><textarea id="originals-public-metadata" class="originals-textarea" spellcheck="false">{}</textarea></div>
+                </div>
+              </div>
+
+              <div id="originals-metrics" class="originals-metrics"></div>
+
+              <div class="card">
+                <div class="originals-topline" style="margin-bottom:12px;">
+                  <div class="section-label" style="margin:0;">ROUTE + STORIES</div>
+                  <div class="originals-actions">
+                    <button class="btn btn-ghost btn-sm" onclick="document.getElementById('originals-route-file').click()">Import route</button>
+                    <input id="originals-route-file" type="file" accept=".geojson,.json,.gpx,.kml,application/geo+json,application/gpx+xml,application/vnd.google-earth.kml+xml" style="display:none;" onchange="importOriginalRoute(event)">
+                    <button id="originals-route-edit-btn" class="btn btn-ghost btn-sm" onclick="toggleOriginalRouteDrawing()">Edit line</button>
+                    <button class="btn btn-ghost btn-sm" onclick="undoOriginalRouteEdit()">Undo line</button>
+                    <button class="btn btn-primary btn-sm" onclick="addOriginalStop()">Add story</button>
+                    <div id="originals-route-caption" style="color:var(--text3);font:10px var(--mono);"></div>
+                  </div>
+                </div>
+                <div class="originals-preview-grid">
+                  <div id="originals-route" class="originals-route editable" title="Click the route to place the selected story" onclick="placeOriginalStopFromRoute(event)"></div>
+                  <div id="originals-stops" class="originals-stop-list"></div>
+                </div>
+                <div class="originals-route-tools">
+                  <div class="originals-route-hint">Click the authored route to place the selected story and set its progress window.</div>
+                  <div class="originals-simulator">
+                    <label for="originals-simulator" style="color:var(--text3);font:700 10px var(--mono);">SIMULATE</label>
+                    <input id="originals-simulator" type="range" min="0" max="1000" value="0" oninput="updateOriginalSimulation()">
+                    <output id="originals-simulator-output" class="originals-simulator-output">START</output>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card" id="originals-stop-card" style="display:none;">
+                <div class="originals-topline" style="margin-bottom:12px;">
+                  <div class="section-label" style="margin:0;">SELECTED STORY</div>
+                  <div class="originals-actions">
+                    <button class="btn btn-ghost btn-sm" onclick="moveOriginalStop(-1)" aria-label="Move selected story earlier">Up</button>
+                    <button class="btn btn-ghost btn-sm" onclick="moveOriginalStop(1)" aria-label="Move selected story later">Down</button>
+                    <button class="btn btn-ghost btn-sm" onclick="removeOriginalStop()">Remove</button>
+                    <button class="btn btn-primary btn-sm" onclick="applyOriginalStopEdits()">Apply story</button>
+                  </div>
+                </div>
+                <div class="originals-stop-editor">
+                  <div class="originals-field half"><label>TITLE</label><input id="original-stop-title" class="originals-input"></div>
+                  <div class="originals-field half"><label>EXPLORE PLACE ID</label><div class="originals-actions"><input id="original-stop-place" class="originals-input" placeholder="Optional" onblur="validateOriginalPlaceLink()"><button class="btn btn-ghost btn-sm" onclick="validateOriginalPlaceLink()">Check</button></div><div id="original-stop-place-status" class="originals-place-status"></div></div>
+                  <div class="originals-field"><label>LATITUDE</label><input id="original-stop-lat" class="originals-input" type="number" step="any"></div>
+                  <div class="originals-field"><label>LONGITUDE</label><input id="original-stop-lng" class="originals-input" type="number" step="any"></div>
+                  <div class="originals-field"><label>ENTER RADIUS · M</label><input id="original-stop-enter" class="originals-input" type="number" min="50"></div>
+                  <div class="originals-field"><label>EXIT RADIUS · M</label><input id="original-stop-exit" class="originals-input" type="number" min="100"></div>
+                  <div class="originals-field"><label>LEAD · SEC</label><input id="original-stop-lead" class="originals-input" type="number" min="0"></div>
+                  <div class="originals-field"><label>PROGRESS START · M</label><input id="original-stop-progress-start" class="originals-input" type="number" min="0"></div>
+                  <div class="originals-field"><label>PROGRESS END · M</label><input id="original-stop-progress-end" class="originals-input" type="number" min="0"></div>
+                  <div class="originals-field"><label>DURATION · SEC</label><input id="original-stop-duration" class="originals-input" type="number" min="1"></div>
+                  <div class="originals-field half"><label>ARTWORK ASSET ID</label><input id="original-stop-artwork" class="originals-input" placeholder="Required to publish"></div>
+                  <div class="originals-field half">
+                    <label>STORY ARTWORK</label>
+                    <div class="originals-actions">
+                      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('originals-artwork-file').click()">Upload image</button>
+                      <input id="originals-artwork-file" type="file" accept="image/png,.png" style="display:none;" onchange="uploadOriginalArtworkFile(event)">
+                      <span id="originals-artwork-status" style="color:var(--text3);font:10px var(--mono);"></span>
+                    </div>
+                  </div>
+                  <div class="originals-field wide"><label>TRANSCRIPT</label><textarea id="original-stop-transcript" class="originals-textarea" style="min-height:150px;"></textarea></div>
+                  <div class="originals-field half"><label>SOURCE TITLE</label><input id="original-stop-source-title" class="originals-input"></div>
+                  <div class="originals-field half"><label>SOURCE URL</label><input id="original-stop-source-url" class="originals-input" type="url" placeholder="https://"></div>
+                  <div class="originals-field half"><label>SOURCE PUBLISHER</label><input id="original-stop-source-publisher" class="originals-input"></div>
+                  <div class="originals-field half"><label>SOURCE REVIEWED</label><input id="original-stop-source-reviewed" class="originals-input" type="date"></div>
+                  <div class="originals-field wide">
+                    <label>PREVIEW</label>
+                    <div class="originals-actions">
+                      <button class="btn btn-primary btn-sm" id="originals-narration-btn" onclick="generateOriginalNarration()">Generate + attach</button>
+                      <button class="btn btn-ghost btn-sm" onclick="document.getElementById('originals-narration-file').click()">Upload audio</button>
+                      <input id="originals-narration-file" type="file" accept="audio/wav,.wav" style="display:none;" onchange="uploadOriginalNarrationFile(event)">
+                      <span id="originals-narration-status" style="color:var(--text3);font:10px var(--mono);"></span>
+                    </div>
+                    <audio id="originals-narration-audio" class="originals-audio" controls preload="none"></audio>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card" id="originals-versions-card">
+                <div class="originals-topline" style="margin-bottom:12px;">
+                  <div class="section-label" style="margin:0;">IMMUTABLE VERSIONS</div>
+                  <div style="color:var(--text3);font:10px var(--mono);">COMPARE WITH CURRENT DRAFT</div>
+                </div>
+                <div id="originals-version-list" class="originals-version-list"></div>
+                <div id="originals-version-comparison"></div>
+              </div>
+
+              <div class="card">
+                <div class="section-label">SOURCE DOCUMENTS</div>
+                <div class="originals-json-grid">
+                  <div class="originals-field"><label>TRIP TEMPLATE · JSON</label><textarea id="originals-template-json" class="originals-textarea originals-json" spellcheck="false"></textarea></div>
+                  <div class="originals-field"><label>OFFLINE MANIFEST · JSON</label><textarea id="originals-manifest-json" class="originals-textarea originals-json" spellcheck="false" oninput="refreshOriginalPreviewSoon()"></textarea></div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="originals-topline" style="margin-bottom:12px;">
+                  <div class="section-label" style="margin:0;">RELEASE REVIEW</div>
+                  <button class="btn btn-ghost btn-sm" onclick="validateOriginalDraft()">Run validation</button>
+                </div>
+                <div id="originals-review-checks" class="originals-review-grid"></div>
+                <div id="originals-readiness" class="originals-readiness" style="margin-top:12px;">
+                  <div class="originals-readiness-title">SAVE TO VALIDATE</div>
+                </div>
+              </div>
+
+              <div class="card">
+                <div class="section-label">FEATURED</div>
+                <div class="originals-actions">
+                  <input id="originals-feature-month" class="originals-input" type="month" style="width:170px;">
+                  <input id="originals-feature-version" class="originals-input" type="number" min="1" placeholder="Version" style="width:120px;">
+                  <button class="btn btn-primary" onclick="featureOriginal()">Set featured</button>
+                </div>
+              </div>
+            </div>
+          </section>
+        </div>
+      </div>
+
       <!-- Bug Reports -->
       <div class="page" id="page-bugs">
         <div class="page-title">Bug Reports</div>
@@ -735,6 +971,24 @@ let storyFontSize = 15;
 let extremeDebugEvents = [];
 let adminSupportThreads = [];
 let selectedAdminSupportThreadId = null;
+let authoredOriginals = [];
+let selectedOriginalId = null;
+let selectedOriginal = null;
+let selectedOriginalStopIndex = 0;
+let originalValidation = null;
+let originalPreviewTimer = null;
+let originalNarrationObjectUrl = null;
+let originalEditorDirty = false;
+let originalStopEditorDirty = false;
+let selectedOriginalVersion = null;
+let originalRouteDrawing = false;
+let originalRouteUndoStack = [];
+const ORIGINAL_REVIEW_CHECKS = [
+  'route_reviewed', 'cue_route_reviewed', 'trigger_drive_tested',
+  'narration_reviewed', 'audio_assets_reviewed', 'transcripts_reviewed',
+  'source_citations_reviewed', 'media_licenses_reviewed',
+  'safety_access_reviewed', 'season_reviewed', 'offline_bundle_reviewed'
+];
 
 // ── Auth ────────────────────────────────────────────────────────────────────
 
@@ -805,6 +1059,7 @@ function showPage(name, el) {
   if (name === 'pin-updates') loadPinUpdates();
   if (name === 'camp-edits') loadCampEdits();
   if (name === 'audio-guides') loadAudioGuidePlaces();
+  if (name === 'originals') loadOriginals();
   if (name === 'contest') loadContest();
   if (name === 'push-campaigns') loadPushCampaigns();
   if (name === 'messages') loadSupportThreads();
@@ -2013,6 +2268,1194 @@ async function saveAudioGuideStory() {
 
 // ── Utility ───────────────────────────────────────────────────────────────────
 
+// Originals Studio
+
+function originalStarterTemplate(title = 'Untitled Original') {
+  return {
+    schema_version: 2, status: 'draft', title,
+    summary: 'A self-guided Trailhead Original.', regions: ['Utah'],
+    dates: {}, rig_snapshot: {}, route: {}, days: [], items: [], notes: [],
+    readiness: {}, bookings: [], alerts: [], offline: {},
+    visibility: 'private', source: 'trailhead_original'
+  };
+}
+
+function originalStarterManifest(title = 'Untitled Original') {
+  const bounds = { north: 38.64, south: 38.50, east: -109.43, west: -109.62 };
+  return {
+    schema_version: 1, locale: 'en-US', title,
+    route: {
+      profile: 'driving', direction: 'one_way',
+      geometry: { type: 'LineString', coordinates: [[-109.5498, 38.5733], [-109.469, 38.608]] },
+      bounds, distance_m: 10000.0, duration_s: 1800.0
+    },
+    stops: [{
+      id: 'story_01', sequence: 1, title: 'First story',
+      coordinates: { lat: 38.5733, lng: -109.5498 },
+      transcript: 'Add the reviewed story script.',
+      audio_asset_id: 'narration_story_01', audio_duration_s: 60.0,
+      artwork_asset_id: 'artwork_story_01',
+      trigger: {
+        enter_radius_m: 250.0, exit_radius_m: 375.0, lead_time_s: 0.0,
+        route_progress_start_m: 0.0, route_progress_end_m: 1000.0
+      },
+      citations: [{ title: 'National Park Service', url: 'https://www.nps.gov/', publisher: 'National Park Service' }]
+    }],
+    assets: [{
+      id: 'narration_story_01', kind: 'narration', path: 'placeholder/narration_story_01.wav',
+      mime_type: 'audio/wav', bytes: 0, sha256: '0'.repeat(64)
+    }, {
+      id: 'artwork_story_01', kind: 'image', path: 'placeholder/artwork_story_01.png',
+      mime_type: 'image/png', bytes: 0, sha256: '0'.repeat(64)
+    }],
+    offline_map: { region_id: 'moab-original-draft', bounds, min_zoom: 8, max_zoom: 14, estimated_bytes: 0 },
+    safety: { summary: 'Review road, weather, and park conditions before departure.', emergency_note: '', disclaimers: [] },
+    access: { surface: 'paved', vehicle: 'Standard passenger vehicle', fees: '', accessibility_notes: '' },
+    season: { recommended_months: [3, 4, 5, 9, 10, 11], closures_note: '' },
+    review: { editorial_status: 'draft', field_drive_completed_at: null, source_review_completed_at: null }
+  };
+}
+
+async function loadOriginals() {
+  try {
+    const data = await api('/api/admin/originals');
+    authoredOriginals = Array.isArray(data.items) ? data.items : [];
+    renderOriginalList();
+  } catch(e) {
+    document.getElementById('originals-list').innerHTML = `<div class="originals-empty" style="color:var(--red);">${esc(e.message)}</div>`;
+  }
+}
+
+function renderOriginalList() {
+  const list = document.getElementById('originals-list');
+  const draftItems = authoredOriginals.filter(item => item.status !== 'published');
+  const publishedItems = authoredOriginals.filter(item => item.status === 'published');
+  const renderGroup = (label, items) => {
+    if (!items.length) return `<div class="originals-group">${label}</div><div class="originals-empty">None</div>`;
+    return `<div class="originals-group">${label}</div>` + items.map(item => {
+      const active = selectedOriginalId === item.id ? ' active' : '';
+      const status = item.status === 'published'
+        ? `PUBLISHED · V${item.current_published_version || 1}`
+        : `DRAFT · R${item.draft_revision || 1}`;
+      return `<button class="originals-item${active}" onclick="openOriginalEncoded('${encodeURIComponent(item.id)}')">
+        <div class="originals-item-title">${esc(item.title || item.slug || item.id)}</div>
+        <div class="originals-item-meta">${esc(status)} · ${Number(item.price_credits || 0) === 0 ? 'FREE' : `${Number(item.price_credits)} CR`}</div>
+      </button>`;
+    }).join('');
+  };
+  list.innerHTML = renderGroup('DRAFTS', draftItems) + renderGroup('PUBLISHED', publishedItems);
+}
+
+function openOriginalEncoded(id) {
+  openOriginal(decodeURIComponent(id));
+}
+
+async function openOriginal(id) {
+  try {
+    const original = await api(`/api/admin/originals/${encodeURIComponent(id)}`);
+    showOriginalEditor(original);
+    renderOriginalList();
+    await validateOriginalDraft(false);
+  } catch(e) {
+    toast('Original: ' + e.message, 'err');
+  }
+}
+
+function startNewOriginal() {
+  const stamp = Date.now().toString().slice(-8);
+  const title = 'Untitled Original';
+  showOriginalEditor({
+    id: '', slug: `original-draft-${stamp}`, title,
+    summary: 'A self-guided Trailhead Original.', price_credits: 0,
+    coverage_region: 'north_america', public_metadata: {}, validation_metadata: {},
+    template: originalStarterTemplate(title), original_manifest: originalStarterManifest(title),
+    status: 'draft', draft_revision: 0
+  }, true);
+  renderOriginalList();
+}
+
+function showOriginalEditor(original, isNew = false) {
+  selectedOriginal = original;
+  selectedOriginalId = isNew ? null : original.id;
+  selectedOriginalStopIndex = 0;
+  selectedOriginalVersion = null;
+  originalRouteDrawing = false;
+  originalRouteUndoStack = [];
+  originalValidation = null;
+  document.getElementById('originals-editor-empty').style.display = 'none';
+  document.getElementById('originals-editor').style.display = 'flex';
+  const idInput = document.getElementById('originals-id');
+  idInput.value = original.id || '';
+  idInput.disabled = !isNew;
+  document.getElementById('originals-slug').value = original.slug || '';
+  document.getElementById('originals-title').value = original.title || '';
+  document.getElementById('originals-summary').value = original.summary || '';
+  document.getElementById('originals-price').value = String(Number(original.price_credits || 0));
+  document.getElementById('originals-coverage').value = original.coverage_region || 'north_america';
+  document.getElementById('originals-public-metadata').value = prettyJson(original.public_metadata || {});
+  document.getElementById('originals-template-json').value = prettyJson(original.template || originalStarterTemplate(original.title));
+  document.getElementById('originals-manifest-json').value = prettyJson(original.original_manifest || original.manifest || originalStarterManifest(original.title));
+  document.getElementById('originals-current-title').textContent = original.title || 'Untitled Original';
+  document.getElementById('originals-current-meta').textContent = isNew
+    ? 'NEW DRAFT'
+    : `${String(original.status || 'draft').toUpperCase()} · REVISION ${original.draft_revision || 1}${original.current_published_version ? ` · LIVE V${original.current_published_version}` : ''}`;
+  document.getElementById('originals-feature-month').value = new Date().toISOString().slice(0, 7);
+  document.getElementById('originals-feature-version').value = original.current_published_version || '';
+  const routeEditButton = document.getElementById('originals-route-edit-btn');
+  routeEditButton.textContent = 'Edit line';
+  routeEditButton.className = 'btn btn-ghost btn-sm';
+  renderOriginalReviewChecks(original.validation_metadata || {});
+  renderOriginalVersionHistory(original);
+  renderOriginalReadiness(null);
+  document.getElementById('originals-publish-btn').disabled = true;
+  renderOriginalPreview();
+  const editor = document.getElementById('originals-editor');
+  if (!editor.dataset.dirtyBound) {
+    const handleEdit = event => {
+      if (['originals-feature-month', 'originals-feature-version', 'originals-narration-audio'].includes(event.target.id)) return;
+      if (event.target.id === 'originals-manifest-json') originalStopEditorDirty = false;
+      else if (event.target.closest && event.target.closest('#originals-stop-card')) originalStopEditorDirty = true;
+      markOriginalContentDirty();
+    };
+    editor.addEventListener('input', handleEdit);
+    editor.addEventListener('change', handleEdit);
+    editor.dataset.dirtyBound = 'true';
+  }
+  originalEditorDirty = isNew;
+  originalStopEditorDirty = false;
+}
+
+function prettyJson(value) {
+  return JSON.stringify(value, null, 2);
+}
+
+function originalVersionManifest(version) {
+  return (version && (version.original_manifest || version.manifest)) || {};
+}
+
+function formatOriginalPublishedAt(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 'DATE UNAVAILABLE';
+  return new Date(numeric * 1000).toLocaleDateString(undefined, {
+    year: 'numeric', month: 'short', day: 'numeric'
+  }).toUpperCase();
+}
+
+function renderOriginalVersionHistory(original = selectedOriginal) {
+  const list = document.getElementById('originals-version-list');
+  const comparison = document.getElementById('originals-version-comparison');
+  if (!list || !comparison) return;
+  const versions = Array.isArray(original && original.versions) ? original.versions : [];
+  if (!versions.length) {
+    selectedOriginalVersion = null;
+    list.innerHTML = '<div class="originals-empty">No published versions yet.</div>';
+    comparison.innerHTML = '';
+    return;
+  }
+  if (!versions.some(version => Number(version.version) === Number(selectedOriginalVersion))) {
+    selectedOriginalVersion = Number(versions[0].version);
+  }
+  list.innerHTML = versions.map(version => {
+    const manifest = originalVersionManifest(version);
+    const stories = Array.isArray(manifest.stops) ? manifest.stops.length : 0;
+    const active = Number(version.version) === Number(selectedOriginalVersion) ? ' active' : '';
+    return `<button class="originals-version${active}" onclick="selectOriginalVersion(${Number(version.version)})">
+      <span class="originals-version-number">V${Number(version.version)}</span>
+      <span><strong style="display:block;font-size:12px;">${esc(version.title || original.title || 'Trailhead Original')}</strong><span class="originals-version-meta">${esc(formatOriginalPublishedAt(version.published_at))} / ${stories} STORIES</span></span>
+      <span class="originals-version-meta">${Number(version.price_credits || 0) === 0 ? 'FREE' : Number(version.price_credits) + ' CR'}</span>
+    </button>`;
+  }).join('');
+  renderOriginalVersionComparison();
+}
+
+function selectOriginalVersion(version) {
+  selectedOriginalVersion = Number(version);
+  renderOriginalVersionHistory(selectedOriginal);
+}
+
+function renderOriginalVersionComparison() {
+  const host = document.getElementById('originals-version-comparison');
+  if (!host || !selectedOriginal || selectedOriginalVersion == null) return;
+  const versions = Array.isArray(selectedOriginal.versions) ? selectedOriginal.versions : [];
+  const version = versions.find(item => Number(item.version) === Number(selectedOriginalVersion));
+  if (!version) {
+    host.innerHTML = '';
+    return;
+  }
+  let draftManifest;
+  try {
+    draftManifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+  } catch(e) {
+    host.innerHTML = '<div class="originals-empty" style="margin-top:10px;color:var(--red);">Fix manifest JSON to compare.</div>';
+    return;
+  }
+  const publishedManifest = originalVersionManifest(version);
+  const draftStops = Array.isArray(draftManifest.stops) ? draftManifest.stops : [];
+  const publishedStops = Array.isArray(publishedManifest.stops) ? publishedManifest.stops : [];
+  const draftAssets = Array.isArray(draftManifest.assets) ? draftManifest.assets : [];
+  const publishedAssets = Array.isArray(publishedManifest.assets) ? publishedManifest.assets : [];
+  const publishedScripts = new Map(publishedStops.map(stop => [stop.id, String(stop.transcript || '')]));
+  const changedScripts = draftStops.filter(stop => publishedScripts.has(stop.id)
+    && publishedScripts.get(stop.id) !== String(stop.transcript || '')).length;
+  const titleChanged = String(version.title || '') !== String(document.getElementById('originals-title').value || '');
+  const chips = [
+    'TITLE / ' + (titleChanged ? 'CHANGED' : 'UNCHANGED'),
+    'PRICE / ' + Number(version.price_credits || 0) + ' TO ' + Number(document.getElementById('originals-price').value || 0),
+    'ROUTE / ' + formatDistance(publishedManifest.route && publishedManifest.route.distance_m)
+      + ' TO ' + formatDistance(draftManifest.route && draftManifest.route.distance_m),
+    'STORIES / ' + publishedStops.length + ' TO ' + draftStops.length,
+    'SCRIPTS CHANGED / ' + changedScripts,
+    'ASSETS / ' + publishedAssets.length + ' TO ' + draftAssets.length
+  ];
+  host.innerHTML = `<div class="originals-version-diff" aria-label="Version ${Number(version.version)} compared with current draft">
+    ${chips.map(chip => `<span class="originals-version-chip">${esc(chip)}</span>`).join('')}
+  </div>`;
+}
+
+function parseOriginalJsonField(id, label) {
+  const raw = document.getElementById(id).value.trim();
+  try {
+    const value = JSON.parse(raw || '{}');
+    if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('must be an object');
+    return value;
+  } catch(e) {
+    throw new Error(`${label}: ${e.message}`);
+  }
+}
+
+function renderOriginalReviewChecks(metadata) {
+  document.getElementById('originals-review-checks').innerHTML = ORIGINAL_REVIEW_CHECKS.map(check => `
+    <label class="originals-check">
+      <input type="checkbox" data-original-review="${check}" ${metadata[check] === true ? 'checked' : ''} onchange="markOriginalReviewDirty()">
+      <span>${esc(check.replace(/_/g, ' '))}</span>
+    </label>`).join('');
+}
+
+function collectOriginalReviewMetadata() {
+  const metadata = { ...((selectedOriginal && selectedOriginal.validation_metadata) || {}) };
+  document.querySelectorAll('[data-original-review]').forEach(input => {
+    metadata[input.dataset.originalReview] = input.checked === true;
+  });
+  return metadata;
+}
+
+function markOriginalReviewDirty() {
+  markOriginalContentDirty();
+}
+
+function markOriginalContentDirty() {
+  originalEditorDirty = true;
+  originalValidation = null;
+  document.getElementById('originals-publish-btn').disabled = true;
+  renderOriginalReadiness(null, 'SAVE TO VALIDATE');
+  renderOriginalVersionComparison();
+}
+
+async function saveOriginalDraft() {
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    const title = document.getElementById('originals-title').value.trim();
+    const summary = document.getElementById('originals-summary').value.trim();
+    const slug = document.getElementById('originals-slug').value.trim();
+    if (!title || !summary || !slug) throw new Error('Title, summary, and slug are required');
+    const template = parseOriginalJsonField('originals-template-json', 'Trip template');
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const publicMetadata = parseOriginalJsonField('originals-public-metadata', 'Public metadata');
+    template.title = title;
+    if (!template.summary) template.summary = summary;
+    manifest.title = title;
+    const packId = selectedOriginalId || document.getElementById('originals-id').value.trim();
+    const body = {
+      slug, title, summary,
+      price_credits: Number(document.getElementById('originals-price').value),
+      coverage_region: document.getElementById('originals-coverage').value,
+      public_metadata: publicMetadata,
+      validation_metadata: collectOriginalReviewMetadata(),
+      template, manifest
+    };
+    if (packId) body.pack_id = packId;
+    const saved = await api(
+      selectedOriginalId ? `/api/admin/originals/${encodeURIComponent(selectedOriginalId)}` : '/api/admin/originals',
+      { method: selectedOriginalId ? 'PUT' : 'POST', body: JSON.stringify(body) }
+    );
+    selectedOriginalId = saved.id;
+    toast('Draft saved', 'ok');
+    await loadOriginals();
+    await openOriginal(saved.id);
+  } catch(e) {
+    toast('Save: ' + e.message, 'err');
+  }
+}
+
+async function validateOriginalDraft(showToast = true) {
+  if (!selectedOriginalId) {
+    renderOriginalReadiness(null, 'SAVE TO VALIDATE');
+    if (showToast) toast('Save the draft first', 'err');
+    return null;
+  }
+  if (originalEditorDirty) {
+    renderOriginalReadiness(null, 'SAVE TO VALIDATE');
+    if (showToast) toast('Save changes before validating', 'err');
+    return null;
+  }
+  try {
+    const result = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/validate`);
+    originalValidation = result;
+    renderOriginalReadiness(result);
+    document.getElementById('originals-publish-btn').disabled = !result.publish_ready;
+    if (showToast) toast(result.publish_ready ? 'Ready to publish' : `${result.issues.length} items remain`, result.publish_ready ? 'ok' : 'err');
+    return result;
+  } catch(e) {
+    renderOriginalReadiness({ publish_ready: false, issues: [e.message] });
+    document.getElementById('originals-publish-btn').disabled = true;
+    if (showToast) toast('Validation: ' + e.message, 'err');
+    return null;
+  }
+}
+
+function renderOriginalReadiness(result, fallback = '') {
+  const box = document.getElementById('originals-readiness');
+  if (!result) {
+    box.className = 'originals-readiness';
+    box.innerHTML = `<div class="originals-readiness-title">${esc(fallback || 'SAVE TO VALIDATE')}</div>`;
+    return;
+  }
+  const issues = Array.isArray(result.issues) ? result.issues : [];
+  box.className = `originals-readiness${result.publish_ready ? ' ready' : ''}`;
+  box.innerHTML = `<div class="originals-readiness-title">${result.publish_ready ? `READY · VERSION ${result.next_version || ''}` : `${issues.length} ITEMS REMAIN`}</div>
+    ${issues.length ? `<div class="originals-issues">${issues.map(issue => `<div class="originals-issue">${esc(issue)}</div>`).join('')}</div>` : '<div style="color:var(--text2);font-size:11px;margin-top:7px;">All release checks passed.</div>'}`;
+}
+
+async function publishOriginal() {
+  if (!selectedOriginalId) return toast('Save the draft first', 'err');
+  const result = originalValidation && originalValidation.publish_ready ? originalValidation : await validateOriginalDraft(false);
+  if (!result || !result.publish_ready) return toast('Complete release review first', 'err');
+  if (!window.confirm(`Publish version ${result.next_version} of this Original?`)) return;
+  try {
+    await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/publish`, { method: 'POST' });
+    toast(`Version ${result.next_version} published`, 'ok');
+    await loadOriginals();
+    await openOriginal(selectedOriginalId);
+  } catch(e) {
+    toast('Publish: ' + e.message, 'err');
+  }
+}
+
+async function featureOriginal() {
+  if (!selectedOriginalId) return toast('Select a published Original', 'err');
+  const month = document.getElementById('originals-feature-month').value;
+  const versionValue = document.getElementById('originals-feature-version').value;
+  if (!/^\d{4}-\d{2}$/.test(month)) return toast('Choose a month', 'err');
+  const body = { pack_id: selectedOriginalId };
+  if (versionValue) body.version = Number(versionValue);
+  try {
+    await api(`/api/admin/originals/featured/${encodeURIComponent(month)}`, { method: 'PUT', body: JSON.stringify(body) });
+    toast(`Featured for ${month}`, 'ok');
+  } catch(e) {
+    toast('Featured: ' + e.message, 'err');
+  }
+}
+
+function refreshOriginalPreviewSoon() {
+  clearTimeout(originalPreviewTimer);
+  originalPreviewTimer = setTimeout(() => renderOriginalPreview(), 180);
+}
+
+function renderOriginalPreview(manifestOverride = null) {
+  let manifest = manifestOverride;
+  if (!manifest) {
+    try { manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest'); }
+    catch(e) {
+      document.getElementById('originals-metrics').innerHTML = '';
+      document.getElementById('originals-route').innerHTML = `<div class="originals-empty" style="margin:18px;color:var(--red);">${esc(e.message)}</div>`;
+      document.getElementById('originals-stops').innerHTML = '<div class="originals-empty">Fix manifest JSON.</div>';
+      document.getElementById('originals-stop-card').style.display = 'none';
+      return;
+    }
+  }
+  const route = manifest.route || {};
+  const stops = Array.isArray(manifest.stops) ? manifest.stops : [];
+  const assets = Array.isArray(manifest.assets) ? manifest.assets : [];
+  const assetBytes = assets.reduce((total, asset) => total + (Number(asset.bytes) || 0), 0);
+  const offlineBytes = Number(manifest.offline_map && manifest.offline_map.estimated_bytes) || 0;
+  document.getElementById('originals-metrics').innerHTML = [
+    [formatDistance(route.distance_m), 'DISTANCE'],
+    [formatDuration(route.duration_s), 'DURATION'],
+    [stops.length, 'STORIES'],
+    [assets.length, 'ASSETS'],
+    [formatBytes(assetBytes + offlineBytes), 'OFFLINE BUNDLE']
+  ].map(([value, label]) => `<div class="originals-metric"><strong>${esc(value)}</strong><span>${label}</span></div>`).join('');
+  const coordinates = route.geometry && Array.isArray(route.geometry.coordinates) ? route.geometry.coordinates : [];
+  document.getElementById('originals-route-caption').textContent = `${coordinates.length} route points · ${route.direction || 'direction unset'}`;
+  renderOriginalRoute(coordinates, stops);
+  renderOriginalStops(stops);
+}
+
+function formatDistance(value) {
+  const meters = Number(value) || 0;
+  return meters >= 1000 ? `${(meters / 1000).toFixed(meters >= 100000 ? 0 : 1)} km` : `${Math.round(meters)} m`;
+}
+
+function formatDuration(value) {
+  const seconds = Number(value) || 0;
+  const hours = Math.floor(seconds / 3600);
+  const minutes = Math.round((seconds % 3600) / 60);
+  return hours ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function formatBytes(value) {
+  const bytes = Number(value) || 0;
+  if (bytes >= 1073741824) return `${(bytes / 1073741824).toFixed(1)} GB`;
+  if (bytes >= 1048576) return `${(bytes / 1048576).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${bytes} B`;
+}
+
+function normalizedOriginalCoordinates(rawCoordinates) {
+  if (!Array.isArray(rawCoordinates)) return [];
+  return rawCoordinates
+    .filter(point => Array.isArray(point) && point.length >= 2)
+    .map(point => [Number(point[0]), Number(point[1])])
+    .filter(point => Number.isFinite(point[0]) && Number.isFinite(point[1])
+      && point[0] >= -180 && point[0] <= 180 && point[1] >= -90 && point[1] <= 90);
+}
+
+function originalHaversineMeters(a, b) {
+  const radians = value => value * Math.PI / 180;
+  const lat1 = radians(a[1]), lat2 = radians(b[1]);
+  const deltaLat = lat2 - lat1;
+  const deltaLng = radians(b[0] - a[0]);
+  const sinLat = Math.sin(deltaLat / 2);
+  const sinLng = Math.sin(deltaLng / 2);
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLng * sinLng;
+  return 6371000 * 2 * Math.atan2(Math.sqrt(h), Math.sqrt(Math.max(0, 1 - h)));
+}
+
+function originalRouteMetrics(rawCoordinates) {
+  const coordinates = normalizedOriginalCoordinates(rawCoordinates);
+  const cumulative = [0];
+  for (let index = 1; index < coordinates.length; index += 1) {
+    cumulative.push(cumulative[index - 1] + originalHaversineMeters(coordinates[index - 1], coordinates[index]));
+  }
+  const lngs = coordinates.map(point => point[0]);
+  const lats = coordinates.map(point => point[1]);
+  return {
+    coordinates,
+    cumulative,
+    distance: cumulative[cumulative.length - 1] || 0,
+    bounds: coordinates.length ? {
+      north: Math.max(...lats), south: Math.min(...lats),
+      east: Math.max(...lngs), west: Math.min(...lngs)
+    } : null
+  };
+}
+
+function originalCoordinateAtProgress(metrics, progressMeters) {
+  const coordinates = metrics.coordinates || [];
+  if (!coordinates.length) return null;
+  if (coordinates.length === 1) return coordinates[0];
+  const progress = Math.max(0, Math.min(Number(progressMeters) || 0, metrics.distance));
+  let segment = 0;
+  while (segment < metrics.cumulative.length - 2 && metrics.cumulative[segment + 1] < progress) segment += 1;
+  const startProgress = metrics.cumulative[segment];
+  const endProgress = metrics.cumulative[segment + 1];
+  const ratio = endProgress > startProgress ? (progress - startProgress) / (endProgress - startProgress) : 0;
+  const start = coordinates[segment], end = coordinates[segment + 1];
+  return [start[0] + (end[0] - start[0]) * ratio, start[1] + (end[1] - start[1]) * ratio];
+}
+
+function originalProjectToRoute(metrics, candidate) {
+  const coordinates = metrics.coordinates || [];
+  if (coordinates.length < 2) return null;
+  const meanLatitude = coordinates.reduce((total, point) => total + point[1], 0) / coordinates.length;
+  const lngScale = Math.max(.01, Math.cos(meanLatitude * Math.PI / 180));
+  const targetX = candidate[0] * lngScale, targetY = candidate[1];
+  let best = null;
+  for (let index = 0; index < coordinates.length - 1; index += 1) {
+    const a = coordinates[index], b = coordinates[index + 1];
+    const ax = a[0] * lngScale, ay = a[1], bx = b[0] * lngScale, by = b[1];
+    const dx = bx - ax, dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    const ratio = lengthSquared > 0
+      ? Math.max(0, Math.min(1, ((targetX - ax) * dx + (targetY - ay) * dy) / lengthSquared))
+      : 0;
+    const projectedX = ax + dx * ratio, projectedY = ay + dy * ratio;
+    const distanceSquared = (targetX - projectedX) ** 2 + (targetY - projectedY) ** 2;
+    if (!best || distanceSquared < best.distanceSquared) {
+      const segmentMeters = metrics.cumulative[index + 1] - metrics.cumulative[index];
+      best = {
+        distanceSquared,
+        segmentIndex: index,
+        coordinate: [a[0] + (b[0] - a[0]) * ratio, a[1] + (b[1] - a[1]) * ratio],
+        progress: metrics.cumulative[index] + segmentMeters * ratio
+      };
+    }
+  }
+  return best;
+}
+
+function extractOriginalGeoJsonCoordinates(value) {
+  if (!value || typeof value !== 'object') return [];
+  if (value.route && value.route.geometry) return extractOriginalGeoJsonCoordinates(value.route.geometry);
+  if (value.geometry) return extractOriginalGeoJsonCoordinates(value.geometry);
+  if (value.type === 'LineString') return normalizedOriginalCoordinates(value.coordinates);
+  if (value.type === 'MultiLineString') {
+    const lines = (value.coordinates || []).map(normalizedOriginalCoordinates).filter(line => line.length >= 2);
+    return lines.sort((a, b) => originalRouteMetrics(b).distance - originalRouteMetrics(a).distance)[0] || [];
+  }
+  if (value.type === 'FeatureCollection') {
+    const lines = (value.features || []).map(extractOriginalGeoJsonCoordinates).filter(line => line.length >= 2);
+    return lines.sort((a, b) => originalRouteMetrics(b).distance - originalRouteMetrics(a).distance)[0] || [];
+  }
+  if (value.type === 'GeometryCollection') {
+    const lines = (value.geometries || []).map(extractOriginalGeoJsonCoordinates).filter(line => line.length >= 2);
+    return lines.sort((a, b) => originalRouteMetrics(b).distance - originalRouteMetrics(a).distance)[0] || [];
+  }
+  if (Array.isArray(value.coordinates)) return normalizedOriginalCoordinates(value.coordinates);
+  return [];
+}
+
+function parseOriginalXmlRoute(text, extension) {
+  const documentXml = new DOMParser().parseFromString(text, 'application/xml');
+  if (documentXml.getElementsByTagName('parsererror').length) throw new Error('The route XML is invalid');
+  if (extension === 'gpx') {
+    let nodes = Array.from(documentXml.getElementsByTagNameNS('*', 'trkpt'));
+    if (!nodes.length) nodes = Array.from(documentXml.getElementsByTagNameNS('*', 'rtept'));
+    return normalizedOriginalCoordinates(nodes.map(node => [node.getAttribute('lon'), node.getAttribute('lat')]));
+  }
+  const lineStrings = Array.from(documentXml.getElementsByTagNameNS('*', 'LineString'));
+  const lines = lineStrings.map(line => {
+    const node = line.getElementsByTagNameNS('*', 'coordinates')[0];
+    if (!node) return [];
+    return normalizedOriginalCoordinates(node.textContent.trim().split(/\s+/).map(token => token.split(',').slice(0, 2)));
+  }).filter(line => line.length >= 2);
+  return lines.sort((a, b) => originalRouteMetrics(b).distance - originalRouteMetrics(a).distance)[0] || [];
+}
+
+function applyOriginalRouteGeometry(manifest, rawCoordinates) {
+  const metrics = originalRouteMetrics(rawCoordinates);
+  if (metrics.coordinates.length < 2 || !metrics.bounds || metrics.distance <= 0) {
+    throw new Error('The route needs at least two distinct coordinates');
+  }
+  manifest.route = manifest.route || {};
+  manifest.route.geometry = { type: 'LineString', coordinates: metrics.coordinates };
+  manifest.route.bounds = metrics.bounds;
+  manifest.route.distance_m = Math.round(metrics.distance);
+  manifest.route.duration_s = Math.max(60, Math.round(metrics.distance / 13.4));
+  manifest.route.profile = manifest.route.profile || 'driving';
+  manifest.route.direction = manifest.route.direction || 'one_way';
+  manifest.offline_map = manifest.offline_map || {};
+  manifest.offline_map.bounds = metrics.bounds;
+  return metrics;
+}
+
+function rememberOriginalRoute(rawCoordinates) {
+  const coordinates = normalizedOriginalCoordinates(rawCoordinates);
+  if (coordinates.length >= 2) {
+    originalRouteUndoStack.push(coordinates.map(point => point.slice()));
+    if (originalRouteUndoStack.length > 50) originalRouteUndoStack.shift();
+  }
+}
+
+function toggleOriginalRouteDrawing() {
+  originalRouteDrawing = !originalRouteDrawing;
+  const button = document.getElementById('originals-route-edit-btn');
+  button.textContent = originalRouteDrawing ? 'Finish line' : 'Edit line';
+  button.className = originalRouteDrawing ? 'btn btn-primary btn-sm' : 'btn btn-ghost btn-sm';
+  document.getElementById('originals-route').title = originalRouteDrawing
+    ? 'Click to add a route vertex'
+    : 'Click the route to place the selected story';
+  renderOriginalPreview();
+}
+
+function undoOriginalRouteEdit() {
+  const coordinates = originalRouteUndoStack.pop();
+  if (!coordinates) return toast('No route edit to undo', 'err');
+  try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    applyOriginalRouteGeometry(manifest, coordinates);
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+    toast('Route edit undone', 'ok');
+  } catch(e) {
+    toast('Undo route: ' + e.message, 'err');
+  }
+}
+
+async function importOriginalRoute(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const extension = (file.name.split('.').pop() || '').toLowerCase();
+    const text = await file.text();
+    const coordinates = extension === 'gpx' || extension === 'kml'
+      ? parseOriginalXmlRoute(text, extension)
+      : extractOriginalGeoJsonCoordinates(JSON.parse(text));
+    if (coordinates.length < 2) throw new Error('No LineString with at least two valid coordinates was found');
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    rememberOriginalRoute(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
+    const metrics = applyOriginalRouteGeometry(manifest, coordinates);
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+    toast('Route imported: ' + coordinates.length + ' points / ' + formatDistance(metrics.distance), 'ok');
+  } catch(e) {
+    toast('Route import: ' + e.message, 'err');
+  }
+}
+
+function renderOriginalRoute(rawCoordinates, stops) {
+  const coordinates = normalizedOriginalCoordinates(rawCoordinates);
+  const stopPoints = stops
+    .filter(stop => stop.coordinates && Number.isFinite(Number(stop.coordinates.lng)) && Number.isFinite(Number(stop.coordinates.lat)))
+    .map(stop => [Number(stop.coordinates.lng), Number(stop.coordinates.lat)]);
+  const all = coordinates.concat(stopPoints);
+  if (coordinates.length < 2 || !all.length) {
+    document.getElementById('originals-route').innerHTML = '<div class="originals-empty" style="margin:18px;">Add route geometry to preview.</div>';
+    return;
+  }
+  const lngs = all.map(point => point[0]);
+  const lats = all.map(point => point[1]);
+  let minLng = Math.min(...lngs), maxLng = Math.max(...lngs);
+  let minLat = Math.min(...lats), maxLat = Math.max(...lats);
+  const lngPadding = Math.max((maxLng - minLng) * .05, .0005);
+  const latPadding = Math.max((maxLat - minLat) * .05, .0005);
+  minLng -= lngPadding; maxLng += lngPadding;
+  minLat -= latPadding; maxLat += latPadding;
+  const lngSpan = Math.max(maxLng - minLng, .0001);
+  const latSpan = Math.max(maxLat - minLat, .0001);
+  const point = ([lng, lat]) => `${(24 + ((lng - minLng) / lngSpan) * 592).toFixed(1)},${(246 - ((lat - minLat) / latSpan) * 222).toFixed(1)}`;
+  const grid = [1, 2, 3, 4].map(i => `<line x1="0" y1="${i * 54}" x2="640" y2="${i * 54}" stroke="#1e2736" stroke-width="1"/><line x1="${i * 128}" y1="0" x2="${i * 128}" y2="270" stroke="#1e2736" stroke-width="1"/>`).join('');
+  const stopSvg = stops.map((stop, index) => {
+    if (!stop.coordinates) return '';
+    const lng = Number(stop.coordinates.lng), lat = Number(stop.coordinates.lat);
+    if (!Number.isFinite(lng) || !Number.isFinite(lat)) return '';
+    const [x, y] = point([lng, lat]).split(',');
+    const selectedRing = index === selectedOriginalStopIndex
+      ? `<circle cx="${x}" cy="${y}" r="16" fill="none" stroke="#ffffff" stroke-width="2"/>`
+      : '';
+    return `<g style="pointer-events:none;">${selectedRing}<circle cx="${x}" cy="${y}" r="11" fill="#f97316" stroke="#fff" stroke-width="2"><title>${esc(stop.title || `Story ${index + 1}`)}</title></circle><text x="${x}" y="${Number(y) + 3.5}" text-anchor="middle" fill="#fff" font-size="9" font-weight="800">${index + 1}</text></g>`;
+  }).join('');
+  const vertexSvg = originalRouteDrawing
+    ? coordinates.map(coordinate => {
+      const [x, y] = point(coordinate).split(',');
+      return `<circle cx="${x}" cy="${y}" r="4" fill="#ffffff" stroke="#090a0c" stroke-width="2" style="pointer-events:none;"/>`;
+    }).join('')
+    : '';
+  document.getElementById('originals-route').innerHTML = `<svg viewBox="0 0 640 270" role="img" aria-label="Original route and story stops" data-min-lng="${minLng}" data-max-lng="${maxLng}" data-min-lat="${minLat}" data-max-lat="${maxLat}"><rect width="640" height="270" fill="#090a0c"/>${grid}<polyline points="${coordinates.map(point).join(' ')}" fill="none" stroke="#f97316" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>${vertexSvg}${stopSvg}<g id="originals-sim-marker" style="pointer-events:none;"><circle r="9" fill="#ffffff" stroke="#090a0c" stroke-width="3"/><path d="M0 -15 L5 -7 L-5 -7 Z" fill="#ffffff"/></g></svg>`;
+  updateOriginalSimulation();
+}
+
+function originalSvgCoordinate(svg, coordinate) {
+  const minLng = Number(svg.dataset.minLng), maxLng = Number(svg.dataset.maxLng);
+  const minLat = Number(svg.dataset.minLat), maxLat = Number(svg.dataset.maxLat);
+  const lngSpan = Math.max(maxLng - minLng, .0001);
+  const latSpan = Math.max(maxLat - minLat, .0001);
+  return [
+    24 + ((coordinate[0] - minLng) / lngSpan) * 592,
+    246 - ((coordinate[1] - minLat) / latSpan) * 222
+  ];
+}
+
+function updateOriginalSimulation() {
+  const output = document.getElementById('originals-simulator-output');
+  const slider = document.getElementById('originals-simulator');
+  const svg = document.querySelector('#originals-route svg');
+  const marker = document.getElementById('originals-sim-marker');
+  if (!output || !slider || !svg || !marker) return;
+  try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const metrics = originalRouteMetrics(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
+    if (metrics.coordinates.length < 2 || metrics.distance <= 0) throw new Error('Route unavailable');
+    const progress = metrics.distance * (Number(slider.value) / 1000);
+    const coordinate = originalCoordinateAtProgress(metrics, progress);
+    const [x, y] = originalSvgCoordinate(svg, coordinate);
+    marker.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
+    const stops = (Array.isArray(manifest.stops) ? manifest.stops : [])
+      .slice().sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+    const nextIndex = stops.findIndex(stop => progress <= Number(stop.trigger && stop.trigger.route_progress_end_m));
+    let state = 'ROUTE COMPLETE';
+    if (nextIndex >= 0) {
+      const stop = stops[nextIndex];
+      const start = Number(stop.trigger && stop.trigger.route_progress_start_m) || 0;
+      state = progress >= start
+        ? 'STORY ' + (Number(stop.sequence) || nextIndex + 1) + ' ARMED'
+        : 'NEXT ' + (Number(stop.sequence) || nextIndex + 1) + ' IN ' + formatDistance(start - progress);
+    }
+    output.textContent = formatDistance(progress) + ' / ' + state;
+  } catch(e) {
+    output.textContent = 'ROUTE UNAVAILABLE';
+  }
+}
+
+function placeOriginalStopFromRoute(event) {
+  if (!event.currentTarget || event.currentTarget.id !== 'originals-route') return;
+  const svg = event.currentTarget.querySelector('svg');
+  if (!svg) {
+    toast('Import route geometry first', 'err');
+    return;
+  }
+  if (!originalRouteDrawing && document.getElementById('originals-stop-card').style.display === 'none') {
+    toast('Add or select a story first', 'err');
+    return;
+  }
+  try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const metrics = originalRouteMetrics(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
+    if (metrics.coordinates.length < 2) throw new Error('Import route geometry first');
+    let x, y;
+    const transform = svg.getScreenCTM && svg.getScreenCTM();
+    if (transform && svg.createSVGPoint) {
+      const point = svg.createSVGPoint();
+      point.x = event.clientX;
+      point.y = event.clientY;
+      const local = point.matrixTransform(transform.inverse());
+      x = local.x;
+      y = local.y;
+    } else {
+      const bounds = svg.getBoundingClientRect();
+      x = ((event.clientX - bounds.left) / bounds.width) * 640;
+      y = ((event.clientY - bounds.top) / bounds.height) * 270;
+    }
+    x = Math.max(24, Math.min(616, x));
+    y = Math.max(24, Math.min(246, y));
+    const minLng = Number(svg.dataset.minLng), maxLng = Number(svg.dataset.maxLng);
+    const minLat = Number(svg.dataset.minLat), maxLat = Number(svg.dataset.maxLat);
+    const candidate = [
+      minLng + ((x - 24) / 592) * (maxLng - minLng),
+      minLat + ((246 - y) / 222) * (maxLat - minLat)
+    ];
+    const projected = originalProjectToRoute(metrics, candidate);
+    if (!projected) throw new Error('The click could not be projected onto the route');
+    if (originalRouteDrawing) {
+      rememberOriginalRoute(metrics.coordinates);
+      const coordinates = metrics.coordinates.map(point => point.slice());
+      coordinates.splice(projected.segmentIndex + 1, 0, candidate);
+      const updated = applyOriginalRouteGeometry(manifest, coordinates);
+      document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+      markOriginalContentDirty();
+      renderOriginalPreview(manifest);
+      toast('Route point added / ' + coordinates.length + ' points / ' + formatDistance(updated.distance), 'ok');
+      return;
+    }
+    const halfWindow = Math.max(250, (Number(document.getElementById('original-stop-enter').value) || 250) * 2);
+    document.getElementById('original-stop-lng').value = projected.coordinate[0].toFixed(6);
+    document.getElementById('original-stop-lat').value = projected.coordinate[1].toFixed(6);
+    document.getElementById('original-stop-progress-start').value = Math.round(Math.max(0, projected.progress - halfWindow));
+    document.getElementById('original-stop-progress-end').value = Math.round(Math.min(metrics.distance, projected.progress + halfWindow));
+    originalStopEditorDirty = true;
+    if (!applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    document.getElementById('originals-simulator').value = String(Math.round((projected.progress / metrics.distance) * 1000));
+    updateOriginalSimulation();
+    toast('Story placed at ' + formatDistance(projected.progress), 'ok');
+  } catch(e) {
+    toast('Route placement: ' + e.message, 'err');
+  }
+}
+
+function renderOriginalStops(stops) {
+  const list = document.getElementById('originals-stops');
+  if (!stops.length) {
+    list.innerHTML = '<div class="originals-empty">No stories.</div>';
+    document.getElementById('originals-stop-card').style.display = 'none';
+    return;
+  }
+  selectedOriginalStopIndex = Math.min(selectedOriginalStopIndex, stops.length - 1);
+  list.innerHTML = stops.map((stop, index) => `<div class="originals-stop${index === selectedOriginalStopIndex ? ' active' : ''}" onclick="selectOriginalStop(${index})">
+    <div class="originals-stop-number">${Number(stop.sequence) || index + 1}</div>
+    <div><div class="originals-stop-title">${esc(stop.title || `Story ${index + 1}`)}</div><div class="originals-stop-meta">${formatDuration(stop.audio_duration_s)} · ${Math.round(Number(stop.trigger && stop.trigger.enter_radius_m) || 0)} M</div></div>
+    <span style="color:var(--orange);font-size:14px;">›</span>
+  </div>`).join('');
+  fillOriginalStopEditor(stops[selectedOriginalStopIndex]);
+}
+
+function renumberOriginalStops(stops) {
+  stops.forEach((stop, index) => { stop.sequence = index + 1; });
+}
+
+function addOriginalStop() {
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    manifest.stops = Array.isArray(manifest.stops) ? manifest.stops : [];
+    manifest.assets = Array.isArray(manifest.assets) ? manifest.assets : [];
+    const usedIds = new Set(manifest.stops.map(stop => String(stop.id || '')));
+    let number = manifest.stops.length + 1;
+    let stopId = 'story_' + String(number).padStart(2, '0');
+    while (usedIds.has(stopId)) {
+      number += 1;
+      stopId = 'story_' + String(number).padStart(2, '0');
+    }
+    const metrics = originalRouteMetrics(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
+    const slider = document.getElementById('originals-simulator');
+    const progress = metrics.distance > 0 ? metrics.distance * (Number(slider.value) / 1000) : 0;
+    const coordinate = originalCoordinateAtProgress(metrics, progress) || [-109.5498, 38.5733];
+    const halfWindow = 500;
+    const narrationId = 'narration_' + stopId;
+    const artworkId = 'artwork_' + stopId;
+    manifest.stops.push({
+      id: stopId,
+      sequence: manifest.stops.length + 1,
+      title: 'New story',
+      coordinates: { lat: coordinate[1], lng: coordinate[0] },
+      transcript: '',
+      audio_asset_id: narrationId,
+      audio_duration_s: 60,
+      artwork_asset_id: artworkId,
+      trigger: {
+        enter_radius_m: 250,
+        exit_radius_m: 375,
+        lead_time_s: 0,
+        route_progress_start_m: Math.round(Math.max(0, progress - halfWindow)),
+        route_progress_end_m: Math.round(metrics.distance > 0 ? Math.min(metrics.distance, progress + halfWindow) : 1000)
+      },
+      citations: [{ title: '', url: '', publisher: '', reviewed_at: '' }]
+    });
+    [
+      { id: narrationId, kind: 'narration', path: 'placeholder/' + narrationId + '.wav', mime_type: 'audio/wav' },
+      { id: artworkId, kind: 'image', path: 'placeholder/' + artworkId + '.png', mime_type: 'image/png' }
+    ].forEach(asset => {
+      if (!manifest.assets.some(existing => existing && existing.id === asset.id)) {
+        manifest.assets.push({ ...asset, bytes: 0, sha256: '0'.repeat(64) });
+      }
+    });
+    renumberOriginalStops(manifest.stops);
+    selectedOriginalStopIndex = manifest.stops.length - 1;
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    originalStopEditorDirty = false;
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+    toast('Story added; click the route to place it', 'ok');
+  } catch(e) {
+    toast('Add story: ' + e.message, 'err');
+  }
+}
+
+function moveOriginalStop(direction) {
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const stops = Array.isArray(manifest.stops) ? manifest.stops : [];
+    const target = selectedOriginalStopIndex + Number(direction);
+    if (!stops[selectedOriginalStopIndex] || target < 0 || target >= stops.length) return;
+    [stops[selectedOriginalStopIndex], stops[target]] = [stops[target], stops[selectedOriginalStopIndex]];
+    renumberOriginalStops(stops);
+    selectedOriginalStopIndex = target;
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    originalStopEditorDirty = false;
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+  } catch(e) {
+    toast('Move story: ' + e.message, 'err');
+  }
+}
+
+function removeOriginalStop() {
+  try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const stops = Array.isArray(manifest.stops) ? manifest.stops : [];
+    const stop = stops[selectedOriginalStopIndex];
+    if (!stop) return;
+    if (!window.confirm('Remove "' + (stop.title || stop.id || 'this story') + '" from the draft?')) return;
+    stops.splice(selectedOriginalStopIndex, 1);
+    renumberOriginalStops(stops);
+    const removedAssetIds = new Set([stop.audio_asset_id, stop.artwork_asset_id].filter(Boolean));
+    manifest.assets = (Array.isArray(manifest.assets) ? manifest.assets : []).filter(asset => {
+      if (!removedAssetIds.has(asset && asset.id)) return true;
+      return Number(asset.bytes) > 0 || !(String(asset.path || '').startsWith('placeholder/'));
+    });
+    selectedOriginalStopIndex = Math.max(0, Math.min(selectedOriginalStopIndex, stops.length - 1));
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    originalStopEditorDirty = false;
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+    toast('Story removed', 'ok');
+  } catch(e) {
+    toast('Remove story: ' + e.message, 'err');
+  }
+}
+
+function selectOriginalStop(index) {
+  if (originalStopEditorDirty && !applyOriginalStopEdits(false)) return;
+  selectedOriginalStopIndex = index;
+  renderOriginalPreview();
+}
+
+function fillOriginalStopEditor(stop) {
+  if (!stop) return;
+  document.getElementById('originals-stop-card').style.display = 'block';
+  const trigger = stop.trigger || {};
+  const citation = Array.isArray(stop.citations) && stop.citations.length ? stop.citations[0] : {};
+  document.getElementById('original-stop-title').value = stop.title || '';
+  document.getElementById('original-stop-place').value = stop.explore_place_id || '';
+  const placeStatus = document.getElementById('original-stop-place-status');
+  placeStatus.textContent = '';
+  placeStatus.style.color = 'var(--text3)';
+  document.getElementById('original-stop-lat').value = stop.coordinates && stop.coordinates.lat != null ? stop.coordinates.lat : '';
+  document.getElementById('original-stop-lng').value = stop.coordinates && stop.coordinates.lng != null ? stop.coordinates.lng : '';
+  document.getElementById('original-stop-enter').value = trigger.enter_radius_m != null ? trigger.enter_radius_m : 250;
+  document.getElementById('original-stop-exit').value = trigger.exit_radius_m != null ? trigger.exit_radius_m : 375;
+  document.getElementById('original-stop-lead').value = trigger.lead_time_s != null ? trigger.lead_time_s : 0;
+  document.getElementById('original-stop-progress-start').value = trigger.route_progress_start_m != null ? trigger.route_progress_start_m : 0;
+  document.getElementById('original-stop-progress-end').value = trigger.route_progress_end_m != null ? trigger.route_progress_end_m : 0;
+  document.getElementById('original-stop-duration').value = stop.audio_duration_s != null ? stop.audio_duration_s : '';
+  document.getElementById('original-stop-artwork').value = stop.artwork_asset_id || '';
+  document.getElementById('original-stop-transcript').value = stop.transcript || '';
+  document.getElementById('original-stop-source-title').value = citation.title || '';
+  document.getElementById('original-stop-source-url').value = citation.url || '';
+  document.getElementById('original-stop-source-publisher').value = citation.publisher || '';
+  document.getElementById('original-stop-source-reviewed').value = citation.reviewed_at ? String(citation.reviewed_at).slice(0, 10) : '';
+  const uploaded = Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets)
+    ? selectedOriginal.uploaded_assets.find(asset => asset.id === stop.audio_asset_id)
+    : null;
+  document.getElementById('originals-narration-status').textContent = uploaded
+    ? `VERIFIED · ${formatBytes(uploaded.bytes)}`
+    : 'NOT ATTACHED';
+  const uploadedArtwork = Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets)
+    ? selectedOriginal.uploaded_assets.find(asset => asset.id === stop.artwork_asset_id)
+    : null;
+  document.getElementById('originals-artwork-status').textContent = uploadedArtwork
+    ? `VERIFIED · ${formatBytes(uploadedArtwork.bytes)}`
+    : 'NOT ATTACHED';
+  originalStopEditorDirty = false;
+}
+
+async function validateOriginalPlaceLink() {
+  const input = document.getElementById('original-stop-place');
+  const status = document.getElementById('original-stop-place-status');
+  const placeId = input.value.trim();
+  if (!placeId) {
+    status.textContent = 'Optional';
+    status.style.color = 'var(--text3)';
+    return;
+  }
+  status.textContent = 'CHECKING';
+  status.style.color = 'var(--text3)';
+  try {
+    const result = await api('/api/admin/explore/places/' + encodeURIComponent(placeId));
+    if (input.value.trim() !== placeId) return;
+    const title = (result.editable && result.editable.title)
+      || (result.place && result.place.title)
+      || result.title
+      || placeId;
+    status.textContent = 'LINKED / ' + title;
+    status.style.color = 'var(--orange)';
+  } catch(e) {
+    if (input.value.trim() !== placeId) return;
+    status.textContent = 'NOT FOUND / ' + e.message;
+    status.style.color = 'var(--red)';
+  }
+}
+
+function originalNumberInput(id, label) {
+  const value = Number(document.getElementById(id).value);
+  if (!Number.isFinite(value)) throw new Error(`${label} must be a number`);
+  return value;
+}
+
+function applyOriginalStopEdits(showToast = true) {
+  const card = document.getElementById('originals-stop-card');
+  if (card.style.display === 'none') return true;
+  try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    if (!Array.isArray(manifest.stops) || !manifest.stops[selectedOriginalStopIndex]) return true;
+    const stop = manifest.stops[selectedOriginalStopIndex];
+    stop.title = document.getElementById('original-stop-title').value.trim();
+    stop.transcript = document.getElementById('original-stop-transcript').value.trim();
+    stop.audio_duration_s = originalNumberInput('original-stop-duration', 'Duration');
+    stop.coordinates = {
+      lat: originalNumberInput('original-stop-lat', 'Latitude'),
+      lng: originalNumberInput('original-stop-lng', 'Longitude')
+    };
+    stop.trigger = stop.trigger || {};
+    stop.trigger.enter_radius_m = originalNumberInput('original-stop-enter', 'Enter radius');
+    stop.trigger.exit_radius_m = originalNumberInput('original-stop-exit', 'Exit radius');
+    stop.trigger.lead_time_s = originalNumberInput('original-stop-lead', 'Lead time');
+    stop.trigger.route_progress_start_m = originalNumberInput('original-stop-progress-start', 'Progress start');
+    stop.trigger.route_progress_end_m = originalNumberInput('original-stop-progress-end', 'Progress end');
+    const artworkId = document.getElementById('original-stop-artwork').value.trim();
+    if (artworkId) stop.artwork_asset_id = artworkId; else delete stop.artwork_asset_id;
+    const placeId = document.getElementById('original-stop-place').value.trim();
+    if (placeId) stop.explore_place_id = placeId; else delete stop.explore_place_id;
+    const previousCitation = Array.isArray(stop.citations) && stop.citations.length ? stop.citations[0] : {};
+    stop.citations = [{
+      ...previousCitation,
+      title: document.getElementById('original-stop-source-title').value.trim(),
+      url: document.getElementById('original-stop-source-url').value.trim(),
+      publisher: document.getElementById('original-stop-source-publisher').value.trim(),
+      reviewed_at: document.getElementById('original-stop-source-reviewed').value
+    }, ...(Array.isArray(stop.citations) ? stop.citations.slice(1) : [])];
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+    if (showToast) toast('Story applied', 'ok');
+    return true;
+  } catch(e) {
+    if (showToast) toast('Story: ' + e.message, 'err');
+    return false;
+  }
+}
+
+function selectedOriginalNarrationTarget() {
+  if (!selectedOriginalId) throw new Error('Save the draft before attaching audio');
+  const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+  const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+  if (!stop || !stop.audio_asset_id) throw new Error('The selected story needs an audio_asset_id');
+  return { manifest, assetId: stop.audio_asset_id };
+}
+
+function attachVerifiedOriginalAsset(manifest, record) {
+  manifest.assets = Array.isArray(manifest.assets) ? manifest.assets : [];
+  const asset = {
+    id: record.id, kind: record.kind, path: record.path,
+    mime_type: record.mime_type, bytes: record.bytes, sha256: record.sha256
+  };
+  const index = manifest.assets.findIndex(item => item && item.id === record.id);
+  if (index >= 0) manifest.assets[index] = asset; else manifest.assets.push(asset);
+  document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+  selectedOriginal.uploaded_assets = Array.isArray(selectedOriginal.uploaded_assets)
+    ? selectedOriginal.uploaded_assets.filter(item => item.id !== record.id).concat(record)
+    : [record];
+  originalStopEditorDirty = false;
+  markOriginalContentDirty();
+  renderOriginalPreview(manifest);
+  const statusId = record.kind === 'image' ? 'originals-artwork-status' : 'originals-narration-status';
+  document.getElementById(statusId).textContent = `VERIFIED · ${formatBytes(record.bytes)}`;
+}
+
+async function previewVerifiedOriginalNarration(record) {
+  const audio = document.getElementById('originals-narration-audio');
+  const response = await fetch(`${API}${record.preview_path}`, {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  if (!response.ok) throw new Error('The verified narration could not be previewed');
+  const blob = await response.blob();
+  if (originalNarrationObjectUrl) URL.revokeObjectURL(originalNarrationObjectUrl);
+  originalNarrationObjectUrl = URL.createObjectURL(blob);
+  audio.src = originalNarrationObjectUrl;
+  try { await audio.play(); } catch {}
+}
+
+async function generateOriginalNarration() {
+  const text = document.getElementById('original-stop-transcript').value.trim();
+  if (!text) return toast('Add a transcript first', 'err');
+  const button = document.getElementById('originals-narration-btn');
+  const status = document.getElementById('originals-narration-status');
+  button.disabled = true;
+  status.textContent = 'GENERATING…';
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    const { manifest, assetId } = selectedOriginalNarrationTarget();
+    const record = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}/cartesia`, {
+      method: 'POST', body: JSON.stringify({ text })
+    });
+    attachVerifiedOriginalAsset(manifest, record);
+    await previewVerifiedOriginalNarration(record);
+    toast('Narration verified and attached; save the draft to keep the manifest change', 'ok');
+  } catch(e) {
+    status.textContent = 'FAILED';
+    toast('Narration: ' + e.message, 'err');
+  } finally {
+    button.disabled = false;
+  }
+}
+
+async function uploadOriginalNarrationFile(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  const status = document.getElementById('originals-narration-status');
+  status.textContent = 'UPLOADING…';
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    const { manifest, assetId } = selectedOriginalNarrationTarget();
+    const contentBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('The audio file could not be read'));
+      reader.readAsDataURL(file);
+    });
+    const record = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        kind: 'narration', mime_type: file.type || 'audio/wav',
+        file_name: file.name, content_base64: contentBase64,
+        transcript: document.getElementById('original-stop-transcript').value.trim()
+      })
+    });
+    attachVerifiedOriginalAsset(manifest, record);
+    await previewVerifiedOriginalNarration(record);
+    toast('Audio verified and attached; save the draft to keep the manifest change', 'ok');
+  } catch(e) {
+    status.textContent = 'FAILED';
+    toast('Audio upload: ' + e.message, 'err');
+  }
+}
+
+async function uploadOriginalArtworkFile(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  const status = document.getElementById('originals-artwork-status');
+  status.textContent = 'UPLOADING…';
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    if (!selectedOriginalId) throw new Error('Save the draft before attaching artwork');
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+    const assetId = stop && stop.artwork_asset_id;
+    if (!assetId) throw new Error('Add an artwork asset ID to the selected story');
+    const contentBase64 = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result || ''));
+      reader.onerror = () => reject(new Error('The artwork file could not be read'));
+      reader.readAsDataURL(file);
+    });
+    const record = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}`, {
+      method: 'PUT',
+      body: JSON.stringify({
+        kind: 'image', mime_type: file.type || 'image/png',
+        file_name: file.name, content_base64: contentBase64
+      })
+    });
+    attachVerifiedOriginalAsset(manifest, record);
+    toast('Artwork verified and attached; save the draft to keep the manifest change', 'ok');
+  } catch(e) {
+    status.textContent = 'FAILED';
+    toast('Artwork upload: ' + e.message, 'err');
+  }
+}
+
+async function importOriginalJson(event) {
+  const file = event.target.files && event.target.files[0];
+  event.target.value = '';
+  if (!file) return;
+  try {
+    const data = JSON.parse(await file.text());
+    startNewOriginal();
+    const manifest = data.manifest || data.original_manifest || (data.schema_version === 1 && data.route && data.stops ? data : null);
+    const template = data.template || (data.schema_version === 2 ? data : null);
+    const title = data.title || (manifest && manifest.title) || (template && template.title) || 'Untitled Original';
+    document.getElementById('originals-title').value = title;
+    document.getElementById('originals-current-title').textContent = title;
+    if (data.id || data.pack_id) document.getElementById('originals-id').value = data.id || data.pack_id;
+    if (data.slug) document.getElementById('originals-slug').value = data.slug;
+    if (data.summary) document.getElementById('originals-summary').value = data.summary;
+    if ([0, 250, 500, 900].includes(Number(data.price_credits))) document.getElementById('originals-price').value = String(Number(data.price_credits));
+    if (data.coverage_region) document.getElementById('originals-coverage').value = data.coverage_region;
+    if (data.public_metadata) document.getElementById('originals-public-metadata').value = prettyJson(data.public_metadata);
+    if (data.validation_metadata) renderOriginalReviewChecks(data.validation_metadata);
+    if (template) document.getElementById('originals-template-json').value = prettyJson(template);
+    if (manifest) document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    renderOriginalPreview();
+    toast('JSON imported', 'ok');
+  } catch(e) {
+    toast('Import: ' + e.message, 'err');
+  }
+}
+
 function esc(s) {
   return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
@@ -2021,7 +3464,8 @@ let toastTimer = null;
 function toast(msg, type='ok') {
   const el = document.getElementById('toast');
   el.textContent = (type === 'ok' ? '✓ ' : '✗ ') + msg;
-  el.className = `show ${type}`;
+  const originalsActive = document.getElementById('page-originals')?.classList.contains('active');
+  el.className = `show ${type === 'ok' && originalsActive ? 'originals-ok' : type}`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.className = ''; }, 3000);
 }

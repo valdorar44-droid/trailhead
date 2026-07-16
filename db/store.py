@@ -1,7 +1,8 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import base64, sqlite3, json, time, math, hashlib, random, secrets, re
+import base64, sqlite3, json, time, math, hashlib, random, secrets, re, io, struct, wave, zlib
 from datetime import date as _date, datetime as _datetime, timedelta as _timedelta, timezone as _timezone
+from pathlib import Path as _Path
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import settings
 
@@ -42,6 +43,125 @@ def _conn() -> sqlite3.Connection:
     db.execute("PRAGMA busy_timeout=30000")
     db.row_factory = sqlite3.Row
     return db
+
+
+def _migrate_authored_entitlements_for_original_versions(db: sqlite3.Connection) -> None:
+    columns = {row["name"] for row in db.execute(
+        "PRAGMA table_info(authored_trip_pack_entitlements)"
+    ).fetchall()}
+    unique_pack_constraint = False
+    for index in db.execute("PRAGMA index_list(authored_trip_pack_entitlements)").fetchall():
+        if not index["unique"]:
+            continue
+        indexed = [row["name"] for row in db.execute(
+            f"PRAGMA index_info('{index['name']}')"
+        ).fetchall()]
+        if indexed == ["user_id", "pack_id"] and not bool(index["partial"]):
+            unique_pack_constraint = True
+            break
+    if "content_kind" in columns and not unique_pack_constraint:
+        db.execute(
+            """CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_legacy_pack
+               ON authored_trip_pack_entitlements(user_id,pack_id)
+               WHERE content_kind='trip_pack'"""
+        )
+        return
+
+    db.commit()
+    db.execute("PRAGMA foreign_keys=OFF")
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        has_requests = bool(db.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='authored_trip_pack_acquisition_requests'"
+        ).fetchone())
+        if has_requests:
+            db.execute(
+                "ALTER TABLE authored_trip_pack_acquisition_requests RENAME TO authored_trip_pack_acquisition_requests_legacy"
+            )
+        db.execute(
+            "ALTER TABLE authored_trip_pack_entitlements RENAME TO authored_trip_pack_entitlements_legacy"
+        )
+        db.execute(
+            """CREATE TABLE authored_trip_pack_entitlements (
+                id                TEXT PRIMARY KEY,
+                user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                pack_id           TEXT NOT NULL,
+                version           INTEGER NOT NULL,
+                content_kind      TEXT NOT NULL DEFAULT 'trip_pack',
+                acquisition_type  TEXT NOT NULL,
+                list_price_credits INTEGER NOT NULL,
+                credits_charged   INTEGER NOT NULL,
+                explorer_discount INTEGER NOT NULL DEFAULT 0,
+                claim_month       TEXT,
+                trip_id           TEXT NOT NULL,
+                idempotency_key   TEXT NOT NULL,
+                request_hash      TEXT NOT NULL,
+                acquired_at       INTEGER NOT NULL,
+                UNIQUE(user_id, pack_id, version),
+                UNIQUE(user_id, idempotency_key),
+                UNIQUE(user_id, claim_month),
+                FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+            )"""
+        )
+        legacy_has_kind = "content_kind" in columns
+        legacy_kind_fallback = ",content_kind" if legacy_has_kind else ""
+        kind_expression = (
+            "COALESCE((SELECT content_kind FROM authored_trip_pack_versions v "
+            "WHERE v.pack_id=authored_trip_pack_entitlements_legacy.pack_id "
+            "AND v.version=authored_trip_pack_entitlements_legacy.version)"
+            f"{legacy_kind_fallback},'trip_pack')"
+        )
+        db.execute(
+            f"""INSERT INTO authored_trip_pack_entitlements
+                (id,user_id,pack_id,version,content_kind,acquisition_type,
+                 list_price_credits,credits_charged,explorer_discount,claim_month,
+                 trip_id,idempotency_key,request_hash,acquired_at)
+                SELECT id,user_id,pack_id,version,{kind_expression},acquisition_type,
+                       list_price_credits,credits_charged,explorer_discount,claim_month,
+                       trip_id,idempotency_key,request_hash,acquired_at
+                FROM authored_trip_pack_entitlements_legacy"""
+        )
+        db.execute(
+            """CREATE TABLE authored_trip_pack_acquisition_requests (
+                user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                idempotency_key TEXT NOT NULL,
+                request_hash    TEXT NOT NULL,
+                entitlement_id  TEXT NOT NULL REFERENCES authored_trip_pack_entitlements(id) ON DELETE CASCADE,
+                created_at      INTEGER NOT NULL,
+                PRIMARY KEY (user_id, idempotency_key)
+            )"""
+        )
+        if has_requests:
+            db.execute(
+                """INSERT INTO authored_trip_pack_acquisition_requests
+                   (user_id,idempotency_key,request_hash,entitlement_id,created_at)
+                   SELECT request.user_id,request.idempotency_key,request.request_hash,
+                          request.entitlement_id,request.created_at
+                   FROM authored_trip_pack_acquisition_requests_legacy request
+                   JOIN authored_trip_pack_entitlements entitlement
+                     ON entitlement.id=request.entitlement_id"""
+            )
+            db.execute("DROP TABLE authored_trip_pack_acquisition_requests_legacy")
+        db.execute("DROP TABLE authored_trip_pack_entitlements_legacy")
+        db.execute(
+            """CREATE UNIQUE INDEX idx_authored_trip_pack_entitlements_legacy_pack
+               ON authored_trip_pack_entitlements(user_id,pack_id)
+               WHERE content_kind='trip_pack'"""
+        )
+        db.execute(
+            """CREATE INDEX idx_authored_trip_pack_entitlements_user
+               ON authored_trip_pack_entitlements(user_id,acquired_at DESC)"""
+        )
+        db.execute(
+            """CREATE INDEX idx_authored_trip_pack_acquisition_entitlement
+               ON authored_trip_pack_acquisition_requests(entitlement_id)"""
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.execute("PRAGMA foreign_keys=ON")
 
 
 def _migrate_trip_documents_to_account_scope(db: sqlite3.Connection) -> None:
@@ -557,6 +677,7 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS authored_trip_packs (
             id                        TEXT PRIMARY KEY,
+            content_kind              TEXT NOT NULL DEFAULT 'trip_pack',
             slug                      TEXT NOT NULL UNIQUE,
             status                    TEXT NOT NULL DEFAULT 'draft',
             draft_title               TEXT NOT NULL,
@@ -566,6 +687,7 @@ def init_db():
             draft_public_metadata     TEXT NOT NULL DEFAULT '{}',
             draft_validation_metadata TEXT NOT NULL DEFAULT '{}',
             draft_template_json       TEXT NOT NULL,
+            draft_original_manifest_json TEXT,
             draft_revision            INTEGER NOT NULL DEFAULT 1,
             current_published_version INTEGER,
             created_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -576,6 +698,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS authored_trip_pack_versions (
             pack_id             TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
             version             INTEGER NOT NULL,
+            content_kind        TEXT NOT NULL DEFAULT 'trip_pack',
             slug                TEXT NOT NULL,
             title               TEXT NOT NULL,
             summary             TEXT NOT NULL,
@@ -584,6 +707,7 @@ def init_db():
             public_metadata     TEXT NOT NULL DEFAULT '{}',
             validation_metadata TEXT NOT NULL DEFAULT '{}',
             template_json       TEXT NOT NULL,
+            original_manifest_json TEXT,
             published_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
             published_at        INTEGER NOT NULL,
             PRIMARY KEY (pack_id, version)
@@ -596,11 +720,20 @@ def init_db():
             selected_at  INTEGER NOT NULL,
             FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
         );
+        CREATE TABLE IF NOT EXISTS authored_original_features (
+            period_month TEXT PRIMARY KEY,
+            pack_id      TEXT NOT NULL,
+            version      INTEGER NOT NULL,
+            selected_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            selected_at  INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        );
         CREATE TABLE IF NOT EXISTS authored_trip_pack_entitlements (
             id                TEXT PRIMARY KEY,
             user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             pack_id           TEXT NOT NULL,
             version           INTEGER NOT NULL,
+            content_kind      TEXT NOT NULL DEFAULT 'trip_pack',
             acquisition_type  TEXT NOT NULL,
             list_price_credits INTEGER NOT NULL,
             credits_charged   INTEGER NOT NULL,
@@ -610,10 +743,36 @@ def init_db():
             idempotency_key   TEXT NOT NULL,
             request_hash      TEXT NOT NULL,
             acquired_at       INTEGER NOT NULL,
-            UNIQUE(user_id, pack_id),
+            UNIQUE(user_id, pack_id, version),
             UNIQUE(user_id, idempotency_key),
             UNIQUE(user_id, claim_month),
             FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        );
+        CREATE TABLE IF NOT EXISTS authored_trip_pack_acquisition_requests (
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            idempotency_key TEXT NOT NULL,
+            request_hash    TEXT NOT NULL,
+            entitlement_id  TEXT NOT NULL REFERENCES authored_trip_pack_entitlements(id) ON DELETE CASCADE,
+            created_at      INTEGER NOT NULL,
+            PRIMARY KEY (user_id, idempotency_key)
+        );
+        CREATE TABLE IF NOT EXISTS authored_original_assets (
+            pack_id       TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            asset_id      TEXT NOT NULL,
+            sha256        TEXT NOT NULL,
+            kind          TEXT NOT NULL,
+            mime_type     TEXT NOT NULL,
+            byte_count    INTEGER NOT NULL,
+            public_path   TEXT NOT NULL,
+            storage_path  TEXT NOT NULL,
+            media_metadata_json TEXT NOT NULL DEFAULT '{}',
+            transcript_sha256 TEXT,
+            generator_metadata_json TEXT NOT NULL DEFAULT '{}',
+            is_current    INTEGER NOT NULL DEFAULT 1,
+            uploaded_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL,
+            PRIMARY KEY (pack_id, asset_id, sha256)
         );
         CREATE TABLE IF NOT EXISTS communication_preferences (
             user_id                    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -960,6 +1119,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_availability_monitors_user ON availability_monitors(user_id, status, expires_at, updated_at DESC)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_availability_monitors_active_target ON availability_monitors(user_id,target_id,monitor_type,COALESCE(start_date,''),COALESCE(end_date,'')) WHERE status='active'",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_packs_status ON authored_trip_packs(status, updated_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_packs_kind_status ON authored_trip_packs(content_kind, status, updated_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_versions_published ON authored_trip_pack_versions(published_at DESC, pack_id)",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_user ON authored_trip_pack_entitlements(user_id, acquired_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_communication_preferences_digest ON communication_preferences(weekly_digest,unsubscribed_all,user_id)",
@@ -1300,6 +1460,7 @@ def init_db():
         )""",
         """CREATE TABLE IF NOT EXISTS authored_trip_packs (
             id                        TEXT PRIMARY KEY,
+            content_kind              TEXT NOT NULL DEFAULT 'trip_pack',
             slug                      TEXT NOT NULL UNIQUE,
             status                    TEXT NOT NULL DEFAULT 'draft',
             draft_title               TEXT NOT NULL,
@@ -1309,6 +1470,7 @@ def init_db():
             draft_public_metadata     TEXT NOT NULL DEFAULT '{}',
             draft_validation_metadata TEXT NOT NULL DEFAULT '{}',
             draft_template_json       TEXT NOT NULL,
+            draft_original_manifest_json TEXT,
             draft_revision            INTEGER NOT NULL DEFAULT 1,
             current_published_version INTEGER,
             created_by                INTEGER REFERENCES users(id) ON DELETE SET NULL,
@@ -1319,6 +1481,7 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS authored_trip_pack_versions (
             pack_id             TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
             version             INTEGER NOT NULL,
+            content_kind        TEXT NOT NULL DEFAULT 'trip_pack',
             slug                TEXT NOT NULL,
             title               TEXT NOT NULL,
             summary             TEXT NOT NULL,
@@ -1327,6 +1490,7 @@ def init_db():
             public_metadata     TEXT NOT NULL DEFAULT '{}',
             validation_metadata TEXT NOT NULL DEFAULT '{}',
             template_json       TEXT NOT NULL,
+            original_manifest_json TEXT,
             published_by        INTEGER REFERENCES users(id) ON DELETE SET NULL,
             published_at        INTEGER NOT NULL,
             PRIMARY KEY (pack_id, version)
@@ -1339,11 +1503,20 @@ def init_db():
             selected_at  INTEGER NOT NULL,
             FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
         )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_features (
+            period_month TEXT PRIMARY KEY,
+            pack_id      TEXT NOT NULL,
+            version      INTEGER NOT NULL,
+            selected_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            selected_at  INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        )""",
         """CREATE TABLE IF NOT EXISTS authored_trip_pack_entitlements (
             id                TEXT PRIMARY KEY,
             user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
             pack_id           TEXT NOT NULL,
             version           INTEGER NOT NULL,
+            content_kind      TEXT NOT NULL DEFAULT 'trip_pack',
             acquisition_type  TEXT NOT NULL,
             list_price_credits INTEGER NOT NULL,
             credits_charged   INTEGER NOT NULL,
@@ -1353,10 +1526,36 @@ def init_db():
             idempotency_key   TEXT NOT NULL,
             request_hash      TEXT NOT NULL,
             acquired_at       INTEGER NOT NULL,
-            UNIQUE(user_id, pack_id),
+            UNIQUE(user_id, pack_id, version),
             UNIQUE(user_id, idempotency_key),
             UNIQUE(user_id, claim_month),
             FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_trip_pack_acquisition_requests (
+            user_id         INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            idempotency_key TEXT NOT NULL,
+            request_hash    TEXT NOT NULL,
+            entitlement_id  TEXT NOT NULL REFERENCES authored_trip_pack_entitlements(id) ON DELETE CASCADE,
+            created_at      INTEGER NOT NULL,
+            PRIMARY KEY (user_id, idempotency_key)
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_assets (
+            pack_id       TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            asset_id      TEXT NOT NULL,
+            sha256        TEXT NOT NULL,
+            kind          TEXT NOT NULL,
+            mime_type     TEXT NOT NULL,
+            byte_count    INTEGER NOT NULL,
+            public_path   TEXT NOT NULL,
+            storage_path  TEXT NOT NULL,
+            media_metadata_json TEXT NOT NULL DEFAULT '{}',
+            transcript_sha256 TEXT,
+            generator_metadata_json TEXT NOT NULL DEFAULT '{}',
+            is_current    INTEGER NOT NULL DEFAULT 1,
+            uploaded_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            created_at    INTEGER NOT NULL,
+            updated_at    INTEGER NOT NULL,
+            PRIMARY KEY (pack_id, asset_id, sha256)
         )""",
         """CREATE TABLE IF NOT EXISTS communication_preferences (
             user_id                    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -1424,6 +1623,12 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_packs_status ON authored_trip_packs(status, updated_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_versions_published ON authored_trip_pack_versions(published_at DESC, pack_id)",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_user ON authored_trip_pack_entitlements(user_id, acquired_at DESC)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_legacy_pack ON authored_trip_pack_entitlements(user_id,pack_id) WHERE content_kind='trip_pack'",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_acquisition_entitlement ON authored_trip_pack_acquisition_requests(entitlement_id)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_original_assets_current ON authored_original_assets(pack_id,asset_id) WHERE is_current=1",
+        "ALTER TABLE authored_original_assets ADD COLUMN media_metadata_json TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE authored_original_assets ADD COLUMN transcript_sha256 TEXT",
+        "ALTER TABLE authored_original_assets ADD COLUMN generator_metadata_json TEXT NOT NULL DEFAULT '{}'",
         "CREATE INDEX IF NOT EXISTS idx_communication_preferences_digest ON communication_preferences(weekly_digest,unsubscribed_all,user_id)",
         "CREATE INDEX IF NOT EXISTS idx_communication_preferences_briefs ON communication_preferences(trip_window_briefs,unsubscribed_all,user_id)",
         "CREATE INDEX IF NOT EXISTS idx_community_publications_user ON community_publications(user_id,submitted_at DESC,id DESC)",
@@ -1431,6 +1636,20 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_community_publications_place ON community_publications(place_id,status,submitted_at DESC,id DESC)",
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_community_publications_open_source ON community_publications(user_id,trip_id,note_id,publication_type) WHERE status IN ('pending_review','approved')",
         "ALTER TABLE authored_trip_pack_versions ADD COLUMN slug TEXT",
+        "ALTER TABLE authored_trip_packs ADD COLUMN content_kind TEXT NOT NULL DEFAULT 'trip_pack'",
+        "ALTER TABLE authored_trip_packs ADD COLUMN draft_original_manifest_json TEXT",
+        "ALTER TABLE authored_trip_pack_versions ADD COLUMN content_kind TEXT NOT NULL DEFAULT 'trip_pack'",
+        "ALTER TABLE authored_trip_pack_versions ADD COLUMN original_manifest_json TEXT",
+        "CREATE INDEX IF NOT EXISTS idx_authored_trip_packs_kind_status ON authored_trip_packs(content_kind, status, updated_at DESC)",
+        """CREATE TABLE IF NOT EXISTS authored_original_features (
+            period_month TEXT PRIMARY KEY,
+            pack_id      TEXT NOT NULL,
+            version      INTEGER NOT NULL,
+            selected_by  INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            selected_at  INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version)
+        )""",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_features_pack ON authored_original_features(pack_id, version)",
         "CREATE INDEX IF NOT EXISTS idx_viator_bookings_user ON viator_bookings(user_id, status, updated_at)",
         "CREATE INDEX IF NOT EXISTS idx_viator_bookings_reference ON viator_bookings(booking_reference)",
         """CREATE TABLE IF NOT EXISTS trail_field_reports (
@@ -1688,6 +1907,19 @@ def init_db():
             db.execute(sql)
         except Exception:
             pass
+    # Originals retain every immutable version a user owns, while legacy trip
+    # packs remain one entitlement per pack. Rebuild older entitlement tables
+    # before backfilling their request ledger.
+    _migrate_authored_entitlements_for_original_versions(db)
+
+    # Preserve every legacy acquisition key in the request ledger. New keys are
+    # recorded there as well, including no-charge, already-owned responses.
+    db.execute(
+        """INSERT OR IGNORE INTO authored_trip_pack_acquisition_requests
+           (user_id,idempotency_key,request_hash,entitlement_id,created_at)
+           SELECT user_id,idempotency_key,request_hash,id,acquired_at
+           FROM authored_trip_pack_entitlements"""
+    )
     # These indexes depend on columns/tables added by the migration loop above.
     # A partial unique index preserves compatibility for legacy NULL identifiers.
     db.execute(
@@ -2931,6 +3163,8 @@ def upsert_trip_document_v2(
         raise ValueError("Invalid Idempotency-Key")
     if not isinstance(expected_revision, int) or expected_revision < 0:
         raise ValueError("Expected revision must be a non-negative integer")
+    if isinstance(document, dict) and "experience_ref" in document:
+        raise ValueError("Trip experience_ref is server-owned")
     normalized, document_json = _normalize_trip_document(document, trip_id)
     request_hash = hashlib.sha256(json.dumps({
         "trip_id": trip_id,
@@ -2964,6 +3198,14 @@ def upsert_trip_document_v2(
         current = db.execute(
             "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?", (user_id, trip_id),
         ).fetchone()
+        if current:
+            existing_document = _decode_pack_json(current["document_json"], {})
+            existing_experience_ref = existing_document.get("experience_ref")
+            if isinstance(existing_experience_ref, dict):
+                normalized["experience_ref"] = existing_experience_ref
+                normalized, document_json = _json_object(
+                    normalized, "Trip document", 2 * 1024 * 1024,
+                )
         legacy = db.execute(
             """SELECT id,user_id,created_at,COALESCE(updated_at,created_at) AS updated_at,
                       request,plan,route_geometry,builder_state,source,version AS revision
@@ -3975,11 +4217,14 @@ def delete_user(user_id: int) -> None:
     # disabled on this recovery path.
     db = sqlite3.connect(settings.db_path, timeout=60.0, check_same_thread=False)
     db.execute("PRAGMA foreign_keys=OFF")
+    db.execute("DELETE FROM authored_trip_pack_acquisition_requests WHERE user_id=?", (user_id,))
     db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
     db.execute("UPDATE authored_trip_packs SET created_by=NULL WHERE created_by=?", (user_id,))
     db.execute("UPDATE authored_trip_packs SET updated_by=NULL WHERE updated_by=?", (user_id,))
     db.execute("UPDATE authored_trip_pack_versions SET published_by=NULL WHERE published_by=?", (user_id,))
     db.execute("UPDATE authored_trip_pack_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
+    db.execute("UPDATE authored_original_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
+    db.execute("UPDATE authored_original_assets SET uploaded_by=NULL WHERE uploaded_by=?", (user_id,))
     db.execute("DELETE FROM availability_monitors WHERE user_id=?", (user_id,))
     db.execute("DELETE FROM community_publications WHERE user_id=?", (user_id,))
     db.execute("UPDATE community_publications SET moderated_by=NULL WHERE moderated_by=?", (user_id,))
@@ -8425,6 +8670,7 @@ def fail_availability_monitor_creation(user_id: int, monitor_id: str, reason: st
 
 TRIP_PACK_PRICES = {250, 500, 900}
 TRIP_PACK_COVERAGE_REGIONS = {"north_america", "global"}
+TRIP_PACK_CONTENT_KINDS = {"trip_pack", "original_drive"}
 TRIP_PACK_VALIDATION_CHECKS = {
     "route_reviewed",
     "rig_requirements_reviewed",
@@ -8435,6 +8681,21 @@ TRIP_PACK_VALIDATION_CHECKS = {
     "media_licenses_reviewed",
     "offline_coverage_reviewed",
 }
+ORIGINAL_VALIDATION_CHECKS = {
+    "route_reviewed",
+    "cue_route_reviewed",
+    "trigger_drive_tested",
+    "narration_reviewed",
+    "audio_assets_reviewed",
+    "transcripts_reviewed",
+    "source_citations_reviewed",
+    "media_licenses_reviewed",
+    "safety_access_reviewed",
+    "season_reviewed",
+    "offline_bundle_reviewed",
+}
+ORIGINAL_FIELD_DRIVE_MAX_AGE_DAYS = 365
+ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS = 180
 TRIP_PACK_EXPLORER_DISCOUNT_PERCENT = 20
 
 
@@ -8446,7 +8707,21 @@ class InsufficientTripPackCreditsError(ValueError):
         super().__init__("Not enough credits for this trip pack")
 
 
+class InsufficientOriginalCreditsError(InsufficientTripPackCreditsError):
+    def __init__(self, balance: int, credits_needed: int, list_price: int):
+        super().__init__(balance, credits_needed, list_price)
+        self.args = ("Not enough credits for this Trailhead Original",)
+
+
+class OriginalAcquisitionConflictError(ValueError):
+    pass
+
+
 class FeaturedTripPackUnavailableError(ValueError):
+    pass
+
+
+class FeaturedOriginalUnavailableError(FeaturedTripPackUnavailableError):
     pass
 
 
@@ -8456,7 +8731,21 @@ class MonthlyTripPackClaimUsedError(ValueError):
         super().__init__("This month's featured trip pack has already been claimed")
 
 
+class MonthlyOriginalClaimUsedError(MonthlyTripPackClaimUsedError):
+    def __init__(self, period_month: str):
+        super().__init__(period_month)
+        self.args = ("This month's featured Trailhead experience has already been claimed",)
+
+
 class ExplorerTripPackClaimRequiredError(ValueError):
+    pass
+
+
+class ExplorerOriginalClaimRequiredError(ExplorerTripPackClaimRequiredError):
+    pass
+
+
+class OriginalManifestAccessError(PermissionError):
     pass
 
 
@@ -8515,8 +8804,974 @@ def _stable_trip_pack_template(pack_id: str, template: dict) -> tuple[dict, str]
         item["id"] = item_id
         stable_items.append(item)
     normalized["items"] = stable_items
+    # Provenance is injected only when the server clones an acquired Original.
+    normalized.pop("experience_ref", None)
     normalized, template_json = _json_object(normalized, "Trip pack template", 2 * 1024 * 1024)
     return normalized, template_json
+
+
+def _original_number(
+    value: object,
+    label: str,
+    *,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{label} must be a number")
+    number = float(value)
+    if not math.isfinite(number):
+        raise ValueError(f"{label} must be finite")
+    if minimum is not None and number < minimum:
+        raise ValueError(f"{label} must be at least {minimum:g}")
+    if maximum is not None and number > maximum:
+        raise ValueError(f"{label} must be at most {maximum:g}")
+    return number
+
+
+ORIGINAL_ASSET_KINDS = {"narration", "image", "transcript", "route", "other"}
+
+
+def _original_asset_mime_allowed(kind: str, mime_type: str) -> bool:
+    if kind == "narration":
+        return mime_type == "audio/wav"
+    if kind == "image":
+        return mime_type == "image/png"
+    if kind == "transcript":
+        return mime_type in {"text/plain", "application/json", "application/x-subrip"}
+    if kind == "route":
+        return mime_type in {"application/json", "application/geo+json", "application/octet-stream"}
+    if kind == "other":
+        return mime_type in {"application/octet-stream", "application/pdf", "application/zip"}
+    return False
+
+
+def original_transcript_sha256(transcript: object) -> str:
+    normalized = " ".join(str(transcript or "").split())
+    if not normalized:
+        raise ValueError("Original narration transcript is required")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+def _probe_original_mp3(data: bytes) -> dict:
+    offset = 0
+    if data.startswith(b"ID3"):
+        if len(data) < 10 or any(byte & 0x80 for byte in data[6:10]):
+            raise ValueError("Original narration MP3 has an invalid ID3 header")
+        tag_size = sum(data[6 + index] << (21 - 7 * index) for index in range(4))
+        offset = 10 + tag_size + (10 if data[5] & 0x10 else 0)
+    bitrate_v1_l3 = (0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0)
+    bitrate_v2_l3 = (0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0)
+    sample_rates = (44100, 48000, 32000)
+    frames = 0
+    duration_s = 0.0
+    sample_rate = 0
+    while offset + 4 <= len(data):
+        if data[offset:offset + 3] == b"TAG" and len(data) - offset == 128:
+            offset = len(data)
+            break
+        header = int.from_bytes(data[offset:offset + 4], "big")
+        if (header >> 21) & 0x7FF != 0x7FF:
+            break
+        version_bits = (header >> 19) & 0x3
+        layer_bits = (header >> 17) & 0x3
+        bitrate_index = (header >> 12) & 0xF
+        sample_index = (header >> 10) & 0x3
+        padding = (header >> 9) & 0x1
+        if version_bits == 1 or layer_bits != 1 or sample_index == 3:
+            break
+        mpeg1 = version_bits == 3
+        bitrate_kbps = (bitrate_v1_l3 if mpeg1 else bitrate_v2_l3)[bitrate_index]
+        if not bitrate_kbps:
+            break
+        sample_rate = sample_rates[sample_index]
+        if version_bits == 2:
+            sample_rate //= 2
+        elif version_bits == 0:
+            sample_rate //= 4
+        frame_length = int(
+            ((144000 if mpeg1 else 72000) * bitrate_kbps) / sample_rate + padding
+        )
+        if frame_length < 4 or offset + frame_length > len(data):
+            break
+        duration_s += (1152 if mpeg1 else 576) / sample_rate
+        frames += 1
+        offset += frame_length
+    trailing = data[offset:]
+    if frames < 2 or duration_s < 0.05 or (trailing and any(byte != 0 for byte in trailing)):
+        raise ValueError("Original narration is not a decodable MP3 stream")
+    return {"format": "mp3", "duration_s": round(duration_s, 3), "sample_rate_hz": sample_rate}
+
+
+def _probe_original_png(data: bytes) -> dict:
+    if not data.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise ValueError("Original artwork is not a valid PNG")
+    offset = 8
+    width = height = 0
+    bit_depth = color_type = compression = filter_method = interlace = -1
+    compressed = bytearray()
+    saw_idat = saw_iend = False
+    while offset + 12 <= len(data):
+        length = struct.unpack(">I", data[offset:offset + 4])[0]
+        chunk_type = data[offset + 4:offset + 8]
+        end = offset + 12 + length
+        if end > len(data):
+            break
+        chunk_data = data[offset + 8:offset + 8 + length]
+        expected_crc = struct.unpack(">I", data[offset + 8 + length:end])[0]
+        if zlib.crc32(chunk_type + chunk_data) & 0xFFFFFFFF != expected_crc:
+            raise ValueError("Original artwork PNG failed CRC validation")
+        if chunk_type == b"IHDR":
+            if length != 13:
+                raise ValueError("Original artwork PNG has an invalid header")
+            width, height = struct.unpack(">II", chunk_data[:8])
+            bit_depth, color_type, compression, filter_method, interlace = chunk_data[8:13]
+        elif chunk_type == b"IDAT":
+            saw_idat = True
+            compressed.extend(chunk_data)
+        elif chunk_type == b"IEND":
+            saw_iend = True
+            offset = end
+            break
+        offset = end
+    if not saw_iend or not saw_idat or width < 1 or height < 1 or offset != len(data):
+        raise ValueError("Original artwork PNG is incomplete")
+    if width > 8192 or height > 8192 or width * height > 32_000_000:
+        raise ValueError("Original artwork PNG dimensions are unsafe")
+    bytes_per_pixel = {0: 1, 2: 3, 6: 4}.get(color_type)
+    if bit_depth != 8 or bytes_per_pixel is None or compression != 0 or filter_method != 0 or interlace != 0:
+        raise ValueError("Original artwork PNG format is not supported")
+    row_size = 1 + width * bytes_per_pixel
+    expected_decoded_bytes = row_size * height
+    try:
+        decompressor = zlib.decompressobj()
+        decoded = decompressor.decompress(bytes(compressed), expected_decoded_bytes + 1)
+    except zlib.error as exc:
+        raise ValueError("Original artwork PNG pixels could not be decoded") from exc
+    if (
+        not decompressor.eof
+        or decompressor.unconsumed_tail
+        or decompressor.unused_data
+        or len(decoded) != expected_decoded_bytes
+        or any(decoded[row * row_size] > 4 for row in range(height))
+    ):
+        raise ValueError("Original artwork PNG pixel data is invalid")
+    return {"format": "png", "width": width, "height": height}
+
+
+def _probe_original_jpeg(data: bytes) -> dict:
+    if not (data.startswith(b"\xff\xd8") and data.endswith(b"\xff\xd9")):
+        raise ValueError("Original artwork is not a complete JPEG")
+    offset = 2
+    width = height = 0
+    while offset + 4 <= len(data):
+        if data[offset] != 0xFF:
+            raise ValueError("Original artwork JPEG marker is invalid")
+        while offset < len(data) and data[offset] == 0xFF:
+            offset += 1
+        marker = data[offset]
+        offset += 1
+        if marker in {0xD8, 0xD9}:
+            continue
+        if marker == 0xDA:
+            break
+        if offset + 2 > len(data):
+            break
+        length = int.from_bytes(data[offset:offset + 2], "big")
+        if length < 2 or offset + length > len(data):
+            break
+        if marker in {0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF}:
+            if length < 7:
+                break
+            height = int.from_bytes(data[offset + 3:offset + 5], "big")
+            width = int.from_bytes(data[offset + 5:offset + 7], "big")
+        offset += length
+    if width < 1 or height < 1:
+        raise ValueError("Original artwork JPEG dimensions are unavailable")
+    return {"format": "jpeg", "width": width, "height": height}
+
+
+def _probe_original_asset_file(path: _Path, kind: str, mime_type: str) -> dict:
+    if kind not in {"narration", "image"}:
+        return {}
+    data = path.read_bytes()
+    if kind == "narration" and mime_type == "audio/wav":
+        try:
+            with wave.open(io.BytesIO(data), "rb") as audio:
+                frames = audio.getnframes()
+                sample_rate = audio.getframerate()
+                channels = audio.getnchannels()
+                sample_width = audio.getsampwidth()
+                decoded_frames = audio.readframes(frames)
+        except (EOFError, wave.Error) as exc:
+            raise ValueError("Original narration is not a decodable WAV stream") from exc
+        if frames < 1 or sample_rate < 1000 or channels not in {1, 2} or sample_width not in {1, 2, 3, 4}:
+            raise ValueError("Original narration WAV format is invalid")
+        if len(decoded_frames) != frames * channels * sample_width:
+            raise ValueError("Original narration WAV audio data is incomplete")
+        return {
+            "format": "wav",
+            "duration_s": round(frames / sample_rate, 3),
+            "sample_rate_hz": sample_rate,
+            "channels": channels,
+        }
+    if kind == "image" and mime_type == "image/png":
+        return _probe_original_png(data)
+    raise ValueError("Original asset format is not supported")
+
+
+def _original_asset_public_path(pack_id: str, asset_id: str, sha256: str) -> str:
+    return f"/api/original-assets/{pack_id}/{asset_id}/{sha256}"
+
+
+def _sha256_file(path: _Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+_ORIGINAL_ASSET_INTEGRITY_CACHE: dict[tuple[str, int, int, str], bool] = {}
+
+
+def _original_asset_file_verified(raw: dict, *, force_hash: bool = False) -> bool:
+    path = _Path(raw["storage_path"])
+    if not path.is_file():
+        return False
+    stat = path.stat()
+    expected_size = int(raw["byte_count"])
+    if stat.st_size != expected_size:
+        return False
+    key = (str(path), stat.st_size, stat.st_mtime_ns, str(raw["sha256"]))
+    if not force_hash and _ORIGINAL_ASSET_INTEGRITY_CACHE.get(key):
+        return True
+    verified = _sha256_file(path) == raw["sha256"]
+    if verified:
+        if len(_ORIGINAL_ASSET_INTEGRITY_CACHE) >= 2048:
+            _ORIGINAL_ASSET_INTEGRITY_CACHE.clear()
+        _ORIGINAL_ASSET_INTEGRITY_CACHE[key] = True
+    return verified
+
+
+def save_authored_original_asset_record(
+    pack_id: str,
+    asset_id: str,
+    kind: str,
+    mime_type: str,
+    storage_path: str,
+    byte_count: int,
+    sha256: str,
+    admin_user_id: int,
+    transcript_sha256: str | None = None,
+    generator_metadata: dict | None = None,
+) -> dict:
+    """Record an uploaded asset only after independently verifying its file bytes."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    asset_id = _validate_canonical_id(asset_id, "Original asset id")
+    kind = str(kind or "").strip().lower()
+    if kind not in ORIGINAL_ASSET_KINDS:
+        raise ValueError("Original asset kind is invalid")
+    mime_type = str(mime_type or "").strip().lower()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9.+-]{0,79}/[a-z0-9][a-z0-9.+-]{0,79}", mime_type):
+        raise ValueError("Original asset MIME type is invalid")
+    if not _original_asset_mime_allowed(kind, mime_type):
+        raise ValueError("Original asset MIME type is not allowed for its content kind")
+    if isinstance(byte_count, bool) or not isinstance(byte_count, int) or byte_count <= 0:
+        raise ValueError("Original asset bytes must be a positive integer")
+    sha256 = str(sha256 or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+        raise ValueError("Original asset sha256 is invalid")
+    path = _Path(str(storage_path or "")).expanduser().resolve()
+    if not path.is_file():
+        raise ValueError("Original asset upload is not present on the server")
+    if path.stat().st_size != byte_count or _sha256_file(path) != sha256:
+        raise ValueError("Original asset upload failed server integrity verification")
+    media_metadata = _probe_original_asset_file(path, kind, mime_type)
+    media_metadata, media_metadata_json = _json_object(
+        media_metadata, "Original media metadata", 32 * 1024,
+    )
+    if kind == "narration":
+        transcript_sha256 = str(transcript_sha256 or "").strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", transcript_sha256):
+            raise ValueError("Original narration must be bound to a reviewed transcript")
+    elif transcript_sha256 is not None:
+        raise ValueError("Only Original narration assets may carry a transcript binding")
+    generator_metadata, generator_metadata_json = _json_object(
+        generator_metadata or {}, "Original asset generator metadata", 32 * 1024,
+    )
+    public_path = _original_asset_public_path(pack_id, asset_id, sha256)
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        pack = db.execute(
+            "SELECT 1 FROM authored_trip_packs WHERE id=? AND content_kind='original_drive'",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            raise ValueError("Trailhead Original not found")
+        existing = db.execute(
+            """SELECT * FROM authored_original_assets
+               WHERE pack_id=? AND asset_id=? AND sha256=?""",
+            (pack_id, asset_id, sha256),
+        ).fetchone()
+        if existing and (
+            existing["kind"] != kind
+            or existing["mime_type"] != mime_type
+            or int(existing["byte_count"]) != byte_count
+            or existing["public_path"] != public_path
+            or existing["media_metadata_json"] != media_metadata_json
+            or existing["transcript_sha256"] != transcript_sha256
+            or existing["generator_metadata_json"] != generator_metadata_json
+        ):
+            raise ValueError("Original content-addressed asset metadata is immutable")
+        db.execute(
+            "UPDATE authored_original_assets SET is_current=0,updated_at=? WHERE pack_id=? AND asset_id=?",
+            (now, pack_id, asset_id),
+        )
+        if existing:
+            db.execute(
+                """UPDATE authored_original_assets
+                   SET storage_path=?,is_current=1,uploaded_by=?,updated_at=?
+                   WHERE pack_id=? AND asset_id=? AND sha256=?""",
+                (str(path), admin_user_id, now, pack_id, asset_id, sha256),
+            )
+        else:
+            db.execute(
+                """INSERT INTO authored_original_assets
+                   (pack_id,asset_id,sha256,kind,mime_type,byte_count,public_path,
+                    storage_path,media_metadata_json,transcript_sha256,
+                    generator_metadata_json,is_current,uploaded_by,created_at,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,1,?,?,?)""",
+                (
+                    pack_id, asset_id, sha256, kind, mime_type, byte_count, public_path,
+                    str(path), media_metadata_json, transcript_sha256, generator_metadata_json,
+                    admin_user_id, now, now,
+                ),
+            )
+        row = db.execute(
+            "SELECT * FROM authored_original_assets WHERE pack_id=? AND asset_id=? AND sha256=?",
+            (pack_id, asset_id, sha256),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _public_original_asset_record(row)
+
+
+def _public_original_asset_record(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    return {
+        "pack_id": raw["pack_id"],
+        "id": raw["asset_id"],
+        "kind": raw["kind"],
+        "mime_type": raw["mime_type"],
+        "bytes": int(raw["byte_count"]),
+        "sha256": raw["sha256"],
+        "path": raw["public_path"],
+        "current": bool(raw["is_current"]),
+        "uploaded_at": int(raw["updated_at"]),
+        "media_metadata": _decode_pack_json(raw.get("media_metadata_json"), {}),
+        "transcript_sha256": raw.get("transcript_sha256"),
+        "generator_metadata": _decode_pack_json(raw.get("generator_metadata_json"), {}),
+    }
+
+
+def list_authored_original_asset_records(pack_id: str, current_only: bool = True) -> list[dict]:
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    db = _conn()
+    sql = "SELECT * FROM authored_original_assets WHERE pack_id=?"
+    if current_only:
+        sql += " AND is_current=1"
+    sql += " ORDER BY asset_id,updated_at DESC"
+    rows = db.execute(sql, (pack_id,)).fetchall()
+    db.close()
+    return [_public_original_asset_record(row) for row in rows]
+
+
+def get_authored_original_asset_record_admin(pack_id: str, asset_id: str) -> dict | None:
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    asset_id = _validate_canonical_id(asset_id, "Original asset id")
+    db = _conn()
+    row = db.execute(
+        """SELECT * FROM authored_original_assets
+           WHERE pack_id=? AND asset_id=? AND is_current=1""",
+        (pack_id, asset_id),
+    ).fetchone()
+    db.close()
+    if not row:
+        return None
+    raw = dict(row)
+    if not _original_asset_file_verified(raw):
+        raise ValueError("Original asset failed integrity verification")
+    return raw
+
+
+def _verified_original_asset_map_db(db: sqlite3.Connection, pack_id: str) -> dict[str, dict]:
+    rows = db.execute(
+        "SELECT * FROM authored_original_assets WHERE pack_id=? AND is_current=1",
+        (pack_id,),
+    ).fetchall()
+    verified: dict[str, dict] = {}
+    for row in rows:
+        raw = dict(row)
+        if not _original_asset_file_verified(raw, force_hash=True):
+            continue
+        verified[raw["asset_id"]] = raw
+    return verified
+
+
+def _normalize_original_review_timestamp(value: object, label: str) -> str | None:
+    if value is None or value == "":
+        return None
+    raw = str(value).strip()
+    if "T" not in raw or not re.search(r"(?:Z|[+-]\d{2}:\d{2})$", raw):
+        raise ValueError(f"{label} must be an ISO 8601 date-time with timezone")
+    try:
+        parsed = _datetime.fromisoformat(raw[:-1] + "+00:00" if raw.endswith("Z") else raw)
+    except ValueError as exc:
+        raise ValueError(f"{label} must be a valid ISO 8601 date-time") from exc
+    if parsed.tzinfo is None:
+        raise ValueError(f"{label} must include a timezone")
+    parsed = parsed.astimezone(_timezone.utc)
+    now = _datetime.now(_timezone.utc)
+    if parsed.year < 2000 or parsed > now + _timedelta(minutes=5):
+        raise ValueError(f"{label} is outside the accepted review window")
+    return parsed.isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+def _normalize_original_citation_review_date(value: object) -> str | None:
+    if value is None or value == "":
+        return None
+    raw = str(value).strip()
+    try:
+        if "T" in raw:
+            normalized = _normalize_original_review_timestamp(raw, "Original citation reviewed_at")
+            return normalized
+        parsed = _date.fromisoformat(raw)
+    except ValueError as exc:
+        raise ValueError("Original citation reviewed_at must be a valid ISO date or date-time") from exc
+    if parsed.year < 2000 or parsed > _date.today():
+        raise ValueError("Original citation reviewed_at is outside the accepted review window")
+    return parsed.isoformat()
+
+
+def _original_haversine_m(a: list[float], b: list[float]) -> float:
+    lng1, lat1 = map(math.radians, a)
+    lng2, lat2 = map(math.radians, b)
+    delta_lat = lat2 - lat1
+    delta_lng = lng2 - lng1
+    hav = (
+        math.sin(delta_lat / 2) ** 2
+        + math.cos(lat1) * math.cos(lat2) * math.sin(delta_lng / 2) ** 2
+    )
+    return 2 * 6_371_000 * math.asin(min(1.0, math.sqrt(hav)))
+
+
+def _original_route_cumulative_m(coordinates: list[list[float]]) -> list[float]:
+    cumulative = [0.0]
+    for start, end in zip(coordinates, coordinates[1:]):
+        cumulative.append(cumulative[-1] + _original_haversine_m(start, end))
+    return cumulative
+
+
+def _original_project_to_segment(
+    point: dict,
+    start: list[float],
+    end: list[float],
+) -> tuple[float, float]:
+    """Return distance to and fraction along a route segment."""
+    radius = 6_371_000.0
+    mean_lat = math.radians((float(start[1]) + float(end[1]) + float(point["lat"])) / 3)
+
+    def local_xy(lng: float, lat: float) -> tuple[float, float]:
+        return (
+            math.radians(lng - float(point["lng"])) * radius * math.cos(mean_lat),
+            math.radians(lat - float(point["lat"])) * radius,
+        )
+
+    start_x, start_y = local_xy(float(start[0]), float(start[1]))
+    end_x, end_y = local_xy(float(end[0]), float(end[1]))
+    delta_x = end_x - start_x
+    delta_y = end_y - start_y
+    length_squared = delta_x * delta_x + delta_y * delta_y
+    if length_squared <= 0:
+        return math.hypot(start_x, start_y), 0.0
+    fraction = max(0.0, min(1.0, -(start_x * delta_x + start_y * delta_y) / length_squared))
+    projected_x = start_x + fraction * delta_x
+    projected_y = start_y + fraction * delta_y
+    return math.hypot(projected_x, projected_y), fraction
+
+
+_ORIGINAL_UNRESOLVED_COPY_RE = re.compile(
+    r"\b(?:draft|placeholder|fixture|tbd|todo)\b"
+    r"|\bnot\s+approved\b|\bmust\s+not\s+be\s+published\b"
+    r"|\bsource[ _-]?review[ _-]?required\b|\breplace\s+with\b",
+    re.IGNORECASE,
+)
+
+
+def _original_unresolved_copy_path(value: object, path: str = "content") -> str | None:
+    if isinstance(value, str):
+        return path if _ORIGINAL_UNRESOLVED_COPY_RE.search(value) else None
+    if isinstance(value, dict):
+        for raw_key, child in value.items():
+            key = str(raw_key)
+            if key in {"id", "pack_id", "trip_id", "manifest_id", "sha256", "path", "url", "mime_type"}:
+                continue
+            found = _original_unresolved_copy_path(child, f"{path}.{key}")
+            if found:
+                return found
+    elif isinstance(value, list):
+        for index, child in enumerate(value):
+            found = _original_unresolved_copy_path(child, f"{path}[{index}]")
+            if found:
+                return found
+    return None
+
+
+def _normalize_original_manifest(
+    pack_id: str,
+    title: str,
+    manifest: dict,
+    *,
+    version: int | None = None,
+    publishing: bool = False,
+    verified_assets: dict[str, dict] | None = None,
+) -> tuple[dict, str]:
+    """Validate and canonicalize the immutable offline contract for an Original."""
+    normalized, _ = _json_object(manifest, "Original manifest", 4 * 1024 * 1024)
+    if int(normalized.get("schema_version") or 0) != 1:
+        raise ValueError("Original manifest schema_version must be 1")
+    locale = str(normalized.get("locale") or "en-US").strip()
+    if not re.fullmatch(r"[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8})?", locale):
+        raise ValueError("Original manifest locale is invalid")
+
+    route = normalized.get("route")
+    if not isinstance(route, dict):
+        raise ValueError("Original manifest route is required")
+    profile = str(route.get("profile") or "").strip().lower()
+    if profile != "driving":
+        raise ValueError("Original route profile must be driving")
+    direction = str(route.get("direction") or "").strip().lower()
+    if direction not in {"one_way", "loop"}:
+        raise ValueError("Original route direction must be one_way or loop")
+    geometry = route.get("geometry")
+    if not isinstance(geometry, dict) or geometry.get("type") != "LineString":
+        raise ValueError("Original route geometry must be a GeoJSON LineString")
+    raw_coordinates = geometry.get("coordinates")
+    if not isinstance(raw_coordinates, list) or not 2 <= len(raw_coordinates) <= 20000:
+        raise ValueError("Original route needs between 2 and 20000 coordinates")
+    coordinates: list[list[float]] = []
+    for index, coordinate in enumerate(raw_coordinates):
+        if not isinstance(coordinate, (list, tuple)) or len(coordinate) != 2:
+            raise ValueError(f"Original route coordinate {index + 1} must be [lng, lat]")
+        lng = _original_number(coordinate[0], "Original route longitude", minimum=-180, maximum=180)
+        lat = _original_number(coordinate[1], "Original route latitude", minimum=-90, maximum=90)
+        coordinates.append([lng, lat])
+    distance_m = _original_number(route.get("distance_m"), "Original route distance_m", minimum=1)
+    duration_s = _original_number(route.get("duration_s"), "Original route duration_s", minimum=1)
+    bounds = route.get("bounds")
+    if not isinstance(bounds, dict):
+        raise ValueError("Original route bounds are required")
+    clean_bounds = {
+        "north": _original_number(bounds.get("north"), "Original route north", minimum=-90, maximum=90),
+        "south": _original_number(bounds.get("south"), "Original route south", minimum=-90, maximum=90),
+        "east": _original_number(bounds.get("east"), "Original route east", minimum=-180, maximum=180),
+        "west": _original_number(bounds.get("west"), "Original route west", minimum=-180, maximum=180),
+    }
+    if clean_bounds["north"] < clean_bounds["south"] or clean_bounds["east"] < clean_bounds["west"]:
+        raise ValueError("Original route bounds are invalid")
+    if any(
+        lat < clean_bounds["south"] or lat > clean_bounds["north"]
+        or lng < clean_bounds["west"] or lng > clean_bounds["east"]
+        for lng, lat in coordinates
+    ):
+        raise ValueError("Original route bounds must contain the route geometry")
+    clean_route = {
+        "profile": profile,
+        "direction": direction,
+        "geometry": {"type": "LineString", "coordinates": coordinates},
+        "bounds": clean_bounds,
+        "distance_m": distance_m,
+        "duration_s": duration_s,
+    }
+
+    raw_assets = normalized.get("assets")
+    if not isinstance(raw_assets, list) or len(raw_assets) > 500:
+        raise ValueError("Original assets must be a list with at most 500 entries")
+    assets: list[dict] = []
+    assets_by_id: dict[str, dict] = {}
+    for raw_asset in raw_assets:
+        if not isinstance(raw_asset, dict):
+            raise ValueError("Every Original asset must be an object")
+        asset_id = _validate_canonical_id(raw_asset.get("id"), "Original asset id")
+        if asset_id in assets_by_id:
+            raise ValueError("Original asset ids must be unique")
+        kind = str(raw_asset.get("kind") or "").strip().lower()
+        if kind not in ORIGINAL_ASSET_KINDS:
+            raise ValueError("Original asset kind is invalid")
+        path = str(raw_asset.get("path") or "").strip()
+        mime_type = str(raw_asset.get("mime_type") or "").strip().lower()
+        if not path or not mime_type:
+            raise ValueError("Original asset path and MIME type are required")
+        byte_count = raw_asset.get("bytes")
+        if isinstance(byte_count, bool) or not isinstance(byte_count, int) or byte_count < 0:
+            raise ValueError("Original asset bytes must be a non-negative integer")
+        sha256 = str(raw_asset.get("sha256") or "").strip().lower()
+        if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+            raise ValueError("Original asset sha256 must be 64 lowercase hex characters")
+        asset = {
+            "id": asset_id,
+            "kind": kind,
+            "path": path,
+            "mime_type": mime_type,
+            "bytes": byte_count,
+            "sha256": sha256,
+        }
+        assets.append(asset)
+        assets_by_id[asset_id] = asset
+
+    raw_stops = normalized.get("stops")
+    if not isinstance(raw_stops, list) or not 1 <= len(raw_stops) <= 100:
+        raise ValueError("Original manifest needs between 1 and 100 story stops")
+    stops: list[dict] = []
+    stop_ids: set[str] = set()
+    for raw_stop in raw_stops:
+        if not isinstance(raw_stop, dict):
+            raise ValueError("Every Original stop must be an object")
+        stop_id = _validate_canonical_id(raw_stop.get("id"), "Original stop id")
+        if stop_id in stop_ids:
+            raise ValueError("Original stop ids must be unique")
+        stop_ids.add(stop_id)
+        sequence = raw_stop.get("sequence")
+        if isinstance(sequence, bool) or not isinstance(sequence, int) or sequence < 1:
+            raise ValueError("Original stop sequence must be a positive integer")
+        stop_title = re.sub(r"\s+", " ", str(raw_stop.get("title") or "")).strip()
+        if not stop_title or len(stop_title) > 200:
+            raise ValueError("Original stop title must be between 1 and 200 characters")
+        point = raw_stop.get("coordinates")
+        if not isinstance(point, dict):
+            raise ValueError("Original stop coordinates are required")
+        clean_point = {
+            "lat": _original_number(point.get("lat"), "Original stop latitude", minimum=-90, maximum=90),
+            "lng": _original_number(point.get("lng"), "Original stop longitude", minimum=-180, maximum=180),
+        }
+        transcript = str(raw_stop.get("transcript") or "").strip()
+        if not transcript or len(transcript) > 20000:
+            raise ValueError("Original stop transcript is required and must be under 20000 characters")
+        audio_asset_id = _validate_canonical_id(raw_stop.get("audio_asset_id"), "Original narration asset id")
+        audio_duration_s = _original_number(
+            raw_stop.get("audio_duration_s"), "Original narration duration", minimum=1, maximum=3600,
+        )
+        trigger = raw_stop.get("trigger")
+        if not isinstance(trigger, dict):
+            raise ValueError("Original stop trigger is required")
+        enter_radius_m = _original_number(
+            trigger.get("enter_radius_m"), "Original trigger enter radius", minimum=50, maximum=1000,
+        )
+        exit_radius_m = _original_number(
+            trigger.get("exit_radius_m"), "Original trigger exit radius", minimum=enter_radius_m,
+        )
+        minimum_exit = max(enter_radius_m * 1.5, enter_radius_m + 50)
+        if exit_radius_m < minimum_exit:
+            raise ValueError("Original trigger exit radius must provide route hysteresis")
+        start_m = _original_number(
+            trigger.get("route_progress_start_m"), "Original trigger progress start", minimum=0,
+        )
+        end_m = _original_number(
+            trigger.get("route_progress_end_m"), "Original trigger progress end", minimum=start_m,
+        )
+        if end_m > distance_m:
+            raise ValueError("Original trigger progress window cannot exceed route distance")
+        clean_trigger = {
+            "enter_radius_m": enter_radius_m,
+            "exit_radius_m": exit_radius_m,
+            "lead_time_s": _original_number(
+                trigger.get("lead_time_s", 0), "Original trigger lead time", minimum=0, maximum=120,
+            ),
+            "route_progress_start_m": start_m,
+            "route_progress_end_m": end_m,
+        }
+        bearing = trigger.get("approach_bearing_deg")
+        tolerance = trigger.get("bearing_tolerance_deg")
+        if bearing is not None:
+            clean_bearing = _original_number(
+                bearing, "Original trigger approach bearing", minimum=0,
+            )
+            if clean_bearing >= 360:
+                raise ValueError("Original trigger approach bearing must be less than 360")
+            clean_trigger["approach_bearing_deg"] = clean_bearing
+            clean_trigger["bearing_tolerance_deg"] = _original_number(
+                tolerance if tolerance is not None else 45,
+                "Original trigger bearing tolerance", minimum=1, maximum=180,
+            )
+        elif tolerance is not None:
+            raise ValueError("Original trigger bearing tolerance requires an approach bearing")
+        raw_citations = raw_stop.get("citations")
+        if not isinstance(raw_citations, list) or not raw_citations:
+            raise ValueError("Every Original stop needs at least one source citation")
+        citations: list[dict] = []
+        for raw_citation in raw_citations:
+            if not isinstance(raw_citation, dict):
+                raise ValueError("Original citations must be objects")
+            citation_title = re.sub(r"\s+", " ", str(raw_citation.get("title") or "")).strip()
+            citation_url = str(raw_citation.get("url") or "").strip()
+            if not citation_title or not re.match(r"^https://", citation_url, re.IGNORECASE):
+                raise ValueError("Original citations need a title and HTTPS URL")
+            citation = {"title": citation_title, "url": citation_url}
+            publisher = str(raw_citation.get("publisher") or "").strip()
+            if publisher:
+                citation["publisher"] = publisher
+            citation_reviewed_at = _normalize_original_citation_review_date(
+                raw_citation.get("reviewed_at")
+            )
+            if citation_reviewed_at:
+                citation["reviewed_at"] = citation_reviewed_at
+            citations.append(citation)
+        stop = {
+            "id": stop_id,
+            "sequence": sequence,
+            "title": stop_title,
+            "coordinates": clean_point,
+            "transcript": transcript,
+            "audio_asset_id": audio_asset_id,
+            "audio_duration_s": audio_duration_s,
+            "trigger": clean_trigger,
+            "citations": citations,
+        }
+        for key in ("explore_place_id", "artwork_asset_id"):
+            value = raw_stop.get(key)
+            if value:
+                stop[key] = _validate_canonical_id(value, f"Original stop {key}")
+        stops.append(stop)
+    stops.sort(key=lambda item: item["sequence"])
+    if [stop["sequence"] for stop in stops] != list(range(1, len(stops) + 1)):
+        raise ValueError("Original stop sequence must be contiguous starting at 1")
+    if any(
+        stop["coordinates"]["lat"] < clean_bounds["south"]
+        or stop["coordinates"]["lat"] > clean_bounds["north"]
+        or stop["coordinates"]["lng"] < clean_bounds["west"]
+        or stop["coordinates"]["lng"] > clean_bounds["east"]
+        for stop in stops
+    ):
+        raise ValueError("Original route bounds must contain every story stop")
+    if publishing:
+        cumulative_m = _original_route_cumulative_m(coordinates)
+        geometry_distance_m = cumulative_m[-1]
+        distance_tolerance_m = max(500.0, geometry_distance_m * 0.10)
+        if abs(distance_m - geometry_distance_m) > distance_tolerance_m:
+            raise ValueError("Original route distance must match the authored route geometry")
+        average_speed_kph = distance_m / duration_s * 3.6
+        if duration_s < 15 * 60 or duration_s > 24 * 3600 or not 3 <= average_speed_kph <= 130:
+            raise ValueError("Original route duration must be plausible for the authored driving distance")
+        window_starts = [stop["trigger"]["route_progress_start_m"] for stop in stops]
+        if any(current <= previous for previous, current in zip(window_starts, window_starts[1:])):
+            raise ValueError("Original story cues must progress monotonically along the route")
+        previous_projected_progress: float | None = None
+        for stop in stops:
+            trigger = stop["trigger"]
+            candidates: list[tuple[float, float]] = []
+            for segment_index, (start, end) in enumerate(zip(coordinates, coordinates[1:])):
+                distance_to_segment, fraction = _original_project_to_segment(
+                    stop["coordinates"], start, end,
+                )
+                segment_progress = (
+                    cumulative_m[segment_index]
+                    + fraction * (cumulative_m[segment_index + 1] - cumulative_m[segment_index])
+                )
+                if (
+                    trigger["route_progress_start_m"] - 1 <= segment_progress
+                    <= trigger["route_progress_end_m"] + 1
+                ):
+                    candidates.append((distance_to_segment, segment_progress))
+            if not candidates:
+                raise ValueError(
+                    f"Original stop {stop['id']} progress window does not intersect its route projection"
+                )
+            distance_to_route, projected_progress = min(candidates, key=lambda item: item[0])
+            if distance_to_route > trigger["enter_radius_m"]:
+                raise ValueError(
+                    f"Original stop {stop['id']} is outside its authored trigger radius"
+                )
+            if (
+                previous_projected_progress is not None
+                and projected_progress <= previous_projected_progress + 1
+            ):
+                raise ValueError("Original story cues must progress monotonically along the route")
+            previous_projected_progress = projected_progress
+
+    offline_map, _ = _json_object(normalized.get("offline_map"), "Original offline map", 128 * 1024)
+    region_id = str(offline_map.get("region_id") or "").strip()
+    if not region_id:
+        raise ValueError("Original offline map region_id is required")
+    offline_bounds = offline_map.get("bounds")
+    if not isinstance(offline_bounds, dict):
+        raise ValueError("Original offline map bounds are required")
+    clean_offline_bounds = {
+        "north": _original_number(offline_bounds.get("north"), "Original offline map north", minimum=-90, maximum=90),
+        "south": _original_number(offline_bounds.get("south"), "Original offline map south", minimum=-90, maximum=90),
+        "east": _original_number(offline_bounds.get("east"), "Original offline map east", minimum=-180, maximum=180),
+        "west": _original_number(offline_bounds.get("west"), "Original offline map west", minimum=-180, maximum=180),
+    }
+    if (
+        clean_offline_bounds["north"] < clean_offline_bounds["south"]
+        or clean_offline_bounds["east"] < clean_offline_bounds["west"]
+    ):
+        raise ValueError("Original offline map bounds are invalid")
+    if any(
+        lat < clean_offline_bounds["south"] or lat > clean_offline_bounds["north"]
+        or lng < clean_offline_bounds["west"] or lng > clean_offline_bounds["east"]
+        for lng, lat in coordinates
+    ) or any(
+        stop["coordinates"]["lat"] < clean_offline_bounds["south"]
+        or stop["coordinates"]["lat"] > clean_offline_bounds["north"]
+        or stop["coordinates"]["lng"] < clean_offline_bounds["west"]
+        or stop["coordinates"]["lng"] > clean_offline_bounds["east"]
+        for stop in stops
+    ):
+        raise ValueError("Original offline map bounds must contain the route and every story stop")
+    for key in ("min_zoom", "max_zoom", "estimated_bytes"):
+        if isinstance(offline_map.get(key), bool) or not isinstance(offline_map.get(key), int):
+            raise ValueError(f"Original offline map {key} must be an integer")
+    if offline_map["estimated_bytes"] < 0 or offline_map["min_zoom"] < 0 or offline_map["max_zoom"] < offline_map["min_zoom"]:
+        raise ValueError("Original offline map settings are invalid")
+    offline_map = {
+        "region_id": region_id,
+        "bounds": clean_offline_bounds,
+        "min_zoom": offline_map["min_zoom"],
+        "max_zoom": offline_map["max_zoom"],
+        "estimated_bytes": offline_map["estimated_bytes"],
+    }
+
+    safety, _ = _json_object(normalized.get("safety"), "Original safety", 128 * 1024)
+    access, _ = _json_object(normalized.get("access"), "Original access", 128 * 1024)
+    season, _ = _json_object(normalized.get("season"), "Original season", 128 * 1024)
+    review, _ = _json_object(normalized.get("review"), "Original review", 128 * 1024)
+    if not str(safety.get("summary") or "").strip():
+        raise ValueError("Original safety summary is required")
+    if str(access.get("surface") or "").strip().lower() not in {"paved", "mixed", "unpaved"}:
+        raise ValueError("Original access surface must be paved, mixed, or unpaved")
+    recommended_months = season.get("recommended_months")
+    if not isinstance(recommended_months, list) or not recommended_months:
+        raise ValueError("Original recommended months are required")
+    if any(isinstance(month, bool) or not isinstance(month, int) or not 1 <= month <= 12 for month in recommended_months):
+        raise ValueError("Original recommended months must be integers from 1 through 12")
+    if len(set(recommended_months)) != len(recommended_months):
+        raise ValueError("Original recommended months must be unique")
+    season["recommended_months"] = list(recommended_months)
+    field_drive_completed_at = _normalize_original_review_timestamp(
+        review.get("field_drive_completed_at"), "Original field_drive_completed_at",
+    )
+    source_review_completed_at = _normalize_original_review_timestamp(
+        review.get("source_review_completed_at"), "Original source_review_completed_at",
+    )
+    review["field_drive_completed_at"] = field_drive_completed_at
+    review["source_review_completed_at"] = source_review_completed_at
+
+    if publishing:
+        unresolved_path = _original_unresolved_copy_path({
+            "title": title,
+            "stops": [{
+                "title": stop["title"],
+                "transcript": stop["transcript"],
+                "citations": stop["citations"],
+            } for stop in stops],
+            "safety": safety,
+            "access": access,
+            "season": season,
+        }, "manifest")
+        if unresolved_path:
+            raise ValueError(f"Original publish content is unresolved at {unresolved_path}")
+        if review.get("editorial_status") != "approved":
+            raise ValueError("Original editorial review must be approved before publishing")
+        if not field_drive_completed_at or not source_review_completed_at:
+            raise ValueError("Original field-drive and source reviews must be complete before publishing")
+        review_now = _datetime.now(_timezone.utc)
+        parsed_field_drive = _datetime.fromisoformat(field_drive_completed_at.replace("Z", "+00:00"))
+        parsed_source_review = _datetime.fromisoformat(source_review_completed_at.replace("Z", "+00:00"))
+        if parsed_field_drive < review_now - _timedelta(days=ORIGINAL_FIELD_DRIVE_MAX_AGE_DAYS):
+            raise ValueError("Original field-drive review is too old to publish")
+        if parsed_source_review < review_now - _timedelta(days=ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS):
+            raise ValueError("Original source review is too old to publish")
+        if int(offline_map.get("estimated_bytes") or 0) <= 0:
+            raise ValueError("Original offline map package must have a reviewed non-zero size")
+        if "placeholder" in region_id.lower() or "draft" in region_id.lower():
+            raise ValueError("Original offline map region must be final before publishing")
+        verified_assets = verified_assets or {}
+        for asset in assets:
+            verified = verified_assets.get(asset["id"])
+            if not verified:
+                raise ValueError(f"Original asset {asset['id']} needs a server-verified upload")
+            expected = {
+                "kind": verified["kind"],
+                "path": verified["public_path"],
+                "mime_type": verified["mime_type"],
+                "bytes": int(verified["byte_count"]),
+                "sha256": verified["sha256"],
+            }
+            if any(asset[key] != expected[key] for key in expected):
+                raise ValueError(f"Original asset {asset['id']} does not match its server-verified upload")
+        for stop in stops:
+            if re.search(r"\b(?:placeholder|draft)\b", stop["transcript"], re.IGNORECASE):
+                raise ValueError(f"Original stop {stop['id']} still has placeholder script text")
+            for citation in stop["citations"]:
+                if not citation.get("publisher"):
+                    raise ValueError(f"Original stop {stop['id']} citations need an explicit publisher")
+                if not citation.get("reviewed_at"):
+                    raise ValueError(f"Original stop {stop['id']} citations need a reviewed_at date")
+                citation_reviewed_on = _date.fromisoformat(str(citation["reviewed_at"])[:10])
+                if citation_reviewed_on < _date.today() - _timedelta(days=ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS):
+                    raise ValueError(f"Original stop {stop['id']} citation review is too old to publish")
+            narration = assets_by_id.get(stop["audio_asset_id"])
+            if not narration or narration["kind"] != "narration":
+                raise ValueError(f"Original stop {stop['id']} needs a published narration asset")
+            if not narration["mime_type"].startswith("audio/"):
+                raise ValueError(f"Original stop {stop['id']} narration must be an audio upload")
+            verified_narration = verified_assets.get(stop["audio_asset_id"])
+            if not verified_narration or verified_narration.get("transcript_sha256") != original_transcript_sha256(stop["transcript"]):
+                raise ValueError(f"Original stop {stop['id']} narration does not match its reviewed transcript")
+            media_metadata = _decode_pack_json(verified_narration.get("media_metadata_json"), {})
+            verified_duration = float(media_metadata.get("duration_s") or 0)
+            if verified_duration <= 0 or abs(stop["audio_duration_s"] - verified_duration) > max(0.25, verified_duration * 0.05):
+                raise ValueError(f"Original stop {stop['id']} narration duration does not match its verified audio")
+            artwork_id = stop.get("artwork_asset_id")
+            if not artwork_id:
+                raise ValueError(f"Original stop {stop['id']} needs a published artwork asset")
+            artwork = assets_by_id.get(artwork_id)
+            if not artwork or artwork["kind"] != "image" or not artwork["mime_type"].startswith("image/"):
+                raise ValueError(f"Original stop {stop['id']} artwork must be a verified image upload")
+            verified_artwork = verified_assets.get(artwork_id)
+            artwork_metadata = _decode_pack_json(
+                verified_artwork.get("media_metadata_json") if verified_artwork else None, {},
+            )
+            if int(artwork_metadata.get("width") or 0) < 320 or int(artwork_metadata.get("height") or 0) < 180:
+                raise ValueError(f"Original stop {stop['id']} artwork is too small for offline playback")
+
+    result = {
+        "schema_version": 1,
+        "locale": locale,
+        "title": re.sub(r"\s+", " ", title).strip(),
+        "route": clean_route,
+        "stops": stops,
+        "assets": assets,
+        "offline_map": offline_map,
+        "safety": safety,
+        "access": access,
+        "season": season,
+        "review": review,
+    }
+    if version is not None:
+        result.update({
+            "manifest_id": f"original_manifest_{pack_id}_v{int(version)}",
+            "pack_id": pack_id,
+            "version": int(version),
+        })
+    return _json_object(result, "Original manifest", 4 * 1024 * 1024)
 
 
 def _validate_trip_pack_fields(
@@ -8529,19 +9784,27 @@ def _validate_trip_pack_fields(
     public_metadata: dict,
     validation_metadata: dict,
     template: dict,
+    content_kind: str = "trip_pack",
+    original_manifest: dict | None = None,
 ) -> dict:
     pack_id = _validate_canonical_id(pack_id, "trip pack id")
     slug = re.sub(r"[^a-z0-9]+", "-", str(slug or "").strip().lower()).strip("-")
     title = re.sub(r"\s+", " ", str(title or "")).strip()
     summary = re.sub(r"\s+", " ", str(summary or "")).strip()
     coverage_region = str(coverage_region or "").strip().lower()
+    content_kind = str(content_kind or "trip_pack").strip().lower()
     if not slug or len(slug) > 120:
         raise ValueError("Trip pack slug is required")
     if not title or len(title) > 200:
         raise ValueError("Trip pack title must be between 1 and 200 characters")
     if not summary or len(summary) > 2000:
         raise ValueError("Trip pack summary must be between 1 and 2000 characters")
-    if price_credits not in TRIP_PACK_PRICES:
+    if content_kind not in TRIP_PACK_CONTENT_KINDS:
+        raise ValueError("Content kind must be trip_pack or original_drive")
+    allowed_prices = TRIP_PACK_PRICES | ({0} if content_kind == "original_drive" else set())
+    if price_credits not in allowed_prices:
+        if content_kind == "original_drive":
+            raise ValueError("Original price must be free or 250, 500, or 900 credits")
         raise ValueError("Trip pack price must be 250, 500, or 900 credits")
     if coverage_region not in TRIP_PACK_COVERAGE_REGIONS:
         raise ValueError("Trip pack coverage must be north_america or global")
@@ -8555,6 +9818,16 @@ def _validate_trip_pack_fields(
     template_for_pack["title"] = title
     template_for_pack.setdefault("summary", summary)
     normalized_template, template_json = _stable_trip_pack_template(pack_id, template_for_pack)
+    normalized_manifest = None
+    original_manifest_json = None
+    if content_kind == "original_drive":
+        if not isinstance(original_manifest, dict):
+            raise ValueError("Original drive manifest is required")
+        normalized_manifest, original_manifest_json = _normalize_original_manifest(
+            pack_id, title, original_manifest,
+        )
+    elif original_manifest is not None:
+        raise ValueError("Original manifests may only be attached to original_drive content")
     return {
         "id": pack_id,
         "slug": slug,
@@ -8562,12 +9835,15 @@ def _validate_trip_pack_fields(
         "summary": summary,
         "price_credits": price_credits,
         "coverage_region": coverage_region,
+        "content_kind": content_kind,
         "public_metadata": public_metadata,
         "public_metadata_json": public_metadata_json,
         "validation_metadata": validation_metadata,
         "validation_metadata_json": validation_metadata_json,
         "template": normalized_template,
         "template_json": template_json,
+        "original_manifest": normalized_manifest,
+        "original_manifest_json": original_manifest_json,
     }
 
 
@@ -8576,6 +9852,9 @@ def _trip_pack_admin_from_row(row: sqlite3.Row | dict) -> dict:
     raw["public_metadata"] = _decode_pack_json(raw.pop("draft_public_metadata", "{}"), {})
     raw["validation_metadata"] = _decode_pack_json(raw.pop("draft_validation_metadata", "{}"), {})
     raw["template"] = _decode_pack_json(raw.pop("draft_template_json", "{}"), {})
+    raw["original_manifest"] = _decode_pack_json(
+        raw.pop("draft_original_manifest_json", None), None,
+    )
     for field in ("title", "summary", "price_credits", "coverage_region"):
         raw[field] = raw.pop(f"draft_{field}")
     return raw
@@ -8592,10 +9871,12 @@ def save_authored_trip_pack_draft(
     validation_metadata: dict,
     template: dict,
     admin_user_id: int,
+    content_kind: str = "trip_pack",
+    original_manifest: dict | None = None,
 ) -> dict:
     clean = _validate_trip_pack_fields(
         pack_id, slug, title, summary, price_credits, coverage_region,
-        public_metadata, validation_metadata, template,
+        public_metadata, validation_metadata, template, content_kind, original_manifest,
     )
     now = int(time.time())
     db = _conn()
@@ -8610,31 +9891,35 @@ def save_authored_trip_pack_draft(
             raise ValueError("Trip pack slug is already in use")
         existing = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (clean["id"],)).fetchone()
         if existing:
+            if existing["content_kind"] != clean["content_kind"]:
+                raise ValueError("Authored content cannot change content kind")
             db.execute(
                 """UPDATE authored_trip_packs SET
-                     slug=?,draft_title=?,draft_summary=?,draft_price_credits=?,
+                     content_kind=?,slug=?,draft_title=?,draft_summary=?,draft_price_credits=?,
                      draft_coverage_region=?,draft_public_metadata=?,
-                     draft_validation_metadata=?,draft_template_json=?,
+                     draft_validation_metadata=?,draft_template_json=?,draft_original_manifest_json=?,
                      draft_revision=draft_revision+1,updated_by=?,updated_at=?
                    WHERE id=?""",
                 (
-                    clean["slug"], clean["title"], clean["summary"], clean["price_credits"],
+                    clean["content_kind"], clean["slug"], clean["title"], clean["summary"], clean["price_credits"],
                     clean["coverage_region"], clean["public_metadata_json"],
-                    clean["validation_metadata_json"], clean["template_json"],
+                    clean["validation_metadata_json"], clean["template_json"], clean["original_manifest_json"],
                     admin_user_id, now, clean["id"],
                 ),
             )
         else:
             db.execute(
                 """INSERT INTO authored_trip_packs
-                   (id,slug,status,draft_title,draft_summary,draft_price_credits,
+                   (id,content_kind,slug,status,draft_title,draft_summary,draft_price_credits,
                     draft_coverage_region,draft_public_metadata,draft_validation_metadata,
-                    draft_template_json,draft_revision,created_by,updated_by,created_at,updated_at)
-                   VALUES (?,?,'draft',?,?,?,?,?,?,?,1,?,?,?,?)""",
+                    draft_template_json,draft_original_manifest_json,draft_revision,
+                    created_by,updated_by,created_at,updated_at)
+                   VALUES (?,?,?,'draft',?,?,?,?,?,?,?,?,1,?,?,?,?)""",
                 (
-                    clean["id"], clean["slug"], clean["title"], clean["summary"],
+                    clean["id"], clean["content_kind"], clean["slug"], clean["title"], clean["summary"],
                     clean["price_credits"], clean["coverage_region"], clean["public_metadata_json"],
-                    clean["validation_metadata_json"], clean["template_json"], admin_user_id,
+                    clean["validation_metadata_json"], clean["template_json"],
+                    clean["original_manifest_json"], admin_user_id,
                     admin_user_id, now, now,
                 ),
             )
@@ -8651,22 +9936,146 @@ def save_authored_trip_pack_draft(
     return _trip_pack_admin_from_row(saved)
 
 
-def get_authored_trip_pack_admin(pack_id: str) -> dict | None:
+def get_authored_trip_pack_admin(
+    pack_id: str,
+    content_kind: str | None = None,
+) -> dict | None:
     pack_id = _validate_canonical_id(pack_id, "trip pack id")
     db = _conn()
-    row = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (pack_id,)).fetchone()
+    if content_kind is None:
+        row = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (pack_id,)).fetchone()
+    else:
+        if content_kind not in TRIP_PACK_CONTENT_KINDS:
+            db.close()
+            raise ValueError("Invalid authored content kind")
+        row = db.execute(
+            "SELECT * FROM authored_trip_packs WHERE id=? AND content_kind=?",
+            (pack_id, content_kind),
+        ).fetchone()
     db.close()
     return _trip_pack_admin_from_row(row) if row else None
 
 
-def list_authored_trip_packs_admin() -> list[dict]:
+def list_authored_trip_pack_versions_admin(
+    pack_id: str,
+    content_kind: str | None = None,
+) -> list[dict]:
+    """Return immutable published snapshots for an authored pack, newest first."""
+    pack_id = _validate_canonical_id(pack_id, "trip pack id")
     db = _conn()
-    rows = db.execute("SELECT * FROM authored_trip_packs ORDER BY updated_at DESC,id").fetchall()
+    if content_kind is None:
+        rows = db.execute(
+            """SELECT * FROM authored_trip_pack_versions
+               WHERE pack_id=? ORDER BY version DESC""",
+            (pack_id,),
+        ).fetchall()
+    else:
+        if content_kind not in TRIP_PACK_CONTENT_KINDS:
+            db.close()
+            raise ValueError("Invalid authored content kind")
+        rows = db.execute(
+            """SELECT * FROM authored_trip_pack_versions
+               WHERE pack_id=? AND content_kind=? ORDER BY version DESC""",
+            (pack_id, content_kind),
+        ).fetchall()
+    db.close()
+    versions: list[dict] = []
+    for row in rows:
+        version = dict(row)
+        version["version"] = int(version["version"])
+        version["price_credits"] = int(version["price_credits"])
+        version["published_at"] = int(version["published_at"])
+        version["public_metadata"] = _decode_pack_json(
+            version.pop("public_metadata", "{}"), {},
+        )
+        version["validation_metadata"] = _decode_pack_json(
+            version.pop("validation_metadata", "{}"), {},
+        )
+        version["template"] = _decode_pack_json(
+            version.pop("template_json", "{}"), {},
+        )
+        version["original_manifest"] = _decode_pack_json(
+            version.pop("original_manifest_json", None), None,
+        )
+        versions.append(version)
+    return versions
+
+
+def list_authored_trip_packs_admin(content_kind: str | None = None) -> list[dict]:
+    db = _conn()
+    if content_kind is None:
+        rows = db.execute("SELECT * FROM authored_trip_packs ORDER BY updated_at DESC,id").fetchall()
+    else:
+        if content_kind not in TRIP_PACK_CONTENT_KINDS:
+            db.close()
+            raise ValueError("Invalid authored content kind")
+        rows = db.execute(
+            "SELECT * FROM authored_trip_packs WHERE content_kind=? ORDER BY updated_at DESC,id",
+            (content_kind,),
+        ).fetchall()
     db.close()
     return [_trip_pack_admin_from_row(row) for row in rows]
 
 
-def publish_authored_trip_pack(pack_id: str, admin_user_id: int) -> dict:
+def validate_authored_original_draft(pack_id: str) -> dict | None:
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    db = _conn()
+    pack = db.execute(
+        "SELECT * FROM authored_trip_packs WHERE id=? AND content_kind='original_drive'",
+        (pack_id,),
+    ).fetchone()
+    if not pack:
+        db.close()
+        return None
+    next_version = int(db.execute(
+        "SELECT COALESCE(MAX(version),0)+1 FROM authored_trip_pack_versions WHERE pack_id=?",
+        (pack_id,),
+    ).fetchone()[0])
+    verified_assets = _verified_original_asset_map_db(db, pack_id)
+    db.close()
+    validation = _decode_pack_json(pack["draft_validation_metadata"], {})
+    missing = sorted(check for check in ORIGINAL_VALIDATION_CHECKS if validation.get(check) is not True)
+    issues = [f"Review is incomplete: {check}" for check in missing]
+    template_for_scan = _decode_pack_json(pack["draft_template_json"], {})
+    if isinstance(template_for_scan, dict):
+        template_for_scan = dict(template_for_scan)
+        for structural_key in ("schema_version", "trip_id", "status", "visibility", "source"):
+            template_for_scan.pop(structural_key, None)
+    unresolved_path = _original_unresolved_copy_path({
+        "title": pack["draft_title"],
+        "summary": pack["draft_summary"],
+        "public_metadata": _decode_pack_json(pack["draft_public_metadata"], {}),
+        "template": template_for_scan,
+    }, "original")
+    if unresolved_path:
+        issues.append(f"Original publish content is unresolved at {unresolved_path}")
+    try:
+        _normalize_original_manifest(
+            pack_id,
+            pack["draft_title"],
+            _decode_pack_json(pack["draft_original_manifest_json"], None),
+            version=next_version,
+            publishing=True,
+            verified_assets=verified_assets,
+        )
+    except ValueError as exc:
+        issues.append(str(exc))
+    return {
+        "pack_id": pack_id,
+        "content_kind": "original_drive",
+        "draft_revision": int(pack["draft_revision"]),
+        "next_version": next_version,
+        "publish_ready": not issues,
+        "missing_reviews": missing,
+        "issues": issues,
+    }
+
+
+def publish_authored_trip_pack(
+    pack_id: str,
+    admin_user_id: int,
+    required_content_kind: str | None = None,
+) -> dict:
     pack_id = _validate_canonical_id(pack_id, "trip pack id")
     now = int(time.time())
     db = _conn()
@@ -8675,24 +10084,59 @@ def publish_authored_trip_pack(pack_id: str, admin_user_id: int) -> dict:
         pack = db.execute("SELECT * FROM authored_trip_packs WHERE id=?", (pack_id,)).fetchone()
         if not pack:
             raise ValueError("Trip pack not found")
+        if required_content_kind and pack["content_kind"] != required_content_kind:
+            raise ValueError("Authored content kind does not match this publishing endpoint")
         validation = _decode_pack_json(pack["draft_validation_metadata"], {})
-        missing = sorted(check for check in TRIP_PACK_VALIDATION_CHECKS if validation.get(check) is not True)
+        validation_checks = (
+            ORIGINAL_VALIDATION_CHECKS
+            if pack["content_kind"] == "original_drive"
+            else TRIP_PACK_VALIDATION_CHECKS
+        )
+        missing = sorted(check for check in validation_checks if validation.get(check) is not True)
         if missing:
-            raise ValueError("Trip pack review is incomplete: " + ", ".join(missing))
+            label = "Original" if pack["content_kind"] == "original_drive" else "Trip pack"
+            raise ValueError(f"{label} review is incomplete: " + ", ".join(missing))
         version = int(db.execute(
             "SELECT COALESCE(MAX(version),0)+1 FROM authored_trip_pack_versions WHERE pack_id=?",
             (pack_id,),
         ).fetchone()[0])
+        original_manifest_json = None
+        if pack["content_kind"] == "original_drive":
+            template_for_scan = _decode_pack_json(pack["draft_template_json"], {})
+            if isinstance(template_for_scan, dict):
+                template_for_scan = dict(template_for_scan)
+                for structural_key in ("schema_version", "trip_id", "status", "visibility", "source"):
+                    template_for_scan.pop(structural_key, None)
+            unresolved_path = _original_unresolved_copy_path({
+                "title": pack["draft_title"],
+                "summary": pack["draft_summary"],
+                "public_metadata": _decode_pack_json(pack["draft_public_metadata"], {}),
+                "template": template_for_scan,
+            }, "original")
+            if unresolved_path:
+                raise ValueError(f"Original publish content is unresolved at {unresolved_path}")
+            original_manifest = _decode_pack_json(pack["draft_original_manifest_json"], None)
+            verified_assets = _verified_original_asset_map_db(db, pack_id)
+            _, original_manifest_json = _normalize_original_manifest(
+                pack_id,
+                pack["draft_title"],
+                original_manifest,
+                version=version,
+                publishing=True,
+                verified_assets=verified_assets,
+            )
         db.execute(
             """INSERT INTO authored_trip_pack_versions
-               (pack_id,version,slug,title,summary,price_credits,coverage_region,
-                public_metadata,validation_metadata,template_json,published_by,published_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+               (pack_id,version,content_kind,slug,title,summary,price_credits,coverage_region,
+                public_metadata,validation_metadata,template_json,original_manifest_json,
+                published_by,published_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                pack_id, version, pack["slug"], pack["draft_title"], pack["draft_summary"],
+                pack_id, version, pack["content_kind"], pack["slug"],
+                pack["draft_title"], pack["draft_summary"],
                 pack["draft_price_credits"], pack["draft_coverage_region"],
                 pack["draft_public_metadata"], pack["draft_validation_metadata"],
-                pack["draft_template_json"], admin_user_id, now,
+                pack["draft_template_json"], original_manifest_json, admin_user_id, now,
             ),
         )
         db.execute(
@@ -8728,6 +10172,8 @@ def _public_trip_pack_from_row(row: sqlite3.Row | dict, include_template: bool =
         "summary": raw["summary"],
         "price_credits": int(raw["price_credits"]),
         "explorer_price_credits": int(raw["price_credits"]) * 80 // 100,
+        "free": int(raw["price_credits"]) == 0,
+        "content_kind": raw.get("content_kind") or "trip_pack",
         "coverage_region": raw["coverage_region"],
         "public_metadata": _decode_pack_json(raw.get("public_metadata"), {}),
         "validation_metadata": _decode_pack_json(raw.get("validation_metadata"), {}),
@@ -8736,26 +10182,36 @@ def _public_trip_pack_from_row(row: sqlite3.Row | dict, include_template: bool =
     }
     if include_template:
         result["template"] = _decode_pack_json(raw.get("template_json"), {})
+        if result["content_kind"] == "original_drive":
+            result["original_manifest"] = _decode_pack_json(raw.get("original_manifest_json"), None)
     return result
 
 
-def _published_trip_pack_query() -> str:
-    return """SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.title,v.summary,v.price_credits,
+def _published_trip_pack_query(content_kind: str = "trip_pack") -> str:
+    feature_table = {
+        "trip_pack": "authored_trip_pack_features",
+        "original_drive": "authored_original_features",
+    }.get(content_kind)
+    if not feature_table:
+        raise ValueError("Invalid authored content kind")
+    return f"""SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.content_kind,
+                     v.title,v.summary,v.price_credits,
                      v.coverage_region,v.public_metadata,v.validation_metadata,
-                     v.template_json,v.published_at,
+                     v.template_json,v.original_manifest_json,v.published_at,
                      CASE WHEN feature.pack_id=p.id AND feature.version=v.version THEN 1 ELSE 0 END AS featured
               FROM authored_trip_packs p
               JOIN authored_trip_pack_versions v
                 ON v.pack_id=p.id AND v.version=p.current_published_version
-              LEFT JOIN authored_trip_pack_features feature
+              LEFT JOIN {feature_table} feature
                 ON feature.period_month=? AND feature.pack_id=p.id AND feature.version=v.version
-              WHERE p.status='published'"""
+              WHERE p.status='published' AND p.content_kind='{content_kind}'"""
 
 
 def list_published_trip_packs(
     limit: int = 50,
     cursor: str | None = None,
     coverage_region: str | None = None,
+    content_kind: str = "trip_pack",
 ) -> dict:
     if not isinstance(limit, int) or limit < 1 or limit > 100:
         raise ValueError("Limit must be between 1 and 100")
@@ -8763,7 +10219,7 @@ def list_published_trip_packs(
     if coverage_region and coverage_region not in TRIP_PACK_COVERAGE_REGIONS:
         raise ValueError("Invalid trip pack coverage")
     decoded_cursor = _decode_account_cursor(cursor)
-    sql = _published_trip_pack_query()
+    sql = _published_trip_pack_query(content_kind)
     params: list = [_utc_month()]
     if coverage_region:
         sql += " AND v.coverage_region=?"
@@ -8784,15 +10240,127 @@ def list_published_trip_packs(
     }
 
 
-def get_published_trip_pack(pack_id_or_slug: str, include_template: bool = False) -> dict | None:
+def get_published_trip_pack(
+    pack_id_or_slug: str,
+    include_template: bool = False,
+    content_kind: str = "trip_pack",
+) -> dict | None:
     clean = str(pack_id_or_slug or "").strip()
     db = _conn()
     row = db.execute(
-        _published_trip_pack_query() + " AND (p.id=? OR COALESCE(v.slug,p.slug)=?) LIMIT 1",
+        _published_trip_pack_query(content_kind) + " AND (p.id=? OR COALESCE(v.slug,p.slug)=?) LIMIT 1",
         (_utc_month(), clean, clean),
     ).fetchone()
     db.close()
     return _public_trip_pack_from_row(row, include_template=include_template) if row else None
+
+
+def _original_manifest_preview(manifest: dict | None) -> dict | None:
+    if not isinstance(manifest, dict):
+        return None
+    stops = []
+    for raw_stop in manifest.get("stops") or []:
+        if not isinstance(raw_stop, dict):
+            continue
+        stops.append({
+            key: raw_stop[key]
+            for key in ("id", "sequence", "title", "coordinates", "explore_place_id", "artwork_asset_id")
+            if key in raw_stop
+        })
+    offline_map = manifest.get("offline_map") if isinstance(manifest.get("offline_map"), dict) else {}
+    return {
+        key: value
+        for key, value in {
+            "schema_version": manifest.get("schema_version"),
+            "manifest_id": manifest.get("manifest_id"),
+            "pack_id": manifest.get("pack_id"),
+            "version": manifest.get("version"),
+            "locale": manifest.get("locale"),
+            "title": manifest.get("title"),
+            "route": manifest.get("route"),
+            "stops": stops,
+            "offline_map": {
+                key: offline_map.get(key)
+                for key in ("region_id", "bounds", "min_zoom", "max_zoom", "estimated_bytes")
+                if key in offline_map
+            },
+            "safety": manifest.get("safety"),
+            "access": manifest.get("access"),
+            "season": manifest.get("season"),
+        }.items()
+        if value is not None
+    }
+
+
+def _public_original_from_row(row: sqlite3.Row | dict, include_preview: bool = False) -> dict:
+    result = _public_trip_pack_from_row(row)
+    # Editorial review flags and source checklists are admin-only.
+    result.pop("validation_metadata", None)
+    if include_preview:
+        result["manifest_preview"] = _original_manifest_preview(
+            _decode_pack_json(dict(row).get("original_manifest_json"), None),
+        )
+    return result
+
+
+def list_published_originals(
+    limit: int = 50,
+    cursor: str | None = None,
+    coverage_region: str | None = None,
+) -> dict:
+    page = list_published_trip_packs(
+        limit=limit,
+        cursor=cursor,
+        coverage_region=coverage_region,
+        content_kind="original_drive",
+    )
+    # The base helper has already decoded rows, so remove the admin-only field here.
+    for item in page["items"]:
+        item.pop("validation_metadata", None)
+    return page
+
+
+def get_published_original(pack_id_or_slug: str, include_preview: bool = True) -> dict | None:
+    clean = str(pack_id_or_slug or "").strip()
+    db = _conn()
+    row = db.execute(
+        _published_trip_pack_query("original_drive")
+        + " AND (p.id=? OR COALESCE(v.slug,p.slug)=?) LIMIT 1",
+        (_utc_month(), clean, clean),
+    ).fetchone()
+    db.close()
+    return _public_original_from_row(row, include_preview=include_preview) if row else None
+
+
+def get_published_original_version(
+    pack_id_or_slug: str,
+    version: int,
+    include_preview: bool = True,
+) -> dict | None:
+    """Return one immutable published Original version, never a newer substitute."""
+    clean = str(pack_id_or_slug or "").strip()
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("Original version must be a positive integer")
+    db = _conn()
+    row = db.execute(
+        """SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.content_kind,
+                  v.title,v.summary,v.price_credits,v.coverage_region,v.public_metadata,
+                  v.validation_metadata,v.template_json,v.original_manifest_json,
+                  v.published_at,
+                  CASE WHEN feature.pack_id=p.id AND feature.version=v.version
+                       THEN 1 ELSE 0 END AS featured
+           FROM authored_trip_packs p
+           JOIN authored_trip_pack_versions v ON v.pack_id=p.id
+           LEFT JOIN authored_original_features feature
+             ON feature.period_month=? AND feature.pack_id=p.id AND feature.version=v.version
+           WHERE (p.id=? OR COALESCE(v.slug,p.slug)=?) AND v.version=?
+             AND p.status='published' AND p.content_kind='original_drive'
+             AND v.content_kind='original_drive'
+           LIMIT 1""",
+        (_utc_month(), clean, clean, version),
+    ).fetchone()
+    db.close()
+    return _public_original_from_row(row, include_preview=include_preview) if row else None
 
 
 def select_featured_trip_pack(
@@ -8810,14 +10378,15 @@ def select_featured_trip_pack(
         if version is None:
             row = db.execute(
                 """SELECT current_published_version AS version FROM authored_trip_packs
-                   WHERE id=? AND status='published'""",
+                   WHERE id=? AND status='published' AND content_kind='trip_pack'""",
                 (pack_id,),
             ).fetchone()
             version = int(row["version"]) if row and row["version"] else None
         if version is None or not db.execute(
             """SELECT 1 FROM authored_trip_pack_versions version
                JOIN authored_trip_packs pack ON pack.id=version.pack_id
-               WHERE version.pack_id=? AND version.version=? AND pack.status='published'""",
+               WHERE version.pack_id=? AND version.version=? AND pack.status='published'
+                 AND pack.content_kind='trip_pack'""",
             (pack_id, version),
         ).fetchone():
             raise ValueError("Published trip pack version not found")
@@ -8850,11 +10419,76 @@ def get_featured_trip_pack(period_month: str | None = None, include_template: bo
            JOIN authored_trip_packs p ON p.id=feature.pack_id
            JOIN authored_trip_pack_versions v
              ON v.pack_id=feature.pack_id AND v.version=feature.version
-           WHERE feature.period_month=? AND p.status='published'""",
+           WHERE feature.period_month=? AND p.status='published' AND p.content_kind='trip_pack'""",
         (month,),
     ).fetchone()
     db.close()
     return _public_trip_pack_from_row(row, include_template=include_template) if row else None
+
+
+def select_featured_original(
+    period_month: str,
+    pack_id: str,
+    admin_user_id: int,
+    version: int | None = None,
+) -> dict:
+    period_month = _validate_trip_pack_month(period_month)
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if version is None:
+            row = db.execute(
+                """SELECT current_published_version AS version FROM authored_trip_packs
+                   WHERE id=? AND status='published' AND content_kind='original_drive'""",
+                (pack_id,),
+            ).fetchone()
+            version = int(row["version"]) if row and row["version"] else None
+        if version is None or not db.execute(
+            """SELECT 1 FROM authored_trip_pack_versions version
+               JOIN authored_trip_packs pack ON pack.id=version.pack_id
+               WHERE version.pack_id=? AND version.version=? AND pack.status='published'
+                 AND pack.content_kind='original_drive'""",
+            (pack_id, version),
+        ).fetchone():
+            raise ValueError("Published Original version not found")
+        db.execute(
+            """INSERT INTO authored_original_features
+               (period_month,pack_id,version,selected_by,selected_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(period_month) DO UPDATE SET
+                 pack_id=excluded.pack_id,version=excluded.version,
+                 selected_by=excluded.selected_by,selected_at=excluded.selected_at""",
+            (period_month, pack_id, version, admin_user_id, now),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {"period_month": period_month, "pack_id": pack_id, "version": version, "selected_at": now}
+
+
+def get_featured_original(period_month: str | None = None) -> dict | None:
+    month = _validate_trip_pack_month(period_month or _utc_month())
+    db = _conn()
+    row = db.execute(
+        """SELECT p.id,COALESCE(v.slug,p.slug) AS slug,v.version,v.content_kind,
+                  v.title,v.summary,v.price_credits,v.coverage_region,v.public_metadata,
+                  v.validation_metadata,v.template_json,v.original_manifest_json,
+                  v.published_at,1 AS featured
+           FROM authored_original_features feature
+           JOIN authored_trip_packs p ON p.id=feature.pack_id
+           JOIN authored_trip_pack_versions v
+             ON v.pack_id=feature.pack_id AND v.version=feature.version
+           WHERE feature.period_month=? AND p.status='published'
+             AND p.content_kind='original_drive'""",
+        (month,),
+    ).fetchone()
+    db.close()
+    return _public_original_from_row(row) if row else None
 
 
 def _clone_authored_pack_trip_db(
@@ -8864,6 +10498,8 @@ def _clone_authored_pack_trip_db(
     version: int,
     template_json: str,
     now: int,
+    content_kind: str = "trip_pack",
+    original_manifest_json: str | None = None,
 ) -> dict:
     template = _decode_pack_json(template_json, {})
     trip_id = f"packtrip_{user_id}_{secrets.token_hex(12)}"
@@ -8875,6 +10511,17 @@ def _clone_authored_pack_trip_db(
         "visibility": "private",
         "source": f"trip_pack:{pack_id}:v{version}",
     })
+    if content_kind == "original_drive":
+        manifest = _decode_pack_json(original_manifest_json, {})
+        document["source"] = f"trailhead_original:{pack_id}:v{version}"
+        document["experience_ref"] = {
+            "kind": "trailhead_original",
+            "pack_id": pack_id,
+            "version": int(version),
+            "manifest_id": str(
+                manifest.get("manifest_id") or f"original_manifest_{pack_id}_v{int(version)}"
+            ),
+        }
     normalized, document_json = _normalize_trip_document(document, trip_id)
     db.execute(
         """INSERT INTO trip_documents_v2
@@ -8890,9 +10537,9 @@ def _clone_authored_pack_trip_db(
 
 def _trip_pack_entitlement_query() -> str:
     return """SELECT entitlement.*,COALESCE(version.slug,pack.slug) AS slug,version.title,version.summary,
-                     version.price_credits,version.coverage_region,
+                     version.price_credits,version.coverage_region,version.content_kind,
                      version.public_metadata,version.validation_metadata,
-                     version.template_json,version.published_at
+                     version.template_json,version.original_manifest_json,version.published_at
               FROM authored_trip_pack_entitlements entitlement
               JOIN authored_trip_packs pack ON pack.id=entitlement.pack_id
               JOIN authored_trip_pack_versions version
@@ -8926,11 +10573,16 @@ def _trip_pack_entitlement_result(
         "title": raw["title"],
         "summary": raw["summary"],
         "price_credits": int(raw["price_credits"]),
+        "explorer_price_credits": int(raw["price_credits"]) * 80 // 100,
+        "free": int(raw["price_credits"]) == 0,
+        "content_kind": raw.get("content_kind") or "trip_pack",
         "coverage_region": raw["coverage_region"],
         "public_metadata": _decode_pack_json(raw["public_metadata"], {}),
         "validation_metadata": _decode_pack_json(raw["validation_metadata"], {}),
         "published_at": int(raw["published_at"]),
     }
+    if pack["content_kind"] == "original_drive":
+        pack.pop("validation_metadata", None)
     trip_row = db.execute(
         "SELECT * FROM trip_documents_v2 WHERE user_id=? AND id=?",
         (raw["user_id"], raw["trip_id"]),
@@ -8960,6 +10612,7 @@ def _restore_trip_pack_entitlement_db(
     if not trip or trip["status"] == "deleted":
         cloned = _clone_authored_pack_trip_db(
             db, user_id, raw["pack_id"], int(raw["version"]), raw["template_json"], now,
+            raw.get("content_kind") or "trip_pack", raw.get("original_manifest_json"),
         )
         db.execute(
             "UPDATE authored_trip_pack_entitlements SET trip_id=? WHERE id=?",
@@ -8977,6 +10630,8 @@ def _acquire_authored_trip_pack(
     *,
     pack_id: str | None = None,
     claim_month: str | None = None,
+    required_content_kind: str = "trip_pack",
+    requested_version: int | None = None,
 ) -> dict:
     idempotency_key = str(idempotency_key or "").strip()
     if not _IDEMPOTENCY_KEY_RE.fullmatch(idempotency_key):
@@ -8985,23 +10640,49 @@ def _acquire_authored_trip_pack(
         claim_month = _validate_trip_pack_month(claim_month)
     if pack_id is not None:
         pack_id = _validate_canonical_id(pack_id, "trip pack id")
+    if required_content_kind not in TRIP_PACK_CONTENT_KINDS:
+        raise ValueError("Invalid authored content kind")
+    if requested_version is not None:
+        if required_content_kind != "original_drive":
+            raise ValueError("Explicit versions are supported only for Trailhead Originals")
+        if (
+            isinstance(requested_version, bool)
+            or not isinstance(requested_version, int)
+            or requested_version < 1
+        ):
+            raise ValueError("Original version must be a positive integer")
+    if claim_month is not None and requested_version is not None:
+        raise ValueError("Featured claims use the selected immutable version")
     request_hash = hashlib.sha256(json.dumps({
         "pack_id": pack_id,
+        "version": requested_version,
         "claim_month": claim_month,
         "mode": "featured_claim" if claim_month else "purchase",
+        "content_kind": required_content_kind,
     }, separators=(",", ":"), sort_keys=True).encode("utf-8")).hexdigest()
     now = int(time.time())
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
-        replay = db.execute(
-            _trip_pack_entitlement_query()
-            + " WHERE entitlement.user_id=? AND entitlement.idempotency_key=?",
+        replay_request = db.execute(
+            """SELECT request_hash,entitlement_id
+               FROM authored_trip_pack_acquisition_requests
+               WHERE user_id=? AND idempotency_key=?""",
             (user_id, idempotency_key),
         ).fetchone()
-        if replay:
-            if replay["request_hash"] != request_hash:
+        if replay_request:
+            if replay_request["request_hash"] != request_hash:
+                if required_content_kind == "original_drive":
+                    raise OriginalAcquisitionConflictError(
+                        "This Original request key was already used for a different acquisition"
+                    )
                 raise ValueError("Idempotency-Key was already used for a different request")
+            replay = db.execute(
+                _trip_pack_entitlement_query() + " WHERE entitlement.id=?",
+                (replay_request["entitlement_id"],),
+            ).fetchone()
+            if not replay:
+                raise ValueError("Acquisition request record is incomplete")
             replay = _restore_trip_pack_entitlement_db(db, replay, user_id, now)
             result = _trip_pack_entitlement_result(db, replay, already_owned=True)
             result["replayed"] = True
@@ -9012,37 +10693,76 @@ def _acquire_authored_trip_pack(
             return result
 
         if claim_month:
+            feature_table = (
+                "authored_original_features"
+                if required_content_kind == "original_drive"
+                else "authored_trip_pack_features"
+            )
             version_row = db.execute(
-                """SELECT pack.id,pack.slug,version.*
-                   FROM authored_trip_pack_features feature
+                f"""SELECT pack.id,pack.slug,version.*
+                   FROM {feature_table} feature
                    JOIN authored_trip_packs pack ON pack.id=feature.pack_id
                    JOIN authored_trip_pack_versions version
                      ON version.pack_id=feature.pack_id AND version.version=feature.version
-                   WHERE feature.period_month=? AND pack.status='published'""",
-                (claim_month,),
+                   WHERE feature.period_month=? AND pack.status='published'
+                     AND pack.content_kind=? AND version.content_kind=?""",
+                (claim_month, required_content_kind, required_content_kind),
             ).fetchone()
             if not version_row:
-                raise FeaturedTripPackUnavailableError("No featured trip pack is available this month")
+                error_type = (
+                    FeaturedOriginalUnavailableError
+                    if required_content_kind == "original_drive"
+                    else FeaturedTripPackUnavailableError
+                )
+                raise error_type("No featured authored experience is available this month")
             pack_id = str(version_row["id"])
+        elif requested_version is not None:
+            version_row = db.execute(
+                """SELECT pack.id,pack.slug,version.*
+                   FROM authored_trip_packs pack
+                   JOIN authored_trip_pack_versions version ON version.pack_id=pack.id
+                   WHERE pack.id=? AND version.version=? AND pack.status='published'
+                     AND pack.content_kind=? AND version.content_kind=?""",
+                (
+                    pack_id,
+                    requested_version,
+                    required_content_kind,
+                    required_content_kind,
+                ),
+            ).fetchone()
+            if not version_row:
+                raise ValueError("Published Trailhead Original version not found")
         else:
             version_row = db.execute(
                 """SELECT pack.id,pack.slug,version.*
                    FROM authored_trip_packs pack
                    JOIN authored_trip_pack_versions version
                      ON version.pack_id=pack.id AND version.version=pack.current_published_version
-                   WHERE pack.id=? AND pack.status='published'""",
-                (pack_id,),
+                   WHERE pack.id=? AND pack.status='published' AND pack.content_kind=?""",
+                (pack_id, required_content_kind),
             ).fetchone()
             if not version_row:
+                if required_content_kind == "original_drive":
+                    raise ValueError("Published Trailhead Original not found")
                 raise ValueError("Published trip pack not found")
 
-        owned = db.execute(
+        owned_sql = (
             _trip_pack_entitlement_query()
-            + " WHERE entitlement.user_id=? AND entitlement.pack_id=?",
-            (user_id, pack_id),
-        ).fetchone()
+            + " WHERE entitlement.user_id=? AND entitlement.pack_id=?"
+        )
+        owned_params: list[object] = [user_id, pack_id]
+        if required_content_kind == "original_drive":
+            owned_sql += " AND entitlement.version=?"
+            owned_params.append(int(version_row["version"]))
+        owned = db.execute(owned_sql, owned_params).fetchone()
         if owned:
             owned = _restore_trip_pack_entitlement_db(db, owned, user_id, now)
+            db.execute(
+                """INSERT INTO authored_trip_pack_acquisition_requests
+                   (user_id,idempotency_key,request_hash,entitlement_id,created_at)
+                   VALUES (?,?,?,?,?)""",
+                (user_id, idempotency_key, request_hash, owned["id"], now),
+            )
             result = _trip_pack_entitlement_result(db, owned, already_owned=True)
             result["replayed"] = False
             result["credit_balance"] = int(db.execute(
@@ -9060,19 +10780,48 @@ def _acquire_authored_trip_pack(
             user["plan_type"], user["plan_expires_at"], now,
         )
         list_price = int(version_row["price_credits"])
+        latest_owned_version = None
+        if required_content_kind == "original_drive":
+            latest_owned_version = db.execute(
+                """SELECT MAX(version) FROM authored_trip_pack_entitlements
+                   WHERE user_id=? AND pack_id=? AND content_kind='original_drive'""",
+                (user_id, pack_id),
+            ).fetchone()[0]
         if claim_month:
             if not explorer_active:
-                raise ExplorerTripPackClaimRequiredError("The featured monthly trip pack is included with Explorer")
+                error_type = (
+                    ExplorerOriginalClaimRequiredError
+                    if required_content_kind == "original_drive"
+                    else ExplorerTripPackClaimRequiredError
+                )
+                raise error_type("The featured monthly experience is included with Explorer")
             previous_claim = db.execute(
                 """SELECT pack_id FROM authored_trip_pack_entitlements
                    WHERE user_id=? AND claim_month=?""",
                 (user_id, claim_month),
             ).fetchone()
             if previous_claim:
-                raise MonthlyTripPackClaimUsedError(claim_month)
+                error_type = (
+                    MonthlyOriginalClaimUsedError
+                    if required_content_kind == "original_drive"
+                    else MonthlyTripPackClaimUsedError
+                )
+                raise error_type(claim_month)
             acquisition_type = "featured_claim"
             credits_charged = 0
             explorer_discount = list_price
+        elif (
+            required_content_kind == "original_drive"
+            and latest_owned_version is not None
+            and int(version_row["version"]) > int(latest_owned_version)
+        ):
+            acquisition_type = "version_update"
+            credits_charged = 0
+            explorer_discount = 0
+        elif list_price == 0:
+            acquisition_type = "free"
+            explorer_discount = 0
+            credits_charged = 0
         else:
             acquisition_type = "purchase"
             explorer_discount = list_price * TRIP_PACK_EXPLORER_DISCOUNT_PERCENT // 100 if explorer_active else 0
@@ -9082,30 +10831,49 @@ def _acquire_authored_trip_pack(
                 (credits_charged, user_id, credits_charged),
             )
             if db.execute("SELECT changes()").fetchone()[0] == 0:
-                raise InsufficientTripPackCreditsError(
-                    int(user["credits"] or 0), credits_charged, list_price,
+                error_type = (
+                    InsufficientOriginalCreditsError
+                    if required_content_kind == "original_drive"
+                    else InsufficientTripPackCreditsError
                 )
+                raise error_type(int(user["credits"] or 0), credits_charged, list_price)
             db.execute(
                 """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
                    VALUES (?,?,?,?)""",
-                (user_id, -credits_charged, f"Trip pack: {version_row['title']}", now),
+                (
+                    user_id,
+                    -credits_charged,
+                    (
+                        f"Trailhead Original: {version_row['title']}"
+                        if required_content_kind == "original_drive"
+                        else f"Trip pack: {version_row['title']}"
+                    ),
+                    now,
+                ),
             )
 
         trip = _clone_authored_pack_trip_db(
             db, user_id, pack_id, int(version_row["version"]), version_row["template_json"], now,
+            version_row["content_kind"], version_row["original_manifest_json"],
         )
         entitlement_id = f"packent_{secrets.token_hex(12)}"
         db.execute(
             """INSERT INTO authored_trip_pack_entitlements
-               (id,user_id,pack_id,version,acquisition_type,list_price_credits,
+               (id,user_id,pack_id,version,content_kind,acquisition_type,list_price_credits,
                 credits_charged,explorer_discount,claim_month,trip_id,
                 idempotency_key,request_hash,acquired_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 entitlement_id, user_id, pack_id, int(version_row["version"]),
-                acquisition_type, list_price, credits_charged, explorer_discount,
+                required_content_kind, acquisition_type, list_price, credits_charged, explorer_discount,
                 claim_month, trip["trip_id"], idempotency_key, request_hash, now,
             ),
+        )
+        db.execute(
+            """INSERT INTO authored_trip_pack_acquisition_requests
+               (user_id,idempotency_key,request_hash,entitlement_id,created_at)
+               VALUES (?,?,?,?,?)""",
+            (user_id, idempotency_key, request_hash, entitlement_id, now),
         )
         saved = db.execute(
             _trip_pack_entitlement_query() + " WHERE entitlement.id=?",
@@ -9131,6 +10899,21 @@ def acquire_authored_trip_pack(user_id: int, pack_id: str, idempotency_key: str)
     )
 
 
+def acquire_authored_original(
+    user_id: int,
+    pack_id: str,
+    idempotency_key: str,
+    version: int | None = None,
+) -> dict:
+    return _acquire_authored_trip_pack(
+        user_id,
+        idempotency_key,
+        pack_id=pack_id,
+        required_content_kind="original_drive",
+        requested_version=version,
+    )
+
+
 def claim_featured_authored_trip_pack(
     user_id: int,
     idempotency_key: str,
@@ -9141,27 +10924,52 @@ def claim_featured_authored_trip_pack(
     )
 
 
-def list_owned_authored_trip_packs(user_id: int) -> list[dict]:
+def claim_featured_authored_original(
+    user_id: int,
+    idempotency_key: str,
+    period_month: str | None = None,
+) -> dict:
+    return _acquire_authored_trip_pack(
+        user_id,
+        idempotency_key,
+        claim_month=period_month or _utc_month(),
+        required_content_kind="original_drive",
+    )
+
+
+def list_owned_authored_trip_packs(
+    user_id: int,
+    content_kind: str = "trip_pack",
+) -> list[dict]:
+    if content_kind not in TRIP_PACK_CONTENT_KINDS:
+        raise ValueError("Invalid authored content kind")
     db = _conn()
     rows = db.execute(
         _trip_pack_entitlement_query()
-        + " WHERE entitlement.user_id=? ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
-        (user_id,),
+        + " WHERE entitlement.user_id=? AND version.content_kind=?"
+          " ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
+        (user_id, content_kind),
     ).fetchall()
     results = [_trip_pack_entitlement_result(db, row, already_owned=True) for row in rows]
     db.close()
     return results
 
 
-def restore_owned_authored_trip_packs(user_id: int) -> list[dict]:
+def restore_owned_authored_trip_packs(
+    user_id: int,
+    content_kind: str = "trip_pack",
+) -> list[dict]:
+    if content_kind not in TRIP_PACK_CONTENT_KINDS:
+        raise ValueError("Invalid authored content kind")
     now = int(time.time())
     db = _conn()
     try:
         db.execute("BEGIN IMMEDIATE")
         rows = db.execute(
             _trip_pack_entitlement_query()
-            + " WHERE entitlement.user_id=? ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
-            (user_id,),
+            + " WHERE entitlement.user_id=? AND version.content_kind=?"
+              " ORDER BY entitlement.acquired_at DESC,entitlement.id DESC",
+            (user_id, content_kind),
         ).fetchall()
         restored = [
             _restore_trip_pack_entitlement_db(db, row, user_id, now)
@@ -9177,6 +10985,165 @@ def restore_owned_authored_trip_packs(user_id: int) -> list[dict]:
     return results
 
 
+def list_owned_authored_originals(user_id: int) -> list[dict]:
+    return list_owned_authored_trip_packs(user_id, content_kind="original_drive")
+
+
+def restore_owned_authored_originals(user_id: int) -> list[dict]:
+    return restore_owned_authored_trip_packs(user_id, content_kind="original_drive")
+
+
+def get_published_original_manifest(
+    pack_id_or_slug: str,
+    version: int,
+    user_id: int | None = None,
+) -> dict | None:
+    clean = str(pack_id_or_slug or "").strip()
+    if not isinstance(version, int) or version < 1:
+        raise ValueError("Original version must be a positive integer")
+    db = _conn()
+    row = db.execute(
+        """SELECT p.id,v.version,v.price_credits,v.original_manifest_json
+           FROM authored_trip_packs p
+           JOIN authored_trip_pack_versions v ON v.pack_id=p.id
+           WHERE (p.id=? OR v.slug=?) AND v.version=?
+             AND p.status='published' AND p.content_kind='original_drive'
+             AND v.content_kind='original_drive'
+           LIMIT 1""",
+        (clean, clean, version),
+    ).fetchone()
+    if not row:
+        db.close()
+        return None
+    if int(row["price_credits"]) > 0:
+        entitled = user_id is not None and db.execute(
+            """SELECT 1 FROM authored_trip_pack_entitlements
+               WHERE user_id=? AND pack_id=? AND version=? LIMIT 1""",
+            (user_id, row["id"], version),
+        ).fetchone()
+        if not entitled:
+            db.close()
+            raise OriginalManifestAccessError("Acquire this Original before downloading it")
+    manifest = _decode_pack_json(row["original_manifest_json"], None)
+    db.close()
+    if not isinstance(manifest, dict):
+        raise ValueError("Published Original manifest is unavailable")
+    return manifest
+
+
+def get_published_original_asset_record(
+    pack_id: str,
+    asset_id: str,
+    sha256: str,
+    user_id: int | None = None,
+) -> dict | None:
+    """Resolve an immutable uploaded asset only through an accessible manifest."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    asset_id = _validate_canonical_id(asset_id, "Original asset id")
+    sha256 = str(sha256 or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+        raise ValueError("Original asset sha256 is invalid")
+    db = _conn()
+    versions = db.execute(
+        """SELECT v.version,v.price_credits,v.original_manifest_json
+           FROM authored_trip_packs p
+           JOIN authored_trip_pack_versions v ON v.pack_id=p.id
+           WHERE p.id=? AND p.status='published' AND p.content_kind='original_drive'
+             AND v.content_kind='original_drive'
+           ORDER BY v.version DESC""",
+        (pack_id,),
+    ).fetchall()
+    matched = False
+    authorized = False
+    free_access = False
+    for version_row in versions:
+        manifest = _decode_pack_json(version_row["original_manifest_json"], {})
+        manifest_asset = next((
+            asset for asset in (manifest.get("assets") or [])
+            if isinstance(asset, dict)
+            and asset.get("id") == asset_id
+            and asset.get("sha256") == sha256
+        ), None)
+        if not manifest_asset:
+            continue
+        matched = True
+        if int(version_row["price_credits"]) == 0:
+            authorized = True
+            free_access = True
+        elif user_id is not None:
+            authorized = bool(db.execute(
+                """SELECT 1 FROM authored_trip_pack_entitlements
+                   WHERE user_id=? AND pack_id=? AND version=? LIMIT 1""",
+                (user_id, pack_id, int(version_row["version"])),
+            ).fetchone())
+        if authorized:
+            break
+    if not matched:
+        db.close()
+        return None
+    if not authorized:
+        db.close()
+        raise OriginalManifestAccessError("Acquire this Original before downloading it")
+    row = db.execute(
+        """SELECT * FROM authored_original_assets
+           WHERE pack_id=? AND asset_id=? AND sha256=?""",
+        (pack_id, asset_id, sha256),
+    ).fetchone()
+    db.close()
+    if not row:
+        return None
+    raw = dict(row)
+    if not _original_asset_file_verified(raw):
+        raise ValueError("Published Original asset failed integrity verification")
+    raw["free_access"] = free_access
+    return raw
+
+
+def validate_original_analytics_dimensions(
+    pack_id: str,
+    version: int,
+    stop_id: str | None = None,
+    user_id: int | None = None,
+) -> bool:
+    """Accept analytics IDs only when they name an immutable published manifest."""
+    pack_id = _validate_canonical_id(pack_id, "Original analytics pack id")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("Original analytics version is invalid")
+    if stop_id is not None:
+        stop_id = _validate_canonical_id(stop_id, "Original analytics stop id")
+    db = _conn()
+    row = db.execute(
+        """SELECT v.price_credits,v.original_manifest_json
+           FROM authored_trip_packs p
+           JOIN authored_trip_pack_versions v ON v.pack_id=p.id
+           WHERE p.id=? AND v.version=? AND p.status='published'
+             AND p.content_kind='original_drive' AND v.content_kind='original_drive'""",
+        (pack_id, version),
+    ).fetchone()
+    db.close()
+    if not row:
+        return False
+    if int(row["price_credits"]) > 0:
+        if user_id is None:
+            return False
+        db = _conn()
+        entitled = db.execute(
+            """SELECT 1 FROM authored_trip_pack_entitlements
+               WHERE user_id=? AND pack_id=? AND version=? LIMIT 1""",
+            (user_id, pack_id, version),
+        ).fetchone()
+        db.close()
+        if not entitled:
+            return False
+    if stop_id is None:
+        return True
+    manifest = _decode_pack_json(row["original_manifest_json"], {})
+    return any(
+        isinstance(stop, dict) and stop.get("id") == stop_id
+        for stop in (manifest.get("stops") or [])
+    )
+
+
 def authored_trip_pack_release_validation(
     minimum_published: int = 10,
     target_north_america_ratio: float = 0.70,
@@ -9189,7 +11156,7 @@ def authored_trip_pack_release_validation(
            JOIN authored_trip_pack_versions current_version
              ON current_version.pack_id=pack.id
             AND current_version.version=pack.current_published_version
-           WHERE pack.status='published'
+           WHERE pack.status='published' AND pack.content_kind='trip_pack'
            GROUP BY current_version.coverage_region"""
     ).fetchall()
     db.close()

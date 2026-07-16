@@ -1,6 +1,12 @@
 import { Audio, InterruptionModeAndroid, InterruptionModeIOS } from 'expo-av';
 import * as Speech from 'expo-speech';
 import { api } from './api';
+import {
+  originalAudioCoordinator,
+  type OriginalAudioFocusLease,
+  type OriginalAudioPriorityName,
+} from './originals/audioCoordinator';
+import { applyNativeAudioSessionMode } from './originals/nativeAudioSession';
 
 type SpeechOptions = Parameters<typeof Speech.speak>[1];
 type VoiceMode = 'direction' | 'guide' | 'flyover';
@@ -19,10 +25,66 @@ const COPILOT_LISTENING_CUE = require('../assets/trail-guide/copilot-listening.w
 let activeSound: Audio.Sound | null = null;
 let activeCueSound: Audio.Sound | null = null;
 let voiceRequestId = 0;
-let audioModeReady: Promise<void> | null = null;
-let cueAudioModeReady: Promise<void> | null = null;
+let cueRequestId = 0;
 let deviceVoicePromise: Promise<string | undefined> | null = null;
 const preloadedSounds = new Map<string, { sound: Audio.Sound; createdAt: number }>();
+let activeVoiceFocus: { requestId: number; owner: string; lease: OriginalAudioFocusLease } | null = null;
+let activeCueFocus: { requestId: number; owner: string; lease: OriginalAudioFocusLease } | null = null;
+
+function voiceAudioPriority(mode: VoiceMode): OriginalAudioPriorityName {
+  return mode === 'direction' ? 'navigation' : 'copilot';
+}
+
+async function releaseVoiceAudioFocus(requestId?: number) {
+  const focus = activeVoiceFocus;
+  if (!focus || (requestId != null && focus.requestId !== requestId)) return;
+  activeVoiceFocus = null;
+  await focus.lease.release().catch(() => {});
+}
+
+async function acquireVoiceAudioFocus(requestId: number, mode: VoiceMode) {
+  const owner = `trailhead-voice:${mode}:${requestId}`;
+  const lease = await originalAudioCoordinator.acquire({
+    owner,
+    priority: voiceAudioPriority(mode),
+    pause: async () => {
+      if (requestId !== voiceRequestId) return;
+      if (activeSound) await activeSound.pauseAsync().catch(() => {});
+      else await Speech.pause().catch(() => {});
+    },
+    resume: async () => {
+      if (requestId !== voiceRequestId) return;
+      if (activeSound) await activeSound.playAsync().catch(() => {});
+      else await Speech.resume().catch(() => {});
+    },
+    canAutoResume: () => requestId === voiceRequestId,
+  });
+  if (requestId !== voiceRequestId || originalAudioCoordinator.activeOwner() !== owner) {
+    await lease.release().catch(() => {});
+    return false;
+  }
+  activeVoiceFocus = { requestId, owner, lease };
+  return true;
+}
+
+async function releaseCueAudioFocus(requestId?: number) {
+  const focus = activeCueFocus;
+  if (!focus || (requestId != null && focus.requestId !== requestId)) return;
+  activeCueFocus = null;
+  await focus.lease.release().catch(() => {});
+}
+
+async function stopActiveTrailheadCue(expectedRequestId?: number) {
+  if (expectedRequestId != null && activeCueFocus?.requestId !== expectedRequestId) return;
+  const focusRequestId = activeCueFocus?.requestId;
+  const sound = activeCueSound;
+  activeCueSound = null;
+  if (sound) {
+    await sound.stopAsync().catch(() => {});
+    await sound.unloadAsync().catch(() => {});
+  }
+  if (focusRequestId != null) await releaseCueAudioFocus(focusRequestId);
+}
 
 function voiceCacheKey(text: string, mode: VoiceMode) {
   return `${mode}:${text.trim()}`;
@@ -62,52 +124,48 @@ async function bestDeviceVoiceId(): Promise<string | undefined> {
 }
 
 function ensureVoiceAudioMode() {
-  if (!audioModeReady) {
-    audioModeReady = Audio.setAudioModeAsync({
-      allowsRecordingIOS: false,
-      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    }).catch(err => {
-      audioModeReady = null;
-      throw err;
-    });
-  }
-  return audioModeReady;
+  return applyNativeAudioSessionMode(() => Audio.setAudioModeAsync({
+    allowsRecordingIOS: false,
+    interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: true,
+    interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+    shouldDuckAndroid: true,
+    playThroughEarpieceAndroid: false,
+  }));
 }
 
 function ensureCueAudioMode() {
-  if (!cueAudioModeReady) {
-    cueAudioModeReady = Audio.setAudioModeAsync({
-      allowsRecordingIOS: true,
-      interruptionModeIOS: InterruptionModeIOS.DuckOthers,
-      playsInSilentModeIOS: true,
-      staysActiveInBackground: true,
-      interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
-      shouldDuckAndroid: true,
-      playThroughEarpieceAndroid: false,
-    }).catch(err => {
-      cueAudioModeReady = null;
-      throw err;
-    });
+  return applyNativeAudioSessionMode(() => Audio.setAudioModeAsync({
+    allowsRecordingIOS: true,
+    interruptionModeIOS: InterruptionModeIOS.DuckOthers,
+    playsInSilentModeIOS: true,
+    staysActiveInBackground: true,
+    interruptionModeAndroid: InterruptionModeAndroid.DuckOthers,
+    shouldDuckAndroid: true,
+    playThroughEarpieceAndroid: false,
+  }));
+}
+
+async function stopActiveTrailheadVoice() {
+  const focusRequestId = activeVoiceFocus?.requestId;
+  const sound = activeSound;
+  activeSound = null;
+  try {
+    await Speech.stop().catch(() => {});
+    if (sound) {
+      await sound.stopAsync().catch(() => {});
+      await sound.unloadAsync().catch(() => {});
+    }
+  } catch {
+  } finally {
+    if (focusRequestId != null) await releaseVoiceAudioFocus(focusRequestId);
   }
-  return cueAudioModeReady;
 }
 
 export async function stopTrailheadVoice() {
   voiceRequestId += 1;
-  try {
-    Speech.stop();
-    if (activeSound) {
-      const sound = activeSound;
-      activeSound = null;
-      await sound.stopAsync().catch(() => {});
-      await sound.unloadAsync().catch(() => {});
-    }
-  } catch {}
+  await stopActiveTrailheadVoice();
 }
 
 export async function preloadTrailheadVoice(text: string, mode: VoiceMode = 'flyover'): Promise<boolean> {
@@ -116,7 +174,6 @@ export async function preloadTrailheadVoice(text: string, mode: VoiceMode = 'fly
   const key = voiceCacheKey(clean, mode);
   if (preloadedSounds.has(key)) return true;
   try {
-    await ensureVoiceAudioMode();
     const source = await api.ttsSource(clean, mode);
     const { sound } = await Audio.Sound.createAsync(source, { shouldPlay: false });
     preloadedSounds.set(key, { sound, createdAt: Date.now() });
@@ -128,27 +185,61 @@ export async function preloadTrailheadVoice(text: string, mode: VoiceMode = 'fly
 }
 
 export async function playTrailheadCue(name: 'copilotListening') {
+  const requestId = cueRequestId + 1;
+  cueRequestId = requestId;
   try {
+    await stopActiveTrailheadCue();
+    if (requestId !== cueRequestId) return;
+    const owner = `trailhead-ui-cue:${requestId}`;
+    const lease = await originalAudioCoordinator.acquire({
+      owner,
+      priority: 'ui',
+      pause: async () => {
+        if (requestId === cueRequestId) await activeCueSound?.pauseAsync().catch(() => {});
+      },
+      resume: async () => {
+        if (requestId === cueRequestId) await activeCueSound?.playAsync().catch(() => {});
+      },
+      canAutoResume: () => requestId === cueRequestId,
+    });
+    if (requestId !== cueRequestId || originalAudioCoordinator.activeOwner() !== owner) {
+      await lease.release().catch(() => {});
+      return;
+    }
+    activeCueFocus = { requestId, owner, lease };
     await ensureCueAudioMode();
-    if (activeCueSound) {
-      const sound = activeCueSound;
-      activeCueSound = null;
-      await sound.stopAsync().catch(() => {});
-      await sound.unloadAsync().catch(() => {});
+    if (requestId !== cueRequestId || originalAudioCoordinator.activeOwner() !== owner) {
+      await releaseCueAudioFocus(requestId);
+      return;
     }
     const cueSource = { copilotListening: COPILOT_LISTENING_CUE }[name];
-    const { sound } = await Audio.Sound.createAsync(
+    let cueSound: Audio.Sound | null = null;
+    const created = await Audio.Sound.createAsync(
       cueSource,
-      { shouldPlay: true, volume: 0.72 },
+      { shouldPlay: false, volume: 0.72 },
       status => {
-        if ('didJustFinish' in status && status.didJustFinish) {
-          sound.unloadAsync().catch(() => {});
-          if (activeCueSound === sound) activeCueSound = null;
+        if ('didJustFinish' in status && status.didJustFinish && cueSound) {
+          const finishedSound = cueSound;
+          cueSound = null;
+          finishedSound.unloadAsync().catch(() => {});
+          if (activeCueSound === finishedSound) activeCueSound = null;
+          void releaseCueAudioFocus(requestId);
         }
       },
     );
-    activeCueSound = sound;
-  } catch {}
+    cueSound = created.sound;
+    if (requestId !== cueRequestId || originalAudioCoordinator.activeOwner() !== owner) {
+      const sound = cueSound;
+      cueSound = null;
+      await sound.unloadAsync().catch(() => {});
+      await releaseCueAudioFocus(requestId);
+      return;
+    }
+    activeCueSound = cueSound;
+    await cueSound.playAsync();
+  } catch {
+    await stopActiveTrailheadCue(requestId);
+  }
 }
 
 /** Cinematic narration — instant on-device speech (zero network latency, always plays).
@@ -156,31 +247,45 @@ export async function playTrailheadCue(name: 'copilotListening') {
 export function speakCinematicNarration(text: string, callbacks?: VoiceCallbacks) {
   const clean = (text || '').trim();
   if (!clean) return;
-  voiceRequestId += 1;
-  ensureVoiceAudioMode().catch(() => {});
-  try { Speech.stop(); } catch {}
-  bestDeviceVoiceId().then(voice => {
-    Speech.speak(clean, {
-      rate: 0.92,
-      pitch: 1.02,
-      language: 'en-US',
-      ...(voice ? { voice } : {}),
-      onStart: () => callbacks?.onStart?.('device_tts'),
-      onDone: () => callbacks?.onFinish?.('device_tts'),
-      onStopped: () => callbacks?.onFinish?.('device_tts'),
-      onError: () => callbacks?.onFinish?.('device_tts'),
-    });
-  }).catch(() => {
-    Speech.speak(clean, {
-      rate: 0.92,
-      pitch: 1.02,
-      language: 'en-US',
-      onStart: () => callbacks?.onStart?.('device_tts'),
-      onDone: () => callbacks?.onFinish?.('device_tts'),
-      onStopped: () => callbacks?.onFinish?.('device_tts'),
-      onError: () => callbacks?.onFinish?.('device_tts'),
-    });
-  });
+  const requestId = voiceRequestId + 1;
+  voiceRequestId = requestId;
+  void (async () => {
+    await stopActiveTrailheadVoice();
+    if (requestId !== voiceRequestId) return;
+    const hasFocus = await acquireVoiceAudioFocus(requestId, 'flyover');
+    if (!hasFocus) {
+      callbacks?.onUnavailable?.();
+      return;
+    }
+    try {
+      await ensureVoiceAudioMode();
+      const voice = await bestDeviceVoiceId();
+      if (requestId !== voiceRequestId) {
+        await releaseVoiceAudioFocus(requestId);
+        return;
+      }
+      let finished = false;
+      const finish = () => {
+        if (finished) return;
+        finished = true;
+        void releaseVoiceAudioFocus(requestId)
+          .finally(() => callbacks?.onFinish?.('device_tts'));
+      };
+      Speech.speak(clean, {
+        rate: 0.92,
+        pitch: 1.02,
+        language: 'en-US',
+        ...(voice ? { voice } : {}),
+        onStart: () => callbacks?.onStart?.('device_tts'),
+        onDone: finish,
+        onStopped: finish,
+        onError: finish,
+      });
+    } catch {
+      await releaseVoiceAudioFocus(requestId);
+      callbacks?.onFinish?.('device_tts');
+    }
+  })();
 }
 
 /** Co-Pilot cinematic narration — Cartesia via Trailhead's server-side TTS. */
@@ -215,7 +320,6 @@ export async function speakFlyoverBeat(text: string, callbacks?: VoiceCallbacks)
     }
     fallbackStarted = true;
     callbacks?.onFallback?.('cartesia_voice_unavailable');
-    stopTrailheadVoice().catch(() => {});
     speakCinematicNarration(clean, {
       onStart: () => {
         started = true;
@@ -224,6 +328,11 @@ export async function speakFlyoverBeat(text: string, callbacks?: VoiceCallbacks)
       onFinish: () => {
         finished = true;
         callbacks?.onFinish?.();
+      },
+      onUnavailable: () => {
+        if (finished) return;
+        finished = true;
+        callbacks?.onUnavailable?.();
       },
     });
   };
@@ -262,32 +371,48 @@ export async function playTrailheadVoice(text: string, mode: VoiceMode, fallback
   if (!clean) return;
   const requestId = voiceRequestId + 1;
   voiceRequestId = requestId;
-  await stopTrailheadVoice();
-  voiceRequestId = requestId;
+  await stopActiveTrailheadVoice();
+  if (requestId !== voiceRequestId) return;
   try {
+    const hasFocus = await acquireVoiceAudioFocus(requestId, mode);
+    if (!hasFocus) {
+      if (callbacks?.onUnavailable) callbacks.onUnavailable();
+      else callbacks?.onFallback?.('audio_focus_unavailable');
+      return;
+    }
     await ensureVoiceAudioMode();
-    if (requestId !== voiceRequestId) return;
+    if (requestId !== voiceRequestId) {
+      await releaseVoiceAudioFocus(requestId);
+      return;
+    }
     const key = voiceCacheKey(clean, mode);
     const cached = preloadedSounds.get(key);
     let sound = cached?.sound ?? null;
     if (cached) preloadedSounds.delete(key);
     if (!sound) {
       const source = await api.ttsSource(clean, mode);
-      if (requestId !== voiceRequestId) return;
+      if (requestId !== voiceRequestId) {
+        await releaseVoiceAudioFocus(requestId);
+        return;
+      }
       const created = await Audio.Sound.createAsync(source, { shouldPlay: false });
       sound = created.sound;
     }
     if (requestId !== voiceRequestId) {
       await sound.stopAsync().catch(() => {});
       await sound.unloadAsync().catch(() => {});
+      await releaseVoiceAudioFocus(requestId);
       return;
     }
     activeSound = sound;
+    let finished = false;
     sound.setOnPlaybackStatusUpdate(status => {
-      if ('didJustFinish' in status && status.didJustFinish) {
+      if ('didJustFinish' in status && status.didJustFinish && !finished) {
+        finished = true;
         sound?.unloadAsync().catch(() => {});
         if (activeSound === sound) activeSound = null;
-        callbacks?.onFinish?.(generatedVoiceSource(mode));
+        void releaseVoiceAudioFocus(requestId)
+          .finally(() => callbacks?.onFinish?.(generatedVoiceSource(mode)));
       }
     });
     await sound.setPositionAsync(0).catch(() => {});
@@ -295,23 +420,49 @@ export async function playTrailheadVoice(text: string, mode: VoiceMode, fallback
     callbacks?.onStart?.(generatedVoiceSource(mode));
   } catch (err) {
     console.warn('Trailhead voice MP3 failed.', err);
-    if (requestId !== voiceRequestId) return;
+    if (requestId !== voiceRequestId) {
+      await releaseVoiceAudioFocus(requestId);
+      return;
+    }
+    if (activeSound) {
+      const sound = activeSound;
+      activeSound = null;
+      await sound.stopAsync().catch(() => {});
+      await sound.unloadAsync().catch(() => {});
+    }
     if (fallbackOptions === false) {
+      await releaseVoiceAudioFocus(requestId);
       callbacks?.onFallback?.('generated_voice_error');
       return;
     }
     ensureVoiceAudioMode().catch(() => {});
     const voice = await bestDeviceVoiceId();
-    Speech.speak(clean, {
-      rate: 0.9,
-      pitch: 1,
-      language: 'en-US',
-      ...(voice ? { voice } : {}),
-      ...(fallbackOptions ?? {}),
-      onStart: () => callbacks?.onStart?.('device_tts'),
-      onDone: () => callbacks?.onFinish?.('device_tts'),
-      onStopped: () => callbacks?.onFinish?.('device_tts'),
-      onError: () => callbacks?.onFinish?.('device_tts'),
-    });
+    if (requestId !== voiceRequestId) {
+      await releaseVoiceAudioFocus(requestId);
+      return;
+    }
+    let finished = false;
+    const finish = () => {
+      if (finished) return;
+      finished = true;
+      void releaseVoiceAudioFocus(requestId)
+        .finally(() => callbacks?.onFinish?.('device_tts'));
+    };
+    try {
+      Speech.speak(clean, {
+        rate: 0.9,
+        pitch: 1,
+        language: 'en-US',
+        ...(voice ? { voice } : {}),
+        ...(fallbackOptions ?? {}),
+        onStart: () => callbacks?.onStart?.('device_tts'),
+        onDone: finish,
+        onStopped: finish,
+        onError: finish,
+      });
+    } catch {
+      await releaseVoiceAudioFocus(requestId);
+      callbacks?.onFinish?.('device_tts');
+    }
   }
 }

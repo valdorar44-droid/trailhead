@@ -2,8 +2,8 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.7',
-    runtimeVersion: 'native-1.0.7',
+    version: '1.0.8',
+    runtimeVersion: 'native-1.0.8-originals1',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',
@@ -33,7 +33,7 @@ module.exports = {
       },
     },
     android: {
-      runtimeVersion: 'native-1.0.7-car1',
+      runtimeVersion: 'native-1.0.8-car2-originals1',
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0c0f14',
@@ -89,6 +89,7 @@ module.exports = {
         },
       ],
       'expo-asset',
+      'expo-audio',
       'expo-apple-authentication',
       'expo-font',
       [

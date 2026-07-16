@@ -11,6 +11,7 @@ import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow } from '@/components/TrailheadUI';
+import { OriginalsContextCard, OriginalsShelf } from '@/components/originals';
 import {
   EXPLORE_CATEGORY_CHIPS,
   ExploreCategoryFilterSheet,
@@ -4692,21 +4693,25 @@ function GuideScreenContent() {
     const experiences = exploreExperiencesById[place.id] ?? [];
     const loading = exploreExperienceLoadingId === place.id && experiences.length === 0;
     const error = exploreExperienceErrors[place.id];
-    if (!loading && !error && experiences.length === 0) return null;
     return (
-      <ExploreExperiencesRail
-        experiences={experiences}
-        loading={loading}
-        error={error}
-        emptySubtitle={`Near ${place.summary.title}`}
-        mediaUrl={mediaUrl}
-        onOpen={openExperienceDetail}
-        onSave={saveExperienceToPlanner}
-        saveActionLabel={activeTrip ? 'Add to trip' : 'Start trip'}
-        onShowArea={showExperienceOnMap}
-        initialVisible={12}
-        showMoreStep={12}
-      />
+      <>
+        <OriginalsContextCard context={`${place.summary.title} ${place.summary.region || ''}`} />
+        {loading || error || experiences.length ? (
+          <ExploreExperiencesRail
+            experiences={experiences}
+            loading={loading}
+            error={error}
+            emptySubtitle={`Near ${place.summary.title}`}
+            mediaUrl={mediaUrl}
+            onOpen={openExperienceDetail}
+            onSave={saveExperienceToPlanner}
+            saveActionLabel={activeTrip ? 'Add to trip' : 'Start trip'}
+            onShowArea={showExperienceOnMap}
+            initialVisible={12}
+            showMoreStep={12}
+          />
+        ) : null}
+      </>
     );
   }
 
@@ -5255,6 +5260,7 @@ function GuideScreenContent() {
                 : undefined}
               onSortCycle={cycleExploreSort}
             />
+            {!guidedCategoryActive ? <OriginalsShelf query={exploreQuery} /> : null}
             {!!exploreCatalogNotice && (
               <View style={s.catalogNotice}>
                 <Ionicons name="cloud-offline-outline" size={16} color={C.text3} />

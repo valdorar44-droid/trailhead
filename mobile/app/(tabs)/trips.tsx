@@ -27,6 +27,7 @@ import {
 } from '@/lib/tripRepository';
 import AvailabilityWatchManager from '@/components/trips/AvailabilityWatchManager';
 import SavedItemsSection from '@/components/trips/SavedItemsSection';
+import { OwnedOriginalsSection } from '@/components/originals';
 import TripActionSheet from '@/components/trips/TripActionSheet';
 import TripCard, { TripPreview } from '@/components/trips/TripCard';
 import TripFilterSegment from '@/components/trips/TripFilterSegment';
@@ -591,6 +592,7 @@ export default function TripsScreen() {
 
           {repositoryReady ? (
             <>
+              <OwnedOriginalsSection />
               {availabilityEnabled ? (
                 <AvailabilityWatchManager signedIn={Boolean(userId)} knownActiveCount={knownActiveWatchCount} />
               ) : null}

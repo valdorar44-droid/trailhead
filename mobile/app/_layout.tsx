@@ -49,6 +49,7 @@ import {
 } from '@/lib/tripRepositorySync';
 import { accountRecoveryContext } from '@/lib/tripRepository/accountRecovery';
 import { routeBuilderRequestFromGeoUrl } from '@/lib/carNavigationIntent';
+import { OriginalsRuntimeProvider } from '@/lib/originals/runtime';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -673,6 +674,7 @@ export default function RootLayout() {
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
+      <OriginalsRuntimeProvider>
       <StatusBar style={themeMode === 'dark' ? 'light' : 'dark'} />
       <Stack screenOptions={{ headerShown: false }} />
       <WelcomeGate
@@ -711,6 +713,7 @@ export default function RootLayout() {
         </View>
       )}
       {launchLoaderVisible ? <TrailheadLaunchLoader /> : null}
+      </OriginalsRuntimeProvider>
     </GestureHandlerRootView>
   );
 }

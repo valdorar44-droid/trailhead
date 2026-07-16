@@ -411,6 +411,7 @@ export function ExploreDetailSheet({
   highlightedSentence,
   storyScrollRef,
   campgroundsSlot,
+  experiencesSlot,
   relatedSlot,
   weatherSlot,
   weather,
@@ -1291,6 +1292,7 @@ export function ExploreDetailSheet({
             <ExpandableText value={aboutCopy} textStyle={[styles.copyBody, { color: C.text2 }]} previewChars={520} />
           </View>
         )}
+        {experiencesSlot}
         <View style={styles.moduleGrid}>
           {visibleModules.map(module => {
             const imageCandidates = module.imageCandidates?.length ? module.imageCandidates : module.imageUrl ? [module.imageUrl] : [];

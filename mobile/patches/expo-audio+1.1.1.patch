@@ -1,0 +1,130 @@
+diff --git a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
+index 320062e..644734b 100644
+--- a/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
++++ b/node_modules/expo-audio/android/src/main/java/expo/modules/audio/AudioPlayer.kt
+@@ -218,7 +218,8 @@ class AudioPlayer(
+       "isLoaded" to if (ref.playbackState == Player.STATE_ENDED) true else isLoaded,
+       "playbackRate" to ref.playbackParameters.speed,
+       "shouldCorrectPitch" to preservesPitch,
+-      "isBuffering" to isBuffering
++      "isBuffering" to isBuffering,
++      "isPausedByInterruption" to isPaused
+     )
+   }
+ 
+diff --git a/node_modules/expo-audio/build/Audio.types.d.ts b/node_modules/expo-audio/build/Audio.types.d.ts
+index 752f8d1..3bc8361 100644
+--- a/node_modules/expo-audio/build/Audio.types.d.ts
++++ b/node_modules/expo-audio/build/Audio.types.d.ts
+@@ -157,6 +157,8 @@ export type AudioStatus = {
+     didJustFinish: boolean;
+     /** Whether the player is currently buffering data. */
+     isBuffering: boolean;
++    /** Whether native audio focus, such as a call or alarm, paused playback. */
++    isPausedByInterruption?: boolean;
+     /** Whether the audio has finished loading and is ready to play. */
+     isLoaded: boolean;
+     /** Current playback rate (1.0 = normal speed). */
+diff --git a/node_modules/expo-audio/ios/AudioModule.swift b/node_modules/expo-audio/ios/AudioModule.swift
+index 938f985..f3c938c 100644
+--- a/node_modules/expo-audio/ios/AudioModule.swift
++++ b/node_modules/expo-audio/ios/AudioModule.swift
+@@ -392,7 +392,12 @@ public class AudioModule: Module {
+           playerVolumes[player.id] = player.ref.volume
+           player.ref.volume *= 0.5
+         case .doNotMix, .mixWithOthers:
++          player.isPausedByInterruption = true
+           player.ref.pause()
++          player.updateStatus(with: [
++            "playing": false,
++            "isPausedByInterruption": true
++          ])
+         }
+       }
+     }
+@@ -462,7 +467,12 @@ public class AudioModule: Module {
+     registry.allPlayers.values.forEach { player in
+       if player.isPlaying {
+         player.wasPlaying = true
++        player.isPausedByInterruption = false
+         player.ref.pause()
++        player.updateStatus(with: [
++          "playing": false,
++          "isPausedByInterruption": false
++        ])
+       }
+     }
+   }
+diff --git a/node_modules/expo-audio/ios/AudioPlayer.swift b/node_modules/expo-audio/ios/AudioPlayer.swift
+index 1dbce09..2878af4 100644
+--- a/node_modules/expo-audio/ios/AudioPlayer.swift
++++ b/node_modules/expo-audio/ios/AudioPlayer.swift
+@@ -16,6 +16,7 @@ public class AudioPlayer: SharedRef<AVPlayer> {
+   var currentRate: Float = 0.0
+   let interval: Double
+   var wasPlaying = false
++  var isPausedByInterruption = false
+   var isPaused: Bool {
+     ref.rate == 0.0
+   }
+@@ -61,6 +62,7 @@ public class AudioPlayer: SharedRef<AVPlayer> {
+   }
+ 
+   func play(at rate: Float) {
++    isPausedByInterruption = false
+     addPlaybackEndNotification()
+     registerTimeObserver()
+     ref.playImmediately(atRate: rate)
+@@ -104,7 +106,8 @@ public class AudioPlayer: SharedRef<AVPlayer> {
+       "isLoaded": isLoaded,
+       "playbackRate": rate,
+       "shouldCorrectPitch": shouldCorrectPitch,
+-      "isBuffering": isBuffering
++      "isBuffering": isBuffering,
++      "isPausedByInterruption": isPausedByInterruption
+     ]
+   }
+ 
+diff --git a/node_modules/expo-audio/ios/MediaController.swift b/node_modules/expo-audio/ios/MediaController.swift
+index 2dd3fb2..e892bd2 100644
+--- a/node_modules/expo-audio/ios/MediaController.swift
++++ b/node_modules/expo-audio/ios/MediaController.swift
+@@ -144,7 +144,12 @@ class MediaController {
+         return .commandFailed
+       }
+ 
++      player.isPausedByInterruption = false
+       player.ref.pause()
++      player.updateStatus(with: [
++        "playing": false,
++        "isPausedByInterruption": false
++      ])
+       return .success
+     }
+ 
+@@ -154,7 +159,12 @@ class MediaController {
+       }
+ 
+       if player.isPlaying {
++        player.isPausedByInterruption = false
+         player.ref.pause()
++        player.updateStatus(with: [
++          "playing": false,
++          "isPausedByInterruption": false
++        ])
+       } else {
+         player.play(at: Float(player.currentRate > 0 ? player.currentRate : 1.0))
+       }
+diff --git a/node_modules/expo-audio/src/Audio.types.ts b/node_modules/expo-audio/src/Audio.types.ts
+index e44352b..d28ca57 100644
+--- a/node_modules/expo-audio/src/Audio.types.ts
++++ b/node_modules/expo-audio/src/Audio.types.ts
+@@ -168,6 +168,8 @@ export type AudioStatus = {
+   didJustFinish: boolean;
+   /** Whether the player is currently buffering data. */
+   isBuffering: boolean;
++  /** Whether native audio focus, such as a call or alarm, paused playback. */
++  isPausedByInterruption?: boolean;
+   /** Whether the audio has finished loading and is ready to play. */
+   isLoaded: boolean;
+   /** Current playback rate (1.0 = normal speed). */

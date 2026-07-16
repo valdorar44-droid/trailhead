@@ -1,0 +1,205 @@
+{
+  "pack_id": "original_moab_canyons_to_sky",
+  "slug": "moab-canyons-to-the-sky",
+  "title": "Moab: Canyons to the Sky",
+  "summary": "A draft Trailhead Original for a paved Moab scenic drive. Editorial copy, route geometry, access details, timing, and triggers require source review and an in-person field drive before publication.",
+  "price_credits": 0,
+  "coverage_region": "north_america",
+  "public_metadata": {
+    "pilot": true,
+    "duration_hours": 5,
+    "story_count": 10,
+    "surface": "paved",
+    "editorial_notice": "DRAFT FIXTURE — NOT APPROVED FOR PUBLICATION"
+  },
+  "validation_metadata": {
+    "route_reviewed": false,
+    "cue_route_reviewed": false,
+    "trigger_drive_tested": false,
+    "narration_reviewed": false,
+    "audio_assets_reviewed": false,
+    "transcripts_reviewed": false,
+    "source_citations_reviewed": false,
+    "media_licenses_reviewed": false,
+    "safety_access_reviewed": false,
+    "season_reviewed": false,
+    "offline_bundle_reviewed": false
+  },
+  "template": {
+    "schema_version": 2,
+    "title": "Moab: Canyons to the Sky",
+    "summary": "Draft editable itinerary cloned with the free Original.",
+    "regions": ["UT"],
+    "route": {
+      "coordinates": [
+        [-109.5498, 38.5733],
+        [-109.7399, 38.4829],
+        [-109.8560, 38.4590],
+        [-109.5498, 38.5733]
+      ]
+    },
+    "days": [{"day": 1, "title": "Moab scenic drive"}],
+    "items": [
+      {"id": "moab_story_01", "title": "Moab departure", "type": "story"},
+      {"id": "moab_story_02", "title": "Colorado Plateau preview", "type": "story"},
+      {"id": "moab_story_03", "title": "High desert transition", "type": "story"},
+      {"id": "moab_story_04", "title": "Dead Horse Point approach", "type": "story"},
+      {"id": "moab_story_05", "title": "Mesa overlook", "type": "story"},
+      {"id": "moab_story_06", "title": "Island in the Sky approach", "type": "story"},
+      {"id": "moab_story_07", "title": "Canyon country geology", "type": "story"},
+      {"id": "moab_story_08", "title": "High mesa ecology", "type": "story"},
+      {"id": "moab_story_09", "title": "Return drive reflection", "type": "story"},
+      {"id": "moab_story_10", "title": "Moab arrival", "type": "story"}
+    ],
+    "notes": [],
+    "readiness": {"status": "source_review_required"},
+    "bookings": [],
+    "alerts": [],
+    "offline": {},
+    "visibility": "private"
+  },
+  "manifest": {
+    "schema_version": 1,
+    "locale": "en-US",
+    "title": "Moab: Canyons to the Sky",
+    "route": {
+      "profile": "driving",
+      "direction": "loop",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [-109.5498, 38.5733],
+          [-109.6500, 38.5400],
+          [-109.7399, 38.4829],
+          [-109.8560, 38.4590],
+          [-109.7000, 38.5200],
+          [-109.5498, 38.5733]
+        ]
+      },
+      "bounds": {"north": 38.70, "south": 38.30, "east": -109.45, "west": -109.95},
+      "distance_m": 220000.0,
+      "duration_s": 18000.0
+    },
+    "stops": [
+      {
+        "id": "moab_story_01", "sequence": 1, "title": "Moab departure",
+        "coordinates": {"lat": 38.5733, "lng": -109.5498},
+        "transcript": "PLACEHOLDER — Write and fact-check the opening orientation, safety reminder, and route context before publication.",
+        "audio_asset_id": "moab_audio_01", "audio_duration_s": 75.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 0.0, "route_progress_end_m": 8000.0},
+        "citations": [{"title": "Canyonlands National Park", "url": "https://www.nps.gov/cany/index.htm", "publisher": "National Park Service"}]
+      },
+      {
+        "id": "moab_story_02", "sequence": 2, "title": "Colorado Plateau preview",
+        "coordinates": {"lat": 38.5500, "lng": -109.6200},
+        "transcript": "PLACEHOLDER — Develop a sourced Colorado Plateau story and verify its timing on the actual drive before publication.",
+        "audio_asset_id": "moab_audio_02", "audio_duration_s": 90.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 16000.0, "route_progress_end_m": 28000.0},
+        "citations": [{"title": "Canyonlands Nature", "url": "https://www.nps.gov/cany/learn/nature/index.htm", "publisher": "National Park Service"}]
+      },
+      {
+        "id": "moab_story_03", "sequence": 3, "title": "High desert transition",
+        "coordinates": {"lat": 38.5200, "lng": -109.6800},
+        "transcript": "PLACEHOLDER — Write a source-reviewed high-desert transition story; do not treat this draft as visitor guidance.",
+        "audio_asset_id": "moab_audio_03", "audio_duration_s": 90.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 35000.0, "route_progress_end_m": 48000.0},
+        "citations": [{"title": "Canyonlands Nature", "url": "https://www.nps.gov/cany/learn/nature/index.htm", "publisher": "National Park Service"}]
+      },
+      {
+        "id": "moab_story_04", "sequence": 4, "title": "Dead Horse Point approach",
+        "coordinates": {"lat": 38.4829, "lng": -109.7399},
+        "transcript": "PLACEHOLDER — Confirm park access, fees, road conditions, and all historical claims with official sources and field review.",
+        "audio_asset_id": "moab_audio_04", "audio_duration_s": 105.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 54000.0, "route_progress_end_m": 68000.0},
+        "citations": [{"title": "Dead Horse Point State Park", "url": "https://stateparks.utah.gov/parks/dead-horse/", "publisher": "Utah State Parks"}]
+      },
+      {
+        "id": "moab_story_05", "sequence": 5, "title": "Mesa overlook",
+        "coordinates": {"lat": 38.4700, "lng": -109.7800},
+        "transcript": "PLACEHOLDER — Create an overlook story only after verifying the safe stopping location, sight lines, and cited facts.",
+        "audio_asset_id": "moab_audio_05", "audio_duration_s": 90.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 72000.0, "route_progress_end_m": 85000.0},
+        "citations": [{"title": "Dead Horse Point State Park", "url": "https://stateparks.utah.gov/parks/dead-horse/", "publisher": "Utah State Parks"}]
+      },
+      {
+        "id": "moab_story_06", "sequence": 6, "title": "Island in the Sky approach",
+        "coordinates": {"lat": 38.4590, "lng": -109.8560},
+        "transcript": "PLACEHOLDER — Source and field-check the Island in the Sky orientation, current access rules, and trigger placement.",
+        "audio_asset_id": "moab_audio_06", "audio_duration_s": 105.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 90000.0, "route_progress_end_m": 108000.0},
+        "citations": [{"title": "Island in the Sky", "url": "https://www.nps.gov/cany/planyourvisit/islandinthesky.htm", "publisher": "National Park Service"}]
+      },
+      {
+        "id": "moab_story_07", "sequence": 7, "title": "Canyon country geology",
+        "coordinates": {"lat": 38.4800, "lng": -109.8200},
+        "transcript": "PLACEHOLDER — Commission a fact-checked geology script with primary sources and remove this placeholder before approval.",
+        "audio_asset_id": "moab_audio_07", "audio_duration_s": 120.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 116000.0, "route_progress_end_m": 132000.0},
+        "citations": [{"title": "Canyonlands Geology", "url": "https://www.nps.gov/cany/learn/nature/geologicformations.htm", "publisher": "National Park Service"}]
+      },
+      {
+        "id": "moab_story_08", "sequence": 8, "title": "High mesa ecology",
+        "coordinates": {"lat": 38.5100, "lng": -109.7500},
+        "transcript": "PLACEHOLDER — Draft an ecology story from current official sources and verify that it does not distract at this road segment.",
+        "audio_asset_id": "moab_audio_08", "audio_duration_s": 90.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 142000.0, "route_progress_end_m": 157000.0},
+        "citations": [{"title": "Canyonlands Plants", "url": "https://www.nps.gov/cany/learn/nature/plants.htm", "publisher": "National Park Service"}]
+      },
+      {
+        "id": "moab_story_09", "sequence": 9, "title": "Return drive reflection",
+        "coordinates": {"lat": 38.5400, "lng": -109.6500},
+        "transcript": "PLACEHOLDER — Write a return-drive reflection after field testing story spacing, audio focus, and route timing.",
+        "audio_asset_id": "moab_audio_09", "audio_duration_s": 75.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 170000.0, "route_progress_end_m": 188000.0},
+        "citations": [{"title": "Plan Your Canyonlands Visit", "url": "https://www.nps.gov/cany/planyourvisit/index.htm", "publisher": "National Park Service"}]
+      },
+      {
+        "id": "moab_story_10", "sequence": 10, "title": "Moab arrival",
+        "coordinates": {"lat": 38.5733, "lng": -109.5498},
+        "transcript": "PLACEHOLDER — Write the closing story and verify the arrival trigger, parking assumptions, and current local guidance.",
+        "audio_asset_id": "moab_audio_10", "audio_duration_s": 75.0,
+        "trigger": {"enter_radius_m": 250.0, "exit_radius_m": 375.0, "lead_time_s": 0.0, "route_progress_start_m": 205000.0, "route_progress_end_m": 220000.0},
+        "citations": [{"title": "Moab Area Travel Information", "url": "https://www.discovermoab.com/", "publisher": "Grand County Economic Development"}]
+      }
+    ],
+    "assets": [
+      {"id": "moab_audio_01", "kind": "narration", "path": "placeholder://moab/audio/01.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_02", "kind": "narration", "path": "placeholder://moab/audio/02.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_03", "kind": "narration", "path": "placeholder://moab/audio/03.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_04", "kind": "narration", "path": "placeholder://moab/audio/04.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_05", "kind": "narration", "path": "placeholder://moab/audio/05.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_06", "kind": "narration", "path": "placeholder://moab/audio/06.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_07", "kind": "narration", "path": "placeholder://moab/audio/07.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_08", "kind": "narration", "path": "placeholder://moab/audio/08.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_09", "kind": "narration", "path": "placeholder://moab/audio/09.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"},
+      {"id": "moab_audio_10", "kind": "narration", "path": "placeholder://moab/audio/10.m4a", "mime_type": "audio/mp4", "bytes": 0, "sha256": "0000000000000000000000000000000000000000000000000000000000000000"}
+    ],
+    "offline_map": {
+      "region_id": "placeholder_moab_original_v1",
+      "bounds": {"north": 38.70, "south": 38.30, "east": -109.45, "west": -109.95},
+      "min_zoom": 6,
+      "max_zoom": 14,
+      "estimated_bytes": 0
+    },
+    "safety": {
+      "summary": "DRAFT — Confirm current road, weather, park, emergency, and accessibility guidance immediately before editorial approval.",
+      "emergency_note": "DRAFT — Replace with reviewed emergency guidance.",
+      "disclaimers": ["This fixture is not visitor guidance and must not be published as-is."]
+    },
+    "access": {
+      "surface": "paved",
+      "vehicle": "DRAFT — Verify the complete route with a standard passenger vehicle.",
+      "fees": "DRAFT — Confirm current park entrance fees from official sources.",
+      "accessibility_notes": "DRAFT — Complete an accessibility review before publication."
+    },
+    "season": {
+      "recommended_months": [3, 4, 5, 9, 10, 11],
+      "closures_note": "DRAFT — Check current closures and weather before publication and every trip."
+    },
+    "review": {
+      "editorial_status": "source_review_required",
+      "field_drive_completed_at": null,
+      "source_review_completed_at": null
+    }
+  }
+}

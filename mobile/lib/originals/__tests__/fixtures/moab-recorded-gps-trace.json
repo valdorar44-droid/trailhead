@@ -1,0 +1,91 @@
+{
+  "name": "Moab Originals recorded GPS regression trace",
+  "description": "Sanitized WGS84 samples from a drive trace, reduced to the state transitions needed by the trigger regression test.",
+  "route_origin": {
+    "lat": 38.5733,
+    "lng": -109.5498
+  },
+  "samples": [
+    {
+      "phase": "mid_route_start",
+      "lat": 38.5733,
+      "lng": -109.5383,
+      "accuracy_m": 12,
+      "heading_deg": 90,
+      "speed_mps": 12.1,
+      "timestamp_ms": 1784073601000
+    },
+    {
+      "phase": "poor_accuracy",
+      "lat": 38.57331,
+      "lng": -109.5382,
+      "accuracy_m": 146,
+      "heading_deg": 91,
+      "speed_mps": 11.8,
+      "timestamp_ms": 1784073602500
+    },
+    {
+      "phase": "off_route",
+      "lat": 38.5793,
+      "lng": -109.539,
+      "accuracy_m": 18,
+      "heading_deg": 89,
+      "speed_mps": 10.4,
+      "timestamp_ms": 1784073605000
+    },
+    {
+      "phase": "rejoin_arm",
+      "lat": 38.5733,
+      "lng": -109.539,
+      "accuracy_m": 10,
+      "heading_deg": 90,
+      "speed_mps": 11.2,
+      "timestamp_ms": 1784073608000
+    },
+    {
+      "phase": "story_2_trigger",
+      "lat": 38.5733,
+      "lng": -109.53895,
+      "accuracy_m": 9,
+      "heading_deg": 90,
+      "speed_mps": 11.5,
+      "timestamp_ms": 1784073611100
+    },
+    {
+      "phase": "story_2_duplicate_after_restart",
+      "lat": 38.5733,
+      "lng": -109.5389,
+      "accuracy_m": 11,
+      "heading_deg": 90,
+      "speed_mps": 11.3,
+      "timestamp_ms": 1784073614500
+    },
+    {
+      "phase": "story_3_arm",
+      "lat": 38.5733,
+      "lng": -109.5336,
+      "accuracy_m": 8,
+      "heading_deg": 89,
+      "speed_mps": 10.9,
+      "timestamp_ms": 1784073618000
+    },
+    {
+      "phase": "story_3_trigger",
+      "lat": 38.5733,
+      "lng": -109.53355,
+      "accuracy_m": 8,
+      "heading_deg": 90,
+      "speed_mps": 10.7,
+      "timestamp_ms": 1784073621100
+    },
+    {
+      "phase": "after_completion",
+      "lat": 38.5733,
+      "lng": -109.531,
+      "accuracy_m": 10,
+      "heading_deg": 90,
+      "speed_mps": 9.6,
+      "timestamp_ms": 1784073625000
+    }
+  ]
+}

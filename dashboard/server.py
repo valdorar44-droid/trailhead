@@ -1,6 +1,6 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
@@ -12,8 +12,8 @@ from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field, ValidationError
-from typing import Any, Literal, Optional
+from pydantic import BaseModel, Field, ValidationError, model_validator
+from typing import Annotated, Any, Literal, Optional
 import httpx
 import bcrypt as _bcrypt_lib
 from jose import jwt, JWTError
@@ -138,12 +138,25 @@ from db.store import (
     availability_monitor_policy, create_availability_monitor, get_availability_monitor,
     list_availability_monitors, cancel_availability_monitor,
     InsufficientTripPackCreditsError, FeaturedTripPackUnavailableError,
+    InsufficientOriginalCreditsError, OriginalAcquisitionConflictError,
+    FeaturedOriginalUnavailableError, MonthlyOriginalClaimUsedError,
+    ExplorerOriginalClaimRequiredError,
     MonthlyTripPackClaimUsedError, ExplorerTripPackClaimRequiredError,
-    save_authored_trip_pack_draft, get_authored_trip_pack_admin, list_authored_trip_packs_admin,
+    OriginalManifestAccessError,
+    save_authored_trip_pack_draft, get_authored_trip_pack_admin,
+    list_authored_trip_pack_versions_admin, list_authored_trip_packs_admin,
     publish_authored_trip_pack, list_published_trip_packs, get_published_trip_pack,
     select_featured_trip_pack, get_featured_trip_pack, acquire_authored_trip_pack,
     claim_featured_authored_trip_pack, list_owned_authored_trip_packs,
     restore_owned_authored_trip_packs, authored_trip_pack_release_validation,
+    validate_authored_original_draft, list_published_originals, get_published_original,
+    select_featured_original, get_featured_original, acquire_authored_original,
+    claim_featured_authored_original, get_published_original_version,
+    list_owned_authored_originals, restore_owned_authored_originals,
+    get_published_original_manifest,
+    save_authored_original_asset_record, list_authored_original_asset_records,
+    get_authored_original_asset_record_admin, get_published_original_asset_record,
+    validate_original_analytics_dimensions, original_transcript_sha256,
     upsert_route_intelligence_places, list_cached_places_near_samples,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
     upsert_trail_profile, get_trail_profile, list_trail_profiles_near,
@@ -316,6 +329,15 @@ EXPLORE_SERVING_INDEX = Path(
     or (Path(__file__).parent / "explore_serving_index_v2.json")
 )
 EXPLORE_ASSETS = Path(__file__).parent / "explore_assets"
+_DEFAULT_ORIGINALS_ASSET_DIR = (
+    Path("/data/originals/assets")
+    if Path("/data").exists()
+    else Path(__file__).resolve().parents[1] / "data" / "originals" / "assets"
+)
+ORIGINALS_ASSET_DIR = Path(
+    os.getenv("TRAILHEAD_ORIGINALS_ASSET_DIR")
+    or _DEFAULT_ORIGINALS_ASSET_DIR
+)
 OFFICIAL_DATA_DB = Path(__file__).resolve().parents[1] / "data" / "processed" / "trailhead_official_data.sqlite"
 CANONICAL_SERVING_DIR = Path(os.getenv("TRAILHEAD_CANONICAL_SERVING_DIR") or (Path(__file__).resolve().parents[1] / "data" / "processed" / "canonical_serving"))
 CANONICAL_CAMP_INDEX_ENV = os.getenv("TRAILHEAD_CANONICAL_CAMP_INDEX")
@@ -9476,6 +9498,7 @@ async def product_features(user: dict | None = Depends(_optional_user)):
         "trips_tab": _product_feature_enabled("TRAILHEAD_TRIPS_TAB_ENABLED", user),
         "availability_monitors": _product_feature_enabled("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user),
         "trip_packs": _product_feature_enabled("TRAILHEAD_TRIP_PACKS_ENABLED", user),
+        "originals": _product_feature_enabled("TRAILHEAD_ORIGINALS_ENABLED", user),
         "community_publications": _product_feature_enabled("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user),
         "digest_preferences": _product_feature_enabled("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user),
     }
@@ -10487,6 +10510,15 @@ class AccountTripRequest(BaseModel):
     source: str = "web"
 
 
+class TripExperienceRef(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    kind: Literal["trailhead_original"]
+    pack_id: str = Field(min_length=1, max_length=240)
+    version: int = Field(ge=1)
+    manifest_id: str = Field(min_length=1, max_length=240)
+
+
 class TripDocumentPayload(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -10511,6 +10543,9 @@ class TripDocumentPayload(BaseModel):
     offline: dict = Field(default_factory=dict)
     visibility: Literal["private", "shared", "public"] = "private"
     source: str = Field(default="trailhead", max_length=80)
+    # Returned on cloned Originals. Writes are rejected by the store when a
+    # client tries to set or change this server-owned field.
+    experience_ref: Optional[TripExperienceRef] = None
     legacy_v1: Optional[dict] = None
     created_at: Optional[int] = Field(default=None, ge=0)
     updated_at: Optional[int] = Field(default=None, ge=0)
@@ -10571,6 +10606,160 @@ class CommunityPublicationModerate(BaseModel):
     note: Optional[str] = Field(default=None, max_length=1000)
 
 
+class OriginalCoordinatesV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+
+
+class OriginalBoundsV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    north: float = Field(ge=-90, le=90)
+    south: float = Field(ge=-90, le=90)
+    east: float = Field(ge=-180, le=180)
+    west: float = Field(ge=-180, le=180)
+
+
+class OriginalRouteGeometryV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    type: Literal["LineString"] = "LineString"
+    coordinates: list[list[float]] = Field(min_length=2, max_length=20000)
+
+
+class OriginalRouteV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    profile: Literal["driving"] = "driving"
+    direction: Literal["one_way", "loop"]
+    geometry: OriginalRouteGeometryV1
+    bounds: OriginalBoundsV1
+    distance_m: float = Field(gt=0)
+    duration_s: float = Field(gt=0)
+
+
+class OriginalTriggerV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    enter_radius_m: float = Field(default=250, ge=50, le=1000)
+    exit_radius_m: float = Field(default=375, ge=100)
+    lead_time_s: float = Field(default=0, ge=0, le=120)
+    route_progress_start_m: float = Field(ge=0)
+    route_progress_end_m: float = Field(ge=0)
+    approach_bearing_deg: Optional[float] = Field(default=None, ge=0, lt=360)
+    bearing_tolerance_deg: Optional[float] = Field(default=None, ge=1, le=180)
+
+
+class OriginalCitationV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    title: str = Field(min_length=1, max_length=300)
+    url: str = Field(pattern=r"^https://", max_length=2000)
+    publisher: Optional[str] = Field(default=None, max_length=200)
+    reviewed_at: Optional[str] = Field(default=None, max_length=40)
+
+
+class OriginalStopV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    id: str = Field(min_length=1, max_length=240)
+    sequence: int = Field(ge=1)
+    title: str = Field(min_length=1, max_length=200)
+    coordinates: OriginalCoordinatesV1
+    explore_place_id: Optional[str] = Field(default=None, max_length=240)
+    transcript: str = Field(min_length=1, max_length=20000)
+    audio_asset_id: str = Field(min_length=1, max_length=240)
+    audio_duration_s: float = Field(gt=0, le=3600)
+    artwork_asset_id: Optional[str] = Field(default=None, max_length=240)
+    trigger: OriginalTriggerV1
+    citations: list[OriginalCitationV1] = Field(min_length=1, max_length=50)
+
+
+class OriginalAssetV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    id: str = Field(min_length=1, max_length=240)
+    kind: Literal["narration", "image", "transcript", "route", "other"]
+    path: str = Field(min_length=1, max_length=2000)
+    mime_type: str = Field(min_length=1, max_length=120)
+    bytes: int = Field(ge=0)
+    sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+
+class OriginalOfflineMapV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    region_id: str = Field(min_length=1, max_length=240)
+    bounds: OriginalBoundsV1
+    min_zoom: int = Field(ge=0, le=24)
+    max_zoom: int = Field(ge=0, le=24)
+    estimated_bytes: int = Field(ge=0)
+
+
+class OriginalSafetyV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    summary: str = Field(min_length=1, max_length=4000)
+    emergency_note: str = Field(default="", max_length=4000)
+    disclaimers: list[str] = Field(default_factory=list, max_length=50)
+
+
+class OriginalAccessV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    surface: Literal["paved", "mixed", "unpaved"]
+    vehicle: str = Field(min_length=1, max_length=500)
+    fees: str = Field(default="", max_length=1000)
+    accessibility_notes: str = Field(default="", max_length=2000)
+
+
+class OriginalSeasonV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    recommended_months: list[Annotated[int, Field(ge=1, le=12)]] = Field(min_length=1, max_length=12)
+    closures_note: str = Field(default="", max_length=2000)
+
+    @model_validator(mode="after")
+    def unique_recommended_months(self):
+        if len(set(self.recommended_months)) != len(self.recommended_months):
+            raise ValueError("recommended_months must be unique")
+        return self
+
+
+class OriginalReviewV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    editorial_status: Literal["draft", "source_review_required", "ready_for_review", "approved"]
+    field_drive_completed_at: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        pattern=r"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$",
+    )
+    source_review_completed_at: Optional[str] = Field(
+        default=None,
+        max_length=40,
+        pattern=r"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$",
+    )
+
+
+class OriginalManifestV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[1] = 1
+    locale: str = Field(default="en-US", min_length=2, max_length=20)
+    title: str = Field(min_length=1, max_length=200)
+    route: OriginalRouteV1
+    stops: list[OriginalStopV1] = Field(min_length=1, max_length=100)
+    assets: list[OriginalAssetV1] = Field(default_factory=list, max_length=500)
+    offline_map: OriginalOfflineMapV1
+    safety: OriginalSafetyV1
+    access: OriginalAccessV1
+    season: OriginalSeasonV1
+    review: OriginalReviewV1
+
+
 class AuthoredTripPackDraftRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -10583,6 +10772,37 @@ class AuthoredTripPackDraftRequest(BaseModel):
     public_metadata: dict = Field(default_factory=dict)
     validation_metadata: dict = Field(default_factory=dict)
     template: TripDocumentPayload
+
+
+class AuthoredOriginalDraftRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    pack_id: Optional[str] = Field(default=None, max_length=240)
+    slug: str = Field(min_length=1, max_length=120)
+    title: str = Field(min_length=1, max_length=200)
+    summary: str = Field(min_length=1, max_length=2000)
+    price_credits: Literal[0, 250, 500, 900]
+    coverage_region: Literal["north_america", "global"]
+    public_metadata: dict = Field(default_factory=dict)
+    validation_metadata: dict = Field(default_factory=dict)
+    template: TripDocumentPayload
+    manifest: OriginalManifestV1
+
+
+class OriginalAssetUploadRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    kind: Literal["narration", "image", "transcript", "route", "other"]
+    mime_type: str = Field(min_length=3, max_length=160)
+    file_name: Optional[str] = Field(default=None, max_length=240)
+    content_base64: str = Field(min_length=1, max_length=90_000_000)
+    transcript: Optional[str] = Field(default=None, max_length=20000)
+
+
+class OriginalCartesiaAssetRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    text: str = Field(min_length=1, max_length=10000)
 
 
 class AuthoredTripPackFeatureRequest(BaseModel):
@@ -12033,6 +12253,20 @@ def _raise_account_store_error(exc: Exception) -> None:
             "code": "idempotency_conflict",
             "message": "This request key was already used for a different change.",
         })
+    if isinstance(exc, InsufficientOriginalCreditsError):
+        raise HTTPException(402, {
+            "code": "original_credits",
+            "message": f"This Trailhead Original needs {exc.credits_needed} credits.",
+            "credits_needed": exc.credits_needed,
+            "credit_balance": exc.balance,
+            "list_price_credits": exc.list_price,
+            "earn_hint": True,
+        })
+    if isinstance(exc, OriginalAcquisitionConflictError):
+        raise HTTPException(409, {
+            "code": "original_idempotency_conflict",
+            "message": "This request key was already used for a different Original acquisition.",
+        })
     if isinstance(exc, InsufficientTripPackCreditsError):
         raise HTTPException(402, {
             "code": "trip_pack_credits",
@@ -12041,6 +12275,22 @@ def _raise_account_store_error(exc: Exception) -> None:
             "credit_balance": exc.balance,
             "list_price_credits": exc.list_price,
             "earn_hint": True,
+        })
+    if isinstance(exc, FeaturedOriginalUnavailableError):
+        raise HTTPException(404, {
+            "code": "featured_original_unavailable",
+            "message": "This month's featured Trailhead Original is not available yet.",
+        })
+    if isinstance(exc, MonthlyOriginalClaimUsedError):
+        raise HTTPException(409, {
+            "code": "featured_original_claim_used",
+            "message": "This month's featured Trailhead experience has already been claimed.",
+            "period_month": exc.period_month,
+        })
+    if isinstance(exc, ExplorerOriginalClaimRequiredError):
+        raise HTTPException(403, {
+            "code": "explorer_required",
+            "message": "The featured monthly Trailhead Original is included with Explorer.",
         })
     if isinstance(exc, FeaturedTripPackUnavailableError):
         raise HTTPException(404, {
@@ -12057,6 +12307,11 @@ def _raise_account_store_error(exc: Exception) -> None:
         raise HTTPException(403, {
             "code": "explorer_required",
             "message": "The featured monthly trip pack is included with Explorer.",
+        })
+    if isinstance(exc, OriginalManifestAccessError):
+        raise HTTPException(403, {
+            "code": "original_access_required",
+            "message": "Acquire this Trailhead Original before downloading it.",
         })
     if isinstance(exc, InsufficientMonitorCreditsError):
         raise HTTPException(402, {
@@ -12374,9 +12629,438 @@ def _save_authored_pack_request(
         _raise_account_store_error(exc)
 
 
+def _save_authored_original_request(
+    pack_id: str,
+    body: AuthoredOriginalDraftRequest,
+    admin: dict,
+) -> dict:
+    template = body.template.model_dump(mode="json", exclude_none=True)
+    manifest = body.manifest.model_dump(mode="json", exclude_none=True)
+    try:
+        return save_authored_trip_pack_draft(
+            pack_id=pack_id,
+            slug=body.slug,
+            title=body.title,
+            summary=body.summary,
+            price_credits=body.price_credits,
+            coverage_region=body.coverage_region,
+            public_metadata=body.public_metadata,
+            validation_metadata=body.validation_metadata,
+            template=template,
+            admin_user_id=admin["id"],
+            content_kind="original_drive",
+            original_manifest=manifest,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+def _original_asset_bytes_match_kind(kind: str, mime_type: str, content: bytes) -> bool:
+    if kind == "narration":
+        return bool(
+            mime_type == "audio/wav"
+            and content.startswith(b"RIFF")
+            and content[8:12] == b"WAVE"
+        )
+    if kind == "image":
+        if not mime_type.startswith("image/"):
+            return False
+        return mime_type == "image/png" and content.startswith(b"\x89PNG\r\n\x1a\n")
+    if kind == "transcript":
+        return mime_type.startswith("text/") or mime_type in {"application/json", "application/x-subrip"}
+    if kind == "route":
+        return mime_type in {"application/json", "application/geo+json", "application/octet-stream"}
+    if kind == "other":
+        return mime_type in {"application/octet-stream", "application/pdf", "application/zip"}
+    return False
+
+
+def _persist_original_asset_bytes(
+    pack_id: str,
+    asset_id: str,
+    kind: str,
+    mime_type: str,
+    content: bytes,
+    file_name: str | None,
+    admin_user_id: int,
+    transcript: str | None = None,
+    generator_metadata: dict | None = None,
+) -> dict:
+    canonical_id = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,239}$")
+    if not canonical_id.fullmatch(str(pack_id or "")) or not canonical_id.fullmatch(str(asset_id or "")):
+        raise ValueError("Original and asset ids must be stable canonical identifiers")
+    if not get_authored_trip_pack_admin(pack_id, "original_drive"):
+        raise ValueError("Trailhead Original not found")
+    if not content:
+        raise ValueError("Original asset upload is empty")
+    if len(content) > 64 * 1024 * 1024:
+        raise ValueError("Original asset uploads are limited to 64 MB")
+    kind = str(kind or "").strip().lower()
+    mime_type = str(mime_type or "").split(";", 1)[0].strip().lower()
+    if not _original_asset_bytes_match_kind(kind, mime_type, content):
+        raise ValueError("Original asset bytes do not match the selected content type")
+    digest = hashlib.sha256(content).hexdigest()
+    suffix = Path(str(file_name or "")).suffix.lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
+        suffix = {
+            "audio/wav": ".wav",
+            "image/png": ".png",
+            "application/json": ".json",
+            "application/geo+json": ".geojson",
+            "text/plain": ".txt",
+        }.get(mime_type, ".bin")
+    asset_root = ORIGINALS_ASSET_DIR.resolve()
+    directory = (asset_root / pack_id / asset_id).resolve()
+    if directory != asset_root and asset_root not in directory.parents:
+        raise ValueError("Original asset path is invalid")
+    directory.mkdir(parents=True, exist_ok=True)
+    destination = directory / f"{digest}{suffix}"
+    destination_existed = destination.exists()
+    temporary: Path | None = None
+    try:
+        if not destination_existed:
+            temporary = directory / f".{digest}.{uuid.uuid4().hex}.tmp"
+            temporary.write_bytes(content)
+            os.replace(temporary, destination)
+            temporary = None
+        record = save_authored_original_asset_record(
+            pack_id=pack_id,
+            asset_id=asset_id,
+            kind=kind,
+            mime_type=mime_type,
+            storage_path=str(destination),
+            byte_count=len(content),
+            sha256=digest,
+            admin_user_id=admin_user_id,
+            transcript_sha256=(
+                original_transcript_sha256(transcript)
+                if kind == "narration" else None
+            ),
+            generator_metadata=generator_metadata,
+        )
+    except Exception:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+        if not destination_existed:
+            destination.unlink(missing_ok=True)
+        raise
+    record["preview_path"] = (
+        f"/api/admin/originals/{quote(pack_id, safe='')}/assets/"
+        f"{quote(asset_id, safe='')}/content"
+    )
+    return record
+
+
+@app.get("/api/admin/originals")
+async def api_admin_originals(admin: dict = Depends(_require_admin)):
+    return {"items": list_authored_trip_packs_admin("original_drive")}
+
+
+@app.put("/api/admin/originals/{pack_id}/assets/{asset_id}")
+async def api_admin_upload_original_asset(
+    pack_id: str,
+    asset_id: str,
+    body: OriginalAssetUploadRequest,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        encoded = body.content_base64.split(",", 1)[-1].strip()
+        content = base64.b64decode(encoded, validate=True)
+        return _persist_original_asset_bytes(
+            pack_id, asset_id, body.kind, body.mime_type, content,
+            body.file_name, admin["id"], transcript=body.transcript,
+        )
+    except (binascii.Error, ValueError) as exc:
+        _raise_account_store_error(
+            ValueError("Original asset content is not valid base64")
+            if isinstance(exc, binascii.Error) else exc
+        )
+
+
+@app.post("/api/admin/originals/{pack_id}/assets/{asset_id}/cartesia")
+async def api_admin_generate_original_narration(
+    pack_id: str,
+    asset_id: str,
+    body: OriginalCartesiaAssetRequest,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        clean = _normalize_tts_text(body.text, "guide")
+        audio = await _cartesia_tts(clean, "guide", container="wav")
+        return _persist_original_asset_bytes(
+            pack_id, asset_id, "narration", "audio/wav", audio,
+            f"{asset_id}.wav", admin["id"], transcript=clean,
+            generator_metadata={
+                "provider": "cartesia",
+                "model_id": _tts_model_id("guide"),
+                "voice_id": settings.cartesia_voice_id,
+                "generated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/admin/originals/{pack_id}/assets/{asset_id}/content")
+async def api_admin_original_asset_content(
+    pack_id: str,
+    asset_id: str,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        asset = get_authored_original_asset_record_admin(pack_id, asset_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not asset:
+        raise HTTPException(404, "Original asset not found")
+    headers = {"X-Content-Type-Options": "nosniff"}
+    if asset["kind"] not in {"narration", "image"}:
+        headers["Content-Disposition"] = f'attachment; filename="{asset["asset_id"]}"'
+    return FileResponse(
+        asset["storage_path"], media_type=asset["mime_type"], headers=headers,
+    )
+
+
+@app.post("/api/admin/originals", status_code=201)
+async def api_admin_create_original(
+    body: AuthoredOriginalDraftRequest,
+    admin: dict = Depends(_require_admin),
+):
+    pack_id = str(body.pack_id or f"original_{uuid.uuid4().hex}")
+    return _save_authored_original_request(pack_id, body, admin)
+
+
+@app.get("/api/admin/originals/{pack_id}/validate")
+async def api_admin_validate_original(pack_id: str, admin: dict = Depends(_require_admin)):
+    try:
+        result = validate_authored_original_draft(pack_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not result:
+        raise HTTPException(404, "Trailhead Original not found")
+    return result
+
+
+@app.get("/api/admin/originals/{pack_id}")
+async def api_admin_original(pack_id: str, admin: dict = Depends(_require_admin)):
+    try:
+        original = get_authored_trip_pack_admin(pack_id, "original_drive")
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not original:
+        raise HTTPException(404, "Trailhead Original not found")
+    original["uploaded_assets"] = list_authored_original_asset_records(pack_id)
+    original["versions"] = list_authored_trip_pack_versions_admin(
+        pack_id, "original_drive",
+    )
+    return original
+
+
+@app.put("/api/admin/originals/{pack_id}")
+async def api_admin_update_original(
+    pack_id: str,
+    body: AuthoredOriginalDraftRequest,
+    admin: dict = Depends(_require_admin),
+):
+    if body.pack_id and body.pack_id != pack_id:
+        raise HTTPException(400, "pack_id does not match the route")
+    return _save_authored_original_request(pack_id, body, admin)
+
+
+@app.post("/api/admin/originals/{pack_id}/publish")
+async def api_admin_publish_original(pack_id: str, admin: dict = Depends(_require_admin)):
+    try:
+        return publish_authored_trip_pack(
+            pack_id,
+            admin["id"],
+            required_content_kind="original_drive",
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.put("/api/admin/originals/featured/{period_month}")
+async def api_admin_feature_original(
+    period_month: str,
+    body: AuthoredTripPackFeatureRequest,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        return select_featured_original(
+            period_month, body.pack_id, admin["id"], body.version,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/original-assets/{pack_id}/{asset_id}/{sha256}")
+async def api_original_asset_content(
+    pack_id: str,
+    asset_id: str,
+    sha256: str,
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    try:
+        asset = get_published_original_asset_record(
+            pack_id, asset_id, sha256, user_id=user["id"] if user else None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not asset:
+        raise HTTPException(404, "Trailhead Original asset not found")
+    return FileResponse(
+        asset["storage_path"],
+        media_type=asset["mime_type"],
+        headers={
+            "Cache-Control": (
+                "public, max-age=31536000, immutable"
+                if asset.get("free_access")
+                else "private, max-age=31536000, immutable"
+            ),
+            "ETag": f'"{asset["sha256"]}"',
+            "X-Content-Type-Options": "nosniff",
+            **({
+                "Content-Disposition": f'attachment; filename="{asset["asset_id"]}"',
+            } if asset["kind"] not in {"narration", "image"} else {}),
+        },
+    )
+
+
+@app.get("/api/originals")
+async def api_public_originals(
+    limit: int = 50,
+    cursor: str = "",
+    coverage_region: str = "",
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    try:
+        return list_published_originals(
+            limit=limit,
+            cursor=cursor or None,
+            coverage_region=coverage_region or None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/originals/featured/current")
+async def api_featured_original(user: dict | None = Depends(_optional_user)):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    original = get_featured_original()
+    if not original:
+        raise HTTPException(404, "Featured Trailhead Original not found")
+    return original
+
+
+@app.post("/api/originals/featured/current/claim")
+async def api_claim_featured_original(
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    try:
+        return claim_featured_authored_original(user["id"], idempotency_key)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/originals/owned")
+async def api_owned_originals(user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    return {"items": list_owned_authored_originals(user["id"])}
+
+
+@app.post("/api/originals/restore")
+async def api_restore_originals(user: dict = Depends(_current_user)):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    return {"items": restore_owned_authored_originals(user["id"])}
+
+
+@app.get("/api/originals/{pack_id}/versions/{version}/manifest")
+async def api_original_manifest(
+    pack_id: str,
+    version: int,
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    try:
+        manifest = get_published_original_manifest(
+            pack_id,
+            version,
+            user_id=user["id"] if user else None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not manifest:
+        raise HTTPException(404, "Trailhead Original manifest not found")
+    return manifest
+
+
+@app.get("/api/originals/{pack_id}")
+async def api_public_original(
+    pack_id: str,
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    original = get_published_original(pack_id)
+    if not original:
+        raise HTTPException(404, "Trailhead Original not found")
+    return original
+
+
+@app.post("/api/originals/{pack_id}/acquire")
+async def api_acquire_original(
+    pack_id: str,
+    idempotency_key: Optional[str] = Header(default=None, alias="Idempotency-Key"),
+    user: dict | None = Depends(_optional_user),
+    version: Optional[int] = None,
+):
+    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    try:
+        original = (
+            get_published_original_version(pack_id, version, include_preview=False)
+            if version is not None
+            else get_published_original(pack_id, include_preview=False)
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not original:
+        raise HTTPException(404, "Trailhead Original version not found")
+    if not user:
+        if not original["free"]:
+            raise HTTPException(401, {
+                "code": "original_sign_in_required",
+                "message": "Sign in to acquire this paid Trailhead Original.",
+            })
+        return {
+            "guest_access": True,
+            "access_type": "guest_free",
+            "pack": original,
+            "manifest_path": (
+                f"/api/originals/{quote(original['id'], safe='')}/versions/"
+                f"{original['version']}/manifest"
+            ),
+        }
+    if not idempotency_key:
+        raise HTTPException(400, {
+            "code": "original_idempotency_key_required",
+            "message": "Idempotency-Key is required when acquiring an Original.",
+        })
+    try:
+        return acquire_authored_original(
+            user["id"], original["id"], idempotency_key, version=original["version"],
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
 @app.get("/api/admin/trip-packs")
 async def api_admin_trip_packs(admin: dict = Depends(_require_admin)):
-    return {"items": list_authored_trip_packs_admin()}
+    return {"items": list_authored_trip_packs_admin("trip_pack")}
 
 
 @app.post("/api/admin/trip-packs", status_code=201)
@@ -12396,7 +13080,7 @@ async def api_admin_trip_pack_release_validation(admin: dict = Depends(_require_
 @app.get("/api/admin/trip-packs/{pack_id}")
 async def api_admin_trip_pack(pack_id: str, admin: dict = Depends(_require_admin)):
     try:
-        pack = get_authored_trip_pack_admin(pack_id)
+        pack = get_authored_trip_pack_admin(pack_id, "trip_pack")
     except Exception as exc:
         _raise_account_store_error(exc)
     if not pack:
@@ -12418,7 +13102,9 @@ async def api_admin_update_trip_pack(
 @app.post("/api/admin/trip-packs/{pack_id}/publish")
 async def api_admin_publish_trip_pack(pack_id: str, admin: dict = Depends(_require_admin)):
     try:
-        return publish_authored_trip_pack(pack_id, admin["id"])
+        return publish_authored_trip_pack(
+            pack_id, admin["id"], required_content_kind="trip_pack",
+        )
     except Exception as exc:
         _raise_account_store_error(exc)
 
@@ -12600,6 +13286,10 @@ async def _mutate_trip_document_status(
         if trip.get("status") == "deleted" and status != "deleted":
             raise HTTPException(404, "Trip not found")
         trip["status"] = status
+        # Status endpoints operate on a server-fetched document. Strip the
+        # provenance echo so the shared client-write guard can preserve the
+        # stored immutable experience_ref itself.
+        trip.pop("experience_ref", None)
         return upsert_trip_document_v2(
             user["id"], trip_id, trip, expected_revision, idempotency_key,
         )
@@ -13150,14 +13840,14 @@ async def _purge_guide_audio_texts(*texts: str) -> int:
         purged += 1
     return purged
 
-async def _cartesia_tts(clean: str, mode: str) -> bytes:
+async def _cartesia_tts(clean: str, mode: str, container: str = "mp3") -> bytes:
     if not settings.cartesia_api_key:
         raise HTTPException(500, "CARTESIA_API_KEY not configured")
     payload = {
         "model_id": _tts_model_id(mode),
         "transcript": clean,
         "voice": {"mode": "id", "id": settings.cartesia_voice_id},
-        "output_format": {"container": "mp3", "sample_rate": CARTESIA_SAMPLE_RATE},
+        "output_format": {"container": container, "sample_rate": CARTESIA_SAMPLE_RATE},
         "generation_config": _tts_voice_settings(mode),
         "speed": "normal",
     }
@@ -13168,7 +13858,7 @@ async def _cartesia_tts(clean: str, mode: str) -> bytes:
             headers={
                 "Authorization": f"Bearer {settings.cartesia_api_key}",
                 "Cartesia-Version": settings.cartesia_version or "2026-03-01",
-                "Accept": "audio/mpeg",
+                "Accept": "audio/wav" if container == "wav" else "audio/mpeg",
                 "Content-Type": "application/json",
             },
             json=payload,
@@ -13756,6 +14446,140 @@ async def admin_place_photo_status(photo_id: int, body: dict, admin: dict = Depe
     return {"ok": True}
 
 
+ORIGINALS_ANALYTICS_RELEASE_COHORT = "originals_v1"
+ORIGINALS_ANALYTICS_EVENT_SPECS: dict[str, dict[str, object]] = {
+    "originals_download_result": {
+        "result": {"ready", "failed", "cancelled", "insufficient_storage", "corrupt"},
+    },
+    "originals_stop_outcome": {
+        "outcome": {"completed", "skipped", "missed", "replayed"},
+    },
+}
+
+_ANALYTICS_PRIVATE_KEYS = {
+    "coordinate", "coordinates", "geo", "geojson", "geometry", "gps", "gps_trace",
+    "lat", "latitude", "lng", "lon", "long", "longitude", "location", "locations",
+    "path", "polyline", "position", "positions", "route", "route_geometry", "route_path",
+    "route_points", "samples", "track", "travelled_route", "traveled_route", "waypoints",
+}
+
+
+def _analytics_key_is_private(value: object) -> bool:
+    key = re.sub(r"[^a-z0-9]+", "_", str(value or "").strip().lower()).strip("_")
+    if key in _ANALYTICS_PRIVATE_KEYS:
+        return True
+    if key.endswith(("_lat", "_latitude", "_lng", "_lon", "_longitude")):
+        return True
+    return any(fragment in key for fragment in (
+        "coordinate", "geometry", "geojson", "polyline", "gps_trace",
+        "route_path", "route_points", "travelled_route", "traveled_route",
+    ))
+
+
+def _scrub_analytics_event_data(value: object, *, depth: int = 0) -> object | None:
+    """Bound legacy analytics payloads and remove location/route-shaped fields."""
+    if depth > 3:
+        return None
+    if value is None or isinstance(value, (bool, int, float)):
+        return value
+    if isinstance(value, str):
+        return value[:240]
+    if isinstance(value, dict):
+        clean: dict[str, object] = {}
+        for raw_key, raw_value in list(value.items())[:40]:
+            if _analytics_key_is_private(raw_key):
+                continue
+            key = re.sub(r"[^a-zA-Z0-9_.:-]+", "_", str(raw_key).strip())[:80]
+            if not key:
+                continue
+            scrubbed = _scrub_analytics_event_data(raw_value, depth=depth + 1)
+            if scrubbed is not None:
+                clean[key] = scrubbed
+        return clean
+    if isinstance(value, (list, tuple)):
+        # Numeric arrays are a common representation for coordinates and route
+        # traces. Analytics has no need for raw arrays; keep only short labels.
+        labels = [item[:80] for item in value[:20] if isinstance(item, str)]
+        return labels or None
+    return None
+
+
+def _clean_originals_analytics_identifier(value: object, *, limit: int = 120) -> str:
+    clean = str(value or "").strip()
+    if len(clean) > limit or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,119}", clean):
+        return ""
+    return clean
+
+
+def _clean_originals_analytics_session(value: object) -> str | None:
+    # Originals analytics is deliberately coarse and does not retain a stable
+    # client, account, trip, or session grouping key.
+    return None
+
+
+def _originals_analytics_alias(kind: str, canonical_id: str) -> str:
+    digest = hmac.new(
+        settings.secret_key.encode("utf-8"),
+        f"originals:{kind}:{canonical_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:24]
+    return f"{kind}_{digest}"
+
+
+def _clean_originals_analytics_event_data(
+    event_type: str,
+    event_data: object,
+    *,
+    user_id: int | None = None,
+) -> dict[str, object]:
+    """Allow only non-location scalar dimensions for a branded Originals event."""
+    spec = ORIGINALS_ANALYTICS_EVENT_SPECS.get(event_type)
+    if spec is None:
+        raise HTTPException(400, "Unsupported analytics event")
+    source = event_data if isinstance(event_data, dict) else {}
+    clean: dict[str, object] = {"release_cohort": ORIGINALS_ANALYTICS_RELEASE_COHORT}
+    pack_id = _clean_originals_analytics_identifier(source.get("pack_id"))
+    if not pack_id:
+        raise HTTPException(400, "Invalid Originals analytics event")
+    clean["pack_id"] = pack_id
+    version = source.get("version")
+    if isinstance(version, int) and not isinstance(version, bool) and 1 <= version <= 1_000_000:
+        clean["version"] = version
+    else:
+        raise HTTPException(400, "Invalid Originals analytics event")
+    stop_id = _clean_originals_analytics_identifier(source.get("stop_id"))
+    if event_type == "originals_stop_outcome":
+        if not stop_id:
+            raise HTTPException(400, "Invalid Originals analytics event")
+        clean["stop_id"] = stop_id
+    for key, rule in spec.items():
+        value = source.get(key)
+        if rule == "count":
+            if isinstance(value, int) and not isinstance(value, bool):
+                clean[key] = max(0, min(value, 1_000))
+            else:
+                raise HTTPException(400, "Invalid Originals analytics event")
+        elif isinstance(rule, set) and value in rule:
+            clean[key] = value
+        else:
+            raise HTTPException(400, "Invalid Originals analytics event")
+    try:
+        canonical = validate_original_analytics_dimensions(
+            pack_id,
+            int(clean["version"]),
+            stop_id if event_type == "originals_stop_outcome" else None,
+            user_id,
+        )
+    except Exception:
+        canonical = False
+    if not canonical:
+        raise HTTPException(400, "Invalid Originals analytics identifiers")
+    clean["pack_id"] = _originals_analytics_alias("pack", pack_id)
+    if event_type == "originals_stop_outcome":
+        clean["stop_id"] = _originals_analytics_alias("stop", stop_id)
+    return clean
+
+
 @app.post("/api/analytics/event")
 async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depends(_optional_user)):
     event_type = re.sub(r"[^a-z0-9_.:-]+", "_", (body.event_type or "").strip().lower())[:80]
@@ -13769,10 +14593,20 @@ async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depen
         "welcome_walkthrough_seen",
         "welcome_walkthrough_cta",
     }
-    if event_type not in allowed_events and not event_type.startswith("phase0_"):
+    is_originals_event = event_type in ORIGINALS_ANALYTICS_EVENT_SPECS
+    if event_type not in allowed_events and not event_type.startswith("phase0_") and not is_originals_event:
         raise HTTPException(400, "Unsupported analytics event")
-    clean_session = re.sub(r"[^a-zA-Z0-9_.:-]+", "", (body.session_id or "").strip())[:120]
-    log_event(user["id"] if user else None, clean_session or None, event_type, body.event_data or {})
+    if is_originals_event:
+        clean_session = None
+        event_data = _clean_originals_analytics_event_data(
+            event_type, body.event_data, user_id=user["id"] if user else None,
+        )
+    else:
+        clean_session = re.sub(r"[^a-zA-Z0-9_.:-]+", "", (body.session_id or "").strip())[:120] or None
+        event_data = _scrub_analytics_event_data(body.event_data or {})
+        if not isinstance(event_data, dict):
+            event_data = {}
+    log_event(None if is_originals_event else (user["id"] if user else None), clean_session, event_type, event_data)
     return {"ok": True}
 
 
@@ -13782,6 +14616,9 @@ async def analytics_event(body: AnalyticsEventRequest, user: dict | None = Depen
 def get_config():
     return {
         "mapbox_token": settings.mapbox_token,
+        # Public rollout capability only; unlike account capabilities this does
+        # not include the separate admin preview bypass.
+        "originals_enabled": _server_feature_enabled("TRAILHEAD_ORIGINALS_ENABLED"),
         # Exposed so the mobile app can fetch vector tiles direct from Protomaps'
         # CDN (faster than proxying via Railway). Acceptable for early-stage —
         # rotate if abused. Free tier is 200k-1M tiles/month.

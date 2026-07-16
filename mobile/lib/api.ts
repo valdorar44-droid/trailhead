@@ -588,7 +588,11 @@ export const api = {
   adminDeleteReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}`, { method: 'DELETE' }),
   adminRemovePhoto:  (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/remove-photo`, { method: 'POST' }),
   adminExpireReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}/expire`, { method: 'POST' }),
-  getConfig: () => req<{ mapbox_token: string; protomaps_key?: string }>('/api/config'),
+  getConfig: () => req<{
+    mapbox_token: string;
+    protomaps_key?: string;
+    originals_enabled?: boolean;
+  }>('/api/config'),
   getExplorerConfig: () => req<ExtremeConfig>('/api/explorer/config'),
   getExtremeConfig: () => req<ExtremeConfig>('/api/extreme/config'),
   authorizeExplorerSession: (data: ExtremeSessionAuthorizeRequest) =>

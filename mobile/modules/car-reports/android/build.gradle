@@ -1,0 +1,25 @@
+apply plugin: 'com.android.library'
+
+group = 'expo.modules.trailheadcarreports'
+version = '1.0.0'
+
+def expoModulesCorePlugin = new File(project(":expo-modules-core").projectDir.absolutePath, "ExpoModulesCorePlugin.gradle")
+apply from: expoModulesCorePlugin
+applyKotlinExpoModulesCorePlugin()
+useCoreDependencies()
+useDefaultAndroidSdkVersions()
+
+android {
+  namespace "expo.modules.trailheadcarreports"
+
+  testOptions {
+    unitTests.returnDefaultValues = true
+  }
+}
+
+dependencies {
+  implementation "androidx.work:work-runtime-ktx:2.11.2"
+
+  testImplementation "junit:junit:4.13.2"
+  testImplementation "org.json:json:20260522"
+}

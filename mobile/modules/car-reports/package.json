@@ -1,0 +1,16 @@
+{
+  "name": "expo-trailhead-car-reports",
+  "version": "1.0.0",
+  "description": "Trailhead Android Auto report queue and secure session bridge",
+  "main": "src/index.ts",
+  "types": "src/index.ts",
+  "expo": {
+    "autolinking": {
+      "nativeModulesDir": "."
+    }
+  },
+  "peerDependencies": {
+    "expo": "*",
+    "expo-modules-core": "*"
+  }
+}

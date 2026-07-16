@@ -92,10 +92,10 @@ from db.store import (
     add_credits, deduct_credits, get_credit_history,
     get_user_report_count_today, get_report_credits_today,
     is_stripe_session_fulfilled, fulfill_stripe_purchase,
-    create_report, get_reports_near, get_reports_along_route,
+    create_report_idempotent, get_report_by_client_id, get_reports_near, get_reports_along_route,
     upvote_report, downvote_report, confirm_report,
     get_leaderboard, is_reporter_restricted, check_and_update_streak,
-    EXPIRY_BY_TYPE,
+    EXPIRY_BY_TYPE, report_max_observation_age,
     get_platform_stats, get_all_users, set_user_admin, ban_user,
     get_all_reports, expire_report, delete_report,
     get_all_trips, get_all_pins, delete_pin, ensure_admin_user,
@@ -19157,6 +19157,10 @@ class ReportRequest(BaseModel):
     description: Optional[str] = None
     severity: str = "moderate"
     photo_data: Optional[str] = None  # base64 jpeg
+    client_report_id: Optional[str] = Field(default=None, max_length=128)
+    observed_at: Optional[int] = None
+    source_surface: Optional[str] = Field(default=None, max_length=64)
+    accuracy_m: Optional[float] = Field(default=None, ge=0, le=10_000)
 
 @app.post("/api/reports")
 async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)):
@@ -19171,6 +19175,43 @@ async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)
     if body.photo_data and len(body.photo_data) > 2_000_000:
         raise HTTPException(400, "Photo too large (max 1.5 MB)")
     import time as _time
+    now = int(_time.time())
+    client_report_id = (body.client_report_id or "").strip() or None
+    if client_report_id and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", client_report_id):
+        raise HTTPException(400, "Invalid client report ID")
+    source_surface = (body.source_surface or "").strip() or None
+    if source_surface and not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,63}", source_surface):
+        raise HTTPException(400, "Invalid report source")
+
+    # Replay detection intentionally precedes restriction and quota checks. A
+    # disconnected client retry must return the original report without earning
+    # credits or consuming another daily report slot.
+    existing = get_report_by_client_id(user["id"], client_report_id)
+    if existing:
+        fresh_user = get_user_by_id(user["id"])
+        return {
+            "status": "ok",
+            "report_id": existing["id"],
+            "duplicate": True,
+            "credits_earned": 0,
+            "new_balance": fresh_user["credits"] if fresh_user else user.get("credits", 0),
+            "streak": fresh_user.get("report_streak", 0) if fresh_user else 0,
+            "streak_bonus": 0,
+            "streak_reason": "",
+            "ttl_hours": round(EXPIRY_BY_TYPE.get(existing["type"], 7 * 86400) / 3600, 1),
+            "observed_at": existing["observed_at"],
+            "expires_at": existing["expires_at"],
+        }
+
+    observed_at = now if body.observed_at is None else int(body.observed_at)
+    if observed_at > now + 300:
+        raise HTTPException(400, "Observation time is in the future")
+    max_age = report_max_observation_age(body.type)
+    if now - observed_at >= max_age:
+        if body.type == "police":
+            raise HTTPException(400, "Police report is too old to publish")
+        raise HTTPException(400, "Report is too old to publish")
+
     # Check active restriction
     restricted, secs = is_reporter_restricted(user["id"])
     if restricted:
@@ -19186,9 +19227,34 @@ async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)
     account_age_h = (_time.time() - user.get("created_at", 0)) / 3600
     credits_eligible = account_age_h >= 24
 
-    report_id = create_report(user["id"], body.lat, body.lng, body.type,
-                              body.subtype, body.description, body.severity,
-                              photo_data=body.photo_data)
+    created_report = create_report_idempotent(
+        user["id"], body.lat, body.lng, body.type,
+        body.subtype, body.description, body.severity,
+        photo_data=body.photo_data,
+        client_report_id=client_report_id,
+        observed_at=observed_at,
+        source_surface=source_surface,
+        accuracy_m=body.accuracy_m,
+    )
+    report_id = created_report["report_id"]
+
+    # A concurrent replay can lose the initial lookup race but is still caught by
+    # the datastore uniqueness constraint. It must not grant credits twice.
+    if not created_report["created"]:
+        fresh_user = get_user_by_id(user["id"])
+        return {
+            "status": "ok",
+            "report_id": report_id,
+            "duplicate": True,
+            "credits_earned": 0,
+            "new_balance": fresh_user["credits"] if fresh_user else user.get("credits", 0),
+            "streak": fresh_user.get("report_streak", 0) if fresh_user else 0,
+            "streak_bonus": 0,
+            "streak_reason": "",
+            "ttl_hours": round(EXPIRY_BY_TYPE.get(body.type, 7 * 86400) / 3600, 1),
+            "observed_at": created_report["observed_at"],
+            "expires_at": created_report["expires_at"],
+        }
 
     credits_earned = 0
     streak_info = {"streak": 0, "bonus": 0, "reason": ""}
@@ -19215,12 +19281,15 @@ async def submit_report(body: ReportRequest, user: dict = Depends(_current_user)
     return {
         "status": "ok",
         "report_id": report_id,
+        "duplicate": False,
         "credits_earned": credits_earned + streak_info["bonus"],
         "new_balance": fresh_user["credits"],
         "streak": streak_info["streak"],
         "streak_bonus": streak_info["bonus"],
         "streak_reason": streak_info["reason"],
         "ttl_hours": round(EXPIRY_BY_TYPE.get(body.type, 7 * 86400) / 3600, 1),
+        "observed_at": created_report["observed_at"],
+        "expires_at": created_report["expires_at"],
     }
 
 @app.get("/api/reports")
@@ -19308,13 +19377,29 @@ async def fire_perimeters():
     return data or {"type": "FeatureCollection", "features": []}
 
 @app.post("/api/reports/{report_id}/upvote")
-async def upvote(report_id: int, user: dict = Depends(_optional_user)):
-    upvote_report(report_id, user["id"] if user else None)
+async def upvote(report_id: int, user: dict = Depends(_current_user)):
+    result = upvote_report(report_id, user["id"])
+    if result.get("reason") == "not_found":
+        raise HTTPException(404, "Report not found")
+    if result.get("reason") == "expired":
+        raise HTTPException(410, "Report has expired")
+    if result.get("reason") == "own_report":
+        raise HTTPException(400, "Cannot vote on your own report")
+    if result.get("reason") == "already_voted":
+        raise HTTPException(400, "Already voted on this report")
     return {"status": "ok"}
 
 @app.post("/api/reports/{report_id}/downvote")
-async def downvote(report_id: int):
-    downvote_report(report_id)
+async def downvote(report_id: int, user: dict = Depends(_current_user)):
+    result = downvote_report(report_id, user["id"])
+    if result.get("reason") == "not_found":
+        raise HTTPException(404, "Report not found")
+    if result.get("reason") == "expired":
+        raise HTTPException(410, "Report has expired")
+    if result.get("reason") == "own_report":
+        raise HTTPException(400, "Cannot vote on your own report")
+    if result.get("reason") == "already_voted":
+        raise HTTPException(400, "Already voted on this report")
     return {"status": "ok"}
 
 @app.post("/api/reports/{report_id}/confirm")
@@ -19324,6 +19409,8 @@ async def confirm(report_id: int, user: dict = Depends(_current_user)):
     reason = result.get("reason")
     if reason == "not_found":
         raise HTTPException(404, "Report not found")
+    if reason == "expired":
+        raise HTTPException(410, "Report has expired")
     if reason == "own_report":
         raise HTTPException(400, "Cannot confirm your own report")
     if reason == "already_confirmed":

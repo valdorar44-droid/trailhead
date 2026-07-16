@@ -48,6 +48,7 @@ import {
   synchronizeTripRepository,
 } from '@/lib/tripRepositorySync';
 import { accountRecoveryContext } from '@/lib/tripRepository/accountRecovery';
+import { routeBuilderRequestFromGeoUrl } from '@/lib/carNavigationIntent';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -95,6 +96,7 @@ export default function RootLayout() {
   const repositoryTransitionRun = useRef(0);
   const tripGraphSyncEnabled = useRef(false);
   const stopTripRepositoryAutoSync = useRef<(() => void) | null>(null);
+  const navigationLinkSequence = useRef(0);
 
   useEffect(() => {
     if (!startupReady) return;
@@ -253,6 +255,25 @@ export default function RootLayout() {
     } catch (e: any) {
       Alert.alert('Verification failed', e?.message ?? 'This verification link is invalid or expired.');
     }
+  }
+
+  async function handleIncomingUrl(url: string | null | undefined) {
+    if (verificationTokenFromUrl(url)) {
+      await handleVerificationUrl(url);
+      return;
+    }
+    const request = routeBuilderRequestFromGeoUrl(url);
+    if (!request) return;
+    navigationLinkSequence.current += 1;
+    router.push({
+      pathname: '/(tabs)/route-builder',
+      params: {
+        intent: request.action === 'add_a_stop' ? 'edit-active' : 'new',
+        request: `${Date.now()}-${navigationLinkSequence.current}`,
+        destination: request.destination,
+        navigationAction: request.action,
+      },
+    } as any);
   }
 
   async function checkForUpdate() {
@@ -564,9 +585,9 @@ export default function RootLayout() {
       }
     });
 
-    Linking.getInitialURL().then(handleVerificationUrl).catch(() => {});
+    Linking.getInitialURL().then(handleIncomingUrl).catch(() => {});
     const linkSub = Linking.addEventListener('url', event => {
-      handleVerificationUrl(event.url);
+      handleIncomingUrl(event.url).catch(() => {});
     });
 
     return () => {

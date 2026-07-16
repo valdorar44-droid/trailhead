@@ -1656,6 +1656,12 @@ function RouteBuilderScreenContent() {
   const routeParams = useLocalSearchParams();
   const routeBuilderIntent = Array.isArray(routeParams.intent) ? routeParams.intent[0] : routeParams.intent;
   const routeBuilderRequest = Array.isArray(routeParams.request) ? routeParams.request[0] : routeParams.request;
+  const routeBuilderDestination = Array.isArray(routeParams.destination)
+    ? routeParams.destination[0]
+    : routeParams.destination;
+  const routeBuilderNavigationAction = Array.isArray(routeParams.navigationAction)
+    ? routeParams.navigationAction[0]
+    : routeParams.navigationAction;
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const user = useStore(st => st.user);
@@ -5730,6 +5736,7 @@ function RouteBuilderScreenContent() {
     if (routeBuilderAccountScopeRef.current === nextScope) return;
     routeBuilderAccountScopeRef.current = nextScope;
     consumedRouteBuilderDraftRef.current = '';
+    consumedRouteBuilderIntentRef.current = '';
     resetRouteDraft();
     setRouteTabMode('wizard');
     setRouteTours([]);
@@ -5787,16 +5794,22 @@ function RouteBuilderScreenContent() {
 
   useFocusEffect(useCallback(() => {
     if (routeBuilderIntent !== 'new' && routeBuilderIntent !== 'edit-active') return;
-    const requestKey = `${routeBuilderIntent}:${routeBuilderRequest || 'default'}`;
+    const requestKey = `${accountEpoch}:${String(user?.id ?? '')}:${routeBuilderIntent}:${routeBuilderRequest || 'default'}`;
     if (consumedRouteBuilderIntentRef.current === requestKey) return;
     consumedRouteBuilderIntentRef.current = requestKey;
     if (routeBuilderIntent === 'edit-active') {
       resetRouteDraft();
       setRouteTabMode('wizard');
+      if (routeBuilderNavigationAction === 'add_a_stop' && routeBuilderDestination?.trim()) {
+        setPendingType('waypoint');
+        setQuery(routeBuilderDestination.trim().slice(0, 240));
+      }
       return;
     }
     startNewRoute();
-  }, [activeTrip?.trip_id, routeBuilderIntent, routeBuilderRequest]));
+    const destination = routeBuilderDestination?.trim();
+    if (destination) setEndQuery(destination.slice(0, 240));
+  }, [accountEpoch, activeTrip?.trip_id, routeBuilderDestination, routeBuilderIntent, routeBuilderNavigationAction, routeBuilderRequest, user?.id]));
 
   function openPlanWorkspace(href: PlanWorkspaceHref) {
     if (routeSaving) return;

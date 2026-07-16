@@ -66,6 +66,7 @@
     "expo-status-bar": "~3.0.9",
     "expo-task-manager": "~14.0.9",
     "expo-tile-server": "file:./modules/tile-server",
+    "expo-trailhead-car-reports": "file:./modules/car-reports",
     "expo-updates": "~29.0.18",
     "expo-valhalla-routing": "file:./modules/valhalla-routing",
     "expo-web-browser": "~15.0.11",

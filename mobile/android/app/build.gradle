@@ -126,6 +126,9 @@ android {
     androidResources {
         ignoreAssetsPattern '!.svn:!.git:!.ds_store:!*.scc:!CVS:!thumbs.db:!picasa.ini:!*~'
     }
+    testOptions {
+        unitTests.includeAndroidResources = true
+    }
 }
 
 // Apply static values from `gradle.properties` to the `android.packagingOptions`
@@ -153,8 +156,11 @@ dependencies {
     implementation("com.facebook.react:react-android")
     implementation("androidx.car.app:app:1.7.0")
     implementation("androidx.car.app:app-projected:1.7.0")
+    implementation("com.mapbox.maps:android-ndk27:11.16.0")
+    testImplementation("androidx.car.app:app-testing:1.7.0")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
+    testImplementation("org.robolectric:robolectric:4.14.1")
 
     def isGifEnabled = (findProperty('expo.gif.enabled') ?: "") == "true";
     def isWebpEnabled = (findProperty('expo.webp.enabled') ?: "") == "true";

@@ -26,6 +26,15 @@ EXPIRY_BY_TYPE = {
     'smoke':        12 * 3600,
 }
 
+# Reports queued by a disconnected client should describe current conditions,
+# even when the report type itself remains useful for several days.
+REPORT_MAX_QUEUE_AGE = 24 * 3600
+
+
+def report_max_observation_age(report_type: str) -> int:
+    """Maximum accepted delay between an observation and server receipt."""
+    return min(EXPIRY_BY_TYPE.get(report_type, 7 * 86400), REPORT_MAX_QUEUE_AGE)
+
 def _conn() -> sqlite3.Connection:
     db = sqlite3.connect(settings.db_path, check_same_thread=False, timeout=30.0)
     db.execute("PRAGMA journal_mode=WAL")
@@ -268,6 +277,10 @@ def init_db():
             confirmations INTEGER NOT NULL DEFAULT 0,
             has_photo     INTEGER NOT NULL DEFAULT 0,
             photo_data    TEXT,
+            client_report_id TEXT,
+            observed_at   INTEGER,
+            source_surface TEXT,
+            accuracy_m    REAL,
             created_at    INTEGER NOT NULL,
             expires_at    INTEGER,
             FOREIGN KEY (user_id) REFERENCES users(id)
@@ -997,6 +1010,10 @@ def init_db():
         "ALTER TABLE reports ADD COLUMN has_photo INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE reports ADD COLUMN photo_data TEXT",
         "ALTER TABLE reports ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE reports ADD COLUMN client_report_id TEXT",
+        "ALTER TABLE reports ADD COLUMN observed_at INTEGER",
+        "ALTER TABLE reports ADD COLUMN source_surface TEXT",
+        "ALTER TABLE reports ADD COLUMN accuracy_m REAL",
         "ALTER TABLE community_pins ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN details TEXT",
@@ -1671,6 +1688,41 @@ def init_db():
             db.execute(sql)
         except Exception:
             pass
+    # These indexes depend on columns/tables added by the migration loop above.
+    # A partial unique index preserves compatibility for legacy NULL identifiers.
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_user_client_report
+           ON reports(user_id, client_report_id)
+           WHERE client_report_id IS NOT NULL"""
+    )
+    db.execute(
+        """DELETE FROM report_interactions
+           WHERE action IN ('upvote','downvote')
+             AND id NOT IN (
+               SELECT MIN(id) FROM report_interactions
+               WHERE action IN ('upvote','downvote')
+               GROUP BY report_id,user_id
+             )"""
+    )
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_report_interactions_user_vote
+           ON report_interactions(report_id, user_id)
+           WHERE action IN ('upvote', 'downvote')"""
+    )
+    db.execute(
+        """DELETE FROM report_interactions
+           WHERE action='confirm'
+             AND id NOT IN (
+               SELECT MIN(id) FROM report_interactions
+               WHERE action='confirm'
+               GROUP BY report_id,user_id
+             )"""
+    )
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_report_interactions_user_confirmation
+           ON report_interactions(report_id, user_id)
+           WHERE action='confirm'"""
+    )
     # Preserve pre-policy campground alerts as grandfathered 30-day watches.
     try:
         db.execute(
@@ -4198,7 +4250,7 @@ def deduct_credits(user_id: int, amount: int, reason: str) -> bool:
 
 def get_user_report_count_today(user_id: int) -> int:
     import datetime
-    today = datetime.date.today().isoformat()
+    today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
     db = _conn()
     row = db.execute(
         "SELECT COUNT(*) as cnt FROM reports WHERE user_id=? AND date(created_at,'unixepoch')=?",
@@ -4308,21 +4360,84 @@ def check_and_update_streak(user_id: int) -> dict:
 
 # ── Reports ───────────────────────────────────────────────────────────────────
 
-def create_report(user_id: int, lat: float, lng: float, type: str, subtype: str,
-                  description: str, severity: str, photo_data: str | None = None) -> int:
+def get_report_by_client_id(user_id: int, client_report_id: str | None) -> dict | None:
+    """Return an account-scoped idempotent report, if one was already accepted."""
+    if not client_report_id:
+        return None
     db = _conn()
+    row = db.execute(
+        """SELECT id,type,observed_at,created_at,expires_at
+           FROM reports WHERE user_id=? AND client_report_id=?""",
+        (user_id, client_report_id),
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+
+def create_report_idempotent(
+    user_id: int, lat: float, lng: float, type: str, subtype: str | None,
+    description: str | None, severity: str, photo_data: str | None = None,
+    *, client_report_id: str | None = None, observed_at: int | None = None,
+    source_surface: str | None = None, accuracy_m: float | None = None,
+) -> dict:
+    """Create a report once per account/client identifier."""
+    db = _conn()
+    now = int(time.time())
+    observed = now if observed_at is None else int(observed_at)
     ttl = EXPIRY_BY_TYPE.get(type, 7 * 86400)
-    expires = int(time.time()) + ttl
+    expires = observed + ttl
     has_photo = 1 if photo_data else 0
-    cur = db.execute(
-        """INSERT INTO reports
-           (user_id,lat,lng,type,subtype,description,severity,has_photo,photo_data,created_at,expires_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (user_id, lat, lng, type, subtype, description, severity, has_photo, photo_data,
-         int(time.time()), expires)
+    try:
+        cur = db.execute(
+            """INSERT INTO reports
+               (user_id,lat,lng,type,subtype,description,severity,has_photo,photo_data,
+                client_report_id,observed_at,source_surface,accuracy_m,created_at,expires_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (user_id, lat, lng, type, subtype, description, severity, has_photo, photo_data,
+             client_report_id, observed, source_surface, accuracy_m, now, expires),
+        )
+        db.commit()
+        return {
+            "report_id": int(cur.lastrowid),
+            "created": True,
+            "observed_at": observed,
+            "expires_at": expires,
+        }
+    except sqlite3.IntegrityError:
+        if not client_report_id:
+            raise
+        row = db.execute(
+            """SELECT id,observed_at,expires_at FROM reports
+               WHERE user_id=? AND client_report_id=?""",
+            (user_id, client_report_id),
+        ).fetchone()
+        if not row:
+            raise
+        return {
+            "report_id": int(row["id"]),
+            "created": False,
+            "observed_at": row["observed_at"],
+            "expires_at": row["expires_at"],
+        }
+    finally:
+        db.close()
+
+
+def create_report(user_id: int, lat: float, lng: float, type: str, subtype: str | None,
+                  description: str | None, severity: str, photo_data: str | None = None,
+                  *, client_report_id: str | None = None, observed_at: int | None = None,
+                  source_surface: str | None = None,
+                  accuracy_m: float | None = None) -> int:
+    """Backward-compatible report creator returning the numeric report ID."""
+    result = create_report_idempotent(
+        user_id, lat, lng, type, subtype, description, severity,
+        photo_data=photo_data,
+        client_report_id=client_report_id,
+        observed_at=observed_at,
+        source_surface=source_surface,
+        accuracy_m=accuracy_m,
     )
-    db.commit(); db.close()
-    return cur.lastrowid
+    return result["report_id"]
 
 def get_reports_near(lat: float, lng: float, radius_deg: float = 0.5) -> list:
     db = _conn()
@@ -4412,80 +4527,162 @@ def _cluster_reports(reports: list[dict], cluster_deg: float = 0.002) -> list:
 def confirm_report(report_id: int, user_id: int) -> dict:
     """'Still there' confirmation — resets expiry, +1 credit to confirmer. One confirm per user per report."""
     db = _conn()
-    row = db.execute("SELECT type,expires_at,user_id FROM reports WHERE id=?", (report_id,)).fetchone()
-    if not row:
-        db.close(); return {"ok": False, "reason": "not_found"}
-    if row["user_id"] == user_id:
-        db.close(); return {"ok": False, "reason": "own_report"}
-    existing = db.execute(
-        "SELECT id FROM report_interactions WHERE report_id=? AND user_id=? AND action='confirm'",
-        (report_id, user_id)
-    ).fetchone()
-    if existing:
-        db.close(); return {"ok": False, "reason": "already_confirmed"}
-    ttl = EXPIRY_BY_TYPE.get(row["type"], 7 * 86400)
-    new_expires = int(time.time()) + ttl
-    db.execute("UPDATE reports SET confirmations=confirmations+1, expires_at=? WHERE id=?",
-               (new_expires, report_id))
     now = int(time.time())
-    db.execute("UPDATE users SET credits=credits+1 WHERE id=?", (user_id,))
-    db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-               (user_id, 1, f"Confirmed report #{report_id} still active", now))
-    db.execute("INSERT INTO report_interactions (report_id,user_id,action,created_at) VALUES (?,?,?,?)",
-               (report_id, user_id, "confirm", now))
-    _record_contest_event_db(db, user_id, 1, f"Confirmed report #{report_id} still active", "report_confirmation", str(report_id), now)
-    db.commit(); db.close()
-    return {"ok": True}
-
-def upvote_report(report_id: int, user_id: int | None = None):
-    db = _conn()
-    row = db.execute("SELECT user_id FROM reports WHERE id=?", (report_id,)).fetchone()
-    if not row:
-        db.close(); return
-    if user_id:
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT type,expires_at,user_id FROM reports WHERE id=?", (report_id,)
+        ).fetchone()
+        if not row:
+            db.rollback()
+            return {"ok": False, "reason": "not_found"}
+        if row["expires_at"] is not None and row["expires_at"] <= now:
+            db.rollback()
+            return {"ok": False, "reason": "expired"}
         if row["user_id"] == user_id:
-            db.close(); return  # no self-upvotes
+            db.rollback()
+            return {"ok": False, "reason": "own_report"}
         existing = db.execute(
-            "SELECT id FROM report_interactions WHERE report_id=? AND user_id=? AND action='upvote'",
-            (report_id, user_id)
+            """SELECT id FROM report_interactions
+               WHERE report_id=? AND user_id=? AND action='confirm'""",
+            (report_id, user_id),
         ).fetchone()
         if existing:
-            db.close(); return
-        db.execute("INSERT INTO report_interactions (report_id,user_id,action,created_at) VALUES (?,?,?,?)",
-                   (report_id, user_id, "upvote", int(time.time())))
-    db.execute("UPDATE reports SET upvotes=upvotes+1 WHERE id=?", (report_id,))
-    now = int(time.time())
-    db.execute("UPDATE users SET credits=credits+2 WHERE id=?", (row["user_id"],))
-    db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-               (row["user_id"], 2, f"Report #{report_id} upvoted", now))
-    _record_contest_event_db(db, row["user_id"], 2, f"Report #{report_id} upvoted", "report_upvote", str(report_id), now)
-    db.commit(); db.close()
+            db.rollback()
+            return {"ok": False, "reason": "already_confirmed"}
 
-def downvote_report(report_id: int):
+        db.execute(
+            """INSERT INTO report_interactions (report_id,user_id,action,created_at)
+               VALUES (?,?,?,?)""",
+            (report_id, user_id, "confirm", now),
+        )
+        ttl = EXPIRY_BY_TYPE.get(row["type"], 7 * 86400)
+        new_expires = now + ttl
+        db.execute(
+            """UPDATE reports
+               SET confirmations=confirmations+1, expires_at=? WHERE id=?""",
+            (new_expires, report_id),
+        )
+        db.execute("UPDATE users SET credits=credits+1 WHERE id=?", (user_id,))
+        reason = f"Confirmed report #{report_id} still active"
+        db.execute(
+            """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
+               VALUES (?,?,?,?)""",
+            (user_id, 1, reason, now),
+        )
+        _record_contest_event_db(
+            db, user_id, 1, reason, "report_confirmation", str(report_id), now
+        )
+        db.commit()
+        return {"ok": True, "expires_at": new_expires}
+    except sqlite3.IntegrityError:
+        db.rollback()
+        return {"ok": False, "reason": "already_confirmed"}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+def _record_report_vote(report_id: int, user_id: int, action: str) -> dict:
     db = _conn()
-    db.execute("UPDATE reports SET downvotes=downvotes+1 WHERE id=?", (report_id,))
-    row = db.execute("SELECT user_id,downvotes FROM reports WHERE id=?", (report_id,)).fetchone()
-    if row and row["downvotes"] >= 5:
-        # Auto-expire flagged report
-        db.execute("UPDATE reports SET expires_at=? WHERE id=?", (int(time.time()), report_id))
-        # Dock 5 credits from reporter
-        db.execute("UPDATE users SET credits=MAX(0,credits-5), flagged_report_count=flagged_report_count+1 WHERE id=?",
-                   (row["user_id"],))
-        db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-                   (row["user_id"], -5, f"Report #{report_id} removed — flagged inaccurate", int(time.time())))
-        # Check if user should be restricted (3 flagged in 30 days)
-        cutoff = int(time.time()) - 30 * 86400
-        count_row = db.execute(
-            "SELECT flagged_report_count FROM users WHERE id=?", (row["user_id"],)
+    now = int(time.time())
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT user_id,downvotes,expires_at FROM reports WHERE id=?", (report_id,)
         ).fetchone()
-        if count_row and count_row["flagged_report_count"] >= 3:
-            restrict_until = int(time.time()) + 7 * 86400
-            db.execute("UPDATE users SET reporting_restricted_until=?, flagged_report_count=0 WHERE id=?",
-                       (restrict_until, row["user_id"]))
-            db.execute("INSERT INTO credit_transactions (user_id,amount,reason,created_at) VALUES (?,?,?,?)",
-                       (row["user_id"], 0,
-                        "Reporting restricted 7 days — 3 reports flagged as inaccurate", int(time.time())))
-    db.commit(); db.close()
+        if not row:
+            db.rollback()
+            return {"ok": False, "reason": "not_found"}
+        if row["expires_at"] is not None and row["expires_at"] <= now:
+            db.rollback()
+            return {"ok": False, "reason": "expired"}
+        if row["user_id"] == user_id:
+            db.rollback()
+            return {"ok": False, "reason": "own_report"}
+        existing = db.execute(
+            """SELECT action FROM report_interactions
+               WHERE report_id=? AND user_id=?
+                 AND action IN ('upvote','downvote')""",
+            (report_id, user_id),
+        ).fetchone()
+        if existing:
+            db.rollback()
+            return {
+                "ok": False,
+                "reason": "already_voted",
+                "existing_action": existing["action"],
+            }
+        db.execute(
+            """INSERT INTO report_interactions (report_id,user_id,action,created_at)
+               VALUES (?,?,?,?)""",
+            (report_id, user_id, action, now),
+        )
+        if action == "upvote":
+            db.execute("UPDATE reports SET upvotes=upvotes+1 WHERE id=?", (report_id,))
+            db.execute("UPDATE users SET credits=credits+2 WHERE id=?", (row["user_id"],))
+            db.execute(
+                """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
+                   VALUES (?,?,?,?)""",
+                (row["user_id"], 2, f"Report #{report_id} upvoted", now),
+            )
+            _record_contest_event_db(
+                db, row["user_id"], 2, f"Report #{report_id} upvoted",
+                "report_upvote", str(report_id), now,
+            )
+        else:
+            db.execute("UPDATE reports SET downvotes=downvotes+1 WHERE id=?", (report_id,))
+            updated = db.execute(
+                "SELECT downvotes FROM reports WHERE id=?", (report_id,)
+            ).fetchone()
+            if updated and updated["downvotes"] == 5:
+                db.execute("UPDATE reports SET expires_at=? WHERE id=?", (now, report_id))
+                db.execute(
+                    """UPDATE users
+                       SET credits=MAX(0,credits-5),
+                           flagged_report_count=flagged_report_count+1
+                       WHERE id=?""",
+                    (row["user_id"],),
+                )
+                db.execute(
+                    """INSERT INTO credit_transactions (user_id,amount,reason,created_at)
+                       VALUES (?,?,?,?)""",
+                    (row["user_id"], -5,
+                     f"Report #{report_id} removed - flagged inaccurate", now),
+                )
+                count_row = db.execute(
+                    "SELECT flagged_report_count FROM users WHERE id=?", (row["user_id"],)
+                ).fetchone()
+                if count_row and count_row["flagged_report_count"] >= 3:
+                    restrict_until = now + 7 * 86400
+                    db.execute(
+                        """UPDATE users
+                           SET reporting_restricted_until=?, flagged_report_count=0
+                           WHERE id=?""",
+                        (restrict_until, row["user_id"]),
+                    )
+                    db.execute(
+                        """INSERT INTO credit_transactions
+                           (user_id,amount,reason,created_at) VALUES (?,?,?,?)""",
+                        (row["user_id"], 0,
+                         "Reporting restricted 7 days - 3 reports flagged as inaccurate", now),
+                    )
+        db.commit()
+        return {"ok": True, "action": action}
+    except sqlite3.IntegrityError:
+        db.rollback()
+        return {"ok": False, "reason": "already_voted"}
+    finally:
+        db.close()
+
+
+def upvote_report(report_id: int, user_id: int) -> dict:
+    return _record_report_vote(report_id, user_id, "upvote")
+
+
+def downvote_report(report_id: int, user_id: int) -> dict:
+    return _record_report_vote(report_id, user_id, "downvote")
 
 def get_leaderboard(limit: int = 20) -> list:
     """Top reporters by confirmed reports in last 30 days."""

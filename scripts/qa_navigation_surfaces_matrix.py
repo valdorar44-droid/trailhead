@@ -28,10 +28,9 @@ def main() -> int:
 
     config_markers = {
         "android background disabled": "isAndroidBackgroundLocationEnabled: false",
-        "android foreground service disabled": "isAndroidForegroundServiceEnabled: false",
+        "android foreground service enabled": "isAndroidForegroundServiceEnabled: true",
         "blocked background permission": "'android.permission.ACCESS_BACKGROUND_LOCATION'",
-        "blocked foreground service": "'android.permission.FOREGROUND_SERVICE'",
-        "blocked foreground service location": "'android.permission.FOREGROUND_SERVICE_LOCATION'",
+        "Android Auto config plugin": "'./plugins/withAndroidAuto'",
     }
     for label, marker in config_markers.items():
         if marker not in app_config:
@@ -39,16 +38,20 @@ def main() -> int:
 
     manifest_markers = {
         "manifest removes background": 'android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"',
-        "manifest removes foreground service": 'android.permission.FOREGROUND_SERVICE" tools:node="remove"',
-        "manifest removes location foreground service": 'android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"',
+        "manifest foreground service": 'android.permission.FOREGROUND_SERVICE"',
+        "manifest location foreground service": 'android.permission.FOREGROUND_SERVICE_LOCATION"',
         "location task service removed": 'expo.modules.location.services.LocationTaskService" tools:node="remove"',
+        "navigation template permission": 'androidx.car.app.NAVIGATION_TEMPLATES',
+        "car surface permission": 'androidx.car.app.ACCESS_SURFACE',
+        "navigation category": 'androidx.car.app.category.NAVIGATION',
+        "navigation location service": 'TrailheadCarLocationService',
+        "navigation destination action": 'androidx.car.app.action.NAVIGATE',
+        "navigation geo scheme": 'android:scheme="geo"',
+        "maps app category": 'android.intent.category.APP_MAPS',
     }
     for label, marker in manifest_markers.items():
         if marker not in manifest:
             failures.append(f"Missing Android manifest marker for {label}: {marker}")
-
-    if "androidx.car.app.category.NAVIGATION" in manifest:
-        failures.append("Android Auto navigation category is present before the separate native review lane is ready")
 
     server_markers = {
         "navigation confirmation": "acknowledged_billing",
@@ -84,7 +87,7 @@ def main() -> int:
             failures.append(f"Missing audit marker for {label}: {marker}")
 
     print("Navigation surfaces QA matrix")
-    print("Checks: CarPlay package, Live Activity spike, Android Auto deferral, Mapbox billing guardrails")
+    print("Checks: CarPlay package, Live Activity spike, Android Auto navigation, Mapbox billing guardrails")
 
     if failures:
         print("")

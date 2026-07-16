@@ -33,6 +33,7 @@ module.exports = {
       },
     },
     android: {
+      runtimeVersion: 'native-1.0.7-car1',
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0c0f14',
@@ -46,6 +47,8 @@ module.exports = {
       permissions: [
         'android.permission.ACCESS_FINE_LOCATION',
         'android.permission.ACCESS_COARSE_LOCATION',
+        'android.permission.FOREGROUND_SERVICE',
+        'android.permission.FOREGROUND_SERVICE_LOCATION',
         'android.permission.MODIFY_AUDIO_SETTINGS',
         'android.permission.VIBRATE',
         'android.permission.RECORD_AUDIO',
@@ -53,8 +56,6 @@ module.exports = {
       ],
       blockedPermissions: [
         'android.permission.ACCESS_BACKGROUND_LOCATION',
-        'android.permission.FOREGROUND_SERVICE',
-        'android.permission.FOREGROUND_SERVICE_LOCATION',
         'android.permission.RECEIVE_BOOT_COMPLETED',
         'android.permission.READ_EXTERNAL_STORAGE',
         'android.permission.WRITE_EXTERNAL_STORAGE',
@@ -69,7 +70,7 @@ module.exports = {
           locationAlwaysAndWhenInUsePermission: 'Trailhead uses location to auto-play audio guides as you drive near landmarks.',
           locationAlwaysPermission: 'Background location lets Trailhead narrate landmarks while your phone is in your pocket.',
           isAndroidBackgroundLocationEnabled: false,
-          isAndroidForegroundServiceEnabled: false,
+          isAndroidForegroundServiceEnabled: true,
         },
       ],
       [
@@ -108,6 +109,7 @@ module.exports = {
       ],
       '@maplibre/maplibre-react-native',
       './modules/tile-server/app.plugin.js',
+      './plugins/withAndroidAuto',
       './plugins/withKotlinVersion',
     ],
     experiments: { typedRoutes: true },

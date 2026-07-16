@@ -55,6 +55,12 @@ import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { applyBackendAcknowledgedActiveTrip, useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
+import {
+  buildCarAccountState,
+  clearCarTrailFollow,
+  setCarTrailFollow,
+  type CarNavigationMode,
+} from '@/lib/carIntegration';
 import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
@@ -9904,6 +9910,7 @@ function MapScreen() {
         }
       }
     } else {
+      restoreCarTripSnapshot();
       navSpeechHoldUntilRef.current = 0;
       setIsApproaching(false);
       setIsRerouting(false);
@@ -17361,6 +17368,7 @@ function MapScreen() {
   }
 
   function resetMapRouteSession() {
+    restoreCarTripSnapshot();
     setNavMode(false);
     navRef.current.active = false;
     navRef.current.idx = 0;
@@ -19886,6 +19894,7 @@ function MapScreen() {
     setRouteProgress(null);
     setNavDest(null);
     navDestRef.current = null;
+    restoreCarTripSnapshot();
     stepAnnouncedRef.current.clear();
     alertedRepIdsRef.current.clear();
     if (offRouteWarnTimer.current) {
@@ -21206,6 +21215,7 @@ function MapScreen() {
     setTrailPinCaptureSeedName('');
     trailAutoBuildCountRef.current = 0;
     if (!navMode) {
+      restoreCarTripSnapshot();
       setRouteFromCache(false);
       setRouteDebug('');
       setRouteSteps([]);
@@ -21722,6 +21732,7 @@ function MapScreen() {
     setRouteLegs([steps]);
     setLastRouteCoords(plan.coords);
     setIsRouted(true);
+    syncTrailFollowWithCar('trail_follow_preview', trail, plan, steps, duration);
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, duration);
     postWebMessage(JSON.stringify({
       type: 'restore_route',
@@ -21784,11 +21795,47 @@ function MapScreen() {
     navDestRef.current = { lat: last[1], lng: last[0], name: trail.name, day: 0, type: 'trail' };
     setNavDest(navDestRef.current);
     nativeMapRef.current?.restoreRoute(plan.coords, steps, [steps], plan.distanceM, duration);
+    syncTrailFollowWithCar('trail_follow_active', trail, plan, steps, duration);
     setSelectedTrail(null);
     setTrailRouteBuilderOpen(false);
     setTrailCardCollapsed(false);
     setNavMode(true);
     focusNavigationCamera();
+  }
+
+  function syncTrailFollowWithCar(
+    mode: Extract<CarNavigationMode, 'trail_follow_preview' | 'trail_follow_active'>,
+    trail: TrailFeature,
+    plan: TrailRoutePlan,
+    steps: RouteStep[],
+    durationS: number,
+  ) {
+    const carState = useStore.getState();
+    void setCarTrailFollow({
+      mode,
+      trailId: trail.id,
+      title: trail.name || plan.title,
+      summary: trail.summary || plan.subtitle,
+      coords: plan.coords,
+      steps,
+      totalDistanceM: plan.distanceM,
+      totalDurationS: durationS,
+      offlineReady: trail.support.offlineReady,
+      offlineMessage: trail.support.readinessLabel,
+    }, {
+      trip: carState.activeTrip,
+      account: buildCarAccountState(carState.user, Boolean(carState.token)),
+      mapboxAccessToken: carState.mapboxToken,
+    }).catch(() => {});
+  }
+
+  function restoreCarTripSnapshot() {
+    const carState = useStore.getState();
+    void clearCarTrailFollow({
+      trip: carState.activeTrip,
+      account: buildCarAccountState(carState.user, Boolean(carState.token)),
+      mapboxAccessToken: carState.mapboxToken,
+    }).catch(() => {});
   }
 
   async function saveTrailRoutePlan(trail: TrailFeature, plan: TrailRoutePlan, nameOverride?: string) {

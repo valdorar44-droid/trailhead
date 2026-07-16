@@ -1,14 +1,17 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android" xmlns:tools="http://schemas.android.com/tools">
   <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
   <uses-permission android:name="android.permission.ACCESS_FINE_LOCATION"/>
+  <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION"/>
   <uses-permission android:name="android.permission.INTERNET"/>
+  <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
   <uses-permission android:name="android.permission.RECORD_AUDIO"/>
   <uses-permission android:name="android.permission.VIBRATE"/>
-  <uses-permission android:name="androidx.car.app.MAP_TEMPLATES"/>
+  <uses-permission android:name="androidx.car.app.NAVIGATION_TEMPLATES"/>
+  <uses-permission android:name="androidx.car.app.ACCESS_SURFACE"/>
   <uses-permission android:name="com.android.vending.BILLING"/>
   <uses-permission android:name="android.permission.ACCESS_BACKGROUND_LOCATION" tools:node="remove"/>
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE" tools:node="remove"/>
-  <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" tools:node="remove"/>
   <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" tools:node="remove"/>
   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" tools:node="remove"/>
   <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" tools:node="remove"/>
@@ -20,7 +23,7 @@
       <data android:scheme="https"/>
     </intent>
   </queries>
-  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="true" android:theme="@style/AppTheme" android:supportsRtl="true">
+  <application android:name=".MainApplication" android:label="@string/app_name" android:icon="@mipmap/ic_launcher" android:roundIcon="@mipmap/ic_launcher_round" android:allowBackup="false" android:theme="@style/AppTheme" android:supportsRtl="true">
     <meta-data android:name="com.google.android.geo.API_KEY" android:value="AIzaSyDXhz92yE29B5Q3ZdRdxgalcN59MYFFjJU"/>
     <meta-data android:name="com.google.firebase.messaging.default_notification_color" android:resource="@color/notification_icon_color"/>
     <meta-data android:name="com.google.firebase.messaging.default_notification_icon" android:resource="@drawable/notification_icon"/>
@@ -36,9 +39,10 @@
     <service android:name=".car.TrailheadCarAppService" android:exported="true">
       <intent-filter>
         <action android:name="androidx.car.app.CarAppService"/>
-        <category android:name="androidx.car.app.category.POI"/>
+        <category android:name="androidx.car.app.category.NAVIGATION"/>
       </intent-filter>
     </service>
+    <service android:name=".car.TrailheadCarLocationService" android:exported="false" android:foregroundServiceType="location"/>
     <service android:name="expo.modules.location.services.LocationTaskService" tools:node="remove"/>
     <service android:name="com.oney.WebRTCModule.MediaProjectionService" tools:node="remove"/>
     <activity android:name=".MainActivity" android:configChanges="keyboard|keyboardHidden|orientation|screenSize|screenLayout|uiMode" android:launchMode="singleTask" android:windowSoftInputMode="adjustResize" android:theme="@style/Theme.App.SplashScreen" android:exported="true">
@@ -52,6 +56,15 @@
         <category android:name="android.intent.category.BROWSABLE"/>
         <data android:scheme="trailhead"/>
         <data android:scheme="com.trailhead.app"/>
+      </intent-filter>
+      <intent-filter>
+        <action android:name="androidx.car.app.action.NAVIGATE"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <data android:scheme="geo"/>
+      </intent-filter>
+      <intent-filter>
+        <action android:name="android.intent.action.MAIN"/>
+        <category android:name="android.intent.category.APP_MAPS"/>
       </intent-filter>
     </activity>
     <uses-library android:name="org.apache.http.legacy" android:required="false"/>

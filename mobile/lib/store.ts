@@ -40,6 +40,17 @@ import {
   legacyTripSaveContextIsCurrent,
   type LegacyTripSaveContext,
 } from './legacyTripSaveContext';
+import {
+  buildCarAccountState,
+  clearCarNavigationSnapshot,
+  syncCarNavigationSnapshot,
+} from './carIntegration';
+import {
+  clearCarReportSession,
+  requestCarReportFlush,
+  setCarReportSession,
+} from 'expo-trailhead-car-reports';
+import { TRAILHEAD_API_BASE } from './apiBase';
 
 let accountLocalWriteBlockDepth = 0;
 let accountLocalWriteTail: Promise<unknown> = Promise.resolve();
@@ -70,6 +81,12 @@ export function resumeAccountLocalWrites() {
   if (pending) {
     accountSet('trailhead_token', pending.token);
     accountSet('trailhead_user', JSON.stringify(pending.user));
+    void syncCarNavigationSnapshot({
+      trip: useStore.getState().activeTrip,
+      account: buildCarAccountState(pending.user, Boolean(pending.token)),
+      mapboxAccessToken: useStore.getState().mapboxToken,
+    }).catch(() => {});
+    void setCarReportSession(pending.user.id, pending.token, TRAILHEAD_API_BASE).catch(() => false);
   }
 }
 
@@ -156,6 +173,7 @@ const PRIVATE_DIRECTORIES = ['offline_trips', 'offline_routes', 'offline_place_p
 
 function isPrivateRootFile(name: string) {
   return name === 'active_trip.json'
+    || /^car_navigation_snapshot\.json(?:\.(?:tmp|bak))?$/i.test(name)
     || name === 'rig_profile.json'
     || name === 'last_background_location.json'
     || name === 'notified_wps.json'
@@ -877,6 +895,16 @@ export const useStore = create<AppState>((set) => ({
       tripHistory: state.tripHistory,
       favoriteCamps: state.favoriteCamps,
     }));
+    if (accountLocalWriteBlockDepth === 0) {
+      void syncCarNavigationSnapshot({
+        trip: useStore.getState().activeTrip,
+        account: buildCarAccountState(user, Boolean(token)),
+        mapboxAccessToken: useStore.getState().mapboxToken,
+      }).catch(() => {});
+      void setCarReportSession(user.id, token, TRAILHEAD_API_BASE)
+        .then(() => requestCarReportFlush())
+        .catch(() => false);
+    }
   },
 
   signOut: async () => {
@@ -884,6 +912,8 @@ export const useStore = create<AppState>((set) => ({
     pendingAuthPersistence = null;
     const writesDrained = prepareAccountLocalDataErase();
     const externalWritesDrained = beginAccountStorageCleanup();
+    const carSnapshotCleared = clearCarNavigationSnapshot().catch(() => {});
+    const carReportSessionCleared = clearCarReportSession(true).catch(() => false);
     const freshSession = newSessionId();
     set({
       token: null,
@@ -915,7 +945,7 @@ export const useStore = create<AppState>((set) => ({
       planExpiresAt: null,
     });
     await serializeAccountLocalCleanup(async () => {
-      await Promise.all([writesDrained, externalWritesDrained]);
+      await Promise.all([writesDrained, externalWritesDrained, carSnapshotCleared, carReportSessionCleared]);
       try {
         await Promise.all([
           sd('trailhead_token'),
@@ -937,6 +967,8 @@ export const useStore = create<AppState>((set) => ({
     pendingAuthPersistence = null;
     const writesDrained = prepareAccountLocalDataErase();
     const externalWritesDrained = beginAccountStorageCleanup();
+    const carSnapshotCleared = clearCarNavigationSnapshot().catch(() => {});
+    const carReportSessionCleared = clearCarReportSession(true).catch(() => false);
     const freshSession = newSessionId();
     set({
       token: null,
@@ -968,7 +1000,7 @@ export const useStore = create<AppState>((set) => ({
       planExpiresAt: null,
     });
     await serializeAccountLocalCleanup(async () => {
-      await Promise.all([writesDrained, externalWritesDrained]);
+      await Promise.all([writesDrained, externalWritesDrained, carSnapshotCleared, carReportSessionCleared]);
       try {
         await Promise.all([
           sd('trailhead_token'),
@@ -995,6 +1027,12 @@ export const useStore = create<AppState>((set) => ({
       sd('trailhead_active_route');
     }
     set({ activeTrip: trip, activeTripFromCache: fromCache });
+    const current = useStore.getState();
+    void syncCarNavigationSnapshot({
+      trip,
+      account: buildCarAccountState(current.user, Boolean(current.token)),
+      mapboxAccessToken: current.mapboxToken,
+    }).catch(() => {});
     if (options?.mirrorRepository !== false) scheduleActiveTripMirror(trip, previousTripId);
   },
 
@@ -1018,20 +1056,19 @@ export const useStore = create<AppState>((set) => ({
 
   removeTripFromHistory: (tripId) => {
     if (!accountLocalMutationAllowed()) return;
+    const activeWasRemoved = useStore.getState().activeTrip?.trip_id === tripId;
     set((state) => {
       const updated = state.tripHistory.filter(t => t.trip_id !== tripId);
       accountSet('trailhead_history', JSON.stringify(updated));
-      return {
-        tripHistory: updated,
-        activeTrip: state.activeTrip?.trip_id === tripId ? null : state.activeTrip,
-        activeTripFromCache: state.activeTrip?.trip_id === tripId ? false : state.activeTripFromCache,
-      };
+      return { tripHistory: updated };
     });
+    if (activeWasRemoved) useStore.getState().setActiveTrip(null);
   },
 
   removeTripsFromHistory: async (tripIds, expectedOwnerScope) => {
     const ids = new Set(tripIds.map(id => String(id || '').trim()).filter(Boolean));
     if (ids.size === 0) return;
+    let removedActiveTripId: string | null = null;
     const completed = await accountLocalWrite(async () => {
       if (getTripRepositorySnapshot().ownerScope !== expectedOwnerScope) {
         throw new Error('The active account changed while trips were being removed.');
@@ -1039,11 +1076,8 @@ export const useStore = create<AppState>((set) => ({
       const state = useStore.getState();
       const updated = state.tripHistory.filter(item => !ids.has(item.trip_id));
       const activeWasRemoved = Boolean(state.activeTrip?.trip_id && ids.has(state.activeTrip.trip_id));
-      useStore.setState({
-        tripHistory: updated,
-        activeTrip: activeWasRemoved ? null : state.activeTrip,
-        activeTripFromCache: activeWasRemoved ? false : state.activeTripFromCache,
-      });
+      removedActiveTripId = activeWasRemoved ? state.activeTrip?.trip_id ?? null : null;
+      useStore.setState({ tripHistory: updated });
       await ss('trailhead_history', JSON.stringify(updated));
       if (getTripRepositorySnapshot().ownerScope !== expectedOwnerScope) {
         throw new Error('The active account changed while trips were being removed.');
@@ -1052,6 +1086,13 @@ export const useStore = create<AppState>((set) => ({
     });
     if (completed !== true) {
       throw new Error('Trip history is unavailable while account data is changing.');
+    }
+    if (
+      removedActiveTripId &&
+      getTripRepositorySnapshot().ownerScope === expectedOwnerScope &&
+      useStore.getState().activeTrip?.trip_id === removedActiveTripId
+    ) {
+      useStore.getState().setActiveTrip(null);
     }
   },
 
@@ -1069,7 +1110,15 @@ export const useStore = create<AppState>((set) => ({
     if (!accountLocalMutationAllowed()) return;
     set({ userLoc: loc });
   },
-  setMapboxToken: (token) => set({ mapboxToken: token }),
+  setMapboxToken: (token) => {
+    set({ mapboxToken: token });
+    const current = useStore.getState();
+    void syncCarNavigationSnapshot({
+      trip: current.activeTrip,
+      account: buildCarAccountState(current.user, Boolean(current.token)),
+      mapboxAccessToken: token,
+    }).catch(() => {});
+  },
   addLiveReport: (report) => set(state => ({
     liveReports: [report, ...state.liveReports.filter(r => r.id !== report.id)].slice(0, 100),
   })),
@@ -1394,6 +1443,12 @@ export async function restoreLegacyAccountState() {
       } catch {}
     }
     if (Object.keys(patch).length > 0) useStore.setState(patch);
+    const current = useStore.getState();
+    void syncCarNavigationSnapshot({
+      trip: current.activeTrip,
+      account: buildCarAccountState(current.user, Boolean(current.token)),
+      mapboxAccessToken: current.mapboxToken,
+    }).catch(() => {});
   } catch {}
 }
 
@@ -1428,12 +1483,19 @@ function clearLegacyAccountStateFromMemory() {
 export async function separateAnonymousLegacyState() {
   const writesDrained = prepareAccountLocalDataErase();
   const externalWritesDrained = beginAccountStorageCleanup();
+  const carSnapshotCleared = clearCarNavigationSnapshot().catch(() => {});
   await cancelActiveTripMirror();
   await serializeAccountLocalCleanup(async () => {
-    await Promise.all([writesDrained, externalWritesDrained]);
+    await Promise.all([writesDrained, externalWritesDrained, carSnapshotCleared]);
     try {
       await stashAnonymousLegacyData();
       clearLegacyAccountStateFromMemory();
+      const current = useStore.getState();
+      await syncCarNavigationSnapshot({
+        trip: null,
+        account: buildCarAccountState(current.user, Boolean(current.token)),
+        mapboxAccessToken: current.mapboxToken,
+      }).catch(() => {});
     } finally {
       endAccountStorageCleanup();
       resumeAccountLocalWrites();
@@ -1444,12 +1506,24 @@ export async function separateAnonymousLegacyState() {
 export async function restoreSeparatedAnonymousLegacyState(_clearCurrent = false) {
   return serializeAccountLocalCleanup(async () => {
     const hasStash = await hasAnonymousLegacyStash();
-    if (!hasStash) return false;
+    if (!hasStash && !_clearCurrent) return false;
     const externalWritesDrained = beginAccountStorageCleanup();
-    await Promise.all([prepareAccountLocalDataErase(), externalWritesDrained]);
+    const carSnapshotCleared = _clearCurrent
+      ? clearCarNavigationSnapshot().catch(() => {})
+      : Promise.resolve();
+    const carReportSessionCleared = _clearCurrent
+      ? clearCarReportSession(true).catch(() => false)
+      : Promise.resolve(false);
+    await Promise.all([
+      prepareAccountLocalDataErase(),
+      externalWritesDrained,
+      carSnapshotCleared,
+      carReportSessionCleared,
+    ]);
     try {
       await eraseLegacyAccountData();
       clearLegacyAccountStateFromMemory();
+      if (!hasStash) return false;
       const restored = await restoreAnonymousLegacyData();
       if (restored) await restoreLegacyAccountState();
       return restored;

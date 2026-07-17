@@ -867,9 +867,13 @@ td.name{color:var(--text);font-weight:600;}
                   <div class="originals-field wide">
                     <label>PREVIEW</label>
                     <div class="originals-actions">
+                      <select id="originals-narration-provider" class="originals-input" aria-label="Narration voice" style="width:auto;min-width:210px;">
+                        <option value="cartesia">Cartesia</option>
+                        <option value="elevenlabs">ElevenLabs</option>
+                      </select>
                       <button class="btn btn-primary btn-sm" id="originals-narration-btn" onclick="generateOriginalNarration()">Generate + attach</button>
                       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('originals-narration-file').click()">Upload audio</button>
-                      <input id="originals-narration-file" type="file" accept="audio/wav,.wav" style="display:none;" onchange="uploadOriginalNarrationFile(event)">
+                      <input id="originals-narration-file" type="file" accept="audio/wav,audio/mpeg,.wav,.mp3" style="display:none;" onchange="uploadOriginalNarrationFile(event)">
                       <span id="originals-narration-status" style="color:var(--text3);font:10px var(--mono);"></span>
                     </div>
                     <audio id="originals-narration-audio" class="originals-audio" controls preload="none"></audio>
@@ -3183,6 +3187,12 @@ function selectOriginalStop(index) {
   renderOriginalPreview();
 }
 
+function originalNarrationProviderName(provider) {
+  if (provider === 'elevenlabs') return 'ELEVENLABS';
+  if (provider === 'cartesia') return 'CARTESIA';
+  return 'UPLOAD';
+}
+
 function fillOriginalStopEditor(stop) {
   if (!stop) return;
   document.getElementById('originals-stop-card').style.display = 'block';
@@ -3210,8 +3220,11 @@ function fillOriginalStopEditor(stop) {
   const uploaded = Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets)
     ? selectedOriginal.uploaded_assets.find(asset => asset.id === stop.audio_asset_id)
     : null;
+  const provider = uploaded && uploaded.generator_metadata && uploaded.generator_metadata.provider;
+  const providerSelect = document.getElementById('originals-narration-provider');
+  if (providerSelect && ['cartesia', 'elevenlabs'].includes(provider)) providerSelect.value = provider;
   document.getElementById('originals-narration-status').textContent = uploaded
-    ? `VERIFIED · ${formatBytes(uploaded.bytes)}`
+    ? `VERIFIED · ${originalNarrationProviderName(provider)} · ${formatBytes(uploaded.bytes)}`
     : 'NOT ATTACHED';
   const uploadedArtwork = Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets)
     ? selectedOriginal.uploaded_assets.find(asset => asset.id === stop.artwork_asset_id)
@@ -3314,15 +3327,26 @@ function attachVerifiedOriginalAsset(manifest, record) {
   };
   const index = manifest.assets.findIndex(item => item && item.id === record.id);
   if (index >= 0) manifest.assets[index] = asset; else manifest.assets.push(asset);
-  document.getElementById('originals-manifest-json').value = prettyJson(manifest);
   selectedOriginal.uploaded_assets = Array.isArray(selectedOriginal.uploaded_assets)
     ? selectedOriginal.uploaded_assets.filter(item => item.id !== record.id).concat(record)
     : [record];
+  if (record.kind === 'narration') {
+    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+    const duration = Number(record.media_metadata && record.media_metadata.duration_s);
+    if (stop && stop.audio_asset_id === record.id && Number.isFinite(duration) && duration > 0) {
+      stop.audio_duration_s = duration;
+      document.getElementById('original-stop-duration').value = duration;
+    }
+  }
+  document.getElementById('originals-manifest-json').value = prettyJson(manifest);
   originalStopEditorDirty = false;
   markOriginalContentDirty();
   renderOriginalPreview(manifest);
   const statusId = record.kind === 'image' ? 'originals-artwork-status' : 'originals-narration-status';
-  document.getElementById(statusId).textContent = `VERIFIED · ${formatBytes(record.bytes)}`;
+  const provider = record.generator_metadata && record.generator_metadata.provider;
+  document.getElementById(statusId).textContent = record.kind === 'narration'
+    ? `VERIFIED · ${originalNarrationProviderName(provider)} · ${formatBytes(record.bytes)}`
+    : `VERIFIED · ${formatBytes(record.bytes)}`;
 }
 
 async function previewVerifiedOriginalNarration(record) {
@@ -3341,6 +3365,7 @@ async function previewVerifiedOriginalNarration(record) {
 async function generateOriginalNarration() {
   const text = document.getElementById('original-stop-transcript').value.trim();
   if (!text) return toast('Add a transcript first', 'err');
+  const provider = document.getElementById('originals-narration-provider').value;
   const button = document.getElementById('originals-narration-btn');
   const status = document.getElementById('originals-narration-status');
   button.disabled = true;
@@ -3348,12 +3373,12 @@ async function generateOriginalNarration() {
   try {
     if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
     const { manifest, assetId } = selectedOriginalNarrationTarget();
-    const record = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}/cartesia`, {
-      method: 'POST', body: JSON.stringify({ text })
+    const record = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}/narration`, {
+      method: 'POST', body: JSON.stringify({ text, provider })
     });
     attachVerifiedOriginalAsset(manifest, record);
     await previewVerifiedOriginalNarration(record);
-    toast('Narration verified and attached; save the draft to keep the manifest change', 'ok');
+    toast(`${originalNarrationProviderName(provider)} narration attached; save the draft to keep it`, 'ok');
   } catch(e) {
     status.textContent = 'FAILED';
     toast('Narration: ' + e.message, 'err');
@@ -3371,6 +3396,9 @@ async function uploadOriginalNarrationFile(event) {
   try {
     if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
     const { manifest, assetId } = selectedOriginalNarrationTarget();
+    const mimeType = file.name.toLowerCase().endsWith('.mp3') || file.type === 'audio/mp3'
+      ? 'audio/mpeg'
+      : (file.type || 'audio/wav');
     const contentBase64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result || ''));
@@ -3380,7 +3408,7 @@ async function uploadOriginalNarrationFile(event) {
     const record = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}`, {
       method: 'PUT',
       body: JSON.stringify({
-        kind: 'narration', mime_type: file.type || 'audio/wav',
+        kind: 'narration', mime_type: mimeType,
         file_name: file.name, content_base64: contentBase64,
         transcript: document.getElementById('original-stop-transcript').value.trim()
       })

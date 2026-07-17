@@ -5,6 +5,7 @@ class Settings:
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
     elevenlabs_api_key: str = os.environ.get("ELEVENLABS_API_KEY", "")
     elevenlabs_voice_id: str = os.environ.get("ELEVENLABS_VOICE_ID", "JBFqnCBsd6RMkjVDRZzb")
+    elevenlabs_model_id: str = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
     cartesia_api_key: str = os.environ.get("CARTESIA_API_KEY", "")
     cartesia_voice_id: str = os.environ.get("CARTESIA_VOICE_ID", "f786b574-daa5-4673-aa0c-cbe3e8534c02")
     cartesia_model_id: str = os.environ.get("CARTESIA_MODEL_ID", "sonic-3.5")

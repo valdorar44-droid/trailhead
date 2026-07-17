@@ -8834,7 +8834,7 @@ ORIGINAL_ASSET_KINDS = {"narration", "image", "transcript", "route", "other"}
 
 def _original_asset_mime_allowed(kind: str, mime_type: str) -> bool:
     if kind == "narration":
-        return mime_type == "audio/wav"
+        return mime_type in {"audio/wav", "audio/mpeg"}
     if kind == "image":
         return mime_type == "image/png"
     if kind == "transcript":
@@ -9015,6 +9015,8 @@ def _probe_original_asset_file(path: _Path, kind: str, mime_type: str) -> dict:
             "sample_rate_hz": sample_rate,
             "channels": channels,
         }
+    if kind == "narration" and mime_type == "audio/mpeg":
+        return _probe_original_mp3(data)
     if kind == "image" and mime_type == "image/png":
         return _probe_original_png(data)
     raise ValueError("Original asset format is not supported")

@@ -10,8 +10,13 @@
  * no per-tile download loop. The SDK handles resume on failure, quota, etc.
  */
 import MapLibreGL from '@maplibre/maplibre-react-native';
+import {
+  installedOfflinePackStatuses,
+  mapLibreOfflinePackBounds,
+} from './offlinePackStatus';
 
-// Bounds format: [[westLng, southLat], [eastLng, northLat]]
+// Internal bounds format: [[westLng, southLat], [eastLng, northLat]].
+// Convert at the MapLibre boundary; its createPack API expects [NE, SW].
 export type PackBounds = [[number, number], [number, number]];
 
 export interface PackProgress {
@@ -61,12 +66,12 @@ export async function downloadPack(
 
   const styleURL = packStyleURI(mapboxToken);
 
-  MapLibreGL.offlineManager.createPack(
-    { name, styleURL, bounds, minZoom, maxZoom },
+  await MapLibreGL.offlineManager.createPack(
+    { name, styleURL, bounds: mapLibreOfflinePackBounds(bounds), minZoom, maxZoom },
     (_pack: any, status: any) => {
       const pct = status.percentage ?? 0;
       const cr  = status.completedResourceCount ?? 0;
-      const er  = status.expectedResourceCount  ?? 1;
+      const er  = status.requiredResourceCount  ?? 1;
       const sz  = Math.round((status.completedResourceSize ?? 0) / 1_048_576 * 10) / 10;
       onProgress({ percentage: pct, completedTiles: cr, expectedTiles: er, completedResources: cr, expectedResources: er, sizeMb: sz });
       if (pct >= 100) onComplete();
@@ -102,15 +107,7 @@ export async function deletePack(name: string): Promise<void> {
 export async function getInstalledPacks(): Promise<InstalledPack[]> {
   try {
     const packs = await MapLibreGL.offlineManager.getPacks();
-    return (packs || []).map((p: any) => {
-      const status = p.status;
-      return {
-        name:       p.name ?? 'unknown',
-        percentage: status?.percentage ?? 0,
-        complete:   (status?.percentage ?? 0) >= 100,
-        sizeMb:     Math.round((status?.completedResourceSize ?? 0) / 1_048_576 * 10) / 10,
-      };
-    });
+    return installedOfflinePackStatuses(packs || []);
   } catch {
     return [];
   }

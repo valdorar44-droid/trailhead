@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -18,15 +18,18 @@ import { useTheme } from '@/lib/design';
 import { useStore } from '@/lib/store';
 import {
   originalBundleStore,
-  originalVersionAccessIsExact,
-  originalsApi,
+  originalPackVersionAccessIsExact,
   useOriginalsRuntime,
   type OriginalOwnerScope,
 } from '@/lib/originals';
 import { TrailheadButton, TrailheadMetricRow, TrailheadPrompt } from '@/components/TrailheadUI';
 import OriginalArtwork from '@/components/originals/OriginalArtwork';
 import OriginalRouteMap from '@/components/originals/OriginalRouteMap';
-import { getOriginalBundleState, getOriginalDetail } from '@/components/originals/originalsUiService';
+import {
+  downloadOriginalBundle,
+  getOriginalBundleState,
+  getOriginalDetail,
+} from '@/components/originals/originalsUiService';
 import type { OriginalUiBundleState, OriginalUiDetail } from '@/components/originals/types';
 
 const EMPTY_BUNDLE: OriginalUiBundleState = {
@@ -45,9 +48,15 @@ export default function OriginalDetailScreen() {
   const versionValue = Array.isArray(params.version) ? params.version[0] : params.version;
   const requestedVersion = Number.isFinite(Number(versionValue)) ? Number(versionValue) : undefined;
   const user = useStore(state => state.user);
+  const accountScope = user?.id == null ? 'guest' : `account:${String(user.id)}`;
+  const currentScopeRef = useRef(accountScope);
+  currentScopeRef.current = accountScope;
+  const loadRequestRef = useRef(0);
   const hasPlan = useStore(state => state.hasPlan);
   const originalsRuntime = useOriginalsRuntime();
-  const [detail, setDetail] = useState<OriginalUiDetail | null>(null);
+  const [loadedDetail, setLoadedDetail] = useState<OriginalUiDetail | null>(null);
+  const [detailScope, setDetailScope] = useState('');
+  const detail = detailScope === accountScope ? loadedDetail : null;
   const [bundle, setBundle] = useState<OriginalUiBundleState>(EMPTY_BUNDLE);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -58,20 +67,29 @@ export default function OriginalDetailScreen() {
 
   const load = useCallback(async () => {
     if (!id) return;
+    const request = ++loadRequestRef.current;
+    const requestScope = accountScope;
     setLoading(true);
     setError('');
     try {
       const next = await getOriginalDetail(id, requestedVersion);
-      setDetail(next);
-      setBundle(await getOriginalBundleState(next.id, next.version));
+      const nextBundle = await getOriginalBundleState(next.id, next.version);
+      if (request !== loadRequestRef.current || currentScopeRef.current !== requestScope) return;
+      setLoadedDetail(next);
+      setDetailScope(requestScope);
+      setBundle(nextBundle);
     } catch (loadError: any) {
+      if (request !== loadRequestRef.current || currentScopeRef.current !== requestScope) return;
       setError(loadError?.message || 'This Original could not be loaded.');
     } finally {
-      setLoading(false);
+      if (request === loadRequestRef.current && currentScopeRef.current === requestScope) setLoading(false);
     }
-  }, [id, requestedVersion]);
+  }, [accountScope, id, requestedVersion]);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load();
+    return () => { loadRequestRef.current += 1; };
+  }, [load]);
 
   useEffect(() => {
     const progress = originalsRuntime.downloadProgress;
@@ -117,14 +135,19 @@ export default function OriginalDetailScreen() {
       const result = canClaimFeatured
         ? await originalsRuntime.claimFeaturedOriginal(`original-featured:${new Date().toISOString().slice(0, 7)}:${detail.id}:${detail.version}`)
         : await originalsRuntime.acquireOriginal(detail.id, detail.version, `original:${detail.id}:${detail.version}`);
-      if (!originalVersionAccessIsExact(result.pack.version, detail.version)) {
+      if (!originalPackVersionAccessIsExact(
+        result.pack.id,
+        result.pack.version,
+        detail.id,
+        detail.version,
+      )) {
         Alert.alert(
-          `Version ${result.pack.version} is yours`,
-          `This page is version ${detail.version}. Ownership is version-specific, so it has not been unlocked.`,
+          `${result.pack.title} is yours`,
+          `You acquired version ${result.pack.version} of ${result.pack.title}. This page is ${detail.title} version ${detail.version}, so it has not been unlocked.`,
           [
             { text: 'Stay here', style: 'cancel' },
             {
-              text: `Open version ${result.pack.version}`,
+              text: 'Open acquired Original',
               onPress: () => router.replace({
                 pathname: '/originals/[id]',
                 params: { id: String(result.pack.id), version: String(result.pack.version) },
@@ -134,7 +157,7 @@ export default function OriginalDetailScreen() {
         );
         return;
       }
-      setDetail(current => current ? { ...current, access: 'owned' } : current);
+      setLoadedDetail(current => current ? { ...current, access: 'owned' } : current);
       setReadinessVisible(true);
     } catch (acquireError: any) {
       Alert.alert('Original not unlocked', acquireError?.message || 'Check your connection and credit balance, then try again.');
@@ -147,14 +170,12 @@ export default function OriginalDetailScreen() {
     if (!detail || bundle.state === 'downloading') return;
     setBundle(current => ({ ...current, state: 'downloading', error: undefined }));
     try {
-      const manifest = await originalsApi.manifest(detail.id, detail.version);
-      const record = await originalsRuntime.downloadOriginal(manifest);
-      setBundle({
-        state: 'ready',
-        progress: 1,
-        downloadedBytes: record.total_bytes,
-        totalBytes: record.total_bytes,
-      });
+      const next = await downloadOriginalBundle(
+        detail.id,
+        detail.version,
+        progress => setBundle(progress),
+      );
+      setBundle(next);
     } catch (downloadError: any) {
       setBundle(current => ({
         ...current,
@@ -162,7 +183,7 @@ export default function OriginalDetailScreen() {
         error: downloadError?.message || 'The offline package was not saved. Try again on a stable connection.',
       }));
     }
-  }, [bundle.state, detail, originalsRuntime]);
+  }, [bundle.state, detail]);
 
   const beginStart = useCallback(async () => {
     if (!detail) return;

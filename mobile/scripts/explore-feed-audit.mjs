@@ -32,6 +32,11 @@ const trailArea = read(join(mobileRoot, 'components/explore/ExploreTrailArea.tsx
 const rootLayout = read(join(mobileRoot, 'app/_layout.tsx'));
 const server = read(join(repoRoot, 'dashboard/server.py'));
 const nearbyContext = read(join(mobileRoot, 'lib/exploreNearbyContext.ts'));
+const originalsShelf = read(join(mobileRoot, 'components/originals/OriginalsShelf.tsx'));
+const ownedOriginals = read(join(mobileRoot, 'components/originals/OwnedOriginalsSection.tsx'));
+const originalsUiService = read(join(mobileRoot, 'components/originals/originalsUiService.ts'));
+const tripLibraryAdapter = read(join(mobileRoot, 'components/trips/trip-library-adapter.ts'));
+const tripRepositorySync = read(join(mobileRoot, 'lib/tripRepositorySync.ts'));
 
 assert(
   server.includes('class ExplorePlacesBulkRequest') && server.includes('@app.post("/api/explore/places/bulk")'),
@@ -205,6 +210,40 @@ assert(
     && !trailArea.includes('Route preview')
     && !trailArea.includes('TrailMiniMap'),
   'Trail actions must offer directions to the trailhead without a decorative route preview.',
+);
+assert(
+  guide.includes('{showExploreHome ? <OriginalsShelf /> : null}')
+    && !originalsShelf.includes('TrailheadRailSkeleton')
+    && originalsShelf.includes("studioOnly ? 'Originals Studio' : 'Self-guided drives'")
+    && originalsShelf.includes("isAdmin ? 'Open Originals Studio' : 'See all Trailhead Originals'")
+    && originalsShelf.includes("isAdmin ? 'Studio' : 'All'")
+    && originalsShelf.includes("if (!isAdmin && visible.length === 0) return null;"),
+  'Originals discovery must stay on Explore home, avoid a disabled loading flash, and retain a stable admin Studio entry.',
+);
+assert(
+  ownedOriginals.includes('requestRef.current')
+    && ownedOriginals.includes('if (items.length === 0 && !scopedView.error) return null;')
+    && ownedOriginals.includes('Your Originals')
+    && ownedOriginals.includes('Downloads and listening progress')
+    && ownedOriginals.includes('Try again')
+    && !ownedOriginals.includes('Browse Trailhead Originals'),
+  'Trips must show a scope-safe ownership library, retain retry/Restore recovery, and stay hidden only for verified empty accounts.',
+);
+const ownedOriginalsService = originalsUiService.match(
+  /export async function listOwnedOriginals\(\)[^{]*\{([\s\S]*?)\n\}\n\nexport async function restoreOwnedOriginals/,
+)?.[1] ?? '';
+assert(
+  ownedOriginalsService.length > 0
+    && !ownedOriginalsService.includes('listOriginals(')
+    && ownedOriginalsService.includes('originalSummaryForLocalAccess(access)')
+    && ownedOriginalsService.includes('requestEpoch = accountStorage.epoch()'),
+  'The Trips Originals library must not load the public catalog and must retain undownloaded local ownership within one account epoch.',
+);
+assert(
+  tripRepositorySync.includes('experienceRef: tripExperienceRefFromApi(item.experience_ref)')
+    && tripLibraryAdapter.includes('.filter(document => !isTrailheadOriginalTripDocument(document))')
+    && api.includes("'experience_ref'>"),
+  'Server-owned Original provenance must keep cloned fulfillment trips out of the editable Plan trip list and out of client writes.',
 );
 
 console.log('Explore feed audit passed.');

@@ -18,6 +18,7 @@ import type {
 } from './types';
 
 export * from './types';
+export * from './originalExperience';
 export {
   createSavedEntity,
   createTripDocument,

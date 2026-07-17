@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
@@ -11,36 +11,85 @@ export default function OwnedOriginalsSection() {
   const C = useTheme();
   const router = useRouter();
   const accountId = useStore(state => state.user?.id ?? null);
-  const [items, setItems] = useState<OriginalUiSummary[]>([]);
+  const accountScope = accountId == null ? 'guest' : `account:${String(accountId)}`;
+  const currentScopeRef = useRef(accountScope);
+  currentScopeRef.current = accountScope;
+  const requestRef = useRef(0);
+  const [view, setView] = useState<{
+    scope: string;
+    items: OriginalUiSummary[];
+    verified: boolean;
+    loaded: boolean;
+    error: string;
+  }>({ scope: '', items: [], verified: false, loaded: false, error: '' });
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [restoreMessage, setRestoreMessage] = useState('');
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const load = useCallback(async (scope: string, initial = false) => {
+    const request = ++requestRef.current;
+    if (initial) setLoading(true);
+    else setRefreshing(true);
     try {
-      setItems(await listOwnedOriginals());
+      const result = await listOwnedOriginals();
+      if (request !== requestRef.current || currentScopeRef.current !== scope || result.stale) return;
+      setView({
+        scope,
+        items: result.items,
+        verified: result.verified,
+        loaded: true,
+        error: result.error ?? '',
+      });
     } catch {
-      setItems([]);
+      if (request !== requestRef.current || currentScopeRef.current !== scope) return;
+      setView(previous => ({
+        scope,
+        items: previous.scope === scope ? previous.items : [],
+        verified: false,
+        loaded: true,
+        error: 'Your Originals could not refresh. Check your connection and retry.',
+      }));
     } finally {
-      setLoading(false);
+      if (request === requestRef.current && currentScopeRef.current === scope) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, []);
 
-  useEffect(() => { void load(); }, [accountId, load]);
-  if (!loading && items.length === 0 && accountId == null) return null;
+  useEffect(() => {
+    requestRef.current += 1;
+    setRestoreMessage('');
+    setRestoring(false);
+    void load(accountScope, true);
+    return () => { requestRef.current += 1; };
+  }, [accountScope, load]);
+
+  const scopedView = view.scope === accountScope
+    ? view
+    : { items: [] as OriginalUiSummary[], verified: false, loaded: false, error: '' };
+  const items = scopedView.items;
+
+  // Trips is an ownership surface, not another Originals acquisition entry.
+  // A verified empty library stays hidden; a failed check retains recovery controls.
+  if (items.length === 0 && !scopedView.error) return null;
 
   const restore = async () => {
+    const restoreScope = accountScope;
     setRestoring(true);
     setRestoreMessage('');
     try {
       const count = await restoreOwnedOriginals();
-      await load();
+      if (currentScopeRef.current !== restoreScope) return;
+      await load(restoreScope);
+      if (currentScopeRef.current !== restoreScope) return;
       setRestoreMessage(count ? `${count} restored` : 'Up to date');
     } catch (error) {
+      if (currentScopeRef.current !== restoreScope) return;
       setRestoreMessage(error instanceof Error ? error.message : 'Restore failed');
     } finally {
-      setRestoring(false);
+      if (currentScopeRef.current === restoreScope) setRestoring(false);
     }
   };
 
@@ -50,35 +99,38 @@ export default function OwnedOriginalsSection() {
         <View style={styles.headingCopy}>
           <View style={styles.titleRow}>
             <Ionicons name="navigate-outline" size={15} color={C.orange} />
-            <Text style={[styles.heading, { color: C.text }]}>Trailhead Originals</Text>
+            <Text style={[styles.heading, { color: C.text }]}>Your Originals</Text>
           </View>
           <Text style={[styles.subheading, { color: C.text2 }]}>Downloads and listening progress</Text>
         </View>
         <View style={styles.headerActions}>
+          {scopedView.error ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Try loading your Trailhead Originals again"
+              accessibilityState={{ busy: refreshing || loading }}
+              disabled={refreshing || loading}
+              onPress={() => void load(accountScope)}
+              style={styles.browse}
+            >
+              {refreshing || loading ? <ActivityIndicator size="small" color={C.orange} /> : <Ionicons name="reload" size={14} color={C.orange} />}
+              <Text style={[styles.browseText, { color: C.orange }]}>Try again</Text>
+            </TouchableOpacity>
+          ) : null}
           {accountId != null ? (
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Restore Trailhead Originals" accessibilityState={{ busy: restoring }} disabled={restoring} onPress={() => void restore()} style={styles.browse}>
               {restoring ? <ActivityIndicator size="small" color={C.orange} /> : <Ionicons name="refresh" size={14} color={C.orange} />}
               <Text style={[styles.browseText, { color: C.orange }]}>Restore</Text>
             </TouchableOpacity>
           ) : null}
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Browse Trailhead Originals" onPress={() => router.push('/originals' as any)} style={styles.browse}>
-            <Text style={[styles.browseText, { color: C.orange }]}>Browse</Text>
-            <Ionicons name="arrow-forward" size={14} color={C.orange} />
-          </TouchableOpacity>
         </View>
       </View>
+      {scopedView.error ? (
+        <Text accessibilityLiveRegion="polite" style={[styles.loadError, { color: C.text2 }]}>{scopedView.error}</Text>
+      ) : null}
       {restoreMessage ? <Text accessibilityLiveRegion="polite" style={[styles.restoreMessage, { color: C.text2 }]}>{restoreMessage}</Text> : null}
-      <View style={[styles.list, { borderTopColor: C.border }] }>
-        {loading ? (
-          <View style={[styles.loading, { borderBottomColor: C.border }] }>
-            <ActivityIndicator size="small" color={C.orange} />
-            <Text style={[styles.loadingText, { color: C.text2 }]}>Checking downloaded Originals</Text>
-          </View>
-        ) : items.length === 0 ? (
-          <View style={[styles.empty, { borderBottomColor: C.border }] }>
-            <Text style={[styles.loadingText, { color: C.text2 }]}>No Originals found for this account.</Text>
-          </View>
-        ) : items.map(item => {
+      {items.length > 0 ? <View style={[styles.list, { borderTopColor: C.border }] }>
+        {items.map(item => {
           const progress = Math.max(0, Math.min(1, item.progress || 0));
           const status = progress > 0
             ? `${Math.round(progress * 100)}% complete`
@@ -113,7 +165,7 @@ export default function OwnedOriginalsSection() {
             </TouchableOpacity>
           );
         })}
-      </View>
+      </View> : null}
     </View>
   );
 }
@@ -129,10 +181,8 @@ const styles = StyleSheet.create({
   browse: { minHeight: 44, flexDirection: 'row', alignItems: 'center', gap: 4 },
   browseText: { fontSize: 11.5, fontWeight: '900' },
   restoreMessage: { marginTop: -5, fontSize: 10.5, lineHeight: 14, fontWeight: '700', textAlign: 'right' },
+  loadError: { marginTop: -4, fontSize: 11, lineHeight: 16, fontWeight: '600' },
   list: { borderTopWidth: StyleSheet.hairlineWidth },
-  loading: { minHeight: 64, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  loadingText: { fontSize: 11.5, fontWeight: '700' },
-  empty: { minHeight: 54, borderBottomWidth: StyleSheet.hairlineWidth, justifyContent: 'center' },
   row: { minHeight: 72, borderBottomWidth: StyleSheet.hairlineWidth, paddingVertical: 9, flexDirection: 'row', alignItems: 'center', gap: 9 },
   icon: { width: 40, height: 40, borderRadius: 12, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   rowCopy: { flex: 1, minWidth: 0 },

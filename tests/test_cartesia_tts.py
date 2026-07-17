@@ -48,13 +48,14 @@ class CartesiaTtsOutputFormatTests(unittest.IsolatedAsyncioTestCase):
             "encoding": "pcm_s16le",
         })
 
-    async def test_mp3_request_does_not_receive_wav_encoding(self):
+    async def test_mp3_request_uses_128_kbps_and_does_not_receive_wav_encoding(self):
         _, request = await self._generate("mp3")
 
         self.assertEqual(request["headers"]["Accept"], "audio/mpeg")
         self.assertEqual(request["json"]["output_format"], {
             "container": "mp3",
             "sample_rate": 44100,
+            "bit_rate": 128000,
         })
 
 

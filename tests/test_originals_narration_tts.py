@@ -154,6 +154,76 @@ class ElevenLabsTtsTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("generated_at", call.kwargs["generator_metadata"])
 
 
+class CartesiaOriginalNarrationEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_legacy_endpoint_persists_mp3_with_cartesia_provenance(self):
+        audio = _synthetic_mp3()
+        persisted = {"id": "story_audio", "mime_type": "audio/mpeg"}
+        with (
+            patch.object(server, "_cartesia_tts", new=AsyncMock(return_value=audio)) as generate,
+            patch.object(server, "_persist_original_asset_bytes", return_value=persisted) as persist,
+            patch.object(server, "_tts_model_id", return_value="sonic-test"),
+            patch.object(server.settings, "cartesia_voice_id", "cartesia-test-voice"),
+        ):
+            result = await server.api_admin_generate_original_narration(
+                "original_moab",
+                "story_audio",
+                server.OriginalCartesiaAssetRequest(text="A reviewed Original story."),
+                admin={"id": 17},
+            )
+
+        self.assertEqual(result, persisted)
+        generate.assert_awaited_once_with(
+            "A reviewed Original story.", "guide", container="mp3",
+        )
+        call = persist.call_args
+        self.assertEqual(call.args[:5], (
+            "original_moab", "story_audio", "narration", "audio/mpeg", audio,
+        ))
+        self.assertEqual(call.args[5:7], ("story_audio.mp3", 17))
+        self.assertEqual(call.kwargs["transcript"], "A reviewed Original story.")
+        self.assertEqual(call.kwargs["generator_metadata"], {
+            "provider": "cartesia",
+            "model_id": "sonic-test",
+            "voice_id": "cartesia-test-voice",
+            "output_format": "mp3_44100_128",
+        })
+
+    async def test_provider_endpoint_persists_mp3_with_cartesia_provenance(self):
+        audio = _synthetic_mp3()
+        persisted = {"id": "story_audio", "mime_type": "audio/mpeg"}
+        with (
+            patch.object(server, "_cartesia_tts", new=AsyncMock(return_value=audio)) as generate,
+            patch.object(server, "_persist_original_asset_bytes", return_value=persisted) as persist,
+            patch.object(server, "_tts_model_id", return_value="sonic-test"),
+            patch.object(server.settings, "cartesia_voice_id", "cartesia-test-voice"),
+        ):
+            result = await server.api_admin_generate_original_narration_with_provider(
+                "original_moab",
+                "story_audio",
+                server.OriginalNarrationAssetRequest(
+                    text="A reviewed Original story.", provider="cartesia",
+                ),
+                admin={"id": 17},
+            )
+
+        self.assertEqual(result, persisted)
+        generate.assert_awaited_once_with(
+            "A reviewed Original story.", "guide", container="mp3",
+        )
+        call = persist.call_args
+        self.assertEqual(call.args[:5], (
+            "original_moab", "story_audio", "narration", "audio/mpeg", audio,
+        ))
+        self.assertEqual(call.args[5:7], ("story_audio.mp3", 17))
+        self.assertEqual(call.kwargs["transcript"], "A reviewed Original story.")
+        self.assertEqual(call.kwargs["generator_metadata"], {
+            "provider": "cartesia",
+            "model_id": "sonic-test",
+            "voice_id": "cartesia-test-voice",
+            "output_format": "mp3_44100_128",
+        })
+
+
 class OriginalMp3AssetTests(unittest.TestCase):
     def test_audio_mime_aliases_are_normalized_before_persistence(self):
         for alias in ("audio/wave", "audio/x-wav", "audio/vnd.wave"):

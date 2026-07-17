@@ -868,8 +868,8 @@ td.name{color:var(--text);font-weight:600;}
                     <label>PREVIEW</label>
                     <div class="originals-actions">
                       <select id="originals-narration-provider" class="originals-input" aria-label="Narration voice" style="width:auto;min-width:210px;">
+                        <option value="elevenlabs" selected>ElevenLabs</option>
                         <option value="cartesia">Cartesia</option>
-                        <option value="elevenlabs">ElevenLabs</option>
                       </select>
                       <button class="btn btn-primary btn-sm" id="originals-narration-btn" onclick="generateOriginalNarration()">Generate + attach</button>
                       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('originals-narration-file').click()">Upload audio</button>
@@ -3222,7 +3222,9 @@ function fillOriginalStopEditor(stop) {
     : null;
   const provider = uploaded && uploaded.generator_metadata && uploaded.generator_metadata.provider;
   const providerSelect = document.getElementById('originals-narration-provider');
-  if (providerSelect && ['cartesia', 'elevenlabs'].includes(provider)) providerSelect.value = provider;
+  if (providerSelect) {
+    providerSelect.value = ['cartesia', 'elevenlabs'].includes(provider) ? provider : 'elevenlabs';
+  }
   document.getElementById('originals-narration-status').textContent = uploaded
     ? `VERIFIED · ${originalNarrationProviderName(provider)} · ${formatBytes(uploaded.bytes)}`
     : 'NOT ATTACHED';

@@ -115,7 +115,14 @@ class ElevenLabsTtsTests(unittest.IsolatedAsyncioTestCase):
                 text="A reviewed Original story.", provider="untrusted-provider",
             )
 
-    async def test_originals_endpoint_selects_elevenlabs_and_records_provenance(self):
+    def test_originals_narration_defaults_to_elevenlabs(self):
+        request = server.OriginalNarrationAssetRequest(
+            text="A reviewed Original story.",
+        )
+
+        self.assertEqual(request.provider, "elevenlabs")
+
+    async def test_originals_endpoint_defaults_to_elevenlabs_and_records_provenance(self):
         audio = _synthetic_mp3()
         persisted = {"id": "story_audio", "mime_type": "audio/mpeg"}
         with (
@@ -128,7 +135,7 @@ class ElevenLabsTtsTests(unittest.IsolatedAsyncioTestCase):
                 "original_moab",
                 "story_audio",
                 server.OriginalNarrationAssetRequest(
-                    text="A reviewed Original story.", provider="elevenlabs",
+                    text="A reviewed Original story.",
                 ),
                 admin={"id": 17},
             )

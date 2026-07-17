@@ -12810,15 +12810,15 @@ async def api_admin_generate_original_narration(
 ):
     try:
         clean = _normalize_tts_text(body.text, "guide")
-        audio = await _cartesia_tts(clean, "guide", container="wav")
+        audio = await _cartesia_tts(clean, "guide", container="mp3")
         return _persist_original_asset_bytes(
-            pack_id, asset_id, "narration", "audio/wav", audio,
-            f"{asset_id}.wav", admin["id"], transcript=clean,
+            pack_id, asset_id, "narration", "audio/mpeg", audio,
+            f"{asset_id}.mp3", admin["id"], transcript=clean,
             generator_metadata={
                 "provider": "cartesia",
                 "model_id": _tts_model_id("guide"),
                 "voice_id": settings.cartesia_voice_id,
-                "output_format": "wav_pcm_s16le_44100",
+                "output_format": "mp3_44100_128",
             },
         )
     except HTTPException:
@@ -12843,9 +12843,9 @@ async def api_admin_generate_original_narration_with_provider(
             suffix = "mp3"
             voice_id, model_id = _elevenlabs_voice_and_model_ids()
         else:
-            audio = await _cartesia_tts(clean, "guide", container="wav")
-            mime_type = "audio/wav"
-            suffix = "wav"
+            audio = await _cartesia_tts(clean, "guide", container="mp3")
+            mime_type = "audio/mpeg"
+            suffix = "mp3"
             model_id = _tts_model_id("guide")
             voice_id = settings.cartesia_voice_id
         return _persist_original_asset_bytes(
@@ -12858,7 +12858,7 @@ async def api_admin_generate_original_narration_with_provider(
                 "output_format": (
                     ELEVENLABS_OUTPUT_FORMAT
                     if body.provider == "elevenlabs"
-                    else "wav_pcm_s16le_44100"
+                    else "mp3_44100_128"
                 ),
             },
         )
@@ -13741,6 +13741,7 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
 
 CARTESIA_TTS_ENDPOINT = "https://api.cartesia.ai/tts/bytes"
 CARTESIA_SAMPLE_RATE = 44100
+CARTESIA_MP3_BIT_RATE = 128000
 CARTESIA_WAV_ENCODING = "pcm_s16le"
 ELEVENLABS_TTS_ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech"
 ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
@@ -13914,6 +13915,8 @@ async def _cartesia_tts(clean: str, mode: str, container: str = "mp3") -> bytes:
     output_format = {"container": container, "sample_rate": CARTESIA_SAMPLE_RATE}
     if container == "wav":
         output_format["encoding"] = CARTESIA_WAV_ENCODING
+    elif container == "mp3":
+        output_format["bit_rate"] = CARTESIA_MP3_BIT_RATE
     payload = {
         "model_id": _tts_model_id(mode),
         "transcript": clean,

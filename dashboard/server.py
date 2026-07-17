@@ -10809,7 +10809,7 @@ class OriginalNarrationAssetRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
     text: str = Field(min_length=1, max_length=10000)
-    provider: Literal["cartesia", "elevenlabs"] = "cartesia"
+    provider: Literal["cartesia", "elevenlabs"] = "elevenlabs"
 
 
 class AuthoredTripPackFeatureRequest(BaseModel):

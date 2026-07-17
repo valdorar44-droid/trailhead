@@ -189,6 +189,7 @@ export type OriginalLocalAccessV1 = {
   title: string;
   owner_scope: OriginalOwnerScope;
   access_type: 'guest_free' | 'entitled' | 'admin_preview';
+  pack_summary?: OriginalSummary;
   manifest_path?: string;
   claimed_at_ms: number;
   updated_at_ms: number;

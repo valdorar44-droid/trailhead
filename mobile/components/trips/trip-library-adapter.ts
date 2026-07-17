@@ -23,6 +23,7 @@ import {
   getTrip,
   getTripRepositoryOutbox,
   getTripRepositorySnapshot,
+  isTrailheadOriginalTripDocument,
   normalizeTripRepositoryScope,
   saveTripNote,
   subscribeTripRepository,
@@ -367,7 +368,11 @@ export async function loadTripLibrarySnapshot(input: TripLibraryInput): Promise<
   const repository = getTripRepositorySnapshot();
   const offlineIds = new Set(offlineIndex);
   const savedEntitiesById = new Map(repository.savedEntities.map(entity => [entity.id, entity]));
-  const documents = [...repository.trips].sort((left, right) => right.updatedAt - left.updatedAt);
+  // Originals have a dedicated ownership/download surface below. Their
+  // server-cloned provenance trip must not also masquerade as an editable plan.
+  const documents = repository.trips
+    .filter(document => !isTrailheadOriginalTripDocument(document))
+    .sort((left, right) => right.updatedAt - left.updatedAt);
   const activeFromStore = input.activeTrip?.trip_id
     ? documents.find(document => document.id === input.activeTrip?.trip_id && document.status !== 'archived')
     : null;

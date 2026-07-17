@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from 'react';
 import { useStore } from '../store';
-import { accountStorage, storage } from '../storage';
+import { accountStorage } from '../storage';
 import { originalsApi } from './api';
 import {
   type OriginalAccessStore,
@@ -59,6 +59,7 @@ import { evaluateOriginalLocation, remainingOriginalTriggerStops } from './trigg
 import type {
   OriginalLocationSample,
   OriginalAcquisition,
+  OriginalAuthenticatedAcquisition,
   OriginalManifestV1,
   OriginalOwnerScope,
   OriginalSessionV1,
@@ -167,11 +168,20 @@ export function OriginalsRuntimeProvider({
     expectedScope?: OriginalOwnerScope,
     allowAdminPreview = false,
   ) => {
-    const ownerScope = originalOwnerScopeForAccount(useStore.getState().user?.id ?? null);
+    const requestEpoch = accountStorage.epoch();
+    const requestUserId = useStore.getState().user?.id ?? null;
+    const ownerScope = originalOwnerScopeForAccount(requestUserId);
+    const scopeIsStillCurrent = () => originalRestoreScopeIsCurrent(
+      ownerScope,
+      requestEpoch,
+      accountStorage.epoch(),
+      useStore.getState().user?.id ?? null,
+    );
     if (expectedScope && expectedScope !== ownerScope) {
       throw new Error('This downloaded Original belongs to a different account.');
     }
     const access = await dependencies.access.get(ownerScope, packId, version);
+    if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
     const currentUser = useStore.getState().user;
     const allowed = access?.owner_scope === ownerScope && (
       ownerScope === 'guest'
@@ -188,6 +198,7 @@ export function OriginalsRuntimeProvider({
         ? 'Get this free Original on this device before downloading or starting it.'
         : 'Restore or acquire this exact Original version for the signed-in account.');
     }
+    if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
     return ownerScope;
   }, [dependencies.access]);
 
@@ -474,13 +485,23 @@ export function OriginalsRuntimeProvider({
     return result;
   }, [playStop, publishSession, stopLocation]);
 
-  const startLocation = useCallback(async () => {
+  const startLocation = useCallback(async (operationIsCurrent?: () => boolean) => {
     await stopLocation();
+    if (operationIsCurrent && !operationIsCurrent()) throw new Error('Original start was cancelled.');
     const result = await dependencies.location.start(submitLocationSample);
+    if (operationIsCurrent && !operationIsCurrent()) {
+      await result.stop().catch(() => {});
+      throw new Error('Original start was cancelled.');
+    }
     stopLocationRef.current = result.stop;
     const active = sessionRef.current;
     if (active) {
       await publishSession({ ...active, permission_state: result.permission, updated_at_ms: Date.now() });
+    }
+    if (operationIsCurrent && !operationIsCurrent()) {
+      await result.stop().catch(() => {});
+      if (stopLocationRef.current === result.stop) stopLocationRef.current = null;
+      throw new Error('Original start was cancelled.');
     }
     if (result.permission === 'denied') throw new Error('Location permission is required to trigger stories.');
   }, [dependencies.location, publishSession, stopLocation, submitLocationSample]);
@@ -491,7 +512,26 @@ export function OriginalsRuntimeProvider({
     simulate = false,
   ) => {
     let activatedSessionId: string | null = null;
+    const requestEpoch = accountStorage.epoch();
+    const requestScope = originalOwnerScopeForAccount(useStore.getState().user?.id ?? null);
+    const activationGeneration = trackingGenerationRef.current + 1;
+    trackingGenerationRef.current = activationGeneration;
+    const scopeIsStillCurrent = () => originalRestoreScopeIsCurrent(
+      requestScope,
+      requestEpoch,
+      accountStorage.epoch(),
+      useStore.getState().user?.id ?? null,
+    );
+    const activationIsCurrent = () => (
+      scopeIsStillCurrent()
+      && !stoppingRef.current
+      && trackingGenerationRef.current === activationGeneration
+    );
+    const requireActiveActivation = () => {
+      if (!activationIsCurrent()) throw new Error('Original start was cancelled.');
+    };
     try {
+      requireActiveActivation();
       if (
         simulate
         && !simulationRef.current
@@ -503,16 +543,23 @@ export function OriginalsRuntimeProvider({
       const ownerScope = await requireCurrentAccess(
         cleanManifest.pack_id,
         cleanManifest.version,
-        undefined,
+        requestScope,
         simulate,
       );
+      requireActiveActivation();
       const installed = await dependencies.bundles.get(ownerScope, cleanManifest.pack_id, cleanManifest.version);
-      if (!installed || !await dependencies.bundles.verify(ownerScope, cleanManifest.pack_id, cleanManifest.version)) {
+      requireActiveActivation();
+      const verified = installed
+        ? await dependencies.bundles.verify(ownerScope, cleanManifest.pack_id, cleanManifest.version)
+        : false;
+      requireActiveActivation();
+      if (!installed || !verified) {
         throw new Error('Finish downloading and verifying this Original before starting.');
       }
       const existing = restart || simulate
         ? null
         : await dependencies.sessions.load(ownerScope, cleanManifest.pack_id, cleanManifest.version);
+      requireActiveActivation();
       const now = Date.now();
       const active = {
         ...(existing ?? createOriginalSession(cleanManifest, ownerScope, now)),
@@ -523,11 +570,14 @@ export function OriginalsRuntimeProvider({
         completed_at_ms: restart ? null : existing?.completed_at_ms ?? null,
         updated_at_ms: now,
       };
-      trackingGenerationRef.current += 1;
       await stopLocation();
+      requireActiveActivation();
       await dependencies.audio.stop().catch(() => {});
+      requireActiveActivation();
       await dependencies.audio.unload().catch(() => {});
+      requireActiveActivation();
       await releaseAudio();
+      requireActiveActivation();
       simulationRef.current = simulate;
       lastTriggerEvaluationRef.current = null;
       manifestRef.current = cleanManifest;
@@ -541,12 +591,23 @@ export function OriginalsRuntimeProvider({
         setState('tracking');
       }
       activatedSessionId = active.session_id;
+      requireActiveActivation();
       await publishSession(active);
-      if (!simulate) await startLocation();
-      if (active.current_stop_id) await playStop(active.current_stop_id, active.current_audio_position_ms);
+      requireActiveActivation();
+      if (!simulate) await startLocation(activationIsCurrent);
+      requireActiveActivation();
+      if (active.current_stop_id) {
+        await playStop(active.current_stop_id, active.current_audio_position_ms);
+        requireActiveActivation();
+      }
       return sessionRef.current ?? active;
     } catch (caught) {
       if (activatedSessionId) await stopLocation();
+      if (!scopeIsStillCurrent() || trackingGenerationRef.current !== activationGeneration || stoppingRef.current) {
+        throw new Error(scopeIsStillCurrent()
+          ? 'Original start was cancelled.'
+          : 'The signed-in account changed. Try again.');
+      }
       const active = sessionRef.current;
       if (active?.session_id === activatedSessionId && active.status === 'active') {
         await publishSession({
@@ -579,24 +640,54 @@ export function OriginalsRuntimeProvider({
       setDownloadProgress(null);
     }
     try {
+      const requestEpoch = accountStorage.epoch();
+      const requestUserId = useStore.getState().user?.id ?? null;
+      const requestScope = originalOwnerScopeForAccount(requestUserId);
+      const requestToken = requestUserId == null ? null : useStore.getState().token ?? null;
+      if (requestUserId != null && !requestToken) throw new Error('Sign in to download this Original.');
+      const scopeIsStillCurrent = () => originalRestoreScopeIsCurrent(
+        requestScope,
+        requestEpoch,
+        accountStorage.epoch(),
+        useStore.getState().user?.id ?? null,
+      );
       const ownerScope = await requireCurrentAccess(
         manifestInput.pack_id,
         manifestInput.version,
-        undefined,
+        requestScope,
         true,
       );
+      if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
       const access = await dependencies.access.get(ownerScope, manifestInput.pack_id, manifestInput.version);
+      if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
       reportDownloadAnalytics = access?.access_type !== 'admin_preview';
-      const token = await storage.get('trailhead_token').catch(() => null);
-      const installed = await dependencies.bundles.download(manifestInput, {
-        ...options,
-        ownerScope,
-        headers: {
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-          ...(options.headers ?? {}),
-        },
-        onProgress: value => mountedRef.current && setDownloadProgress(value),
-      });
+      const controller = new AbortController();
+      const abortForScopeChange = () => {
+        if (!scopeIsStillCurrent()) controller.abort();
+      };
+      const abortForCaller = () => controller.abort();
+      if (options.signal?.aborted) controller.abort();
+      else options.signal?.addEventListener('abort', abortForCaller, { once: true });
+      const unsubscribe = accountStorage.subscribe(abortForScopeChange);
+      let installed: OriginalBundleRecord;
+      try {
+        installed = await dependencies.bundles.download(manifestInput, {
+          ...options,
+          ownerScope,
+          headers: {
+            ...(options.headers ?? {}),
+            ...(requestToken ? { Authorization: `Bearer ${requestToken}` } : {}),
+          },
+          signal: controller.signal,
+          onProgress: value => {
+            if (scopeIsStillCurrent() && mountedRef.current) setDownloadProgress(value);
+          },
+        });
+      } finally {
+        unsubscribe();
+        options.signal?.removeEventListener('abort', abortForCaller);
+      }
+      if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
       bundleRef.current = installed;
       if (mountedRef.current) {
         setBundle(installed);
@@ -958,34 +1049,65 @@ export function OriginalsRuntimeProvider({
 
   const acquireOriginal = useCallback(async (id: string, version: number, idempotencyKey?: string) => {
     const requestEpoch = accountStorage.epoch();
-    const requestUserId = userId;
-    const acquisition: OriginalAcquisition = await originalsApi.acquire(id, { idempotencyKey, version });
-    if (
-      requestEpoch !== accountStorage.epoch()
-      || String(useStore.getState().user?.id ?? '') !== String(requestUserId ?? '')
-    ) return acquisition;
-    if (acquisition.guest_access) {
-      await dependencies.access.claimGuest(acquisition);
-    } else if (userId != null) {
-      await dependencies.access.recordEntitlement(acquisition, userId);
+    const requestUserId = useStore.getState().user?.id ?? null;
+    const requestScope = originalOwnerScopeForAccount(requestUserId);
+    const requestToken = requestUserId == null ? null : useStore.getState().token ?? null;
+    if (requestUserId != null && !requestToken) throw new Error('Sign in to acquire this Original.');
+    const scopeIsStillCurrent = () => originalRestoreScopeIsCurrent(
+      requestScope,
+      requestEpoch,
+      accountStorage.epoch(),
+      useStore.getState().user?.id ?? null,
+    );
+    const acquisition: OriginalAcquisition = await originalsApi.acquire(id, {
+      idempotencyKey,
+      version,
+      authToken: requestToken,
+    });
+    if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
+    const persisted = await accountStorage.run(async () => {
+      if (!scopeIsStillCurrent()) return false;
+      if (acquisition.guest_access) {
+        if (requestUserId != null) return false;
+        await dependencies.access.claimGuest(acquisition);
+      } else {
+        if (requestUserId == null) return false;
+        await dependencies.access.recordEntitlement(acquisition, requestUserId);
+      }
+      return scopeIsStillCurrent();
+    }, requestEpoch);
+    if (persisted !== true || !scopeIsStillCurrent()) {
+      throw new Error('The signed-in account changed. Try again.');
     }
     return acquisition;
-  }, [dependencies.access, userId]);
+  }, [dependencies.access]);
 
   const claimFeaturedOriginal = useCallback(async (idempotencyKey = `original-featured:${new Date().toISOString().slice(0, 7)}`) => {
     const requestEpoch = accountStorage.epoch();
-    const requestUserId = userId;
-    const acquisition = await originalsApi.claimFeatured(idempotencyKey);
-    if (
-      requestEpoch === accountStorage.epoch()
-      && requestUserId != null
-      && String(useStore.getState().user?.id ?? '') === String(requestUserId)
-      && !('guest_access' in acquisition && acquisition.guest_access)
-    ) {
+    const requestUserId = useStore.getState().user?.id ?? null;
+    const requestToken = useStore.getState().token ?? null;
+    if (requestUserId == null || !requestToken) throw new Error('Sign in to claim this Original.');
+    const requestScope = originalOwnerScopeForAccount(requestUserId);
+    const scopeIsStillCurrent = () => originalRestoreScopeIsCurrent(
+      requestScope,
+      requestEpoch,
+      accountStorage.epoch(),
+      useStore.getState().user?.id ?? null,
+    );
+    const acquisition = await originalsApi.claimFeatured(idempotencyKey, undefined, requestToken);
+    if (!scopeIsStillCurrent() || ('guest_access' in acquisition && acquisition.guest_access)) {
+      throw new Error('The signed-in account changed. Try again.');
+    }
+    const persisted = await accountStorage.run(async () => {
+      if (!scopeIsStillCurrent()) return false;
       await dependencies.access.recordEntitlement(acquisition, requestUserId);
+      return scopeIsStillCurrent();
+    }, requestEpoch);
+    if (persisted !== true || !scopeIsStillCurrent()) {
+      throw new Error('The signed-in account changed. Try again.');
     }
     return acquisition;
-  }, [dependencies.access, userId]);
+  }, [dependencies.access]);
 
   const beginAudioInterruption = useCallback(async (kind: 'navigation' | 'hazard') => {
     const owner = `trailhead-originals-${kind}:${Date.now()}`;
@@ -1000,40 +1122,69 @@ export function OriginalsRuntimeProvider({
 
   const migrateGuestToAccount = useCallback(async (accountId: string | number) => {
     const requestEpoch = accountStorage.epoch();
-    const [guestSessions, guestAccess] = await Promise.all([
-      dependencies.sessions.list('guest'),
-      dependencies.access.list('guest'),
-    ]);
+    const requestScope = originalOwnerScopeForAccount(accountId);
+    const requestToken = useStore.getState().token ?? null;
+    const scopeIsStillCurrent = () => originalRestoreScopeIsCurrent(
+      requestScope,
+      requestEpoch,
+      accountStorage.epoch(),
+      useStore.getState().user?.id ?? null,
+    );
+    if (!requestToken || !scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
+    const guestAccess = await dependencies.access.list('guest');
+    if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
     const guestPacks = new Map<string, { pack_id: string; version: number }>();
-    [...guestSessions, ...guestAccess].forEach(guest => {
+    guestAccess.filter(guest => guest.access_type === 'guest_free').forEach(guest => {
       guestPacks.set(`${guest.pack_id}@${guest.version}`, guest);
     });
     const acquired: Array<{ pack_id: string; version: number }> = [];
+    const acceptedAcquisitions = new Map<string, OriginalAuthenticatedAcquisition>();
     for (const guest of guestPacks.values()) {
       if (
-        requestEpoch !== accountStorage.epoch()
-        || String(useStore.getState().user?.id ?? '') !== String(accountId)
-      ) return [];
+        !scopeIsStillCurrent()
+      ) throw new Error('The signed-in account changed. Try again.');
       const acquisition = await originalsApi.acquire(guest.pack_id, {
         idempotencyKey: `guest-original:${guest.pack_id}:${guest.version}:account:${accountId}`,
         version: guest.version,
+        authToken: requestToken,
       }).catch(() => null);
-      if (acquisition && !acquisition.guest_access) {
+      if (
+        acquisition
+        && !acquisition.guest_access
+        && String(acquisition.pack.id) === String(guest.pack_id)
+        && acquisition.pack.version === guest.version
+      ) {
         acquired.push(guest);
-        await dependencies.access.recordEntitlement(acquisition, accountId).catch(() => null);
+        acceptedAcquisitions.set(`${guest.pack_id}@${guest.version}`, acquisition);
       }
     }
-    if (
-      requestEpoch !== accountStorage.epoch()
-      || String(useStore.getState().user?.id ?? '') !== String(accountId)
-    ) return [];
-    // Only exact free versions that the server just accepted are allowed to
-    // cross from the guest partition into this account partition.
-    await dependencies.bundles.migrateGuestToAccount(accountId, acquired);
-    const [migrated] = await Promise.all([
-      dependencies.sessions.migrateGuestToAccount(accountId, acquired),
-      dependencies.access.migrateGuestToAccount(accountId, acquired),
-    ]);
+    if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
+    const acquisitionsByIdentity = new Map(acquired.map((identity, index) => [
+      `${identity.pack_id}@${identity.version}`,
+      identity,
+    ]));
+    const accepted = [...acquisitionsByIdentity.values()];
+    const committed = await accountStorage.run(async () => {
+      if (!scopeIsStillCurrent()) return null;
+      // Only exact guest-free versions just accepted by the server may cross
+      // into the account partition. Orphan sessions are never candidates.
+      for (const identity of accepted) {
+        const acquisition = acceptedAcquisitions.get(`${identity.pack_id}@${identity.version}`);
+        if (!acquisition) return null;
+        await dependencies.access.recordEntitlement(acquisition, accountId);
+      }
+      // Once this captured-scope commit begins, finish every idempotent move.
+      // Account cleanup waits on accountStorage.run, so stopping between stores
+      // would be more dangerous than completing the migration before cleanup.
+      await dependencies.bundles.migrateGuestToAccount(accountId, accepted);
+      const [migrated] = await Promise.all([
+        dependencies.sessions.migrateGuestToAccount(accountId, accepted),
+        dependencies.access.migrateGuestToAccount(accountId, accepted),
+      ]);
+      return migrated;
+    }, requestEpoch);
+    if (!committed || !scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
+    const migrated = committed;
     const active = sessionRef.current;
     if (active?.owner_scope === 'guest') {
       const replacement = migrated.find(value => (

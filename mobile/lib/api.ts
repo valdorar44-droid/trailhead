@@ -2436,6 +2436,12 @@ export interface AccountLibraryPage {
   next_cursor?: string | null;
 }
 export type AccountTripDocumentStatus = 'draft' | 'active' | 'completed' | 'archived' | 'deleted';
+export interface AccountTripExperienceRef {
+  kind: 'trailhead_original';
+  pack_id: string;
+  version: number;
+  manifest_id: string;
+}
 export interface AccountTripDocumentV2 {
   schema_version: 2;
   trip_id: string;
@@ -2458,6 +2464,7 @@ export interface AccountTripDocumentV2 {
   route?: Record<string, unknown>;
   visibility: 'private' | 'shared' | 'public';
   source: string;
+  experience_ref?: AccountTripExperienceRef | null;
   legacy_v1?: Record<string, unknown> | null;
   created_at: number;
   updated_at: number;
@@ -2467,7 +2474,7 @@ export interface AccountTripDocumentV2 {
 export interface AccountTripDocumentWritePayload {
   trip_id?: string;
   expected_revision: number;
-  document: Omit<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at'>
+  document: Omit<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at' | 'experience_ref'>
     & Partial<Pick<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at'>>;
 }
 export interface AccountTripDocumentListOptions {

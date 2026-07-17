@@ -21,3 +21,13 @@ export function originalVersionAccessIsExact(acquiredVersion: number, requestedV
     && Number.isInteger(requestedVersion)
     && acquiredVersion === requestedVersion;
 }
+
+export function originalPackVersionAccessIsExact(
+  acquiredPackId: string | number,
+  acquiredVersion: number,
+  requestedPackId: string | number,
+  requestedVersion: number,
+) {
+  return String(acquiredPackId) === String(requestedPackId)
+    && originalVersionAccessIsExact(acquiredVersion, requestedVersion);
+}

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/lib/design';
-import { TrailheadRailSkeleton } from '@/components/TrailheadUI';
+import { useStore } from '@/lib/store';
 import OriginalCard from './OriginalCard';
 import { listOriginals } from './originalsUiService';
 import type { OriginalUiSummary } from './types';
@@ -11,27 +11,40 @@ import type { OriginalUiSummary } from './types';
 export default function OriginalsShelf({ query = '' }: { query?: string }) {
   const C = useTheme();
   const router = useRouter();
+  const isAdmin = useStore(state => Boolean(state.user?.is_admin));
+  const accountId = useStore(state => state.user?.id ?? null);
+  const accountScope = accountId == null ? 'guest' : `account:${String(accountId)}`;
+  const requestRef = useRef(0);
   const [items, setItems] = useState<OriginalUiSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loadedScope, setLoadedScope] = useState('');
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (scope: string) => {
+    const request = ++requestRef.current;
     try {
-      setItems(await listOriginals());
+      const next = await listOriginals();
+      if (request !== requestRef.current) return;
+      setItems(next);
+      setLoadedScope(scope);
     } catch {
+      if (request !== requestRef.current) return;
       setItems([]);
-    } finally {
-      setLoading(false);
+      setLoadedScope(scope);
     }
   }, []);
 
-  useEffect(() => { void load(); }, [load]);
+  useEffect(() => {
+    void load(accountScope);
+    return () => { requestRef.current += 1; };
+  }, [accountScope, load]);
 
+  const scopedItems = loadedScope === accountScope ? items : [];
   const normalizedQuery = query.trim().toLowerCase();
   const contextual = normalizedQuery
-    ? items.filter(item => `${item.title} ${item.region} ${item.summary}`.toLowerCase().includes(normalizedQuery))
-    : items;
-  const visible = (contextual.length ? contextual : normalizedQuery ? [] : items).slice(0, 5);
-  if (!loading && visible.length === 0) return null;
+    ? scopedItems.filter(item => `${item.title} ${item.region} ${item.summary}`.toLowerCase().includes(normalizedQuery))
+    : scopedItems;
+  const visible = (contextual.length ? contextual : normalizedQuery ? [] : scopedItems).slice(0, 5);
+  const studioOnly = isAdmin && visible.length === 0;
+  if (!isAdmin && visible.length === 0) return null;
 
   return (
     <View
@@ -44,24 +57,22 @@ export default function OriginalsShelf({ query = '' }: { query?: string }) {
         </View>
         <View style={styles.headingCopy}>
           <Text style={[styles.kicker, { color: C.orange }]}>TRAILHEAD ORIGINALS</Text>
-          <Text style={[styles.heading, { color: C.text }]}>Self-guided drives</Text>
-          <Text style={[styles.subheading, { color: C.text2 }]}>GPS stories · Offline audio</Text>
+          <Text style={[styles.heading, { color: C.text }]}>{studioOnly ? 'Originals Studio' : 'Self-guided drives'}</Text>
+          <Text style={[styles.subheading, { color: C.text2 }]}>{studioOnly ? 'Draft testing · Admin only' : 'GPS stories · Offline audio'}</Text>
         </View>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel="See all Trailhead Originals"
+          accessibilityLabel={isAdmin ? 'Open Originals Studio' : 'See all Trailhead Originals'}
           hitSlop={8}
           activeOpacity={0.72}
           onPress={() => router.push('/originals' as any)}
           style={styles.seeAll}
         >
-          <Text style={[styles.seeAllText, { color: C.orange }]}>All</Text>
+          <Text style={[styles.seeAllText, { color: C.orange }]}>{isAdmin ? 'Studio' : 'All'}</Text>
           <Ionicons name="arrow-forward" size={14} color={C.orange} />
         </TouchableOpacity>
       </View>
-      {loading ? (
-        <TrailheadRailSkeleton count={2} cardWidth={286} />
-      ) : (
+      {visible.length > 0 ? (
         <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.rail}>
           {visible.map(original => (
             <OriginalCard
@@ -71,7 +82,7 @@ export default function OriginalsShelf({ query = '' }: { query?: string }) {
             />
           ))}
         </ScrollView>
-      )}
+      ) : null}
     </View>
   );
 }

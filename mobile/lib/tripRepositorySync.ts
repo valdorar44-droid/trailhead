@@ -28,6 +28,7 @@ import {
   type TripItemV1,
   type TripNoteV1,
 } from './tripRepository';
+import { tripExperienceRefFromApi } from './tripRepository/originalExperience';
 import {
   hasRunnableTripRepositoryOutboxEntries,
   nextTripRepositoryRetryAt,
@@ -222,6 +223,7 @@ function remoteTripDocument(item: AccountTripDocumentV2, ownerScope: string): Tr
     rigSnapshot: record(item.rig_snapshot),
     route: record(item.route),
     source: item.source,
+    experienceRef: tripExperienceRefFromApi(item.experience_ref),
     createdAt: milliseconds(item.created_at),
     updatedAt: milliseconds(item.updated_at),
     archivedAt: item.archived_at ? milliseconds(item.archived_at) : undefined,

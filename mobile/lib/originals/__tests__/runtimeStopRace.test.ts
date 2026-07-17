@@ -12,18 +12,22 @@ type Runtime = import('../runtime').OriginalsRuntimeValue;
 
 const nativeRuntimeStubs: Record<string, string> = {
   '../store': `
-    const state = { user: null };
-    export function useStore(selector) { return selector(state); }
-    useStore.getState = () => state;
+    const state = () => globalThis.__originalsRuntimeAuthState || { user: null, token: null };
+    export function useStore(selector) { return selector(state()); }
+    useStore.getState = state;
   `,
   '../storage': `
-    export const accountStorage = { epoch: () => 0 };
+    export const accountStorage = {
+      epoch: () => globalThis.__originalsRuntimeEpoch || 0,
+      run: async (operation, epoch) => epoch === (globalThis.__originalsRuntimeEpoch || 0) ? operation() : undefined,
+      subscribe: () => () => {},
+    };
     export const storage = { get: async () => null };
   `,
   './api': `
     export const originalsApi = {
-      acquire: async () => { throw new Error('unused'); },
-      claimFeatured: async () => { throw new Error('unused'); },
+      acquire: (...args) => globalThis.__originalsRuntimeAcquire(...args),
+      claimFeatured: (...args) => globalThis.__originalsRuntimeClaimFeatured(...args),
     };
   `,
   './analytics': `
@@ -92,6 +96,16 @@ function deferred<T>() {
 }
 
 async function main() {
+  const globals = globalThis as typeof globalThis & {
+    __originalsRuntimeAuthState?: { user: { id: string } | null; token: string | null };
+    __originalsRuntimeEpoch?: number;
+    __originalsRuntimeAcquire?: (...args: unknown[]) => Promise<unknown>;
+    __originalsRuntimeClaimFeatured?: (...args: unknown[]) => Promise<unknown>;
+  };
+  globals.__originalsRuntimeAuthState = { user: null, token: null };
+  globals.__originalsRuntimeEpoch = 0;
+  globals.__originalsRuntimeAcquire = async () => { throw new Error('unused'); };
+  globals.__originalsRuntimeClaimFeatured = async () => { throw new Error('unused'); };
   const runtimeModule = await loadRuntimeModule();
   const accessGate = deferred<Record<string, unknown>>();
   const accessEntered = deferred<void>();
@@ -99,6 +113,12 @@ async function main() {
   let playCount = 0;
   let sessionSaveCount = 0;
   let setActiveCount = 0;
+  let guestClaimCount = 0;
+  let entitlementWriteCount = 0;
+  let locationStartCount = 0;
+  let accessOverride: (() => Promise<Record<string, unknown>>) | null = null;
+  let bundleOverride: (() => Promise<Record<string, unknown>>) | null = null;
+  let verifyOverride: (() => Promise<boolean>) | null = null;
 
   const manifest = originalManifest();
   const bundle = {
@@ -128,6 +148,7 @@ async function main() {
   const dependencies = {
     access: {
       async get() {
+        if (accessOverride) return accessOverride();
         accessReads += 1;
         if (accessReads === 1) {
           return { owner_scope: 'guest', access_type: 'guest_free' };
@@ -136,11 +157,13 @@ async function main() {
         return accessGate.promise;
       },
       async list() { return []; },
+      async claimGuest() { guestClaimCount += 1; },
+      async recordEntitlement() { entitlementWriteCount += 1; },
       async migrateGuestToAccount() { return []; },
     },
     bundles: {
-      async get() { return bundle; },
-      async verify() { return true; },
+      async get() { return bundleOverride ? bundleOverride() : bundle; },
+      async verify() { return verifyOverride ? verifyOverride() : true; },
       async assetUri() { return 'file:///originals/test/story.mp3'; },
       async loadManifest() { return null; },
       async migrateGuestToAccount() {},
@@ -155,7 +178,7 @@ async function main() {
     },
     location: {
       capabilities: { foreground: true, backgroundTask: true, androidForegroundService: true },
-      async start() { return { permission: 'granted', stop: async () => {} }; },
+      async start() { locationStartCount += 1; return { permission: 'granted', stop: async () => {} }; },
       async stopActive() {},
     },
     audio: {
@@ -224,6 +247,72 @@ async function main() {
   assert.equal(playCount, 0, 'an in-flight cue cannot play after stop invalidates its generation');
   assert.equal(sessionSaveCount, 0, 'the ephemeral simulation session is never persisted by stop');
   assert.equal(setActiveCount, 0, 'the ephemeral simulation session never replaces durable active state');
+  const ownershipRuntime = runtime as unknown as Runtime;
+
+  const guestAcquireEntered = deferred<void>();
+  const guestAcquireGate = deferred<unknown>();
+  let acquireOptions: Record<string, unknown> | undefined;
+  globals.__originalsRuntimeAcquire = async (_id, options) => {
+    acquireOptions = options as Record<string, unknown>;
+    guestAcquireEntered.resolve();
+    return guestAcquireGate.promise;
+  };
+  const staleGuestAcquire = ownershipRuntime.acquireOriginal('moab-original', 1);
+  await guestAcquireEntered.promise;
+  globals.__originalsRuntimeAuthState = { user: { id: 'account-b' }, token: 'token-b' };
+  globals.__originalsRuntimeEpoch = 1;
+  guestAcquireGate.resolve({
+    guest_access: true,
+    access_type: 'guest_free',
+    pack: { id: 'moab-original', version: 1 },
+    manifest_path: '/manifest',
+  });
+  await assert.rejects(staleGuestAcquire, /account changed/i);
+  assert.equal(acquireOptions?.authToken, null, 'a logical guest acquire is pinned to guest auth');
+  assert.equal(guestClaimCount, 0, 'a stale guest acquire cannot write access after sign-in');
+
+  const featuredEntered = deferred<void>();
+  const featuredGate = deferred<unknown>();
+  let featuredToken: unknown;
+  globals.__originalsRuntimeAuthState = { user: { id: 'account-a' }, token: 'token-a' };
+  globals.__originalsRuntimeEpoch = 2;
+  globals.__originalsRuntimeClaimFeatured = async (_key, _signal, authToken) => {
+    featuredToken = authToken;
+    featuredEntered.resolve();
+    return featuredGate.promise;
+  };
+  const staleFeaturedClaim = ownershipRuntime.claimFeaturedOriginal('featured:test');
+  await featuredEntered.promise;
+  globals.__originalsRuntimeEpoch = 3;
+  featuredGate.resolve({
+    entitlement: { pack_id: 'moab-original', version: 1 },
+    pack: { id: 'moab-original', version: 1 },
+    trip: {},
+    already_owned: false,
+    replayed: false,
+    credit_balance: 0,
+  });
+  await assert.rejects(staleFeaturedClaim, /account changed/i);
+  assert.equal(featuredToken, 'token-a', 'a featured claim uses the token captured at start');
+  assert.equal(entitlementWriteCount, 0, 'a stale same-account epoch cannot persist featured ownership');
+
+  const verifyEntered = deferred<void>();
+  const verifyGate = deferred<boolean>();
+  accessOverride = async () => ({ owner_scope: 'account:account-a', access_type: 'entitled' });
+  bundleOverride = async () => ({ ...bundle, owner_scope: 'account:account-a' });
+  verifyOverride = async () => {
+    verifyEntered.resolve();
+    return verifyGate.promise;
+  };
+  globals.__originalsRuntimeAuthState = { user: { id: 'account-a' }, token: 'token-a' };
+  globals.__originalsRuntimeEpoch = 3;
+  const staleStart = ownershipRuntime.startTour(manifest);
+  await verifyEntered.promise;
+  globals.__originalsRuntimeAuthState = { user: { id: 'account-b' }, token: 'token-b' };
+  globals.__originalsRuntimeEpoch = 4;
+  verifyGate.resolve(true);
+  await assert.rejects(staleStart, /account changed/i);
+  assert.equal(locationStartCount, 0, 'a stale activation never starts background location');
 
   await act(async () => { renderer!.unmount(); });
   console.log('Originals runtime stop-race regression tests passed.');

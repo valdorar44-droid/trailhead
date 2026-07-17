@@ -89,6 +89,13 @@ export interface TripReadinessV1 {
   checks?: Record<string, boolean | string | number | null>;
 }
 
+export interface TripExperienceRefV1 {
+  kind: 'trailhead_original';
+  packId: string;
+  version: number;
+  manifestId: string;
+}
+
 export interface TripDocumentV2 {
   schemaVersion: typeof TRIP_DOCUMENT_SCHEMA_VERSION;
   id: string;
@@ -111,6 +118,8 @@ export interface TripDocumentV2 {
   rigSnapshot?: Record<string, unknown>;
   route?: Record<string, unknown>;
   source?: string;
+  /** Server-owned provenance. Client write payloads intentionally omit it. */
+  experienceRef?: TripExperienceRefV1;
   createdAt: number;
   updatedAt: number;
   archivedAt?: number;

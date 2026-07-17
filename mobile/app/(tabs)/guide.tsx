@@ -5260,7 +5260,7 @@ function GuideScreenContent() {
                 : undefined}
               onSortCycle={cycleExploreSort}
             />
-            {!guidedCategoryActive ? <OriginalsShelf query={exploreQuery} /> : null}
+            {showExploreHome ? <OriginalsShelf /> : null}
             {!!exploreCatalogNotice && (
               <View style={s.catalogNotice}>
                 <Ionicons name="cloud-offline-outline" size={16} color={C.text3} />

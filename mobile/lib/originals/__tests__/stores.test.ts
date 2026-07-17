@@ -2,10 +2,14 @@ import assert from 'node:assert/strict';
 import { createOriginalAccessStore } from '../accessStore';
 import { createOriginalBundleStore } from '../bundleStore';
 import { writeOriginalTextAtomically } from '../fileAdapter';
-import { originalRestoreScopeIsCurrent, originalVersionAccessIsExact } from '../ownership';
+import {
+  originalPackVersionAccessIsExact,
+  originalRestoreScopeIsCurrent,
+  originalVersionAccessIsExact,
+} from '../ownership';
 import { createOriginalSession, finishManualOriginalStop, originalStopCanReplay, startManualOriginalStop } from '../session';
 import { createOriginalSessionStore } from '../sessionStore';
-import type { OriginalGuestAcquisition, OriginalSummary } from '../types';
+import type { OriginalAuthenticatedAcquisition, OriginalGuestAcquisition, OriginalSummary } from '../types';
 import { AUDIO_ONE, AUDIO_THREE, AUDIO_TWO, originalManifest } from './fixtures';
 import { createMemoryOriginalFileAdapter } from './memoryFileAdapter';
 
@@ -15,6 +19,12 @@ async function main() {
   assert.equal(originalRestoreScopeIsCurrent('account:A', 7, 8, 'A'), false, 'stale same-account restore epochs are rejected');
   assert.equal(originalVersionAccessIsExact(1, 2), false, 'owning pinned v1 never unlocks requested v2');
   assert.equal(originalVersionAccessIsExact(2, 2), true);
+  assert.equal(originalPackVersionAccessIsExact('moab', 1, 'moab', 1), true);
+  assert.equal(
+    originalPackVersionAccessIsExact('featured-now', 1, 'featured-before', 1),
+    false,
+    'a rotated featured pack with the same version never unlocks a stale detail page',
+  );
   const files = createMemoryOriginalFileAdapter({
     downloads: {
       'https://assets.test/one.mp3': AUDIO_ONE,
@@ -206,13 +216,31 @@ async function main() {
     manifest_path: '/api/originals/moab-original/versions/1/manifest',
   };
   await access.claimGuest(guestAcquisition);
-  assert.equal((await access.get('guest', manifest.pack_id, 1))?.access_type, 'guest_free');
+  const guestAccess = await access.get('guest', manifest.pack_id, 1);
+  assert.equal(guestAccess?.access_type, 'guest_free');
+  assert.deepEqual(guestAccess?.pack_summary, summary, 'guest acquisition metadata survives before bundle download');
   const migratedAccess = await access.migrateGuestToAccount(42, [{ pack_id: manifest.pack_id, version: 1 }]);
   assert.equal(migratedAccess[0].access_type, 'entitled');
+  assert.deepEqual(migratedAccess[0].pack_summary, summary, 'guest acquisition metadata survives account migration');
   assert.equal((await access.get(accountScope, manifest.pack_id, 1))?.title, manifest.title);
   assert.equal(await access.get('account:99', manifest.pack_id, 1), null, 'another account cannot reuse the entitlement');
   assert.equal(await access.get('guest', manifest.pack_id, 1), null, 'logout does not turn account ownership into guest access');
   assert.equal((await access.list('guest')).length, 0);
+
+  const authenticatedAcquisition: OriginalAuthenticatedAcquisition = {
+    entitlement: { pack_id: manifest.pack_id, version: 1 },
+    pack: summary,
+    trip: {},
+    already_owned: false,
+    replayed: false,
+    credit_balance: 500,
+  };
+  await access.recordEntitlement(authenticatedAcquisition, 77);
+  assert.deepEqual(
+    (await access.get('account:77', manifest.pack_id, 1))?.pack_summary,
+    summary,
+    'authenticated acquisition metadata survives before bundle download',
+  );
 
   const previewManifest = {
     ...manifest,

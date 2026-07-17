@@ -8,6 +8,7 @@ export * from './expoFileAdapter';
 export * from './expoStores';
 export * from './fileAdapter';
 export * from './locationAdapter';
+export * from './localAccessSummary';
 export * from './manifest';
 export * from './mapAdapter';
 export * from './ownership';

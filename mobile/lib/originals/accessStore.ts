@@ -71,6 +71,7 @@ export function createOriginalAccessStore(
           title: acquisition.pack.title,
           owner_scope: 'guest',
           access_type: 'guest_free',
+          pack_summary: acquisition.pack,
           manifest_path: acquisition.manifest_path,
           claimed_at_ms: now,
           updated_at_ms: now,
@@ -89,6 +90,7 @@ export function createOriginalAccessStore(
           title: acquisition.pack.title,
           owner_scope: `account:${accountId}`,
           access_type: 'entitled',
+          pack_summary: acquisition.pack,
           claimed_at_ms: now,
           updated_at_ms: now,
         });

@@ -188,7 +188,7 @@ export type OriginalLocalAccessV1 = {
   slug: string;
   title: string;
   owner_scope: OriginalOwnerScope;
-  access_type: 'guest_free' | 'entitled';
+  access_type: 'guest_free' | 'entitled' | 'admin_preview';
   manifest_path?: string;
   claimed_at_ms: number;
   updated_at_ms: number;
@@ -256,9 +256,75 @@ export type OriginalTriggerEvent =
   | { type: 'stop_queued'; stop_id: string }
   | { type: 'session_completed' };
 
+export type OriginalTriggerDecisionCode =
+  | 'inactive'
+  | 'user_paused'
+  | 'poor_accuracy'
+  | 'route_unavailable'
+  | 'off_route'
+  | 'queue_full'
+  | 'no_remaining_stops'
+  | 'complete'
+  | 'before_window'
+  | 'after_window'
+  | 'outside_radius'
+  | 'missing_bearing'
+  | 'wrong_bearing'
+  | 'armed'
+  | 'waiting_for_fixes'
+  | 'waiting_for_dwell'
+  | 'triggered'
+  | 'queued'
+  | 'missed';
+
+/**
+ * Read-only explanation of the decision made for a location fix. Values are
+ * produced by the same gates that mutate the trigger session, so diagnostics
+ * and runtime behavior cannot disagree about why a cue did or did not fire.
+ */
+export type OriginalTriggerDecisionDiagnostic = Readonly<{
+  code: OriginalTriggerDecisionCode;
+  message: string;
+  stop_id: string | null;
+  missed_stop_ids: readonly string[];
+  session_status: OriginalSessionStatus;
+  accuracy: Readonly<{
+    actual_m: number | null;
+    maximum_m: number;
+  }>;
+  route: Readonly<{
+    projected_progress_m: number | null;
+    distance_from_route_m: number | null;
+    maximum_distance_from_route_m: number;
+  }>;
+  window: Readonly<{
+    authored_start_m: number;
+    effective_start_m: number;
+    end_m: number;
+  }> | null;
+  radius: Readonly<{
+    distance_to_stop_m: number;
+    enter_radius_m: number;
+    exit_radius_m: number;
+  }> | null;
+  bearing: Readonly<{
+    actual_deg: number | null;
+    required_deg: number;
+    tolerance_deg: number;
+    difference_deg: number | null;
+  }> | null;
+  wait: Readonly<{
+    sample_count: number;
+    required_sample_count: number;
+    elapsed_ms: number;
+    required_elapsed_ms: number;
+  }> | null;
+}>;
+
 export type OriginalTriggerEvaluation = {
   session: OriginalSessionV1;
   events: OriginalTriggerEvent[];
   projected_route_progress_m: number | null;
   distance_from_route_m: number | null;
+  decision: OriginalTriggerDecisionDiagnostic;
 };

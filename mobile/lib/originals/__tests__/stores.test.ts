@@ -67,9 +67,22 @@ async function main() {
   );
   files.files.set(asset.local_uri, originalAssetBytes);
   assert.equal(await bundles.verify('guest', manifest.pack_id, 2), true);
+  const savedManifestText = await files.readText(updated.manifest_uri);
+  const alteredManifest = JSON.parse(savedManifestText);
+  alteredManifest.stops[0].transcript = 'A syntactically valid but corrupted offline transcript.';
+  await files.writeText(updated.manifest_uri, JSON.stringify(alteredManifest));
+  assert.equal(await bundles.verify('guest', manifest.pack_id, 2), false, 'manifest content changes fail digest verification');
+  assert.equal(await bundles.loadManifest('guest', manifest.pack_id, 2), null, 'runtime never loads a modified offline manifest');
+  await files.writeText(updated.manifest_uri, savedManifestText);
+  assert.equal(await bundles.verify('guest', manifest.pack_id, 2), true);
   mapReady = false;
   assert.equal(await bundles.verify('guest', manifest.pack_id, 2), false, 'missing offline maps block restore');
   mapReady = true;
+
+  const previewLike = originalManifest(4);
+  await bundles.download(previewLike, { ownerScope: 'guest', pinVersion: false });
+  assert.equal((await bundles.getPinned('guest', manifest.pack_id))?.version, 2, 'non-pinned previews do not replace the production pin');
+  assert.equal(await bundles.verify('guest', manifest.pack_id, 4), true, 'a non-pinned preview is still fully verified');
 
   const cancelled = new AbortController();
   cancelled.abort();
@@ -200,6 +213,21 @@ async function main() {
   assert.equal(await access.get('account:99', manifest.pack_id, 1), null, 'another account cannot reuse the entitlement');
   assert.equal(await access.get('guest', manifest.pack_id, 1), null, 'logout does not turn account ownership into guest access');
   assert.equal((await access.list('guest')).length, 0);
+
+  const previewManifest = {
+    ...manifest,
+    version: 1_000_000_009,
+    manifest_id: `${manifest.manifest_id}:draft:9`,
+  };
+  await access.recordAdminPreview(previewManifest, 42);
+  const previewAccess = await access.get(accountScope, manifest.pack_id, previewManifest.version);
+  assert.equal(previewAccess?.access_type, 'admin_preview');
+  assert.equal(previewAccess?.owner_scope, accountScope);
+  assert.equal(
+    await access.get('guest', manifest.pack_id, previewManifest.version),
+    null,
+    'admin draft access never leaks into the guest scope',
+  );
 
   console.log('Originals durable store tests passed.');
 }

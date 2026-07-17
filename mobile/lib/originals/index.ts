@@ -16,4 +16,5 @@ export * from './runtime';
 export * from './session';
 export * from './sessionStore';
 export * from './triggerEngine';
+export * from './triggerSimulation';
 export * from './types';

@@ -68,6 +68,9 @@ jobs:
       - name: Test account storage lifecycle
         run: npm run test:account-storage
 
+      - name: Test Trailhead Originals runtime
+        run: npm run test:originals
+
       - name: Audit user-facing copy
         run: npm run audit:copy
 
@@ -79,3 +82,6 @@ jobs:
 
       - name: Audit Profile and Map
         run: npm run audit:profile-map
+
+      - name: Audit Plan workspace
+        run: npm run audit:plan-workspace

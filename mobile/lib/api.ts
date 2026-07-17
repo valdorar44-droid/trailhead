@@ -2359,6 +2359,7 @@ export interface ProductFeatures {
   trips_tab: boolean;
   availability_monitors?: boolean;
   trip_packs?: boolean;
+  originals?: boolean;
   community_publications?: boolean;
   digest_preferences?: boolean;
 }

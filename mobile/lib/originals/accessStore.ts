@@ -8,6 +8,7 @@ import type {
   OriginalAuthenticatedAcquisition,
   OriginalGuestAcquisition,
   OriginalLocalAccessV1,
+  OriginalManifestV1,
   OriginalOwnerScope,
 } from './types';
 
@@ -88,6 +89,24 @@ export function createOriginalAccessStore(
           title: acquisition.pack.title,
           owner_scope: `account:${accountId}`,
           access_type: 'entitled',
+          claimed_at_ms: now,
+          updated_at_ms: now,
+        });
+      });
+    },
+
+    recordAdminPreview(manifest: OriginalManifestV1, accountId: string | number) {
+      return serialized(() => {
+        const now = Date.now();
+        return saveInternal({
+          schema_version: 1,
+          pack_id: manifest.pack_id,
+          version: manifest.version,
+          slug: manifest.pack_id,
+          title: manifest.title,
+          owner_scope: `account:${accountId}`,
+          access_type: 'admin_preview',
+          manifest_path: `/api/admin/originals/${encodeURIComponent(manifest.pack_id)}/device-preview/manifest`,
           claimed_at_ms: now,
           updated_at_ms: now,
         });

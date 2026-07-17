@@ -19,6 +19,7 @@ export type OriginalBundleRecord = {
   pack_id: string;
   version: number;
   manifest_id: string;
+  manifest_sha256: string;
   directory_uri: string;
   manifest_uri: string;
   assets: OriginalBundleAssetRecord[];
@@ -51,6 +52,7 @@ export type OriginalBundleDownloadOptions = {
   headers?: Record<string, string>;
   signal?: AbortSignal;
   mapAdapter?: OriginalOfflineMapAdapter;
+  pinVersion?: boolean;
   onProgress?: (progress: OriginalBundleProgress) => void;
 };
 
@@ -164,12 +166,28 @@ export function createOriginalBundleStore(
     const manifestInfo = await files.info(record.manifest_uri);
     if (!manifestInfo.exists) return false;
     try {
+      if (!/^[a-f0-9]{64}$/i.test(record.manifest_sha256 || '')) return false;
+      const manifestDigest = await files.sha256(record.manifest_uri);
+      if (manifestDigest.toLowerCase() !== record.manifest_sha256.toLowerCase()) return false;
       const manifest = validateOriginalManifest(JSON.parse(await files.readText(record.manifest_uri)));
       if (
         manifest.pack_id !== record.pack_id
         || manifest.version !== record.version
         || manifest.manifest_id !== record.manifest_id
       ) return false;
+      if (manifest.assets.length !== record.assets.length) return false;
+      for (let index = 0; index < manifest.assets.length; index += 1) {
+        const expected = manifest.assets[index];
+        const installed = record.assets[index];
+        if (
+          expected.id !== installed.id
+          || expected.kind !== installed.kind
+          || expected.path !== installed.path
+          || expected.mime_type !== installed.mime_type
+          || expected.bytes !== installed.bytes
+          || expected.sha256.toLowerCase() !== installed.sha256.toLowerCase()
+        ) return false;
+      }
     } catch {
       return false;
     }
@@ -205,7 +223,11 @@ export function createOriginalBundleStore(
         const currentScope = bundleScope(currentIndex, ownerScope);
         const existing = currentScope.records[manifest.pack_id]?.[String(manifest.version)];
         if (existing && await verifyRecordInternal(existing)) {
-          currentScope.pinned_versions[manifest.pack_id] = manifest.version;
+          if (options.pinVersion !== false) {
+            currentScope.pinned_versions[manifest.pack_id] = manifest.version;
+          } else if (currentScope.pinned_versions[manifest.pack_id] === manifest.version) {
+            delete currentScope.pinned_versions[manifest.pack_id];
+          }
           await writeIndex(currentIndex);
           return existing;
         }
@@ -267,12 +289,16 @@ export function createOriginalBundleStore(
           preparedMapPackId = preparedMap.pack_id;
           completedBytes += manifest.offline_map.estimated_bytes;
 
+          const stagedManifestUri = joinOriginalPath(stagingDirectory, 'manifest.json');
+          await files.writeText(stagedManifestUri, JSON.stringify(manifest));
+          const manifestSha256 = await files.sha256(stagedManifestUri);
           const record: OriginalBundleRecord = {
             schema_version: 1,
             owner_scope: ownerScope,
             pack_id: manifest.pack_id,
             version: manifest.version,
             manifest_id: manifest.manifest_id,
+            manifest_sha256: manifestSha256,
             directory_uri: finalDirectory,
             manifest_uri: joinOriginalPath(finalDirectory, 'manifest.json'),
             assets: stagedAssets,
@@ -281,7 +307,6 @@ export function createOriginalBundleStore(
             total_bytes: totalBytes,
             verified_at_ms: Date.now(),
           };
-          await files.writeText(joinOriginalPath(stagingDirectory, 'manifest.json'), JSON.stringify(manifest));
           await files.writeText(joinOriginalPath(stagingDirectory, 'bundle.json'), JSON.stringify(record));
           progress(options.onProgress, 'verifying', completedBytes, totalBytes);
           throwIfCancelled(options.signal);
@@ -293,7 +318,11 @@ export function createOriginalBundleStore(
           const scope = bundleScope(index, ownerScope);
           scope.records[manifest.pack_id] ??= {};
           scope.records[manifest.pack_id][String(manifest.version)] = record;
-          scope.pinned_versions[manifest.pack_id] = manifest.version;
+          if (options.pinVersion !== false) {
+            scope.pinned_versions[manifest.pack_id] = manifest.version;
+          } else if (scope.pinned_versions[manifest.pack_id] === manifest.version) {
+            delete scope.pinned_versions[manifest.pack_id];
+          }
           await writeIndex(index);
           return record;
         } catch (error) {

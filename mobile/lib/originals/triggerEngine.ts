@@ -7,6 +7,8 @@ import type {
   OriginalManifestV1,
   OriginalSessionV1,
   OriginalStopV1,
+  OriginalTriggerDecisionCode,
+  OriginalTriggerDecisionDiagnostic,
   OriginalTriggerEvaluation,
   OriginalTriggerEvent,
   OriginalTriggerRuntimeStateV1,
@@ -19,7 +21,9 @@ export const ORIGINAL_TRIGGER_DEFAULTS = {
   off_route_distance_m: 500,
 } as const;
 
-export type OriginalTriggerEngineOptions = Partial<typeof ORIGINAL_TRIGGER_DEFAULTS>;
+export type OriginalTriggerEngineOptions = {
+  [Key in keyof typeof ORIGINAL_TRIGGER_DEFAULTS]?: number;
+};
 
 function resetCandidate(routeInitialized: boolean): OriginalTriggerRuntimeStateV1 {
   return {
@@ -31,7 +35,10 @@ function resetCandidate(routeInitialized: boolean): OriginalTriggerRuntimeStateV
   };
 }
 
-function remainingStops(manifest: OriginalManifestV1, session: OriginalSessionV1) {
+export function remainingOriginalTriggerStops(
+  manifest: OriginalManifestV1,
+  session: OriginalSessionV1,
+) {
   return orderedOriginalStops(manifest).filter(stop => (
     !originalStopIsTerminal(session, stop.id)
     && stop.id !== session.current_stop_id
@@ -39,25 +46,75 @@ function remainingStops(manifest: OriginalManifestV1, session: OriginalSessionV1
   ));
 }
 
-function stopMatchesLocation(stop: OriginalStopV1, sample: OriginalLocationSample, routeProgress: number) {
+type StopLocationGateCode = Extract<
+  OriginalTriggerDecisionCode,
+  'before_window' | 'after_window' | 'outside_radius' | 'missing_bearing' | 'wrong_bearing'
+>;
+
+type StopLocationGate = {
+  code: StopLocationGateCode | null;
+  window: NonNullable<OriginalTriggerDecisionDiagnostic['window']>;
+  radius: OriginalTriggerDecisionDiagnostic['radius'];
+  bearing: OriginalTriggerDecisionDiagnostic['bearing'];
+};
+
+function effectiveExitRadius(stop: OriginalStopV1) {
+  return Math.max(
+    stop.trigger.exit_radius_m,
+    stop.trigger.enter_radius_m * 1.5,
+    stop.trigger.enter_radius_m + 50,
+  );
+}
+
+function evaluateStopLocation(
+  stop: OriginalStopV1,
+  sample: OriginalLocationSample,
+  routeProgress: number,
+): StopLocationGate {
   const speed = Math.max(0, Number(sample.speed_mps) || 0);
   const leadDistance = speed * Math.max(0, stop.trigger.lead_time_s || 0);
   const start = Math.max(0, stop.trigger.route_progress_start_m - leadDistance);
   const end = stop.trigger.route_progress_end_m;
-  if (routeProgress < start || routeProgress > end) return false;
+  const window = {
+    authored_start_m: stop.trigger.route_progress_start_m,
+    effective_start_m: start,
+    end_m: end,
+  };
+  if (routeProgress < start) return { code: 'before_window', window, radius: null, bearing: null };
+  if (routeProgress > end) return { code: 'after_window', window, radius: null, bearing: null };
   const distance = distanceBetweenLngLatMeters(
     [sample.lng, sample.lat],
     [stop.coordinates.lng, stop.coordinates.lat],
   );
-  if (distance > stop.trigger.enter_radius_m) return false;
-  if (stop.trigger.approach_bearing_deg != null) {
-    if (!Number.isFinite(sample.heading_deg)) return false;
-    const tolerance = stop.trigger.bearing_tolerance_deg ?? 45;
-    if (angularDifferenceDegrees(Number(sample.heading_deg), stop.trigger.approach_bearing_deg) > tolerance) {
-      return false;
-    }
+  const radius = {
+    distance_to_stop_m: distance,
+    enter_radius_m: stop.trigger.enter_radius_m,
+    exit_radius_m: effectiveExitRadius(stop),
+  };
+  if (distance > stop.trigger.enter_radius_m) {
+    return { code: 'outside_radius', window, radius, bearing: null };
   }
-  return true;
+  if (stop.trigger.approach_bearing_deg != null) {
+    const actualBearing = Number.isFinite(sample.heading_deg) ? Number(sample.heading_deg) : null;
+    const tolerance = stop.trigger.bearing_tolerance_deg ?? 45;
+    const difference = actualBearing == null
+      ? null
+      : angularDifferenceDegrees(actualBearing, stop.trigger.approach_bearing_deg);
+    const bearing = {
+      actual_deg: actualBearing,
+      required_deg: stop.trigger.approach_bearing_deg,
+      tolerance_deg: tolerance,
+      difference_deg: difference,
+    };
+    if (actualBearing == null) {
+      return { code: 'missing_bearing', window, radius, bearing };
+    }
+    if (difference! > tolerance) {
+      return { code: 'wrong_bearing', window, radius, bearing };
+    }
+    return { code: null, window, radius, bearing };
+  }
+  return { code: null, window, radius, bearing: null };
 }
 
 function beyondHysteresis(stop: OriginalStopV1, sample: OriginalLocationSample) {
@@ -65,12 +122,7 @@ function beyondHysteresis(stop: OriginalStopV1, sample: OriginalLocationSample) 
     [sample.lng, sample.lat],
     [stop.coordinates.lng, stop.coordinates.lat],
   );
-  const exitRadius = Math.max(
-    stop.trigger.exit_radius_m,
-    stop.trigger.enter_radius_m * 1.5,
-    stop.trigger.enter_radius_m + 50,
-  );
-  return distance > exitRadius;
+  return distance > effectiveExitRadius(stop);
 }
 
 function passedStop(stop: OriginalStopV1, sample: OriginalLocationSample, routeProgress: number) {
@@ -86,6 +138,47 @@ function addUnique(values: string[], additions: string[]) {
   return [...new Set([...values, ...additions])];
 }
 
+type TriggerWaitDiagnostic = NonNullable<OriginalTriggerDecisionDiagnostic['wait']>;
+
+type TriggerDecisionDetails = {
+  stop?: OriginalStopV1 | null;
+  stop_id?: string | null;
+  gate?: StopLocationGate | null;
+  wait?: TriggerWaitDiagnostic | null;
+  missed_stop_ids?: readonly string[];
+};
+
+function triggerDecisionMessage(
+  code: OriginalTriggerDecisionCode,
+  details: TriggerDecisionDetails,
+) {
+  const title = details.stop?.title || 'Next story';
+  const gate = details.gate ?? null;
+  const wait = details.wait ?? null;
+  const missedCount = details.missed_stop_ids?.length ?? 0;
+  switch (code) {
+    case 'inactive': return 'Tour is not active.';
+    case 'user_paused': return 'Automatic story triggers are paused by the listener.';
+    case 'poor_accuracy': return 'GPS accuracy does not meet the trigger requirement.';
+    case 'route_unavailable': return 'The authored route cannot be projected from this location.';
+    case 'off_route': return 'Location is too far from the authored route.';
+    case 'queue_full': return 'One story is already queued; another cannot overlap it.';
+    case 'no_remaining_stops': return 'No incomplete story is available to arm right now.';
+    case 'complete': return 'All stories in this Original are complete.';
+    case 'before_window': return `${title} is ahead of its route-progress window.`;
+    case 'after_window': return `${title} is behind its route-progress window.`;
+    case 'outside_radius': return `${title} is ${Math.round(gate?.radius?.distance_to_stop_m ?? 0)} meters away, outside its ${Math.round(gate?.radius?.enter_radius_m ?? 0)} meter trigger radius.`;
+    case 'missing_bearing': return `${title} requires a direction of travel, but this fix has no usable heading.`;
+    case 'wrong_bearing': return `${title} requires an approach near ${Math.round(gate?.bearing?.required_deg ?? 0)} degrees; this fix is headed ${Math.round(gate?.bearing?.actual_deg ?? 0)} degrees.`;
+    case 'armed': return `${title} is armed; waiting for another reliable fix over at least ${Math.ceil((wait?.required_elapsed_ms ?? 0) / 1_000)} seconds.`;
+    case 'waiting_for_fixes': return `${title} is waiting for ${Math.max(0, (wait?.required_sample_count ?? 0) - (wait?.sample_count ?? 0))} more reliable location fix.`;
+    case 'waiting_for_dwell': return `${title} is waiting ${Math.max(0, Math.ceil(((wait?.required_elapsed_ms ?? 0) - (wait?.elapsed_ms ?? 0)) / 1_000))} more seconds inside the trigger area.`;
+    case 'triggered': return `${title} triggered and is ready to play.`;
+    case 'queued': return `${title} triggered and was queued behind the current story.`;
+    case 'missed': return `${missedCount || 1} ${missedCount === 1 ? 'story was' : 'stories were'} passed and marked missed.`;
+  }
+}
+
 export function evaluateOriginalLocation(
   manifest: OriginalManifestV1,
   currentSession: OriginalSessionV1,
@@ -94,14 +187,62 @@ export function evaluateOriginalLocation(
 ): OriginalTriggerEvaluation {
   const settings = { ...ORIGINAL_TRIGGER_DEFAULTS, ...options };
   const events: OriginalTriggerEvent[] = [];
+  let missedStopIds: string[] = [];
   let session: OriginalSessionV1 = {
     ...currentSession,
     trigger_state: { ...currentSession.trigger_state },
     updated_at_ms: sample.timestamp_ms,
   };
 
-  if (session.status !== 'active' || session.user_paused) {
-    return { session, events, projected_route_progress_m: null, distance_from_route_m: null };
+  const finish = (
+    code: OriginalTriggerDecisionCode,
+    projectedRouteProgressM: number | null = null,
+    distanceFromRouteM: number | null = null,
+    details: TriggerDecisionDetails = {},
+  ): OriginalTriggerEvaluation => {
+    const actualAccuracy = Number(sample.accuracy_m);
+    const gate = details.gate ?? null;
+    return {
+      session,
+      events,
+      projected_route_progress_m: projectedRouteProgressM,
+      distance_from_route_m: distanceFromRouteM,
+      decision: {
+        code,
+        message: triggerDecisionMessage(code, {
+          ...details,
+          missed_stop_ids: details.missed_stop_ids ?? missedStopIds,
+        }),
+        stop_id: details.stop_id !== undefined
+          ? details.stop_id
+          : details.stop?.id ?? null,
+        missed_stop_ids: [...(details.missed_stop_ids ?? missedStopIds)],
+        session_status: session.status,
+        accuracy: {
+          actual_m: Number.isFinite(actualAccuracy) ? actualAccuracy : null,
+          maximum_m: settings.maximum_accuracy_m,
+        },
+        route: {
+          projected_progress_m: projectedRouteProgressM,
+          distance_from_route_m: distanceFromRouteM,
+          maximum_distance_from_route_m: settings.off_route_distance_m,
+        },
+        window: gate?.window ?? null,
+        radius: gate?.radius ?? null,
+        bearing: gate?.bearing ?? null,
+        wait: details.wait ?? null,
+      },
+    };
+  };
+
+  if (session.status === 'completed') {
+    return finish('complete');
+  }
+  if (session.user_paused) {
+    return finish('user_paused');
+  }
+  if (session.status !== 'active') {
+    return finish('inactive');
   }
 
   const accuracy = Number(sample.accuracy_m);
@@ -114,7 +255,7 @@ export function evaluateOriginalLocation(
       tracking_state: 'poor_accuracy',
       trigger_state: resetCandidate(session.trigger_state.route_initialized),
     };
-    return { session, events, projected_route_progress_m: null, distance_from_route_m: null };
+    return finish('poor_accuracy');
   }
 
   const projection = projectPointToOriginalRoute(
@@ -131,7 +272,7 @@ export function evaluateOriginalLocation(
   );
   if (!projection) {
     session = { ...session, tracking_state: 'off_route' };
-    return { session, events, projected_route_progress_m: null, distance_from_route_m: null };
+    return finish('route_unavailable');
   }
   // Trigger windows are authored against the manifest's canonical distance.
   // Scale the geometric projection by its route ratio so Valhalla distance and
@@ -148,12 +289,7 @@ export function evaluateOriginalLocation(
       last_route_distance_m: projection.distance_from_route_m,
       trigger_state: resetCandidate(session.trigger_state.route_initialized),
     };
-    return {
-      session,
-      events,
-      projected_route_progress_m: routeProgress,
-      distance_from_route_m: projection.distance_from_route_m,
-    };
+    return finish('off_route', routeProgress, projection.distance_from_route_m);
   }
 
   if (session.tracking_state === 'off_route') {
@@ -168,13 +304,14 @@ export function evaluateOriginalLocation(
     last_route_distance_m: projection.distance_from_route_m,
   };
 
-  const eligible = remainingStops(manifest, session);
+  const eligible = remainingOriginalTriggerStops(manifest, session);
   const missed: string[] = [];
   for (const stop of eligible) {
     if (!passedStop(stop, sample, routeProgress)) break;
     missed.push(stop.id);
   }
   if (missed.length) {
+    missedStopIds = missed;
     session = {
       ...session,
       missed_stop_ids: addUnique(session.missed_stop_ids, missed),
@@ -189,15 +326,12 @@ export function evaluateOriginalLocation(
   }
 
   if (session.queued_stop_id) {
-    return {
-      session,
-      events,
-      projected_route_progress_m: routeProgress,
-      distance_from_route_m: projection.distance_from_route_m,
-    };
+    return finish('queue_full', routeProgress, projection.distance_from_route_m, {
+      stop_id: session.queued_stop_id,
+    });
   }
 
-  const candidate = remainingStops(manifest, session)[0];
+  const candidate = remainingOriginalTriggerStops(manifest, session)[0];
   if (!candidate) {
     const terminalCount = new Set([
       ...session.completed_stop_ids,
@@ -208,28 +342,23 @@ export function evaluateOriginalLocation(
       session = { ...session, status: 'completed', completed_at_ms: sample.timestamp_ms };
       events.push({ type: 'session_completed' });
     }
-    return {
-      session,
-      events,
-      projected_route_progress_m: routeProgress,
-      distance_from_route_m: projection.distance_from_route_m,
-    };
+    return finish(
+      missedStopIds.length ? 'missed' : session.status === 'completed' ? 'complete' : 'no_remaining_stops',
+      routeProgress,
+      projection.distance_from_route_m,
+      { stop_id: missedStopIds[0] ?? null },
+    );
   }
 
-  const matches = stopMatchesLocation(candidate, sample, routeProgress);
-  if (!matches) {
+  const gate = evaluateStopLocation(candidate, sample, routeProgress);
+  if (gate.code) {
     if (
       session.trigger_state.candidate_stop_id !== candidate.id
       || beyondHysteresis(candidate, sample)
     ) {
       session = { ...session, trigger_state: resetCandidate(true) };
     }
-    return {
-      session,
-      events,
-      projected_route_progress_m: routeProgress,
-      distance_from_route_m: projection.distance_from_route_m,
-    };
+    return finish(gate.code, routeProgress, projection.distance_from_route_m, { stop: candidate, gate });
   }
 
   const sameCandidate = session.trigger_state.candidate_stop_id === candidate.id;
@@ -249,16 +378,23 @@ export function evaluateOriginalLocation(
   };
   if (!sameCandidate) events.push({ type: 'stop_armed', stop_id: candidate.id });
 
+  const wait: TriggerWaitDiagnostic = {
+    sample_count: sampleCount,
+    required_sample_count: settings.minimum_inside_samples,
+    elapsed_ms: Math.max(0, sample.timestamp_ms - enteredAt),
+    required_elapsed_ms: settings.minimum_inside_duration_ms,
+  };
+
   if (
     sampleCount < settings.minimum_inside_samples
     || sample.timestamp_ms - enteredAt < settings.minimum_inside_duration_ms
   ) {
-    return {
-      session,
-      events,
-      projected_route_progress_m: routeProgress,
-      distance_from_route_m: projection.distance_from_route_m,
-    };
+    const code: OriginalTriggerDecisionCode = !sameCandidate
+      ? 'armed'
+      : sampleCount < settings.minimum_inside_samples
+        ? 'waiting_for_fixes'
+        : 'waiting_for_dwell';
+    return finish(code, routeProgress, projection.distance_from_route_m, { stop: candidate, gate, wait });
   }
 
   const queue = Boolean(session.current_stop_id);
@@ -271,10 +407,9 @@ export function evaluateOriginalLocation(
     trigger_state: resetCandidate(true),
   };
   events.push({ type: queue ? 'stop_queued' : 'stop_triggered', stop_id: candidate.id });
-  return {
-    session,
-    events,
-    projected_route_progress_m: routeProgress,
-    distance_from_route_m: projection.distance_from_route_m,
-  };
+  return finish(queue ? 'queued' : 'triggered', routeProgress, projection.distance_from_route_m, {
+    stop: candidate,
+    gate,
+    wait,
+  });
 }

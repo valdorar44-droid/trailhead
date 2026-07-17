@@ -55,13 +55,14 @@ import {
   originalBundleStore,
   originalSessionStore,
 } from './expoStores';
-import { evaluateOriginalLocation } from './triggerEngine';
+import { evaluateOriginalLocation, remainingOriginalTriggerStops } from './triggerEngine';
 import type {
   OriginalLocationSample,
   OriginalAcquisition,
   OriginalManifestV1,
   OriginalOwnerScope,
   OriginalSessionV1,
+  OriginalTriggerEvaluation,
 } from './types';
 
 export type OriginalsRuntimeState = 'idle' | 'ready' | 'tracking' | 'paused' | 'completed' | 'error';
@@ -74,6 +75,8 @@ export type OriginalsRuntimeValue = {
   downloadProgress: OriginalBundleProgress | null;
   error: string | null;
   muted: boolean;
+  simulation: boolean;
+  lastTriggerEvaluation: OriginalTriggerEvaluation | null;
   audioCapabilities: OriginalAudioAdapter['capabilities'];
   downloadOriginal: (
     manifest: OriginalManifestV1,
@@ -81,6 +84,9 @@ export type OriginalsRuntimeValue = {
   ) => Promise<OriginalBundleRecord>;
   startTour: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
   restartTour: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
+  startSimulation: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
+  skipSimulationCue: () => Promise<void>;
+  clearSimulationDiagnostic: () => void;
   pauseTour: () => Promise<void>;
   resumeTour: () => Promise<void>;
   stopTour: () => Promise<void>;
@@ -136,6 +142,8 @@ export function OriginalsRuntimeProvider({
   const [downloadProgress, setDownloadProgress] = useState<OriginalBundleProgress | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [muted, setMutedState] = useState(false);
+  const [simulation, setSimulation] = useState(false);
+  const [lastTriggerEvaluation, setLastTriggerEvaluation] = useState<OriginalTriggerEvaluation | null>(null);
 
   const sessionRef = useRef<OriginalSessionV1 | null>(null);
   const manifestRef = useRef<OriginalManifestV1 | null>(null);
@@ -148,21 +156,32 @@ export function OriginalsRuntimeProvider({
   const mountedRef = useRef(true);
   const priorUserIdRef = useRef<string | number | null>(null);
   const trackingGenerationRef = useRef(0);
+  const simulationRef = useRef(false);
+  const lastTriggerEvaluationRef = useRef<OriginalTriggerEvaluation | null>(null);
+  const stoppingRef = useRef(false);
+  const stopTourPromiseRef = useRef<Promise<void> | null>(null);
 
   const requireCurrentAccess = useCallback(async (
     packId: string,
     version: number,
     expectedScope?: OriginalOwnerScope,
+    allowAdminPreview = false,
   ) => {
     const ownerScope = originalOwnerScopeForAccount(useStore.getState().user?.id ?? null);
     if (expectedScope && expectedScope !== ownerScope) {
       throw new Error('This downloaded Original belongs to a different account.');
     }
     const access = await dependencies.access.get(ownerScope, packId, version);
+    const currentUser = useStore.getState().user;
     const allowed = access?.owner_scope === ownerScope && (
       ownerScope === 'guest'
         ? access.access_type === 'guest_free'
         : access.access_type === 'entitled'
+          || (
+            access.access_type === 'admin_preview'
+            && Boolean(currentUser?.is_admin)
+            && allowAdminPreview
+          )
     );
     if (!allowed) {
       throw new Error(ownerScope === 'guest'
@@ -175,8 +194,12 @@ export function OriginalsRuntimeProvider({
   const publishSession = useCallback(async (next: OriginalSessionV1, active = true) => {
     sessionRef.current = next;
     if (mountedRef.current) setSession(next);
-    if (active) await dependencies.sessions.setActive(next);
-    else await dependencies.sessions.save(next);
+    // Trigger Lab sessions are deliberately ephemeral. They exercise the real
+    // trigger and audio paths without replacing a tester's saved drive state.
+    if (!simulationRef.current) {
+      if (active) await dependencies.sessions.setActive(next);
+      else await dependencies.sessions.save(next);
+    }
     return next;
   }, [dependencies.sessions]);
 
@@ -253,19 +276,30 @@ export function OriginalsRuntimeProvider({
     const activeManifest = manifestRef.current;
     const activeSession = sessionRef.current;
     if (!activeManifest || !activeSession) throw new Error('No Trailhead Original is active.');
+    const generation = trackingGenerationRef.current;
+    const operationIsCurrent = () => (
+      !stoppingRef.current
+      && generation === trackingGenerationRef.current
+      && sessionRef.current?.session_id === activeSession.session_id
+      && manifestRef.current?.manifest_id === activeManifest.manifest_id
+    );
+    if (!operationIsCurrent()) return;
     const stop = activeManifest.stops.find(item => item.id === stopId);
     if (!stop) throw new Error('This story is not part of the active Original.');
     const ownerScope = await requireCurrentAccess(
       activeManifest.pack_id,
       activeManifest.version,
       activeSession.owner_scope,
+      simulationRef.current,
     );
+    if (!operationIsCurrent()) return;
     const localUri = await dependencies.bundles.assetUri(
       ownerScope,
       activeManifest.pack_id,
       activeManifest.version,
       stop.audio_asset_id,
     );
+    if (!operationIsCurrent()) return;
     if (!localUri) throw new Error('Download this Original before playing its stories.');
 
     // Persist the trigger/current cue before audio begins. A process restart can
@@ -276,14 +310,24 @@ export function OriginalsRuntimeProvider({
       current_audio_position_ms: Math.max(0, positionMs),
       updated_at_ms: Date.now(),
     });
+    if (!operationIsCurrent()) return;
     lastPositionPersistRef.current = persisted.current_audio_position_ms;
     await acquireOriginalAudioFocus();
+    if (!operationIsCurrent()) {
+      await releaseAudio();
+      return;
+    }
     try {
       await dependencies.audio.load(localUri, {
         positionMs: persisted.current_audio_position_ms,
         onState: handleAudioState,
         onUserPause: value => handleExternalUserPauseRef.current(value),
       });
+      if (!operationIsCurrent()) {
+        await dependencies.audio.unload().catch(() => {});
+        await releaseAudio();
+        return;
+      }
       if (originalAudioCoordinator.activeOwner() === 'trailhead-originals') {
         await dependencies.audio.play();
       }
@@ -292,15 +336,21 @@ export function OriginalsRuntimeProvider({
       await releaseAudio();
       throw error;
     }
-  }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, handleAudioState, publishSession, requireCurrentAccess]);
+  }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, handleAudioState, publishSession, releaseAudio, requireCurrentAccess]);
 
   const handleAudioFinished = useCallback(async () => {
     const activeManifest = manifestRef.current;
     const activeSession = sessionRef.current;
     const completedStopId = activeSession?.current_stop_id;
     if (!activeManifest || !activeSession || !completedStopId) return;
+    const generation = trackingGenerationRef.current;
     await dependencies.audio.unload();
     await releaseAudio();
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== activeSession.session_id
+    ) return;
     const manualReplay = finishManualOriginalStop(activeSession, completedStopId);
     let next = manualReplay ?? completeOriginalStop(
       activeSession,
@@ -310,7 +360,12 @@ export function OriginalsRuntimeProvider({
     const queued = next.queued_stop_id;
     if (queued) next = { ...next, current_stop_id: queued, queued_stop_id: null, current_audio_position_ms: 0 };
     await publishSession(next);
-    if (!manualReplay) {
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== activeSession.session_id
+    ) return;
+    if (!manualReplay && !simulationRef.current) {
       trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
         pack_id: activeSession.pack_id,
         version: activeSession.version,
@@ -335,7 +390,13 @@ export function OriginalsRuntimeProvider({
     const active = sessionRef.current;
     if (!active?.current_stop_id || active.user_paused) return;
     trackingGenerationRef.current += 1;
+    const generation = trackingGenerationRef.current;
     await stopLocation();
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     lastPositionPersistRef.current = audioState.position_ms;
     await publishSession({
       ...active,
@@ -344,24 +405,34 @@ export function OriginalsRuntimeProvider({
       current_audio_position_ms: Math.max(0, audioState.position_ms),
       updated_at_ms: Date.now(),
     });
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     await releaseAudio();
     if (mountedRef.current) setState('paused');
   }, [publishSession, releaseAudio, stopLocation]);
   handleExternalUserPauseRef.current = handleExternalUserPause;
 
   const submitLocationSample = useCallback((sample: OriginalLocationSample) => {
+    if (stoppingRef.current) return Promise.resolve();
     const generation = trackingGenerationRef.current;
     const operation = async () => {
-      if (generation !== trackingGenerationRef.current) return;
+      if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
       const activeManifest = manifestRef.current;
       const activeSession = sessionRef.current;
       if (!activeManifest || !activeSession) return;
       const evaluation = evaluateOriginalLocation(activeManifest, activeSession, sample);
-      if (generation !== trackingGenerationRef.current) return;
+      if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
+      lastTriggerEvaluationRef.current = evaluation;
+      if (mountedRef.current) setLastTriggerEvaluation(evaluation);
       await publishSession(evaluation.session);
+      if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
       for (const event of evaluation.events) {
         if (event.type === 'stops_missed') {
           event.stop_ids.forEach(stopId => {
+            if (simulationRef.current) return;
             trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
               pack_id: evaluation.session.pack_id,
               version: evaluation.session.version,
@@ -376,6 +447,7 @@ export function OriginalsRuntimeProvider({
         try {
           await playStop(trigger.stop_id);
         } catch (caught) {
+          if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
           await stopLocation();
           const failed = sessionRef.current;
           if (failed) {
@@ -413,16 +485,32 @@ export function OriginalsRuntimeProvider({
     if (result.permission === 'denied') throw new Error('Location permission is required to trigger stories.');
   }, [dependencies.location, publishSession, stopLocation, submitLocationSample]);
 
-  const activateTour = useCallback(async (manifestInput: OriginalManifestV1, restart: boolean) => {
+  const activateTour = useCallback(async (
+    manifestInput: OriginalManifestV1,
+    restart: boolean,
+    simulate = false,
+  ) => {
     let activatedSessionId: string | null = null;
     try {
+      if (
+        simulate
+        && !simulationRef.current
+        && sessionRef.current?.status === 'active'
+      ) {
+        throw new Error('Pause or end the active drive before opening the trigger test.');
+      }
       const cleanManifest = validateOriginalManifest(manifestInput);
-      const ownerScope = await requireCurrentAccess(cleanManifest.pack_id, cleanManifest.version);
+      const ownerScope = await requireCurrentAccess(
+        cleanManifest.pack_id,
+        cleanManifest.version,
+        undefined,
+        simulate,
+      );
       const installed = await dependencies.bundles.get(ownerScope, cleanManifest.pack_id, cleanManifest.version);
       if (!installed || !await dependencies.bundles.verify(ownerScope, cleanManifest.pack_id, cleanManifest.version)) {
         throw new Error('Finish downloading and verifying this Original before starting.');
       }
-      const existing = restart
+      const existing = restart || simulate
         ? null
         : await dependencies.sessions.load(ownerScope, cleanManifest.pack_id, cleanManifest.version);
       const now = Date.now();
@@ -436,17 +524,25 @@ export function OriginalsRuntimeProvider({
         updated_at_ms: now,
       };
       trackingGenerationRef.current += 1;
+      await stopLocation();
+      await dependencies.audio.stop().catch(() => {});
+      await dependencies.audio.unload().catch(() => {});
+      await releaseAudio();
+      simulationRef.current = simulate;
+      lastTriggerEvaluationRef.current = null;
       manifestRef.current = cleanManifest;
       bundleRef.current = installed;
       if (mountedRef.current) {
         setManifest(cleanManifest);
         setBundle(installed);
         setError(null);
+        setSimulation(simulate);
+        setLastTriggerEvaluation(null);
         setState('tracking');
       }
       activatedSessionId = active.session_id;
       await publishSession(active);
-      await startLocation();
+      if (!simulate) await startLocation();
       if (active.current_stop_id) await playStop(active.current_stop_id, active.current_audio_position_ms);
       return sessionRef.current ?? active;
     } catch (caught) {
@@ -465,20 +561,32 @@ export function OriginalsRuntimeProvider({
         setError(message);
         setState('error');
       }
+      if (activatedSessionId && simulate) {
+        simulationRef.current = false;
+        if (mountedRef.current) setSimulation(false);
+      }
       throw caught;
     }
-  }, [dependencies.bundles, dependencies.sessions, playStop, publishSession, requireCurrentAccess, startLocation]);
+  }, [dependencies.audio, dependencies.bundles, dependencies.sessions, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
 
   const downloadOriginal = useCallback(async (
     manifestInput: OriginalManifestV1,
     options: Omit<OriginalBundleDownloadOptions, 'onProgress' | 'ownerScope'> = {},
   ) => {
+    let reportDownloadAnalytics = true;
     if (mountedRef.current) {
       setError(null);
       setDownloadProgress(null);
     }
     try {
-      const ownerScope = await requireCurrentAccess(manifestInput.pack_id, manifestInput.version);
+      const ownerScope = await requireCurrentAccess(
+        manifestInput.pack_id,
+        manifestInput.version,
+        undefined,
+        true,
+      );
+      const access = await dependencies.access.get(ownerScope, manifestInput.pack_id, manifestInput.version);
+      reportDownloadAnalytics = access?.access_type !== 'admin_preview';
       const token = await storage.get('trailhead_token').catch(() => null);
       const installed = await dependencies.bundles.download(manifestInput, {
         ...options,
@@ -495,18 +603,22 @@ export function OriginalsRuntimeProvider({
         setDownloadProgress(null);
         setState('ready');
       }
-      trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.downloadResult, {
-        pack_id: manifestInput.pack_id,
-        version: manifestInput.version,
-        result: 'ready',
-      });
+      if (reportDownloadAnalytics) {
+        trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.downloadResult, {
+          pack_id: manifestInput.pack_id,
+          version: manifestInput.version,
+          result: 'ready',
+        });
+      }
       return installed;
     } catch (caught) {
-      trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.downloadResult, {
-        pack_id: manifestInput.pack_id,
-        version: manifestInput.version,
-        result: originalDownloadFailure(caught),
-      });
+      if (reportDownloadAnalytics) {
+        trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.downloadResult, {
+          pack_id: manifestInput.pack_id,
+          version: manifestInput.version,
+          result: originalDownloadFailure(caught),
+        });
+      }
       const message = caught instanceof Error ? caught.message : 'Original download failed.';
       if (mountedRef.current) {
         setDownloadProgress(null);
@@ -515,15 +627,21 @@ export function OriginalsRuntimeProvider({
       }
       throw caught;
     }
-  }, [dependencies.bundles, requireCurrentAccess]);
+  }, [dependencies.access, dependencies.bundles, requireCurrentAccess]);
 
   const pauseTour = useCallback(async () => {
     const active = sessionRef.current;
-    if (!active) return;
+    if (!active || stoppingRef.current) return;
     trackingGenerationRef.current += 1;
+    const generation = trackingGenerationRef.current;
     await stopLocation();
     await dependencies.audio.pause();
     await persistExactAudioPosition();
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     const persisted = sessionRef.current ?? active;
     await publishSession({
       ...persisted,
@@ -531,6 +649,11 @@ export function OriginalsRuntimeProvider({
       user_paused: true,
       updated_at_ms: Date.now(),
     });
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     await releaseAudio();
     if (mountedRef.current) setState('paused');
   }, [dependencies.audio, persistExactAudioPosition, publishSession, releaseAudio, stopLocation]);
@@ -539,8 +662,26 @@ export function OriginalsRuntimeProvider({
     const active = sessionRef.current;
     const activeManifest = manifestRef.current;
     if (!active || !activeManifest) throw new Error('No Trailhead Original is ready to resume.');
-    const ownerScope = await requireCurrentAccess(active.pack_id, active.version, active.owner_scope);
+    if (stoppingRef.current) return;
+    trackingGenerationRef.current += 1;
+    const generation = trackingGenerationRef.current;
+    const simulating = simulationRef.current;
+    const operationIsCurrent = () => (
+      !stoppingRef.current
+      && generation === trackingGenerationRef.current
+      && sessionRef.current?.session_id === active.session_id
+      && manifestRef.current?.manifest_id === activeManifest.manifest_id
+      && simulationRef.current === simulating
+    );
+    const ownerScope = await requireCurrentAccess(
+      active.pack_id,
+      active.version,
+      active.owner_scope,
+      simulating,
+    );
+    if (!operationIsCurrent()) return;
     const verified = await dependencies.bundles.verify(ownerScope, active.pack_id, active.version);
+    if (!operationIsCurrent()) return;
     if (!verified) {
       await publishSession({ ...active, download_state: 'corrupt', status: 'paused', updated_at_ms: Date.now() });
       const message = 'This offline download is incomplete or corrupt. Download it again before resuming.';
@@ -550,19 +691,30 @@ export function OriginalsRuntimeProvider({
       }
       throw new Error(message);
     }
-    trackingGenerationRef.current += 1;
     const next = await publishSession({
       ...active,
       status: 'active',
       user_paused: false,
       updated_at_ms: Date.now(),
     });
+    if (!operationIsCurrent()) return;
     if (mountedRef.current) setState('tracking');
-    await startLocation();
+    if (!simulating) {
+      await startLocation();
+      if (!operationIsCurrent()) {
+        await stopLocation();
+        return;
+      }
+    }
     const audioState = await dependencies.audio.getState();
+    if (!operationIsCurrent()) return;
     if (next.current_stop_id) {
       if (audioState.loaded) {
         await acquireOriginalAudioFocus();
+        if (!operationIsCurrent()) {
+          await releaseAudio();
+          return;
+        }
         if (originalAudioCoordinator.activeOwner() === 'trailhead-originals') {
           await dependencies.audio.play();
         }
@@ -570,35 +722,88 @@ export function OriginalsRuntimeProvider({
         await playStop(next.current_stop_id, next.current_audio_position_ms);
       }
     }
-  }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, playStop, publishSession, requireCurrentAccess, startLocation]);
+  }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, playStop, publishSession, releaseAudio, requireCurrentAccess, startLocation, stopLocation]);
 
-  const stopTour = useCallback(async () => {
-    const active = sessionRef.current;
+  const stopTour = useCallback(() => {
+    const inFlight = stopTourPromiseRef.current;
+    if (inFlight) return inFlight;
+
+    // Capture the persistence mode before any awaited cleanup. A concurrent
+    // stop must never observe simulation=false and save an ephemeral preview.
+    const wasSimulation = simulationRef.current;
+    stoppingRef.current = true;
     trackingGenerationRef.current += 1;
-    await stopLocation();
-    await dependencies.audio.stop();
-    await dependencies.audio.unload();
-    await releaseAudio();
-    if (active) await publishSession({ ...active, status: 'stopped', updated_at_ms: Date.now() }, false);
-    await dependencies.sessions.setActive(null);
-    sessionRef.current = null;
-    manifestRef.current = null;
-    bundleRef.current = null;
-    if (mountedRef.current) {
-      setSession(null);
-      setManifest(null);
-      setBundle(null);
-      setState('idle');
-    }
-  }, [dependencies.audio, dependencies.sessions, publishSession, releaseAudio, stopLocation]);
+
+    const operation = (async () => {
+      try {
+        await stopLocation().catch(() => {});
+
+        // Cancel a pending native load, then drain any synthetic/native sample
+        // that had already passed its generation check. Playback also checks
+        // the generation after every await, so it cannot restart after this.
+        await dependencies.audio.stop().catch(() => {});
+        await dependencies.audio.unload().catch(() => {});
+        await releaseAudio().catch(() => {});
+        await sampleTailRef.current.catch(() => {});
+
+        // A sample may have reached audio immediately before invalidation;
+        // perform a final idempotent teardown after the queue is quiescent.
+        await dependencies.audio.stop().catch(() => {});
+        await dependencies.audio.unload().catch(() => {});
+        await releaseAudio().catch(() => {});
+
+        const active = sessionRef.current;
+        if (!wasSimulation) {
+          if (active) {
+            await dependencies.sessions.save({
+              ...active,
+              status: 'stopped',
+              updated_at_ms: Date.now(),
+            }).catch(() => {});
+          }
+          await dependencies.sessions.setActive(null).catch(() => {});
+        }
+      } finally {
+        simulationRef.current = false;
+        lastTriggerEvaluationRef.current = null;
+        sessionRef.current = null;
+        manifestRef.current = null;
+        bundleRef.current = null;
+        finishingAudioRef.current = false;
+        lastPositionPersistRef.current = 0;
+        if (mountedRef.current) {
+          setSession(null);
+          setManifest(null);
+          setBundle(null);
+          setSimulation(false);
+          setLastTriggerEvaluation(null);
+          setState('idle');
+        }
+        stoppingRef.current = false;
+      }
+    })();
+
+    stopTourPromiseRef.current = operation;
+    const clear = () => {
+      if (stopTourPromiseRef.current === operation) stopTourPromiseRef.current = null;
+    };
+    operation.then(clear, clear);
+    return operation;
+  }, [dependencies.audio, dependencies.sessions, releaseAudio, stopLocation]);
 
   const skipCurrentStory = useCallback(async () => {
     const active = sessionRef.current;
     const activeManifest = manifestRef.current;
-    if (!active?.current_stop_id || !activeManifest) return;
+    if (!active?.current_stop_id || !activeManifest || stoppingRef.current) return;
+    const generation = trackingGenerationRef.current;
     await dependencies.audio.stop();
     await dependencies.audio.unload();
     await releaseAudio();
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     let next = skipOriginalStop(
       active,
       active.current_stop_id,
@@ -607,12 +812,19 @@ export function OriginalsRuntimeProvider({
     const queued = next.queued_stop_id;
     if (queued) next = { ...next, current_stop_id: queued, queued_stop_id: null, current_audio_position_ms: 0 };
     await publishSession(next);
-    trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
-      pack_id: active.pack_id,
-      version: active.version,
-      stop_id: active.current_stop_id,
-      outcome: 'skipped',
-    });
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
+    if (!simulationRef.current) {
+      trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
+        pack_id: active.pack_id,
+        version: active.version,
+        stop_id: active.current_stop_id,
+        outcome: 'skipped',
+      });
+    }
     if (queued) await playStop(queued);
     else if (next.status === 'completed') {
       await stopLocation();
@@ -620,38 +832,116 @@ export function OriginalsRuntimeProvider({
     }
   }, [dependencies.audio, playStop, publishSession, releaseAudio, stopLocation]);
 
+  const skipSimulationCue = useCallback(async () => {
+    if (!simulationRef.current || stoppingRef.current) {
+      throw new Error('Cue advancing is available only in the no-driving trigger test.');
+    }
+    const active = sessionRef.current;
+    const activeManifest = manifestRef.current;
+    if (!active || !activeManifest) throw new Error('No draft trigger test is active.');
+    if (active.current_stop_id) {
+      throw new Error('Finish or skip the playing story before advancing the next cue.');
+    }
+    const nextStop = remainingOriginalTriggerStops(activeManifest, active)[0];
+    if (!nextStop) return;
+    const decision = lastTriggerEvaluationRef.current?.decision;
+    const explicitCueFailure = decision?.stop_id === nextStop.id && [
+      'before_window',
+      'after_window',
+      'outside_radius',
+      'missing_bearing',
+      'wrong_bearing',
+    ].includes(decision.code);
+    if (!explicitCueFailure) {
+      throw new Error('Test this cue and capture a cue-specific failure before marking it failed.');
+    }
+    const next = skipOriginalStop(
+      active,
+      nextStop.id,
+      activeManifest.stops.map(stop => stop.id),
+    );
+    await publishSession(next);
+    lastTriggerEvaluationRef.current = null;
+    if (mountedRef.current) {
+      setLastTriggerEvaluation(null);
+      if (next.status === 'completed') setState('completed');
+    }
+  }, [publishSession]);
+
+  const clearSimulationDiagnostic = useCallback(() => {
+    if (!simulationRef.current) return;
+    lastTriggerEvaluationRef.current = null;
+    if (mountedRef.current) setLastTriggerEvaluation(null);
+  }, []);
+
   const replayStory = useCallback(async (stopId: string) => {
     const active = sessionRef.current;
     const activeManifest = manifestRef.current;
-    if (!active || !activeManifest?.stops.some(stop => stop.id === stopId)) return;
+    if (!active || !activeManifest?.stops.some(stop => stop.id === stopId) || stoppingRef.current) return;
+    const generation = trackingGenerationRef.current;
     if (!originalStopCanReplay(active, stopId)) {
       throw new Error('A story can be replayed only after it is completed, skipped, or missed.');
     }
     if (active.current_stop_id) {
       throw new Error('Pause or finish the current story before replaying another one.');
     }
-    const ownerScope = await requireCurrentAccess(active.pack_id, active.version, active.owner_scope);
+    const ownerScope = await requireCurrentAccess(
+      active.pack_id,
+      active.version,
+      active.owner_scope,
+      simulationRef.current,
+    );
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     if (!await dependencies.bundles.verify(ownerScope, active.pack_id, active.version)) {
       throw new Error('This offline download needs to be downloaded again before replaying stories.');
     }
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     await dependencies.audio.stop();
     await dependencies.audio.unload();
     await releaseAudio();
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     await publishSession(startManualOriginalStop(active, stopId));
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
     if (mountedRef.current) setState('tracking');
-    trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
-      pack_id: active.pack_id,
-      version: active.version,
-      stop_id: stopId,
-      outcome: 'replayed',
-    });
+    if (!simulationRef.current) {
+      trackOriginalsAnalyticsEvent(ORIGINALS_ANALYTICS_EVENTS.stopOutcome, {
+        pack_id: active.pack_id,
+        version: active.version,
+        stop_id: stopId,
+        outcome: 'replayed',
+      });
+    }
     await playStop(stopId);
   }, [dependencies.audio, dependencies.bundles, playStop, publishSession, releaseAudio, requireCurrentAccess]);
 
   const seekStory = useCallback(async (positionMs: number) => {
-    await dependencies.audio.seek(positionMs);
+    if (stoppingRef.current) return;
+    const generation = trackingGenerationRef.current;
     const active = sessionRef.current;
-    if (active) await publishSession({
+    if (!active) return;
+    await dependencies.audio.seek(positionMs);
+    if (
+      stoppingRef.current
+      || generation !== trackingGenerationRef.current
+      || sessionRef.current?.session_id !== active.session_id
+    ) return;
+    await publishSession({
       ...active,
       current_audio_position_ms: Math.max(0, positionMs),
       updated_at_ms: Date.now(),
@@ -659,7 +949,10 @@ export function OriginalsRuntimeProvider({
   }, [dependencies.audio, publishSession]);
 
   const setMuted = useCallback(async (nextMuted: boolean) => {
+    if (stoppingRef.current) return;
+    const generation = trackingGenerationRef.current;
     await dependencies.audio.setVolume(nextMuted ? 0 : 1);
+    if (stoppingRef.current || generation !== trackingGenerationRef.current) return;
     if (mountedRef.current) setMutedState(nextMuted);
   }, [dependencies.audio]);
 
@@ -876,10 +1169,15 @@ export function OriginalsRuntimeProvider({
     downloadProgress,
     error,
     muted,
+    simulation,
+    lastTriggerEvaluation,
     audioCapabilities: dependencies.audio.capabilities,
     downloadOriginal,
     startTour: value => activateTour(value, false),
     restartTour: value => activateTour(value, true),
+    startSimulation: value => activateTour(value, true, true),
+    skipSimulationCue,
+    clearSimulationDiagnostic,
     pauseTour,
     resumeTour,
     stopTour,
@@ -896,15 +1194,18 @@ export function OriginalsRuntimeProvider({
     activateTour,
     acquireOriginal,
     claimFeaturedOriginal,
+    clearSimulationDiagnostic,
     beginAudioInterruption,
     bundle,
     dependencies.audio.capabilities,
     downloadOriginal,
     downloadProgress,
     error,
+    lastTriggerEvaluation,
     manifest,
     migrateGuestToAccount,
     muted,
+    simulation,
     pauseTour,
     replayStory,
     resumeTour,
@@ -912,6 +1213,7 @@ export function OriginalsRuntimeProvider({
     setMuted,
     session,
     skipCurrentStory,
+    skipSimulationCue,
     state,
     stopTour,
     submitLocationSample,

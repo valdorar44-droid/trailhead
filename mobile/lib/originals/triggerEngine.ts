@@ -120,6 +120,14 @@ export function evaluateOriginalLocation(
   const projection = projectPointToOriginalRoute(
     manifest.route.geometry.coordinates,
     [sample.lng, sample.lat],
+    {
+      previous_route_ratio: currentSession.last_projected_route_progress_m == null
+        ? null
+        : currentSession.last_projected_route_progress_m / manifest.route.distance_m,
+      heading_deg: sample.heading_deg,
+      speed_mps: sample.speed_mps,
+      accuracy_m: sample.accuracy_m,
+    },
   );
   if (!projection) {
     session = { ...session, tracking_state: 'off_route' };
@@ -130,11 +138,6 @@ export function evaluateOriginalLocation(
   // client-side haversine rounding cannot drift cue placement.
   const routeProgress = projection.route_ratio * manifest.route.distance_m;
 
-  session = {
-    ...session,
-    last_projected_route_progress_m: routeProgress,
-    last_route_distance_m: projection.distance_from_route_m,
-  };
   if (projection.distance_from_route_m > settings.off_route_distance_m) {
     if (session.tracking_state !== 'off_route') {
       events.push({ type: 'route_state_changed', state: 'off_route', distance_m: projection.distance_from_route_m });
@@ -142,6 +145,7 @@ export function evaluateOriginalLocation(
     session = {
       ...session,
       tracking_state: 'off_route',
+      last_route_distance_m: projection.distance_from_route_m,
       trigger_state: resetCandidate(session.trigger_state.route_initialized),
     };
     return {
@@ -157,7 +161,12 @@ export function evaluateOriginalLocation(
   } else if (session.tracking_state === 'poor_accuracy') {
     events.push({ type: 'gps_quality_changed', state: 'on_route' });
   }
-  session = { ...session, tracking_state: 'on_route' };
+  session = {
+    ...session,
+    tracking_state: 'on_route',
+    last_projected_route_progress_m: routeProgress,
+    last_route_distance_m: projection.distance_from_route_m,
+  };
 
   const eligible = remainingStops(manifest, session);
   const missed: string[] = [];

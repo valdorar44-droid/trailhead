@@ -3,12 +3,118 @@ import asyncio
 import unittest
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import dashboard.server as server
 from db import store
 from ingestors import osm
 from ingestors.pakistan_curated import get_pakistan_curated_treks
 from scripts import promote_nps_child_explore_places as promote_nps_children
+
+
+def _official_trailhead_profile(
+    place_id: str,
+    title: str,
+    lat: float,
+    lng: float,
+    region: str,
+    description: str,
+    *,
+    source: str,
+    official_url: str = "",
+) -> dict:
+    return {
+        "id": place_id,
+        "category": "trailhead",
+        "subcategories": ["trailhead", "trail"],
+        "quality": "official",
+        "verified": True,
+        "search_aliases": [title, region],
+        "summary": {
+            "id": place_id,
+            "title": title,
+            "category": "Trailhead",
+            "explore_group": "trails",
+            "region": region,
+            "lat": lat,
+            "lng": lng,
+            "rank": 760000,
+            "hero_rank": 760000,
+            "tags": ["Trailhead", "Trail"],
+            "hook": title,
+            "short_description": description,
+            "source_title": source,
+            "source_url": official_url,
+        },
+        "profile": {
+            "hook": title,
+            "summary": description,
+            "access_notes": "Check current access before you go.",
+        },
+        "source_pack": {
+            "quality": "official",
+            "primary": source,
+            "official_url": official_url,
+            "sources": [
+                {
+                    "title": source,
+                    "publisher": source,
+                    "url": official_url,
+                    "kind": "official",
+                }
+            ],
+        },
+        "facts": {
+            "coordinates": f"{lat:.6f}, {lng:.6f}",
+            "source_quality": "official",
+        },
+    }
+
+
+MOAB_TRAILHEAD_FIXTURES = [
+    _official_trailhead_profile(
+        "place:ridb:257115",
+        "Moab Brands Trailhead",
+        38.651270,
+        -109.667980,
+        "Moab, Utah",
+        "Trail access north of Moab for the Moab Brands trail system.",
+        source="Recreation Information Database",
+    ),
+    _official_trailhead_profile(
+        "place:ridb:257119",
+        "Moab Rim Trailhead",
+        38.558716,
+        -109.583191,
+        "Moab, Utah",
+        "Trailhead for hiking or driving the difficult Moab Rim 4WD route.",
+        source="Recreation Information Database",
+    ),
+]
+
+
+YOSEMITE_TRAILHEAD_FIXTURES = [
+    _official_trailhead_profile(
+        "place:nps:places:b1b4a158-95ce-4526-ae28-5916d7af7547",
+        "Lower Yosemite Fall Trailhead",
+        37.746364,
+        -119.596268,
+        "Yosemite National Park, California",
+        "Trailhead for the walk to the base of Lower Yosemite Fall.",
+        source="National Park Service",
+        official_url="https://www.nps.gov/places/000/lower-yosemite-fall-trailhead.htm",
+    ),
+    _official_trailhead_profile(
+        "place:nps:places:07da404d-9d30-48b7-866d-eb5160fd74e3",
+        "Upper Yosemite Fall Trailhead",
+        37.742769,
+        -119.603251,
+        "Yosemite National Park, California",
+        "Trailhead for the steep climb toward Upper Yosemite Fall.",
+        source="National Park Service",
+        official_url="https://www.nps.gov/places/000/upper-yosemite-fall-trailhead.htm",
+    ),
+]
 
 
 class TrailCatalogTests(unittest.TestCase):
@@ -436,7 +542,12 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertEqual(springs_titles[:1], ["Springs Connector"])
 
     def test_explore_places_moab_trails_filters_far_little_moab_matches(self):
-        payload = asyncio.run(server.explore_places(q="Moab trails", category="trail", limit=12))
+        with patch.object(
+            server,
+            "_official_cache_search_profiles",
+            return_value=MOAB_TRAILHEAD_FIXTURES,
+        ):
+            payload = asyncio.run(server.explore_places(q="Moab trails", category="trail", limit=12))
         titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
 
         self.assertNotIn("Little Moab", titles)
@@ -447,7 +558,12 @@ class TrailCatalogTests(unittest.TestCase):
 
     def test_explore_places_exact_trail_title_prefers_usable_location(self):
         self.assertIsNone(server._explore_guided_destination_for_exact_query("Moab Rim Trail"))
-        payload = asyncio.run(server.explore_places(q="Moab Rim Trail", category="trail", limit=12))
+        with patch.object(
+            server,
+            "_official_cache_search_profiles",
+            return_value=[MOAB_TRAILHEAD_FIXTURES[1]],
+        ):
+            payload = asyncio.run(server.explore_places(q="Moab Rim Trail", category="trail", limit=12))
         titles = [(item.get("summary") or {}).get("title") or "" for item in payload.get("places") or []]
 
         self.assertIn("Moab Rim Trailhead", titles)
@@ -542,7 +658,12 @@ class TrailCatalogTests(unittest.TestCase):
         self.assertNotRegex(" ".join(titles), r"\bMountain\. Bike\b")
 
     def test_explore_trail_fallback_prefers_nearby_catalog_trailheads(self):
-        payload = asyncio.run(server.explore_catalog_index(q="Yosemite trails", category="trail", limit=12))
+        with patch.object(
+            server,
+            "_official_cache_search_profiles",
+            return_value=YOSEMITE_TRAILHEAD_FIXTURES,
+        ):
+            payload = asyncio.run(server.explore_catalog_index(q="Yosemite trails", category="trail", limit=12))
         titles = [item["title"] for item in payload["places"]]
         visible = " ".join(
             " ".join(str(item.get(key) or "") for key in ("title", "category", "region", "short_description"))

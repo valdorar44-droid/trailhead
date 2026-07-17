@@ -10805,6 +10805,13 @@ class OriginalCartesiaAssetRequest(BaseModel):
     text: str = Field(min_length=1, max_length=10000)
 
 
+class OriginalNarrationAssetRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    text: str = Field(min_length=1, max_length=10000)
+    provider: Literal["cartesia", "elevenlabs"] = "cartesia"
+
+
 class AuthoredTripPackFeatureRequest(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -12657,11 +12664,14 @@ def _save_authored_original_request(
 
 def _original_asset_bytes_match_kind(kind: str, mime_type: str, content: bytes) -> bool:
     if kind == "narration":
-        return bool(
-            mime_type == "audio/wav"
-            and content.startswith(b"RIFF")
-            and content[8:12] == b"WAVE"
-        )
+        if mime_type == "audio/wav":
+            return bool(content.startswith(b"RIFF") and content[8:12] == b"WAVE")
+        if mime_type == "audio/mpeg":
+            return bool(
+                content.startswith(b"ID3")
+                or (len(content) >= 2 and content[0] == 0xFF and content[1] & 0xE0 == 0xE0)
+            )
+        return False
     if kind == "image":
         if not mime_type.startswith("image/"):
             return False
@@ -12673,6 +12683,19 @@ def _original_asset_bytes_match_kind(kind: str, mime_type: str, content: bytes) 
     if kind == "other":
         return mime_type in {"application/octet-stream", "application/pdf", "application/zip"}
     return False
+
+
+def _normalize_original_asset_mime_type(mime_type: str) -> str:
+    normalized = str(mime_type or "").split(";", 1)[0].strip().lower()
+    return {
+        "audio/wave": "audio/wav",
+        "audio/x-wav": "audio/wav",
+        "audio/vnd.wave": "audio/wav",
+        "audio/mp3": "audio/mpeg",
+        "audio/x-mp3": "audio/mpeg",
+        "audio/mpeg3": "audio/mpeg",
+        "audio/x-mpeg-3": "audio/mpeg",
+    }.get(normalized, normalized)
 
 
 def _persist_original_asset_bytes(
@@ -12696,7 +12719,7 @@ def _persist_original_asset_bytes(
     if len(content) > 64 * 1024 * 1024:
         raise ValueError("Original asset uploads are limited to 64 MB")
     kind = str(kind or "").strip().lower()
-    mime_type = str(mime_type or "").split(";", 1)[0].strip().lower()
+    mime_type = _normalize_original_asset_mime_type(mime_type)
     if not _original_asset_bytes_match_kind(kind, mime_type, content):
         raise ValueError("Original asset bytes do not match the selected content type")
     digest = hashlib.sha256(content).hexdigest()
@@ -12704,6 +12727,7 @@ def _persist_original_asset_bytes(
     if not re.fullmatch(r"\.[a-z0-9]{1,8}", suffix):
         suffix = {
             "audio/wav": ".wav",
+            "audio/mpeg": ".mp3",
             "image/png": ".png",
             "application/json": ".json",
             "application/geo+json": ".geojson",
@@ -12794,7 +12818,48 @@ async def api_admin_generate_original_narration(
                 "provider": "cartesia",
                 "model_id": _tts_model_id("guide"),
                 "voice_id": settings.cartesia_voice_id,
-                "generated_at": datetime.now(timezone.utc).isoformat(),
+                "output_format": "wav_pcm_s16le_44100",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/admin/originals/{pack_id}/assets/{asset_id}/narration")
+async def api_admin_generate_original_narration_with_provider(
+    pack_id: str,
+    asset_id: str,
+    body: OriginalNarrationAssetRequest,
+    admin: dict = Depends(_require_admin),
+):
+    """Generate a reviewed Original script with a server-owned voice configuration."""
+    try:
+        clean = _normalize_tts_text(body.text, "guide")
+        if body.provider == "elevenlabs":
+            audio = await _elevenlabs_tts(clean)
+            mime_type = "audio/mpeg"
+            suffix = "mp3"
+            voice_id, model_id = _elevenlabs_voice_and_model_ids()
+        else:
+            audio = await _cartesia_tts(clean, "guide", container="wav")
+            mime_type = "audio/wav"
+            suffix = "wav"
+            model_id = _tts_model_id("guide")
+            voice_id = settings.cartesia_voice_id
+        return _persist_original_asset_bytes(
+            pack_id, asset_id, "narration", mime_type, audio,
+            f"{asset_id}.{suffix}", admin["id"], transcript=clean,
+            generator_metadata={
+                "provider": body.provider,
+                "model_id": model_id,
+                "voice_id": voice_id,
+                "output_format": (
+                    ELEVENLABS_OUTPUT_FORMAT
+                    if body.provider == "elevenlabs"
+                    else "wav_pcm_s16le_44100"
+                ),
             },
         )
     except HTTPException:
@@ -13676,6 +13741,9 @@ async def weather_forecast(lat: float, lng: float, days: int = 7, units: str = "
 
 CARTESIA_TTS_ENDPOINT = "https://api.cartesia.ai/tts/bytes"
 CARTESIA_SAMPLE_RATE = 44100
+CARTESIA_WAV_ENCODING = "pcm_s16le"
+ELEVENLABS_TTS_ENDPOINT = "https://api.elevenlabs.io/v1/text-to-speech"
+ELEVENLABS_OUTPUT_FORMAT = "mp3_44100_128"
 AUDIO_CACHE_VERSION = "v2-cartesia"
 
 def _tts_mode(mode: str) -> str:
@@ -13843,11 +13911,14 @@ async def _purge_guide_audio_texts(*texts: str) -> int:
 async def _cartesia_tts(clean: str, mode: str, container: str = "mp3") -> bytes:
     if not settings.cartesia_api_key:
         raise HTTPException(500, "CARTESIA_API_KEY not configured")
+    output_format = {"container": container, "sample_rate": CARTESIA_SAMPLE_RATE}
+    if container == "wav":
+        output_format["encoding"] = CARTESIA_WAV_ENCODING
     payload = {
         "model_id": _tts_model_id(mode),
         "transcript": clean,
         "voice": {"mode": "id", "id": settings.cartesia_voice_id},
-        "output_format": {"container": container, "sample_rate": CARTESIA_SAMPLE_RATE},
+        "output_format": output_format,
         "generation_config": _tts_voice_settings(mode),
         "speed": "normal",
     }
@@ -13867,6 +13938,70 @@ async def _cartesia_tts(clean: str, mode: str, container: str = "mp3") -> bytes:
         detail = r.text[:240] if r.text else r.reason_phrase
         raise HTTPException(r.status_code, f"Cartesia TTS failed: {detail}")
     return r.content
+
+
+def _elevenlabs_error_detail(response: httpx.Response) -> str:
+    try:
+        payload = response.json()
+    except Exception:
+        payload = None
+    detail = payload.get("detail") if isinstance(payload, dict) else None
+    if isinstance(detail, dict):
+        message = detail.get("message") or detail.get("code") or detail.get("type")
+    else:
+        message = detail
+    return str(message or response.reason_phrase or "provider error")[:240]
+
+
+def _elevenlabs_voice_and_model_ids() -> tuple[str, str]:
+    voice_id = str(settings.elevenlabs_voice_id or "").strip()
+    model_id = str(settings.elevenlabs_model_id or "eleven_multilingual_v2").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", voice_id):
+        raise HTTPException(503, "ElevenLabs narration voice is not configured correctly")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", model_id):
+        raise HTTPException(503, "ElevenLabs narration model is not configured correctly")
+    return voice_id, model_id
+
+
+async def _elevenlabs_tts(clean: str) -> bytes:
+    """Return ElevenLabs MP3 bytes while keeping credentials and voice choice server-side."""
+    if not settings.elevenlabs_api_key:
+        raise HTTPException(
+            503,
+            "ElevenLabs narration is unavailable: ELEVENLABS_API_KEY is not configured",
+        )
+    voice_id, model_id = _elevenlabs_voice_and_model_ids()
+    timeout = httpx.Timeout(120.0, connect=10.0)
+    try:
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.post(
+                f"{ELEVENLABS_TTS_ENDPOINT}/{quote(voice_id, safe='')}",
+                params={"output_format": ELEVENLABS_OUTPUT_FORMAT},
+                headers={
+                    "xi-api-key": settings.elevenlabs_api_key,
+                    "Accept": "audio/mpeg",
+                    "Content-Type": "application/json",
+                },
+                json={"text": clean, "model_id": model_id},
+            )
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            503, "ElevenLabs TTS request failed before audio was returned",
+        ) from exc
+    if response.status_code >= 400:
+        status_code = (
+            429 if response.status_code == 429
+            else 503 if response.status_code in {401, 402, 403}
+            else 502
+        )
+        raise HTTPException(
+            status_code,
+            f"ElevenLabs TTS failed ({response.status_code}): {_elevenlabs_error_detail(response)}",
+        )
+    if not _original_asset_bytes_match_kind("narration", "audio/mpeg", response.content):
+        raise HTTPException(502, "ElevenLabs TTS returned an invalid audio response")
+    return response.content
+
 
 @app.get("/api/audio/tts")
 async def tts_audio(text: str = "", mode: str = "direction", token: str = "", user: dict = Depends(_current_user)):

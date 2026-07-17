@@ -21,6 +21,48 @@ const sample = (
   ...overrides,
 });
 
+function originalBacktrackManifest() {
+  const value = originalManifest();
+  value.route.geometry.coordinates = [[0, 0], [0.02, 0], [0, 0], [0, 0.02]];
+  value.route.bounds = { north: 0.02, south: 0, east: 0.02, west: 0 };
+  value.route.distance_m = 6_672;
+  value.offline_map.bounds = { ...value.route.bounds };
+  value.stops[0] = {
+    ...value.stops[0],
+    coordinates: { lat: 0, lng: 0.005 },
+    trigger: {
+      ...value.stops[0].trigger,
+      route_progress_start_m: 400,
+      route_progress_end_m: 700,
+      approach_bearing_deg: 90,
+      bearing_tolerance_deg: 30,
+    },
+  };
+  value.stops[1] = {
+    ...value.stops[1],
+    coordinates: { lat: 0, lng: 0.019 },
+    trigger: {
+      ...value.stops[1].trigger,
+      route_progress_start_m: 1_950,
+      route_progress_end_m: 2_240,
+      approach_bearing_deg: 90,
+      bearing_tolerance_deg: 30,
+    },
+  };
+  value.stops[2] = {
+    ...value.stops[2],
+    coordinates: { lat: 0, lng: 0.015 },
+    trigger: {
+      ...value.stops[2].trigger,
+      route_progress_start_m: 2_650,
+      route_progress_end_m: 2_900,
+      approach_bearing_deg: 270,
+      bearing_tolerance_deg: 30,
+    },
+  };
+  return validateOriginalManifest(value);
+}
+
 let result = evaluateOriginalLocation(manifest, session, sample(0.0045, 1_000));
 session = result.session;
 assert.equal(session.current_stop_id, null, 'one location fix only arms a cue');
@@ -136,5 +178,102 @@ hysteresis = evaluateOriginalLocation(manifest, hysteresis, sample(0.0045, 2_000
 assert.equal(hysteresis.trigger_state.candidate_sample_count, 1, 'hysteresis retains an armed cue near its boundary');
 hysteresis = evaluateOriginalLocation(manifest, hysteresis, sample(0.0045, 4_100)).session;
 assert.equal(hysteresis.current_stop_id, 'story-1');
+
+const backtrackManifest = originalBacktrackManifest();
+let returnSession: OriginalSessionV1 = {
+  ...createOriginalSession(backtrackManifest),
+  status: 'active',
+  completed_stop_ids: ['story-1', 'story-2'],
+  triggered_stop_ids: ['story-1', 'story-2'],
+  last_projected_route_progress_m: 2_224,
+  trigger_state: {
+    ...createOriginalSession(backtrackManifest).trigger_state,
+    route_initialized: true,
+  },
+};
+let returnResult = evaluateOriginalLocation(
+  backtrackManifest,
+  returnSession,
+  sample(0.015, 20_000, { heading_deg: 270 }),
+);
+returnSession = JSON.parse(JSON.stringify(returnResult.session)) as OriginalSessionV1;
+assert(returnResult.projected_route_progress_m! > 2_650, 'the return occurrence advances beyond the turnaround');
+assert.equal(returnSession.trigger_state.candidate_stop_id, 'story-3', 'the return-leg cue arms on the shared road');
+
+returnResult = evaluateOriginalLocation(
+  backtrackManifest,
+  returnSession,
+  sample(0.015, 23_100, { heading_deg: 270 }),
+);
+returnSession = returnResult.session;
+assert.equal(returnSession.current_stop_id, 'story-3', 'a persisted return-leg candidate triggers after restart');
+assert.equal(
+  returnSession.triggered_stop_ids.filter(id => id === 'story-3').length,
+  1,
+  'the return-leg cue triggers exactly once',
+);
+
+const duplicateReturn = evaluateOriginalLocation(
+  backtrackManifest,
+  JSON.parse(JSON.stringify(returnSession)) as OriginalSessionV1,
+  sample(0.015, 27_000, { heading_deg: 270 }),
+);
+assert.equal(
+  duplicateReturn.session.triggered_stop_ids.filter(id => id === 'story-3').length,
+  1,
+  'a restored return-leg session cannot duplicate the cue',
+);
+
+const overlapMidRoute = evaluateOriginalLocation(
+  backtrackManifest,
+  { ...createOriginalSession(backtrackManifest), status: 'active' },
+  sample(0.015, 30_000, { heading_deg: 270 }),
+);
+assert.deepEqual(
+  overlapMidRoute.session.missed_stop_ids,
+  ['story-1', 'story-2'],
+  'a headed mid-route start on the return occurrence marks earlier stories missed',
+);
+assert.equal(overlapMidRoute.session.trigger_state.candidate_stop_id, 'story-3');
+
+const outboundProgressSession: OriginalSessionV1 = {
+  ...createOriginalSession(backtrackManifest),
+  status: 'active',
+  completed_stop_ids: ['story-1'],
+  triggered_stop_ids: ['story-1'],
+  last_projected_route_progress_m: 1_500,
+  trigger_state: {
+    ...createOriginalSession(backtrackManifest).trigger_state,
+    route_initialized: true,
+  },
+};
+const reverseOnOutbound = evaluateOriginalLocation(
+  backtrackManifest,
+  outboundProgressSession,
+  sample(0.013, 34_000, { heading_deg: 270 }),
+);
+assert(reverseOnOutbound.projected_route_progress_m! < 2_000, 'reverse travel remains on the outbound occurrence');
+assert(!reverseOnOutbound.session.missed_stop_ids.includes('story-2'));
+assert(!reverseOnOutbound.session.missed_stop_ids.includes('story-3'));
+
+const leftRoute = evaluateOriginalLocation(
+  backtrackManifest,
+  outboundProgressSession,
+  sample(0.019, 38_000, { lat: 0.01, heading_deg: 90 }),
+);
+assert.equal(leftRoute.session.tracking_state, 'off_route');
+assert.equal(
+  leftRoute.session.last_projected_route_progress_m,
+  1_500,
+  'an off-route projection does not overwrite the last accepted route progress',
+);
+const outboundRejoin = evaluateOriginalLocation(
+  backtrackManifest,
+  leftRoute.session,
+  sample(0.014, 42_000, { heading_deg: 90 }),
+);
+assert.equal(outboundRejoin.session.tracking_state, 'on_route');
+assert(outboundRejoin.projected_route_progress_m! < 2_000, 'rejoin returns to the prior outbound occurrence');
+assert(!outboundRejoin.session.missed_stop_ids.includes('story-2'));
 
 console.log('Originals trigger engine tests passed.');

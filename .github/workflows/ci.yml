@@ -16,6 +16,8 @@ jobs:
   backend:
     name: Backend and catalog contracts
     runs-on: ubuntu-latest
+    env:
+      TRAILHEAD_DB_PATH: /tmp/trailhead-ci.db
     steps:
       - uses: actions/checkout@v4
 
@@ -29,6 +31,9 @@ jobs:
 
       - name: Compile backend
         run: python -m py_compile dashboard/server.py db/store.py
+
+      - name: Initialize test database
+        run: python -c "from db.store import init_db; init_db()"
 
       - name: Run backend tests
         run: python -m unittest discover -s tests

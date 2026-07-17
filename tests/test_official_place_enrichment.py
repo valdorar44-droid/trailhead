@@ -304,7 +304,7 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(server, "get_cached", return_value=None),
             patch.object(server, "set_cached", return_value=None),
-            patch.object(server, "nearby_smart_pack", new=AsyncMock(return_value={"places": [event]})),
+            patch.object(server, "_discovery_context_smart_places", new=AsyncMock(return_value={"places": [event]})),
             patch.object(server, "trails_discover", new=AsyncMock(return_value={"trails": []})),
             patch.object(server, "_open_town_profile", new=AsyncMock(return_value=wiki_profile)),
         ):

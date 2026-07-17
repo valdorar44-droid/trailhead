@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64, sqlite3, json, time, math, hashlib, random, secrets, re, io, struct, wave, zlib
 from datetime import date as _date, datetime as _datetime, timedelta as _timedelta, timezone as _timezone
 from pathlib import Path as _Path
+from urllib.parse import quote as _url_quote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import settings
 
@@ -8694,6 +8695,7 @@ ORIGINAL_VALIDATION_CHECKS = {
     "season_reviewed",
     "offline_bundle_reviewed",
 }
+ORIGINAL_DEVICE_PREVIEW_VERSION_BASE = 1_000_000_000
 ORIGINAL_FIELD_DRIVE_MAX_AGE_DAYS = 365
 ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS = 180
 TRIP_PACK_EXPLORER_DISCOUNT_PERCENT = 20
@@ -9026,6 +9028,17 @@ def _original_asset_public_path(pack_id: str, asset_id: str, sha256: str) -> str
     return f"/api/original-assets/{pack_id}/{asset_id}/{sha256}"
 
 
+def _original_asset_admin_immutable_path(
+    pack_id: str,
+    asset_id: str,
+    sha256: str,
+) -> str:
+    return (
+        f"/api/admin/originals/{_url_quote(pack_id, safe='')}/assets/"
+        f"{_url_quote(asset_id, safe='')}/{sha256}/content"
+    )
+
+
 def _sha256_file(path: _Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:
@@ -9209,6 +9222,32 @@ def get_authored_original_asset_record_admin(pack_id: str, asset_id: str) -> dic
         return None
     raw = dict(row)
     if not _original_asset_file_verified(raw):
+        raise ValueError("Original asset failed integrity verification")
+    return raw
+
+
+def get_authored_original_asset_record_admin_by_sha256(
+    pack_id: str,
+    asset_id: str,
+    sha256: str,
+) -> dict | None:
+    """Return an immutable admin asset revision after re-verifying its bytes."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    asset_id = _validate_canonical_id(asset_id, "Original asset id")
+    sha256 = str(sha256 or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", sha256):
+        raise ValueError("Original asset sha256 is invalid")
+    db = _conn()
+    row = db.execute(
+        """SELECT * FROM authored_original_assets
+           WHERE pack_id=? AND asset_id=? AND sha256=?""",
+        (pack_id, asset_id, sha256),
+    ).fetchone()
+    db.close()
+    if not row:
+        return None
+    raw = dict(row)
+    if not _original_asset_file_verified(raw, force_hash=True):
         raise ValueError("Original asset failed integrity verification")
     return raw
 
@@ -10017,6 +10056,86 @@ def list_authored_trip_packs_admin(content_kind: str | None = None) -> list[dict
         ).fetchall()
     db.close()
     return [_trip_pack_admin_from_row(row) for row in rows]
+
+
+def get_authored_original_device_preview_manifest(pack_id: str) -> dict | None:
+    """Build a read-only, hash-bound manifest for testing the current draft."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    db = _conn()
+    try:
+        pack = db.execute(
+            """SELECT * FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            return None
+        verified_assets = _verified_original_asset_map_db(db, pack_id)
+    finally:
+        db.close()
+
+    draft_revision = int(pack["draft_revision"])
+    if draft_revision < 1:
+        raise ValueError("Original draft revision is invalid")
+    preview_version = ORIGINAL_DEVICE_PREVIEW_VERSION_BASE + draft_revision
+    manifest, _ = _normalize_original_manifest(
+        pack_id,
+        pack["draft_title"],
+        _decode_pack_json(pack["draft_original_manifest_json"], None),
+        version=preview_version,
+        publishing=False,
+    )
+    assets_by_id = {asset["id"]: asset for asset in manifest["assets"]}
+    for asset in manifest["assets"]:
+        verified = verified_assets.get(asset["id"])
+        if not verified:
+            raise ValueError(
+                f"Original asset {asset['id']} needs a current server-verified upload"
+            )
+        expected = {
+            "kind": verified["kind"],
+            "mime_type": verified["mime_type"],
+            "bytes": int(verified["byte_count"]),
+            "sha256": verified["sha256"],
+        }
+        if any(asset[key] != expected[key] for key in expected):
+            raise ValueError(
+                f"Original asset {asset['id']} does not match its current server-verified upload"
+            )
+        asset["path"] = _original_asset_admin_immutable_path(
+            pack_id,
+            asset["id"],
+            asset["sha256"],
+        )
+    for stop in manifest["stops"]:
+        narration = assets_by_id.get(stop["audio_asset_id"])
+        verified_narration = verified_assets.get(stop["audio_asset_id"])
+        if (
+            not narration
+            or narration["kind"] != "narration"
+            or not verified_narration
+            or verified_narration.get("transcript_sha256")
+            != original_transcript_sha256(stop["transcript"])
+        ):
+            raise ValueError(
+                f"Original stop {stop['id']} narration does not match its current transcript"
+            )
+        media_metadata = _decode_pack_json(
+            verified_narration.get("media_metadata_json"), {},
+        )
+        verified_duration = float(media_metadata.get("duration_s") or 0)
+        if (
+            verified_duration <= 0
+            or abs(stop["audio_duration_s"] - verified_duration)
+            > max(0.25, verified_duration * 0.05)
+        ):
+            raise ValueError(
+                f"Original stop {stop['id']} narration duration does not match its verified audio"
+            )
+    manifest["manifest_id"] = (
+        f"original_preview_manifest_{pack_id}_r{draft_revision}"
+    )
+    return manifest
 
 
 def validate_authored_original_draft(pack_id: str) -> dict | None:

@@ -155,7 +155,10 @@ from db.store import (
     list_owned_authored_originals, restore_owned_authored_originals,
     get_published_original_manifest,
     save_authored_original_asset_record, list_authored_original_asset_records,
-    get_authored_original_asset_record_admin, get_published_original_asset_record,
+    get_authored_original_asset_record_admin,
+    get_authored_original_asset_record_admin_by_sha256,
+    get_authored_original_device_preview_manifest,
+    get_published_original_asset_record,
     validate_original_analytics_dimensions, original_transcript_sha256,
     upsert_route_intelligence_places, list_cached_places_near_samples,
     submit_trail_field_report, get_trail_field_reports, get_trail_field_report_summary,
@@ -12888,6 +12891,33 @@ async def api_admin_original_asset_content(
     )
 
 
+@app.get("/api/admin/originals/{pack_id}/assets/{asset_id}/{sha256}/content")
+async def api_admin_original_asset_immutable_content(
+    pack_id: str,
+    asset_id: str,
+    sha256: str,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        asset = get_authored_original_asset_record_admin_by_sha256(
+            pack_id, asset_id, sha256,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not asset:
+        raise HTTPException(404, "Original asset not found")
+    headers = {
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "ETag": f'"{asset["sha256"]}"',
+        "X-Content-Type-Options": "nosniff",
+    }
+    if asset["kind"] not in {"narration", "image"}:
+        headers["Content-Disposition"] = f'attachment; filename="{asset["asset_id"]}"'
+    return FileResponse(
+        asset["storage_path"], media_type=asset["mime_type"], headers=headers,
+    )
+
+
 @app.post("/api/admin/originals", status_code=201)
 async def api_admin_create_original(
     body: AuthoredOriginalDraftRequest,
@@ -12895,6 +12925,20 @@ async def api_admin_create_original(
 ):
     pack_id = str(body.pack_id or f"original_{uuid.uuid4().hex}")
     return _save_authored_original_request(pack_id, body, admin)
+
+
+@app.get("/api/admin/originals/{pack_id}/device-preview/manifest")
+async def api_admin_original_device_preview_manifest(
+    pack_id: str,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        manifest = get_authored_original_device_preview_manifest(pack_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not manifest:
+        raise HTTPException(404, "Trailhead Original not found")
+    return manifest
 
 
 @app.get("/api/admin/originals/{pack_id}/validate")

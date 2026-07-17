@@ -57,7 +57,7 @@ function clamp(value: number, minimum: number, maximum: number) {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function segmentBearingDegrees(start: LngLat, end: LngLat) {
+export function originalRouteSegmentBearingDegrees(start: LngLat, end: LngLat) {
   const referenceLatitude = toRadians((start[1] + end[1]) / 2);
   const east = normalizedLngDelta(end[0] - start[0]) * Math.cos(referenceLatitude);
   const north = end[1] - start[1];
@@ -117,7 +117,7 @@ export function projectPointToOriginalRoute(
       route_ratio: progress / total,
       distance_from_route_m: distance,
       segment_index: index,
-      segment_bearing_deg: segmentBearingDegrees(clean[index], clean[index + 1]),
+      segment_bearing_deg: originalRouteSegmentBearingDegrees(clean[index], clean[index + 1]),
     });
   }
 

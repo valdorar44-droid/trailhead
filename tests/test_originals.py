@@ -17,6 +17,7 @@ import zlib
 from unittest.mock import patch
 
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from config.settings import settings
@@ -578,6 +579,217 @@ class TrailheadOriginalsTests(unittest.TestCase):
         self.assertEqual(response["current_published_version"], second["version"])
         self.assertEqual([item["version"] for item in response["versions"]], [2, 1])
         self.assertEqual(response["versions"][1]["title"], "Moab Original V1")
+
+    def test_admin_device_preview_is_normalized_hash_bound_and_does_not_change_publish_gates(self):
+        pack_id = "original_device_preview"
+        self._save(_ready_payload(), pack_id=pack_id)
+        draft = store.get_authored_trip_pack_admin(pack_id, "original_drive")
+        draft["validation_metadata"]["trigger_drive_tested"] = False
+        saved = store.save_authored_trip_pack_draft(
+            pack_id=draft["id"], slug=draft["slug"], title=draft["title"],
+            summary=draft["summary"], price_credits=draft["price_credits"],
+            coverage_region=draft["coverage_region"], public_metadata=draft["public_metadata"],
+            validation_metadata=draft["validation_metadata"], template=draft["template"],
+            admin_user_id=self.admin, content_kind="original_drive",
+            original_manifest=draft["original_manifest"],
+        )
+        before = store.validate_authored_original_draft(pack_id)
+
+        manifest = store.get_authored_original_device_preview_manifest(pack_id)
+        after = store.validate_authored_original_draft(pack_id)
+
+        self.assertEqual(manifest["schema_version"], 1)
+        self.assertEqual(manifest["pack_id"], pack_id)
+        self.assertEqual(
+            manifest["version"],
+            store.ORIGINAL_DEVICE_PREVIEW_VERSION_BASE + saved["draft_revision"],
+        )
+        self.assertEqual(
+            manifest["manifest_id"],
+            f"original_preview_manifest_{pack_id}_r{saved['draft_revision']}",
+        )
+        self.assertEqual(before, after)
+        self.assertFalse(after["publish_ready"])
+        self.assertEqual(after["missing_reviews"], ["trigger_drive_tested"])
+        self.assertFalse(
+            store.get_authored_trip_pack_admin(pack_id, "original_drive")[
+                "validation_metadata"
+            ]["trigger_drive_tested"]
+        )
+        for asset in manifest["assets"]:
+            self.assertEqual(
+                asset["path"],
+                f"/api/admin/originals/{pack_id}/assets/{asset['id']}/{asset['sha256']}/content",
+            )
+        with self.assertRaisesRegex(ValueError, "review is incomplete"):
+            store.publish_authored_trip_pack(
+                pack_id, self.admin, required_content_kind="original_drive",
+            )
+
+        client = TestClient(server.app)
+        preview_url = f"/api/admin/originals/{pack_id}/device-preview/manifest"
+        self.assertEqual(client.get(preview_url).status_code, 401)
+        self.assertEqual(
+            client.get(
+                preview_url,
+                headers={"Authorization": f"Bearer {server._make_token(self.user)}"},
+            ).status_code,
+            403,
+        )
+        admin_response = client.get(
+            preview_url,
+            headers={"Authorization": f"Bearer {server._make_token(self.admin)}"},
+        )
+        self.assertEqual(admin_response.status_code, 200)
+        self.assertEqual(admin_response.json(), manifest)
+
+    def test_admin_device_preview_rejects_missing_mismatched_and_corrupt_assets(self):
+        missing_id = "original_preview_missing"
+        self._save(_ready_payload(), pack_id=missing_id, verify_assets=False)
+        with self.assertRaisesRegex(ValueError, "current server-verified upload"):
+            store.get_authored_original_device_preview_manifest(missing_id)
+
+        mismatch_id = "original_preview_mismatch"
+        self._save(_ready_payload(), pack_id=mismatch_id)
+        mismatch = store.get_authored_trip_pack_admin(mismatch_id, "original_drive")
+        mismatch["original_manifest"]["assets"][0]["bytes"] += 1
+        store.save_authored_trip_pack_draft(
+            pack_id=mismatch["id"], slug=mismatch["slug"], title=mismatch["title"],
+            summary=mismatch["summary"], price_credits=mismatch["price_credits"],
+            coverage_region=mismatch["coverage_region"], public_metadata=mismatch["public_metadata"],
+            validation_metadata=mismatch["validation_metadata"], template=mismatch["template"],
+            admin_user_id=self.admin, content_kind="original_drive",
+            original_manifest=mismatch["original_manifest"],
+        )
+        with self.assertRaisesRegex(ValueError, "does not match its current"):
+            store.get_authored_original_device_preview_manifest(mismatch_id)
+
+        corrupt_id = "original_preview_corrupt"
+        self._save(_ready_payload(), pack_id=corrupt_id)
+        corrupt_draft = store.get_authored_trip_pack_admin(corrupt_id, "original_drive")
+        corrupt_asset_id = corrupt_draft["original_manifest"]["assets"][0]["id"]
+        corrupt_asset = store.get_authored_original_asset_record_admin(
+            corrupt_id, corrupt_asset_id,
+        )
+        corrupt_path = Path(corrupt_asset["storage_path"])
+        corrupt_path.write_bytes(corrupt_path.read_bytes() + b"corrupt")
+        with self.assertRaisesRegex(ValueError, "current server-verified upload"):
+            store.get_authored_original_device_preview_manifest(corrupt_id)
+
+    def test_admin_device_preview_binds_narration_to_current_transcript_and_duration(self):
+        transcript_id = "original_preview_transcript_binding"
+        self._save(_ready_payload(), pack_id=transcript_id)
+        transcript_draft = store.get_authored_trip_pack_admin(
+            transcript_id, "original_drive",
+        )
+        transcript_draft["original_manifest"]["stops"][0]["transcript"] = (
+            "A newly edited transcript whose narration has not been regenerated."
+        )
+        store.save_authored_trip_pack_draft(
+            pack_id=transcript_draft["id"], slug=transcript_draft["slug"],
+            title=transcript_draft["title"], summary=transcript_draft["summary"],
+            price_credits=transcript_draft["price_credits"],
+            coverage_region=transcript_draft["coverage_region"],
+            public_metadata=transcript_draft["public_metadata"],
+            validation_metadata=transcript_draft["validation_metadata"],
+            template=transcript_draft["template"], admin_user_id=self.admin,
+            content_kind="original_drive",
+            original_manifest=transcript_draft["original_manifest"],
+        )
+        with self.assertRaisesRegex(ValueError, "current transcript"):
+            store.get_authored_original_device_preview_manifest(transcript_id)
+
+        duration_id = "original_preview_duration_binding"
+        self._save(_ready_payload(), pack_id=duration_id)
+        duration_draft = store.get_authored_trip_pack_admin(
+            duration_id, "original_drive",
+        )
+        duration_draft["original_manifest"]["stops"][0]["audio_duration_s"] = 1.25
+        store.save_authored_trip_pack_draft(
+            pack_id=duration_draft["id"], slug=duration_draft["slug"],
+            title=duration_draft["title"], summary=duration_draft["summary"],
+            price_credits=duration_draft["price_credits"],
+            coverage_region=duration_draft["coverage_region"],
+            public_metadata=duration_draft["public_metadata"],
+            validation_metadata=duration_draft["validation_metadata"],
+            template=duration_draft["template"], admin_user_id=self.admin,
+            content_kind="original_drive",
+            original_manifest=duration_draft["original_manifest"],
+        )
+        self.assertIsNotNone(
+            store.get_authored_original_device_preview_manifest(duration_id)
+        )
+
+        duration_draft = store.get_authored_trip_pack_admin(
+            duration_id, "original_drive",
+        )
+        duration_draft["original_manifest"]["stops"][0]["audio_duration_s"] = 1.251
+        store.save_authored_trip_pack_draft(
+            pack_id=duration_draft["id"], slug=duration_draft["slug"],
+            title=duration_draft["title"], summary=duration_draft["summary"],
+            price_credits=duration_draft["price_credits"],
+            coverage_region=duration_draft["coverage_region"],
+            public_metadata=duration_draft["public_metadata"],
+            validation_metadata=duration_draft["validation_metadata"],
+            template=duration_draft["template"], admin_user_id=self.admin,
+            content_kind="original_drive",
+            original_manifest=duration_draft["original_manifest"],
+        )
+        with self.assertRaisesRegex(ValueError, "duration does not match"):
+            store.get_authored_original_device_preview_manifest(duration_id)
+
+    def test_admin_preview_asset_urls_remain_immutable_after_current_asset_changes(self):
+        pack_id = "original_preview_immutable"
+        self._save(_ready_payload(), pack_id=pack_id)
+        preview = store.get_authored_original_device_preview_manifest(pack_id)
+        asset = next(item for item in preview["assets"] if item["kind"] == "narration")
+        old_record = store.get_authored_original_asset_record_admin_by_sha256(
+            pack_id, asset["id"], asset["sha256"],
+        )
+        old_bytes = Path(old_record["storage_path"]).read_bytes()
+
+        replacement_transcript = "Replacement narration intentionally not saved into the draft."
+        replacement_bytes = _fixture_asset_content(
+            {"kind": "narration", "id": asset["id"]}, replacement_transcript,
+        )
+        replacement_path = Path(self.asset_dir.name) / f"{pack_id}_replacement.wav"
+        replacement_path.write_bytes(replacement_bytes)
+        replacement_sha = hashlib.sha256(replacement_bytes).hexdigest()
+        store.save_authored_original_asset_record(
+            pack_id, asset["id"], "narration", "audio/wav",
+            str(replacement_path), len(replacement_bytes), replacement_sha, self.admin,
+            transcript_sha256=store.original_transcript_sha256(replacement_transcript),
+        )
+
+        preserved = store.get_authored_original_asset_record_admin_by_sha256(
+            pack_id, asset["id"], asset["sha256"],
+        )
+        current = store.get_authored_original_asset_record_admin_by_sha256(
+            pack_id, asset["id"], replacement_sha,
+        )
+        self.assertFalse(bool(preserved["is_current"]))
+        self.assertTrue(bool(current["is_current"]))
+        self.assertEqual(Path(preserved["storage_path"]).read_bytes(), old_bytes)
+
+        client = TestClient(server.app)
+        headers = {"Authorization": f"Bearer {server._make_token(self.admin)}"}
+        old_response = client.get(asset["path"], headers=headers)
+        self.assertEqual(old_response.status_code, 200)
+        self.assertEqual(old_response.content, old_bytes)
+        self.assertEqual(old_response.headers["etag"], f'"{asset["sha256"]}"')
+        self.assertEqual(
+            old_response.headers["cache-control"],
+            "private, max-age=31536000, immutable",
+        )
+        missing_sha = "f" * 64 if asset["sha256"] != "f" * 64 else "e" * 64
+        self.assertEqual(
+            client.get(
+                asset["path"].replace(asset["sha256"], missing_sha), headers=headers,
+            ).status_code,
+            404,
+        )
+        with self.assertRaisesRegex(ValueError, "does not match its current"):
+            store.get_authored_original_device_preview_manifest(pack_id)
 
     def test_exact_guest_version_converts_without_substitution_and_owned_update_is_free(self):
         first = self._publish(_ready_payload(price=0, title="Moab Original V1"))

@@ -189,15 +189,18 @@ td.name{color:var(--text);font-weight:600;}
 .originals-item-title{font-size:13px;font-weight:800;line-height:18px;}
 .originals-item-meta{color:var(--text3);font:10px var(--mono);margin-top:6px;}
 .originals-editor{display:flex;flex-direction:column;gap:14px;min-width:0;}
+.originals-editor .btn,.originals-sidebar .btn,.originals-item,.originals-stop,.originals-check,.originals-version{min-height:44px;}
 .originals-topline{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;}
 .originals-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}
 .originals-editor .btn:disabled{opacity:.35;cursor:not-allowed;}
 .originals-form{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
 .originals-field{display:flex;flex-direction:column;gap:6px;min-width:0;}
 .originals-field.wide{grid-column:1/-1;}
-.originals-field label{color:var(--text3);font:700 10px var(--mono);letter-spacing:.7px;}
+.originals-field label,.originals-field-label{color:var(--text3);font:700 10px var(--mono);letter-spacing:.7px;}
 .originals-input,.originals-select,.originals-textarea{background:var(--s3);border:1px solid var(--border);border-radius:9px;padding:10px 11px;color:var(--text);font-size:13px;outline:none;width:100%;}
+.originals-input,.originals-select{min-height:44px;}
 .originals-input:focus,.originals-select:focus,.originals-textarea:focus{border-color:var(--orange);}
+.originals-editor .btn:focus-visible,.originals-sidebar .btn:focus-visible,.originals-item:focus-visible,.originals-stop:focus-visible,.originals-version:focus-visible,.originals-route:focus-visible,.originals-input:focus-visible,.originals-select:focus-visible,.originals-textarea:focus-visible{outline:2px solid var(--orange);outline-offset:2px;}
 .originals-textarea{resize:vertical;min-height:84px;line-height:1.5;}
 .originals-json{min-height:310px;font:11px/1.55 var(--mono);tab-size:2;white-space:pre;}
 .originals-json-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;}
@@ -212,15 +215,32 @@ td.name{color:var(--text);font-weight:600;}
 .originals-route-tools{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px;padding-top:10px;border-top:1px solid var(--border);}
 .originals-route-hint{color:var(--text3);font:10px/1.45 var(--mono);flex:1;min-width:220px;}
 .originals-simulator{display:flex;align-items:center;gap:8px;min-width:min(100%,360px);}
-.originals-simulator input{accent-color:var(--orange);flex:1;min-width:120px;}
+.originals-simulator input[type="range"]{accent-color:var(--orange);flex:1;min-width:120px;min-height:44px;cursor:pointer;}
 .originals-simulator-output{color:var(--orange);font:800 10px var(--mono);min-width:136px;text-align:right;}
+.originals-simulator-speed{display:flex;align-items:center;gap:7px;min-height:44px;}
+.originals-simulator-speed label{color:var(--text3);font:700 10px var(--mono);}
+.originals-simulator-speed input{width:76px;min-height:44px;background:var(--s3);border:1px solid var(--border);border-radius:9px;padding:8px 10px;color:var(--text);font:800 12px var(--mono);outline:none;}
+.originals-simulator-speed input:focus{border-color:var(--orange);}
+.originals-simulator-speed output{min-width:108px;color:var(--orange);font:800 10px var(--mono);}
+.originals-simulator-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:center;margin-top:10px;padding:12px;border:1px solid var(--border);border-radius:11px;background:var(--s3);}
+.originals-simulator-panel .btn{min-height:44px;}
+.originals-simulator-copy{min-width:0;}
+.originals-simulator-status{color:var(--orange);font:800 11px/1.4 var(--mono);}
+.originals-simulator-reason{color:var(--text2);font-size:11px;line-height:1.5;margin-top:4px;}
+.originals-simulator-gates{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px;}
+.originals-simulator-gate{border:1px solid var(--border);border-radius:999px;padding:4px 7px;color:var(--text3);font:700 9px/1.2 var(--mono);background:var(--s2);}
+.originals-cue-window{fill:none;stroke:rgba(249,115,22,.35);stroke-width:9;stroke-linecap:round;stroke-linejoin:round;}
+.originals-cue-window.active{stroke:rgba(255,255,255,.82);stroke-width:11;}
+.originals-cue-edge{fill:#f97316;stroke:#090a0c;stroke-width:2;}
+.originals-cue-edge.active{fill:#fff;}
+@media(max-width:760px){.originals-simulator-panel{grid-template-columns:1fr;}.originals-simulator-panel .originals-actions{justify-content:flex-start;}}
 .originals-stop-list{display:flex;flex-direction:column;gap:7px;max-height:270px;overflow:auto;}
 .originals-stop{display:grid;grid-template-columns:28px 1fr auto;gap:8px;align-items:center;background:var(--s3);border:1px solid var(--border);border-radius:9px;padding:9px;cursor:pointer;}
 .originals-stop{width:100%;text-align:left;font:inherit;}
 .originals-stop:hover,.originals-stop.active{border-color:var(--orange);}
 .originals-stop-number{width:24px;height:24px;border-radius:50%;display:flex;align-items:center;justify-content:center;background:var(--orange);color:#fff;font:800 10px var(--mono);}
-.originals-stop-title{font-size:12px;font-weight:700;color:var(--text);}
-.originals-stop-meta{font:9px var(--mono);color:var(--text3);margin-top:3px;}
+.originals-stop-title{display:block;font-size:12px;font-weight:700;color:var(--text);}
+.originals-stop-meta{display:block;font:9px var(--mono);color:var(--text3);margin-top:3px;}
 .originals-stop-editor{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;}
 .originals-stop-editor .wide{grid-column:1/-1;}
 .originals-stop-editor .half{grid-column:span 2;}
@@ -233,7 +253,7 @@ td.name{color:var(--text);font-weight:600;}
 .originals-issues{display:flex;flex-direction:column;gap:6px;margin-top:9px;}
 .originals-issue{color:var(--text2);font-size:11px;line-height:1.45;padding-left:13px;position:relative;}
 .originals-issue:before{content:'—';position:absolute;left:0;color:var(--red);}
-.originals-audio{width:100%;height:34px;margin-top:8px;filter:grayscale(1);}
+.originals-audio{width:100%;height:44px;margin-top:8px;filter:grayscale(1);}
 .originals-place-status{color:var(--text3);font:10px/1.4 var(--mono);min-height:14px;}
 .originals-version-list{display:flex;flex-direction:column;gap:7px;}
 .originals-version{display:grid;grid-template-columns:58px 1fr auto;gap:10px;align-items:center;width:100%;text-align:left;background:var(--s3);border:1px solid var(--border);border-radius:9px;padding:10px;color:var(--text);cursor:pointer;}
@@ -791,13 +811,13 @@ td.name{color:var(--text);font-weight:600;}
               <div class="card">
                 <div class="section-label">DETAILS</div>
                 <div class="originals-form">
-                  <div class="originals-field"><label>ID</label><input id="originals-id" class="originals-input" placeholder="Generated when blank"></div>
-                  <div class="originals-field"><label>SLUG</label><input id="originals-slug" class="originals-input" placeholder="moab-canyons-to-the-sky"></div>
-                  <div class="originals-field wide"><label>TITLE</label><input id="originals-title" class="originals-input" maxlength="200"></div>
-                  <div class="originals-field wide"><label>SUMMARY</label><textarea id="originals-summary" class="originals-textarea" maxlength="2000"></textarea></div>
-                  <div class="originals-field"><label>PRICE</label><select id="originals-price" class="originals-select"><option value="0">Free</option><option value="250">250 credits</option><option value="500">500 credits</option><option value="900">900 credits</option></select></div>
-                  <div class="originals-field"><label>COVERAGE</label><select id="originals-coverage" class="originals-select"><option value="north_america">North America</option><option value="global">Global</option></select></div>
-                  <div class="originals-field wide"><label>PUBLIC METADATA · JSON</label><textarea id="originals-public-metadata" class="originals-textarea" spellcheck="false">{}</textarea></div>
+                  <div class="originals-field"><label for="originals-id">ID</label><input id="originals-id" class="originals-input" placeholder="Generated when blank"></div>
+                  <div class="originals-field"><label for="originals-slug">SLUG</label><input id="originals-slug" class="originals-input" placeholder="moab-canyons-to-the-sky"></div>
+                  <div class="originals-field wide"><label for="originals-title">TITLE</label><input id="originals-title" class="originals-input" maxlength="200"></div>
+                  <div class="originals-field wide"><label for="originals-summary">SUMMARY</label><textarea id="originals-summary" class="originals-textarea" maxlength="2000"></textarea></div>
+                  <div class="originals-field"><label for="originals-price">PRICE</label><select id="originals-price" class="originals-select"><option value="0">Free</option><option value="250">250 credits</option><option value="500">500 credits</option><option value="900">900 credits</option></select></div>
+                  <div class="originals-field"><label for="originals-coverage">COVERAGE</label><select id="originals-coverage" class="originals-select"><option value="north_america">North America</option><option value="global">Global</option></select></div>
+                  <div class="originals-field wide"><label for="originals-public-metadata">PUBLIC METADATA · JSON</label><textarea id="originals-public-metadata" class="originals-textarea" spellcheck="false">{}</textarea></div>
                 </div>
               </div>
 
@@ -816,17 +836,36 @@ td.name{color:var(--text);font-weight:600;}
                   </div>
                 </div>
                 <div class="originals-preview-grid">
-                  <div id="originals-route" class="originals-route editable" title="Click the route to place the selected story" onclick="placeOriginalStopFromRoute(event)"></div>
+                  <div id="originals-route" class="originals-route editable" role="button" tabindex="0" title="Click the route to place the selected story" aria-label="Route and story map. Press Enter or Space to place the selected story at the simulated slider position." aria-describedby="originals-route-hint" onclick="placeOriginalStopFromRoute(event)" onkeydown="handleOriginalRouteKeydown(event)"></div>
                   <div id="originals-stops" class="originals-stop-list"></div>
                 </div>
                 <div class="originals-route-tools">
-                  <div class="originals-route-hint">Click the authored route to place the selected story and set its progress window.</div>
+                  <div id="originals-route-hint" class="originals-route-hint">Click the authored route to place the selected story and set its progress window. For keyboard placement, move the slider and use Place story at slider.</div>
                   <div class="originals-simulator">
                     <label for="originals-simulator" style="color:var(--text3);font:700 10px var(--mono);">SIMULATE</label>
-                    <input id="originals-simulator" type="range" min="0" max="1000" value="0" oninput="updateOriginalSimulation()">
-                    <output id="originals-simulator-output" class="originals-simulator-output">START</output>
+                    <input id="originals-simulator" type="range" min="0" max="1000" step="0.01" value="0" oninput="updateOriginalSimulation()" onchange="announceOriginalSimulation()">
+                    <output id="originals-simulator-output" class="originals-simulator-output" for="originals-simulator">START</output>
+                  </div>
+                  <div class="originals-simulator-speed">
+                    <label for="originals-simulator-speed-input">TEST SPEED</label>
+                    <input id="originals-simulator-speed-input" type="number" min="0" max="100" step="0.5" value="12" inputmode="decimal" oninput="renderOriginalPreview()" onchange="announceOriginalSimulation()">
+                    <output id="originals-simulator-speed-output" for="originals-simulator-speed-input">12 M/S · 27 MPH</output>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" type="button" onclick="placeOriginalStopAtSimulationProgress()">Place story at slider</button>
+                </div>
+                <div class="originals-simulator-panel">
+                  <div class="originals-simulator-copy">
+                    <div id="originals-simulator-status" class="originals-simulator-status">TRIGGER PREVIEW</div>
+                    <div id="originals-simulator-reason" class="originals-simulator-reason">Move the route slider or jump to a story cue.</div>
+                    <div id="originals-simulator-gates" class="originals-simulator-gates"></div>
+                  </div>
+                  <div class="originals-actions">
+                    <button class="btn btn-ghost btn-sm" aria-label="Preview the previous story cue" onclick="stepOriginalSimulationCue(-1)">Previous cue</button>
+                    <button class="btn btn-primary btn-sm" aria-label="Preview the closest valid point for the selected story cue" onclick="jumpOriginalSimulationToSelected()">Selected cue</button>
+                    <button class="btn btn-ghost btn-sm" aria-label="Preview the next story cue" onclick="stepOriginalSimulationCue(1)">Next cue</button>
                   </div>
                 </div>
+                <div id="originals-simulator-announcement" role="status" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
               </div>
 
               <div class="card" id="originals-stop-card" style="display:none;">
@@ -840,34 +879,34 @@ td.name{color:var(--text);font-weight:600;}
                   </div>
                 </div>
                 <div class="originals-stop-editor">
-                  <div class="originals-field half"><label>TITLE</label><input id="original-stop-title" class="originals-input"></div>
-                  <div class="originals-field half"><label>EXPLORE PLACE ID</label><div class="originals-actions"><input id="original-stop-place" class="originals-input" placeholder="Optional" onblur="validateOriginalPlaceLink()"><button class="btn btn-ghost btn-sm" onclick="validateOriginalPlaceLink()">Check</button></div><div id="original-stop-place-status" class="originals-place-status"></div></div>
-                  <div class="originals-field"><label>LATITUDE</label><input id="original-stop-lat" class="originals-input" type="number" step="any"></div>
-                  <div class="originals-field"><label>LONGITUDE</label><input id="original-stop-lng" class="originals-input" type="number" step="any"></div>
-                  <div class="originals-field"><label>ENTER RADIUS · M</label><input id="original-stop-enter" class="originals-input" type="number" min="50"></div>
-                  <div class="originals-field"><label>EXIT RADIUS · M</label><input id="original-stop-exit" class="originals-input" type="number" min="100"></div>
-                  <div class="originals-field"><label>LEAD · SEC</label><input id="original-stop-lead" class="originals-input" type="number" min="0"></div>
-                  <div class="originals-field"><label>PROGRESS START · M</label><input id="original-stop-progress-start" class="originals-input" type="number" min="0"></div>
-                  <div class="originals-field"><label>PROGRESS END · M</label><input id="original-stop-progress-end" class="originals-input" type="number" min="0"></div>
-                  <div class="originals-field"><label>DURATION · SEC</label><input id="original-stop-duration" class="originals-input" type="number" min="1"></div>
-                  <div class="originals-field half"><label>ARTWORK ASSET ID</label><input id="original-stop-artwork" class="originals-input" placeholder="Required to publish"></div>
+                  <div class="originals-field half"><label for="original-stop-title">TITLE</label><input id="original-stop-title" class="originals-input"></div>
+                  <div class="originals-field half"><label for="original-stop-place">EXPLORE PLACE ID</label><div class="originals-actions"><input id="original-stop-place" class="originals-input" placeholder="Optional" aria-describedby="original-stop-place-status" onblur="validateOriginalPlaceLink()"><button class="btn btn-ghost btn-sm" type="button" onclick="validateOriginalPlaceLink()">Check</button></div><div id="original-stop-place-status" class="originals-place-status"></div></div>
+                  <div class="originals-field"><label for="original-stop-lat">LATITUDE</label><input id="original-stop-lat" class="originals-input" type="number" step="any"></div>
+                  <div class="originals-field"><label for="original-stop-lng">LONGITUDE</label><input id="original-stop-lng" class="originals-input" type="number" step="any"></div>
+                  <div class="originals-field"><label for="original-stop-enter">ENTER RADIUS · M</label><input id="original-stop-enter" class="originals-input" type="number" min="50"></div>
+                  <div class="originals-field"><label for="original-stop-exit">EXIT RADIUS · M</label><input id="original-stop-exit" class="originals-input" type="number" min="100"></div>
+                  <div class="originals-field"><label for="original-stop-lead">LEAD · SEC</label><input id="original-stop-lead" class="originals-input" type="number" min="0"></div>
+                  <div class="originals-field"><label for="original-stop-progress-start">PROGRESS START · M</label><input id="original-stop-progress-start" class="originals-input" type="number" min="0"></div>
+                  <div class="originals-field"><label for="original-stop-progress-end">PROGRESS END · M</label><input id="original-stop-progress-end" class="originals-input" type="number" min="0"></div>
+                  <div class="originals-field"><label for="original-stop-duration">DURATION · SEC</label><input id="original-stop-duration" class="originals-input" type="number" min="1"></div>
+                  <div class="originals-field half"><label for="original-stop-artwork">ARTWORK ASSET ID</label><input id="original-stop-artwork" class="originals-input" placeholder="Required to publish"></div>
                   <div class="originals-field half">
-                    <label>STORY ARTWORK</label>
+                    <label for="originals-artwork-file">STORY ARTWORK</label>
                     <div class="originals-actions">
                       <button class="btn btn-ghost btn-sm" onclick="document.getElementById('originals-artwork-file').click()">Upload image</button>
                       <input id="originals-artwork-file" type="file" accept="image/png,.png" style="display:none;" onchange="uploadOriginalArtworkFile(event)">
                       <span id="originals-artwork-status" style="color:var(--text3);font:10px var(--mono);"></span>
                     </div>
                   </div>
-                  <div class="originals-field wide"><label>TRANSCRIPT</label><textarea id="original-stop-transcript" class="originals-textarea" style="min-height:150px;"></textarea></div>
-                  <div class="originals-field half"><label>SOURCE TITLE</label><input id="original-stop-source-title" class="originals-input"></div>
-                  <div class="originals-field half"><label>SOURCE URL</label><input id="original-stop-source-url" class="originals-input" type="url" placeholder="https://"></div>
-                  <div class="originals-field half"><label>SOURCE PUBLISHER</label><input id="original-stop-source-publisher" class="originals-input"></div>
-                  <div class="originals-field half"><label>SOURCE REVIEWED</label><input id="original-stop-source-reviewed" class="originals-input" type="date"></div>
+                  <div class="originals-field wide"><label for="original-stop-transcript">TRANSCRIPT</label><textarea id="original-stop-transcript" class="originals-textarea" style="min-height:150px;"></textarea></div>
+                  <div class="originals-field half"><label for="original-stop-source-title">SOURCE TITLE</label><input id="original-stop-source-title" class="originals-input"></div>
+                  <div class="originals-field half"><label for="original-stop-source-url">SOURCE URL</label><input id="original-stop-source-url" class="originals-input" type="url" placeholder="https://"></div>
+                  <div class="originals-field half"><label for="original-stop-source-publisher">SOURCE PUBLISHER</label><input id="original-stop-source-publisher" class="originals-input"></div>
+                  <div class="originals-field half"><label for="original-stop-source-reviewed">SOURCE REVIEWED</label><input id="original-stop-source-reviewed" class="originals-input" type="date"></div>
                   <div class="originals-field wide">
-                    <label>PREVIEW</label>
+                    <label for="originals-narration-provider">NARRATION PREVIEW</label>
                     <div class="originals-actions">
-                      <select id="originals-narration-provider" class="originals-input" aria-label="Narration voice" style="width:auto;min-width:210px;">
+                      <select id="originals-narration-provider" class="originals-input" style="width:auto;min-width:210px;">
                         <option value="elevenlabs" selected>ElevenLabs</option>
                         <option value="cartesia">Cartesia</option>
                       </select>
@@ -876,7 +915,7 @@ td.name{color:var(--text);font-weight:600;}
                       <input id="originals-narration-file" type="file" accept="audio/wav,audio/mpeg,.wav,.mp3" style="display:none;" onchange="uploadOriginalNarrationFile(event)">
                       <span id="originals-narration-status" style="color:var(--text3);font:10px var(--mono);"></span>
                     </div>
-                    <audio id="originals-narration-audio" class="originals-audio" controls preload="none"></audio>
+                    <audio id="originals-narration-audio" class="originals-audio" controls preload="none" aria-label="Selected story narration preview"></audio>
                   </div>
                 </div>
               </div>
@@ -893,8 +932,8 @@ td.name{color:var(--text);font-weight:600;}
               <div class="card">
                 <div class="section-label">SOURCE DOCUMENTS</div>
                 <div class="originals-json-grid">
-                  <div class="originals-field"><label>TRIP TEMPLATE · JSON</label><textarea id="originals-template-json" class="originals-textarea originals-json" spellcheck="false"></textarea></div>
-                  <div class="originals-field"><label>OFFLINE MANIFEST · JSON</label><textarea id="originals-manifest-json" class="originals-textarea originals-json" spellcheck="false" oninput="refreshOriginalPreviewSoon()"></textarea></div>
+                  <div class="originals-field"><label for="originals-template-json">TRIP TEMPLATE · JSON</label><textarea id="originals-template-json" class="originals-textarea originals-json" spellcheck="false"></textarea></div>
+                  <div class="originals-field"><label for="originals-manifest-json">OFFLINE MANIFEST · JSON</label><textarea id="originals-manifest-json" class="originals-textarea originals-json" spellcheck="false" oninput="refreshOriginalPreviewSoon()"></textarea></div>
                 </div>
               </div>
 
@@ -912,7 +951,9 @@ td.name{color:var(--text);font-weight:600;}
               <div class="card">
                 <div class="section-label">FEATURED</div>
                 <div class="originals-actions">
+                  <label for="originals-feature-month" class="originals-field-label">MONTH</label>
                   <input id="originals-feature-month" class="originals-input" type="month" style="width:170px;">
+                  <label for="originals-feature-version" class="originals-field-label">VERSION</label>
                   <input id="originals-feature-version" class="originals-input" type="number" min="1" placeholder="Version" style="width:120px;">
                   <button class="btn btn-primary" onclick="featureOriginal()">Set featured</button>
                 </div>
@@ -981,6 +1022,7 @@ let selectedOriginal = null;
 let selectedOriginalStopIndex = 0;
 let originalValidation = null;
 let originalPreviewTimer = null;
+let originalSimulationAnnouncementTimer = null;
 let originalNarrationObjectUrl = null;
 let originalEditorDirty = false;
 let originalStopEditorDirty = false;
@@ -2583,7 +2625,7 @@ async function saveOriginalDraft() {
       { method: selectedOriginalId ? 'PUT' : 'POST', body: JSON.stringify(body) }
     );
     selectedOriginalId = saved.id;
-    toast('Draft saved', 'ok');
+    toast('Draft saved', 'originals-ok');
     await loadOriginals();
     await openOriginal(saved.id);
   } catch(e) {
@@ -2607,7 +2649,7 @@ async function validateOriginalDraft(showToast = true) {
     originalValidation = result;
     renderOriginalReadiness(result);
     document.getElementById('originals-publish-btn').disabled = !result.publish_ready;
-    if (showToast) toast(result.publish_ready ? 'Ready to publish' : `${result.issues.length} items remain`, result.publish_ready ? 'ok' : 'err');
+    if (showToast) toast(result.publish_ready ? 'Ready to publish' : `${result.issues.length} items remain`, result.publish_ready ? 'originals-ok' : 'err');
     return result;
   } catch(e) {
     renderOriginalReadiness({ publish_ready: false, issues: [e.message] });
@@ -2637,7 +2679,7 @@ async function publishOriginal() {
   if (!window.confirm(`Publish version ${result.next_version} of this Original?`)) return;
   try {
     await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/publish`, { method: 'POST' });
-    toast(`Version ${result.next_version} published`, 'ok');
+    toast(`Version ${result.next_version} published`, 'originals-ok');
     await loadOriginals();
     await openOriginal(selectedOriginalId);
   } catch(e) {
@@ -2654,7 +2696,7 @@ async function featureOriginal() {
   if (versionValue) body.version = Number(versionValue);
   try {
     await api(`/api/admin/originals/featured/${encodeURIComponent(month)}`, { method: 'PUT', body: JSON.stringify(body) });
-    toast(`Featured for ${month}`, 'ok');
+    toast(`Featured for ${month}`, 'originals-ok');
   } catch(e) {
     toast('Featured: ' + e.message, 'err');
   }
@@ -2691,7 +2733,7 @@ function renderOriginalPreview(manifestOverride = null) {
   ].map(([value, label]) => `<div class="originals-metric"><strong>${esc(value)}</strong><span>${label}</span></div>`).join('');
   const coordinates = route.geometry && Array.isArray(route.geometry.coordinates) ? route.geometry.coordinates : [];
   document.getElementById('originals-route-caption').textContent = `${coordinates.length} route points · ${route.direction || 'direction unset'}`;
-  renderOriginalRoute(coordinates, stops);
+  renderOriginalRoute(coordinates, stops, route.distance_m);
   renderOriginalStops(stops);
 }
 
@@ -2766,6 +2808,132 @@ function originalCoordinateAtProgress(metrics, progressMeters) {
   const ratio = endProgress > startProgress ? (progress - startProgress) / (endProgress - startProgress) : 0;
   const start = coordinates[segment], end = coordinates[segment + 1];
   return [start[0] + (end[0] - start[0]) * ratio, start[1] + (end[1] - start[1]) * ratio];
+}
+
+const ORIGINAL_SIMULATOR_DEFAULT_SPEED_MPS = 12;
+
+function originalSimulationSpeedMps() {
+  const input = document.getElementById('originals-simulator-speed-input');
+  if (!input || String(input.value || '').trim() === '') return ORIGINAL_SIMULATOR_DEFAULT_SPEED_MPS;
+  const value = Number(input.value);
+  return Number.isFinite(value) && value >= 0 ? value : ORIGINAL_SIMULATOR_DEFAULT_SPEED_MPS;
+}
+
+function originalSimulationSpeedLabel(speedMps) {
+  const rounded = Math.round(Math.max(0, Number(speedMps) || 0) * 10) / 10;
+  return `${Number.isInteger(rounded) ? rounded.toFixed(0) : rounded.toFixed(1)} M/S`;
+}
+
+function originalTriggerWindowAtSpeed(triggerValue, speedMps) {
+  const trigger = triggerValue || {};
+  const authoredStart = Math.max(0, Number(trigger.route_progress_start_m) || 0);
+  const end = Math.max(authoredStart, Number(trigger.route_progress_end_m) || authoredStart);
+  const leadTime = Math.max(0, Number(trigger.lead_time_s) || 0);
+  const speed = Math.max(0, Number(speedMps) || 0);
+  const leadDistance = speed * leadTime;
+  return {
+    authoredStart,
+    liveStart: Math.max(0, authoredStart - leadDistance),
+    end,
+    leadTime,
+    leadDistance,
+  };
+}
+
+function originalRouteCoordinatesBetweenProgress(metrics, startMeters, endMeters) {
+  const coordinates = metrics.coordinates || [];
+  if (!coordinates.length || metrics.distance <= 0) return [];
+  const start = Math.max(0, Math.min(Number(startMeters) || 0, metrics.distance));
+  const end = Math.max(start, Math.min(Number(endMeters) || start, metrics.distance));
+  const points = [];
+  const pushPoint = coordinate => {
+    if (!coordinate) return;
+    const prior = points[points.length - 1];
+    if (!prior || Math.abs(prior[0] - coordinate[0]) > 1e-10 || Math.abs(prior[1] - coordinate[1]) > 1e-10) {
+      points.push(coordinate);
+    }
+  };
+  pushPoint(originalCoordinateAtProgress(metrics, start));
+  for (let index = 1; index < coordinates.length - 1; index += 1) {
+    if (metrics.cumulative[index] > start && metrics.cumulative[index] < end) pushPoint(coordinates[index]);
+  }
+  pushPoint(originalCoordinateAtProgress(metrics, end));
+  return points;
+}
+
+function originalClosestRouteTargetInWindow(metrics, canonicalDistanceMeters, stop, speedMps) {
+  const canonicalDistance = Math.max(1, Number(canonicalDistanceMeters) || metrics.distance || 1);
+  const stopCoordinate = stop && stop.coordinates
+    ? [Number(stop.coordinates.lng), Number(stop.coordinates.lat)]
+    : null;
+  if (
+    metrics.distance <= 0
+    || !stopCoordinate
+    || !stopCoordinate.every(Number.isFinite)
+  ) return null;
+  const trigger = stop.trigger || {};
+  const window = originalTriggerWindowAtSpeed(trigger, speedMps);
+  const windowStart = Math.max(0, Math.min(window.liveStart, canonicalDistance));
+  const windowEnd = Math.max(windowStart, Math.min(window.end, canonicalDistance));
+  const radius = Math.max(0, Number(trigger.enter_radius_m) || 0);
+  const requiredBearing = trigger.approach_bearing_deg == null
+    ? null
+    : Number(trigger.approach_bearing_deg);
+  const authoredTolerance = Number(trigger.bearing_tolerance_deg);
+  const tolerance = trigger.bearing_tolerance_deg == null || !Number.isFinite(authoredTolerance)
+    ? 45
+    : Math.max(0, authoredTolerance);
+  const candidates = [];
+
+  for (let index = 0; index < metrics.coordinates.length - 1; index += 1) {
+    const geometricStart = metrics.cumulative[index];
+    const geometricEnd = metrics.cumulative[index + 1];
+    const geometricLength = geometricEnd - geometricStart;
+    if (geometricLength <= 0) continue;
+    const canonicalStart = geometricStart / metrics.distance * canonicalDistance;
+    const canonicalEnd = geometricEnd / metrics.distance * canonicalDistance;
+    const overlapStart = Math.max(windowStart, canonicalStart);
+    const overlapEnd = Math.min(windowEnd, canonicalEnd);
+    if (overlapStart > overlapEnd) continue;
+    const canonicalLength = canonicalEnd - canonicalStart;
+    if (canonicalLength <= 0) continue;
+    const startRatio = (overlapStart - canonicalStart) / canonicalLength;
+    const endRatio = (overlapEnd - canonicalStart) / canonicalLength;
+    const segmentStart = metrics.coordinates[index];
+    const segmentEnd = metrics.coordinates[index + 1];
+    const coordinateAtRatio = ratio => [
+      segmentStart[0] + (segmentEnd[0] - segmentStart[0]) * ratio,
+      segmentStart[1] + (segmentEnd[1] - segmentStart[1]) * ratio,
+    ];
+    const clippedMetrics = originalRouteMetrics([
+      coordinateAtRatio(startRatio),
+      coordinateAtRatio(endRatio),
+    ]);
+    const projection = originalProjectToRoute(clippedMetrics, stopCoordinate);
+    if (!projection) continue;
+    const clippedRatio = clippedMetrics.distance > 0
+      ? Math.max(0, Math.min(1, projection.progress / clippedMetrics.distance))
+      : 0;
+    const progress = overlapStart + (overlapEnd - overlapStart) * clippedRatio;
+    const distance = originalHaversineMeters(projection.coordinate, stopCoordinate);
+    const geometricProgress = metrics.distance * (progress / canonicalDistance);
+    const bearing = originalRouteBearingAtProgress(metrics, geometricProgress);
+    const bearingPasses = requiredBearing == null
+      || (bearing != null && originalBearingDifference(bearing, requiredBearing) <= tolerance);
+    candidates.push({
+      coordinate: projection.coordinate,
+      progress,
+      distance,
+      bearing,
+      valid: distance <= radius && bearingPasses,
+    });
+  }
+
+  return candidates.sort((a, b) => (
+    Number(b.valid) - Number(a.valid)
+    || a.distance - b.distance
+    || a.progress - b.progress
+  ))[0] || null;
 }
 
 function originalProjectToRoute(metrics, candidate) {
@@ -2881,7 +3049,7 @@ function undoOriginalRouteEdit() {
     document.getElementById('originals-manifest-json').value = prettyJson(manifest);
     markOriginalContentDirty();
     renderOriginalPreview(manifest);
-    toast('Route edit undone', 'ok');
+    toast('Route edit undone', 'originals-ok');
   } catch(e) {
     toast('Undo route: ' + e.message, 'err');
   }
@@ -2904,14 +3072,17 @@ async function importOriginalRoute(event) {
     document.getElementById('originals-manifest-json').value = prettyJson(manifest);
     markOriginalContentDirty();
     renderOriginalPreview(manifest);
-    toast('Route imported: ' + coordinates.length + ' points / ' + formatDistance(metrics.distance), 'ok');
+    toast('Route imported: ' + coordinates.length + ' points / ' + formatDistance(metrics.distance), 'originals-ok');
   } catch(e) {
     toast('Route import: ' + e.message, 'err');
   }
 }
 
-function renderOriginalRoute(rawCoordinates, stops) {
+function renderOriginalRoute(rawCoordinates, stops, canonicalDistanceMeters) {
   const coordinates = normalizedOriginalCoordinates(rawCoordinates);
+  const metrics = originalRouteMetrics(coordinates);
+  const canonicalDistance = Math.max(1, Number(canonicalDistanceMeters) || metrics.distance || 1);
+  const simulatorSpeed = originalSimulationSpeedMps();
   const stopPoints = stops
     .filter(stop => stop.coordinates && Number.isFinite(Number(stop.coordinates.lng)) && Number.isFinite(Number(stop.coordinates.lat)))
     .map(stop => [Number(stop.coordinates.lng), Number(stop.coordinates.lat)]);
@@ -2948,7 +3119,25 @@ function renderOriginalRoute(rawCoordinates, stops) {
       return `<circle cx="${x}" cy="${y}" r="4" fill="#ffffff" stroke="#090a0c" stroke-width="2" style="pointer-events:none;"/>`;
     }).join('')
     : '';
-  document.getElementById('originals-route').innerHTML = `<svg viewBox="0 0 640 270" role="img" aria-label="Original route and story stops" data-min-lng="${minLng}" data-max-lng="${maxLng}" data-min-lat="${minLat}" data-max-lat="${maxLat}"><rect width="640" height="270" fill="#090a0c"/>${grid}<polyline points="${coordinates.map(point).join(' ')}" fill="none" stroke="#f97316" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>${vertexSvg}${stopSvg}<g id="originals-sim-marker" style="pointer-events:none;"><circle r="9" fill="#ffffff" stroke="#090a0c" stroke-width="3"/><path d="M0 -15 L5 -7 L-5 -7 Z" fill="#ffffff"/></g></svg>`;
+  const cueWindows = stops.map((stop, index) => {
+    const trigger = stop && stop.trigger || {};
+    const window = originalTriggerWindowAtSpeed(trigger, simulatorSpeed);
+    const start = Math.max(0, Math.min(canonicalDistance, window.liveStart));
+    const end = Math.max(start, Math.min(canonicalDistance, window.end));
+    const geometricStart = metrics.distance * (start / canonicalDistance);
+    const geometricEnd = metrics.distance * (end / canonicalDistance);
+    const windowCoordinates = originalRouteCoordinatesBetweenProgress(metrics, geometricStart, geometricEnd);
+    const startCoordinate = windowCoordinates[0];
+    const endCoordinate = windowCoordinates[windowCoordinates.length - 1];
+    if (!startCoordinate || !endCoordinate || !windowCoordinates.length) return '';
+    const [startX, startY] = point(startCoordinate).split(',');
+    const [endX, endY] = point(endCoordinate).split(',');
+    const active = index === selectedOriginalStopIndex ? ' active' : '';
+    const windowPoints = windowCoordinates.map(point).join(' ');
+    const title = `${stop.title || `Story ${index + 1}`} live window at ${originalSimulationSpeedLabel(simulatorSpeed)}`;
+    return `<g data-original-cue-window="${index}" style="pointer-events:none;"><polyline class="originals-cue-window${active}" points="${windowPoints}"><title>${esc(title)}</title></polyline><circle class="originals-cue-edge${active}" cx="${startX}" cy="${startY}" r="4"/><circle class="originals-cue-edge${active}" cx="${endX}" cy="${endY}" r="4"/></g>`;
+  }).join('');
+  document.getElementById('originals-route').innerHTML = `<svg viewBox="0 0 640 270" role="img" aria-label="Original route and story stops" data-min-lng="${minLng}" data-max-lng="${maxLng}" data-min-lat="${minLat}" data-max-lat="${maxLat}"><rect width="640" height="270" fill="#090a0c"/>${grid}<polyline points="${coordinates.map(point).join(' ')}" fill="none" stroke="#f97316" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>${cueWindows}${vertexSvg}${stopSvg}<g id="originals-sim-marker" style="pointer-events:none;"><circle r="9" fill="#ffffff" stroke="#090a0c" stroke-width="3"/><path d="M0 -15 L5 -7 L-5 -7 Z" fill="#ffffff"/></g></svg>`;
   updateOriginalSimulation();
 }
 
@@ -2963,18 +3152,57 @@ function originalSvgCoordinate(svg, coordinate) {
   ];
 }
 
+function updateOriginalSimulationAriaValue(slider, progress, canonicalDistance) {
+  if (!slider) return;
+  const status = document.getElementById('originals-simulator-status');
+  const reason = document.getElementById('originals-simulator-reason');
+  const gateLabels = Array.from(document.querySelectorAll('#originals-simulator-gates .originals-simulator-gate'))
+    .map(node => String(node.textContent || '').trim())
+    .filter(Boolean);
+  const parts = [
+    `Position ${formatDistance(progress)} of ${formatDistance(canonicalDistance)}`,
+    status && status.textContent,
+    reason && String(reason.textContent || '').replace(/[.]+$/, ''),
+    gateLabels.length ? `Conditions: ${gateLabels.join('; ')}` : '',
+  ].map(value => String(value || '').trim()).filter(Boolean);
+  slider.setAttribute('aria-valuetext', parts.join('. '));
+}
+
+function announceOriginalSimulation() {
+  const announcement = document.getElementById('originals-simulator-announcement');
+  const slider = document.getElementById('originals-simulator');
+  if (!announcement || !slider) return;
+  clearTimeout(originalSimulationAnnouncementTimer);
+  originalSimulationAnnouncementTimer = setTimeout(() => {
+    announcement.textContent = '';
+    requestAnimationFrame(() => {
+      announcement.textContent = slider.getAttribute('aria-valuetext') || 'Trigger preview unavailable.';
+    });
+  }, 120);
+}
+
 function updateOriginalSimulation() {
   const output = document.getElementById('originals-simulator-output');
   const slider = document.getElementById('originals-simulator');
+  const speedOutput = document.getElementById('originals-simulator-speed-output');
   const svg = document.querySelector('#originals-route svg');
   const marker = document.getElementById('originals-sim-marker');
-  if (!output || !slider || !svg || !marker) return;
+  const simulatorSpeed = originalSimulationSpeedMps();
+  if (speedOutput) {
+    speedOutput.textContent = `${originalSimulationSpeedLabel(simulatorSpeed)} · ${Math.round(simulatorSpeed * 2.23694)} MPH`;
+  }
+  if (!output || !slider) return;
+  if (!svg || !marker) {
+    slider.setAttribute('aria-valuetext', 'Route unavailable. Add valid route geometry to use the trigger preview.');
+    return;
+  }
   try {
     const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
     const metrics = originalRouteMetrics(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
     if (metrics.coordinates.length < 2 || metrics.distance <= 0) throw new Error('Route unavailable');
-    const progress = metrics.distance * (Number(slider.value) / 1000);
-    const coordinate = originalCoordinateAtProgress(metrics, progress);
+    const canonicalDistance = Math.max(1, Number(manifest.route && manifest.route.distance_m) || metrics.distance);
+    const progress = canonicalDistance * (Number(slider.value) / 1000);
+    const coordinate = originalCoordinateAtProgress(metrics, metrics.distance * (progress / canonicalDistance));
     const [x, y] = originalSvgCoordinate(svg, coordinate);
     marker.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
     const stops = (Array.isArray(manifest.stops) ? manifest.stops : [])
@@ -2983,14 +3211,185 @@ function updateOriginalSimulation() {
     let state = 'ROUTE COMPLETE';
     if (nextIndex >= 0) {
       const stop = stops[nextIndex];
-      const start = Number(stop.trigger && stop.trigger.route_progress_start_m) || 0;
-      state = progress >= start
-        ? 'STORY ' + (Number(stop.sequence) || nextIndex + 1) + ' ARMED'
-        : 'NEXT ' + (Number(stop.sequence) || nextIndex + 1) + ' IN ' + formatDistance(start - progress);
+      const window = originalTriggerWindowAtSpeed(stop.trigger, simulatorSpeed);
+      state = progress >= window.liveStart
+        ? 'STORY ' + (Number(stop.sequence) || nextIndex + 1) + ' WINDOW OPEN'
+        : 'NEXT ' + (Number(stop.sequence) || nextIndex + 1) + ' IN ' + formatDistance(window.liveStart - progress);
     }
     output.textContent = formatDistance(progress) + ' / ' + state;
+    renderOriginalSimulationDiagnostic(manifest, metrics, progress, nextIndex, coordinate);
+    document.querySelectorAll('[data-original-cue-window]').forEach(group => {
+      const active = Number(group.getAttribute('data-original-cue-window')) === nextIndex;
+      group.querySelectorAll('.originals-cue-window,.originals-cue-edge').forEach(node => node.classList.toggle('active', active));
+    });
+    updateOriginalSimulationAriaValue(slider, progress, canonicalDistance);
   } catch(e) {
     output.textContent = 'ROUTE UNAVAILABLE';
+    const status = document.getElementById('originals-simulator-status');
+    const reason = document.getElementById('originals-simulator-reason');
+    const gates = document.getElementById('originals-simulator-gates');
+    if (status) status.textContent = 'TRIGGER PREVIEW UNAVAILABLE';
+    if (reason) reason.textContent = e.message || 'Fix the route and trigger fields.';
+    if (gates) gates.innerHTML = '';
+    slider.setAttribute('aria-valuetext', `Route unavailable. ${e.message || 'Fix the route and trigger fields.'}`);
+  }
+}
+
+function originalRouteBearingAtProgress(metrics, geometricProgress) {
+  const coordinates = metrics.coordinates || [];
+  if (coordinates.length < 2) return null;
+  const progress = Math.max(0, Math.min(Number(geometricProgress) || 0, metrics.distance));
+  let segment = 0;
+  while (segment < metrics.cumulative.length - 2 && metrics.cumulative[segment + 1] < progress) segment += 1;
+  const start = coordinates[segment], end = coordinates[segment + 1];
+  const latitude = ((start[1] + end[1]) / 2) * Math.PI / 180;
+  const east = (end[0] - start[0]) * Math.cos(latitude);
+  const north = end[1] - start[1];
+  if (Math.abs(east) + Math.abs(north) < 1e-12) return null;
+  return (Math.atan2(east, north) * 180 / Math.PI + 360) % 360;
+}
+
+function originalBearingDifference(a, b) {
+  return Math.abs(((Number(a) - Number(b) + 540) % 360) - 180);
+}
+
+function renderOriginalSimulationDiagnostic(manifest, metrics, progress, nextIndex, coordinate) {
+  const status = document.getElementById('originals-simulator-status');
+  const reason = document.getElementById('originals-simulator-reason');
+  const gates = document.getElementById('originals-simulator-gates');
+  if (!status || !reason || !gates) return;
+  const canonicalDistance = Math.max(1, Number(manifest.route && manifest.route.distance_m) || metrics.distance);
+  const stops = (Array.isArray(manifest.stops) ? manifest.stops : [])
+    .slice().sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+  if (nextIndex < 0 || !stops[nextIndex]) {
+    status.textContent = 'ROUTE COMPLETE';
+    reason.textContent = 'Every authored cue window is behind this simulated position.';
+    gates.innerHTML = '<span class="originals-simulator-gate">NO STORY BACKLOG</span>';
+    return;
+  }
+  const stop = stops[nextIndex];
+  const trigger = stop.trigger || {};
+  const simulatorSpeed = originalSimulationSpeedMps();
+  const window = originalTriggerWindowAtSpeed(trigger, simulatorSpeed);
+  const sequence = Number(stop.sequence) || nextIndex + 1;
+  const authoredStart = window.authoredStart;
+  const liveStart = window.liveStart;
+  const end = window.end;
+  const radius = Math.max(0, Number(trigger.enter_radius_m) || 0);
+  const stopCoordinate = stop.coordinates ? [Number(stop.coordinates.lng), Number(stop.coordinates.lat)] : null;
+  const distance = coordinate && stopCoordinate && stopCoordinate.every(Number.isFinite)
+    ? originalHaversineMeters(coordinate, stopCoordinate)
+    : Infinity;
+  const geometryProgress = metrics.distance * (progress / canonicalDistance);
+  const bearing = originalRouteBearingAtProgress(metrics, geometryProgress);
+  const requiredBearing = trigger.approach_bearing_deg == null ? null : Number(trigger.approach_bearing_deg);
+  const authoredTolerance = Number(trigger.bearing_tolerance_deg);
+  const tolerance = trigger.bearing_tolerance_deg == null || !Number.isFinite(authoredTolerance)
+    ? 45
+    : Math.max(0, authoredTolerance);
+  const bearingPasses = requiredBearing == null || (bearing != null && originalBearingDifference(bearing, requiredBearing) <= tolerance);
+  const withinWindow = progress >= liveStart && progress <= end;
+  const withinRadius = distance <= radius;
+  const speedLabel = originalSimulationSpeedLabel(simulatorSpeed);
+
+  if (!withinWindow) {
+    status.textContent = `STORY ${sequence} · WAITING FOR LIVE WINDOW`;
+    reason.textContent = `${stop.title || 'Untitled story'} becomes eligible in ${formatDistance(Math.max(0, liveStart - progress))} at ${speedLabel}. Its authored window starts at ${formatDistance(authoredStart)}.`;
+  } else if (!withinRadius) {
+    status.textContent = `STORY ${sequence} · BLOCKED OUTSIDE RADIUS`;
+    reason.textContent = `At ${speedLabel}, this live-window route point is ${formatDistance(distance)} from the story coordinate; the cue requires ${formatDistance(radius)} or less.`;
+  } else if (!bearingPasses) {
+    status.textContent = `STORY ${sequence} · BLOCKED BY DIRECTION`;
+    reason.textContent = `The route approaches near ${Math.round(bearing)}°, outside the authored ${Math.round(requiredBearing)}° ± ${Math.round(tolerance)}° gate.`;
+  } else {
+    status.textContent = `STORY ${sequence} · READY TO ARM · ${speedLabel}`;
+    reason.textContent = 'The live speed-adjusted window, radius, and direction gates pass here. The app then requires two GPS fixes of 100 m accuracy or better spanning at least 3 seconds before narration starts.';
+  }
+
+  const gateLabels = [
+    `AUTHORED ${formatDistance(authoredStart)}–${formatDistance(end)}`,
+    `LIVE @ ${speedLabel} ${formatDistance(liveStart)}–${formatDistance(end)}`,
+    `RADIUS ≤ ${formatDistance(radius)}`,
+    `GPS ≤ 100 M`,
+    `2 FIXES / ≥ 3 SEC`,
+    `EXIT ≥ ${formatDistance(Math.max(Number(trigger.exit_radius_m) || 0, radius * 1.5, radius + 50))}`,
+  ];
+  if (Number.isFinite(distance)) gateLabels.push(`HERE ${formatDistance(distance)} FROM STOP`);
+  if (window.leadTime > 0) gateLabels.push(`LEAD ${Math.round(window.leadTime)} SEC = ${formatDistance(window.leadDistance)}`);
+  if (requiredBearing != null) gateLabels.push(`BEARING ${Math.round(requiredBearing)}° ± ${Math.round(tolerance)}°`);
+  gates.innerHTML = gateLabels.map(label => `<span class="originals-simulator-gate">${esc(label)}</span>`).join('');
+}
+
+function jumpOriginalSimulationToSelected() {
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) return;
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+    if (!stop) return toast('Select a story first', 'err');
+    const metrics = originalRouteMetrics(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
+    if (metrics.coordinates.length < 2 || metrics.distance <= 0) throw new Error('Route unavailable');
+    const routeDistance = Math.max(1, Number(manifest.route && manifest.route.distance_m) || metrics.distance);
+    const target = originalClosestRouteTargetInWindow(
+      metrics,
+      routeDistance,
+      stop,
+      originalSimulationSpeedMps(),
+    );
+    if (!target) throw new Error('Add a valid story coordinate and route window first');
+    document.getElementById('originals-simulator').value = String(Math.max(0, Math.min(1000, (target.progress / routeDistance) * 1000)));
+    updateOriginalSimulation();
+    announceOriginalSimulation();
+  } catch(e) {
+    toast('Trigger preview: ' + e.message, 'err');
+  }
+}
+
+function stepOriginalSimulationCue(direction) {
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) return;
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const stops = Array.isArray(manifest.stops) ? manifest.stops : [];
+    if (!stops.length) return toast('Add a story first', 'err');
+    selectedOriginalStopIndex = Math.max(0, Math.min(stops.length - 1, selectedOriginalStopIndex + Number(direction || 0)));
+    renderOriginalPreview(manifest);
+    jumpOriginalSimulationToSelected();
+  } catch(e) {
+    toast('Trigger preview: ' + e.message, 'err');
+  }
+}
+
+function handleOriginalRouteKeydown(event) {
+  if (!event || !['Enter', ' '].includes(event.key)) return;
+  event.preventDefault();
+  placeOriginalStopAtSimulationProgress();
+}
+
+function placeOriginalStopAtSimulationProgress() {
+  if (originalRouteDrawing) return toast('Finish line editing before placing a story', 'err');
+  if (document.getElementById('originals-stop-card').style.display === 'none') {
+    return toast('Add or select a story first', 'err');
+  }
+  try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const metrics = originalRouteMetrics(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
+    if (metrics.coordinates.length < 2 || metrics.distance <= 0) throw new Error('Import route geometry first');
+    const routeDistance = Math.max(1, Number(manifest.route && manifest.route.distance_m) || metrics.distance);
+    const slider = document.getElementById('originals-simulator');
+    const progress = routeDistance * (Number(slider.value) / 1000);
+    const coordinate = originalCoordinateAtProgress(metrics, metrics.distance * (progress / routeDistance));
+    if (!coordinate) throw new Error('The simulated position could not be located on the route');
+    const halfWindow = Math.max(250, (Number(document.getElementById('original-stop-enter').value) || 250) * 2);
+    document.getElementById('original-stop-lng').value = coordinate[0].toFixed(6);
+    document.getElementById('original-stop-lat').value = coordinate[1].toFixed(6);
+    document.getElementById('original-stop-progress-start').value = Math.round(Math.max(0, progress - halfWindow));
+    document.getElementById('original-stop-progress-end').value = Math.round(Math.min(routeDistance, progress + halfWindow));
+    originalStopEditorDirty = true;
+    if (!applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    updateOriginalSimulation();
+    announceOriginalSimulation();
+    toast('Story placed at ' + formatDistance(progress), 'originals-ok');
+  } catch(e) {
+    toast('Route placement: ' + e.message, 'err');
   }
 }
 
@@ -3041,7 +3440,7 @@ function placeOriginalStopFromRoute(event) {
       document.getElementById('originals-manifest-json').value = prettyJson(manifest);
       markOriginalContentDirty();
       renderOriginalPreview(manifest);
-      toast('Route point added / ' + coordinates.length + ' points / ' + formatDistance(updated.distance), 'ok');
+      toast('Route point added / ' + coordinates.length + ' points / ' + formatDistance(updated.distance), 'originals-ok');
       return;
     }
     const halfWindow = Math.max(250, (Number(document.getElementById('original-stop-enter').value) || 250) * 2);
@@ -3053,7 +3452,7 @@ function placeOriginalStopFromRoute(event) {
     if (!applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
     document.getElementById('originals-simulator').value = String(Math.round((projected.progress / metrics.distance) * 1000));
     updateOriginalSimulation();
-    toast('Story placed at ' + formatDistance(projected.progress), 'ok');
+    toast('Story placed at ' + formatDistance(projected.progress), 'originals-ok');
   } catch(e) {
     toast('Route placement: ' + e.message, 'err');
   }
@@ -3067,11 +3466,11 @@ function renderOriginalStops(stops) {
     return;
   }
   selectedOriginalStopIndex = Math.min(selectedOriginalStopIndex, stops.length - 1);
-  list.innerHTML = stops.map((stop, index) => `<div class="originals-stop${index === selectedOriginalStopIndex ? ' active' : ''}" onclick="selectOriginalStop(${index})">
-    <div class="originals-stop-number">${Number(stop.sequence) || index + 1}</div>
-    <div><div class="originals-stop-title">${esc(stop.title || `Story ${index + 1}`)}</div><div class="originals-stop-meta">${formatDuration(stop.audio_duration_s)} · ${Math.round(Number(stop.trigger && stop.trigger.enter_radius_m) || 0)} M</div></div>
+  list.innerHTML = stops.map((stop, index) => `<button type="button" class="originals-stop${index === selectedOriginalStopIndex ? ' active' : ''}" aria-current="${index === selectedOriginalStopIndex ? 'true' : 'false'}" onclick="selectOriginalStop(${index})">
+    <span class="originals-stop-number">${Number(stop.sequence) || index + 1}</span>
+    <span><span class="originals-stop-title">${esc(stop.title || `Story ${index + 1}`)}</span><span class="originals-stop-meta">${formatDuration(stop.audio_duration_s)} · ${Math.round(Number(stop.trigger && stop.trigger.enter_radius_m) || 0)} M</span></span>
     <span style="color:var(--orange);font-size:14px;">›</span>
-  </div>`).join('');
+  </button>`).join('');
   fillOriginalStopEditor(stops[selectedOriginalStopIndex]);
 }
 
@@ -3131,7 +3530,7 @@ function addOriginalStop() {
     originalStopEditorDirty = false;
     markOriginalContentDirty();
     renderOriginalPreview(manifest);
-    toast('Story added; click the route to place it', 'ok');
+    toast('Story added; click the route to place it', 'originals-ok');
   } catch(e) {
     toast('Add story: ' + e.message, 'err');
   }
@@ -3175,7 +3574,7 @@ function removeOriginalStop() {
     originalStopEditorDirty = false;
     markOriginalContentDirty();
     renderOriginalPreview(manifest);
-    toast('Story removed', 'ok');
+    toast('Story removed', 'originals-ok');
   } catch(e) {
     toast('Remove story: ' + e.message, 'err');
   }
@@ -3305,7 +3704,7 @@ function applyOriginalStopEdits(showToast = true) {
     document.getElementById('originals-manifest-json').value = prettyJson(manifest);
     markOriginalContentDirty();
     renderOriginalPreview(manifest);
-    if (showToast) toast('Story applied', 'ok');
+    if (showToast) toast('Story applied', 'originals-ok');
     return true;
   } catch(e) {
     if (showToast) toast('Story: ' + e.message, 'err');
@@ -3380,7 +3779,7 @@ async function generateOriginalNarration() {
     });
     attachVerifiedOriginalAsset(manifest, record);
     await previewVerifiedOriginalNarration(record);
-    toast(`${originalNarrationProviderName(provider)} narration attached; save the draft to keep it`, 'ok');
+    toast(`${originalNarrationProviderName(provider)} narration attached; save the draft to keep it`, 'originals-ok');
   } catch(e) {
     status.textContent = 'FAILED';
     toast('Narration: ' + e.message, 'err');
@@ -3435,7 +3834,7 @@ async function uploadOriginalNarrationFile(event) {
     });
     attachVerifiedOriginalAsset(manifest, record);
     await previewVerifiedOriginalNarration(record);
-    toast('Audio verified and attached; save the draft to keep the manifest change', 'ok');
+      toast('Audio verified and attached; save the draft to keep the manifest change', 'originals-ok');
   } catch(e) {
     status.textContent = 'FAILED';
     toast('Audio upload: ' + e.message, 'err');
@@ -3469,7 +3868,7 @@ async function uploadOriginalArtworkFile(event) {
       })
     });
     attachVerifiedOriginalAsset(manifest, record);
-    toast('Artwork verified and attached; save the draft to keep the manifest change', 'ok');
+      toast('Artwork verified and attached; save the draft to keep the manifest change', 'originals-ok');
   } catch(e) {
     status.textContent = 'FAILED';
     toast('Artwork upload: ' + e.message, 'err');
@@ -3498,7 +3897,7 @@ async function importOriginalJson(event) {
     if (template) document.getElementById('originals-template-json').value = prettyJson(template);
     if (manifest) document.getElementById('originals-manifest-json').value = prettyJson(manifest);
     renderOriginalPreview();
-    toast('JSON imported', 'ok');
+    toast('JSON imported', 'originals-ok');
   } catch(e) {
     toast('Import: ' + e.message, 'err');
   }
@@ -3511,9 +3910,10 @@ function esc(s) {
 let toastTimer = null;
 function toast(msg, type='ok') {
   const el = document.getElementById('toast');
-  el.textContent = (type === 'ok' ? '✓ ' : '✗ ') + msg;
+  const success = type === 'ok' || type === 'originals-ok';
+  el.textContent = (success ? '✓ ' : '✗ ') + msg;
   const originalsActive = document.getElementById('page-originals')?.classList.contains('active');
-  el.className = `show ${type === 'ok' && originalsActive ? 'originals-ok' : type}`;
+  el.className = `show ${success && originalsActive ? 'originals-ok' : type}`;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.className = ''; }, 3000);
 }

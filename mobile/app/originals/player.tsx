@@ -1,31 +1,117 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Alert, Modal, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { usePreventRemove } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useLocalSearchParams, useRouter } from 'expo-router';
+import { useLocalSearchParams, useNavigation, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
-import { useOriginalsRuntime } from '@/lib/originals';
+import {
+  originalSimulationSamplesForNextCue,
+  useOriginalsRuntime,
+  type OriginalStopV1,
+  type OriginalTriggerDecisionDiagnostic,
+} from '@/lib/originals';
 import { useStore } from '@/lib/store';
 import { getOriginalDetail, manifestStories, originalSessionToUi } from '@/components/originals/originalsUiService';
 import OriginalRouteMap from '@/components/originals/OriginalRouteMap';
-import type { OriginalUiDetail, OriginalUiSession, OriginalUiStory } from '@/components/originals/types';
+import type { OriginalUiDetail, OriginalUiSession } from '@/components/originals/types';
+
+type SimulationCueResult = {
+  stopId: string;
+  sequence: number;
+  title: string;
+  outcome: 'passed' | 'failed';
+  code: string;
+  message: string;
+  speedMps: number;
+  projectedProgressM: number | null;
+  authoredStartM: number;
+  effectiveStartM: number;
+  endM: number;
+  distanceToStopM: number | null;
+  enterRadiusM: number;
+  actualBearingDeg: number | null;
+  requiredBearingDeg: number | null;
+  bearingToleranceDeg: number | null;
+};
+
+const SIMULATION_CUE_FAILURE_CODES = new Set([
+  'before_window',
+  'after_window',
+  'outside_radius',
+  'missing_bearing',
+  'wrong_bearing',
+]);
 
 export default function OriginalPlayerScreen() {
   const C = useTheme();
   const router = useRouter();
+  const navigation = useNavigation();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ id?: string | string[]; version?: string | string[] }>();
+  const params = useLocalSearchParams<{ id?: string | string[]; version?: string | string[]; simulate?: string | string[] }>();
   const id = Array.isArray(params.id) ? params.id[0] : params.id || '';
   const versionValue = Array.isArray(params.version) ? params.version[0] : params.version;
   const requestedVersion = Number.isFinite(Number(versionValue)) ? Number(versionValue) : undefined;
+  const simulateValue = Array.isArray(params.simulate) ? params.simulate[0] : params.simulate;
   const originalsRuntime = useOriginalsRuntime();
+  const runtimeRef = useRef(originalsRuntime);
+  runtimeRef.current = originalsRuntime;
+  const ownsSimulationRouteRef = useRef(simulateValue === '1');
+  const exitPromptVisibleRef = useRef(false);
+  const [navigationAllowed, setNavigationAllowed] = useState(false);
   const accountId = useStore(state => state.user?.id ?? null);
   const ownerScope = accountId == null ? 'guest' : `account:${String(accountId)}`;
   const [detail, setDetail] = useState<OriginalUiDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [transcriptVisible, setTranscriptVisible] = useState(true);
   const [storiesVisible, setStoriesVisible] = useState(false);
+  const [simulationBusy, setSimulationBusy] = useState(false);
+  const [simulationSpeedMps, setSimulationSpeedMps] = useState(12);
+  const [simulationResults, setSimulationResults] = useState<SimulationCueResult[]>([]);
+
+  useEffect(() => () => {
+    if (ownsSimulationRouteRef.current && runtimeRef.current.simulation) {
+      void runtimeRef.current.stopTour().catch(() => {});
+    }
+  }, []);
+
+  useEffect(() => {
+    const evaluation = originalsRuntime.lastTriggerEvaluation;
+    const decision = evaluation?.decision;
+    const manifest = originalsRuntime.manifest;
+    if (!originalsRuntime.simulation || !decision?.stop_id || !manifest) return;
+    const passed = decision.code === 'triggered' || decision.code === 'queued';
+    const failed = SIMULATION_CUE_FAILURE_CODES.has(decision.code);
+    if (!passed && !failed) return;
+    const stop = manifest.stops.find(item => item.id === decision.stop_id);
+    if (!stop) return;
+    const result: SimulationCueResult = {
+      stopId: stop.id,
+      sequence: stop.sequence,
+      title: stop.title,
+      outcome: passed ? 'passed' : 'failed',
+      code: decision.code,
+      message: decision.message,
+      speedMps: simulationSpeedMps,
+      projectedProgressM: decision.route.projected_progress_m,
+      authoredStartM: decision.window?.authored_start_m ?? stop.trigger.route_progress_start_m,
+      effectiveStartM: decision.window?.effective_start_m ?? Math.max(
+        0,
+        stop.trigger.route_progress_start_m - simulationSpeedMps * Math.max(0, stop.trigger.lead_time_s || 0),
+      ),
+      endM: decision.window?.end_m ?? stop.trigger.route_progress_end_m,
+      distanceToStopM: decision.radius?.distance_to_stop_m ?? null,
+      enterRadiusM: decision.radius?.enter_radius_m ?? stop.trigger.enter_radius_m,
+      actualBearingDeg: decision.bearing?.actual_deg ?? null,
+      requiredBearingDeg: decision.bearing?.required_deg ?? stop.trigger.approach_bearing_deg ?? null,
+      bearingToleranceDeg: decision.bearing?.tolerance_deg ?? stop.trigger.bearing_tolerance_deg ?? null,
+    };
+    setSimulationResults(current => [
+      ...current.filter(item => item.stopId !== result.stopId),
+      result,
+    ].sort((a, b) => a.sequence - b.sequence));
+  }, [originalsRuntime.lastTriggerEvaluation, originalsRuntime.manifest, originalsRuntime.simulation, simulationSpeedMps]);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,19 +146,133 @@ export default function OriginalPlayerScreen() {
     else await originalsRuntime.pauseTour();
   }, [originalsRuntime, session]);
 
+  useEffect(() => {
+    if (originalsRuntime.simulation) setTranscriptVisible(false);
+  }, [originalsRuntime.simulation]);
+
+  const finishSimulationExit = useCallback((navigateAfterStop?: () => void) => {
+    setNavigationAllowed(true);
+    ownsSimulationRouteRef.current = false;
+    void originalsRuntime.stopTour().catch(() => {}).finally(() => {
+      requestAnimationFrame(() => {
+        if (navigateAfterStop) navigateAfterStop();
+        else router.replace('/originals' as any);
+      });
+    });
+  }, [originalsRuntime, router]);
+
+  const closePlayer = useCallback(() => {
+    if (!originalsRuntime.simulation) {
+      router.replace('/(tabs)/map' as any);
+      return;
+    }
+    finishSimulationExit();
+  }, [finishSimulationExit, originalsRuntime.simulation, router]);
+
+  const requestClosePlayer = useCallback((navigateAfterStop?: () => void) => {
+    if (!originalsRuntime.simulation) {
+      if (navigateAfterStop) navigateAfterStop();
+      else closePlayer();
+      return;
+    }
+    if (exitPromptVisibleRef.current) return;
+    exitPromptVisibleRef.current = true;
+    Alert.alert(
+      'End trigger test?',
+      'The per-story test report is temporary. Synthetic progress will be discarded and your saved drive stays unchanged.',
+      [
+        {
+          text: 'Keep testing',
+          style: 'cancel',
+          onPress: () => { exitPromptVisibleRef.current = false; },
+        },
+        {
+          text: 'End test',
+          style: 'destructive',
+          onPress: () => {
+            exitPromptVisibleRef.current = false;
+            finishSimulationExit(navigateAfterStop);
+          },
+        },
+      ],
+      {
+        cancelable: true,
+        onDismiss: () => { exitPromptVisibleRef.current = false; },
+      },
+    );
+  }, [closePlayer, finishSimulationExit, originalsRuntime.simulation]);
+
+  usePreventRemove(simulateValue === '1' && !navigationAllowed, ({ data }) => {
+    requestClosePlayer(() => navigation.dispatch(data.action));
+  });
+
+  const runSimulation = useCallback(async (scenario: 'trigger' | 'poor_accuracy' | 'off_route') => {
+    const manifest = originalsRuntime.manifest;
+    const activeSession = originalsRuntime.session;
+    if (!originalsRuntime.simulation || !manifest || !activeSession || simulationBusy) return;
+    setSimulationBusy(true);
+    try {
+      const plan = originalSimulationSamplesForNextCue(manifest, activeSession, {
+        start_timestamp_ms: Math.max(Date.now(), activeSession.updated_at_ms + 1_000),
+        speed_mps: simulationSpeedMps,
+      });
+      if (!plan) {
+        Alert.alert('Trigger test complete', 'There are no remaining cue windows in this simulation.');
+        return;
+      }
+      if (scenario === 'poor_accuracy') {
+        await originalsRuntime.submitLocationSample({ ...plan.samples[0], accuracy_m: 150 });
+      } else if (scenario === 'off_route') {
+        await originalsRuntime.submitLocationSample({
+          ...plan.samples[0],
+          lat: plan.samples[0].lat + 0.03,
+          lng: plan.samples[0].lng + 0.03,
+        });
+      } else {
+        for (const sample of plan.samples) await originalsRuntime.submitLocationSample(sample);
+      }
+    } catch (error: any) {
+      Alert.alert('Trigger test failed', error?.message || 'The synthetic GPS sample could not be processed.');
+    } finally {
+      setSimulationBusy(false);
+    }
+  }, [originalsRuntime, simulationBusy, simulationSpeedMps]);
+
+  const advanceSimulationCue = useCallback(async () => {
+    if (simulationBusy) return;
+    setSimulationBusy(true);
+    try {
+      await originalsRuntime.skipSimulationCue();
+    } catch (error: any) {
+      Alert.alert('Cue could not be advanced', error?.message || 'Finish the playing story and try again.');
+    } finally {
+      setSimulationBusy(false);
+    }
+  }, [originalsRuntime, simulationBusy]);
+
   const currentStory = session?.currentStory || session?.nextStory || playerDetail?.stories[0];
   const nextStop = useMemo(() => {
     if (!originalsRuntime.manifest || originalsRuntime.manifest.pack_id !== id) return null;
     const nextId = session?.nextStory?.id;
     return nextId ? originalsRuntime.manifest.stops.find(stop => stop.id === nextId) ?? null : null;
   }, [id, originalsRuntime.manifest, session?.nextStory?.id]);
+  const diagnosticStop = useMemo(() => {
+    const stopId = originalsRuntime.lastTriggerEvaluation?.decision.stop_id;
+    if (!stopId || !originalsRuntime.manifest) return null;
+    return originalsRuntime.manifest.stops.find(stop => stop.id === stopId) ?? null;
+  }, [originalsRuntime.lastTriggerEvaluation?.decision.stop_id, originalsRuntime.manifest]);
+  const canAdvanceFailedCue = Boolean(
+    !session?.currentStory
+    && nextStop
+    && originalsRuntime.lastTriggerEvaluation?.decision.stop_id === nextStop.id
+    && SIMULATION_CUE_FAILURE_CODES.has(originalsRuntime.lastTriggerEvaluation.decision.code)
+  );
+  const changeSimulationSpeed = useCallback((value: number) => {
+    originalsRuntime.clearSimulationDiagnostic();
+    setSimulationSpeedMps(value);
+  }, [originalsRuntime]);
   const isPaused = Boolean(session?.userPaused || session?.status === 'paused');
   const status = session?.status || 'ready';
-  const completedStories = useMemo(() => {
-    if (!playerDetail) return [];
-    return playerDetail.stories.filter(story => story.replayable);
-  }, [playerDetail]);
-
   const needsRedownload = Boolean(
     originalsRuntime.session?.owner_scope === ownerScope
     && originalsRuntime.session?.pack_id === id
@@ -103,8 +303,8 @@ export default function OriginalPlayerScreen() {
   if (status === 'completed') {
     return (
       <>
-        <CompletionState detail={playerDetail} session={session} onStories={() => setStoriesVisible(true)} />
-        <StoriesModal visible={storiesVisible} detail={playerDetail} completed={completedStories} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
+        <CompletionState detail={playerDetail} session={session} onStories={() => setStoriesVisible(true)} simulation={originalsRuntime.simulation} simulationResults={simulationResults} onExit={closePlayer} />
+        <StoriesModal visible={storiesVisible} detail={playerDetail} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
       </>
     );
   }
@@ -116,8 +316,8 @@ export default function OriginalPlayerScreen() {
         <View style={styles.topBar}>
           <TouchableOpacity
             accessibilityRole="button"
-            accessibilityLabel="Minimize tour player"
-            onPress={() => router.replace('/(tabs)/map' as any)}
+            accessibilityLabel={originalsRuntime.simulation ? 'Close trigger test' : 'Minimize tour player'}
+            onPress={() => requestClosePlayer()}
             style={styles.roundButton}
           >
             <Ionicons name="chevron-down" size={22} color="#FFFFFF" />
@@ -149,14 +349,34 @@ export default function OriginalPlayerScreen() {
               <Text style={styles.offlineText}>OFFLINE READY</Text>
             </View>
             <View style={styles.gpsBadge}>
-              <View style={[styles.gpsDot, { backgroundColor: status === 'location_unavailable' ? C.red : C.silverBright }]} />
-              <Text style={styles.offlineText}>{status === 'location_unavailable' ? 'GPS PAUSED' : 'GPS ACTIVE'}</Text>
+              <View style={[styles.gpsDot, { backgroundColor: status === 'location_unavailable' && !originalsRuntime.simulation ? C.red : C.orange }]} />
+              <Text style={styles.offlineText}>{originalsRuntime.simulation ? 'SYNTHETIC GPS' : status === 'location_unavailable' ? 'GPS PAUSED' : 'GPS ACTIVE'}</Text>
             </View>
           </View>
         </View>
 
-        <View style={[styles.playerSheet, { backgroundColor: C.s1, borderColor: C.border, paddingBottom: Math.max(insets.bottom, 14) }] }>
+        <View style={[styles.playerSheet, originalsRuntime.simulation && styles.simulationSheet, { backgroundColor: C.s1, borderColor: C.border }] }>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            contentContainerStyle={[styles.playerSheetContent, { paddingBottom: Math.max(insets.bottom, 14) }]}
+          >
           <View style={[styles.handle, { backgroundColor: C.border2 }]} />
+          {originalsRuntime.simulation ? (
+            <TriggerSimulationPanel
+              decision={originalsRuntime.lastTriggerEvaluation?.decision ?? null}
+              diagnosticStop={diagnosticStop}
+              nextStop={nextStop}
+              busy={simulationBusy}
+              speedMps={simulationSpeedMps}
+              canAdvance={canAdvanceFailedCue}
+              results={simulationResults}
+              onTrigger={() => void runSimulation('trigger')}
+              onPoorAccuracy={() => void runSimulation('poor_accuracy')}
+              onOffRoute={() => void runSimulation('off_route')}
+              onAdvance={() => void advanceSimulationCue()}
+              onSpeedChange={changeSimulationSpeed}
+            />
+          ) : null}
           {status === 'off_route' || status === 'location_unavailable' ? (
             <View style={[styles.alert, { borderColor: C.orange + '55', backgroundColor: C.orange + '10' }] }>
               <Ionicons name={status === 'off_route' ? 'git-compare-outline' : 'location-outline'} size={18} color={C.orange} />
@@ -190,7 +410,7 @@ export default function OriginalPlayerScreen() {
           </View>
 
           {currentStory?.transcript && transcriptVisible ? (
-            <ScrollView style={styles.transcript} contentContainerStyle={styles.transcriptContent} showsVerticalScrollIndicator={false}>
+            <ScrollView nestedScrollEnabled style={styles.transcript} contentContainerStyle={styles.transcriptContent} showsVerticalScrollIndicator={false}>
               <Text style={[styles.transcriptText, { color: C.text2 }]}>{currentStory.transcript}</Text>
             </ScrollView>
           ) : null}
@@ -215,21 +435,177 @@ export default function OriginalPlayerScreen() {
             </TouchableOpacity>
             <TouchableOpacity
               accessibilityRole="button"
-              accessibilityLabel="End tour"
-              onPress={() => Alert.alert('End this tour?', 'Your progress is saved and can be resumed later.', [
-                { text: 'Keep touring', style: 'cancel' },
-                { text: 'End for now', onPress: () => void originalsRuntime.pauseTour().then(() => router.replace({ pathname: '/originals/[id]', params: { id, version: String(session.version) } } as any)) },
-              ])}
+              accessibilityLabel={originalsRuntime.simulation ? 'End trigger test' : 'End tour'}
+              onPress={() => originalsRuntime.simulation
+                ? requestClosePlayer()
+                : Alert.alert('End this tour?', 'Your progress is saved and can be resumed later.', [
+                  { text: 'Keep touring', style: 'cancel' },
+                  { text: 'End for now', onPress: () => void originalsRuntime.pauseTour().then(() => router.replace({ pathname: '/originals/[id]', params: { id, version: String(session.version) } } as any)) },
+                ])}
               style={[styles.secondaryButton, { borderColor: C.border }]}
             >
               <Ionicons name="flag-outline" size={16} color={C.text2} />
-              <Text style={[styles.secondaryLabel, { color: C.text2 }]}>End tour</Text>
+              <Text style={[styles.secondaryLabel, { color: C.text2 }]}>{originalsRuntime.simulation ? 'End test' : 'End tour'}</Text>
             </TouchableOpacity>
           </View>
+          </ScrollView>
         </View>
       </SafeAreaView>
 
-      <StoriesModal visible={storiesVisible} detail={playerDetail} completed={completedStories} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
+      <StoriesModal visible={storiesVisible} detail={playerDetail} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
+    </View>
+  );
+}
+
+function triggerDecisionTitle(decision: OriginalTriggerDecisionDiagnostic | null) {
+  if (!decision) return 'READY FOR SYNTHETIC FIX';
+  const titles: Partial<Record<OriginalTriggerDecisionDiagnostic['code'], string>> = {
+    poor_accuracy: 'BLOCKED · GPS ACCURACY',
+    route_unavailable: 'BLOCKED · ROUTE UNAVAILABLE',
+    off_route: 'BLOCKED · OFF ROUTE',
+    queue_full: 'WAITING · STORY QUEUE FULL',
+    before_window: 'WAITING · BEFORE CUE WINDOW',
+    after_window: 'BLOCKED · PAST CUE WINDOW',
+    outside_radius: 'BLOCKED · OUTSIDE RADIUS',
+    missing_bearing: 'BLOCKED · HEADING REQUIRED',
+    wrong_bearing: 'BLOCKED · WRONG DIRECTION',
+    armed: 'ARMED · FIX 1 RECEIVED',
+    waiting_for_fixes: 'ARMED · WAITING FOR FIX 2',
+    waiting_for_dwell: 'ARMED · WAITING FOR 3 SECONDS',
+    triggered: 'PASSED · STORY TRIGGERED',
+    queued: 'PASSED · STORY QUEUED',
+    missed: 'EARLIER STORY MARKED MISSED',
+    complete: 'SIMULATED ROUTE COMPLETE',
+    no_remaining_stops: 'NO REMAINING STORIES',
+  };
+  return titles[decision.code] || decision.code.replace(/_/g, ' ').toUpperCase();
+}
+
+function compactTriggerDistance(value: number) {
+  if (!Number.isFinite(value)) return '—';
+  return value >= 1_000 ? `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)} KM` : `${Math.round(value)} M`;
+}
+
+function simulationResultConditions(result: SimulationCueResult) {
+  const conditions = [
+    `${Math.round(result.speedMps * 2.23694)} MPH`,
+    result.projectedProgressM == null ? null : `FIX ${compactTriggerDistance(result.projectedProgressM)}`,
+    `LIVE ${compactTriggerDistance(result.effectiveStartM)}–${compactTriggerDistance(result.endM)}`,
+    result.distanceToStopM == null
+      ? `RADIUS ≤ ${Math.round(result.enterRadiusM)} M`
+      : `${Math.round(result.distanceToStopM)} / ${Math.round(result.enterRadiusM)} M RADIUS`,
+    result.requiredBearingDeg == null
+      ? 'NO BEARING GATE'
+      : result.actualBearingDeg == null
+        ? `HEADING REQUIRED · ${Math.round(result.requiredBearingDeg)}° ± ${Math.round(result.bearingToleranceDeg ?? 45)}°`
+        : `HEADING ${Math.round(result.actualBearingDeg)}° / ${Math.round(result.requiredBearingDeg)}° ± ${Math.round(result.bearingToleranceDeg ?? 45)}°`,
+  ];
+  return conditions.filter(Boolean).join(' · ');
+}
+
+function TriggerSimulationPanel({
+  decision,
+  diagnosticStop,
+  nextStop,
+  busy,
+  speedMps,
+  canAdvance,
+  results,
+  onTrigger,
+  onPoorAccuracy,
+  onOffRoute,
+  onAdvance,
+  onSpeedChange,
+}: {
+  decision: OriginalTriggerDecisionDiagnostic | null;
+  diagnosticStop: OriginalStopV1 | null;
+  nextStop: OriginalStopV1 | null;
+  busy: boolean;
+  speedMps: number;
+  canAdvance: boolean;
+  results: SimulationCueResult[];
+  onTrigger: () => void;
+  onPoorAccuracy: () => void;
+  onOffRoute: () => void;
+  onAdvance: () => void;
+  onSpeedChange: (value: number) => void;
+}) {
+  const C = useTheme();
+  const displayStop = diagnosticStop ?? nextStop;
+  const trigger = displayStop?.trigger;
+  const window = trigger ? {
+    authoredStart: decision?.window?.authored_start_m ?? trigger.route_progress_start_m,
+    effectiveStart: decision?.window?.effective_start_m ?? Math.max(
+      0,
+      trigger.route_progress_start_m - speedMps * Math.max(0, trigger.lead_time_s || 0),
+    ),
+    end: decision?.window?.end_m ?? trigger.route_progress_end_m,
+  } : null;
+  const exitRadius = trigger
+    ? Math.max(trigger.exit_radius_m, trigger.enter_radius_m * 1.5, trigger.enter_radius_m + 50)
+    : null;
+  const speedMph = Math.round(speedMps * 2.23694);
+  const passedCount = results.filter(item => item.outcome === 'passed').length;
+  const failedCount = results.filter(item => item.outcome === 'failed').length;
+  const showingPreviousResult = Boolean(diagnosticStop && nextStop && diagnosticStop.id !== nextStop.id);
+  return (
+    <View style={[styles.simulationPanel, { borderColor: C.orange + '55', backgroundColor: C.s2 }] }>
+      <View style={styles.simulationHeading}>
+        <View style={[styles.simulationIcon, { backgroundColor: C.orange + '18' }] }>
+          <Ionicons name="speedometer-outline" size={17} color={C.orange} />
+        </View>
+        <View style={styles.simulationHeadingCopy}>
+          <Text style={[styles.simulationKicker, { color: C.orange }]}>TRIGGER TEST · NO DRIVING</Text>
+          <Text style={[styles.simulationTitle, { color: C.text }]}>{triggerDecisionTitle(decision)}</Text>
+        </View>
+      </View>
+      <Text accessibilityLiveRegion="polite" style={[styles.simulationReason, { color: C.text2 }]}>
+        {decision?.message || (nextStop ? `Next: ${nextStop.sequence}. ${nextStop.title}` : 'Every story cue has been exercised.')}
+      </Text>
+      {showingPreviousResult ? (
+        <Text style={[styles.simulationNext, { color: C.orange }]}>NEXT · {nextStop!.sequence}. {nextStop!.title}</Text>
+      ) : null}
+      <Text style={[styles.simulationResultSummary, { color: C.text3 }]}>{passedCount} PASSED · {failedCount} BLOCKED · {results.length} REVIEWED</Text>
+      <View style={[styles.simulationSpeed, { borderColor: C.border }] }>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Lower synthetic test speed" disabled={busy || speedMps <= 0} onPress={() => onSpeedChange(Math.max(0, speedMps - 4))} style={styles.simulationSpeedButton}>
+          <Ionicons name="remove" size={18} color={speedMps <= 0 ? C.text3 : C.text2} />
+        </TouchableOpacity>
+        <View style={styles.simulationSpeedCopy}>
+          <Text style={[styles.simulationSpeedLabel, { color: C.text3 }]}>SYNTHETIC TEST SPEED</Text>
+          <Text style={[styles.simulationSpeedValue, { color: C.text }]}>{speedMph} MPH · {speedMps.toFixed(0)} M/S</Text>
+        </View>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Raise synthetic test speed" disabled={busy || speedMps >= 40} onPress={() => onSpeedChange(Math.min(40, speedMps + 4))} style={styles.simulationSpeedButton}>
+          <Ionicons name="add" size={18} color={speedMps >= 40 ? C.text3 : C.text2} />
+        </TouchableOpacity>
+      </View>
+      {trigger && window ? (
+        <View style={styles.simulationGates}>
+          <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>LIVE WINDOW {compactTriggerDistance(window.effectiveStart)}–{compactTriggerDistance(window.end)}</Text>
+          {window.effectiveStart !== window.authoredStart ? <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>AUTHORED START {compactTriggerDistance(window.authoredStart)} · LEAD {Math.max(0, trigger.lead_time_s || 0).toFixed(0)} SEC</Text> : null}
+          <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>RADIUS ≤ {Math.round(trigger.enter_radius_m)} M</Text>
+          <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>EXIT ≥ {Math.round(exitRadius!)} M</Text>
+          {decision?.route.projected_progress_m != null ? <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>FIX AT {compactTriggerDistance(decision.route.projected_progress_m)}</Text> : null}
+          {decision?.radius ? <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>STOP DISTANCE {Math.round(decision.radius.distance_to_stop_m)} M</Text> : null}
+          {trigger.approach_bearing_deg != null ? <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>BEARING {Math.round(trigger.approach_bearing_deg)}° ± {Math.round(trigger.bearing_tolerance_deg ?? 45)}°</Text> : null}
+          <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>GPS ≤ 100 M · 2 FIXES / 3 SEC</Text>
+        </View>
+      ) : null}
+      <View style={styles.simulationButtons}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Test poor GPS accuracy" disabled={busy || !nextStop} onPress={onPoorAccuracy} style={[styles.simulationSecondary, { borderColor: C.border }] }>
+          <Text style={[styles.simulationSecondaryText, { color: C.text2 }]}>Poor GPS</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Test an off route location" disabled={busy || !nextStop} onPress={onOffRoute} style={[styles.simulationSecondary, { borderColor: C.border }] }>
+          <Text style={[styles.simulationSecondaryText, { color: C.text2 }]}>Off route</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Send two valid fixes and trigger the next story" disabled={busy || !nextStop} onPress={onTrigger} style={[styles.simulationPrimary, { backgroundColor: C.orange, opacity: busy || !nextStop ? 0.45 : 1 }] }>
+          {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="play" size={15} color="#FFFFFF" />}
+          <Text style={styles.simulationPrimaryText}>Trigger next</Text>
+        </TouchableOpacity>
+      </View>
+      <TouchableOpacity accessibilityRole="button" accessibilityLabel="Mark this failed cue and continue to the next cue" disabled={busy || !nextStop || !canAdvance} onPress={onAdvance} style={[styles.simulationAdvance, { borderColor: C.border, opacity: busy || !nextStop || !canAdvance ? 0.45 : 1 }] }>
+        <Text style={[styles.simulationAdvanceText, { color: C.text2 }]}>{canAdvance ? 'Mark failed & continue' : 'Capture a cue-specific failure to continue'}</Text>
+        <Ionicons name="arrow-forward" size={16} color={C.text2} />
+      </TouchableOpacity>
     </View>
   );
 }
@@ -247,18 +623,15 @@ function PlayerControl({ icon, label, disabled = false, onPress }: { icon: keyof
 function StoriesModal({
   visible,
   detail,
-  completed,
   onClose,
   onReplay,
 }: {
   visible: boolean;
   detail: OriginalUiDetail;
-  completed: OriginalUiStory[];
   onClose: () => void;
   onReplay: (storyId: string) => void;
 }) {
   const C = useTheme();
-  const completedIds = new Set(completed.map(story => story.id));
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
@@ -274,26 +647,30 @@ function StoriesModal({
           </View>
           <ScrollView showsVerticalScrollIndicator={false}>
             {detail.stories.map(story => {
-              const heard = completedIds.has(story.id) || Boolean(story.completed || story.skipped);
-              const replayable = Boolean(story.replayable || heard || story.missed);
+              const heard = Boolean(story.completed);
+              const skipped = Boolean(story.skipped);
+              const missed = Boolean(story.missed);
+              const replayable = Boolean(story.replayable || heard || skipped || missed);
+              const stateLabel = missed ? 'missed' : skipped ? 'skipped' : heard ? 'heard' : 'ahead';
+              const stateIcon = heard ? 'checkmark' : missed ? 'play-skip-forward' : skipped ? 'play-forward' : 'headset-outline';
               return (
                 <TouchableOpacity
                   key={story.id}
                   accessibilityRole="button"
-                  accessibilityLabel={`${replayable ? 'Replay' : 'Unavailable'} story ${story.sequence}, ${story.title}`}
+                  accessibilityLabel={`${replayable ? 'Replay' : 'Unavailable'} ${stateLabel} story ${story.sequence}, ${story.title}`}
                   accessibilityState={{ disabled: !replayable }}
                   disabled={!replayable}
                   onPress={() => replayable && onReplay(story.id)}
                   style={[styles.storyModalRow, { borderBottomColor: C.border }]}
                 >
-                  <View style={[styles.storyModalSequence, { backgroundColor: heard ? C.orange + '18' : C.s2, borderColor: heard ? C.orange + '50' : C.border }] }>
-                    <Ionicons name={heard ? 'checkmark' : story.missed ? 'play-skip-forward' : 'headset-outline'} size={16} color={heard ? C.orange : C.text3} />
+                  <View style={[styles.storyModalSequence, { backgroundColor: replayable ? C.orange + '18' : C.s2, borderColor: replayable ? C.orange + '50' : C.border }] }>
+                    <Ionicons name={stateIcon} size={16} color={replayable ? C.orange : C.text3} />
                   </View>
                   <View style={styles.storyModalCopy}>
                     <Text style={[styles.storyModalTitle, { color: C.text }]}>{story.sequence}. {story.title}</Text>
-                    <Text style={[styles.storyModalMeta, { color: C.text3 }]}>{story.missed ? 'Missed · tap to play safely' : story.skipped ? 'Skipped · tap to replay' : heard ? 'Heard · tap to replay' : `${story.durationLabel} · ahead`}</Text>
+                    <Text style={[styles.storyModalMeta, { color: C.text3 }]}>{missed ? 'Missed · tap to play safely' : skipped ? 'Skipped · tap to replay' : heard ? 'Heard · tap to replay' : `${story.durationLabel} · ahead`}</Text>
                   </View>
-                  <Ionicons name="play-circle-outline" size={21} color={heard || story.missed ? C.orange : C.text3} />
+                  <Ionicons name="play-circle-outline" size={21} color={replayable ? C.orange : C.text3} />
                 </TouchableOpacity>
               );
             })}
@@ -304,39 +681,57 @@ function StoriesModal({
   );
 }
 
-function CompletionState({ detail, session, onStories }: { detail: OriginalUiDetail; session: OriginalUiSession; onStories: () => void }) {
+function CompletionState({ detail, session, onStories, simulation = false, simulationResults = [], onExit }: { detail: OriginalUiDetail; session: OriginalUiSession; onStories: () => void; simulation?: boolean; simulationResults?: SimulationCueResult[]; onExit?: () => void }) {
   const C = useTheme();
   const router = useRouter();
+  const passedCount = simulationResults.filter(item => item.outcome === 'passed').length;
+  const failedCount = simulationResults.filter(item => item.outcome === 'failed').length;
   return (
     <SafeAreaView style={[styles.completion, { backgroundColor: C.bg }] }>
       <LinearGradient colors={[C.s1, C.bg]} style={StyleSheet.absoluteFillObject} />
-      <View style={[styles.completionMark, { backgroundColor: C.orange + '18', borderColor: C.orange + '55' }] }>
-        <Ionicons name="checkmark" size={39} color={C.orange} />
-      </View>
-      <Text style={[styles.completionKicker, { color: C.orange }]}>ORIGINAL COMPLETE</Text>
-      <Text style={[styles.completionTitle, { color: C.text }]}>{detail.title}</Text>
-      <Text style={[styles.completionBody, { color: C.text2 }]}>Progress is saved. Replay missed stories when parked.</Text>
-      <View style={styles.completionMetrics}>
-        <View style={[styles.completionMetric, { backgroundColor: C.s1, borderColor: C.border }] }>
-          <Text style={[styles.completionValue, { color: C.text }]}>{session.playedCount}</Text>
-          <Text style={[styles.completionLabel, { color: C.text3 }]}>HEARD</Text>
+      <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.completionContent}>
+        <View style={[styles.completionMark, { backgroundColor: C.orange + '18', borderColor: C.orange + '55' }] }>
+          <Ionicons name="checkmark" size={39} color={C.orange} />
         </View>
-        <View style={[styles.completionMetric, { backgroundColor: C.s1, borderColor: C.border }] }>
-          <Text style={[styles.completionValue, { color: C.text }]}>{session.missedCount}</Text>
-          <Text style={[styles.completionLabel, { color: C.text3 }]}>MISSED</Text>
+        <Text style={[styles.completionKicker, { color: C.orange }]}>{simulation ? 'TRIGGER TEST COMPLETE' : 'ORIGINAL COMPLETE'}</Text>
+        <Text style={[styles.completionTitle, { color: C.text }]}>{detail.title}</Text>
+        <Text style={[styles.completionBody, { color: C.text2 }]}>{simulation ? 'The cue sequence is complete. Synthetic results did not change saved drive progress.' : 'Progress is saved. Replay missed stories when parked.'}</Text>
+        <View style={styles.completionMetrics}>
+          <View style={[styles.completionMetric, { backgroundColor: C.s1, borderColor: C.border }] }>
+            <Text style={[styles.completionValue, { color: C.text }]}>{simulation ? passedCount : session.playedCount}</Text>
+            <Text style={[styles.completionLabel, { color: C.text3 }]}>{simulation ? 'PASSED' : 'HEARD'}</Text>
+          </View>
+          <View style={[styles.completionMetric, { backgroundColor: C.s1, borderColor: C.border }] }>
+            <Text style={[styles.completionValue, { color: C.text }]}>{simulation ? failedCount : session.missedCount}</Text>
+            <Text style={[styles.completionLabel, { color: C.text3 }]}>{simulation ? 'BLOCKED' : 'MISSED'}</Text>
+          </View>
+          <View style={[styles.completionMetric, { backgroundColor: C.s1, borderColor: C.border }] }>
+            <Text style={[styles.completionValue, { color: C.text }]}>{simulation ? simulationResults.length : detail.distanceLabel}</Text>
+            <Text style={[styles.completionLabel, { color: C.text3 }]}>{simulation ? 'REVIEWED' : 'ROUTE'}</Text>
+          </View>
         </View>
-        <View style={[styles.completionMetric, { backgroundColor: C.s1, borderColor: C.border }] }>
-          <Text style={[styles.completionValue, { color: C.text }]}>{detail.distanceLabel}</Text>
-          <Text style={[styles.completionLabel, { color: C.text3 }]}>ROUTE</Text>
-        </View>
-      </View>
-      <TouchableOpacity accessibilityRole="button" onPress={onStories} style={[styles.completionPrimary, { backgroundColor: C.orange }] }>
-        <Ionicons name="headset-outline" size={18} color="#FFFFFF" />
-        <Text style={styles.completionPrimaryText}>Review stories</Text>
-      </TouchableOpacity>
-      <TouchableOpacity accessibilityRole="button" onPress={() => router.replace('/(tabs)/trips' as any)} style={[styles.completionSecondary, { borderColor: C.border }] }>
-        <Text style={[styles.completionSecondaryText, { color: C.text2 }]}>Back to Trips</Text>
-      </TouchableOpacity>
+        {simulation && simulationResults.length ? (
+          <View style={[styles.simulationResults, { backgroundColor: C.s1, borderColor: C.border }] }>
+            {simulationResults.map(result => (
+              <View key={result.stopId} style={[styles.simulationResultRow, { borderBottomColor: C.border }] }>
+                <Ionicons name={result.outcome === 'passed' ? 'checkmark-circle' : 'alert-circle'} size={18} color={C.orange} />
+                <View style={styles.simulationResultCopy}>
+                  <Text style={[styles.simulationResultTitle, { color: C.text }]}>{result.sequence}. {result.title} · {result.outcome.toUpperCase()}</Text>
+                  <Text style={[styles.simulationResultMessage, { color: C.text2 }]}>{result.message}</Text>
+                  <Text style={[styles.simulationResultConditions, { color: C.text3 }]}>{simulationResultConditions(result)}</Text>
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        <TouchableOpacity accessibilityRole="button" onPress={onStories} style={[styles.completionPrimary, { backgroundColor: C.orange }] }>
+          <Ionicons name="headset-outline" size={18} color="#FFFFFF" />
+          <Text style={styles.completionPrimaryText}>Review stories</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" onPress={() => simulation ? onExit?.() : router.replace('/(tabs)/trips' as any)} style={[styles.completionSecondary, { borderColor: C.border }] }>
+          <Text style={[styles.completionSecondaryText, { color: C.text2 }]}>{simulation ? 'End trigger test' : 'Back to Trips'}</Text>
+        </TouchableOpacity>
+      </ScrollView>
     </SafeAreaView>
   );
 }
@@ -359,8 +754,33 @@ const styles = StyleSheet.create({
   gpsBadge: { minHeight: 28, borderRadius: 999, paddingHorizontal: 9, flexDirection: 'row', alignItems: 'center', gap: 6, backgroundColor: 'rgba(8,8,8,0.72)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.16)' },
   gpsDot: { width: 7, height: 7, borderRadius: 4 },
   offlineText: { color: '#FFFFFF', fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },
-  playerSheet: { maxHeight: '60%', borderTopLeftRadius: 25, borderTopRightRadius: 25, borderWidth: 1, paddingHorizontal: 18, paddingTop: 9, gap: 10 },
+  playerSheet: { maxHeight: '60%', flexShrink: 1, borderTopLeftRadius: 25, borderTopRightRadius: 25, borderWidth: 1, overflow: 'hidden' },
+  playerSheetContent: { paddingHorizontal: 18, paddingTop: 9, gap: 10 },
+  simulationSheet: { maxHeight: '62%', flexShrink: 1 },
   handle: { width: 42, height: 4, borderRadius: 2, alignSelf: 'center', marginBottom: 1 },
+  simulationPanel: { borderWidth: 1, borderRadius: 15, padding: 11, gap: 8 },
+  simulationHeading: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  simulationIcon: { width: 34, height: 34, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  simulationHeadingCopy: { flex: 1, minWidth: 0 },
+  simulationKicker: { fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 0.7 },
+  simulationTitle: { marginTop: 1, fontSize: 13, lineHeight: 17, fontWeight: '900' },
+  simulationReason: { fontSize: 12, lineHeight: 17, fontWeight: '600' },
+  simulationNext: { fontSize: 11, lineHeight: 15, fontWeight: '900', letterSpacing: 0.35 },
+  simulationResultSummary: { fontSize: 10.5, lineHeight: 14, fontWeight: '900', letterSpacing: 0.35 },
+  simulationSpeed: { minHeight: 48, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center' },
+  simulationSpeedButton: { width: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
+  simulationSpeedCopy: { flex: 1, alignItems: 'center' },
+  simulationSpeedLabel: { fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 0.4 },
+  simulationSpeedValue: { marginTop: 1, fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  simulationGates: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  simulationGate: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 7, paddingVertical: 4, fontSize: 10.5, lineHeight: 14, fontWeight: '900', letterSpacing: 0.2 },
+  simulationButtons: { flexDirection: 'row', gap: 7 },
+  simulationSecondary: { minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  simulationSecondaryText: { fontSize: 11, fontWeight: '900' },
+  simulationPrimary: { flex: 1, minHeight: 44, paddingHorizontal: 11, borderRadius: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  simulationPrimaryText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
+  simulationAdvance: { minHeight: 44, borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  simulationAdvanceText: { fontSize: 11, lineHeight: 15, fontWeight: '900' },
   alert: { borderWidth: 1, borderRadius: 13, padding: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   alertCopy: { flex: 1, minWidth: 0 },
   alertTitle: { fontSize: 11.5, lineHeight: 15, fontWeight: '900' },
@@ -399,7 +819,8 @@ const styles = StyleSheet.create({
   storyModalCopy: { flex: 1, minWidth: 0 },
   storyModalTitle: { fontSize: 12.5, lineHeight: 17, fontWeight: '800' },
   storyModalMeta: { marginTop: 2, fontSize: 10, lineHeight: 14, fontWeight: '600' },
-  completion: { flex: 1, paddingHorizontal: 24, alignItems: 'center', justifyContent: 'center' },
+  completion: { flex: 1 },
+  completionContent: { flexGrow: 1, paddingHorizontal: 24, paddingVertical: 28, alignItems: 'center', justifyContent: 'center' },
   completionMark: { width: 78, height: 78, borderRadius: 39, borderWidth: 1, alignItems: 'center', justifyContent: 'center' },
   completionKicker: { marginTop: 20, fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 1 },
   completionTitle: { marginTop: 6, fontSize: 28, lineHeight: 34, fontWeight: '900', textAlign: 'center', letterSpacing: -0.6 },
@@ -408,6 +829,12 @@ const styles = StyleSheet.create({
   completionMetric: { flex: 1, minHeight: 72, borderWidth: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   completionValue: { fontSize: 17, lineHeight: 21, fontWeight: '900' },
   completionLabel: { marginTop: 3, fontSize: 8, lineHeight: 11, fontWeight: '900', letterSpacing: 0.7 },
+  simulationResults: { width: '100%', marginTop: 14, borderWidth: 1, borderRadius: 14, paddingHorizontal: 12 },
+  simulationResultRow: { minHeight: 62, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
+  simulationResultCopy: { flex: 1, minWidth: 0 },
+  simulationResultTitle: { fontSize: 11.5, lineHeight: 16, fontWeight: '900' },
+  simulationResultMessage: { marginTop: 2, fontSize: 11, lineHeight: 16, fontWeight: '600' },
+  simulationResultConditions: { marginTop: 4, fontSize: 9.5, lineHeight: 14, fontWeight: '800', letterSpacing: 0.2 },
   completionPrimary: { width: '100%', minHeight: 50, marginTop: 22, borderRadius: 14, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   completionPrimaryText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900' },
   completionSecondary: { width: '100%', minHeight: 48, marginTop: 9, borderWidth: 1, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },

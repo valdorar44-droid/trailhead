@@ -166,6 +166,7 @@ export default function OriginalDetailScreen() {
 
   const beginStart = useCallback(async () => {
     if (!detail) return;
+    if (detail.adminPreview) throw new Error('Unpublished Studio drafts can run only in the no-driving trigger test.');
     try {
       const scope = (user?.id == null ? 'guest' : `account:${String(user.id)}`) as OriginalOwnerScope;
       const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
@@ -177,6 +178,19 @@ export default function OriginalDetailScreen() {
       throw startError;
     }
   }, [detail, originalsRuntime, router, user?.id]);
+
+  const beginSimulation = useCallback(async () => {
+    if (!detail || !user?.is_admin) return;
+    const scope = `account:${String(user.id)}` as OriginalOwnerScope;
+    const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
+    if (!manifest) throw new Error('Download and verify this Original before opening the trigger test.');
+    await originalsRuntime.startSimulation(manifest);
+    setStartVisible(false);
+    router.replace({
+      pathname: '/originals/player',
+      params: { id: detail.id, version: String(detail.version), simulate: '1' },
+    } as any);
+  }, [detail, originalsRuntime, router, user?.id, user?.is_admin]);
 
   if (loading) {
     return (
@@ -203,7 +217,10 @@ export default function OriginalDetailScreen() {
 
   const ready = bundle.state === 'ready';
   const owned = detail.access === 'owned';
-  const primaryLabel = !owned
+  const adminPreview = Boolean(detail.adminPreview);
+  const primaryLabel = adminPreview
+    ? 'Open no-driving test'
+    : !owned
     ? canClaimFeatured
       ? 'Claim monthly Original'
       : detail.priceCredits === 0
@@ -218,7 +235,9 @@ export default function OriginalDetailScreen() {
       : detail.progress && detail.progress > 0
         ? 'Resume tour'
         : 'Start tour';
-  const primaryAction = !owned
+  const primaryAction = adminPreview
+    ? () => router.replace({ pathname: '/originals/preview', params: { id: detail.id } } as any)
+    : !owned
     ? acquire
     : !ready
       ? () => setReadinessVisible(true)
@@ -232,16 +251,18 @@ export default function OriginalDetailScreen() {
           <TouchableOpacity accessibilityRole="button" accessibilityLabel="Back" onPress={() => router.back()} style={styles.floatingButton}>
             <Ionicons name="chevron-back" size={20} color="#FFFFFF" />
           </TouchableOpacity>
-          <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share this Original" onPress={() => Alert.alert('Share', 'Original sharing will use the published Trailhead link.')} style={styles.floatingButton}>
-            <Ionicons name="share-outline" size={19} color="#FFFFFF" />
-          </TouchableOpacity>
+          {!adminPreview ? (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share this Original" onPress={() => Alert.alert('Share', 'Original sharing will use the published Trailhead link.')} style={styles.floatingButton}>
+              <Ionicons name="share-outline" size={19} color="#FFFFFF" />
+            </TouchableOpacity>
+          ) : <View style={styles.floatingButtonSpacer} />}
         </SafeAreaView>
 
         <View style={styles.content}>
           <View style={styles.titleBlock}>
             <View style={styles.creatorRow}>
               <Ionicons name="shield-checkmark" size={15} color={C.orange} />
-              <Text style={[styles.creator, { color: C.orange }]}>A TRAILHEAD ORIGINAL</Text>
+              <Text style={[styles.creator, { color: C.orange }]}>{adminPreview ? 'UNPUBLISHED STUDIO DRAFT' : 'A TRAILHEAD ORIGINAL'}</Text>
             </View>
             <Text style={[styles.title, { color: C.text }]}>{detail.title}</Text>
             <Text style={[styles.route, { color: C.text2 }]}>{detail.routeLabel}</Text>
@@ -261,7 +282,7 @@ export default function OriginalDetailScreen() {
 
           <View style={styles.routePreviewSection}>
             <View style={styles.routePreviewHeading}>
-              <Text style={[styles.sectionTitle, { color: C.text }]}>Published route</Text>
+              <Text style={[styles.sectionTitle, { color: C.text }]}>{adminPreview ? 'Draft route' : 'Published route'}</Text>
               <Text style={[styles.routePreviewMeta, { color: C.text3 }]}>{detail.distanceLabel} · fixed direction</Text>
             </View>
             <View style={[styles.routePreview, { borderColor: C.border }] }>
@@ -315,7 +336,7 @@ export default function OriginalDetailScreen() {
                   </View>
                   <View style={styles.storyCopy}>
                     <Text style={[styles.storyTitle, { color: C.text }]}>{story.title}</Text>
-                    <Text style={[styles.storyMeta, { color: C.text3 }]}>{story.durationLabel} · plays automatically on route</Text>
+                    <Text style={[styles.storyMeta, { color: C.text3 }]}>{story.durationLabel} · {adminPreview ? 'unpublished trigger cue' : 'plays automatically on route'}</Text>
                   </View>
                   <Ionicons name="headset-outline" size={17} color={C.text3} />
                 </View>
@@ -326,8 +347,8 @@ export default function OriginalDetailScreen() {
           <TrailheadPrompt
             icon="shield-checkmark-outline"
             tone={C.orange}
-            title="Drive first"
-            body="Passenger use recommended. Audio pauses for navigation and calls."
+            title={adminPreview ? 'Synthetic test only' : 'Drive first'}
+            body={adminPreview ? 'This draft is unpublished. Use the no-driving trigger test; physical location tracking is disabled.' : 'Passenger use recommended. Audio pauses for navigation and calls.'}
           />
 
           <View style={styles.section}>
@@ -343,7 +364,7 @@ export default function OriginalDetailScreen() {
           {detail.sources.length ? (
             <View style={styles.section}>
               <Text style={[styles.sectionTitle, { color: C.text }]}>Sources and review</Text>
-              <Text style={[styles.sourceIntro, { color: C.text2 }]}>Scripts are human-written and fact-checked against the sources below. Access conditions can change.</Text>
+              <Text style={[styles.sourceIntro, { color: C.text2 }]}>{adminPreview ? 'Draft citations and review metadata appear below. Publication review is not complete.' : 'Scripts are human-written and fact-checked against the sources below. Access conditions can change.'}</Text>
               {detail.sources.map(source => (
                 <TouchableOpacity
                   key={`${source.label}:${source.url || ''}`}
@@ -364,8 +385,8 @@ export default function OriginalDetailScreen() {
 
       <View style={[styles.dock, { backgroundColor: C.s1, borderTopColor: C.border, paddingBottom: Math.max(insets.bottom, 12) }] }>
         <View style={styles.dockCopy}>
-          <Text style={[styles.dockPrice, { color: owned || canClaimFeatured ? C.orange : C.text }]}>{owned ? 'Yours permanently' : canClaimFeatured ? 'Included this month' : detail.priceCredits === 0 ? 'Free' : `${price} credits`}</Text>
-          <Text style={[styles.dockMeta, { color: C.text3 }]}>{owned ? bundleLabel(bundle) : canClaimFeatured ? 'Explorer monthly claim' : detail.priceCredits === 0 ? 'No account required' : user ? `${user.credits} credits available` : 'Account required'}</Text>
+          <Text style={[styles.dockPrice, { color: owned || canClaimFeatured ? C.orange : C.text }]}>{adminPreview ? 'Admin device preview' : owned ? 'Yours permanently' : canClaimFeatured ? 'Included this month' : detail.priceCredits === 0 ? 'Free' : `${price} credits`}</Text>
+          <Text style={[styles.dockMeta, { color: C.text3 }]}>{adminPreview ? 'Not published · synthetic GPS only' : owned ? bundleLabel(bundle) : canClaimFeatured ? 'Explorer monthly claim' : detail.priceCredits === 0 ? 'No account required' : user ? `${user.credits} credits available` : 'Account required'}</Text>
         </View>
         <TrailheadButton label={primaryLabel} icon={ready ? 'play' : !owned ? detail.priceCredits === 0 ? 'gift-outline' : 'ticket-outline' : 'cloud-download'} variant="primary" loading={busy} onPress={() => void primaryAction()} style={styles.primary} />
       </View>
@@ -378,7 +399,13 @@ export default function OriginalDetailScreen() {
         onDownload={() => void startDownload()}
         onStart={() => { setReadinessVisible(false); setStartVisible(true); }}
       />
-      <StartTourModal visible={startVisible} detail={detail} onClose={() => setStartVisible(false)} onStart={beginStart} />
+      <StartTourModal
+        visible={startVisible}
+        detail={detail}
+        onClose={() => setStartVisible(false)}
+        onStart={beginStart}
+        onSimulate={!adminPreview && user?.is_admin ? beginSimulation : undefined}
+      />
     </View>
   );
 }
@@ -422,6 +449,11 @@ function ReadinessModal({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <View style={[styles.sheet, { backgroundColor: C.s1, borderColor: C.border }] }>
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetContent}
+            showsVerticalScrollIndicator={false}
+          >
           <View style={[styles.handle, { backgroundColor: C.border2 }]} />
           <View style={styles.sheetTitleRow}>
             <View style={[styles.sheetIcon, { backgroundColor: C.orange + '18' }] }>
@@ -462,6 +494,7 @@ function ReadinessModal({
             loading={bundle.state === 'downloading'}
             onPress={ready ? onStart : onDownload}
           />
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -484,33 +517,36 @@ function StartTourModal({
   detail,
   onClose,
   onStart,
+  onSimulate,
 }: {
   visible: boolean;
   detail: OriginalUiDetail;
   onClose: () => void;
   onStart: () => Promise<void>;
+  onSimulate?: () => Promise<void>;
 }) {
   const C = useTheme();
   const [confirmed, setConfirmed] = useState(false);
-  const [starting, setStarting] = useState(false);
+  const [starting, setStarting] = useState<'tour' | 'simulation' | null>(null);
   const [permissionError, setPermissionError] = useState('');
 
   useEffect(() => {
     if (!visible) {
       setConfirmed(false);
-      setStarting(false);
+      setStarting(null);
       setPermissionError('');
     }
   }, [visible]);
 
-  const start = async () => {
-    setStarting(true);
+  const start = async (mode: 'tour' | 'simulation') => {
+    setStarting(mode);
     setPermissionError('');
     try {
-      await onStart();
+      if (mode === 'simulation' && onSimulate) await onSimulate();
+      else await onStart();
     } catch (error: any) {
       setPermissionError(error?.message || `Trailhead needs ${Platform.OS === 'ios' ? 'background' : 'precise'} location while this tour is active.`);
-      setStarting(false);
+      setStarting(null);
     }
   };
 
@@ -518,6 +554,12 @@ function StartTourModal({
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
       <View style={styles.modalOverlay}>
         <View style={[styles.sheet, { backgroundColor: C.s1, borderColor: C.border }] }>
+          <ScrollView
+            style={styles.sheetScroll}
+            contentContainerStyle={styles.sheetContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
           <View style={[styles.handle, { backgroundColor: C.border2 }]} />
           <View style={styles.sheetTitleRow}>
             <View style={[styles.sheetIcon, { backgroundColor: C.orange + '18' }] }>
@@ -527,7 +569,7 @@ function StartTourModal({
               <Text style={[styles.sheetKicker, { color: C.orange }]}>BEFORE YOU DRIVE</Text>
               <Text style={[styles.sheetTitle, { color: C.text }]}>Start {detail.title}</Text>
             </View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" disabled={starting} onPress={onClose} style={styles.sheetClose}>
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" disabled={Boolean(starting)} onPress={onClose} style={styles.sheetClose}>
               <Ionicons name="close" size={20} color={C.text2} />
             </TouchableOpacity>
           </View>
@@ -555,14 +597,21 @@ function StartTourModal({
               <TrailheadPrompt
                 icon="location-outline"
                 tone={C.red}
-                title="Location permission is off"
+                title="Tour could not start"
                 body={permissionError}
                 action={<TouchableOpacity accessibilityRole="button" onPress={() => Linking.openSettings()} style={styles.settingsAction}><Text style={[styles.settingsText, { color: C.orange }]}>Settings</Text></TouchableOpacity>}
               />
             </View>
           ) : null}
 
-          <TrailheadButton label="Start hands-free tour" icon="play" variant="primary" disabled={!confirmed} loading={starting} onPress={() => void start()} />
+          <TrailheadButton label="Start hands-free tour" icon="play" variant="primary" disabled={!confirmed || Boolean(starting)} loading={starting === 'tour'} onPress={() => void start('tour')} />
+          {onSimulate ? (
+            <View style={styles.simulationAction}>
+              <TrailheadButton label="Test without driving" icon="speedometer-outline" disabled={!confirmed || Boolean(starting)} loading={starting === 'simulation'} onPress={() => void start('simulation')} />
+              <Text style={[styles.simulationNote, { color: C.text3 }]}>ADMIN TEST · SYNTHETIC GPS · SAVED DRIVE PROGRESS IS UNCHANGED</Text>
+            </View>
+          ) : null}
+          </ScrollView>
         </View>
       </View>
     </Modal>
@@ -593,6 +642,7 @@ const styles = StyleSheet.create({
   errorActions: { marginTop: 18, flexDirection: 'row', gap: 10 },
   floatingTop: { position: 'absolute', top: 0, left: 16, right: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   floatingButton: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(8,8,8,0.68)', borderWidth: 1, borderColor: 'rgba(255,255,255,0.2)' },
+  floatingButtonSpacer: { width: 44, height: 44 },
   content: { paddingHorizontal: 18, paddingTop: 20, gap: 22 },
   titleBlock: { gap: 5 },
   creatorRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
@@ -638,7 +688,9 @@ const styles = StyleSheet.create({
   dockMeta: { marginTop: 2, fontSize: 9.5, lineHeight: 13, fontWeight: '700' },
   primary: { minWidth: 176 },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.54)' },
-  sheet: { maxHeight: '92%', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, paddingHorizontal: 18, paddingTop: 10, paddingBottom: 24, gap: 16 },
+  sheet: { maxHeight: '92%', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, overflow: 'hidden' },
+  sheetScroll: { flexShrink: 1 },
+  sheetContent: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 24, gap: 16 },
   handle: { width: 42, height: 4, borderRadius: 2, alignSelf: 'center' },
   sheetTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 11 },
   sheetIcon: { width: 42, height: 42, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
@@ -663,6 +715,8 @@ const styles = StyleSheet.create({
   confirmRow: { minHeight: 58, borderRadius: 14, borderWidth: 1, paddingHorizontal: 13, flexDirection: 'row', alignItems: 'center', gap: 10 },
   confirmText: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 17, fontWeight: '800' },
   permissionError: { gap: 8 },
+  simulationAction: { gap: 7 },
+  simulationNote: { fontSize: 8, lineHeight: 11, fontWeight: '900', letterSpacing: 0.55, textAlign: 'center' },
   settingsAction: { minWidth: 58, minHeight: 44, alignItems: 'center', justifyContent: 'center' },
   settingsText: { fontSize: 10.5, fontWeight: '900' },
 });

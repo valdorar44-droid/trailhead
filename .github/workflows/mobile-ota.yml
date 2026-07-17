@@ -12,6 +12,15 @@ on:
           - production
           - preview
           - both
+      platform:
+        description: "Mobile platform to publish"
+        required: true
+        default: "ios"
+        type: choice
+        options:
+          - ios
+          - android
+          - all
       message:
         description: "OTA update message"
         required: true
@@ -22,7 +31,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: manual-mobile-ota-${{ github.event.inputs.channel }}
+  group: manual-mobile-ota-${{ github.event.inputs.channel }}-${{ github.event.inputs.platform }}
   cancel-in-progress: false
 
 jobs:
@@ -82,13 +91,16 @@ jobs:
       - name: Test account storage lifecycle
         run: npm run test:account-storage
 
+      - name: Test Trailhead Originals runtime
+        run: npm run test:originals
+
       - name: Run release audits
-        run: npm run audit:copy && npm run audit:explore && npm run audit:routes && npm run audit:profile-map
+        run: npm run audit:copy && npm run audit:explore && npm run audit:routes && npm run audit:profile-map && npm run audit:plan-workspace
 
       - name: Publish preview OTA
         if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
-        run: eas update --channel preview --message "${{ github.event.inputs.message }}" --non-interactive
+        run: eas update --channel preview --platform "${{ github.event.inputs.platform }}" --message "${{ github.event.inputs.message }}" --non-interactive
 
       - name: Publish production OTA
         if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
-        run: eas update --channel production --message "${{ github.event.inputs.message }}" --non-interactive
+        run: eas update --channel production --platform "${{ github.event.inputs.platform }}" --message "${{ github.event.inputs.message }}" --non-interactive

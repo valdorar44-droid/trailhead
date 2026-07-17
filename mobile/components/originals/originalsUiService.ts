@@ -91,6 +91,18 @@ function ownerScope(): OriginalOwnerScope {
   return userId == null ? 'guest' : `account:${String(userId)}`;
 }
 
+async function originalsAvailability() {
+  const authenticated = Boolean(useStore.getState().token);
+  const [config, accountFeatures] = await Promise.all([
+    api.getConfig().catch(() => null),
+    authenticated ? api.productFeatures().catch(() => null) : Promise.resolve(null),
+  ]);
+  return {
+    verified: Boolean(config || accountFeatures),
+    enabled: Boolean(config?.originals_enabled || accountFeatures?.originals),
+  };
+}
+
 function identityKey(id: string, version: number) {
   return `${id}@${version}`;
 }
@@ -106,7 +118,7 @@ function hasExactAccess(
 
 async function accessRecords() {
   const scope = ownerScope();
-  const local = await originalAccessStore.list(scope).catch(() => []);
+  const local = await currentUserAccessRecords(scope);
   if (useStore.getState().token && scope !== 'guest') {
     const owned = await originalsApi.owned().catch(() => ({ items: [] }));
     const accountId = scope.slice('account:'.length);
@@ -121,6 +133,18 @@ async function accessRecords() {
     records.set(identityKey(item.pack_id, item.version), item);
     records.set(identityKey(item.slug, item.version), item);
   });
+  return records;
+}
+
+async function currentUserAccessRecords(scope: OriginalOwnerScope) {
+  let records = await originalAccessStore.list(scope).catch(() => []);
+  if (useStore.getState().user?.is_admin) return records;
+  const previews = records.filter(item => item.access_type === 'admin_preview');
+  await Promise.all(previews.map(async item => {
+    await originalBundleStore.remove(scope, item.pack_id, item.version).catch(() => {});
+    await originalAccessStore.remove(scope, item.pack_id, item.version).catch(() => {});
+  }));
+  records = records.filter(item => item.access_type !== 'admin_preview');
   return records;
 }
 
@@ -287,6 +311,7 @@ function cachedManifestToUi(
     priceCredits: 0,
     explorerPriceCredits: 0,
     access: 'owned',
+    adminPreview: access.access_type === 'admin_preview',
     featured: false,
     progress: manifest.stops.length ? terminalCount / manifest.stops.length : 0,
     downloadState: bundle ? 'ready' : 'not_downloaded',
@@ -317,7 +342,7 @@ function cachedManifestToUi(
 
 async function cachedDetail(id: string, requestedVersion?: number) {
   const scope = ownerScope();
-  const accesses = await originalAccessStore.list(scope).catch(() => []);
+  const accesses = await currentUserAccessRecords(scope);
   const matching = accesses
     .filter(item => item.pack_id === id || item.slug === id)
     .filter(item => requestedVersion == null || item.version === requestedVersion)
@@ -352,9 +377,9 @@ async function detailContext(item: OriginalDetail) {
 }
 
 export async function listOriginals(_options: ListUiOptions = {}): Promise<OriginalUiSummary[]> {
-  const config = await api.getConfig().catch(() => null);
-  if (!config) throw new Error('Trailhead Originals availability could not be verified. Connect and try again.');
-  if (!config.originals_enabled) throw new Error('Trailhead Originals are not enabled in this release.');
+  const availability = await originalsAvailability();
+  if (!availability.verified) throw new Error('Trailhead Originals availability could not be verified. Connect and try again.');
+  if (!availability.enabled) throw new Error('Trailhead Originals are not enabled in this release.');
   const [catalog, access, bundles, sessions] = await Promise.all([
     originalsApi.list({ limit: 40 }),
     accessRecords(),
@@ -391,7 +416,8 @@ export async function listOwnedOriginals() {
       session: sessions.get(key) || sessions.get(slugKey),
     });
   });
-  const localAccess = await originalAccessStore.list(ownerScope()).catch(() => []);
+  const localAccess = (await originalAccessStore.list(ownerScope()).catch(() => []))
+    .filter(item => item.access_type !== 'admin_preview');
   const cached = (await Promise.all(localAccess.map(item => cachedDetail(item.pack_id, item.version))))
     .filter(Boolean) as OriginalUiDetail[];
   const byVersion = new Map<string, OriginalUiSummary>();
@@ -418,8 +444,8 @@ export async function restoreOwnedOriginals() {
 
 export async function getOriginalDetail(id: string, requestedVersion?: number): Promise<OriginalUiDetail> {
   const local = await cachedDetail(id, requestedVersion);
-  const config = await api.getConfig().catch(() => null);
-  if (config?.originals_enabled) {
+  const availability = await originalsAvailability();
+  if (availability.enabled) {
     try {
       const item = await originalsApi.detail(id);
       if (requestedVersion == null || item.version === requestedVersion) {
@@ -443,7 +469,7 @@ export async function getOriginalDetail(id: string, requestedVersion?: number): 
     }
   }
   if (local) return local;
-  throw new Error(config
+  throw new Error(availability.verified
     ? 'Trailhead Originals are not available in this release.'
     : 'Trailhead Originals availability could not be verified. Connect and try again.');
 }
@@ -472,7 +498,12 @@ export async function getOriginalBundleState(id: string, version: number): Promi
   const exactAccess = accesses.find(item => (
     (item.pack_id === id || item.slug === id) && item.version === version
   ));
-  const anyAccess = exactAccess ?? accesses
+  const exactPreview = exactAccess?.access_type === 'admin_preview';
+  if (exactPreview && !useStore.getState().user?.is_admin) {
+    return { state: 'not_downloaded', progress: 0, downloadedBytes: 0, totalBytes: 0 };
+  }
+  const productionAccesses = accesses.filter(item => item.access_type !== 'admin_preview');
+  const anyAccess = exactAccess ?? productionAccesses
     .filter(item => item.pack_id === id || item.slug === id)
     .sort((a, b) => b.version - a.version)[0];
   if (!anyAccess) {
@@ -481,7 +512,16 @@ export async function getOriginalBundleState(id: string, version: number): Promi
   const exact = exactAccess
     ? await originalBundleStore.get(scope, exactAccess.pack_id, version)
     : null;
-  const bundle = exact ?? await originalBundleStore.getPinned(scope, anyAccess.pack_id);
+  let bundle = exact;
+  if (!bundle) {
+    const candidates = productionAccesses
+      .filter(item => item.pack_id === anyAccess.pack_id || item.slug === id)
+      .sort((a, b) => b.version - a.version);
+    for (const candidate of candidates) {
+      bundle = await originalBundleStore.get(scope, candidate.pack_id, candidate.version);
+      if (bundle) break;
+    }
+  }
   if (!bundle) return { state: 'not_downloaded', progress: 0, downloadedBytes: 0, totalBytes: 0 };
   const bundleAccess = accesses.find(item => (
     item.pack_id === bundle.pack_id && item.version === bundle.version

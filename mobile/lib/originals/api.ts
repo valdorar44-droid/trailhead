@@ -60,7 +60,31 @@ export type AcquireOriginalOptions = {
   signal?: AbortSignal;
 };
 
+export type OriginalAdminDraftSummary = {
+  id: string;
+  slug: string;
+  title: string;
+  status: string;
+  draft_revision: number;
+  updated_at?: number;
+};
+
 export const originalsApi = {
+  adminDrafts(signal?: AbortSignal) {
+    return originalsRequest<{ items: OriginalAdminDraftSummary[] }>('/api/admin/originals', {
+      signal,
+      requireAuth: true,
+    });
+  },
+
+  async adminPreviewManifest(id: string, signal?: AbortSignal): Promise<OriginalManifestV1> {
+    const response = await originalsRequest<unknown>(
+      `/api/admin/originals/${encodeURIComponent(id)}/device-preview/manifest`,
+      { signal, requireAuth: true },
+    );
+    return validateOriginalManifest(response);
+  },
+
   list(options: ListOriginalsOptions = {}) {
     const query = new URLSearchParams();
     if (options.limit != null) query.set('limit', String(options.limit));

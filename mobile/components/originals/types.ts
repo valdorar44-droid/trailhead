@@ -49,6 +49,7 @@ export type OriginalUiSummary = {
   priceCredits: number;
   explorerPriceCredits: number;
   access: OriginalAccessState;
+  adminPreview?: boolean;
   featured: boolean;
   heroImageUrl?: string;
   progress?: number;

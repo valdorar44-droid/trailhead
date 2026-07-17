@@ -3387,6 +3387,26 @@ async function generateOriginalNarration() {
   }
 }
 
+function normalizeOriginalNarrationMimeType(file) {
+  const fileName = String(file && file.name || '').toLowerCase();
+  if (fileName.endsWith('.mp3')) return 'audio/mpeg';
+  if (fileName.endsWith('.wav')) return 'audio/wav';
+  const mimeType = String(file && file.type || '').split(';', 1)[0].trim().toLowerCase();
+  const aliases = {
+    'audio/wav': 'audio/wav',
+    'audio/wave': 'audio/wav',
+    'audio/x-wav': 'audio/wav',
+    'audio/vnd.wave': 'audio/wav',
+    'audio/mpeg': 'audio/mpeg',
+    'audio/mp3': 'audio/mpeg',
+    'audio/x-mp3': 'audio/mpeg',
+    'audio/mpeg3': 'audio/mpeg',
+    'audio/x-mpeg-3': 'audio/mpeg'
+  };
+  if (aliases[mimeType]) return aliases[mimeType];
+  return mimeType || 'audio/wav';
+}
+
 async function uploadOriginalNarrationFile(event) {
   const file = event.target.files && event.target.files[0];
   event.target.value = '';
@@ -3396,9 +3416,7 @@ async function uploadOriginalNarrationFile(event) {
   try {
     if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
     const { manifest, assetId } = selectedOriginalNarrationTarget();
-    const mimeType = file.name.toLowerCase().endsWith('.mp3') || file.type === 'audio/mp3'
-      ? 'audio/mpeg'
-      : (file.type || 'audio/wav');
+    const mimeType = normalizeOriginalNarrationMimeType(file);
     const contentBase64 = await new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = () => resolve(String(reader.result || ''));

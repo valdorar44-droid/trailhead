@@ -121,8 +121,8 @@ class ElevenLabsTtsTests(unittest.IsolatedAsyncioTestCase):
         with (
             patch.object(server, "_elevenlabs_tts", new=AsyncMock(return_value=audio)) as generate,
             patch.object(server, "_persist_original_asset_bytes", return_value=persisted) as persist,
-            patch.object(server.settings, "elevenlabs_voice_id", "JBFqnCBsd6RMkjVDRZzb"),
-            patch.object(server.settings, "elevenlabs_model_id", "eleven_multilingual_v2"),
+            patch.object(server.settings, "elevenlabs_voice_id", "  JBFqnCBsd6RMkjVDRZzb  "),
+            patch.object(server.settings, "elevenlabs_model_id", "  eleven_multilingual_v2  "),
         ):
             result = await server.api_admin_generate_original_narration_with_provider(
                 "original_moab",
@@ -146,12 +146,27 @@ class ElevenLabsTtsTests(unittest.IsolatedAsyncioTestCase):
             call.kwargs["generator_metadata"]["model_id"], "eleven_multilingual_v2",
         )
         self.assertEqual(
+            call.kwargs["generator_metadata"]["voice_id"], "JBFqnCBsd6RMkjVDRZzb",
+        )
+        self.assertEqual(
             call.kwargs["generator_metadata"]["output_format"], "mp3_44100_128",
         )
         self.assertNotIn("generated_at", call.kwargs["generator_metadata"])
 
 
 class OriginalMp3AssetTests(unittest.TestCase):
+    def test_audio_mime_aliases_are_normalized_before_persistence(self):
+        for alias in ("audio/wave", "audio/x-wav", "audio/vnd.wave"):
+            with self.subTest(alias=alias):
+                self.assertEqual(server._normalize_original_asset_mime_type(alias), "audio/wav")
+        for alias in ("audio/mp3", "audio/x-mp3", "audio/mpeg3", "audio/x-mpeg-3"):
+            with self.subTest(alias=alias):
+                self.assertEqual(server._normalize_original_asset_mime_type(alias), "audio/mpeg")
+        self.assertEqual(
+            server._normalize_original_asset_mime_type(" Audio/X-Wav; codecs=pcm "),
+            "audio/wav",
+        )
+
     def test_mp3_is_accepted_and_duration_is_probed(self):
         audio = _synthetic_mp3()
         self.assertTrue(store._original_asset_mime_allowed("narration", "audio/mpeg"))

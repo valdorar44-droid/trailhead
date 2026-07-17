@@ -12685,6 +12685,19 @@ def _original_asset_bytes_match_kind(kind: str, mime_type: str, content: bytes) 
     return False
 
 
+def _normalize_original_asset_mime_type(mime_type: str) -> str:
+    normalized = str(mime_type or "").split(";", 1)[0].strip().lower()
+    return {
+        "audio/wave": "audio/wav",
+        "audio/x-wav": "audio/wav",
+        "audio/vnd.wave": "audio/wav",
+        "audio/mp3": "audio/mpeg",
+        "audio/x-mp3": "audio/mpeg",
+        "audio/mpeg3": "audio/mpeg",
+        "audio/x-mpeg-3": "audio/mpeg",
+    }.get(normalized, normalized)
+
+
 def _persist_original_asset_bytes(
     pack_id: str,
     asset_id: str,
@@ -12706,7 +12719,7 @@ def _persist_original_asset_bytes(
     if len(content) > 64 * 1024 * 1024:
         raise ValueError("Original asset uploads are limited to 64 MB")
     kind = str(kind or "").strip().lower()
-    mime_type = str(mime_type or "").split(";", 1)[0].strip().lower()
+    mime_type = _normalize_original_asset_mime_type(mime_type)
     if not _original_asset_bytes_match_kind(kind, mime_type, content):
         raise ValueError("Original asset bytes do not match the selected content type")
     digest = hashlib.sha256(content).hexdigest()
@@ -12828,8 +12841,7 @@ async def api_admin_generate_original_narration_with_provider(
             audio = await _elevenlabs_tts(clean)
             mime_type = "audio/mpeg"
             suffix = "mp3"
-            model_id = settings.elevenlabs_model_id or "eleven_multilingual_v2"
-            voice_id = settings.elevenlabs_voice_id
+            voice_id, model_id = _elevenlabs_voice_and_model_ids()
         else:
             audio = await _cartesia_tts(clean, "guide", container="wav")
             mime_type = "audio/wav"
@@ -13941,6 +13953,16 @@ def _elevenlabs_error_detail(response: httpx.Response) -> str:
     return str(message or response.reason_phrase or "provider error")[:240]
 
 
+def _elevenlabs_voice_and_model_ids() -> tuple[str, str]:
+    voice_id = str(settings.elevenlabs_voice_id or "").strip()
+    model_id = str(settings.elevenlabs_model_id or "eleven_multilingual_v2").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", voice_id):
+        raise HTTPException(503, "ElevenLabs narration voice is not configured correctly")
+    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", model_id):
+        raise HTTPException(503, "ElevenLabs narration model is not configured correctly")
+    return voice_id, model_id
+
+
 async def _elevenlabs_tts(clean: str) -> bytes:
     """Return ElevenLabs MP3 bytes while keeping credentials and voice choice server-side."""
     if not settings.elevenlabs_api_key:
@@ -13948,12 +13970,7 @@ async def _elevenlabs_tts(clean: str) -> bytes:
             503,
             "ElevenLabs narration is unavailable: ELEVENLABS_API_KEY is not configured",
         )
-    voice_id = str(settings.elevenlabs_voice_id or "").strip()
-    model_id = str(settings.elevenlabs_model_id or "eleven_multilingual_v2").strip()
-    if not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", voice_id):
-        raise HTTPException(503, "ElevenLabs narration voice is not configured correctly")
-    if not re.fullmatch(r"[A-Za-z0-9_.-]{1,128}", model_id):
-        raise HTTPException(503, "ElevenLabs narration model is not configured correctly")
+    voice_id, model_id = _elevenlabs_voice_and_model_ids()
     timeout = httpx.Timeout(120.0, connect=10.0)
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:

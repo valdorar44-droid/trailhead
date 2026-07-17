@@ -46,6 +46,27 @@ assert.equal(
   'forward progress resolves an exact turnaround tie while heading is unavailable',
 );
 
+const northSouthTurnaroundRoute: LngLat[] = [
+  [0, 0],
+  [0, 0.02],
+  [0, 0],
+];
+const northSouthWithoutHeading = projectPointToOriginalRoute(
+  northSouthTurnaroundRoute,
+  [0, 0.0199],
+  {
+    previous_route_ratio: 0.5,
+    heading_deg: null,
+    speed_mps: 12,
+    accuracy_m: 10,
+  },
+);
+assert.equal(
+  northSouthWithoutHeading?.segment_index,
+  1,
+  'a null heading cannot override continuity at a north-south turnaround',
+);
+
 const reverseBeforeTurnaround = projectPointToOriginalRoute(backtrackRoute.slice(0, 3), [0.01, 0], {
   previous_route_ratio: 0.27,
   heading_deg: 270,
@@ -74,6 +95,24 @@ assert.equal(
   parallel?.segment_index,
   0,
   'a stale progress hint cannot snap to a separate parallel road about 11 metres away',
+);
+
+const closeParallelRoute: LngLat[] = [
+  [0, 0],
+  [0.02, 0],
+  [0.02, 0.000036],
+  [0, 0.000036],
+];
+const closeParallel = projectPointToOriginalRoute(closeParallelRoute, [0.01, 0], {
+  previous_route_ratio: 0.8,
+  heading_deg: null,
+  speed_mps: 0,
+  accuracy_m: 20,
+});
+assert.equal(
+  closeParallel?.segment_index,
+  0,
+  'a stale progress hint cannot snap to a separate parallel road about 4 metres away',
 );
 
 console.log('Originals route projection tests passed.');

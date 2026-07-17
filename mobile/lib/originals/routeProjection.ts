@@ -21,6 +21,7 @@ type ProjectionCandidate = OriginalRouteProjection & {
 };
 
 const MAX_EQUIVALENT_PROJECTION_SEPARATION_M = 5;
+const MAX_EQUIVALENT_DISTANCE_FROM_FIX_DELTA_M = 1;
 const MIN_PROGRESS_TIE_TOLERANCE_M = 15;
 const MAX_PROGRESS_TIE_TOLERANCE_M = 50;
 const MIN_HEADING_SPEED_MPS = 2;
@@ -65,6 +66,7 @@ function segmentBearingDegrees(start: LngLat, end: LngLat) {
 }
 
 function usableHeading(options: OriginalRouteProjectionOptions) {
+  if (options.heading_deg == null) return null;
   const heading = Number(options.heading_deg);
   const speed = Number(options.speed_mps);
   return Number.isFinite(heading)
@@ -130,11 +132,14 @@ export function projectPointToOriginalRoute(
   if (!hasProgressHint && heading == null) return nearest;
 
   // Only disambiguate segments whose projected route coordinates genuinely
-  // coincide. GPS accuracy describes uncertainty in the fix, not equivalence
-  // between two distinct nearby roads, so it must not widen this set.
+  // coincide and whose distances from the fix are effectively tied. GPS
+  // accuracy describes uncertainty in the fix, not equivalence between two
+  // distinct nearby roads, so it must not widen either guard.
   const spatialCandidates = candidates.filter(candidate => (
     distanceBetweenLngLatMeters(candidate.coordinate, nearest.coordinate)
       <= MAX_EQUIVALENT_PROJECTION_SEPARATION_M
+    && candidate.distance_from_route_m
+      <= nearest.distance_from_route_m + MAX_EQUIVALENT_DISTANCE_FROM_FIX_DELTA_M
   ));
 
   if (!hasProgressHint) {

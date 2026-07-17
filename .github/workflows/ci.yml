@@ -17,7 +17,7 @@ jobs:
     name: Backend and catalog contracts
     runs-on: ubuntu-latest
     env:
-      TRAILHEAD_DB_PATH: ${{ runner.temp }}/trailhead-ci.db
+      TRAILHEAD_DB_PATH: /tmp/trailhead-ci.db
     steps:
       - uses: actions/checkout@v4
 

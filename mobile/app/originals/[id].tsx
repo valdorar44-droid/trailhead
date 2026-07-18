@@ -32,6 +32,7 @@ import {
   getOriginalDetail,
 } from '@/components/originals/originalsUiService';
 import type { OriginalUiBundleState, OriginalUiDetail } from '@/components/originals/types';
+import { originalStartDestination } from '@/lib/originals/mainMapNavigation';
 
 const EMPTY_BUNDLE: OriginalUiBundleState = {
   state: 'not_downloaded',
@@ -196,7 +197,7 @@ export default function OriginalDetailScreen() {
       if (!manifest) throw new Error('Download and verify this Original before starting.');
       await originalsRuntime.startTour(manifest);
       setStartVisible(false);
-      router.replace({ pathname: '/originals/player', params: { id: detail.id, version: String(detail.version) } } as any);
+      router.replace(originalStartDestination(detail.id, detail.version) as any);
     } catch (startError: any) {
       throw startError;
     }

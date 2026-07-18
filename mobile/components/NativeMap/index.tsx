@@ -186,6 +186,17 @@ export type NativeMapDebugEvent = {
   details?: Record<string, unknown>;
 };
 
+export type OriginalsMapCueState = 'completed' | 'current' | 'next' | 'upcoming' | 'missed' | 'skipped';
+
+export type OriginalsMapCueStop = {
+  id: string;
+  lat: number;
+  lng: number;
+  sequence: number;
+  title?: string;
+  state: OriginalsMapCueState;
+};
+
 export interface NativeMapHandle {
   flyTo:          (lat: number, lng: number, zoom?: number, name?: string) => void;
   flyToCamera:    (options: NativeMapCameraOptions) => void;
@@ -262,6 +273,11 @@ export interface NativeMapProps {
     name: string;
     needsReview?: boolean;
   }>;
+  originalsRouteActive?: boolean;
+  originalsRouteCoords?: [number, number][];
+  /** Authored-route progress from 0 (route start) through 1 (route complete). */
+  originalsRouteProgress?: number;
+  originalsCueStops?: OriginalsMapCueStop[];
   suppressFeatureTaps?: boolean;
 
   // Overlay visibility
@@ -833,6 +849,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
     trailPreviewCoords = [], trailPreviewProgress = 0, trailPreviewTone = 'cyan',
     routeBuildActive = false, routeBuildCoords = [], routeBuildReveal = 1, routeBuildStops = [],
+    originalsRouteActive = false, originalsRouteCoords = [], originalsRouteProgress = 0, originalsCueStops = [],
     suppressFeatureTaps = false,
     showLandOverlay = false, showUsgsOverlay, showTerrain, showFire, showAva, showRadar, showTrailOverlay = true, showMvum, showNautical = false, hideMapStatusBadge = false,
     missionBriefActive = false, missionBriefFullRoute = [], missionBriefProgressRoute = [],
@@ -2436,6 +2453,42 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       })));
   }, [routeBuildActive, routeBuildStops]);
 
+  const originalsRouteVisual = useMemo(() => {
+    const normalizedProgress = Number.isFinite(originalsRouteProgress)
+      ? Math.max(0, Math.min(1, originalsRouteProgress))
+      : 0;
+    const split = splitLineAtProgress(originalsRouteCoords, normalizedProgress);
+    return {
+      active: originalsRouteActive && originalsRouteCoords.length >= 2,
+      completed: split.completed.length >= 2 ? split.completed : [],
+      remaining: split.remaining.length >= 2 ? split.remaining : [],
+      marker: normalizedProgress > 0 && normalizedProgress < 1 ? split.marker : null,
+    };
+  }, [originalsRouteActive, originalsRouteCoords, originalsRouteProgress]);
+
+  const originalsCueStopsFC = useMemo(() => {
+    if (!originalsRouteActive || !originalsCueStops.length) return emptyFC();
+    return pointFC(originalsCueStops
+      .filter(stop => (
+        stop.id
+        && Number.isFinite(stop.lat)
+        && Math.abs(stop.lat) <= 90
+        && Number.isFinite(stop.lng)
+        && Math.abs(stop.lng) <= 180
+        && Number.isFinite(stop.sequence)
+      ))
+      .map(stop => ({
+        type: 'Feature' as const,
+        geometry: { type: 'Point' as const, coordinates: [stop.lng, stop.lat] },
+        properties: {
+          id: stop.id,
+          title: stop.title ?? '',
+          sequence: Math.max(1, Math.round(stop.sequence)),
+          state: stop.state,
+        },
+      })));
+  }, [originalsCueStops, originalsRouteActive]);
+
   const missionBriefCalloutFC = useMemo(() => {
     if (!missionBriefActive || !missionBriefCallouts.length) return emptyFC();
     const labelForKind = (kind: string, idx: number) => {
@@ -3199,6 +3252,149 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
                   textField: ['get', 'label'],
                   textSize: 10,
                   textColor: '#FFFFFF',
+                  textFont: ['Open Sans Bold'],
+                  textAllowOverlap: true,
+                  textIgnorePlacement: true,
+                  textLetterSpacing: 0,
+                } as any}
+              />
+            </MapGL.ShapeSource>
+          )}
+        </>
+      )}
+
+      {originalsRouteVisual.active && (
+        <>
+          {originalsRouteVisual.remaining.length > 1 && (
+            <MapGL.ShapeSource id="originals-route-remaining" shape={lineFC(originalsRouteVisual.remaining)}>
+              <MapGL.LineLayer
+                id="originals-route-remaining-casing"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: 'rgba(5,5,5,0.72)', lineWidth: 9, lineCap: 'round', lineJoin: 'round' }}
+              />
+              <MapGL.LineLayer
+                id="originals-route-remaining-line"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: 'rgba(235,235,232,0.82)', lineWidth: 4.5, lineCap: 'round', lineJoin: 'round' }}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {originalsRouteVisual.completed.length > 1 && (
+            <MapGL.ShapeSource id="originals-route-completed" shape={lineFC(originalsRouteVisual.completed)}>
+              <MapGL.LineLayer
+                id="originals-route-completed-casing"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: 'rgba(5,5,5,0.78)', lineWidth: 10, lineCap: 'round', lineJoin: 'round' }}
+              />
+              <MapGL.LineLayer
+                id="originals-route-completed-line"
+                {...mapboxTopSlotProps}
+                style={{ lineColor: '#D97745', lineWidth: 5.5, lineCap: 'round', lineJoin: 'round' }}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {originalsRouteVisual.marker && (
+            <MapGL.ShapeSource
+              id="originals-route-progress-marker"
+              shape={pointFC([{
+                type: 'Feature' as const,
+                geometry: { type: 'Point' as const, coordinates: originalsRouteVisual.marker },
+                properties: {},
+              }])}
+            >
+              <MapGL.CircleLayer
+                id="originals-route-progress-halo"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: 13,
+                  circleColor: 'rgba(217,119,69,0.22)',
+                  circleStrokeColor: 'rgba(255,255,255,0.72)',
+                  circleStrokeWidth: 1,
+                }}
+              />
+              <MapGL.CircleLayer
+                id="originals-route-progress-core"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: 5.5,
+                  circleColor: '#D97745',
+                  circleStrokeColor: '#FFFFFF',
+                  circleStrokeWidth: 2,
+                }}
+              />
+            </MapGL.ShapeSource>
+          )}
+          {originalsCueStopsFC.features.length > 0 && (
+            <MapGL.ShapeSource id="originals-cue-stops" shape={originalsCueStopsFC}>
+              <MapGL.CircleLayer
+                id="originals-cue-stop-halo"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: [
+                    'match', ['get', 'state'],
+                    'current', 15,
+                    'next', 13,
+                    9,
+                  ],
+                  circleColor: '#D97745',
+                  circleOpacity: [
+                    'match', ['get', 'state'],
+                    'current', 0.3,
+                    'next', 0.18,
+                    0,
+                  ],
+                  circleStrokeWidth: 0,
+                } as any}
+              />
+              <MapGL.CircleLayer
+                id="originals-cue-stop-core"
+                {...mapboxTopSlotProps}
+                style={{
+                  circleRadius: [
+                    'match', ['get', 'state'],
+                    'current', 9,
+                    'next', 8.5,
+                    7.5,
+                  ],
+                  circleColor: [
+                    'match', ['get', 'state'],
+                    'current', '#D97745',
+                    'next', '#111412',
+                    'completed', '#AD5A33',
+                    'missed', '#626662',
+                    'skipped', '#626662',
+                    '#8A8E89',
+                  ],
+                  circleOpacity: [
+                    'match', ['get', 'state'],
+                    'missed', 0.72,
+                    'skipped', 0.72,
+                    'upcoming', 0.84,
+                    1,
+                  ],
+                  circleStrokeColor: [
+                    'match', ['get', 'state'],
+                    'next', '#D97745',
+                    'upcoming', '#F2F2EF',
+                    '#FFFFFF',
+                  ],
+                  circleStrokeWidth: [
+                    'match', ['get', 'state'],
+                    'current', 2.5,
+                    'next', 2.5,
+                    1.5,
+                  ],
+                } as any}
+              />
+              <MapGL.SymbolLayer
+                id="originals-cue-stop-label"
+                {...mapboxTopSlotProps}
+                style={{
+                  textField: ['to-string', ['get', 'sequence']],
+                  textSize: 10,
+                  textColor: '#FFFFFF',
+                  textHaloColor: 'rgba(5,5,5,0.3)',
+                  textHaloWidth: 0.5,
                   textFont: ['Open Sans Bold'],
                   textAllowOverlap: true,
                   textIgnorePlacement: true,

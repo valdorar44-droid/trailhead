@@ -1,4 +1,5 @@
 import json
+import subprocess
 from datetime import datetime, timezone
 import unittest
 from unittest.mock import patch
@@ -195,6 +196,41 @@ class OriginalRouteNetworkValidationTests(unittest.TestCase):
         self.coordinates = [[-109.55 + index * 0.00005, 38.57] for index in range(120)]
         self.manifest = _manifest(self.coordinates)
         self.valhalla = _ValhallaFixture(self.coordinates)
+
+    def test_headless_validator_budget_covers_a_realistic_whole_route(self):
+        manifest = {
+            "pack_id": "original_long_route",
+            "version": 1,
+            "manifest_id": "original_long_route:1",
+            "route": {
+                "geometry": {
+                    "type": "LineString",
+                    "coordinates": [
+                        [-109.6 + index * 0.00001, 38.5]
+                        for index in range(2_112)
+                    ],
+                },
+            },
+        }
+        with patch.object(
+            validation.subprocess,
+            "run",
+            side_effect=subprocess.TimeoutExpired("validator", 1),
+        ) as runner:
+            with self.assertRaisesRegex(
+                validation.OriginalValidationRunnerError,
+                "could not complete",
+            ):
+                validation.run_originals_validation_cli(
+                    manifest,
+                    required_scenario_ids=(),
+                    expected_engine_version="original-trigger-v2",
+                )
+        self.assertGreaterEqual(
+            runner.call_args.kwargs["timeout"],
+            180,
+            "whole-route validation needs headroom beyond the observed Moab runtime",
+        )
 
     def test_polyline6_decoder_round_trips_and_rejects_malformed_input(self):
         points = [

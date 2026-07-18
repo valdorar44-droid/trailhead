@@ -86,7 +86,14 @@ const missingBearing = evaluateOriginalLocation(
 expectDecision(missingBearing, 'missing_bearing');
 const wrongBearing = evaluateOriginalLocation(
   directedManifest,
-  activeSession(directedManifest),
+  {
+    ...activeSession(directedManifest),
+    last_projected_route_progress_m: 400,
+    trigger_state: {
+      ...activeSession(directedManifest).trigger_state,
+      route_initialized: true,
+    },
+  },
   sample(0.0045, 1_000, { heading_deg: 270 }),
 );
 expectDecision(wrongBearing, 'wrong_bearing');
@@ -142,6 +149,11 @@ const queueFull = evaluateOriginalLocation(
 );
 expectDecision(queueFull, 'queue_full');
 assert.equal(queueFull.decision.stop_id, 'story-2');
+assert.deepEqual(queueFull.decision.queue, {
+  queued_stop_id: 'story-2',
+  following_stop_id: 'story-3',
+  following_stop_eligible: true,
+});
 
 const noRemaining = evaluateOriginalLocation(
   manifest,

@@ -2,23 +2,25 @@ import { distanceBetweenLngLatMeters, type LngLat } from '../routeProjection';
 import { orderedOriginalStops } from './manifest';
 import {
   angularDifferenceDegrees,
+  ORIGINAL_ROUTE_MAX_HEADING_RECOVERY_SEPARATION_M,
   originalRouteSegmentBearingDegrees,
   projectPointToOriginalRoute,
 } from './routeProjection';
 import { completeOriginalStop, createOriginalSession } from './session';
-import { evaluateOriginalLocation } from './triggerEngine';
-import { originalSimulationSamplesForNextCue } from './triggerSimulation';
+import { ORIGINAL_TRIGGER_DEFAULTS, evaluateOriginalLocation } from './triggerEngine';
 import type {
   OriginalLocationSample,
   OriginalManifestV1,
   OriginalSessionV1,
+  OriginalStopV1,
   OriginalTriggerDecisionCode,
   OriginalTriggerEvaluation,
 } from './types';
 
 export const ORIGINAL_ROUTE_VALIDATION_SCHEMA_VERSION = 1 as const;
-export const ORIGINAL_ROUTE_VALIDATION_ENGINE_VERSION = 'original-trigger-v1' as const;
+export const ORIGINAL_ROUTE_VALIDATION_ENGINE_VERSION = 'original-trigger-v2' as const;
 export const ORIGINAL_ROUTE_DISCONTINUITY_M = 2_000;
+const MAX_AMBIGUOUS_ROUTE_POSITION_SEPARATION_M = ORIGINAL_ROUTE_MAX_HEADING_RECOVERY_SEPARATION_M;
 
 export const ORIGINAL_ROUTE_VALIDATION_SCENARIO_IDS = [
   'baseline_slow_15mph',
@@ -108,15 +110,21 @@ type ScenarioHarness = {
   queue_counts: Map<string, number>;
   trigger_order: string[];
   audio_end_ms: number | null;
+  queued_playback_stop_ids: Set<string>;
+  queued_following_pairs: Set<string>;
   maximum_queue_depth: number;
   audio_overlap_count: number;
   projection_regressions: number;
+  minimum_authored_trace_progress_m: number | null;
+  maximum_authored_trace_progress_m: number | null;
   minimum_projected_progress_m: number | null;
   maximum_projected_progress_m: number | null;
 };
 
 const START_TIMESTAMP_MS = 1_700_000_000_000;
 const SAMPLE_INTERVAL_MS = 3_100;
+const GPS_JITTER_PATTERN_M = [-72, 48, 84, -60, 25, -80, 55] as const;
+const GPS_JITTER_ACCURACY_M = 90;
 const MAX_ISSUES = 40;
 const MAX_ISSUE_LENGTH = 240;
 
@@ -185,22 +193,72 @@ function routePointAtProgress(
   };
 }
 
+function segmentProjectionFraction(
+  point: LngLat,
+  start: LngLat,
+  end: LngLat,
+) {
+  const referenceLatitude = (point[1] + start[1] + end[1]) / 3 * Math.PI / 180;
+  const longitudeScale = Math.max(1, 111_320 * Math.cos(referenceLatitude));
+  const latitudeScale = 111_320;
+  const startX = normalizedLngDelta(start[0] - point[0]) * longitudeScale;
+  const startY = (start[1] - point[1]) * latitudeScale;
+  const endX = normalizedLngDelta(end[0] - point[0]) * longitudeScale;
+  const endY = (end[1] - point[1]) * latitudeScale;
+  const deltaX = endX - startX;
+  const deltaY = endY - startY;
+  const squaredLength = deltaX * deltaX + deltaY * deltaY;
+  if (squaredLength <= 0) return 0;
+  return clamp(-(startX * deltaX + startY * deltaY) / squaredLength, 0, 1);
+}
+
 function nearRepeatedRoutePositions(manifest: OriginalManifestV1, route: RouteMeasure) {
-  const sampleStepM = Math.max(50, manifest.route.distance_m / 2_500);
-  const repeatedPositionRadiusM = Math.max(
-    35,
-    ...manifest.stops.map(stop => Math.max(0, stop.trigger.enter_radius_m)),
-  );
-  const occurrences: Array<RoutePoint & { progress_m: number }> = [];
+  const sampleStepM = Math.max(25, manifest.route.distance_m / 5_000);
+  // Search the complete projection-recovery envelope. Repeated route legs can
+  // still be a trigger risk for a small-radius cue when an accepted GPS fix is
+  // displaced toward that cue.
+  const repeatedPositionRadiusM = MAX_AMBIGUOUS_ROUTE_POSITION_SEPARATION_M;
+  const occurrenceByKey = new Map<string, RoutePoint & { progress_m: number }>();
+  const addOccurrence = (occurrence: RoutePoint & { progress_m: number }) => {
+    const heading = occurrence.heading_deg == null ? 'none' : occurrence.heading_deg.toFixed(4);
+    const key = `${occurrence.progress_m.toFixed(3)}:${heading}`;
+    occurrenceByKey.set(key, occurrence);
+  };
   for (let progress = 0; progress <= manifest.route.distance_m; progress += sampleStepM) {
-    occurrences.push({ ...routePointAtProgress(manifest, route, progress), progress_m: progress });
+    addOccurrence({ ...routePointAtProgress(manifest, route, progress), progress_m: progress });
   }
-  if (occurrences.at(-1)?.progress_m !== manifest.route.distance_m) {
-    occurrences.push({
+  addOccurrence({
       ...routePointAtProgress(manifest, route, manifest.route.distance_m),
       progress_m: manifest.route.distance_m,
-    });
+  });
+  // Add exact closest points from every cue to every nearby route segment.
+  // This closes the sampling gap for small-radius cues centered between the
+  // regular 25 metre trace samples without making the whole route grid tiny.
+  for (const stop of manifest.stops) {
+    const stopCoordinate: LngLat = [stop.coordinates.lng, stop.coordinates.lat];
+    const riskRadius = stop.trigger.enter_radius_m
+      + ORIGINAL_TRIGGER_DEFAULTS.maximum_accuracy_m;
+    for (let segmentIndex = 0; segmentIndex < route.segment_lengths_m.length; segmentIndex += 1) {
+      const start = route.coordinates[segmentIndex];
+      const end = route.coordinates[segmentIndex + 1];
+      const fraction = segmentProjectionFraction(stopCoordinate, start, end);
+      const coordinate: LngLat = [
+        start[0] + normalizedLngDelta(end[0] - start[0]) * fraction,
+        start[1] + (end[1] - start[1]) * fraction,
+      ];
+      if (distanceBetweenLngLatMeters(coordinate, stopCoordinate) > riskRadius) continue;
+      const geometricProgress = route.cumulative_m[segmentIndex]
+        + route.segment_lengths_m[segmentIndex] * fraction;
+      addOccurrence({
+        coordinate,
+        heading_deg: originalRouteSegmentBearingDegrees(start, end),
+        progress_m: route.total_m > 0
+          ? geometricProgress / route.total_m * manifest.route.distance_m
+          : 0,
+      });
+    }
   }
+  const occurrences = [...occurrenceByKey.values()].sort((a, b) => a.progress_m - b.progress_m);
   const ambiguities: RouteAmbiguity[] = [];
   for (let first = 0; first < occurrences.length; first += 1) {
     for (let second = first + 1; second < occurrences.length; second += 1) {
@@ -224,6 +282,24 @@ function nearRepeatedRoutePositions(manifest: OriginalManifestV1, route: RouteMe
   return ambiguities;
 }
 
+function occurrenceDistanceToStop(
+  stop: OriginalStopV1,
+  occurrence: { point: RoutePoint },
+) {
+  return distanceBetweenLngLatMeters(
+    occurrence.point.coordinate,
+    [stop.coordinates.lng, stop.coordinates.lat],
+  );
+}
+
+function occurrenceInsideTriggerRisk(
+  stop: OriginalStopV1,
+  occurrence: { point: RoutePoint },
+) {
+  return occurrenceDistanceToStop(stop, occurrence)
+    <= stop.trigger.enter_radius_m + ORIGINAL_TRIGGER_DEFAULTS.maximum_accuracy_m;
+}
+
 function ambiguousStops(
   manifest: OriginalManifestV1,
   ambiguities: readonly RouteAmbiguity[],
@@ -231,19 +307,109 @@ function ambiguousStops(
 ) {
   return orderedOriginalStops(manifest).filter(stop => ambiguities.some(ambiguity => (
     (!options.requires_bearing_only || ambiguity.approach_delta_deg >= 30)
-    &&
-    [
+    && (() => {
+      const occurrences = [
+        { progress: ambiguity.first_progress_m, point: ambiguity.first },
+        { progress: ambiguity.second_progress_m, point: ambiguity.second },
+      ];
+      const intended = occurrences.filter(occurrence => (
+        occurrence.progress >= stop.trigger.route_progress_start_m
+        && occurrence.progress <= stop.trigger.route_progress_end_m
+      ));
+      if (intended.length !== 1) return false;
+      const competing = occurrences.find(occurrence => occurrence !== intended[0])!;
+      return occurrenceDistanceToStop(stop, intended[0]) <= stop.trigger.enter_radius_m
+        && occurrenceInsideTriggerRisk(stop, competing);
+    })()
+  )));
+}
+
+function multipleOccurrenceWindowStops(
+  manifest: OriginalManifestV1,
+  ambiguities: readonly RouteAmbiguity[],
+) {
+  return orderedOriginalStops(manifest).filter(stop => ambiguities.some(ambiguity => {
+    const occurrences = [
       { progress: ambiguity.first_progress_m, point: ambiguity.first },
       { progress: ambiguity.second_progress_m, point: ambiguity.second },
-    ].some(occurrence => (
+    ];
+    const bothInsideWindow = occurrences.every(occurrence => (
       occurrence.progress >= stop.trigger.route_progress_start_m
       && occurrence.progress <= stop.trigger.route_progress_end_m
-      && distanceBetweenLngLatMeters(
-        occurrence.point.coordinate,
+    ));
+    return bothInsideWindow
+      && occurrences.some(occurrence => (
+        occurrenceDistanceToStop(stop, occurrence) <= stop.trigger.enter_radius_m
+      ))
+      && occurrences.every(occurrence => occurrenceInsideTriggerRisk(stop, occurrence));
+  }));
+}
+
+function ineffectiveBearingGateStops(
+  manifest: OriginalManifestV1,
+  ambiguities: readonly RouteAmbiguity[],
+) {
+  return orderedOriginalStops(manifest).filter(stop => {
+    const requiredBearing = stop.trigger.approach_bearing_deg;
+    if (requiredBearing == null) return false;
+    const tolerance = stop.trigger.bearing_tolerance_deg ?? 45;
+    const relevant = ambiguities.flatMap(ambiguity => {
+      if (ambiguity.approach_delta_deg < 30) return [];
+      const occurrences = [
+        { progress: ambiguity.first_progress_m, point: ambiguity.first },
+        { progress: ambiguity.second_progress_m, point: ambiguity.second },
+      ];
+      const intended = occurrences.filter(occurrence => (
+        occurrence.progress >= stop.trigger.route_progress_start_m
+        && occurrence.progress <= stop.trigger.route_progress_end_m
+      ));
+      if (intended.length !== 1) return [];
+      const competing = occurrences.find(occurrence => occurrence !== intended[0])!;
+      if (
+        occurrenceDistanceToStop(stop, intended[0]) > stop.trigger.enter_radius_m
+        || !occurrenceInsideTriggerRisk(stop, competing)
+      ) return [];
+      return [{
+        spatial_distance_m: ambiguity.spatial_distance_m,
+        intended: intended[0],
+        competing,
+      }];
+    });
+    if (!relevant.length) return false;
+    // Curved approaches legitimately contain headings outside the authored
+    // gate. Evaluate the one ambiguity pair whose intended occurrence is
+    // closest to the authored cue, with stable geometric tie-breakers, rather
+    // than cherry-picking a favorable tangent or requiring every curve sample.
+    const representative = [...relevant].sort((a, b) => (
+      distanceBetweenLngLatMeters(
+        a.intended.point.coordinate,
         [stop.coordinates.lng, stop.coordinates.lat],
-      ) <= stop.trigger.enter_radius_m
-    ))
-  )));
+      ) - distanceBetweenLngLatMeters(
+        b.intended.point.coordinate,
+        [stop.coordinates.lng, stop.coordinates.lat],
+      )
+      || a.spatial_distance_m - b.spatial_distance_m
+      || a.intended.progress - b.intended.progress
+    ))[0];
+    const intendedHeading = representative.intended.point.heading_deg;
+    // A curved trigger window can expose several intended tangents. The gate
+    // may deliberately admit only the tangent nearest the cue. Require that
+    // nearest anchor to pass, then evaluate every competitor paired with any
+    // intended tangent the authored gate would actually admit.
+    const admitted = relevant.filter(value => {
+      const heading = value.intended.point.heading_deg;
+      return heading != null
+        && angularDifferenceDegrees(requiredBearing, heading) <= tolerance;
+    });
+    const competingHeadings = admitted.map(value => value.competing.point.heading_deg);
+    return intendedHeading == null
+      || angularDifferenceDegrees(requiredBearing, intendedHeading) > tolerance
+      || !admitted.length
+      || competingHeadings.some(value => value == null)
+      || competingHeadings.some(value => (
+        value != null && angularDifferenceDegrees(requiredBearing, value) <= tolerance
+      ));
+  });
 }
 
 function offsetCoordinate(coordinate: LngLat, eastM: number, northM: number): LngLat {
@@ -271,9 +437,13 @@ function createHarness(manifest: OriginalManifestV1): ScenarioHarness {
     queue_counts: new Map(),
     trigger_order: [],
     audio_end_ms: null,
+    queued_playback_stop_ids: new Set(),
+    queued_following_pairs: new Set(),
     maximum_queue_depth: 0,
     audio_overlap_count: 0,
     projection_regressions: 0,
+    minimum_authored_trace_progress_m: null,
+    maximum_authored_trace_progress_m: null,
     minimum_projected_progress_m: null,
     maximum_projected_progress_m: null,
   };
@@ -305,6 +475,7 @@ function completeCurrentAudio(harness: ScenarioHarness, timestampMs: number) {
     timestampMs,
   );
   const queued = next.queued_stop_id;
+  harness.queued_playback_stop_ids.delete(current);
   if (queued) {
     next = {
       ...next,
@@ -318,7 +489,10 @@ function completeCurrentAudio(harness: ScenarioHarness, timestampMs: number) {
   }
   harness.session = next;
   harness.audio_end_ms = null;
-  if (queued) startAudio(harness, queued, timestampMs);
+  if (queued) {
+    harness.queued_playback_stop_ids.add(queued);
+    startAudio(harness, queued, timestampMs);
+  }
 }
 
 function advanceAudio(harness: ScenarioHarness, timestampMs: number) {
@@ -336,6 +510,10 @@ function advanceAudio(harness: ScenarioHarness, timestampMs: number) {
 
 function processSample(harness: ScenarioHarness, sample: OriginalLocationSample) {
   advanceAudio(harness, sample.timestamp_ms);
+  const queuedPlaybackStopId = harness.session.current_stop_id != null
+    && harness.queued_playback_stop_ids.has(harness.session.current_stop_id)
+    ? harness.session.current_stop_id
+    : null;
   const priorProgress = harness.session.last_projected_route_progress_m;
   const evaluation = evaluateOriginalLocation(harness.manifest, harness.session, sample);
   harness.sample_count += 1;
@@ -361,6 +539,17 @@ function processSample(harness: ScenarioHarness, sample: OriginalLocationSample)
     harness.projection_regressions += 1;
   }
   evaluation.events.forEach(event => {
+    if (
+      queuedPlaybackStopId
+      && (
+        event.type === 'stop_armed'
+        || event.type === 'stop_triggered'
+        || event.type === 'stop_queued'
+      )
+      && event.stop_id !== queuedPlaybackStopId
+    ) {
+      harness.queued_following_pairs.add(`${queuedPlaybackStopId}:${event.stop_id}`);
+    }
     if (event.type === 'stop_triggered' || event.type === 'stop_queued') {
       harness.trigger_counts.set(event.stop_id, (harness.trigger_counts.get(event.stop_id) ?? 0) + 1);
       harness.trigger_order.push(event.stop_id);
@@ -369,6 +558,14 @@ function processSample(harness: ScenarioHarness, sample: OriginalLocationSample)
       harness.queue_counts.set(event.stop_id, (harness.queue_counts.get(event.stop_id) ?? 0) + 1);
     }
   });
+  if (
+    evaluation.decision.queue?.following_stop_eligible
+    && evaluation.decision.queue.following_stop_id
+  ) {
+    harness.queued_following_pairs.add(
+      `${evaluation.decision.queue.queued_stop_id}:${evaluation.decision.queue.following_stop_id}`,
+    );
+  }
   const triggered = evaluation.events.find(event => event.type === 'stop_triggered');
   if (triggered?.type === 'stop_triggered') startAudio(harness, triggered.stop_id, sample.timestamp_ms);
   harness.maximum_queue_depth = Math.max(harness.maximum_queue_depth, harness.session.queued_stop_id ? 1 : 0);
@@ -385,6 +582,15 @@ type TraceOptions = {
   restart_after_first_trigger?: boolean;
 };
 
+function recordAuthoredTraceProgress(harness: ScenarioHarness, progressM: number) {
+  harness.minimum_authored_trace_progress_m = harness.minimum_authored_trace_progress_m == null
+    ? progressM
+    : Math.min(harness.minimum_authored_trace_progress_m, progressM);
+  harness.maximum_authored_trace_progress_m = harness.maximum_authored_trace_progress_m == null
+    ? progressM
+    : Math.max(harness.maximum_authored_trace_progress_m, progressM);
+}
+
 function driveTrace(harness: ScenarioHarness, route: RouteMeasure, options: TraceOptions) {
   const speedMps = mphToMps(options.speed_mph);
   const stepM = Math.max(5, speedMps * SAMPLE_INTERVAL_MS / 1_000);
@@ -394,19 +600,21 @@ function driveTrace(harness: ScenarioHarness, route: RouteMeasure, options: Trac
   let progress = clamp(options.start_progress_m ?? (reverse ? distance : 0), 0, distance);
   let index = 0;
   let restarted = false;
-  while ((reverse ? progress >= endProgress : progress <= endProgress) && index < 50_000 && harness.session.status !== 'completed') {
+  while ((reverse ? progress >= endProgress : progress <= endProgress) && index < 50_000) {
+    recordAuthoredTraceProgress(harness, progress);
     const point = routePointAtProgress(harness.manifest, route, progress);
     const heading = point.heading_deg == null
       ? null
       : reverse ? (point.heading_deg + 180) % 360 : point.heading_deg;
-    const jitterPattern = [-14, 8, 19, -7, 3, -18, 11];
-    const jitter = options.jitter ? jitterPattern[index % jitterPattern.length] : 0;
+    const jitter = options.jitter
+      ? GPS_JITTER_PATTERN_M[index % GPS_JITTER_PATTERN_M.length]
+      : 0;
     const coordinate = offsetCoordinate(point.coordinate, jitter, -jitter * 0.35);
     harness.timestamp_ms += SAMPLE_INTERVAL_MS;
     const sample: OriginalLocationSample = {
       lat: coordinate[1],
       lng: coordinate[0],
-      accuracy_m: options.jitter ? 22 : 10,
+      accuracy_m: options.jitter ? GPS_JITTER_ACCURACY_M : 10,
       heading_deg: heading,
       speed_mps: speedMps,
       timestamp_ms: harness.timestamp_ms,
@@ -430,7 +638,13 @@ function driveTrace(harness: ScenarioHarness, route: RouteMeasure, options: Trac
     progress += reverse ? -stepM : stepM;
     index += 1;
   }
-  if (!reverse && endProgress === distance && progress - stepM < distance && harness.session.status !== 'completed') {
+  if (
+    !reverse
+    && endProgress === distance
+    && index < 50_000
+    && progress - stepM < distance
+  ) {
+    recordAuthoredTraceProgress(harness, distance);
     const point = routePointAtProgress(harness.manifest, route, distance);
     for (let fix = 0; fix < 2; fix += 1) {
       harness.timestamp_ms += SAMPLE_INTERVAL_MS;
@@ -509,6 +723,9 @@ function commonIssues(
   }
   if (harness.maximum_queue_depth > 1) issues.push('More than one story entered the narration queue.');
   if (harness.audio_overlap_count > 0) issues.push('Narration playback overlapped.');
+  if (harness.queued_following_pairs.size > 0) {
+    issues.push('A following cue became eligible before queued narration finished.');
+  }
   if (harness.session.status !== 'completed') issues.push(`Run ended ${harness.session.status}, not completed.`);
   return issues;
 }
@@ -532,7 +749,14 @@ function scenarioReport(
       missed_count: harness.session.missed_stop_ids.length,
       maximum_queue_depth: harness.maximum_queue_depth,
       audio_overlap_count: harness.audio_overlap_count,
+      following_cue_during_queued_playback_count:
+        harness.queued_following_pairs.size,
       projection_regressions: harness.projection_regressions,
+      authored_trace_span_m: Math.max(
+        0,
+        (harness.maximum_authored_trace_progress_m ?? 0)
+          - (harness.minimum_authored_trace_progress_m ?? 0),
+      ),
       terminal: harness.session.status === 'completed',
       ...metrics,
     },
@@ -551,11 +775,26 @@ function baselineScenario(
   driveTrace(harness, route, { speed_mph: speedMph, ...traceOptions });
   finishHarness(harness, route);
   const expected = orderedOriginalStops(manifest).map(stop => stop.id);
+  const issues = commonIssues(manifest, harness, { expect_all_completed: true, expected_order: expected });
+  const traceSpanM = (harness.maximum_authored_trace_progress_m ?? 0)
+    - (harness.minimum_authored_trace_progress_m ?? 0);
+  if (traceSpanM < manifest.route.distance_m * 0.99) {
+    issues.push('The continuous trace did not cover the complete authored route.');
+  }
   return scenarioReport(
     id,
     harness,
-    commonIssues(manifest, harness, { expect_all_completed: true, expected_order: expected }),
-    { speed_mph: speedMph, speed_mps: Number(mphToMps(speedMph).toFixed(4)) },
+    issues,
+    {
+      speed_mph: speedMph,
+      speed_mps: Number(mphToMps(speedMph).toFixed(4)),
+      ...(traceOptions.jitter ? {
+        jitter_accuracy_m: GPS_JITTER_ACCURACY_M,
+        maximum_jitter_offset_m: Math.round(
+          Math.max(...GPS_JITTER_PATTERN_M.map(value => Math.hypot(value, value * 0.35))),
+        ),
+      } : {}),
+    },
   );
 }
 
@@ -643,7 +882,6 @@ function reverseScenario(manifest: OriginalManifestV1, route: RouteMeasure) {
     ...harness.session,
     current_stop_id: heldStop.id,
     triggered_stop_ids: [heldStop.id],
-    trigger_state: { ...harness.session.trigger_state, route_initialized: true },
   };
   driveTrace(harness, route, { speed_mph: 36, reverse: true });
   harness.session = completeOriginalStop(
@@ -707,38 +945,95 @@ function restartScenario(manifest: OriginalManifestV1, route: RouteMeasure) {
   });
 }
 
+function syntheticQueueControl(manifest: OriginalManifestV1) {
+  const template = orderedOriginalStops(manifest)[0];
+  const origin = cleanCoordinates(manifest)[0];
+  if (!template || !origin) {
+    return { passed: false, queue_exercised: false, queued_story_id: null as string | null };
+  }
+  const distanceM = 2_000;
+  const endpoint = offsetCoordinate(origin, distanceM, 0);
+  const bounds = {
+    north: Math.max(origin[1], endpoint[1]) + 0.001,
+    south: Math.min(origin[1], endpoint[1]) - 0.001,
+    east: Math.max(origin[0], endpoint[0]) + 0.001,
+    west: Math.min(origin[0], endpoint[0]) - 0.001,
+  };
+  const stopProgresses = [400, 700, 1_300] as const;
+  const controlManifest: OriginalManifestV1 = {
+    ...JSON.parse(JSON.stringify(manifest)) as OriginalManifestV1,
+    route: {
+      ...manifest.route,
+      geometry: { type: 'LineString', coordinates: [origin, endpoint] },
+      bounds,
+      distance_m: distanceM,
+    },
+    offline_map: { ...manifest.offline_map, bounds },
+    stops: stopProgresses.map((progress, index) => ({
+      ...JSON.parse(JSON.stringify(template)) as OriginalStopV1,
+      id: `validation-queue-${index + 1}`,
+      sequence: index + 1,
+      title: `Validation queue cue ${index + 1}`,
+      coordinates: (() => {
+        const coordinate = offsetCoordinate(origin, progress, 0);
+        return { lat: coordinate[1], lng: coordinate[0] };
+      })(),
+      audio_duration_s: index === 0 ? 30 : 5,
+      trigger: {
+        ...template.trigger,
+        enter_radius_m: 100,
+        exit_radius_m: 150,
+        lead_time_s: 0,
+        route_progress_start_m: progress - 100,
+        route_progress_end_m: progress + 100,
+        approach_bearing_deg: undefined,
+        bearing_tolerance_deg: undefined,
+      },
+    })),
+  };
+  const route = measureRoute(controlManifest);
+  const harness = createHarness(controlManifest);
+  driveTrace(harness, route, { speed_mph: 36 });
+  finishHarness(harness, route);
+  const queuedStoryId = 'validation-queue-2';
+  const expected = controlManifest.stops.map(stop => stop.id);
+  const issues = commonIssues(controlManifest, harness, {
+    expect_all_completed: true,
+    expected_order: expected,
+  });
+  const traceSpanM = (harness.maximum_authored_trace_progress_m ?? 0)
+    - (harness.minimum_authored_trace_progress_m ?? 0);
+  if (traceSpanM < distanceM * 0.99) {
+    issues.push('The synthetic queue control did not cover its complete route.');
+  }
+  const queueExercised = (harness.queue_counts.get(queuedStoryId) ?? 0) === 1;
+  return {
+    passed: queueExercised && issues.length === 0,
+    queue_exercised: queueExercised,
+    queued_story_id: queueExercised ? queuedStoryId : null,
+  };
+}
+
 function overlappingQueueScenario(manifest: OriginalManifestV1, route: RouteMeasure) {
   const harness = createHarness(manifest);
-  const first = originalSimulationSamplesForNextCue(manifest, harness.session, {
-    start_timestamp_ms: harness.timestamp_ms + 1_000,
-    speed_mps: mphToMps(36),
-  });
-  if (first) first.samples.forEach(sample => processSample(harness, sample));
-  const second = originalSimulationSamplesForNextCue(manifest, harness.session, {
-    start_timestamp_ms: harness.timestamp_ms + 1_000,
-    speed_mps: mphToMps(36),
-  });
-  if (second) second.samples.forEach(sample => processSample(harness, sample));
-  const observedQueuedStop = harness.session.queued_stop_id;
-  if (harness.audio_end_ms != null) {
-    advanceAudio(harness, harness.audio_end_ms);
-    if (harness.audio_end_ms != null) advanceAudio(harness, harness.audio_end_ms);
-  }
-  const resumeProgress = second?.target_route_progress_m ?? first?.target_route_progress_m ?? 0;
-  driveTrace(harness, route, {
-    speed_mph: 36,
-    start_progress_m: Math.min(manifest.route.distance_m, resumeProgress + mphToMps(36) * 4),
-  });
+  driveTrace(harness, route, { speed_mph: 36 });
   finishHarness(harness, route);
   const expected = orderedOriginalStops(manifest).map(stop => stop.id);
   const issues = commonIssues(manifest, harness, { expect_all_completed: true, expected_order: expected });
-  if (manifest.stops.length > 1 && !observedQueuedStop) issues.push('The overlapping narration scenario did not queue the second story.');
-  if (observedQueuedStop && !harness.session.completed_stop_ids.includes(observedQueuedStop)) {
-    issues.push('The queued narration did not drain to completion.');
+  const traceSpanM = (harness.maximum_authored_trace_progress_m ?? 0)
+    - (harness.minimum_authored_trace_progress_m ?? 0);
+  if (traceSpanM < manifest.route.distance_m * 0.99) {
+    issues.push('The queue-spacing trace did not cover the complete authored route.');
   }
+  const queueControl = syntheticQueueControl(manifest);
+  if (!queueControl.passed) issues.push('The continuous narration queue control did not drain safely.');
   return scenarioReport('overlapping_audio_queue', harness, issues, {
     speed_mph: 36,
-    queue_exercised: Boolean(observedQueuedStop),
+    queue_exercised: queueControl.queue_exercised,
+    queued_story_id: queueControl.queued_story_id,
+    synthetic_queue_control_passed: queueControl.passed,
+    actual_queue_count: [...harness.queue_counts.values()].reduce((total, value) => total + value, 0),
+    queue_spacing_violation_count: harness.queued_following_pairs.size,
   });
 }
 
@@ -810,20 +1105,31 @@ function ambiguityProjectionFailures(
 
 function syntheticAmbiguityControl(manifest: OriginalManifestV1) {
   const origin = cleanCoordinates(manifest)[0];
-  const east = clamp(origin[0] + 0.02, -179.9, 179.9);
-  const north = clamp(origin[1] + 0.02, -89.9, 89.9);
+  const east = offsetCoordinate(origin, 1_600, 0);
+  const north = offsetCoordinate(origin, 0, 1_600);
+  const geometry: LngLat[] = [origin, east, origin, north];
+  const eastDistanceM = distanceBetweenLngLatMeters(origin, east);
+  const geometricDistanceM = geometry.slice(0, -1).reduce((total, coordinate, index) => (
+    total + distanceBetweenLngLatMeters(coordinate, geometry[index + 1])
+  ), 0);
+  const returnProgressM = eastDistanceM + eastDistanceM * 0.25;
+  const returnBearing = originalRouteSegmentBearingDegrees(east, origin) ?? 270;
+  const outboundBearing = originalRouteSegmentBearingDegrees(origin, east) ?? 90;
   const template = orderedOriginalStops(manifest)[0];
   const controlStop = {
     ...template,
     id: 'validation-return-leg',
     sequence: 1,
     title: 'Validation return leg',
-    coordinates: { lat: origin[1], lng: origin[0] + (east - origin[0]) * 0.75 },
+    coordinates: {
+      lat: origin[1] + (east[1] - origin[1]) * 0.75,
+      lng: origin[0] + normalizedLngDelta(east[0] - origin[0]) * 0.75,
+    },
     trigger: {
       ...template.trigger,
-      route_progress_start_m: 2_300,
-      route_progress_end_m: 2_700,
-      approach_bearing_deg: 270,
+      route_progress_start_m: returnProgressM - 150,
+      route_progress_end_m: returnProgressM + 150,
+      approach_bearing_deg: returnBearing,
       bearing_tolerance_deg: 35,
     },
   };
@@ -834,9 +1140,9 @@ function syntheticAmbiguityControl(manifest: OriginalManifestV1) {
       ...manifest.route,
       geometry: {
         type: 'LineString',
-        coordinates: [origin, [east, origin[1]], origin, [origin[0], north]],
+        coordinates: geometry,
       },
-      distance_m: 6_000,
+      distance_m: geometricDistanceM,
     },
     stops: [controlStop],
   };
@@ -844,7 +1150,6 @@ function syntheticAmbiguityControl(manifest: OriginalManifestV1) {
   let session: OriginalSessionV1 = {
     ...seed,
     status: 'active',
-    last_projected_route_progress_m: 2_000,
     trigger_state: { ...seed.trigger_state, route_initialized: true },
   };
   const coordinate = controlStop.coordinates;
@@ -852,7 +1157,7 @@ function syntheticAmbiguityControl(manifest: OriginalManifestV1) {
     lat: coordinate.lat,
     lng: coordinate.lng,
     accuracy_m: 10,
-    heading_deg: 270,
+    heading_deg: returnBearing,
     speed_mps: mphToMps(36),
     timestamp_ms: START_TIMESTAMP_MS + 1_000,
   });
@@ -861,14 +1166,41 @@ function syntheticAmbiguityControl(manifest: OriginalManifestV1) {
     lat: coordinate.lat,
     lng: coordinate.lng,
     accuracy_m: 10,
-    heading_deg: 270,
+    heading_deg: returnBearing,
     speed_mps: mphToMps(36),
     timestamp_ms: START_TIMESTAMP_MS + 4_100,
   });
+  const outboundSeed = createOriginalSession(controlManifest, 'guest', START_TIMESTAMP_MS);
+  let outboundSession: OriginalSessionV1 = {
+    ...outboundSeed,
+    status: 'active',
+    trigger_state: { ...outboundSeed.trigger_state, route_initialized: true },
+  };
+  const outboundFirst = evaluateOriginalLocation(controlManifest, outboundSession, {
+    lat: coordinate.lat,
+    lng: coordinate.lng,
+    accuracy_m: 10,
+    heading_deg: outboundBearing,
+    speed_mps: mphToMps(36),
+    timestamp_ms: START_TIMESTAMP_MS + 1_000,
+  });
+  outboundSession = outboundFirst.session;
+  const outboundSecond = evaluateOriginalLocation(controlManifest, outboundSession, {
+    lat: coordinate.lat,
+    lng: coordinate.lng,
+    accuracy_m: 10,
+    heading_deg: outboundBearing,
+    speed_mps: mphToMps(36),
+    timestamp_ms: START_TIMESTAMP_MS + 4_100,
+  });
+  const outboundTriggered = [...outboundFirst.events, ...outboundSecond.events].some(event => (
+    event.type === 'stop_triggered' || event.type === 'stop_queued'
+  ));
   return first.decision.code === 'armed'
     && second.decision.code === 'triggered'
     && second.decision.stop_id === controlStop.id
-    && (second.projected_route_progress_m ?? 0) > 2_300;
+    && Math.abs((second.projected_route_progress_m ?? 0) - returnProgressM) <= 125
+    && !outboundTriggered;
 }
 
 function syntheticSameDirectionControl(manifest: OriginalManifestV1) {
@@ -955,7 +1287,9 @@ function selfIntersectionScenario(
   const issues = commonIssues(manifest, harness, { expect_all_completed: true, expected_order: expected });
   const ambiguous = ambiguousStops(manifest, ambiguities);
   const directionalAmbiguous = ambiguousStops(manifest, ambiguities, { requires_bearing_only: true });
+  const multipleOccurrenceWindows = multipleOccurrenceWindowStops(manifest, ambiguities);
   const missingBearing = directionalAmbiguous.filter(stop => stop.trigger.approach_bearing_deg == null);
+  const ineffectiveBearing = ineffectiveBearingGateStops(manifest, ambiguities);
   const projectionFailures = ambiguityProjectionFailures(manifest, ambiguities);
   const syntheticDirectionalControlPassed = syntheticAmbiguityControl(manifest);
   const syntheticSameDirectionControlPassed = syntheticSameDirectionControl(manifest);
@@ -975,6 +1309,8 @@ function selfIntersectionScenario(
     issues.push(`${projectionFailures.same_direction_failures} same-direction repeated-route checks lost progress continuity.`);
   }
   missingBearing.forEach(stop => issues.push(`${stop.id} needs a direction gate where the route repeats nearby.`));
+  multipleOccurrenceWindows.forEach(stop => issues.push(`${stop.id} trigger window contains multiple repeated route occurrences.`));
+  ineffectiveBearing.forEach(stop => issues.push(`${stop.id} has a direction gate that does not separate the intended route occurrence.`));
   if (!syntheticDirectionalControlPassed) issues.push('The directional repeated-route control did not select and trigger the return occurrence.');
   if (!syntheticSameDirectionControlPassed) issues.push('The same-direction repeated-route control did not preserve progress continuity.');
   return scenarioReport('self_intersection_ambiguity', harness, issues, {
@@ -984,7 +1320,9 @@ function selfIntersectionScenario(
     directional_repeated_position_count: ambiguities.filter(value => value.approach_delta_deg >= 30).length,
     same_direction_repeated_position_count: ambiguities.filter(value => value.approach_delta_deg < 30).length,
     ambiguous_stop_count: ambiguous.length,
+    multiple_occurrence_window_count: multipleOccurrenceWindows.length,
     missing_bearing_gate_count: missingBearing.length,
+    ineffective_bearing_gate_count: ineffectiveBearing.length,
     projection_case_count: projectionFailures.directional_cases + projectionFailures.same_direction_cases,
     directional_projection_failure_count: projectionFailures.directional_failures,
     same_direction_projection_failure_count: projectionFailures.same_direction_failures,
@@ -1082,9 +1420,17 @@ function segmentsIntersect(a: LngLat, b: LngLat, c: LngLat, d: LngLat) {
 
 function selfIntersectionCount(coordinates: LngLat[]) {
   let count = 0;
+  const firstCoordinate = coordinates[0];
+  const lastCoordinate = coordinates.at(-1);
+  const closed = Boolean(
+    firstCoordinate
+    && lastCoordinate
+    && Math.abs(normalizedLngDelta(lastCoordinate[0] - firstCoordinate[0])) <= 1e-10
+    && Math.abs(lastCoordinate[1] - firstCoordinate[1]) <= 1e-10,
+  );
   for (let first = 0; first < coordinates.length - 1; first += 1) {
     for (let second = first + 2; second < coordinates.length - 1; second += 1) {
-      if (first === 0 && second === coordinates.length - 2) continue;
+      if (closed && first === 0 && second === coordinates.length - 2) continue;
       if (segmentsIntersect(
         coordinates[first], coordinates[first + 1],
         coordinates[second], coordinates[second + 1],

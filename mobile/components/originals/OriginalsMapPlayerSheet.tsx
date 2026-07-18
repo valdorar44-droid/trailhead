@@ -129,6 +129,7 @@ export default function OriginalsMapPlayerSheet({
 
   const isCompleted = session.status === 'completed';
   const isPaused = session.status === 'paused' || uiSession.userPaused || runtime.state === 'paused';
+  const shouldResume = isPaused || session.status === 'ready';
   const currentStory = uiSession.currentStory;
   const nextStory = uiSession.nextStory;
   const displayStory = currentStory || nextStory;
@@ -151,7 +152,7 @@ export default function OriginalsMapPlayerSheet({
       setExpanded(true);
       return;
     }
-    if (!isPaused && session.status === 'active') {
+    if (!shouldResume && session.status === 'active') {
       setExpanded(true);
       return;
     }
@@ -159,8 +160,8 @@ export default function OriginalsMapPlayerSheet({
   };
 
   const togglePause = () => {
-    const action = isPaused || session.status === 'ready' ? runtime.resumeTour : runtime.pauseTour;
-    void runAction(isPaused ? 'resume' : 'pause', action);
+    const action = shouldResume ? runtime.resumeTour : runtime.pauseTour;
+    void runAction(shouldResume ? 'resume' : 'pause', action);
   };
 
   const endForNow = () => {
@@ -176,7 +177,7 @@ export default function OriginalsMapPlayerSheet({
       <View pointerEvents="box-none" style={[styles.overlayRoot, { bottom: panelBottom }] }>
         <TouchableOpacity
           accessibilityRole="button"
-          accessibilityLabel={isCompleted ? 'View Original completion recap' : isPaused ? 'Resume Original' : 'Open Original player'}
+          accessibilityLabel={isCompleted ? 'View Original completion recap' : shouldResume ? 'Resume Original' : 'Open Original player'}
           disabled={Boolean(busyAction)}
           onPress={resumeFromPill}
           style={[
@@ -196,7 +197,7 @@ export default function OriginalsMapPlayerSheet({
           <View style={styles.pillCopy}>
             <Text style={[styles.pillKicker, { color: C.orange }]}>TRAILHEAD ORIGINAL</Text>
             <Text style={[styles.pillTitle, { color: C.text }]} numberOfLines={1}>
-              {isCompleted ? 'View drive recap' : isPaused ? 'Resume Original' : 'Open Original player'}
+              {isCompleted ? 'View drive recap' : shouldResume ? 'Resume Original' : 'Open Original player'}
             </Text>
             <Text style={[styles.pillMeta, { color: C.text3 }]} numberOfLines={1}>
               {manifest.title} · {terminalCount}/{manifest.stops.length} stories
@@ -339,14 +340,14 @@ export default function OriginalsMapPlayerSheet({
                   />
                   <TouchableOpacity
                     accessibilityRole="button"
-                    accessibilityLabel={isPaused ? 'Resume Original' : 'Pause Original'}
+                    accessibilityLabel={shouldResume ? 'Resume Original' : 'Pause Original'}
                     disabled={Boolean(busyAction)}
                     onPress={togglePause}
                     style={[styles.primaryControl, { backgroundColor: C.orange, opacity: busyAction ? 0.64 : 1 }]}
                   >
                     {busyAction === 'pause' || busyAction === 'resume'
                       ? <ActivityIndicator size="small" color="#FFFFFF" />
-                      : <Ionicons name={isPaused ? 'play' : 'pause'} size={29} color="#FFFFFF" />}
+                      : <Ionicons name={shouldResume ? 'play' : 'pause'} size={29} color="#FFFFFF" />}
                   </TouchableOpacity>
                   <TransportButton
                     icon="play-forward"
@@ -610,7 +611,6 @@ const styles = StyleSheet.create({
   storyTitle: { fontSize: 20, lineHeight: 24, fontWeight: '800', marginTop: 2 },
   storyMeta: { fontSize: 12, fontWeight: '600', marginTop: 3, fontVariant: ['tabular-nums'] },
   caption: {
-    maxHeight: 112,
     borderRadius: 14,
     borderWidth: StyleSheet.hairlineWidth,
     marginTop: 12,

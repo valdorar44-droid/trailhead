@@ -6890,7 +6890,11 @@ function MapScreen() {
   }, [insets.top, originalsMapExperience.active, originalsMapExperience.routeCoords, windowHeight]);
 
   useEffect(() => {
-    if (!mapSurfaceReady || !originalsMapExperience.active || navMode) return;
+    if (!mapSurfaceReady || !originalsMapExperience.active) return;
+    if (navMode) {
+      originalsAutoFitRef.current = '';
+      return;
+    }
     const first = originalsMapExperience.routeCoords[0];
     const last = originalsMapExperience.routeCoords.at(-1);
     const signature = [
@@ -6900,6 +6904,9 @@ function MapScreen() {
       originalsMapExperience.routeCoords.length,
       first?.join(','),
       last?.join(','),
+      windowHeight,
+      insets.top,
+      navMode,
     ].join(':');
     if (originalsAutoFitRef.current === signature) return;
     originalsAutoFitRef.current = signature;
@@ -6907,6 +6914,7 @@ function MapScreen() {
     return () => clearTimeout(timer);
   }, [
     fitOriginalsRoute,
+    insets.top,
     mapSurfaceGeneration,
     mapSurfaceReady,
     navMode,
@@ -6914,6 +6922,7 @@ function MapScreen() {
     originalsMapExperience.packId,
     originalsMapExperience.routeCoords,
     originalsMapExperience.version,
+    windowHeight,
   ]);
 
   const clearRouteBuildMapTimers = useCallback(() => {
@@ -22483,6 +22492,7 @@ function MapScreen() {
   }, [activeFilters, areaCamps, campDiscoveryWideActive]);
   const showCampDiscoverySheet = Boolean(
     showCampPins &&
+    !originalsMapExperience.active &&
     !campDiscoverySheetDismissed &&
     !navMode &&
     !safeWaterPlanningActive &&
@@ -22711,7 +22721,7 @@ function MapScreen() {
           routeBuildCoords={routeBuildSession?.routeCoords ?? []}
           routeBuildReveal={routeBuildReveal}
           routeBuildStops={routeBuildSession?.previewStops ?? []}
-          originalsRouteActive={originalsMapExperience.active}
+          originalsRouteActive={originalsMapExperience.active && !navMode}
           originalsRouteCoords={originalsMapExperience.routeCoords}
           originalsRouteProgress={originalsMapExperience.routeProgress}
           originalsCueStops={originalsMapExperience.cues}
@@ -23567,7 +23577,7 @@ function MapScreen() {
         </TrailheadSnapSheet>
       )}
 
-      {copilotResults.length > 0 && !androidInlineSearchKeyboardActive && !scopedMapSearchActive && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && (
+      {copilotResults.length > 0 && !androidInlineSearchKeyboardActive && !scopedMapSearchActive && !routeScout && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !navMode && !safeWaterPlanningActive && !waterFollowActive && !showSearch && !originalsMapExperience.active && (
         <View style={s.copilotResultRail} pointerEvents="auto">
           <View style={s.copilotResultHeader}>
             <View style={s.copilotResultTitleWrap}>
@@ -23709,7 +23719,7 @@ function MapScreen() {
         </View>
       )}
 
-      {scopedMapSearchActive && mapSearchSession && !androidInlineSearchKeyboardActive && !inlineSearchOpen && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !showMapDrawer && !showFilterSheet && (
+      {scopedMapSearchActive && mapSearchSession && !androidInlineSearchKeyboardActive && !inlineSearchOpen && !selectedPlace && !selectedCamp && !selectedTrail && !selectedCommunityPin && !showMapDrawer && !showFilterSheet && !originalsMapExperience.active && (
         <View style={[s.scopedSearchRail, { bottom: bottomInset + 90 }]} pointerEvents="auto">
           <View style={s.scopedSearchHeader}>
             <View style={{ flex: 1, minWidth: 0 }}>
@@ -23969,7 +23979,7 @@ function MapScreen() {
         </TouchableOpacity>
       </View>
 
-      {safeWaterPlanningActive && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && (
+      {safeWaterPlanningActive && !showSearch && !selectedCamp && !selectedPlace && !selectedTrail && !selectedCommunityPin && !originalsMapExperience.active && (
         <View style={[s.safeWaterPanel, safeWaterSheetOwnsPage && s.safeWaterPanelTakeover]} pointerEvents="auto">
           <View style={s.safeWaterHeader}>
             <View style={s.safeWaterTitleRow}>
@@ -24737,7 +24747,7 @@ function MapScreen() {
         </View>
       )}
 
-      {showDiscoveryPanel && !navMode && !selectedCamp && !selectedCommunityPin && !selectedTrail && (
+      {showDiscoveryPanel && !navMode && !selectedCamp && !selectedCommunityPin && !selectedTrail && !originalsMapExperience.active && (
         <TrailheadSnapSheet
           initialStage="peek"
           maxFullRatio={0.82}

@@ -3407,7 +3407,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Route line ────────────────────────────────────────────────── */}
-      {routeCoords.length > 0 && !waterRouteVisualActive && !routeBuildActive && (
+      {routeCoords.length > 0 && !waterRouteVisualActive && !routeBuildActive && !originalsRouteVisual.active && (
         <MapGL.ShapeSource id="route" shape={lineFC(routeCoords)}>
           <MapGL.LineLayer
             id="route-shadow"
@@ -3523,7 +3523,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapGL.ShapeSource>
       )}
 
-      {routeTurnFC.features.length > 0 && !waterRouteVisualActive && !routeBuildActive && (
+      {routeTurnFC.features.length > 0 && !waterRouteVisualActive && !routeBuildActive && !originalsRouteVisual.active && (
         <MapGL.ShapeSource id="route-turns" shape={routeTurnFC}>
           <MapGL.SymbolLayer
             id="route-turn-shadows"
@@ -3556,7 +3556,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Passed route dimmed overlay ───────────────────────────────── */}
-      {passedCoords.length > 1 && !waterRouteVisualActive && !routeBuildActive && (
+      {passedCoords.length > 1 && !waterRouteVisualActive && !routeBuildActive && !originalsRouteVisual.active && (
         <MapGL.ShapeSource id="route-passed" shape={lineFC(passedCoords)}>
           <MapGL.LineLayer
             id="route-passed-line"
@@ -3566,7 +3566,7 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
       )}
 
       {/* ── Breadcrumb trail ──────────────────────────────────────────── */}
-      {breadcrumb.length > 1 && !waterRouteVisualActive && !routeBuildActive && (
+      {breadcrumb.length > 1 && !waterRouteVisualActive && !routeBuildActive && !originalsRouteVisual.active && (
         <MapGL.ShapeSource id="breadcrumb" shape={lineFC(breadcrumb)}>
           <MapGL.LineLayer
             id="breadcrumb-line"

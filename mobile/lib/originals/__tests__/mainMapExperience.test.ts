@@ -116,9 +116,14 @@ const detailScreenSource = readFileSync(
   fileURLToPath(new NodeURL('../../../app/originals/[id].tsx', import.meta.url)),
   'utf8',
 );
+const beginStartIndex = detailScreenSource.indexOf('const beginStart');
+const beginSimulationIndex = detailScreenSource.indexOf('const beginSimulation');
+assert.notEqual(beginStartIndex, -1, 'Original detail must define beginStart');
+assert.notEqual(beginSimulationIndex, -1, 'Original detail must define beginSimulation');
+assert.ok(beginSimulationIndex > beginStartIndex, 'beginSimulation must follow the consumer start block');
 const consumerStartBlock = detailScreenSource.slice(
-  detailScreenSource.indexOf('const beginStart'),
-  detailScreenSource.indexOf('const beginSimulation'),
+  beginStartIndex,
+  beginSimulationIndex,
 );
 assert.match(consumerStartBlock, /originalStartDestination/);
 assert.doesNotMatch(
@@ -133,6 +138,7 @@ const standalonePlayerSource = readFileSync(
 );
 assert.match(standalonePlayerSource, /consumerOriginalPlayerShouldRedirect/);
 assert.match(standalonePlayerSource, /Opening this Original on the Trailhead map/);
+assert.match(standalonePlayerSource, /runtimeSession\.owner_scope === ownerScope/);
 assert.match(
   standalonePlayerSource,
   /pathname: '\/originals\/\[id\]'/,
@@ -143,14 +149,24 @@ const mainMapPlayerSource = readFileSync(
   fileURLToPath(new NodeURL('../../../components/originals/OriginalsMapPlayerSheet.tsx', import.meta.url)),
   'utf8',
 );
+const endForNowIndex = mainMapPlayerSource.indexOf('const endForNow');
+const collapsedPlayerIndex = mainMapPlayerSource.indexOf('if (!panelExpanded)');
+assert.notEqual(endForNowIndex, -1, 'main-map player must define endForNow');
+assert.notEqual(collapsedPlayerIndex, -1, 'main-map player must define its collapsed state');
+assert.ok(collapsedPlayerIndex > endForNowIndex, 'collapsed player must follow endForNow');
 const completionCloseBlock = mainMapPlayerSource.slice(
-  mainMapPlayerSource.indexOf('const endForNow'),
-  mainMapPlayerSource.indexOf('if (!panelExpanded)'),
+  endForNowIndex,
+  collapsedPlayerIndex,
 );
 assert.match(
   completionCloseBlock,
   /if \(isCompleted\)[\s\S]*runtime\.stopTour/,
   'closing a completion recap must remove the Original route and player from the main map',
+);
+assert.match(
+  mainMapPlayerSource,
+  /const shouldResume = isPaused \|\| session\.status === 'ready'/,
+  'ready sessions must present a Resume control',
 );
 
 console.log('Originals main-map experience tests passed.');

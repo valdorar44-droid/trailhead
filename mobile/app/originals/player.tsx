@@ -110,6 +110,7 @@ export default function OriginalPlayerScreen() {
     const runtimeMatchesRequest = Boolean(
       runtimeManifest
       && runtimeSession
+      && runtimeSession.owner_scope === ownerScope
       && runtimeSession.pack_id === runtimeManifest.pack_id
       && runtimeSession.version === runtimeManifest.version
       && runtimeSession.manifest_id === runtimeManifest.manifest_id
@@ -133,6 +134,7 @@ export default function OriginalPlayerScreen() {
     originalsRuntime.manifest?.pack_id,
     originalsRuntime.manifest?.manifest_id,
     originalsRuntime.manifest?.version,
+    ownerScope,
     redirectConsumerToMainMap,
     requestedVersion,
     router,

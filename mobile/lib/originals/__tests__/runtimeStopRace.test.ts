@@ -7,6 +7,7 @@ import TestRenderer, { act } from 'react-test-renderer';
 import { originalManifest } from './fixtures';
 
 type Runtime = import('../runtime').OriginalsRuntimeValue;
+type AdminRuntime = import('../runtime').OriginalsAdminRuntimeValue;
 
 (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
@@ -32,7 +33,9 @@ const nativeRuntimeStubs: Record<string, string> = {
   `,
   './analytics': `
     export const ORIGINALS_ANALYTICS_EVENTS = { downloadResult: 'download', stopOutcome: 'stop' };
-    export function trackOriginalsAnalyticsEvent() {}
+    export function trackOriginalsAnalyticsEvent() {
+      globalThis.__originalsRuntimeAnalyticsCount = (globalThis.__originalsRuntimeAnalyticsCount || 0) + 1;
+    }
   `,
   './audioAdapter': `
     export const expoAudioOriginalAudioAdapter = {};
@@ -86,6 +89,7 @@ async function loadRuntimeModule() {
       dependencies: unknown;
     }>;
     useOriginalsRuntime: () => Runtime;
+    useOriginalsAdminRuntime: () => AdminRuntime;
   };
 }
 
@@ -97,15 +101,17 @@ function deferred<T>() {
 
 async function main() {
   const globals = globalThis as typeof globalThis & {
-    __originalsRuntimeAuthState?: { user: { id: string } | null; token: string | null };
+    __originalsRuntimeAuthState?: { user: { id: string; is_admin?: boolean } | null; token: string | null };
     __originalsRuntimeEpoch?: number;
     __originalsRuntimeAcquire?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeClaimFeatured?: (...args: unknown[]) => Promise<unknown>;
+    __originalsRuntimeAnalyticsCount?: number;
   };
-  globals.__originalsRuntimeAuthState = { user: null, token: null };
+  globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
   globals.__originalsRuntimeEpoch = 0;
   globals.__originalsRuntimeAcquire = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeClaimFeatured = async () => { throw new Error('unused'); };
+  globals.__originalsRuntimeAnalyticsCount = 0;
   const runtimeModule = await loadRuntimeModule();
   const accessGate = deferred<Record<string, unknown>>();
   const accessEntered = deferred<void>();
@@ -151,7 +157,7 @@ async function main() {
         if (accessOverride) return accessOverride();
         accessReads += 1;
         if (accessReads === 1) {
-          return { owner_scope: 'guest', access_type: 'guest_free' };
+          return { owner_scope: 'account:admin-preview', access_type: 'admin_preview' };
         }
         accessEntered.resolve();
         return accessGate.promise;
@@ -195,8 +201,10 @@ async function main() {
   };
 
   let runtime: Runtime | null = null;
+  let adminRuntime: AdminRuntime | null = null;
   function CaptureRuntime() {
     runtime = runtimeModule.useOriginalsRuntime();
+    adminRuntime = runtimeModule.useOriginalsAdminRuntime();
     return null;
   }
 
@@ -211,10 +219,30 @@ async function main() {
     );
   });
   assert.ok(runtime);
-  await act(async () => { await runtime!.startSimulation(manifest); });
+  globals.__originalsRuntimeAuthState = { user: { id: 'non-admin' }, token: 'user-token' };
+  await assert.rejects(
+    adminRuntime!.startSimulation(manifest),
+    /available only to Trailhead admins/i,
+  );
+  assert.equal(locationStartCount, 0, 'a rejected lab launch cannot start native location');
+  globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
+  await act(async () => { await adminRuntime!.startSimulation(manifest); });
+  assert.equal(locationStartCount, 0, 'an admin lab session never starts native location');
+
+  globals.__originalsRuntimeAuthState = { user: { id: 'non-admin' }, token: 'user-token' };
+  await assert.rejects(
+    adminRuntime!.submitLocationSample({
+      lat: 0,
+      lng: 0,
+      accuracy_m: 10,
+      timestamp_ms: 500,
+    }),
+    /admin Virtual Drive Lab session/i,
+  );
+  globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
 
   await act(async () => {
-    await runtime!.submitLocationSample({
+    await adminRuntime!.submitLocationSample({
       lat: 0,
       lng: 0.0045,
       accuracy_m: 10,
@@ -226,7 +254,7 @@ async function main() {
   let firstStop!: Promise<void>;
   let concurrentStop!: Promise<void>;
   await act(async () => {
-    const triggeringSample = runtime!.submitLocationSample({
+    const triggeringSample = adminRuntime!.submitLocationSample({
       lat: 0,
       lng: 0.0045,
       accuracy_m: 10,
@@ -240,13 +268,15 @@ async function main() {
     concurrentStop = runtime!.stopTour();
     assert.strictEqual(concurrentStop, firstStop, 'concurrent stop calls coalesce onto one cleanup promise');
 
-    accessGate.resolve({ owner_scope: 'guest', access_type: 'guest_free' });
+    accessGate.resolve({ owner_scope: 'account:admin-preview', access_type: 'admin_preview' });
     await Promise.all([firstStop, concurrentStop, triggeringSample]);
   });
 
   assert.equal(playCount, 0, 'an in-flight cue cannot play after stop invalidates its generation');
   assert.equal(sessionSaveCount, 0, 'the ephemeral simulation session is never persisted by stop');
   assert.equal(setActiveCount, 0, 'the ephemeral simulation session never replaces durable active state');
+  assert.equal(globals.__originalsRuntimeAnalyticsCount, 0, 'synthetic lab activity never emits production analytics');
+  globals.__originalsRuntimeAuthState = { user: null, token: null };
   const ownershipRuntime = runtime as unknown as Runtime;
 
   const guestAcquireEntered = deferred<void>();

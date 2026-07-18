@@ -33,6 +33,7 @@ const rootLayout = read(join(mobileRoot, 'app/_layout.tsx'));
 const server = read(join(repoRoot, 'dashboard/server.py'));
 const nearbyContext = read(join(mobileRoot, 'lib/exploreNearbyContext.ts'));
 const originalsShelf = read(join(mobileRoot, 'components/originals/OriginalsShelf.tsx'));
+const exploreHero = read(join(mobileRoot, 'components/explore/ExploreHero.tsx'));
 const ownedOriginals = read(join(mobileRoot, 'components/originals/OwnedOriginalsSection.tsx'));
 const originalsUiService = read(join(mobileRoot, 'components/originals/originalsUiService.ts'));
 const tripLibraryAdapter = read(join(mobileRoot, 'components/trips/trip-library-adapter.ts'));
@@ -212,13 +213,16 @@ assert(
   'Trail actions must offer directions to the trailhead without a decorative route preview.',
 );
 assert(
-  guide.includes('{showExploreHome ? <OriginalsShelf /> : null}')
+  !guide.includes('<OriginalsShelf')
+    && exploreHero.includes('onOpenOriginals')
+    && exploreHero.includes('Open Trailhead Originals self-guided drives')
+    && guide.includes("onOpenOriginals={() => router.push('/originals' as any)}")
     && !originalsShelf.includes('TrailheadRailSkeleton')
     && originalsShelf.includes("studioOnly ? 'Originals Studio' : 'Self-guided drives'")
     && originalsShelf.includes("isAdmin ? 'Open Originals Studio' : 'See all Trailhead Originals'")
     && originalsShelf.includes("isAdmin ? 'Studio' : 'All'")
     && originalsShelf.includes("if (!isAdmin && visible.length === 0) return null;"),
-  'Originals discovery must stay on Explore home, avoid a disabled loading flash, and retain a stable admin Studio entry.',
+  'Originals discovery must use its own Explore navigation lane, never load inside Featured Places, and retain a stable admin Studio entry.',
 );
 assert(
   ownedOriginals.includes('requestRef.current')

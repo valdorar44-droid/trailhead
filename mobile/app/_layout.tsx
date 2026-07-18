@@ -50,6 +50,7 @@ import {
 import { accountRecoveryContext } from '@/lib/tripRepository/accountRecovery';
 import { routeBuilderRequestFromGeoUrl } from '@/lib/carNavigationIntent';
 import { OriginalsRuntimeProvider } from '@/lib/originals/runtime';
+import { consumeOriginalPreviewUrl } from '@/lib/originals/previewAccess';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -259,6 +260,18 @@ export default function RootLayout() {
   }
 
   async function handleIncomingUrl(url: string | null | undefined) {
+    if (url?.includes('originals_preview_token')) {
+      try {
+        const previewRoute = await consumeOriginalPreviewUrl(url);
+        if (previewRoute) {
+          router.push(previewRoute as any);
+          return;
+        }
+      } catch (error: any) {
+        Alert.alert('Preview link unavailable', error?.message || 'This internal preview link is invalid or expired.');
+        return;
+      }
+    }
     if (verificationTokenFromUrl(url)) {
       await handleVerificationUrl(url);
       return;

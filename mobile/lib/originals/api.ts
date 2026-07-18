@@ -1,6 +1,8 @@
 import { TRAILHEAD_API_BASE } from '../apiBase';
 import { storage } from '../storage';
+import type { OriginalFeedbackPayloadV1 } from './feedbackStore';
 import { validateOriginalManifest } from './manifest';
+import { getOriginalPreviewToken } from './previewAccess';
 import type {
   OriginalAcquisition,
   OriginalCatalogResponse,
@@ -43,6 +45,8 @@ async function originalsRequest<T>(path: string, options: RequestOptions = {}): 
     ...(options.headers as Record<string, string> | undefined),
   };
   if (token) headers.Authorization = `Bearer ${token}`;
+  const previewToken = await getOriginalPreviewToken().catch(() => null);
+  if (previewToken) headers['X-Trailhead-Originals-Preview'] = previewToken;
   const response = await fetch(`${TRAILHEAD_API_BASE}${path}`, { ...request, headers });
   const body = await response.json().catch(() => null);
   if (!response.ok) {
@@ -70,6 +74,19 @@ export type AcquireOriginalOptions = {
   authToken?: string | null;
 };
 
+export type SubmitOriginalFeedbackOptions = {
+  idempotencyKey: string;
+  authToken?: string | null;
+  guestToken?: string;
+  signal?: AbortSignal;
+};
+
+export type OriginalPreviewTokenResponse = {
+  token: string;
+  expires_at: number;
+  header: 'X-Trailhead-Originals-Preview';
+};
+
 export type OriginalAdminDraftSummary = {
   id: string;
   slug: string;
@@ -80,6 +97,15 @@ export type OriginalAdminDraftSummary = {
 };
 
 export const originalsApi = {
+  adminPreviewToken(expiresInSeconds = 3_600, signal?: AbortSignal) {
+    return originalsRequest<OriginalPreviewTokenResponse>('/api/admin/originals/preview-token', {
+      method: 'POST',
+      signal,
+      requireAuth: true,
+      body: JSON.stringify({ expires_in_seconds: expiresInSeconds }),
+    });
+  },
+
   adminDrafts(signal?: AbortSignal) {
     return originalsRequest<{ items: OriginalAdminDraftSummary[] }>('/api/admin/originals', {
       signal,
@@ -153,6 +179,29 @@ export const originalsApi = {
       signal,
       ...(authToken !== undefined ? { authToken } : {}),
       requireAuth: true,
+    });
+  },
+
+  feedbackGuestToken(packId: string, version: number, installId: string, signal?: AbortSignal) {
+    return originalsRequest<{ token: string; expires_at?: string }>('/api/originals/feedback/guest-token', {
+      method: 'POST',
+      signal,
+      authToken: null,
+      headers: { 'X-Trailhead-Install-ID': installId },
+      body: JSON.stringify({ pack_id: packId, version }),
+    });
+  },
+
+  submitFeedback(id: string, payload: OriginalFeedbackPayloadV1, options: SubmitOriginalFeedbackOptions) {
+    return originalsRequest<Record<string, unknown>>(`/api/originals/${encodeURIComponent(id)}/feedback`, {
+      method: 'POST',
+      signal: options.signal,
+      ...(Object.prototype.hasOwnProperty.call(options, 'authToken') ? { authToken: options.authToken } : {}),
+      headers: {
+        'Idempotency-Key': options.idempotencyKey,
+        ...(options.guestToken ? { 'X-Original-Feedback-Token': options.guestToken } : {}),
+      },
+      body: JSON.stringify(payload),
     });
   },
 

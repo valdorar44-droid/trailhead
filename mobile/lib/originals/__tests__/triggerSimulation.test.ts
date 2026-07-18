@@ -3,6 +3,15 @@ import { validateOriginalManifest } from '../manifest';
 import { createOriginalSession } from '../session';
 import { evaluateOriginalLocation } from '../triggerEngine';
 import { originalSimulationSamplesForNextCue } from '../triggerSimulation';
+import {
+  createOriginalVirtualDriveLabState,
+  nextOriginalVirtualDriveCueProgress,
+  ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
+  originalVirtualDriveCueStatuses,
+  seekOriginalVirtualDriveLab,
+  tickOriginalVirtualDriveLab,
+  updateOriginalVirtualDriveLabState,
+} from '../virtualDriveLab';
 import type { OriginalManifestV1, OriginalSessionV1 } from '../types';
 import { originalManifest } from './fixtures';
 
@@ -99,5 +108,87 @@ const completeSession: OriginalSessionV1 = {
   triggered_stop_ids: manifest.stops.map(stop => stop.id),
 };
 assert.equal(originalSimulationSamplesForNextCue(manifest, completeSession), null);
+
+const pausedDrive = createOriginalVirtualDriveLabState(manifest, {
+  progress_m: 300,
+  speed_mps: 20,
+  synthetic_timestamp_ms: 1_000,
+});
+const pausedTick = tickOriginalVirtualDriveLab(manifest, pausedDrive, 3_100);
+assert.strictEqual(pausedTick.state, pausedDrive, 'a paused route clock is side-effect free');
+assert.equal(pausedTick.sample, null);
+
+let continuousDrive = updateOriginalVirtualDriveLabState(manifest, pausedDrive, { playing: true });
+const continuousFirst = tickOriginalVirtualDriveLab(manifest, continuousDrive, 3_100);
+assert.ok(continuousFirst.sample);
+assert.equal(continuousFirst.sample.accuracy_m, 10);
+assert.equal(continuousFirst.sample.heading_deg, 90);
+assert(continuousFirst.state.progress_m > pausedDrive.progress_m);
+const continuousFirstEvaluation = evaluateOriginalLocation(
+  manifest,
+  activeSession(manifest),
+  continuousFirst.sample,
+);
+assert.equal(continuousFirstEvaluation.decision.code, 'armed');
+
+const continuousSecond = tickOriginalVirtualDriveLab(manifest, continuousFirst.state, 3_100);
+assert.ok(continuousSecond.sample);
+const continuousSecondEvaluation = evaluateOriginalLocation(
+  manifest,
+  continuousFirstEvaluation.session,
+  continuousSecond.sample,
+);
+assert.equal(continuousSecondEvaluation.decision.code, 'triggered');
+assert.equal(continuousSecondEvaluation.session.current_stop_id, 'story-1');
+
+const poorGpsDrive = updateOriginalVirtualDriveLabState(manifest, continuousFirst.state, {
+  gps_quality: 'poor',
+});
+const poorGpsTick = tickOriginalVirtualDriveLab(manifest, poorGpsDrive, 3_100);
+assert.ok(poorGpsTick.sample);
+assert.equal(poorGpsTick.sample.accuracy_m, 150);
+assert.equal(
+  evaluateOriginalLocation(manifest, activeSession(manifest), poorGpsTick.sample).decision.code,
+  'poor_accuracy',
+);
+
+const offRouteDrive = updateOriginalVirtualDriveLabState(manifest, continuousFirst.state, {
+  off_route_m: ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
+});
+const offRouteTick = tickOriginalVirtualDriveLab(manifest, offRouteDrive, 3_100);
+assert.ok(offRouteTick.sample);
+assert.equal(
+  evaluateOriginalLocation(manifest, activeSession(manifest), offRouteTick.sample).decision.code,
+  'off_route',
+);
+
+const reverseDrive = updateOriginalVirtualDriveLabState(manifest, continuousFirst.state, {
+  direction: 'reverse',
+});
+const reverseTick = tickOriginalVirtualDriveLab(manifest, reverseDrive, 3_100);
+assert.ok(reverseTick.sample);
+assert(reverseTick.state.progress_m < reverseDrive.progress_m);
+assert.equal(reverseTick.sample.heading_deg, 270);
+
+assert.equal(seekOriginalVirtualDriveLab(manifest, pausedDrive, -1).progress_m, 0);
+assert.equal(
+  seekOriginalVirtualDriveLab(manifest, pausedDrive, manifest.route.distance_m + 1).progress_m,
+  manifest.route.distance_m,
+);
+const cueStatuses = originalVirtualDriveCueStatuses(
+  manifest,
+  continuousSecondEvaluation.session,
+  continuousSecond.state,
+);
+assert.equal(cueStatuses[0].status, 'playing');
+assert.equal(cueStatuses[1].status, 'ahead');
+assert.equal(
+  nextOriginalVirtualDriveCueProgress(
+    manifest,
+    continuousSecondEvaluation.session,
+    continuousSecond.state,
+  ),
+  manifest.stops[1].trigger.route_progress_start_m,
+);
 
 console.log('Originals trigger simulation tests passed.');

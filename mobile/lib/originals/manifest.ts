@@ -74,6 +74,22 @@ function validateStop(stop: OriginalStopV1, index: number, routeDistance: number
   stop.citations.forEach((citation, citationIndex) => {
     assertText(citation.title, `${label}.citations[${citationIndex}].title`);
     assertText(citation.url, `${label}.citations[${citationIndex}].url`);
+    if (citation.role != null && citation.role !== 'story' && citation.role !== 'operational') {
+      throw new OriginalManifestError(`${label}.citations[${citationIndex}].role must be story or operational.`);
+    }
+    if (
+      citation.authority != null
+      && citation.authority !== 'official'
+      && citation.authority !== 'authoritative'
+    ) {
+      throw new OriginalManifestError(`${label}.citations[${citationIndex}].authority is invalid.`);
+    }
+    if (citation.scope != null && (
+      !Array.isArray(citation.scope)
+      || citation.scope.some(value => typeof value !== 'string' || !value.trim())
+    )) {
+      throw new OriginalManifestError(`${label}.citations[${citationIndex}].scope must contain non-empty strings.`);
+    }
   });
 }
 

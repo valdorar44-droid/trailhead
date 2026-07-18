@@ -1,13 +1,13 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import quote, unquote
-from fastapi import FastAPI, HTTPException, Depends, Header, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Header, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -143,6 +143,8 @@ from db.store import (
     ExplorerOriginalClaimRequiredError,
     MonthlyTripPackClaimUsedError, ExplorerTripPackClaimRequiredError,
     OriginalManifestAccessError,
+    OriginalFeedbackTokenError, OriginalFeedbackConflictError,
+    OriginalFeedbackRateLimitError,
     save_authored_trip_pack_draft, get_authored_trip_pack_admin,
     list_authored_trip_pack_versions_admin, list_authored_trip_packs_admin,
     publish_authored_trip_pack, list_published_trip_packs, get_published_trip_pack,
@@ -155,9 +157,17 @@ from db.store import (
     list_owned_authored_originals, restore_owned_authored_originals,
     get_published_original_manifest,
     save_authored_original_asset_record, list_authored_original_asset_records,
+    attest_authored_original_generator_license,
     get_authored_original_asset_record_admin,
     get_authored_original_asset_record_admin_by_sha256,
     get_authored_original_device_preview_manifest,
+    create_authored_original_virtual_validation_run,
+    execute_authored_original_virtual_validation_run,
+    start_authored_original_virtual_validation,
+    get_authored_original_virtual_validation_report,
+    get_latest_authored_original_virtual_validation_report,
+    issue_original_feedback_guest_token, submit_original_feedback,
+    list_original_feedback_admin, moderate_original_feedback,
     get_published_original_asset_record,
     validate_original_analytics_dimensions, original_transcript_sha256,
     upsert_route_intelligence_places, list_cached_places_near_samples,
@@ -268,7 +278,13 @@ REPORT_CREDIT_PHOTO = 10   # credits for a report with photo
 # Keyed by IP. Buckets reset after ANON_WINDOW_S seconds.
 # Authenticated users bypass this entirely — credits are their limit.
 _ANON_WINDOW_S = 604_800   # 7-day rolling window
-_ANON_LIMITS   = {"chat": 15, "plan": 1, "insight": 1, "search": 1}  # per window
+_ANON_LIMITS   = {
+    "chat": 15,
+    "plan": 1,
+    "insight": 1,
+    "search": 1,
+    "original_feedback_token": 10,
+}  # per window
 _anon_buckets: dict[str, dict] = {}
 
 def _client_ip(request: Request) -> str:
@@ -277,6 +293,56 @@ def _client_ip(request: Request) -> str:
     if forwarded:
         return forwarded.split(",")[0].strip()
     return request.client.host
+
+
+def _original_feedback_subject_hmac(
+    subject_kind: str,
+    pack_id: str,
+    version: int,
+    subject_value: str,
+) -> str:
+    """Return an unlinkable, Original-version-scoped server-keyed digest."""
+    if subject_kind not in {"ip", "install"}:
+        raise ValueError("Unsupported Original feedback quota subject")
+    scoped_key = hmac.new(
+        str(settings.secret_key).encode("utf-8"),
+        b"trailhead-original-feedback-token-quota-v1",
+        hashlib.sha256,
+    ).digest()
+    material = (
+        f"{subject_kind}\0{pack_id}\0{int(version)}\0{subject_value}"
+    ).encode("utf-8")
+    return hmac.new(scoped_key, material, hashlib.sha256).hexdigest()
+
+
+def _original_feedback_quota_subjects(
+    client_ip: str,
+    install_id: str | None,
+    pack_id: str,
+    version: int,
+) -> tuple[str, str | None]:
+    raw_ip = str(client_ip or "").strip()
+    try:
+        normalized_ip = ipaddress.ip_address(raw_ip).compressed.lower()
+    except ValueError:
+        # ASGI test clients and unusual trusted-proxy adapters may expose a
+        # non-IP host marker. It is still keyed before persistence and bounded
+        # here to avoid storing or hashing unbounded attacker input.
+        normalized_ip = raw_ip.lower()[:255] or "unknown-client"
+    clean_install_id = str(install_id or "").strip()
+    if clean_install_id and not re.fullmatch(
+        r"[A-Za-z0-9][A-Za-z0-9._:-]{7,127}", clean_install_id,
+    ):
+        raise HTTPException(400, {
+            "code": "original_feedback_install_id_invalid",
+            "message": "X-Trailhead-Install-ID must be an opaque 8–128 character installation identifier.",
+        })
+    return (
+        _original_feedback_subject_hmac("ip", pack_id, version, normalized_ip),
+        _original_feedback_subject_hmac(
+            "install", pack_id, version, clean_install_id,
+        ) if clean_install_id else None,
+    )
 
 def _anon_check(ip: str, kind: str) -> None:
     """Raise 429 if the anonymous IP has hit its 7-day limit for `kind`."""
@@ -352,8 +418,26 @@ CANONICAL_TRAIL_INDEX_PATH = Path(CANONICAL_TRAIL_INDEX_ENV or (CANONICAL_SERVIN
 CANONICAL_TRAIL_INDEX_BUNDLED_PATH = Path(__file__).parent / "canonical_trail_index_v1.json"
 APP_ICON = Path(__file__).resolve().parents[1] / "mobile" / "assets" / "icon.png"
 
+_originals_preview_token_context: contextvars.ContextVar[str | None] = contextvars.ContextVar(
+    "originals_preview_token", default=None,
+)
+
 app = FastAPI(title="Trailhead API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.middleware("http")
+async def originals_preview_token_context(request: Request, call_next):
+    # Preview credentials never belong in HTTP URLs, where they can leak via
+    # proxy logs, browser history, analytics, or referrer headers. Internal app
+    # onboarding may use the private trailhead:// scheme, but API calls always
+    # authenticate with this header.
+    preview_token = request.headers.get("X-Trailhead-Originals-Preview")
+    marker = _originals_preview_token_context.set(preview_token)
+    try:
+        return await call_next(request)
+    finally:
+        _originals_preview_token_context.reset(marker)
 if EXPLORE_ASSETS.exists():
     app.mount("/assets/explore", StaticFiles(directory=str(EXPLORE_ASSETS)), name="explore-assets")
 if (WEB_DIST / "_astro").exists():
@@ -8931,6 +9015,66 @@ async def app_route_page(route_path: str):
 async def app_route_page_head(route_path: str):
     return Response(status_code=200, media_type="text/html")
 
+
+def _site_built_or_public(*parts: str) -> Path | None:
+    built = WEB_DIST.joinpath(*parts)
+    if built.is_file():
+        return built
+    public = WEB_PUBLIC.joinpath(*parts)
+    return public if public.is_file() else None
+
+
+@app.get("/originals/{slug}", response_class=HTMLResponse)
+async def originals_landing_page(slug: str):
+    clean_slug = unquote(slug).strip("/")
+    if not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,119}", clean_slug):
+        raise HTTPException(404, "Original landing page not found")
+    path = _site_built_or_public("originals", clean_slug, "index.html")
+    if not path:
+        raise HTTPException(404, "Original landing page not found")
+    return FileResponse(path, media_type="text/html")
+
+
+@app.head("/originals/{slug}")
+async def originals_landing_page_head(slug: str):
+    clean_slug = unquote(slug).strip("/")
+    if (
+        not re.fullmatch(r"[a-z0-9][a-z0-9-]{0,119}", clean_slug)
+        or not _site_built_or_public("originals", clean_slug, "index.html")
+    ):
+        raise HTTPException(404, "Original landing page not found")
+    return Response(status_code=200, media_type="text/html")
+
+
+@app.get("/.well-known/apple-app-site-association", include_in_schema=False)
+async def apple_app_site_association():
+    path = _site_built_or_public(".well-known", "apple-app-site-association")
+    if not path:
+        raise HTTPException(404, "Association file not found")
+    return FileResponse(path, media_type="application/json")
+
+
+@app.head("/.well-known/apple-app-site-association", include_in_schema=False)
+async def apple_app_site_association_head():
+    if not _site_built_or_public(".well-known", "apple-app-site-association"):
+        raise HTTPException(404, "Association file not found")
+    return Response(status_code=200, media_type="application/json")
+
+
+@app.get("/.well-known/assetlinks.json", include_in_schema=False)
+async def android_asset_links():
+    path = _site_built_or_public(".well-known", "assetlinks.json")
+    if not path:
+        raise HTTPException(404, "Association file not found")
+    return FileResponse(path, media_type="application/json")
+
+
+@app.head("/.well-known/assetlinks.json", include_in_schema=False)
+async def android_asset_links_head():
+    if not _site_built_or_public(".well-known", "assetlinks.json"):
+        raise HTTPException(404, "Association file not found")
+    return Response(status_code=200, media_type="application/json")
+
 @app.get("/journal", response_class=HTMLResponse)
 async def journal_page():
     site_journal = WEB_DIST / "journal" / "index.html"
@@ -9486,6 +9630,108 @@ def _product_feature_enabled(env_name: str, user: dict | None = None) -> bool:
     return bool((isinstance(user, dict) and user.get("is_admin")) or _server_feature_enabled(env_name))
 
 
+ORIGINALS_ROLLOUT_STAGES = {"off", "internal", "public_beta", "public"}
+
+
+def _originals_rollout_stage() -> str:
+    """Use the staged flag when present and preserve the released boolean flag."""
+    configured_value = os.getenv("TRAILHEAD_ORIGINALS_STAGE")
+    if configured_value is None:
+        configured_value = os.getenv("TRAILHEAD_ORIGINALS_ROLLOUT_STAGE")
+    if configured_value is None:
+        return "public" if _server_feature_enabled("TRAILHEAD_ORIGINALS_ENABLED") else "off"
+    configured = str(configured_value).strip().lower()
+    aliases = {"beta": "public_beta", "on": "public", "enabled": "public"}
+    configured = aliases.get(configured, configured)
+    if configured in ORIGINALS_ROLLOUT_STAGES:
+        return configured
+    return "off"
+
+
+def _originals_preview_token_key() -> bytes:
+    return hmac.new(
+        str(settings.secret_key).encode("utf-8"),
+        b"trailhead-originals-internal-preview-v1",
+        hashlib.sha256,
+    ).digest()
+
+
+def _issue_originals_preview_token(admin_user_id: int, expires_in_seconds: int) -> dict:
+    ttl = max(300, min(int(expires_in_seconds), 86400))
+    now = int(time.time())
+    payload = {
+        "v": 1,
+        "scope": "originals_internal_preview",
+        "iat": now,
+        "exp": now + ttl,
+        "nonce": secrets.token_urlsafe(12),
+        "issued_by": int(admin_user_id),
+    }
+    encoded = base64.urlsafe_b64encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    ).rstrip(b"=")
+    signature = base64.urlsafe_b64encode(
+        hmac.new(_originals_preview_token_key(), encoded, hashlib.sha256).digest()
+    ).rstrip(b"=")
+    return {
+        "token": f"{encoded.decode('ascii')}.{signature.decode('ascii')}",
+        "expires_at": payload["exp"],
+        "header": "X-Trailhead-Originals-Preview",
+    }
+
+
+def _valid_originals_preview_token(token: str | None) -> bool:
+    clean = str(token or "").strip()
+    if not clean or len(clean) > 2048 or clean.count(".") != 1:
+        return False
+    encoded_text, signature_text = clean.split(".", 1)
+    try:
+        encoded = encoded_text.encode("ascii")
+        supplied_signature = base64.urlsafe_b64decode(
+            signature_text + "=" * (-len(signature_text) % 4)
+        )
+        expected_signature = hmac.new(
+            _originals_preview_token_key(), encoded, hashlib.sha256,
+        ).digest()
+        if not hmac.compare_digest(supplied_signature, expected_signature):
+            return False
+        payload = json.loads(base64.urlsafe_b64decode(
+            encoded_text + "=" * (-len(encoded_text) % 4)
+        ))
+    except (UnicodeError, ValueError, json.JSONDecodeError, binascii.Error):
+        return False
+    now = int(time.time())
+    return bool(
+        isinstance(payload, dict)
+        and payload.get("v") == 1
+        and payload.get("scope") == "originals_internal_preview"
+        and isinstance(payload.get("iat"), int)
+        and isinstance(payload.get("exp"), int)
+        and payload["iat"] <= now + 60
+        and now < payload["exp"] <= payload["iat"] + 86400
+    )
+
+
+def _originals_feature_enabled(user: dict | None = None) -> bool:
+    if isinstance(user, dict) and user.get("is_admin"):
+        return True
+    stage = _originals_rollout_stage()
+    if stage in {"public_beta", "public"}:
+        return True
+    return bool(
+        stage == "internal"
+        and _valid_originals_preview_token(_originals_preview_token_context.get())
+    )
+
+
+def _require_originals_feature(user: dict | None = None) -> None:
+    if not _originals_feature_enabled(user):
+        raise HTTPException(404, {
+            "code": "feature_unavailable",
+            "message": "This feature is not available yet.",
+        })
+
+
 def _require_product_feature(env_name: str, user: dict | None = None) -> None:
     if not _product_feature_enabled(env_name, user):
         raise HTTPException(404, {
@@ -9501,7 +9747,7 @@ async def product_features(user: dict | None = Depends(_optional_user)):
         "trips_tab": _product_feature_enabled("TRAILHEAD_TRIPS_TAB_ENABLED", user),
         "availability_monitors": _product_feature_enabled("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user),
         "trip_packs": _product_feature_enabled("TRAILHEAD_TRIP_PACKS_ENABLED", user),
-        "originals": _product_feature_enabled("TRAILHEAD_ORIGINALS_ENABLED", user),
+        "originals": _originals_feature_enabled(user),
         "community_publications": _product_feature_enabled("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user),
         "digest_preferences": _product_feature_enabled("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user),
     }
@@ -10662,6 +10908,9 @@ class OriginalCitationV1(BaseModel):
     url: str = Field(pattern=r"^https://", max_length=2000)
     publisher: Optional[str] = Field(default=None, max_length=200)
     reviewed_at: Optional[str] = Field(default=None, max_length=40)
+    role: Literal["story", "operational"] = "story"
+    authority: Optional[Literal["official", "authoritative"]] = None
+    scope: list[str] = Field(default_factory=list, max_length=20)
 
 
 class OriginalStopV1(BaseModel):
@@ -10731,6 +10980,37 @@ class OriginalSeasonV1(BaseModel):
         return self
 
 
+class OriginalRouteNetworkOverrideV1(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    schema_version: Literal[1] = 1
+    status: Literal["approved"]
+    finding_codes: list[Literal[
+        "private_or_restricted_access",
+        "destination_only",
+        "not_through",
+        "seasonal_access",
+        "restricted_road_use",
+        "unpaved_surface",
+    ]] = Field(min_length=1, max_length=6)
+    reason: str = Field(min_length=20, max_length=2000)
+    official_source_url: str = Field(
+        max_length=2000,
+        pattern=r"^https://[^\s]+$",
+    )
+    approved_at: str = Field(
+        max_length=40,
+        pattern=r"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$",
+    )
+    approved_by_admin_user_id: int = Field(ge=1)
+
+    @model_validator(mode="after")
+    def unique_finding_codes(self):
+        if len(set(self.finding_codes)) != len(self.finding_codes):
+            raise ValueError("route_network_override finding_codes must be unique")
+        return self
+
+
 class OriginalReviewV1(BaseModel):
     model_config = {"extra": "forbid", "strict": True}
 
@@ -10745,6 +11025,7 @@ class OriginalReviewV1(BaseModel):
         max_length=40,
         pattern=r"^\d{4}-\d{2}-\d{2}T.+(?:Z|[+-]\d{2}:\d{2})$",
     )
+    route_network_override: Optional[OriginalRouteNetworkOverrideV1] = None
 
 
 class OriginalManifestV1(BaseModel):
@@ -10813,6 +11094,78 @@ class OriginalNarrationAssetRequest(BaseModel):
 
     text: str = Field(min_length=1, max_length=10000)
     provider: Literal["cartesia", "elevenlabs"] = "elevenlabs"
+
+
+class OriginalGeneratorLicenseAttestationRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    terms_id: str = Field(min_length=3, max_length=200, pattern=r"^[A-Za-z0-9_.:-]+$")
+    terms_url: str = Field(max_length=2000, pattern=r"^https://[^\s]+$")
+    terms_version: str = Field(min_length=1, max_length=120)
+    reviewed_at: str = Field(
+        min_length=10,
+        max_length=40,
+        pattern=r"^\d{4}-\d{2}-\d{2}(?:T.+(?:Z|[+-]\d{2}:\d{2}))?$",
+    )
+
+
+class OriginalFeedbackRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    category: Literal[
+        "general", "trigger_timing", "audio", "map", "offline",
+        "access_info", "safety", "other",
+    ]
+    message: str = Field(min_length=3, max_length=2000)
+    platform: Literal["ios", "android", "web"]
+    stop_id: Optional[str] = Field(default=None, max_length=240)
+    rating: Optional[int] = Field(default=None, ge=1, le=5)
+    app_version: Optional[str] = Field(default=None, max_length=80)
+    runtime_version: Optional[str] = Field(default=None, max_length=120)
+    release_cohort: Optional[str] = Field(default=None, max_length=80)
+    contact_consent: bool = False
+
+
+class OriginalFeedbackGuestTokenRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    pack_id: str = Field(min_length=1, max_length=240)
+    version: int = Field(ge=1)
+
+
+class OriginalFeedbackTokenIssuancePolicyResponse(BaseModel):
+    window_seconds: int
+    ip_limit: int
+    install_limit: int
+    installation_bound: bool
+    install_id_header: Literal["X-Trailhead-Install-ID"]
+
+
+class OriginalFeedbackGuestTokenResponse(BaseModel):
+    schema_version: Literal[1]
+    pack_id: str
+    version: int
+    token: str
+    expires_at: int
+    max_submissions: int
+    issuance_policy: OriginalFeedbackTokenIssuancePolicyResponse
+
+
+class OriginalFeedbackCanonicalRequest(OriginalFeedbackRequest):
+    version: int = Field(ge=1)
+
+
+class OriginalFeedbackModerationRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    status: Literal["reviewing", "resolved", "dismissed"]
+    note: Optional[str] = Field(default=None, max_length=1000)
+
+
+class OriginalsPreviewTokenRequest(BaseModel):
+    model_config = {"extra": "forbid", "strict": True}
+
+    expires_in_seconds: int = Field(default=3600, ge=300, le=86400)
 
 
 class AuthoredTripPackFeatureRequest(BaseModel):
@@ -12258,6 +12611,21 @@ def _raise_account_store_error(exc: Exception) -> None:
             "code": "publication_private_content",
             "message": "Remove precise coordinates before submitting this note.",
         })
+    if isinstance(exc, OriginalFeedbackTokenError):
+        raise HTTPException(403, {
+            "code": "original_feedback_access",
+            "message": str(exc) or "A valid feedback token or account is required.",
+        })
+    if isinstance(exc, OriginalFeedbackConflictError):
+        raise HTTPException(409, {
+            "code": "original_feedback_idempotency_conflict",
+            "message": "This feedback key was already used for different feedback.",
+        })
+    if isinstance(exc, OriginalFeedbackRateLimitError):
+        raise HTTPException(429, {
+            "code": "original_feedback_rate_limited",
+            "message": str(exc) or "Feedback limit reached; try again later.",
+        })
     if isinstance(exc, IdempotencyConflictError):
         raise HTTPException(409, {
             "code": "idempotency_conflict",
@@ -12783,6 +13151,14 @@ async def api_admin_originals(admin: dict = Depends(_require_admin)):
     return {"items": list_authored_trip_packs_admin("original_drive")}
 
 
+@app.post("/api/admin/originals/preview-token", status_code=201)
+async def api_admin_originals_preview_token(
+    body: OriginalsPreviewTokenRequest,
+    admin: dict = Depends(_require_admin),
+):
+    return _issue_originals_preview_token(admin["id"], body.expires_in_seconds)
+
+
 @app.put("/api/admin/originals/{pack_id}/assets/{asset_id}")
 async def api_admin_upload_original_asset(
     pack_id: str,
@@ -12822,6 +13198,7 @@ async def api_admin_generate_original_narration(
                 "model_id": _tts_model_id("guide"),
                 "voice_id": settings.cartesia_voice_id,
                 "output_format": "mp3_44100_128",
+                "license": "cartesia_commercial_terms",
             },
         )
     except HTTPException:
@@ -12858,6 +13235,11 @@ async def api_admin_generate_original_narration_with_provider(
                 "provider": body.provider,
                 "model_id": model_id,
                 "voice_id": voice_id,
+                "license": (
+                    "elevenlabs_commercial_terms"
+                    if body.provider == "elevenlabs"
+                    else "cartesia_commercial_terms"
+                ),
                 "output_format": (
                     ELEVENLABS_OUTPUT_FORMAT
                     if body.provider == "elevenlabs"
@@ -12867,6 +13249,27 @@ async def api_admin_generate_original_narration_with_provider(
         )
     except HTTPException:
         raise
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/admin/originals/{pack_id}/assets/{asset_id}/license-attestation")
+async def api_admin_attest_original_generator_license(
+    pack_id: str,
+    asset_id: str,
+    body: OriginalGeneratorLicenseAttestationRequest,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        return attest_authored_original_generator_license(
+            pack_id,
+            asset_id,
+            terms_id=body.terms_id,
+            terms_url=body.terms_url,
+            terms_version=body.terms_version,
+            reviewed_at=body.reviewed_at,
+            admin_user_id=admin["id"],
+        )
     except Exception as exc:
         _raise_account_store_error(exc)
 
@@ -12941,6 +13344,59 @@ async def api_admin_original_device_preview_manifest(
     return manifest
 
 
+@app.post("/api/admin/originals/{pack_id}/validation-runs", status_code=201)
+@app.post("/api/admin/originals/{pack_id}/virtual-validation", status_code=201, include_in_schema=False)
+async def api_admin_start_original_virtual_validation(
+    pack_id: str,
+    background_tasks: BackgroundTasks,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        report = await asyncio.to_thread(
+            create_authored_original_virtual_validation_run,
+            pack_id,
+            admin["id"],
+        )
+        background_tasks.add_task(
+            execute_authored_original_virtual_validation_run,
+            report["id"],
+        )
+        return report
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.get("/api/admin/originals/{pack_id}/validation-runs/latest")
+@app.get("/api/admin/originals/{pack_id}/virtual-validation/latest", include_in_schema=False)
+async def api_admin_latest_original_virtual_validation(
+    pack_id: str,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        report = get_latest_authored_original_virtual_validation_report(pack_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not report:
+        raise HTTPException(404, "Original virtual validation report not found")
+    return report
+
+
+@app.get("/api/admin/originals/{pack_id}/validation-runs/{report_id}")
+@app.get("/api/admin/originals/{pack_id}/virtual-validation/{report_id}", include_in_schema=False)
+async def api_admin_original_virtual_validation_report(
+    pack_id: str,
+    report_id: str,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        report = get_authored_original_virtual_validation_report(pack_id, report_id)
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not report:
+        raise HTTPException(404, "Original virtual validation report not found")
+    return report
+
+
 @app.get("/api/admin/originals/{pack_id}/validate")
 async def api_admin_validate_original(pack_id: str, admin: dict = Depends(_require_admin)):
     try:
@@ -12950,6 +13406,44 @@ async def api_admin_validate_original(pack_id: str, admin: dict = Depends(_requi
     if not result:
         raise HTTPException(404, "Trailhead Original not found")
     return result
+
+
+@app.get("/api/admin/originals-feedback")
+async def api_admin_original_feedback(
+    status: str = "new",
+    pack_id: str = "",
+    category: str = "",
+    limit: int = 50,
+    cursor: str = "",
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        return list_original_feedback_admin(
+            status=status,
+            pack_id=pack_id or None,
+            category=category or None,
+            limit=limit,
+            cursor=cursor or None,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.patch("/api/admin/originals-feedback/{feedback_id}")
+async def api_admin_moderate_original_feedback(
+    feedback_id: str,
+    body: OriginalFeedbackModerationRequest,
+    admin: dict = Depends(_require_admin),
+):
+    try:
+        feedback = moderate_original_feedback(
+            feedback_id, body.status, admin["id"], body.note,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+    if not feedback:
+        raise HTTPException(404, "Original feedback not found")
+    return feedback
 
 
 @app.get("/api/admin/originals/{pack_id}")
@@ -13011,7 +13505,7 @@ async def api_original_asset_content(
     sha256: str,
     user: dict | None = Depends(_optional_user),
 ):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     try:
         asset = get_published_original_asset_record(
             pack_id, asset_id, sha256, user_id=user["id"] if user else None,
@@ -13038,6 +13532,162 @@ async def api_original_asset_content(
     )
 
 
+ORIGINAL_FEEDBACK_INSTALL_ID_HEADER_DESCRIPTION = (
+    "Optional opaque installation identifier (8–128 letters, digits, dots, colons, "
+    "underscores, or hyphens). Trailhead stores only a server-keyed, Original-version-"
+    "scoped HMAC and never stores this identifier or the client IP."
+)
+
+
+def _issue_original_feedback_guest_token_for_request(
+    pack_id: str,
+    version: int,
+    request: Request,
+    install_id: str | None,
+) -> dict:
+    client_ip = _client_ip(request)
+    _anon_check(client_ip, "original_feedback_token")
+    ip_subject_hmac, install_subject_hmac = _original_feedback_quota_subjects(
+        client_ip, install_id, pack_id, version,
+    )
+    result = issue_original_feedback_guest_token(
+        pack_id,
+        version,
+        ip_subject_hmac=ip_subject_hmac,
+        install_subject_hmac=install_subject_hmac,
+    )
+    result["issuance_policy"]["install_id_header"] = "X-Trailhead-Install-ID"
+    return result
+
+
+@app.post(
+    "/api/originals/feedback/guest-token",
+    status_code=201,
+    response_model=OriginalFeedbackGuestTokenResponse,
+)
+async def api_original_feedback_guest_token(
+    body: OriginalFeedbackGuestTokenRequest,
+    request: Request,
+    install_id: Annotated[
+        str | None,
+        Header(
+            alias="X-Trailhead-Install-ID",
+            description=ORIGINAL_FEEDBACK_INSTALL_ID_HEADER_DESCRIPTION,
+        ),
+    ] = None,
+    user: dict | None = Depends(_optional_user),
+):
+    _require_originals_feature(user)
+    if user:
+        raise HTTPException(400, {
+            "code": "original_feedback_token_not_needed",
+            "message": "Signed-in feedback does not need a guest token.",
+        })
+    try:
+        return _issue_original_feedback_guest_token_for_request(
+            body.pack_id, body.version, request, install_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post(
+    "/api/originals/{pack_id}/versions/{version}/feedback-token",
+    status_code=201,
+    response_model=OriginalFeedbackGuestTokenResponse,
+)
+async def api_original_feedback_token(
+    pack_id: str,
+    version: int,
+    request: Request,
+    install_id: Annotated[
+        str | None,
+        Header(
+            alias="X-Trailhead-Install-ID",
+            description=ORIGINAL_FEEDBACK_INSTALL_ID_HEADER_DESCRIPTION,
+        ),
+    ] = None,
+    user: dict | None = Depends(_optional_user),
+):
+    _require_originals_feature(user)
+    if user:
+        raise HTTPException(400, {
+            "code": "original_feedback_token_not_needed",
+            "message": "Signed-in feedback does not need a guest token.",
+        })
+    try:
+        return _issue_original_feedback_guest_token_for_request(
+            pack_id, version, request, install_id,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/originals/{pack_id}/feedback", status_code=201)
+async def api_submit_original_feedback_canonical(
+    pack_id: str,
+    body: OriginalFeedbackCanonicalRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    guest_token: str | None = Header(default=None, alias="X-Original-Feedback-Token"),
+    user: dict | None = Depends(_optional_user),
+):
+    _require_originals_feature(user)
+    try:
+        return submit_original_feedback(
+            pack_id=pack_id,
+            version=body.version,
+            idempotency_key=idempotency_key,
+            category=body.category,
+            message=body.message,
+            platform=body.platform,
+            user_id=user["id"] if user else None,
+            guest_token=guest_token,
+            stop_id=body.stop_id,
+            rating=body.rating,
+            app_version=body.app_version,
+            runtime_version=body.runtime_version,
+            release_cohort=body.release_cohort,
+            contact_consent=body.contact_consent,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
+@app.post("/api/originals/{pack_id}/versions/{version}/feedback", status_code=201)
+async def api_submit_original_feedback(
+    pack_id: str,
+    version: int,
+    body: OriginalFeedbackRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+    guest_token: str | None = Header(default=None, alias="X-Original-Feedback-Token"),
+    user: dict | None = Depends(_optional_user),
+):
+    _require_originals_feature(user)
+    try:
+        return submit_original_feedback(
+            pack_id=pack_id,
+            version=version,
+            idempotency_key=idempotency_key,
+            category=body.category,
+            message=body.message,
+            platform=body.platform,
+            user_id=user["id"] if user else None,
+            guest_token=guest_token,
+            stop_id=body.stop_id,
+            rating=body.rating,
+            app_version=body.app_version,
+            runtime_version=body.runtime_version,
+            release_cohort=body.release_cohort,
+            contact_consent=body.contact_consent,
+        )
+    except Exception as exc:
+        _raise_account_store_error(exc)
+
+
 @app.get("/api/originals")
 async def api_public_originals(
     limit: int = 50,
@@ -13045,7 +13695,7 @@ async def api_public_originals(
     coverage_region: str = "",
     user: dict | None = Depends(_optional_user),
 ):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     try:
         return list_published_originals(
             limit=limit,
@@ -13058,7 +13708,7 @@ async def api_public_originals(
 
 @app.get("/api/originals/featured/current")
 async def api_featured_original(user: dict | None = Depends(_optional_user)):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     original = get_featured_original()
     if not original:
         raise HTTPException(404, "Featured Trailhead Original not found")
@@ -13070,7 +13720,7 @@ async def api_claim_featured_original(
     idempotency_key: str = Header(..., alias="Idempotency-Key"),
     user: dict = Depends(_current_user),
 ):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     try:
         return claim_featured_authored_original(user["id"], idempotency_key)
     except Exception as exc:
@@ -13079,13 +13729,13 @@ async def api_claim_featured_original(
 
 @app.get("/api/originals/owned")
 async def api_owned_originals(user: dict = Depends(_current_user)):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     return {"items": list_owned_authored_originals(user["id"])}
 
 
 @app.post("/api/originals/restore")
 async def api_restore_originals(user: dict = Depends(_current_user)):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     return {"items": restore_owned_authored_originals(user["id"])}
 
 
@@ -13095,7 +13745,7 @@ async def api_original_manifest(
     version: int,
     user: dict | None = Depends(_optional_user),
 ):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     try:
         manifest = get_published_original_manifest(
             pack_id,
@@ -13114,7 +13764,7 @@ async def api_public_original(
     pack_id: str,
     user: dict | None = Depends(_optional_user),
 ):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     original = get_published_original(pack_id)
     if not original:
         raise HTTPException(404, "Trailhead Original not found")
@@ -13128,7 +13778,7 @@ async def api_acquire_original(
     user: dict | None = Depends(_optional_user),
     version: Optional[int] = None,
 ):
-    _require_product_feature("TRAILHEAD_ORIGINALS_ENABLED", user)
+    _require_originals_feature(user)
     try:
         original = (
             get_published_original_version(pack_id, version, include_preview=False)
@@ -14800,7 +15450,8 @@ def get_config():
         "mapbox_token": settings.mapbox_token,
         # Public rollout capability only; unlike account capabilities this does
         # not include the separate admin preview bypass.
-        "originals_enabled": _server_feature_enabled("TRAILHEAD_ORIGINALS_ENABLED"),
+        "originals_enabled": _originals_feature_enabled(None),
+        "originals_rollout_stage": _originals_rollout_stage(),
         # Exposed so the mobile app can fetch vector tiles direct from Protomaps'
         # CDN (faster than proxying via Railway). Acceptable for early-stage —
         # rotate if abused. Free tier is 200k-1M tiles/month.

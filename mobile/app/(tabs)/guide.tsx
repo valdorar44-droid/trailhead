@@ -11,7 +11,7 @@ import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow } from '@/components/TrailheadUI';
-import { OriginalsContextCard, OriginalsShelf } from '@/components/originals';
+import { OriginalsContextCard } from '@/components/originals';
 import {
   EXPLORE_CATEGORY_CHIPS,
   ExploreCategoryFilterSheet,
@@ -5164,6 +5164,7 @@ function GuideScreenContent() {
 	          onQueryChange={handleExploreQueryChange}
           onClearQuery={() => handleExploreQueryChange('')}
           onCategorySelect={selectExploreHomeCategory}
+          onOpenOriginals={() => router.push('/originals' as any)}
         />
       </View>
     );
@@ -5260,7 +5261,6 @@ function GuideScreenContent() {
                 : undefined}
               onSortCycle={cycleExploreSort}
             />
-            {showExploreHome ? <OriginalsShelf /> : null}
             {!!exploreCatalogNotice && (
               <View style={s.catalogNotice}>
                 <Ionicons name="cloud-offline-outline" size={16} color={C.text3} />

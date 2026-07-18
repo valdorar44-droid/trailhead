@@ -2,8 +2,8 @@ module.exports = {
   expo: {
     name: 'Trailhead',
     slug: 'trailhead',
-    version: '1.0.8',
-    runtimeVersion: 'native-1.0.8-originals1',
+    version: '1.0.9',
+    runtimeVersion: 'native-1.0.9-originals1',
     newArchEnabled: true,
     updates: { url: 'https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5' },
     icon: './assets/icon.png',
@@ -18,6 +18,10 @@ module.exports = {
       supportsTablet: true,
       bundleIdentifier: 'com.trailhead.app',
       usesAppleSignIn: true,
+      associatedDomains: [
+        'applinks:gettrailhead.app',
+        'applinks:api.gettrailhead.app',
+      ],
       infoPlist: {
         NSLocationWhenInUseUsageDescription: 'Trailhead uses your location to show your position on the map, provide turn-by-turn navigation, find nearby campsites, and alert you to road hazard reports near your current position.',
         NSLocationAlwaysAndWhenInUseUsageDescription: 'Trailhead uses your location in the background so navigation and audio guide narrations continue when your phone is locked while driving.',
@@ -33,7 +37,7 @@ module.exports = {
       },
     },
     android: {
-      runtimeVersion: 'native-1.0.8-car2-originals1',
+      runtimeVersion: 'native-1.0.9-car2-originals1',
       adaptiveIcon: {
         foregroundImage: './assets/adaptive-icon.png',
         backgroundColor: '#0c0f14',
@@ -60,6 +64,17 @@ module.exports = {
         'android.permission.READ_EXTERNAL_STORAGE',
         'android.permission.WRITE_EXTERNAL_STORAGE',
         'android.permission.SYSTEM_ALERT_WINDOW',
+      ],
+      intentFilters: [
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          category: ['BROWSABLE', 'DEFAULT'],
+          data: [
+            { scheme: 'https', host: 'gettrailhead.app', pathPrefix: '/originals' },
+            { scheme: 'https', host: 'api.gettrailhead.app', pathPrefix: '/originals' },
+          ],
+        },
       ],
     },
     plugins: [

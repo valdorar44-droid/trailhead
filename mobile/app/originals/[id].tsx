@@ -19,6 +19,7 @@ import { useStore } from '@/lib/store';
 import {
   originalBundleStore,
   originalPackVersionAccessIsExact,
+  useOriginalsAdminRuntime,
   useOriginalsRuntime,
   type OriginalOwnerScope,
 } from '@/lib/originals';
@@ -54,6 +55,7 @@ export default function OriginalDetailScreen() {
   const loadRequestRef = useRef(0);
   const hasPlan = useStore(state => state.hasPlan);
   const originalsRuntime = useOriginalsRuntime();
+  const originalsAdminRuntime = useOriginalsAdminRuntime();
   const [loadedDetail, setLoadedDetail] = useState<OriginalUiDetail | null>(null);
   const [detailScope, setDetailScope] = useState('');
   const detail = detailScope === accountScope ? loadedDetail : null;
@@ -205,13 +207,13 @@ export default function OriginalDetailScreen() {
     const scope = `account:${String(user.id)}` as OriginalOwnerScope;
     const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
     if (!manifest) throw new Error('Download and verify this Original before opening the trigger test.');
-    await originalsRuntime.startSimulation(manifest);
+    await originalsAdminRuntime.startSimulation(manifest);
     setStartVisible(false);
     router.replace({
       pathname: '/originals/player',
       params: { id: detail.id, version: String(detail.version), simulate: '1' },
     } as any);
-  }, [detail, originalsRuntime, router, user?.id, user?.is_admin]);
+  }, [detail, originalsAdminRuntime, originalsRuntime, router, user?.id, user?.is_admin]);
 
   if (loading) {
     return (
@@ -395,7 +397,14 @@ export default function OriginalDetailScreen() {
                   style={[styles.sourceRow, { borderBottomColor: C.border }]}
                 >
                   <Ionicons name="document-text-outline" size={16} color={C.text3} />
-                  <Text style={[styles.sourceLabel, { color: C.text2 }]}>{source.label}</Text>
+                  <View style={styles.sourceCopy}>
+                    <Text style={[styles.sourceLabel, { color: C.text2 }]}>{source.label}</Text>
+                    <Text style={[styles.sourceMeta, { color: C.orange }]}>
+                      {source.role === 'operational' ? 'OPERATIONS' : 'STORY'}
+                      {source.authority ? ` · ${source.authority.toUpperCase()}` : ''}
+                      {source.scope.length ? ` · ${source.scope.map(value => value.toUpperCase()).join(' / ')}` : ''}
+                    </Text>
+                  </View>
                   {source.url ? <Ionicons name="open-outline" size={15} color={C.orange} /> : null}
                 </TouchableOpacity>
               ))}
@@ -702,7 +711,9 @@ const styles = StyleSheet.create({
   noteText: { flex: 1, minWidth: 0, fontSize: 12, lineHeight: 18, fontWeight: '600' },
   sourceIntro: { fontSize: 11.5, lineHeight: 17, fontWeight: '600' },
   sourceRow: { minHeight: 50, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 9 },
-  sourceLabel: { flex: 1, minWidth: 0, fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
+  sourceCopy: { flex: 1, minWidth: 0, paddingVertical: 7 },
+  sourceLabel: { fontSize: 11.5, lineHeight: 16, fontWeight: '700' },
+  sourceMeta: { marginTop: 2, fontSize: 8.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.45 },
   dock: { position: 'absolute', left: 0, right: 0, bottom: 0, minHeight: 88, borderTopWidth: 1, paddingHorizontal: 18, paddingTop: 12, flexDirection: 'row', alignItems: 'center', gap: 12 },
   dockCopy: { flex: 1, minWidth: 0 },
   dockPrice: { fontSize: 13, lineHeight: 17, fontWeight: '900' },

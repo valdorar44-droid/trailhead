@@ -21,6 +21,10 @@ export const ORIGINAL_TRIGGER_DEFAULTS = {
   off_route_distance_m: 500,
 } as const;
 
+const MINIMUM_ROUTE_DIRECTION_SPEED_MPS = 2;
+const OPPOSITE_ROUTE_DIRECTION_DEG = 120;
+const MAXIMUM_REVERSE_CONFIRMATION_FIX_GAP_MS = 10_000;
+
 export type OriginalTriggerEngineOptions = {
   [Key in keyof typeof ORIGINAL_TRIGGER_DEFAULTS]?: number;
 };
@@ -32,6 +36,9 @@ function resetCandidate(routeInitialized: boolean): OriginalTriggerRuntimeStateV
     candidate_entered_at_ms: null,
     candidate_sample_count: 0,
     candidate_last_sample_at_ms: null,
+    reverse_candidate_entered_at_ms: null,
+    reverse_candidate_sample_count: 0,
+    reverse_candidate_last_sample_at_ms: null,
   };
 }
 
@@ -134,6 +141,42 @@ function passedStop(stop: OriginalStopV1, sample: OriginalLocationSample, routeP
   return distance > stop.trigger.enter_radius_m;
 }
 
+function oppositeAuthoredRouteDirection(
+  sample: OriginalLocationSample,
+  routeBearingDeg: number | null,
+) {
+  if (typeof sample.heading_deg !== 'number' || !Number.isFinite(sample.heading_deg)) return false;
+  const heading = sample.heading_deg;
+  const speed = Number(sample.speed_mps);
+  return routeBearingDeg != null
+    && Number.isFinite(heading)
+    && heading >= 0
+    && heading < 360
+    && Number.isFinite(speed)
+    && speed >= MINIMUM_ROUTE_DIRECTION_SPEED_MPS
+    && angularDifferenceDegrees(heading, routeBearingDeg) >= OPPOSITE_ROUTE_DIRECTION_DEG;
+}
+
+function applyOppositeRouteDirectionGate(
+  gate: StopLocationGate,
+  sample: OriginalLocationSample,
+  routeBearingDeg: number | null,
+  oppositeRouteDirection: boolean,
+) {
+  if (gate.code != null || !oppositeRouteDirection || routeBearingDeg == null) return gate;
+  const actualBearing = Number(sample.heading_deg);
+  return {
+    ...gate,
+    code: 'wrong_bearing' as const,
+    bearing: {
+      actual_deg: actualBearing,
+      required_deg: routeBearingDeg,
+      tolerance_deg: OPPOSITE_ROUTE_DIRECTION_DEG - 1,
+      difference_deg: angularDifferenceDegrees(actualBearing, routeBearingDeg),
+    },
+  };
+}
+
 function addUnique(values: string[], additions: string[]) {
   return [...new Set([...values, ...additions])];
 }
@@ -146,6 +189,7 @@ type TriggerDecisionDetails = {
   gate?: StopLocationGate | null;
   wait?: TriggerWaitDiagnostic | null;
   missed_stop_ids?: readonly string[];
+  queue?: NonNullable<OriginalTriggerDecisionDiagnostic['queue']> | null;
 };
 
 function triggerDecisionMessage(
@@ -232,6 +276,7 @@ export function evaluateOriginalLocation(
         radius: gate?.radius ?? null,
         bearing: gate?.bearing ?? null,
         wait: details.wait ?? null,
+        queue: details.queue ?? null,
       },
     };
   };
@@ -253,9 +298,17 @@ export function evaluateOriginalLocation(
     return finish('complete');
   }
   if (session.user_paused) {
+    session = {
+      ...session,
+      trigger_state: resetCandidate(session.trigger_state.route_initialized),
+    };
     return finish('user_paused');
   }
   if (session.status !== 'active') {
+    session = {
+      ...session,
+      trigger_state: resetCandidate(session.trigger_state.route_initialized),
+    };
     return finish('inactive');
   }
 
@@ -285,7 +338,11 @@ export function evaluateOriginalLocation(
     },
   );
   if (!projection) {
-    session = { ...session, tracking_state: 'off_route' };
+    session = {
+      ...session,
+      tracking_state: 'off_route',
+      trigger_state: resetCandidate(session.trigger_state.route_initialized),
+    };
     return finish('route_unavailable');
   }
   // Trigger windows are authored against the manifest's canonical distance.
@@ -319,10 +376,94 @@ export function evaluateOriginalLocation(
   };
 
   const eligible = remainingOriginalTriggerStops(manifest, session);
+  const oppositeRouteDirection = oppositeAuthoredRouteDirection(
+    sample,
+    projection.segment_bearing_deg,
+  );
+  const pendingInitialReverseEntry = (
+    Math.max(0, Number(currentSession.trigger_state.reverse_candidate_sample_count) || 0) > 0
+    && currentSession.trigger_state.reverse_candidate_entered_at_ms != null
+  );
+  const initialReverseEntry = oppositeRouteDirection && (
+    pendingInitialReverseEntry
+    || (
+      !currentSession.trigger_state.route_initialized
+      && currentSession.last_projected_route_progress_m == null
+    )
+  );
+  let confirmedInitialReverseEntry = false;
+  if (initialReverseEntry) {
+    const storedReverseCount = Math.max(
+      0,
+      Number(currentSession.trigger_state.reverse_candidate_sample_count) || 0,
+    );
+    const previousAcceptedAt = Number(
+      currentSession.trigger_state.reverse_candidate_last_sample_at_ms,
+    );
+    const reverseFixesAreContinuous = storedReverseCount > 0
+      && Number.isFinite(previousAcceptedAt)
+      && sample.timestamp_ms - previousAcceptedAt <= MAXIMUM_REVERSE_CONFIRMATION_FIX_GAP_MS;
+    const priorReverseCount = reverseFixesAreContinuous ? storedReverseCount : 0;
+    const reverseEnteredAt = priorReverseCount > 0
+      ? currentSession.trigger_state.reverse_candidate_entered_at_ms ?? sample.timestamp_ms
+      : sample.timestamp_ms;
+    const reverseSampleCount = priorReverseCount + 1;
+    const reverseElapsedMs = Math.max(0, sample.timestamp_ms - reverseEnteredAt);
+    confirmedInitialReverseEntry = reverseSampleCount >= settings.minimum_inside_samples
+      && reverseElapsedMs >= settings.minimum_inside_duration_ms;
+    session = {
+      ...session,
+      trigger_state: {
+        ...resetCandidate(false),
+        reverse_candidate_entered_at_ms: reverseEnteredAt,
+        reverse_candidate_sample_count: reverseSampleCount,
+        reverse_candidate_last_sample_at_ms: sample.timestamp_ms,
+      },
+    };
+    if (!confirmedInitialReverseEntry) {
+      const candidate = eligible[0] ?? null;
+      const tolerance = OPPOSITE_ROUTE_DIRECTION_DEG - 1;
+      const actualBearing = Number(sample.heading_deg);
+      // oppositeAuthoredRouteDirection can only return true when the projected
+      // segment exposes a finite authored bearing.
+      const requiredBearing = projection.segment_bearing_deg!;
+      const gate: StopLocationGate = {
+        code: 'wrong_bearing',
+        window: candidate
+          ? {
+              authored_start_m: candidate.trigger.route_progress_start_m,
+              effective_start_m: candidate.trigger.route_progress_start_m,
+              end_m: candidate.trigger.route_progress_end_m,
+            }
+          : { authored_start_m: 0, effective_start_m: 0, end_m: manifest.route.distance_m },
+        radius: null,
+        bearing: {
+          actual_deg: actualBearing,
+          required_deg: requiredBearing,
+          tolerance_deg: tolerance,
+          difference_deg: angularDifferenceDegrees(actualBearing, requiredBearing),
+        },
+      };
+      return finish('wrong_bearing', routeProgress, projection.distance_from_route_m, {
+        stop: candidate,
+        gate,
+        wait: {
+          sample_count: reverseSampleCount,
+          required_sample_count: settings.minimum_inside_samples,
+          elapsed_ms: reverseElapsedMs,
+          required_elapsed_ms: settings.minimum_inside_duration_ms,
+        },
+      });
+    }
+  }
   const missed: string[] = [];
-  for (const stop of eligible) {
-    if (!passedStop(stop, sample, routeProgress)) break;
-    missed.push(stop.id);
+  if (confirmedInitialReverseEntry) {
+    missed.push(...eligible.map(stop => stop.id));
+  } else if (!oppositeRouteDirection) {
+    for (const stop of eligible) {
+      if (!passedStop(stop, sample, routeProgress)) break;
+      missed.push(stop.id);
+    }
   }
   if (missed.length) {
     missedStopIds = missed;
@@ -335,13 +476,30 @@ export function evaluateOriginalLocation(
   } else if (!session.trigger_state.route_initialized) {
     session = {
       ...session,
-      trigger_state: { ...session.trigger_state, route_initialized: true },
+      trigger_state: resetCandidate(true),
     };
   }
 
   if (session.queued_stop_id) {
+    const queuedStopId = session.queued_stop_id;
+    const followingCandidate = remainingOriginalTriggerStops(manifest, session)[0] ?? null;
+    const followingGate = followingCandidate
+      ? applyOppositeRouteDirectionGate(
+          evaluateStopLocation(followingCandidate, sample, routeProgress),
+          sample,
+          projection.segment_bearing_deg,
+          oppositeRouteDirection,
+        )
+      : null;
     return finish('queue_full', routeProgress, projection.distance_from_route_m, {
-      stop_id: session.queued_stop_id,
+      stop: followingCandidate,
+      stop_id: queuedStopId,
+      gate: followingGate,
+      queue: {
+        queued_stop_id: queuedStopId,
+        following_stop_id: followingCandidate?.id ?? null,
+        following_stop_eligible: followingGate?.code == null && followingCandidate != null,
+      },
     });
   }
 
@@ -364,11 +522,17 @@ export function evaluateOriginalLocation(
     );
   }
 
-  const gate = evaluateStopLocation(candidate, sample, routeProgress);
+  const gate = applyOppositeRouteDirectionGate(
+    evaluateStopLocation(candidate, sample, routeProgress),
+    sample,
+    projection.segment_bearing_deg,
+    oppositeRouteDirection,
+  );
   if (gate.code) {
     if (
       session.trigger_state.candidate_stop_id !== candidate.id
       || beyondHysteresis(candidate, sample)
+      || oppositeRouteDirection
     ) {
       session = { ...session, trigger_state: resetCandidate(true) };
     }

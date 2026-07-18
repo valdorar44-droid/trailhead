@@ -212,6 +212,15 @@ export type OriginalTriggerRuntimeStateV1 = {
   candidate_entered_at_ms: number | null;
   candidate_sample_count: number;
   candidate_last_sample_at_ms: number | null;
+  /**
+   * Initial reverse travel is destructive because it closes every unplayed
+   * cue. Confirm it independently from cue arming so one noisy course fix can
+   * never invalidate the route. These optional fields keep persisted V1
+   * sessions backward-compatible.
+   */
+  reverse_candidate_entered_at_ms?: number | null;
+  reverse_candidate_sample_count?: number;
+  reverse_candidate_last_sample_at_ms?: number | null;
 };
 
 export type OriginalSessionV1 = {
@@ -327,6 +336,11 @@ export type OriginalTriggerDecisionDiagnostic = Readonly<{
     required_sample_count: number;
     elapsed_ms: number;
     required_elapsed_ms: number;
+  }> | null;
+  queue: Readonly<{
+    queued_stop_id: string;
+    following_stop_id: string | null;
+    following_stop_eligible: boolean;
   }> | null;
 }>;
 

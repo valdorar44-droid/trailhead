@@ -20,6 +20,8 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 MOBILE_ROOT = REPO_ROOT / "mobile"
 RUNNER_PATH = MOBILE_ROOT / "scripts" / "validate-original-route.ts"
 MAX_OUTPUT_BYTES = 2 * 1024 * 1024
+DEFAULT_VALIDATOR_TIMEOUT_SECONDS = 180
+MAX_VALIDATOR_TIMEOUT_SECONDS = 300
 MAX_ROUTE_NETWORK_RESPONSE_BYTES = 4 * 1024 * 1024
 MAX_ROUTE_NETWORK_CHUNK_POINTS = 50
 ROUTE_NETWORK_CHUNK_OVERLAP_POINTS = 2
@@ -190,7 +192,7 @@ def run_originals_validation_cli(
     required_scenario_ids: Iterable[str],
     expected_engine_version: str,
     expected_validator_source_sha256: str | None = None,
-    timeout_seconds: int = 45,
+    timeout_seconds: int = DEFAULT_VALIDATOR_TIMEOUT_SECONDS,
 ) -> dict:
     if not RUNNER_PATH.is_file():
         raise OriginalValidationRunnerError(f"Trusted validator is unavailable at {RUNNER_PATH}")
@@ -228,7 +230,7 @@ def run_originals_validation_cli(
             input=json.dumps(payload, separators=(",", ":")),
             text=True,
             capture_output=True,
-            timeout=max(5, min(int(timeout_seconds), 120)),
+            timeout=max(5, min(int(timeout_seconds), MAX_VALIDATOR_TIMEOUT_SECONDS)),
             check=False,
             env={**os.environ, "NO_COLOR": "1"},
         )

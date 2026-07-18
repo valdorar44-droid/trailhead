@@ -43,6 +43,9 @@ export function createOriginalSession(
       candidate_entered_at_ms: null,
       candidate_sample_count: 0,
       candidate_last_sample_at_ms: null,
+      reverse_candidate_entered_at_ms: null,
+      reverse_candidate_sample_count: 0,
+      reverse_candidate_last_sample_at_ms: null,
     },
     started_at_ms: null,
     updated_at_ms: now,
@@ -72,6 +75,14 @@ export function normalizeOriginalSession(input: OriginalSessionV1): OriginalSess
       candidate_entered_at_ms: input.trigger_state?.candidate_entered_at_ms ?? null,
       candidate_sample_count: Math.max(0, Number(input.trigger_state?.candidate_sample_count) || 0),
       candidate_last_sample_at_ms: input.trigger_state?.candidate_last_sample_at_ms ?? null,
+      reverse_candidate_entered_at_ms:
+        input.trigger_state?.reverse_candidate_entered_at_ms ?? null,
+      reverse_candidate_sample_count: Math.max(
+        0,
+        Number(input.trigger_state?.reverse_candidate_sample_count) || 0,
+      ),
+      reverse_candidate_last_sample_at_ms:
+        input.trigger_state?.reverse_candidate_last_sample_at_ms ?? null,
     },
   };
 }

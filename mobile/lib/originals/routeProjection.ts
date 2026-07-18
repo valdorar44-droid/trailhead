@@ -6,6 +6,7 @@ export type OriginalRouteProjection = {
   route_ratio: number;
   distance_from_route_m: number;
   segment_index: number;
+  segment_bearing_deg: number | null;
 };
 
 export type OriginalRouteProjectionOptions = {
@@ -16,15 +17,18 @@ export type OriginalRouteProjectionOptions = {
   accuracy_m?: number | null;
 };
 
-type ProjectionCandidate = OriginalRouteProjection & {
-  segment_bearing_deg: number | null;
-};
+type ProjectionCandidate = OriginalRouteProjection;
 
 const MAX_EQUIVALENT_PROJECTION_SEPARATION_M = 5;
 const MAX_EQUIVALENT_DISTANCE_FROM_FIX_DELTA_M = 1;
+export const ORIGINAL_ROUTE_MAX_HEADING_RECOVERY_SEPARATION_M = 200;
+const MAX_HEADING_RECOVERY_DISTANCE_FROM_FIX_DELTA_M = 100;
+const HEADING_RECOVERY_ACCURACY_MULTIPLIER = 2;
 const MIN_PROGRESS_TIE_TOLERANCE_M = 15;
 const MAX_PROGRESS_TIE_TOLERANCE_M = 50;
 const MIN_HEADING_SPEED_MPS = 2;
+const DIRECTIONALLY_DISTINCT_NEAREST_BEARING_DEG = 30;
+const RECOVERY_HEADING_TOLERANCE_DEG = 45;
 
 function toRadians(value: number) {
   return value * Math.PI / 180;
@@ -132,14 +136,51 @@ export function projectPointToOriginalRoute(
   if (!hasProgressHint && heading == null) return nearest;
 
   // Only disambiguate segments whose projected route coordinates genuinely
-  // coincide and whose distances from the fix are effectively tied. GPS
-  // accuracy describes uncertainty in the fix, not equivalence between two
-  // distinct nearby roads, so it must not widen either guard.
+  // coincide and whose distances from the fix are effectively tied. A narrow
+  // exception handles bounded GPS jitter when the physically nearest leg is
+  // directionally distinct from the measured course: within twice the stated
+  // fix accuracy, continuity and heading may recover the prior authored leg
+  // instead of jumping far ahead to a nearby return leg. Accuracy never widens
+  // matching without a usable heading; prior progress further disambiguates
+  // the candidates once a session has accepted its first fix.
+  const nearestHeadingDifference = heading == null || nearest.segment_bearing_deg == null
+    ? null
+    : angularDifferenceDegrees(heading, nearest.segment_bearing_deg);
+  const directionallyDistinctNearest = nearestHeadingDifference != null
+    && nearestHeadingDifference >= DIRECTIONALLY_DISTINCT_NEAREST_BEARING_DEG;
+  const accuracy = Number(options.accuracy_m);
+  const conditionalProjectionSeparationM = directionallyDistinctNearest && Number.isFinite(accuracy)
+    ? clamp(
+      accuracy * HEADING_RECOVERY_ACCURACY_MULTIPLIER,
+      MAX_EQUIVALENT_PROJECTION_SEPARATION_M,
+      ORIGINAL_ROUTE_MAX_HEADING_RECOVERY_SEPARATION_M,
+    )
+    : null;
+  const conditionalDistanceDeltaM = directionallyDistinctNearest && Number.isFinite(accuracy)
+    ? clamp(
+      accuracy,
+      MAX_EQUIVALENT_DISTANCE_FROM_FIX_DELTA_M,
+      MAX_HEADING_RECOVERY_DISTANCE_FROM_FIX_DELTA_M,
+    )
+    : null;
+  const maximumProjectionSeparationM = conditionalProjectionSeparationM
+    ?? MAX_EQUIVALENT_PROJECTION_SEPARATION_M;
+  const maximumDistanceDeltaM = conditionalDistanceDeltaM
+    ?? MAX_EQUIVALENT_DISTANCE_FROM_FIX_DELTA_M;
   const spatialCandidates = candidates.filter(candidate => (
     distanceBetweenLngLatMeters(candidate.coordinate, nearest.coordinate)
-      <= MAX_EQUIVALENT_PROJECTION_SEPARATION_M
+      <= maximumProjectionSeparationM
     && candidate.distance_from_route_m
-      <= nearest.distance_from_route_m + MAX_EQUIVALENT_DISTANCE_FROM_FIX_DELTA_M
+      <= nearest.distance_from_route_m + maximumDistanceDeltaM
+    && (
+      !directionallyDistinctNearest
+      || candidate === nearest
+      || (
+        candidate.segment_bearing_deg != null
+        && angularDifferenceDegrees(heading!, candidate.segment_bearing_deg)
+          <= RECOVERY_HEADING_TOLERANCE_DEG
+      )
+    )
   ));
 
   if (!hasProgressHint) {

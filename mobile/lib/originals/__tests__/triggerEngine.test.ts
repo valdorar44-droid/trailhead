@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { validateOriginalManifest } from '../manifest';
-import { createOriginalSession } from '../session';
+import { completeOriginalStop, createOriginalSession, normalizeOriginalSession } from '../session';
 import { evaluateOriginalLocation } from '../triggerEngine';
 import type { OriginalLocationSample, OriginalSessionV1 } from '../types';
 import { originalManifest } from './fixtures';
@@ -145,6 +145,231 @@ assert.equal(
   'reverse travel cannot arm a cue with an authored forward bearing',
 );
 
+const implicitReverseManifest = originalManifest();
+implicitReverseManifest.stops[2] = {
+  ...implicitReverseManifest.stops[2],
+  coordinates: { lat: 0, lng: 0.02 },
+  trigger: {
+    ...implicitReverseManifest.stops[2].trigger,
+    route_progress_start_m: 2_000,
+    route_progress_end_m: implicitReverseManifest.route.distance_m,
+  },
+};
+const heldReverseSession: OriginalSessionV1 = {
+  ...createOriginalSession(implicitReverseManifest),
+  status: 'active',
+  current_stop_id: 'story-1',
+  triggered_stop_ids: ['story-1'],
+};
+const reverseEntry = evaluateOriginalLocation(
+  implicitReverseManifest,
+  heldReverseSession,
+  sample(0.02, 1_000, { heading_deg: 270 }),
+);
+assert.deepEqual(
+  reverseEntry.session.missed_stop_ids,
+  [],
+  'one reverse course fix cannot irreversibly close the route',
+);
+assert.equal(reverseEntry.session.trigger_state.reverse_candidate_sample_count, 1);
+assert.equal(reverseEntry.session.trigger_state.route_initialized, false);
+assert.equal(reverseEntry.session.trigger_state.candidate_stop_id, null);
+assert(!reverseEntry.events.some(event => (
+  event.type === 'stop_triggered' || event.type === 'stop_queued'
+)));
+const persistedReverseEntry = normalizeOriginalSession(
+  JSON.parse(JSON.stringify(reverseEntry.session)) as OriginalSessionV1,
+);
+const earlyContinuedReverse = evaluateOriginalLocation(
+  implicitReverseManifest,
+  persistedReverseEntry,
+  sample(0.0195, 2_000, { heading_deg: 270 }),
+);
+assert.deepEqual(earlyContinuedReverse.session.missed_stop_ids, []);
+assert.equal(
+  earlyContinuedReverse.session.trigger_state.reverse_candidate_sample_count,
+  2,
+  'a second reverse fix before three seconds remains an unconfirmed candidate',
+);
+const continuedReverse = evaluateOriginalLocation(
+  implicitReverseManifest,
+  earlyContinuedReverse.session,
+  sample(0.019, 4_100, { heading_deg: 270 }),
+);
+assert.deepEqual(
+  continuedReverse.session.missed_stop_ids,
+  ['story-2', 'story-3'],
+  'two reverse fixes spanning three seconds confirm a reverse route entry',
+);
+assert(!continuedReverse.events.some(event => (
+  event.type === 'stop_triggered' || event.type === 'stop_queued'
+)));
+const completedReverse = completeOriginalStop(
+  continuedReverse.session,
+  'story-1',
+  implicitReverseManifest.stops.map(stop => stop.id),
+  5_000,
+);
+assert.equal(completedReverse.status, 'completed', 'completing a held story closes a reverse-entry session');
+
+const interruptedReverseEntry = evaluateOriginalLocation(
+  implicitReverseManifest,
+  heldReverseSession,
+  sample(0.02, 10_000, { heading_deg: 270 }),
+);
+const poorDuringReverseEntry = evaluateOriginalLocation(
+  implicitReverseManifest,
+  interruptedReverseEntry.session,
+  sample(0.0198, 11_000, { heading_deg: 270, accuracy_m: 150 }),
+);
+assert.equal(poorDuringReverseEntry.session.trigger_state.reverse_candidate_sample_count, 0);
+assert.deepEqual(
+  poorDuringReverseEntry.session.missed_stop_ids,
+  [],
+  'an invalid fix clears reverse confirmation without closing stories',
+);
+
+const staleDuringReverseEntry = evaluateOriginalLocation(
+  implicitReverseManifest,
+  interruptedReverseEntry.session,
+  sample(0.0198, 9_000, { heading_deg: 270 }),
+);
+assert.equal(staleDuringReverseEntry.decision.code, 'stale_fix');
+assert.equal(staleDuringReverseEntry.session.trigger_state.reverse_candidate_sample_count, 1);
+
+const delayedReverseConfirmation = evaluateOriginalLocation(
+  implicitReverseManifest,
+  interruptedReverseEntry.session,
+  sample(0.019, 30_000, { heading_deg: 270 }),
+);
+assert.equal(delayedReverseConfirmation.session.trigger_state.reverse_candidate_sample_count, 1);
+assert.deepEqual(
+  delayedReverseConfirmation.session.missed_stop_ids,
+  [],
+  'widely separated reverse fixes restart confirmation instead of closing the tour',
+);
+
+const pausedReverseEntry = evaluateOriginalLocation(
+  implicitReverseManifest,
+  { ...interruptedReverseEntry.session, user_paused: true },
+  sample(0.0195, 40_000, { heading_deg: 270 }),
+);
+assert.equal(pausedReverseEntry.decision.code, 'user_paused');
+assert.equal(pausedReverseEntry.session.trigger_state.reverse_candidate_sample_count, 0);
+const resumedAfterPausedFix = evaluateOriginalLocation(
+  implicitReverseManifest,
+  { ...pausedReverseEntry.session, user_paused: false },
+  sample(0.019, 43_100, { heading_deg: 270 }),
+);
+assert.deepEqual(
+  resumedAfterPausedFix.session.missed_stop_ids,
+  [],
+  'paused location updates cannot refresh a stale destructive reverse candidate',
+);
+
+let recoveredFromNoisyInitialCourse = evaluateOriginalLocation(
+  manifest,
+  { ...createOriginalSession(manifest), status: 'active' },
+  sample(0, 20_000, { heading_deg: 270 }),
+).session;
+assert.deepEqual(recoveredFromNoisyInitialCourse.missed_stop_ids, []);
+recoveredFromNoisyInitialCourse = evaluateOriginalLocation(
+  manifest,
+  recoveredFromNoisyInitialCourse,
+  sample(0.0045, 23_100, { heading_deg: 90 }),
+).session;
+assert.equal(recoveredFromNoisyInitialCourse.trigger_state.candidate_stop_id, 'story-1');
+assert.deepEqual(
+  recoveredFromNoisyInitialCourse.missed_stop_ids,
+  [],
+  'a forward fix clears an unconfirmed reverse candidate without losing future stories',
+);
+recoveredFromNoisyInitialCourse = evaluateOriginalLocation(
+  manifest,
+  recoveredFromNoisyInitialCourse,
+  sample(0.0045, 26_200, { heading_deg: 90 }),
+).session;
+assert.equal(recoveredFromNoisyInitialCourse.current_stop_id, 'story-1');
+
+const southboundManifest = originalManifest();
+southboundManifest.route.geometry.coordinates = [[0, 0], [0, -0.03]];
+southboundManifest.route.distance_m = 3_336;
+southboundManifest.route.bounds = { north: 0, south: -0.03, east: 0, west: 0 };
+southboundManifest.offline_map.bounds = { ...southboundManifest.route.bounds };
+let missingHeadingSouthbound = evaluateOriginalLocation(
+  southboundManifest,
+  { ...createOriginalSession(southboundManifest), status: 'active' },
+  sample(0, 30_000, { lat: -0.001, heading_deg: null }),
+).session;
+missingHeadingSouthbound = evaluateOriginalLocation(
+  southboundManifest,
+  missingHeadingSouthbound,
+  sample(0, 33_100, { lat: -0.0015, heading_deg: null }),
+).session;
+assert.deepEqual(
+  missingHeadingSouthbound.missed_stop_ids,
+  [],
+  'missing heading data is never coerced to north or treated as reverse travel',
+);
+assert.equal(missingHeadingSouthbound.trigger_state.reverse_candidate_sample_count, 0);
+
+const uTurnSession: OriginalSessionV1 = {
+  ...createOriginalSession(manifest),
+  status: 'active',
+  completed_stop_ids: ['story-1'],
+  triggered_stop_ids: ['story-1'],
+  last_projected_route_progress_m: 900,
+  trigger_state: {
+    ...createOriginalSession(manifest).trigger_state,
+    route_initialized: true,
+  },
+};
+const uTurn = evaluateOriginalLocation(
+  manifest,
+  uTurnSession,
+  sample(0.0108, 10_000, { heading_deg: 270 }),
+);
+assert.equal(uTurn.decision.code, 'wrong_bearing');
+assert.equal(uTurn.session.trigger_state.candidate_stop_id, null);
+assert(!uTurn.session.missed_stop_ids.includes('story-2'));
+assert(!uTurn.session.missed_stop_ids.includes('story-3'));
+const endpointUTurn = evaluateOriginalLocation(
+  manifest,
+  uTurnSession,
+  sample(0.02, 10_100, { heading_deg: 270 }),
+);
+assert.deepEqual(
+  endpointUTurn.session.missed_stop_ids,
+  [],
+  'a later U-turn at the route endpoint blocks triggers without discarding future cues',
+);
+const broadBearingManifest = originalManifest();
+broadBearingManifest.stops[1].trigger.approach_bearing_deg = 90;
+broadBearingManifest.stops[1].trigger.bearing_tolerance_deg = 180;
+const broadBearingUTurn = evaluateOriginalLocation(
+  broadBearingManifest,
+  uTurnSession,
+  sample(0.0108, 10_200, { heading_deg: 270 }),
+);
+assert.equal(
+  broadBearingUTurn.decision.code,
+  'wrong_bearing',
+  'route-opposite protection cannot be bypassed by an authored 180 degree tolerance',
+);
+assert.equal(broadBearingUTurn.session.trigger_state.candidate_stop_id, null);
+let recoveredFromUTurn = evaluateOriginalLocation(
+  manifest,
+  uTurn.session,
+  sample(0.0108, 13_100, { heading_deg: 90 }),
+).session;
+assert.equal(recoveredFromUTurn.trigger_state.candidate_stop_id, 'story-2');
+recoveredFromUTurn = evaluateOriginalLocation(
+  manifest,
+  recoveredFromUTurn,
+  sample(0.0108, 16_200, { heading_deg: 90 }),
+).session;
+assert.equal(recoveredFromUTurn.current_stop_id, 'story-2', 'two fresh forward fixes trigger after a U-turn');
+
 const driveByManifest = originalManifest();
 driveByManifest.stops[1].trigger.lead_time_s = 10;
 let driveBySession: OriginalSessionV1 = {
@@ -168,6 +393,15 @@ assert.equal(
   'story-2',
   'lead time lets two high-speed drive-by fixes trigger before the authored route window',
 );
+
+const legacySession = createOriginalSession(manifest);
+delete legacySession.trigger_state.reverse_candidate_entered_at_ms;
+delete legacySession.trigger_state.reverse_candidate_sample_count;
+delete legacySession.trigger_state.reverse_candidate_last_sample_at_ms;
+const normalizedLegacySession = normalizeOriginalSession(legacySession);
+assert.equal(normalizedLegacySession.trigger_state.reverse_candidate_entered_at_ms, null);
+assert.equal(normalizedLegacySession.trigger_state.reverse_candidate_sample_count, 0);
+assert.equal(normalizedLegacySession.trigger_state.reverse_candidate_last_sample_at_ms, null);
 
 let hysteresis = evaluateOriginalLocation(
   manifest,

@@ -115,4 +115,96 @@ assert.equal(
   'a stale progress hint cannot snap to a separate parallel road about 4 metres away',
 );
 
+const opposingJitterRoute: LngLat[] = [
+  [0, 0],
+  [0.02, 0],
+  [0.02, 0.0001],
+  [0, 0.0001],
+];
+const recoveredOutbound = projectPointToOriginalRoute(opposingJitterRoute, [0.01, 0.00007], {
+  previous_route_ratio: 0.2,
+  heading_deg: 90,
+  speed_mps: 16,
+  accuracy_m: 20,
+});
+assert.equal(
+  recoveredOutbound?.segment_index,
+  0,
+  'bounded jitter nearer an opposing return leg preserves the prior headed occurrence',
+);
+
+const acceptedAccuracyRoute: LngLat[] = [
+  [0, 0],
+  [0.02, 0],
+  [0.02, 0.001],
+  [0, 0.001],
+];
+const recoveredAcrossNinetyMetreAccuracy = projectPointToOriginalRoute(
+  acceptedAccuracyRoute,
+  [0.01, 0.00055],
+  {
+    previous_route_ratio: 0.2,
+    heading_deg: 90,
+    speed_mps: 16,
+    accuracy_m: 90,
+  },
+);
+assert.equal(
+  recoveredAcrossNinetyMetreAccuracy?.segment_index,
+  0,
+  'a 90 metre fix error cannot jump from the prior outbound leg to a return leg 111 metres away',
+);
+const recoveredInitialHeading = projectPointToOriginalRoute(
+  acceptedAccuracyRoute,
+  [0.01, 0.00055],
+  {
+    heading_deg: 90,
+    speed_mps: 16,
+    accuracy_m: 90,
+  },
+);
+assert.equal(
+  recoveredInitialHeading?.segment_index,
+  0,
+  'a usable initial heading disambiguates the first fix before progress history exists',
+);
+
+const twoAccuracyEnvelopeRoute: LngLat[] = [
+  [0, 0],
+  [0.02, 0],
+  [0.02, 0.00165],
+  [0, 0.00165],
+];
+const recoveredAcrossTwoAccuracyEnvelope = projectPointToOriginalRoute(
+  twoAccuracyEnvelopeRoute,
+  [0.01, 0.0009],
+  {
+    previous_route_ratio: 0.2,
+    heading_deg: 90,
+    speed_mps: 16,
+    accuracy_m: 100,
+  },
+);
+assert.equal(
+  recoveredAcrossTwoAccuracyEnvelope?.segment_index,
+  0,
+  'continuity and heading recover the authored leg across the full 200 metre ambiguity envelope',
+);
+
+const physicalNearestWithoutHeading = projectPointToOriginalRoute(
+  opposingJitterRoute,
+  [0.01, 0.00007],
+  {
+    previous_route_ratio: 0.2,
+    heading_deg: null,
+    speed_mps: 16,
+    accuracy_m: 20,
+  },
+);
+assert.equal(
+  physicalNearestWithoutHeading?.segment_index,
+  2,
+  'accuracy never widens nearby-road matching without a usable directionally distinct heading',
+);
+
 console.log('Originals route projection tests passed.');

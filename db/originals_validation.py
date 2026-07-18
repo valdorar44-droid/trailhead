@@ -25,6 +25,7 @@ MAX_ROUTE_NETWORK_CHUNK_POINTS = 50
 ROUTE_NETWORK_CHUNK_OVERLAP_POINTS = 2
 MAX_AUTHORED_ROUTE_SEGMENT_M = 2_000.0
 MAX_MATCHED_POINT_OFFSET_M = 50.0
+MAX_LOCATE_EDGE_DISTANCE_M = 25.0
 MAX_NETWORK_DISTANCE_DELTA_RATIO = 0.15
 MAX_NETWORK_DISTANCE_DELTA_M = 300.0
 ROUTE_NETWORK_OVERRIDE_MAX_AGE_DAYS = 30
@@ -361,6 +362,45 @@ def _matched_coordinate(point: dict) -> list[float] | None:
     return [lng, lat]
 
 
+def _decode_valhalla_polyline6(value: Any) -> list[list[float]]:
+    """Decode Valhalla's encoded route shape into [longitude, latitude] points."""
+    encoded = str(value or "")
+    if not encoded:
+        raise OriginalValidationRunnerError("Valhalla matched route shape is missing")
+    coordinates: list[list[float]] = []
+    index = 0
+    latitude = 0
+    longitude = 0
+    factor = 1_000_000.0
+    while index < len(encoded):
+        deltas = []
+        for _axis in range(2):
+            result = 0
+            shift = 0
+            while True:
+                if index >= len(encoded):
+                    raise OriginalValidationRunnerError("Valhalla matched route shape is invalid")
+                byte = ord(encoded[index]) - 63
+                index += 1
+                if byte < 0 or byte > 0x3F or shift > 60:
+                    raise OriginalValidationRunnerError("Valhalla matched route shape is invalid")
+                result |= (byte & 0x1F) << shift
+                shift += 5
+                if byte < 0x20:
+                    break
+            deltas.append(~(result >> 1) if result & 1 else result >> 1)
+        latitude += deltas[0]
+        longitude += deltas[1]
+        lng = longitude / factor
+        lat = latitude / factor
+        if not -180 <= lng <= 180 or not -90 <= lat <= 90:
+            raise OriginalValidationRunnerError("Valhalla matched route shape is invalid")
+        coordinates.append([lng, lat])
+    if len(coordinates) < 2:
+        raise OriginalValidationRunnerError("Valhalla matched route shape is incomplete")
+    return coordinates
+
+
 def _surface_class(value: Any) -> str:
     surface = str(value or "").strip().lower().replace("-", "_")
     if surface in {"paved", "paved_smooth", "paved_rough"}:
@@ -408,14 +448,35 @@ _OVERRIDABLE_NETWORK_FINDINGS = {
 }
 
 
-def _validated_route_network_override(manifest: dict, finding_codes: set[str]) -> dict:
+def _validated_route_network_override(
+    manifest: dict,
+    finding_codes: set[str],
+    finding_evidence: list[dict] | None = None,
+) -> dict:
     review = manifest.get("review") if isinstance(manifest.get("review"), dict) else {}
     override = review.get("route_network_override")
     if not isinstance(override, dict):
-        raise OriginalValidationRunnerError(
+        message = (
             "Route-network restrictions require an approved official-source-backed override: "
             + ", ".join(sorted(finding_codes))
         )
+        evidence_samples = []
+        for code in sorted(finding_codes):
+            sample = next((
+                item for item in (finding_evidence or [])
+                if isinstance(item, dict) and item.get("code") == code
+            ), None)
+            coordinate = sample.get("coordinate") if isinstance(sample, dict) else None
+            if (
+                isinstance(coordinate, list) and len(coordinate) == 2
+                and all(isinstance(value, (int, float)) for value in coordinate)
+            ):
+                evidence_samples.append(
+                    f"{code} at {float(coordinate[1]):.6f},{float(coordinate[0]):.6f}"
+                )
+        if evidence_samples:
+            message += ". Evidence: " + "; ".join(evidence_samples)
+        raise OriginalValidationRunnerError(message)
     expected_keys = {
         "schema_version", "status", "finding_codes", "reason",
         "official_source_url", "approved_at", "approved_by_admin_user_id",
@@ -536,14 +597,52 @@ def validate_original_route_network(
     total_authored_chunk_distance_m = 0.0
     maximum_offset_m = 0.0
     discontinuities = 0
-    unpaved = 0
+    unique_trace_edge_ids: set[str] = set()
+    unpaved_edge_ids: set[str] = set()
+    restricted_edge_ids: set[str] = set()
     findings: set[str] = set()
+    finding_evidence: list[dict] = []
+    finding_evidence_keys: set[tuple] = set()
     osm_changesets: set[str] = set()
     located_edge_ids: set[str] = set()
     access_evidence_count = 0
+    provider_seasonal_field_seen = False
+
+    def record_finding_evidence(
+        code: str,
+        *,
+        source: str,
+        edge_id: str,
+        coordinate: list[float] | None,
+        use: str,
+        surface: str,
+    ) -> None:
+        restricted_edge_ids.add(edge_id)
+        rounded_coordinate = (
+            [round(float(coordinate[0]), 6), round(float(coordinate[1]), 6)]
+            if isinstance(coordinate, list) and len(coordinate) == 2 else None
+        )
+        key = (
+            code,
+            source,
+            edge_id,
+            tuple(rounded_coordinate) if rounded_coordinate else None,
+        )
+        if key in finding_evidence_keys or len(finding_evidence) >= 200:
+            return
+        finding_evidence_keys.add(key)
+        finding_evidence.append({
+            "code": code,
+            "source": source,
+            "edge_id": edge_id,
+            "coordinate": rounded_coordinate,
+            "use": use,
+            "surface": surface,
+        })
 
     trace_attributes = [
         "edge.id", "edge.length", "edge.surface", "edge.unpaved", "edge.use",
+        "edge.begin_shape_index", "edge.end_shape_index",
         "edge.traversability", "edge.travel_mode", "edge.vehicle_type",
         "matched.point", "matched.type", "matched.edge_index",
         "matched.begin_route_discontinuity", "matched.end_route_discontinuity",
@@ -557,12 +656,17 @@ def validate_original_route_network(
         trace_payload = {
             "shape": [{"lat": point[1], "lon": point[0]} for point in chunk],
             "costing": "auto",
-            "shape_match": "walk_or_snap",
+            # Valhalla only returns the point-for-point ``matched_points``
+            # evidence used below when trace matching is explicitly map_snap.
+            "shape_match": "map_snap",
             "directions_options": {"units": "kilometers"},
             "trace_options": {
                 "gps_accuracy": 20,
                 "search_radius": 75,
                 "breakage_distance": 2_000,
+                # This is authored geometry, not a noisy GPS trace. Disable
+                # Meili interpolation so each coordinate is edge-bound.
+                "interpolation_distance": 0,
             },
             "filters": {"action": "include", "attributes": trace_attributes},
         }
@@ -590,6 +694,7 @@ def validate_original_route_network(
             raise OriginalValidationRunnerError(
                 f"Valhalla did not return one matched point per authored point in chunk {chunk_number}"
             )
+        matched_shape = _decode_valhalla_polyline6(result.get("shape"))
         osm_changeset = result.get("osm_changeset")
         if not isinstance(osm_changeset, (dict, list)) and osm_changeset is not None and osm_changeset != "":
             osm_changesets.add(str(osm_changeset))
@@ -597,6 +702,9 @@ def validate_original_route_network(
         network_distance_m = 0.0
         edge_ids: list[str] = []
         edge_surfaces: list[str] = []
+        edge_uses: list[str] = []
+        edge_finding_codes: list[set[str]] = []
+        edge_coordinates: list[list[float]] = []
         for edge_index, edge in enumerate(edges):
             if not isinstance(edge, dict):
                 raise OriginalValidationRunnerError("Valhalla returned an unusable edge record")
@@ -609,6 +717,8 @@ def validate_original_route_network(
             vehicle_type = str(edge.get("vehicle_type") or "").strip().lower()
             unpaved_flag = edge.get("unpaved")
             length = edge.get("length")
+            begin_shape_index = edge.get("begin_shape_index")
+            end_shape_index = edge.get("end_shape_index")
             if (
                 not edge_id or surface_class == "unknown" or not use or not traversability
                 or travel_mode not in {"drive", "driving"}
@@ -616,6 +726,9 @@ def validate_original_route_network(
                 or not isinstance(unpaved_flag, bool)
                 or isinstance(length, bool) or not isinstance(length, (int, float))
                 or not math.isfinite(float(length)) or float(length) < 0
+                or isinstance(begin_shape_index, bool) or not isinstance(begin_shape_index, int)
+                or isinstance(end_shape_index, bool) or not isinstance(end_shape_index, int)
+                or not 0 <= begin_shape_index < end_shape_index < len(matched_shape)
             ):
                 raise OriginalValidationRunnerError(
                     f"Valhalla edge {edge_index} is missing usable driving, surface, or length attributes"
@@ -624,18 +737,45 @@ def validate_original_route_network(
                 raise OriginalValidationRunnerError("Valhalla matched a non-drivable edge")
             if bool(unpaved_flag) != (surface_class == "unpaved"):
                 raise OriginalValidationRunnerError("Valhalla surface attributes disagree")
+            current_edge_findings: set[str] = set()
             if use in restricted_uses:
                 findings.add("restricted_road_use")
+                current_edge_findings.add("restricted_road_use")
             if surface_class == "unpaved":
-                unpaved += 1
+                unpaved_edge_ids.add(edge_id)
                 if authored_surface == "paved":
                     findings.add("unpaved_surface")
+                    current_edge_findings.add("unpaved_surface")
             network_distance_m += float(length) * 1000.0
             edge_ids.append(edge_id)
+            unique_trace_edge_ids.add(edge_id)
             edge_surfaces.append(surface_class)
+            edge_uses.append(use)
+            edge_finding_codes.append(current_edge_findings)
+            representative_segment_index = begin_shape_index + (
+                end_shape_index - begin_shape_index - 1
+            ) // 2
+            segment_start = matched_shape[representative_segment_index]
+            segment_end = matched_shape[representative_segment_index + 1]
+            edge_coordinates.append([
+                (segment_start[0] + segment_end[0]) / 2.0,
+                (segment_start[1] + segment_end[1]) / 2.0,
+            ])
 
         representatives: list[dict] = []
-        for authored_point, matched_point in zip(chunk, matched):
+        for edge_index, edge_id in enumerate(edge_ids):
+            if (
+                edge_id not in located_edge_ids
+                and all(item["edge_id"] != edge_id for item in representatives)
+            ):
+                coordinate = edge_coordinates[edge_index]
+                representatives.append({
+                    "edge_id": edge_id,
+                    "edge_index": edge_index,
+                    "lat": coordinate[1],
+                    "lon": coordinate[0],
+                })
+        for chunk_point_index, (authored_point, matched_point) in enumerate(zip(chunk, matched)):
             if not isinstance(matched_point, dict):
                 raise OriginalValidationRunnerError("Valhalla returned an unusable matched point")
             edge_index = matched_point.get("edge_index")
@@ -643,7 +783,13 @@ def validate_original_route_network(
                 isinstance(edge_index, bool) or not isinstance(edge_index, int)
                 or not 0 <= edge_index < len(edges)
             ):
-                raise OriginalValidationRunnerError("Valhalla returned an unmatched authored point")
+                route_point_number = start_index + chunk_point_index + 1
+                matched_type = str(matched_point.get("type") or "unknown")
+                raise OriginalValidationRunnerError(
+                    "Valhalla returned an unmatched authored point at "
+                    f"route coordinate {route_point_number} "
+                    f"(chunk {chunk_number}, edge_index={edge_index!r}, type={matched_type})"
+                )
             if (
                 matched_point.get("begin_route_discontinuity") is True
                 or matched_point.get("end_route_discontinuity") is True
@@ -658,14 +804,16 @@ def validate_original_route_network(
                 raise OriginalValidationRunnerError(
                     f"Valhalla matched geometry deviates {offset:.0f} m from the authored route"
                 )
-            edge_id = edge_ids[edge_index]
-            if edge_id not in located_edge_ids and all(item["edge_id"] != edge_id for item in representatives):
-                representatives.append({
-                    "edge_id": edge_id,
-                    "edge_index": edge_index,
-                    "lat": coordinate[1],
-                    "lon": coordinate[0],
-                })
+        for edge_index, codes in enumerate(edge_finding_codes):
+            for code in sorted(codes):
+                record_finding_evidence(
+                    code,
+                    source="trace",
+                    edge_id=edge_ids[edge_index],
+                    coordinate=edge_coordinates[edge_index],
+                    use=edge_uses[edge_index],
+                    surface=edge_surfaces[edge_index],
+                )
         if discontinuities:
             raise OriginalValidationRunnerError("Valhalla found a route discontinuity")
 
@@ -717,7 +865,9 @@ def validate_original_route_network(
                 ), None)
                 if not candidate:
                     raise OriginalValidationRunnerError(
-                        "Valhalla could not bind driving-access evidence to a matched edge"
+                        "Valhalla could not bind driving-access evidence to matched edge "
+                        f"{representative['edge_id']} in chunk {chunk_number} at "
+                        f"{representative['lat']:.6f},{representative['lon']:.6f}"
                     )
                 edge_detail = candidate.get("edge")
                 if not isinstance(edge_detail, dict):
@@ -725,32 +875,85 @@ def validate_original_route_network(
                 access = edge_detail.get("access")
                 car_access = access.get("car") if isinstance(access, dict) else None
                 restriction_flag = edge_detail.get("access_restriction")
+                access_restrictions = candidate.get("access_restrictions")
                 classification = edge_detail.get("classification")
                 located_surface = (
                     classification.get("surface") if isinstance(classification, dict) else None
                 )
+                located_use = str(
+                    classification.get("use") if isinstance(classification, dict) else ""
+                ).strip().lower()
                 located_surface_class = _surface_class(located_surface)
+                candidate_distance = candidate.get("distance")
                 if (
                     not isinstance(car_access, bool)
                     or not isinstance(restriction_flag, bool)
+                    or not isinstance(access_restrictions, list)
+                    or not located_use
                     or located_surface_class == "unknown"
+                    or isinstance(candidate_distance, bool)
+                    or not isinstance(candidate_distance, (int, float))
+                    or not math.isfinite(float(candidate_distance))
+                    or not 0 <= float(candidate_distance) <= MAX_LOCATE_EDGE_DISTANCE_M
                 ):
                     raise OriginalValidationRunnerError(
-                        "Valhalla locate response lacks car access, private/restriction, or surface evidence"
+                        "Valhalla locate response lacks nearby car access, private/restriction, use, or surface evidence"
+                    )
+                for key in ("start_restriction", "end_restriction"):
+                    restriction = edge_detail.get(key)
+                    car_restricted = restriction.get("car") if isinstance(restriction, dict) else None
+                    if not isinstance(car_restricted, bool):
+                        raise OriginalValidationRunnerError(
+                            f"Valhalla locate response lacks {key} car-access evidence"
+                        )
+                if not isinstance(edge_detail.get("part_of_complex_restriction"), bool):
+                    raise OriginalValidationRunnerError(
+                        "Valhalla locate response lacks complex-turn-restriction evidence"
                     )
                 trace_surface_class = edge_surfaces[representative["edge_index"]]
                 if located_surface_class != trace_surface_class:
                     raise OriginalValidationRunnerError(
                         "Valhalla trace and locate surface evidence disagree"
                     )
+                trace_use = edge_uses[representative["edge_index"]]
+                if located_use != trace_use:
+                    raise OriginalValidationRunnerError(
+                        "Valhalla trace and locate road-use evidence disagree"
+                    )
                 if car_access is not True or edge_detail.get("unreachable") is True:
                     raise OriginalValidationRunnerError("Valhalla matched an edge without car access")
-                if restriction_flag is True or candidate.get("access_restrictions"):
+                car_access_restriction = False
+                for restriction_index, restriction in enumerate(access_restrictions):
+                    restriction_type = (
+                        str(restriction.get("type") or "").strip()
+                        if isinstance(restriction, dict) else ""
+                    )
+                    restricted_for_car = (
+                        restriction.get("car") if isinstance(restriction, dict) else None
+                    )
+                    if not restriction_type or not isinstance(restricted_for_car, bool):
+                        raise OriginalValidationRunnerError(
+                            "Valhalla locate response returned unusable access restriction "
+                            f"{restriction_index + 1}"
+                        )
+                    car_access_restriction = car_access_restriction or restricted_for_car
+                if restriction_flag is True and not access_restrictions:
+                    raise OriginalValidationRunnerError(
+                        "Valhalla reports restricted access without restriction details"
+                    )
+                if car_access_restriction:
                     findings.add("private_or_restricted_access")
+                    record_finding_evidence(
+                        "private_or_restricted_access",
+                        source="locate",
+                        edge_id=representative["edge_id"],
+                        coordinate=[representative["lon"], representative["lat"]],
+                        use=located_use,
+                        surface=located_surface_class,
+                    )
                 for key, finding in (
                     ("destination_only", "destination_only"),
                     ("not_thru", "not_through"),
-                    ("seasonal", "seasonal_access"),
                 ):
                     flag = edge_detail.get(key)
                     if not isinstance(flag, bool):
@@ -759,6 +962,58 @@ def validate_original_route_network(
                         )
                     if flag:
                         findings.add(finding)
+                        record_finding_evidence(
+                            finding,
+                            source="locate",
+                            edge_id=representative["edge_id"],
+                            coordinate=[representative["lon"], representative["lat"]],
+                            use=located_use,
+                            surface=located_surface_class,
+                        )
+                # Valhalla 3.5.x does not expose a seasonal flag in verbose
+                # locate responses. Treat it as evidence when a provider does
+                # expose it, while operational-source freshness remains the
+                # authoritative seasonal-access gate.
+                seasonal_flag = edge_detail.get("seasonal")
+                provider_seasonal_field_seen = provider_seasonal_field_seen or "seasonal" in edge_detail
+                if seasonal_flag is not None and not isinstance(seasonal_flag, bool):
+                    raise OriginalValidationRunnerError(
+                        "Valhalla locate response returned unusable seasonal access evidence"
+                    )
+                if seasonal_flag is True:
+                    findings.add("seasonal_access")
+                    record_finding_evidence(
+                        "seasonal_access",
+                        source="locate",
+                        edge_id=representative["edge_id"],
+                        coordinate=[representative["lon"], representative["lat"]],
+                        use=located_use,
+                        surface=located_surface_class,
+                    )
+                end_node_id = _canonical_edge_id(edge_detail.get("end_node"))
+                nodes = located.get("nodes") if isinstance(located, dict) else None
+                if end_node_id and isinstance(nodes, list):
+                    bound_node = next((
+                        node for node in nodes
+                        if isinstance(node, dict)
+                        and _canonical_edge_id(node.get("node_id")) == end_node_id
+                    ), None)
+                    if bound_node is not None:
+                        private_access = bound_node.get("private_access")
+                        if not isinstance(private_access, bool):
+                            raise OriginalValidationRunnerError(
+                                "Valhalla locate response returned unusable private-node evidence"
+                            )
+                        if private_access:
+                            findings.add("private_or_restricted_access")
+                            record_finding_evidence(
+                                "private_or_restricted_access",
+                                source="locate_node",
+                                edge_id=representative["edge_id"],
+                                coordinate=[representative["lon"], representative["lat"]],
+                                use=located_use,
+                                surface=located_surface_class,
+                            )
                 located_edge_ids.add(representative["edge_id"])
                 access_evidence_count += 1
 
@@ -767,10 +1022,19 @@ def validate_original_route_network(
         total_network_distance_m += network_distance_m
         total_authored_chunk_distance_m += authored_chunk_distance_m
 
+    missing_access_edge_ids = unique_trace_edge_ids - located_edge_ids
+    if missing_access_edge_ids:
+        raise OriginalValidationRunnerError(
+            "Valhalla driving-access evidence does not cover every matched route edge "
+            f"({len(missing_access_edge_ids)} missing)"
+        )
     status_after = _valhalla_status(base_url, timeout_seconds)
     if status_after != status_before:
         raise OriginalValidationRunnerError("Valhalla provider or graph changed during validation")
-    override_summary = _validated_route_network_override(manifest, findings) if findings else None
+    override_summary = (
+        _validated_route_network_override(manifest, findings, finding_evidence)
+        if findings else None
+    )
     return {
         "provider": "valhalla",
         "provider_version": status_before["provider_version"],
@@ -782,15 +1046,23 @@ def validate_original_route_network(
         "chunk_count": len(chunks),
         "matched_point_count": total_matched,
         "edge_count": total_edges,
+        "unique_edge_count": len(unique_trace_edge_ids),
         "access_evidence_edge_count": access_evidence_count,
+        "provider_seasonal_field_available": provider_seasonal_field_seen,
+        "seasonal_access_evidence": (
+            "valhalla_and_official_operational_sources"
+            if provider_seasonal_field_seen
+            else "official_operational_sources"
+        ),
         "maximum_authored_segment_m": maximum_segment,
         "maximum_matched_offset_m": maximum_offset_m,
         "matched_network_distance_m_with_chunk_overlap": total_network_distance_m,
         "authored_distance_m_with_chunk_overlap": total_authored_chunk_distance_m,
         "discontinuity_count": 0,
         "unmatched_point_count": 0,
-        "restricted_segment_count": len(findings),
-        "unpaved_segment_count": unpaved,
+        "restricted_segment_count": len(restricted_edge_ids),
+        "finding_evidence": finding_evidence,
+        "unpaved_segment_count": len(unpaved_edge_ids),
         "unknown_surface_segment_count": 0,
         "authored_surface": authored_surface,
         "override": override_summary,

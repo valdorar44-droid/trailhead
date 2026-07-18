@@ -6,6 +6,24 @@ from unittest.mock import patch
 from db import originals_validation as validation
 
 
+def _encode_polyline6(points):
+    output = []
+    previous_latitude = 0
+    previous_longitude = 0
+    for point in points:
+        latitude = round(float(point["lat"]) * 1_000_000)
+        longitude = round(float(point["lon"]) * 1_000_000)
+        for delta in (latitude - previous_latitude, longitude - previous_longitude):
+            value = ~(delta << 1) if delta < 0 else delta << 1
+            while value >= 0x20:
+                output.append(chr((0x20 | (value & 0x1F)) + 63))
+                value >>= 5
+            output.append(chr(value + 63))
+        previous_latitude = latitude
+        previous_longitude = longitude
+    return "".join(output)
+
+
 class _JsonResponse:
     def __init__(self, value):
         self._payload = json.dumps(value, separators=(",", ":")).encode("utf-8")
@@ -29,6 +47,11 @@ class _ValhallaFixture:
         self.length_multiplier = 1.0
         self.omit_access_restriction = False
         self.restricted_access = False
+        self.restriction_applies_to_car = True
+        self.turn_restricted = False
+        self.drop_last_matched_point = False
+        self.insert_intermediate_edge = False
+        self.locate_edge_ids = {}
 
     def _global_index(self, lon):
         return min(
@@ -44,16 +67,32 @@ class _ValhallaFixture:
         if request.full_url.endswith("/trace_attributes"):
             self.trace_payloads.append(payload)
             shape = payload["shape"]
-            global_indexes = [self._global_index(point["lon"]) for point in shape]
+            path_shape = list(shape)
+            authored_path_indexes = list(range(len(shape)))
+            if self.insert_intermediate_edge and len(shape) >= 2:
+                midpoint = {
+                    "lat": (shape[0]["lat"] + shape[1]["lat"]) / 2.0,
+                    "lon": (shape[0]["lon"] + shape[1]["lon"]) / 2.0,
+                }
+                path_shape = [shape[0], midpoint, *shape[1:]]
+                authored_path_indexes = [0, *range(2, len(path_shape))]
             edges = []
-            for start, end, global_index in zip(shape, shape[1:], global_indexes):
+            for path_index, (start, end) in enumerate(zip(path_shape, path_shape[1:])):
+                global_index = self._global_index(start["lon"])
+                edge_id = (
+                    f"edge-{global_index}-intermediate-{path_index}"
+                    if self.insert_intermediate_edge and path_index < 2
+                    else f"edge-{global_index}"
+                )
                 distance_m = validation._route_haversine_m(
                     [start["lon"], start["lat"]],
                     [end["lon"], end["lat"]],
                 )
                 edges.append({
-                    "id": f"edge-{global_index}",
+                    "id": edge_id,
                     "length": distance_m / 1000.0 * self.length_multiplier,
+                    "begin_shape_index": path_index,
+                    "end_shape_index": path_index + 1,
                     "surface": "paved_smooth",
                     "unpaved": False,
                     "use": "road",
@@ -61,39 +100,71 @@ class _ValhallaFixture:
                     "travel_mode": "drive",
                     "vehicle_type": "car",
                 })
+                self.locate_edge_ids[
+                    (
+                        round((float(start["lat"]) + float(end["lat"])) / 2.0, 6),
+                        round((float(start["lon"]) + float(end["lon"])) / 2.0, 6),
+                    )
+                ] = edge_id
             matched = [{
                 "lat": point["lat"] + self.matched_lat_offset,
                 "lon": point["lon"],
-                "edge_index": min(index, len(edges) - 1),
+                "edge_index": min(path_index, len(edges) - 1),
                 "begin_route_discontinuity": False,
                 "end_route_discontinuity": False,
-            } for index, point in enumerate(shape)]
-            return _JsonResponse({
+            } for point, path_index in zip(shape, authored_path_indexes)]
+            if self.drop_last_matched_point:
+                matched = matched[:-1]
+            response = {
                 "units": "kilometers",
                 "osm_changeset": 123456,
                 "edges": edges,
-                "matched_points": matched,
-            })
+                "shape": _encode_polyline6(path_shape),
+            }
+            # This mirrors Valhalla's production contract: walk_or_snap can
+            # return edges and shape, but point-for-point matched evidence is
+            # produced by map_snap.
+            if payload.get("shape_match") == "map_snap":
+                response["matched_points"] = matched
+            return _JsonResponse(response)
         if request.full_url.endswith("/locate"):
             self.locate_payloads.append(payload)
             results = []
             for point in payload["locations"]:
-                global_index = min(self._global_index(point["lon"]), len(self.coordinates) - 2)
+                point_key = (float(point["lat"]), float(point["lon"]))
+                nearest_key = min(
+                    self.locate_edge_ids,
+                    key=lambda key: abs(key[0] - point_key[0]) + abs(key[1] - point_key[1]),
+                )
+                edge_id = self.locate_edge_ids[nearest_key]
+                if abs(nearest_key[0] - point_key[0]) + abs(nearest_key[1] - point_key[1]) > 0.000002:
+                    raise AssertionError(f"No fixture edge for locate point: {point}")
                 edge = {
                     "access": {"car": True},
-                    "classification": {"surface": "paved_smooth"},
+                    "classification": {"surface": "paved_smooth", "use": "road"},
                     "unreachable": False,
+                    "start_restriction": {"car": self.turn_restricted},
+                    "end_restriction": {"car": self.turn_restricted},
+                    "part_of_complex_restriction": self.turn_restricted,
                     "destination_only": False,
                     "not_thru": False,
-                    "seasonal": False,
                 }
                 if not self.omit_access_restriction:
                     edge["access_restriction"] = self.restricted_access
                 results.append({
                     "edges": [{
-                        "edge_id": {"value": f"edge-{global_index}"},
+                        "edge_id": {"value": edge_id},
                         "edge": edge,
-                        "access_restrictions": ([{"type": "private"}] if self.restricted_access else []),
+                        "distance": 0.0,
+                        "access_restrictions": (
+                            [{
+                                "type": (
+                                    "private" if self.restriction_applies_to_car else "max_height"
+                                ),
+                                "car": self.restriction_applies_to_car,
+                            }]
+                            if self.restricted_access else []
+                        ),
                     }],
                 })
             return _JsonResponse(results)
@@ -125,6 +196,22 @@ class OriginalRouteNetworkValidationTests(unittest.TestCase):
         self.manifest = _manifest(self.coordinates)
         self.valhalla = _ValhallaFixture(self.coordinates)
 
+    def test_polyline6_decoder_round_trips_and_rejects_malformed_input(self):
+        points = [
+            {"lat": 38.573336, "lon": -109.549741},
+            {"lat": 38.573363, "lon": -109.549768},
+            {"lat": 38.574428, "lon": -109.550772},
+        ]
+        decoded = validation._decode_valhalla_polyline6(_encode_polyline6(points))
+        self.assertEqual(
+            decoded,
+            [[point["lon"], point["lat"]] for point in points],
+        )
+        for malformed in ("", "_", "\x7f?"):
+            with self.subTest(malformed=repr(malformed)):
+                with self.assertRaises(validation.OriginalValidationRunnerError):
+                    validation._decode_valhalla_polyline6(malformed)
+
     def test_validates_every_authored_point_in_overlapping_chunks_and_captures_versions(self):
         with patch.object(validation.urllib_request, "urlopen", side_effect=self.valhalla):
             result = validation.validate_original_route_network(
@@ -142,8 +229,62 @@ class OriginalRouteNetworkValidationTests(unittest.TestCase):
         )
         self.assertIn("edge.travel_mode", self.valhalla.trace_payloads[0]["filters"]["attributes"])
         self.assertIn("edge.surface", self.valhalla.trace_payloads[0]["filters"]["attributes"])
+        self.assertIn("edge.begin_shape_index", self.valhalla.trace_payloads[0]["filters"]["attributes"])
+        self.assertLess(result["unique_edge_count"], result["edge_count"])
+        self.assertEqual(result["access_evidence_edge_count"], result["unique_edge_count"])
         self.assertGreater(result["access_evidence_edge_count"], 0)
+        self.assertFalse(result["provider_seasonal_field_available"])
+        self.assertEqual(result["seasonal_access_evidence"], "official_operational_sources")
         self.assertIsNone(result["override"])
+
+    def test_uses_map_snap_and_requires_one_matched_point_per_authored_coordinate(self):
+        with patch.object(validation.urllib_request, "urlopen", side_effect=self.valhalla):
+            result = validation.validate_original_route_network(
+                self.manifest,
+                valhalla_url="https://valhalla.test",
+            )
+
+        self.assertTrue(self.valhalla.trace_payloads)
+        self.assertTrue(all(
+            payload["shape_match"] == "map_snap"
+            for payload in self.valhalla.trace_payloads
+        ))
+        self.assertTrue(all(
+            payload["trace_options"]["interpolation_distance"] == 0
+            for payload in self.valhalla.trace_payloads
+        ))
+        requested_point_count = sum(
+            len(payload["shape"])
+            for payload in self.valhalla.trace_payloads
+        )
+        self.assertEqual(result["matched_point_count"], requested_point_count)
+
+        incomplete = _ValhallaFixture(self.coordinates)
+        incomplete.drop_last_matched_point = True
+        with patch.object(validation.urllib_request, "urlopen", side_effect=incomplete):
+            with self.assertRaisesRegex(
+                validation.OriginalValidationRunnerError,
+                "one matched point per authored point",
+            ):
+                validation.validate_original_route_network(
+                    self.manifest,
+                    valhalla_url="https://valhalla.test",
+                )
+
+    def test_locates_intermediate_path_edges_without_authored_point_matches(self):
+        route = self.coordinates[:3]
+        manifest = _manifest(route)
+        provider = _ValhallaFixture(route)
+        provider.insert_intermediate_edge = True
+        with patch.object(validation.urllib_request, "urlopen", side_effect=provider):
+            result = validation.validate_original_route_network(
+                manifest,
+                valhalla_url="https://valhalla.test",
+            )
+        self.assertEqual(result["unique_edge_count"], 3)
+        self.assertEqual(result["access_evidence_edge_count"], 3)
+        self.assertEqual(len(provider.locate_payloads), 1)
+        self.assertEqual(len(provider.locate_payloads[0]["locations"]), 3)
 
     def test_fails_closed_on_sparse_geometry_missing_access_or_matched_deviation(self):
         sparse = _manifest([[-109.55, 38.57], [-109.52, 38.57]])
@@ -152,7 +293,7 @@ class OriginalRouteNetworkValidationTests(unittest.TestCase):
 
         self.valhalla.omit_access_restriction = True
         with patch.object(validation.urllib_request, "urlopen", side_effect=self.valhalla):
-            with self.assertRaisesRegex(validation.OriginalValidationRunnerError, "lacks car access"):
+            with self.assertRaisesRegex(validation.OriginalValidationRunnerError, "lacks nearby car access"):
                 validation.validate_original_route_network(
                     self.manifest,
                     valhalla_url="https://valhalla.test",
@@ -220,6 +361,18 @@ class OriginalRouteNetworkValidationTests(unittest.TestCase):
             result["override"]["finding_codes"],
             ["private_or_restricted_access"],
         )
+
+    def test_truck_only_and_complex_turn_restrictions_are_not_private_car_findings(self):
+        provider = _ValhallaFixture(self.coordinates)
+        provider.restricted_access = True
+        provider.restriction_applies_to_car = False
+        provider.turn_restricted = True
+        with patch.object(validation.urllib_request, "urlopen", side_effect=provider):
+            result = validation.validate_original_route_network(
+                self.manifest,
+                valhalla_url="https://valhalla.test",
+            )
+        self.assertIsNone(result["override"])
 
 
 if __name__ == "__main__":

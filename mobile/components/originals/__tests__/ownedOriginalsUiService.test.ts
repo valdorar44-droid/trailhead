@@ -27,6 +27,7 @@ const stubs: Record<string, string> = {
   '@/lib/originals': `
     export const ORIGINALS_ANALYTICS_EVENTS = { downloadResult: 'originals_download_result' };
     export function trackOriginalsAnalyticsEvent() {}
+    export async function getOriginalPreviewToken() { return globalThis.__ownedOriginalsPreviewToken || null; }
     export const originalAccessStore = {
       list: async (scope) => (globalThis.__ownedOriginalsAccess[scope] || []),
       recordEntitlement: async (...args) => { globalThis.__ownedOriginalsWrites.push(args); },
@@ -147,6 +148,7 @@ const guestAccess = {
 async function main() {
   const globals = globalThis as typeof globalThis & {
     __ownedOriginalsState?: { user: { id: string } | null; token: string | null };
+    __ownedOriginalsPreviewToken?: string | null;
     __ownedOriginalsEpoch?: number;
     __ownedOriginalsAccess?: Record<string, unknown[]>;
     __ownedOriginalsWrites?: unknown[];
@@ -162,6 +164,7 @@ async function main() {
     __ownedOriginalsRemovals?: number;
   };
   globals.__ownedOriginalsState = { user: null, token: null };
+  globals.__ownedOriginalsPreviewToken = null;
   globals.__ownedOriginalsEpoch = 0;
   globals.__ownedOriginalsAccess = { guest: [guestAccess] };
   globals.__ownedOriginalsWrites = [];
@@ -264,6 +267,28 @@ async function main() {
   manifestGate.resolve(manifest);
   await assert.rejects(staleDownload, /account changed/i);
   assert.equal(bundleDownloads, 0, 'an account switch during manifest fetch never starts a bundle download');
+
+  let previewDownloadArgs: unknown[] = [];
+  globals.__ownedOriginalsState = { user: null, token: null };
+  globals.__ownedOriginalsEpoch = 6;
+  globals.__ownedOriginalsAccess = { guest: [guestAccess] };
+  globals.__ownedOriginalsPreviewToken = 'internal-preview-token';
+  globals.__ownedOriginalsManifest = async () => manifest;
+  globals.__ownedOriginalsBundleDownload = async (...args) => {
+    previewDownloadArgs = args;
+    return { ...bundle, owner_scope: 'guest' };
+  };
+  const previewDownload = await service.downloadOriginalBundle('moab-original', 1);
+  const previewDownloadOptions = previewDownloadArgs[1] as {
+    ownerScope?: string;
+    headers?: Record<string, string>;
+  };
+  assert.equal(previewDownload.state, 'ready');
+  assert.equal(previewDownloadOptions.ownerScope, 'guest', 'preview credentials never change ownership scope');
+  assert.deepEqual(previewDownloadOptions.headers, {
+    'X-Trailhead-Originals-Preview': 'internal-preview-token',
+  }, 'guest asset GETs receive the stored internal preview credential');
+  assert.equal(globals.__ownedOriginalsWrites?.length, 0, 'downloading with preview access never creates ownership');
 
   console.log('Owned Originals UI service tests passed.');
 }

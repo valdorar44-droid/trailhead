@@ -6,6 +6,7 @@ import {
   originalAccessStore,
   originalBundleStore,
   originalOwnerScopeForAccount,
+  getOriginalPreviewToken,
   originalRestoreScopeIsCurrent,
   originalSessionStore,
   originalSummaryForLocalAccess,
@@ -789,6 +790,8 @@ export async function downloadOriginalBundle(
     if (!access) throw new Error('Acquire this exact Original version before downloading it.');
     const manifest = await originalsApi.manifest(access.pack_id, version, undefined, requestToken);
     if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
+    const previewToken = await getOriginalPreviewToken().catch(() => null);
+    if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
     const controller = new AbortController();
     const unsubscribe = accountStorage.subscribe(() => {
       if (!scopeIsCurrent()) controller.abort();
@@ -797,7 +800,10 @@ export async function downloadOriginalBundle(
     try {
       record = await originalBundleStore.download(manifest, {
         ownerScope: scope,
-        headers: requestToken ? { Authorization: `Bearer ${requestToken}` } : {},
+        headers: {
+          ...(requestToken ? { Authorization: `Bearer ${requestToken}` } : {}),
+          ...(previewToken ? { 'X-Trailhead-Originals-Preview': previewToken } : {}),
+        },
         signal: controller.signal,
         onProgress: value => onProgress?.(progressState(value)),
       });

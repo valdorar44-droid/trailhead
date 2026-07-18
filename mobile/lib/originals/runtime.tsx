@@ -39,6 +39,7 @@ import {
 } from './locationAdapter';
 import { validateOriginalManifest } from './manifest';
 import { originalOwnerScopeForAccount, originalRestoreScopeIsCurrent } from './ownership';
+import { getOriginalPreviewToken } from './previewAccess';
 import {
   completeOriginalStop,
   createOriginalSession,
@@ -673,6 +674,8 @@ export function OriginalsRuntimeProvider({
       const access = await dependencies.access.get(ownerScope, manifestInput.pack_id, manifestInput.version);
       if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
       reportDownloadAnalytics = access?.access_type !== 'admin_preview';
+      const previewToken = await getOriginalPreviewToken().catch(() => null);
+      if (!scopeIsStillCurrent()) throw new Error('The signed-in account changed. Try again.');
       const controller = new AbortController();
       const abortForScopeChange = () => {
         if (!scopeIsStillCurrent()) controller.abort();
@@ -689,6 +692,7 @@ export function OriginalsRuntimeProvider({
           headers: {
             ...(options.headers ?? {}),
             ...(requestToken ? { Authorization: `Bearer ${requestToken}` } : {}),
+            ...(previewToken ? { 'X-Trailhead-Originals-Preview': previewToken } : {}),
           },
           signal: controller.signal,
           onProgress: value => {

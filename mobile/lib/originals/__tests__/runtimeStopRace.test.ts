@@ -43,6 +43,11 @@ const nativeRuntimeStubs: Record<string, string> = {
   './locationAdapter': `
     export const expoOriginalLocationAdapter = {};
   `,
+  './previewAccess': `
+    export async function getOriginalPreviewToken() {
+      return globalThis.__originalsRuntimePreviewToken || null;
+    }
+  `,
   './expoStores': `
     export const originalAccessStore = {};
     export const originalBundleStore = {};
@@ -103,12 +108,14 @@ async function main() {
   const globals = globalThis as typeof globalThis & {
     __originalsRuntimeAuthState?: { user: { id: string; is_admin?: boolean } | null; token: string | null };
     __originalsRuntimeEpoch?: number;
+    __originalsRuntimePreviewToken?: string | null;
     __originalsRuntimeAcquire?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeClaimFeatured?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeAnalyticsCount?: number;
   };
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
   globals.__originalsRuntimeEpoch = 0;
+  globals.__originalsRuntimePreviewToken = null;
   globals.__originalsRuntimeAcquire = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeClaimFeatured = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeAnalyticsCount = 0;
@@ -125,6 +132,7 @@ async function main() {
   let accessOverride: (() => Promise<Record<string, unknown>>) | null = null;
   let bundleOverride: (() => Promise<Record<string, unknown>>) | null = null;
   let verifyOverride: (() => Promise<boolean>) | null = null;
+  let bundleDownloadOptions: Record<string, unknown> | null = null;
 
   const manifest = originalManifest();
   const bundle = {
@@ -173,6 +181,10 @@ async function main() {
       async assetUri() { return 'file:///originals/test/story.mp3'; },
       async loadManifest() { return null; },
       async migrateGuestToAccount() {},
+      async download(_manifest: unknown, options: Record<string, unknown>) {
+        bundleDownloadOptions = options;
+        return { ...bundle, owner_scope: options.ownerScope };
+      },
     },
     sessions: {
       async load() { return null; },
@@ -276,6 +288,23 @@ async function main() {
   assert.equal(sessionSaveCount, 0, 'the ephemeral simulation session is never persisted by stop');
   assert.equal(setActiveCount, 0, 'the ephemeral simulation session never replaces durable active state');
   assert.equal(globals.__originalsRuntimeAnalyticsCount, 0, 'synthetic lab activity never emits production analytics');
+
+  accessOverride = async () => ({ owner_scope: 'account:admin-preview', access_type: 'admin_preview' });
+  globals.__originalsRuntimePreviewToken = 'stored-preview-token';
+  await act(async () => { await runtime!.downloadOriginal(manifest); });
+  const recordedDownloadOptions = bundleDownloadOptions as unknown as Record<string, unknown>;
+  const downloadHeaders = recordedDownloadOptions.headers as Record<string, string> | undefined;
+  assert.equal(recordedDownloadOptions.ownerScope, 'account:admin-preview', 'preview headers never change ownership scope');
+  assert.equal(downloadHeaders?.Authorization, 'Bearer admin-token');
+  assert.equal(
+    downloadHeaders?.['X-Trailhead-Originals-Preview'],
+    'stored-preview-token',
+    'runtime asset GETs receive the stored internal preview credential',
+  );
+  assert.equal(globals.__originalsRuntimeAnalyticsCount, 0, 'admin preview downloads never emit production analytics');
+  accessOverride = null;
+  globals.__originalsRuntimePreviewToken = null;
+
   globals.__originalsRuntimeAuthState = { user: null, token: null };
   const ownershipRuntime = runtime as unknown as Runtime;
 

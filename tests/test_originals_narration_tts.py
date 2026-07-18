@@ -158,6 +158,9 @@ class ElevenLabsTtsTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             call.kwargs["generator_metadata"]["output_format"], "mp3_44100_128",
         )
+        self.assertEqual(
+            call.kwargs["generator_metadata"]["license"], "elevenlabs_commercial_terms",
+        )
         self.assertNotIn("generated_at", call.kwargs["generator_metadata"])
 
 
@@ -193,6 +196,7 @@ class CartesiaOriginalNarrationEndpointTests(unittest.IsolatedAsyncioTestCase):
             "model_id": "sonic-test",
             "voice_id": "cartesia-test-voice",
             "output_format": "mp3_44100_128",
+            "license": "cartesia_commercial_terms",
         })
 
     async def test_provider_endpoint_persists_mp3_with_cartesia_provenance(self):
@@ -228,6 +232,7 @@ class CartesiaOriginalNarrationEndpointTests(unittest.IsolatedAsyncioTestCase):
             "model_id": "sonic-test",
             "voice_id": "cartesia-test-voice",
             "output_format": "mp3_44100_128",
+            "license": "cartesia_commercial_terms",
         })
 
 

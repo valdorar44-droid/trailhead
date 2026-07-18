@@ -48,6 +48,7 @@ type Props = {
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
   onCategorySelect: (key: ExploreCategoryKey) => void;
+  onOpenOriginals: () => void;
 };
 
 export function ExploreHero({
@@ -65,6 +66,7 @@ export function ExploreHero({
   onQueryChange,
   onClearQuery,
   onCategorySelect,
+  onOpenOriginals,
 }: Props) {
   return (
     <View style={[styles.shell, { height }]}>
@@ -147,6 +149,18 @@ export function ExploreHero({
             style={styles.categoryScroller}
             contentContainerStyle={styles.categoryRail}
           >
+            <TouchableOpacity
+              accessibilityRole="button"
+              accessibilityLabel="Open Trailhead Originals self-guided drives"
+              style={[styles.categoryItem, { width: 80 }]}
+              onPress={onOpenOriginals}
+              activeOpacity={0.84}
+            >
+              <View style={[styles.categoryIcon, styles.originalsCategoryIcon]}>
+                <Ionicons name="navigate-outline" size={24} color="#fff" />
+              </View>
+              <Text style={styles.categoryLabel} numberOfLines={1}>Originals</Text>
+            </TouchableOpacity>
             {HERO_CATEGORY_KEYS.map(key => {
             const source = EXPLORE_CATEGORY_CHIPS.find(item => item.key === key);
             if (!source) return null;
@@ -318,6 +332,7 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(15,23,42,0.74)',
     borderColor: 'rgba(255,255,255,0.56)',
   },
+  originalsCategoryIcon: { borderColor: '#E67E22', backgroundColor: 'rgba(230,126,34,0.82)' },
   categoryLabel: {
     color: '#fff',
     fontSize: 11,

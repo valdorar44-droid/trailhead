@@ -78,6 +78,7 @@ export type OriginalsRuntimeValue = {
   muted: boolean;
   simulation: boolean;
   lastTriggerEvaluation: OriginalTriggerEvaluation | null;
+  audioPlaybackState: OriginalAudioPlaybackState | null;
   audioCapabilities: OriginalAudioAdapter['capabilities'];
   downloadOriginal: (
     manifest: OriginalManifestV1,
@@ -85,9 +86,6 @@ export type OriginalsRuntimeValue = {
   ) => Promise<OriginalBundleRecord>;
   startTour: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
   restartTour: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
-  startSimulation: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
-  skipSimulationCue: () => Promise<void>;
-  clearSimulationDiagnostic: () => void;
   pauseTour: () => Promise<void>;
   resumeTour: () => Promise<void>;
   stopTour: () => Promise<void>;
@@ -98,8 +96,15 @@ export type OriginalsRuntimeValue = {
   acquireOriginal: (id: string, version: number, idempotencyKey?: string) => Promise<OriginalAcquisition>;
   claimFeaturedOriginal: (idempotencyKey?: string) => Promise<OriginalAcquisition>;
   beginAudioInterruption: (kind: 'navigation' | 'hazard') => Promise<() => Promise<void>>;
-  submitLocationSample: (sample: OriginalLocationSample) => Promise<void>;
   migrateGuestToAccount: (accountId: string | number) => Promise<OriginalSessionV1[]>;
+};
+
+/** Privileged synthetic controls intentionally excluded from the public runtime API. */
+export type OriginalsAdminRuntimeValue = {
+  startSimulation: (manifest: OriginalManifestV1) => Promise<OriginalSessionV1>;
+  skipSimulationCue: () => Promise<void>;
+  clearSimulationDiagnostic: () => void;
+  submitLocationSample: (sample: OriginalLocationSample) => Promise<void>;
 };
 
 type OriginalsRuntimeDependencies = {
@@ -119,6 +124,7 @@ const defaultDependencies: OriginalsRuntimeDependencies = {
 };
 
 const OriginalsRuntimeContext = createContext<OriginalsRuntimeValue | null>(null);
+const OriginalsAdminRuntimeContext = createContext<OriginalsAdminRuntimeValue | null>(null);
 
 function originalDownloadFailure(error: unknown) {
   if (error instanceof Error && error.name === 'AbortError') return 'cancelled';
@@ -145,6 +151,7 @@ export function OriginalsRuntimeProvider({
   const [muted, setMutedState] = useState(false);
   const [simulation, setSimulation] = useState(false);
   const [lastTriggerEvaluation, setLastTriggerEvaluation] = useState<OriginalTriggerEvaluation | null>(null);
+  const [audioPlaybackState, setAudioPlaybackState] = useState<OriginalAudioPlaybackState | null>(null);
 
   const sessionRef = useRef<OriginalSessionV1 | null>(null);
   const manifestRef = useRef<OriginalManifestV1 | null>(null);
@@ -230,6 +237,7 @@ export function OriginalsRuntimeProvider({
   const handleExternalUserPauseRef = useRef<(state: OriginalAudioPlaybackState) => Promise<void>>(async () => {});
 
   const handleAudioState = useCallback((audioState: OriginalAudioPlaybackState) => {
+    if (mountedRef.current) setAudioPlaybackState(audioState);
     const active = sessionRef.current;
     if (!active) return;
     if (audioState.loaded && Math.abs(audioState.position_ms - lastPositionPersistRef.current) >= 5_000) {
@@ -532,6 +540,9 @@ export function OriginalsRuntimeProvider({
     };
     try {
       requireActiveActivation();
+      if (simulate && !useStore.getState().user?.is_admin) {
+        throw new Error('The Virtual Drive Lab is available only to Trailhead admins.');
+      }
       if (
         simulate
         && !simulationRef.current
@@ -588,6 +599,7 @@ export function OriginalsRuntimeProvider({
         setError(null);
         setSimulation(simulate);
         setLastTriggerEvaluation(null);
+        setAudioPlaybackState(null);
         setState('tracking');
       }
       activatedSessionId = active.session_id;
@@ -868,6 +880,7 @@ export function OriginalsRuntimeProvider({
           setBundle(null);
           setSimulation(false);
           setLastTriggerEvaluation(null);
+          setAudioPlaybackState(null);
           setState('idle');
         }
         stoppingRef.current = false;
@@ -1322,13 +1335,11 @@ export function OriginalsRuntimeProvider({
     muted,
     simulation,
     lastTriggerEvaluation,
+    audioPlaybackState,
     audioCapabilities: dependencies.audio.capabilities,
     downloadOriginal,
     startTour: value => activateTour(value, false),
     restartTour: value => activateTour(value, true),
-    startSimulation: value => activateTour(value, true, true),
-    skipSimulationCue,
-    clearSimulationDiagnostic,
     pauseTour,
     resumeTour,
     stopTour,
@@ -1339,19 +1350,18 @@ export function OriginalsRuntimeProvider({
     acquireOriginal,
     claimFeaturedOriginal,
     beginAudioInterruption,
-    submitLocationSample,
     migrateGuestToAccount,
   }), [
     activateTour,
     acquireOriginal,
     claimFeaturedOriginal,
-    clearSimulationDiagnostic,
     beginAudioInterruption,
     bundle,
     dependencies.audio.capabilities,
     downloadOriginal,
     downloadProgress,
     error,
+    audioPlaybackState,
     lastTriggerEvaluation,
     manifest,
     migrateGuestToAccount,
@@ -1364,17 +1374,52 @@ export function OriginalsRuntimeProvider({
     setMuted,
     session,
     skipCurrentStory,
-    skipSimulationCue,
     state,
     stopTour,
-    submitLocationSample,
   ]);
 
-  return <OriginalsRuntimeContext.Provider value={value}>{children}</OriginalsRuntimeContext.Provider>;
+  const adminValue = useMemo<OriginalsAdminRuntimeValue>(() => ({
+    startSimulation: value => {
+      if (!useStore.getState().user?.is_admin) {
+        return Promise.reject(new Error('The Virtual Drive Lab is available only to Trailhead admins.'));
+      }
+      return activateTour(value, true, true);
+    },
+    skipSimulationCue: () => {
+      if (!useStore.getState().user?.is_admin || !simulationRef.current) {
+        return Promise.reject(new Error('No admin Virtual Drive Lab session is active.'));
+      }
+      return skipSimulationCue();
+    },
+    clearSimulationDiagnostic: () => {
+      if (!useStore.getState().user?.is_admin || !simulationRef.current) return;
+      clearSimulationDiagnostic();
+    },
+    submitLocationSample: sample => {
+      if (!useStore.getState().user?.is_admin || !simulationRef.current) {
+        return Promise.reject(new Error('Synthetic location is available only in an admin Virtual Drive Lab session.'));
+      }
+      return submitLocationSample(sample);
+    },
+  }), [activateTour, clearSimulationDiagnostic, skipSimulationCue, submitLocationSample]);
+
+  return (
+    <OriginalsRuntimeContext.Provider value={value}>
+      <OriginalsAdminRuntimeContext.Provider value={adminValue}>
+        {children}
+      </OriginalsAdminRuntimeContext.Provider>
+    </OriginalsRuntimeContext.Provider>
+  );
 }
 
 export function useOriginalsRuntime() {
   const value = useContext(OriginalsRuntimeContext);
   if (!value) throw new Error('useOriginalsRuntime must be used inside OriginalsRuntimeProvider.');
+  return value;
+}
+
+export function useOriginalsAdminRuntime() {
+  const value = useContext(OriginalsAdminRuntimeContext);
+  if (!value) throw new Error('useOriginalsAdminRuntime must be used inside OriginalsRuntimeProvider.');
   return value;
 }

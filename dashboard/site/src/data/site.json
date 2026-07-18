@@ -23,7 +23,7 @@
       {
         "title": "Download",
         "links": [
-          { "label": "Download iOS", "href": "https://apps.apple.com/au/app/trailhead-camp-route-free/id6763677349" },
+          { "label": "Download iOS", "href": "https://apps.apple.com/app/id6763677349" },
           { "label": "Download Android", "href": "https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US" },
           { "label": "Open app", "href": "/app/index.html" }
         ]

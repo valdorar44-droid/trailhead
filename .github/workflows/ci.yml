@@ -26,11 +26,19 @@ jobs:
           python-version: "3.12"
           cache: pip
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: |
+          pip install -r requirements.txt
+          npm ci --ignore-scripts
 
       - name: Compile backend
-        run: python -m py_compile dashboard/server.py db/store.py
+        run: python -m py_compile dashboard/server.py db/store.py db/originals_validation.py
 
       - name: Initialize test database
         run: python -c "from db.store import init_db; init_db()"
@@ -85,3 +93,27 @@ jobs:
 
       - name: Audit Plan workspace
         run: npm run audit:plan-workspace
+
+  website:
+    name: Website and verified-link contracts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install website dependencies
+        run: npm ci
+
+      - name: Build website and association files
+        run: npm run build
+
+      - name: Validate Originals preview contract
+        run: node dashboard/site/scripts/check-originals-preview.mjs
+
+      - name: Validate tracked diffs
+        run: git diff --check

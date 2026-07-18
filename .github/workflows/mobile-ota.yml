@@ -1,4 +1,4 @@
-name: Manual Mobile OTA
+name: Paired Mobile OTA
 
 on:
   workflow_dispatch:
@@ -12,17 +12,8 @@ on:
           - production
           - preview
           - both
-      platform:
-        description: "Mobile platform to publish"
-        required: true
-        default: "ios"
-        type: choice
-        options:
-          - ios
-          - android
-          - all
       message:
-        description: "OTA update message"
+        description: "Paired Android and iOS update message"
         required: true
         default: "Manual OTA from GitHub Actions"
         type: string
@@ -31,7 +22,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: manual-mobile-ota-${{ github.event.inputs.channel }}-${{ github.event.inputs.platform }}
+  group: paired-mobile-ota-${{ github.event.inputs.channel }}
   cancel-in-progress: false
 
 jobs:
@@ -99,8 +90,8 @@ jobs:
 
       - name: Publish preview OTA
         if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
-        run: eas update --channel preview --platform "${{ github.event.inputs.platform }}" --message "${{ github.event.inputs.message }}" --non-interactive
+        run: eas update --channel preview --platform all --message "${{ github.event.inputs.message }}" --non-interactive
 
       - name: Publish production OTA
         if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
-        run: eas update --channel production --platform "${{ github.event.inputs.platform }}" --message "${{ github.event.inputs.message }}" --non-interactive
+        run: eas update --channel production --platform all --message "${{ github.event.inputs.message }}" --non-interactive

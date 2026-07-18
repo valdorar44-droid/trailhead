@@ -57,6 +57,13 @@
         <data android:scheme="trailhead"/>
         <data android:scheme="com.trailhead.app"/>
       </intent-filter>
+      <intent-filter android:autoVerify="true">
+        <action android:name="android.intent.action.VIEW"/>
+        <category android:name="android.intent.category.DEFAULT"/>
+        <category android:name="android.intent.category.BROWSABLE"/>
+        <data android:scheme="https" android:host="gettrailhead.app" android:pathPrefix="/originals"/>
+        <data android:scheme="https" android:host="api.gettrailhead.app" android:pathPrefix="/originals"/>
+      </intent-filter>
       <intent-filter>
         <action android:name="androidx.car.app.action.NAVIGATE"/>
         <category android:name="android.intent.category.DEFAULT"/>

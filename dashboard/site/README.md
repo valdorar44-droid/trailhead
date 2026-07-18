@@ -56,3 +56,19 @@ npm run dev
 # Build for production
 npm run build
 ```
+
+### App-link association credentials
+
+The static association files use the confirmed app identifiers (`com.trailhead.app`) and internal-build signing credentials:
+
+- Apple Team ID: `4FJKGBQA5X`.
+- EAS internal Android signing SHA-256: `DE:BB:4B:74:EF:C8:94:42:1B:00:B3:E0:92:45:86:77:DA:EB:A5:72:C7:82:74:76:61:AA:FC:93:89:CA:CB:C6`.
+
+The Android association therefore verifies EAS internal builds. Before a public Google Play release, add the production app-signing SHA-256 from Google Play Console → Setup → App integrity → App signing key certificate to the `sha256_cert_fingerprints` array. Keep the EAS fingerprint if both internal and store builds should open these links.
+
+After deployment, confirm both URLs return the JSON body directly over HTTPS with no redirects:
+
+- `/.well-known/apple-app-site-association`
+- `/.well-known/assetlinks.json`
+
+The canonical Originals URL uses `https://gettrailhead.app`. The apex currently needs an address/alias record pointing at the same host as `api.gettrailhead.app`; until that DNS prerequisite is complete, use the `https://api.gettrailhead.app/originals/...` preview URL. Verify both association files on the apex and API host before the public launch.

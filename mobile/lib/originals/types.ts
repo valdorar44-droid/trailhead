@@ -24,6 +24,10 @@ export type OriginalCitationV1 = {
   url: string;
   publisher?: string;
   reviewed_at?: string;
+  /** Legacy citations omit role and are interpreted as story sources. */
+  role?: 'story' | 'operational';
+  authority?: 'official' | 'authoritative' | null;
+  scope?: string[];
 };
 
 export type OriginalTriggerV1 = {
@@ -97,8 +101,9 @@ export type OriginalManifestV1 = {
   };
   review: {
     editorial_status: string;
-    field_drive_completed_at: string;
-    source_review_completed_at: string;
+    /** Historical manifests may retain this; virtual validation does not set it. */
+    field_drive_completed_at?: string | null;
+    source_review_completed_at?: string | null;
   };
 };
 
@@ -229,6 +234,8 @@ export type OriginalSessionV1 = {
   current_audio_position_ms: number;
   last_projected_route_progress_m: number | null;
   last_route_distance_m: number | null;
+  /** Last fix accepted by the pure trigger engine; used to reject delayed fixes. */
+  last_location_timestamp_ms?: number | null;
   user_paused: boolean;
   /** Present only while a terminal story is being replayed manually. */
   manual_replay_return_status?: OriginalSessionStatus | null;
@@ -260,6 +267,7 @@ export type OriginalTriggerEvent =
 export type OriginalTriggerDecisionCode =
   | 'inactive'
   | 'user_paused'
+  | 'stale_fix'
   | 'poor_accuracy'
   | 'route_unavailable'
   | 'off_route'

@@ -159,6 +159,7 @@ function triggerDecisionMessage(
   switch (code) {
     case 'inactive': return 'Tour is not active.';
     case 'user_paused': return 'Automatic story triggers are paused by the listener.';
+    case 'stale_fix': return 'This delayed location fix was ignored because a newer fix was already processed.';
     case 'poor_accuracy': return 'GPS accuracy does not meet the trigger requirement.';
     case 'route_unavailable': return 'The authored route cannot be projected from this location.';
     case 'off_route': return 'Location is too far from the authored route.';
@@ -234,6 +235,19 @@ export function evaluateOriginalLocation(
       },
     };
   };
+
+  const lastLocationTimestamp = Number(currentSession.last_location_timestamp_ms);
+  if (
+    Number.isFinite(lastLocationTimestamp)
+    && sample.timestamp_ms <= lastLocationTimestamp
+  ) {
+    session = {
+      ...currentSession,
+      trigger_state: { ...currentSession.trigger_state },
+    };
+    return finish('stale_fix');
+  }
+  session.last_location_timestamp_ms = sample.timestamp_ms;
 
   if (session.status === 'completed') {
     return finish('complete');

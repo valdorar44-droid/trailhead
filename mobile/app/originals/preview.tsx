@@ -4,7 +4,13 @@ import { Ionicons } from '@expo/vector-icons';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
-import { originalAccessStore, originalBundleStore, originalsApi, useOriginalsRuntime } from '@/lib/originals';
+import {
+  originalAccessStore,
+  originalBundleStore,
+  originalsApi,
+  useOriginalsAdminRuntime,
+  useOriginalsRuntime,
+} from '@/lib/originals';
 import { useStore } from '@/lib/store';
 
 export default function OriginalDraftPreviewScreen() {
@@ -14,8 +20,11 @@ export default function OriginalDraftPreviewScreen() {
   const id = Array.isArray(params.id) ? params.id[0] : params.id || '';
   const user = useStore(state => state.user);
   const runtime = useOriginalsRuntime();
+  const adminRuntime = useOriginalsAdminRuntime();
   const runtimeRef = useRef(runtime);
   runtimeRef.current = runtime;
+  const adminRuntimeRef = useRef(adminRuntime);
+  adminRuntimeRef.current = adminRuntime;
   const startedRef = useRef(false);
   const [attempt, setAttempt] = useState(0);
   const [phase, setPhase] = useState('Preparing Studio draft');
@@ -53,7 +62,7 @@ export default function OriginalDraftPreviewScreen() {
         await originalAccessStore.remove(scope, item.pack_id, item.version).catch(() => {});
       }));
       setPhase('Opening the trigger test');
-      await runtimeRef.current.startSimulation(manifest);
+      await adminRuntimeRef.current.startSimulation(manifest);
       simulationStarted = true;
       if (!active) {
         await runtimeRef.current.stopTour().catch(() => {});

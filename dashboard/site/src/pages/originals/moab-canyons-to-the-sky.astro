@@ -1,0 +1,1422 @@
+---
+import Layout from '../../layouts/Layout.astro';
+
+const deepLink = 'trailhead://originals/moab-canyons-to-the-sky';
+
+const facts = [
+  { label: 'Route', value: 'Moab → Island in the Sky' },
+  { label: 'Time', value: '4–6 hours' },
+  { label: 'Original', value: 'Free' },
+  { label: 'Stories', value: '11 GPS-triggered' },
+  { label: 'Offline', value: 'Route + audio' },
+  { label: 'Roads', value: 'Paved' },
+];
+
+const stories = [
+  ['01', 'From River Town to High Desert', 'Set out from the red-rock valley and meet the landscape at road speed.'],
+  ['02', 'The Road to the Sky', 'Watch the desert change as the road climbs toward the mesa.'],
+  ['03', 'Layers of Time', 'A wide-angle introduction to the forces that raised this country.'],
+  ['04', 'The Neck and the Point', 'Pause at the rim for the view, the river, and the stories held below.'],
+  ['05', 'Above the Colorado', 'Follow the river’s path through a landscape measured in deep time.'],
+  ['06', 'One Park, Four Districts', 'Enter Canyonlands through Island in the Sky and place the mesa in a larger park.'],
+  ['07', 'Shafer Canyon: A Road Through Rock', 'Look down on switchbacks, cliffs, and a route built through stone.'],
+  ['08', 'Mesa Arch: A Window in Stone', 'Meet a stone frame opening onto the canyons beyond the mesa.'],
+  ['09', 'Green River: What Shall We Find?', 'Turn west toward a second river system and another horizon.'],
+  ['10', 'Tracks in Buck Canyon', 'Read the contours, drainage, and marks carried through Buck Canyon.'],
+  ['11', 'Grand View: Water, Gravity, Time', 'Reach the mesa’s far end for the broadest view of the day.'],
+];
+
+const sources = [
+  {
+    name: 'Dead Horse Point State Park — fees and hours',
+    owner: 'Utah State Parks',
+    href: 'https://stateparks.utah.gov/parks/dead-horse/park-fees/',
+  },
+  {
+    name: 'Canyonlands National Park — entrance fees',
+    owner: 'National Park Service',
+    href: 'https://www.nps.gov/cany/planyourvisit/fees.htm',
+  },
+  {
+    name: 'Canyonlands — road conditions',
+    owner: 'National Park Service',
+    href: 'https://www.nps.gov/cany/planyourvisit/road-conditions.htm',
+  },
+  {
+    name: 'Canyonlands — auto touring',
+    owner: 'National Park Service',
+    href: 'https://www.nps.gov/cany/planyourvisit/driving.htm',
+  },
+  {
+    name: 'Canyonlands — basic visitor information',
+    owner: 'National Park Service',
+    href: 'https://www.nps.gov/cany/planyourvisit/basicinfo.htm',
+  },
+  {
+    name: 'Grand View Point — 2026 construction schedule',
+    owner: 'National Park Service',
+    href: 'https://www.nps.gov/cany/planyourvisit/grand_view_point_construction.htm',
+  },
+];
+---
+
+<Layout
+  title="Moab: Canyons to the Sky | Trailhead Originals"
+  description="A free, self-guided GPS audio drive from Moab through Dead Horse Point and Canyonlands' Island in the Sky."
+  canonical="https://gettrailhead.app/originals/moab-canyons-to-the-sky"
+  image="/assets/screenshots/camp-card.jpg"
+  transparentNav={true}
+  noindex={true}
+  showStoreLinks={false}
+>
+  <main class="originals-page">
+    <section class="hero" aria-labelledby="original-title">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <div class="preview-row">
+            <span class="eyebrow">Trailhead Originals</span>
+            <span class="preview-chip">Internal preview</span>
+          </div>
+          <p class="validation-note">Virtual route validation required before release</p>
+          <h1 id="original-title">Moab:<br /><span>Canyons to the Sky</span></h1>
+          <p class="hero-lead">
+            A self-guided scenic drive from Moab to Dead Horse Point and Canyonlands’
+            Island in the Sky, told through 11 stories that meet you along the road.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href={deepLink} data-open-original>
+              Open in Trailhead
+              <svg aria-hidden="true" viewBox="0 0 20 20">
+                <path d="M4 10h11M11 5l5 5-5 5"></path>
+              </svg>
+            </a>
+            <a class="button button-ghost" href="#route">Preview the route</a>
+          </div>
+          <p class="cta-note">Trailhead app required · Park admission is separate</p>
+          <p class="build-note">Android and iPhone preview invitations are sent directly to approved testers after the paired builds are ready.</p>
+        </div>
+
+        <div class="route-card" id="route">
+          <div class="route-card-head">
+            <div>
+              <span>Route preview</span>
+              <strong>High desert, one road at a time</strong>
+            </div>
+            <span class="route-number">11</span>
+          </div>
+          <svg class="route-map" viewBox="0 0 720 620" role="img" aria-labelledby="route-title route-desc">
+            <title id="route-title">Schematic route from Moab to Grand View Point</title>
+            <desc id="route-desc">
+              A stylized orange line connects Moab, Dead Horse Point, Island in the Sky,
+              and Grand View Point. This drawing is not for navigation.
+            </desc>
+            <path class="contour contour-a" d="M38 500C142 419 165 339 282 309S457 198 682 102"></path>
+            <path class="contour contour-b" d="M8 570C117 484 226 461 343 392S535 260 711 214"></path>
+            <path class="contour contour-c" d="M27 183C153 215 193 170 303 135S507 85 692 40"></path>
+            <path class="road-shadow" d="M105 542C126 489 171 470 196 416C226 351 198 311 267 277C332 244 398 291 427 218C452 154 517 177 561 128C590 95 624 91 660 76"></path>
+            <path class="road" d="M105 542C126 489 171 470 196 416C226 351 198 311 267 277C332 244 398 291 427 218C452 154 517 177 561 128C590 95 624 91 660 76"></path>
+            <g class="route-stop stop-moab" transform="translate(105 542)">
+              <circle r="13"></circle><circle class="stop-core" r="4"></circle>
+              <text x="24" y="6">Moab</text>
+            </g>
+            <g class="story-dot"><circle cx="146" cy="470" r="5"></circle><text x="158" y="474">02</text></g>
+            <g class="story-dot"><circle cx="197" cy="407" r="5"></circle><text x="209" y="411">03</text></g>
+            <g class="route-stop" transform="translate(269 277)">
+              <circle r="13"></circle><circle class="stop-core" r="4"></circle>
+              <text x="-9" y="-26">Dead Horse Point</text>
+            </g>
+            <g class="story-dot"><circle cx="353" cy="267" r="5"></circle><text x="365" y="271">05</text></g>
+            <g class="story-dot"><circle cx="416" cy="229" r="5"></circle><text x="381" y="212">06</text></g>
+            <g class="route-stop" transform="translate(471 169)">
+              <circle r="13"></circle><circle class="stop-core" r="4"></circle>
+              <text x="-138" y="-17">Island in the Sky</text>
+            </g>
+            <g class="story-dot"><circle cx="530" cy="151" r="5"></circle><text x="505" y="139">08</text></g>
+            <g class="story-dot"><circle cx="575" cy="116" r="5"></circle><text x="588" y="120">09</text></g>
+            <g class="story-dot"><circle cx="616" cy="91" r="5"></circle><text x="617" y="116">10</text></g>
+            <g class="route-stop" transform="translate(660 76)">
+              <circle r="13"></circle><circle class="stop-core" r="4"></circle>
+              <text x="-24" y="-27" text-anchor="end">Grand View Point</text>
+            </g>
+            <text class="map-state" x="54" y="80">UTAH</text>
+          </svg>
+          <div class="map-disclaimer">
+            <span>Schematic route · not for navigation</span>
+            <span>Moab, Utah</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="facts-wrap" aria-label="Original details">
+      <div class="facts">
+        {facts.map((fact) => (
+          <div class="fact">
+            <span>{fact.label}</span>
+            <strong>{fact.value}</strong>
+          </div>
+        ))}
+      </div>
+      <p class="fee-ribbon"><strong>Original: free.</strong> Dead Horse Point and Canyonlands admission fees are separate.</p>
+    </section>
+
+    <section class="section intro" aria-labelledby="how-title">
+      <div class="section-kicker">Built for the drive</div>
+      <div class="section-heading split-heading">
+        <h2 id="how-title">The road tells you when to listen.</h2>
+        <p>
+          Download the whole Original before leaving Moab. Trailhead holds the route,
+          narration, transcripts, artwork, and map for use when cell service disappears.
+        </p>
+      </div>
+      <div class="steps">
+        <article>
+          <span class="step-number">01</span>
+          <h3>Download once</h3>
+          <p>Save the complete drive over Wi-Fi and check that every part is ready.</p>
+        </article>
+        <article>
+          <span class="step-number">02</span>
+          <h3>Start while parked</h3>
+          <p>Review location access, audio, route notes, and current park conditions.</p>
+        </article>
+        <article>
+          <span class="step-number">03</span>
+          <h3>Let stories arrive</h3>
+          <p>The next story begins after you reach its authored point along the route.</p>
+        </article>
+      </div>
+      <div class="trigger-note">
+        <div class="trigger-icon" aria-hidden="true">
+          <span></span>
+        </div>
+        <div>
+          <strong>How a story is triggered</strong>
+          <p>
+            Trailhead confirms you are near the next story and moving through the right
+            part of the route before playback starts. Poor location quality or going
+            off-route pauses new stories. Missed stories remain available for manual replay.
+          </p>
+        </div>
+      </div>
+    </section>
+
+    <section class="stories-section" id="stories" aria-labelledby="stories-title">
+      <div class="section stories-inner">
+        <div class="stories-heading">
+          <div>
+            <div class="section-kicker light">Working story sequence</div>
+            <h2 id="stories-title">Eleven stops.<br /><span>One unfolding landscape.</span></h2>
+          </div>
+          <p>
+            Titles and timing are an editorial preview. Scripts, cue locations, and
+            narration remain subject to source, licensing, and automated whole-route validation.
+          </p>
+        </div>
+        <ol class="story-list">
+          {stories.map(([number, title, description]) => (
+            <li>
+              <span class="story-number">{number}</span>
+              <div>
+                <h3>{title}</h3>
+                <p>{description}</p>
+              </div>
+              <span class="story-mark" aria-hidden="true"></span>
+            </li>
+          ))}
+        </ol>
+      </div>
+    </section>
+
+    <section class="section planning" aria-labelledby="planning-title">
+      <div class="section-kicker">Plan the day</div>
+      <div class="section-heading split-heading">
+        <h2 id="planning-title">Free to listen.<br />Prepared for the desert.</h2>
+        <p>
+          The Trailhead Original is free. Admission to Dead Horse Point State Park and
+          Canyonlands National Park is not included.
+        </p>
+      </div>
+
+      <div class="planning-grid">
+        <article class="fee-card featured">
+          <span class="card-label">Dead Horse Point</span>
+          <strong class="fee-price">$20</strong>
+          <p>Current regular private-vehicle day-use fee listed by Utah State Parks.</p>
+          <a href="https://stateparks.utah.gov/parks/dead-horse/park-fees/" target="_blank" rel="noopener">Check current fee →</a>
+        </article>
+        <article class="fee-card">
+          <span class="card-label">Canyonlands</span>
+          <strong class="fee-price">$30</strong>
+          <p>Current private-vehicle entrance fee, valid for seven consecutive days.</p>
+          <a href="https://www.nps.gov/cany/planyourvisit/fees.htm" target="_blank" rel="noopener">Check current fee →</a>
+        </article>
+        <article class="access-card">
+          <span class="card-label">Before departure</span>
+          <ul>
+            <li>Paved passenger-car route</li>
+            <li>Allow 4–6 hours including stops</li>
+            <li>Download audio and route first</li>
+            <li>Check weather, hours, and closures</li>
+          </ul>
+        </article>
+      </div>
+
+      <p class="checked-note">
+        Fees checked <time datetime="2026-07-17">July 17, 2026</time>. Fees, hours, access,
+        and pass eligibility can change. Confirm details with the parks before departing.
+      </p>
+
+      <aside id="current-access" class="access-alert" aria-label="Upcoming Grand View Point access change">
+        <strong>Upcoming access change</strong>
+        <p>
+          From July 27 through October 1, 2026, Grand View Point closes from 6 a.m. Monday
+          to 4 p.m. Thursday for NPS road construction. During closures, the drive turns
+          around earlier; long vehicles should turn around at Green River Overlook.
+          <a href="https://www.nps.gov/cany/planyourvisit/grand_view_point_construction.htm" target="_blank" rel="noopener">Review the NPS schedule →</a>
+        </p>
+      </aside>
+
+      <div class="safety-note">
+        <strong>Drive first.</strong>
+        <p>
+          Start and adjust the tour while parked, or let a passenger handle the phone.
+          Follow posted signs and closures over any in-app direction.
+        </p>
+      </div>
+    </section>
+
+    <section class="sources-section" aria-labelledby="sources-title">
+      <div class="section sources-inner">
+        <div>
+          <div class="section-kicker">Source desk</div>
+          <h2 id="sources-title">Built from official park information.</h2>
+          <p class="sources-lead">
+            The public preview uses primary planning sources. Final scripts require
+            citation, licensing, access, and automated whole-route validation before publication.
+          </p>
+        </div>
+        <ul class="sources-list">
+          {sources.map((source) => (
+            <li>
+              <a href={source.href} target="_blank" rel="noopener">
+                <span>
+                  <small>{source.owner}</small>
+                  <strong>{source.name}</strong>
+                </span>
+                <svg aria-hidden="true" viewBox="0 0 20 20"><path d="M5 15 15 5M7 5h8v8"></path></svg>
+              </a>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </section>
+
+    <section class="final-cta" aria-labelledby="final-title">
+      <div class="final-cta-inner">
+        <div>
+          <span class="eyebrow">Trailhead Originals</span>
+          <h2 id="final-title">Take Moab’s stories<br />with you.</h2>
+          <p>Free Original · 11 stories · Full offline download · Park admission separate</p>
+        </div>
+        <div class="final-actions">
+          <a class="button button-primary" href={deepLink} data-open-original>Open in Trailhead</a>
+          <p class="build-note final-build-note">Android and iPhone preview invitations are sent directly to approved testers after the paired builds are ready.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script is:inline>
+    (() => {
+      const fallback = '/app/index.html';
+      document.querySelectorAll('[data-open-original]').forEach((link) => {
+        link.addEventListener('click', () => {
+          window.setTimeout(() => {
+            if (document.visibilityState === 'visible') {
+              window.location.assign(fallback);
+            }
+          }, 900);
+        });
+      });
+    })();
+  </script>
+</Layout>
+
+<style>
+  :global(:root),
+  :global(:root[data-theme='dark']) {
+    --bg: #ffffff;
+    --fg: #111111;
+    --fg-muted: #686868;
+    --card: #ffffff;
+    --rule: rgba(17, 17, 17, 0.13);
+    --accent: #ff6b1a;
+  }
+
+  :global(body) {
+    margin: 0;
+    background: #ffffff;
+    color: #111111;
+  }
+
+  :global(body > footer) {
+    margin-top: 0 !important;
+    background: #ffffff !important;
+  }
+
+  .originals-page {
+    --orange: #ff6b1a;
+    --orange-dark: #d94f00;
+    --black: #0a0a0a;
+    --white: #ffffff;
+    --line: #dedede;
+    --muted: #6d6d6d;
+    overflow: hidden;
+    background: var(--white);
+    color: var(--black);
+    font-family: var(--font-display);
+  }
+
+  .hero {
+    position: relative;
+    min-height: 850px;
+    padding: 132px 24px 118px;
+    background: var(--black);
+    color: var(--white);
+  }
+
+  .hero::before {
+    position: absolute;
+    inset: 0;
+    background:
+      linear-gradient(120deg, rgba(255, 107, 26, 0.13), transparent 32%),
+      radial-gradient(circle at 82% 16%, rgba(255, 255, 255, 0.08), transparent 25%);
+    content: '';
+    pointer-events: none;
+  }
+
+  .hero-grid,
+  .section,
+  .facts-wrap,
+  .final-cta-inner {
+    width: min(1220px, 100%);
+    margin: 0 auto;
+  }
+
+  .hero-grid {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(500px, 0.9fr);
+    gap: 70px;
+    align-items: center;
+  }
+
+  .hero-copy,
+  .route-card {
+    min-width: 0;
+  }
+
+  .preview-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .eyebrow,
+  .preview-chip,
+  .section-kicker,
+  .card-label,
+  .fact span,
+  .validation-note,
+  .route-card-head > div > span {
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.09em;
+    text-transform: uppercase;
+  }
+
+  .eyebrow,
+  .section-kicker {
+    color: var(--orange);
+  }
+
+  .preview-chip {
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 999px;
+    padding: 7px 11px;
+    color: rgba(255, 255, 255, 0.8);
+  }
+
+  .validation-note {
+    margin: 22px 0 0;
+    color: rgba(255, 255, 255, 0.46);
+    letter-spacing: 0.04em;
+  }
+
+  h1,
+  h2,
+  h3,
+  p {
+    margin-top: 0;
+  }
+
+  .hero h1 {
+    max-width: 720px;
+    margin: 20px 0 26px;
+    font-size: clamp(3.9rem, 5.7vw, 6.5rem);
+    font-weight: 800;
+    letter-spacing: -0.065em;
+    line-height: 0.87;
+  }
+
+  .hero h1 span,
+  .stories-heading h2 span {
+    color: var(--orange);
+  }
+
+  .hero-lead {
+    max-width: 610px;
+    margin-bottom: 0;
+    color: rgba(255, 255, 255, 0.71);
+    font-size: clamp(1.05rem, 1.5vw, 1.27rem);
+    line-height: 1.62;
+  }
+
+  .hero-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-top: 34px;
+  }
+
+  .button {
+    display: inline-flex;
+    min-height: 54px;
+    align-items: center;
+    justify-content: center;
+    gap: 13px;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    padding: 0 24px;
+    color: inherit;
+    font-size: 0.94rem;
+    font-weight: 800;
+    text-decoration: none;
+    transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+  }
+
+  .button svg,
+  .sources-list svg {
+    width: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 1.7;
+  }
+
+  .button:hover,
+  .store-links a:hover,
+  .sources-list a:hover {
+    transform: translateY(-2px);
+  }
+
+  .button-primary {
+    background: var(--orange);
+    color: var(--black);
+  }
+
+  .button-primary:hover {
+    background: #ff7c33;
+  }
+
+  .button-ghost {
+    border-color: rgba(255, 255, 255, 0.23);
+    color: var(--white);
+  }
+
+  .button-ghost:hover {
+    border-color: rgba(255, 255, 255, 0.55);
+  }
+
+  .cta-note {
+    margin: 13px 0 0;
+    color: rgba(255, 255, 255, 0.44);
+    font-family: var(--font-mono);
+    font-size: 0.71rem;
+  }
+
+  .store-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-top: 24px;
+  }
+
+  .store-links a {
+    display: flex;
+    min-width: 154px;
+    flex-direction: column;
+    gap: 2px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.24);
+    padding: 8px 2px 10px;
+    color: var(--white);
+    text-decoration: none;
+    transition: transform 160ms ease, border-color 160ms ease;
+  }
+
+  .store-links a:hover {
+    border-color: var(--orange);
+  }
+
+  .store-links span {
+    color: rgba(255, 255, 255, 0.46);
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+    text-transform: uppercase;
+  }
+
+  .store-links strong {
+    font-size: 0.88rem;
+  }
+
+  .build-note {
+    max-width: 420px;
+    margin: 12px 0 0;
+    color: rgba(255, 255, 255, 0.43);
+    font-family: var(--font-mono);
+    font-size: 0.66rem;
+    line-height: 1.5;
+  }
+
+  .route-card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 30px;
+    background: #f6f6f4;
+    box-shadow: 0 40px 90px rgba(0, 0, 0, 0.42);
+    color: var(--black);
+  }
+
+  .route-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    border-bottom: 1px solid #ddddda;
+    padding: 22px 25px;
+  }
+
+  .route-card-head > div {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .route-card-head > div > span {
+    color: var(--orange-dark);
+  }
+
+  .route-card-head strong {
+    font-size: 0.95rem;
+  }
+
+  .route-number {
+    display: grid;
+    width: 42px;
+    height: 42px;
+    place-items: center;
+    border-radius: 50%;
+    background: var(--black);
+    color: var(--orange);
+    font-family: var(--font-mono);
+    font-size: 0.82rem;
+    font-weight: 700;
+  }
+
+  .route-map {
+    display: block;
+    width: 100%;
+    height: auto;
+    background:
+      linear-gradient(rgba(17, 17, 17, 0.035) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(17, 17, 17, 0.035) 1px, transparent 1px);
+    background-size: 42px 42px;
+  }
+
+  .contour {
+    fill: none;
+    stroke: #deded9;
+    stroke-width: 1.5;
+  }
+
+  .contour-a { opacity: 0.9; }
+  .contour-b { opacity: 0.6; }
+  .contour-c { opacity: 0.75; }
+
+  .road-shadow {
+    fill: none;
+    stroke: #ffffff;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 15;
+  }
+
+  .road {
+    fill: none;
+    stroke: var(--orange);
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    stroke-width: 6;
+  }
+
+  .route-stop circle:first-child {
+    fill: var(--black);
+    stroke: #ffffff;
+    stroke-width: 5;
+  }
+
+  .route-stop .stop-core {
+    fill: var(--orange);
+    stroke: none;
+  }
+
+  .route-stop text {
+    fill: var(--black);
+    font-family: var(--font-display);
+    font-size: 17px;
+    font-weight: 800;
+  }
+
+  .story-dot circle {
+    fill: var(--orange);
+    stroke: #fff;
+    stroke-width: 3;
+  }
+
+  .story-dot text {
+    fill: #797979;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .map-state {
+    fill: #d8d8d3;
+    font-family: var(--font-display);
+    font-size: 64px;
+    font-weight: 800;
+    letter-spacing: 0.1em;
+  }
+
+  .map-disclaimer {
+    display: flex;
+    justify-content: space-between;
+    gap: 16px;
+    border-top: 1px solid #ddddda;
+    padding: 15px 25px;
+    color: #6d6d6d;
+    font-family: var(--font-mono);
+    font-size: 0.65rem;
+  }
+
+  .facts-wrap {
+    position: relative;
+    z-index: 2;
+    margin-top: -58px;
+    border: 1px solid #dedede;
+    border-radius: 24px;
+    background: #ffffff;
+    box-shadow: 0 22px 60px rgba(0, 0, 0, 0.11);
+  }
+
+  .facts {
+    display: grid;
+    grid-template-columns: 1.45fr repeat(5, 1fr);
+  }
+
+  .fact {
+    min-width: 0;
+    border-right: 1px solid #e1e1e1;
+    padding: 22px 20px;
+  }
+
+  .fact:last-child {
+    border-right: 0;
+  }
+
+  .fact span {
+    display: block;
+    margin-bottom: 8px;
+    color: var(--orange-dark);
+  }
+
+  .fact strong {
+    display: block;
+    font-size: 0.92rem;
+    line-height: 1.25;
+  }
+
+  .fee-ribbon {
+    margin: 0;
+    border-top: 1px solid #e1e1e1;
+    padding: 12px 20px;
+    color: #666;
+    font-size: 0.78rem;
+    text-align: center;
+  }
+
+  .fee-ribbon strong {
+    color: var(--black);
+  }
+
+  .section {
+    padding: 118px 0;
+  }
+
+  .section-kicker {
+    margin-bottom: 18px;
+  }
+
+  .section-heading {
+    margin-bottom: 52px;
+  }
+
+  .split-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.7fr);
+    gap: 70px;
+    align-items: end;
+  }
+
+  .section h2,
+  .final-cta h2 {
+    margin-bottom: 0;
+    font-size: clamp(2.8rem, 5vw, 5.3rem);
+    font-weight: 800;
+    letter-spacing: -0.055em;
+    line-height: 0.98;
+  }
+
+  .split-heading > p,
+  .stories-heading > p,
+  .sources-lead {
+    margin-bottom: 0;
+    color: var(--muted);
+    font-size: 1.04rem;
+    line-height: 1.65;
+  }
+
+  .steps {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    border-top: 1px solid var(--line);
+    border-bottom: 1px solid var(--line);
+  }
+
+  .steps article {
+    min-height: 238px;
+    border-right: 1px solid var(--line);
+    padding: 28px;
+  }
+
+  .steps article:first-child {
+    padding-left: 0;
+  }
+
+  .steps article:last-child {
+    border-right: 0;
+  }
+
+  .step-number,
+  .story-number {
+    color: var(--orange-dark);
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    font-weight: 700;
+  }
+
+  .steps h3 {
+    margin: 56px 0 10px;
+    font-size: 1.25rem;
+  }
+
+  .steps p,
+  .trigger-note p,
+  .fee-card p,
+  .safety-note p {
+    margin-bottom: 0;
+    color: var(--muted);
+    font-size: 0.91rem;
+    line-height: 1.62;
+  }
+
+  .trigger-note {
+    display: grid;
+    grid-template-columns: 72px 1fr;
+    gap: 24px;
+    align-items: center;
+    margin-top: 38px;
+    border-radius: 20px;
+    background: #f5f5f3;
+    padding: 27px 30px;
+  }
+
+  .trigger-icon {
+    position: relative;
+    display: grid;
+    width: 58px;
+    height: 58px;
+    place-items: center;
+    border: 1px solid #d9d9d5;
+    border-radius: 50%;
+  }
+
+  .trigger-icon::before,
+  .trigger-icon::after {
+    position: absolute;
+    border: 1px solid rgba(255, 107, 26, 0.45);
+    border-radius: 50%;
+    content: '';
+  }
+
+  .trigger-icon::before { inset: 12px; }
+  .trigger-icon::after { inset: 20px; }
+
+  .trigger-icon span {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--orange);
+  }
+
+  .trigger-note strong {
+    display: block;
+    margin-bottom: 6px;
+    font-size: 1rem;
+  }
+
+  .stories-section {
+    background: var(--black);
+    color: var(--white);
+  }
+
+  .section-kicker.light {
+    color: var(--orange);
+  }
+
+  .stories-heading {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.65fr);
+    gap: 70px;
+    align-items: end;
+    margin-bottom: 58px;
+  }
+
+  .stories-heading > p {
+    color: rgba(255, 255, 255, 0.58);
+  }
+
+  .story-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .story-list li {
+    position: relative;
+    display: grid;
+    grid-template-columns: 64px 1fr 28px;
+    gap: 24px;
+    align-items: center;
+    border-top: 1px solid rgba(255, 255, 255, 0.14);
+    padding: 24px 0;
+  }
+
+  .story-list li:last-child {
+    border-bottom: 1px solid rgba(255, 255, 255, 0.14);
+  }
+
+  .story-list h3 {
+    margin-bottom: 5px;
+    color: var(--white);
+    font-size: 1.22rem;
+  }
+
+  .story-list p {
+    margin-bottom: 0;
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 0.86rem;
+    line-height: 1.5;
+  }
+
+  .story-mark {
+    width: 10px;
+    height: 10px;
+    justify-self: end;
+    border: 2px solid var(--orange);
+    border-radius: 50%;
+  }
+
+  .planning-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1.1fr;
+    gap: 16px;
+  }
+
+  .fee-card,
+  .access-card {
+    min-height: 310px;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    padding: 26px;
+  }
+
+  .fee-card.featured {
+    border-color: var(--orange);
+  }
+
+  .card-label {
+    display: block;
+    color: var(--orange-dark);
+  }
+
+  .fee-price {
+    display: block;
+    margin: 52px 0 14px;
+    font-size: 4.5rem;
+    letter-spacing: -0.07em;
+    line-height: 1;
+  }
+
+  .fee-card a {
+    display: inline-block;
+    margin-top: 24px;
+    border-bottom: 1px solid var(--orange);
+    color: var(--black);
+    font-size: 0.82rem;
+    font-weight: 800;
+    text-decoration: none;
+  }
+
+  .access-card {
+    background: var(--black);
+    color: var(--white);
+  }
+
+  .access-card ul {
+    margin: 45px 0 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .access-card li {
+    position: relative;
+    border-top: 1px solid rgba(255, 255, 255, 0.15);
+    padding: 13px 0 13px 23px;
+    color: rgba(255, 255, 255, 0.75);
+    font-size: 0.86rem;
+  }
+
+  .access-card li::before {
+    position: absolute;
+    top: 19px;
+    left: 0;
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--orange);
+    content: '';
+  }
+
+  .checked-note {
+    margin: 18px 0 0;
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.69rem;
+    line-height: 1.65;
+  }
+
+  .access-alert {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 24px;
+    margin-top: 24px;
+    border: 1px solid rgba(210, 99, 34, 0.35);
+    background: rgba(210, 99, 34, 0.08);
+    padding: 20px;
+  }
+
+  .access-alert strong {
+    color: var(--orange);
+    font-family: var(--font-display);
+    font-size: 0.76rem;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+  }
+
+  .access-alert p {
+    margin: 0;
+    color: var(--muted);
+    font-size: 0.86rem;
+    line-height: 1.65;
+  }
+
+  .access-alert a {
+    color: var(--black);
+    font-weight: 800;
+  }
+
+  .safety-note {
+    display: grid;
+    grid-template-columns: 140px 1fr;
+    gap: 24px;
+    margin-top: 60px;
+    border-top: 3px solid var(--black);
+    padding-top: 20px;
+  }
+
+  .sources-section {
+    border-top: 1px solid var(--line);
+    background: #f5f5f3;
+  }
+
+  .sources-inner {
+    display: grid;
+    grid-template-columns: minmax(0, 0.8fr) minmax(440px, 1.2fr);
+    gap: 90px;
+  }
+
+  .sources-inner h2 {
+    font-size: clamp(2.4rem, 4vw, 4.2rem);
+  }
+
+  .sources-lead {
+    margin-top: 24px;
+  }
+
+  .sources-list {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+  }
+
+  .sources-list li {
+    border-top: 1px solid #d2d2cf;
+  }
+
+  .sources-list li:last-child {
+    border-bottom: 1px solid #d2d2cf;
+  }
+
+  .sources-list a {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 20px;
+    padding: 19px 2px;
+    color: var(--black);
+    text-decoration: none;
+    transition: transform 160ms ease, color 160ms ease;
+  }
+
+  .sources-list a:hover {
+    color: var(--orange-dark);
+  }
+
+  .sources-list a > span {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .sources-list small {
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 0.63rem;
+    text-transform: uppercase;
+  }
+
+  .sources-list strong {
+    font-size: 0.9rem;
+  }
+
+  .final-cta {
+    padding: 110px 24px;
+    background: var(--black);
+    color: var(--white);
+  }
+
+  .final-cta-inner {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 80px;
+    align-items: end;
+  }
+
+  .final-cta h2 {
+    margin-top: 18px;
+  }
+
+  .final-cta p {
+    margin: 22px 0 0;
+    color: rgba(255, 255, 255, 0.52);
+    font-size: 0.9rem;
+  }
+
+  .final-actions {
+    min-width: 280px;
+  }
+
+  .final-actions > .button {
+    width: 100%;
+  }
+
+  .final-build-note {
+    text-align: center;
+  }
+
+  .store-links.compact {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 14px;
+    margin-top: 14px;
+  }
+
+  .store-links.compact a {
+    min-width: 0;
+    text-align: center;
+  }
+
+  @media (max-width: 1100px) {
+    .hero-grid {
+      grid-template-columns: minmax(0, 1fr) minmax(420px, 1fr);
+      gap: 32px;
+    }
+
+    .facts-wrap,
+    .section,
+    .final-cta-inner {
+      width: min(100% - 48px, 960px);
+    }
+
+    .facts {
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .fact:nth-child(3) {
+      border-right: 0;
+    }
+
+    .fact:nth-child(-n + 3) {
+      border-bottom: 1px solid #e1e1e1;
+    }
+
+    .planning-grid {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .access-card {
+      grid-column: 1 / -1;
+      min-height: 0;
+    }
+
+    .access-card ul {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      column-gap: 30px;
+      margin-top: 28px;
+    }
+  }
+
+  @media (max-width: 900px) {
+    .hero {
+      padding-bottom: 100px;
+    }
+
+    .hero-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .route-card {
+      width: min(100%, 650px);
+    }
+
+    .split-heading,
+    .stories-heading,
+    .sources-inner,
+    .final-cta-inner {
+      grid-template-columns: 1fr;
+      gap: 30px;
+    }
+
+    .sources-inner {
+      gap: 52px;
+    }
+
+    .final-actions {
+      width: min(100%, 360px);
+    }
+  }
+
+  @media (max-width: 640px) {
+    .hero {
+      min-height: 0;
+      padding: 112px 18px 86px;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.5rem, 13vw, 3.8rem);
+    }
+
+    .hero-actions {
+      display: grid;
+    }
+
+    .button {
+      width: 100%;
+    }
+
+    .store-links {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .store-links a {
+      min-width: 0;
+    }
+
+    .route-card {
+      border-radius: 22px;
+    }
+
+    .route-card-head,
+    .map-disclaimer {
+      padding-right: 17px;
+      padding-left: 17px;
+    }
+
+    .map-disclaimer {
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .facts-wrap,
+    .section,
+    .final-cta-inner {
+      width: calc(100% - 36px);
+    }
+
+    .facts-wrap {
+      margin-top: -42px;
+      border-radius: 20px;
+    }
+
+    .facts {
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .fact,
+    .fact:nth-child(3) {
+      border-right: 1px solid #e1e1e1;
+      border-bottom: 1px solid #e1e1e1;
+    }
+
+    .fact:nth-child(2n) {
+      border-right: 0;
+    }
+
+    .fact:nth-last-child(-n + 2) {
+      border-bottom: 0;
+    }
+
+    .section {
+      padding-top: 82px;
+      padding-bottom: 82px;
+    }
+
+    .section h2,
+    .final-cta h2 {
+      font-size: clamp(2.6rem, 12vw, 4.2rem);
+    }
+
+    .section-heading {
+      margin-bottom: 38px;
+    }
+
+    .steps {
+      grid-template-columns: 1fr;
+    }
+
+    .steps article,
+    .steps article:first-child {
+      min-height: 0;
+      border-right: 0;
+      border-bottom: 1px solid var(--line);
+      padding: 24px 0;
+    }
+
+    .steps article:last-child {
+      border-bottom: 0;
+    }
+
+    .steps h3 {
+      margin-top: 27px;
+    }
+
+    .trigger-note {
+      grid-template-columns: 1fr;
+      padding: 24px;
+    }
+
+    .story-list li {
+      grid-template-columns: 42px 1fr 14px;
+      gap: 12px;
+    }
+
+    .story-list p {
+      display: none;
+    }
+
+    .planning-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .access-card {
+      grid-column: auto;
+    }
+
+    .access-card ul {
+      grid-template-columns: 1fr;
+    }
+
+    .access-alert,
+    .safety-note {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .sources-inner {
+      grid-template-columns: 1fr;
+    }
+
+    .final-cta {
+      padding: 82px 0;
+    }
+
+    .final-actions {
+      min-width: 0;
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .button,
+    .store-links a,
+    .sources-list a {
+      transition: none;
+    }
+  }
+</style>

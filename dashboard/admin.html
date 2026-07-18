@@ -253,6 +253,46 @@ td.name{color:var(--text);font-weight:600;}
 .originals-issues{display:flex;flex-direction:column;gap:6px;margin-top:9px;}
 .originals-issue{color:var(--text2);font-size:11px;line-height:1.45;padding-left:13px;position:relative;}
 .originals-issue:before{content:'—';position:absolute;left:0;color:var(--red);}
+.originals-lab-summary{display:grid;grid-template-columns:repeat(4,minmax(110px,1fr));gap:8px;margin-bottom:12px;}
+.originals-lab-metric{border:1px solid var(--border);border-radius:10px;background:var(--s3);padding:11px;}
+.originals-lab-metric strong{display:block;color:var(--orange);font:900 16px var(--mono);}
+.originals-lab-metric span{display:block;color:var(--text3);font:9px/1.35 var(--mono);letter-spacing:.6px;margin-top:5px;}
+.originals-lab-state{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;border:1px solid var(--border);border-radius:11px;padding:12px;background:var(--s3);margin-bottom:10px;}
+.originals-lab-state.current{border-color:var(--orange);}
+.originals-lab-state.failed{border-color:var(--red);}
+.originals-lab-state-title{color:var(--orange);font:900 12px/1.4 var(--mono);}
+.originals-lab-state.failed .originals-lab-state-title{color:var(--red);}
+.originals-lab-state-copy{color:var(--text2);font-size:11px;line-height:1.5;margin-top:4px;}
+.originals-lab-meta{color:var(--text3);font:9px/1.5 var(--mono);text-align:right;overflow-wrap:anywhere;}
+.originals-route-diagnostics{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0;}
+.originals-route-diagnostic{border:1px solid var(--border);border-radius:999px;padding:6px 9px;color:var(--text2);font:700 9px/1.2 var(--mono);background:var(--s2);}
+.originals-scenario-list{display:flex;flex-direction:column;gap:7px;}
+.originals-scenario{display:grid;grid-template-columns:minmax(180px,1fr) auto;gap:10px;border:1px solid var(--border);border-radius:9px;background:var(--s3);padding:10px;}
+.originals-scenario.failed{border-color:var(--red);}
+.originals-scenario-title{color:var(--text);font-size:11px;font-weight:800;line-height:1.4;}
+.originals-scenario-metrics{color:var(--text3);font:9px/1.55 var(--mono);margin-top:4px;overflow-wrap:anywhere;}
+.originals-scenario-badge{color:var(--orange);font:900 10px var(--mono);}
+.originals-scenario.failed .originals-scenario-badge{color:var(--red);}
+.originals-preview-link{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin-top:10px;}
+.originals-preview-link input{font:10px var(--mono);}
+.originals-sensitive-note{color:var(--text3);font:9px/1.55 var(--mono);margin-top:8px;}
+.originals-feedback-controls{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px;}
+.originals-feedback-list{display:flex;flex-direction:column;gap:8px;}
+.originals-feedback-item{border:1px solid var(--border);border-radius:10px;background:var(--s3);padding:11px;}
+.originals-feedback-head{display:flex;justify-content:space-between;align-items:flex-start;gap:10px;}
+.originals-feedback-category{color:var(--orange);font:900 10px var(--mono);}
+.originals-feedback-message{color:var(--text);font-size:12px;line-height:1.55;margin:8px 0;white-space:pre-wrap;overflow-wrap:anywhere;}
+.originals-feedback-meta{color:var(--text3);font:9px/1.55 var(--mono);}
+.originals-feedback-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:9px;}
+.originals-license-panel{border:1px solid var(--border);border-radius:11px;background:var(--s3);padding:12px;}
+.originals-license-panel.attested{border-color:var(--orange);}
+.originals-license-panel.needs-review{border-color:var(--orange);}
+.originals-license-head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+.originals-license-title{color:var(--text);font-size:12px;font-weight:900;}
+.originals-license-status{color:var(--orange);font:900 10px/1.45 var(--mono);text-align:right;}
+.originals-license-copy{color:var(--text2);font-size:11px;line-height:1.5;margin-top:4px;max-width:700px;}
+.originals-license-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;}
+.originals-license-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-top:10px;}
 .originals-audio{width:100%;height:44px;margin-top:8px;filter:grayscale(1);}
 .originals-place-status{color:var(--text3);font:10px/1.4 var(--mono);min-height:14px;}
 .originals-version-list{display:flex;flex-direction:column;gap:7px;}
@@ -264,7 +304,7 @@ td.name{color:var(--text);font-weight:600;}
 .originals-version-chip{border:1px solid var(--border);border-radius:999px;padding:6px 9px;color:var(--text2);font:10px var(--mono);}
 .originals-empty{color:var(--text3);font-size:12px;padding:18px;text-align:center;border:1px dashed var(--border);border-radius:10px;}
 @media(max-width:1050px){.originals-shell{grid-template-columns:1fr}.originals-sidebar{position:static;max-height:none}.originals-json-grid,.originals-preview-grid{grid-template-columns:1fr}.originals-metrics{grid-template-columns:repeat(3,1fr)}}
-@media(max-width:720px){.originals-form,.originals-review-grid{grid-template-columns:1fr}.originals-stop-editor{grid-template-columns:1fr 1fr}.originals-metrics{grid-template-columns:1fr 1fr}}
+@media(max-width:720px){.originals-form,.originals-review-grid{grid-template-columns:1fr}.originals-stop-editor{grid-template-columns:1fr 1fr}.originals-metrics,.originals-lab-summary{grid-template-columns:1fr 1fr}.originals-preview-link,.originals-license-grid{grid-template-columns:1fr}.originals-lab-state{flex-direction:column}.originals-lab-meta{text-align:left}}
 </style>
 </head>
 <body>
@@ -842,7 +882,7 @@ td.name{color:var(--text);font-weight:600;}
                 <div class="originals-route-tools">
                   <div id="originals-route-hint" class="originals-route-hint">Click the authored route to place the selected story and set its progress window. For keyboard placement, move the slider and use Place story at slider.</div>
                   <div class="originals-simulator">
-                    <label for="originals-simulator" style="color:var(--text3);font:700 10px var(--mono);">SIMULATE</label>
+                    <label for="originals-simulator" style="color:var(--text3);font:700 10px var(--mono);">CUE PREVIEW</label>
                     <input id="originals-simulator" type="range" min="0" max="1000" step="0.01" value="0" oninput="updateOriginalSimulation()" onchange="announceOriginalSimulation()">
                     <output id="originals-simulator-output" class="originals-simulator-output" for="originals-simulator">START</output>
                   </div>
@@ -851,21 +891,48 @@ td.name{color:var(--text);font-weight:600;}
                     <input id="originals-simulator-speed-input" type="number" min="0" max="100" step="0.5" value="12" inputmode="decimal" oninput="renderOriginalPreview()" onchange="announceOriginalSimulation()">
                     <output id="originals-simulator-speed-output" for="originals-simulator-speed-input">12 M/S · 27 MPH</output>
                   </div>
+                  <div class="originals-simulator-speed">
+                    <label for="originals-simulator-direction">DIRECTION</label>
+                    <select id="originals-simulator-direction" class="originals-select" style="width:120px;" onchange="resetOriginalRoutePlayback()"><option value="forward">Forward</option><option value="reverse">Reverse</option></select>
+                  </div>
+                  <div class="originals-simulator-speed">
+                    <label for="originals-simulator-time-scale">TIME SCALE</label>
+                    <select id="originals-simulator-time-scale" class="originals-select" style="width:100px;"><option value="1">1×</option><option value="10">10×</option><option value="60" selected>60×</option></select>
+                  </div>
                   <button class="btn btn-ghost btn-sm" type="button" onclick="placeOriginalStopAtSimulationProgress()">Place story at slider</button>
                 </div>
                 <div class="originals-simulator-panel">
                   <div class="originals-simulator-copy">
-                    <div id="originals-simulator-status" class="originals-simulator-status">TRIGGER PREVIEW</div>
+                    <div id="originals-simulator-status" class="originals-simulator-status">CUE PREVIEW · ADMIN</div>
                     <div id="originals-simulator-reason" class="originals-simulator-reason">Move the route slider or jump to a story cue.</div>
                     <div id="originals-simulator-gates" class="originals-simulator-gates"></div>
                   </div>
                   <div class="originals-actions">
+                    <button id="originals-simulator-play-btn" class="btn btn-primary btn-sm" type="button" onclick="toggleOriginalRoutePlayback()">Play drive</button>
+                    <button class="btn btn-ghost btn-sm" type="button" onclick="resetOriginalRoutePlayback()">Reset</button>
                     <button class="btn btn-ghost btn-sm" aria-label="Preview the previous story cue" onclick="stepOriginalSimulationCue(-1)">Previous cue</button>
                     <button class="btn btn-primary btn-sm" aria-label="Preview the closest valid point for the selected story cue" onclick="jumpOriginalSimulationToSelected()">Selected cue</button>
                     <button class="btn btn-ghost btn-sm" aria-label="Preview the next story cue" onclick="stepOriginalSimulationCue(1)">Next cue</button>
                   </div>
                 </div>
                 <div id="originals-simulator-announcement" role="status" aria-live="polite" aria-atomic="true" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"></div>
+              </div>
+
+              <div class="card" aria-labelledby="originals-virtual-lab-title">
+                <div class="originals-topline" style="margin-bottom:12px;">
+                  <div>
+                    <div id="originals-virtual-lab-title" class="section-label" style="margin:0;">VIRTUAL DRIVE LAB · ADMIN</div>
+                    <div style="color:var(--text2);font-size:11px;line-height:1.5;margin-top:6px;max-width:720px;">The server replays 13 continuous GPS drives through the production trigger rules. It checks slow, normal, and highway speeds, jitter, poor accuracy, off-route recovery, reverse travel, mid-route starts, restarts, audio queues, delayed fixes, and route ambiguity.</div>
+                  </div>
+                  <div class="originals-actions">
+                    <button id="originals-validation-run-btn" class="btn btn-primary btn-sm" type="button" onclick="runOriginalVirtualValidation()">Run full matrix</button>
+                    <button class="btn btn-ghost btn-sm" type="button" onclick="loadOriginalVirtualValidation(true)">Refresh report</button>
+                  </div>
+                </div>
+                <div id="originals-validation-report" aria-live="polite">
+                  <div class="originals-empty">Save the draft to run the server-owned route matrix.</div>
+                </div>
+                <div class="originals-sensitive-note">A current passing report is required to publish. Editing the route, stories, triggers, or assets makes the previous report stale. Simulation validates deterministic trigger behavior; current official sources remain the authority for road conditions, access, and timing.</div>
               </div>
 
               <div class="card" id="originals-stop-card" style="display:none;">
@@ -899,10 +966,23 @@ td.name{color:var(--text);font-weight:600;}
                     </div>
                   </div>
                   <div class="originals-field wide"><label for="original-stop-transcript">TRANSCRIPT</label><textarea id="original-stop-transcript" class="originals-textarea" style="min-height:150px;"></textarea></div>
+                  <div class="originals-field wide">
+                    <div class="originals-topline">
+                      <label for="original-stop-source-index">SOURCES · EVERY STORY NEEDS A STORY SOURCE; OPERATIONAL SOURCES COVER LIVE ACCESS FACTS</label>
+                      <div class="originals-actions">
+                        <select id="original-stop-source-index" class="originals-select" style="width:190px;" onchange="selectOriginalCitation(Number(this.value))"></select>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="addOriginalCitation()">Add source</button>
+                        <button class="btn btn-ghost btn-sm" type="button" onclick="removeOriginalCitation()">Remove source</button>
+                      </div>
+                    </div>
+                  </div>
                   <div class="originals-field half"><label for="original-stop-source-title">SOURCE TITLE</label><input id="original-stop-source-title" class="originals-input"></div>
                   <div class="originals-field half"><label for="original-stop-source-url">SOURCE URL</label><input id="original-stop-source-url" class="originals-input" type="url" placeholder="https://"></div>
                   <div class="originals-field half"><label for="original-stop-source-publisher">SOURCE PUBLISHER</label><input id="original-stop-source-publisher" class="originals-input"></div>
                   <div class="originals-field half"><label for="original-stop-source-reviewed">SOURCE REVIEWED</label><input id="original-stop-source-reviewed" class="originals-input" type="date"></div>
+                  <div class="originals-field"><label for="original-stop-source-role">SOURCE ROLE</label><select id="original-stop-source-role" class="originals-select"><option value="story">Story</option><option value="operational">Operational</option></select></div>
+                  <div class="originals-field"><label for="original-stop-source-authority">AUTHORITY</label><select id="original-stop-source-authority" class="originals-select"><option value="official">Official</option><option value="authoritative">Authoritative</option></select></div>
+                  <div class="originals-field half"><label for="original-stop-source-scope">OPERATIONAL SCOPE · COMMA SEPARATED</label><input id="original-stop-source-scope" class="originals-input" placeholder="route, access, fees, closures, surface, season"></div>
                   <div class="originals-field wide">
                     <label for="originals-narration-provider">NARRATION PREVIEW</label>
                     <div class="originals-actions">
@@ -916,6 +996,28 @@ td.name{color:var(--text);font-weight:600;}
                       <span id="originals-narration-status" style="color:var(--text3);font:10px var(--mono);"></span>
                     </div>
                     <audio id="originals-narration-audio" class="originals-audio" controls preload="none" aria-label="Selected story narration preview"></audio>
+                  </div>
+                  <div class="originals-field wide">
+                    <div id="originals-narration-license-panel" class="originals-license-panel" aria-labelledby="originals-narration-license-title">
+                      <div class="originals-license-head">
+                        <div>
+                          <div id="originals-narration-license-title" class="originals-license-title">NARRATION LICENSE REVIEW</div>
+                          <div id="originals-narration-license-copy" class="originals-license-copy">Attach narration to review its license provenance.</div>
+                        </div>
+                        <div id="originals-narration-license-status" class="originals-license-status" role="status" aria-live="polite">NOT AVAILABLE</div>
+                      </div>
+                      <div class="originals-license-grid">
+                        <div class="originals-field"><label for="originals-license-terms-id">TERMS ID</label><input id="originals-license-terms-id" class="originals-input" maxlength="200" placeholder="Provider terms identifier"></div>
+                        <div class="originals-field"><label for="originals-license-terms-version">TERMS VERSION</label><input id="originals-license-terms-version" class="originals-input" maxlength="120" placeholder="Version or effective date"></div>
+                        <div class="originals-field"><label for="originals-license-terms-url">REVIEWED TERMS URL</label><input id="originals-license-terms-url" class="originals-input" type="url" maxlength="2000" placeholder="https://"></div>
+                        <div class="originals-field"><label for="originals-license-reviewed-at">REVIEWED DATE</label><input id="originals-license-reviewed-at" class="originals-input" type="date"></div>
+                      </div>
+                      <div class="originals-license-actions">
+                        <button id="originals-license-open-btn" class="btn btn-ghost btn-sm" type="button" onclick="openOriginalNarrationTerms()" disabled>Open terms</button>
+                        <button id="originals-license-attest-btn" class="btn btn-primary btn-sm" type="button" onclick="attestOriginalNarrationLicense()" disabled>Record reviewed terms</button>
+                        <span class="originals-sensitive-note" style="margin:0;">Recorded by the server for this exact narration asset. Replacing the audio requires a new review.</span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -939,8 +1041,11 @@ td.name{color:var(--text);font-weight:600;}
 
               <div class="card">
                 <div class="originals-topline" style="margin-bottom:12px;">
-                  <div class="section-label" style="margin:0;">RELEASE REVIEW</div>
-                  <button class="btn btn-ghost btn-sm" onclick="validateOriginalDraft()">Run validation</button>
+                  <div>
+                    <div class="section-label" style="margin:0;">EDITORIAL RELEASE REVIEW</div>
+                    <div style="color:var(--text2);font-size:11px;line-height:1.5;margin-top:6px;">Confirm the human editorial, licensing, safety, access, season, and offline checks. Trigger behavior is owned by the Virtual Drive Lab report above.</div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" onclick="validateOriginalDraft()">Check publish readiness</button>
                 </div>
                 <div id="originals-review-checks" class="originals-review-grid"></div>
                 <div id="originals-readiness" class="originals-readiness" style="margin-top:12px;">
@@ -949,7 +1054,39 @@ td.name{color:var(--text);font-weight:600;}
               </div>
 
               <div class="card">
-                <div class="section-label">FEATURED</div>
+                <div class="originals-topline" style="margin-bottom:10px;">
+                  <div>
+                    <div class="section-label" style="margin:0;">APP PREVIEW</div>
+                    <div style="color:var(--text2);font-size:11px;line-height:1.5;margin-top:6px;">Create a short-lived internal link for a signed build of the Trailhead app. Draft content stays out of public Explore and public web links.</div>
+                  </div>
+                  <div class="originals-actions">
+                    <select id="originals-preview-expiry" class="originals-select" aria-label="Preview link lifetime" style="width:150px;"><option value="3600">1 hour</option><option value="14400">4 hours</option><option value="86400">24 hours</option></select>
+                    <button class="btn btn-primary btn-sm" type="button" onclick="generateOriginalPreviewLink()">Generate app link</button>
+                  </div>
+                </div>
+                <div id="originals-preview-output" class="originals-empty">Save the draft before creating a preview link.</div>
+              </div>
+
+              <div class="card">
+                <div class="originals-topline" style="margin-bottom:10px;">
+                  <div>
+                    <div class="section-label" style="margin:0;">RIDER FEEDBACK</div>
+                    <div style="color:var(--text2);font-size:11px;line-height:1.5;margin-top:6px;">Private, coarse release feedback for this Original. Raw coordinates and traveled routes are never collected.</div>
+                  </div>
+                  <button class="btn btn-ghost btn-sm" type="button" onclick="loadOriginalFeedback(true)">Refresh</button>
+                </div>
+                <div class="originals-feedback-controls">
+                  <label class="originals-field-label" for="originals-feedback-status">STATUS</label>
+                  <select id="originals-feedback-status" class="originals-select" style="width:150px;" onchange="loadOriginalFeedback()"><option value="new">New</option><option value="reviewing">Reviewing</option><option value="resolved">Resolved</option><option value="dismissed">Dismissed</option></select>
+                  <label class="originals-field-label" for="originals-feedback-category">CATEGORY</label>
+                  <select id="originals-feedback-category" class="originals-select" style="width:180px;" onchange="loadOriginalFeedback()"><option value="">All categories</option><option value="general">General</option><option value="trigger_timing">Trigger timing</option><option value="audio">Audio</option><option value="map">Map</option><option value="offline">Offline</option><option value="access_info">Access info</option><option value="safety">Safety</option><option value="other">Other</option></select>
+                </div>
+                <div id="originals-feedback-list" class="originals-feedback-list"><div class="originals-empty">Select a saved Original to review feedback.</div></div>
+              </div>
+
+              <div class="card">
+                <div class="section-label">ORIGINALS FEATURE</div>
+                <div style="color:var(--text2);font-size:11px;line-height:1.5;margin-bottom:10px;">Controls the monthly Trailhead Originals lane only. It never changes organic Explore ranking or inserts an Original into Featured Places.</div>
                 <div class="originals-actions">
                   <label for="originals-feature-month" class="originals-field-label">MONTH</label>
                   <input id="originals-feature-month" class="originals-input" type="month" style="width:170px;">
@@ -1020,6 +1157,7 @@ let authoredOriginals = [];
 let selectedOriginalId = null;
 let selectedOriginal = null;
 let selectedOriginalStopIndex = 0;
+let selectedOriginalCitationIndex = 0;
 let originalValidation = null;
 let originalPreviewTimer = null;
 let originalSimulationAnnouncementTimer = null;
@@ -1029,8 +1167,12 @@ let originalStopEditorDirty = false;
 let selectedOriginalVersion = null;
 let originalRouteDrawing = false;
 let originalRouteUndoStack = [];
+let originalVirtualValidation = null;
+let originalFeedbackItems = [];
+let originalSimulationFrame = null;
+let originalSimulationLastTimestamp = null;
 const ORIGINAL_REVIEW_CHECKS = [
-  'route_reviewed', 'cue_route_reviewed', 'trigger_drive_tested',
+  'route_reviewed', 'cue_route_reviewed',
   'narration_reviewed', 'audio_assets_reviewed', 'transcripts_reviewed',
   'source_citations_reviewed', 'media_licenses_reviewed',
   'safety_access_reviewed', 'season_reviewed', 'offline_bundle_reviewed'
@@ -2345,7 +2487,10 @@ function originalStarterManifest(title = 'Untitled Original') {
         enter_radius_m: 250.0, exit_radius_m: 375.0, lead_time_s: 0.0,
         route_progress_start_m: 0.0, route_progress_end_m: 1000.0
       },
-      citations: [{ title: 'National Park Service', url: 'https://www.nps.gov/', publisher: 'National Park Service' }]
+      citations: [{
+        title: 'National Park Service', url: 'https://www.nps.gov/', publisher: 'National Park Service',
+        reviewed_at: new Date().toISOString().slice(0, 10), role: 'story', authority: 'official', scope: []
+      }]
     }],
     assets: [{
       id: 'narration_story_01', kind: 'narration', path: 'placeholder/narration_story_01.wav',
@@ -2358,7 +2503,7 @@ function originalStarterManifest(title = 'Untitled Original') {
     safety: { summary: 'Review road, weather, and park conditions before departure.', emergency_note: '', disclaimers: [] },
     access: { surface: 'paved', vehicle: 'Standard passenger vehicle', fees: '', accessibility_notes: '' },
     season: { recommended_months: [3, 4, 5, 9, 10, 11], closures_note: '' },
-    review: { editorial_status: 'draft', field_drive_completed_at: null, source_review_completed_at: null }
+    review: { editorial_status: 'draft', source_review_completed_at: null }
   };
 }
 
@@ -2401,7 +2546,11 @@ async function openOriginal(id) {
     const original = await api(`/api/admin/originals/${encodeURIComponent(id)}`);
     showOriginalEditor(original);
     renderOriginalList();
-    await validateOriginalDraft(false);
+    await Promise.allSettled([
+      validateOriginalDraft(false),
+      loadOriginalVirtualValidation(false),
+      loadOriginalFeedback(false)
+    ]);
   } catch(e) {
     toast('Original: ' + e.message, 'err');
   }
@@ -2421,13 +2570,17 @@ function startNewOriginal() {
 }
 
 function showOriginalEditor(original, isNew = false) {
+  stopOriginalRoutePlayback();
   selectedOriginal = original;
   selectedOriginalId = isNew ? null : original.id;
   selectedOriginalStopIndex = 0;
+  selectedOriginalCitationIndex = 0;
   selectedOriginalVersion = null;
   originalRouteDrawing = false;
   originalRouteUndoStack = [];
   originalValidation = null;
+  originalVirtualValidation = null;
+  originalFeedbackItems = [];
   document.getElementById('originals-editor-empty').style.display = 'none';
   document.getElementById('originals-editor').style.display = 'flex';
   const idInput = document.getElementById('originals-id');
@@ -2453,12 +2606,22 @@ function showOriginalEditor(original, isNew = false) {
   renderOriginalReviewChecks(original.validation_metadata || {});
   renderOriginalVersionHistory(original);
   renderOriginalReadiness(null);
+  renderOriginalVirtualValidation(null, isNew ? 'SAVE THE DRAFT TO RUN THE MATRIX' : 'LOADING LATEST SERVER REPORT');
+  renderOriginalFeedback([], isNew ? 'SAVE THE DRAFT TO REVIEW FEEDBACK' : 'LOADING FEEDBACK');
+  clearOriginalPreviewLink(isNew ? 'Save the draft before creating a preview link.' : 'Generate a short-lived app preview link when ready.');
   document.getElementById('originals-publish-btn').disabled = true;
   renderOriginalPreview();
   const editor = document.getElementById('originals-editor');
   if (!editor.dataset.dirtyBound) {
     const handleEdit = event => {
-      if (['originals-feature-month', 'originals-feature-version', 'originals-narration-audio'].includes(event.target.id)) return;
+      if ([
+        'originals-feature-month', 'originals-feature-version', 'originals-narration-audio',
+        'originals-preview-expiry', 'originals-feedback-status', 'originals-feedback-category',
+        'original-stop-source-index', 'originals-simulator', 'originals-simulator-speed-input',
+        'originals-simulator-direction', 'originals-simulator-time-scale',
+        'originals-license-terms-id', 'originals-license-terms-version',
+        'originals-license-terms-url', 'originals-license-reviewed-at'
+      ].includes(event.target.id)) return;
       if (event.target.id === 'originals-manifest-json') originalStopEditorDirty = false;
       else if (event.target.closest && event.target.closest('#originals-stop-card')) originalStopEditorDirty = true;
       markOriginalContentDirty();
@@ -2590,10 +2753,18 @@ function markOriginalReviewDirty() {
 }
 
 function markOriginalContentDirty() {
+  stopOriginalRoutePlayback();
   originalEditorDirty = true;
   originalValidation = null;
   document.getElementById('originals-publish-btn').disabled = true;
   renderOriginalReadiness(null, 'SAVE TO VALIDATE');
+  if (originalVirtualValidation) {
+    originalVirtualValidation = { ...originalVirtualValidation, current: false };
+    renderOriginalVirtualValidation(originalVirtualValidation);
+  } else {
+    renderOriginalVirtualValidation(null, 'SAVE, THEN RUN THE FULL MATRIX');
+  }
+  clearOriginalPreviewLink('Save changes before creating another app preview link.');
   renderOriginalVersionComparison();
 }
 
@@ -2647,6 +2818,10 @@ async function validateOriginalDraft(showToast = true) {
   try {
     const result = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/validate`);
     originalValidation = result;
+    if (result.virtual_validation) {
+      originalVirtualValidation = result.virtual_validation;
+      renderOriginalVirtualValidation(originalVirtualValidation);
+    }
     renderOriginalReadiness(result);
     document.getElementById('originals-publish-btn').disabled = !result.publish_ready;
     if (showToast) toast(result.publish_ready ? 'Ready to publish' : `${result.issues.length} items remain`, result.publish_ready ? 'originals-ok' : 'err');
@@ -2667,9 +2842,261 @@ function renderOriginalReadiness(result, fallback = '') {
     return;
   }
   const issues = Array.isArray(result.issues) ? result.issues : [];
+  const virtual = result.virtual_validation;
+  const virtualReady = Boolean(virtual && virtual.current === true && virtual.passed === true && virtual.status === 'passed');
+  const virtualLabel = virtualReady
+    ? 'SERVER ROUTE MATRIX · CURRENT PASS'
+    : virtual && virtual.current === false
+      ? 'SERVER ROUTE MATRIX · STALE'
+      : 'SERVER ROUTE MATRIX · REQUIRED';
   box.className = `originals-readiness${result.publish_ready ? ' ready' : ''}`;
   box.innerHTML = `<div class="originals-readiness-title">${result.publish_ready ? `READY · VERSION ${result.next_version || ''}` : `${issues.length} ITEMS REMAIN`}</div>
+    <div style="color:${virtualReady ? 'var(--orange)' : 'var(--text3)'};font:800 9px var(--mono);margin-top:7px;">${virtualLabel}</div>
     ${issues.length ? `<div class="originals-issues">${issues.map(issue => `<div class="originals-issue">${esc(issue)}</div>`).join('')}</div>` : '<div style="color:var(--text2);font-size:11px;margin-top:7px;">All release checks passed.</div>'}`;
+}
+
+function originalHumanLabel(value) {
+  return String(value || '').replace(/_/g, ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+}
+
+function originalReportTime(value) {
+  const numeric = Number(value);
+  if (!Number.isFinite(numeric) || numeric <= 0) return 'TIME UNAVAILABLE';
+  return new Date(numeric * 1000).toLocaleString();
+}
+
+function originalMetricValue(value) {
+  if (typeof value === 'boolean') return value ? 'YES' : 'NO';
+  if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(1);
+  return String(value == null ? '—' : value);
+}
+
+function renderOriginalVirtualValidation(report, fallback = '') {
+  const host = document.getElementById('originals-validation-report');
+  if (!host) return;
+  if (!report) {
+    host.innerHTML = `<div class="originals-empty">${esc(fallback || 'No server validation report yet. Save the draft, then run the full matrix.')}</div>`;
+    return;
+  }
+  const stale = report.current === false;
+  const passed = report.passed === true && report.status === 'passed';
+  const running = report.status === 'running';
+  const stateClass = passed && !stale ? ' current' : (!running && !passed ? ' failed' : '');
+  const title = stale
+    ? 'STALE · RUN AGAIN AFTER EDITS'
+    : passed
+      ? 'CURRENT SERVER REPORT · PASSED'
+      : running
+        ? 'SERVER MATRIX RUNNING'
+        : `${String(report.status || 'failed').toUpperCase()} · NEEDS ATTENTION`;
+  const copy = stale
+    ? 'This report describes an older draft revision and cannot unlock publishing.'
+    : passed
+      ? 'Every required deterministic trigger scenario passed for this exact saved draft and asset set.'
+      : running
+        ? 'The server is replaying the route through the production trigger engine.'
+        : 'Review the failed scenarios and route diagnostics below, fix the draft, save, and rerun.';
+  const summary = report.summary && typeof report.summary === 'object' ? report.summary : {};
+  const route = summary.route && typeof summary.route === 'object' ? summary.route : {};
+  const network = route.network && typeof route.network === 'object' ? route.network : {};
+  const metrics = [
+    [summary.required ?? 13, 'REQUIRED SCENARIOS'],
+    [summary.passed ?? 0, 'PASSED'],
+    [summary.failed ?? 0, 'FAILED'],
+    [summary.stop_count ?? 0, 'STORIES']
+  ];
+  const routeDiagnostics = [
+    ['ROUTE', route.distance_m != null ? formatDistance(route.distance_m) : null],
+    ['POINTS', route.coordinate_count],
+    ['MAX SEGMENT', route.maximum_segment_m != null ? `${Math.round(Number(route.maximum_segment_m))} M` : null],
+    ['DISCONTINUITIES', route.discontinuity_count],
+    ['SELF INTERSECTIONS', route.self_intersection_count],
+    ['STOP PROJECTION FAILURES', route.runner_stop_projection_failures],
+    ['NETWORK MATCHED POINTS', network.matched_point_count],
+    ['NETWORK RESTRICTED SEGMENTS', network.restricted_segment_count],
+    ['NETWORK UNPAVED SEGMENTS', network.unpaved_segment_count]
+  ].filter(([, value]) => value !== null && value !== undefined);
+  const scenarios = Array.isArray(report.scenarios) ? report.scenarios : [];
+  const issues = Array.isArray(report.issues) ? report.issues : [];
+  host.innerHTML = `
+    <div class="originals-lab-state${stateClass}">
+      <div><div class="originals-lab-state-title">${esc(title)}</div><div class="originals-lab-state-copy">${esc(copy)}</div></div>
+      <div class="originals-lab-meta">REVISION ${Number(report.draft_revision || 0)}<br>${esc(report.suite_version || 'SUITE UNAVAILABLE')}<br>${esc(originalReportTime(report.completed_at || report.started_at))}</div>
+    </div>
+    <div class="originals-lab-summary">${metrics.map(([value, label]) => `<div class="originals-lab-metric"><strong>${esc(originalMetricValue(value))}</strong><span>${esc(label)}</span></div>`).join('')}</div>
+    ${routeDiagnostics.length ? `<div class="originals-route-diagnostics" aria-label="Route diagnostics">${routeDiagnostics.map(([label, value]) => `<span class="originals-route-diagnostic">${esc(label)} · ${esc(originalMetricValue(value))}</span>`).join('')}</div>` : ''}
+    ${issues.length ? `<div class="originals-issues" style="margin-bottom:10px;">${issues.map(issue => `<div class="originals-issue">${esc(issue)}</div>`).join('')}</div>` : ''}
+    ${scenarios.length ? `<div class="originals-scenario-list">${scenarios.map(scenario => {
+      const scenarioPassed = scenario && scenario.passed === true;
+      const scenarioMetrics = scenario && scenario.metrics && typeof scenario.metrics === 'object' ? scenario.metrics : {};
+      const visibleMetrics = Object.entries(scenarioMetrics).slice(0, 8);
+      const scenarioIssues = scenario && Array.isArray(scenario.issues) ? scenario.issues : [];
+      return `<div class="originals-scenario${scenarioPassed ? '' : ' failed'}">
+        <div><div class="originals-scenario-title">${esc(originalHumanLabel(scenario && scenario.id))}</div>
+          <div class="originals-scenario-metrics">${visibleMetrics.map(([key, value]) => `${esc(originalHumanLabel(key))}: ${esc(originalMetricValue(value))}`).join(' · ')}</div>
+          ${scenarioIssues.length ? `<div class="originals-issues">${scenarioIssues.map(issue => `<div class="originals-issue">${esc(issue)}</div>`).join('')}</div>` : ''}
+        </div><div class="originals-scenario-badge">${scenarioPassed ? 'PASS' : 'FAIL'}</div>
+      </div>`;
+    }).join('')}</div>` : ''}`;
+}
+
+async function loadOriginalVirtualValidation(showToast = false) {
+  if (!selectedOriginalId) {
+    renderOriginalVirtualValidation(null, 'Save the draft to run the server-owned route matrix.');
+    return null;
+  }
+  try {
+    const report = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/validation-runs/latest`);
+    originalVirtualValidation = report;
+    renderOriginalVirtualValidation(report);
+    if (showToast) toast('Latest server report loaded', 'originals-ok');
+    return report;
+  } catch(e) {
+    originalVirtualValidation = null;
+    const noReport = /not found/i.test(String(e.message || ''));
+    renderOriginalVirtualValidation(null, noReport ? 'No server report yet. Run the full matrix when the saved draft is ready.' : `Could not load report: ${e.message}`);
+    if (showToast && !noReport) toast('Virtual Drive Lab: ' + e.message, 'err');
+    return null;
+  }
+}
+
+async function runOriginalVirtualValidation() {
+  if (!selectedOriginalId) return toast('Save the draft before running the Virtual Drive Lab', 'err');
+  if (originalEditorDirty) return toast('Save changes before running the Virtual Drive Lab', 'err');
+  const button = document.getElementById('originals-validation-run-btn');
+  button.disabled = true;
+  button.textContent = 'Running matrix…';
+  renderOriginalVirtualValidation({
+    status: 'running', passed: false, current: true,
+    draft_revision: selectedOriginal && selectedOriginal.draft_revision,
+    started_at: Math.floor(Date.now() / 1000), summary: {}, scenarios: [], issues: []
+  });
+  try {
+    const report = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/validation-runs`, { method: 'POST' });
+    originalVirtualValidation = report;
+    renderOriginalVirtualValidation(report);
+    await validateOriginalDraft(false);
+    toast(report.passed && report.current !== false ? 'Virtual Drive Lab passed' : 'Virtual Drive Lab found issues', report.passed && report.current !== false ? 'originals-ok' : 'err');
+    return report;
+  } catch(e) {
+    renderOriginalVirtualValidation({
+      status: 'error', passed: false, current: true,
+      draft_revision: selectedOriginal && selectedOriginal.draft_revision,
+      completed_at: Math.floor(Date.now() / 1000), summary: {}, scenarios: [], issues: [e.message]
+    });
+    toast('Virtual Drive Lab: ' + e.message, 'err');
+    return null;
+  } finally {
+    button.disabled = false;
+    button.textContent = 'Run full matrix';
+  }
+}
+
+function clearOriginalPreviewLink(message = '') {
+  const host = document.getElementById('originals-preview-output');
+  if (!host) return;
+  host.className = 'originals-empty';
+  host.innerHTML = esc(message || 'Generate a short-lived app preview link when ready.');
+}
+
+async function generateOriginalPreviewLink() {
+  if (!selectedOriginalId) return toast('Save the draft before creating a preview link', 'err');
+  if (originalEditorDirty) return toast('Save changes before creating a preview link', 'err');
+  try {
+    const expiresIn = Number(document.getElementById('originals-preview-expiry').value || 3600);
+    const result = await api('/api/admin/originals/preview-token', {
+      method: 'POST', body: JSON.stringify({ expires_in_seconds: expiresIn })
+    });
+    if (!result || !result.token) throw new Error('Preview token was not returned');
+    const link = `trailhead://originals/${encodeURIComponent(selectedOriginalId)}?originals_preview_token=${encodeURIComponent(result.token)}`;
+    const host = document.getElementById('originals-preview-output');
+    host.className = '';
+    host.innerHTML = `<div class="originals-preview-link"><input id="originals-preview-link-value" class="originals-input" readonly aria-label="Short-lived internal app preview link"><div class="originals-actions"><button class="btn btn-primary btn-sm" type="button" onclick="copyOriginalPreviewLink()">Copy link</button><a id="originals-preview-open" class="btn btn-ghost btn-sm" href="#">Open app</a></div></div><div class="originals-sensitive-note">INTERNAL · EXPIRES ${esc(originalReportTime(result.expires_at))} · Do not paste this token into an HTTPS URL or public channel.</div>`;
+    document.getElementById('originals-preview-link-value').value = link;
+    document.getElementById('originals-preview-open').href = link;
+    toast('Short-lived app preview link created', 'originals-ok');
+  } catch(e) {
+    clearOriginalPreviewLink('Could not create preview link: ' + e.message);
+    toast('Preview link: ' + e.message, 'err');
+  }
+}
+
+async function copyOriginalPreviewLink() {
+  const input = document.getElementById('originals-preview-link-value');
+  if (!input || !input.value) return;
+  try {
+    if (navigator.clipboard && navigator.clipboard.writeText) await navigator.clipboard.writeText(input.value);
+    else {
+      input.focus();
+      input.select();
+      if (!document.execCommand('copy')) throw new Error('Copy is unavailable');
+    }
+    toast('Preview link copied', 'originals-ok');
+  } catch(e) {
+    toast('Copy failed; select the link manually', 'err');
+  }
+}
+
+function renderOriginalFeedback(items, fallback = '') {
+  const host = document.getElementById('originals-feedback-list');
+  if (!host) return;
+  originalFeedbackItems = Array.isArray(items) ? items : [];
+  if (!originalFeedbackItems.length) {
+    host.innerHTML = `<div class="originals-empty">${esc(fallback || 'No feedback in this view.')}</div>`;
+    return;
+  }
+  host.innerHTML = originalFeedbackItems.map(item => {
+    const itemId = encodeURIComponent(item.id || '');
+    const rating = item.rating == null ? 'NO RATING' : `${Number(item.rating)}/5`;
+    const release = [item.platform, item.app_version, item.runtime_version, item.release_cohort].filter(Boolean).join(' · ');
+    const actions = ['reviewing', 'resolved', 'dismissed'].filter(status => status !== item.status);
+    return `<article class="originals-feedback-item">
+      <div class="originals-feedback-head"><div><div class="originals-feedback-category">${esc(originalHumanLabel(item.category))} · ${esc(rating)}</div><div class="originals-feedback-meta">${esc(originalReportTime(item.submitted_at))}${item.stop_id ? ` · STORY ${esc(item.stop_id)}` : ''}</div></div><div class="originals-feedback-meta">${esc(String(item.status || 'new').toUpperCase())}</div></div>
+      <div class="originals-feedback-message">${esc(item.message || '')}</div>
+      <div class="originals-feedback-meta">${esc(String(item.subject_type || 'guest').toUpperCase())}${release ? ` · ${esc(release.toUpperCase())}` : ''} · CONTACT ${item.contact_consent ? 'ALLOWED' : 'NOT REQUESTED'}</div>
+      ${item.moderation_note ? `<div class="originals-feedback-meta" style="margin-top:6px;">NOTE · ${esc(item.moderation_note)}</div>` : ''}
+      <div class="originals-feedback-actions">${actions.map(status => `<button class="btn ${status === 'resolved' ? 'btn-primary' : 'btn-ghost'} btn-sm" type="button" onclick="moderateOriginalFeedbackEncoded('${itemId}','${status}')">${esc(originalHumanLabel(status))}</button>`).join('')}</div>
+    </article>`;
+  }).join('');
+}
+
+async function loadOriginalFeedback(showToast = false) {
+  if (!selectedOriginalId) {
+    renderOriginalFeedback([], 'Save the draft to review feedback.');
+    return [];
+  }
+  const status = document.getElementById('originals-feedback-status').value || 'new';
+  const category = document.getElementById('originals-feedback-category').value || '';
+  const query = new URLSearchParams({ status, pack_id: selectedOriginalId, limit: '50' });
+  if (category) query.set('category', category);
+  try {
+    const result = await api('/api/admin/originals-feedback?' + query.toString());
+    const items = Array.isArray(result.items) ? result.items : [];
+    renderOriginalFeedback(items, 'No feedback in this view.');
+    if (showToast) toast(`${items.length} feedback item${items.length === 1 ? '' : 's'} loaded`, 'originals-ok');
+    return items;
+  } catch(e) {
+    renderOriginalFeedback([], 'Could not load feedback: ' + e.message);
+    if (showToast) toast('Feedback: ' + e.message, 'err');
+    return [];
+  }
+}
+
+function moderateOriginalFeedbackEncoded(id, status) {
+  moderateOriginalFeedback(decodeURIComponent(id), status);
+}
+
+async function moderateOriginalFeedback(id, status) {
+  const note = window.prompt(`Optional moderation note for ${originalHumanLabel(status)}:`, '') || '';
+  try {
+    await api(`/api/admin/originals-feedback/${encodeURIComponent(id)}`, {
+      method: 'PATCH', body: JSON.stringify({ status, note: note.trim() || null })
+    });
+    toast(`Feedback marked ${status}`, 'originals-ok');
+    await loadOriginalFeedback(false);
+  } catch(e) {
+    toast('Feedback: ' + e.message, 'err');
+  }
 }
 
 async function publishOriginal() {
@@ -3181,6 +3608,85 @@ function announceOriginalSimulation() {
   }, 120);
 }
 
+function originalSimulationDirection() {
+  return document.getElementById('originals-simulator-direction')?.value === 'reverse' ? 'reverse' : 'forward';
+}
+
+function stopOriginalRoutePlayback() {
+  if (originalSimulationFrame != null) cancelAnimationFrame(originalSimulationFrame);
+  originalSimulationFrame = null;
+  originalSimulationLastTimestamp = null;
+  const button = document.getElementById('originals-simulator-play-btn');
+  if (button) button.textContent = 'Play drive';
+}
+
+function resetOriginalRoutePlayback() {
+  stopOriginalRoutePlayback();
+  const slider = document.getElementById('originals-simulator');
+  if (!slider) return;
+  slider.value = originalSimulationDirection() === 'reverse' ? '1000' : '0';
+  updateOriginalSimulation();
+  announceOriginalSimulation();
+}
+
+function toggleOriginalRoutePlayback() {
+  if (originalSimulationFrame != null) {
+    stopOriginalRoutePlayback();
+    announceOriginalSimulation();
+    return;
+  }
+  const slider = document.getElementById('originals-simulator');
+  if (!slider) return;
+  const direction = originalSimulationDirection();
+  if ((direction === 'forward' && Number(slider.value) >= 1000)
+    || (direction === 'reverse' && Number(slider.value) <= 0)) {
+    slider.value = direction === 'reverse' ? '1000' : '0';
+  }
+  const button = document.getElementById('originals-simulator-play-btn');
+  if (button) button.textContent = 'Pause drive';
+  originalSimulationLastTimestamp = null;
+  originalSimulationFrame = requestAnimationFrame(runOriginalRoutePlaybackFrame);
+}
+
+function runOriginalRoutePlaybackFrame(timestamp) {
+  if (originalSimulationFrame == null) return;
+  if (originalSimulationLastTimestamp == null) {
+    originalSimulationLastTimestamp = timestamp;
+    originalSimulationFrame = requestAnimationFrame(runOriginalRoutePlaybackFrame);
+    return;
+  }
+  const elapsedSeconds = Math.min(.1, Math.max(0, (timestamp - originalSimulationLastTimestamp) / 1000));
+  if (elapsedSeconds < .04) {
+    originalSimulationFrame = requestAnimationFrame(runOriginalRoutePlaybackFrame);
+    return;
+  }
+  originalSimulationLastTimestamp = timestamp;
+  try {
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const metrics = originalRouteMetrics(manifest.route && manifest.route.geometry && manifest.route.geometry.coordinates);
+    const routeDistance = Math.max(1, Number(manifest.route && manifest.route.distance_m) || metrics.distance);
+    if (metrics.coordinates.length < 2 || routeDistance <= 1) throw new Error('Route unavailable');
+    const speed = originalSimulationSpeedMps();
+    if (speed <= 0) throw new Error('Set a test speed above zero');
+    const scale = Math.max(1, Number(document.getElementById('originals-simulator-time-scale')?.value) || 1);
+    const direction = originalSimulationDirection() === 'reverse' ? -1 : 1;
+    const slider = document.getElementById('originals-simulator');
+    const delta = (speed * scale * elapsedSeconds / routeDistance) * 1000 * direction;
+    const next = Math.max(0, Math.min(1000, Number(slider.value) + delta));
+    slider.value = String(next);
+    updateOriginalSimulation();
+    if (next <= 0 || next >= 1000) {
+      stopOriginalRoutePlayback();
+      announceOriginalSimulation();
+      return;
+    }
+    originalSimulationFrame = requestAnimationFrame(runOriginalRoutePlaybackFrame);
+  } catch(e) {
+    stopOriginalRoutePlayback();
+    toast('Drive preview: ' + e.message, 'err');
+  }
+}
+
 function updateOriginalSimulation() {
   const output = document.getElementById('originals-simulator-output');
   const slider = document.getElementById('originals-simulator');
@@ -3207,16 +3713,29 @@ function updateOriginalSimulation() {
     marker.setAttribute('transform', `translate(${x.toFixed(1)} ${y.toFixed(1)})`);
     const stops = (Array.isArray(manifest.stops) ? manifest.stops : [])
       .slice().sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
-    const nextIndex = stops.findIndex(stop => progress <= Number(stop.trigger && stop.trigger.route_progress_end_m));
+    const direction = originalSimulationDirection();
+    let nextIndex = -1;
+    if (direction === 'reverse') {
+      for (let index = stops.length - 1; index >= 0; index -= 1) {
+        const window = originalTriggerWindowAtSpeed(stops[index].trigger, simulatorSpeed);
+        if (progress >= window.liveStart) { nextIndex = index; break; }
+      }
+    } else {
+      nextIndex = stops.findIndex(stop => progress <= Number(stop.trigger && stop.trigger.route_progress_end_m));
+    }
     let state = 'ROUTE COMPLETE';
     if (nextIndex >= 0) {
       const stop = stops[nextIndex];
       const window = originalTriggerWindowAtSpeed(stop.trigger, simulatorSpeed);
-      state = progress >= window.liveStart
+      const open = progress >= window.liveStart && progress <= window.end;
+      const distanceToWindow = direction === 'reverse'
+        ? Math.max(0, progress - window.end)
+        : Math.max(0, window.liveStart - progress);
+      state = open
         ? 'STORY ' + (Number(stop.sequence) || nextIndex + 1) + ' WINDOW OPEN'
-        : 'NEXT ' + (Number(stop.sequence) || nextIndex + 1) + ' IN ' + formatDistance(window.liveStart - progress);
+        : 'NEXT ' + (Number(stop.sequence) || nextIndex + 1) + ' IN ' + formatDistance(distanceToWindow);
     }
-    output.textContent = formatDistance(progress) + ' / ' + state;
+    output.textContent = formatDistance(progress) + ' / ' + direction.toUpperCase() + ' / ' + state;
     renderOriginalSimulationDiagnostic(manifest, metrics, progress, nextIndex, coordinate);
     document.querySelectorAll('[data-original-cue-window]').forEach(group => {
       const active = Number(group.getAttribute('data-original-cue-window')) === nextIndex;
@@ -3261,9 +3780,12 @@ function renderOriginalSimulationDiagnostic(manifest, metrics, progress, nextInd
   const canonicalDistance = Math.max(1, Number(manifest.route && manifest.route.distance_m) || metrics.distance);
   const stops = (Array.isArray(manifest.stops) ? manifest.stops : [])
     .slice().sort((a, b) => Number(a.sequence || 0) - Number(b.sequence || 0));
+  const direction = originalSimulationDirection();
   if (nextIndex < 0 || !stops[nextIndex]) {
     status.textContent = 'ROUTE COMPLETE';
-    reason.textContent = 'Every authored cue window is behind this simulated position.';
+    reason.textContent = direction === 'reverse'
+      ? 'Every authored cue window is ahead of this reverse simulated position.'
+      : 'Every authored cue window is behind this simulated position.';
     gates.innerHTML = '<span class="originals-simulator-gate">NO STORY BACKLOG</span>';
     return;
   }
@@ -3281,7 +3803,10 @@ function renderOriginalSimulationDiagnostic(manifest, metrics, progress, nextInd
     ? originalHaversineMeters(coordinate, stopCoordinate)
     : Infinity;
   const geometryProgress = metrics.distance * (progress / canonicalDistance);
-  const bearing = originalRouteBearingAtProgress(metrics, geometryProgress);
+  const authoredBearing = originalRouteBearingAtProgress(metrics, geometryProgress);
+  const bearing = authoredBearing == null
+    ? null
+    : direction === 'reverse' ? (authoredBearing + 180) % 360 : authoredBearing;
   const requiredBearing = trigger.approach_bearing_deg == null ? null : Number(trigger.approach_bearing_deg);
   const authoredTolerance = Number(trigger.bearing_tolerance_deg);
   const tolerance = trigger.bearing_tolerance_deg == null || !Number.isFinite(authoredTolerance)
@@ -3294,13 +3819,16 @@ function renderOriginalSimulationDiagnostic(manifest, metrics, progress, nextInd
 
   if (!withinWindow) {
     status.textContent = `STORY ${sequence} · WAITING FOR LIVE WINDOW`;
-    reason.textContent = `${stop.title || 'Untitled story'} becomes eligible in ${formatDistance(Math.max(0, liveStart - progress))} at ${speedLabel}. Its authored window starts at ${formatDistance(authoredStart)}.`;
+    const distanceToWindow = direction === 'reverse'
+      ? Math.max(0, progress - end)
+      : Math.max(0, liveStart - progress);
+    reason.textContent = `${stop.title || 'Untitled story'} becomes eligible in ${formatDistance(distanceToWindow)} while traveling ${direction} at ${speedLabel}. Its authored window starts at ${formatDistance(authoredStart)}.`;
   } else if (!withinRadius) {
     status.textContent = `STORY ${sequence} · BLOCKED OUTSIDE RADIUS`;
     reason.textContent = `At ${speedLabel}, this live-window route point is ${formatDistance(distance)} from the story coordinate; the cue requires ${formatDistance(radius)} or less.`;
   } else if (!bearingPasses) {
     status.textContent = `STORY ${sequence} · BLOCKED BY DIRECTION`;
-    reason.textContent = `The route approaches near ${Math.round(bearing)}°, outside the authored ${Math.round(requiredBearing)}° ± ${Math.round(tolerance)}° gate.`;
+    reason.textContent = `The ${direction} route bearing is ${bearing == null ? 'unavailable' : `near ${Math.round(bearing)}°`}, outside the authored ${Math.round(requiredBearing)}° ± ${Math.round(tolerance)}° gate.`;
   } else {
     status.textContent = `STORY ${sequence} · READY TO ARM · ${speedLabel}`;
     reason.textContent = 'The live speed-adjusted window, radius, and direction gates pass here. The app then requires two GPS fixes of 100 m accuracy or better spanning at least 3 seconds before narration starts.';
@@ -3514,7 +4042,10 @@ function addOriginalStop() {
         route_progress_start_m: Math.round(Math.max(0, progress - halfWindow)),
         route_progress_end_m: Math.round(metrics.distance > 0 ? Math.min(metrics.distance, progress + halfWindow) : 1000)
       },
-      citations: [{ title: '', url: '', publisher: '', reviewed_at: '' }]
+      citations: [{
+        title: '', url: '', publisher: '', reviewed_at: '',
+        role: 'story', authority: 'official', scope: []
+      }]
     });
     [
       { id: narrationId, kind: 'narration', path: 'placeholder/' + narrationId + '.wav', mime_type: 'audio/wav' },
@@ -3583,6 +4114,7 @@ function removeOriginalStop() {
 function selectOriginalStop(index) {
   if (originalStopEditorDirty && !applyOriginalStopEdits(false)) return;
   selectedOriginalStopIndex = index;
+  selectedOriginalCitationIndex = 0;
   renderOriginalPreview();
 }
 
@@ -3592,11 +4124,80 @@ function originalNarrationProviderName(provider) {
   return 'UPLOAD';
 }
 
+function originalNarrationRecordForStop(stop) {
+  if (!stop || !stop.audio_asset_id || !Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets)) return null;
+  return selectedOriginal.uploaded_assets.find(asset => asset.id === stop.audio_asset_id) || null;
+}
+
+function renderOriginalNarrationLicense(record) {
+  const panel = document.getElementById('originals-narration-license-panel');
+  const status = document.getElementById('originals-narration-license-status');
+  const copy = document.getElementById('originals-narration-license-copy');
+  const button = document.getElementById('originals-license-attest-btn');
+  const openButton = document.getElementById('originals-license-open-btn');
+  const fields = [
+    document.getElementById('originals-license-terms-id'),
+    document.getElementById('originals-license-terms-version'),
+    document.getElementById('originals-license-terms-url'),
+    document.getElementById('originals-license-reviewed-at')
+  ];
+  if (!panel || !status || !copy || !button || !openButton || fields.some(field => !field)) return;
+  const metadata = record && record.generator_metadata && typeof record.generator_metadata === 'object'
+    ? record.generator_metadata
+    : null;
+  const attestation = metadata && metadata.license_attestation && typeof metadata.license_attestation === 'object'
+    ? metadata.license_attestation
+    : null;
+  const generated = Boolean(metadata && metadata.provider);
+  const attested = Boolean(generated && metadata.license_status === 'attested' && attestation);
+  panel.className = `originals-license-panel${attested ? ' attested' : generated ? ' needs-review' : ''}`;
+  fields.forEach(field => { field.disabled = !generated; });
+  button.disabled = !generated;
+  openButton.disabled = !generated;
+
+  document.getElementById('originals-license-terms-id').value = attestation && attestation.terms_id
+    ? attestation.terms_id
+    : metadata && metadata.license || '';
+  document.getElementById('originals-license-terms-version').value = attestation && attestation.terms_version || '';
+  document.getElementById('originals-license-terms-url').value = attestation && attestation.terms_url || '';
+  document.getElementById('originals-license-reviewed-at').value = attestation && attestation.reviewed_at
+    ? String(attestation.reviewed_at).slice(0, 10)
+    : '';
+
+  if (!record) {
+    status.textContent = 'NOT AVAILABLE';
+    copy.textContent = 'Attach narration to review its license provenance.';
+    button.textContent = 'Record reviewed terms';
+    return;
+  }
+  if (!generated) {
+    status.textContent = 'MANUAL UPLOAD';
+    copy.textContent = 'This recording has no server generator provenance. Confirm its usage rights in the editorial media-license review.';
+    button.textContent = 'Not required here';
+    return;
+  }
+  const provider = originalNarrationProviderName(metadata.provider);
+  if (attested) {
+    status.textContent = `ATTESTED · ${provider}`;
+    copy.textContent = `Server record: ${attestation.terms_id} · ${attestation.terms_version} · reviewed ${String(attestation.reviewed_at).slice(0, 10)} · recorded ${originalReportTime(Date.parse(attestation.attested_at) / 1000)}.`;
+    button.textContent = 'Update reviewed terms';
+    return;
+  }
+  status.textContent = `REVIEW REQUIRED · ${provider}`;
+  copy.textContent = 'Open the provider’s current commercial terms, verify this narration may be published in Trailhead, then record the exact terms URL, version, and review date.';
+  button.textContent = 'Record reviewed terms';
+}
+
 function fillOriginalStopEditor(stop) {
   if (!stop) return;
   document.getElementById('originals-stop-card').style.display = 'block';
   const trigger = stop.trigger || {};
-  const citation = Array.isArray(stop.citations) && stop.citations.length ? stop.citations[0] : {};
+  const citations = Array.isArray(stop.citations) && stop.citations.length ? stop.citations : [{}];
+  selectedOriginalCitationIndex = Math.max(0, Math.min(selectedOriginalCitationIndex, citations.length - 1));
+  const citation = citations[selectedOriginalCitationIndex] || {};
+  const citationPicker = document.getElementById('original-stop-source-index');
+  citationPicker.innerHTML = citations.map((item, index) => `<option value="${index}">${index + 1} · ${esc(originalHumanLabel(item.role || 'story'))} · ${esc(item.publisher || item.title || 'Untitled source')}</option>`).join('');
+  citationPicker.value = String(selectedOriginalCitationIndex);
   document.getElementById('original-stop-title').value = stop.title || '';
   document.getElementById('original-stop-place').value = stop.explore_place_id || '';
   const placeStatus = document.getElementById('original-stop-place-status');
@@ -3616,17 +4217,22 @@ function fillOriginalStopEditor(stop) {
   document.getElementById('original-stop-source-url').value = citation.url || '';
   document.getElementById('original-stop-source-publisher').value = citation.publisher || '';
   document.getElementById('original-stop-source-reviewed').value = citation.reviewed_at ? String(citation.reviewed_at).slice(0, 10) : '';
-  const uploaded = Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets)
-    ? selectedOriginal.uploaded_assets.find(asset => asset.id === stop.audio_asset_id)
-    : null;
+  document.getElementById('original-stop-source-role').value = citation.role || 'story';
+  document.getElementById('original-stop-source-authority').value = citation.authority || 'official';
+  document.getElementById('original-stop-source-scope').value = Array.isArray(citation.scope) ? citation.scope.join(', ') : '';
+  const uploaded = originalNarrationRecordForStop(stop);
   const provider = uploaded && uploaded.generator_metadata && uploaded.generator_metadata.provider;
   const providerSelect = document.getElementById('originals-narration-provider');
   if (providerSelect) {
     providerSelect.value = ['cartesia', 'elevenlabs'].includes(provider) ? provider : 'elevenlabs';
   }
+  const licenseState = uploaded && uploaded.generator_metadata && uploaded.generator_metadata.provider
+    ? uploaded.generator_metadata.license_status === 'attested' ? ' · LICENSE ATTESTED' : ' · LICENSE REVIEW REQUIRED'
+    : '';
   document.getElementById('originals-narration-status').textContent = uploaded
-    ? `VERIFIED · ${originalNarrationProviderName(provider)} · ${formatBytes(uploaded.bytes)}`
+    ? `VERIFIED · ${originalNarrationProviderName(provider)} · ${formatBytes(uploaded.bytes)}${licenseState}`
     : 'NOT ATTACHED';
+  renderOriginalNarrationLicense(uploaded);
   const uploadedArtwork = Array.isArray(selectedOriginal && selectedOriginal.uploaded_assets)
     ? selectedOriginal.uploaded_assets.find(asset => asset.id === stop.artwork_asset_id)
     : null;
@@ -3669,6 +4275,52 @@ function originalNumberInput(id, label) {
   return value;
 }
 
+function selectOriginalCitation(index) {
+  if (!Number.isInteger(index) || index < 0) return;
+  if (originalStopEditorDirty && !applyOriginalStopEdits(false)) {
+    document.getElementById('original-stop-source-index').value = String(selectedOriginalCitationIndex);
+    return;
+  }
+  selectedOriginalCitationIndex = index;
+  renderOriginalPreview();
+}
+
+function addOriginalCitation() {
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+    if (!stop) throw new Error('Select a story first');
+    stop.citations = Array.isArray(stop.citations) ? stop.citations : [];
+    stop.citations.push({ title: '', url: '', publisher: '', reviewed_at: '', role: 'story', authority: 'official', scope: [] });
+    selectedOriginalCitationIndex = stop.citations.length - 1;
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+    toast('Source added', 'originals-ok');
+  } catch(e) {
+    toast('Source: ' + e.message, 'err');
+  }
+}
+
+function removeOriginalCitation() {
+  try {
+    if (originalStopEditorDirty && !applyOriginalStopEdits(false)) throw new Error('Fix the selected story fields');
+    const manifest = parseOriginalJsonField('originals-manifest-json', 'Offline manifest');
+    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+    if (!stop || !Array.isArray(stop.citations)) throw new Error('Select a story source first');
+    if (stop.citations.length <= 1) throw new Error('Every story must keep at least one source');
+    stop.citations.splice(selectedOriginalCitationIndex, 1);
+    selectedOriginalCitationIndex = Math.max(0, Math.min(selectedOriginalCitationIndex, stop.citations.length - 1));
+    document.getElementById('originals-manifest-json').value = prettyJson(manifest);
+    markOriginalContentDirty();
+    renderOriginalPreview(manifest);
+    toast('Source removed', 'originals-ok');
+  } catch(e) {
+    toast('Source: ' + e.message, 'err');
+  }
+}
+
 function applyOriginalStopEdits(showToast = true) {
   const card = document.getElementById('originals-stop-card');
   if (card.style.display === 'none') return true;
@@ -3693,14 +4345,23 @@ function applyOriginalStopEdits(showToast = true) {
     if (artworkId) stop.artwork_asset_id = artworkId; else delete stop.artwork_asset_id;
     const placeId = document.getElementById('original-stop-place').value.trim();
     if (placeId) stop.explore_place_id = placeId; else delete stop.explore_place_id;
-    const previousCitation = Array.isArray(stop.citations) && stop.citations.length ? stop.citations[0] : {};
-    stop.citations = [{
+    stop.citations = Array.isArray(stop.citations) && stop.citations.length ? stop.citations : [{}];
+    selectedOriginalCitationIndex = Math.max(0, Math.min(selectedOriginalCitationIndex, stop.citations.length - 1));
+    const previousCitation = stop.citations[selectedOriginalCitationIndex] || {};
+    const sourceScope = document.getElementById('original-stop-source-scope').value
+      .split(',')
+      .map(value => value.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^_+|_+$/g, ''))
+      .filter((value, index, values) => value && values.indexOf(value) === index);
+    stop.citations[selectedOriginalCitationIndex] = {
       ...previousCitation,
       title: document.getElementById('original-stop-source-title').value.trim(),
       url: document.getElementById('original-stop-source-url').value.trim(),
       publisher: document.getElementById('original-stop-source-publisher').value.trim(),
-      reviewed_at: document.getElementById('original-stop-source-reviewed').value
-    }, ...(Array.isArray(stop.citations) ? stop.citations.slice(1) : [])];
+      reviewed_at: document.getElementById('original-stop-source-reviewed').value,
+      role: document.getElementById('original-stop-source-role').value,
+      authority: document.getElementById('original-stop-source-authority').value,
+      scope: sourceScope
+    };
     document.getElementById('originals-manifest-json').value = prettyJson(manifest);
     markOriginalContentDirty();
     renderOriginalPreview(manifest);
@@ -3718,6 +4379,69 @@ function selectedOriginalNarrationTarget() {
   const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
   if (!stop || !stop.audio_asset_id) throw new Error('The selected story needs an audio_asset_id');
   return { manifest, assetId: stop.audio_asset_id };
+}
+
+function openOriginalNarrationTerms() {
+  const termsUrl = document.getElementById('originals-license-terms-url').value.trim();
+  let parsed;
+  try { parsed = new URL(termsUrl); } catch { return toast('Enter the reviewed HTTPS terms URL first', 'err'); }
+  if (parsed.protocol !== 'https:') return toast('The reviewed terms URL must use HTTPS', 'err');
+  window.open(parsed.href, '_blank', 'noopener,noreferrer');
+}
+
+async function attestOriginalNarrationLicense() {
+  const button = document.getElementById('originals-license-attest-btn');
+  const status = document.getElementById('originals-narration-license-status');
+  try {
+    const { manifest, assetId } = selectedOriginalNarrationTarget();
+    const stop = Array.isArray(manifest.stops) ? manifest.stops[selectedOriginalStopIndex] : null;
+    const record = originalNarrationRecordForStop(stop);
+    const metadata = record && record.generator_metadata && typeof record.generator_metadata === 'object'
+      ? record.generator_metadata
+      : null;
+    if (!record || !metadata || !metadata.provider) throw new Error('Attach generated narration before recording provider terms');
+    const termsId = document.getElementById('originals-license-terms-id').value.trim();
+    const termsUrl = document.getElementById('originals-license-terms-url').value.trim();
+    const termsVersion = document.getElementById('originals-license-terms-version').value.trim();
+    const reviewedAt = document.getElementById('originals-license-reviewed-at').value;
+    if (!/^[A-Za-z0-9_.:-]{3,200}$/.test(termsId)) throw new Error('Enter the stable provider terms identifier');
+    let parsedTermsUrl;
+    try { parsedTermsUrl = new URL(termsUrl); } catch { throw new Error('Enter the reviewed HTTPS terms URL'); }
+    if (parsedTermsUrl.protocol !== 'https:') throw new Error('The reviewed terms URL must use HTTPS');
+    if (!termsVersion) throw new Error('Enter the reviewed terms version or effective date');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(reviewedAt)) throw new Error('Choose the date the terms were reviewed');
+    if (reviewedAt > new Date().toISOString().slice(0, 10)) throw new Error('The review date cannot be in the future');
+    const confirmed = window.confirm(
+      `Confirm you reviewed ${originalNarrationProviderName(metadata.provider)} terms ${termsVersion} at the supplied URL and verified this narration may be published in Trailhead. The server will record your admin identity for this exact audio asset.`
+    );
+    if (!confirmed) return;
+    button.disabled = true;
+    status.textContent = 'RECORDING REVIEW…';
+    const result = await api(`/api/admin/originals/${encodeURIComponent(selectedOriginalId)}/assets/${encodeURIComponent(assetId)}/license-attestation`, {
+      method: 'POST',
+      body: JSON.stringify({
+        terms_id: termsId,
+        terms_url: termsUrl,
+        terms_version: termsVersion,
+        reviewed_at: reviewedAt
+      })
+    });
+    record.generator_metadata = {
+      ...metadata,
+      license_status: result.license_status,
+      license_attestation: result.license_attestation
+    };
+    renderOriginalNarrationLicense(record);
+    document.getElementById('originals-narration-status').textContent = `VERIFIED · ${originalNarrationProviderName(metadata.provider)} · ${formatBytes(record.bytes)} · LICENSE ATTESTED`;
+    if (!originalEditorDirty) await validateOriginalDraft(false);
+    else renderOriginalReadiness(null, 'SAVE TO REFRESH READINESS');
+    toast('Narration license review recorded by the server', 'originals-ok');
+  } catch(e) {
+    status.textContent = 'REVIEW NOT RECORDED';
+    toast('Narration license: ' + e.message, 'err');
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function attachVerifiedOriginalAsset(manifest, record) {
@@ -3745,9 +4469,13 @@ function attachVerifiedOriginalAsset(manifest, record) {
   renderOriginalPreview(manifest);
   const statusId = record.kind === 'image' ? 'originals-artwork-status' : 'originals-narration-status';
   const provider = record.generator_metadata && record.generator_metadata.provider;
+  const licenseState = provider
+    ? record.generator_metadata.license_status === 'attested' ? ' · LICENSE ATTESTED' : ' · LICENSE REVIEW REQUIRED'
+    : '';
   document.getElementById(statusId).textContent = record.kind === 'narration'
-    ? `VERIFIED · ${originalNarrationProviderName(provider)} · ${formatBytes(record.bytes)}`
+    ? `VERIFIED · ${originalNarrationProviderName(provider)} · ${formatBytes(record.bytes)}${licenseState}`
     : `VERIFIED · ${formatBytes(record.bytes)}`;
+  if (record.kind === 'narration') renderOriginalNarrationLicense(record);
 }
 
 async function previewVerifiedOriginalNarration(record) {
@@ -3779,7 +4507,7 @@ async function generateOriginalNarration() {
     });
     attachVerifiedOriginalAsset(manifest, record);
     await previewVerifiedOriginalNarration(record);
-    toast(`${originalNarrationProviderName(provider)} narration attached; save the draft to keep it`, 'originals-ok');
+    toast(`${originalNarrationProviderName(provider)} narration attached; save the draft, then record the reviewed license terms`, 'originals-ok');
   } catch(e) {
     status.textContent = 'FAILED';
     toast('Narration: ' + e.message, 'err');

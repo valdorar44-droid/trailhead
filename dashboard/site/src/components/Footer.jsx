@@ -1,4 +1,6 @@
-export default function Footer({ data }) {
+const isStoreLink = (href = '') => /apps\.apple\.com|play\.google\.com\/store\/apps/i.test(href);
+
+export default function Footer({ data, showStoreLinks = true }) {
   return (
     <footer className="mt-16 border-t border-(--rule) bg-[color-mix(in_srgb,var(--bg)_94%,white)] relative z-10">
       <div className="max-w-[1180px] mx-auto px-6 py-10">
@@ -15,7 +17,7 @@ export default function Footer({ data }) {
             {data.columns.map((col) => (
               <div key={col.title}>
                 <h5 className="font-display text-[0.82rem] font-bold text-(--fg-muted) mb-3">{col.title}</h5>
-                {col.links.map((l) => (
+                {col.links.filter((link) => showStoreLinks || !isStoreLink(link.href)).map((l) => (
                   <a key={l.href} href={l.href} className="font-display block py-1.5 text-[0.95rem] hover:text-(--accent)">
                     {l.label}
                   </a>

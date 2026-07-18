@@ -5,9 +5,13 @@ const {
   title = 'Trailhead - Camps, trails, routes, and guided trips.',
   description = 'Trailhead brings camps, trails, routes, guided trips, and saved places into one outdoor travel app.',
   image = '/assets/screenshots/map-main.jpg',
+  noindex = false,
+  canonical,
 } = Astro.props;
 
-const canonicalURL = new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin);
+const canonicalURL = canonical
+  ? new URL(canonical)
+  : new URL(Astro.url.pathname, Astro.site ?? Astro.url.origin);
 const socialImage = new URL(image, Astro.site ?? Astro.url.origin);
 ---
 <meta charset="UTF-8" />
@@ -16,6 +20,8 @@ const socialImage = new URL(image, Astro.site ?? Astro.url.origin);
 
 <title>{title}</title>
 <meta name="description" content={description} />
+{noindex ? <meta name="robots" content="noindex, nofollow, noarchive" /> : null}
+{noindex ? <meta name="googlebot" content="noindex, nofollow, noarchive" /> : null}
 
 <link rel="canonical" href={canonicalURL} />
 <link rel="icon" type="image/png" href="/assets/app-icon.png" />

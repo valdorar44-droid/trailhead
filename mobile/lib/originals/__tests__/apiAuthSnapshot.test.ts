@@ -16,6 +16,7 @@ const stubs: Record<string, string> = {
     };
   `,
   './manifest': `export function validateOriginalManifest(value) { return value; }`,
+  './previewAccess': `export async function getOriginalPreviewToken() { return globalThis.__originalsPreviewToken || null; }`,
 };
 
 const stubDependencies: Plugin = {
@@ -54,16 +55,18 @@ async function loadApiModule(): Promise<OriginalsApiModule> {
 
 async function main() {
   const apiModule = await loadApiModule();
-  const requests: Array<{ headers: Record<string, string> }> = [];
+  const requests: Array<{ url: string; headers: Record<string, string>; body?: BodyInit | null }> = [];
   const globals = globalThis as typeof globalThis & {
     __originalsStorageReads?: number;
     __originalsStoredToken?: string;
+    __originalsPreviewToken?: string;
   };
   globals.__originalsStorageReads = 0;
   globals.__originalsStoredToken = 'later-account-token';
+  globals.__originalsPreviewToken = 'short-lived-preview';
   const previousFetch = globalThis.fetch;
   globalThis.fetch = (async (_url: string | URL | Request, init?: RequestInit) => {
-    requests.push({ headers: init?.headers as Record<string, string> });
+    requests.push({ url: String(_url), headers: init?.headers as Record<string, string>, body: init?.body });
     return {
       ok: true,
       status: 200,
@@ -84,6 +87,26 @@ async function main() {
     await apiModule.originalsApi.acquire('moab', { version: 1 });
     assert.equal(requests[2]?.headers.Authorization, 'Bearer later-account-token');
     assert.equal(globals.__originalsStorageReads, 1, 'legacy reads still resolve auth when no snapshot is supplied');
+
+    await apiModule.originalsApi.feedbackGuestToken('moab', 4, 'opaque-install-id');
+    assert.equal(requests[3]?.headers.Authorization, undefined);
+    assert.equal(requests[3]?.headers['X-Trailhead-Originals-Preview'], 'short-lived-preview');
+    assert.equal(requests[3]?.headers['X-Trailhead-Install-ID'], 'opaque-install-id');
+    assert.equal(requests[3]?.body, JSON.stringify({ pack_id: 'moab', version: 4 }));
+
+    await apiModule.originalsApi.submitFeedback('moab', {
+      version: 4,
+      category: 'general',
+      message: 'Good drive.',
+      platform: 'ios',
+    }, {
+      idempotencyKey: 'feedback-key',
+      authToken: null,
+      guestToken: 'guest-feedback-token',
+    });
+    assert.equal(requests[4]?.headers.Authorization, undefined);
+    assert.equal(requests[4]?.headers['Idempotency-Key'], 'feedback-key');
+    assert.equal(requests[4]?.headers['X-Original-Feedback-Token'], 'guest-feedback-token');
   } finally {
     globalThis.fetch = previousFetch;
   }

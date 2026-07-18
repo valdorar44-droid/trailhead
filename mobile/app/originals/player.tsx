@@ -8,14 +8,32 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '@/lib/design';
 import {
   originalSimulationSamplesForNextCue,
+  runOriginalRouteValidation,
+  useOriginalsAdminRuntime,
   useOriginalsRuntime,
+  type OriginalRouteValidationReportV1,
   type OriginalStopV1,
   type OriginalTriggerDecisionDiagnostic,
 } from '@/lib/originals';
 import { useStore } from '@/lib/store';
 import { getOriginalDetail, manifestStories, originalSessionToUi } from '@/components/originals/originalsUiService';
 import OriginalRouteMap from '@/components/originals/OriginalRouteMap';
+import OriginalFeedbackSheet from '@/components/originals/OriginalFeedbackSheet';
 import type { OriginalUiDetail, OriginalUiSession } from '@/components/originals/types';
+import {
+  createOriginalVirtualDriveLabState,
+  nextOriginalVirtualDriveCueProgress,
+  ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
+  ORIGINAL_VIRTUAL_DRIVE_TICK_REAL_MS,
+  ORIGINAL_VIRTUAL_DRIVE_TICK_SIMULATED_MS,
+  originalVirtualDriveCueStatuses,
+  seekOriginalVirtualDriveLab,
+  tickOriginalVirtualDriveLab,
+  updateOriginalVirtualDriveLabState,
+  type OriginalVirtualDriveCueStatus,
+  type OriginalVirtualDriveGpsQuality,
+  type OriginalVirtualDriveLabState,
+} from '@/lib/originals/virtualDriveLab';
 
 type SimulationCueResult = {
   stopId: string;
@@ -55,6 +73,7 @@ export default function OriginalPlayerScreen() {
   const requestedVersion = Number.isFinite(Number(versionValue)) ? Number(versionValue) : undefined;
   const simulateValue = Array.isArray(params.simulate) ? params.simulate[0] : params.simulate;
   const originalsRuntime = useOriginalsRuntime();
+  const originalsAdminRuntime = useOriginalsAdminRuntime();
   const runtimeRef = useRef(originalsRuntime);
   runtimeRef.current = originalsRuntime;
   const ownsSimulationRouteRef = useRef(simulateValue === '1');
@@ -66,15 +85,101 @@ export default function OriginalPlayerScreen() {
   const [loading, setLoading] = useState(true);
   const [transcriptVisible, setTranscriptVisible] = useState(true);
   const [storiesVisible, setStoriesVisible] = useState(false);
+  const [feedbackVisible, setFeedbackVisible] = useState(false);
   const [simulationBusy, setSimulationBusy] = useState(false);
+  const [validationBusy, setValidationBusy] = useState(false);
+  const [validationReport, setValidationReport] = useState<OriginalRouteValidationReportV1 | null>(null);
   const [simulationSpeedMps, setSimulationSpeedMps] = useState(12);
   const [simulationResults, setSimulationResults] = useState<SimulationCueResult[]>([]);
+  const [driveLabState, setDriveLabState] = useState<OriginalVirtualDriveLabState | null>(null);
+  const [driveLabError, setDriveLabError] = useState('');
+  const driveLabStateRef = useRef<OriginalVirtualDriveLabState | null>(null);
+  const driveLabManifestKeyRef = useRef('');
+  const driveLabTickBusyRef = useRef(false);
+  const isAdmin = useStore(state => Boolean(state.user?.is_admin));
 
   useEffect(() => () => {
     if (ownsSimulationRouteRef.current && runtimeRef.current.simulation) {
       void runtimeRef.current.stopTour().catch(() => {});
     }
   }, []);
+
+  const commitDriveLabState = useCallback((next: OriginalVirtualDriveLabState | null) => {
+    driveLabStateRef.current = next;
+    setDriveLabState(next);
+  }, []);
+
+  useEffect(() => {
+    const manifest = originalsRuntime.manifest;
+    if (!originalsRuntime.simulation || !isAdmin || !manifest) {
+      driveLabManifestKeyRef.current = '';
+      commitDriveLabState(null);
+      return;
+    }
+    const manifestKey = `${manifest.manifest_id}:${manifest.version}`;
+    if (driveLabManifestKeyRef.current === manifestKey && driveLabStateRef.current) return;
+    driveLabManifestKeyRef.current = manifestKey;
+    const activeSession = originalsRuntime.session;
+    commitDriveLabState(createOriginalVirtualDriveLabState(manifest, {
+      progress_m: activeSession?.last_projected_route_progress_m ?? 0,
+      speed_mps: simulationSpeedMps,
+      synthetic_timestamp_ms: Math.max(
+        Date.now(),
+        Number(activeSession?.last_location_timestamp_ms ?? activeSession?.updated_at_ms ?? 0) + 1_000,
+      ),
+    }));
+    setDriveLabError('');
+  }, [
+    commitDriveLabState,
+    isAdmin,
+    originalsRuntime.manifest,
+    originalsRuntime.session,
+    originalsRuntime.simulation,
+    simulationSpeedMps,
+  ]);
+
+  useEffect(() => {
+    if (!originalsRuntime.simulation || isAdmin) return;
+    commitDriveLabState(null);
+    void originalsRuntime.stopTour().catch(() => {});
+  }, [commitDriveLabState, isAdmin, originalsRuntime]);
+
+  useEffect(() => {
+    if (!originalsRuntime.simulation || !isAdmin || !driveLabState?.playing) return;
+    const timer = setInterval(() => {
+      if (driveLabTickBusyRef.current) return;
+      const manifest = runtimeRef.current.manifest;
+      const current = driveLabStateRef.current;
+      if (!manifest || !current?.playing || !runtimeRef.current.simulation) return;
+      const sessionTimestamp = Number(runtimeRef.current.session?.last_location_timestamp_ms ?? 0);
+      const synchronized = sessionTimestamp >= current.synthetic_timestamp_ms
+        ? { ...current, synthetic_timestamp_ms: sessionTimestamp + 1 }
+        : current;
+      let tick;
+      try {
+        tick = tickOriginalVirtualDriveLab(
+          manifest,
+          synchronized,
+          ORIGINAL_VIRTUAL_DRIVE_TICK_SIMULATED_MS,
+        );
+      } catch (error: any) {
+        commitDriveLabState({ ...current, playing: false });
+        setDriveLabError(error?.message || 'The synthetic route clock could not advance.');
+        return;
+      }
+      commitDriveLabState(tick.state);
+      if (!tick.sample) return;
+      driveLabTickBusyRef.current = true;
+      void originalsAdminRuntime.submitLocationSample(tick.sample).catch((error: any) => {
+        const latest = driveLabStateRef.current;
+        if (latest) commitDriveLabState({ ...latest, playing: false });
+        setDriveLabError(error?.message || 'The synthetic GPS sample could not be processed.');
+      }).finally(() => {
+        driveLabTickBusyRef.current = false;
+      });
+    }, ORIGINAL_VIRTUAL_DRIVE_TICK_REAL_MS);
+    return () => clearInterval(timer);
+  }, [commitDriveLabState, driveLabState?.playing, isAdmin, originalsAdminRuntime, originalsRuntime.simulation]);
 
   useEffect(() => {
     const evaluation = originalsRuntime.lastTriggerEvaluation;
@@ -221,34 +326,49 @@ export default function OriginalPlayerScreen() {
         return;
       }
       if (scenario === 'poor_accuracy') {
-        await originalsRuntime.submitLocationSample({ ...plan.samples[0], accuracy_m: 150 });
+        await originalsAdminRuntime.submitLocationSample({ ...plan.samples[0], accuracy_m: 150 });
       } else if (scenario === 'off_route') {
-        await originalsRuntime.submitLocationSample({
+        await originalsAdminRuntime.submitLocationSample({
           ...plan.samples[0],
           lat: plan.samples[0].lat + 0.03,
           lng: plan.samples[0].lng + 0.03,
         });
       } else {
-        for (const sample of plan.samples) await originalsRuntime.submitLocationSample(sample);
+        for (const sample of plan.samples) await originalsAdminRuntime.submitLocationSample(sample);
       }
     } catch (error: any) {
       Alert.alert('Trigger test failed', error?.message || 'The synthetic GPS sample could not be processed.');
     } finally {
       setSimulationBusy(false);
     }
-  }, [originalsRuntime, simulationBusy, simulationSpeedMps]);
+  }, [originalsAdminRuntime, originalsRuntime, simulationBusy, simulationSpeedMps]);
 
   const advanceSimulationCue = useCallback(async () => {
     if (simulationBusy) return;
     setSimulationBusy(true);
     try {
-      await originalsRuntime.skipSimulationCue();
+      await originalsAdminRuntime.skipSimulationCue();
     } catch (error: any) {
       Alert.alert('Cue could not be advanced', error?.message || 'Finish the playing story and try again.');
     } finally {
       setSimulationBusy(false);
     }
-  }, [originalsRuntime, simulationBusy]);
+  }, [originalsAdminRuntime, simulationBusy]);
+
+  const runValidationMatrix = useCallback(async () => {
+    const manifest = originalsRuntime.manifest;
+    if (!originalsRuntime.simulation || !manifest || validationBusy) return;
+    setValidationBusy(true);
+    try {
+      // Let the loading state paint before the deterministic CPU-bound run begins.
+      await new Promise(resolve => setTimeout(resolve, 16));
+      setValidationReport(runOriginalRouteValidation(manifest));
+    } catch (error: any) {
+      Alert.alert('Virtual drive could not run', error?.message || 'The route validation matrix could not be completed.');
+    } finally {
+      setValidationBusy(false);
+    }
+  }, [originalsRuntime.manifest, originalsRuntime.simulation, validationBusy]);
 
   const currentStory = session?.currentStory || session?.nextStory || playerDetail?.stories[0];
   const nextStop = useMemo(() => {
@@ -268,9 +388,73 @@ export default function OriginalPlayerScreen() {
     && SIMULATION_CUE_FAILURE_CODES.has(originalsRuntime.lastTriggerEvaluation.decision.code)
   );
   const changeSimulationSpeed = useCallback((value: number) => {
-    originalsRuntime.clearSimulationDiagnostic();
+    originalsAdminRuntime.clearSimulationDiagnostic();
     setSimulationSpeedMps(value);
-  }, [originalsRuntime]);
+    const manifest = runtimeRef.current.manifest;
+    const current = driveLabStateRef.current;
+    if (manifest && current && runtimeRef.current.simulation && isAdmin) {
+      commitDriveLabState(updateOriginalVirtualDriveLabState(manifest, current, {
+        speed_mps: value,
+      }));
+    }
+  }, [commitDriveLabState, isAdmin, originalsAdminRuntime]);
+  const updateDriveLab = useCallback((patch: Partial<Pick<
+    OriginalVirtualDriveLabState,
+    'playing' | 'direction' | 'gps_quality' | 'off_route_m'
+  >>) => {
+    const manifest = runtimeRef.current.manifest;
+    const current = driveLabStateRef.current;
+    if (!isAdmin || !runtimeRef.current.simulation || !manifest || !current) return;
+    originalsAdminRuntime.clearSimulationDiagnostic();
+    commitDriveLabState(updateOriginalVirtualDriveLabState(manifest, current, patch));
+    setDriveLabError('');
+  }, [commitDriveLabState, isAdmin, originalsAdminRuntime]);
+  const seekDriveLab = useCallback((progressM: number) => {
+    const manifest = runtimeRef.current.manifest;
+    const current = driveLabStateRef.current;
+    if (!isAdmin || !runtimeRef.current.simulation || !manifest || !current) return;
+    originalsAdminRuntime.clearSimulationDiagnostic();
+    commitDriveLabState(seekOriginalVirtualDriveLab(manifest, current, progressM));
+    setDriveLabError('');
+  }, [commitDriveLabState, isAdmin, originalsAdminRuntime]);
+  const cycleDriveLabGps = useCallback(() => {
+    const current = driveLabStateRef.current;
+    if (!current) return;
+    const order: OriginalVirtualDriveGpsQuality[] = ['precise', 'approximate', 'poor'];
+    updateDriveLab({
+      gps_quality: order[(order.indexOf(current.gps_quality) + 1) % order.length],
+    });
+  }, [updateDriveLab]);
+  const seekDriveLabToNextCue = useCallback(() => {
+    const manifest = runtimeRef.current.manifest;
+    const activeSession = runtimeRef.current.session;
+    const current = driveLabStateRef.current;
+    if (!manifest || !activeSession || !current) return;
+    const progressM = nextOriginalVirtualDriveCueProgress(manifest, activeSession, current);
+    if (progressM != null) seekDriveLab(progressM);
+  }, [seekDriveLab]);
+  const driveLabCueStatuses = useMemo<readonly OriginalVirtualDriveCueStatus[]>(() => {
+    if (!originalsRuntime.manifest || !originalsRuntime.session || !driveLabState) return [];
+    return originalVirtualDriveCueStatuses(
+      originalsRuntime.manifest,
+      originalsRuntime.session,
+      driveLabState,
+    );
+  }, [driveLabState, originalsRuntime.manifest, originalsRuntime.session]);
+  useEffect(() => {
+    if (
+      !driveLabStateRef.current?.playing
+      || (
+        originalsRuntime.session?.status !== 'completed'
+        && !originalsRuntime.session?.user_paused
+      )
+    ) return;
+    commitDriveLabState({ ...driveLabStateRef.current, playing: false });
+  }, [
+    commitDriveLabState,
+    originalsRuntime.session?.status,
+    originalsRuntime.session?.user_paused,
+  ]);
   const isPaused = Boolean(session?.userPaused || session?.status === 'paused');
   const status = session?.status || 'ready';
   const needsRedownload = Boolean(
@@ -278,6 +462,18 @@ export default function OriginalPlayerScreen() {
     && originalsRuntime.session?.pack_id === id
     && originalsRuntime.session.download_state !== 'ready'
   );
+
+  if (simulateValue === '1' && !isAdmin) {
+    return (
+      <SafeAreaView style={[styles.center, { backgroundColor: C.bg }] }>
+        <Ionicons name="lock-closed-outline" size={34} color={C.orange} />
+        <Text style={[styles.centerText, { color: C.text2 }]}>The Virtual Drive Lab is available only to Trailhead admins.</Text>
+        <TouchableOpacity accessibilityRole="button" onPress={() => router.replace('/originals' as any)} style={[styles.recoveryButton, { borderColor: C.border }] }>
+          <Text style={[styles.recoveryText, { color: C.orange }]}>Back to Originals</Text>
+        </TouchableOpacity>
+      </SafeAreaView>
+    );
+  }
 
   if (loading || !playerDetail || !session || needsRedownload) {
     const canResume = Boolean(
@@ -303,8 +499,20 @@ export default function OriginalPlayerScreen() {
   if (status === 'completed') {
     return (
       <>
-        <CompletionState detail={playerDetail} session={session} onStories={() => setStoriesVisible(true)} simulation={originalsRuntime.simulation} simulationResults={simulationResults} onExit={closePlayer} />
+        <CompletionState
+          detail={playerDetail}
+          session={session}
+          onStories={() => setStoriesVisible(true)}
+          simulation={originalsRuntime.simulation}
+          simulationResults={simulationResults}
+          validationBusy={validationBusy}
+          validationReport={validationReport}
+          onRunValidation={() => void runValidationMatrix()}
+          onFeedback={() => setFeedbackVisible(true)}
+          onExit={closePlayer}
+        />
         <StoriesModal visible={storiesVisible} detail={playerDetail} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
+        {!originalsRuntime.simulation ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} onClose={() => setFeedbackVisible(false)} /> : null}
       </>
     );
   }
@@ -367,14 +575,38 @@ export default function OriginalPlayerScreen() {
               diagnosticStop={diagnosticStop}
               nextStop={nextStop}
               busy={simulationBusy}
-              speedMps={simulationSpeedMps}
+              speedMps={driveLabState?.speed_mps ?? simulationSpeedMps}
               canAdvance={canAdvanceFailedCue}
               results={simulationResults}
+              driveLabState={driveLabState}
+              driveLabError={driveLabError}
+              cueStatuses={driveLabCueStatuses}
+              routeDistanceM={originalsRuntime.manifest!.route.distance_m}
+              audioPositionMs={originalsRuntime.audioPlaybackState?.position_ms ?? originalsRuntime.session?.current_audio_position_ms ?? 0}
+              audioDurationMs={originalsRuntime.audioPlaybackState?.duration_ms ?? (
+                originalsRuntime.manifest?.stops.find(stop => (
+                  stop.id === originalsRuntime.session?.current_stop_id
+                ))?.audio_duration_s ?? 0
+              ) * 1_000}
+              audioPlaying={Boolean(originalsRuntime.audioPlaybackState?.playing)}
+              validationBusy={validationBusy}
+              validationReport={validationReport}
               onTrigger={() => void runSimulation('trigger')}
               onPoorAccuracy={() => void runSimulation('poor_accuracy')}
               onOffRoute={() => void runSimulation('off_route')}
               onAdvance={() => void advanceSimulationCue()}
               onSpeedChange={changeSimulationSpeed}
+              onDriveToggle={() => updateDriveLab({ playing: !driveLabStateRef.current?.playing })}
+              onDirectionToggle={() => updateDriveLab({
+                direction: driveLabStateRef.current?.direction === 'reverse' ? 'forward' : 'reverse',
+              })}
+              onGpsQuality={cycleDriveLabGps}
+              onOffRouteToggle={() => updateDriveLab({
+                off_route_m: driveLabStateRef.current?.off_route_m ? 0 : ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
+              })}
+              onSeek={seekDriveLab}
+              onSeekNextCue={seekDriveLabToNextCue}
+              onRunValidation={() => void runValidationMatrix()}
             />
           ) : null}
           {status === 'off_route' || status === 'location_unavailable' ? (
@@ -448,11 +680,18 @@ export default function OriginalPlayerScreen() {
               <Text style={[styles.secondaryLabel, { color: C.text2 }]}>{originalsRuntime.simulation ? 'End test' : 'End tour'}</Text>
             </TouchableOpacity>
           </View>
+          {!originalsRuntime.simulation ? (
+            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share feedback about this Original" onPress={() => setFeedbackVisible(true)} style={[styles.feedbackButton, { borderColor: C.border }] }>
+              <Ionicons name="chatbubble-ellipses-outline" size={16} color={C.orange} />
+              <Text style={[styles.feedbackButtonText, { color: C.orange }]}>Share feedback</Text>
+            </TouchableOpacity>
+          ) : null}
           </ScrollView>
         </View>
       </SafeAreaView>
 
       <StoriesModal visible={storiesVisible} detail={playerDetail} onClose={() => setStoriesVisible(false)} onReplay={storyId => void originalsRuntime.replayStory(storyId)} />
+      {!originalsRuntime.simulation ? <OriginalFeedbackSheet visible={feedbackVisible} packId={id} version={session.version} stopId={currentStory?.id} onClose={() => setFeedbackVisible(false)} /> : null}
     </View>
   );
 }
@@ -503,6 +742,148 @@ function simulationResultConditions(result: SimulationCueResult) {
   return conditions.filter(Boolean).join(' · ');
 }
 
+function formatLabClock(milliseconds: number) {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
+    : `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function driveCueStatusLabel(status: OriginalVirtualDriveCueStatus['status']) {
+  const labels: Record<OriginalVirtualDriveCueStatus['status'], string> = {
+    completed: 'heard',
+    skipped: 'skipped',
+    missed: 'missed',
+    playing: 'playing',
+    queued: 'queued',
+    in_window: 'window',
+    passed_window: 'passed',
+    ahead: 'ahead',
+  };
+  return labels[status];
+}
+
+function ContinuousDriveLabControls({
+  state,
+  error,
+  cueStatuses,
+  routeDistanceM,
+  audioPositionMs,
+  audioDurationMs,
+  audioPlaying,
+  disabled,
+  onToggle,
+  onDirectionToggle,
+  onGpsQuality,
+  onOffRouteToggle,
+  onSeek,
+  onSeekNextCue,
+}: {
+  state: OriginalVirtualDriveLabState;
+  error: string;
+  cueStatuses: readonly OriginalVirtualDriveCueStatus[];
+  routeDistanceM: number;
+  audioPositionMs: number;
+  audioDurationMs: number;
+  audioPlaying: boolean;
+  disabled: boolean;
+  onToggle: () => void;
+  onDirectionToggle: () => void;
+  onGpsQuality: () => void;
+  onOffRouteToggle: () => void;
+  onSeek: (progressM: number) => void;
+  onSeekNextCue: () => void;
+}) {
+  const C = useTheme();
+  const progress = routeDistanceM > 0 ? state.progress_m / routeDistanceM : 0;
+  const seekStepM = Math.max(500, routeDistanceM * 0.05);
+  const gpsAccuracy = state.gps_quality === 'precise' ? 10 : state.gps_quality === 'approximate' ? 75 : 150;
+  return (
+    <View style={[styles.driveLabController, { borderColor: C.border, backgroundColor: C.s1 }] }>
+      <View style={styles.driveLabHeader}>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={state.playing ? 'Pause continuous synthetic drive' : 'Play continuous synthetic drive'}
+          disabled={disabled}
+          onPress={onToggle}
+          style={[styles.driveLabPlay, { backgroundColor: C.orange, opacity: disabled ? 0.5 : 1 }]}
+        >
+          <Ionicons name={state.playing ? 'pause' : 'play'} size={20} color="#FFFFFF" />
+        </TouchableOpacity>
+        <View style={styles.driveLabHeaderCopy}>
+          <Text style={[styles.driveLabKicker, { color: C.orange }]}>CONTINUOUS SYNTHETIC ROUTE</Text>
+          <Text style={[styles.driveLabTitle, { color: C.text }]}>
+            {compactTriggerDistance(state.progress_m)} / {compactTriggerDistance(routeDistanceM)} · {state.direction.toUpperCase()}
+          </Text>
+          <Text style={[styles.driveLabMeta, { color: C.text3 }]}>SIM {formatLabClock(state.elapsed_simulated_ms)} · {state.sample_count} FIXES</Text>
+        </View>
+        <View style={styles.driveLabAudioCopy}>
+          <Text style={[styles.driveLabKicker, { color: C.text3 }]}>AUDIO CLOCK</Text>
+          <Text style={[styles.driveLabAudio, { color: C.text }]}>{formatLabClock(audioPositionMs)} / {formatLabClock(audioDurationMs)}</Text>
+          <Text style={[styles.driveLabAudioState, { color: C.text3 }]}>{audioPlaying ? 'PLAYING' : audioPositionMs > 0 ? 'PAUSED' : 'IDLE'}</Text>
+        </View>
+      </View>
+      <View
+        accessible
+        accessibilityRole="adjustable"
+        accessibilityLabel="Synthetic route progress"
+        accessibilityValue={{ min: 0, max: 100, now: Math.round(progress * 100) }}
+        accessibilityActions={[{ name: 'decrement' }, { name: 'increment' }]}
+        onAccessibilityAction={event => onSeek(
+          event.nativeEvent.actionName === 'decrement'
+            ? state.progress_m - seekStepM
+            : state.progress_m + seekStepM,
+        )}
+        style={[styles.driveLabTrack, { backgroundColor: C.s3 }]}
+      >
+        <View style={[styles.driveLabFill, { width: `${Math.max(1, Math.round(progress * 100))}%`, backgroundColor: C.orange }]} />
+      </View>
+      <View style={styles.driveLabSeekRow}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Seek backward on the synthetic route" disabled={disabled || state.progress_m <= 0} onPress={() => onSeek(state.progress_m - seekStepM)} style={[styles.driveLabSeek, { borderColor: C.border }] }>
+          <Ionicons name="play-back" size={15} color={C.text2} />
+          <Text style={[styles.driveLabSeekText, { color: C.text2 }]}>5%</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Seek to the next cue window" disabled={disabled} onPress={onSeekNextCue} style={[styles.driveLabSeekNext, { borderColor: C.orange + '66', backgroundColor: C.orange + '12' }] }>
+          <Text style={[styles.driveLabSeekText, { color: C.orange }]}>Next cue window</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel="Seek forward on the synthetic route" disabled={disabled || state.progress_m >= routeDistanceM} onPress={() => onSeek(state.progress_m + seekStepM)} style={[styles.driveLabSeek, { borderColor: C.border }] }>
+          <Text style={[styles.driveLabSeekText, { color: C.text2 }]}>5%</Text>
+          <Ionicons name="play-forward" size={15} color={C.text2} />
+        </TouchableOpacity>
+      </View>
+      <View style={styles.driveLabModes}>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Synthetic direction ${state.direction}`} onPress={onDirectionToggle} style={[styles.driveLabMode, { borderColor: C.border }] }>
+          <Ionicons name="swap-horizontal" size={15} color={C.orange} />
+          <Text style={[styles.driveLabModeText, { color: C.text2 }]}>{state.direction === 'forward' ? 'Forward' : 'Reverse'}</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={`Synthetic GPS quality ${state.gps_quality}`} onPress={onGpsQuality} style={[styles.driveLabMode, { borderColor: C.border }] }>
+          <Ionicons name="locate-outline" size={15} color={C.orange} />
+          <Text style={[styles.driveLabModeText, { color: C.text2 }]}>{state.gps_quality} · {gpsAccuracy}m</Text>
+        </TouchableOpacity>
+        <TouchableOpacity accessibilityRole="button" accessibilityLabel={state.off_route_m ? 'Disable off route injection' : 'Enable off route injection'} onPress={onOffRouteToggle} style={[styles.driveLabMode, { borderColor: C.border }] }>
+          <Ionicons name="git-compare-outline" size={15} color={C.orange} />
+          <Text style={[styles.driveLabModeText, { color: C.text2 }]}>{state.off_route_m ? `Off route · ${Math.round(state.off_route_m)}m` : 'On route'}</Text>
+        </TouchableOpacity>
+      </View>
+      {error ? <Text accessibilityLiveRegion="polite" style={[styles.driveLabError, { color: C.orange }]}>{error}</Text> : null}
+      <View style={styles.driveLabCueList}>
+        {cueStatuses.map(cue => {
+          const active = ['playing', 'queued', 'in_window'].includes(cue.status);
+          return (
+            <View key={cue.stop_id} style={[styles.driveLabCue, { borderColor: active ? C.orange + '66' : C.border, backgroundColor: active ? C.orange + '10' : C.s2 }] }>
+              <Text style={[styles.driveLabCueTitle, { color: active ? C.orange : C.text2 }]} numberOfLines={1}>{cue.sequence}. {cue.title}</Text>
+              <Text style={[styles.driveLabCueStatus, { color: active ? C.orange : C.text3 }]}>{driveCueStatusLabel(cue.status).toUpperCase()} · {compactTriggerDistance(cue.effective_start_m)}–{compactTriggerDistance(cue.end_m)}</Text>
+            </View>
+          );
+        })}
+      </View>
+    </View>
+  );
+}
+
 function TriggerSimulationPanel({
   decision,
   diagnosticStop,
@@ -511,11 +892,27 @@ function TriggerSimulationPanel({
   speedMps,
   canAdvance,
   results,
+  driveLabState,
+  driveLabError,
+  cueStatuses,
+  routeDistanceM,
+  audioPositionMs,
+  audioDurationMs,
+  audioPlaying,
+  validationBusy,
+  validationReport,
   onTrigger,
   onPoorAccuracy,
   onOffRoute,
   onAdvance,
   onSpeedChange,
+  onDriveToggle,
+  onDirectionToggle,
+  onGpsQuality,
+  onOffRouteToggle,
+  onSeek,
+  onSeekNextCue,
+  onRunValidation,
 }: {
   decision: OriginalTriggerDecisionDiagnostic | null;
   diagnosticStop: OriginalStopV1 | null;
@@ -524,11 +921,27 @@ function TriggerSimulationPanel({
   speedMps: number;
   canAdvance: boolean;
   results: SimulationCueResult[];
+  driveLabState: OriginalVirtualDriveLabState | null;
+  driveLabError: string;
+  cueStatuses: readonly OriginalVirtualDriveCueStatus[];
+  routeDistanceM: number;
+  audioPositionMs: number;
+  audioDurationMs: number;
+  audioPlaying: boolean;
+  validationBusy: boolean;
+  validationReport: OriginalRouteValidationReportV1 | null;
   onTrigger: () => void;
   onPoorAccuracy: () => void;
   onOffRoute: () => void;
   onAdvance: () => void;
   onSpeedChange: (value: number) => void;
+  onDriveToggle: () => void;
+  onDirectionToggle: () => void;
+  onGpsQuality: () => void;
+  onOffRouteToggle: () => void;
+  onSeek: (progressM: number) => void;
+  onSeekNextCue: () => void;
+  onRunValidation: () => void;
 }) {
   const C = useTheme();
   const displayStop = diagnosticStop ?? nextStop;
@@ -555,7 +968,7 @@ function TriggerSimulationPanel({
           <Ionicons name="speedometer-outline" size={17} color={C.orange} />
         </View>
         <View style={styles.simulationHeadingCopy}>
-          <Text style={[styles.simulationKicker, { color: C.orange }]}>TRIGGER TEST · NO DRIVING</Text>
+          <Text style={[styles.simulationKicker, { color: C.orange }]}>VIRTUAL DRIVE LAB · ADMIN</Text>
           <Text style={[styles.simulationTitle, { color: C.text }]}>{triggerDecisionTitle(decision)}</Text>
         </View>
       </View>
@@ -566,6 +979,24 @@ function TriggerSimulationPanel({
         <Text style={[styles.simulationNext, { color: C.orange }]}>NEXT · {nextStop!.sequence}. {nextStop!.title}</Text>
       ) : null}
       <Text style={[styles.simulationResultSummary, { color: C.text3 }]}>{passedCount} PASSED · {failedCount} BLOCKED · {results.length} REVIEWED</Text>
+      {driveLabState ? (
+        <ContinuousDriveLabControls
+          state={driveLabState}
+          error={driveLabError}
+          cueStatuses={cueStatuses}
+          routeDistanceM={routeDistanceM}
+          audioPositionMs={audioPositionMs}
+          audioDurationMs={audioDurationMs}
+          audioPlaying={audioPlaying}
+          disabled={busy}
+          onToggle={onDriveToggle}
+          onDirectionToggle={onDirectionToggle}
+          onGpsQuality={onGpsQuality}
+          onOffRouteToggle={onOffRouteToggle}
+          onSeek={onSeek}
+          onSeekNextCue={onSeekNextCue}
+        />
+      ) : null}
       <View style={[styles.simulationSpeed, { borderColor: C.border }] }>
         <TouchableOpacity accessibilityRole="button" accessibilityLabel="Lower synthetic test speed" disabled={busy || speedMps <= 0} onPress={() => onSpeedChange(Math.max(0, speedMps - 4))} style={styles.simulationSpeedButton}>
           <Ionicons name="remove" size={18} color={speedMps <= 0 ? C.text3 : C.text2} />
@@ -606,6 +1037,69 @@ function TriggerSimulationPanel({
         <Text style={[styles.simulationAdvanceText, { color: C.text2 }]}>{canAdvance ? 'Mark failed & continue' : 'Capture a cue-specific failure to continue'}</Text>
         <Ionicons name="arrow-forward" size={16} color={C.text2} />
       </TouchableOpacity>
+      <ValidationMatrixPanel busy={validationBusy} report={validationReport} onRun={onRunValidation} />
+    </View>
+  );
+}
+
+function scenarioTitle(id: string) {
+  return id
+    .replace(/^baseline_/, '')
+    .replace(/_/g, ' ')
+    .replace(/\b\w/g, character => character.toUpperCase());
+}
+
+function ValidationMatrixPanel({ busy, report, onRun }: {
+  busy: boolean;
+  report: OriginalRouteValidationReportV1 | null;
+  onRun: () => void;
+}) {
+  const C = useTheme();
+  return (
+    <View style={[styles.validationMatrix, { borderColor: C.border, backgroundColor: C.s1 }] }>
+      <View style={styles.validationMatrixHeader}>
+        <View style={styles.validationMatrixCopy}>
+          <Text style={[styles.validationMatrixKicker, { color: C.orange }]}>FULL ROUTE MATRIX</Text>
+          <Text style={[styles.validationMatrixTitle, { color: C.text }]}>
+            {report ? `${report.summary.passed} of ${report.summary.required} scenarios passed` : 'Exercise all 13 required scenarios'}
+          </Text>
+        </View>
+        <TouchableOpacity
+          accessibilityRole="button"
+          accessibilityLabel={report ? 'Run the full virtual drive matrix again' : 'Run the full virtual drive matrix'}
+          disabled={busy}
+          onPress={onRun}
+          style={[styles.validationMatrixButton, { backgroundColor: C.orange, opacity: busy ? 0.55 : 1 }]}
+        >
+          {busy ? <ActivityIndicator size="small" color="#FFFFFF" /> : <Ionicons name="play" size={14} color="#FFFFFF" />}
+          <Text style={styles.validationMatrixButtonText}>{busy ? 'Running' : report ? 'Run again' : 'Run matrix'}</Text>
+        </TouchableOpacity>
+      </View>
+      <Text style={[styles.validationMatrixNote, { color: C.text3 }]}>This device report is informational. Originals Studio records the server validation that controls release readiness.</Text>
+      {report ? (
+        <>
+          <View style={styles.validationRouteSummary}>
+            <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>{Math.round(report.route_summary.distance_m / 1_000)} KM ROUTE</Text>
+            <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>{report.route_summary.coordinate_count} POINTS</Text>
+            <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>{report.route_summary.discontinuity_count} BREAKS</Text>
+            <Text style={[styles.simulationGate, { color: C.text3, borderColor: C.border }]}>{report.route_summary.self_intersection_count} INTERSECTIONS</Text>
+          </View>
+          <View style={[styles.validationScenarioList, { borderTopColor: C.border }] }>
+            {report.scenarios.map(scenario => (
+              <View key={scenario.id} style={[styles.validationScenarioRow, { borderBottomColor: C.border }] }>
+                <Ionicons name={scenario.passed ? 'checkmark-circle' : 'alert-circle'} size={17} color={C.orange} />
+                <View style={styles.validationScenarioCopy}>
+                  <Text style={[styles.validationScenarioTitle, { color: C.text }]}>{scenarioTitle(scenario.id)}</Text>
+                  <Text style={[styles.validationScenarioMeta, { color: C.text3 }]}>
+                    {scenario.passed ? 'PASSED' : `${scenario.issues.length} ISSUE${scenario.issues.length === 1 ? '' : 'S'}`} · {Number(scenario.metrics.sample_count ?? 0)} FIXES
+                  </Text>
+                  {!scenario.passed && scenario.issues[0] ? <Text style={[styles.validationScenarioIssue, { color: C.text2 }]}>{scenario.issues[0]}</Text> : null}
+                </View>
+              </View>
+            ))}
+          </View>
+        </>
+      ) : null}
     </View>
   );
 }
@@ -681,7 +1175,29 @@ function StoriesModal({
   );
 }
 
-function CompletionState({ detail, session, onStories, simulation = false, simulationResults = [], onExit }: { detail: OriginalUiDetail; session: OriginalUiSession; onStories: () => void; simulation?: boolean; simulationResults?: SimulationCueResult[]; onExit?: () => void }) {
+function CompletionState({
+  detail,
+  session,
+  onStories,
+  simulation = false,
+  simulationResults = [],
+  validationBusy = false,
+  validationReport = null,
+  onRunValidation,
+  onFeedback,
+  onExit,
+}: {
+  detail: OriginalUiDetail;
+  session: OriginalUiSession;
+  onStories: () => void;
+  simulation?: boolean;
+  simulationResults?: SimulationCueResult[];
+  validationBusy?: boolean;
+  validationReport?: OriginalRouteValidationReportV1 | null;
+  onRunValidation?: () => void;
+  onFeedback: () => void;
+  onExit?: () => void;
+}) {
   const C = useTheme();
   const router = useRouter();
   const passedCount = simulationResults.filter(item => item.outcome === 'passed').length;
@@ -724,10 +1240,18 @@ function CompletionState({ detail, session, onStories, simulation = false, simul
             ))}
           </View>
         ) : null}
+        {simulation && onRunValidation ? (
+          <ValidationMatrixPanel busy={validationBusy} report={validationReport} onRun={onRunValidation} />
+        ) : null}
         <TouchableOpacity accessibilityRole="button" onPress={onStories} style={[styles.completionPrimary, { backgroundColor: C.orange }] }>
           <Ionicons name="headset-outline" size={18} color="#FFFFFF" />
           <Text style={styles.completionPrimaryText}>Review stories</Text>
         </TouchableOpacity>
+        {!simulation ? (
+          <TouchableOpacity accessibilityRole="button" onPress={onFeedback} style={[styles.completionSecondary, { borderColor: C.border }] }>
+            <Text style={[styles.completionSecondaryText, { color: C.orange }]}>Share feedback</Text>
+          </TouchableOpacity>
+        ) : null}
         <TouchableOpacity accessibilityRole="button" onPress={() => simulation ? onExit?.() : router.replace('/(tabs)/trips' as any)} style={[styles.completionSecondary, { borderColor: C.border }] }>
           <Text style={[styles.completionSecondaryText, { color: C.text2 }]}>{simulation ? 'End trigger test' : 'Back to Trips'}</Text>
         </TouchableOpacity>
@@ -767,6 +1291,30 @@ const styles = StyleSheet.create({
   simulationReason: { fontSize: 12, lineHeight: 17, fontWeight: '600' },
   simulationNext: { fontSize: 11, lineHeight: 15, fontWeight: '900', letterSpacing: 0.35 },
   simulationResultSummary: { fontSize: 10.5, lineHeight: 14, fontWeight: '900', letterSpacing: 0.35 },
+  driveLabController: { borderWidth: 1, borderRadius: 13, padding: 10, gap: 9 },
+  driveLabHeader: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  driveLabPlay: { width: 44, height: 44, borderRadius: 13, alignItems: 'center', justifyContent: 'center' },
+  driveLabHeaderCopy: { flex: 1, minWidth: 0 },
+  driveLabKicker: { fontSize: 8, lineHeight: 11, fontWeight: '900', letterSpacing: 0.65 },
+  driveLabTitle: { marginTop: 1, fontSize: 11.5, lineHeight: 15, fontWeight: '900' },
+  driveLabMeta: { marginTop: 1, fontSize: 9.5, lineHeight: 13, fontWeight: '800' },
+  driveLabAudioCopy: { minWidth: 78, alignItems: 'flex-end' },
+  driveLabAudio: { marginTop: 1, fontSize: 10.5, lineHeight: 14, fontWeight: '900' },
+  driveLabAudioState: { marginTop: 1, fontSize: 8, lineHeight: 11, fontWeight: '900', letterSpacing: 0.55 },
+  driveLabTrack: { height: 8, borderRadius: 999, overflow: 'hidden' },
+  driveLabFill: { height: '100%', borderRadius: 999 },
+  driveLabSeekRow: { flexDirection: 'row', gap: 6 },
+  driveLabSeek: { minWidth: 58, minHeight: 44, paddingHorizontal: 8, borderWidth: 1, borderRadius: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 4 },
+  driveLabSeekNext: { flex: 1, minHeight: 44, paddingHorizontal: 10, borderWidth: 1, borderRadius: 11, alignItems: 'center', justifyContent: 'center' },
+  driveLabSeekText: { fontSize: 10.5, lineHeight: 14, fontWeight: '900' },
+  driveLabModes: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  driveLabMode: { flexGrow: 1, minHeight: 44, paddingHorizontal: 9, borderWidth: 1, borderRadius: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  driveLabModeText: { fontSize: 10, lineHeight: 14, fontWeight: '900', textTransform: 'capitalize' },
+  driveLabError: { fontSize: 10.5, lineHeight: 15, fontWeight: '800' },
+  driveLabCueList: { gap: 5 },
+  driveLabCue: { minHeight: 42, paddingHorizontal: 9, paddingVertical: 6, borderWidth: 1, borderRadius: 10, justifyContent: 'center' },
+  driveLabCueTitle: { fontSize: 10.5, lineHeight: 14, fontWeight: '900' },
+  driveLabCueStatus: { marginTop: 1, fontSize: 8.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.35 },
   simulationSpeed: { minHeight: 48, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center' },
   simulationSpeedButton: { width: 48, minHeight: 48, alignItems: 'center', justifyContent: 'center' },
   simulationSpeedCopy: { flex: 1, alignItems: 'center' },
@@ -781,6 +1329,21 @@ const styles = StyleSheet.create({
   simulationPrimaryText: { color: '#FFFFFF', fontSize: 11, fontWeight: '900' },
   simulationAdvance: { minHeight: 44, borderWidth: 1, borderRadius: 11, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
   simulationAdvanceText: { fontSize: 11, lineHeight: 15, fontWeight: '900' },
+  validationMatrix: { borderWidth: 1, borderRadius: 13, padding: 10, gap: 9 },
+  validationMatrixHeader: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  validationMatrixCopy: { flex: 1, minWidth: 0 },
+  validationMatrixKicker: { fontSize: 9, lineHeight: 12, fontWeight: '900', letterSpacing: 0.65 },
+  validationMatrixTitle: { marginTop: 2, fontSize: 12, lineHeight: 16, fontWeight: '900' },
+  validationMatrixButton: { minHeight: 44, minWidth: 104, borderRadius: 11, paddingHorizontal: 11, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 5 },
+  validationMatrixButtonText: { color: '#FFFFFF', fontSize: 10.5, fontWeight: '900' },
+  validationMatrixNote: { fontSize: 10, lineHeight: 15, fontWeight: '600' },
+  validationRouteSummary: { flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
+  validationScenarioList: { borderTopWidth: StyleSheet.hairlineWidth },
+  validationScenarioRow: { minHeight: 48, paddingVertical: 8, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  validationScenarioCopy: { flex: 1, minWidth: 0 },
+  validationScenarioTitle: { fontSize: 10.5, lineHeight: 14, fontWeight: '900' },
+  validationScenarioMeta: { marginTop: 1, fontSize: 9.5, lineHeight: 13, fontWeight: '800', letterSpacing: 0.25 },
+  validationScenarioIssue: { marginTop: 3, fontSize: 10, lineHeight: 14, fontWeight: '600' },
   alert: { borderWidth: 1, borderRadius: 13, padding: 10, flexDirection: 'row', alignItems: 'flex-start', gap: 9 },
   alertCopy: { flex: 1, minWidth: 0 },
   alertTitle: { fontSize: 11.5, lineHeight: 15, fontWeight: '900' },
@@ -807,6 +1370,8 @@ const styles = StyleSheet.create({
   secondaryControls: { flexDirection: 'row', gap: 8 },
   secondaryButton: { flex: 1, minHeight: 44, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6 },
   secondaryLabel: { fontSize: 10, fontWeight: '800' },
+  feedbackButton: { minHeight: 44, borderWidth: 1, borderRadius: 12, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 7 },
+  feedbackButtonText: { fontSize: 10.5, fontWeight: '900' },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.56)' },
   storySheet: { maxHeight: '82%', borderTopLeftRadius: 24, borderTopRightRadius: 24, borderWidth: 1, paddingHorizontal: 18, paddingTop: 16, paddingBottom: 24 },
   storySheetHeader: { minHeight: 56, flexDirection: 'row', alignItems: 'center' },

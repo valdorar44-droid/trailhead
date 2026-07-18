@@ -14,9 +14,9 @@ import time
 import unittest
 import wave
 import zlib
-from unittest.mock import patch
+from unittest.mock import AsyncMock, Mock, patch
 
-from fastapi import HTTPException
+from fastapi import BackgroundTasks, HTTPException
 from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
@@ -137,6 +137,18 @@ def _ready_payload(*, price: int = 0, title: str | None = None) -> dict:
         })
         for citation in stop["citations"]:
             citation["reviewed_at"] = reviewed_at.date().isoformat()
+            citation["role"] = "story"
+            citation["authority"] = "official"
+            citation["scope"] = ["story"]
+    payload["manifest"]["stops"][0]["citations"].append({
+        "title": "Official route and visitor conditions",
+        "url": "https://www.nps.gov/cany/planyourvisit/conditions.htm",
+        "publisher": "National Park Service",
+        "reviewed_at": reviewed_at.date().isoformat(),
+        "role": "operational",
+        "authority": "official",
+        "scope": ["route", "access", "fees", "closures", "surface", "season", "safety"],
+    })
     transcripts_by_asset = {
         stop["audio_asset_id"]: stop["transcript"]
         for stop in payload["manifest"]["stops"]
@@ -165,6 +177,72 @@ def _legacy_template() -> dict:
         "alerts": [],
         "offline": {},
         "visibility": "private",
+    }
+
+
+def _passing_virtual_validation(
+    manifest: dict,
+    *,
+    expected_validator_source_sha256: str,
+    **_: object,
+) -> dict:
+    scenarios = [{
+        "id": scenario_id,
+        "required": True,
+        "passed": True,
+        "issues": [],
+        "metrics": {},
+        "stops": [{
+            "stop_id": stop["id"],
+            "outcome": "completed",
+            "trigger_count": 1,
+            "queue_count": 0,
+            "completed": True,
+        } for stop in manifest["stops"]],
+    } for scenario_id in store.ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS]
+    return {
+        "schema_version": 1,
+        "engine_version": store.ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+        "validator_source_sha256": expected_validator_source_sha256,
+        "manifest": {
+            "pack_id": manifest["pack_id"],
+            "version": manifest["version"],
+            "manifest_id": manifest["manifest_id"],
+        },
+        "passed": True,
+        "summary": {
+            "required": len(scenarios), "passed": len(scenarios),
+            "failed": 0, "stop_count": len(manifest["stops"]),
+        },
+        "route_summary": {
+            "geometry_sha256": store.original_route_geometry_sha256(
+                manifest["route"]["geometry"]["coordinates"],
+            ),
+            "coordinate_count": len(manifest["route"]["geometry"]["coordinates"]),
+            "distance_m": manifest["route"]["distance_m"],
+            "maximum_segment_m": 0,
+            "discontinuity_count": 0,
+            "self_intersection_count": 0,
+            "stop_projection_failures": 0,
+        },
+        "scenarios": scenarios,
+    }
+
+
+def _passing_route_network_validation(manifest: dict, **_: object) -> dict:
+    coordinates = manifest["route"]["geometry"]["coordinates"]
+    return {
+        "provider": "valhalla-test",
+        "geometry_sha256": store.original_route_geometry_sha256(coordinates),
+        "sampled_point_count": len(coordinates),
+        "matched_point_count": len(coordinates),
+        "edge_count": max(1, len(coordinates) - 1),
+        "discontinuity_count": 0,
+        "unmatched_point_count": 0,
+        "restricted_segment_count": 0,
+        "unpaved_segment_count": 0,
+        "unknown_surface_segment_count": 0,
+        "authored_surface": manifest["access"]["surface"],
     }
 
 
@@ -261,6 +339,12 @@ class TrailheadOriginalsTests(unittest.TestCase):
                 content_kind="original_drive",
                 original_manifest=payload["manifest"],
             )
+            report = store.start_authored_original_virtual_validation(
+                pack_id, self.admin,
+                runner=_passing_virtual_validation,
+                route_network_validator=_passing_route_network_validation,
+            )
+            self.assertEqual(report["status"], "passed")
         return saved
 
     def _publish(self, payload: dict | None = None, *, pack_id: str | None = None) -> dict:
@@ -290,6 +374,40 @@ class TrailheadOriginalsTests(unittest.TestCase):
             store.publish_authored_trip_pack(
                 draft["id"], self.admin, required_content_kind="original_drive",
             )
+
+    def test_original_route_network_override_is_strictly_typed(self):
+        override = {
+            "schema_version": 1,
+            "status": "approved",
+            "finding_codes": ["destination_only", "seasonal_access"],
+            "reason": "Official access guidance confirms this authored scenic route is allowed.",
+            "official_source_url": "https://www.nps.gov/example/conditions.htm",
+            "approved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "approved_by_admin_user_id": self.admin,
+        }
+        review = server.OriginalReviewV1.model_validate({
+            "editorial_status": "approved",
+            "route_network_override": override,
+        })
+        self.assertEqual(
+            review.route_network_override.finding_codes,
+            ["destination_only", "seasonal_access"],
+        )
+
+        duplicate = copy.deepcopy(override)
+        duplicate["finding_codes"] = ["destination_only", "destination_only"]
+        with self.assertRaises(ValidationError):
+            server.OriginalReviewV1.model_validate({
+                "editorial_status": "approved",
+                "route_network_override": duplicate,
+            })
+        insecure_source = copy.deepcopy(override)
+        insecure_source["official_source_url"] = "http://example.com/conditions"
+        with self.assertRaises(ValidationError):
+            server.OriginalReviewV1.model_validate({
+                "editorial_status": "approved",
+                "route_network_override": insecure_source,
+            })
 
     def test_existing_authored_pack_schema_migrates_without_reclassification(self):
         tmp = tempfile.NamedTemporaryFile(delete=False)
@@ -610,7 +728,8 @@ class TrailheadOriginalsTests(unittest.TestCase):
         )
         self.assertEqual(before, after)
         self.assertFalse(after["publish_ready"])
-        self.assertEqual(after["missing_reviews"], ["trigger_drive_tested"])
+        self.assertEqual(after["missing_reviews"], [])
+        self.assertIn("virtual route validation", " ".join(after["issues"]))
         self.assertFalse(
             store.get_authored_trip_pack_admin(pack_id, "original_drive")[
                 "validation_metadata"
@@ -621,7 +740,7 @@ class TrailheadOriginalsTests(unittest.TestCase):
                 asset["path"],
                 f"/api/admin/originals/{pack_id}/assets/{asset['id']}/{asset['sha256']}/content",
             )
-        with self.assertRaisesRegex(ValueError, "review is incomplete"):
+        with self.assertRaisesRegex(ValueError, "virtual route validation"):
             store.publish_authored_trip_pack(
                 pack_id, self.admin, required_content_kind="original_drive",
             )
@@ -1257,6 +1376,648 @@ class TrailheadOriginalsTests(unittest.TestCase):
         self.assertEqual(sign_in.exception.detail["code"], "original_sign_in_required")
         self.assertEqual(manifest_access.exception.status_code, 403)
         self.assertEqual(manifest_access.exception.detail["code"], "original_access_required")
+
+    def test_virtual_validation_report_is_server_owned_hash_bound_and_invalidated(self):
+        payload = _ready_payload()
+        pack_id = "original_validation_binding"
+        saved = self._save(payload, pack_id=pack_id)
+        report = store.get_latest_authored_original_virtual_validation_report(pack_id)
+
+        self.assertEqual(report["schema_version"], 1)
+        self.assertEqual(report["report_type"], "OriginalRouteValidationReportV1")
+        self.assertEqual(report["status"], "passed")
+        self.assertTrue(report["passed"])
+        self.assertTrue(report["current"])
+        self.assertEqual(
+            report["summary"]["required"],
+            len(store.ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS),
+        )
+        self.assertEqual(report["summary"]["route"]["network"]["provider"], "valhalla-test")
+
+        draft = store.get_authored_trip_pack_admin(pack_id, "original_drive")
+        store.save_authored_trip_pack_draft(
+            pack_id=pack_id, slug=draft["slug"], title=draft["title"],
+            summary=draft["summary"] + " Updated.", price_credits=draft["price_credits"],
+            coverage_region=draft["coverage_region"], public_metadata=draft["public_metadata"],
+            validation_metadata=draft["validation_metadata"], template=draft["template"],
+            admin_user_id=self.admin, content_kind="original_drive",
+            original_manifest=draft["original_manifest"],
+        )
+        stale = store.get_latest_authored_original_virtual_validation_report(pack_id)
+        validation = store.validate_authored_original_draft(pack_id)
+        self.assertFalse(stale["current"])
+        self.assertFalse(validation["publish_ready"])
+        self.assertIn("server-owned virtual route validation", " ".join(validation["issues"]))
+        with self.assertRaisesRegex(ValueError, "virtual route validation"):
+            store.publish_authored_trip_pack(
+                pack_id, self.admin, required_content_kind="original_drive",
+            )
+
+    def test_trusted_node_validator_contract_runs_unmocked(self):
+        pack_id = "original_cli_contract"
+        self._save(_ready_payload(), pack_id=pack_id)
+        manifest = store.get_authored_original_device_preview_manifest(pack_id)
+        report = store.run_originals_validation_cli(
+            manifest,
+            required_scenario_ids=store.ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
+            expected_engine_version=store.ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+            expected_validator_source_sha256=store.trusted_originals_validator_source_sha256(),
+        )
+        self.assertEqual(report["engine_version"], store.ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION)
+        self.assertEqual(
+            report["validator_source_sha256"],
+            store.trusted_originals_validator_source_sha256(),
+        )
+        self.assertEqual(
+            report["route_summary"]["geometry_sha256"],
+            store.original_route_geometry_sha256(
+                manifest["route"]["geometry"]["coordinates"],
+            ),
+        )
+        self.assertEqual(
+            {item["id"] for item in report["scenarios"]},
+            set(store.ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS),
+        )
+
+    def test_validator_source_hash_invalidates_pass_without_manual_version_bump(self):
+        pack_id = "original_validator_source_binding"
+        self._save(_ready_payload(), pack_id=pack_id)
+        current = store.get_latest_authored_original_virtual_validation_report(pack_id)
+        self.assertTrue(current["current"])
+        self.assertEqual(
+            current["validator_source_sha256"],
+            store.trusted_originals_validator_source_sha256(),
+        )
+        changed_source_hash = "f" * 64
+        if changed_source_hash == current["validator_source_sha256"]:
+            changed_source_hash = "e" * 64
+        with patch(
+            "db.store.trusted_originals_validator_source_sha256",
+            return_value=changed_source_hash,
+        ):
+            stale = store.get_latest_authored_original_virtual_validation_report(pack_id)
+            validation = store.validate_authored_original_draft(pack_id)
+        self.assertFalse(stale["current"])
+        self.assertFalse(validation["publish_ready"])
+        self.assertIn("server-owned virtual route validation", " ".join(validation["issues"]))
+
+    def test_virtual_validation_fails_closed_for_malformed_or_incomplete_runner_output(self):
+        pack_id = "original_validation_fail_closed"
+        self._save(_ready_payload(), pack_id=pack_id)
+
+        def missing_scenario(manifest: dict, **kwargs: object) -> dict:
+            result = _passing_virtual_validation(manifest, **kwargs)
+            result["scenarios"] = result["scenarios"][:-1]
+            return result
+
+        report = store.start_authored_original_virtual_validation(
+            pack_id, self.admin,
+            runner=missing_scenario,
+            route_network_validator=_passing_route_network_validation,
+        )
+        self.assertEqual(report["status"], "error")
+        self.assertFalse(report["passed"])
+        self.assertIn("omitted required scenarios", " ".join(report["issues"]))
+
+        report = store.start_authored_original_virtual_validation(
+            pack_id, self.admin,
+            runner=_passing_virtual_validation,
+            route_network_validator=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+                RuntimeError("Valhalla unavailable")
+            ),
+        )
+        self.assertEqual(report["status"], "error")
+        self.assertIn("Valhalla unavailable", " ".join(report["issues"]))
+
+    def test_admin_validation_endpoint_persists_running_report_before_scheduling_worker(self):
+        expected = {"id": "validation_report_test", "status": "running"}
+        offload = AsyncMock(return_value=expected)
+        background_tasks = BackgroundTasks()
+        with patch("dashboard.server.asyncio.to_thread", new=offload):
+            result = asyncio.run(
+                server.api_admin_start_original_virtual_validation(
+                    "original_validation_threadpool",
+                    background_tasks,
+                    {"id": self.admin, "is_admin": True},
+                )
+            )
+        self.assertEqual(result, expected)
+        offload.assert_awaited_once_with(
+            store.create_authored_original_virtual_validation_run,
+            "original_validation_threadpool",
+            self.admin,
+        )
+        self.assertEqual(len(background_tasks.tasks), 1)
+        scheduled = background_tasks.tasks[0]
+        self.assertIs(
+            scheduled.func,
+            store.execute_authored_original_virtual_validation_run,
+        )
+        self.assertEqual(scheduled.args, ("validation_report_test",))
+
+    def test_persisted_validation_run_is_pollable_before_trusted_execution(self):
+        pack_id = "original_async_validation"
+        self._save(_ready_payload(), pack_id=pack_id)
+        created = store.create_authored_original_virtual_validation_run(pack_id, self.admin)
+        self.assertEqual(created["status"], "running")
+        self.assertFalse(created["passed"])
+        polled = store.get_authored_original_virtual_validation_report(pack_id, created["id"])
+        self.assertEqual(polled["status"], "running")
+        completed = store.execute_authored_original_virtual_validation_run(
+            created["id"],
+            runner=_passing_virtual_validation,
+            route_network_validator=_passing_route_network_validation,
+        )
+        self.assertEqual(completed["status"], "passed")
+        self.assertTrue(completed["passed"])
+
+    def test_incomplete_validation_run_fails_closed_on_service_restart(self):
+        pack_id = "original_restart_recovery"
+        self._save(_ready_payload(), pack_id=pack_id)
+        created = store.create_authored_original_virtual_validation_run(pack_id, self.admin)
+        self.assertEqual(created["status"], "running")
+
+        # An idempotent schema check in the live worker must not cancel its job.
+        store.init_db()
+        still_running = store.get_authored_original_virtual_validation_report(
+            pack_id,
+            created["id"],
+        )
+        self.assertEqual(still_running["status"], "running")
+
+        db = store._conn()
+        db.execute(
+            "UPDATE authored_original_validation_reports SET worker_pid=? WHERE id=?",
+            (99_999_999, created["id"]),
+        )
+        db.commit()
+        db.close()
+        store.init_db()
+        recovered = store.get_authored_original_virtual_validation_report(pack_id, created["id"])
+        self.assertEqual(recovered["status"], "error")
+        self.assertFalse(recovered["passed"])
+        self.assertIsNotNone(recovered["completed_at"])
+        self.assertIn("server restart", " ".join(recovered["issues"]))
+
+        runner = Mock(side_effect=AssertionError("recovered run must not execute"))
+        replay = store.execute_authored_original_virtual_validation_run(
+            created["id"],
+            runner=runner,
+            route_network_validator=runner,
+        )
+        self.assertEqual(replay["status"], "error")
+        runner.assert_not_called()
+
+    def test_timed_out_executing_validation_cannot_later_become_a_pass(self):
+        pack_id = "original_timeout_recovery"
+        self._save(_ready_payload(), pack_id=pack_id)
+        created = store.create_authored_original_virtual_validation_run(pack_id, self.admin)
+        expired_started_at = (
+            int(time.time())
+            - store.ORIGINAL_VIRTUAL_VALIDATION_RUN_TIMEOUT_SECONDS
+            - 1
+        )
+        db = store._conn()
+        db.execute(
+            """UPDATE authored_original_validation_reports
+               SET status='executing',started_at=? WHERE id=?""",
+            (expired_started_at, created["id"]),
+        )
+        db.commit()
+        db.close()
+
+        recovered = store.get_authored_original_virtual_validation_report(
+            pack_id,
+            created["id"],
+        )
+        self.assertEqual(recovered["status"], "error")
+        self.assertFalse(recovered["passed"])
+        self.assertIn("timed out", " ".join(recovered["issues"]))
+
+        runner = Mock(side_effect=AssertionError("expired run must not execute"))
+        replay = store.execute_authored_original_virtual_validation_run(
+            created["id"],
+            runner=runner,
+            route_network_validator=runner,
+        )
+        self.assertEqual(replay["status"], "error")
+        runner.assert_not_called()
+
+    def test_publish_requires_fresh_authoritative_story_and_official_operational_sources(self):
+        missing_operational = _ready_payload()
+        for stop in missing_operational["manifest"]["stops"]:
+            stop["citations"] = [
+                citation for citation in stop["citations"]
+                if citation.get("role") != "operational"
+            ]
+        self._save(missing_operational, pack_id="original_missing_operational")
+        validation = store.validate_authored_original_draft("original_missing_operational")
+        self.assertIn("official operational sources must cover", " ".join(validation["issues"]))
+
+        missing_safety = _ready_payload()
+        operational = next(
+            citation
+            for stop in missing_safety["manifest"]["stops"]
+            for citation in stop["citations"]
+            if citation.get("role") == "operational"
+        )
+        operational["scope"].remove("safety")
+        self._save(missing_safety, pack_id="original_missing_safety_source")
+        validation = store.validate_authored_original_draft("original_missing_safety_source")
+        self.assertIn("official operational sources must cover: safety", " ".join(validation["issues"]))
+
+        stale_operational = _ready_payload()
+        operational = next(
+            citation
+            for stop in stale_operational["manifest"]["stops"]
+            for citation in stop["citations"]
+            if citation.get("role") == "operational"
+        )
+        operational["reviewed_at"] = "2000-01-01"
+        self._save(stale_operational, pack_id="original_stale_operational")
+        validation = store.validate_authored_original_draft("original_stale_operational")
+        self.assertIn("operational citation review is too old", " ".join(validation["issues"]))
+
+        missing_story_authority = _ready_payload()
+        del missing_story_authority["manifest"]["stops"][2]["citations"][0]["authority"]
+        self._save(missing_story_authority, pack_id="original_story_authority")
+        validation = store.validate_authored_original_draft("original_story_authority")
+        self.assertIn("story citations need an authority classification", " ".join(validation["issues"]))
+
+    def test_generated_narration_requires_explicit_admin_license_attestation(self):
+        pack_id = "original_generator_license"
+        self._save(_ready_payload(), pack_id=pack_id)
+        draft = store.get_authored_trip_pack_admin(pack_id, "original_drive")
+        narration_id = draft["original_manifest"]["stops"][0]["audio_asset_id"]
+        db = store._conn()
+        db.execute(
+            """UPDATE authored_original_assets SET generator_metadata_json=?
+               WHERE pack_id=? AND asset_id=? AND is_current=1""",
+            (json.dumps({
+                "provider": "elevenlabs", "model_id": "eleven_multilingual_v2",
+                "voice_id": "test-voice", "output_format": "mp3_44100_128",
+            }), pack_id, narration_id),
+        )
+        db.commit()
+        db.close()
+        validation = store.validate_authored_original_draft(pack_id)
+        self.assertIn("explicit admin license attestation", " ".join(validation["issues"]))
+
+        store.init_db()
+        record = store.get_authored_original_asset_record_admin(pack_id, narration_id)
+        generator_metadata = json.loads(record["generator_metadata_json"])
+        self.assertEqual(generator_metadata["license_status"], "unverified")
+        self.assertNotIn("license_attestation", generator_metadata)
+        with self.assertRaises(PermissionError):
+            store.attest_authored_original_generator_license(
+                pack_id,
+                narration_id,
+                terms_id="elevenlabs_commercial_terms",
+                terms_url="https://elevenlabs.io/terms-of-use",
+                terms_version="2026-07-01",
+                reviewed_at=datetime.now(timezone.utc).date().isoformat(),
+                admin_user_id=self.user,
+            )
+        attested = store.attest_authored_original_generator_license(
+            pack_id,
+            narration_id,
+            terms_id="elevenlabs_commercial_terms",
+            terms_url="https://elevenlabs.io/terms-of-use",
+            terms_version="2026-07-01",
+            reviewed_at=datetime.now(timezone.utc).date().isoformat(),
+            admin_user_id=self.admin,
+        )
+        self.assertEqual(attested["license_status"], "attested")
+        self.assertEqual(
+            attested["license_attestation"]["attested_by_admin_user_id"],
+            self.admin,
+        )
+        self.assertNotIn(
+            "explicit admin license attestation",
+            " ".join(store.validate_authored_original_draft(pack_id)["issues"]),
+        )
+
+    def test_guest_and_account_feedback_are_private_idempotent_and_moderated(self):
+        published = self._publish(pack_id="original_feedback_flow")
+        token = store.issue_original_feedback_guest_token(
+            published["id"], published["version"], ip_subject_hmac="a" * 64,
+        )
+        guest = store.submit_original_feedback(
+            pack_id=published["id"], version=published["version"],
+            idempotency_key="guest-feedback-1", category="trigger_timing",
+            message="Story three started a little later than expected.", platform="ios",
+            guest_token=token["token"], stop_id="moab_story_03", rating=4,
+            app_version="1.0.8", runtime_version="native-1.0.8-originals1",
+            release_cohort="public_beta", contact_consent=False,
+        )
+        replay = store.submit_original_feedback(
+            pack_id=published["id"], version=published["version"],
+            idempotency_key="guest-feedback-1", category="trigger_timing",
+            message="Story three started a little later than expected.", platform="ios",
+            guest_token=token["token"], stop_id="moab_story_03", rating=4,
+            app_version="1.0.8", runtime_version="native-1.0.8-originals1",
+            release_cohort="public_beta", contact_consent=False,
+        )
+        self.assertFalse(guest["replayed"])
+        self.assertTrue(replay["replayed"])
+        self.assertNotIn("user_id", guest)
+        with self.assertRaises(store.OriginalFeedbackConflictError):
+            store.submit_original_feedback(
+                pack_id=published["id"], version=published["version"],
+                idempotency_key="guest-feedback-1", category="audio",
+                message="Different content under the same key.", platform="ios",
+                guest_token=token["token"],
+            )
+        with self.assertRaises(store.PublicationPrivacyError):
+            store.submit_original_feedback(
+                pack_id=published["id"], version=published["version"],
+                idempotency_key="guest-feedback-coordinates", category="map",
+                message="It happened at 38.5733, -109.5498 on the route.", platform="ios",
+                guest_token=token["token"],
+            )
+
+        account = store.submit_original_feedback(
+            pack_id=published["id"], version=published["version"],
+            idempotency_key="account-feedback-1", category="general",
+            message="The offline experience worked well.", platform="ios",
+            user_id=self.user, rating=5, contact_consent=True,
+        )
+        queue = store.list_original_feedback_admin(status="new")
+        self.assertEqual({item["subject_type"] for item in queue["items"]}, {"guest", "account"})
+        reviewed = store.moderate_original_feedback(
+            account["id"], "resolved", self.admin, "Reviewed during beta triage.",
+        )
+        self.assertEqual(reviewed["status"], "resolved")
+        self.assertEqual(reviewed["moderation_note"], "Reviewed during beta triage.")
+
+    def test_feedback_rejects_precise_location_formats_without_flagging_ordinary_numbers(self):
+        published = self._publish(pack_id="original_feedback_coordinate_privacy")
+        precise_references = [
+            "The issue happened near 38.573315 -109.549839.",
+            "The issue happened at 38° 34' 23\" N 109° 32' 59\" W.",
+            "The issue happened at 109° 32' 59\" W 38° 34' 23\" N.",
+            "The issue happened at geo:38.573315,-109.549839.",
+            "See https://www.google.com/maps/@38.573315,-109.549839,15z for the spot.",
+            "See https://maps.apple.com/?ll=38.573315,-109.549839 for the spot.",
+            "See https://www.openstreetmap.org/#map=15/38.573315/-109.549839.",
+            "The exact place is 849VCWC8+R9 near the overlook.",
+            "The exact place is ///filled.count.soap near the overlook.",
+            "The exact place is filled.count.soap near the overlook.",
+        ]
+        for index, message in enumerate(precise_references):
+            with self.subTest(message=message), self.assertRaises(store.PublicationPrivacyError):
+                store.submit_original_feedback(
+                    pack_id=published["id"], version=published["version"],
+                    idempotency_key=f"coordinate-private-{index}", category="map",
+                    message=message, platform="android", user_id=self.user,
+                )
+
+        ordinary = (
+            "At 65 mph, story 11 began about 30 seconds late after version 1.0.9. "
+            "The park fee was $30.00."
+        )
+        self.assertFalse(store._contains_coordinates(ordinary))
+        saved = store.submit_original_feedback(
+            pack_id=published["id"], version=published["version"],
+            idempotency_key="ordinary-numbers-feedback", category="trigger_timing",
+            message=ordinary, platform="android", user_id=self.user,
+        )
+        self.assertEqual(saved["message"], ordinary)
+
+    def test_guest_feedback_token_routes_share_persistent_ip_and_install_quota(self):
+        published = self._publish(pack_id="original_feedback_token_limit")
+        canonical_path = "/api/originals/feedback/guest-token"
+        alias_path = (
+            f"/api/originals/{published['id']}/versions/"
+            f"{published['version']}/feedback-token"
+        )
+        forwarded_ip = "203.0.113.45"
+        install_id = "ios-install-0123456789abcdef"
+        headers = {
+            "X-Forwarded-For": f"{forwarded_ip}, 10.0.0.1",
+            "X-Trailhead-Install-ID": install_id,
+        }
+        client = TestClient(server.app)
+        server._anon_buckets.pop(forwarded_ip, None)
+        try:
+            with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_STAGE": "public_beta"}):
+                for index in range(10):
+                    if index % 2 == 0:
+                        response = client.post(
+                            canonical_path,
+                            headers=headers,
+                            json={
+                                "pack_id": published["id"],
+                                "version": published["version"],
+                            },
+                        )
+                    else:
+                        response = client.post(alias_path, headers=headers)
+                    self.assertEqual(response.status_code, 201, response.text)
+                    policy = response.json()["issuance_policy"]
+                    self.assertEqual(policy["window_seconds"], 7 * 86400)
+                    self.assertEqual(policy["ip_limit"], 10)
+                    self.assertEqual(policy["install_limit"], 10)
+                    self.assertTrue(policy["installation_bound"])
+                    self.assertEqual(
+                        policy["install_id_header"], "X-Trailhead-Install-ID",
+                    )
+
+                # Simulate a process restart: the in-memory fast bucket is gone,
+                # but the durable per-version quota still blocks issuance.
+                server._anon_buckets.pop(forwarded_ip, None)
+                self.assertEqual(
+                    client.post(
+                        canonical_path,
+                        headers=headers,
+                        json={
+                            "pack_id": published["id"],
+                            "version": published["version"],
+                        },
+                    ).status_code,
+                    429,
+                )
+                server._anon_buckets.pop(forwarded_ip, None)
+                changed_install_headers = {
+                    **headers,
+                    "X-Trailhead-Install-ID": "ios-install-fedcba9876543210",
+                }
+                self.assertEqual(
+                    client.post(alias_path, headers=changed_install_headers).status_code,
+                    429,
+                )
+
+                changed_ip = "198.51.100.77"
+                changed_ip_headers = {
+                    **headers,
+                    "X-Forwarded-For": changed_ip,
+                }
+                server._anon_buckets.pop(changed_ip, None)
+                self.assertEqual(
+                    client.post(alias_path, headers=changed_ip_headers).status_code,
+                    429,
+                )
+
+                db = store._conn()
+                db.execute(
+                    """UPDATE authored_original_feedback_token_issuances
+                       SET created_at=created_at-? WHERE pack_id=? AND version=?""",
+                    (
+                        store.ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_WINDOW_SECONDS + 1,
+                        published["id"], published["version"],
+                    ),
+                )
+                db.commit()
+                db.close()
+                server._anon_buckets.pop(forwarded_ip, None)
+                self.assertEqual(client.post(alias_path, headers=headers).status_code, 201)
+        finally:
+            server._anon_buckets.pop(forwarded_ip, None)
+            server._anon_buckets.pop("198.51.100.77", None)
+
+    def test_guest_feedback_quota_persists_only_scoped_keyed_subjects(self):
+        published = self._publish(pack_id="original_feedback_quota_privacy")
+        forwarded_ip = "2001:db8::45"
+        install_id = "android-install-privacy-0001"
+        headers = {
+            "X-Forwarded-For": forwarded_ip,
+            "X-Trailhead-Install-ID": install_id,
+        }
+        server._anon_buckets.pop(forwarded_ip, None)
+        try:
+            with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_STAGE": "public_beta"}):
+                response = TestClient(server.app).post(
+                    "/api/originals/feedback/guest-token",
+                    headers=headers,
+                    json={
+                        "pack_id": published["id"],
+                        "version": published["version"],
+                    },
+                )
+            self.assertEqual(response.status_code, 201, response.text)
+            self.assertNotIn("hmac", json.dumps(response.json()).lower())
+
+            db = store._conn()
+            row = dict(db.execute(
+                """SELECT * FROM authored_original_feedback_token_issuances
+                   WHERE pack_id=? AND version=?""",
+                (published["id"], published["version"]),
+            ).fetchone())
+            columns = {
+                item["name"] for item in db.execute(
+                    "PRAGMA table_info(authored_original_feedback_token_issuances)"
+                ).fetchall()
+            }
+            db.close()
+            self.assertEqual(
+                row["ip_subject_hmac"],
+                server._original_feedback_subject_hmac(
+                    "ip", published["id"], published["version"], forwarded_ip,
+                ),
+            )
+            self.assertEqual(
+                row["install_subject_hmac"],
+                server._original_feedback_subject_hmac(
+                    "install", published["id"], published["version"], install_id,
+                ),
+            )
+            self.assertRegex(row["ip_subject_hmac"], r"^[a-f0-9]{64}$")
+            self.assertRegex(row["install_subject_hmac"], r"^[a-f0-9]{64}$")
+            self.assertNotIn(forwarded_ip, json.dumps(row))
+            self.assertNotIn(install_id, json.dumps(row))
+            self.assertFalse({"ip", "ip_address", "install_id"} & columns)
+
+            operation = server.app.openapi()["paths"][
+                "/api/originals/feedback/guest-token"
+            ]["post"]
+            install_header = next(
+                item for item in operation["parameters"]
+                if item["in"] == "header" and item["name"] == "X-Trailhead-Install-ID"
+            )
+            self.assertIn("server-keyed", install_header["description"])
+        finally:
+            server._anon_buckets.pop(forwarded_ip, None)
+
+    def test_feedback_token_quota_table_is_added_by_idempotent_migration(self):
+        db = store._conn()
+        db.execute("DROP TABLE authored_original_feedback_token_issuances")
+        db.commit()
+        db.close()
+
+        store.init_db()
+        db = store._conn()
+        columns = {
+            row["name"] for row in db.execute(
+                "PRAGMA table_info(authored_original_feedback_token_issuances)"
+            ).fetchall()
+        }
+        indexes = {
+            row["name"] for row in db.execute(
+                "PRAGMA index_list(authored_original_feedback_token_issuances)"
+            ).fetchall()
+        }
+        db.close()
+        self.assertEqual(columns, {
+            "token_id", "pack_id", "version", "ip_subject_hmac",
+            "install_subject_hmac", "created_at",
+        })
+        self.assertIn("idx_authored_original_feedback_issuance_ip", indexes)
+        self.assertIn("idx_authored_original_feedback_issuance_install", indexes)
+        self.assertIn("idx_authored_original_feedback_issuance_created", indexes)
+
+    def test_rollout_stage_uses_new_stage_with_legacy_boolean_fallback(self):
+        with patch.dict(os.environ, {
+            "TRAILHEAD_ORIGINALS_STAGE": "public_beta",
+            "TRAILHEAD_ORIGINALS_ENABLED": "0",
+        }):
+            self.assertEqual(server._originals_rollout_stage(), "public_beta")
+            self.assertTrue(server._originals_feature_enabled(None))
+            self.assertEqual(server.get_config()["originals_rollout_stage"], "public_beta")
+        with patch.dict(os.environ, {
+            "TRAILHEAD_ORIGINALS_STAGE": "internal",
+            "TRAILHEAD_ORIGINALS_ENABLED": "0",
+        }):
+            issued = server._issue_originals_preview_token(self.admin, 600)
+            self.assertFalse(server._originals_feature_enabled(None))
+            marker = server._originals_preview_token_context.set(issued["token"])
+            try:
+                self.assertTrue(server._originals_feature_enabled(None))
+                self.assertTrue(server.get_config()["originals_enabled"])
+            finally:
+                server._originals_preview_token_context.reset(marker)
+            self.assertFalse(server._valid_originals_preview_token(issued["token"] + "x"))
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_ENABLED": "1"}, clear=False):
+            os.environ.pop("TRAILHEAD_ORIGINALS_STAGE", None)
+            os.environ.pop("TRAILHEAD_ORIGINALS_ROLLOUT_STAGE", None)
+            self.assertEqual(server._originals_rollout_stage(), "public")
+            self.assertTrue(server.get_config()["originals_enabled"])
+
+    def test_invalid_rollout_stage_fails_closed_despite_legacy_enabled_flag(self):
+        with patch.dict(os.environ, {
+            "TRAILHEAD_ORIGINALS_STAGE": "definitely-not-a-stage",
+            "TRAILHEAD_ORIGINALS_ROLLOUT_STAGE": "public",
+            "TRAILHEAD_ORIGINALS_ENABLED": "1",
+        }):
+            self.assertEqual(server._originals_rollout_stage(), "off")
+            self.assertFalse(server._originals_feature_enabled(None))
+            self.assertFalse(server.get_config()["originals_enabled"])
+
+    def test_internal_preview_credential_is_accepted_only_in_header(self):
+        self._publish(pack_id="original_internal_header_preview")
+        issued = server._issue_originals_preview_token(self.admin, 600)
+        self.assertNotIn("query_parameter", issued)
+        client = TestClient(server.app)
+        with patch.dict(os.environ, {"TRAILHEAD_ORIGINALS_STAGE": "internal"}):
+            query_response = client.get(
+                "/api/originals",
+                params={"originals_preview_token": issued["token"]},
+            )
+            header_response = client.get(
+                "/api/originals",
+                headers={"X-Trailhead-Originals-Preview": issued["token"]},
+            )
+        self.assertEqual(query_response.status_code, 404)
+        self.assertEqual(header_response.status_code, 200)
 
 
 if __name__ == "__main__":

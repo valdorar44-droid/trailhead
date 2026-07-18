@@ -1,11 +1,19 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import base64, sqlite3, json, time, math, hashlib, random, secrets, re, io, struct, wave, zlib
+import base64, sqlite3, json, time, math, hashlib, random, secrets, re, io, struct, wave, zlib, os
 from datetime import date as _date, datetime as _datetime, timedelta as _timedelta, timezone as _timezone
 from pathlib import Path as _Path
-from urllib.parse import quote as _url_quote
+from urllib.parse import quote as _url_quote, unquote as _url_unquote
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from config.settings import settings
+from db.originals_validation import (
+    OriginalValidationRunnerError,
+    normalize_original_validation_output,
+    original_route_geometry_sha256,
+    run_originals_validation_cli,
+    trusted_originals_validator_source_sha256,
+    validate_original_route_network,
+)
 
 # Report expiry by type (seconds)
 EXPIRY_BY_TYPE = {
@@ -44,6 +52,68 @@ def _conn() -> sqlite3.Connection:
     db.execute("PRAGMA busy_timeout=30000")
     db.row_factory = sqlite3.Row
     return db
+
+
+def _original_generator_license_attestation_complete(metadata: object) -> bool:
+    if not isinstance(metadata, dict) or metadata.get("license_status") != "attested":
+        return False
+    attestation = metadata.get("license_attestation")
+    if not isinstance(attestation, dict):
+        return False
+    if not str(attestation.get("terms_id") or "").strip():
+        return False
+    if not str(attestation.get("terms_url") or "").strip().startswith("https://"):
+        return False
+    if not str(attestation.get("terms_version") or "").strip():
+        return False
+    admin_id = attestation.get("attested_by_admin_user_id")
+    if isinstance(admin_id, bool) or not isinstance(admin_id, int) or admin_id < 1:
+        return False
+    try:
+        reviewed_raw = str(attestation.get("reviewed_at") or "").strip()
+        reviewed = (
+            _datetime.fromisoformat(reviewed_raw[:-1] + "+00:00" if reviewed_raw.endswith("Z") else reviewed_raw).date()
+            if "T" in reviewed_raw else _date.fromisoformat(reviewed_raw)
+        )
+        attested_raw = str(attestation.get("attested_at") or "").strip()
+        attested = _datetime.fromisoformat(
+            attested_raw[:-1] + "+00:00" if attested_raw.endswith("Z") else attested_raw
+        )
+    except (TypeError, ValueError):
+        return False
+    if attested.tzinfo is None or reviewed > _datetime.now(_timezone.utc).date():
+        return False
+    if attested.astimezone(_timezone.utc) > _datetime.now(_timezone.utc) + _timedelta(minutes=5):
+        return False
+    return reviewed.year >= 2000 and attested.year >= 2000
+
+
+def _backfill_original_generator_licenses(db: sqlite3.Connection) -> None:
+    """Mark legacy/generated license claims unverified; never fabricate an attestation."""
+    try:
+        rows = db.execute(
+            """SELECT pack_id,asset_id,sha256,generator_metadata_json
+               FROM authored_original_assets WHERE generator_metadata_json!='{}'"""
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return
+    for row in rows:
+        metadata = _decode_pack_json(row["generator_metadata_json"], {})
+        if not isinstance(metadata, dict) or not metadata:
+            continue
+        if _original_generator_license_attestation_complete(metadata):
+            continue
+        if metadata.get("license_status") == "unverified":
+            continue
+        metadata["license_status"] = "unverified"
+        db.execute(
+            """UPDATE authored_original_assets SET generator_metadata_json=?
+               WHERE pack_id=? AND asset_id=? AND sha256=?""",
+            (
+                json.dumps(metadata, separators=(",", ":"), sort_keys=True),
+                row["pack_id"], row["asset_id"], row["sha256"],
+            ),
+        )
 
 
 def _migrate_authored_entitlements_for_original_versions(db: sqlite3.Connection) -> None:
@@ -775,6 +845,71 @@ def init_db():
             updated_at    INTEGER NOT NULL,
             PRIMARY KEY (pack_id, asset_id, sha256)
         );
+        CREATE TABLE IF NOT EXISTS authored_original_validation_reports (
+            id                 TEXT PRIMARY KEY,
+            pack_id            TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            draft_revision     INTEGER NOT NULL,
+            manifest_sha256    TEXT NOT NULL,
+            assets_sha256      TEXT NOT NULL,
+            input_sha256       TEXT NOT NULL,
+            validator_source_sha256 TEXT NOT NULL,
+            manifest_json      TEXT NOT NULL,
+            suite_version      TEXT NOT NULL,
+            engine_version     TEXT,
+            status             TEXT NOT NULL,
+            passed             INTEGER NOT NULL DEFAULT 0,
+            summary_json       TEXT NOT NULL DEFAULT '{}',
+            scenarios_json     TEXT NOT NULL DEFAULT '[]',
+            issues_json        TEXT NOT NULL DEFAULT '[]',
+            started_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            worker_pid         INTEGER,
+            started_at         INTEGER NOT NULL,
+            completed_at       INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS authored_original_feedback_tokens (
+            id          TEXT PRIMARY KEY,
+            pack_id     TEXT NOT NULL,
+            version     INTEGER NOT NULL,
+            token_hash  TEXT NOT NULL UNIQUE,
+            expires_at  INTEGER NOT NULL,
+            use_count   INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS authored_original_feedback_token_issuances (
+            token_id             TEXT PRIMARY KEY REFERENCES authored_original_feedback_tokens(id) ON DELETE CASCADE,
+            pack_id              TEXT NOT NULL,
+            version              INTEGER NOT NULL,
+            ip_subject_hmac      TEXT NOT NULL,
+            install_subject_hmac TEXT,
+            created_at           INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version) ON DELETE CASCADE
+        );
+        CREATE TABLE IF NOT EXISTS authored_original_feedback (
+            id                 TEXT PRIMARY KEY,
+            pack_id            TEXT NOT NULL,
+            version            INTEGER NOT NULL,
+            stop_id            TEXT,
+            user_id            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            guest_token_id     TEXT REFERENCES authored_original_feedback_tokens(id) ON DELETE SET NULL,
+            idempotency_key    TEXT NOT NULL,
+            request_hash       TEXT NOT NULL,
+            category           TEXT NOT NULL,
+            rating             INTEGER,
+            message            TEXT NOT NULL,
+            platform           TEXT NOT NULL,
+            app_version        TEXT,
+            runtime_version    TEXT,
+            release_cohort     TEXT,
+            contact_consent    INTEGER NOT NULL DEFAULT 0,
+            status             TEXT NOT NULL DEFAULT 'new',
+            moderation_note    TEXT,
+            moderated_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            submitted_at       INTEGER NOT NULL,
+            updated_at         INTEGER NOT NULL,
+            moderated_at       INTEGER,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version) ON DELETE CASCADE
+        );
         CREATE TABLE IF NOT EXISTS communication_preferences (
             user_id                    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
             weekly_digest              INTEGER NOT NULL DEFAULT 0,
@@ -1123,6 +1258,15 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_packs_kind_status ON authored_trip_packs(content_kind, status, updated_at DESC)",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_versions_published ON authored_trip_pack_versions(published_at DESC, pack_id)",
         "CREATE INDEX IF NOT EXISTS idx_authored_trip_pack_entitlements_user ON authored_trip_pack_entitlements(user_id, acquired_at DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_validation_latest ON authored_original_validation_reports(pack_id,started_at DESC,id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_validation_binding ON authored_original_validation_reports(pack_id,draft_revision,manifest_sha256,assets_sha256,status)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_ip ON authored_original_feedback_token_issuances(pack_id,version,ip_subject_hmac,created_at)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_install ON authored_original_feedback_token_issuances(pack_id,version,install_subject_hmac,created_at) WHERE install_subject_hmac IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_issuance_created ON authored_original_feedback_token_issuances(created_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_original_feedback_user_key ON authored_original_feedback(user_id,idempotency_key) WHERE user_id IS NOT NULL",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_authored_original_feedback_guest_key ON authored_original_feedback(guest_token_id,idempotency_key) WHERE guest_token_id IS NOT NULL",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_review ON authored_original_feedback(status,submitted_at DESC,id DESC)",
+        "CREATE INDEX IF NOT EXISTS idx_authored_original_feedback_pack ON authored_original_feedback(pack_id,version,submitted_at DESC,id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_communication_preferences_digest ON communication_preferences(weekly_digest,unsubscribed_all,user_id)",
         "CREATE INDEX IF NOT EXISTS idx_communication_preferences_briefs ON communication_preferences(trip_window_briefs,unsubscribed_all,user_id)",
         "CREATE INDEX IF NOT EXISTS idx_community_publications_user ON community_publications(user_id,submitted_at DESC,id DESC)",
@@ -1558,6 +1702,71 @@ def init_db():
             updated_at    INTEGER NOT NULL,
             PRIMARY KEY (pack_id, asset_id, sha256)
         )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_validation_reports (
+            id                 TEXT PRIMARY KEY,
+            pack_id            TEXT NOT NULL REFERENCES authored_trip_packs(id) ON DELETE CASCADE,
+            draft_revision     INTEGER NOT NULL,
+            manifest_sha256    TEXT NOT NULL,
+            assets_sha256      TEXT NOT NULL,
+            input_sha256       TEXT NOT NULL,
+            validator_source_sha256 TEXT NOT NULL,
+            manifest_json      TEXT NOT NULL,
+            suite_version      TEXT NOT NULL,
+            engine_version     TEXT,
+            status             TEXT NOT NULL,
+            passed             INTEGER NOT NULL DEFAULT 0,
+            summary_json       TEXT NOT NULL DEFAULT '{}',
+            scenarios_json     TEXT NOT NULL DEFAULT '[]',
+            issues_json        TEXT NOT NULL DEFAULT '[]',
+            started_by         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            worker_pid         INTEGER,
+            started_at         INTEGER NOT NULL,
+            completed_at       INTEGER
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_feedback_tokens (
+            id          TEXT PRIMARY KEY,
+            pack_id     TEXT NOT NULL,
+            version     INTEGER NOT NULL,
+            token_hash  TEXT NOT NULL UNIQUE,
+            expires_at  INTEGER NOT NULL,
+            use_count   INTEGER NOT NULL DEFAULT 0,
+            created_at  INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version) ON DELETE CASCADE
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_feedback_token_issuances (
+            token_id             TEXT PRIMARY KEY REFERENCES authored_original_feedback_tokens(id) ON DELETE CASCADE,
+            pack_id              TEXT NOT NULL,
+            version              INTEGER NOT NULL,
+            ip_subject_hmac      TEXT NOT NULL,
+            install_subject_hmac TEXT,
+            created_at           INTEGER NOT NULL,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version) ON DELETE CASCADE
+        )""",
+        """CREATE TABLE IF NOT EXISTS authored_original_feedback (
+            id                 TEXT PRIMARY KEY,
+            pack_id            TEXT NOT NULL,
+            version            INTEGER NOT NULL,
+            stop_id            TEXT,
+            user_id            INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            guest_token_id     TEXT REFERENCES authored_original_feedback_tokens(id) ON DELETE SET NULL,
+            idempotency_key    TEXT NOT NULL,
+            request_hash       TEXT NOT NULL,
+            category           TEXT NOT NULL,
+            rating             INTEGER,
+            message            TEXT NOT NULL,
+            platform           TEXT NOT NULL,
+            app_version        TEXT,
+            runtime_version    TEXT,
+            release_cohort     TEXT,
+            contact_consent    INTEGER NOT NULL DEFAULT 0,
+            status             TEXT NOT NULL DEFAULT 'new',
+            moderation_note    TEXT,
+            moderated_by       INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            submitted_at       INTEGER NOT NULL,
+            updated_at         INTEGER NOT NULL,
+            moderated_at       INTEGER,
+            FOREIGN KEY (pack_id, version) REFERENCES authored_trip_pack_versions(pack_id, version) ON DELETE CASCADE
+        )""",
         """CREATE TABLE IF NOT EXISTS communication_preferences (
             user_id                    INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
             weekly_digest              INTEGER NOT NULL DEFAULT 0,
@@ -1630,6 +1839,9 @@ def init_db():
         "ALTER TABLE authored_original_assets ADD COLUMN media_metadata_json TEXT NOT NULL DEFAULT '{}'",
         "ALTER TABLE authored_original_assets ADD COLUMN transcript_sha256 TEXT",
         "ALTER TABLE authored_original_assets ADD COLUMN generator_metadata_json TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE authored_original_validation_reports ADD COLUMN validator_source_sha256 TEXT",
+        "ALTER TABLE authored_original_validation_reports ADD COLUMN manifest_json TEXT",
+        "ALTER TABLE authored_original_validation_reports ADD COLUMN worker_pid INTEGER",
         "CREATE INDEX IF NOT EXISTS idx_communication_preferences_digest ON communication_preferences(weekly_digest,unsubscribed_all,user_id)",
         "CREATE INDEX IF NOT EXISTS idx_communication_preferences_briefs ON communication_preferences(trip_window_briefs,unsubscribed_all,user_id)",
         "CREATE INDEX IF NOT EXISTS idx_community_publications_user ON community_publications(user_id,submitted_at DESC,id DESC)",
@@ -1997,6 +2209,11 @@ def init_db():
         )
     except Exception:
         pass
+    _backfill_original_generator_licenses(db)
+    _recover_incomplete_original_validation_runs_db(
+        db,
+        interrupted_by_restart=True,
+    )
     _backfill_embedded_trip_payloads(db)
     db.commit()
     db.close()
@@ -2034,6 +2251,12 @@ def cleanup_stale_data():
         db.execute(
             "DELETE FROM plan_jobs WHERE status IN ('done','failed') AND updated_at < ?",
             (plan_job_cutoff,),
+        )
+        # Quota subjects are scoped HMACs, but they still have no purpose after
+        # the rolling issuance window closes. Remove them on normal maintenance.
+        db.execute(
+            "DELETE FROM authored_original_feedback_token_issuances WHERE created_at < ?",
+            (now - ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_WINDOW_SECONDS,),
         )
         db.commit(); db.close()
     except Exception:
@@ -3345,10 +3568,49 @@ TRIP_BRIEF_LEAD_DAYS = 7
 TRIP_BRIEF_MAX_DURATION_DAYS = 90
 _LOCALE_RE = re.compile(r"^[a-z]{2}(?:-[A-Z]{2})?$")
 _DECIMAL_PAIR_RE = re.compile(r"(?<!\d)([-+]?\d{1,2}\.\d{3,})\s*[,;/]\s*([-+]?\d{1,3}\.\d{3,})(?!\d)")
+_WHITESPACE_DECIMAL_PAIR_RE = re.compile(
+    r"(?<![\d.])([-+]?\d{1,2}\.\d{4,})[ \t]+([-+]?\d{1,3}\.\d{4,})(?!\d)"
+)
 _LABELED_COORDINATE_RE = re.compile(
     r"\b(?:lat(?:itude)?)\s*[:=]?\s*[-+]?\d{1,2}(?:\.\d+)?\s*[,;/ ]+"
     r"(?:lon(?:gitude)?|lng)\s*[:=]?\s*[-+]?\d{1,3}(?:\.\d+)?\b",
     re.IGNORECASE,
+)
+_DMS_COORDINATE_PAIR_RE = re.compile(
+    r"(?<!\d)\d{1,2}\s*[°º]\s*\d{1,2}\s*['′’]?\s*\d{1,2}(?:\.\d+)?\s*[\"″”]?\s*[NS]"
+    r"\s*[,;/ ]+\s*\d{1,3}\s*[°º]\s*\d{1,2}\s*['′’]?\s*\d{1,2}(?:\.\d+)?\s*[\"″”]?\s*[EW]\b",
+    re.IGNORECASE,
+)
+_DMS_COORDINATE_PAIR_REVERSED = re.compile(
+    r"(?<!\d)\d{1,3}\s*[°º]\s*\d{1,2}\s*['′’]?\s*\d{1,2}(?:\.\d+)?\s*[\"″”]?\s*[EW]"
+    r"\s*[,;/ ]+\s*\d{1,2}\s*[°º]\s*\d{1,2}\s*['′’]?\s*\d{1,2}(?:\.\d+)?\s*[\"″”]?\s*[NS]\b",
+    re.IGNORECASE,
+)
+_GEO_URI_RE = re.compile(
+    r"\bgeo:\s*([-+]?\d{1,2}(?:\.\d+)?)\s*,\s*([-+]?\d{1,3}(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_MAP_LINK_RE = re.compile(
+    r"https?://(?:[^/\s]*\.)?(?:google\.[^/\s]+/maps|maps\.google\.[^/\s]+|maps\.apple\.com|openstreetmap\.org)(?:/|\?)[^\s<>{}]*",
+    re.IGNORECASE,
+)
+_MAP_QUERY_PAIR_RE = re.compile(
+    r"(?:@|[?&#](?:q|query|ll|center)=|[?&#]mlat=|#map=\d{1,2}/)"
+    r"\s*([-+]?\d{1,2}(?:\.\d+)?)\s*[,/&]"
+    r"(?:mlon=)?\s*([-+]?\d{1,3}(?:\.\d+)?)",
+    re.IGNORECASE,
+)
+_PLUS_CODE_RE = re.compile(
+    r"(?<![A-Z0-9])[23456789CFGHJMPQRVWX]{4,8}\+[23456789CFGHJMPQRVWX]{2,3}(?![A-Z0-9])",
+    re.IGNORECASE,
+)
+_WHAT3WORDS_EXPLICIT_RE = re.compile(
+    r"(?:/{3}|what3words(?:\.com/|\s*[:=]\s*))"
+    r"[a-z]{2,30}\.[a-z]{2,30}\.[a-z]{2,30}\b",
+    re.IGNORECASE,
+)
+_WHAT3WORDS_BARE_RE = re.compile(
+    r"(?<![/@\w])([a-z]{3,30}\.[a-z]{3,30}\.([a-z]{3,30}))(?![/\w])"
 )
 
 
@@ -3635,14 +3897,29 @@ def select_trip_window_brief_recipients(
 
 
 def _contains_coordinates(value: str) -> bool:
-    if _LABELED_COORDINATE_RE.search(value):
+    if (
+        _LABELED_COORDINATE_RE.search(value)
+        or _DMS_COORDINATE_PAIR_RE.search(value)
+        or _DMS_COORDINATE_PAIR_REVERSED.search(value)
+        or _PLUS_CODE_RE.search(value)
+        or _WHAT3WORDS_EXPLICIT_RE.search(value)
+    ):
         return True
-    for match in _DECIMAL_PAIR_RE.finditer(value):
-        try:
-            lat, lng = float(match.group(1)), float(match.group(2))
-        except ValueError:
-            continue
-        if -90 <= lat <= 90 and -180 <= lng <= 180:
+    for pattern in (_DECIMAL_PAIR_RE, _WHITESPACE_DECIMAL_PAIR_RE, _GEO_URI_RE):
+        for match in pattern.finditer(value):
+            try:
+                lat, lng = float(match.group(1)), float(match.group(2))
+            except ValueError:
+                continue
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                return True
+    for raw_link in _MAP_LINK_RE.findall(value):
+        link = _url_unquote(raw_link)
+        if _MAP_QUERY_PAIR_RE.search(link) or _DECIMAL_PAIR_RE.search(link):
+            return True
+    common_domain_endings = {"com", "org", "net", "app", "gov", "edu", "ca", "io", "co"}
+    for match in _WHAT3WORDS_BARE_RE.finditer(value):
+        if match.group(2).lower() not in common_domain_endings:
             return True
     return False
 
@@ -8685,7 +8962,6 @@ TRIP_PACK_VALIDATION_CHECKS = {
 ORIGINAL_VALIDATION_CHECKS = {
     "route_reviewed",
     "cue_route_reviewed",
-    "trigger_drive_tested",
     "narration_reviewed",
     "audio_assets_reviewed",
     "transcripts_reviewed",
@@ -8696,8 +8972,40 @@ ORIGINAL_VALIDATION_CHECKS = {
     "offline_bundle_reviewed",
 }
 ORIGINAL_DEVICE_PREVIEW_VERSION_BASE = 1_000_000_000
-ORIGINAL_FIELD_DRIVE_MAX_AGE_DAYS = 365
 ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS = 180
+ORIGINAL_OPERATIONAL_SOURCE_MAX_AGE_DAYS = 30
+ORIGINAL_VIRTUAL_VALIDATION_SUITE_VERSION = "originals_virtual_route_v1"
+ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION = "original-trigger-v1"
+ORIGINAL_VIRTUAL_VALIDATION_RUN_TIMEOUT_SECONDS = 2 * 3600
+ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS = (
+    "baseline_slow_15mph",
+    "baseline_cruise_36mph",
+    "baseline_highway_65mph",
+    "gps_jitter",
+    "poor_accuracy_recovery",
+    "off_route_rejoin",
+    "reverse_travel",
+    "mid_route_start",
+    "restart_duplicate_prevention",
+    "overlapping_audio_queue",
+    "drive_by_speed",
+    "delayed_out_of_order_fixes",
+    "self_intersection_ambiguity",
+)
+ORIGINAL_OPERATIONAL_SOURCE_SCOPES = {
+    "route", "access", "fees", "closures", "surface", "season", "safety",
+}
+ORIGINAL_FEEDBACK_CATEGORIES = {
+    "general", "trigger_timing", "audio", "map", "offline",
+    "access_info", "safety", "other",
+}
+ORIGINAL_FEEDBACK_STATUSES = {"new", "reviewing", "resolved", "dismissed"}
+ORIGINAL_FEEDBACK_PLATFORMS = {"ios", "android", "web"}
+ORIGINAL_FEEDBACK_GUEST_TOKEN_TTL_SECONDS = 30 * 86400
+ORIGINAL_FEEDBACK_GUEST_MAX_SUBMISSIONS = 5
+ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_WINDOW_SECONDS = 7 * 86400
+ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_IP_LIMIT = 10
+ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_INSTALL_LIMIT = 10
 TRIP_PACK_EXPLORER_DISCOUNT_PERCENT = 20
 
 
@@ -8748,6 +9056,18 @@ class ExplorerOriginalClaimRequiredError(ExplorerTripPackClaimRequiredError):
 
 
 class OriginalManifestAccessError(PermissionError):
+    pass
+
+
+class OriginalFeedbackTokenError(PermissionError):
+    pass
+
+
+class OriginalFeedbackConflictError(ValueError):
+    pass
+
+
+class OriginalFeedbackRateLimitError(ValueError):
     pass
 
 
@@ -9178,6 +9498,83 @@ def save_authored_original_asset_record(
     return _public_original_asset_record(row)
 
 
+def attest_authored_original_generator_license(
+    pack_id: str,
+    asset_id: str,
+    *,
+    terms_id: str,
+    terms_url: str,
+    terms_version: str,
+    reviewed_at: str,
+    admin_user_id: int,
+) -> dict:
+    """Attach a server-owned admin attestation to the current generated narration."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    asset_id = _validate_canonical_id(asset_id, "Original asset id")
+    clean_terms_id = str(terms_id or "").strip()
+    clean_terms_url = str(terms_url or "").strip()
+    clean_terms_version = str(terms_version or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9_.:-]{3,200}", clean_terms_id):
+        raise ValueError("Original narration license terms id is invalid")
+    if not clean_terms_url.startswith("https://") or len(clean_terms_url) > 2000:
+        raise ValueError("Original narration license terms URL must use HTTPS")
+    if not clean_terms_version or len(clean_terms_version) > 120:
+        raise ValueError("Original narration license terms version is required")
+    normalized_reviewed_at = _normalize_original_citation_review_date(reviewed_at)
+    if not normalized_reviewed_at:
+        raise ValueError("Original narration license reviewed_at is required")
+    attested_at = _datetime.now(_timezone.utc).isoformat(timespec="seconds").replace("+00:00", "Z")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original narration license attestation requires an admin")
+        row = db.execute(
+            """SELECT * FROM authored_original_assets
+               WHERE pack_id=? AND asset_id=? AND is_current=1""",
+            (pack_id, asset_id),
+        ).fetchone()
+        if not row:
+            raise ValueError("Original narration asset not found")
+        if row["kind"] != "narration":
+            raise ValueError("Only generated Original narration can carry a license attestation")
+        metadata = _decode_pack_json(row["generator_metadata_json"], {})
+        if not isinstance(metadata, dict) or not str(metadata.get("provider") or "").strip():
+            raise ValueError("Original narration has no generator provenance to attest")
+        metadata["license_status"] = "attested"
+        metadata["license_attestation"] = {
+            "terms_id": clean_terms_id,
+            "terms_url": clean_terms_url,
+            "terms_version": clean_terms_version,
+            "reviewed_at": normalized_reviewed_at,
+            "attested_at": attested_at,
+            "attested_by_admin_user_id": int(admin_user_id),
+        }
+        if not _original_generator_license_attestation_complete(metadata):
+            raise ValueError("Original narration license attestation is incomplete")
+        metadata_json = json.dumps(metadata, separators=(",", ":"), sort_keys=True)
+        db.execute(
+            """UPDATE authored_original_assets SET generator_metadata_json=?,updated_at=?
+               WHERE pack_id=? AND asset_id=? AND sha256=?""",
+            (metadata_json, int(time.time()), pack_id, asset_id, row["sha256"]),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {
+        "pack_id": pack_id,
+        "asset_id": asset_id,
+        "license_status": "attested",
+        "license_attestation": metadata["license_attestation"],
+    }
+
+
 def _public_original_asset_record(row: sqlite3.Row | dict) -> dict:
     raw = dict(row)
     return {
@@ -9296,7 +9693,7 @@ def _normalize_original_citation_review_date(value: object) -> str | None:
         parsed = _date.fromisoformat(raw)
     except ValueError as exc:
         raise ValueError("Original citation reviewed_at must be a valid ISO date or date-time") from exc
-    if parsed.year < 2000 or parsed > _date.today():
+    if parsed.year < 2000 or parsed > _datetime.now(_timezone.utc).date():
         raise ValueError("Original citation reviewed_at is outside the accepted review window")
     return parsed.isoformat()
 
@@ -9573,6 +9970,28 @@ def _normalize_original_manifest(
             )
             if citation_reviewed_at:
                 citation["reviewed_at"] = citation_reviewed_at
+            role = str(raw_citation.get("role") or "story").strip().lower()
+            if role not in {"story", "operational"}:
+                raise ValueError("Original citation role must be story or operational")
+            citation["role"] = role
+            authority = str(raw_citation.get("authority") or "").strip().lower()
+            if authority:
+                if authority not in {"official", "authoritative"}:
+                    raise ValueError("Original citation authority must be official or authoritative")
+                citation["authority"] = authority
+            raw_scope = raw_citation.get("scope", [])
+            if raw_scope is None:
+                raw_scope = []
+            if not isinstance(raw_scope, list) or len(raw_scope) > 20:
+                raise ValueError("Original citation scope must be a list with at most 20 entries")
+            scope: list[str] = []
+            for raw_value in raw_scope:
+                value = re.sub(r"[^a-z0-9_]+", "_", str(raw_value or "").strip().lower()).strip("_")
+                if not value or len(value) > 80:
+                    raise ValueError("Original citation scope entries must be short identifiers")
+                if value not in scope:
+                    scope.append(value)
+            citation["scope"] = scope
             citations.append(citation)
         stop = {
             "id": stop_id,
@@ -9730,13 +10149,10 @@ def _normalize_original_manifest(
             raise ValueError(f"Original publish content is unresolved at {unresolved_path}")
         if review.get("editorial_status") != "approved":
             raise ValueError("Original editorial review must be approved before publishing")
-        if not field_drive_completed_at or not source_review_completed_at:
-            raise ValueError("Original field-drive and source reviews must be complete before publishing")
+        if not source_review_completed_at:
+            raise ValueError("Original source review must be complete before publishing")
         review_now = _datetime.now(_timezone.utc)
-        parsed_field_drive = _datetime.fromisoformat(field_drive_completed_at.replace("Z", "+00:00"))
         parsed_source_review = _datetime.fromisoformat(source_review_completed_at.replace("Z", "+00:00"))
-        if parsed_field_drive < review_now - _timedelta(days=ORIGINAL_FIELD_DRIVE_MAX_AGE_DAYS):
-            raise ValueError("Original field-drive review is too old to publish")
         if parsed_source_review < review_now - _timedelta(days=ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS):
             raise ValueError("Original source review is too old to publish")
         if int(offline_map.get("estimated_bytes") or 0) <= 0:
@@ -9757,17 +10173,33 @@ def _normalize_original_manifest(
             }
             if any(asset[key] != expected[key] for key in expected):
                 raise ValueError(f"Original asset {asset['id']} does not match its server-verified upload")
+        operational_scopes: set[str] = set()
         for stop in stops:
             if re.search(r"\b(?:placeholder|draft)\b", stop["transcript"], re.IGNORECASE):
                 raise ValueError(f"Original stop {stop['id']} still has placeholder script text")
+            has_story_source = False
             for citation in stop["citations"]:
                 if not citation.get("publisher"):
                     raise ValueError(f"Original stop {stop['id']} citations need an explicit publisher")
                 if not citation.get("reviewed_at"):
                     raise ValueError(f"Original stop {stop['id']} citations need a reviewed_at date")
                 citation_reviewed_on = _date.fromisoformat(str(citation["reviewed_at"])[:10])
-                if citation_reviewed_on < _date.today() - _timedelta(days=ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS):
-                    raise ValueError(f"Original stop {stop['id']} citation review is too old to publish")
+                role = citation.get("role") or "story"
+                authority = citation.get("authority")
+                if role == "operational":
+                    if authority != "official":
+                        raise ValueError(f"Original stop {stop['id']} operational citations must be official")
+                    if citation_reviewed_on < _date.today() - _timedelta(days=ORIGINAL_OPERATIONAL_SOURCE_MAX_AGE_DAYS):
+                        raise ValueError(f"Original stop {stop['id']} operational citation review is too old to publish")
+                    operational_scopes.update(citation.get("scope") or [])
+                else:
+                    if authority not in {"official", "authoritative"}:
+                        raise ValueError(f"Original stop {stop['id']} story citations need an authority classification")
+                    if citation_reviewed_on < _date.today() - _timedelta(days=ORIGINAL_SOURCE_REVIEW_MAX_AGE_DAYS):
+                        raise ValueError(f"Original stop {stop['id']} story citation review is too old to publish")
+                    has_story_source = True
+            if not has_story_source:
+                raise ValueError(f"Original stop {stop['id']} needs an authoritative story citation")
             narration = assets_by_id.get(stop["audio_asset_id"])
             if not narration or narration["kind"] != "narration":
                 raise ValueError(f"Original stop {stop['id']} needs a published narration asset")
@@ -9776,6 +10208,23 @@ def _normalize_original_manifest(
             verified_narration = verified_assets.get(stop["audio_asset_id"])
             if not verified_narration or verified_narration.get("transcript_sha256") != original_transcript_sha256(stop["transcript"]):
                 raise ValueError(f"Original stop {stop['id']} narration does not match its reviewed transcript")
+            generator_metadata = _decode_pack_json(
+                verified_narration.get("generator_metadata_json"), {},
+            )
+            if generator_metadata:
+                provider = str(generator_metadata.get("provider") or "").strip().lower()
+                if provider not in {"elevenlabs", "cartesia"}:
+                    raise ValueError(f"Original stop {stop['id']} narration generator is not approved")
+                for key in ("model_id", "voice_id"):
+                    if not str(generator_metadata.get(key) or "").strip():
+                        raise ValueError(
+                            f"Original stop {stop['id']} generated narration needs {key.replace('_', ' ')} metadata"
+                        )
+                if not _original_generator_license_attestation_complete(generator_metadata):
+                    raise ValueError(
+                        f"Original stop {stop['id']} generated narration needs an explicit "
+                        "admin license attestation with terms, version, and review date"
+                    )
             media_metadata = _decode_pack_json(verified_narration.get("media_metadata_json"), {})
             verified_duration = float(media_metadata.get("duration_s") or 0)
             if verified_duration <= 0 or abs(stop["audio_duration_s"] - verified_duration) > max(0.25, verified_duration * 0.05):
@@ -9792,6 +10241,12 @@ def _normalize_original_manifest(
             )
             if int(artwork_metadata.get("width") or 0) < 320 or int(artwork_metadata.get("height") or 0) < 180:
                 raise ValueError(f"Original stop {stop['id']} artwork is too small for offline playback")
+        missing_operational_scopes = sorted(ORIGINAL_OPERATIONAL_SOURCE_SCOPES - operational_scopes)
+        if missing_operational_scopes:
+            raise ValueError(
+                "Original official operational sources must cover: "
+                + ", ".join(missing_operational_scopes)
+            )
 
     result = {
         "schema_version": 1,
@@ -10058,22 +10513,11 @@ def list_authored_trip_packs_admin(content_kind: str | None = None) -> list[dict
     return [_trip_pack_admin_from_row(row) for row in rows]
 
 
-def get_authored_original_device_preview_manifest(pack_id: str) -> dict | None:
-    """Build a read-only, hash-bound manifest for testing the current draft."""
-    pack_id = _validate_canonical_id(pack_id, "Original id")
-    db = _conn()
-    try:
-        pack = db.execute(
-            """SELECT * FROM authored_trip_packs
-               WHERE id=? AND content_kind='original_drive'""",
-            (pack_id,),
-        ).fetchone()
-        if not pack:
-            return None
-        verified_assets = _verified_original_asset_map_db(db, pack_id)
-    finally:
-        db.close()
-
+def _authored_original_preview_manifest_from_row(
+    pack: sqlite3.Row | dict,
+    verified_assets: dict[str, dict],
+) -> dict:
+    pack_id = str(pack["id"])
     draft_revision = int(pack["draft_revision"])
     if draft_revision < 1:
         raise ValueError("Original draft revision is invalid")
@@ -10138,6 +10582,865 @@ def get_authored_original_device_preview_manifest(pack_id: str) -> dict | None:
     return manifest
 
 
+def get_authored_original_device_preview_manifest(pack_id: str) -> dict | None:
+    """Build a read-only, hash-bound manifest for testing the current draft."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    db = _conn()
+    try:
+        pack = db.execute(
+            """SELECT * FROM authored_trip_packs
+               WHERE id=? AND content_kind='original_drive'""",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            return None
+        verified_assets = _verified_original_asset_map_db(db, pack_id)
+        return _authored_original_preview_manifest_from_row(pack, verified_assets)
+    finally:
+        db.close()
+
+
+def _original_validation_hash(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(value, separators=(",", ":"), sort_keys=True, ensure_ascii=False).encode("utf-8")
+    ).hexdigest()
+
+
+def _original_validation_material(manifest: dict, draft_revision: int) -> dict:
+    assets = sorted(({
+        "id": asset.get("id"),
+        "kind": asset.get("kind"),
+        "mime_type": asset.get("mime_type"),
+        "bytes": asset.get("bytes"),
+        "sha256": asset.get("sha256"),
+    } for asset in manifest.get("assets") or []), key=lambda item: str(item["id"]))
+    manifest_sha256 = _original_validation_hash(manifest)
+    assets_sha256 = _original_validation_hash(assets)
+    validator_source_sha256 = trusted_originals_validator_source_sha256()
+    input_sha256 = _original_validation_hash({
+        "draft_revision": int(draft_revision),
+        "manifest_sha256": manifest_sha256,
+        "assets_sha256": assets_sha256,
+        "suite_version": ORIGINAL_VIRTUAL_VALIDATION_SUITE_VERSION,
+        "engine_version": ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+        "validator_source_sha256": validator_source_sha256,
+        "scenario_ids": ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
+    })
+    return {
+        "draft_revision": int(draft_revision),
+        "manifest_sha256": manifest_sha256,
+        "assets_sha256": assets_sha256,
+        "validator_source_sha256": validator_source_sha256,
+        "input_sha256": input_sha256,
+    }
+
+
+def _original_route_structural_summary(manifest: dict) -> dict:
+    coordinates = manifest.get("route", {}).get("geometry", {}).get("coordinates") or []
+    segment_lengths = [
+        _original_haversine_m(start, end)
+        for start, end in zip(coordinates, coordinates[1:])
+    ]
+    route_distance = float(manifest.get("route", {}).get("distance_m") or 0)
+    discontinuity_threshold = max(25_000.0, route_distance * 0.25)
+    discontinuities = [
+        index for index, length in enumerate(segment_lengths)
+        if length > discontinuity_threshold
+    ]
+    return {
+        "geometry_sha256": original_route_geometry_sha256(coordinates),
+        "coordinate_count": len(coordinates),
+        "distance_m": route_distance,
+        "maximum_segment_m": max(segment_lengths, default=0.0),
+        "discontinuity_threshold_m": discontinuity_threshold,
+        "discontinuity_count": len(discontinuities),
+        "discontinuity_segment_indexes": discontinuities[:100],
+        # Stop proximity and route-window intersection are derived by
+        # _normalize_original_manifest before this trusted report is created.
+        "stop_projection_failures": 0,
+    }
+
+
+def _recover_incomplete_original_validation_runs_db(
+    db: sqlite3.Connection,
+    *,
+    timestamp: int | None = None,
+    interrupted_by_restart: bool = False,
+) -> int:
+    """Fail abandoned trusted runs; recovery can never synthesize a passing report."""
+    now = int(time.time()) if timestamp is None else int(timestamp)
+    if interrupted_by_restart:
+        issue = (
+            "Trusted validation was interrupted by a server restart before completion; "
+            "start a new authoritative run"
+        )
+        stale_ids: list[str] = []
+        for row in db.execute(
+            """SELECT id,worker_pid FROM authored_original_validation_reports
+               WHERE status IN ('running','executing')"""
+        ).fetchall():
+            pid = row["worker_pid"]
+            if isinstance(pid, bool) or not isinstance(pid, int) or pid < 1:
+                stale_ids.append(row["id"])
+                continue
+            try:
+                os.kill(pid, 0)
+            except ProcessLookupError:
+                stale_ids.append(row["id"])
+            except PermissionError:
+                # A live process owned by another user is still a live worker.
+                continue
+            except OSError:
+                stale_ids.append(row["id"])
+        if not stale_ids:
+            return 0
+        issue_json = json.dumps([issue], separators=(",", ":"))
+        recovered = 0
+        for report_id in stale_ids:
+            recovered += int(db.execute(
+                """UPDATE authored_original_validation_reports
+                   SET status='error',passed=0,issues_json=?,completed_at=?
+                   WHERE id=? AND status IN ('running','executing')""",
+                (issue_json, now, report_id),
+            ).rowcount or 0)
+        return recovered
+
+    cutoff = now - ORIGINAL_VIRTUAL_VALIDATION_RUN_TIMEOUT_SECONDS
+    issue = "Trusted validation timed out before completion; start a new authoritative run"
+    cursor = db.execute(
+        """UPDATE authored_original_validation_reports
+           SET status='error',passed=0,issues_json=?,completed_at=?
+           WHERE status IN ('running','executing') AND started_at<=?""",
+        (
+            json.dumps([issue], separators=(",", ":")),
+            now,
+            cutoff,
+        ),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def recover_stale_authored_original_validation_runs() -> int:
+    """Expire timed-out runs during normal service operation and polling."""
+    db = _conn()
+    try:
+        recovered = _recover_incomplete_original_validation_runs_db(db)
+        if recovered:
+            db.commit()
+        return recovered
+    finally:
+        db.close()
+
+
+def _original_validation_report_from_row(
+    row: sqlite3.Row | dict,
+    *,
+    current_material: dict | None = None,
+) -> dict:
+    raw = dict(row)
+    report = {
+        "schema_version": 1,
+        "report_type": "OriginalRouteValidationReportV1",
+        "id": raw["id"],
+        "pack_id": raw["pack_id"],
+        "draft_revision": int(raw["draft_revision"]),
+        "manifest_sha256": raw["manifest_sha256"],
+        "assets_sha256": raw["assets_sha256"],
+        "input_sha256": raw["input_sha256"],
+        "validator_source_sha256": raw.get("validator_source_sha256"),
+        "suite_version": raw["suite_version"],
+        "engine_version": raw.get("engine_version"),
+        "status": raw["status"],
+        "passed": bool(raw["passed"]),
+        "summary": _decode_pack_json(raw.get("summary_json"), {}),
+        "scenarios": _decode_pack_json(raw.get("scenarios_json"), []),
+        "issues": _decode_pack_json(raw.get("issues_json"), []),
+        "started_at": int(raw["started_at"]),
+        "completed_at": int(raw["completed_at"]) if raw.get("completed_at") is not None else None,
+    }
+    if current_material is not None:
+        report["current"] = all(
+            report[key] == current_material[key]
+            for key in (
+                "draft_revision", "manifest_sha256", "assets_sha256", "input_sha256",
+                "validator_source_sha256",
+            )
+        )
+    return report
+
+
+def _current_original_validation_report_db(
+    db: sqlite3.Connection,
+    pack_id: str,
+    material: dict,
+) -> sqlite3.Row | None:
+    return db.execute(
+        """SELECT * FROM authored_original_validation_reports
+           WHERE pack_id=? AND draft_revision=? AND manifest_sha256=?
+             AND assets_sha256=? AND input_sha256=? AND suite_version=?
+             AND engine_version=? AND validator_source_sha256=?
+             AND status='passed' AND passed=1
+           ORDER BY completed_at DESC,id DESC LIMIT 1""",
+        (
+            pack_id,
+            material["draft_revision"], material["manifest_sha256"],
+            material["assets_sha256"], material["input_sha256"],
+            ORIGINAL_VIRTUAL_VALIDATION_SUITE_VERSION,
+            ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+            material["validator_source_sha256"],
+        ),
+    ).fetchone()
+
+
+def create_authored_original_virtual_validation_run(
+    pack_id: str,
+    admin_user_id: int,
+) -> dict:
+    """Persist a hash-bound running report before any trusted worker executes."""
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    manifest = get_authored_original_device_preview_manifest(pack_id)
+    if not manifest:
+        raise ValueError("Trailhead Original not found")
+    draft_revision = int(manifest["version"]) - ORIGINAL_DEVICE_PREVIEW_VERSION_BASE
+    material = _original_validation_material(manifest, draft_revision)
+    report_id = f"original_validation_{secrets.token_hex(16)}"
+    started_at = int(time.time())
+    db = _conn()
+    try:
+        _recover_incomplete_original_validation_runs_db(db)
+        admin = db.execute(
+            "SELECT is_admin FROM users WHERE id=?", (admin_user_id,),
+        ).fetchone()
+        if not admin or not bool(admin["is_admin"]):
+            raise PermissionError("Original validation requires an admin")
+        db.execute(
+            """INSERT INTO authored_original_validation_reports
+               (id,pack_id,draft_revision,manifest_sha256,assets_sha256,input_sha256,
+                validator_source_sha256,manifest_json,suite_version,status,started_by,
+                worker_pid,started_at)
+               VALUES (?,?,?,?,?,?,?,?,?,'running',?,?,?)""",
+            (
+                report_id, pack_id, draft_revision, material["manifest_sha256"],
+                material["assets_sha256"], material["input_sha256"],
+                material["validator_source_sha256"],
+                json.dumps(manifest, separators=(",", ":"), sort_keys=True),
+                ORIGINAL_VIRTUAL_VALIDATION_SUITE_VERSION, admin_user_id,
+                os.getpid(), started_at,
+            ),
+        )
+        row = db.execute(
+            "SELECT * FROM authored_original_validation_reports WHERE id=?", (report_id,),
+        ).fetchone()
+        db.commit()
+    finally:
+        db.close()
+    return _original_validation_report_from_row(row, current_material=material)
+
+
+def execute_authored_original_virtual_validation_run(
+    report_id: str,
+    *,
+    runner=None,
+    route_network_validator=None,
+) -> dict:
+    """Claim and execute one persisted validation run; clients cannot complete it."""
+    report_id = _validate_canonical_id(report_id, "Original validation report id")
+    db = _conn()
+    try:
+        if _recover_incomplete_original_validation_runs_db(db):
+            db.commit()
+        row = db.execute(
+            "SELECT * FROM authored_original_validation_reports WHERE id=?", (report_id,),
+        ).fetchone()
+        if not row:
+            raise ValueError("Original virtual validation report not found")
+        pack_id = row["pack_id"]
+        if row["status"] != "running":
+            return _original_validation_report_from_row(row)
+        claimed = db.execute(
+            """UPDATE authored_original_validation_reports SET status='executing'
+               WHERE id=? AND status='running'""",
+            (report_id,),
+        ).rowcount
+        if claimed != 1:
+            db.rollback()
+            current = db.execute(
+                "SELECT * FROM authored_original_validation_reports WHERE id=?", (report_id,),
+            ).fetchone()
+            return _original_validation_report_from_row(current)
+        db.commit()
+        claimed_row = db.execute(
+            "SELECT * FROM authored_original_validation_reports WHERE id=?", (report_id,),
+        ).fetchone()
+    finally:
+        db.close()
+
+    status = "error"
+    engine_version: str | None = None
+    passed = False
+    summary: dict = {}
+    scenarios: list = []
+    issues: list[str] = []
+    material: dict | None = None
+    try:
+        manifest = _decode_pack_json(claimed_row["manifest_json"], None)
+        if not isinstance(manifest, dict):
+            raise OriginalValidationRunnerError("Persisted validation manifest is unavailable")
+        material = _original_validation_material(manifest, int(claimed_row["draft_revision"]))
+        for key in (
+            "manifest_sha256", "assets_sha256", "input_sha256", "validator_source_sha256",
+        ):
+            if claimed_row[key] != material[key]:
+                raise OriginalValidationRunnerError(
+                    "Persisted validation input no longer matches the trusted source set"
+                )
+
+        execute_network = route_network_validator or validate_original_route_network
+        network_summary = execute_network(
+            manifest,
+            valhalla_url=settings.valhalla_url,
+        )
+        if (
+            not isinstance(network_summary, dict)
+            or network_summary.get("geometry_sha256")
+            != original_route_geometry_sha256(manifest["route"]["geometry"]["coordinates"])
+        ):
+            raise OriginalValidationRunnerError(
+                "Route-network validation is for different geometry"
+            )
+        execute = runner or run_originals_validation_cli
+        raw = execute(
+            manifest,
+            required_scenario_ids=ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
+            expected_engine_version=ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+            expected_validator_source_sha256=material["validator_source_sha256"],
+        )
+        result = normalize_original_validation_output(
+            raw,
+            manifest=manifest,
+            required_scenario_ids=ORIGINAL_VIRTUAL_VALIDATION_REQUIRED_SCENARIOS,
+            expected_engine_version=ORIGINAL_VIRTUAL_VALIDATION_ENGINE_VERSION,
+            expected_validator_source_sha256=material["validator_source_sha256"],
+        )
+        engine_version = result["engine_version"]
+        passed = result["passed"] is True
+        summary = dict(result["summary"])
+        route_summary = _original_route_structural_summary(manifest)
+        runner_route_summary = result["route_summary"]
+        route_summary.update({
+            "runner_maximum_segment_m": runner_route_summary["maximum_segment_m"],
+            "runner_discontinuity_count": int(runner_route_summary["discontinuity_count"]),
+            "self_intersection_count": int(runner_route_summary["self_intersection_count"]),
+            "runner_stop_projection_failures": int(runner_route_summary["stop_projection_failures"]),
+            "network": network_summary,
+        })
+        summary["route"] = route_summary
+        if (
+            route_summary["discontinuity_count"]
+            or route_summary["runner_discontinuity_count"]
+            or route_summary["runner_stop_projection_failures"]
+        ):
+            passed = False
+            result["issues"] = [
+                *result["issues"],
+                "Authored route contains implausible geometry discontinuities",
+            ]
+        status = "passed" if passed else "failed"
+        scenarios = result["scenarios"]
+        issues = result["issues"]
+    except Exception as exc:
+        clean = re.sub(r"\s+", " ", str(exc or "Virtual validation failed")).strip()
+        issues = [clean[:1000] or "Virtual validation failed"]
+    completed_at = int(time.time())
+    db = _conn()
+    try:
+        db.execute(
+            """UPDATE authored_original_validation_reports
+               SET engine_version=?,status=?,passed=?,summary_json=?,scenarios_json=?,
+                   issues_json=?,completed_at=? WHERE id=? AND status='executing'""",
+            (
+                engine_version, status, 1 if passed else 0,
+                json.dumps(summary, separators=(",", ":"), sort_keys=True),
+                json.dumps(scenarios, separators=(",", ":"), sort_keys=True),
+                json.dumps(issues, separators=(",", ":"), sort_keys=True),
+                completed_at, report_id,
+            ),
+        )
+        row = db.execute(
+            "SELECT * FROM authored_original_validation_reports WHERE id=?", (report_id,),
+        ).fetchone()
+        db.commit()
+    finally:
+        db.close()
+    current = get_authored_original_virtual_validation_report(pack_id, report_id)
+    return current or _original_validation_report_from_row(row, current_material=material)
+
+
+def start_authored_original_virtual_validation(
+    pack_id: str,
+    admin_user_id: int,
+    *,
+    runner=None,
+    route_network_validator=None,
+) -> dict:
+    """Synchronous compatibility wrapper used by tests and maintenance jobs."""
+    created = create_authored_original_virtual_validation_run(pack_id, admin_user_id)
+    return execute_authored_original_virtual_validation_run(
+        created["id"],
+        runner=runner,
+        route_network_validator=route_network_validator,
+    )
+
+
+def get_authored_original_virtual_validation_report(
+    pack_id: str,
+    report_id: str,
+) -> dict | None:
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    report_id = _validate_canonical_id(report_id, "Original validation report id")
+    db = _conn()
+    try:
+        if _recover_incomplete_original_validation_runs_db(db):
+            db.commit()
+        pack = db.execute(
+            "SELECT * FROM authored_trip_packs WHERE id=? AND content_kind='original_drive'",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            return None
+        row = db.execute(
+            "SELECT * FROM authored_original_validation_reports WHERE id=? AND pack_id=?",
+            (report_id, pack_id),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            manifest = _authored_original_preview_manifest_from_row(
+                pack, _verified_original_asset_map_db(db, pack_id),
+            )
+            material = _original_validation_material(manifest, int(pack["draft_revision"]))
+        except ValueError:
+            material = None
+        return _original_validation_report_from_row(row, current_material=material)
+    finally:
+        db.close()
+
+
+def get_latest_authored_original_virtual_validation_report(pack_id: str) -> dict | None:
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    db = _conn()
+    try:
+        if _recover_incomplete_original_validation_runs_db(db):
+            db.commit()
+        pack = db.execute(
+            "SELECT * FROM authored_trip_packs WHERE id=? AND content_kind='original_drive'",
+            (pack_id,),
+        ).fetchone()
+        if not pack:
+            return None
+        row = db.execute(
+            """SELECT * FROM authored_original_validation_reports
+               WHERE pack_id=? ORDER BY started_at DESC,id DESC LIMIT 1""",
+            (pack_id,),
+        ).fetchone()
+        if not row:
+            return None
+        try:
+            manifest = _authored_original_preview_manifest_from_row(
+                pack, _verified_original_asset_map_db(db, pack_id),
+            )
+            material = _original_validation_material(manifest, int(pack["draft_revision"]))
+        except ValueError:
+            material = None
+        return _original_validation_report_from_row(row, current_material=material)
+    finally:
+        db.close()
+
+
+def _original_feedback_version_db(
+    db: sqlite3.Connection,
+    pack_id: str,
+    version: int,
+) -> sqlite3.Row:
+    row = db.execute(
+        """SELECT version.* FROM authored_trip_pack_versions version
+           JOIN authored_trip_packs pack ON pack.id=version.pack_id
+           WHERE version.pack_id=? AND version.version=?
+             AND version.content_kind='original_drive'
+             AND pack.current_published_version IS NOT NULL""",
+        (pack_id, version),
+    ).fetchone()
+    if not row:
+        raise ValueError("Published Trailhead Original version not found")
+    return row
+
+
+def _validate_original_feedback_subject_hmac(value: object, label: str) -> str:
+    clean = str(value or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", clean):
+        raise ValueError(f"{label} must be a server-keyed SHA-256 HMAC")
+    return clean
+
+
+def issue_original_feedback_guest_token(
+    pack_id: str,
+    version: int,
+    *,
+    ip_subject_hmac: str,
+    install_subject_hmac: str | None = None,
+) -> dict:
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("Original version must be a positive integer")
+    clean_ip_hmac = _validate_original_feedback_subject_hmac(
+        ip_subject_hmac, "Original feedback IP subject",
+    )
+    clean_install_hmac = (
+        _validate_original_feedback_subject_hmac(
+            install_subject_hmac, "Original feedback installation subject",
+        )
+        if install_subject_hmac else None
+    )
+    now = int(time.time())
+    window_start = now - ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_WINDOW_SECONDS
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode("utf-8")).hexdigest()
+    token_id = f"original_feedback_token_{secrets.token_hex(16)}"
+    expires_at = now + ORIGINAL_FEEDBACK_GUEST_TOKEN_TTL_SECONDS
+    db = _conn()
+    try:
+        # Serialize the count-and-insert gate so concurrent workers cannot race
+        # through a quota. Subject values are scoped, server-keyed HMACs; raw
+        # network or installation identifiers never reach persistent storage.
+        db.execute("BEGIN IMMEDIATE")
+        version_row = _original_feedback_version_db(db, pack_id, version)
+        if int(version_row["price_credits"]) != 0:
+            raise OriginalFeedbackTokenError("Guest feedback is available only for free Originals")
+        db.execute(
+            "DELETE FROM authored_original_feedback_token_issuances WHERE created_at<?",
+            (window_start,),
+        )
+        ip_count = int(db.execute(
+            """SELECT COUNT(*) FROM authored_original_feedback_token_issuances
+               WHERE pack_id=? AND version=? AND ip_subject_hmac=? AND created_at>=?""",
+            (pack_id, version, clean_ip_hmac, window_start),
+        ).fetchone()[0])
+        if ip_count >= ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_IP_LIMIT:
+            raise OriginalFeedbackRateLimitError(
+                "Guest feedback token limit reached for this network; try again later"
+            )
+        if clean_install_hmac:
+            install_count = int(db.execute(
+                """SELECT COUNT(*) FROM authored_original_feedback_token_issuances
+                   WHERE pack_id=? AND version=? AND install_subject_hmac=? AND created_at>=?""",
+                (pack_id, version, clean_install_hmac, window_start),
+            ).fetchone()[0])
+            if install_count >= ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_INSTALL_LIMIT:
+                raise OriginalFeedbackRateLimitError(
+                    "Guest feedback token limit reached for this installation; try again later"
+                )
+        db.execute(
+            """INSERT INTO authored_original_feedback_tokens
+               (id,pack_id,version,token_hash,expires_at,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (token_id, pack_id, version, token_hash, expires_at, now),
+        )
+        db.execute(
+            """INSERT INTO authored_original_feedback_token_issuances
+               (token_id,pack_id,version,ip_subject_hmac,install_subject_hmac,created_at)
+               VALUES (?,?,?,?,?,?)""",
+            (
+                token_id, pack_id, version, clean_ip_hmac,
+                clean_install_hmac, now,
+            ),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {
+        "schema_version": 1,
+        "pack_id": pack_id,
+        "version": version,
+        "token": raw_token,
+        "expires_at": expires_at,
+        "max_submissions": ORIGINAL_FEEDBACK_GUEST_MAX_SUBMISSIONS,
+        "issuance_policy": {
+            "window_seconds": ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_WINDOW_SECONDS,
+            "ip_limit": ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_IP_LIMIT,
+            "install_limit": ORIGINAL_FEEDBACK_TOKEN_ISSUANCE_INSTALL_LIMIT,
+            "installation_bound": bool(clean_install_hmac),
+        },
+    }
+
+
+def _clean_original_feedback_text(value: object, label: str, maximum: int) -> str | None:
+    clean = re.sub(r"\s+", " ", str(value or "").replace("\x00", " ")).strip()
+    if not clean:
+        return None
+    if len(clean) > maximum:
+        raise ValueError(f"{label} is too long")
+    return clean
+
+
+def _original_feedback_from_row(row: sqlite3.Row | dict, *, admin: bool = False) -> dict:
+    raw = dict(row)
+    item = {
+        "id": raw["id"],
+        "pack_id": raw["pack_id"],
+        "version": int(raw["version"]),
+        "stop_id": raw.get("stop_id"),
+        "category": raw["category"],
+        "rating": int(raw["rating"]) if raw.get("rating") is not None else None,
+        "message": raw["message"],
+        "platform": raw["platform"],
+        "app_version": raw.get("app_version"),
+        "runtime_version": raw.get("runtime_version"),
+        "release_cohort": raw.get("release_cohort"),
+        "contact_consent": bool(raw.get("contact_consent")),
+        "status": raw["status"],
+        "submitted_at": int(raw["submitted_at"]),
+        "updated_at": int(raw["updated_at"]),
+    }
+    if admin:
+        item.update({
+            "subject_type": "account" if raw.get("user_id") is not None else "guest",
+            "moderation_note": raw.get("moderation_note"),
+            "moderated_at": int(raw["moderated_at"]) if raw.get("moderated_at") is not None else None,
+        })
+    return item
+
+
+def submit_original_feedback(
+    *,
+    pack_id: str,
+    version: int,
+    idempotency_key: str,
+    category: str,
+    message: str,
+    platform: str,
+    user_id: int | None = None,
+    guest_token: str | None = None,
+    stop_id: str | None = None,
+    rating: int | None = None,
+    app_version: str | None = None,
+    runtime_version: str | None = None,
+    release_cohort: str | None = None,
+    contact_consent: bool = False,
+) -> dict:
+    pack_id = _validate_canonical_id(pack_id, "Original id")
+    if isinstance(version, bool) or not isinstance(version, int) or version < 1:
+        raise ValueError("Original version must be a positive integer")
+    clean_key = str(idempotency_key or "").strip()
+    if not clean_key or len(clean_key) > 240:
+        raise ValueError("A valid idempotency key is required")
+    clean_category = str(category or "").strip().lower()
+    if clean_category not in ORIGINAL_FEEDBACK_CATEGORIES:
+        raise ValueError("Invalid Original feedback category")
+    clean_platform = str(platform or "").strip().lower()
+    if clean_platform not in ORIGINAL_FEEDBACK_PLATFORMS:
+        raise ValueError("Invalid Original feedback platform")
+    clean_message = _clean_original_feedback_text(message, "Feedback message", 2000)
+    if not clean_message or len(clean_message) < 3:
+        raise ValueError("Feedback message must be at least 3 characters")
+    if _contains_coordinates(clean_message):
+        raise PublicationPrivacyError("Remove precise coordinates before submitting feedback")
+    clean_stop_id = _validate_canonical_id(stop_id, "Original stop id") if stop_id else None
+    if rating is not None and (isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5):
+        raise ValueError("Feedback rating must be from 1 through 5")
+    clean_app_version = _clean_original_feedback_text(app_version, "App version", 80)
+    clean_runtime_version = _clean_original_feedback_text(runtime_version, "Runtime version", 120)
+    clean_cohort = _clean_original_feedback_text(release_cohort, "Release cohort", 80)
+    if any(
+        value and not re.fullmatch(r"[A-Za-z0-9_.:-]+", value)
+        for value in (clean_app_version, clean_runtime_version, clean_cohort)
+    ):
+        raise ValueError("Feedback release metadata contains unsupported characters")
+    if user_id is None and not guest_token:
+        raise OriginalFeedbackTokenError("A guest feedback token or signed-in account is required")
+
+    request = {
+        "pack_id": pack_id, "version": version, "stop_id": clean_stop_id,
+        "category": clean_category, "rating": rating, "message": clean_message,
+        "platform": clean_platform, "app_version": clean_app_version,
+        "runtime_version": clean_runtime_version, "release_cohort": clean_cohort,
+        "contact_consent": bool(contact_consent),
+    }
+    request_hash = _original_validation_hash(request)
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        version_row = _original_feedback_version_db(db, pack_id, version)
+        manifest = _decode_pack_json(version_row["original_manifest_json"], {})
+        if clean_stop_id and clean_stop_id not in {
+            str(stop.get("id")) for stop in manifest.get("stops") or [] if isinstance(stop, dict)
+        }:
+            raise ValueError("Original feedback stop does not exist in this version")
+
+        token_row = None
+        if user_id is not None:
+            if int(version_row["price_credits"]) > 0 and not db.execute(
+                """SELECT 1 FROM authored_trip_pack_entitlements
+                   WHERE user_id=? AND pack_id=? AND version=? AND content_kind='original_drive'""",
+                (user_id, pack_id, version),
+            ).fetchone():
+                raise OriginalFeedbackTokenError("Acquire this Original before sending feedback")
+            existing = db.execute(
+                "SELECT * FROM authored_original_feedback WHERE user_id=? AND idempotency_key=?",
+                (user_id, clean_key),
+            ).fetchone()
+            recent_count = int(db.execute(
+                """SELECT COUNT(*) FROM authored_original_feedback
+                   WHERE user_id=? AND submitted_at>=?""",
+                (user_id, now - 86400),
+            ).fetchone()[0])
+            if not existing and recent_count >= 20:
+                raise OriginalFeedbackRateLimitError("Feedback limit reached; try again later")
+        else:
+            token_hash = hashlib.sha256(str(guest_token).encode("utf-8")).hexdigest()
+            token_row = db.execute(
+                """SELECT * FROM authored_original_feedback_tokens
+                   WHERE token_hash=? AND pack_id=? AND version=?""",
+                (token_hash, pack_id, version),
+            ).fetchone()
+            if not token_row or int(token_row["expires_at"]) < now:
+                raise OriginalFeedbackTokenError("Guest feedback token is invalid or expired")
+            existing = db.execute(
+                "SELECT * FROM authored_original_feedback WHERE guest_token_id=? AND idempotency_key=?",
+                (token_row["id"], clean_key),
+            ).fetchone()
+            if not existing and int(token_row["use_count"]) >= ORIGINAL_FEEDBACK_GUEST_MAX_SUBMISSIONS:
+                raise OriginalFeedbackRateLimitError("Guest feedback limit reached")
+
+        if existing:
+            if existing["request_hash"] != request_hash:
+                raise OriginalFeedbackConflictError("Idempotency key was used for different feedback")
+            db.commit()
+            replay = _original_feedback_from_row(existing)
+            replay["replayed"] = True
+            return replay
+
+        feedback_id = f"original_feedback_{secrets.token_hex(16)}"
+        db.execute(
+            """INSERT INTO authored_original_feedback
+               (id,pack_id,version,stop_id,user_id,guest_token_id,idempotency_key,
+                request_hash,category,rating,message,platform,app_version,runtime_version,
+                release_cohort,contact_consent,status,submitted_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?, 'new',?,?)""",
+            (
+                feedback_id, pack_id, version, clean_stop_id, user_id,
+                token_row["id"] if token_row else None, clean_key, request_hash,
+                clean_category, rating, clean_message, clean_platform,
+                clean_app_version, clean_runtime_version, clean_cohort,
+                1 if contact_consent else 0, now, now,
+            ),
+        )
+        if token_row:
+            db.execute(
+                "UPDATE authored_original_feedback_tokens SET use_count=use_count+1 WHERE id=?",
+                (token_row["id"],),
+            )
+        saved = db.execute(
+            "SELECT * FROM authored_original_feedback WHERE id=?", (feedback_id,),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    result = _original_feedback_from_row(saved)
+    result["replayed"] = False
+    return result
+
+
+def list_original_feedback_admin(
+    *,
+    status: str = "new",
+    pack_id: str | None = None,
+    category: str | None = None,
+    limit: int = 50,
+    cursor: str | None = None,
+) -> dict:
+    clean_status = str(status or "").strip().lower()
+    if clean_status not in ORIGINAL_FEEDBACK_STATUSES:
+        raise ValueError("Invalid Original feedback status")
+    if not isinstance(limit, int) or not 1 <= limit <= 100:
+        raise ValueError("Limit must be between 1 and 100")
+    clauses = ["status=?"]
+    params: list = [clean_status]
+    if pack_id:
+        clauses.append("pack_id=?")
+        params.append(_validate_canonical_id(pack_id, "Original id"))
+    if category:
+        clean_category = str(category).strip().lower()
+        if clean_category not in ORIGINAL_FEEDBACK_CATEGORIES:
+            raise ValueError("Invalid Original feedback category")
+        clauses.append("category=?")
+        params.append(clean_category)
+    decoded_cursor = _decode_account_cursor(cursor)
+    if decoded_cursor:
+        clauses.append("(submitted_at<? OR (submitted_at=? AND id<?))")
+        params.extend([decoded_cursor[0], decoded_cursor[0], decoded_cursor[1]])
+    params.append(limit + 1)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT * FROM authored_original_feedback
+            WHERE {' AND '.join(clauses)}
+            ORDER BY submitted_at DESC,id DESC LIMIT ?""",
+        params,
+    ).fetchall()
+    db.close()
+    has_more = len(rows) > limit
+    page = rows[:limit]
+    return {
+        "items": [_original_feedback_from_row(row, admin=True) for row in page],
+        "next_cursor": _encode_account_cursor(page[-1]["submitted_at"], page[-1]["id"])
+        if has_more else None,
+    }
+
+
+def moderate_original_feedback(
+    feedback_id: str,
+    status: str,
+    moderator_user_id: int,
+    note: str | None = None,
+) -> dict | None:
+    feedback_id = _validate_canonical_id(feedback_id, "Original feedback id")
+    clean_status = str(status or "").strip().lower()
+    if clean_status not in ORIGINAL_FEEDBACK_STATUSES - {"new"}:
+        raise ValueError("Feedback status must be reviewing, resolved, or dismissed")
+    clean_note = _clean_original_feedback_text(note, "Moderation note", 1000)
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        row = db.execute(
+            "SELECT * FROM authored_original_feedback WHERE id=?", (feedback_id,),
+        ).fetchone()
+        if not row:
+            db.commit()
+            return None
+        db.execute(
+            """UPDATE authored_original_feedback SET status=?,moderation_note=?,
+               moderated_by=?,moderated_at=?,updated_at=? WHERE id=?""",
+            (clean_status, clean_note, moderator_user_id, now, now, feedback_id),
+        )
+        saved = db.execute(
+            "SELECT * FROM authored_original_feedback WHERE id=?", (feedback_id,),
+        ).fetchone()
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return _original_feedback_from_row(saved, admin=True)
+
+
 def validate_authored_original_draft(pack_id: str) -> dict | None:
     pack_id = _validate_canonical_id(pack_id, "Original id")
     db = _conn()
@@ -10153,10 +11456,27 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
         (pack_id,),
     ).fetchone()[0])
     verified_assets = _verified_original_asset_map_db(db, pack_id)
+    current_validation_report = None
+    try:
+        preview_manifest = _authored_original_preview_manifest_from_row(pack, verified_assets)
+        validation_material = _original_validation_material(
+            preview_manifest, int(pack["draft_revision"]),
+        )
+        validation_row = _current_original_validation_report_db(
+            db, pack_id, validation_material,
+        )
+        if validation_row:
+            current_validation_report = _original_validation_report_from_row(
+                validation_row, current_material=validation_material,
+            )
+    except ValueError:
+        validation_material = None
     db.close()
     validation = _decode_pack_json(pack["draft_validation_metadata"], {})
     missing = sorted(check for check in ORIGINAL_VALIDATION_CHECKS if validation.get(check) is not True)
     issues = [f"Review is incomplete: {check}" for check in missing]
+    if current_validation_report is None:
+        issues.append("A current server-owned virtual route validation report must pass before publishing")
     template_for_scan = _decode_pack_json(pack["draft_template_json"], {})
     if isinstance(template_for_scan, dict):
         template_for_scan = dict(template_for_scan)
@@ -10188,6 +11508,7 @@ def validate_authored_original_draft(pack_id: str) -> dict | None:
         "next_version": next_version,
         "publish_ready": not issues,
         "missing_reviews": missing,
+        "virtual_validation": current_validation_report,
         "issues": issues,
     }
 
@@ -10208,6 +11529,7 @@ def publish_authored_trip_pack(
         if required_content_kind and pack["content_kind"] != required_content_kind:
             raise ValueError("Authored content kind does not match this publishing endpoint")
         validation = _decode_pack_json(pack["draft_validation_metadata"], {})
+        published_validation_metadata = dict(validation)
         validation_checks = (
             ORIGINAL_VALIDATION_CHECKS
             if pack["content_kind"] == "original_drive"
@@ -10238,6 +11560,29 @@ def publish_authored_trip_pack(
                 raise ValueError(f"Original publish content is unresolved at {unresolved_path}")
             original_manifest = _decode_pack_json(pack["draft_original_manifest_json"], None)
             verified_assets = _verified_original_asset_map_db(db, pack_id)
+            preview_manifest = _authored_original_preview_manifest_from_row(pack, verified_assets)
+            validation_material = _original_validation_material(
+                preview_manifest, int(pack["draft_revision"]),
+            )
+            validation_report_row = _current_original_validation_report_db(
+                db, pack_id, validation_material,
+            )
+            if not validation_report_row:
+                raise ValueError(
+                    "Original needs a current server-owned virtual route validation pass before publishing"
+                )
+            published_validation_metadata.pop("trigger_drive_tested", None)
+            published_validation_metadata["virtual_route_validated"] = True
+            published_validation_metadata["virtual_validation_report"] = {
+                "schema_version": 1,
+                "report_type": "OriginalRouteValidationReportV1",
+                "id": validation_report_row["id"],
+                "input_sha256": validation_report_row["input_sha256"],
+                "validator_source_sha256": validation_report_row["validator_source_sha256"],
+                "suite_version": validation_report_row["suite_version"],
+                "engine_version": validation_report_row["engine_version"],
+                "completed_at": int(validation_report_row["completed_at"]),
+            }
             _, original_manifest_json = _normalize_original_manifest(
                 pack_id,
                 pack["draft_title"],
@@ -10256,7 +11601,9 @@ def publish_authored_trip_pack(
                 pack_id, version, pack["content_kind"], pack["slug"],
                 pack["draft_title"], pack["draft_summary"],
                 pack["draft_price_credits"], pack["draft_coverage_region"],
-                pack["draft_public_metadata"], pack["draft_validation_metadata"],
+                pack["draft_public_metadata"], json.dumps(
+                    published_validation_metadata, separators=(",", ":"), sort_keys=True,
+                ),
                 pack["draft_template_json"], original_manifest_json, admin_user_id, now,
             ),
         )

@@ -1,0 +1,24 @@
+{
+  "applinks": {
+    "apps": [],
+    "details": [
+      {
+        "appID": "4FJKGBQA5X.com.trailhead.app",
+        "paths": [
+          "/originals/*",
+          "/app/*"
+        ],
+        "components": [
+          {
+            "/": "/originals/*",
+            "comment": "Trailhead Originals detail links"
+          },
+          {
+            "/": "/app/*",
+            "comment": "Trailhead web-app links"
+          }
+        ]
+      }
+    ]
+  }
+}

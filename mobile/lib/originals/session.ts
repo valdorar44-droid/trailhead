@@ -33,6 +33,7 @@ export function createOriginalSession(
     current_audio_position_ms: 0,
     last_projected_route_progress_m: null,
     last_route_distance_m: null,
+    last_location_timestamp_ms: null,
     user_paused: false,
     manual_replay_return_status: null,
     manual_replay_stop_id: null,
@@ -60,6 +61,9 @@ export function normalizeOriginalSession(input: OriginalSessionV1): OriginalSess
     skipped_stop_ids: unique(input.skipped_stop_ids ?? []),
     missed_stop_ids: unique(input.missed_stop_ids ?? []),
     current_audio_position_ms: Math.max(0, Number(input.current_audio_position_ms) || 0),
+    last_location_timestamp_ms: Number.isFinite(input.last_location_timestamp_ms)
+      ? Number(input.last_location_timestamp_ms)
+      : null,
     manual_replay_return_status: input.manual_replay_return_status ?? null,
     manual_replay_stop_id: input.manual_replay_stop_id ?? null,
     trigger_state: {

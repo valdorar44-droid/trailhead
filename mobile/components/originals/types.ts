@@ -19,6 +19,9 @@ export type OriginalSessionStatus =
 export type OriginalUiSource = {
   label: string;
   url?: string;
+  role: 'story' | 'operational';
+  authority?: 'official' | 'authoritative';
+  scope: string[];
 };
 
 export type OriginalUiStory = {

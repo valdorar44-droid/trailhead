@@ -4,13 +4,21 @@ import Nav from "../components/Nav.jsx";
 import Footer from "../components/Footer.jsx";
 import { ClientRouter } from "astro:transitions";
 import site from "../data/site.json";
-const { title, description, image, transparentNav = false } = Astro.props;
+const {
+  title,
+  description,
+  image,
+  transparentNav = false,
+  noindex = false,
+  canonical,
+  showStoreLinks = true,
+} = Astro.props;
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
-    <BaseHead title={title} description={description} image={image} />
+    <BaseHead title={title} description={description} image={image} noindex={noindex} canonical={canonical} />
     <ClientRouter />
   </head>
   <body>
@@ -34,6 +42,6 @@ const { title, description, image, transparentNav = false } = Astro.props;
       />
     )}
     <slot />
-    <Footer data={site.footer} client:load />
+    <Footer data={site.footer} showStoreLinks={showStoreLinks} client:load />
   </body>
 </html>

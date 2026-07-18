@@ -251,7 +251,16 @@ function sourceList(meta: Record<string, unknown>): OriginalUiSource[] {
   const values = Array.isArray(meta.sources) ? meta.sources : [];
   return values.map(value => {
     const item = record(value);
-    return { label: textValue(item, ['label', 'title', 'publisher'], 'Official source'), url: textValue(item, ['url']) || undefined };
+    const role = textValue(item, ['role']) === 'operational' ? 'operational' : 'story';
+    const authorityValue = textValue(item, ['authority']);
+    const authority = authorityValue === 'official' || authorityValue === 'authoritative' ? authorityValue : undefined;
+    return {
+      label: textValue(item, ['label', 'title', 'publisher'], 'Official source'),
+      url: textValue(item, ['url']) || undefined,
+      role,
+      authority,
+      scope: stringList(item, ['scope']),
+    };
   });
 }
 
@@ -297,7 +306,13 @@ function cachedManifestToUi(
 ): OriginalUiDetail {
   const citations = new Map<string, OriginalUiSource>();
   manifest.stops.forEach(stop => stop.citations.forEach(citation => {
-    citations.set(citation.url || citation.title, { label: citation.title, url: citation.url });
+    citations.set(citation.url || citation.title, {
+      label: citation.title,
+      url: citation.url,
+      role: citation.role === 'operational' ? 'operational' : 'story',
+      authority: citation.authority || undefined,
+      scope: Array.isArray(citation.scope) ? citation.scope : [],
+    });
   }));
   const stories = manifestStories(manifest, session);
   const terminalCount = session

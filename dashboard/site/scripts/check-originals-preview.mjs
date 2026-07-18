@@ -43,7 +43,7 @@ assert.match(
 
 for (const requiredText of [
   'Internal preview',
-  'Virtual route validation required before release',
+  'Deterministic whole-route validation passed · Internal preview only',
   'Moab:',
   'Canyons to the Sky',
   'Moab → Island in the Sky',

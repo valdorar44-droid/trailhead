@@ -21,6 +21,10 @@ import OriginalRouteMap from '@/components/originals/OriginalRouteMap';
 import OriginalFeedbackSheet from '@/components/originals/OriginalFeedbackSheet';
 import type { OriginalUiDetail, OriginalUiSession } from '@/components/originals/types';
 import {
+  consumerOriginalPlayerShouldRedirect,
+  originalStartDestination,
+} from '@/lib/originals/mainMapNavigation';
+import {
   createOriginalVirtualDriveLabState,
   nextOriginalVirtualDriveCueProgress,
   ORIGINAL_VIRTUAL_DRIVE_OFF_ROUTE_M,
@@ -72,6 +76,7 @@ export default function OriginalPlayerScreen() {
   const versionValue = Array.isArray(params.version) ? params.version[0] : params.version;
   const requestedVersion = Number.isFinite(Number(versionValue)) ? Number(versionValue) : undefined;
   const simulateValue = Array.isArray(params.simulate) ? params.simulate[0] : params.simulate;
+  const redirectConsumerToMainMap = consumerOriginalPlayerShouldRedirect(simulateValue);
   const originalsRuntime = useOriginalsRuntime();
   const originalsAdminRuntime = useOriginalsAdminRuntime();
   const runtimeRef = useRef(originalsRuntime);
@@ -97,6 +102,43 @@ export default function OriginalPlayerScreen() {
   const driveLabManifestKeyRef = useRef('');
   const driveLabTickBusyRef = useRef(false);
   const isAdmin = useStore(state => Boolean(state.user?.is_admin));
+
+  useEffect(() => {
+    if (!redirectConsumerToMainMap) return;
+    const runtimeManifest = originalsRuntime.manifest;
+    const runtimeSession = originalsRuntime.session;
+    const runtimeMatchesRequest = Boolean(
+      runtimeManifest
+      && runtimeSession
+      && runtimeSession.owner_scope === ownerScope
+      && runtimeSession.pack_id === runtimeManifest.pack_id
+      && runtimeSession.version === runtimeManifest.version
+      && runtimeSession.manifest_id === runtimeManifest.manifest_id
+      && runtimeSession.download_state === 'ready'
+      && runtimeSession.status !== 'stopped'
+      && (!id || runtimeManifest.pack_id === id)
+      && (requestedVersion == null || runtimeManifest.version === requestedVersion)
+    );
+    if (runtimeMatchesRequest && runtimeManifest) {
+      router.replace(originalStartDestination(runtimeManifest.pack_id, runtimeManifest.version) as any);
+      return;
+    }
+    router.replace(
+      id
+        ? { pathname: '/originals/[id]', params: { id, ...(requestedVersion == null ? {} : { version: String(requestedVersion) }) } } as any
+        : '/(tabs)/map' as any,
+    );
+  }, [
+    id,
+    originalsRuntime.session,
+    originalsRuntime.manifest?.pack_id,
+    originalsRuntime.manifest?.manifest_id,
+    originalsRuntime.manifest?.version,
+    ownerScope,
+    redirectConsumerToMainMap,
+    requestedVersion,
+    router,
+  ]);
 
   useEffect(() => () => {
     if (ownsSimulationRouteRef.current && runtimeRef.current.simulation) {
@@ -462,6 +504,15 @@ export default function OriginalPlayerScreen() {
     && originalsRuntime.session?.pack_id === id
     && originalsRuntime.session.download_state !== 'ready'
   );
+
+  if (redirectConsumerToMainMap) {
+    return (
+      <SafeAreaView style={[styles.center, { backgroundColor: C.bg }] }>
+        <ActivityIndicator color={C.orange} />
+        <Text style={[styles.centerText, { color: C.text2 }]}>Opening this Original on the Trailhead map</Text>
+      </SafeAreaView>
+    );
+  }
 
   if (simulateValue === '1' && !isAdmin) {
     return (

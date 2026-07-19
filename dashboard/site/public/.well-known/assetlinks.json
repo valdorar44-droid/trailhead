@@ -7,7 +7,8 @@
       "namespace": "android_app",
       "package_name": "com.trailhead.app",
       "sha256_cert_fingerprints": [
-        "DE:BB:4B:74:EF:C8:94:42:1B:00:B3:E0:92:45:86:77:DA:EB:A5:72:C7:82:74:76:61:AA:FC:93:89:CA:CB:C6"
+        "DE:BB:4B:74:EF:C8:94:42:1B:00:B3:E0:92:45:86:77:DA:EB:A5:72:C7:82:74:76:61:AA:FC:93:89:CA:CB:C6",
+        "56:0A:41:91:BC:AD:1E:3B:70:5A:95:23:13:06:78:09:BE:F1:3A:75:C2:45:EE:81:9D:9E:5B:C0:7C:48:77:05"
       ]
     }
   }

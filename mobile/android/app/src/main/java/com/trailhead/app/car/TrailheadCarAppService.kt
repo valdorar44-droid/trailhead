@@ -28,6 +28,7 @@ import androidx.car.app.navigation.NavigationManagerCallback
 import androidx.car.app.navigation.model.Trip
 import androidx.car.app.validation.HostValidator
 import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleOwner
 import com.trailhead.app.BuildConfig
 import expo.modules.trailheadcarreports.CarReportEnqueueStatus
@@ -125,7 +126,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
       if (!autoDriveEnabled || !navigating) return
       val next = navigationState?.simulateNext() ?: return
       applyProgress(next)
-      if (!next.finalArrival) mainHandler.postDelayed(this, 900L)
+      if (!next.finalArrival && next.arrivedStopIndex == null) mainHandler.postDelayed(this, 900L)
     }
   }
 
@@ -161,7 +162,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     snapshot = TrailheadCarRepository.load(carContext)
     mapSurface = TrailheadCarMapSurface(carContext)
     mapSurface.setSnapshot(snapshot)
-    guidanceScreen = TrailheadCarGuidanceScreen(carContext, this)
+    guidanceScreen = newGuidanceScreen()
     navigationManager = carContext.getCarService(NavigationManager::class.java)
     navigationManager.setNavigationManagerCallback(navigationCallback)
     TrailheadCarLocationService.addListener(locationListener)
@@ -199,7 +200,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
         }
         CarToast.makeText(carContext, message, CarToast.LENGTH_LONG).show()
         val manager = carContext.getCarService(ScreenManager::class.java)
-        if (manager.top !is TrailheadCarGuidanceScreen) manager.push(guidanceScreen)
+        showGuidanceScreen(manager)
         return
       }
       val manager = carContext.getCarService(ScreenManager::class.java)
@@ -209,7 +210,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     }
     val manager = carContext.getCarService(ScreenManager::class.java)
     if (navigating) {
-      if (manager.top !is TrailheadCarGuidanceScreen) manager.push(guidanceScreen)
+      showGuidanceScreen(manager)
     } else {
       manager.popToRoot()
     }
@@ -217,13 +218,13 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
 
   override fun onCarConfigurationChanged(newConfiguration: Configuration) {
     if (::mapSurface.isInitialized) mapSurface.onCarConfigurationChanged()
-    if (::guidanceScreen.isInitialized) guidanceScreen.invalidate()
+    invalidateGuidanceScreen()
   }
 
   override fun startGuidance() {
     if (navigating) {
       val manager = carContext.getCarService(ScreenManager::class.java)
-      if (manager.top !is TrailheadCarGuidanceScreen) manager.push(guidanceScreen)
+      showGuidanceScreen(manager)
       return
     }
     if (!hasGuidancePermissions()) {
@@ -249,11 +250,12 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
         navigationManager.navigationEnded()
         CarToast.makeText(carContext, "Allow location and notifications on your phone when parked.", CarToast.LENGTH_LONG).show()
         return
-      }
+    }
     mapSurface.setSnapshot(snapshot)
     mapSurface.setProgress(null)
-    TrailheadCarLocationService.freshNavigationLocation(MAX_NAVIGATION_LOCATION_AGE_MS)?.let(::handleLocation)
+    guidanceScreen = newGuidanceScreen()
     carContext.getCarService(ScreenManager::class.java).push(guidanceScreen)
+    TrailheadCarLocationService.freshNavigationLocation(MAX_NAVIGATION_LOCATION_AGE_MS)?.let(::handleLocation)
   }
 
   override fun endGuidance() = endGuidance(refreshSnapshot = true)
@@ -284,7 +286,25 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   override fun continueAfterArrival(stopIndex: Int) {
     navigationState?.acknowledgeArrival(stopIndex)
     arrivalPresentedFor = null
-    guidanceScreen.invalidate()
+    invalidateGuidanceScreen()
+    if (autoDriveEnabled && navigating) {
+      mainHandler.removeCallbacks(autoDriveStep)
+      mainHandler.postDelayed(autoDriveStep, 250L)
+    }
+  }
+
+  private fun newGuidanceScreen() = TrailheadCarGuidanceScreen(carContext, this)
+
+  private fun showGuidanceScreen(manager: ScreenManager) {
+    if (manager.top is TrailheadCarGuidanceScreen || manager.top is TrailheadCarArrivalScreen) return
+    guidanceScreen = newGuidanceScreen()
+    manager.push(guidanceScreen)
+  }
+
+  private fun invalidateGuidanceScreen() {
+    if (::guidanceScreen.isInitialized && guidanceScreenCanBeInvalidated(guidanceScreen.lifecycle.currentState)) {
+      guidanceScreen.invalidate()
+    }
   }
 
   override fun toggleMuted() {
@@ -322,7 +342,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   override fun latestLocation(): Location? = TrailheadCarLocationService.freshLocation()
 
   private fun handleLocation(location: Location) {
-    if (!navigating) return
+    if (!shouldApplyLiveCarLocation(navigating, autoDriveEnabled)) return
     val next = navigationState?.update(location) ?: return
     applyProgress(next)
   }
@@ -341,7 +361,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     updateCluster(next)
     updateGuidanceNotification(next)
     speakIfNeeded(next)
-    guidanceScreen.invalidate()
+    invalidateGuidanceScreen()
     val arrival = next.arrivedStopIndex ?: if (next.finalArrival) {
       snapshot.stops.lastIndex.coerceAtLeast(0)
     } else {
@@ -352,6 +372,8 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
       if (next.finalArrival) {
         navigationManager.navigationEnded()
         navigating = false
+        autoDriveEnabled = false
+        mainHandler.removeCallbacks(autoDriveStep)
         TrailheadCarLocationService.stop(carContext)
         activeSpeechId = null
         tts?.stop()
@@ -384,6 +406,9 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   }
 
   private fun speakIfNeeded(current: TrailheadCarProgress) {
+    // Original narration and trigger progress remain phone-owned. The car
+    // displays the authored route without inventing or speaking turn cues.
+    if (snapshot.route?.isOriginalDrive == true) return
     if (muted || !ttsReady || current.offRoute) return
     val step = current.currentStep ?: return
     val isNewStep = current.stepIndex != lastSpokenStep
@@ -545,6 +570,13 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     mapSurface.setSnapshot(next)
     if (routeChanged) routeReplacementRequestedUntilElapsedMs = 0L
 
+    if (shouldEndActiveOriginalGuidance(previous, next, navigating, routeChanged)) {
+      endGuidance(refreshSnapshot = false)
+      carContext.getCarService(ScreenManager::class.java).popToRoot()
+      CarToast.makeText(carContext, "Original ended on phone", CarToast.LENGTH_SHORT).show()
+      return
+    }
+
     if (navigating && routeChanged) {
       val nextRoute = next.route
       if (nextRoute == null) {
@@ -603,6 +635,14 @@ internal fun routeReplacementRequestIsPending(deadlineElapsedMs: Long, nowElapse
   return deadlineElapsedMs > 0L && nowElapsedMs <= deadlineElapsedMs
 }
 
+internal fun guidanceScreenCanBeInvalidated(state: Lifecycle.State): Boolean {
+  return state != Lifecycle.State.DESTROYED
+}
+
+internal fun shouldApplyLiveCarLocation(navigating: Boolean, autoDriveEnabled: Boolean): Boolean {
+  return navigating && !autoDriveEnabled
+}
+
 private fun emptyCarSnapshot(): TrailheadCarSnapshot {
   return TrailheadCarSnapshot(
     state = TrailheadCarSnapshotState.NO_TRIP,
@@ -624,9 +664,23 @@ internal fun shouldPreserveActiveCarRoute(
     current.account.accountId == incoming.account.accountId &&
     current.account.signedIn == incoming.account.signedIn &&
     current.route != null &&
+    !current.route.isOriginalDrive &&
     incoming.route != null &&
+    !incoming.route.isOriginalDrive &&
     current.route.routeId != incoming.route.routeId &&
     incoming.route.mode != TrailheadCarRouteMode.TRAIL_FOLLOW_ACTIVE
+}
+
+internal fun shouldEndActiveOriginalGuidance(
+  current: TrailheadCarSnapshot,
+  incoming: TrailheadCarSnapshot,
+  navigating: Boolean,
+  routeChanged: Boolean,
+): Boolean {
+  return navigating &&
+    routeChanged &&
+    current.route?.isOriginalDrive == true &&
+    incoming.route?.isOriginalDrive != true
 }
 
 private fun formatNotificationDistance(meters: Double): String {

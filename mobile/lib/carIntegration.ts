@@ -3,7 +3,11 @@ import type { TripResult, User } from './api';
 export const CAR_NAVIGATION_SNAPSHOT_VERSION = 1 as const;
 export const CAR_NAVIGATION_SNAPSHOT_FILE = 'car_navigation_snapshot.json';
 
-export type CarNavigationMode = 'road_preview' | 'trail_follow_preview' | 'trail_follow_active';
+export type CarNavigationMode =
+  | 'road_preview'
+  | 'trail_follow_preview'
+  | 'trail_follow_active'
+  | 'original_drive_active';
 
 export type CarAccountState = {
   accountId: string | null;
@@ -93,6 +97,19 @@ export type CarTrailFollowInput = {
   offlineMessage?: string | null;
 };
 
+export type CarOriginalDriveInput = {
+  packId: string;
+  version: number;
+  manifestId: string;
+  title: string;
+  summary?: string | null;
+  coords: [number, number][];
+  totalDistanceM: number;
+  totalDurationS: number;
+  offlineReady: boolean;
+  offlineMessage?: string | null;
+};
+
 type ExpoFileSystem = typeof import('expo-file-system/legacy');
 
 const EMPTY_ACCOUNT: CarAccountState = {
@@ -104,6 +121,7 @@ const EMPTY_ACCOUNT: CarAccountState = {
 
 let latestContext: CarTripContext = { trip: null, account: EMPTY_ACCOUNT, mapboxAccessToken: null };
 let trailFollow: CarTrailFollowInput | null = null;
+let originalDrive: CarOriginalDriveInput | null = null;
 let scheduledRevision = 0;
 let writeTail: Promise<void> = Promise.resolve();
 let fileSystemPromise: Promise<ExpoFileSystem> | null = null;
@@ -339,15 +357,50 @@ function trailNavigation(input: CarTrailFollowInput, tripId: string | null): Car
   };
 }
 
+function originalDriveNavigation(input: CarOriginalDriveInput): CarNavigationRoute | null {
+  const route = coordinates(input.coords);
+  if (route.length < 2) return null;
+  const totalDistanceM = nonNegativeNumber(input.totalDistanceM) ?? geometryDistanceM(route);
+  const totalDurationS = nonNegativeNumber(input.totalDurationS) ?? 0;
+  const destination = route[route.length - 1];
+  const title = text(input.title, 200) || 'Trailhead Original';
+  const step: CarRouteStep = {
+    type: 'continue',
+    modifier: 'straight',
+    name: 'Trailhead Original',
+    instruction: 'Continue on the Original route',
+    distanceM: totalDistanceM ?? 0,
+    durationS: totalDurationS,
+    lat: destination[1],
+    lng: destination[0],
+  };
+  return {
+    mode: 'original_drive_active',
+    tripId: null,
+    routeId: `original:${text(input.packId, 200) || 'selected'}:v${Math.max(1, Math.trunc(input.version || 1))}:${text(input.manifestId, 200) || 'manifest'}`,
+    title,
+    summary: text(input.summary, 500) || null,
+    source: 'trailhead_original',
+    coords: route,
+    steps: [step],
+    legs: [[step]],
+    totalDistanceM,
+    totalDurationS,
+  };
+}
+
 export function buildCarNavigationSnapshot(
   context: CarTripContext,
   trail: CarTrailFollowInput | null = null,
   now = Date.now(),
+  original: CarOriginalDriveInput | null = null,
 ): CarNavigationSnapshot {
   const baseOffline = offlineReadiness(context.trip);
-  const navigation = trail
-    ? trailNavigation(trail, context.trip?.trip_id ?? null)
-    : roadNavigation(context.trip);
+  const navigation = original
+    ? originalDriveNavigation(original)
+    : trail
+      ? trailNavigation(trail, context.trip?.trip_id ?? null)
+      : roadNavigation(context.trip);
   const trailOffline = trail ? {
     ...baseOffline,
     status: trail.offlineReady ? baseOffline.status : 'needs_download' as const,
@@ -355,14 +408,22 @@ export function buildCarNavigationSnapshot(
     trails: trail.offlineReady,
     message: text(trail.offlineMessage, 300) || baseOffline.message,
   } : baseOffline;
+  const activeOffline = original ? {
+    ...baseOffline,
+    status: original.offlineReady ? 'ready' as const : 'needs_download' as const,
+    map: original.offlineReady,
+    navigation: original.offlineReady,
+    tripDownload: original.offlineReady,
+    message: text(original.offlineMessage, 300) || baseOffline.message,
+  } : trailOffline;
   return {
     schemaVersion: CAR_NAVIGATION_SNAPSHOT_VERSION,
     updatedAt: now,
     account: { ...context.account },
     mapboxAccessToken: text(context.mapboxAccessToken, 500) || null,
     navigation,
-    stops: trail ? [] : tripStops(context.trip),
-    offlineReadiness: trailOffline,
+    stops: original || trail ? [] : tripStops(context.trip),
+    offlineReadiness: activeOffline,
   };
 }
 
@@ -421,7 +482,7 @@ async function deleteSnapshotFiles(): Promise<void> {
 
 function scheduleSnapshotWrite(): Promise<void> {
   const revision = ++scheduledRevision;
-  const snapshot = buildCarNavigationSnapshot(latestContext, trailFollow);
+  const snapshot = buildCarNavigationSnapshot(latestContext, trailFollow, Date.now(), originalDrive);
   const operation = writeTail.then(async () => {
     if (revision !== scheduledRevision) return;
     await atomicWriteSnapshot(snapshot);
@@ -435,6 +496,7 @@ export function syncCarNavigationSnapshot(context: CarTripContext): Promise<void
   const accountChanged = latestContext.account.accountId !== context.account.accountId
     || latestContext.account.signedIn !== context.account.signedIn;
   if (tripChanged || accountChanged) trailFollow = null;
+  if (accountChanged) originalDrive = null;
   latestContext = {
     trip: context.trip,
     account: { ...context.account },
@@ -456,6 +518,7 @@ export function setCarTrailFollow(input: CarTrailFollowInput, context?: CarTripC
     coords: coordinates(input.coords),
     steps: Array.isArray(input.steps) ? input.steps : [],
   };
+  originalDrive = null;
   return scheduleSnapshotWrite();
 }
 
@@ -471,10 +534,38 @@ export function clearCarTrailFollow(context?: CarTripContext): Promise<void> {
   return scheduleSnapshotWrite();
 }
 
+export function setCarOriginalDrive(input: CarOriginalDriveInput, context?: CarTripContext): Promise<void> {
+  if (!writesEnabled) return writeTail;
+  if (context) latestContext = {
+    trip: context.trip,
+    account: { ...context.account },
+    mapboxAccessToken: context.mapboxAccessToken ?? latestContext.mapboxAccessToken ?? null,
+  };
+  originalDrive = {
+    ...input,
+    coords: coordinates(input.coords),
+  };
+  trailFollow = null;
+  return scheduleSnapshotWrite();
+}
+
+export function clearCarOriginalDrive(context?: CarTripContext): Promise<void> {
+  if (!writesEnabled) return writeTail;
+  if (context) latestContext = {
+    trip: context.trip,
+    account: { ...context.account },
+    mapboxAccessToken: context.mapboxAccessToken ?? latestContext.mapboxAccessToken ?? null,
+  };
+  if (!originalDrive && !context) return writeTail;
+  originalDrive = null;
+  return scheduleSnapshotWrite();
+}
+
 export function clearCarNavigationSnapshot(): Promise<void> {
   writesEnabled = false;
   latestContext = { trip: null, account: EMPTY_ACCOUNT, mapboxAccessToken: null };
   trailFollow = null;
+  originalDrive = null;
   scheduledRevision += 1;
   const operation = writeTail.then(async () => {
     await deleteSnapshotFiles();

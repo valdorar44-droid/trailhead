@@ -177,6 +177,54 @@ class TrailheadCarRepositoryTest {
   }
 
   @Test
+  fun parsesVersionPinnedOriginalDriveWithoutStoryStops() {
+    val snapshot = TrailheadCarRepository.fromCarJson(
+      JSONObject(
+        """
+        {
+          "schemaVersion": 1,
+          "navigation": {
+            "mode": "original_drive_active",
+            "routeId": "original:moab:v1:manifest-moab-v1",
+            "title": "Moab: Canyons to the Sky",
+            "summary": "11 stories · audio plays on your phone",
+            "source": "trailhead_original",
+            "coords": [[-109.55, 38.57], [-109.72, 38.63]],
+            "steps": [{
+              "type": "continue",
+              "modifier": "straight",
+              "name": "Trailhead Original",
+              "instruction": "Continue on the Original route",
+              "distanceM": 104569,
+              "durationS": 14400
+            }],
+            "totalDistanceM": 104569,
+            "totalDurationS": 14400
+          },
+          "stops": [],
+          "offlineReadiness": {
+            "status": "ready",
+            "map": true,
+            "navigation": true,
+            "tripDownload": true
+          }
+        }
+        """.trimIndent(),
+      ),
+    )
+
+    requireNotNull(snapshot)
+    val route = requireNotNull(snapshot.route)
+    assertEquals(TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE, route.mode)
+    assertTrue(route.isOriginalDrive)
+    assertFalse(route.isTrailFollow)
+    assertEquals("trailhead_original", route.source)
+    assertEquals("Continue on the Original route", route.steps.single().instruction)
+    assertTrue(snapshot.stops.isEmpty())
+    assertTrue(snapshot.offline.ready)
+  }
+
+  @Test
   fun marksAReadableButInvalidTripUnavailable() {
     val snapshot = TrailheadCarRepository.fromJson(
       trip = JSONObject("{\"trip_id\":\"missing-plan\"}"),

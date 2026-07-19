@@ -1,5 +1,6 @@
 package com.trailhead.app.car
 
+import androidx.lifecycle.Lifecycle
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -11,6 +12,14 @@ class TrailheadCarSessionPolicyTest {
     val incoming = snapshot("route-b", TrailheadCarRouteMode.ROAD_PREVIEW)
 
     assertTrue(shouldPreserveActiveCarRoute(current, incoming, navigating = true, routeChanged = true))
+  }
+
+  @Test
+  fun phoneStartedOriginalReplacesActiveCarRoute() {
+    val current = snapshot("route-a", TrailheadCarRouteMode.ROAD_PREVIEW)
+    val incoming = snapshot("original:moab:v1", TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE)
+
+    assertFalse(shouldPreserveActiveCarRoute(current, incoming, navigating = true, routeChanged = true))
   }
 
   @Test
@@ -31,6 +40,16 @@ class TrailheadCarSessionPolicyTest {
     val incoming = snapshot("route-b", TrailheadCarRouteMode.ROAD_PREVIEW)
 
     assertFalse(shouldPreserveActiveCarRoute(current, incoming, navigating = false, routeChanged = true))
+  }
+
+  @Test
+  fun endingAnOriginalOnPhoneEndsItsCarGuidance() {
+    val original = snapshot("original:moab:v1", TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE)
+    val restoredTrip = snapshot("route-a", TrailheadCarRouteMode.ROAD_PREVIEW)
+
+    assertFalse(shouldPreserveActiveCarRoute(original, restoredTrip, navigating = true, routeChanged = true))
+    assertTrue(shouldEndActiveOriginalGuidance(original, restoredTrip, navigating = true, routeChanged = true))
+    assertFalse(shouldEndActiveOriginalGuidance(original, original, navigating = true, routeChanged = false))
   }
 
   @Test
@@ -83,6 +102,21 @@ class TrailheadCarSessionPolicyTest {
         now,
       ),
     )
+  }
+
+  @Test
+  fun destroyedGuidanceScreensAreNeverInvalidated() {
+    assertFalse(guidanceScreenCanBeInvalidated(Lifecycle.State.DESTROYED))
+    assertTrue(guidanceScreenCanBeInvalidated(Lifecycle.State.CREATED))
+    assertTrue(guidanceScreenCanBeInvalidated(Lifecycle.State.STARTED))
+    assertTrue(guidanceScreenCanBeInvalidated(Lifecycle.State.RESUMED))
+  }
+
+  @Test
+  fun liveGpsCannotOverwriteAnActiveAutoDriveSimulation() {
+    assertFalse(shouldApplyLiveCarLocation(navigating = true, autoDriveEnabled = true))
+    assertTrue(shouldApplyLiveCarLocation(navigating = true, autoDriveEnabled = false))
+    assertFalse(shouldApplyLiveCarLocation(navigating = false, autoDriveEnabled = false))
   }
 
   private fun snapshot(routeId: String, mode: TrailheadCarRouteMode): TrailheadCarSnapshot {

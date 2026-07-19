@@ -25,6 +25,22 @@ const nativeRuntimeStubs: Record<string, string> = {
     };
     export const storage = { get: async () => null };
   `,
+  '../carIntegration': `
+    export function buildCarAccountState(user, signedIn) {
+      return {
+        accountId: signedIn && user?.id != null ? String(user.id) : null,
+        signedIn: Boolean(signedIn && user?.id != null),
+        reportsEnabled: false,
+        reportsDisabledReason: signedIn ? null : 'signed_out',
+      };
+    }
+    export async function setCarOriginalDrive() {
+      globalThis.__originalsRuntimeCarSyncCount = (globalThis.__originalsRuntimeCarSyncCount || 0) + 1;
+    }
+    export async function clearCarOriginalDrive() {
+      globalThis.__originalsRuntimeCarClearCount = (globalThis.__originalsRuntimeCarClearCount || 0) + 1;
+    }
+  `,
   './api': `
     export const originalsApi = {
       acquire: (...args) => globalThis.__originalsRuntimeAcquire(...args),
@@ -112,6 +128,8 @@ async function main() {
     __originalsRuntimeAcquire?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeClaimFeatured?: (...args: unknown[]) => Promise<unknown>;
     __originalsRuntimeAnalyticsCount?: number;
+    __originalsRuntimeCarSyncCount?: number;
+    __originalsRuntimeCarClearCount?: number;
   };
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
   globals.__originalsRuntimeEpoch = 0;
@@ -119,6 +137,8 @@ async function main() {
   globals.__originalsRuntimeAcquire = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeClaimFeatured = async () => { throw new Error('unused'); };
   globals.__originalsRuntimeAnalyticsCount = 0;
+  globals.__originalsRuntimeCarSyncCount = 0;
+  globals.__originalsRuntimeCarClearCount = 0;
   const runtimeModule = await loadRuntimeModule();
   const accessGate = deferred<Record<string, unknown>>();
   const accessEntered = deferred<void>();
@@ -288,6 +308,8 @@ async function main() {
   assert.equal(sessionSaveCount, 0, 'the ephemeral simulation session is never persisted by stop');
   assert.equal(setActiveCount, 0, 'the ephemeral simulation session never replaces durable active state');
   assert.equal(globals.__originalsRuntimeAnalyticsCount, 0, 'synthetic lab activity never emits production analytics');
+  assert.equal(globals.__originalsRuntimeCarSyncCount, 0, 'synthetic lab activity never replaces the real Android Auto route');
+  assert.equal(globals.__originalsRuntimeCarClearCount, 0, 'ending the lab never clears the real Android Auto route');
 
   accessOverride = async () => ({ owner_scope: 'account:admin-preview', access_type: 'admin_preview' });
   globals.__originalsRuntimePreviewToken = 'stored-preview-token';

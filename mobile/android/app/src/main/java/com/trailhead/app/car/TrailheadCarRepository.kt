@@ -16,6 +16,7 @@ enum class TrailheadCarRouteMode {
   ROAD_PREVIEW,
   TRAIL_FOLLOW_PREVIEW,
   TRAIL_FOLLOW_ACTIVE,
+  ORIGINAL_DRIVE_ACTIVE,
 }
 
 data class TrailheadCarPoint(
@@ -49,7 +50,11 @@ data class TrailheadCarRoute(
   val totalDurationS: Double,
 ) {
   val isTrailFollow: Boolean
-    get() = mode != TrailheadCarRouteMode.ROAD_PREVIEW
+    get() = mode == TrailheadCarRouteMode.TRAIL_FOLLOW_PREVIEW ||
+      mode == TrailheadCarRouteMode.TRAIL_FOLLOW_ACTIVE
+
+  val isOriginalDrive: Boolean
+    get() = mode == TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE
 }
 
 data class TrailheadCarOfflineReadiness(
@@ -199,6 +204,7 @@ object TrailheadCarRepository {
     val mode = when (clean(value.optString("mode"))) {
       "trail_follow_active" -> TrailheadCarRouteMode.TRAIL_FOLLOW_ACTIVE
       "trail_follow_preview" -> TrailheadCarRouteMode.TRAIL_FOLLOW_PREVIEW
+      "original_drive_active" -> TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE
       else -> TrailheadCarRouteMode.ROAD_PREVIEW
     }
     val geometricDistance = TrailheadCarNavigationMath.routeDistance(points)
@@ -206,7 +212,11 @@ object TrailheadCarRepository {
       mode = mode,
       routeId = clean(value.optString("routeId")).ifEmpty { "saved-route" },
       title = clean(value.optString("title")).ifEmpty {
-        if (mode == TrailheadCarRouteMode.ROAD_PREVIEW) "Saved trip" else "Trail Follow"
+        when (mode) {
+          TrailheadCarRouteMode.ROAD_PREVIEW -> "Saved trip"
+          TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE -> "Trailhead Original"
+          else -> "Trail Follow"
+        }
       },
       summary = shorten(clean(value.optString("summary")), 300),
       source = clean(value.optString("source")).ifEmpty { "saved_trip" },

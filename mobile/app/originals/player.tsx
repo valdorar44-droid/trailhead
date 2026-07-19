@@ -126,7 +126,7 @@ export default function OriginalPlayerScreen() {
     router.replace(
       id
         ? { pathname: '/originals/[id]', params: { id, ...(requestedVersion == null ? {} : { version: String(requestedVersion) }) } } as any
-        : '/(tabs)/map' as any,
+        : '/originals' as any,
     );
   }, [
     id,

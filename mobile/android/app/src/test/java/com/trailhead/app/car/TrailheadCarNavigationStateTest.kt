@@ -80,6 +80,102 @@ class TrailheadCarNavigationStateTest {
   }
 
   @Test
+  fun autoDriveSimulationStopsAtEveryAuthoredArrivalUntilAcknowledged() {
+    val points = (0..20).map { index ->
+      TrailheadCarPoint(lat = 38.50000, lng = -109.50000 + index * 0.002)
+    }
+    val intermediate = TrailheadCarPoint(lat = 38.50000, lng = -109.48900)
+    val destination = points.last()
+    val navigation = TrailheadCarNavigationState(
+      snapshot(
+        points = points,
+        stops = listOf(
+          stop("Start", points.first().lng, "start"),
+          stop("Water", intermediate.lng, "water"),
+          stop("Camp", destination.lng, "camp"),
+        ),
+      ),
+    )
+
+    var progress = navigation.simulateNext()
+    var attempts = 1
+    while (progress.arrivedStopIndex == null && attempts <= points.size + 1) {
+      progress = navigation.simulateNext()
+      attempts += 1
+    }
+
+    assertEquals(1, progress.arrivedStopIndex)
+    assertFalse(progress.finalArrival)
+    assertEquals("simulation must hold the arrival until Continue", progress, navigation.simulateNext())
+
+    navigation.acknowledgeArrival(requireNotNull(progress.arrivedStopIndex))
+    do {
+      progress = navigation.simulateNext()
+      attempts += 1
+    } while (!progress.finalArrival && attempts <= points.size + 3)
+
+    assertEquals(2, progress.arrivedStopIndex)
+    assertTrue(progress.finalArrival)
+    assertEquals(destination, progress.routePoint)
+  }
+
+  @Test
+  fun autoDriveSimulationDoesNotInventAnArrivalForAnOffRouteStop() {
+    val points = (0..8).map { index ->
+      TrailheadCarPoint(lat = 38.50000, lng = -109.50000 + index * 0.002)
+    }
+    val navigation = TrailheadCarNavigationState(
+      snapshot(
+        points = points,
+        stops = listOf(
+          stop("Start", points.first().lng, "start"),
+          TrailheadCarStop("Off route", "", "Stop", "poi", 1, 38.51000, -109.49300),
+          stop("Camp", points.last().lng, "camp"),
+        ),
+      ),
+    )
+
+    var progress = navigation.simulateNext()
+    repeat(points.size + 2) { progress = navigation.simulateNext() }
+
+    assertNull(progress.arrivedStopIndex)
+    assertFalse(progress.finalArrival)
+    assertEquals(1.0, progress.routeProgress, 0.000001)
+  }
+
+  @Test
+  fun autoDriveSimulationCompletesAValidatedRoundTripInStopOrder() {
+    val origin = TrailheadCarPoint(lat = 38.50000, lng = -109.50000)
+    val outbound = TrailheadCarPoint(lat = 38.50000, lng = -109.49000)
+    val turnaround = TrailheadCarPoint(lat = 38.50000, lng = -109.48000)
+    val navigation = TrailheadCarNavigationState(
+      snapshot(
+        points = listOf(origin, outbound, turnaround, outbound, origin),
+        stops = listOf(
+          stop("Start", origin.lng, "start"),
+          stop("Turnaround", turnaround.lng, "poi"),
+          stop("Finish", origin.lng, "finish"),
+        ),
+      ),
+    )
+
+    var progress = navigation.simulateNext()
+    repeat(4) {
+      if (progress.arrivedStopIndex == null) progress = navigation.simulateNext()
+    }
+    assertEquals(1, progress.arrivedStopIndex)
+    assertFalse(progress.finalArrival)
+
+    navigation.acknowledgeArrival(1)
+    repeat(4) {
+      if (!progress.finalArrival) progress = navigation.simulateNext()
+    }
+    assertEquals(2, progress.arrivedStopIndex)
+    assertTrue(progress.finalArrival)
+    assertEquals(1.0, progress.routeProgress, 0.000001)
+  }
+
+  @Test
   fun roundTripArrivalsStayOrderedAndFinishAfterReturningToOrigin() {
     val origin = TrailheadCarPoint(lat = 38.50000, lng = -109.50000)
     val outbound = TrailheadCarPoint(lat = 38.50000, lng = -109.49000)

@@ -342,7 +342,7 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   override fun latestLocation(): Location? = TrailheadCarLocationService.freshLocation()
 
   private fun handleLocation(location: Location) {
-    if (!navigating) return
+    if (!shouldApplyLiveCarLocation(navigating, autoDriveEnabled)) return
     val next = navigationState?.update(location) ?: return
     applyProgress(next)
   }
@@ -637,6 +637,10 @@ internal fun routeReplacementRequestIsPending(deadlineElapsedMs: Long, nowElapse
 
 internal fun guidanceScreenCanBeInvalidated(state: Lifecycle.State): Boolean {
   return state != Lifecycle.State.DESTROYED
+}
+
+internal fun shouldApplyLiveCarLocation(navigating: Boolean, autoDriveEnabled: Boolean): Boolean {
+  return navigating && !autoDriveEnabled
 }
 
 private fun emptyCarSnapshot(): TrailheadCarSnapshot {

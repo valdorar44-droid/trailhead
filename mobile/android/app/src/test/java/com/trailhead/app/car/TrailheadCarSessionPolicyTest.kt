@@ -104,6 +104,13 @@ class TrailheadCarSessionPolicyTest {
     assertTrue(guidanceScreenCanBeInvalidated(Lifecycle.State.RESUMED))
   }
 
+  @Test
+  fun liveGpsCannotOverwriteAnActiveAutoDriveSimulation() {
+    assertFalse(shouldApplyLiveCarLocation(navigating = true, autoDriveEnabled = true))
+    assertTrue(shouldApplyLiveCarLocation(navigating = true, autoDriveEnabled = false))
+    assertFalse(shouldApplyLiveCarLocation(navigating = false, autoDriveEnabled = false))
+  }
+
   private fun snapshot(routeId: String, mode: TrailheadCarRouteMode): TrailheadCarSnapshot {
     val points = listOf(
       TrailheadCarPoint(38.57, -109.53),

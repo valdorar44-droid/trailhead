@@ -666,6 +666,7 @@ internal fun shouldPreserveActiveCarRoute(
     current.route != null &&
     !current.route.isOriginalDrive &&
     incoming.route != null &&
+    !incoming.route.isOriginalDrive &&
     current.route.routeId != incoming.route.routeId &&
     incoming.route.mode != TrailheadCarRouteMode.TRAIL_FOLLOW_ACTIVE
 }

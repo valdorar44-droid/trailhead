@@ -15,6 +15,14 @@ class TrailheadCarSessionPolicyTest {
   }
 
   @Test
+  fun phoneStartedOriginalReplacesActiveCarRoute() {
+    val current = snapshot("route-a", TrailheadCarRouteMode.ROAD_PREVIEW)
+    val incoming = snapshot("original:moab:v1", TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE)
+
+    assertFalse(shouldPreserveActiveCarRoute(current, incoming, navigating = true, routeChanged = true))
+  }
+
+  @Test
   fun activeTrailAndAccountChangesAreApplied() {
     val current = snapshot("route-a", TrailheadCarRouteMode.ROAD_PREVIEW)
     val activeTrail = snapshot("trail-b", TrailheadCarRouteMode.TRAIL_FOLLOW_ACTIVE)

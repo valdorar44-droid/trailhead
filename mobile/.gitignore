@@ -8,6 +8,7 @@ dist/
 *.p12
 *.key
 *.mobileprovision
+google-play-service-account*.json
 *.orig.*
 web-build/
 android/build/

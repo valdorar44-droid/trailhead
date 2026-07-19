@@ -72,6 +72,13 @@ module.exports = {
           category: ['BROWSABLE', 'DEFAULT'],
           data: [
             { scheme: 'https', host: 'gettrailhead.app', pathPrefix: '/originals' },
+          ],
+        },
+        {
+          action: 'VIEW',
+          autoVerify: true,
+          category: ['BROWSABLE', 'DEFAULT'],
+          data: [
             { scheme: 'https', host: 'api.gettrailhead.app', pathPrefix: '/originals' },
           ],
         },

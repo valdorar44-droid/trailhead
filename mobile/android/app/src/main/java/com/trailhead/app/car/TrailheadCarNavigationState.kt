@@ -147,15 +147,33 @@ class TrailheadCarNavigationState(
     if (projection == null || projection.distanceFromRouteM > 450.0) {
       projection = TrailheadCarNavigationMath.project(location, route.points, geometryCumulative)
     }
-    requireNotNull(projection)
-
+    var resolvedProjection = requireNotNull(projection)
     val previousAlong = lastProgress?.distanceAlongRouteM ?: 0.0
-    val along = if (projection.distanceFromRouteM < 180.0) {
-      max(previousAlong - 40.0, projection.distanceAlongRouteM)
-    } else {
-      projection.distanceAlongRouteM
+    if (
+      lastProgress != null &&
+      resolvedProjection.distanceAlongRouteM < previousAlong - 40.0 &&
+      lastSegmentIndex < route.points.lastIndex - 1
+    ) {
+      val forwardProjection = TrailheadCarNavigationMath.project(
+        location,
+        route.points,
+        geometryCumulative,
+        lastSegmentIndex + 1,
+        route.points.lastIndex,
+      )
+      if (
+        forwardProjection != null &&
+        forwardProjection.distanceFromRouteM <= resolvedProjection.distanceFromRouteM + 5.0
+      ) {
+        resolvedProjection = forwardProjection
+      }
     }
-    lastSegmentIndex = projection.segmentIndex
+    val along = if (resolvedProjection.distanceFromRouteM < 180.0) {
+      max(previousAlong - 40.0, resolvedProjection.distanceAlongRouteM)
+    } else {
+      resolvedProjection.distanceAlongRouteM
+    }
+    lastSegmentIndex = resolvedProjection.segmentIndex
     val geometryTotal = geometryCumulative.last().coerceAtLeast(1.0)
     val ratio = (along / geometryTotal).coerceIn(0.0, 1.0)
     if (!hasDepartedOrigin) {
@@ -178,9 +196,9 @@ class TrailheadCarNavigationState(
       (snapshot.stops.isEmpty() && remainingDistance <= 45.0)
     return TrailheadCarProgress(
       location = location,
-      routePoint = projection.point,
-      segmentIndex = projection.segmentIndex,
-      distanceFromRouteM = projection.distanceFromRouteM,
+      routePoint = resolvedProjection.point,
+      segmentIndex = resolvedProjection.segmentIndex,
+      distanceFromRouteM = resolvedProjection.distanceFromRouteM,
       distanceAlongRouteM = along,
       remainingDistanceM = remainingDistance,
       remainingDurationS = remainingDuration,
@@ -189,7 +207,7 @@ class TrailheadCarNavigationState(
       currentStep = currentStep,
       nextStep = nextStep,
       stepRemainingDistanceM = stepRemaining,
-      offRoute = projection.distanceFromRouteM > if (route.isTrailFollow) 55.0 else 90.0,
+      offRoute = resolvedProjection.distanceFromRouteM > if (route.isTrailFollow) 55.0 else 90.0,
       arrivedStopIndex = arrival,
       finalArrival = finalArrival,
     ).also { lastProgress = it }
@@ -202,7 +220,35 @@ class TrailheadCarNavigationState(
   }
 
   fun simulateNext(): TrailheadCarProgress {
-    simulationIndex = (simulationIndex + max(1, route.points.size / 120)).coerceAtMost(route.points.lastIndex)
+    lastProgress?.takeIf {
+      it.arrivedStopIndex == nextStopIndex && it.arrivedStopIndex !in acknowledgedStops
+    }?.let { return it }
+
+    val proposedIndex = (simulationIndex + max(1, route.points.size / 120))
+      .coerceAtMost(route.points.lastIndex)
+    val nextStop = snapshot.stops.getOrNull(nextStopIndex)
+    if (nextStop != null && nextStopIndex !in acknowledgedStops && simulationIndex < route.points.lastIndex) {
+      val stopPoint = TrailheadCarPoint(nextStop.lat, nextStop.lng)
+      val stopProjection = TrailheadCarNavigationMath.project(
+        stopPoint,
+        route.points,
+        geometryCumulative,
+        simulationIndex,
+        route.points.lastIndex,
+      )
+      val stopRouteIndex = stopProjection?.segmentIndex?.plus(1)
+      if (
+        stopProjection != null &&
+        stopProjection.distanceFromRouteM <= ARRIVAL_RADIUS_M &&
+        stopRouteIndex != null &&
+        stopRouteIndex <= proposedIndex
+      ) {
+        simulationIndex = stopRouteIndex
+        return update(stopPoint)
+      }
+    }
+
+    simulationIndex = proposedIndex
     return update(route.points[simulationIndex])
   }
 

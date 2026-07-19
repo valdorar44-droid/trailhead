@@ -125,6 +125,12 @@ assert.ok(
   ),
   'Asset Links must include the current EAS internal signing certificate',
 );
+assert.ok(
+  androidTarget?.sha256_cert_fingerprints?.includes(
+    '56:0A:41:91:BC:AD:1E:3B:70:5A:95:23:13:06:78:09:BE:F1:3A:75:C2:45:EE:81:9D:9E:5B:C0:7C:48:77:05',
+  ),
+  'Asset Links must include the Google Play app-signing certificate',
+);
 assert.doesNotMatch(assetLinksRaw, /PLACEHOLDER|REPLACE_WITH/, 'Asset Links cannot ship placeholders');
 
 const sitemapFiles = collectFiles(fileURLToPath(distPath), (path) => /sitemap.*\.xml$/.test(path));

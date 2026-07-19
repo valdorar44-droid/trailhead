@@ -1,5 +1,6 @@
 package com.trailhead.app.car
 
+import androidx.lifecycle.Lifecycle
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -93,6 +94,14 @@ class TrailheadCarSessionPolicyTest {
         now,
       ),
     )
+  }
+
+  @Test
+  fun destroyedGuidanceScreensAreNeverInvalidated() {
+    assertFalse(guidanceScreenCanBeInvalidated(Lifecycle.State.DESTROYED))
+    assertTrue(guidanceScreenCanBeInvalidated(Lifecycle.State.CREATED))
+    assertTrue(guidanceScreenCanBeInvalidated(Lifecycle.State.STARTED))
+    assertTrue(guidanceScreenCanBeInvalidated(Lifecycle.State.RESUMED))
   }
 
   private fun snapshot(routeId: String, mode: TrailheadCarRouteMode): TrailheadCarSnapshot {

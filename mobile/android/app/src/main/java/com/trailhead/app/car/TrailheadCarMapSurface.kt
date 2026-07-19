@@ -17,6 +17,10 @@ import androidx.car.app.AppManager
 import androidx.car.app.CarContext
 import androidx.car.app.SurfaceCallback
 import androidx.car.app.SurfaceContainer
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.LifecycleRegistry
+import androidx.lifecycle.setViewTreeLifecycleOwner
 import com.mapbox.common.MapboxOptions
 import com.mapbox.geojson.Feature
 import com.mapbox.geojson.FeatureCollection
@@ -68,6 +72,7 @@ class TrailheadCarMapSurface(
   private var virtualDisplay: VirtualDisplay? = null
   private var presentation: Presentation? = null
   private var mapView: MapView? = null
+  private var mapLifecycleOwner: CarMapLifecycleOwner? = null
   private var cancelStyleErrorSubscription: (() -> Unit)? = null
   private var styleLoaded = false
   private var followLocation = true
@@ -294,11 +299,13 @@ class TrailheadCarMapSurface(
         )
         setMaximumFps(30)
       }
+      val nextLifecycleOwner = CarMapLifecycleOwner().apply { create() }
+      nextMap.setViewTreeLifecycleOwner(nextLifecycleOwner)
+      mapLifecycleOwner = nextLifecycleOwner
       mapView = nextMap
       nextPresentation.setContentView(nextMap)
       nextPresentation.show()
-      nextMap.onStart()
-      nextMap.onResume()
+      nextLifecycleOwner.startAndResume()
       fallbackActive = false
       loadMapStyle(nextMap)
     } catch (error: Throwable) {
@@ -332,8 +339,10 @@ class TrailheadCarMapSurface(
     styleLoaded = false
     val currentMap = mapView
     mapView = null
-    runCatching { currentMap?.onStop() }
-    runCatching { currentMap?.onDestroy() }
+    val currentLifecycleOwner = mapLifecycleOwner
+    mapLifecycleOwner = null
+    runCatching { currentLifecycleOwner?.stopAndDestroy() }
+    currentMap?.setViewTreeLifecycleOwner(null)
     val currentPresentation = presentation
     presentation = null
     runCatching { currentPresentation?.dismiss() }
@@ -695,5 +704,33 @@ class TrailheadCarMapSurface(
     const val ROUTE_LAYER = "trailhead-car-route-line"
     const val PROGRESS_LAYER = "trailhead-car-progress-line"
     const val LOCATION_LAYER = "trailhead-car-location"
+  }
+
+  private class CarMapLifecycleOwner : LifecycleOwner {
+    private val registry = LifecycleRegistry(this)
+
+    override val lifecycle: Lifecycle
+      get() = registry
+
+    fun create() {
+      registry.handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+    }
+
+    fun startAndResume() {
+      registry.handleLifecycleEvent(Lifecycle.Event.ON_START)
+      registry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+    }
+
+    fun stopAndDestroy() {
+      if (registry.currentState == Lifecycle.State.RESUMED) {
+        registry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
+      }
+      if (registry.currentState.isAtLeast(Lifecycle.State.STARTED)) {
+        registry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
+      }
+      if (registry.currentState != Lifecycle.State.DESTROYED) {
+        registry.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
+      }
+    }
   }
 }

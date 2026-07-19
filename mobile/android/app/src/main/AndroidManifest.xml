@@ -36,7 +36,7 @@
     <meta-data android:name="expo.modules.updates.EXPO_UPDATE_URL" android:value="https://u.expo.dev/92c016d2-6e63-480e-a483-a6898d7e77d5"/>
     <meta-data android:name="androidx.car.app.minCarApiLevel" android:value="1"/>
     <meta-data android:name="com.google.android.gms.car.application" android:resource="@xml/automotive_app_desc"/>
-    <service android:name=".car.TrailheadCarAppService" android:exported="true">
+    <service android:name=".car.TrailheadCarAppService" android:exported="true" android:intentMatchingFlags="allowNullAction" tools:targetApi="36">
       <intent-filter>
         <action android:name="androidx.car.app.CarAppService"/>
         <category android:name="androidx.car.app.category.NAVIGATION"/>

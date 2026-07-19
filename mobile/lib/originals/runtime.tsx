@@ -10,6 +10,11 @@ import {
 } from 'react';
 import { useStore } from '../store';
 import { accountStorage } from '../storage';
+import {
+  buildCarAccountState,
+  clearCarOriginalDrive,
+  setCarOriginalDrive,
+} from '../carIntegration';
 import { originalsApi } from './api';
 import {
   type OriginalAccessStore,
@@ -68,6 +73,34 @@ import type {
 } from './types';
 
 export type OriginalsRuntimeState = 'idle' | 'ready' | 'tracking' | 'paused' | 'completed' | 'error';
+
+function currentCarTripContext() {
+  const current = useStore.getState();
+  return {
+    trip: current.activeTrip,
+    account: buildCarAccountState(current.user, Boolean(current.token)),
+    mapboxAccessToken: current.mapboxToken,
+  };
+}
+
+function syncOriginalDriveToCar(manifest: OriginalManifestV1) {
+  return setCarOriginalDrive({
+    packId: manifest.pack_id,
+    version: manifest.version,
+    manifestId: manifest.manifest_id,
+    title: manifest.title,
+    summary: `${manifest.stops.length} stories · audio plays on your phone`,
+    coords: manifest.route.geometry.coordinates,
+    totalDistanceM: manifest.route.distance_m,
+    totalDurationS: manifest.route.duration_s,
+    offlineReady: true,
+    offlineMessage: 'Original route and stories are saved on this phone.',
+  }, currentCarTripContext());
+}
+
+function clearOriginalDriveFromCar() {
+  return clearCarOriginalDrive(currentCarTripContext());
+}
 
 export type OriginalsRuntimeValue = {
   state: OriginalsRuntimeState;
@@ -609,6 +642,8 @@ export function OriginalsRuntimeProvider({
       requireActiveActivation();
       if (!simulate) await startLocation(activationIsCurrent);
       requireActiveActivation();
+      if (!simulate) await syncOriginalDriveToCar(cleanManifest).catch(() => {});
+      requireActiveActivation();
       if (active.current_stop_id) {
         await playStop(active.current_stop_id, active.current_audio_position_ms);
         requireActiveActivation();
@@ -616,6 +651,7 @@ export function OriginalsRuntimeProvider({
       return sessionRef.current ?? active;
     } catch (caught) {
       if (activatedSessionId) await stopLocation();
+      if (activatedSessionId && !simulate) await clearOriginalDriveFromCar().catch(() => {});
       if (!scopeIsStillCurrent() || trackingGenerationRef.current !== activationGeneration || stoppingRef.current) {
         throw new Error(scopeIsStillCurrent()
           ? 'Original start was cancelled.'
@@ -812,6 +848,8 @@ export function OriginalsRuntimeProvider({
         await stopLocation();
         return;
       }
+      await syncOriginalDriveToCar(activeManifest).catch(() => {});
+      if (!operationIsCurrent()) return;
     }
     const audioState = await dependencies.audio.getState();
     if (!operationIsCurrent()) return;
@@ -869,6 +907,7 @@ export function OriginalsRuntimeProvider({
             }).catch(() => {});
           }
           await dependencies.sessions.setActive(null).catch(() => {});
+          await clearOriginalDriveFromCar().catch(() => {});
         }
       } finally {
         simulationRef.current = false;
@@ -1290,6 +1329,7 @@ export function OriginalsRuntimeProvider({
     setBundle(restoredBundle);
     setState(resumable.status === 'completed' ? 'completed' : 'ready');
     if (resumable !== active) await dependencies.sessions.setActive(resumable);
+    if (resumable.status !== 'stopped') await syncOriginalDriveToCar(restoredManifest).catch(() => {});
     return resumable;
   }, [dependencies.access, dependencies.audio, dependencies.bundles, dependencies.location, dependencies.sessions]);
 

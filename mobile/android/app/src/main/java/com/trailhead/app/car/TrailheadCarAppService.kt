@@ -384,6 +384,9 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
   }
 
   private fun speakIfNeeded(current: TrailheadCarProgress) {
+    // Original narration and trigger progress remain phone-owned. The car
+    // displays the authored route without inventing or speaking turn cues.
+    if (snapshot.route?.isOriginalDrive == true) return
     if (muted || !ttsReady || current.offRoute) return
     val step = current.currentStep ?: return
     val isNewStep = current.stepIndex != lastSpokenStep
@@ -545,6 +548,13 @@ internal class TrailheadCarSession : Session(), TrailheadCarSessionController {
     mapSurface.setSnapshot(next)
     if (routeChanged) routeReplacementRequestedUntilElapsedMs = 0L
 
+    if (shouldEndActiveOriginalGuidance(previous, next, navigating, routeChanged)) {
+      endGuidance(refreshSnapshot = false)
+      carContext.getCarService(ScreenManager::class.java).popToRoot()
+      CarToast.makeText(carContext, "Original ended on phone", CarToast.LENGTH_SHORT).show()
+      return
+    }
+
     if (navigating && routeChanged) {
       val nextRoute = next.route
       if (nextRoute == null) {
@@ -624,9 +634,22 @@ internal fun shouldPreserveActiveCarRoute(
     current.account.accountId == incoming.account.accountId &&
     current.account.signedIn == incoming.account.signedIn &&
     current.route != null &&
+    !current.route.isOriginalDrive &&
     incoming.route != null &&
     current.route.routeId != incoming.route.routeId &&
     incoming.route.mode != TrailheadCarRouteMode.TRAIL_FOLLOW_ACTIVE
+}
+
+internal fun shouldEndActiveOriginalGuidance(
+  current: TrailheadCarSnapshot,
+  incoming: TrailheadCarSnapshot,
+  navigating: Boolean,
+  routeChanged: Boolean,
+): Boolean {
+  return navigating &&
+    routeChanged &&
+    current.route?.isOriginalDrive == true &&
+    incoming.route?.isOriginalDrive != true
 }
 
 private fun formatNotificationDistance(meters: Double): String {

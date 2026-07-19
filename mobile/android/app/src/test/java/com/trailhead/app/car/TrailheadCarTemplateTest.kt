@@ -114,6 +114,31 @@ class TrailheadCarTemplateTest {
   }
 
   @Test
+  fun originalDriveUsesDisplayOnlyCarLabels() {
+    val snapshot = readySnapshot().copy(
+      tripName = "Moab: Canyons to the Sky",
+      tripSummary = "11 stories · audio plays on your phone",
+      stops = emptyList(),
+      route = requireNotNull(readySnapshot().route).copy(
+        mode = TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE,
+        routeId = "original:moab:v1:manifest-moab-v1",
+        title = "Moab: Canyons to the Sky",
+        source = "trailhead_original",
+      ),
+    )
+
+    val template = render(TrailheadCarHomeScreen(carContext, TestController(snapshot)))
+
+    assertTrue(template is MapWithContentTemplate)
+    val content = (template as MapWithContentTemplate).contentTemplate as PaneTemplate
+    assertEquals(listOf("Show route", "Report"), content.pane.actions.map { it.title.toString() })
+    assertEquals(
+      listOf("Moab: Canyons to the Sky", "Trailhead Original", "Route ready offline"),
+      content.pane.rows.map { it.title.toString() },
+    )
+  }
+
+  @Test
   fun activeGuidanceReturnsNavigationTemplateWithProgressAndControls() {
     val snapshot = readySnapshot()
     val controller = TestController(

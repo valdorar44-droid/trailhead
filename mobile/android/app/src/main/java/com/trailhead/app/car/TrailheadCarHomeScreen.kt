@@ -93,7 +93,7 @@ internal class TrailheadCarHomeScreen(
       )
       .addRow(
         Row.Builder()
-          .setTitle(if (route.isTrailFollow) "Trail Follow" else "Trip route")
+          .setTitle(routeKindTitle(route))
           .addText(stopCountText(snapshot))
           .build(),
       )
@@ -105,7 +105,7 @@ internal class TrailheadCarHomeScreen(
       )
       .addAction(
         Action.Builder()
-          .setTitle(if (route.isTrailFollow) "Follow trail" else "Start route")
+          .setTitle(routeStartActionTitle(route))
           .setBackgroundColor(TRAILHEAD_ACCENT)
           .setOnClickListener(controller::startGuidance)
           .build(),
@@ -139,7 +139,7 @@ internal class TrailheadCarHomeScreen(
       val place = Place.Builder(CarLocation.create(destination.lat, destination.lng)).build()
       list.addItem(
         Row.Builder()
-          .setTitle(if (route.isTrailFollow) "Follow trail" else "Start route")
+          .setTitle(routeStartActionTitle(route))
           .addText(snapshot.tripSummary)
           .setBrowsable(true)
           .setMetadata(Metadata.Builder().setPlace(place).build())
@@ -289,7 +289,7 @@ internal class TrailheadCarNavigationRequestScreen(
     if (matchesSavedRoute && request.mode != TrailheadCarNavigationMode.ADD_A_STOP) {
       pane.addAction(
         Action.Builder()
-          .setTitle(if (controller.snapshot.route?.isTrailFollow == true) "Follow trail" else "Start route")
+          .setTitle(routeStartActionTitle(controller.snapshot.route))
           .setBackgroundColor(TRAILHEAD_ACCENT)
           .setOnClickListener(controller::startGuidance)
           .build(),
@@ -323,7 +323,7 @@ private class TrailheadCarStopScreen(
     if (controller.snapshot.route != null) {
       pane.addAction(
         Action.Builder()
-          .setTitle(if (controller.snapshot.route?.isTrailFollow == true) "Follow trail" else "Start route")
+          .setTitle(routeStartActionTitle(controller.snapshot.route))
           .setBackgroundColor(TRAILHEAD_ACCENT)
           .setOnClickListener(controller::startGuidance)
           .build(),
@@ -355,9 +355,10 @@ internal class TrailheadCarGuidanceScreen(
       return builder.build()
     }
     if (current.offRoute) {
+      val route = controller.snapshot.route
       builder.setNavigationInfo(
-        MessageInfo.Builder(if (controller.snapshot.route?.isTrailFollow == true) "Return to the saved line" else "Off route")
-          .setText(if (controller.snapshot.route?.isTrailFollow == true) "Trail Follow keeps the original line." else "Open Trailhead on your phone when parked to rebuild the route.")
+        MessageInfo.Builder(offRouteTitle(route))
+          .setText(offRouteDetail(route))
           .build(),
       )
     } else {
@@ -412,12 +413,12 @@ internal class TrailheadCarArrivalScreen(
 ) : Screen(carContext) {
   override fun onGetTemplate(): Template {
     val stop = controller.snapshot.stops.getOrNull(stopIndex)
-    val title = if (finalArrival) "Trip complete" else "Arrived at ${stop?.name ?: "stop"}"
+    val title = if (finalArrival) routeCompletionTitle(controller.snapshot.route) else "Arrived at ${stop?.name ?: "stop"}"
     val pane = Pane.Builder()
       .addRow(
         Row.Builder()
           .setTitle(if (finalArrival) controller.snapshot.tripName else stop?.kindLabel ?: "Route stop")
-          .addText(if (finalArrival) "Route finished" else "Stop ${stopIndex + 1} of ${controller.snapshot.stops.size}")
+          .addText(if (finalArrival) routeCompletionDetail(controller.snapshot.route) else "Stop ${stopIndex + 1} of ${controller.snapshot.stops.size}")
           .build(),
       )
     if (finalArrival) {
@@ -664,9 +665,45 @@ internal fun destination(snapshot: TrailheadCarSnapshot): Destination {
   val last = snapshot.stops.lastOrNull()
   return Destination.Builder()
     .setName(last?.name ?: snapshot.tripName)
-    .setAddress(last?.kindLabel ?: if (snapshot.route?.isTrailFollow == true) "Trail Follow" else "Trip destination")
+    .setAddress(last?.kindLabel ?: routeDestinationLabel(snapshot.route))
     .build()
 }
+
+private fun routeKindTitle(route: TrailheadCarRoute?): String = when {
+  route?.isOriginalDrive == true -> "Trailhead Original"
+  route?.isTrailFollow == true -> "Trail Follow"
+  else -> "Trip route"
+}
+
+private fun routeStartActionTitle(route: TrailheadCarRoute?): String = when {
+  route?.isOriginalDrive == true -> "Show route"
+  route?.isTrailFollow == true -> "Follow trail"
+  else -> "Start route"
+}
+
+private fun offRouteTitle(route: TrailheadCarRoute?): String = when {
+  route?.isOriginalDrive == true -> "Return to the Original route"
+  route?.isTrailFollow == true -> "Return to the saved line"
+  else -> "Off route"
+}
+
+private fun offRouteDetail(route: TrailheadCarRoute?): String = when {
+  route?.isOriginalDrive == true -> "Stories continue on your phone."
+  route?.isTrailFollow == true -> "Trail Follow keeps the original line."
+  else -> "Open Trailhead on your phone when parked to rebuild the route."
+}
+
+private fun routeDestinationLabel(route: TrailheadCarRoute?): String = when {
+  route?.isOriginalDrive == true -> "Trailhead Original"
+  route?.isTrailFollow == true -> "Trail Follow"
+  else -> "Trip destination"
+}
+
+private fun routeCompletionTitle(route: TrailheadCarRoute?): String =
+  if (route?.isOriginalDrive == true) "Original complete" else "Trip complete"
+
+private fun routeCompletionDetail(route: TrailheadCarRoute?): String =
+  if (route?.isOriginalDrive == true) "Original route finished" else "Route finished"
 
 private fun stopCountText(snapshot: TrailheadCarSnapshot): String {
   val count = snapshot.stops.size

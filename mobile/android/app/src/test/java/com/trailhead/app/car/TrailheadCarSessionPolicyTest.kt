@@ -34,6 +34,16 @@ class TrailheadCarSessionPolicyTest {
   }
 
   @Test
+  fun endingAnOriginalOnPhoneEndsItsCarGuidance() {
+    val original = snapshot("original:moab:v1", TrailheadCarRouteMode.ORIGINAL_DRIVE_ACTIVE)
+    val restoredTrip = snapshot("route-a", TrailheadCarRouteMode.ROAD_PREVIEW)
+
+    assertFalse(shouldPreserveActiveCarRoute(original, restoredTrip, navigating = true, routeChanged = true))
+    assertTrue(shouldEndActiveOriginalGuidance(original, restoredTrip, navigating = true, routeChanged = true))
+    assertFalse(shouldEndActiveOriginalGuidance(original, original, navigating = true, routeChanged = false))
+  }
+
+  @Test
   fun navigationRequestsMatchCoordinatesAndDestinationNames() {
     val saved = snapshot("Moab weekend", TrailheadCarRouteMode.ROAD_PREVIEW).copy(
       stops = listOf(

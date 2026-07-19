@@ -2,6 +2,7 @@ import type { TripResult } from '../api';
 import {
   buildCarAccountState,
   buildCarNavigationSnapshot,
+  type CarOriginalDriveInput,
   type CarTrailFollowInput,
 } from '../carIntegration';
 
@@ -133,6 +134,30 @@ const trailPreview = buildCarNavigationSnapshot({ trip, account }, {
   mode: 'trail_follow_preview',
 }, now + 2);
 assert(trailPreview.navigation?.mode === 'trail_follow_preview', 'Trail Follow preview remains distinct from active guidance');
+
+const originalDrive: CarOriginalDriveInput = {
+  packId: 'original-moab',
+  version: 1,
+  manifestId: 'manifest-moab-v1',
+  title: 'Moab: Canyons to the Sky',
+  summary: '11 stories · audio plays on your phone',
+  coords: trailCoords,
+  totalDistanceM: 104_569,
+  totalDurationS: 14_400,
+  offlineReady: true,
+  offlineMessage: 'Original route and stories are saved on this phone.',
+};
+const original = buildCarNavigationSnapshot({ trip, account }, trailFollow, now + 3, originalDrive);
+assert(original.navigation?.mode === 'original_drive_active', 'an active Original has an explicit car display mode');
+assert(original.navigation?.routeId === 'original:original-moab:v1:manifest-moab-v1', 'the Original car route is version pinned');
+assert(original.navigation?.source === 'trailhead_original', 'the car snapshot preserves first-party provenance');
+assert(JSON.stringify(original.navigation?.coords) === JSON.stringify(trailCoords), 'the exact authored Original route is shown in the car');
+assert(original.navigation?.steps.length === 1, 'the car receives display guidance without fabricated turns');
+assert(original.navigation?.steps[0]?.instruction === 'Continue on the Original route', 'the car does not invent turn instructions');
+assert(original.stops.length === 0, 'story triggers never become distracting car arrival stops');
+assert(original.offlineReadiness.status === 'ready', 'a verified Original is marked ready for car display');
+assert(original.offlineReadiness.map === true, 'the verified Original map bundle is retained');
+assert(original.offlineReadiness.navigation === true, 'the authored route is available offline');
 
 const serialized = JSON.stringify(trail);
 assert(!serialized.includes('Bearer'), 'snapshot never contains a bearer credential');

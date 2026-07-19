@@ -144,6 +144,11 @@ assert.match(
   /pathname: '\/originals\/\[id\]'/,
   'a cold legacy player link must return to the Original detail instead of opening a blank map',
 );
+assert.match(
+  standalonePlayerSource,
+  /: '\/originals' as any/,
+  'a malformed legacy player link without an Original ID must return to the catalog instead of opening a blank map',
+);
 
 const mainMapPlayerSource = readFileSync(
   fileURLToPath(new NodeURL('../../../components/originals/OriginalsMapPlayerSheet.tsx', import.meta.url)),

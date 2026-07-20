@@ -22,6 +22,8 @@ type Props = {
   onModeChange: (mode: ExploreMode) => void;
   onCategorySelect: (key: ExploreCategoryKey) => void;
   onOpenFilters?: () => void;
+  onOpenOriginals: () => void;
+  showOriginals?: boolean;
   onClearCategory: () => void;
   onClearSaved: () => void;
   onShowMore?: () => void;
@@ -41,6 +43,8 @@ export function ExploreHomeControls({
   onModeChange,
   onCategorySelect,
   onOpenFilters,
+  onOpenOriginals,
+  showOriginals = false,
   onClearCategory,
   onClearSaved,
   onShowMore,
@@ -51,6 +55,7 @@ export function ExploreHomeControls({
   const countLabel = countLabelOverride || ((category === 'guided' || category === 'tours') && shownCount === 0 ? (hasQuery ? 'Try a new search' : 'Search trips') : shownLabel(shownCount));
   return (
     <View style={styles.shell}>
+      {showOriginals ? <OriginalsLane onPress={onOpenOriginals} /> : null}
       <ExploreModeTabs value={mode} onChange={onModeChange} />
       <ExploreCategoryChips selected={category} mode={mode} counts={categoryCounts} onSelect={onCategorySelect} onMore={onOpenFilters} />
       <ExploreFilterRow
@@ -78,6 +83,28 @@ export function ExploreHomeControls({
         />
       ) : null}
     </View>
+  );
+}
+
+function OriginalsLane({ onPress }: { onPress: () => void }) {
+  const C = useTheme();
+  return (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityLabel="Open Trailhead Originals self-guided drives"
+      onPress={onPress}
+      activeOpacity={0.84}
+      style={[styles.originalsLane, { backgroundColor: C.s1, borderColor: C.border }]}
+    >
+      <View style={[styles.originalsIcon, { backgroundColor: C.orange }]}>
+        <Ionicons name="navigate-outline" size={22} color="#FFFFFF" />
+      </View>
+      <View style={styles.originalsCopy}>
+        <Text style={[styles.originalsKicker, { color: C.orange }]}>TRAILHEAD ORIGINALS</Text>
+        <Text style={[styles.originalsTitle, { color: C.text }]}>Self-guided audio drives</Text>
+      </View>
+      <Ionicons name="chevron-forward" size={19} color={C.orange} />
+    </TouchableOpacity>
   );
 }
 
@@ -116,6 +143,41 @@ function shownLabel(count: number) {
 const styles = StyleSheet.create({
   shell: {
     paddingBottom: 8,
+  },
+  originalsLane: {
+    minHeight: 70,
+    marginHorizontal: 20,
+    marginTop: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderRadius: 18,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  originalsIcon: {
+    width: 42,
+    height: 42,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  originalsCopy: {
+    flex: 1,
+    minWidth: 0,
+  },
+  originalsKicker: {
+    fontSize: 9,
+    lineHeight: 12,
+    fontWeight: '900',
+    letterSpacing: 0.75,
+  },
+  originalsTitle: {
+    marginTop: 3,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '900',
   },
   clearButton: {
     alignSelf: 'flex-start',

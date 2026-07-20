@@ -6,7 +6,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { useLocalSearchParams, usePathname, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -45,6 +45,7 @@ import { useStore } from '@/lib/store';
 import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
+import { originalsApi } from '@/lib/originals/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
@@ -2092,6 +2093,7 @@ function GuideScreenContent() {
   const router = useRouter();
   const params = useLocalSearchParams<{ view?: string | string[] }>();
   const user = useStore(st => st.user);
+  const authToken = useStore(st => st.token);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const userLoc = useStore(st => st.userLoc);
@@ -2102,6 +2104,20 @@ function GuideScreenContent() {
   const setMapboxToken = useStore(st => st.setMapboxToken);
   const setPendingNavigatePlace = useStore(st => st.setPendingNavigatePlace);
   const setPendingMapSelection = useStore(st => st.setPendingMapSelection);
+  const [originalsDiscoverable, setOriginalsDiscoverable] = useState(Boolean(user?.is_admin));
+  useFocusEffect(useCallback(() => {
+    let current = true;
+    const requestToken = user?.id == null ? null : authToken ?? null;
+    setOriginalsDiscoverable(Boolean(user?.is_admin));
+    void originalsApi.availability(undefined, requestToken).then(features => {
+      if (!current) return;
+      setOriginalsDiscoverable(Boolean(user?.is_admin || features.originals));
+    }).catch(() => {
+      if (!current) return;
+      setOriginalsDiscoverable(Boolean(user?.is_admin));
+    });
+    return () => { current = false; };
+  }, [authToken, user?.id, user?.is_admin]));
   const tripRepository = useTripRepositorySnapshot();
   const [guide, setGuide] = useState<Record<string, string>>({});
   const [guideLoading, setGuideLoading] = useState(false);
@@ -5248,6 +5264,8 @@ function GuideScreenContent() {
               onModeChange={handleExploreModeChange}
               onCategorySelect={selectExploreHomeCategory}
               onOpenFilters={() => setExploreFilterSheetOpen(true)}
+              onOpenOriginals={() => router.push('/originals' as any)}
+              showOriginals={originalsDiscoverable}
               onClearCategory={() => {
                 setExploreCategory('all');
                 setGuidedTourSearchQuery('');

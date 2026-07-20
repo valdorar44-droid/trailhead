@@ -121,6 +121,13 @@ export const originalsApi = {
     return validateOriginalManifest(response);
   },
 
+  availability(signal?: AbortSignal, authToken?: string | null) {
+    return originalsRequest<{ originals: boolean }>('/api/product/features', {
+      signal,
+      ...(authToken !== undefined ? { authToken } : {}),
+    });
+  },
+
   list(options: ListOriginalsOptions = {}) {
     const query = new URLSearchParams();
     if (options.limit != null) query.set('limit', String(options.limit));

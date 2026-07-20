@@ -1,6 +1,7 @@
 import {
   createAudioPlayer,
   setAudioModeAsync,
+  setIsAudioActiveAsync,
   type AudioPlayer,
   type AudioStatus,
 } from 'expo-audio';
@@ -31,6 +32,7 @@ export type OriginalAudioAdapter = {
   setVolume(volume: number): Promise<void>;
   stop(): Promise<void>;
   unload(): Promise<void>;
+  releaseSession(): Promise<void>;
   getState(): Promise<OriginalAudioPlaybackState>;
 };
 
@@ -43,16 +45,27 @@ const LOCK_SCREEN_METADATA = {
 type AudioSubscription = { remove(): void };
 type PendingLoad = { promise: Promise<AudioStatus>; cancel(): void };
 
-function prepareOriginalsAudioMode() {
+const ORIGINALS_AUDIO_MODE = {
+  playsInSilentMode: true,
+  shouldPlayInBackground: true,
+  interruptionMode: 'doNotMix',
+} as const;
+
+function configureOriginalsAudioMode() {
   // expo-av navigation/Co-Pilot audio shares the native audio session and may
   // have selected a ducking mode while the Original was paused. Reapply the
-  // Originals background mode on every play/resume, serialized with prior
-  // adapter changes, instead of trusting a forever-resolved setup promise.
-  return applyNativeAudioSessionMode(() => setAudioModeAsync({
-    playsInSilentMode: true,
-    shouldPlayInBackground: true,
-    interruptionMode: 'doNotMix',
-  }));
+  // Originals background mode for each load without activating iOS audio while
+  // an asset is still being prepared.
+  return applyNativeAudioSessionMode(() => setAudioModeAsync(ORIGINALS_AUDIO_MODE));
+}
+
+function activateOriginalsAudioSession() {
+  // End tour explicitly deactivates the shared native session. Configure the
+  // category first, then reactivate immediately before narration starts.
+  return applyNativeAudioSessionMode(async () => {
+    await setAudioModeAsync(ORIGINALS_AUDIO_MODE);
+    await setIsAudioActiveAsync(true);
+  });
 }
 
 function waitUntilLoaded(player: AudioPlayer): PendingLoad {
@@ -174,7 +187,7 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
 
     async load(uri, options = {}) {
       await unload();
-      await prepareOriginalsAudioMode();
+      await configureOriginalsAudioMode();
       onState = options.onState;
       onUserPause = options.onUserPause;
       const created = createAudioPlayer(
@@ -217,7 +230,7 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
 
     async play() {
       if (!player) throw new Error('No Trailhead Original narration is loaded.');
-      await prepareOriginalsAudioMode();
+      await activateOriginalsAudioSession();
       plannedPause = false;
       player.play();
     },
@@ -245,6 +258,11 @@ export function createExpoAudioOriginalAudioAdapter(): OriginalAudioAdapter {
     },
 
     unload,
+
+    async releaseSession() {
+      await unload();
+      await applyNativeAudioSessionMode(() => setIsAudioActiveAsync(false));
+    },
 
     async getState() {
       if (!player) return emptyOriginalPlaybackState();

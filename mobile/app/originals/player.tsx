@@ -721,9 +721,15 @@ export default function OriginalPlayerScreen() {
               accessibilityLabel={originalsRuntime.simulation ? 'End trigger test' : 'End tour'}
               onPress={() => originalsRuntime.simulation
                 ? requestClosePlayer()
-                : Alert.alert('End this tour?', 'Your progress is saved and can be resumed later.', [
+                : Alert.alert('End this tour?', 'GPS and narration will stop. Your download and story progress will stay saved.', [
                   { text: 'Keep touring', style: 'cancel' },
-                  { text: 'End for now', onPress: () => void originalsRuntime.pauseTour().then(() => router.replace({ pathname: '/originals/[id]', params: { id, version: String(session.version) } } as any)) },
+                  {
+                    text: 'End tour',
+                    style: 'destructive',
+                    onPress: () => void originalsRuntime.stopTour()
+                      .then(() => router.replace({ pathname: '/originals/[id]', params: { id, version: String(session.version) } } as any))
+                      .catch(error => Alert.alert('Couldn’t end tour', error instanceof Error ? error.message : 'Try again.')),
+                  },
                 ])}
               style={[styles.secondaryButton, { borderColor: C.border }]}
             >

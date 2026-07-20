@@ -146,6 +146,10 @@ const guestAccess = {
   updated_at_ms: 1,
 };
 
+const MOAB_NPS_HERO_PREFIX = 'https://www.nps.gov/common/uploads/structured_data/3C7A525D-1DD8-B71B-0B8E59D2EB39F6D0.jpg';
+const DOWNLOADED_ARTWORK_URI = 'file:///originals/moab/mesa-arch.jpg';
+const AUTHORED_ARTWORK_URI = 'https://cdn.gettrailhead.app/originals/moab-authored.jpg';
+
 async function main() {
   const globals = globalThis as typeof globalThis & {
     __ownedOriginalsState?: { user: { id: string } | null; token: string | null };
@@ -189,6 +193,7 @@ async function main() {
   assert.equal(guest.items.length, 1);
   assert.equal(guest.items[0]?.access, 'owned');
   assert.equal(guest.items[0]?.downloadState, 'not_downloaded');
+  assert.ok(guest.items[0]?.heroImageUrl?.startsWith(MOAB_NPS_HERO_PREFIX), 'Moab never falls back to the generic oval artwork');
   assert.equal(guest.error, undefined);
 
   globals.__ownedOriginalsState = { user: { id: 'A' }, token: 'token-a' };
@@ -220,6 +225,7 @@ async function main() {
     pack_id: 'moab-original',
     version: 1,
     total_bytes: 10,
+    assets: [{ id: 'mesa-arch', kind: 'image', local_uri: DOWNLOADED_ARTWORK_URI }],
   };
   const manifest = {
     pack_id: 'moab-original',
@@ -233,6 +239,34 @@ async function main() {
     access: { surface: 'Paved', vehicle: '', fees: '', accessibility_notes: '' },
     season: { recommended_months: [], closures_note: '' },
   };
+  globals.__ownedOriginalsState = { user: null, token: null };
+  globals.__ownedOriginalsEpoch = 2;
+  globals.__ownedOriginalsAccess = { guest: [guestAccess] };
+  globals.__ownedOriginalsBundleList = async () => [bundle];
+  globals.__ownedOriginalsBundleGet = async () => bundle;
+  globals.__ownedOriginalsManifestLoad = async () => manifest;
+  globals.__ownedOriginalsBundleVerify = async () => true;
+  const downloadedGuest = await service.listOwnedOriginals();
+  assert.equal(
+    downloadedGuest.items[0]?.heroImageUrl,
+    DOWNLOADED_ARTWORK_URI,
+    'a verified download prefers local Original artwork in airplane mode',
+  );
+  const authoredGuestAccess = {
+    ...guestAccess,
+    pack_summary: {
+      ...summary,
+      public_metadata: { ...summary.public_metadata, hero_image_url: AUTHORED_ARTWORK_URI },
+    },
+  };
+  globals.__ownedOriginalsAccess = { guest: [authoredGuestAccess] };
+  const authoredDownloadedGuest = await service.listOwnedOriginals();
+  assert.equal(
+    authoredDownloadedGuest.items[0]?.heroImageUrl,
+    AUTHORED_ARTWORK_URI,
+    'explicit authored artwork wins when a published version provides it',
+  );
+
   globals.__ownedOriginalsState = { user: { id: 'A' }, token: 'token-a' };
   globals.__ownedOriginalsEpoch = 2;
   globals.__ownedOriginalsAccess = { 'account:A': [accountAccess] };
@@ -307,10 +341,16 @@ async function main() {
   };
   globals.__ownedOriginalsList = async (...args) => {
     catalogCalls.push(args);
-    return { items: [summary] };
+    return {
+      items: [{
+        ...summary,
+        public_metadata: { ...summary.public_metadata, hero_image_url: AUTHORED_ARTWORK_URI },
+      }],
+    };
   };
   const guestPreviewCatalog = await service.listOriginals();
   assert.equal(guestPreviewCatalog.length, 1, 'a guest preview credential unlocks the internal catalog');
+  assert.equal(guestPreviewCatalog[0]?.heroImageUrl, AUTHORED_ARTWORK_URI);
   assert.deepEqual(availabilityCalls[0], [undefined, null], 'guest availability is explicitly pinned anonymous');
   assert.equal((catalogCalls[0]?.[0] as { authToken?: string | null })?.authToken, null);
 

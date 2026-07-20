@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  Alert,
   Modal,
   ScrollView,
   StyleSheet,
@@ -164,12 +165,23 @@ export default function OriginalsMapPlayerSheet({
     void runAction(shouldResume ? 'resume' : 'pause', action);
   };
 
-  const endForNow = () => {
+  const endTour = () => {
     if (isCompleted) {
       void runAction('close', runtime.stopTour);
       return;
     }
-    void runAction('end', runtime.pauseTour, () => setExpanded(false));
+    Alert.alert(
+      'End this tour?',
+      'GPS and narration will stop. Your download and story progress will stay saved.',
+      [
+        { text: 'Keep touring', style: 'cancel' },
+        {
+          text: 'End tour',
+          style: 'destructive',
+          onPress: () => void runAction('end', runtime.stopTour),
+        },
+      ],
+    );
   };
 
   if (!panelExpanded) {
@@ -373,7 +385,7 @@ export default function OriginalsMapPlayerSheet({
               ) : null}
               <SheetAction icon="list" label="Stories" onPress={() => setStoriesVisible(true)} />
               <SheetAction icon="chatbubble-ellipses-outline" label="Feedback" onPress={() => setFeedbackVisible(true)} />
-              <SheetAction icon="flag-outline" label={isCompleted ? 'Close recap' : 'End for now'} onPress={endForNow} disabled={Boolean(busyAction)} />
+              <SheetAction icon="flag-outline" label={isCompleted ? 'Close recap' : 'End tour'} onPress={endTour} disabled={Boolean(busyAction)} />
             </View>
           </ScrollView>
         </View>

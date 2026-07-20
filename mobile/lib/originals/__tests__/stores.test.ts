@@ -193,6 +193,33 @@ async function main() {
   assert.equal((await sessions.loadActive())?.owner_scope, accountScope);
   assert.equal((await sessions.list('guest')).length, 0);
 
+  const activeAccount = {
+    ...migrated[0],
+    status: 'active' as const,
+    user_paused: false,
+    updated_at_ms: 400,
+  };
+  await sessions.setActive(activeAccount);
+  const conditionalUpdate = await sessions.setActiveIfCurrent(activeAccount.session_id, {
+    ...activeAccount,
+    current_audio_position_ms: 12_345,
+    updated_at_ms: 450,
+  });
+  assert.equal(conditionalUpdate?.current_audio_position_ms, 12_345);
+  await sessions.save({ ...activeAccount, status: 'stopped', updated_at_ms: 500 });
+  await sessions.setActive(null);
+  const staleHeadlessWrite = await sessions.setActiveIfCurrent(activeAccount.session_id, {
+    ...activeAccount,
+    updated_at_ms: 550,
+  });
+  assert.equal(staleHeadlessWrite, null, 'a cold task cannot revive a session after End tour clears the active pointer');
+  assert.equal(await sessions.loadActive(), null);
+  assert.equal(
+    (await sessions.load(accountScope, manifest.pack_id, manifest.version))?.status,
+    'stopped',
+    'End tour keeps stopped progress history without keeping an active session',
+  );
+
   const access = createOriginalAccessStore(files);
   const summary: OriginalSummary = {
     id: manifest.pack_id,

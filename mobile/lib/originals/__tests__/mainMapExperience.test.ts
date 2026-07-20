@@ -154,24 +154,39 @@ const mainMapPlayerSource = readFileSync(
   fileURLToPath(new NodeURL('../../../components/originals/OriginalsMapPlayerSheet.tsx', import.meta.url)),
   'utf8',
 );
-const endForNowIndex = mainMapPlayerSource.indexOf('const endForNow');
+const originalArtworkSource = readFileSync(
+  fileURLToPath(new NodeURL('../../../components/originals/OriginalArtwork.tsx', import.meta.url)),
+  'utf8',
+);
+assert.match(originalArtworkSource, /onError=\{\(\) => setImageFailed\(true\)\}/, 'failed remote artwork must reveal a durable fallback');
+assert.doesNotMatch(originalArtworkSource, /routeLine/, 'the rejected oval placeholder cannot return');
+const endTourIndex = mainMapPlayerSource.indexOf('const endTour');
 const collapsedPlayerIndex = mainMapPlayerSource.indexOf('if (!panelExpanded)');
-assert.notEqual(endForNowIndex, -1, 'main-map player must define endForNow');
+assert.notEqual(endTourIndex, -1, 'main-map player must define a full End tour action');
 assert.notEqual(collapsedPlayerIndex, -1, 'main-map player must define its collapsed state');
-assert.ok(collapsedPlayerIndex > endForNowIndex, 'collapsed player must follow endForNow');
+assert.ok(collapsedPlayerIndex > endTourIndex, 'collapsed player must follow End tour');
 const completionCloseBlock = mainMapPlayerSource.slice(
-  endForNowIndex,
+  endTourIndex,
   collapsedPlayerIndex,
 );
 assert.match(
   completionCloseBlock,
-  /if \(isCompleted\)[\s\S]*runtime\.stopTour/,
-  'closing a completion recap must remove the Original route and player from the main map',
+  /runtime\.stopTour/,
+  'End tour must remove the Original route and player from the main map',
 );
+assert.doesNotMatch(completionCloseBlock, /runtime\.pauseTour/, 'End tour must never minimize into a resumable pill');
+assert.match(mainMapPlayerSource, /label=\{isCompleted \? 'Close recap' : 'End tour'\}/);
 assert.match(
   mainMapPlayerSource,
   /const shouldResume = isPaused \|\| session\.status === 'ready'/,
   'ready sessions must present a Resume control',
 );
+
+const legacyEndPrompt = standalonePlayerSource.slice(
+  standalonePlayerSource.indexOf("Alert.alert('End this tour?"),
+  standalonePlayerSource.indexOf("style={[styles.secondaryButton", standalonePlayerSource.indexOf("Alert.alert('End this tour?")),
+);
+assert.match(legacyEndPrompt, /originalsRuntime\.stopTour/);
+assert.doesNotMatch(legacyEndPrompt, /originalsRuntime\.pauseTour/);
 
 console.log('Originals main-map experience tests passed.');

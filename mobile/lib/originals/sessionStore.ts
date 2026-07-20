@@ -144,6 +144,34 @@ export function createOriginalSessionStore(
       });
     },
 
+    setActiveIfCurrent(expectedSessionId: string, session: OriginalSessionV1) {
+      return serialized(async () => {
+        const clean = normalizeOriginalSession(session);
+        if (!expectedSessionId || clean.session_id !== expectedSessionId) return null;
+        const key = sessionKey(clean.pack_id, clean.version);
+        const index = await readIndex();
+        if (
+          !index.active
+          || index.active.owner_scope !== clean.owner_scope
+          || index.active.key !== key
+        ) return null;
+        const current = await loadInternal(index.active.owner_scope, index.active.key);
+        if (
+          !current
+          || current.session_id !== expectedSessionId
+          || current.status !== 'active'
+          || current.user_paused
+        ) return null;
+
+        await writeOriginalTextAtomically(files, pathFor(clean.owner_scope, key), JSON.stringify(clean));
+        const existing = index.sessions[clean.owner_scope] ?? [];
+        index.sessions[clean.owner_scope] = [key, ...existing.filter(value => value !== key)];
+        index.active = { owner_scope: clean.owner_scope, key };
+        await writeIndex(index);
+        return clean;
+      });
+    },
+
     loadActive() {
       return serialized(async () => {
         const index = await readIndex();

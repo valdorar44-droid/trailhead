@@ -35,6 +35,14 @@ import type {
 
 type ListUiOptions = { includeOwnedState?: boolean };
 
+const ORIGINAL_HERO_IMAGE_FALLBACKS: Record<string, string> = {
+  // Mesa Arch at Island in the Sky. NPS / Neal Herbert; public-domain NPS
+  // media. Keep this presentation fallback until the next
+  // immutable Moab version carries the same licensed artwork in metadata.
+  'moab-canyons-to-the-sky': 'https://www.nps.gov/common/uploads/structured_data/3C7A525D-1DD8-B71B-0B8E59D2EB39F6D0.jpg?maxwidth=1400&autorotate=false&quality=78&format=jpg',
+  original_moab_canyons_to_sky: 'https://www.nps.gov/common/uploads/structured_data/3C7A525D-1DD8-B71B-0B8E59D2EB39F6D0.jpg?maxwidth=1400&autorotate=false&quality=78&format=jpg',
+};
+
 function record(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -61,6 +69,30 @@ function stringList(source: Record<string, unknown>, keys: string[]) {
     if (Array.isArray(value)) return value.map(item => String(item || '').trim()).filter(Boolean);
   }
   return [];
+}
+
+function originalHeroImageUrl(
+  identity: { id: string; slug: string },
+  metadata: Record<string, unknown>,
+  downloadedArtworkUri?: string,
+) {
+  return textValue(metadata, ['hero_image_url', 'image_url'])
+    || downloadedArtworkUri
+    || ORIGINAL_HERO_IMAGE_FALLBACKS[identity.slug]
+    || ORIGINAL_HERO_IMAGE_FALLBACKS[identity.id]
+    || undefined;
+}
+
+function downloadedHeroArtwork(
+  manifest: OriginalManifestV1,
+  bundle: OriginalBundleRecord | null,
+) {
+  if (!bundle?.assets?.length) return undefined;
+  const authoredArtworkIds = new Set(
+    manifest.stops.map(stop => stop.artwork_asset_id).filter(Boolean),
+  );
+  return bundle.assets.find(asset => authoredArtworkIds.has(asset.id))?.local_uri
+    || bundle.assets.find(asset => asset.kind === 'image')?.local_uri;
 }
 
 function formatDuration(seconds: number) {
@@ -205,7 +237,7 @@ function summaryToUi(
     explorerPriceCredits: item.explorer_price_credits,
     access,
     featured: item.featured,
-    heroImageUrl: textValue(meta, ['hero_image_url', 'image_url']) || undefined,
+    heroImageUrl: originalHeroImageUrl(item, meta),
     progress: totalStops ? terminalCount / totalStops : 0,
     downloadState: options.bundle ? 'ready' : 'not_downloaded',
   };
@@ -300,6 +332,7 @@ function cachedManifestToUi(
   bundle: OriginalBundleRecord | null,
   session: OriginalSessionV1 | null,
 ): OriginalUiDetail {
+  const cachedMetadata = record(access.pack_summary?.public_metadata);
   const citations = new Map<string, OriginalUiSource>();
   manifest.stops.forEach(stop => stop.citations.forEach(citation => {
     citations.set(citation.url || citation.title, {
@@ -339,6 +372,11 @@ function cachedManifestToUi(
     access: 'owned',
     adminPreview: access.access_type === 'admin_preview',
     featured: false,
+    heroImageUrl: originalHeroImageUrl(
+      { id: manifest.pack_id, slug: access.slug },
+      cachedMetadata,
+      downloadedHeroArtwork(manifest, bundle),
+    ),
     progress: manifest.stops.length ? terminalCount / manifest.stops.length : 0,
     downloadState: bundle ? 'ready' : 'not_downloaded',
     overview: manifest.safety.summary,

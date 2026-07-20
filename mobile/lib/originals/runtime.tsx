@@ -43,6 +43,7 @@ import {
   type OriginalLocationAdapter,
 } from './locationAdapter';
 import { validateOriginalManifest } from './manifest';
+import { stopHeadlessOriginalRuntime } from './headlessRuntime';
 import { originalOwnerScopeForAccount, originalRestoreScopeIsCurrent } from './ownership';
 import { getOriginalPreviewToken } from './previewAccess';
 import {
@@ -271,6 +272,7 @@ export function OriginalsRuntimeProvider({
   const handleExternalUserPauseRef = useRef<(state: OriginalAudioPlaybackState) => Promise<void>>(async () => {});
 
   const handleAudioState = useCallback((audioState: OriginalAudioPlaybackState) => {
+    if (stoppingRef.current) return;
     if (mountedRef.current) setAudioPlaybackState(audioState);
     const active = sessionRef.current;
     if (!active) return;
@@ -387,6 +389,9 @@ export function OriginalsRuntimeProvider({
     } catch (error) {
       await dependencies.audio.unload().catch(() => {});
       await releaseAudio();
+      if (originalAudioCoordinator.activeOwner() == null) {
+        await dependencies.audio.releaseSession().catch(() => {});
+      }
       throw error;
     }
   }, [acquireOriginalAudioFocus, dependencies.audio, dependencies.bundles, handleAudioState, publishSession, releaseAudio, requireCurrentAccess]);
@@ -425,6 +430,9 @@ export function OriginalsRuntimeProvider({
         stop_id: completedStopId,
         outcome: 'completed',
       });
+    }
+    if (!queued && originalAudioCoordinator.activeOwner() == null) {
+      await dependencies.audio.releaseSession().catch(() => {});
     }
     if (next.status === 'completed') {
       await stopLocation();
@@ -876,12 +884,48 @@ export function OriginalsRuntimeProvider({
     // Capture the persistence mode before any awaited cleanup. A concurrent
     // stop must never observe simulation=false and save an ephemeral preview.
     const wasSimulation = simulationRef.current;
+    const sessionAtStop = sessionRef.current;
     stoppingRef.current = true;
     trackingGenerationRef.current += 1;
 
     const operation = (async () => {
       try {
+        let exactAudioPositionMs = sessionAtStop?.current_audio_position_ms ?? 0;
+        if (sessionAtStop?.current_stop_id) {
+          const audioState = await dependencies.audio.getState().catch(() => null);
+          if (audioState?.loaded) exactAudioPositionMs = Math.max(0, audioState.position_ms);
+        }
+
+        // Start cancelling the cold runtime before stopping native deliveries.
+        // Its stopping gate consumes (rather than queues) any final callback.
+        const headlessStop = stopHeadlessOriginalRuntime().catch(() => {});
         await stopLocation().catch(() => {});
+        await dependencies.location.stopActive().catch(() => {});
+        let persistenceError: unknown = null;
+        const active = sessionAtStop ?? sessionRef.current;
+        if (!wasSimulation) {
+          if (active) {
+            try {
+              await dependencies.sessions.save({
+                ...active,
+                status: 'stopped',
+                current_audio_position_ms: active.current_stop_id
+                  ? exactAudioPositionMs
+                  : active.current_audio_position_ms,
+                updated_at_ms: Date.now(),
+              });
+            } catch (error) {
+              persistenceError = error;
+            }
+          }
+          try {
+            await dependencies.sessions.setActive(null);
+          } catch (error) {
+            persistenceError ??= error;
+          }
+          await clearOriginalDriveFromCar().catch(() => {});
+        }
+        await headlessStop;
 
         // Cancel a pending native load, then drain any synthetic/native sample
         // that had already passed its generation check. Playback also checks
@@ -896,19 +940,11 @@ export function OriginalsRuntimeProvider({
         await dependencies.audio.stop().catch(() => {});
         await dependencies.audio.unload().catch(() => {});
         await releaseAudio().catch(() => {});
-
-        const active = sessionRef.current;
-        if (!wasSimulation) {
-          if (active) {
-            await dependencies.sessions.save({
-              ...active,
-              status: 'stopped',
-              updated_at_ms: Date.now(),
-            }).catch(() => {});
-          }
-          await dependencies.sessions.setActive(null).catch(() => {});
-          await clearOriginalDriveFromCar().catch(() => {});
+        await originalAudioCoordinator.release('trailhead-originals').catch(() => {});
+        if (originalAudioCoordinator.activeOwner() == null) {
+          await dependencies.audio.releaseSession().catch(() => {});
         }
+        if (persistenceError) throw persistenceError;
       } finally {
         simulationRef.current = false;
         lastTriggerEvaluationRef.current = null;
@@ -936,7 +972,7 @@ export function OriginalsRuntimeProvider({
     };
     operation.then(clear, clear);
     return operation;
-  }, [dependencies.audio, dependencies.sessions, releaseAudio, stopLocation]);
+  }, [dependencies.audio, dependencies.location, dependencies.sessions, releaseAudio, stopLocation]);
 
   const skipCurrentStory = useCallback(async () => {
     const active = sessionRef.current;
@@ -973,9 +1009,14 @@ export function OriginalsRuntimeProvider({
       });
     }
     if (queued) await playStop(queued);
-    else if (next.status === 'completed') {
-      await stopLocation();
-      if (mountedRef.current) setState('completed');
+    else {
+      if (originalAudioCoordinator.activeOwner() == null) {
+        await dependencies.audio.releaseSession().catch(() => {});
+      }
+      if (next.status === 'completed') {
+        await stopLocation();
+        if (mountedRef.current) setState('completed');
+      }
     }
   }, [dependencies.audio, playStop, publishSession, releaseAudio, stopLocation]);
 
@@ -1263,10 +1304,21 @@ export function OriginalsRuntimeProvider({
       useStore.getState().user?.id ?? null,
     );
     const deviceActive = await dependencies.sessions.loadActive();
-    const active = deviceActive?.owner_scope === ownerScope
+    // The explicit active pointer is authoritative. Once End tour clears it,
+    // never infer a resumable drive from historical session files.
+    if (!deviceActive) return null;
+    const latestForScope = deviceActive.owner_scope === ownerScope
       ? deviceActive
       : (await dependencies.sessions.list(ownerScope))
         .sort((a, b) => b.updated_at_ms - a.updated_at_ms)[0] ?? null;
+    // A stopped session is an explicit restore barrier. Do not skip over it
+    // and resurrect an older paused drive after the user chose End tour.
+    if (latestForScope?.status === 'stopped') {
+      // Do not mutate app/car state from an asynchronous restore read: a newer
+      // Start action may already have replaced this stopped session.
+      return null;
+    }
+    const active = latestForScope;
     if (!active || !scopeIsStillCurrent()) return null;
     const access = await dependencies.access.get(ownerScope, active.pack_id, active.version);
     const accessAllowed = access?.owner_scope === ownerScope && (

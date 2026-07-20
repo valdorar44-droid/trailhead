@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import { Image, StyleSheet, Text, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -13,28 +14,34 @@ export default function OriginalArtwork({
   compact?: boolean;
 }) {
   const C = useTheme();
+  const [imageFailed, setImageFailed] = useState(false);
+  useEffect(() => setImageFailed(false), [imageUrl]);
+  const showImage = Boolean(imageUrl && !imageFailed);
   return (
     <View
       accessible={false}
       importantForAccessibility="no-hide-descendants"
       style={[styles.shell, compact ? styles.compact : styles.hero]}
     >
-      {imageUrl ? <Image source={{ uri: imageUrl }} style={StyleSheet.absoluteFillObject} resizeMode="cover" /> : null}
+      {showImage ? (
+        <Image
+          source={{ uri: imageUrl }}
+          style={StyleSheet.absoluteFillObject}
+          resizeMode="cover"
+          onError={() => setImageFailed(true)}
+        />
+      ) : null}
       <LinearGradient
-        colors={imageUrl
+        colors={showImage
           ? ['rgba(5,5,5,0.04)', 'rgba(5,5,5,0.84)']
           : ['#252525', '#141414', '#050505']}
         start={{ x: 0.12, y: 0 }}
         end={{ x: 0.84, y: 1 }}
         style={StyleSheet.absoluteFillObject}
       />
-      {!imageUrl ? (
-        <View style={styles.routeGraphic}>
-          <View style={[styles.routeLine, { borderColor: C.orange + 'D8' }]} />
-          <View style={[styles.routeDot, styles.routeDotOne]} />
-          <View style={[styles.routeDot, styles.routeDotTwo]} />
-          <View style={[styles.routeDot, styles.routeDotThree]} />
-          <Ionicons name="navigate" size={compact ? 26 : 38} color={C.orange} style={styles.routeArrow} />
+      {!showImage ? (
+        <View style={styles.fallbackGraphic}>
+          <Ionicons name="map-outline" size={compact ? 34 : 52} color={C.orange} />
         </View>
       ) : null}
       <View style={styles.shade} />
@@ -53,30 +60,7 @@ const styles = StyleSheet.create({
   shell: { width: '100%', overflow: 'hidden', backgroundColor: '#311910' },
   compact: { height: 128 },
   hero: { height: 282 },
-  routeGraphic: { ...StyleSheet.absoluteFillObject, opacity: 0.9 },
-  routeLine: {
-    position: 'absolute',
-    width: '62%',
-    height: '88%',
-    left: '20%',
-    top: '6%',
-    borderWidth: 3,
-    borderRadius: 999,
-    transform: [{ rotate: '-19deg' }],
-  },
-  routeDot: {
-    position: 'absolute',
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2,
-    borderColor: 'rgba(20,12,8,0.55)',
-  },
-  routeDotOne: { left: '26%', top: '66%' },
-  routeDotTwo: { left: '55%', top: '40%' },
-  routeDotThree: { right: '22%', top: '20%' },
-  routeArrow: { position: 'absolute', right: '16%', bottom: '17%', transform: [{ rotate: '15deg' }] },
+  fallbackGraphic: { ...StyleSheet.absoluteFillObject, alignItems: 'center', justifyContent: 'center', opacity: 0.9 },
   shade: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(0,0,0,0.08)' },
   labelRow: {
     position: 'absolute',

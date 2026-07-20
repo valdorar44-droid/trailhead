@@ -16,3 +16,7 @@ export function processHeadlessOriginalLocationSamples(
 ) {
   return controller.process(samples, stopTracking);
 }
+
+export function stopHeadlessOriginalRuntime() {
+  return controller.stop();
+}

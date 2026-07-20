@@ -59,6 +59,11 @@ const nativeRuntimeStubs: Record<string, string> = {
   './locationAdapter': `
     export const expoOriginalLocationAdapter = {};
   `,
+  './headlessRuntime': `
+    export async function stopHeadlessOriginalRuntime() {
+      globalThis.__originalsRuntimeHeadlessStopCount = (globalThis.__originalsRuntimeHeadlessStopCount || 0) + 1;
+    }
+  `,
   './previewAccess': `
     export async function getOriginalPreviewToken() {
       return globalThis.__originalsRuntimePreviewToken || null;
@@ -130,6 +135,7 @@ async function main() {
     __originalsRuntimeAnalyticsCount?: number;
     __originalsRuntimeCarSyncCount?: number;
     __originalsRuntimeCarClearCount?: number;
+    __originalsRuntimeHeadlessStopCount?: number;
   };
   globals.__originalsRuntimeAuthState = { user: { id: 'admin-preview', is_admin: true }, token: 'admin-token' };
   globals.__originalsRuntimeEpoch = 0;
@@ -139,6 +145,7 @@ async function main() {
   globals.__originalsRuntimeAnalyticsCount = 0;
   globals.__originalsRuntimeCarSyncCount = 0;
   globals.__originalsRuntimeCarClearCount = 0;
+  globals.__originalsRuntimeHeadlessStopCount = 0;
   const runtimeModule = await loadRuntimeModule();
   const accessGate = deferred<Record<string, unknown>>();
   const accessEntered = deferred<void>();
@@ -149,6 +156,16 @@ async function main() {
   let guestClaimCount = 0;
   let entitlementWriteCount = 0;
   let locationStartCount = 0;
+  let locationStopCount = 0;
+  let locationStopActiveCount = 0;
+  let audioStopCount = 0;
+  let audioUnloadCount = 0;
+  let audioReleaseSessionCount = 0;
+  let audioStateListener: ((state: typeof audioState) => void) | undefined;
+  let failNextSessionSave = false;
+  let locationCallback: ((sample: Record<string, unknown>) => Promise<void> | void) | null = null;
+  let activeStoredSession: Record<string, any> | null = null;
+  let storedSessions: Record<string, any>[] = [];
   let accessOverride: (() => Promise<Record<string, unknown>>) | null = null;
   let bundleOverride: (() => Promise<Record<string, unknown>>) | null = null;
   let verifyOverride: (() => Promise<boolean>) | null = null;
@@ -179,6 +196,17 @@ async function main() {
     duration_ms: 60_000,
     did_finish: false,
   };
+  const storeSession = (value: Record<string, any>) => {
+    storedSessions = [
+      value,
+      ...storedSessions.filter(item => !(
+        item.owner_scope === value.owner_scope
+        && item.pack_id === value.pack_id
+        && item.version === value.version
+      )),
+    ];
+    return value;
+  };
   const dependencies = {
     access: {
       async get() {
@@ -207,27 +235,61 @@ async function main() {
       },
     },
     sessions: {
-      async load() { return null; },
-      async loadActive() { return null; },
-      async list() { return []; },
-      async save(value: unknown) { sessionSaveCount += 1; return value; },
-      async setActive(value: unknown) { setActiveCount += 1; return value; },
+      async load(scope: string, packId: string, version: number) {
+        return storedSessions.find(item => (
+          item.owner_scope === scope && item.pack_id === packId && item.version === version
+        )) ?? null;
+      },
+      async loadActive() { return activeStoredSession; },
+      async list(scope: string) { return storedSessions.filter(item => item.owner_scope === scope); },
+      async save(value: Record<string, any>) {
+        sessionSaveCount += 1;
+        if (failNextSessionSave) {
+          failNextSessionSave = false;
+          throw new Error('Injected stopped-session save failure.');
+        }
+        return storeSession(value);
+      },
+      async setActive(value: Record<string, any> | null) {
+        setActiveCount += 1;
+        activeStoredSession = value ? storeSession(value) : null;
+        return activeStoredSession;
+      },
       async migrateGuestToAccount() { return []; },
     },
     location: {
       capabilities: { foreground: true, backgroundTask: true, androidForegroundService: true },
-      async start() { locationStartCount += 1; return { permission: 'granted', stop: async () => {} }; },
-      async stopActive() {},
+      async start(onLocation: (sample: Record<string, unknown>) => Promise<void> | void) {
+        locationStartCount += 1;
+        locationCallback = onLocation;
+        return { permission: 'granted', stop: async () => { locationStopCount += 1; locationCallback = null; } };
+      },
+      async stopActive() { locationStopActiveCount += 1; locationCallback = null; },
     },
     audio: {
       capabilities: { backgroundPlayback: true, lockScreenControls: true },
-      async load() {},
-      async play() { playCount += 1; },
+      async load(_uri: string, options?: { onState?: (state: typeof audioState) => void }) {
+        audioStateListener = options?.onState;
+        audioState.loaded = true;
+        audioState.position_ms = 0;
+      },
+      async play() { playCount += 1; audioState.playing = true; },
       async pause() {},
       async seek() {},
       async setVolume() {},
-      async stop() {},
-      async unload() {},
+      async stop() {
+        audioStopCount += 1;
+        audioState.playing = false;
+        audioState.position_ms = 20_000;
+        audioStateListener?.({ ...audioState });
+      },
+      async unload() {
+        audioUnloadCount += 1;
+        audioState.loaded = false;
+        audioState.playing = false;
+        audioStateListener = undefined;
+      },
+      async releaseSession() { audioReleaseSessionCount += 1; audioState.loaded = false; audioState.playing = false; },
       async getState() { return audioState; },
     },
   };
@@ -327,6 +389,111 @@ async function main() {
   accessOverride = null;
   globals.__originalsRuntimePreviewToken = null;
 
+  sessionSaveCount = 0;
+  setActiveCount = 0;
+  locationStopCount = 0;
+  locationStopActiveCount = 0;
+  audioStopCount = 0;
+  audioUnloadCount = 0;
+  audioReleaseSessionCount = 0;
+  const headlessStopsBeforeRealTour = globals.__originalsRuntimeHeadlessStopCount ?? 0;
+  const carClearsBeforeRealTour = globals.__originalsRuntimeCarClearCount ?? 0;
+  globals.__originalsRuntimeAuthState = { user: { id: 'driver' }, token: 'driver-token' };
+  accessOverride = async () => ({ owner_scope: 'account:driver', access_type: 'entitled' });
+  bundleOverride = async () => ({ ...bundle, owner_scope: 'account:driver' });
+  verifyOverride = async () => true;
+  await act(async () => { await runtime!.startTour(manifest); });
+  assert.equal(locationStartCount, 1, 'a real tour starts the native location adapter');
+  assert.ok(locationCallback);
+  await act(async () => {
+    await locationCallback!({
+      lat: 0,
+      lng: 0.0045,
+      accuracy_m: 10,
+      heading_deg: 90,
+      speed_mps: 10,
+      timestamp_ms: 10_000,
+    });
+    await locationCallback!({
+      lat: 0,
+      lng: 0.0045,
+      accuracy_m: 10,
+      heading_deg: 90,
+      speed_mps: 10,
+      timestamp_ms: 13_100,
+    });
+  });
+  assert.equal(playCount, 1, 'the real tour reached active narration before teardown');
+  audioState.position_ms = 12_345;
+  await act(async () => { await runtime!.stopTour(); });
+  const stoppedSession = storedSessions.find(item => item.owner_scope === 'account:driver');
+  assert.equal(stoppedSession?.status, 'stopped');
+  assert.equal(stoppedSession?.current_audio_position_ms, 12_345, 'End tour persists the exact narration position');
+  assert.equal(activeStoredSession, null, 'End tour clears the durable active pointer');
+  const stoppedRuntime = runtime as Runtime;
+  assert.equal(stoppedRuntime.session, null, 'End tour removes the main-map player immediately');
+  assert.equal(stoppedRuntime.state, 'idle');
+  assert.ok(locationStopCount >= 1, 'End tour calls the attached location stop closure');
+  assert.ok(locationStopActiveCount >= 1, 'End tour stops a persisted native background task');
+  assert.ok(audioStopCount >= 2 && audioUnloadCount >= 2, 'End tour performs an idempotent audio teardown');
+  assert.equal(audioReleaseSessionCount, 1, 'End tour deactivates the native audio session');
+  assert.equal(globals.__originalsRuntimeHeadlessStopCount, headlessStopsBeforeRealTour + 1);
+  assert.equal(globals.__originalsRuntimeCarClearCount, carClearsBeforeRealTour + 1, 'End tour clears Android Auto route context');
+
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(runtime!.session, null, 'a stopped latest session stays closed after a cold relaunch');
+  assert.equal(runtime!.state, 'idle');
+
+  await act(async () => { await runtime!.startTour(manifest); });
+  failNextSessionSave = true;
+  const carClearsBeforeFailedSave = globals.__originalsRuntimeCarClearCount ?? 0;
+  let stopFailure: unknown;
+  await act(async () => {
+    try {
+      await runtime!.stopTour();
+    } catch (error) {
+      stopFailure = error;
+    }
+  });
+  assert.match(String(stopFailure), /Injected stopped-session save failure/);
+  assert.equal(activeStoredSession, null, 'active-pointer cleanup still runs when stopped-history persistence fails');
+  assert.equal(
+    globals.__originalsRuntimeCarClearCount,
+    carClearsBeforeFailedSave + 1,
+    'car cleanup still runs when stopped-history persistence fails',
+  );
+  assert.equal(runtime!.session, null);
+
+  await act(async () => { renderer!.unmount(); });
+  runtime = null;
+  adminRuntime = null;
+  await act(async () => {
+    renderer = TestRenderer.create(
+      React.createElement(
+        runtimeModule.OriginalsRuntimeProvider,
+        { dependencies },
+        React.createElement(CaptureRuntime),
+      ),
+    );
+    await new Promise(resolve => setTimeout(resolve, 0));
+  });
+  assert.equal(runtime!.session, null, 'a cleared active pointer cannot resurrect historical active state after a save failure');
+  accessOverride = null;
+  bundleOverride = null;
+  verifyOverride = null;
+
   globals.__originalsRuntimeAuthState = { user: null, token: null };
   const ownershipRuntime = runtime as unknown as Runtime;
 
@@ -387,13 +554,18 @@ async function main() {
   };
   globals.__originalsRuntimeAuthState = { user: { id: 'account-a' }, token: 'token-a' };
   globals.__originalsRuntimeEpoch = 3;
+  const locationStartsBeforeStaleActivation = locationStartCount;
   const staleStart = ownershipRuntime.startTour(manifest);
   await verifyEntered.promise;
   globals.__originalsRuntimeAuthState = { user: { id: 'account-b' }, token: 'token-b' };
   globals.__originalsRuntimeEpoch = 4;
   verifyGate.resolve(true);
   await assert.rejects(staleStart, /account changed/i);
-  assert.equal(locationStartCount, 0, 'a stale activation never starts background location');
+  assert.equal(
+    locationStartCount,
+    locationStartsBeforeStaleActivation,
+    'a stale activation never starts background location',
+  );
 
   await act(async () => { renderer!.unmount(); });
   console.log('Originals runtime stop-race regression tests passed.');

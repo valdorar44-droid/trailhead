@@ -107,6 +107,18 @@ async function main() {
     assert.equal(requests[4]?.headers.Authorization, undefined);
     assert.equal(requests[4]?.headers['Idempotency-Key'], 'feedback-key');
     assert.equal(requests[4]?.headers['X-Original-Feedback-Token'], 'guest-feedback-token');
+
+    await apiModule.originalsApi.availability(undefined, null);
+    assert.equal(requests[5]?.url, 'https://trailhead.test/api/product/features');
+    assert.equal(requests[5]?.headers.Authorization, undefined, 'a pinned guest availability probe stays anonymous');
+    assert.equal(requests[5]?.headers['X-Trailhead-Originals-Preview'], 'short-lived-preview');
+    assert.equal(globals.__originalsStorageReads, 1, 'a pinned guest probe never rereads auth storage');
+
+    await apiModule.originalsApi.availability(undefined, 'captured-account-token');
+    assert.equal(requests[6]?.url, 'https://trailhead.test/api/product/features');
+    assert.equal(requests[6]?.headers.Authorization, 'Bearer captured-account-token');
+    assert.equal(requests[6]?.headers['X-Trailhead-Originals-Preview'], 'short-lived-preview');
+    assert.equal(globals.__originalsStorageReads, 1, 'a pinned account probe never rereads auth storage');
   } finally {
     globalThis.fetch = previousFetch;
   }

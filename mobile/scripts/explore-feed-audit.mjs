@@ -214,9 +214,16 @@ assert(
 );
 assert(
   !guide.includes('<OriginalsShelf')
-    && exploreHero.includes('onOpenOriginals')
-    && exploreHero.includes('Open Trailhead Originals self-guided drives')
+    && guide.includes('<ExploreHomeControls')
     && guide.includes("onOpenOriginals={() => router.push('/originals' as any)}")
+    && guide.includes('showOriginals={originalsDiscoverable}')
+    && guide.includes('setOriginalsDiscoverable(Boolean(user?.is_admin));')
+    && guide.includes('user?.is_admin || features.originals')
+    && !guide.includes('previewToken || features')
+    && homeControls.includes('showOriginals ? <OriginalsLane onPress={onOpenOriginals}')
+    && homeControls.includes('Open Trailhead Originals self-guided drives')
+    && homeControls.includes('TRAILHEAD ORIGINALS')
+    && homeControls.includes('Self-guided audio drives')
     && !originalsShelf.includes('TrailheadRailSkeleton')
     && originalsShelf.includes("studioOnly ? 'Originals Studio' : 'Self-guided drives'")
     && originalsShelf.includes("isAdmin ? 'Open Originals Studio' : 'See all Trailhead Originals'")

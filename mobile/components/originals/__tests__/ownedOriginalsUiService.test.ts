@@ -66,8 +66,9 @@ const stubs: Record<string, string> = {
       featured: false,
     });
     export const originalsApi = {
+      availability: (...args) => globalThis.__ownedOriginalsAvailability(...args),
       owned: (...args) => globalThis.__ownedOriginalsOwned(...args),
-      list: async () => ({ items: [] }),
+      list: (...args) => globalThis.__ownedOriginalsList(...args),
       restore: async () => ({ items: [] }),
       detail: (...args) => globalThis.__ownedOriginalsDetail(...args),
       manifest: (...args) => globalThis.__ownedOriginalsManifest(...args),
@@ -153,6 +154,8 @@ async function main() {
     __ownedOriginalsAccess?: Record<string, unknown[]>;
     __ownedOriginalsWrites?: unknown[];
     __ownedOriginalsOwned?: (...args: unknown[]) => Promise<unknown>;
+    __ownedOriginalsAvailability?: (...args: unknown[]) => Promise<unknown>;
+    __ownedOriginalsList?: (...args: unknown[]) => Promise<unknown>;
     __ownedOriginalsBundleList?: (...args: unknown[]) => Promise<unknown>;
     __ownedOriginalsBundleGet?: (...args: unknown[]) => Promise<unknown>;
     __ownedOriginalsManifestLoad?: (...args: unknown[]) => Promise<unknown>;
@@ -169,6 +172,8 @@ async function main() {
   globals.__ownedOriginalsAccess = { guest: [guestAccess] };
   globals.__ownedOriginalsWrites = [];
   globals.__ownedOriginalsOwned = async () => ({ items: [] });
+  globals.__ownedOriginalsAvailability = async () => ({ originals: true });
+  globals.__ownedOriginalsList = async () => ({ items: [] });
   globals.__ownedOriginalsBundleList = async () => [];
   globals.__ownedOriginalsBundleGet = async () => null;
   globals.__ownedOriginalsManifestLoad = async () => null;
@@ -289,6 +294,49 @@ async function main() {
     'X-Trailhead-Originals-Preview': 'internal-preview-token',
   }, 'guest asset GETs receive the stored internal preview credential');
   assert.equal(globals.__ownedOriginalsWrites?.length, 0, 'downloading with preview access never creates ownership');
+
+  const availabilityCalls: unknown[][] = [];
+  const catalogCalls: unknown[][] = [];
+  globals.__ownedOriginalsState = { user: null, token: null };
+  globals.__ownedOriginalsEpoch = 7;
+  globals.__ownedOriginalsAccess = { guest: [] };
+  globals.__ownedOriginalsPreviewToken = 'internal-preview-token';
+  globals.__ownedOriginalsAvailability = async (...args) => {
+    availabilityCalls.push(args);
+    return { originals: true };
+  };
+  globals.__ownedOriginalsList = async (...args) => {
+    catalogCalls.push(args);
+    return { items: [summary] };
+  };
+  const guestPreviewCatalog = await service.listOriginals();
+  assert.equal(guestPreviewCatalog.length, 1, 'a guest preview credential unlocks the internal catalog');
+  assert.deepEqual(availabilityCalls[0], [undefined, null], 'guest availability is explicitly pinned anonymous');
+  assert.equal((catalogCalls[0]?.[0] as { authToken?: string | null })?.authToken, null);
+
+  globals.__ownedOriginalsState = { user: { id: 'A' }, token: 'token-a' };
+  globals.__ownedOriginalsEpoch = 8;
+  globals.__ownedOriginalsAccess = { 'account:A': [] };
+  globals.__ownedOriginalsOwned = async () => ({ items: [] });
+  const accountPreviewCatalog = await service.listOriginals();
+  assert.equal(accountPreviewCatalog.length, 1);
+  assert.deepEqual(availabilityCalls[1], [undefined, 'token-a'], 'account availability uses the captured bearer snapshot');
+  assert.equal((catalogCalls[1]?.[0] as { authToken?: string | null })?.authToken, 'token-a');
+
+  let disabledCatalogCalls = 0;
+  globals.__ownedOriginalsState = { user: null, token: null };
+  globals.__ownedOriginalsEpoch = 9;
+  globals.__ownedOriginalsAccess = { guest: [] };
+  globals.__ownedOriginalsAvailability = async () => ({ originals: false });
+  globals.__ownedOriginalsList = async () => {
+    disabledCatalogCalls += 1;
+    return { items: [summary] };
+  };
+  await assert.rejects(service.listOriginals(), /not enabled/i);
+  assert.equal(disabledCatalogCalls, 0, 'a verified disabled release never requests the catalog');
+
+  globals.__ownedOriginalsAvailability = async () => { throw new Error('offline'); };
+  await assert.rejects(service.listOriginals(), /availability could not be verified/i);
 
   console.log('Owned Originals UI service tests passed.');
 }

@@ -1,5 +1,4 @@
 import { useStore } from '@/lib/store';
-import { api } from '@/lib/api';
 import { accountStorage } from '@/lib/storage';
 import {
   ORIGINALS_ANALYTICS_EVENTS,
@@ -96,15 +95,11 @@ function ownerScope(): OriginalOwnerScope {
   return originalOwnerScopeForAccount(useStore.getState().user?.id);
 }
 
-async function originalsAvailability() {
-  const authenticated = Boolean(useStore.getState().token);
-  const [config, accountFeatures] = await Promise.all([
-    api.getConfig().catch(() => null),
-    authenticated ? api.productFeatures().catch(() => null) : Promise.resolve(null),
-  ]);
+async function originalsAvailability(authToken: string | null) {
+  const features = await originalsApi.availability(undefined, authToken).catch(() => null);
   return {
-    verified: Boolean(config || accountFeatures),
-    enabled: Boolean(config?.originals_enabled || accountFeatures?.originals),
+    verified: features != null,
+    enabled: Boolean(features?.originals),
   };
 }
 
@@ -439,7 +434,7 @@ export async function listOriginals(_options: ListUiOptions = {}): Promise<Origi
     accountStorage.epoch(),
     useStore.getState().user?.id ?? null,
   );
-  const availability = await originalsAvailability();
+  const availability = await originalsAvailability(requestToken);
   if (!scopeIsCurrent()) throw new Error('The signed-in account changed. Try again.');
   if (!availability.verified) throw new Error('Trailhead Originals availability could not be verified. Connect and try again.');
   if (!availability.enabled) throw new Error('Trailhead Originals are not enabled in this release.');
@@ -534,7 +529,7 @@ export async function listOwnedOriginals(): Promise<OriginalOwnedUiLoadResult> {
   if (accountId == null) return staleResult();
   const ownedAccountId = accountId;
 
-  const availability = await originalsAvailability();
+  const availability = await originalsAvailability(requestToken);
   if (!scopeIsCurrent()) return staleResult();
   if (!availability.verified) {
     return { items: mergedItems(), verified: false, stale: false, error: OWNED_REFRESH_ERROR };
@@ -618,7 +613,7 @@ export async function getOriginalDetail(id: string, requestedVersion?: number): 
   );
   const local = await cachedDetail(id, requestedVersion, scope, requestIsAdmin);
   if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
-  const availability = await originalsAvailability();
+  const availability = await originalsAvailability(requestToken);
   if (!scopeIsCurrent()) throw new Error(ACCOUNT_CHANGED_ERROR);
   if (availability.enabled) {
     try {

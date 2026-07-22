@@ -27,6 +27,12 @@ const checks = [
     args: ['scripts/plan-workspace-regression-audit.mjs'],
   },
   {
+    label: 'Mounted-tab lifecycle tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/mobileLifecycle.test.ts'],
+  },
+  {
     label: 'Explore feed audit',
     cwd: mobileRoot,
     cmd: 'node',

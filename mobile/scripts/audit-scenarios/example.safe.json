@@ -1,0 +1,20 @@
+{
+  "name": "Read-only discovery example",
+  "actions": [
+    {
+      "type": "capture",
+      "label": "current-screen"
+    },
+    {
+      "type": "swipe",
+      "direction": "up",
+      "durationMs": 350,
+      "label": "scroll-current-list"
+    },
+    {
+      "type": "back",
+      "label": "return"
+    }
+  ]
+}
+

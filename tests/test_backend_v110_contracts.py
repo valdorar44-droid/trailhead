@@ -35,6 +35,10 @@ class BackendV110ContractsTests(unittest.TestCase):
         self.other_id = store.create_user(
             "v110-other@example.com", "v110_other", server._hash_pw("other-password"), "V110-Other",
         )
+        self.admin_id = store.create_user(
+            "v110-admin@example.com", "v110_admin", server._hash_pw("admin-password"), "V110-Admin",
+        )
+        store.set_user_admin(self.admin_id, True)
         self.client = TestClient(server.app)
         with server._BRANCH_REFERRAL_CACHE_LOCK:
             server._BRANCH_REFERRAL_CACHE.clear()
@@ -61,6 +65,41 @@ class BackendV110ContractsTests(unittest.TestCase):
             "category": "campground",
         })
         return place["trailhead_place_id"]
+
+    def test_admin_qa_diagnostics_separates_configured_stage_from_admin_access(self):
+        endpoint = "/api/admin/qa/diagnostics"
+        self.assertEqual(self.client.get(endpoint).status_code, 401)
+        self.assertEqual(
+            self.client.get(endpoint, headers=self._auth_headers()).status_code,
+            403,
+        )
+
+        with patch.dict(os.environ, {
+            "TRAILHEAD_SEARCH_V2_ENABLED": "0",
+            "OFFLINE_BUNDLE_V2_ENABLED": "0",
+            "UI_SYSTEM_V2_ENABLED": "1",
+            "TRAILHEAD_ORIGINALS_STAGE": "internal",
+        }):
+            response = self.client.get(endpoint, headers=self._auth_headers(self.admin_id))
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertEqual(payload["schema"], "admin_qa_diagnostics_v1")
+        self.assertEqual(payload["configured"], {
+            "search_v2": "off",
+            "offline_v2": "off",
+            "ui_system_v2": "public",
+            "originals": "internal",
+        })
+        self.assertEqual(payload["effective_access"], {
+            "search_v2": True,
+            "offline_v2": True,
+            "ui_system_v2": True,
+            "originals": True,
+        })
+        serialized = json.dumps(payload).lower()
+        for forbidden in ("v110-admin", "@example.com", "user_id", "token"):
+            self.assertNotIn(forbidden, serialized)
 
     def _seed_trip(self) -> dict:
         return store.upsert_trip_document_v2(

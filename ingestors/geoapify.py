@@ -6,6 +6,7 @@ photos, and AI-generated text are deliberately excluded from passive results.
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import logging
 import os
 from typing import Iterable
@@ -16,10 +17,19 @@ from db.store import get_cached, set_cached
 from ingestors.provider_guard import provider_budget_available, record_provider_call, runtime_cached_call
 
 GEOAPIFY_PLACES_URL = "https://api.geoapify.com/v2/places"
+GEOAPIFY_AUTOCOMPLETE_URL = "https://api.geoapify.com/v1/geocode/autocomplete"
 GEOAPIFY_PERMISSION_BACKOFF_KEY = "geoapify_permission_backoff_v1"
 GEOAPIFY_QUOTA_BACKOFF_KEY = "geoapify_quota_backoff_v1"
 GEOAPIFY_BACKOFF_TTL_SECONDS = 15 * 60
 GEOAPIFY_PLACES_TTL_SECONDS = int(os.getenv("GEOAPIFY_PLACES_CACHE_TTL_SECONDS", str(10 * 365 * 24 * 60 * 60)))
+GEOAPIFY_AUTOCOMPLETE_TTL_SECONDS = int(os.getenv("GEOAPIFY_AUTOCOMPLETE_CACHE_TTL_SECONDS", "180"))
+try:
+    GEOAPIFY_AUTOCOMPLETE_CACHE_MAX_ENTRIES = max(
+        1,
+        min(int(os.getenv("GEOAPIFY_AUTOCOMPLETE_CACHE_MAX_ENTRIES", "256")), 2048),
+    )
+except ValueError:
+    GEOAPIFY_AUTOCOMPLETE_CACHE_MAX_ENTRIES = 256
 log = logging.getLogger(__name__)
 
 GEOAPIFY_CATEGORY_MAP: dict[str, list[str]] = {
@@ -92,6 +102,14 @@ def geoapify_passive_places_enabled() -> bool:
     return (
         geoapify_enabled()
         and os.getenv("GEOAPIFY_PASSIVE_PLACES_ENABLED", "true").strip().lower() not in {"0", "false", "no", "off"}
+    )
+
+
+def geoapify_durable_search_enabled() -> bool:
+    return (
+        geoapify_enabled()
+        and os.getenv("GEOAPIFY_DURABLE_SEARCH_ENABLED", "true").strip().lower()
+        not in {"0", "false", "no", "off"}
     )
 
 
@@ -235,6 +253,164 @@ def _normalize_feature(feature: dict, requested_category: str) -> dict | None:
         "rich_detail_available": False,
         "rich_detail_locked": False,
     }
+
+
+def _normalize_autocomplete_result(item: dict) -> dict | None:
+    props = item.get("properties") if isinstance(item.get("properties"), dict) else item
+    try:
+        lat = float(props.get("lat"))
+        lng = float(props.get("lon"))
+    except (TypeError, ValueError):
+        coord = _feature_coord(item)
+        if coord is None:
+            return None
+        lat, lng = coord
+    if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    place_id = str(props.get("place_id") or "").strip()
+    name = str(
+        props.get("name")
+        or props.get("address_line1")
+        or props.get("city")
+        or props.get("locality")
+        or props.get("formatted")
+        or ""
+    ).strip()
+    if not place_id or not name:
+        return None
+    raw_categories = props.get("categories")
+    categories = (
+        [str(value).strip() for value in raw_categories if str(value).strip()]
+        if isinstance(raw_categories, list)
+        else []
+    )
+    category = str(props.get("category") or "").strip()
+    if category and category not in categories:
+        categories.append(category)
+    return {
+        "provider_place_id": place_id,
+        "name": name,
+        "formatted": str(props.get("formatted") or props.get("address_line2") or "").strip(),
+        "address_line2": str(props.get("address_line2") or "").strip(),
+        "lat": lat,
+        "lng": lng,
+        "result_type": str(props.get("result_type") or "place").strip().lower(),
+        "categories": categories[:12],
+        "city": str(props.get("city") or props.get("locality") or "").strip(),
+        "state": str(props.get("state") or "").strip(),
+        "country": str(props.get("country") or "").strip(),
+        "country_code": str(props.get("country_code") or "").strip().lower(),
+        "distance_meters": props.get("distance"),
+        "attribution": "OpenStreetMap contributors",
+    }
+
+
+async def get_geoapify_autocomplete(
+    query: str,
+    *,
+    limit: int = 10,
+    center: tuple[float, float] | None = None,
+    bounds: tuple[float, float, float, float] | None = None,
+) -> list[dict]:
+    """Return a short-lived, storage-permitted Geoapify suggestion snapshot.
+
+    The API key stays server-side. Runtime cache and telemetry keys contain only
+    a digest, never the user's search text or provider credential.
+    """
+    clean_query = " ".join(str(query or "").strip().split())[:160]
+    if len(clean_query) < 2 or not geoapify_durable_search_enabled() or _blocked():
+        return []
+    normalized_limit = max(1, min(int(limit or 10), 10))
+    context = [clean_query, str(normalized_limit)]
+    if center:
+        context.extend([f"{float(center[0]):.5f}", f"{float(center[1]):.5f}"])
+    if bounds:
+        context.extend(f"{float(value):.5f}" for value in bounds)
+    request_digest = hashlib.sha256("\0".join(context).encode("utf-8")).hexdigest()
+    cache_key = f"geoapify_autocomplete:v1:{request_digest}"
+
+    async def fetch() -> list[dict]:
+        if not provider_budget_available("geoapify", "autocomplete", reserve=True):
+            return []
+        params = {
+            "text": clean_query,
+            "format": "json",
+            "lang": "en",
+            "limit": str(normalized_limit),
+            "apiKey": os.getenv("GEOAPIFY_API_KEY", "").strip(),
+        }
+        if center:
+            lat, lng = float(center[0]), float(center[1])
+            if -90 <= lat <= 90 and -180 <= lng <= 180:
+                params["bias"] = f"proximity:{lng:.6f},{lat:.6f}"
+        if bounds:
+            west, south, east, north = (float(value) for value in bounds)
+            if -180 <= west < east <= 180 and -90 <= south < north <= 90:
+                params["filter"] = f"rect:{west:.6f},{south:.6f},{east:.6f},{north:.6f}"
+        started = asyncio.get_running_loop().time()
+        response_recorded = False
+        try:
+            async with httpx.AsyncClient(timeout=8) as client:
+                response = await client.get(GEOAPIFY_AUTOCOMPLETE_URL, params=params)
+            record_provider_call(
+                "geoapify",
+                "autocomplete",
+                status_code=response.status_code,
+                duration_ms=round((asyncio.get_running_loop().time() - started) * 1000),
+                source_action="route_editor_suggest",
+                premium_fields=False,
+                source_tier="hosted_lightweight",
+                key=request_digest,
+                budget_reserved=True,
+            )
+            response_recorded = True
+            if response.status_code in {401, 403, 429}:
+                _remember_block(response.status_code, "Geoapify autocomplete unavailable")
+                return []
+            response.raise_for_status()
+            payload = response.json()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            if not response_recorded:
+                record_provider_call(
+                    "geoapify",
+                    "autocomplete",
+                    status_code=None,
+                    duration_ms=round((asyncio.get_running_loop().time() - started) * 1000),
+                    source_action="route_editor_suggest",
+                    premium_fields=False,
+                    source_tier="hosted_lightweight",
+                    key=request_digest,
+                    budget_reserved=True,
+                )
+            log.warning("Geoapify autocomplete failed for request %s", request_digest[:16])
+            return []
+        raw_results = payload.get("results") if isinstance(payload, dict) else []
+        if not isinstance(raw_results, list):
+            raw_results = []
+        normalized: list[dict] = []
+        for item in raw_results:
+            if not isinstance(item, dict):
+                continue
+            result = _normalize_autocomplete_result(item)
+            if result:
+                normalized.append(result)
+            if len(normalized) >= normalized_limit:
+                break
+        return normalized
+
+    return await runtime_cached_call(
+        cache_key,
+        max(1, min(GEOAPIFY_AUTOCOMPLETE_TTL_SECONDS, 600)),
+        fetch,
+        provider="geoapify",
+        endpoint="autocomplete",
+        source_action="route_editor_suggest",
+        source_tier="hosted_lightweight",
+        max_entries=GEOAPIFY_AUTOCOMPLETE_CACHE_MAX_ENTRIES,
+        cache_namespace="geoapify_autocomplete:v1:",
+    )
 
 
 async def _search_category(lat: float, lng: float, radius_m: int, category: str, limit: int) -> list[dict]:

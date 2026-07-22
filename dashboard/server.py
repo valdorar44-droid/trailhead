@@ -1,7 +1,7 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
 import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future as ConcurrentFuture, ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
@@ -129,7 +129,11 @@ from scripts.explore_sources.offers.providers.outdoorsy import (
 from ingestors.ridb import get_campsites_near, get_campsites_search, get_facility_detail, get_campsite_detail as get_ridb_campsite_detail
 from ingestors.osm import get_osm_campsites, get_osm_campsite_detail, get_water_sources, get_trailheads, get_trails, get_viewpoints, get_peaks, get_hot_springs, get_fuel_stations, get_service_places
 from ingestors.nps import get_nps_places, nps_enabled
-from ingestors.geoapify import get_geoapify_places
+from ingestors.geoapify import (
+    geoapify_durable_search_enabled,
+    get_geoapify_autocomplete,
+    get_geoapify_places,
+)
 from ingestors.usfs import get_usfs_recreation_sites
 from ingestors.provider_guard import provider_call_snapshot, record_provider_call, runtime_cached_call
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail, get_blm_recreation_sites
@@ -18752,7 +18756,9 @@ def _search_v2_source_loader() -> tuple[list[SearchDocumentV2], str]:
             if isinstance(place, dict)
         ]
     revision_payload = {
-        "v": 2,
+        # Bump whenever index/filter semantics change so cursors issued by an
+        # older backend fail closed instead of paging through a new ordering.
+        "v": 3,
         "explore_generated_at": int(explore_generated_at or 0),
         "trail_generated_at": int(trail_generated_at or 0),
         "explore_count": len(explore_items),
@@ -18777,7 +18783,10 @@ def _search_v2_source_loader() -> tuple[list[SearchDocumentV2], str]:
 
 def _search_v2_external_kind(value: object) -> str:
     clean = normalize_search_text(value).replace(" ", "_") or "place"
-    if clean in {"city", "place", "locality", "neighborhood", "district", "region", "country"}:
+    if clean in {
+        "city", "place", "locality", "neighborhood", "suburb", "district",
+        "county", "state", "region", "country",
+    }:
         return "destination"
     if clean in {"trail", "trailhead", "hike", "hiking"}:
         return "trail" if clean != "trailhead" else "trailhead"
@@ -18800,28 +18809,188 @@ def _search_v2_mapbox_session_token(session_id: str) -> str:
     return str(uuid.UUID(bytes=bytes(digest)))
 
 
-def _search_v2_mapbox_detail_ref(
+_SEARCH_V2_SELECTION_TTL_SECONDS = 600
+_SEARCH_V2_SELECTION_CLOCK_SKEW_SECONDS = 30
+_SEARCH_V2_RETRIEVE_CACHE_TTL_SECONDS = 600.0
+_SEARCH_V2_RETRIEVE_CACHE_MAX_ENTRIES = 512
+_SEARCH_V2_RETRIEVE_INFLIGHT_MAX_ENTRIES = 256
+_search_v2_retrieve_cache: "OrderedDict[str, tuple[float, SearchResultV2 | None]]" = OrderedDict()
+_search_v2_retrieve_inflight: "dict[str, ConcurrentFuture]" = {}
+_search_v2_retrieve_cache_lock = threading.RLock()
+
+
+def _search_v2_provider_detail_ref(
+    provider: str,
     request: SearchRequestV2,
     provider_id: str,
+    *,
+    issued_at: int | None = None,
 ) -> str:
-    """Sign a resolution-only suggestion for this exact search session/scope."""
+    """Sign a short-lived resolution reference for one search session/scope."""
+    provider_name = str(provider or "").strip().lower()
+    if provider_name not in {"mapbox", "geoapify"}:
+        raise ValueError("unsupported search provider")
+    issued = int(time.time()) if issued_at is None else int(issued_at)
     context = request.model_dump(
         mode="json",
         exclude={"cursor", "limit"},
         exclude_none=True,
     )
     payload = json.dumps(
-        {"v": 1, "provider_id": provider_id, "request": context},
+        {
+            "v": 2,
+            "issued_at": issued,
+            "provider_id": provider_id,
+            "request": context,
+        },
         sort_keys=True,
         ensure_ascii=False,
         separators=(",", ":"),
     ).encode("utf-8")
     signature = hmac.new(
         str(settings.secret_key).encode("utf-8"),
-        b"search-v2-mapbox-selection\0" + payload,
+        f"search-v2-{provider_name}-selection\0".encode("utf-8") + payload,
         hashlib.sha256,
     ).hexdigest()[:32]
-    return f"provider:mapbox:{provider_id}:{signature}"
+    return f"provider:{provider_name}:v2:{issued}:{signature}"
+
+
+def _search_v2_mapbox_detail_ref(
+    request: SearchRequestV2,
+    provider_id: str,
+    *,
+    issued_at: int | None = None,
+) -> str:
+    return _search_v2_provider_detail_ref(
+        "mapbox", request, provider_id, issued_at=issued_at,
+    )
+
+
+def _search_v2_validate_provider_detail_ref(
+    provider: str,
+    request: SearchRequestV2,
+    provider_id: str,
+    selected_detail_ref: str,
+    *,
+    now: int | None = None,
+) -> int:
+    """Validate signature and age before any provider/cache operation."""
+    provider_name = str(provider or "").strip().lower()
+    if provider_name not in {"mapbox", "geoapify"}:
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "This search suggestion can no longer be resolved.",
+        })
+    match = re.fullmatch(
+        rf"provider:{re.escape(provider_name)}:v2:([0-9]{{10,12}}):([0-9a-f]{{32}})",
+        str(selected_detail_ref or ""),
+    )
+    if not match:
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "This search suggestion can no longer be resolved.",
+        })
+    issued_at = int(match.group(1))
+    current = int(time.time()) if now is None else int(now)
+    if (
+        issued_at > current + _SEARCH_V2_SELECTION_CLOCK_SKEW_SECONDS
+        or current - issued_at > _SEARCH_V2_SELECTION_TTL_SECONDS
+    ):
+        raise HTTPException(422, {
+            "code": "search_selection_expired",
+            "message": "This search suggestion has expired. Search again to continue.",
+        })
+    expected_ref = _search_v2_provider_detail_ref(
+        provider_name, request, provider_id, issued_at=issued_at,
+    )
+    if not hmac.compare_digest(selected_detail_ref, expected_ref):
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "This search suggestion no longer matches this search session.",
+        })
+    return issued_at
+
+
+def _search_v2_validate_mapbox_detail_ref(
+    request: SearchRequestV2,
+    provider_id: str,
+    selected_detail_ref: str,
+    *,
+    now: int | None = None,
+) -> int:
+    return _search_v2_validate_provider_detail_ref(
+        "mapbox", request, provider_id, selected_detail_ref, now=now,
+    )
+
+
+def _search_v2_retrieve_cache_key(
+    selected_result_id: str, selected_detail_ref: str,
+) -> str:
+    return hashlib.sha256(
+        f"{selected_result_id}\0{selected_detail_ref}".encode("utf-8"),
+    ).hexdigest()
+
+
+def _search_v2_retrieve_cache_get(
+    key: str,
+) -> tuple[bool, SearchResultV2 | None]:
+    now = time.monotonic()
+    with _search_v2_retrieve_cache_lock:
+        cached = _search_v2_retrieve_cache.get(key)
+        if cached is None:
+            return False, None
+        expires_at, selected = cached
+        if expires_at <= now:
+            _search_v2_retrieve_cache.pop(key, None)
+            return False, None
+        _search_v2_retrieve_cache.move_to_end(key)
+        return True, selected
+
+
+def _search_v2_retrieve_cache_put(
+    key: str, selected: SearchResultV2 | None,
+) -> None:
+    with _search_v2_retrieve_cache_lock:
+        _search_v2_retrieve_cache[key] = (
+            time.monotonic() + _SEARCH_V2_RETRIEVE_CACHE_TTL_SECONDS,
+            selected,
+        )
+        _search_v2_retrieve_cache.move_to_end(key)
+        while len(_search_v2_retrieve_cache) > _SEARCH_V2_RETRIEVE_CACHE_MAX_ENTRIES:
+            _search_v2_retrieve_cache.popitem(last=False)
+
+
+def _search_v2_retrieve_inflight_join(
+    key: str,
+) -> tuple[ConcurrentFuture | None, bool]:
+    """Join one provider retrieve or become its leader, within a hard bound."""
+    with _search_v2_retrieve_cache_lock:
+        existing = _search_v2_retrieve_inflight.get(key)
+        if existing is not None:
+            return existing, False
+        if len(_search_v2_retrieve_inflight) >= _SEARCH_V2_RETRIEVE_INFLIGHT_MAX_ENTRIES:
+            return None, False
+        future: ConcurrentFuture = ConcurrentFuture()
+        _search_v2_retrieve_inflight[key] = future
+        return future, True
+
+
+def _search_v2_retrieve_inflight_finish(
+    key: str,
+    future: ConcurrentFuture,
+    *,
+    selected: SearchResultV2 | None = None,
+    error: BaseException | None = None,
+) -> None:
+    """Publish one leader outcome and always release its per-key slot."""
+    with _search_v2_retrieve_cache_lock:
+        if not future.done():
+            if error is None:
+                future.set_result(selected)
+            else:
+                future.set_exception(error)
+        if _search_v2_retrieve_inflight.get(key) is future:
+            _search_v2_retrieve_inflight.pop(key, None)
 
 
 async def _search_v2_external_mapbox(
@@ -18926,6 +19095,166 @@ async def _search_v2_external_mapbox(
     return results[:max(1, min(int(limit), 10))]
 
 
+def _search_v2_geoapify_detail_ref(
+    request: SearchRequestV2,
+    provider_id: str,
+    *,
+    issued_at: int | None = None,
+) -> str:
+    return _search_v2_provider_detail_ref(
+        "geoapify", request, provider_id, issued_at=issued_at,
+    )
+
+
+def _search_v2_geoapify_source_label(result_type: str) -> str:
+    clean = normalize_search_text(result_type).replace(" ", "_")
+    if clean in {"address", "building", "street", "postcode"}:
+        return "Address"
+    if clean in {"city", "locality", "suburb", "district", "county"}:
+        return "Town or city"
+    if clean in {"state", "region", "country"}:
+        return "Region"
+    return "Place"
+
+
+def _search_v2_geoapify_result(
+    item: dict,
+    request: SearchRequestV2,
+    *,
+    index: int = 0,
+    durable: bool,
+) -> SearchResultV2 | None:
+    provider_id = _clean_mapbox_param(
+        str(item.get("provider_place_id") or ""),
+        r"[^a-zA-Z0-9_=:.+\-/]+",
+        180,
+    )
+    title = re.sub(r"\s+", " ", str(item.get("name") or "").strip())[:140]
+    if not provider_id or not title:
+        return None
+    result_type = normalize_search_text(item.get("result_type")).replace(" ", "_") or "place"
+    kind = (
+        "destination"
+        if request.intent == "destination"
+        else _search_v2_external_kind(result_type)
+    )
+    categories: list[str] = []
+    for value in [result_type, kind, *(item.get("categories") or [])]:
+        clean = normalize_search_text(value).replace(" ", "_")[:40]
+        if clean and clean not in categories:
+            categories.append(clean)
+        if len(categories) >= 12:
+            break
+    subtitle = re.sub(
+        r"\s+", " ",
+        str(item.get("formatted") or item.get("address_line2") or "").strip(),
+    )[:180] or None
+    if subtitle and normalize_search_text(subtitle) == normalize_search_text(title):
+        subtitle = None
+    parent = re.sub(
+        r"\s+", " ",
+        ", ".join(
+            str(value).strip()
+            for value in [item.get("state"), item.get("country")]
+            if str(value or "").strip()
+        ),
+    )[:100] or None
+    distance_meters = None
+    try:
+        if item.get("distance_meters") is not None:
+            distance_meters = max(0.0, float(item["distance_meters"]))
+    except (TypeError, ValueError):
+        distance_meters = None
+    coordinates = None
+    if durable:
+        try:
+            lat, lng = float(item.get("lat")), float(item.get("lng"))
+        except (TypeError, ValueError):
+            return None
+        if not (-90 <= lat <= 90 and -180 <= lng <= 180):
+            return None
+        coordinates = SearchCenterV2(lat=lat, lng=lng)
+    result = SearchResultV2(
+        result_id=f"geoapify:{provider_id}",
+        canonical_place_id=None,
+        title=title,
+        subtitle=subtitle,
+        kind=kind,
+        categories=categories or [kind],
+        coordinates=coordinates,
+        parent=parent,
+        distance_meters=round(distance_meters, 1) if distance_meters is not None else None,
+        provenance=SearchProvenanceV2(
+            provider="geoapify",
+            source_label=_search_v2_geoapify_source_label(result_type),
+            provider_result_id=provider_id,
+            attribution=re.sub(
+                r"\s+", " ",
+                str(item.get("attribution") or "OpenStreetMap contributors").strip(),
+            )[:160],
+            temporary_use_only=not durable,
+        ),
+        persistence_policy="durable_external" if durable else "temporary",
+        detail_ref=None if durable else _search_v2_geoapify_detail_ref(request, provider_id),
+        score=100_000.0 + max(0, int(index)),
+        match_reason="explicit_selection" if durable else "provider_fallback",
+    )
+    return _external_result_for_request(result, request)
+
+
+async def _search_v2_geoapify_candidates(
+    request: SearchRequestV2,
+    limit: int,
+) -> list[dict]:
+    center = (request.center.lat, request.center.lng) if request.center else None
+    bounds = (
+        (
+            request.bounds.west,
+            request.bounds.south,
+            request.bounds.east,
+            request.bounds.north,
+        )
+        if request.bounds else None
+    )
+    return await get_geoapify_autocomplete(
+        request.query,
+        limit=max(1, min(int(limit), 10)),
+        center=center,
+        bounds=bounds,
+    )
+
+
+async def _search_v2_external_geoapify(
+    request: SearchRequestV2, limit: int, mode: str,
+) -> list[SearchResultV2]:
+    del mode
+    if (
+        request.surface != "route_editor"
+        or request.intent not in {"any", "destination"}
+        or request.scope == "offline"
+        or not request.session_id
+        or not geoapify_durable_search_enabled()
+    ):
+        return []
+    candidates = await _search_v2_geoapify_candidates(request, limit)
+    results: list[SearchResultV2] = []
+    for index, item in enumerate(candidates):
+        result = _search_v2_geoapify_result(
+            item, request, index=index, durable=False,
+        )
+        if result is not None:
+            results.append(result)
+    return results[:max(1, min(int(limit), 10))]
+
+
+async def _search_v2_external_provider(
+    request: SearchRequestV2, limit: int, mode: str,
+) -> list[SearchResultV2]:
+    if request.surface == "route_editor" and request.intent in {"any", "destination"}:
+        return await _search_v2_external_geoapify(request, limit, mode)
+    return await _search_v2_external_mapbox(request, limit, mode)
+
+
 def _search_v2_mapbox_result_from_feature(
     feature: dict,
     request: SearchRequestV2,
@@ -18999,6 +19328,7 @@ async def _search_v2_resolve_mapbox_selection(
     *,
     selected_result_id: str,
     selected_detail_ref: str,
+    external_subject: str,
 ) -> SearchResolveResponseV2:
     if not request.include_external or not request.session_id or not settings.mapbox_token:
         raise HTTPException(422, {
@@ -19015,29 +19345,66 @@ async def _search_v2_resolve_mapbox_selection(
             "code": "invalid_search_selection",
             "message": "This search suggestion can no longer be resolved.",
         })
-    expected_ref = _search_v2_mapbox_detail_ref(request, provider_id)
-    if not hmac.compare_digest(selected_detail_ref, expected_ref):
-        raise HTTPException(422, {
-            "code": "invalid_search_selection",
-            "message": "This search suggestion no longer matches this search session.",
-        })
-    data = await _mapbox_get(
-        "https://api.mapbox.com/search/searchbox/v1/retrieve/"
-        f"{quote(provider_id, safe='')}",
-        _searchbox_params({
-            "session_token": _search_v2_mapbox_session_token(request.session_id),
-            "language": "en",
-        }),
+    _search_v2_validate_mapbox_detail_ref(
+        request, provider_id, selected_detail_ref,
     )
-    selected = None
-    for feature in data.get("features", []):
-        if not isinstance(feature, dict):
-            continue
-        selected = _search_v2_mapbox_result_from_feature(
-            feature, request, provider_id,
-        )
-        if selected is not None:
-            break
+    cache_key = _search_v2_retrieve_cache_key(
+        selected_result_id, selected_detail_ref,
+    )
+    cache_hit, selected = _search_v2_retrieve_cache_get(cache_key)
+    if not cache_hit:
+        inflight, is_leader = _search_v2_retrieve_inflight_join(cache_key)
+        if inflight is None:
+            raise HTTPException(429, {
+                "code": "search_provider_busy",
+                "message": "Search is busy. Try again in a moment.",
+            })
+        if not is_leader:
+            # Shield the shared concurrent future so one disconnected follower
+            # cannot cancel the provider request for every other waiter.
+            selected = await asyncio.shield(asyncio.wrap_future(inflight))
+        else:
+            try:
+                # Close the small cache-miss/join race: another leader may have
+                # completed between our first cache read and slot acquisition.
+                cache_hit, selected = _search_v2_retrieve_cache_get(cache_key)
+                if not cache_hit:
+                    if not _search_v2_service.consume_external_budget(
+                        request.session_id, external_subject,
+                    ):
+                        raise HTTPException(429, {
+                            "code": "search_provider_rate_limited",
+                            "message": "Search is busy. Try again in a moment.",
+                        })
+                    data = await _mapbox_get(
+                        "https://api.mapbox.com/search/searchbox/v1/retrieve/"
+                        f"{quote(provider_id, safe='')}",
+                        _searchbox_params({
+                            "session_token": _search_v2_mapbox_session_token(request.session_id),
+                            "language": "en",
+                        }),
+                    )
+                    selected = None
+                    for feature in data.get("features", []):
+                        if not isinstance(feature, dict):
+                            continue
+                        selected = _search_v2_mapbox_result_from_feature(
+                            feature, request, provider_id,
+                        )
+                        if selected is not None:
+                            break
+                    # Cache both successful and empty retrieves. A signed
+                    # selection is idempotent inside its short validity window.
+                    _search_v2_retrieve_cache_put(cache_key, selected)
+            except BaseException as exc:
+                _search_v2_retrieve_inflight_finish(
+                    cache_key, inflight, error=exc,
+                )
+                raise
+            else:
+                _search_v2_retrieve_inflight_finish(
+                    cache_key, inflight, selected=selected,
+                )
     _count, revision = await _search_v2_service.prewarm()
     if selected is None:
         return SearchResolveResponseV2(
@@ -19046,6 +19413,117 @@ async def _search_v2_resolve_mapbox_selection(
             selected=None,
             alternatives=[],
             reason="selected_result_outside_scope",
+            revision=revision,
+        )
+    return SearchResolveResponseV2(
+        query=request.query,
+        status="resolved",
+        selected=selected,
+        alternatives=[],
+        reason="explicit_selection",
+        revision=revision,
+    )
+
+
+async def _search_v2_resolve_geoapify_selection(
+    request: SearchRequestV2,
+    *,
+    selected_result_id: str,
+    selected_detail_ref: str,
+    external_subject: str,
+) -> SearchResolveResponseV2:
+    if (
+        request.surface != "route_editor"
+        or request.intent not in {"any", "destination"}
+        or not request.include_external
+        or not request.session_id
+        or not geoapify_durable_search_enabled()
+    ):
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "That place is no longer available. Search again or drop a pin.",
+        })
+    provider_id = _clean_mapbox_param(
+        selected_result_id.removeprefix("geoapify:"),
+        r"[^a-zA-Z0-9_=:.+\-/]+",
+        180,
+    )
+    if not provider_id or selected_result_id != f"geoapify:{provider_id}":
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "That place is no longer available. Search again or drop a pin.",
+        })
+    _search_v2_validate_provider_detail_ref(
+        "geoapify", request, provider_id, selected_detail_ref,
+    )
+    cache_key = _search_v2_retrieve_cache_key(
+        selected_result_id, selected_detail_ref,
+    )
+    cache_hit, selected = _search_v2_retrieve_cache_get(cache_key)
+    if not cache_hit:
+        inflight, is_leader = _search_v2_retrieve_inflight_join(cache_key)
+        if inflight is None:
+            raise HTTPException(429, {
+                "code": "search_provider_busy",
+                "message": "Search is busy. Try again in a moment.",
+            })
+        if not is_leader:
+            selected = await asyncio.shield(asyncio.wrap_future(inflight))
+        else:
+            try:
+                cache_hit, selected = _search_v2_retrieve_cache_get(cache_key)
+                if not cache_hit:
+                    if not _search_v2_service.consume_external_budget(
+                        request.session_id, external_subject,
+                    ):
+                        raise HTTPException(429, {
+                            "code": "search_provider_rate_limited",
+                            "message": "Search is busy. Try again in a moment.",
+                        })
+                    try:
+                        candidates = await asyncio.wait_for(
+                            _search_v2_geoapify_candidates(request, 10),
+                            timeout=max(
+                                0.5,
+                                min(_search_v2_external_timeout_seconds(), 2.5),
+                            ),
+                        )
+                    except TimeoutError as exc:
+                        raise HTTPException(503, {
+                            "code": "search_provider_unavailable",
+                            "message": "That place is no longer available. Search again or drop a pin.",
+                        }) from exc
+                    selected = None
+                    for item in candidates:
+                        candidate_id = _clean_mapbox_param(
+                            str(item.get("provider_place_id") or ""),
+                            r"[^a-zA-Z0-9_=:.+\-/]+",
+                            180,
+                        )
+                        if candidate_id != provider_id:
+                            continue
+                        selected = _search_v2_geoapify_result(
+                            item, request, durable=True,
+                        )
+                        break
+                    _search_v2_retrieve_cache_put(cache_key, selected)
+            except BaseException as exc:
+                _search_v2_retrieve_inflight_finish(
+                    cache_key, inflight, error=exc,
+                )
+                raise
+            else:
+                _search_v2_retrieve_inflight_finish(
+                    cache_key, inflight, selected=selected,
+                )
+    _count, revision = await _search_v2_service.prewarm()
+    if selected is None:
+        return SearchResolveResponseV2(
+            query=request.query,
+            status="not_found",
+            selected=None,
+            alternatives=[],
+            reason="selected_result_not_found",
             revision=revision,
         )
     return SearchResolveResponseV2(
@@ -19067,9 +19545,53 @@ def _search_v2_external_timeout_seconds() -> float:
 
 _search_v2_service = SearchV2Service(
     _search_v2_source_loader,
-    _search_v2_external_mapbox,
+    _search_v2_external_provider,
     external_timeout_seconds=_search_v2_external_timeout_seconds(),
 )
+
+
+def _search_v2_external_subject(request: Request, user: dict | None) -> str:
+    """Return a non-reversible, server-owned external-search quota subject.
+
+    Authenticated traffic is scoped to the account. Guest traffic normally
+    uses the ASGI peer address. A deployment may opt into Cloudflare's client
+    address only when its origin is restricted to Cloudflare (or strips inbound
+    CF headers) by setting ``TRAILHEAD_TRUST_CLOUDFLARE_CLIENT_IP=1``. In that
+    explicitly trusted topology, both a syntactically valid CF-Ray and a valid
+    CF-Connecting-IP are required; otherwise we fail back to the peer address.
+    Raw account IDs and addresses never enter the quota maps, cache keys,
+    cursors, provider requests, or logs through this helper.
+    """
+    if isinstance(user, dict) and user.get("id") is not None:
+        material = f"account\0{int(user['id'])}"
+    else:
+        peer = str(request.client.host if request.client else "unknown-client").strip()
+        client_address = peer
+        trust_cf = str(os.getenv(
+            "TRAILHEAD_TRUST_CLOUDFLARE_CLIENT_IP", "0",
+        )).strip().lower() in {"1", "true", "yes", "on"}
+        cf_ray = str(request.headers.get("cf-ray") or "").strip()
+        cf_address = str(request.headers.get("cf-connecting-ip") or "").strip()
+        if (
+            trust_cf
+            and re.fullmatch(r"[0-9a-fA-F]{16,32}(?:-[A-Za-z]{3})?", cf_ray)
+        ):
+            try:
+                client_address = ipaddress.ip_address(cf_address).compressed.lower()
+            except ValueError:
+                client_address = peer
+        try:
+            client_address = ipaddress.ip_address(client_address).compressed.lower()
+        except ValueError:
+            # Test adapters and local transports can expose a host marker rather
+            # than an IP. Bound it before HMACing; the raw value is never stored.
+            client_address = client_address.lower()[:255] or "unknown-client"
+        material = f"guest\0{client_address}"
+    return hmac.new(
+        str(settings.secret_key).encode("utf-8"),
+        b"search-v2-external-quota\0" + material.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 @app.on_event("startup")
@@ -19199,9 +19721,16 @@ def _authorize_search_v2_request(
     return request.model_copy(update={"route_ref": f"trip:{trip_id}", "bounds": bounds})
 
 
-async def _search_v2_page(request: SearchRequestV2, *, mode: str) -> SearchPageV2:
+async def _search_v2_page(
+    request: SearchRequestV2,
+    *,
+    mode: str,
+    external_subject: str | None = None,
+) -> SearchPageV2:
     try:
-        return await _search_v2_service.page(request, mode=mode)
+        return await _search_v2_service.page(
+            request, mode=mode, external_subject=external_subject,
+        )
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -19210,6 +19739,7 @@ async def _search_v2_page(request: SearchRequestV2, *, mode: str) -> SearchPageV
 
 @app.get("/api/search/v2/suggest", response_model=SearchPageV2)
 async def api_search_v2_suggest(
+    http_request: Request,
     q: str = Query(..., min_length=2, max_length=160),
     surface: str = Query("map", max_length=24),
     intent: str = Query("any", max_length=24),
@@ -19237,11 +19767,16 @@ async def api_search_v2_suggest(
         include_external=include_external,
     )
     request = _authorize_search_v2_request(request, user)
-    return await _search_v2_page(request, mode="suggest")
+    return await _search_v2_page(
+        request,
+        mode="suggest",
+        external_subject=_search_v2_external_subject(http_request, user),
+    )
 
 
 @app.get("/api/search/v2/results", response_model=SearchPageV2)
 async def api_search_v2_results(
+    http_request: Request,
     q: str = Query(..., min_length=2, max_length=160),
     surface: str = Query("map", max_length=24),
     intent: str = Query("any", max_length=24),
@@ -19269,12 +19804,17 @@ async def api_search_v2_results(
         include_external=include_external,
     )
     request = _authorize_search_v2_request(request, user)
-    return await _search_v2_page(request, mode="results")
+    return await _search_v2_page(
+        request,
+        mode="results",
+        external_subject=_search_v2_external_subject(http_request, user),
+    )
 
 
 @app.post("/api/search/v2/resolve", response_model=SearchResolveResponseV2)
 async def api_search_v2_resolve(
     body: SearchResolveRequestV2,
+    http_request: Request,
     user: dict | None = Depends(_optional_user),
 ):
     _require_product_feature("TRAILHEAD_SEARCH_V2_ENABLED", user)
@@ -19285,13 +19825,26 @@ async def api_search_v2_resolve(
     ))
     request = _authorize_search_v2_request(request, user)
     if selected_result_id and selected_detail_ref:
+        external_subject = _search_v2_external_subject(http_request, user)
+        if selected_result_id.startswith("geoapify:"):
+            return await _search_v2_resolve_geoapify_selection(
+                request,
+                selected_result_id=selected_result_id,
+                selected_detail_ref=selected_detail_ref,
+                external_subject=external_subject,
+            )
         if selected_result_id.startswith("mapbox:"):
             return await _search_v2_resolve_mapbox_selection(
                 request,
                 selected_result_id=selected_result_id,
                 selected_detail_ref=selected_detail_ref,
+                external_subject=external_subject,
             )
-        page = await _search_v2_page(request, mode="resolve")
+        page = await _search_v2_page(
+            request,
+            mode="resolve",
+            external_subject=external_subject,
+        )
         selected = next((
             result for result in page.results
             if result.result_id == selected_result_id
@@ -19306,7 +19859,10 @@ async def api_search_v2_resolve(
             revision=page.revision,
         )
     try:
-        return await _search_v2_service.resolve(request)
+        return await _search_v2_service.resolve(
+            request,
+            external_subject=_search_v2_external_subject(http_request, user),
+        )
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),

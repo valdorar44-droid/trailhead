@@ -1,9 +1,15 @@
 import { spawnSync } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { assertAuthoritativeWorktreeClean } from './release-worktree.mjs';
 import { validateReleaseEnvironment } from './release-environment.mjs';
-import { validateChannelPromotion, validatePairedUpdatePublication } from './eas-update-evidence.mjs';
+import {
+  combineUpdateViewPayloads,
+  selectPairedUpdateGroups,
+  validateChannelPromotion,
+  validatePairedUpdatePublication,
+} from './eas-update-evidence.mjs';
 
 const target = String(process.argv[2] || '').trim().toLowerCase();
 const dryRun = process.argv.includes('--dry-run');
@@ -29,6 +35,54 @@ function run(command, args, options = {}) {
   if (!options.capture) return '';
   const output = String(result.stdout || '');
   return options.raw ? output : output.trim();
+}
+
+function parseCommandJson(output, label) {
+  try {
+    return JSON.parse(output);
+  } catch {
+    throw new Error(`${label} returned invalid JSON evidence.`);
+  }
+}
+
+function waitSynchronously(milliseconds) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, milliseconds);
+}
+
+function runCapturedAttempt(command, args) {
+  const result = spawnSync(commandName(command), args, {
+    cwd: new URL('..', import.meta.url),
+    env: process.env,
+    stdio: ['ignore', 'pipe', 'inherit'],
+    encoding: 'utf8',
+  });
+  return {
+    error: result.error,
+    status: result.status,
+    output: String(result.stdout || '').trim(),
+  };
+}
+
+function queryJsonWithRetry(args, label, validate, attempts = 8) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    const result = runCapturedAttempt('npx', args);
+    if (result.error) {
+      lastError = result.error;
+    } else if (result.status !== 0) {
+      lastError = new Error(`${label} command exited with status ${result.status ?? 'unknown'}.`);
+    } else {
+      try {
+        const payload = parseCommandJson(result.output, label);
+        return { payload, evidence: validate(payload) };
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (attempt < attempts) waitSynchronously(2_000);
+  }
+  const reason = lastError instanceof Error ? lastError.message : 'unknown evidence error';
+  throw new Error(`${label} did not stabilize: ${reason}`);
 }
 
 function assertCommittedReleaseSource() {
@@ -63,7 +117,13 @@ const appConfig = require('../app.config.js').expo;
 const defaultMessage = `Trailhead ${packageJson.version} ${target} ${shortSha}`;
 const requestedMessage = String(process.env.EAS_UPDATE_MESSAGE || defaultMessage).trim();
 const message = requestedMessage.includes(shortSha) ? requestedMessage : `${requestedMessage} (${shortSha})`;
-const candidateBranch = `${target}-candidate-${fullSha}`;
+// Every publish attempt gets a unique randomized branch. EAS channels point to an
+// entire mutable branch, so reusing a per-SHA branch could expose an update
+// pair other than the exact IDs validated by this process.
+const attemptId = dryRun
+  ? 'dry-run'
+  : `${Date.now().toString(36)}-${randomBytes(12).toString('hex')}`;
+const candidateBranch = `${target}-candidate-${fullSha}-${attemptId}`;
 
 function requiredProductionValue(name) {
   const value = String(process.env[name] || '').trim();
@@ -153,43 +213,64 @@ run('npx', [
 // Upload the exact exported artifacts first. If Sentry rejects any map, no OTA
 // has been published and the current candidate remains untouched.
 run(process.execPath, ['scripts/upload-sentry-update-sourcemaps.mjs']);
-const updateOutput = run('npx', updateArgs, { capture: true });
-let updatePayload;
-try {
-  updatePayload = JSON.parse(updateOutput);
-} catch {
-  throw new Error('EAS update publication returned invalid JSON evidence.');
-}
+// Capture and intentionally ignore the publish command's unreliable JSON
+// stream. Authoritative evidence is queried from EAS after publication.
+run('npx', updateArgs, { capture: true });
+// EAS CLI 21 can publish successfully without leaving its JSON result on the
+// wrapped stdout stream. Query the candidate branch after publication, then
+// inspect each server-owned update group before moving the channel pointer.
+const expectedCandidate = {
+  branch: candidateBranch,
+  commitSha: fullSha,
+  androidRuntime: appConfig.android.runtimeVersion,
+  iosRuntime: appConfig.ios.runtimeVersion,
+};
+const { evidence: selectedGroups } = queryJsonWithRetry([
+    '--yes', 'eas-cli@21.0.2', 'update:list',
+    '--branch', candidateBranch,
+    '--limit', '20',
+    '--json',
+    '--non-interactive',
+  ], 'EAS candidate branch listing', payload => selectPairedUpdateGroups(payload, expectedCandidate));
+const groupPayloads = [...new Set([selectedGroups.androidGroup, selectedGroups.iosGroup])]
+  .map(group => queryJsonWithRetry([
+    '--yes', 'eas-cli@21.0.2', 'update:view', group, '--json',
+  ], `EAS update group ${group}`, payload => {
+    const records = combineUpdateViewPayloads([payload]);
+    if (!records.some(record => record?.group === group)) {
+      throw new Error(`EAS update group ${group} returned mismatched records.`);
+    }
+    return payload;
+  }).evidence);
+const updatePayload = combineUpdateViewPayloads(groupPayloads);
 const updateEvidence = validatePairedUpdatePublication(updatePayload, {
   branch: candidateBranch,
   commitSha: fullSha,
   androidRuntime: appConfig.android.runtimeVersion,
   iosRuntime: appConfig.ios.runtimeVersion,
+  androidGroup: selectedGroups.androidGroup,
+  iosGroup: selectedGroups.iosGroup,
 });
 // Candidate updates are invisible to the installed-app channel until both
 // platform records pass the SHA/runtime evidence checks above. Promotion is a
 // single channel-pointer change, so a partial update can never become live.
-run('npx', [
+// A transport failure can occur after EAS has already changed the channel.
+// Always resolve the authoritative channel mapping instead of treating the
+// mutation command's exit status as proof that no change happened.
+runCapturedAttempt('npx', [
   '--yes', 'eas-cli@21.0.2', 'channel:edit', target,
   '--branch', candidateBranch,
   '--json',
   '--non-interactive',
-], { capture: true });
-const channelViewOutput = run('npx', [
+]);
+const { evidence: promotionEvidence } = queryJsonWithRetry([
   '--yes', 'eas-cli@21.0.2', 'channel:view', target,
   '--json',
   '--non-interactive',
-], { capture: true });
-let channelViewPayload;
-try {
-  channelViewPayload = JSON.parse(channelViewOutput);
-} catch {
-  throw new Error('EAS channel promotion returned invalid JSON evidence.');
-}
-const promotionEvidence = validateChannelPromotion(channelViewPayload, {
+], 'EAS channel promotion', payload => validateChannelPromotion(payload, {
   branch: candidateBranch,
   channel: target,
-});
+}));
 console.log(JSON.stringify({
   published: true,
   repositorySha: fullSha,

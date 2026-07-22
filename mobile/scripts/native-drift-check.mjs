@@ -211,7 +211,7 @@ expect(
 );
 expect(
   otaPublisher.lastIndexOf("['scripts/upload-sentry-update-sourcemaps.mjs']")
-    < otaPublisher.lastIndexOf("const updateOutput = run('npx', updateArgs"),
+    < otaPublisher.lastIndexOf("run('npx', updateArgs, { capture: true })"),
   'Sentry source maps must upload successfully before OTA publication.',
 );
   expect(
@@ -234,6 +234,12 @@ contains('scripts/eas-build-evidence.mjs', "build?.buildProfile === 'production'
 contains('scripts/publish-eas-update.mjs', 'validatePairedUpdatePublication', 'OTA publication must validate paired update evidence.');
 contains('scripts/publish-eas-update.mjs', 'validateChannelPromotion', 'OTA publication must verify candidate-channel promotion.');
 contains('scripts/publish-eas-update.mjs', "'--branch', candidateBranch", 'OTA publication must publish to a SHA candidate branch before promotion.');
+contains('scripts/publish-eas-update.mjs', "'update:list'", 'OTA publication must query the server-owned candidate branch after publishing.');
+contains('scripts/publish-eas-update.mjs', "'update:view'", 'OTA publication must verify server-owned update IDs before promotion.');
+contains('scripts/publish-eas-update.mjs', 'randomBytes(12)', 'Each OTA attempt must use a unique immutable candidate branch.');
+contains('scripts/eas-update-evidence.mjs', 'ambiguous ${platform}', 'OTA evidence must reject multiple matching candidate groups.');
+contains('scripts/publish-eas-update.mjs', 'queryJsonWithRetry', 'OTA evidence reads must tolerate bounded EAS consistency delays.');
+contains('scripts/publish-eas-update.mjs', 'record?.group === group', 'OTA group views must bind records to the selected candidate groups.');
 contains('scripts/publish-eas-update.mjs', "'channel:edit', target", 'OTA publication must promote only after paired validation.');
 contains('scripts/eas-update-evidence.mjs', "relevant.length !== 2", 'Paired OTA evidence must require Android and iOS records.');
 contains('scripts/publish-eas-update.mjs', 'validateReleaseEnvironment(process.env)', 'OTA publication must require the complete release environment.');

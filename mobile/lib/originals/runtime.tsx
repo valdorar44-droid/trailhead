@@ -16,6 +16,7 @@ import {
   setCarOriginalDrive,
 } from '../carIntegration';
 import { originalsApi } from './api';
+import { registerOriginalsAccountDepartureStopper } from './accountCleanup';
 import {
   type OriginalAccessStore,
 } from './accessStore';
@@ -973,6 +974,11 @@ export function OriginalsRuntimeProvider({
     operation.then(clear, clear);
     return operation;
   }, [dependencies.audio, dependencies.location, dependencies.sessions, releaseAudio, stopLocation]);
+
+  useEffect(
+    () => registerOriginalsAccountDepartureStopper(stopTour),
+    [stopTour],
+  );
 
   const skipCurrentStory = useCallback(async () => {
     const active = sessionRef.current;

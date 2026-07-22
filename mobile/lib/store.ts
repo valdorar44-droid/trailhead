@@ -51,6 +51,11 @@ import {
   setCarReportSession,
 } from 'expo-trailhead-car-reports';
 import { TRAILHEAD_API_BASE } from './apiBase';
+import {
+  tabBarIsHidden,
+  updateTabBarHiddenReasons,
+  type TabBarHiddenReasons,
+} from './tabBarVisibilityState';
 
 let accountLocalWriteBlockDepth = 0;
 let accountLocalWriteTail: Promise<unknown> = Promise.resolve();
@@ -179,6 +184,7 @@ function isPrivateRootFile(name: string) {
     || name === 'notified_wps.json'
     || name === 'gpx_import_batches.json'
     || /^weather_.+\.json$/i.test(name)
+    || /^route_weather_v2_.+\.json$/i.test(name)
     || /^guide_.+\.json$/i.test(name)
     || /^trip_ai_.+\.json$/i.test(name)
     || /\.gpx$/i.test(name);
@@ -776,6 +782,7 @@ interface AppState {
   pendingRouteActivityOffer: PendingRouteActivityOffer | null;
   routeBuildSession: RouteBuildSession | null;
   tabBarHidden: boolean;
+  tabBarHiddenReasons: TabBarHiddenReasons;
   hasPlan: boolean;
   planExpiresAt: number | null;
   guidedTourRunId: number;
@@ -791,7 +798,7 @@ interface AppState {
     fromCache?: boolean,
     options?: { mirrorRepository?: boolean },
   ) => void;
-  setTabBarHidden: (hidden: boolean) => void;
+  setTabBarHidden: (hidden: boolean, reason?: string) => void;
   setRigProfile: (rig: RigProfile) => void;
   addTripToHistory: (item: TripHistoryItem) => void;
   removeTripFromHistory: (tripId: string) => void;
@@ -874,6 +881,7 @@ export const useStore = create<AppState>((set) => ({
   pendingRouteActivityOffer: null,
   routeBuildSession: null,
   tabBarHidden: false,
+  tabBarHiddenReasons: {},
   hasPlan: false,
   planExpiresAt: null,
   guidedTourRunId: 0,
@@ -939,6 +947,8 @@ export const useStore = create<AppState>((set) => ({
       pendingOfflineTrip: null,
       pendingRouteActivityOffer: null,
       routeBuildSession: null,
+      tabBarHidden: false,
+      tabBarHiddenReasons: {},
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -994,6 +1004,8 @@ export const useStore = create<AppState>((set) => ({
       pendingOfflineTrip: null,
       pendingRouteActivityOffer: null,
       routeBuildSession: null,
+      tabBarHidden: false,
+      tabBarHiddenReasons: {},
       userLoc: null,
       sessionId: freshSession,
       hasPlan: false,
@@ -1036,7 +1048,13 @@ export const useStore = create<AppState>((set) => ({
     if (options?.mirrorRepository !== false) scheduleActiveTripMirror(trip, previousTripId);
   },
 
-  setTabBarHidden: (hidden) => set({ tabBarHidden: hidden }),
+  setTabBarHidden: (hidden, reason = 'legacy') => set(state => {
+    const tabBarHiddenReasons = updateTabBarHiddenReasons(state.tabBarHiddenReasons ?? {}, reason, hidden);
+    return {
+      tabBarHiddenReasons,
+      tabBarHidden: tabBarIsHidden(tabBarHiddenReasons),
+    };
+  }),
 
   setRigProfile: (rig) => {
     if (!accountLocalMutationAllowed()) return;

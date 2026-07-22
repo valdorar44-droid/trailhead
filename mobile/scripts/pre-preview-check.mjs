@@ -9,6 +9,12 @@ const repoRoot = join(mobileRoot, '..');
 
 const checks = [
   {
+    label: 'Native/config drift',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/native-drift-check.mjs'],
+  },
+  {
     label: 'Mission flyover native/JS smoke',
     cwd: mobileRoot,
     cmd: 'node',
@@ -25,6 +31,48 @@ const checks = [
     cwd: mobileRoot,
     cmd: 'node',
     args: ['scripts/plan-workspace-regression-audit.mjs'],
+  },
+  {
+    label: 'Mounted-tab lifecycle tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/mobileLifecycle.test.ts'],
+  },
+  {
+    label: 'Sentry privacy sanitization tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/telemetry/__tests__/sanitize.test.ts'],
+  },
+  {
+    label: 'Referral link attribution tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/referrals/__tests__/referralLinks.test.ts'],
+  },
+  {
+    label: 'Universal and app-link routing tests',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'lib/__tests__/appLinks.test.ts'],
+  },
+  {
+    label: 'Offline V2 preservation and runtime tests',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:offline-v2'],
+  },
+  {
+    label: 'Search V2 session tests',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:search-v2'],
+  },
+  {
+    label: 'Originals runtime tests',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:originals'],
   },
   {
     label: 'Explore feed audit',

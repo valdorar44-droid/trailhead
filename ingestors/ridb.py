@@ -6,6 +6,7 @@ import asyncio, re, time
 import httpx
 from config.settings import settings
 from db.store import get_cached, set_cached
+from scripts.explore_sources.base.media import is_supported_remote_image_url
 
 RIDB_BASE = "https://ridb.recreation.gov/api/v1"
 
@@ -169,7 +170,11 @@ def _image_urls(records: list[dict], limit: int = 12) -> list[str]:
     for media in records:
         url = media.get("URL") or media.get("URLFull") or media.get("MediaURL")
         media_type = str(media.get("MediaType") or media.get("EntityMediaType") or "").lower()
-        if url and (not media_type or "image" in media_type or "photo" in media_type):
+        if (
+            url
+            and (not media_type or "image" in media_type or "photo" in media_type)
+            and is_supported_remote_image_url(url)
+        ):
             if url not in urls:
                 urls.append(str(url))
         if len(urls) >= limit:

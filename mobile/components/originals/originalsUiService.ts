@@ -115,6 +115,18 @@ function formatBytes(bytes: number) {
   return `${Math.max(1, Math.round(bytes / 1_000_000))} MB`;
 }
 
+function formatCoverageRegion(value: string, fallback = 'Scenic drive') {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (!normalized) return fallback;
+  if (normalized === 'north_america') return 'North America';
+  if (normalized === 'global') return 'Worldwide';
+  return String(value)
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, character => character.toUpperCase());
+}
+
 function seasonLabel(months?: number[]) {
   if (!months?.length) return 'Year-round';
   const names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -220,12 +232,14 @@ function summaryToUi(
     ]).size
     : 0;
   const totalStops = Math.max(storyCount, terminalCount);
+  const region = textValue(meta, ['region', 'location_label'])
+    || formatCoverageRegion(item.coverage_region);
   return {
     id: String(item.id),
     slug: item.slug,
     version: item.version,
     title: item.title,
-    region: item.coverage_region || textValue(meta, ['region'], 'Scenic drive'),
+    region,
     summary: item.summary,
     durationLabel: textValue(meta, ['duration_label'], formatDuration(durationS)),
     distanceLabel: textValue(meta, ['distance_label'], formatDistance(distanceM)),
@@ -315,7 +329,7 @@ function detailToUi(item: OriginalDetail, owned: boolean, bundle: OriginalBundle
     storyCount: preview.stops.length,
     offlineSizeLabel: textValue(meta, ['offline_size_label'], formatBytes(totalOfflineBytes)),
     overview: textValue(meta, ['overview'], item.summary),
-    routeLabel: textValue(meta, ['route_label'], `${item.coverage_region} · ${preview.route.direction || 'Fixed route'}`),
+    routeLabel: textValue(meta, ['route_label'], `${base.region} · ${preview.route.direction || 'Fixed route'}`),
     route: preview.route,
     previewStory,
     stories,

@@ -3,6 +3,10 @@ import type { FileDownloadState } from '@/lib/useOfflineFiles';
 export type OfflineRegionSummary = {
   hasContent: boolean;
   ready: boolean;
+  mapReady: boolean;
+  directionsReady: boolean;
+  placesReady: boolean;
+  trailsReady: boolean;
   active: boolean;
   paused: boolean;
   incomplete: boolean;
@@ -18,6 +22,9 @@ type RegionArtifactInput = {
   trails?: FileDownloadState;
   placeCount?: number;
   requiresRouting?: boolean;
+  requiresPlaces?: boolean;
+  placesComplete?: boolean;
+  requiresTrails?: boolean;
 };
 
 const hasStarted = (state?: FileDownloadState) => !!state && state.status !== 'idle';
@@ -37,13 +44,20 @@ export function summarizeOfflineRegion({
   trails,
   placeCount = 0,
   requiresRouting = true,
+  requiresPlaces = false,
+  placesComplete = !requiresPlaces,
+  requiresTrails = false,
 }: RegionArtifactInput): OfflineRegionSummary {
   const artifacts = [map, routing, contour, trails].filter(Boolean) as FileDownloadState[];
   const started = artifacts.filter(hasStarted);
   const activeArtifacts = started.filter(state => state.status === 'downloading');
   const paused = started.some(state => state.status === 'paused');
   const incomplete = started.some(state => state.status === 'error');
-  const ready = map.status === 'complete' && (!requiresRouting || routing?.status === 'complete');
+  const mapReady = map.status === 'complete';
+  const directionsReady = !requiresRouting || routing?.status === 'complete';
+  const trailsReady = !requiresTrails || trails?.status === 'complete';
+  const placesReady = !requiresPlaces || placesComplete;
+  const ready = mapReady && directionsReady && placesReady && trailsReady;
   const hasContent = started.length > 0 || placeCount > 0;
   const storedBytes = artifacts.reduce((total, state) => total + stateBytes(state), 0);
 
@@ -61,6 +75,7 @@ export function summarizeOfflineRegion({
   else if (paused) status = 'Paused';
   else if (incomplete) status = 'Download incomplete';
   else if (ready) status = 'Ready offline';
+  else if (mapReady && directionsReady) status = requiresRouting ? 'Map & directions ready' : 'Map ready';
   else if (map.status === 'complete') status = 'Map saved';
   else if (routing?.status === 'complete') status = 'Directions saved';
   else if (placeCount > 0) status = `${placeCount.toLocaleString()} places saved`;
@@ -68,6 +83,10 @@ export function summarizeOfflineRegion({
   return {
     hasContent,
     ready,
+    mapReady,
+    directionsReady,
+    placesReady,
+    trailsReady,
     active: activeArtifacts.length > 0,
     paused,
     incomplete,
@@ -75,6 +94,38 @@ export function summarizeOfflineRegion({
     storedBytes,
     status,
   };
+}
+
+type RegionPlaceManifestEntry = Readonly<{ region_id: string; pack_id: string }>;
+type InstalledRegionPlacePack = Readonly<{ region_id?: string; pack_id: string }>;
+
+/** Every server-advertised pack is included; the preferred order is cosmetic. */
+export function regionPlacePackEntries<T extends RegionPlaceManifestEntry>(
+  packs: Readonly<Record<string, T>> | null | undefined,
+  regionId: string,
+  preferredOrder: readonly string[] = [],
+): readonly T[] {
+  const rank = (packId: string) => {
+    const index = preferredOrder.indexOf(packId);
+    return index < 0 ? preferredOrder.length : index;
+  };
+  return Object.freeze(Object.values(packs ?? {})
+    .filter(entry => entry.region_id === regionId)
+    .sort((left, right) => rank(left.pack_id) - rank(right.pack_id)
+      || left.pack_id.localeCompare(right.pack_id)));
+}
+
+export function missingRegionPlacePackEntries<T extends RegionPlaceManifestEntry>(
+  packs: Readonly<Record<string, T>> | null | undefined,
+  installed: readonly InstalledRegionPlacePack[],
+  regionId: string,
+  preferredOrder: readonly string[] = [],
+): readonly T[] {
+  return Object.freeze(regionPlacePackEntries(packs, regionId, preferredOrder).filter(entry => (
+    !installed.some(pack => (
+      pack.region_id === regionId && pack.pack_id === `${regionId}-${entry.pack_id}`
+    ))
+  )));
 }
 
 type OfflineRegionBounds = {

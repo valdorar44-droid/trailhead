@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import {
   displayOfflineDownloadName,
+  missingRegionPlacePackEntries,
   offlineRegionIdsForPoints,
+  regionPlacePackEntries,
   summarizeOfflineRegion,
 } from '../offlineHubModel';
 import type { FileDownloadState } from '@/lib/useOfflineFiles';
@@ -29,6 +31,23 @@ const state = (status: FileDownloadState['status'], progress = 0, bytes = 0): Fi
 
 {
   const summary = summarizeOfflineRegion({
+    map: state('complete', 100, 20_971_520),
+    routing: state('complete', 100, 10_485_760),
+    trails: state('idle'),
+    contour: state('idle'),
+    requiresPlaces: true,
+    placesComplete: false,
+    requiresTrails: true,
+  });
+  assert.equal(summary.ready, false);
+  assert.equal(summary.mapReady, true);
+  assert.equal(summary.status, 'Map & directions ready');
+  assert.equal(summary.placesReady, false);
+  assert.equal(summary.trailsReady, false);
+}
+
+{
+  const summary = summarizeOfflineRegion({
     map: state('downloading', 54, 54),
     routing: state('idle'),
   });
@@ -49,5 +68,32 @@ const state = (status: FileDownloadState['status'], progress = 0, bytes = 0): Fi
 }
 
 assert.equal(displayOfflineDownloadName('Moab-to-Swell-corridor'), 'Moab to Swell');
+
+{
+  const manifestPacks = {
+    a: { region_id: 'ut', pack_id: 'essentials' },
+    b: { region_id: 'ut', pack_id: 'services' },
+    c: { region_id: 'ut', pack_id: 'outdoors' },
+    d: { region_id: 'ut', pack_id: 'camps' },
+    e: { region_id: 'ut', pack_id: 'water' },
+    future: { region_id: 'ut', pack_id: 'future-pack' },
+    other: { region_id: 'co', pack_id: 'camps' },
+  };
+  const order = ['essentials', 'services', 'outdoors', 'camps', 'water'];
+  assert.deepEqual(
+    regionPlacePackEntries(manifestPacks, 'ut', order).map(item => item.pack_id),
+    [...order, 'future-pack'],
+    'all manifest entries are included, including future definitions',
+  );
+  assert.deepEqual(
+    missingRegionPlacePackEntries(
+      manifestPacks,
+      [{ region_id: 'ut', pack_id: 'ut-essentials' }],
+      'ut',
+      order,
+    ).map(item => item.pack_id),
+    ['services', 'outdoors', 'camps', 'water', 'future-pack'],
+  );
+}
 
 console.log('Offline hub model tests passed.');

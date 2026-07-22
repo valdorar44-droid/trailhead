@@ -5,3 +5,5 @@ export * from './shadows';
 export * from './radii';
 export * from './motion';
 export * from './glass';
+export * from './uiV2';
+export * from './useUiV2Theme';

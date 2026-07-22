@@ -919,12 +919,16 @@ class TripGraphV2StoreTests(unittest.TestCase):
 
     def test_product_feature_flags_default_off_with_admin_override(self):
         with patch.dict(os.environ, {
+            "TRAILHEAD_SEARCH_V2_ENABLED": "0",
+            "OFFLINE_BUNDLE_V2_ENABLED": "0",
             "TRAILHEAD_TRIP_GRAPH_V2_ENABLED": "0",
             "TRAILHEAD_TRIPS_TAB_ENABLED": "0",
             "TRAILHEAD_AVAILABILITY_MONITORS_ENABLED": "0",
             "TRAILHEAD_TRIP_PACKS_ENABLED": "0",
             "TRAILHEAD_ORIGINALS_ENABLED": "0",
             "TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED": "0",
+            "TRAILHEAD_COMMUNITY_RATINGS_ENABLED": "0",
+            "TRAILHEAD_BRIEF_AND_BACKUP_ENABLED": "0",
             "TRAILHEAD_DIGEST_PREFERENCES_ENABLED": "0",
         }):
             anonymous = asyncio.run(product_features(None))
@@ -933,12 +937,16 @@ class TripGraphV2StoreTests(unittest.TestCase):
 
         self.assertFalse(any(anonymous.values()))
         self.assertEqual(regular, {
+            "search_v2": False,
+            "offline_bundle_v2": False,
             "trip_graph_v2": False,
             "trips_tab": False,
             "availability_monitors": False,
             "trip_packs": False,
             "originals": False,
             "community_publications": False,
+            "community_ratings": False,
+            "brief_and_backup": False,
             "digest_preferences": False,
         })
         self.assertTrue(all(admin.values()))

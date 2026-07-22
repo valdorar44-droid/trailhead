@@ -4,8 +4,9 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { TrailheadLoadingRow, TrailheadSheet } from '@/components/TrailheadUI';
 import MapModeGallery from '@/components/map/MapModeGallery';
-import { mono, useTheme, type ColorPalette } from '@/lib/design';
+import { useTheme, type ColorPalette } from '@/lib/design';
 import { mapModePresetTitle, type MapModePresetId } from '@/lib/mapLegend';
+import { trailheadFonts } from '@/lib/typography';
 
 export type MapFilterOption = {
   id: string;
@@ -239,7 +240,7 @@ export default function MapFilterSheet({
           >
             <View style={styles.header}>
               <View style={styles.headerCopy}>
-                <Text style={styles.title}>Map layers</Text>
+                <Text style={styles.title}>Layers &amp; filters</Text>
                 <Text style={styles.sub}>{activeModeTitle} · {changedCount > 0 ? `${changedCount} changed` : 'Default view'}</Text>
               </View>
               <View style={styles.headerActions}>
@@ -293,7 +294,7 @@ export default function MapFilterSheet({
             <View style={styles.group}>
               {renderSectionRow({
                 icon: 'bonfire-outline',
-                iconColor: '#14b8a6',
+                iconColor: C.orange,
                 title: 'Camps',
                 summary: campFilterSummary,
                 expanded: expandedSections.includes('camps'),
@@ -312,7 +313,7 @@ export default function MapFilterSheet({
             <View style={styles.group}>
               {renderSectionRow({
                 icon: 'location-outline',
-                iconColor: '#0ea5e9',
+                iconColor: C.orange,
                 title: 'Places',
                 summary: placeFilterSummary,
                 expanded: expandedSections.includes('places'),
@@ -345,7 +346,7 @@ export default function MapFilterSheet({
             <View style={styles.group}>
               {renderSectionRow({
                 icon: 'bed-outline',
-                iconColor: '#6366f1',
+                iconColor: C.orange,
                 title: 'Camps & Stays',
                 summary: 'Private stays, glamping, lodging-style camps',
                 expanded: expandedSections.includes('stays'),
@@ -359,7 +360,7 @@ export default function MapFilterSheet({
             <View style={styles.group}>
               {renderSectionRow({
                 icon: 'briefcase-outline',
-                iconColor: '#06b6d4',
+                iconColor: C.orange,
                 title: 'Services',
                 summary: 'Food, groceries, lodging, repairs, medical, and connection',
                 expanded: expandedSections.includes('explore-services'),
@@ -376,7 +377,7 @@ export default function MapFilterSheet({
             <View style={styles.group}>
               {renderSectionRow({
                 icon: 'people-outline',
-                iconColor: '#22c55e',
+                iconColor: C.orange,
                 title: 'Community notes',
                 summary: communityFilterSummary,
                 expanded: expandedSections.includes('community'),
@@ -398,7 +399,7 @@ export default function MapFilterSheet({
             <View style={styles.group}>
               {renderSectionRow({
                 icon: 'partly-sunny-outline',
-                iconColor: '#f59e0b',
+                iconColor: C.orange,
                 title: 'Weather & trails',
                 summary: 'Radar, trails, public land, topo, and water safety',
                 expanded: expandedSections.includes('weather-layers'),
@@ -469,15 +470,14 @@ function makeStyles(C: ColorPalette) {
     },
     title: {
       color: C.text,
-      fontSize: 15,
-      fontFamily: mono,
-      fontWeight: '900',
-      letterSpacing: 1,
+      fontSize: 24,
+      lineHeight: 27,
+      fontFamily: trailheadFonts.displayBold,
     },
     sub: {
       color: C.text3,
-      fontSize: 10,
-      fontFamily: mono,
+      fontSize: 12,
+      lineHeight: 16,
       marginTop: 3,
     },
     headerActions: {
@@ -486,9 +486,9 @@ function makeStyles(C: ColorPalette) {
       gap: 8,
     },
     closeBtn: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
+      width: 48,
+      height: 48,
+      borderRadius: 12,
       alignItems: 'center',
       justifyContent: 'center',
       backgroundColor: C.s1,
@@ -496,20 +496,19 @@ function makeStyles(C: ColorPalette) {
       borderColor: C.border,
     },
     resetBtn: {
-      minHeight: 34,
+      minHeight: 48,
       alignItems: 'center',
       justifyContent: 'center',
-      borderRadius: 17,
-      paddingHorizontal: 10,
+      borderRadius: 12,
+      paddingHorizontal: 12,
       backgroundColor: C.s1,
       borderWidth: 1,
       borderColor: C.border,
     },
     resetText: {
-      color: '#14b8a6',
-      fontSize: 9,
-      fontFamily: mono,
-      fontWeight: '900',
+      color: C.orange,
+      fontSize: 12,
+      fontWeight: '800',
     },
     scroll: { flex: 1, minHeight: 0 },
     scrollContent: { paddingBottom: 28 },
@@ -520,7 +519,7 @@ function makeStyles(C: ColorPalette) {
     group: {
       marginHorizontal: 12,
       marginBottom: 10,
-      borderRadius: 8,
+      borderRadius: 12,
       borderWidth: 1,
       borderColor: C.border,
       backgroundColor: C.s1,
@@ -556,15 +555,14 @@ function makeStyles(C: ColorPalette) {
     },
     filterSectionRowSub: {
       color: C.text3,
-      fontSize: 11,
-      lineHeight: 15,
+      fontSize: 12,
+      lineHeight: 16,
       marginTop: 2,
     },
     filterClearText: {
-      color: '#14b8a6',
-      fontSize: 9,
-      fontFamily: mono,
-      fontWeight: '900',
+      color: C.orange,
+      fontSize: 12,
+      fontWeight: '800',
     },
     filterActionDisabled: {
       opacity: 0.52,
@@ -594,8 +592,8 @@ function makeStyles(C: ColorPalette) {
       borderColor: C.border,
     },
     filterSwitchOn: {
-      backgroundColor: '#14b8a6',
-      borderColor: '#14b8a6',
+      backgroundColor: C.orange,
+      borderColor: C.orange,
     },
     filterSwitchKnob: {
       width: 16,
@@ -645,9 +643,8 @@ function makeStyles(C: ColorPalette) {
     },
     hintText: {
       color: C.text3,
-      fontSize: 10,
-      fontFamily: mono,
-      lineHeight: 14,
+      fontSize: 12,
+      lineHeight: 16,
       paddingHorizontal: 16,
       paddingTop: 6,
     },
@@ -668,9 +665,8 @@ function makeStyles(C: ColorPalette) {
     pinHintText: {
       flex: 1,
       color: C.text3,
-      fontSize: 10,
-      lineHeight: 14,
-      fontFamily: mono,
+      fontSize: 12,
+      lineHeight: 16,
     },
   });
 }

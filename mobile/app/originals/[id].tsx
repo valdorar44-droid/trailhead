@@ -12,6 +12,8 @@ import {
   View,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import * as Location from 'expo-location';
+import * as Notifications from 'expo-notifications';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '@/lib/design';
@@ -33,6 +35,7 @@ import {
 } from '@/components/originals/originalsUiService';
 import type { OriginalUiBundleState, OriginalUiDetail } from '@/components/originals/types';
 import { originalStartDestination } from '@/lib/originals/mainMapNavigation';
+import { originalStartNeedsPermissionDisclosure } from '@/lib/originals/locationPolicy';
 
 const EMPTY_BUNDLE: OriginalUiBundleState = {
   state: 'not_downloaded',
@@ -66,6 +69,7 @@ export default function OriginalDetailScreen() {
   const [busy, setBusy] = useState(false);
   const [readinessVisible, setReadinessVisible] = useState(false);
   const [startVisible, setStartVisible] = useState(false);
+  const [showPermissionDisclosure, setShowPermissionDisclosure] = useState(true);
   const [previewExpanded, setPreviewExpanded] = useState(false);
 
   const load = useCallback(async () => {
@@ -192,6 +196,15 @@ export default function OriginalDetailScreen() {
     if (!detail) return;
     if (detail.adminPreview) throw new Error('Unpublished Studio drafts can run only in the no-driving trigger test.');
     try {
+      if (Platform.OS === 'android') {
+        const currentNotifications = await Notifications.getPermissionsAsync();
+        const notifications = currentNotifications.status === 'granted'
+          ? currentNotifications
+          : await Notifications.requestPermissionsAsync();
+        if (notifications.status !== 'granted') {
+          throw new Error('Allow notifications so Android can show the active-tour location service.');
+        }
+      }
       const scope = (user?.id == null ? 'guest' : `account:${String(user.id)}`) as OriginalOwnerScope;
       const manifest = await originalBundleStore.loadManifest(scope, detail.id, detail.version);
       if (!manifest) throw new Error('Download and verify this Original before starting.');
@@ -215,6 +228,30 @@ export default function OriginalDetailScreen() {
       params: { id: detail.id, version: String(detail.version), simulate: '1' },
     } as any);
   }, [detail, originalsAdminRuntime, originalsRuntime, router, user?.id, user?.is_admin]);
+
+  const openStart = useCallback(async () => {
+    let needsDisclosure = true;
+    try {
+      const foreground = await Location.getForegroundPermissionsAsync();
+      const background = Platform.OS === 'ios'
+        ? await Location.getBackgroundPermissionsAsync()
+        : null;
+      const notifications = Platform.OS === 'android'
+        ? await Notifications.getPermissionsAsync()
+        : null;
+      needsDisclosure = originalStartNeedsPermissionDisclosure(Platform.OS, {
+        foregroundGranted: foreground.status === 'granted',
+        backgroundGranted: background?.status === 'granted',
+        notificationsGranted: notifications?.status === 'granted',
+      });
+    } catch {
+      // If the native permission adapter cannot be inspected, keep the disclosure
+      // in front of the runtime request rather than surprising the user.
+      needsDisclosure = true;
+    }
+    setShowPermissionDisclosure(needsDisclosure);
+    setStartVisible(true);
+  }, []);
 
   if (loading) {
     return (
@@ -265,7 +302,7 @@ export default function OriginalDetailScreen() {
     ? acquire
     : !ready
       ? () => setReadinessVisible(true)
-      : () => setStartVisible(true);
+      : () => { void openStart(); };
 
   return (
     <View style={[styles.screen, { backgroundColor: C.bg }] }>
@@ -428,11 +465,12 @@ export default function OriginalDetailScreen() {
         bundle={bundle}
         onClose={() => bundle.state !== 'downloading' && setReadinessVisible(false)}
         onDownload={() => void startDownload()}
-        onStart={() => { setReadinessVisible(false); setStartVisible(true); }}
+        onStart={() => { setReadinessVisible(false); void openStart(); }}
       />
       <StartTourModal
         visible={startVisible}
         detail={detail}
+        showPermissionDisclosure={showPermissionDisclosure}
         onClose={() => setStartVisible(false)}
         onStart={beginStart}
         onSimulate={!adminPreview && user?.is_admin ? beginSimulation : undefined}
@@ -546,12 +584,14 @@ function AssetRow({ icon, label, ready }: { icon: keyof typeof Ionicons.glyphMap
 function StartTourModal({
   visible,
   detail,
+  showPermissionDisclosure,
   onClose,
   onStart,
   onSimulate,
 }: {
   visible: boolean;
   detail: OriginalUiDetail;
+  showPermissionDisclosure: boolean;
   onClose: () => void;
   onStart: () => Promise<void>;
   onSimulate?: () => Promise<void>;
@@ -576,7 +616,7 @@ function StartTourModal({
       if (mode === 'simulation' && onSimulate) await onSimulate();
       else await onStart();
     } catch (error: any) {
-      setPermissionError(error?.message || `Trailhead needs ${Platform.OS === 'ios' ? 'background' : 'precise'} location while this tour is active.`);
+      setPermissionError(error?.message || 'Trailhead needs location access while this tour is active.');
       setStarting(null);
     }
   };
@@ -597,19 +637,26 @@ function StartTourModal({
               <Ionicons name="navigate" size={23} color={C.orange} />
             </View>
             <View style={styles.sheetCopy}>
-              <Text style={[styles.sheetKicker, { color: C.orange }]}>BEFORE YOU DRIVE</Text>
-              <Text style={[styles.sheetTitle, { color: C.text }]}>Start {detail.title}</Text>
+              <Text style={[styles.sheetKicker, { color: C.orange }]}>{showPermissionDisclosure ? 'TRAILHEAD ORIGINAL' : 'BEFORE YOU DRIVE'}</Text>
+              <Text style={[styles.sheetTitle, { color: C.text }]}>{showPermissionDisclosure ? 'Allow location for this tour' : `Start ${detail.title}`}</Text>
             </View>
             <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close" disabled={Boolean(starting)} onPress={onClose} style={styles.sheetClose}>
               <Ionicons name="close" size={20} color={C.text2} />
             </TouchableOpacity>
           </View>
 
-          <View style={styles.permissionList}>
-            <PermissionRow icon="location-outline" title="Location while touring" body="Used on-device to trigger the next story. Trailhead does not upload your route." />
-            <PermissionRow icon="notifications-outline" title="Screen-off indicator" body={Platform.OS === 'android' ? 'Android shows a persistent notification while the tour is active.' : 'iOS shows the standard location indicator while the tour is active.'} />
-            <PermissionRow icon="volume-high-outline" title="Audio check" body="Connect Bluetooth before departing. Navigation and calls take priority over stories." />
-          </View>
+          {showPermissionDisclosure ? (
+            <>
+              <Text style={[styles.disclosureBody, { color: C.text2 }]}>
+                Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.
+              </Text>
+              <View style={styles.permissionList}>
+                <PermissionRow icon="location-outline" title="Background location" body="Triggers stories along the route. Your traveled route is not uploaded." />
+                <PermissionRow icon="volume-high-outline" title="Story audio" body="Calls and navigation prompts take priority." />
+                <PermissionRow icon="cloud-download-outline" title="Offline route" body="Route, stories and map are ready before the tour starts." />
+              </View>
+            </>
+          ) : null}
 
           <TouchableOpacity
             accessibilityRole="checkbox"
@@ -635,7 +682,17 @@ function StartTourModal({
             </View>
           ) : null}
 
-          <TrailheadButton label="Start hands-free tour" icon="play" variant="primary" disabled={!confirmed || Boolean(starting)} loading={starting === 'tour'} onPress={() => void start('tour')} />
+          <TrailheadButton label={showPermissionDisclosure ? 'Agree & continue' : 'Start tour'} icon="play" variant="primary" disabled={!confirmed || Boolean(starting)} loading={starting === 'tour'} onPress={() => void start('tour')} />
+          {showPermissionDisclosure ? (
+            <TouchableOpacity
+              accessibilityRole="button"
+              disabled={Boolean(starting)}
+              onPress={onClose}
+              style={styles.notNowAction}
+            >
+              <Text style={[styles.notNowText, { color: C.text2 }]}>Not now</Text>
+            </TouchableOpacity>
+          ) : null}
           {onSimulate ? (
             <View style={styles.simulationAction}>
               <TrailheadButton label="Test without driving" icon="speedometer-outline" disabled={!confirmed || Boolean(starting)} loading={starting === 'simulation'} onPress={() => void start('simulation')} />
@@ -730,6 +787,9 @@ const styles = StyleSheet.create({
   sheetCopy: { flex: 1, minWidth: 0 },
   sheetKicker: { fontSize: 8.5, lineHeight: 12, fontWeight: '900', letterSpacing: 0.8 },
   sheetTitle: { marginTop: 2, fontSize: 18, lineHeight: 23, fontWeight: '900' },
+  disclosureBody: { fontSize: 15, lineHeight: 21 },
+  notNowAction: { minHeight: 44, alignItems: 'center', justifyContent: 'center' },
+  notNowText: { fontSize: 15, lineHeight: 20, fontWeight: '800' },
   sheetClose: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
   assetList: { gap: 0 },
   assetRow: { minHeight: 51, borderBottomWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 10 },

@@ -194,7 +194,11 @@ export function createOriginalSessionStore(
     eraseScope(ownerScope: OriginalOwnerScope) {
       return serialized(async () => {
         const index = await readIndex();
-        await files.remove(joinOriginalPath(root, scopeKey(ownerScope))).catch(() => {});
+        const scopePath = joinOriginalPath(root, scopeKey(ownerScope));
+        await files.remove(scopePath);
+        if ((await files.info(scopePath)).exists) {
+          throw new Error('The account-owned Original sessions could not be removed.');
+        }
         delete index.sessions[ownerScope];
         if (index.active?.owner_scope === ownerScope) index.active = null;
         await writeIndex(index);

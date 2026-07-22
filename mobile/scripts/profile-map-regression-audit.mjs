@@ -23,6 +23,7 @@ const webMap = source('components/NativeMap/index.web.tsx');
 const api = source('lib/api.ts');
 const offlineRoutes = source('lib/offlineRoutes.ts');
 const routeWeatherCache = source('lib/routeWeather.ts');
+const screenActivityState = source('lib/screenActivityState.ts');
 
 assert(layout.includes("if (Platform.OS === 'web')") && layout.includes("typeof setColorScheme === 'function'"),
   'theme application guards web and missing Appearance APIs');
@@ -37,23 +38,27 @@ assert(signOut.includes("sd('trailhead_token')") && signOut.includes('user: null
 assert(signOut.includes('eraseLegacyAccountData()') && signOut.includes('await Promise.all'),
   'sign-out clears durable account data before completing');
 const profileSignOutStart = profile.indexOf('async function signOutFromDevice()');
-const profileSignOutEnd = profile.indexOf('async function deleteAccountAndClearDevice()', profileSignOutStart);
+const profileSignOutEnd = profile.indexOf('async function deleteAccountAndClearDevice(', profileSignOutStart);
 const profileSignOut = profileSignOutStart >= 0 && profileSignOutEnd > profileSignOutStart
   ? profile.slice(profileSignOutStart, profileSignOutEnd)
   : '';
-const localClearAt = profileSignOut.indexOf('const localClear =');
+const stopLocationAt = profileSignOut.indexOf('await stopAccountBackgroundLocation()');
 const cancelTripSyncAt = profileSignOut.indexOf('await cancelTripRepositorySync()');
 const cancelTripMirrorAt = profileSignOut.indexOf('await cancelActiveTripMirror()');
+const eraseOfflineAt = profileSignOut.indexOf('await clearExpoOfflineV2Scope(');
 const eraseTripsAt = profileSignOut.indexOf('await eraseTripRepositoryScope(accountId)');
-const stopLocationAt = profileSignOut.indexOf('await stopAccountBackgroundLocation()');
+const eraseOriginalsAt = profileSignOut.indexOf('await clearOriginalsAccountScope(accountId)');
+const clearIdentityAt = profileSignOut.indexOf('await (finishingDeletedAccount ? clearAuthAndLocalData() : signOut())');
 const removePushAt = profileSignOut.indexOf('await removeAccountPushToken(authToken)');
-assert(localClearAt >= 0
-  && localClearAt < cancelTripSyncAt
+assert(stopLocationAt >= 0
+  && stopLocationAt < cancelTripSyncAt
   && cancelTripSyncAt < cancelTripMirrorAt
-  && cancelTripMirrorAt < eraseTripsAt
-  && eraseTripsAt < stopLocationAt
-  && stopLocationAt < removePushAt,
-  'Profile invalidates private memory before disconnecting sync, repository data, location, and push');
+  && cancelTripMirrorAt < eraseOfflineAt
+  && eraseOfflineAt < eraseTripsAt
+  && eraseTripsAt < eraseOriginalsAt
+  && eraseOriginalsAt < clearIdentityAt
+  && clearIdentityAt < removePushAt,
+  'Profile stops background work and erases account scopes before clearing identity and push');
 assert(!profileSignOut.includes('You are still signed in'),
   'sign-out cleanup failures do not claim the invalidated session remains active');
 const registerStart = profile.indexOf("if (view === 'register')");
@@ -282,11 +287,24 @@ const nativeMapRender = nativeMapRenderStart >= 0 && nativeMapRenderEnd > native
   ? map.slice(nativeMapRenderStart, nativeMapRenderEnd)
   : '';
 for (const prop of ['camps', 'gas', 'pois', 'waterNavLines', 'waterSpotCards', 'reports', 'communityPins']) {
+  const propMatch = nativeMapRender.match(new RegExp(`${prop}=\\{([^\\n]+)`));
+  const expression = propMatch?.[1] ?? '';
   assert(
-    nativeMapRender.includes(`${prop}={mapMissionVisible`),
-    `Route preview suppresses ${prop} while retaining route waypoints`,
+    expression.includes('!mapVisualWorkActive') && expression.includes('mapMissionVisible'),
+    `Hidden Map and route preview suppress ${prop} while retaining visible route state`,
   );
 }
+assert(
+  nativeMapRender.includes('waypoints={mapVisualWorkActive ? waypoints : []}')
+    && nativeMapRender.includes('routeBuildActive={mapVisualWorkActive && routeBuildMapActive}'),
+  'Visible route review retains waypoints and route-build geometry through the shared activity contract',
+);
+assert(
+  screenActivityState.includes('export function mapVisualWorkShouldRun(')
+    && screenActivityState.includes('return screenActive || (appActive && navigationActive);')
+    && map.includes('const mapVisualWorkActive = mapVisualWorkShouldRun('),
+  'Map visual work pauses off-screen without unmounting the shared renderer',
+);
 
 assert(nativeMap.includes("slot: 'bottom'") && nativeMap.includes('belowLayerID: publicLandBelowLayerID'),
   'native public-land raster is positioned below route overlays');

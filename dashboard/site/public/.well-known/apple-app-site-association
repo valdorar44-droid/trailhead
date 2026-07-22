@@ -6,7 +6,15 @@
         "appID": "4FJKGBQA5X.com.trailhead.app",
         "paths": [
           "/originals/*",
-          "/app/*"
+          "/app/*",
+          "/r/*",
+          "/support",
+          "/support/*",
+          "/trips",
+          "/trips/*",
+          "/prizes",
+          "/prizes/*",
+          "/verify-email*"
         ],
         "components": [
           {
@@ -16,6 +24,26 @@
           {
             "/": "/app/*",
             "comment": "Trailhead web-app links"
+          },
+          {
+            "/": "/r/*",
+            "comment": "Trailhead referral links"
+          },
+          {
+            "/": "/support*",
+            "comment": "Trailhead support return links"
+          },
+          {
+            "/": "/trips*",
+            "comment": "Trailhead saved-trip links"
+          },
+          {
+            "/": "/prizes*",
+            "comment": "Trailhead prize and winner inbox links"
+          },
+          {
+            "/": "/verify-email*",
+            "comment": "Trailhead email verification links"
           }
         ]
       }

@@ -64,6 +64,16 @@ const nativeRuntimeStubs: Record<string, string> = {
       globalThis.__originalsRuntimeHeadlessStopCount = (globalThis.__originalsRuntimeHeadlessStopCount || 0) + 1;
     }
   `,
+  './accountCleanup': `
+    export function registerOriginalsAccountDepartureStopper(stopper) {
+      globalThis.__originalsRuntimeAccountDepartureStopper = stopper;
+      return () => {
+        if (globalThis.__originalsRuntimeAccountDepartureStopper === stopper) {
+          globalThis.__originalsRuntimeAccountDepartureStopper = null;
+        }
+      };
+    }
+  `,
   './previewAccess': `
     export async function getOriginalPreviewToken() {
       return globalThis.__originalsRuntimePreviewToken || null;

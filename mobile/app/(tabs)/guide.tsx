@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback, useReducer } from 'react';
 import {
   View, Text, TouchableOpacity, ScrollView, StyleSheet, ActivityIndicator, Animated,
   Image, Modal, Linking, TextInput, useWindowDimensions, Alert, Platform,
@@ -6,10 +6,11 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
+import PlaceSheetShell from '@/components/map/PlaceSheetShell';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow } from '@/components/TrailheadUI';
 import { OriginalsContextCard } from '@/components/originals';
 import {
@@ -42,6 +43,14 @@ import {
   type GuidedDestination,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
+import { useScreenActivity } from '@/lib/screenActivity';
+import { adaptExploreHubSheet, type PlaceSheetModel } from '@/lib/placeSheetAdapters';
+import {
+  initialSheetCoordinatorState,
+  sheetCoordinatorReducer,
+  sheetRequestIsCurrent,
+  type SheetIdentity,
+} from '@/lib/sheetCoordinator';
 import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
@@ -2091,6 +2100,7 @@ function GuideScreenContent() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
+  const screenActivity = useScreenActivity();
   const params = useLocalSearchParams<{ view?: string | string[] }>();
   const user = useStore(st => st.user);
   const authToken = useStore(st => st.token);
@@ -2232,6 +2242,54 @@ function GuideScreenContent() {
   const [exploreLocationRequestId, setExploreLocationRequestId] = useState(0);
   const [exploreLocationState, setExploreLocationState] = useState<'idle' | 'requesting' | 'denied' | 'blocked' | 'error'>('idle');
   const [selectedExplore, setSelectedExplore] = useState<ExplorePlaceProfile | null>(null);
+  const selectedExploreRef = useRef<ExplorePlaceProfile | null>(null);
+  selectedExploreRef.current = selectedExplore;
+  const selectedExploreSheetModel = useMemo(() => selectedExplore ? adaptExploreHubSheet({
+    id: selectedExplore.id,
+    name: selectedExplore.summary.title,
+    lat: selectedExplore.summary.lat,
+    lng: selectedExplore.summary.lng,
+    type: 'explore_hub',
+    source_label: getExplorePrimarySourceLabel(selectedExplore),
+  }) : null, [
+    selectedExplore?.id,
+    selectedExplore?.summary.title,
+    selectedExplore?.summary.lat,
+    selectedExplore?.summary.lng,
+    selectedExplore?.source_pack?.primary,
+    selectedExplore?.source_quality?.primary_provider,
+    selectedExplore?.summary.source_title,
+  ]);
+  const [exploreSheetCoordinator, dispatchExploreSheet] = useReducer(sheetCoordinatorReducer, initialSheetCoordinatorState);
+  const exploreSheetCoordinatorRef = useRef(exploreSheetCoordinator);
+  exploreSheetCoordinatorRef.current = exploreSheetCoordinator;
+  const beginExploreSheetRequest = useCallback((model: PlaceSheetModel) => {
+    const action = {
+      type: 'open' as const,
+      identity: model.identity,
+      presentation: 'full' as const,
+      returnContext: { surface: 'explore' as const },
+    };
+    const next = sheetCoordinatorReducer(exploreSheetCoordinatorRef.current, action);
+    exploreSheetCoordinatorRef.current = next;
+    dispatchExploreSheet(action);
+    return { identity: model.identity, requestGeneration: next.requestGeneration };
+  }, []);
+  const exploreSheetRequestIsCurrent = useCallback((request: { identity: SheetIdentity; requestGeneration: number }) => (
+    sheetRequestIsCurrent(exploreSheetCoordinatorRef.current, request.identity, request.requestGeneration)
+  ), []);
+  const currentExploreSheetRequest = useCallback((model: PlaceSheetModel) => {
+    const state = exploreSheetCoordinatorRef.current;
+    if (!sheetRequestIsCurrent(state, model.identity, state.requestGeneration)) return null;
+    return { identity: model.identity, requestGeneration: state.requestGeneration };
+  }, []);
+  const closeSelectedExplore = useCallback(() => {
+    const next = sheetCoordinatorReducer(exploreSheetCoordinatorRef.current, { type: 'close' });
+    exploreSheetCoordinatorRef.current = next;
+    dispatchExploreSheet({ type: 'close' });
+    selectedExploreRef.current = null;
+    setSelectedExplore(null);
+  }, []);
   const [selectedLivePlace, setSelectedLivePlace] = useState<OsmPoi | null>(null);
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('');
@@ -2750,9 +2808,9 @@ function GuideScreenContent() {
   }, [tab, exploreMode, exploreNearbySearchCenter?.lat, exploreNearbySearchCenter?.lng, weatherUnitMode]);
 
   useEffect(() => {
-    setSelectedExplore(null);
+    closeSelectedExplore();
     setSelectedLivePlace(null);
-  }, [exploreQuery]);
+  }, [closeSelectedExplore, exploreQuery]);
 
   useEffect(() => {
     const place = selectedExplore;
@@ -2771,13 +2829,18 @@ function GuideScreenContent() {
   }, [exploreCampErrors, exploreCampLoadingId, exploreCampgroundsById, selectedExplore]);
 
   useEffect(() => {
-    if (!selectedExplore || !shouldLoadExploreCamps(selectedExplore)) return;
+    if (!selectedExplore || !selectedExploreSheetModel || !shouldLoadExploreCamps(selectedExplore)) return;
     const place = selectedExplore;
+    const sheetRequest = currentExploreSheetRequest(selectedExploreSheetModel);
+    if (!sheetRequest) return;
     const placeId = place.id;
     const fallbackLat = place.summary.lat;
     const fallbackLng = place.summary.lng;
     const fallbackRadius = exploreCampFallbackRadius(place);
     let cancelled = false;
+    const isCurrent = () => !cancelled
+      && exploreSheetRequestIsCurrent(sheetRequest)
+      && selectedExploreRef.current?.id === placeId;
     const cacheKey = `${EXPLORE_CAMPGROUNDS_CACHE_PREFIX}${placeId}`;
     const withCampTimeout = <T,>(promise: Promise<T>, ms = 8000) => new Promise<T>((resolve, reject) => {
       const timer = setTimeout(() => reject(new Error('Explore campgrounds timeout')), ms);
@@ -2793,7 +2856,7 @@ function GuideScreenContent() {
       );
     });
     storage.get(cacheKey).then(raw => {
-      if (cancelled || !raw || exploreCampgroundsById[placeId]?.length) return;
+      if (!isCurrent() || !raw || exploreCampgroundsById[placeId]?.length) return;
       try {
         const cached = JSON.parse(raw);
         if (Array.isArray(cached?.campgrounds)) {
@@ -2817,7 +2880,7 @@ function GuideScreenContent() {
           }),
           9000,
         ).catch(() => []);
-        if (cancelled) return true;
+        if (!isCurrent()) return true;
         if (fallback.length) {
           setExploreCampgroundsById(prev => ({ ...prev, [placeId]: fallback }));
           setExploreCampSourceById(prev => ({ ...prev, [placeId]: 'fallback' }));
@@ -2831,18 +2894,18 @@ function GuideScreenContent() {
     if (!shouldUseExploreCampgroundEndpoint(place)) {
       loadFallbackCamps()
         .then(loaded => {
-          if (!cancelled && !loaded) {
+          if (isCurrent() && !loaded) {
             setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Search a wider area.' }));
           }
         })
         .finally(() => {
-          if (!cancelled) setExploreCampLoadingId(current => current === placeId ? null : current);
+          if (isCurrent()) setExploreCampLoadingId(current => current === placeId ? null : current);
       });
       return () => { cancelled = true; };
     }
     withCampTimeout(api.getExploreCampgrounds(placeId), 7000)
       .then(async res => {
-        if (cancelled) return;
+        if (!isCurrent()) return;
         const primary = res.campgrounds ?? [];
         let merged = primary;
         let sourceMode: 'official' | 'fallback' = 'official';
@@ -2857,7 +2920,7 @@ function GuideScreenContent() {
             }),
             9000,
           ).catch(() => []);
-          if (cancelled) return;
+          if (!isCurrent()) return;
           if (fallback.length) {
             merged = mergeCampPins(primary, fallback);
             if (primary.length === 0) sourceMode = 'fallback';
@@ -2869,19 +2932,21 @@ function GuideScreenContent() {
         storage.set(cacheKey, JSON.stringify({ campgrounds: merged, source_mode: sourceMode, fetched_at: Date.now() })).catch(() => {});
       })
       .catch(async () => {
-        if (cancelled) return;
+        if (!isCurrent()) return;
         if (await loadFallbackCamps()) return;
         setExploreCampErrors(prev => ({ ...prev, [placeId]: 'Search a wider area.' }));
       })
       .finally(() => {
-        if (!cancelled) setExploreCampLoadingId(current => current === placeId ? null : current);
+        if (isCurrent()) setExploreCampLoadingId(current => current === placeId ? null : current);
       });
     return () => { cancelled = true; };
-  }, [selectedExplore?.id]);
+  }, [currentExploreSheetRequest, exploreSheetRequestIsCurrent, selectedExplore?.id, selectedExploreSheetModel]);
 
   useEffect(() => {
-    if (!selectedExplore) return;
+    if (!selectedExplore || !selectedExploreSheetModel) return;
     const place = selectedExplore;
+    const sheetRequest = currentExploreSheetRequest(selectedExploreSheetModel);
+    if (!sheetRequest) return;
     const placeId = place.id;
     if (!BOOKABLE_EXPERIENCES_ENABLED) {
       setExploreExperiencesById(prev => prev[placeId] ? prev : ({ ...prev, [placeId]: [] }));
@@ -2896,9 +2961,12 @@ function GuideScreenContent() {
       return;
     }
     let cancelled = false;
+    const isCurrent = () => !cancelled
+      && exploreSheetRequestIsCurrent(sheetRequest)
+      && selectedExploreRef.current?.id === placeId;
     const cacheKey = `${EXPLORE_EXPERIENCES_CACHE_PREFIX}${placeId}`;
     storage.get(cacheKey).then(raw => {
-      if (cancelled || !raw || exploreExperiencesById[placeId]?.length) return;
+      if (!isCurrent() || !raw || exploreExperiencesById[placeId]?.length) return;
       try {
         const cached = JSON.parse(raw);
         if (Array.isArray(cached?.experiences)) {
@@ -2910,19 +2978,19 @@ function GuideScreenContent() {
     setExploreExperienceErrors(prev => ({ ...prev, [placeId]: '' }));
     api.getExplorePlaceExperiences(placeId, 24)
       .then(res => {
-        if (cancelled) return;
+        if (!isCurrent()) return;
         const experiences = res.results ?? [];
         setExploreExperiencesById(prev => ({ ...prev, [placeId]: experiences }));
         storage.set(cacheKey, JSON.stringify({ experiences, fetched_at: Date.now() })).catch(() => {});
       })
       .catch(() => {
-        if (!cancelled) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Guided trips are not available right now.' }));
+        if (isCurrent()) setExploreExperienceErrors(prev => ({ ...prev, [placeId]: 'Guided trips are not available right now.' }));
       })
       .finally(() => {
-        if (!cancelled) setExploreExperienceLoadingId(current => current === placeId ? null : current);
+        if (isCurrent()) setExploreExperienceLoadingId(current => current === placeId ? null : current);
       });
     return () => { cancelled = true; };
-  }, [selectedExplore?.id]);
+  }, [currentExploreSheetRequest, exploreSheetRequestIsCurrent, selectedExplore?.id, selectedExploreSheetModel]);
 
   useEffect(() => {
     const guidedCategoryActive = exploreCategory === 'guided' || exploreCategory === 'tours';
@@ -3921,7 +3989,7 @@ function GuideScreenContent() {
       && accountStorage.epoch() === requestEpoch
       && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
       && useStore.getState().activeTrip?.trip_id === requestTripId;
-    if (!autoPlay || !activeTrip) {
+    if (!screenActivity.isActive || !autoPlay || !activeTrip) {
       safelyRemoveSubscription(locationSub.current);
       locationSub.current = null;
       return () => { cancelled = true; };
@@ -3957,7 +4025,7 @@ function GuideScreenContent() {
       safelyRemoveSubscription(locationSub.current);
       locationSub.current = null;
     };
-  }, [autoPlay, activeTrip?.trip_id, guide, user?.id]);
+  }, [autoPlay, activeTrip?.trip_id, guide, screenActivity.isActive, user?.id]);
 
   useEffect(() => {
     stopTrailheadVoice();
@@ -4068,7 +4136,7 @@ function GuideScreenContent() {
         relatedContext: exploreMapRelatedContext(place, exploreCampgroundsById[place.id] ?? []),
       },
     });
-    setSelectedExplore(null);
+    closeSelectedExplore();
     router.push('/(tabs)/map');
   }
 
@@ -4097,7 +4165,7 @@ function GuideScreenContent() {
         createdAt: Date.now(),
       },
     });
-    setSelectedExplore(null);
+    closeSelectedExplore();
     router.push('/(tabs)/map');
   }
 
@@ -4112,7 +4180,7 @@ function GuideScreenContent() {
       return;
     }
     setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: title });
-    setSelectedExplore(null);
+    closeSelectedExplore();
     router.push('/(tabs)/map');
   }
 
@@ -4193,7 +4261,7 @@ function GuideScreenContent() {
         || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')
       ) return;
       setActiveTrip(starterTripResult(document, saved));
-      setSelectedExplore(null);
+      closeSelectedExplore();
       closeExperienceDetail();
       router.push({
         pathname: '/(tabs)/route-builder',
@@ -4220,7 +4288,7 @@ function GuideScreenContent() {
 
   function showExploreCampOnMap(camp: CampsitePin) {
     setPendingMapSelection({ kind: 'camp', camp });
-    setSelectedExplore(null);
+    closeSelectedExplore();
     router.push('/(tabs)/map');
   }
 
@@ -4247,7 +4315,7 @@ function GuideScreenContent() {
         createdAt: Date.now(),
       },
     });
-    setSelectedExplore(null);
+    closeSelectedExplore();
     router.push('/(tabs)/map');
   }
 
@@ -4260,7 +4328,7 @@ function GuideScreenContent() {
       return;
     }
     setPendingNavigatePlace({ lat: Number(lat), lng: Number(lng), name: target?.name || trail.title });
-    setSelectedExplore(null);
+    closeSelectedExplore();
     router.push('/(tabs)/map');
   }
 
@@ -4282,7 +4350,7 @@ function GuideScreenContent() {
         createdAt: Date.now(),
       },
     });
-    setSelectedExplore(null);
+    closeSelectedExplore();
     router.push('/(tabs)/map');
   }
 
@@ -4369,11 +4437,21 @@ function GuideScreenContent() {
   function showExploreSheet(place: ExplorePlaceProfile, initialTab: ExploreDetailTab) {
     setProfileReadMode(initialTab);
     const local = exploreTrailAreasById[place.id] ?? place;
+    const model = adaptExploreHubSheet({
+      id: local.id,
+      name: local.summary.title,
+      lat: local.summary.lat,
+      lng: local.summary.lng,
+      type: 'explore_hub',
+      source_label: getExplorePrimarySourceLabel(local),
+    });
+    const sheetRequest = beginExploreSheetRequest(model);
+    selectedExploreRef.current = local;
     setSelectedExplore(local);
     if (!exploreWeatherById[local.id] && exploreWeatherLoadingId !== local.id) {
       fetchExploreWeather(local).catch(() => {});
     }
-    return local;
+    return { local, sheetRequest };
   }
 
   async function openExplorePlace(place: ExplorePlaceProfile, initialTab: ExploreDetailTab = 'summary') {
@@ -4381,7 +4459,7 @@ function GuideScreenContent() {
       const destination = [...guidedDestinations, ...GUIDED_DESTINATIONS]
         .find(item => item.id === place.id);
       if (destination) {
-        setSelectedExplore(null);
+        closeSelectedExplore();
         selectGuidedDestination(destination);
         return;
       }
@@ -4404,13 +4482,14 @@ function GuideScreenContent() {
         return;
       }
     }
-    const local = showExploreSheet(place, initialTab);
+    const { local, sheetRequest } = showExploreSheet(place, initialTab);
     if (!shouldUseExploreDetailEndpoint(place)) {
       if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
       return;
     }
     try {
       const detail = await api.getExplorePlace(place.id);
+      if (!exploreSheetRequestIsCurrent(sheetRequest) || selectedExploreRef.current?.id !== place.id) return;
       setExplorePlaces(prev => prev.map(item => item.id === detail.id ? detail : item));
       const hydrated = exploreTrailAreasById[detail.id] ?? detail;
       setSelectedExplore(current => {
@@ -4427,7 +4506,9 @@ function GuideScreenContent() {
       }
       if (shouldHydrateExploreTrailArea(hydrated)) hydrateExploreTrailArea(hydrated).catch(() => {});
     } catch {
-      if (shouldHydrateExploreTrailArea(local)) hydrateExploreTrailArea(local).catch(() => {});
+      if (exploreSheetRequestIsCurrent(sheetRequest) && shouldHydrateExploreTrailArea(local)) {
+        hydrateExploreTrailArea(local).catch(() => {});
+      }
     }
   }
 
@@ -5808,8 +5889,9 @@ function GuideScreenContent() {
         onShowArea={showSelectedExperienceOnMap}
       />
 
-      <Modal visible={!!selectedExplore} animationType="slide" onRequestClose={() => setSelectedExplore(null)}>
+      <Modal visible={!!selectedExplore} animationType="slide" onRequestClose={closeSelectedExplore}>
         {selectedExplore && (
+          <PlaceSheetShell model={selectedExploreSheetModel!}>
           <ExploreDetailSheet
             place={selectedExplore}
             tab={profileReadMode}
@@ -5839,7 +5921,7 @@ function GuideScreenContent() {
                 </View>
               </View>
             ) : null}
-            onClose={() => setSelectedExplore(null)}
+            onClose={closeSelectedExplore}
             onPlayAudio={() => playExplore(selectedExplore)}
             onShowArea={() => showExploreOnMap(selectedExplore)}
             onRoute={() => activeTrip ? addExplorePlaceToTrip(selectedExplore) : startTripFromExplore(selectedExplore)}
@@ -5852,6 +5934,7 @@ function GuideScreenContent() {
             onTrailRoute={trail => directionsToExploreTrailhead(selectedExplore, trail)}
             mediaUrl={mediaUrl}
           />
+          </PlaceSheetShell>
         )}
       </Modal>
     </SafeAreaView>
@@ -5893,8 +5976,6 @@ function ExploreCampgroundSkeletonCard({
 }
 
 export default function GuideScreen() {
-  const pathname = usePathname();
-  if (pathname !== '/' && !pathname.includes('/guide')) return null;
   return <GuideScreenContent />;
 }
 

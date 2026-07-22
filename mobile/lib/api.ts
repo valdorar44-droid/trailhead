@@ -379,13 +379,13 @@ export const api = {
     req<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
     }),
-  oauthApple: (identity_token: string, full_name = '', email = '') =>
+  oauthApple: (identity_token: string, full_name = '', email = '', referral_code = '') =>
     req<{ token: string; user: User }>('/api/auth/oauth/apple', {
-      method: 'POST', body: JSON.stringify({ identity_token, full_name, email }),
+      method: 'POST', body: JSON.stringify({ identity_token, full_name, email, referral_code }),
     }),
-  oauthGoogle: (identity_token: string, full_name = '', email = '') =>
+  oauthGoogle: (identity_token: string, full_name = '', email = '', referral_code = '') =>
     req<{ token: string; user: User }>('/api/auth/oauth/google', {
-      method: 'POST', body: JSON.stringify({ identity_token, full_name, email }),
+      method: 'POST', body: JSON.stringify({ identity_token, full_name, email, referral_code }),
     }),
   verifyEmail: (token: string) =>
     req<{ token: string; user: User }>('/api/auth/verify-email', {
@@ -400,6 +400,14 @@ export const api = {
       method: 'POST', body: JSON.stringify({ email }),
     }),
   me: () => req<User>('/api/auth/me'),
+  authorizeAccountDeletion: (data: {
+    password?: string;
+    provider?: 'apple' | 'google';
+    identity_token?: string;
+  }) => req<AccountDeletionAuthorization>('/api/auth/deletion-authorization', {
+    method: 'POST',
+    body: JSON.stringify(data),
+  }),
   productFeatures: () => req<ProductFeatures>('/api/product/features'),
   getCommunicationPreferences: () =>
     req<CommunicationPreferences>('/api/communication-preferences'),
@@ -422,6 +430,16 @@ export const api = {
   },
   retractCommunityPublication: (publicationId: string) =>
     req<CommunityPublication>(`/api/community/publications/${encodeURIComponent(publicationId)}/retract`, { method: 'POST' }),
+  getCommunityRating: (kind: CommunityRatingKind, entityId: string) =>
+    req<RatingSummaryV1>(`/api/community/ratings/${encodeURIComponent(kind)}/${encodeURIComponent(entityId)}`),
+  setCommunityRating: (kind: CommunityRatingKind, entityId: string, rating: number) =>
+    req<RatingSummaryV1>(`/api/community/ratings/${encodeURIComponent(kind)}/${encodeURIComponent(entityId)}`, {
+      method: 'PUT', body: JSON.stringify({ rating }),
+    }),
+  deleteCommunityRating: (kind: CommunityRatingKind, entityId: string) =>
+    req<RatingSummaryV1>(`/api/community/ratings/${encodeURIComponent(kind)}/${encodeURIComponent(entityId)}`, {
+      method: 'DELETE',
+    }),
 
   plan: (request: string, sessionId = '', options: PlanRequestOptions = {}) =>
     req<{ job_id: string; status: string }>('/api/plan', { method: 'POST', body: JSON.stringify({ request, session_id: sessionId, ...options }) }),
@@ -456,8 +474,20 @@ export const api = {
     req<{ threads: SupportThread[]; unread_count: number }>('/api/support/inbox'),
   getSupportThread: (threadId: number) =>
     req<SupportThread>(`/api/support/threads/${threadId}`),
-  sendSupportMessage: (data: { thread_id?: number; subject?: string; category?: string; body: string }) =>
+  sendSupportMessage: (data: {
+    thread_id?: number;
+    subject?: string;
+    category?: string;
+    body: string;
+    attachment_refs?: string[];
+    diagnostic_consent?: boolean;
+    diagnostics?: SupportDiagnosticAllowlist;
+  }) =>
     req<{ ok: boolean; thread_id: number; message?: SupportMessage | null }>('/api/support/inbox/message', {
+      method: 'POST', body: JSON.stringify(data),
+    }),
+  uploadSupportAttachment: (data: { content_type: SupportAttachmentContentType; data_base64: string }) =>
+    req<SupportAttachment>('/api/support/attachments', {
       method: 'POST', body: JSON.stringify(data),
     }),
   chat: (message: string, sessionId: string, currentTrip?: TripResult | null, rigContext?: Record<string, unknown> | null) =>
@@ -582,7 +612,10 @@ export const api = {
     }),
   getLeaderboard: () => req<LeaderboardEntry[]>('/api/leaderboard'),
 
-  deleteAccount: () => req<{ deleted: boolean }>('/api/auth/me', { method: 'DELETE' }),
+  deleteAccount: (authorizationToken: string) => req<{ deleted: boolean }>('/api/auth/me', {
+    method: 'DELETE',
+    headers: { 'X-Trailhead-Deletion-Authorization': authorizationToken },
+  }),
 
   // Admin-only
   adminDeleteReport: (reportId: number) => req<{ ok: boolean }>(`/api/admin/reports/${reportId}`, { method: 'DELETE' }),
@@ -845,10 +878,15 @@ export const api = {
     }
     const safeLimit = Math.max(2, Math.min(Math.round(limit || 8), 10));
     const optionParams = geocodeOptionsQuery(options);
+    const run = () => req<GeocodeResolveResponse>(
+      `/api/geocode/resolve?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`,
+      { signal: options.signal },
+    );
+    if (options.signal) return run();
     return guardedRequest(
       `geocode-resolve:${normalized}:${safeLimit}:${optionParams.cacheKey}`,
       10 * 60_000,
-      () => req<GeocodeResolveResponse>(`/api/geocode/resolve?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`),
+      run,
     );
   },
   getSearchPlaceCard: (query: string, lat: number, lng: number) =>
@@ -1376,6 +1414,12 @@ export const api = {
     req<CampsiteInsight>('/api/ai/campsite-insight', { method: 'POST', body: JSON.stringify(data) }),
   getRouteBrief: (data: RouteBriefRequest) =>
     req<RouteBrief>('/api/ai/route-brief', { method: 'POST', body: JSON.stringify(data) }),
+  getBriefAndBackup: (tripId: string, expectedTripRevision: number | null, idempotencyKey: string) =>
+    req<BriefAndBackupV1>(`/api/trips/${encodeURIComponent(tripId)}/brief-and-backup`, {
+      method: 'POST',
+      headers: { 'Idempotency-Key': idempotencyKey },
+      body: JSON.stringify({ expected_trip_revision: expectedTripRevision }),
+    }),
   getPackingList: (data: PackingRequest) =>
     req<PackingList>('/api/ai/packing-list', { method: 'POST', body: JSON.stringify(data) }),
 
@@ -1514,6 +1558,12 @@ export interface User {
   is_admin?: boolean;
   map_contributor?: { status: 'not_applied' | 'pending' | 'approved' | 'dismissed'; approved: boolean; updated_at?: number | null };
   email_verified?: boolean | number;
+  auth_method?: 'password' | 'apple' | 'google';
+}
+export interface AccountDeletionAuthorization {
+  authorization_token: string;
+  expires_at: number;
+  auth_method: 'password' | 'apple' | 'google';
 }
 export interface SupportMessage {
   id: number;
@@ -1524,6 +1574,26 @@ export interface SupportMessage {
   body: string;
   created_at: number;
   meta?: Record<string, unknown>;
+  attachments?: SupportAttachment[];
+}
+export type SupportAttachmentContentType = 'image/jpeg' | 'image/png' | 'image/heic' | 'image/heif';
+export interface SupportAttachment {
+  attachment_ref: string;
+  content_type: SupportAttachmentContentType;
+  byte_count: number;
+  sha256: string;
+  created_at: number;
+}
+export interface SupportDiagnosticAllowlist {
+  platform?: string;
+  app_version?: string;
+  runtime_version?: string;
+  device_class?: string;
+  network_state?: string;
+  location_permission?: string;
+  notification_permission?: string;
+  storage_state?: string;
+  error_codes?: string[];
 }
 export interface SupportThread {
   id: number;
@@ -2355,13 +2425,23 @@ export interface GeocodeResolveResponse {
   retry_of?: string;
 }
 export interface ProductFeatures {
+  search_v2?: boolean;
+  offline_bundle_v2?: boolean;
   trip_graph_v2: boolean;
   trips_tab: boolean;
   availability_monitors?: boolean;
   trip_packs?: boolean;
   originals?: boolean;
   community_publications?: boolean;
+  community_ratings?: boolean;
+  brief_and_backup?: boolean;
   digest_preferences?: boolean;
+}
+export type CommunityRatingKind = 'camp' | 'trail' | 'trailhead' | 'place';
+export interface RatingSummaryV1 {
+  average: number | null;
+  count: number;
+  viewer_rating: number | null;
 }
 export interface CommunicationPreferences {
   weekly_digest: boolean;
@@ -4424,22 +4504,120 @@ export interface CampsiteInsightRequest {
   name: string; lat: number; lng: number;
   description?: string; land_type?: string; amenities?: string[];
   facility_id?: string;
+  source_label?: string;
+  source_url?: string;
+  source_updated_at?: number | string | null;
+}
+export interface CampsiteInsightProvenanceSource {
+  id: 'camp_listing' | 'nearby_references' | 'planning_guidance' | string;
+  label: string;
+  url?: string | null;
+  source_updated_at?: number | null;
+  retrieved_at?: number;
+  max_age_seconds?: number;
+  freshness: 'checked_recently' | 'dated' | 'older_source' | 'date_unknown' | 'refreshed_within_48_hours' | 'current_policy' | string;
+}
+export interface CampsiteInsightProvenance {
+  schema_version: 'campsite-insight-v2' | string;
+  evidence_status: 'supported' | 'limited';
+  source_revision: string;
+  generated_at: number;
+  expires_at: number;
+  sources: CampsiteInsightProvenanceSource[];
+  field_sources: Record<string, string[]>;
+  notice: string;
 }
 export interface CampsiteInsight {
   insider_tip: string; best_for: string; best_season: string;
   nearby_highlights: string[]; hazards: string | null;
   star_rating: number; coordinates_dms: string;
+  provenance?: CampsiteInsightProvenance;
 }
 export interface RouteBriefRequest {
   trip_name: string; waypoints: object[]; reports?: object[];
 }
 export interface RouteBrief {
-  readiness_score: number; top_concerns: string[]; must_do_before_leaving: string[];
-  daily_highlights: string[]; estimated_fuel_stops: number;
-  water_carry_gallons: number; briefing_summary: string;
-  signal_dead_zones?: string[];
-  fire_restriction_likelihood?: string;
-  emergency_bailout?: string;
+  schema_version: 2;
+  planning_status: 'Review required';
+  top_concerns: string[];
+  must_do_before_leaving: string[];
+  daily_highlights: string[];
+  fuel_status: string;
+  water_status: string;
+  signal_status: string;
+  fire_status: string;
+  exit_options_status: string;
+  briefing_summary: string;
+}
+export interface RouteServiceSegmentV1 {
+  id: string;
+  evidence_revision: string;
+  sequence: number;
+  start_progress: number;
+  end_progress: number;
+  availability: string;
+  source_label: string | null;
+  source_url: string | null;
+  observed_at: number | null;
+  updated_at: number;
+  provider?: string;
+  technology?: string;
+  sample_count?: number | null;
+  observation_kind?: 'point_observation';
+  report_id?: number;
+  report_type?: string;
+  severity?: string;
+  description?: string;
+  confirmations?: number;
+  advisory?: boolean;
+}
+export interface ExitReferenceV1 {
+  id: string;
+  evidence_revision: string;
+  route_progress: number;
+  label: string;
+  availability: string;
+  source_label: string | null;
+  source_url: string | null;
+  observed_at: number | null;
+  updated_at: number;
+  canonical_place_id?: string | null;
+  category?: string;
+  detour_miles?: number;
+  availability_note?: string;
+  stale?: boolean;
+}
+export interface TimelineEventMediaV1 {
+  id: string;
+  event_id: string;
+  place_id: string | null;
+  media_url: string;
+  license_id: string | null;
+  attribution: string | null;
+  evidence_revision: string;
+  updated_at: number;
+}
+export interface BriefAndBackupV1 {
+  schema_version: 1;
+  trip_id: string;
+  trip_revision: number;
+  route_sha256: string;
+  evidence_revision: string;
+  generated_at: number;
+  status: 'partially_checked' | 'not_checked';
+  evidence_available: boolean;
+  legacy_fallback_recommended: boolean;
+  checks: {
+    mobile_service: 'observations_found' | 'not_checked';
+    exits: 'references_found' | 'not_checked';
+    backup_routes: 'not_checked';
+    hazards: 'not_checked';
+  };
+  service_segments: RouteServiceSegmentV1[];
+  exits: ExitReferenceV1[];
+  timeline_media: TimelineEventMediaV1[];
+  sources: Array<{ label: string; url: string | null; observed_at: number | null; updated_at: number | null }>;
+  note: string;
 }
 export interface PackingRequest {
   trip_name: string; duration_days: number;

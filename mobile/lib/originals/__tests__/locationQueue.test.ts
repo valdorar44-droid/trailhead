@@ -1,6 +1,13 @@
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createOriginalLocationQueue, type OriginalLocationQueueStorage } from '../locationQueue';
-import { backgroundLocationStartMessage, IOS_LOCKED_SCREEN_LOCATION_MESSAGE, requireIosLockedScreenPermission } from '../locationPolicy';
+import {
+  backgroundLocationStartMessage,
+  IOS_LOCKED_SCREEN_LOCATION_MESSAGE,
+  originalStartNeedsPermissionDisclosure,
+  requireIosLockedScreenPermission,
+} from '../locationPolicy';
 import type { OriginalLocationSample } from '../types';
 
 function memoryStorage(): OriginalLocationQueueStorage & { value: string | null } {
@@ -53,12 +60,42 @@ async function main() {
   await queue.clear();
   assert.equal(await queue.count(), 0);
 
+  await queue.enqueue([sample(now - 500, 38.7)]);
+  assert.equal(await queue.count(), 1, 'a cold native task can leave one pending raw fix');
+  await queue.clear();
+  assert.equal(await queue.count(), 0, 'account departure purges the serialized raw-fix queue');
+
+  const cleanupSource = fs.readFileSync(path.resolve('lib/originals/accountCleanup.ts'), 'utf8');
+  assert.match(cleanupSource, /await expoOriginalLocationAdapter\.stopActive\(\)/);
+  assert.match(cleanupSource, /await clearOriginalLocationRuntimeQueue\(\)/);
+  assert.ok(
+    cleanupSource.indexOf('await clearOriginalLocationRuntimeQueue()')
+      < cleanupSource.indexOf("if (errors.length > 0) throw"),
+    'raw-fix queue cleanup is part of the awaited Originals teardown barrier',
+  );
+
   assert.throws(
     () => requireIosLockedScreenPermission('ios', false),
     new RegExp(IOS_LOCKED_SCREEN_LOCATION_MESSAGE.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')),
   );
   assert.doesNotThrow(() => requireIosLockedScreenPermission('ios', true));
   assert.match(backgroundLocationStartMessage('android'), /active-tour location service/);
+  assert.equal(originalStartNeedsPermissionDisclosure('ios', {
+    foregroundGranted: true,
+    backgroundGranted: true,
+  }), false, 'iOS does not repeat disclosure after all tour permissions are granted');
+  assert.equal(originalStartNeedsPermissionDisclosure('ios', {
+    foregroundGranted: true,
+    backgroundGranted: false,
+  }), true, 'iOS shows disclosure before requesting locked-screen access');
+  assert.equal(originalStartNeedsPermissionDisclosure('android', {
+    foregroundGranted: true,
+    notificationsGranted: true,
+  }), false, 'Android does not repeat disclosure after active-tour permissions are granted');
+  assert.equal(originalStartNeedsPermissionDisclosure('android', {
+    foregroundGranted: true,
+    notificationsGranted: false,
+  }), true, 'Android shows disclosure before requesting the foreground-service notification');
 
   console.log('Originals durable location queue tests passed.');
 }

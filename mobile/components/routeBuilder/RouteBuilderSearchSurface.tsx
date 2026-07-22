@@ -7,11 +7,19 @@ import RouteBuilderInsertNotice from './RouteBuilderInsertNotice';
 
 const DEFAULT_STOP_TYPES: RouteBuilderStopType[] = ['start', 'fuel', 'waypoint', 'camp', 'motel'];
 
+export type RouteBuilderSearchDisplayPlace = Omit<RouteBuilderSearchPlace, 'lat' | 'lng'> & {
+  lat?: number;
+  lng?: number;
+  result_id?: string;
+  resolution_required?: boolean;
+  resolving?: boolean;
+};
+
 type RouteBuilderSearchSurfaceProps = {
   pendingType: RouteBuilderStopType;
   query: string;
   searching: boolean;
-  results: RouteBuilderSearchPlace[];
+  results: RouteBuilderSearchDisplayPlace[];
   selectedStopName?: string | null;
   targetDay?: number | null;
   fallbackDay?: number | null;
@@ -22,7 +30,7 @@ type RouteBuilderSearchSurfaceProps = {
   onSelectType: (type: RouteBuilderStopType) => void;
   onChangeQuery: (query: string) => void;
   onSubmitSearch: () => void;
-  onSelectResult: (place: RouteBuilderSearchPlace) => void;
+  onSelectResult: (place: RouteBuilderSearchDisplayPlace) => void;
   onClearInsert: () => void;
 };
 
@@ -30,7 +38,7 @@ function normalizeMetaToken(value?: string | null) {
   return String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '_');
 }
 
-function searchResultLabel(place: RouteBuilderSearchPlace, fallback: string) {
+function searchResultLabel(place: RouteBuilderSearchDisplayPlace, fallback: string) {
   const tokens = [
     normalizeMetaToken(place.feature_type),
     normalizeMetaToken(place.category),
@@ -128,12 +136,16 @@ export default function RouteBuilderSearchSurface({
         <View style={s.resultsBox}>
           {results.map(place => (
             <TouchableOpacity
-              key={`${place.name}_${place.lat}_${place.lng}`}
+              key={place.result_id || `${place.name}_${place.lat ?? 'pending'}_${place.lng ?? 'pending'}`}
               style={s.resultRow}
               onPress={() => onSelectResult(place)}
               activeOpacity={0.86}
             >
-              <Ionicons name={stopIcon(pendingType)} size={15} color={stopColor(pendingType)} />
+              {place.resolving ? (
+                <ActivityIndicator size="small" color={stopColor(pendingType)} />
+              ) : (
+                <Ionicons name={stopIcon(pendingType)} size={15} color={stopColor(pendingType)} />
+              )}
               <View style={s.resultBody}>
                 <Text style={s.resultName} numberOfLines={1}>{place.name}</Text>
                 <Text style={s.resultMeta}>{searchResultLabel(place, resultMetaLabel)}</Text>

@@ -203,7 +203,7 @@ function tripResultFromDocument(document: TripDocumentV2): TripResult {
     return {
       day: dayNumber,
       title: day?.title || `Day ${dayNumber}`,
-      description: day?.summary || (highlights.length ? highlights.join(', ') : 'Route details are ready to be added.'),
+      description: day?.summary || (highlights.length ? highlights.join(', ') : 'No stops added for this day.'),
       est_miles: 0,
       road_type: 'Review route',
       highlights,

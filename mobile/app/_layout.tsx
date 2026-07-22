@@ -1,4 +1,5 @@
 import '@/lib/backgroundTasks'; // must be first — registers background location task
+import '@/lib/telemetry/sentry';
 import { useEffect, useRef, useState } from 'react';
 import { Alert, Appearance, AppState, Linking, Platform, View, Text, TouchableOpacity } from 'react-native';
 import { Stack, usePathname, useRouter } from 'expo-router';
@@ -51,6 +52,14 @@ import { accountRecoveryContext } from '@/lib/tripRepository/accountRecovery';
 import { routeBuilderRequestFromGeoUrl } from '@/lib/carNavigationIntent';
 import { OriginalsRuntimeProvider } from '@/lib/originals/runtime';
 import { consumeOriginalPreviewUrl } from '@/lib/originals/previewAccess';
+import {
+  referralCodeFromUrl,
+  rememberReferralCode,
+  startBranchReferralAttribution,
+} from '@/lib/referrals/branchAttribution';
+import { useTrailheadFonts } from '@/lib/typography';
+import { withTrailheadTelemetry } from '@/lib/telemetry/sentry';
+import { appLinkDestinationFromUrl } from '@/lib/appLinks';
 
 const LAUNCH_LOADER_MIN_MS = 1200;
 const LAUNCH_LOADER_MAX_MS = 4500;
@@ -69,7 +78,7 @@ function askToAddSignedOutTrips(count: number): Promise<boolean> {
   });
 }
 
-export default function RootLayout() {
+function RootLayout() {
   const setAuth            = useStore(s => s.setAuth);
   const setPlan            = useStore(s => s.setPlan);
   const setActiveTrip      = useStore(s => s.setActiveTrip);
@@ -99,6 +108,8 @@ export default function RootLayout() {
   const tripGraphSyncEnabled = useRef(false);
   const stopTripRepositoryAutoSync = useRef<(() => void) | null>(null);
   const navigationLinkSequence = useRef(0);
+  const [fontsLoaded, fontError] = useTrailheadFonts();
+  const fontsReady = fontsLoaded || Boolean(fontError);
 
   useEffect(() => {
     if (!startupReady) return;
@@ -268,12 +279,49 @@ export default function RootLayout() {
           return;
         }
       } catch (error: any) {
-        Alert.alert('Preview link unavailable', error?.message || 'This internal preview link is invalid or expired.');
+        Alert.alert('Preview link unavailable', error?.message || 'This preview link is invalid or expired.');
         return;
       }
     }
     if (verificationTokenFromUrl(url)) {
       await handleVerificationUrl(url);
+      return;
+    }
+    const referralCode = referralCodeFromUrl(url);
+    if (referralCode) {
+      if (!useStore.getState().user) {
+        await rememberReferralCode(referralCode);
+        router.push({
+          pathname: '/(tabs)/profile',
+          params: { auth: 'register', referral_code: referralCode },
+        } as any);
+      }
+      return;
+    }
+    const appLink = appLinkDestinationFromUrl(url);
+    if (appLink?.screen === 'support') {
+      router.push({
+        pathname: '/(tabs)/profile',
+        params: {
+          support: '1',
+          ...(appLink.threadId ? { support_thread_id: appLink.threadId } : {}),
+        },
+      } as any);
+      return;
+    }
+    if (appLink?.screen === 'prizes') {
+      router.push({ pathname: '/(tabs)/profile', params: { prizes: '1' } } as any);
+      return;
+    }
+    if (appLink?.screen === 'trips') {
+      router.push({
+        pathname: '/(tabs)/trips',
+        params: appLink.tripId ? { trip_id: appLink.tripId } : {},
+      } as any);
+      return;
+    }
+    if (appLink?.screen === 'original') {
+      router.push(`/originals/${encodeURIComponent(appLink.originalId)}` as any);
       return;
     }
     const request = routeBuilderRequestFromGeoUrl(url);
@@ -438,12 +486,12 @@ export default function RootLayout() {
   }, []);
 
   useEffect(() => {
-    if (!startupReady || !launchLoaderVisible) return;
+    if (!startupReady || !fontsReady || !launchLoaderVisible) return;
     const elapsed = Date.now() - launchAtRef.current;
     const releaseDelay = Math.max(0, LAUNCH_LOADER_MIN_MS - elapsed);
     const timer = setTimeout(() => setLaunchLoaderVisible(false), releaseDelay);
     return () => clearTimeout(timer);
-  }, [launchLoaderVisible, startupReady]);
+  }, [fontsReady, launchLoaderVisible, startupReady]);
 
   useEffect(() => {
     let appStateSub: ReturnType<typeof AppState.addEventListener> | null = null;
@@ -603,6 +651,14 @@ export default function RootLayout() {
     const linkSub = Linking.addEventListener('url', event => {
       handleIncomingUrl(event.url).catch(() => {});
     });
+    const branchUnsubscribe = startBranchReferralAttribution(code => {
+      if (useStore.getState().user) return false;
+      router.push({
+        pathname: '/(tabs)/profile',
+        params: { auth: 'register', referral_code: code },
+      } as any);
+      return true;
+    });
 
     return () => {
       launchCancelled = true;
@@ -611,6 +667,7 @@ export default function RootLayout() {
       void cancelTripRepositorySync();
       notifSub.remove();
       linkSub.remove();
+      branchUnsubscribe();
       appStateSub?.remove();
     };
   }, []);
@@ -730,3 +787,5 @@ export default function RootLayout() {
     </GestureHandlerRootView>
   );
 }
+
+export default withTrailheadTelemetry(RootLayout);

@@ -84,7 +84,7 @@ export default function TripsTabBar({ state, descriptors, navigation }: BottomTa
               style={styles.item}
             >
               <View style={styles.iconShell}>
-                <Ionicons name={ICONS[route.name] ?? 'ellipse-outline'} size={20} color={color} />
+                <Ionicons name={ICONS[route.name] ?? 'ellipse-outline'} size={20} color={color} accessible={false} importantForAccessibility="no" />
               </View>
               <Text style={[styles.label, { color }]} numberOfLines={1} adjustsFontSizeToFit minimumFontScale={0.82}>{label}</Text>
               {focused ? <View style={[styles.activeMark, { backgroundColor: C.orange }]} /> : null}

@@ -32,6 +32,10 @@ import {
 } from '@/lib/exploreContextFilters';
 import { TrailheadButton, TrailheadButtonDock, TrailheadLoadingRow, TrailheadRailSkeleton, TrailheadSheet } from '@/components/TrailheadUI';
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
+import PlaceSheetShell, { PlaceSheetHeroChrome, PlaceSheetShellHeader } from '@/components/map/PlaceSheetShell';
+import FirstPartyRatingSection from '@/components/map/FirstPartyRatingSection';
+import { adaptGenericPlaceSheet } from '@/lib/placeSheetAdapters';
+import { communityRatingTarget } from '@/lib/communityRatingEligibility';
 
 type Stage = 'full' | 'half' | 'peek';
 const API_BASE = TRAILHEAD_API_BASE;
@@ -166,6 +170,8 @@ type Props = {
   onOpenRelatedPlace?: (place: RelatedItem) => void;
   onOpenRelatedCamp?: (place: RelatedItem) => void;
   onOpenRelatedTrail?: (place: RelatedItem) => void;
+  communityRatingsEnabled?: boolean;
+  canRate?: boolean;
 };
 
 function titleCase(value?: string) {
@@ -381,6 +387,8 @@ export default function PremiumPlaceSheet({
   onOpenRelatedPlace,
   onOpenRelatedCamp,
   onOpenRelatedTrail,
+  communityRatingsEnabled = false,
+  canRate = false,
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -405,6 +413,29 @@ export default function PremiumPlaceSheet({
   const [alertEnd, setAlertEnd] = useState('');
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<string[]>([]);
   const dragY = useRef(new Animated.Value(0)).current;
+  const sheetModel = useMemo(
+    () => adaptGenericPlaceSheet(place ?? { name: 'Place', type: 'place' }),
+    [place?.id, place?.place_id, place?.provider_place_id, place?.name, place?.lat, place?.lng, place?.type, place?.subtype, place?.source_label],
+  );
+  const ratingTarget = useMemo(() => communityRatingTarget({
+    enabled: communityRatingsEnabled,
+    signedIn: canRate,
+    kind: sheetModel.identity.kind,
+    canonicalEntityId: canonical?.trailhead_place_id,
+    source: place?.source || place?.source_label,
+    type: place?.type,
+    persistencePolicy: (place as any)?.persistence_policy,
+    temporaryUseOnly: place ? isTransientMapboxPlace(place) : false,
+  }), [
+    canRate,
+    canonical?.trailhead_place_id,
+    communityRatingsEnabled,
+    place?.source,
+    place?.source_label,
+    place?.type,
+    (place as any)?.persistence_policy,
+    sheetModel.identity.kind,
+  ]);
 
   useEffect(() => {
     if (!place) {
@@ -739,21 +770,15 @@ export default function PremiumPlaceSheet({
         style={[s.sheet, stage === 'peek' && s.sheetTip]}
         contentStyle={s.sheetContent}
       >
-        <View style={s.grabberZone} {...pan.panHandlers}>
-          <TouchableOpacity style={s.grabberTap} onPress={cycleStage} activeOpacity={0.78}>
-            <View style={s.grabber} />
-          </TouchableOpacity>
-          <View style={s.tipRow}>
-            <View style={{ flex: 1, minWidth: 0 }}>
-              <Text style={s.tipTitle} numberOfLines={1}>{data.name}</Text>
-              <Text style={s.tipMeta} numberOfLines={1}>{subtitle || data.display_type || sourceLabel}</Text>
-            </View>
-            {loading ? <ActivityIndicator color={C.orange} size="small" /> : null}
-            <TouchableOpacity style={s.iconBtn} onPress={onClose}>
-              <Ionicons name="close" size={17} color={C.text2} />
-            </TouchableOpacity>
+        <PlaceSheetShell model={sheetModel}>
+          <View {...pan.panHandlers}>
+            <PlaceSheetShellHeader
+              model={{ ...sheetModel, subtitle: subtitle || data.display_type || sourceLabel }}
+              loading={loading}
+              onToggleStage={cycleStage}
+              onClose={onClose}
+            />
           </View>
-        </View>
 
         {stage !== 'peek' && (
           <ScrollView
@@ -765,10 +790,7 @@ export default function PremiumPlaceSheet({
               <TouchableOpacity style={s.hero} activeOpacity={0.9} onPress={() => setGalleryIndex(0)}>
                 <Image source={{ uri: hero }} style={s.heroImage} resizeMode="cover" onError={() => markPhotoFailed(hero)} />
                 <View style={s.heroShade} />
-                <View style={s.heroText}>
-                  <Text style={s.kicker}>{typeLabel}</Text>
-                  <Text style={s.title}>{data.name}</Text>
-                </View>
+                <PlaceSheetHeroChrome model={{ ...sheetModel, title: data.name, subtitle: typeLabel }} />
               </TouchableOpacity>
             ) : null}
 
@@ -1051,6 +1073,13 @@ export default function PremiumPlaceSheet({
                 </View>
               ) : null}
 
+              {stage === 'full' ? (
+                <FirstPartyRatingSection
+                  target={ratingTarget}
+                  testID={`${sheetModel.testID}-rating`}
+                />
+              ) : null}
+
               {stage === 'full' && (
                 <View style={s.communityBlock}>
                   <View style={s.communityHeader}>
@@ -1085,8 +1114,8 @@ export default function PremiumPlaceSheet({
                         multiline
                       />
                       <TouchableOpacity style={s.photoAttachBtn} onPress={pickCommunityPhoto}>
-                        <Ionicons name={commentPhoto ? 'checkmark-circle-outline' : 'camera-outline'} size={14} color={commentPhoto ? C.green : C.text3} />
-                        <Text style={[s.photoAttachText, commentPhoto && { color: C.green }]}>{commentPhoto ? 'Photo attached (+5 credits)' : 'Add photo (+5 credits)'}</Text>
+                        <Ionicons name={commentPhoto ? 'checkmark-circle-outline' : 'camera-outline'} size={14} color={commentPhoto ? C.orange : C.text3} />
+                        <Text style={[s.photoAttachText, commentPhoto && { color: C.orange }]}>{commentPhoto ? 'Photo attached (+5 credits)' : 'Add photo (+5 credits)'}</Text>
                       </TouchableOpacity>
                       <View style={s.inlineActions}>
                         <TouchableOpacity style={s.smallSecondaryBtn} onPress={() => { setShowCommentForm(false); setCommentText(''); setCommentPhoto(null); }}>
@@ -1212,6 +1241,7 @@ export default function PremiumPlaceSheet({
             )}
           </TrailheadButtonDock>
         )}
+        </PlaceSheetShell>
       </TrailheadSheet>
       <TrailheadPhotoGallery
         visible={galleryIndex !== null}

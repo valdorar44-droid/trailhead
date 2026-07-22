@@ -5,7 +5,7 @@ import {
   Share, Animated, Alert, Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePathname, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -25,6 +25,11 @@ import { markReviewPromptShown, recordReviewMoment } from '@/lib/reviewPrompt';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { mergeTripPreferencesIntoRigContext, tripPreferenceContextFromWelcomePreferences } from '@/lib/tripPreferences';
 import { accountStorage } from '@/lib/storage';
+import {
+  routeWeatherCacheEnvelope,
+  routeWeatherCacheFileName,
+  routeWeatherWaypointSignature,
+} from '@/lib/routeWeather';
 
 const BASE_URL = process.env.EXPO_PUBLIC_API_URL ?? 'https://api.gettrailhead.app';
 const TRAILHEAD_LOGO = require('../../assets/icon.png');
@@ -475,13 +480,22 @@ function PlanScreenContent() {
       // Download route weather for offline use (fail silently)
       const weatherEpoch = accountStorage.epoch();
       api.getRouteWeather(result.trip_id, result.plan.waypoints, weatherUnitMode).then(async weather => {
-        const path = `${FileSystem.documentDirectory}weather_${result.trip_id}.json`;
+        const signature = routeWeatherWaypointSignature(result.plan.waypoints);
+        const path = `${FileSystem.documentDirectory}${routeWeatherCacheFileName(
+          result.trip_id,
+          weatherUnitMode,
+          signature,
+        )}`;
         const stored = await accountStorage.run(async () => {
-          await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), { encoding: FileSystem.EncodingType.UTF8 });
+          await FileSystem.writeAsStringAsync(
+            path,
+            JSON.stringify(routeWeatherCacheEnvelope(weather, weatherUnitMode, signature)),
+            { encoding: FileSystem.EncodingType.UTF8 },
+          );
           return true;
         }, weatherEpoch);
         if (!stored) return;
-        setWeatherToast('Weather saved for this trip');
+        setWeatherToast('Trip weather is ready');
         setTimeout(() => setWeatherToast(''), 3000);
       }).catch(() => {});
     } catch (e: any) {
@@ -1112,8 +1126,6 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
 }
 
 export default function PlanScreen() {
-  const pathname = usePathname();
-  if (!pathname.includes('/plan')) return null;
   return <PlanScreenContent />;
 }
 

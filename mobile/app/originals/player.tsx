@@ -605,7 +605,7 @@ export default function OriginalPlayerScreen() {
           <View style={styles.mapStatusRow}>
             <View style={styles.offlineBadge}>
               <Ionicons name="cloud-offline-outline" size={13} color="#FFFFFF" />
-              <Text style={styles.offlineText}>OFFLINE READY</Text>
+              <Text style={styles.offlineText}>DOWNLOADED</Text>
             </View>
             <View style={styles.gpsBadge}>
               <View style={[styles.gpsDot, { backgroundColor: status === 'location_unavailable' && !originalsRuntime.simulation ? C.red : C.orange }]} />

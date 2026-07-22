@@ -5,6 +5,11 @@ import { api, TripResult, RouteWeatherResult } from './api';
 import { TRAILHEAD_API_BASE } from './apiBase';
 import { useStore } from './store';
 import { accountStorage } from './storage';
+import {
+  routeWeatherCacheEnvelope,
+  routeWeatherCacheFileName,
+  routeWeatherWaypointSignature,
+} from './routeWeather';
 
 const BASE = TRAILHEAD_API_BASE;
 const POLL_MS = 45_000;
@@ -23,6 +28,7 @@ async function probe(): Promise<boolean> {
 }
 
 interface SyncCallbacks {
+  active?: boolean;
   activeTrip: TripResult | null;
   onWeatherUpdate: (weather: RouteWeatherResult) => void;
   onSyncComplete: () => void; // called when any sync succeeds (show toast)
@@ -31,6 +37,7 @@ interface SyncCallbacks {
 }
 
 export function useConnectivitySync({
+  active = true,
   activeTrip,
   onWeatherUpdate,
   onSyncComplete,
@@ -40,21 +47,31 @@ export function useConnectivitySync({
   const wasOnline = useRef<boolean | null>(null); // null = unknown (first probe not done)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSyncing = useRef(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   const syncWeather = useCallback(async (trip: TripResult) => {
     if (isSyncing.current) return;
     const epoch = accountStorage.epoch();
     isSyncing.current = true;
     try {
-      const weather = await api.getRouteWeather(trip.trip_id, trip.plan.waypoints, useStore.getState().weatherUnitMode);
-      const path = `${FileSystem.documentDirectory}weather_${trip.trip_id}.json`;
+      const units = useStore.getState().weatherUnitMode;
+      const weather = await api.getRouteWeather(trip.trip_id, trip.plan.waypoints, units);
+      const signature = routeWeatherWaypointSignature(trip.plan.waypoints);
+      const path = `${FileSystem.documentDirectory}${routeWeatherCacheFileName(
+        trip.trip_id,
+        units,
+        signature,
+      )}`;
       const stored = await accountStorage.run(async () => {
-        await FileSystem.writeAsStringAsync(path, JSON.stringify(weather), {
-          encoding: FileSystem.EncodingType.UTF8,
-        });
+        await FileSystem.writeAsStringAsync(
+          path,
+          JSON.stringify(routeWeatherCacheEnvelope(weather, units, signature)),
+          { encoding: FileSystem.EncodingType.UTF8 },
+        );
         return true;
       }, epoch);
-      if (!stored) return;
+      if (!stored || !activeRef.current) return;
       onWeatherUpdate(weather);
       onSyncComplete();
     } catch {
@@ -69,7 +86,8 @@ export function useConnectivitySync({
     const tickAccountId = useStore.getState().user?.id;
     const online = await probe();
     if (
-      accountStorage.epoch() !== tickEpoch
+      !activeRef.current
+      || accountStorage.epoch() !== tickEpoch
       || String(useStore.getState().user?.id ?? '') !== String(tickAccountId ?? '')
     ) return;
     const prevOnline = wasOnline.current;
@@ -93,6 +111,10 @@ export function useConnectivitySync({
   useEffect(() => { tickRef.current = tick; }, [tick]);
 
   useEffect(() => {
+    if (!active) {
+      wasOnline.current = null;
+      return;
+    }
     // Start polling
     intervalRef.current = setInterval(() => tickRef.current(), POLL_MS);
 
@@ -112,5 +134,5 @@ export function useConnectivitySync({
       if (intervalRef.current) clearInterval(intervalRef.current);
       sub.remove();
     };
-  }, []); // run once — tickRef keeps tick current
+  }, [active]); // tickRef keeps the request closure current without restarting the interval
 }

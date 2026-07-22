@@ -25,6 +25,7 @@ const routeActivityOffer = source('components/routeBuilder/RouteActivityOfferShe
 const routeActivityLogic = source('lib/routeActivityOffer.ts');
 const trips = source('app/(tabs)/trips.tsx');
 const guide = source('app/(tabs)/guide.tsx');
+const report = source('app/(tabs)/report.tsx');
 const profile = source('app/(tabs)/profile.tsx');
 const api = source('lib/api.ts');
 
@@ -72,9 +73,49 @@ assert(routeBuilder.includes("if (routeBuilderIntent !== 'edit-active'")
 assert(!routeBuilder.includes("setRouteTabMode('hub')") && !routeBuilder.includes("if (routeTabMode === 'hub')"),
   'Route Builder never returns to the retired hub');
 assert(
-  routeBuilder.includes('setTabBarHidden(buildingFramework || stops.length >= 2 || keyboardVisible)')
+  routeBuilder.includes('useTabBarVisibility(')
+    && routeBuilder.includes("'route-builder'")
+    && routeBuilder.includes('buildingFramework || stops.length >= 2 || keyboardVisible')
     && routeBuilder.includes('const dockMarginBottom = keyboardVisible ? 10 + bottomInset : 94 + bottomInset'),
   'Route Builder keeps setup controls clear of global tabs and hides them during the full-screen route scan',
+);
+for (const [name, screen] of [
+  ['Explore', guide],
+  ['Plan', plan],
+  ['Map', map],
+  ['Reports', report],
+  ['Profile', profile],
+  ['Route Builder', routeBuilder],
+]) {
+  assert(
+    !screen.includes('pathname.includes('),
+    `${name} remains mounted when another tab is focused`,
+  );
+}
+assert(
+  !routeBuilder.includes('wizardStepScrollRef.current?.scrollTo')
+    && routeBuilder.includes("Dimensions.get('screen').height"),
+  'Route Builder keeps its search field stable when the keyboard resizes the Android window',
+);
+assert(
+  !routeBuilder.includes('campInsight.star_rating'),
+  'Route Builder does not present generated campsite ratings as observed reviews',
+);
+assert(
+  !report.match(/(?:route|camp|nearby|area) looks clear/i)
+    && report.match(/A lack of reports does not confirm conditions/g)?.length >= 3,
+  'Empty report feeds state that missing reports do not confirm conditions',
+);
+assert(
+  !map.includes('windowHeight - keyboardHeight')
+    && map.includes('windowHeight - inlineSearchTop - 28'),
+  'Map search does not subtract the Android keyboard twice',
+);
+assert(
+  /resolveGeocodePlace:[\s\S]{0,1600}\{ signal: options\.signal \}/.test(api)
+    && map.includes('{ signal: request.controller.signal }')
+    && map.includes('mapSearchRequestIsCurrent(request)'),
+  'Map search aborts superseded geocoding and rejects stale responses',
 );
 assert(!routeBuilder.includes('opacity: wizardFade') && !routeBuilder.includes('translateY: wizardSlide'),
   'Route Builder setup cannot remain dimmed by an interrupted entrance animation');

@@ -1,5 +1,45 @@
 from __future__ import annotations
-import os, secrets
+
+import os
+import secrets
+from collections.abc import Mapping
+
+
+DEVELOPMENT_SECRET_KEY = "trailhead-dev-secret-change-in-prod"
+PRODUCTION_ENVIRONMENT_NAMES = frozenset({"prod", "production"})
+
+
+def is_production_environment(
+    environ: Mapping[str, str] | None = None,
+) -> bool:
+    """Return whether Trailhead is explicitly running in production.
+
+    Production is detected only from ``TRAILHEAD_ENVIRONMENT`` or Railway's
+    ``RAILWAY_ENVIRONMENT_NAME``. Preview/staging Railway services therefore do
+    not inherit production-only startup requirements merely because they run on
+    Railway.
+    """
+    source = environ if environ is not None else os.environ
+    values = {
+        str(source.get(name) or "").strip().lower()
+        for name in ("TRAILHEAD_ENVIRONMENT", "RAILWAY_ENVIRONMENT_NAME")
+    }
+    return bool(values & PRODUCTION_ENVIRONMENT_NAMES)
+
+
+def validate_production_secret_key(
+    secret_key: str,
+    environ: Mapping[str, str] | None = None,
+) -> None:
+    """Fail closed when production would sign tokens with a development key."""
+    if not is_production_environment(environ):
+        return
+    normalized = str(secret_key or "").strip()
+    if not normalized or secrets.compare_digest(normalized, DEVELOPMENT_SECRET_KEY):
+        raise RuntimeError(
+            "SECRET_KEY must be configured with a non-development value in production"
+        )
+
 
 class Settings:
     anthropic_api_key: str = os.environ.get("ANTHROPIC_API_KEY", "")
@@ -68,7 +108,7 @@ class Settings:
     fcc_bdc_mobile_data_date: str = os.environ.get("FCC_BDC_MOBILE_DATA_DATE", "")
     fcc_bdc_mobile_source_url: str = os.environ.get("FCC_BDC_MOBILE_SOURCE_URL", "https://broadbandmap.fcc.gov/data-download/nationwide-data")
     geonames_username: str = os.environ.get("GEONAMES_USERNAME", "")
-    secret_key: str = os.environ.get("SECRET_KEY", "trailhead-dev-secret-change-in-prod")
+    secret_key: str = os.environ.get("SECRET_KEY", DEVELOPMENT_SECRET_KEY)
     db_path: str = os.environ.get("TRAILHEAD_DB_PATH", "/data/trailhead.db" if os.path.isdir("/data") else "./trailhead.db")
     stripe_secret_key: str = os.environ.get("STRIPE_SECRET_KEY", "")
     stripe_webhook_secret: str = os.environ.get("STRIPE_WEBHOOK_SECRET", "")
@@ -110,5 +150,23 @@ class Settings:
     google_play_package_name: str = os.environ.get("GOOGLE_PLAY_PACKAGE_NAME", "com.trailhead.app")
     google_play_service_account_json: str = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_JSON", "")
     google_play_service_account_path: str = os.environ.get("GOOGLE_PLAY_SERVICE_ACCOUNT_PATH", "")
+    # Server-created referral links use only the Branch live/test key. Link
+    # creation fails closed unless the handoff is explicitly enabled and the
+    # branded domain is configured in Branch.
+    branch_live_key: str = os.environ.get(
+        "BRANCH_LIVE_KEY", os.environ.get("BRANCH_API_KEY", "")
+    )
+    branch_link_domain: str = os.environ.get(
+        "BRANCH_LINK_DOMAIN",
+        os.environ.get("EXPO_PUBLIC_BRANCH_DOMAIN", "go.gettrailhead.app"),
+    )
+    # Server-only HMAC key for opaque, deterministic Branch aliases. This is
+    # never sent to Branch or exposed to the mobile client.
+    branch_referral_alias_secret: str = os.environ.get(
+        "BRANCH_REFERRAL_ALIAS_SECRET", ""
+    )
+    branch_referral_handoff_enabled: bool = os.environ.get(
+        "BRANCH_REFERRAL_HANDOFF_ENABLED", "false"
+    ).lower() in {"1", "true", "yes", "on"}
 
 settings = Settings()

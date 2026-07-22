@@ -2,7 +2,6 @@ node_modules/
 .expo/
 dist/
 
-/ios/
 *.jks
 *.p8
 *.p12

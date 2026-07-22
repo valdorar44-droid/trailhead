@@ -13,3 +13,17 @@ export function backgroundLocationStartMessage(platform: string) {
 export function requireIosLockedScreenPermission(platform: string, backgroundGranted: boolean) {
   if (platform === 'ios' && !backgroundGranted) throw new Error(IOS_LOCKED_SCREEN_LOCATION_MESSAGE);
 }
+
+export function originalStartNeedsPermissionDisclosure(
+  platform: string,
+  permissions: {
+    foregroundGranted: boolean;
+    backgroundGranted?: boolean;
+    notificationsGranted?: boolean;
+  },
+) {
+  if (!permissions.foregroundGranted) return true;
+  if (platform === 'ios') return permissions.backgroundGranted !== true;
+  if (platform === 'android') return permissions.notificationsGranted !== true;
+  return false;
+}

@@ -10,7 +10,9 @@
     }
   },
   "peerDependencies": {
-    "expo": "*",
-    "expo-modules-core": "*"
+    "expo": "*"
+  },
+  "devDependencies": {
+    "expo-modules-core": "^3.0.30"
   }
 }

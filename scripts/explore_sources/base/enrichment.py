@@ -6,6 +6,7 @@ from copy import deepcopy
 from typing import Any
 
 from .content_quality import fallback_description
+from .media import is_supported_remote_image_url
 from .normalize import compact_text
 from .schema import ExplorePlaceV3
 
@@ -158,11 +159,11 @@ def primary_media_url(place: dict[str, Any]) -> str:
         if not isinstance(media, dict):
             continue
         url = compact_text(media.get("url") or media.get("image_url") or media.get("thumbnail_url") or media.get("src"))
-        if URL_RE.match(url):
+        if is_supported_remote_image_url(url):
             return url
     summary = place.get("summary") if isinstance(place.get("summary"), dict) else {}
     summary_url = compact_text(summary.get("image_url") or summary.get("thumbnail_url"))
-    return summary_url if URL_RE.match(summary_url) else ""
+    return summary_url if is_supported_remote_image_url(summary_url) else ""
 
 
 def media_kind_for_place(place: dict[str, Any]) -> str:

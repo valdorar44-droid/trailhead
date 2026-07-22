@@ -919,6 +919,8 @@ class TripGraphV2StoreTests(unittest.TestCase):
 
     def test_product_feature_flags_default_off_with_admin_override(self):
         with patch.dict(os.environ, {
+            "TRAILHEAD_SEARCH_V2_ENABLED": "0",
+            "OFFLINE_BUNDLE_V2_ENABLED": "0",
             "TRAILHEAD_TRIP_GRAPH_V2_ENABLED": "0",
             "TRAILHEAD_TRIPS_TAB_ENABLED": "0",
             "TRAILHEAD_AVAILABILITY_MONITORS_ENABLED": "0",
@@ -933,6 +935,8 @@ class TripGraphV2StoreTests(unittest.TestCase):
 
         self.assertFalse(any(anonymous.values()))
         self.assertEqual(regular, {
+            "search_v2": False,
+            "offline_bundle_v2": False,
             "trip_graph_v2": False,
             "trips_tab": False,
             "availability_monitors": False,

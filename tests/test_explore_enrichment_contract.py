@@ -11,7 +11,9 @@ from scripts.data.build_canonical_serving_indexes import (
     source_backed_feature_description,
 )
 from scripts.data.promote_explore_serving_index import promote
-from scripts.explore_sources.base.enrichment import enrich_place_dict
+from scripts.explore_sources.base.enrichment import enrich_place_dict, primary_media_url
+from scripts.explore_sources.base.media import is_supported_remote_image_url
+from ingestors.ridb import _image_urls
 
 
 def source(source_id: str = "123") -> dict:
@@ -59,6 +61,28 @@ def place(place_id: str, name: str, *, photo: bool = False) -> dict:
 
 
 class ExploreEnrichmentContractTests(unittest.TestCase):
+    def test_page_and_video_urls_never_become_images(self):
+        raw = place("bad-media", "Bad Media Camp")
+        raw["media"] = [
+            {"url": "https://www.youtube.com/watch?v=r6inJPUbn48"},
+            {"url": "https://cdn.example.com/trailer.mp4"},
+            {"url": "https://images.example.com/camp.jpg"},
+        ]
+
+        self.assertEqual(primary_media_url(raw), "https://images.example.com/camp.jpg")
+        self.assertFalse(is_supported_remote_image_url("https://vimeo.com/123456"))
+        self.assertFalse(is_supported_remote_image_url("https://example.com/brochure.pdf"))
+        self.assertTrue(is_supported_remote_image_url("https://images.example.com/extensionless?id=42"))
+
+    def test_ridb_media_without_a_type_still_requires_an_image_safe_url(self):
+        self.assertEqual(
+            _image_urls([
+                {"URL": "https://www.youtube.com/watch?v=r6inJPUbn48"},
+                {"URL": "https://images.example.com/camp.webp"},
+            ]),
+            ["https://images.example.com/camp.webp"],
+        )
+
     def test_public_copy_keeps_substance_after_hooks_and_leading_ellipsis(self):
         ellipsis = clean_public_text(
             ". . . where you can explore tide pools and hike lush trails near downtown Boston. "

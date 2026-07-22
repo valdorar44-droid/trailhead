@@ -1,4 +1,4 @@
-"""Claude AI trip planning engine."""
+"""Trailhead trip-planning model adapter."""
 from __future__ import annotations
 import json, logging, re, time
 from types import SimpleNamespace
@@ -7,7 +7,7 @@ import anthropic
 import httpx
 from config.settings import settings
 
-CHAT_SYSTEM = """You are Trailhead — a personal overland trip guide and trail expert for supported overland regions. You've driven these roads and camped these spots. Your job is to help the user plan their perfect trip through natural conversation.
+CHAT_SYSTEM = """You are Trailhead, the in-app route-planning assistant for supported overland regions. Help the user shape a practical trip from their preferences and the available map and source context.
 
 Guidelines:
 - Keep responses SHORT (3-6 sentences max). You are a guide in a chat, not writing a blog post.
@@ -93,7 +93,7 @@ CRITICAL rules for the signal:
 - Never mention or explain the signal to the user.
 """
 
-EDIT_SYSTEM = """You are Trailhead, an expert overland trip guide. The user has an active trip and wants to modify it.
+EDIT_SYSTEM = """You are Trailhead, an in-app overland route-planning assistant. The user has an active trip and wants to modify it.
 
 Analyze the edit request carefully and update the trip. Changes can include:
 - Rerouting around geographic areas or specific roads
@@ -115,7 +115,7 @@ Return ONLY valid JSON (no markdown, no extra text):
 }
 """
 
-SYSTEM_PROMPT = """You are Trailhead AI — an expert road trip and overlanding planner covering Trailhead's supported regions: United States, Canada, Mexico, and Finland.
+SYSTEM_PROMPT = """You are Trailhead's route-planning assistant, covering Trailhead's supported regions: United States, Canada, Mexico, and Finland.
 
 You specialize in:
 - Public-land camping where legally available, developed campgrounds, national parks, and local public recreation areas
@@ -338,7 +338,7 @@ POINTS OF INTEREST (POI) HANDLING:
 - If choosing between several POIs, prefer places that solve an overland need: legal camp access, water, fuel, shade, hot springs, scenic payoff, easy bailout, or a known trailhead.
 
 TRUSTED ROUTE-CORRIDOR OUTPUT:
-- Trailhead enriches trips after generation with verified camps, normal gas stations, water, trailheads, viewpoints, peaks, and hot springs close to the route.
+- Trailhead enriches trips after generation with available source-attributed camps, fuel stops, water features, trailheads, viewpoints, peaks, and hot springs close to the route. Source attribution does not guarantee current access or availability.
 - Your job is to set good intent anchors and named destinations. Do not invent exact campsite pins or claim a dispersed camp is verified unless it is a real named public-land area.
 - Keep planned camps logically near the day route. Default overnight detours should be under 20 miles unless the user explicitly wants remote solitude.
 - Fuel and resupply stops must be on-route towns, not broad nearby places. Prefer reliable towns over tiny settlements.
@@ -370,7 +370,7 @@ IN-APP ONLY — CRITICAL:
 - Banned recommendations: Gaia GPS, AllTrails, OSM, CalTopo, Maps.me, OnX, iOverlander, Google Maps, Roadtrippers, Campendium, The Dyrt, or any competitor.
 - Offline maps → "download offline maps from the Download section in the app"
 - Packing lists → "your Packing List is generated automatically in the app"
-- Community reports → "check Field Reports in the app for real-time trail conditions"
+- Community reports → "check recent Field Reports in the app and review each report's time"
 - Weather → "check conditions before departing" (no app name)
 - Permits → name recreation.gov or the specific ranger station/agency only
 
@@ -378,7 +378,7 @@ RESPOND TO REQUESTS INTELLIGENTLY:
 - If user asks "what gas stations are on this route": describe the fuel stops you'd include, spacing them appropriately for their rig.
 - If user asks "are there any hot springs nearby": include a hot springs waypoint if one exists within reasonable distance of the route.
 - If user says "I want to fish": add a waypoint at a known fishing access point on or near the route.
-- If user says "I need good cell signal for work": route through or near towns with known coverage, note the dead zones, suggest Starlink.
+- If a user says "I need good cell signal for work": favor towns and populated corridors, but state that coverage varies by carrier and terrain and must be confirmed before departure. Do not claim a route has reliable service from place names alone.
 - If user says "I'm allergic to crowds" or "I want solitude": favor weekday-friendly dispersed spots, avoid popular National Parks in peak season, route to lesser-known areas.
 """
 
@@ -627,8 +627,8 @@ def generate_campsite_insight(
     land_type: str = "", amenities: list = [],
     wiki_context: str = "", weather_context: str = "",
 ) -> dict:
-    """AI-enriched campsite card with insider tips, coordinates, and nearby context."""
-    prompt = f"""You are an expert overlander and campsite scout. Generate a rich campsite insight for:
+    """Build a source-constrained campsite summary from the supplied context."""
+    prompt = f"""Summarize the supplied campsite information for a compact mobile card.
 
 Name: {name}
 Location: {lat:.5f}, {lng:.5f}
@@ -641,16 +641,21 @@ Nearby Wikipedia context:
 
 Current weather context: {weather_context if weather_context else 'unknown'}
 
-Keep values concise and mobile-card friendly. Do not include markdown headings, "Overview:", "About:", or repeated field labels inside values.
+Evidence rules:
+- Use only the information supplied above. Do not invent first-hand experience, ratings, road conditions, hazards, seasonal access, amenities, or nearby places.
+- An empty or unknown field is better than a plausible guess.
+- Weather context is a short current snapshot; it does not establish a normal season or long-term conditions.
+- Nearby highlights must already be named in the supplied description or Wikipedia context. Otherwise return an empty list.
+- Keep values concise and mobile-card friendly. Do not include markdown headings, "Overview:", "About:", or repeated field labels inside values.
 
 Return ONLY valid JSON with this exact schema:
 {{
-  "insider_tip": "1 short practical pro tip only an experienced overlander would know",
-  "best_for": "who/what this site is ideal for (e.g. 'Solo rigs, not great for big trailers')",
-  "best_season": "best months to visit and why",
-  "nearby_highlights": ["2-3 short nearby attractions within 30 miles worth mentioning"],
-  "hazards": "any known hazards, road conditions, or warnings (or null)",
-  "star_rating": number between 1 and 5 based on overall appeal for overlanders,
+  "insider_tip": "one short planning note directly supported by the supplied context, or an empty string",
+  "best_for": "a fit statement supported by the supplied amenities or description, or an empty string",
+  "best_season": "a season supported by the supplied context, or an empty string",
+  "nearby_highlights": ["only named places supported by the supplied context"],
+  "hazards": "a warning directly supported by the supplied context, or null",
+  "star_rating": 0,
   "coordinates_dms": "convert lat/lng to degrees-minutes-seconds format (e.g. 37°52'30''N 109°23'15''W)"
 }}"""
 
@@ -664,14 +669,159 @@ Return ONLY valid JSON with this exact schema:
     raw = re.sub(r'^```\s*', '', raw)
     raw = re.sub(r'\s*```$', '', raw).strip()
     try:
-        return json.loads(raw)
+        result = json.loads(raw)
+        if isinstance(result, dict):
+            # There is no sourced review aggregate in this request, so a model-created
+            # appeal score would look authoritative without having evidence behind it.
+            result["star_rating"] = 0
+        return result
     except Exception:
         return {"insider_tip": "", "best_for": "", "best_season": "", "nearby_highlights": [],
-                "hazards": None, "star_rating": 3, "coordinates_dms": ""}
+                "hazards": None, "star_rating": 0, "coordinates_dms": ""}
 
 
-def generate_route_brief(trip_name: str, waypoints: list, reports: list = []) -> dict:
-    """AI safety brief for the active trip."""
+_ROUTE_BRIEF_NOT_CHECKED = "Not checked"
+_ROUTE_BRIEF_SUMMARY = (
+    "Current access, fuel, water, signal, fire restrictions, and exit options have not "
+    "been checked. Review the items below before departure."
+)
+_ROUTE_BRIEF_DEFAULT_ACTIONS = (
+    "Check current access and closures with the responsible land manager.",
+    "Confirm fuel availability and range for the mapped route.",
+    "Download offline maps from your Download List in the app.",
+    "Share the trip and an emergency plan with a trusted contact.",
+)
+_ROUTE_BRIEF_UNSUPPORTED_ACTION = re.compile(
+    r"(?:"
+    r"\b(?:safe|clear|open|passable|ready|usable)\b|"
+    r"\b(?:no|zero)\s+(?:hazards?|closures?|issues?|restrictions?)\b|"
+    r"\b\d+(?:\.\d+)?\s*(?:gal|gallons?)\b|"
+    r"\b(?:dead\s*zones?|reliable\s+(?:cell|signal|service|coverage))\b|"
+    r"\b(?:fire\s+restrictions?)\s+(?:are|is|likely|unlikely|possible|in\s+effect|clear)\b|"
+    r"\b(?:bailout|escape\s+route|emergency\s+exit)\b|"
+    r"\b(?:Gaia\s+GPS|AllTrails|CalTopo|Maps\.me|Google\s+Maps|OnX|iOverlander|Roadtrippers|Campendium|The\s+Dyrt)\b"
+    r")",
+    re.IGNORECASE,
+)
+_ROUTE_BRIEF_ACTION_PREFIX = re.compile(
+    r"^(?:check|confirm|review|download|save|share|verify|contact|bring|pack)\b",
+    re.IGNORECASE,
+)
+
+
+def _route_brief_text(value: object, *, max_chars: int = 180) -> str:
+    text = re.sub(r"<[^>]+>", " ", str(value or ""))
+    text = re.sub(r"\s+", " ", text).strip(" \t\r\n-*•")
+    if len(text) > max_chars:
+        text = text[:max_chars].rsplit(" ", 1)[0].rstrip(" ,;:")
+    return text
+
+
+def _route_brief_actions(payload: object) -> list[str]:
+    raw_items = payload.get("must_do_before_leaving") if isinstance(payload, dict) else None
+    if not isinstance(raw_items, list):
+        raw_items = []
+    actions: list[str] = []
+    for raw in raw_items:
+        item = _route_brief_text(raw)
+        if not item or not _ROUTE_BRIEF_ACTION_PREFIX.search(item):
+            continue
+        if _ROUTE_BRIEF_UNSUPPORTED_ACTION.search(item):
+            continue
+        if item.casefold() not in {existing.casefold() for existing in actions}:
+            actions.append(item)
+        if len(actions) == 4:
+            break
+    for default in _ROUTE_BRIEF_DEFAULT_ACTIONS:
+        if len(actions) >= 4:
+            break
+        if default.casefold() not in {existing.casefold() for existing in actions}:
+            actions.append(default)
+    return actions
+
+
+def _route_brief_report_matches(report: dict, terms: tuple[str, ...]) -> bool:
+    context = " ".join(
+        str(report.get(key) or "")
+        for key in ("type", "subtype", "description")
+    ).casefold()
+    return any(term in context for term in terms)
+
+
+def _route_brief_report_status(reports: list[dict], terms: tuple[str, ...], subject: str) -> str:
+    count = sum(1 for report in reports if isinstance(report, dict) and _route_brief_report_matches(report, terms))
+    if not count:
+        return _ROUTE_BRIEF_NOT_CHECKED
+    noun = "report" if count == 1 else "reports"
+    return f"Review {count} supplied {subject} {noun}; current conditions are not verified."
+
+
+def _route_brief_mapped_status(waypoints: list[dict], kind: str, subject: str) -> str:
+    count = sum(
+        1 for waypoint in waypoints
+        if isinstance(waypoint, dict) and str(waypoint.get("type") or "").casefold() == kind
+    )
+    if not count:
+        return _ROUTE_BRIEF_NOT_CHECKED
+    noun = "stop" if count == 1 else "stops"
+    return f"{count} mapped {subject} {noun}; availability is not checked."
+
+
+def _route_brief_report_concerns(reports: list[dict]) -> list[str]:
+    concerns: list[str] = []
+    for report in reports:
+        if not isinstance(report, dict):
+            continue
+        kind = _route_brief_text(report.get("subtype") or report.get("type") or "route", max_chars=40)
+        kind = re.sub(r"[_-]+", " ", kind).strip().lower() or "route"
+        day = report.get("waypoint_day")
+        near_day = f" near day {day}" if isinstance(day, int) and day > 0 else ""
+        concerns.append(f"Review the supplied {kind} report{near_day}; verify its time and source.")
+        if len(concerns) == 3:
+            break
+    return concerns
+
+
+def _route_brief_daily_stops(waypoints: list[dict]) -> list[str]:
+    days: dict[int, list[str]] = {}
+    for waypoint in waypoints:
+        if not isinstance(waypoint, dict):
+            continue
+        try:
+            day = int(waypoint.get("day") or 0)
+        except (TypeError, ValueError):
+            continue
+        name = _route_brief_text(waypoint.get("name"), max_chars=70)
+        if day <= 0 or not name:
+            continue
+        if name not in days.setdefault(day, []) and len(days[day]) < 2:
+            days[day].append(name)
+    return [f"Day {day}: {', '.join(days[day])}." for day in sorted(days)[:7]]
+
+
+def _route_brief_result(payload: object, waypoints: list[dict], reports: list[dict]) -> dict:
+    return {
+        "schema_version": 2,
+        "planning_status": "Review required",
+        "top_concerns": _route_brief_report_concerns(reports),
+        "must_do_before_leaving": _route_brief_actions(payload),
+        "daily_highlights": _route_brief_daily_stops(waypoints),
+        "fuel_status": _route_brief_mapped_status(waypoints, "fuel", "fuel"),
+        "water_status": _route_brief_mapped_status(waypoints, "water", "water-related"),
+        "signal_status": _route_brief_report_status(
+            reports, ("signal", "cellular", "cell service", "coverage"), "signal",
+        ),
+        "fire_status": _route_brief_report_status(
+            reports, ("fire", "burn ban", "burn restriction"), "fire",
+        ),
+        "exit_options_status": _ROUTE_BRIEF_NOT_CHECKED,
+        "briefing_summary": _ROUTE_BRIEF_SUMMARY,
+    }
+
+
+def generate_route_brief(trip_name: str, waypoints: list, reports: list | None = None) -> dict:
+    """Generate a source-limited pre-departure planning brief."""
+    reports = reports or []
     wp_text = "\n".join(
         f"Day {w.get('day','-')}: {w.get('name','')} ({w.get('type','')}, {w.get('land_type','')})"
         for w in waypoints[:20]
@@ -679,47 +829,36 @@ def generate_route_brief(trip_name: str, waypoints: list, reports: list = []) ->
     rep_text = "\n".join(
         f"- {r.get('type','')} near day {r.get('waypoint_day','-')}: {r.get('description','')}"
         for r in reports[:10]
-    ) if reports else "None reported"
+    ) if reports else "No reports supplied"
 
-    blm_usfs_days = [w.get('day') for w in waypoints if w.get('land_type') in ('BLM','USFS','NPS')]
+    prompt = f"""Create a pre-departure planning brief inside the Trailhead app.
 
-    prompt = f"""You are a safety-focused trail guide giving a pre-departure route brief inside the Trailhead app.
+This brief is not a safety certification and must never declare a route safe, clear, open, passable, ready, or usable. Use only the route and community-report context supplied below. A missing report means "no report supplied," not "no hazard." Do not infer readiness, fuel needs, water quantities, signal coverage, fire restrictions, or emergency exit options from route length, land type, season, or place names. Unknown evidence stays unknown.
 
-CRITICAL — IN-APP ONLY: Trailhead has all the tools users need built in. NEVER recommend external apps or services. Specifically:
+IN-APP WORKFLOW:
 - For offline maps: say "download offline maps from your Download List in the app" — never mention Gaia GPS, OSM, AllTrails, CalTopo, Maps.me, Google Maps, or any third-party map app.
 - For packing lists: say "check your Packing List in the app" — never tell users to look elsewhere.
 - For weather: say "check conditions before departing" without naming a specific app.
 - For permits: name the permit and where to get it (recreation.gov, ranger station), but do not recommend external trip planning apps.
-- All navigation, maps, offline tiles, route info, and packing lists are handled inside Trailhead. Keep users in the app.
+- Describe community reports as supplied or time-stamped, never real-time.
 
 Trip: {trip_name}
 Route:
 {wp_text}
 
-Days in remote public land (BLM/USFS/NPS): {blm_usfs_days or 'none identified'}
-
 Community reports along route:
 {rep_text}
 
-Keep wording compact and field-ready. Do not use markdown headings, labels like "Overview:", or long intro text inside values.
+Suggest only short review actions. Every item must begin with an action verb such as Check, Confirm, Review, Download, Save, Share, Verify, Contact, Bring, or Pack. Do not state a condition as fact. Keep wording compact and factual. Do not use markdown headings or field labels inside values.
 
 Return ONLY valid JSON:
 {{
-  "readiness_score": number 1-10 (10 = fully prepared, lower = missing critical prep),
-  "top_concerns": ["up to 3 short safety or logistics concerns for THIS route"],
-  "must_do_before_leaving": ["2-4 short concrete action items — permits to get, gear to check, offline maps to download in-app"],
-  "daily_highlights": ["1 short thing to watch for each day, max 7 items"],
-  "estimated_fuel_stops": number,
-  "water_carry_gallons": number recommended per person,
-  "signal_dead_zones": ["day X: [place name] — short note"],
-  "fire_restriction_likelihood": "low|possible|likely — brief note on season/region fire risk",
-  "emergency_bailout": "nearest highway or town for emergency exit if things go wrong mid-trip, written as one clear option",
-  "briefing_summary": "1-2 sentence field assessment — no heading, no label, no markdown. Prefer direct wording like: This route is usable, but confirm camps, fuel, offline maps, and current closures before you roll."
+  "must_do_before_leaving": ["2-4 source-limited review actions"]
 }}"""
 
     msg = _create_message(
         model=HAIKU_MODEL,
-        max_tokens=1600,
+        max_tokens=700,
         messages=[{"role": "user", "content": prompt}]
     )
     raw = msg.content[0].text.strip()
@@ -727,21 +866,18 @@ Return ONLY valid JSON:
     raw = re.sub(r'^```\s*', '', raw)
     raw = re.sub(r'\s*```$', '', raw).strip()
     try:
-        return json.loads(raw)
+        payload = json.loads(raw)
     except Exception:
-        return {"readiness_score": 7, "top_concerns": [], "must_do_before_leaving": [],
-                "daily_highlights": [], "estimated_fuel_stops": 0,
-                "water_carry_gallons": 10, "signal_dead_zones": [],
-                "fire_restriction_likelihood": "unknown",
-                "emergency_bailout": "", "briefing_summary": ""}
+        payload = {}
+    return _route_brief_result(payload, waypoints, reports)
 
 
 def generate_packing_list(
     trip_name: str, duration_days: int,
     road_types: list = [], land_types: list = [], states: list = [],
 ) -> dict:
-    """Smart packing list generator."""
-    prompt = f"""You are an expert overlander. Generate a smart packing list for:
+    """Generate a trip-specific packing checklist."""
+    prompt = f"""Generate a practical packing checklist for:
 
 Trip: {trip_name}
 Duration: {duration_days} days

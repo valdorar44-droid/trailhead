@@ -755,7 +755,7 @@ td.name{color:var(--text);font-weight:600;}
       <!-- Messages -->
       <div class="page" id="page-messages">
         <div class="page-title">Messages</div>
-        <div class="page-sub">Admin and customer-service threads. Use this to contact winners, answer support questions, and collect payout details.</div>
+        <div class="page-sub">Admin and customer-service threads. Contact winners here and coordinate a secure payout step. Never collect bank, card, password, or identity-document details in chat.</div>
         <div class="support-admin-grid">
           <div class="support-admin-stack">
             <div class="card">
@@ -784,7 +784,7 @@ td.name{color:var(--text);font-weight:600;}
                   <div class="modal-label">CATEGORY</div>
                   <select id="support-new-category" class="filter-input" style="width:100%;">
                     <option value="support">Support</option>
-                    <option value="winner_payout">Winner payout</option>
+                    <option value="winner_payout">Prize coordination</option>
                     <option value="community_event">Community event</option>
                     <option value="contest">Contest</option>
                     <option value="credits">Credits</option>
@@ -1722,7 +1722,11 @@ function renderContestAwards(awards) {
           ${['selected','notified','paid','void'].map(s => `<option value="${s}" ${a.status === s ? 'selected' : ''}>${s}</option>`).join('')}
         </select>
         <button class="btn btn-ghost btn-sm" onclick="updateContestAward(${a.id})">Save</button>
-        ${a.winner_user_id ? `<button class="btn btn-ghost btn-sm" onclick="openSupportTabFromAward(${a.winner_user_id}, decodeURIComponent('${encodeURIComponent(a.winner_username || '')}'), decodeURIComponent('${encodeURIComponent(a.prize_label || a.prize_type || 'Contest payout')}'))">Message Winner</button>` : ''}
+        ${a.support_thread_id
+          ? `<button class="btn btn-ghost btn-sm" onclick="openExistingWinnerThread(${a.support_thread_id})">Open Winner Thread</button>`
+          : a.winner_user_id
+            ? `<button class="btn btn-ghost btn-sm" onclick="openSupportTabFromAward(${a.winner_user_id}, decodeURIComponent('${encodeURIComponent(a.winner_username || '')}'), decodeURIComponent('${encodeURIComponent(a.prize_label || a.prize_type || 'Contest prize')}'))">Message Winner</button>`
+            : ''}
       </div>
     </div>
   `).join('') || '<div style="color:var(--text3);font-size:13px;">No awards recorded yet.</div>';
@@ -1890,10 +1894,10 @@ async function sendPushCampaign() {
 function prefillWinnerMessage() {
   document.getElementById('support-new-category').value = 'winner_payout';
   if (!document.getElementById('support-new-subject').value.trim()) {
-    document.getElementById('support-new-subject').value = 'Trailhead prize payout';
+    document.getElementById('support-new-subject').value = 'Your Trailhead contest prize';
   }
   if (!document.getElementById('support-new-body').value.trim()) {
-    document.getElementById('support-new-body').value = 'You have a Trailhead payout ready. Reply here with your preferred payment method and any required details so we can complete the transfer.';
+    document.getElementById('support-new-body').value = 'Congratulations — you were selected for a Trailhead prize. Reply with your preferred payout method: Cash App, PayPal, or bank deposit. Do not send bank account, routing, card, password, or identity-document details in chat. Trailhead support will arrange verification and the secure payout step.';
   }
 }
 
@@ -1905,9 +1909,18 @@ function openSupportTabFromAward(userId, username, prizeLabel) {
   document.getElementById('page-messages').classList.add('active');
   document.getElementById('support-new-user-id').value = String(userId || '');
   document.getElementById('support-new-category').value = 'winner_payout';
-  document.getElementById('support-new-subject').value = `${prizeLabel || 'Trailhead payout'} for ${username || 'winner'}`;
-  document.getElementById('support-new-body').value = `Hi ${username || ''}, you have a Trailhead payout ready. Reply here with your preferred payment method so we can finish the transfer.`;
+  document.getElementById('support-new-subject').value = `${prizeLabel || 'Trailhead prize'} for ${username || 'winner'}`;
+  document.getElementById('support-new-body').value = `Hi ${username || ''}, congratulations — you were selected for ${prizeLabel || 'a Trailhead prize'}. Reply with your preferred payout method: Cash App, PayPal, or bank deposit. Do not send bank account, routing, card, password, or identity-document details in chat. Trailhead support will arrange verification and the secure payout step.`;
   loadSupportThreads();
+}
+
+function openExistingWinnerThread(threadId) {
+  document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+  const nav = Array.from(document.querySelectorAll('.nav-item')).find(el => el.textContent.includes('Messages'));
+  if (nav) nav.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  document.getElementById('page-messages').classList.add('active');
+  loadSupportThreads(Number(threadId));
 }
 
 function renderSupportThreads(threads) {

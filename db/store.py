@@ -1,6 +1,6 @@
 """SQLite WAL store. Schema + queries."""
 from __future__ import annotations
-import base64, sqlite3, json, time, math, hashlib, random, secrets, re, io, struct, wave, zlib, os
+import base64, sqlite3, json, time, math, hashlib, secrets, re, io, struct, wave, zlib, os
 from datetime import date as _date, datetime as _datetime, timedelta as _timedelta, timezone as _timezone
 from pathlib import Path as _Path
 from urllib.parse import quote as _url_quote, unquote as _url_unquote
@@ -451,6 +451,7 @@ def init_db():
             user_id     INTEGER NOT NULL,
             amount      INTEGER NOT NULL,
             reason      TEXT NOT NULL,
+            reward_key  TEXT,
             created_at  INTEGER NOT NULL,
             FOREIGN KEY (user_id) REFERENCES users(id)
         );
@@ -1161,12 +1162,13 @@ def init_db():
         );
         CREATE TABLE IF NOT EXISTS support_threads (
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id       INTEGER NOT NULL REFERENCES users(id),
+            user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+            contest_award_id INTEGER,
             category      TEXT NOT NULL DEFAULT 'support',
             subject       TEXT NOT NULL,
             status        TEXT NOT NULL DEFAULT 'open',
             opened_by     TEXT NOT NULL DEFAULT 'user',
-            created_by_admin INTEGER REFERENCES users(id),
+            created_by_admin INTEGER REFERENCES users(id) ON DELETE SET NULL,
             last_message_at INTEGER NOT NULL,
             created_at    INTEGER NOT NULL,
             updated_at    INTEGER NOT NULL
@@ -1175,8 +1177,8 @@ def init_db():
             id            INTEGER PRIMARY KEY AUTOINCREMENT,
             thread_id     INTEGER NOT NULL REFERENCES support_threads(id) ON DELETE CASCADE,
             sender_role   TEXT NOT NULL,
-            sender_user_id INTEGER REFERENCES users(id),
-            sender_admin_id INTEGER REFERENCES users(id),
+            sender_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+            sender_admin_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
             body          TEXT NOT NULL,
             meta_json     TEXT NOT NULL DEFAULT '{}',
             created_at    INTEGER NOT NULL,
@@ -1275,6 +1277,7 @@ def init_db():
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_community_publications_open_source ON community_publications(user_id,trip_id,note_id,publication_type) WHERE status IN ('pending_review','approved')",
         "CREATE INDEX IF NOT EXISTS idx_fullness_geo ON camp_fullness(lat, lng, status, expires_at)",
         "CREATE INDEX IF NOT EXISTS idx_credits_user ON credit_transactions(user_id, created_at)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_credits_reward_key ON credit_transactions(user_id, reward_key) WHERE reward_key IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS idx_analytics_session ON analytics_events(session_id, event_type)",
         "CREATE INDEX IF NOT EXISTS idx_analytics_type ON analytics_events(event_type, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_route_cache_time ON route_cache(fetched_at)",
@@ -1294,6 +1297,7 @@ def init_db():
         "CREATE INDEX IF NOT EXISTS idx_push_campaigns_created ON push_campaigns(created_at, status)",
         "CREATE INDEX IF NOT EXISTS idx_push_campaign_deliveries_campaign ON push_campaign_deliveries(campaign_id, delivery_status, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_support_threads_user ON support_threads(user_id, last_message_at, status)",
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_support_threads_contest_award ON support_threads(contest_award_id) WHERE contest_award_id IS NOT NULL",
         "CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id, created_at)",
         "CREATE INDEX IF NOT EXISTS idx_saved_entities_user_updated ON saved_entities(user_id, updated_at DESC, canonical_id DESC)",
         "CREATE INDEX IF NOT EXISTS idx_saved_entities_user_type ON saved_entities(user_id, entity_type, status, updated_at DESC)",
@@ -1319,6 +1323,8 @@ def init_db():
         "ALTER TABLE reports ADD COLUMN observed_at INTEGER",
         "ALTER TABLE reports ADD COLUMN source_surface TEXT",
         "ALTER TABLE reports ADD COLUMN accuracy_m REAL",
+        "ALTER TABLE credit_transactions ADD COLUMN reward_key TEXT",
+        "ALTER TABLE support_threads ADD COLUMN contest_award_id INTEGER",
         "ALTER TABLE community_pins ADD COLUMN downvotes INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN hidden INTEGER NOT NULL DEFAULT 0",
         "ALTER TABLE community_pins ADD COLUMN details TEXT",
@@ -2139,6 +2145,16 @@ def init_db():
         """CREATE UNIQUE INDEX IF NOT EXISTS idx_reports_user_client_report
            ON reports(user_id, client_report_id)
            WHERE client_report_id IS NOT NULL"""
+    )
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_credits_reward_key
+           ON credit_transactions(user_id, reward_key)
+           WHERE reward_key IS NOT NULL"""
+    )
+    db.execute(
+        """CREATE UNIQUE INDEX IF NOT EXISTS idx_support_threads_contest_award
+           ON support_threads(contest_award_id)
+           WHERE contest_award_id IS NOT NULL"""
     )
     db.execute(
         """DELETE FROM report_interactions
@@ -4345,7 +4361,8 @@ def create_user(email: str, username: str, password_hash: str, referral_code: st
     db.commit(); db.close()
     return uid
 
-def create_oauth_user(email: str, username: str, password_hash: str, provider: str, provider_sub: str) -> int:
+def create_oauth_user(email: str, username: str, password_hash: str, provider: str, provider_sub: str,
+                      referred_by: int | None = None) -> int:
     if provider not in {"apple", "google"}:
         raise ValueError("Unsupported OAuth provider")
     column = "apple_sub" if provider == "apple" else "google_sub"
@@ -4353,9 +4370,9 @@ def create_oauth_user(email: str, username: str, password_hash: str, provider: s
     code = f"{username.lower()}-{secrets.token_hex(3)}"
     cur = db.execute(
         f"""INSERT INTO users
-           (email,username,password_hash,referral_code,email_verified,auth_provider,{column},created_at)
-           VALUES (?,?,?,?,1,?,?,?)""",
-        (email.lower(), username, password_hash, code, provider, provider_sub, int(time.time()))
+           (email,username,password_hash,referral_code,referred_by,email_verified,auth_provider,{column},created_at)
+           VALUES (?,?,?,?,?,1,?,?,?)""",
+        (email.lower(), username, password_hash, code, referred_by, provider, provider_sub, int(time.time()))
     )
     uid = cur.lastrowid
     db.commit(); db.close()
@@ -4485,7 +4502,9 @@ def delete_user(user_id: int) -> None:
             _delete_user_full(user_id)
             return
         except sqlite3.OperationalError as e:
-            if "locked" in str(e).lower() and attempt < 2:
+            if "locked" not in str(e).lower():
+                raise
+            if attempt < 2:
                 _time.sleep(2)
             else:
                 break
@@ -4494,30 +4513,61 @@ def delete_user(user_id: int) -> None:
     # Delete account-owned library/trip records explicitly because foreign keys are
     # disabled on this recovery path.
     db = sqlite3.connect(settings.db_path, timeout=60.0, check_same_thread=False)
-    db.execute("PRAGMA foreign_keys=OFF")
-    db.execute("DELETE FROM authored_trip_pack_acquisition_requests WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
-    db.execute("UPDATE authored_trip_packs SET created_by=NULL WHERE created_by=?", (user_id,))
-    db.execute("UPDATE authored_trip_packs SET updated_by=NULL WHERE updated_by=?", (user_id,))
-    db.execute("UPDATE authored_trip_pack_versions SET published_by=NULL WHERE published_by=?", (user_id,))
-    db.execute("UPDATE authored_trip_pack_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
-    db.execute("UPDATE authored_original_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
-    db.execute("UPDATE authored_original_assets SET uploaded_by=NULL WHERE uploaded_by=?", (user_id,))
-    db.execute("DELETE FROM availability_monitors WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM community_publications WHERE user_id=?", (user_id,))
-    db.execute("UPDATE community_publications SET moderated_by=NULL WHERE moderated_by=?", (user_id,))
-    db.execute("DELETE FROM communication_preferences WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM trip_document_mutations WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM trip_documents_v2 WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM saved_entity_mutations WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM saved_entities WHERE user_id=?", (user_id,))
-    db.execute("DELETE FROM users WHERE id=?", (user_id,))
-    db.commit()
-    db.close()
+    try:
+        db.execute("PRAGMA foreign_keys=OFF")
+        _delete_user_support_data(db, user_id)
+        db.execute("DELETE FROM authored_trip_pack_acquisition_requests WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM authored_trip_pack_entitlements WHERE user_id=?", (user_id,))
+        db.execute("UPDATE authored_trip_packs SET created_by=NULL WHERE created_by=?", (user_id,))
+        db.execute("UPDATE authored_trip_packs SET updated_by=NULL WHERE updated_by=?", (user_id,))
+        db.execute("UPDATE authored_trip_pack_versions SET published_by=NULL WHERE published_by=?", (user_id,))
+        db.execute("UPDATE authored_trip_pack_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
+        db.execute("UPDATE authored_original_features SET selected_by=NULL WHERE selected_by=?", (user_id,))
+        db.execute("UPDATE authored_original_assets SET uploaded_by=NULL WHERE uploaded_by=?", (user_id,))
+        db.execute("DELETE FROM availability_monitors WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM community_publications WHERE user_id=?", (user_id,))
+        db.execute("UPDATE community_publications SET moderated_by=NULL WHERE moderated_by=?", (user_id,))
+        db.execute("DELETE FROM communication_preferences WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM trip_document_mutations WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM trip_documents_v2 WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM saved_entity_mutations WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM saved_entities WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM users WHERE id=?", (user_id,))
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def _delete_user_support_data(db: sqlite3.Connection, user_id: int) -> None:
+    """Remove private support data while preserving unrelated transcripts.
+
+    ``support_threads.user_id`` predates cascading deletion in deployed databases,
+    and the locked-database recovery path intentionally disables foreign keys. The
+    child rows therefore have to be removed explicitly in both paths.
+    """
+    db.execute(
+        """DELETE FROM support_messages
+           WHERE thread_id IN (SELECT id FROM support_threads WHERE user_id=?)""",
+        (user_id,),
+    )
+    db.execute("DELETE FROM support_threads WHERE user_id=?", (user_id,))
+
+    # A user message should normally belong to the user's own thread. Remove any
+    # anomalous cross-thread message as private account data as well.
+    db.execute("DELETE FROM support_messages WHERE sender_user_id=?", (user_id,))
+
+    # Admin-authored support remains useful to its recipient after a staff account
+    # is removed; only the now-invalid staff identity references are anonymized.
+    db.execute("UPDATE support_threads SET created_by_admin=NULL WHERE created_by_admin=?", (user_id,))
+    db.execute("UPDATE support_messages SET sender_admin_id=NULL WHERE sender_admin_id=?", (user_id,))
 
 
 def _delete_user_full(user_id: int) -> None:
     db = _conn()
+    _delete_user_support_data(db, user_id)
     # Tables with REFERENCES users(id) — strict foreign key constraints, delete first
     db.execute("DELETE FROM contributor_badges WHERE user_id=? OR granted_by=?", (user_id, user_id))
     db.execute("DELETE FROM contest_events      WHERE user_id=?",    (user_id,))
@@ -4553,15 +4603,25 @@ def _delete_user_full(user_id: int) -> None:
     # stripe_purchases uses session_id PK — delete by user_id if col exists (added via migration)
     try:
         db.execute("DELETE FROM stripe_purchases WHERE user_id=?",   (user_id,))
-    except Exception:
-        pass  # table or column may not exist on older deployments
+    except sqlite3.OperationalError as exc:
+        # Older deployments can legitimately lack this table/column. Do not mask
+        # locking, integrity, or other database failures during account deletion.
+        message = str(exc).lower()
+        if "no such table" not in message and "no such column" not in message:
+            raise
     # Finally delete the user row itself (push_token is a column on users, not a table)
     db.execute("DELETE FROM users               WHERE id=?",         (user_id,))
     db.commit(); db.close()
 
 def get_user_by_referral_code(code: str) -> dict | None:
+    normalized = str(code or "").strip()
+    if not normalized:
+        return None
     db = _conn()
-    row = db.execute("SELECT * FROM users WHERE referral_code=?", (code,)).fetchone()
+    row = db.execute(
+        "SELECT * FROM users WHERE referral_code=? COLLATE NOCASE",
+        (normalized,),
+    ).fetchone()
     db.close()
     return dict(row) if row else None
 
@@ -4630,6 +4690,86 @@ def add_credits(user_id: int, amount: int, reason: str):
                (user_id, amount, reason, now))
     _record_contest_event_db(db, user_id, amount, reason, created_at=now)
     db.commit(); db.close()
+
+def grant_signup_rewards(user_id: int, signup_bonus: int, referral_bonus: int) -> dict:
+    """Grant welcome/referral credits exactly once, independent of current balance.
+
+    Email verification and OAuth callbacks may be retried. Stable reward keys and a
+    single write transaction prevent either retry or concurrent callbacks from
+    double-crediting the new account or its referrer.
+    """
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        user = db.execute(
+            "SELECT id,username,email,referred_by FROM users WHERE id=?",
+            (user_id,),
+        ).fetchone()
+        if not user:
+            db.rollback()
+            return {"welcome_granted": False, "referral_granted": False}
+
+        now = int(time.time())
+
+        def _grant_once(target_user_id: int, amount: int, reason: str, reward_key: str) -> bool:
+            if amount <= 0:
+                return False
+            cur = db.execute(
+                """INSERT OR IGNORE INTO credit_transactions
+                   (user_id,amount,reason,reward_key,created_at)
+                   VALUES (?,?,?,?,?)""",
+                (target_user_id, amount, reason, reward_key, now),
+            )
+            if cur.rowcount <= 0:
+                return False
+            db.execute(
+                "UPDATE users SET credits=MAX(0,credits+?) WHERE id=?",
+                (amount, target_user_id),
+            )
+            return True
+
+        welcome_granted = _grant_once(
+            user_id,
+            int(signup_bonus),
+            "Welcome bonus",
+            f"signup-welcome:{user_id}",
+        )
+        referrer_id = int(user["referred_by"] or 0)
+        referral_granted = False
+        if referrer_id > 0 and referrer_id != user_id:
+            referral_granted = _grant_once(
+                referrer_id,
+                int(referral_bonus),
+                f"Referral - {user['username'] or 'new user'} signed up",
+                f"signup-referral:{user_id}",
+            )
+            if referral_granted:
+                existing = db.execute(
+                    "SELECT id FROM referrals WHERE referrer_id=? AND lower(referred_email)=lower(?) LIMIT 1",
+                    (referrer_id, user["email"]),
+                ).fetchone()
+                if existing:
+                    db.execute(
+                        "UPDATE referrals SET status='converted', converted_at=? WHERE id=?",
+                        (now, existing["id"]),
+                    )
+                else:
+                    db.execute(
+                        """INSERT INTO referrals
+                           (referrer_id,referred_email,status,created_at,converted_at)
+                           VALUES (?,?,?,?,?)""",
+                        (referrer_id, user["email"], "converted", now, now),
+                    )
+        db.commit()
+        return {
+            "welcome_granted": welcome_granted,
+            "referral_granted": referral_granted,
+        }
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def get_credit_history(user_id: int, limit: int = 20) -> list:
     db = _conn()
@@ -5313,8 +5453,14 @@ def ensure_contest_entry(user_id: int, entry_type: str = "free") -> dict:
     now = int(time.time())
     db = _conn()
     db.execute(
-        """INSERT OR IGNORE INTO contest_entries (user_id,period_month,period_year,entry_type,created_at)
-           VALUES (?,?,?,?,?)""",
+        """INSERT INTO contest_entries (user_id,period_month,period_year,entry_type,created_at)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(user_id,period_month) DO UPDATE SET
+             entry_type=CASE
+               WHEN excluded.entry_type='subscriber' THEN 'subscriber'
+               ELSE contest_entries.entry_type
+             END,
+             period_year=excluded.period_year""",
         (user_id, month, year, entry_type, now),
     )
     row = db.execute(
@@ -5324,27 +5470,37 @@ def ensure_contest_entry(user_id: int, entry_type: str = "free") -> dict:
     db.commit(); db.close()
     return dict(row) if row else {}
 
+def _ensure_active_subscriber_entries_db(db: sqlite3.Connection, month: str, year: str,
+                                         now: int | None = None) -> None:
+    timestamp = int(now or time.time())
+    active_subs = db.execute(
+        "SELECT id FROM users WHERE plan_type!='free' AND COALESCE(plan_expires_at,0)>?",
+        (timestamp,),
+    ).fetchall()
+    for sub in active_subs:
+        db.execute(
+            """INSERT INTO contest_entries
+               (user_id,period_month,period_year,entry_type,created_at)
+               VALUES (?,?,?,?,?)
+               ON CONFLICT(user_id,period_month) DO UPDATE SET
+                 entry_type='subscriber', period_year=excluded.period_year""",
+            (sub["id"], month, year, "subscriber", timestamp),
+        )
+
 def get_contest_admin_overview(month: str | None = None, year: str | None = None) -> dict:
     month = (month or _contest_period()[0])[:7]
     year = (year or _contest_period()[1])[:4]
     db = _conn()
     now = int(time.time())
-    active_subs = db.execute(
-        "SELECT id FROM users WHERE plan_type!='free' AND COALESCE(plan_expires_at,0)>?",
-        (now,),
-    ).fetchall()
-    for sub in active_subs:
-        db.execute(
-            """INSERT OR IGNORE INTO contest_entries (user_id,period_month,period_year,entry_type,created_at)
-               VALUES (?,?,?,?,?)""",
-            (sub["id"], month, year, "subscriber", now),
-        )
+    _ensure_active_subscriber_entries_db(db, month, year, now)
     db.commit()
     entries = db.execute("SELECT COUNT(*) AS c FROM contest_entries WHERE period_month=?", (month,)).fetchone()["c"]
     free_entries = db.execute("SELECT COUNT(*) AS c FROM contest_entries WHERE period_month=? AND entry_type='free'", (month,)).fetchone()["c"]
     sub_entries = db.execute("SELECT COUNT(*) AS c FROM contest_entries WHERE period_month=? AND entry_type='subscriber'", (month,)).fetchone()["c"]
     awards = [dict(r) for r in db.execute(
-        """SELECT a.*,u.email FROM contest_awards a LEFT JOIN users u ON u.id=a.winner_user_id
+        """SELECT a.*,u.email,
+                  (SELECT t.id FROM support_threads t WHERE t.contest_award_id=a.id LIMIT 1) AS support_thread_id
+           FROM contest_awards a LEFT JOIN users u ON u.id=a.winner_user_id
            WHERE a.period_year=? ORDER BY a.created_at DESC LIMIT 80""",
         (year,),
     ).fetchall()]
@@ -5367,69 +5523,114 @@ def snapshot_contest_award(prize_type: str, admin_id: int, month: str | None = N
     is_year = prize_type == "yearly_top"
     leaders = get_contest_leaderboard("year" if is_year else "month", 1, month=month, year=year)
     winner = leaders[0] if leaders else None
-    prize_label = "$1,000 cash/card + 1 year Explorer" if is_year else "$100 cash/card + 1 year Explorer"
+    if not winner:
+        raise ValueError("No eligible contributor exists for this contest period")
+    prize_label = "$1,000 cash prize + 1 year Explorer" if is_year else "$100 cash prize + 1 year Explorer"
     now = int(time.time())
     db = _conn()
-    cur = db.execute(
-        """INSERT INTO contest_awards
-           (prize_type,period_month,period_year,winner_user_id,winner_username,points_snapshot,entry_count,prize_label,status,notes,awarded_by,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            prize_type,
-            None if is_year else month,
-            year,
-            winner.get("user_id") if winner else None,
-            winner.get("username") if winner else None,
-            int(winner.get("points") or 0) if winner else 0,
-            0,
-            prize_label,
-            "selected",
-            notes,
-            admin_id,
-            now,
-            now,
-        ),
-    )
-    row = db.execute("SELECT * FROM contest_awards WHERE id=?", (cur.lastrowid,)).fetchone()
-    db.commit(); db.close()
-    return dict(row)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        if is_year:
+            existing = db.execute(
+                """SELECT * FROM contest_awards
+                   WHERE prize_type=? AND period_year=? AND period_month IS NULL
+                   ORDER BY id ASC LIMIT 1""",
+                (prize_type, year),
+            ).fetchone()
+        else:
+            existing = db.execute(
+                """SELECT * FROM contest_awards
+                   WHERE prize_type=? AND period_year=? AND period_month=?
+                   ORDER BY id ASC LIMIT 1""",
+                (prize_type, year, month),
+            ).fetchone()
+        if existing:
+            db.commit()
+            return dict(existing)
+        cur = db.execute(
+            """INSERT INTO contest_awards
+               (prize_type,period_month,period_year,winner_user_id,winner_username,points_snapshot,entry_count,prize_label,status,notes,awarded_by,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                prize_type,
+                None if is_year else month,
+                year,
+                winner.get("user_id") if winner else None,
+                winner.get("username") if winner else None,
+                int(winner.get("points") or 0) if winner else 0,
+                0,
+                prize_label,
+                "selected",
+                notes,
+                admin_id,
+                now,
+                now,
+            ),
+        )
+        row = db.execute("SELECT * FROM contest_awards WHERE id=?", (cur.lastrowid,)).fetchone()
+        db.commit()
+        return dict(row)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def run_contest_drawing(admin_id: int, month: str | None = None, year: str | None = None,
                         notes: str = "") -> dict:
     month = (month or _contest_period()[0])[:7]
     year = (year or _contest_period()[1])[:4]
     db = _conn()
-    rows = db.execute(
-        """SELECT e.*,u.username FROM contest_entries e JOIN users u ON u.id=e.user_id
-           WHERE e.period_month=? ORDER BY e.created_at ASC""",
-        (month,),
-    ).fetchall()
-    entries = [dict(r) for r in rows]
-    winner = random.choice(entries) if entries else None
-    now = int(time.time())
-    cur = db.execute(
-        """INSERT INTO contest_awards
-           (prize_type,period_month,period_year,winner_user_id,winner_username,points_snapshot,entry_count,prize_label,status,notes,awarded_by,created_at,updated_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        (
-            "monthly_drawing",
-            month,
-            year,
-            winner.get("user_id") if winner else None,
-            winner.get("username") if winner else None,
-            0,
-            len(entries),
-            "$50 cash/card + 1 year Explorer",
-            "selected",
-            notes,
-            admin_id,
-            now,
-            now,
-        ),
-    )
-    row = db.execute("SELECT * FROM contest_awards WHERE id=?", (cur.lastrowid,)).fetchone()
-    db.commit(); db.close()
-    return dict(row)
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            """SELECT * FROM contest_awards
+               WHERE prize_type='monthly_drawing' AND period_month=? AND period_year=?
+               ORDER BY id ASC LIMIT 1""",
+            (month, year),
+        ).fetchone()
+        if existing:
+            db.commit()
+            return dict(existing)
+        now = int(time.time())
+        _ensure_active_subscriber_entries_db(db, month, year, now)
+        rows = db.execute(
+            """SELECT e.*,u.username FROM contest_entries e JOIN users u ON u.id=e.user_id
+               WHERE e.period_month=? ORDER BY e.created_at ASC""",
+            (month,),
+        ).fetchall()
+        entries = [dict(r) for r in rows]
+        if not entries:
+            raise ValueError("No eligible entries exist for this drawing period")
+        winner = secrets.choice(entries) if entries else None
+        cur = db.execute(
+            """INSERT INTO contest_awards
+               (prize_type,period_month,period_year,winner_user_id,winner_username,points_snapshot,entry_count,prize_label,status,notes,awarded_by,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (
+                "monthly_drawing",
+                month,
+                year,
+                winner.get("user_id") if winner else None,
+                winner.get("username") if winner else None,
+                0,
+                len(entries),
+                "$50 cash prize + 1 year Explorer",
+                "selected",
+                notes,
+                admin_id,
+                now,
+                now,
+            ),
+        )
+        row = db.execute("SELECT * FROM contest_awards WHERE id=?", (cur.lastrowid,)).fetchone()
+        db.commit()
+        return dict(row)
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def update_contest_award_status(award_id: int, status: str, notes: str = "") -> dict | None:
     allowed = {"selected", "notified", "paid", "void"}
@@ -5443,6 +5644,92 @@ def update_contest_award_status(award_id: int, status: str, notes: str = "") -> 
     row = db.execute("SELECT * FROM contest_awards WHERE id=?", (award_id,)).fetchone()
     db.commit(); db.close()
     return dict(row) if row else None
+
+def ensure_contest_award_support_thread(award_id: int, admin_id: int) -> dict | None:
+    """Create the winner's in-app message exactly once for a selected award."""
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        award = db.execute(
+            """SELECT a.*,u.username
+               FROM contest_awards a
+               LEFT JOIN users u ON u.id=a.winner_user_id
+               WHERE a.id=?""",
+            (award_id,),
+        ).fetchone()
+        if not award or not award["winner_user_id"] or award["status"] == "void":
+            db.commit()
+            return None
+        existing = db.execute(
+            "SELECT id FROM support_threads WHERE contest_award_id=?",
+            (award_id,),
+        ).fetchone()
+        if existing:
+            db.commit()
+            return {"thread_id": int(existing["id"]), "created": False}
+
+        now = int(time.time())
+        subject = "Your Trailhead contest prize"
+        body = (
+            f"Congratulations — you were selected for {award['prize_label']}. "
+            "Reply with your preferred payout method: Cash App, PayPal, or bank deposit. "
+            "Do not send bank account, routing, card, password, or identity-document details in chat. "
+            "Trailhead support will arrange eligibility verification and the secure payout step with you."
+        )
+        cur = db.execute(
+            """INSERT INTO support_threads
+               (user_id,contest_award_id,category,subject,status,opened_by,created_by_admin,last_message_at,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                int(award["winner_user_id"]),
+                award_id,
+                "contest_award",
+                subject,
+                "open",
+                "admin",
+                admin_id,
+                now,
+                now,
+                now,
+            ),
+        )
+        thread_id = int(cur.lastrowid)
+        db.execute(
+            """INSERT INTO support_messages
+               (thread_id,sender_role,sender_user_id,sender_admin_id,body,meta_json,created_at,read_by_user_at,read_by_admin_at)
+               VALUES (?,?,?,?,?,?,?,?,?)""",
+            (
+                thread_id,
+                "admin",
+                None,
+                admin_id,
+                body,
+                json.dumps({
+                    "kind": "contest_award",
+                    "award_id": award_id,
+                    "prize_label": award["prize_label"],
+                    "payout_methods": ["cash_app", "paypal", "bank_deposit"],
+                    "sensitive_details_allowed": False,
+                }),
+                now,
+                None,
+                now,
+            ),
+        )
+        db.execute(
+            """UPDATE contest_awards
+               SET status=CASE WHEN status='selected' THEN 'notified' ELSE status END,
+                   updated_at=?
+               WHERE id=?""",
+            (now, award_id),
+        )
+        db.commit()
+        return {"thread_id": thread_id, "created": True}
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
 
 def backfill_contest_events_from_credits() -> int:
     db = _conn()
@@ -6031,12 +6318,23 @@ def set_user_admin(user_id: int, is_admin: bool):
 
 def set_user_plan(user_id: int, plan_type: str, expires_at: int | None = None) -> dict | None:
     db = _conn()
+    now = int(time.time())
     if plan_type == "free":
         db.execute("UPDATE users SET plan_type='free', plan_expires_at=NULL WHERE id=?", (user_id,))
     else:
         if expires_at is None:
-            expires_at = int(time.time()) + 366 * 86400
+            expires_at = now + 366 * 86400
         db.execute("UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?", (plan_type, expires_at, user_id))
+        if int(expires_at or 0) > now:
+            month, year = _contest_period(now)
+            db.execute(
+                """INSERT INTO contest_entries
+                   (user_id,period_month,period_year,entry_type,created_at)
+                   VALUES (?,?,?,?,?)
+                   ON CONFLICT(user_id,period_month) DO UPDATE SET
+                     entry_type='subscriber', period_year=excluded.period_year""",
+                (user_id, month, year, "subscriber", now),
+            )
     db.commit()
     row = db.execute("SELECT * FROM users WHERE id=?", (user_id,)).fetchone()
     db.close()
@@ -6595,6 +6893,15 @@ def activate_plan(user_id: int, plan_type: str, duration_days: int):
     db.execute(
         "UPDATE users SET plan_type=?, plan_expires_at=? WHERE id=?",
         (plan_type, new_expiry, user_id)
+    )
+    month, year = _contest_period(now)
+    db.execute(
+        """INSERT INTO contest_entries
+           (user_id,period_month,period_year,entry_type,created_at)
+           VALUES (?,?,?,?,?)
+           ON CONFLICT(user_id,period_month) DO UPDATE SET
+             entry_type='subscriber', period_year=excluded.period_year""",
+        (user_id, month, year, "subscriber", now),
     )
     db.commit(); db.close()
     return new_expiry

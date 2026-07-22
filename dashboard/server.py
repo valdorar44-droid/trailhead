@@ -7,7 +7,7 @@ from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
 from urllib.parse import quote, unquote
-from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Header, Request
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Header, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
@@ -20,6 +20,30 @@ from jose import jwt, JWTError
 
 
 logger = logging.getLogger(__name__)
+
+
+class _SearchV2AccessLogPrivacyFilter(logging.Filter):
+    """Redact Search V2 query strings from Uvicorn application access logs."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not isinstance(args, tuple) or len(args) < 3:
+            return True
+        path = str(args[2] or "")
+        if not path.startswith("/api/search/v2/") or "?" not in path:
+            return True
+        safe_args = list(args)
+        safe_args[2] = path.split("?", 1)[0] + "?query=redacted"
+        record.args = tuple(safe_args)
+        return True
+
+
+_uvicorn_access_logger = logging.getLogger("uvicorn.access")
+if not any(
+    isinstance(item, _SearchV2AccessLogPrivacyFilter)
+    for item in _uvicorn_access_logger.filters
+):
+    _uvicorn_access_logger.addFilter(_SearchV2AccessLogPrivacyFilter())
 
 from config.settings import settings
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
@@ -39,11 +63,32 @@ from dashboard.marine_chart_provider import (
 )
 from dashboard.hydro_provider import LOCAL_HYDRO_DIR, HYDRO_DIR, hydro_profile, read_hydro_manifest
 from dashboard.water_routing_provider import route_with_water_graph, water_graph_manifest
+from dashboard.search_v2 import (
+    SearchBoundsV2,
+    SearchCenterV2,
+    SearchCursorError,
+    SearchDocumentV2,
+    SearchPageV2,
+    SearchProvenanceV2,
+    SearchRequestV2,
+    SearchResolveResponseV2,
+    SearchResultV2,
+    SearchV2Service,
+    documents_from_canonical,
+    normalize_search_text,
+)
+from dashboard.offline_bundles_v2 import (
+    OfflineBundleManifestV2,
+    OfflineBundlePrepareRequestV2,
+    OfflineBundlePreparationError,
+    prepare_offline_bundle_manifest_v2,
+)
 from scripts.explore_sources.travel.ranking import rank_experiences
 from scripts.explore_sources.travel.viator.client import ViatorClient, config_from_env as viator_config_from_env
 from scripts.explore_sources.travel.viator.normalize_viator import normalize_viator_products
 from scripts.explore_sources.base.content_quality import clean_description as clean_explore_description
 from scripts.explore_sources.base.content_quality import sanitize_place_profile
+from scripts.explore_sources.base.media import is_supported_remote_image_url
 from scripts.data.canonical_catalog_rules import (
     PUBLIC_COPY_FORBIDDEN_RE,
     is_non_overnight_camp_label,
@@ -89,7 +134,7 @@ from db.store import (
     create_user, create_oauth_user, get_user_by_oauth, link_user_oauth,
     get_user_by_email, get_user_by_username, get_user_by_id, get_user_by_referral_code,
     set_email_verification, verify_email_token, set_password_reset, reset_password_with_token,
-    add_credits, deduct_credits, get_credit_history,
+    add_credits, deduct_credits, get_credit_history, grant_signup_rewards,
     get_user_report_count_today, get_report_credits_today,
     is_stripe_session_fulfilled, fulfill_stripe_purchase,
     create_report_idempotent, get_report_by_client_id, get_reports_near, get_reports_along_route,
@@ -183,7 +228,8 @@ from db.store import (
     save_app_store_subscription, get_app_store_subscription,
     add_contest_points, ensure_contest_entry, get_contest_user_status, get_contest_leaderboard,
     get_contest_admin_overview, snapshot_contest_award, run_contest_drawing,
-    update_contest_award_status, backfill_contest_events_from_credits,
+    update_contest_award_status, ensure_contest_award_support_thread,
+    backfill_contest_events_from_credits,
     get_contributor_profile, get_contributor_leaderboard, set_contributor_visibility,
     submit_map_contributor_application, get_map_contributor_applications,
     update_map_contributor_application_status, has_approved_map_contributor,
@@ -1478,7 +1524,9 @@ _EXPLORE_CATALOG_CACHE: dict[str, Any] = {
 }
 _EXPLORE_LEGACY_SEARCH_CACHE: dict[str, object] = {"key": None, "places": []}
 _EXPLORE_GLOBAL_SEED_RAW_CACHE: dict[str, object] = {"mtime": 0, "groups": []}
-EXPLORE_RUNTIME_CACHE_VERSION = 6
+# Version 7 invalidates persisted catalogs that may contain page/video URLs in
+# image fields from older RIDB payloads.
+EXPLORE_RUNTIME_CACHE_VERSION = 7
 EXPLORE_RUNTIME_CACHE_PATH = Path(
     os.getenv("TRAILHEAD_EXPLORE_RUNTIME_CACHE")
     or (Path(__file__).resolve().parents[1] / "data" / "processed" / "explore_catalog_runtime_cache.json")
@@ -4579,7 +4627,9 @@ def _safe_explore_image_url(value: object) -> str:
         return ""
     if "commons.wikimedia.org/wiki/special:" in lower:
         return ""
-    if lower.startswith(("http://", "https://", "/assets/")):
+    if lower.startswith("/assets/"):
+        return url
+    if is_supported_remote_image_url(url):
         return url
     return ""
 
@@ -6965,8 +7015,19 @@ async def _oauth_login(provider: str, body: "OAuthLoginRequest"):
             grant_welcome = not int(existing.get("email_verified", 1))
             user = link_user_oauth(existing["id"], provider, sub) or existing
         else:
+            referral_code = body.referral_code.strip()
+            referrer = get_user_by_referral_code(referral_code) if referral_code else None
+            if referral_code and not referrer:
+                raise HTTPException(400, "Referral code was not found")
             username = _oauth_username(email, body.full_name, provider)
-            uid = create_oauth_user(email, username, _hash_pw(secrets.token_urlsafe(48)), provider, sub)
+            uid = create_oauth_user(
+                email,
+                username,
+                _hash_pw(secrets.token_urlsafe(48)),
+                provider,
+                sub,
+                referred_by=referrer["id"] if referrer else None,
+            )
             user = get_user_by_id(uid)
             grant_welcome = True
     if not user:
@@ -7148,10 +7209,7 @@ def _send_password_reset_email(email: str, username: str, token: str) -> None:
     _send_email(email, "Reset your Trailhead password", text_body, html_body)
 
 def _grant_signup_rewards(user: dict) -> None:
-    if int(user.get("credits") or 0) == 0:
-        add_credits(user["id"], SIGNUP_BONUS, "Welcome bonus")
-        if user.get("referred_by"):
-            add_credits(user["referred_by"], REFERRAL_BONUS, f"Referral - {user.get('username', 'new user')} signed up")
+    grant_signup_rewards(user["id"], SIGNUP_BONUS, REFERRAL_BONUS)
 
 def _require_admin(user: dict = Depends(_current_user)) -> dict:
     if not user.get("is_admin"):
@@ -7703,6 +7761,29 @@ class AdminSupportThreadMessageBody(BaseModel):
     close_after_send: bool = False
     copilot_persona: Optional[str] = None
     copilot_voice: Optional[str] = None
+
+_SUPPORT_SENSITIVE_DETAIL_PATTERNS = (
+    re.compile(r"\b(?:routing|account|transit|institution)\s*(?:number|no\.?|#)?\s*(?:is|:|=|-)?\s*\d{4,17}\b", re.IGNORECASE),
+    re.compile(r"\b(?:iban|swift|bic|sort\s+code)\s*(?:is|:|=|-)?\s*[A-Z0-9][A-Z0-9 -]{5,33}\b", re.IGNORECASE),
+    re.compile(r"\b(?:card|credit\s+card|debit\s+card)\s*(?:number|no\.?|#)?\s*(?:is|:|=|-)?\s*\d(?:[ -]?\d){11,18}\b", re.IGNORECASE),
+    re.compile(r"\b(?:social\s+security|ssn|passport)\s*(?:number|no\.?|#)?\s*(?:is|:|=|-)?\s*[A-Z0-9-]{4,20}\b", re.IGNORECASE),
+    re.compile(r"\bpassword\s*(?:is|:|=)\s*\S{4,}", re.IGNORECASE),
+)
+_SUPPORT_SENSITIVE_SOLICITATION_PATTERN = re.compile(
+    r"(?<!not )(?<!never )\b(?:send|provide|share|reply\s+with|include|post)\s+(?:your\s+)?"
+    r"(?:bank\s+account|account\s+number|routing\s+number|card\s+number|password|ssn|social\s+security|passport)",
+    re.IGNORECASE,
+)
+
+def _reject_plaintext_support_secrets(text: str) -> None:
+    if (
+        any(pattern.search(text) for pattern in _SUPPORT_SENSITIVE_DETAIL_PATTERNS)
+        or _SUPPORT_SENSITIVE_SOLICITATION_PATTERN.search(text)
+    ):
+        raise HTTPException(
+            400,
+            "For your security, do not send bank, card, password, or identity-document details in chat. Trailhead support will arrange a secure step when needed.",
+        )
 
 class AdminExtremeGrantBody(BaseModel):
     user_id: Optional[int] = None
@@ -9414,6 +9495,7 @@ class OAuthLoginRequest(BaseModel):
     identity_token: str
     full_name: str = ""
     email: str = ""
+    referral_code: str = ""
 
 class VerifyEmailRequest(BaseModel):
     token: str
@@ -9446,7 +9528,10 @@ async def register(body: RegisterRequest):
         raise HTTPException(400, "Email already registered")
     if get_user_by_username(username):
         raise HTTPException(400, "Username already taken")
-    referrer = get_user_by_referral_code(body.referral_code) if body.referral_code else None
+    referral_code = body.referral_code.strip()
+    referrer = get_user_by_referral_code(referral_code) if referral_code else None
+    if referral_code and not referrer:
+        raise HTTPException(400, "Referral code was not found")
     code = f"{username.lower()}-{secrets.token_hex(3)}"
     try:
         uid = create_user(email, username, _hash_pw(body.password), code,
@@ -9743,6 +9828,8 @@ def _require_product_feature(env_name: str, user: dict | None = None) -> None:
 @app.get("/api/product/features")
 async def product_features(user: dict | None = Depends(_optional_user)):
     return {
+        "search_v2": _product_feature_enabled("TRAILHEAD_SEARCH_V2_ENABLED", user),
+        "offline_bundle_v2": _product_feature_enabled("OFFLINE_BUNDLE_V2_ENABLED", user),
         "trip_graph_v2": _product_feature_enabled("TRAILHEAD_TRIP_GRAPH_V2_ENABLED", user),
         "trips_tab": _product_feature_enabled("TRAILHEAD_TRIPS_TAB_ENABLED", user),
         "availability_monitors": _product_feature_enabled("TRAILHEAD_AVAILABILITY_MONITORS_ENABLED", user),
@@ -10614,6 +10701,9 @@ async def support_inbox_message(body: SupportInboxMessageBody, user: dict = Depe
     text = body.body.strip()
     if not text:
         raise HTTPException(400, "Message body is required")
+    if len(text) > 4000:
+        raise HTTPException(400, "Message body must be 4,000 characters or fewer")
+    _reject_plaintext_support_secrets(text)
     if body.thread_id:
         thread = get_support_thread(body.thread_id, user_id=user["id"], admin=False)
         if not thread:
@@ -10621,7 +10711,10 @@ async def support_inbox_message(body: SupportInboxMessageBody, user: dict = Depe
         message = add_support_message(body.thread_id, "user", text, user_id=user["id"])
         thread_id = body.thread_id
     else:
-        subject = (body.subject or "Trailhead support").strip()[:160] or "Trailhead support"
+        subject = (body.subject or "Trailhead support").strip() or "Trailhead support"
+        if len(subject) > 160:
+            raise HTTPException(400, "Subject must be 160 characters or fewer")
+        _reject_plaintext_support_secrets(subject)
         thread_id = create_support_thread(
             user_id=user["id"],
             subject=subject,
@@ -18049,6 +18142,335 @@ async def resolve_geocode_place(q: str, limit: int = 8, countrycodes: str = "", 
 import asyncio
 from collections import OrderedDict
 
+# Search V2 is additive and rollout-gated. Its serving index is generated in
+# memory from immutable canonical artifacts; it never modifies the catalog DB.
+_search_v2_source_cache: dict[str, Any] = {"revision": "", "documents": []}
+_search_v2_source_lock = threading.RLock()
+
+
+def _search_v2_file_revision(path: Path) -> tuple[str, int, int]:
+    try:
+        stat = path.stat()
+        return str(path), int(stat.st_mtime_ns), int(stat.st_size)
+    except OSError:
+        return str(path), 0, 0
+
+
+def _search_v2_source_loader() -> tuple[list[SearchDocumentV2], str]:
+    explore_items, explore_generated_at = _load_canonical_explore_index()
+    trail_items, trail_generated_at = _load_canonical_trail_index()
+    if not explore_items:
+        explore_items = [
+            _explore_place_index_item(place)
+            for place in (_load_explore_catalog().get("places") or [])
+            if isinstance(place, dict)
+        ]
+    revision_payload = {
+        "v": 2,
+        "explore_generated_at": int(explore_generated_at or 0),
+        "trail_generated_at": int(trail_generated_at or 0),
+        "explore_count": len(explore_items),
+        "trail_count": len(trail_items),
+        "files": [
+            _search_v2_file_revision(CANONICAL_EXPLORE_INDEX_PATH),
+            _search_v2_file_revision(CANONICAL_TRAIL_INDEX_PATH),
+            _search_v2_file_revision(CANONICAL_TRAIL_INDEX_BUNDLED_PATH),
+        ],
+    }
+    revision = hashlib.sha256(
+        json.dumps(revision_payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()[:20]
+    with _search_v2_source_lock:
+        if _search_v2_source_cache.get("revision") == revision:
+            return list(_search_v2_source_cache.get("documents") or []), revision
+    documents = documents_from_canonical(explore_items, trail_items)
+    with _search_v2_source_lock:
+        _search_v2_source_cache.update({"revision": revision, "documents": documents})
+    return list(documents), revision
+
+
+def _search_v2_external_kind(value: object) -> str:
+    clean = normalize_search_text(value).replace(" ", "_") or "place"
+    if clean in {"city", "place", "locality", "neighborhood", "district", "region", "country"}:
+        return "destination"
+    if clean in {"trail", "trailhead", "hike", "hiking"}:
+        return "trail" if clean != "trailhead" else "trailhead"
+    if clean in {"camp", "campground", "campsite", "rv_park"}:
+        return "camp"
+    if clean in {"fuel", "gas_station", "grocery", "mechanic", "service"}:
+        return "service"
+    return clean[:48]
+
+
+def _search_v2_mapbox_session_token(session_id: str) -> str:
+    """Derive a provider-valid UUID without disclosing the app session ID."""
+    digest = bytearray(hmac.new(
+        str(settings.secret_key).encode("utf-8"),
+        f"search-v2-mapbox\0{session_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).digest()[:16])
+    digest[6] = (digest[6] & 0x0F) | 0x40
+    digest[8] = (digest[8] & 0x3F) | 0x80
+    return str(uuid.UUID(bytes=bytes(digest)))
+
+
+async def _search_v2_external_mapbox(
+    request: SearchRequestV2, limit: int, mode: str,
+) -> list[SearchResultV2]:
+    if (
+        not settings.mapbox_token
+        or request.scope == "offline"
+        or not request.session_id
+    ):
+        return []
+    if request.intent == "destination":
+        mapbox_types = "place,locality,neighborhood,district,region,country,address"
+    elif request.intent == "trail":
+        mapbox_types = "poi"
+    else:
+        mapbox_types = "poi,place,address"
+    proximity = (
+        f"{request.center.lng:.6f},{request.center.lat:.6f}"
+        if request.center else ""
+    )
+    bbox = (
+        f"{request.bounds.west:.6f},{request.bounds.south:.6f},"
+        f"{request.bounds.east:.6f},{request.bounds.north:.6f}"
+        if request.bounds else ""
+    )
+    params = _searchbox_params({
+        "q": request.query,
+        "session_token": _search_v2_mapbox_session_token(request.session_id),
+        "proximity": proximity,
+        "origin": proximity,
+        "bbox": bbox,
+        "types": mapbox_types,
+        "language": "en",
+        "limit": str(max(1, min(int(limit), 10))),
+    })
+    data = await _mapbox_get(
+        "https://api.mapbox.com/search/searchbox/v1/suggest", params,
+    )
+    suggestions = [
+        item for item in data.get("suggestions", []) if isinstance(item, dict)
+    ]
+    results: list[SearchResultV2] = []
+    for index, suggestion in enumerate(suggestions):
+        provider_id = str(
+            suggestion.get("mapbox_id") or suggestion.get("id") or ""
+        ).strip()
+        title = re.sub(
+            r"\s+", " ", str(suggestion.get("name") or "").strip(),
+        )[:140]
+        if not provider_id or not title:
+            continue
+        categories: list[str] = []
+        for value in [
+            *(suggestion.get("poi_category") or []),
+            *(suggestion.get("poi_category_ids") or []),
+            suggestion.get("feature_type"),
+        ]:
+            clean = normalize_search_text(value).replace(" ", "_")[:40]
+            if clean and clean not in categories:
+                categories.append(clean)
+            if len(categories) >= 12:
+                break
+        kind = _search_v2_external_kind(suggestion.get("feature_type"))
+        subtitle = re.sub(r"\s+", " ", str(
+            suggestion.get("full_address")
+            or suggestion.get("place_formatted")
+            or suggestion.get("address")
+            or ""
+        ).strip())[:180] or None
+        distance_meters = None
+        try:
+            if suggestion.get("distance") is not None:
+                distance_meters = max(0.0, float(suggestion["distance"]))
+        except (TypeError, ValueError):
+            distance_meters = None
+        context = suggestion.get("context") if isinstance(suggestion.get("context"), dict) else {}
+        region = context.get("region") if isinstance(context.get("region"), dict) else {}
+        results.append(SearchResultV2(
+            result_id=f"mapbox:{provider_id}" if not provider_id.startswith("mapbox:") else provider_id,
+            canonical_place_id=None,
+            title=title,
+            subtitle=subtitle,
+            kind=kind,
+            categories=categories or [kind],
+            coordinates=None,
+            parent=re.sub(
+                r"\s+", " ", str(region.get("name") or "").strip(),
+            )[:100] or None,
+            distance_meters=round(distance_meters, 1) if distance_meters is not None else None,
+            provenance=SearchProvenanceV2(
+                provider="mapbox",
+                source_label="Mapbox search",
+                provider_result_id=provider_id[:180],
+                temporary_use_only=True,
+            ),
+            persistence_policy="temporary",
+            detail_ref=f"provider:mapbox:{provider_id}"[:260],
+            score=100_000.0 + index,
+            match_reason="provider_fallback",
+        ))
+    return results[:max(1, min(int(limit), 10))]
+
+
+def _search_v2_external_timeout_seconds() -> float:
+    try:
+        return float(os.getenv("TRAILHEAD_SEARCH_V2_EXTERNAL_TIMEOUT_SECONDS", "0.9"))
+    except (TypeError, ValueError):
+        return 0.9
+
+
+_search_v2_service = SearchV2Service(
+    _search_v2_source_loader,
+    _search_v2_external_mapbox,
+    external_timeout_seconds=_search_v2_external_timeout_seconds(),
+)
+
+
+@app.on_event("startup")
+async def _prewarm_search_v2() -> None:
+    if not _server_feature_enabled("TRAILHEAD_SEARCH_V2_ENABLED"):
+        return
+    try:
+        count, revision = await _search_v2_service.prewarm()
+        logger.info("Search V2 index ready: %s documents (%s)", count, revision)
+    except Exception:
+        # Search can retry lazily on its first request; startup should not take
+        # down unrelated legacy APIs if a generated catalog artifact is bad.
+        logger.exception("Search V2 index prewarm failed")
+
+
+def _search_v2_parse_query_request(
+    *, q: str, surface: str, intent: str, scope: str,
+    center_lat: float | None, center_lng: float | None, bbox: str,
+    route_ref: str, radius_meters: int | None, categories: str,
+    filters: str, cursor: str,
+    limit: int, session_id: str, include_external: bool,
+) -> SearchRequestV2:
+    if (center_lat is None) != (center_lng is None):
+        raise HTTPException(422, {"code": "invalid_search_request", "message": "center_lat and center_lng must be provided together"})
+    center = SearchCenterV2(lat=center_lat, lng=center_lng) if center_lat is not None and center_lng is not None else None
+    bounds = None
+    if bbox.strip():
+        try:
+            values = [float(value.strip()) for value in bbox.split(",")]
+            if len(values) != 4:
+                raise ValueError
+            bounds = SearchBoundsV2(west=values[0], south=values[1], east=values[2], north=values[3])
+        except (TypeError, ValueError, ValidationError):
+            raise HTTPException(422, {"code": "invalid_search_request", "message": "bbox must be west,south,east,north"}) from None
+    parsed_filters: dict[str, Any] = {}
+    if filters.strip():
+        try:
+            decoded = json.loads(filters)
+        except json.JSONDecodeError:
+            raise HTTPException(422, {"code": "invalid_search_request", "message": "filters must be a JSON object"}) from None
+        if not isinstance(decoded, dict):
+            raise HTTPException(422, {"code": "invalid_search_request", "message": "filters must be a JSON object"})
+        parsed_filters = decoded
+    try:
+        return SearchRequestV2(
+            query=q, surface=surface, intent=intent, scope=scope,
+            center=center, bounds=bounds, route_ref=route_ref.strip() or None,
+            radius_meters=radius_meters,
+            categories=[value.strip() for value in categories.split(",") if value.strip()],
+            filters=parsed_filters, cursor=cursor.strip() or None, limit=limit,
+            session_id=session_id.strip() or None, include_external=include_external,
+        )
+    except ValidationError as exc:
+        raise HTTPException(422, {
+            "code": "invalid_search_request",
+            "errors": exc.errors(include_context=False),
+        }) from None
+
+
+async def _search_v2_page(request: SearchRequestV2, *, mode: str) -> SearchPageV2:
+    try:
+        return await _search_v2_service.page(request, mode=mode)
+    except SearchCursorError as exc:
+        raise HTTPException(400, {
+            "code": "invalid_search_cursor", "message": str(exc),
+        }) from None
+
+
+@app.get("/api/search/v2/suggest", response_model=SearchPageV2)
+async def api_search_v2_suggest(
+    q: str = Query(..., min_length=2, max_length=160),
+    surface: str = Query("map", max_length=24),
+    intent: str = Query("any", max_length=24),
+    scope: str = Query("global", max_length=24),
+    center_lat: float | None = Query(None, ge=-90, le=90),
+    center_lng: float | None = Query(None, ge=-180, le=180),
+    bbox: str = Query("", max_length=120),
+    route_ref: str = Query("", max_length=128),
+    radius_meters: int | None = Query(None, ge=100, le=250_000),
+    categories: str = Query("", max_length=256),
+    filters: str = Query("", max_length=2048),
+    cursor: str = Query("", max_length=512),
+    limit: int = Query(8, ge=1, le=10),
+    session_id: str = Query("", max_length=128),
+    include_external: bool = Query(False),
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_SEARCH_V2_ENABLED", user)
+    request = _search_v2_parse_query_request(
+        q=q, surface=surface, intent=intent, scope=scope,
+        center_lat=center_lat, center_lng=center_lng, bbox=bbox,
+        route_ref=route_ref, radius_meters=radius_meters,
+        categories=categories, filters=filters,
+        cursor=cursor, limit=limit, session_id=session_id,
+        include_external=include_external,
+    )
+    return await _search_v2_page(request, mode="suggest")
+
+
+@app.get("/api/search/v2/results", response_model=SearchPageV2)
+async def api_search_v2_results(
+    q: str = Query(..., min_length=2, max_length=160),
+    surface: str = Query("map", max_length=24),
+    intent: str = Query("any", max_length=24),
+    scope: str = Query("global", max_length=24),
+    center_lat: float | None = Query(None, ge=-90, le=90),
+    center_lng: float | None = Query(None, ge=-180, le=180),
+    bbox: str = Query("", max_length=120),
+    route_ref: str = Query("", max_length=128),
+    radius_meters: int | None = Query(None, ge=100, le=250_000),
+    categories: str = Query("", max_length=256),
+    filters: str = Query("", max_length=2048),
+    cursor: str = Query("", max_length=512),
+    limit: int = Query(20, ge=1, le=30),
+    session_id: str = Query("", max_length=128),
+    include_external: bool = Query(False),
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_SEARCH_V2_ENABLED", user)
+    request = _search_v2_parse_query_request(
+        q=q, surface=surface, intent=intent, scope=scope,
+        center_lat=center_lat, center_lng=center_lng, bbox=bbox,
+        route_ref=route_ref, radius_meters=radius_meters,
+        categories=categories, filters=filters,
+        cursor=cursor, limit=limit, session_id=session_id,
+        include_external=include_external,
+    )
+    return await _search_v2_page(request, mode="results")
+
+
+@app.post("/api/search/v2/resolve", response_model=SearchResolveResponseV2)
+async def api_search_v2_resolve(
+    body: SearchRequestV2,
+    user: dict | None = Depends(_optional_user),
+):
+    _require_product_feature("TRAILHEAD_SEARCH_V2_ENABLED", user)
+    try:
+        return await _search_v2_service.resolve(body)
+    except SearchCursorError as exc:
+        raise HTTPException(400, {
+            "code": "invalid_search_cursor", "message": str(exc),
+        }) from None
+
 _TILE_TIMEOUT = httpx.Timeout(connect=5.0, read=15.0, write=5.0, pool=5.0)
 _tile_client: Optional[httpx.AsyncClient] = None
 
@@ -19107,7 +19529,11 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
             f"blm_detail_{clean}",
             f"ai_insight_{clean}",
         ]
-        prefixes = []
+        from dashboard.campsite_insights import campsite_insight_cache_prefix
+        prefixes = list({
+            campsite_insight_cache_prefix(camp_id),
+            campsite_insight_cache_prefix(clean),
+        })
         db = sqlite3.connect(settings.db_path, timeout=30.0)
         try:
             cur = db.execute("DELETE FROM camp_briefs WHERE facility_id=?", (clean,))
@@ -19137,6 +19563,7 @@ async def admin_clear_camp_cache(body: CampCacheClearPayload, admin: dict = Depe
             f"foursquare_search:{lat3}:{lng3}",
             f"land_check:{lat3},{lng3}",
             f"ai_insight_{lat3}_{lng3}",
+            f"ai_insight_v2:coord:{lat3}:{lng3}:",
             f"wiki_{lat2}_{lng2}",
         ]
         gas_prefixes = [
@@ -21557,6 +21984,46 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
         "credits": user.get("credits", 0),
     }
 
+
+@app.post(
+    "/api/offline/bundles/prepare",
+    response_model=OfflineBundleManifestV2,
+    response_model_exclude_none=True,
+)
+async def api_prepare_offline_bundle_v2(
+    body: OfflineBundlePrepareRequestV2,
+    user: dict = Depends(_current_user),
+):
+    """Issue one immutable V2 manifest only from materialized artifacts.
+
+    This stays additive to the legacy authorization endpoint. Bundle identity,
+    integrity metadata, catalog coverage, licensing, and renderer pack IDs are
+    all server-owned. Until real artifact files and delivery endpoints exist,
+    preparation fails closed and the request is not written to analytics.
+    """
+    _require_product_feature("OFFLINE_BUNDLE_V2_ENABLED", user)
+    try:
+        manifest = prepare_offline_bundle_manifest_v2(body)
+    except OfflineBundlePreparationError as exc:
+        raise HTTPException(exc.http_status, {
+            "code": exc.code,
+            "message": exc.message,
+        }) from None
+
+    authorization = authorize_offline_download(
+        user,
+        "trailhead_offline_bundle_v2",
+        manifest.bundle_id,
+        0,
+        "Prepare Trailhead offline bundle V2",
+    )
+    if not authorization.get("authorized"):
+        raise HTTPException(403, {
+            "code": "offline_bundle_not_authorized",
+            "message": "This account cannot prepare the requested offline bundle.",
+        })
+    return manifest
+
 @app.get("/credits/success", response_class=HTMLResponse)
 async def credits_success(session_id: str = ""):
     return HTMLResponse("""<!DOCTYPE html><html><head><title>Payment Successful</title>
@@ -21694,14 +22161,14 @@ CONTEST_RULES = {
     "eligibility": "Open to legal U.S. residents who are 18 or older. Void where prohibited.",
     "sponsor": "Sponsored by Trailhead. Apple is not a sponsor and is not involved in this contest or drawing in any manner.",
     "prizes": [
-        "Yearly top contributor: $1,000 cash/card plus 1 year Explorer.",
-        "Monthly top contributor: $100 cash/card plus 1 year Explorer.",
-        "Monthly drawing: $50 cash/card plus 1 year Explorer.",
+        "Yearly top contributor: $1,000 cash prize plus 1 year Explorer.",
+        "Monthly top contributor: $100 cash prize plus 1 year Explorer.",
+        "Monthly drawing: $50 cash prize plus 1 year Explorer.",
     ],
     "entries": "No purchase necessary. Subscribers are automatically entered in the monthly drawing, and any eligible user may enter free once per calendar month in the app. A purchase does not improve odds.",
     "odds": "Monthly drawing odds depend on the number of eligible entries received for that month.",
     "points": "Contest points are separate from spendable credits. Spendable credits stay on the account; contest totals are measured by calendar month and calendar year.",
-    "contact": "Questions or winner verification: hello@gettrailhead.app",
+    "contact": "Winners receive a private Trailhead message. Cash App, PayPal, and bank deposit are available after eligibility verification; never send bank details in chat. Questions: hello@gettrailhead.app",
 }
 
 @app.get("/api/contest/rules")
@@ -22067,19 +22534,52 @@ async def admin_contest_backfill(admin: dict = Depends(_require_admin)):
     count = backfill_contest_events_from_credits()
     return {"ok": True, "inserted": count}
 
+async def _ensure_contest_winner_message(award: dict, admin: dict) -> int | None:
+    award_id = int(award.get("id") or 0)
+    winner_id = int(award.get("winner_user_id") or 0)
+    if award_id <= 0 or winner_id <= 0:
+        return None
+    thread_result = ensure_contest_award_support_thread(award_id, int(admin["id"]))
+    if not thread_result:
+        return None
+    thread_id = int(thread_result["thread_id"])
+    award["status"] = "notified" if award.get("status") == "selected" else award.get("status")
+    award["support_thread_id"] = thread_id
+    push_token = get_push_token(winner_id)
+    if push_token and bool(thread_result.get("created")):
+        await _send_expo_push(
+            push_token,
+            title="New Trailhead message",
+            body_text="Open Trailhead to read your message.",
+            data={
+                "type": "contest",
+                "deeplink": f"/(tabs)/profile?support=1&support_thread_id={thread_id}",
+                "support_thread_id": thread_id,
+            },
+        )
+    return thread_id
+
 @app.post("/api/admin/contest/snapshot")
 async def admin_contest_snapshot(body: AdminContestSnapshotBody,
                                  admin: dict = Depends(_require_admin)):
     prize_type = body.prize_type.strip()
     if prize_type not in {"monthly_top", "yearly_top"}:
         raise HTTPException(400, "prize_type must be monthly_top or yearly_top")
-    award = snapshot_contest_award(prize_type, admin["id"], body.month or None, body.year or None, body.notes)
+    try:
+        award = snapshot_contest_award(prize_type, admin["id"], body.month or None, body.year or None, body.notes)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await _ensure_contest_winner_message(award, admin)
     return {"ok": True, "award": award}
 
 @app.post("/api/admin/contest/drawing/run")
 async def admin_contest_run_drawing(body: AdminContestDrawingBody,
                                     admin: dict = Depends(_require_admin)):
-    award = run_contest_drawing(admin["id"], body.month or None, body.year or None, body.notes)
+    try:
+        award = run_contest_drawing(admin["id"], body.month or None, body.year or None, body.notes)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+    await _ensure_contest_winner_message(award, admin)
     return {"ok": True, "award": award}
 
 @app.post("/api/admin/contest/awards/{award_id}/status")
@@ -22165,6 +22665,12 @@ async def admin_support_thread_start(body: AdminSupportThreadCreateBody,
         raise HTTPException(400, "Subject is required")
     if not message:
         raise HTTPException(400, "Message body is required")
+    if len(subject) > 160:
+        raise HTTPException(400, "Subject must be 160 characters or fewer")
+    if len(message) > 4000:
+        raise HTTPException(400, "Message body must be 4,000 characters or fewer")
+    _reject_plaintext_support_secrets(subject)
+    _reject_plaintext_support_secrets(message)
     target = get_user_by_id(body.user_id)
     if not target:
         raise HTTPException(404, "User not found")
@@ -22181,7 +22687,7 @@ async def admin_support_thread_start(body: AdminSupportThreadCreateBody,
         await _send_expo_push(
             push_token,
             title="Trailhead support message",
-            body_text=subject[:140],
+            body_text="Open Trailhead to read your message.",
             data={"type": "admin_campaign", "deeplink": "/(tabs)/profile?support=1", "support_thread_id": thread_id},
         )
     log_event(admin["id"], None, "admin_support_thread_start", {"thread_id": thread_id, "target_user_id": body.user_id, "category": body.category})
@@ -22193,6 +22699,9 @@ async def admin_support_thread_message(thread_id: int, body: AdminSupportThreadM
     text = body.body.strip()
     if not text:
         raise HTTPException(400, "Message body is required")
+    if len(text) > 4000:
+        raise HTTPException(400, "Message body must be 4,000 characters or fewer")
+    _reject_plaintext_support_secrets(text)
     thread = get_support_thread(thread_id, admin=True)
     if not thread:
         raise HTTPException(404, "Thread not found")
@@ -22206,7 +22715,7 @@ async def admin_support_thread_message(thread_id: int, body: AdminSupportThreadM
         await _send_expo_push(
             push_token,
             title="New Trailhead message",
-            body_text=text[:140],
+            body_text="Open Trailhead to read your message.",
             data={"type": "admin_campaign", "deeplink": "/(tabs)/profile?support=1", "support_thread_id": thread_id},
         )
     log_event(admin["id"], None, "admin_support_thread_message", {"thread_id": thread_id, "close_after_send": body.close_after_send})
@@ -32420,15 +32929,24 @@ async def wikipedia_nearby(lat: float, lng: float, radius: int = 10000, limit: i
 # ── AI campsite insight ───────────────────────────────────────────────────────
 
 class CampsiteInsightRequest(BaseModel):
-    name: str; lat: float; lng: float
-    description: str = ""; land_type: str = ""; amenities: list[str] = []
-    facility_id: str = ""
+    name: str = Field(min_length=1, max_length=160)
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)
+    description: str = Field(default="", max_length=4000)
+    land_type: str = Field(default="", max_length=100)
+    amenities: list[str] = Field(default_factory=list, max_length=40)
+    facility_id: str = Field(default="", max_length=180)
+    source_label: str = Field(default="", max_length=100)
+    source_url: str = Field(default="", max_length=500)
+    source_updated_at: Optional[int | float | str] = None
 
 @app.post("/api/ai/campsite-insight")
 async def campsite_insight(request: Request, body: CampsiteInsightRequest, user: dict = Depends(_optional_user)):
-    """Generate AI-enriched campsite description with nearby context.
-    Costs credits or active plan before any cached/generated brief is returned.
-    Permanent cache by facility_id; coordinate cache fallback for community pins."""
+    """Return a source-constrained campsite planning note.
+
+    Generated text is untrusted until the evidence validator accepts each field.
+    Cache entries are bound to the exact listing and nearby-reference revision.
+    """
     if not _planner_provider_configured():
         raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
 
@@ -32451,47 +32969,58 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
             "earn_hint": True,
         })
 
-    # Permanent cache by facility_id (RIDB campsites) — returned only after access is authorized
-    if body.facility_id:
-        cached = get_camp_brief(body.facility_id)
-        if cached:
-            return cached
+    # Nearby references have their own bounded cache. Current weather is not fed
+    # into this feature: a short forecast cannot establish season, site access,
+    # or a durable hazard claim.
+    wiki_hits = await wikipedia_nearby(body.lat, body.lng, radius=15000, limit=4)
+    from dashboard.campsite_insights import (
+        CAMP_INSIGHT_CACHE_TTL_SECONDS,
+        build_campsite_insight,
+        campsite_insight_cache_key,
+        normalize_campsite_evidence,
+    )
+    try:
+        evidence = normalize_campsite_evidence(
+            name=body.name,
+            lat=body.lat,
+            lng=body.lng,
+            description=body.description,
+            land_type=body.land_type,
+            amenities=body.amenities,
+            facility_id=body.facility_id,
+            source_label=body.source_label,
+            source_url=body.source_url,
+            source_updated_at=body.source_updated_at,
+            wiki_hits=wiki_hits,
+        )
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+    cache_key = campsite_insight_cache_key(evidence)
+    cached = get_cached("campsite_cache", cache_key, ttl_seconds=CAMP_INSIGHT_CACHE_TTL_SECONDS)
+    if cached:
+        return cached
 
-    # Coordinate-based fallback cache (72h) for pins without a facility_id
-    coord_key = f"ai_insight_{body.lat:.3f}_{body.lng:.3f}"
-    if not body.facility_id:
-        cached = get_cached("campsite_cache", coord_key, ttl_seconds=3600 * 72)
-        if cached:
-            return cached
-
-    # Fetch Wikipedia and weather context in parallel
-    wiki_task = wikipedia_nearby(body.lat, body.lng, radius=15000, limit=4)
-    weather_task = weather_forecast(body.lat, body.lng, days=3)
-    wiki_hits, weather_data = await asyncio.gather(wiki_task, weather_task)
-
-    wiki_ctx = "\n".join(f"- {h['title']}: {h['extract'][:150]}" for h in wiki_hits[:3])
-    daily = weather_data.get("daily", {})
-    temps = daily.get("temperature_2m_max", [])
-    weather_ctx = f"Highs: {temps[0]:.0f}°F" if temps else ""
+    wiki_ctx = "\n".join(
+        f"- {item['title']}: {item['extract']}"
+        for item in evidence["nearby_references"][:3]
+    )
 
     from ai.planner import generate_campsite_insight
     try:
         result = await asyncio.to_thread(
             generate_campsite_insight,
-            name=body.name, lat=body.lat, lng=body.lng,
-            description=body.description, land_type=body.land_type,
-            amenities=body.amenities, wiki_context=wiki_ctx, weather_context=weather_ctx,
+            name=evidence["name"], lat=evidence["lat"], lng=evidence["lng"],
+            description=evidence["description"], land_type=evidence["land_type"],
+            amenities=evidence["amenities"], wiki_context=wiki_ctx, weather_context="",
         )
     except Exception as e:
         if user and not has_active_plan(user):
             add_credits(user["id"], AI_COSTS["campsite_insight"], "Refund — campsite insight error")
         raise HTTPException(500, str(e))
 
-    # Write to permanent cache (facility_id) and/or coordinate cache
-    if body.facility_id:
-        set_camp_brief(body.facility_id, result)
-    set_cached("campsite_cache", coord_key, result)
-    return result
+    validated = build_campsite_insight(result, evidence)
+    set_cached("campsite_cache", cache_key, validated)
+    return validated
 
 
 # ── AI route briefing ─────────────────────────────────────────────────────────
@@ -32501,7 +33030,7 @@ class RouteBriefRequest(BaseModel):
 
 @app.post("/api/ai/route-brief")
 async def route_brief(body: RouteBriefRequest, user: dict = Depends(_current_user)):
-    """AI safety and readiness briefing for an active trip."""
+    """Source-limited pre-departure review for an active trip."""
     if not _planner_provider_configured():
         raise HTTPException(503, TRIP_PLANNER_UNAVAILABLE)
     cost = AI_COSTS["route_brief"]

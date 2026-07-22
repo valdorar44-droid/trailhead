@@ -37,8 +37,8 @@
     "test:search-v2": "node --import tsx lib/searchV2/__tests__/presentation.test.ts && node --import tsx lib/searchV2/__tests__/surfacePersistence.test.ts && node --import tsx lib/searchV2/__tests__/searchV2.test.ts",
     "test:referrals": "node --import tsx lib/referrals/__tests__/referralLinks.test.ts",
     "test:telemetry": "node --import tsx lib/telemetry/__tests__/sanitize.test.ts",
-    "ota": "npx --yes eas-cli@21.0.2 env:exec preview \"node scripts/upload-sentry-update-sourcemaps.mjs --check-env && npx --yes eas-cli@21.0.2 update --channel preview --platform all --auto --non-interactive && node scripts/upload-sentry-update-sourcemaps.mjs\" --non-interactive",
-    "ota:production": "npx --yes eas-cli@21.0.2 env:exec production \"node scripts/upload-sentry-update-sourcemaps.mjs --check-env && npx --yes eas-cli@21.0.2 update --channel production --platform all --auto --non-interactive && node scripts/upload-sentry-update-sourcemaps.mjs\" --non-interactive",
+    "ota": "npx --yes eas-cli@21.0.2 env:exec preview \"node scripts/publish-eas-update.mjs preview\" --non-interactive",
+    "ota:production": "npx --yes eas-cli@21.0.2 env:exec production \"node scripts/publish-eas-update.mjs production\" --non-interactive",
     "eas-build-post-install": "node scripts/prepare-eas-native-env.mjs",
     "postinstall": "node scripts/patch-expo-modules.js && patch-package"
   },

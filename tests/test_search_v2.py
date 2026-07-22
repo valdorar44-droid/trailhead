@@ -2000,6 +2000,40 @@ class SearchV2ApiTests(unittest.TestCase):
         }, clear=True):
             self.assertFalse(server._server_feature_enabled("TRAILHEAD_SEARCH_V2_ENABLED"))
 
+    def test_search_prewarm_defaults_on_when_public_rollout_is_off(self):
+        with patch.dict(os.environ, {
+            "TRAILHEAD_SEARCH_V2_ENABLED": "0",
+        }, clear=True):
+            self.assertTrue(server._search_v2_prewarm_enabled())
+            self.assertFalse(server._server_feature_enabled("TRAILHEAD_SEARCH_V2_ENABLED"))
+
+    def test_search_prewarm_has_an_explicit_independent_opt_out(self):
+        service = SimpleNamespace(prewarm=AsyncMock(return_value=(17, "unused-v1")))
+        with (
+            patch.dict(os.environ, {
+                "TRAILHEAD_SEARCH_V2_ENABLED": "1",
+                "TRAILHEAD_SEARCH_V2_PREWARM_ENABLED": "0",
+            }, clear=True),
+            patch.object(server, "_search_v2_service", service),
+        ):
+            self.assertFalse(server._search_v2_prewarm_enabled())
+            self.assertTrue(server._server_feature_enabled("TRAILHEAD_SEARCH_V2_ENABLED"))
+            asyncio.run(server._prewarm_search_v2())
+
+        service.prewarm.assert_not_awaited()
+
+    def test_search_startup_prewarms_for_internal_admin_access(self):
+        service = SimpleNamespace(prewarm=AsyncMock(return_value=(17, "internal-v1")))
+        with (
+            patch.dict(os.environ, {
+                "TRAILHEAD_SEARCH_V2_ENABLED": "0",
+            }, clear=True),
+            patch.object(server, "_search_v2_service", service),
+        ):
+            asyncio.run(server._prewarm_search_v2())
+
+        service.prewarm.assert_awaited_once_with()
+
     def test_route_scope_is_account_owned_and_uses_server_route_bounds(self):
         account = {"id": 42, "is_admin": 0}
         server.app.dependency_overrides[server._optional_user] = lambda: account

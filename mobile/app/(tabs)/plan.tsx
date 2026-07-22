@@ -28,6 +28,7 @@ import { accountStorage } from '@/lib/storage';
 import {
   routeWeatherCacheEnvelope,
   routeWeatherCacheFileName,
+  routeWeatherEligibleWaypoints,
   routeWeatherWaypointSignature,
 } from '@/lib/routeWeather';
 
@@ -478,9 +479,11 @@ function PlanScreenContent() {
       maybeShowReviewPrompt().catch(() => {});
       setPlanPhase('active');
       // Download route weather for offline use (fail silently)
+      const weatherWaypoints = routeWeatherEligibleWaypoints(result.plan.waypoints);
+      if (!weatherWaypoints.length) return;
       const weatherEpoch = accountStorage.epoch();
-      api.getRouteWeather(result.trip_id, result.plan.waypoints, weatherUnitMode).then(async weather => {
-        const signature = routeWeatherWaypointSignature(result.plan.waypoints);
+      api.getRouteWeather(result.trip_id, weatherWaypoints, weatherUnitMode).then(async weather => {
+        const signature = routeWeatherWaypointSignature(weatherWaypoints);
         const path = `${FileSystem.documentDirectory}${routeWeatherCacheFileName(
           result.trip_id,
           weatherUnitMode,

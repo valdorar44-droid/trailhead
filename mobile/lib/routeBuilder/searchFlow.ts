@@ -17,6 +17,11 @@ export type RouteBuilderSearchPlace = {
   type?: string;
   subtype?: string;
   address?: string;
+  persistence_policy?: 'canonical' | 'durable_external' | 'temporary';
+  temporary_use_only?: boolean;
+  search_provider?: string;
+  provider_result_id?: string;
+  source_attribution?: string;
 };
 
 export type RouteBuilderSearchStopDraft = {
@@ -27,6 +32,11 @@ export type RouteBuilderSearchStopDraft = {
   description: string;
   land_type: string;
   source: 'search';
+  persistence_policy?: 'canonical' | 'durable_external' | 'temporary';
+  temporary_use_only?: boolean;
+  search_provider?: string;
+  provider_result_id?: string;
+  source_attribution?: string;
 };
 
 export type ResolveRouteBuilderSearchResultsInput = {
@@ -110,6 +120,11 @@ export function buildRouteBuilderSearchStop(place: RouteBuilderSearchPlace, type
     description: type === 'start' ? 'Manual route start.' : 'Manual route stop.',
     land_type: type === 'fuel' || type === 'motel' ? 'town' : 'route',
     source: 'search',
+    persistence_policy: place.persistence_policy,
+    temporary_use_only: place.temporary_use_only,
+    search_provider: place.search_provider,
+    provider_result_id: place.provider_result_id,
+    source_attribution: place.source_attribution,
   };
 }
 

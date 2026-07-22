@@ -40,17 +40,25 @@ import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, 
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, ExtremeConfig, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
+import { downloadedPlacePointToPoi } from '@/lib/downloadedPlacePoint';
 import {
   EMPTY_EXPO_OFFLINE_V2_CATALOG,
   loadExpoOfflineV2Catalog,
   mergeOfflinePoiInventory,
   searchExpoOfflineV2Catalog,
 } from '@/lib/offlineV2/expoCatalog';
+import { resolveDownloadedSearchResultPoi } from '@/lib/offlineV2/offlineSearchPresentation';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { deleteOfflineTrip, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { applyBackendAcknowledgedActiveTrip, useStore, type TripHistoryItem } from '@/lib/store';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
+import {
+  accountInventoryIsVisible,
+  accountInventoryRequestIsCurrent,
+  accountInventoryRequiresCleanup,
+  accountInventoryScope,
+} from '@/lib/accountInventoryScope';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { buildRentalSuggestionFit } from '@/lib/outdoorRentals';
 import {
@@ -69,8 +77,10 @@ import {
   offlineSearchResultsV2,
   normalizeSearchV2Query,
   productFeaturesAllowSearchV2,
+  searchPlaceIsTemporary,
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
+  searchV2ShouldShowEmptyState,
   useSearchV2Session,
 } from '@/lib/searchV2';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
@@ -220,9 +230,27 @@ type BuilderStop = {
   campWindowLabel?: string;
   routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
   routeProgressMi?: number;
+  persistence_policy?: 'canonical' | 'durable_external' | 'temporary';
+  temporary_use_only?: boolean;
+  search_provider?: string;
+  provider_result_id?: string;
+  source_attribution?: string;
 };
-type SearchPlace = RouteBuilderSearchPlace & { result_id?: string };
-type SearchDisplayPlace = RouteBuilderSearchDisplayPlace;
+type SearchPlace = RouteBuilderSearchPlace & {
+  result_id?: string;
+  persistence_policy?: 'canonical' | 'durable_external' | 'temporary';
+  temporary_use_only?: boolean;
+  provider_result_id?: string;
+  source_attribution?: string;
+  detail_ref?: string;
+};
+type SearchDisplayPlace = RouteBuilderSearchDisplayPlace & {
+  persistence_policy?: 'canonical' | 'durable_external' | 'temporary';
+  temporary_use_only?: boolean;
+  provider_result_id?: string;
+  source_attribution?: string;
+  detail_ref?: string;
+};
 type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'private' | 'any';
 type CampCadenceMode = 'nightly' | 'alternate' | 'manual';
 type RoutePlaceSelection =
@@ -1574,16 +1602,7 @@ async function geocodePlaces(query: string, signal?: AbortSignal): Promise<Searc
     }));
   }
   if (serverPlaces.length) return serverPlaces;
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=8&q=${encodeURIComponent(query)}`,
-    { headers: { 'User-Agent': 'TrailheadRouteBuilder/1.0' }, signal }
-  );
-  const data = await res.json();
-  return (data ?? []).map((p: any) => ({
-    name: p.display_name?.split(',').slice(0, 3).join(',') ?? query,
-    lat: Number(p.lat),
-    lng: Number(p.lon),
-  })).filter((p: SearchPlace) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
+  return [];
 }
 
 async function searchMapContextNearby(query: string, center: { lat: number; lng: number }, radiusMi = 25, type: OsmPoi['type'] = 'poi', limit = 8): Promise<OsmPoi[]> {
@@ -1641,28 +1660,6 @@ async function searchMapContextNearby(query: string, center: { lat: number; lng:
   })).filter((p: OsmPoi) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
 }
 
-async function searchNominatimNearby(query: string, center: { lat: number; lng: number }, radiusMi = 25, type: OsmPoi['type'] = 'poi', limit = 8): Promise<OsmPoi[]> {
-  const latDelta = radiusMi / 69;
-  const lngDelta = radiusMi / Math.max(8, 69 * Math.cos(center.lat * Math.PI / 180));
-  const west = center.lng - lngDelta;
-  const east = center.lng + lngDelta;
-  const south = center.lat - latDelta;
-  const north = center.lat + latDelta;
-  const res = await fetch(
-    `https://nominatim.openstreetmap.org/search?format=json&limit=${limit}&bounded=1&viewbox=${west},${north},${east},${south}&q=${encodeURIComponent(query)}`,
-    { headers: { 'User-Agent': 'TrailheadRouteBuilder/1.0' } }
-  );
-  const data = await res.json();
-  return (data ?? []).map((p: any) => ({
-    id: `${type}_${p.osm_type ?? 'n'}_${p.osm_id ?? `${p.lat}_${p.lon}`}`,
-    name: p.name || p.display_name?.split(',').slice(0, 2).join(',') || query,
-    lat: Number(p.lat),
-    lng: Number(p.lon),
-    type,
-    subtype: p.type || p.class,
-  })).filter((p: OsmPoi) => Number.isFinite(p.lat) && Number.isFinite(p.lng));
-}
-
 function RouteBuilderScreenContent() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
@@ -1687,10 +1684,27 @@ function RouteBuilderScreenContent() {
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const user = useStore(st => st.user);
-  const [accountEpoch, setAccountEpoch] = useState(accountStorage.epoch);
+  const [accountLifecycle, setAccountLifecycle] = useState(() => ({
+    cleaning: accountStorage.isCleaning(),
+    epoch: accountStorage.epoch(),
+  }));
+  const accountEpoch = accountLifecycle.epoch;
+  const routeAccountInventoryScope = accountInventoryScope(accountEpoch, user?.id);
+  const previousRouteAccountInventoryScopeRef = useRef(routeAccountInventoryScope);
+  const routeAccountTransitionBlocked = !accountLifecycle.cleaning
+    && accountInventoryRequiresCleanup(
+      previousRouteAccountInventoryScopeRef.current,
+      routeAccountInventoryScope,
+    );
+  useEffect(() => {
+    if (!accountLifecycle.cleaning && !routeAccountTransitionBlocked) {
+      previousRouteAccountInventoryScopeRef.current = routeAccountInventoryScope;
+    }
+  }, [accountLifecycle.cleaning, routeAccountInventoryScope.key, routeAccountTransitionBlocked]);
 
   function accountRequestIsCurrent(epoch: number, accountId: string | number | null | undefined) {
-    return accountStorage.epoch() === epoch
+    return !accountStorage.isCleaning()
+      && accountStorage.epoch() === epoch
       && String(useStore.getState().user?.id ?? '') === String(accountId ?? '');
   }
 
@@ -1718,7 +1732,7 @@ function RouteBuilderScreenContent() {
   const setPendingOfflineTrip = useStore(st => st.setPendingOfflineTrip);
   const pendingRouteActivityOffer = useStore(st => st.pendingRouteActivityOffer);
   const setPendingRouteActivityOffer = useStore(st => st.setPendingRouteActivityOffer);
-  const routeBuilderAccountScopeRef = useRef(`${accountEpoch}:${String(user?.id ?? '')}`);
+  const routeBuilderAccountScopeRef = useRef(routeAccountInventoryScope.key);
   const {
     getState: getOfflineMapState,
     getRoutingState: getOfflineRoutingState,
@@ -1726,8 +1740,8 @@ function RouteBuilderScreenContent() {
     getTrailState: getOfflineTrailState,
   } = useOfflineFiles();
 
-  useEffect(() => accountStorage.subscribe((_cleaning, epoch) => {
-    setAccountEpoch(epoch);
+  useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
+    setAccountLifecycle({ cleaning, epoch });
   }), []);
 
   const [activeDay, setActiveDay] = useState(1);
@@ -1742,7 +1756,16 @@ function RouteBuilderScreenContent() {
   const consumedRouteBuilderDraftRef = useRef('');
   const consumedRouteBuilderIntentRef = useRef('');
   const [routeBuilderDraftLoading, setRouteBuilderDraftLoading] = useState(true);
-  const [savedTrails, setSavedTrails] = useState<OfflineTrail[]>([]);
+  const [savedTrailInventory, setSavedTrailInventory] = useState<{
+    scope_key: string;
+    trails: OfflineTrail[];
+  }>({ scope_key: '', trails: [] });
+  const savedTrailInventoryVisible = accountInventoryIsVisible(
+    savedTrailInventory.scope_key,
+    routeAccountInventoryScope,
+    accountLifecycle.cleaning,
+  );
+  const savedTrails = savedTrailInventoryVisible ? savedTrailInventory.trails : [];
   const [routeTripCards, setRouteTripCards] = useState<Record<string, RouteTripCardData>>({});
   const [days, setDays] = useState(defaultRouteDays);
   const [stops, setStops] = useState<BuilderStop[]>([]);
@@ -1849,20 +1872,46 @@ function RouteBuilderScreenContent() {
     if (discoveryRetryTimerRef.current) clearTimeout(discoveryRetryTimerRef.current);
     discoveryRetryTimerRef.current = null;
   }, []);
-  const [offlinePlaces, setOfflinePlaces] = useState<OsmPoi[]>([]);
-  const [offlineV2Catalog, setOfflineV2Catalog] = useState(EMPTY_EXPO_OFFLINE_V2_CATALOG);
+  const [offlinePlaceInventory, setOfflinePlaceInventory] = useState<{
+    scope_key: string;
+    places: OsmPoi[];
+    catalog: typeof EMPTY_EXPO_OFFLINE_V2_CATALOG;
+  }>({ scope_key: '', places: [], catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG });
+  const offlinePlaceInventoryRef = useRef(offlinePlaceInventory);
+  const offlinePlaceInventoryVisible = accountInventoryIsVisible(
+    offlinePlaceInventory.scope_key,
+    routeAccountInventoryScope,
+    accountLifecycle.cleaning,
+  );
+  const offlinePlaces = offlinePlaceInventoryVisible ? offlinePlaceInventory.places : [];
+  const offlineV2Catalog = offlinePlaceInventoryVisible
+    ? offlinePlaceInventory.catalog
+    : EMPTY_EXPO_OFFLINE_V2_CATALOG;
   const routeSearchV2OfflineProvider = useCallback(
     async (request: Parameters<typeof offlineSearchResultsV2>[0]) => {
-      const indexed = await searchExpoOfflineV2Catalog(offlineV2Catalog, request, 'route_editor');
-      const fallback = offlineSearchResultsV2(request, offlinePlaces, 'route_editor');
+      const currentScope = accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id);
+      const inventory = offlinePlaceInventoryRef.current;
+      if (!accountInventoryIsVisible(inventory.scope_key, currentScope, accountStorage.isCleaning())) {
+        return [];
+      }
+      const indexed = await searchExpoOfflineV2Catalog(inventory.catalog, request, 'route_editor');
+      if (!accountInventoryIsVisible(
+        inventory.scope_key,
+        accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id),
+        accountStorage.isCleaning(),
+      )) return [];
+      const fallback = offlineSearchResultsV2(request, inventory.places, 'route_editor');
       const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
       return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
     },
-    [offlinePlaces, offlineV2Catalog],
+    [],
   );
   const routeSearchV2Context = useMemo(() => ({
     surface: 'route_editor' as const,
-    intent: 'destination' as const,
+    // This field adds every kind of route stop, so keep Trailhead and
+    // downloaded camps, trailheads, fuel, and services in the same result set.
+    // The backend may add durable destination completion for this surface.
+    intent: 'any' as const,
     scope: 'global' as const,
     center: userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
     include_external: true,
@@ -1874,14 +1923,34 @@ function RouteBuilderScreenContent() {
     context: routeSearchV2Context,
     offlineProvider: routeSearchV2OfflineProvider,
   });
+  const [routeSearchOwnerScopeKey, setRouteSearchOwnerScopeKey] = useState(routeAccountInventoryScope.key);
+  const routeSearchOwnerIsCurrent = !accountLifecycle.cleaning
+    && routeSearchOwnerScopeKey === routeAccountInventoryScope.key;
+  const routeSearchControllerScopeRef = useRef(routeAccountInventoryScope.key);
 
   useEffect(() => {
-    if (!searchV2Enabled || !screenActivity.isFocused) return;
+    if (!accountLifecycle.cleaning
+      && routeSearchControllerScopeRef.current === routeAccountInventoryScope.key) return;
+    routeSearchControllerScopeRef.current = routeAccountInventoryScope.key;
+    setRouteSearchOwnerScopeKey(routeAccountInventoryScope.key);
+    setSearchResults([]);
+    setSearching(false);
+    routeSearchV2.setQuery('');
+  }, [accountLifecycle.cleaning, routeAccountInventoryScope.key, routeSearchV2.setQuery]);
+
+  useEffect(() => {
+    if (!searchV2Enabled || !screenActivity.isFocused || accountLifecycle.cleaning) return;
+    setRouteSearchOwnerScopeKey(routeAccountInventoryScope.key);
     routeSearchV2.setQuery(query);
-  }, [query, routeSearchV2.setQuery, screenActivity.isFocused, searchV2Enabled]);
+  }, [accountLifecycle.cleaning, query, routeAccountInventoryScope.key, routeSearchV2.setQuery, screenActivity.isFocused, searchV2Enabled]);
 
   useEffect(() => {
     if (!searchV2Enabled) {
+      setSearching(false);
+      return;
+    }
+    if (!routeSearchOwnerIsCurrent) {
+      setSearchResults([]);
       setSearching(false);
       return;
     }
@@ -1906,7 +1975,17 @@ function RouteBuilderScreenContent() {
     routeSearchV2.state.status,
     query,
     searchV2Enabled,
+    routeSearchOwnerIsCurrent,
   ]);
+  const routeSearchEmptyStateReady = searchV2Enabled
+    ? routeSearchOwnerIsCurrent && searchV2ShouldShowEmptyState({
+      displayedQuery: query,
+      settledQuery: routeSearchV2.state.query,
+      status: routeSearchV2.state.status,
+      isEnriching: routeSearchV2.state.isEnriching,
+      resultCount: routeSearchV2.state.results.length,
+    })
+    : undefined;
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
   const [selectedRoutePlace, setSelectedRoutePlace] = useState<RoutePlaceSelection | null>(null);
@@ -2074,91 +2153,101 @@ function RouteBuilderScreenContent() {
 
   useEffect(() => {
     let mounted = true;
-    const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
-    const ownerScope = requestAccountId == null ? 'anonymous' : `account:${String(requestAccountId)}`;
+    const requestScope = accountInventoryScope(accountStorage.epoch(), requestAccountId);
+    if (accountStorage.isCleaning() || routeAccountTransitionBlocked) return () => { mounted = false; };
     Promise.all([
       loadAllPlacePoints().catch(() => []),
       requestAccountId == null
         ? Promise.resolve(EMPTY_EXPO_OFFLINE_V2_CATALOG)
-        : loadExpoOfflineV2Catalog(ownerScope).catch(() => EMPTY_EXPO_OFFLINE_V2_CATALOG),
+        : loadExpoOfflineV2Catalog(requestScope.owner_scope).catch(() => EMPTY_EXPO_OFFLINE_V2_CATALOG),
     ])
-      .then(([points, catalog]) => {
-        if (!mounted || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-        const legacy = points.map(point => ({
-          id: point.id,
-          name: point.name,
-          lat: point.lat,
-          lng: point.lng,
-          type: point.type,
-          subtype: normalizeCampSubtype(point.subtype || ''),
-          elevation: point.elevation,
-          source: point.source || 'offline',
-          source_label: point.source_badge || point.source,
-          address: point.address,
-          photo_url: point.photo_url,
-          website: point.official_url || point.booking_url,
-          activities: point.amenities,
-          amenities: point.amenities,
-          site_types: point.site_types,
-          tags: point.tags,
-          reservable: point.reservable,
-          booking_url: point.booking_url,
-          official_url: point.official_url,
-          source_badge: point.source_badge,
-          source_freshness: point.source_freshness,
-          last_checked: point.last_checked,
-          waterbody_name: point.waterbody_name,
-          waterbody_type: point.waterbody_type,
-          access: point.access,
-          craft: point.craft,
-          fishing_score: point.fishing_score,
-          fishing_score_label: point.fishing_score_label,
-          fish_species: point.fish_species,
-          stocking_notes: point.stocking_notes,
-          regulations_url: point.regulations_url,
-          gauge_id: point.gauge_id,
-          gauge_url: point.gauge_url,
-          flow_cfs: point.flow_cfs,
-          gage_height_ft: point.gage_height_ft,
-          observed_at: point.observed_at,
-          chart_source: point.chart_source,
-          chart_url: point.chart_url,
-          navigation_note: point.navigation_note,
-          aliases: point.aliases,
-          search_terms: point.search_terms,
-          local_terms: point.local_terms,
-          trek_name: point.trek_name,
-          stage_name: point.stage_name,
-          safety_note: point.safety_note,
-        } as OsmPoi));
-        setOfflineV2Catalog(catalog);
-        setOfflinePlaces(mergeOfflinePoiInventory(catalog.places, legacy));
+      .then(async ([points, catalog]) => {
+        if (!mounted || !accountInventoryRequestIsCurrent(
+          requestScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) return;
+        const legacy = points.map(point => downloadedPlacePointToPoi(point, {
+          normalizeSubtype: normalizeCampSubtype,
+          websitePreference: 'official_first',
+          amenitiesAsActivities: true,
+        }));
+        const nextInventory = {
+          scope_key: requestScope.key,
+          places: mergeOfflinePoiInventory(catalog.places, legacy),
+          catalog,
+        };
+        offlinePlaceInventoryRef.current = nextInventory;
+        setOfflinePlaceInventory(nextInventory);
+        setRouteSearchOwnerScopeKey(requestScope.key);
+        if (searchV2Enabled) {
+          const activeQuery = routeSearchQueryRef.current;
+          if (normalizeSearchV2Query(activeQuery).length > 0 && screenActivity.isFocused) {
+            routeSearchV2.setQuery(activeQuery);
+          }
+          await routeSearchV2.refreshOffline();
+        }
       })
       .catch(() => {
-        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
-          setOfflineV2Catalog(EMPTY_EXPO_OFFLINE_V2_CATALOG);
-          setOfflinePlaces([]);
+        if (mounted && accountInventoryRequestIsCurrent(
+          requestScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) {
+          const emptyInventory = {
+            scope_key: requestScope.key,
+            places: [] as OsmPoi[],
+            catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG,
+          };
+          offlinePlaceInventoryRef.current = emptyInventory;
+          setOfflinePlaceInventory(emptyInventory);
+          setRouteSearchOwnerScopeKey(requestScope.key);
+          if (searchV2Enabled) void routeSearchV2.refreshOffline();
         }
       });
     return () => { mounted = false; };
-  }, [user?.id]);
+  }, [
+    accountLifecycle.cleaning,
+    routeAccountTransitionBlocked,
+    routeAccountInventoryScope.key,
+    routeSearchV2.refreshOffline,
+    routeSearchV2.setQuery,
+    screenActivity.isFocused,
+    searchV2Enabled,
+  ]);
 
   useEffect(() => {
     let mounted = true;
-    const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
+    const requestScope = accountInventoryScope(accountStorage.epoch(), requestAccountId);
+    if (accountStorage.isCleaning() || routeAccountTransitionBlocked) return () => { mounted = false; };
     listOfflineTrails()
       .then(items => {
-        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
-          setSavedTrails(items.filter(item => item.geometry?.features?.length).slice(0, 20));
+        if (mounted && accountInventoryRequestIsCurrent(
+          requestScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) {
+          setSavedTrailInventory({
+            scope_key: requestScope.key,
+            trails: items.filter(item => item.geometry?.features?.length).slice(0, 20),
+          });
         }
       })
       .catch(() => {
-        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) setSavedTrails([]);
+        if (mounted && accountInventoryRequestIsCurrent(
+          requestScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) setSavedTrailInventory({ scope_key: requestScope.key, trails: [] });
       });
     return () => { mounted = false; };
-  }, [routeTabMode, user?.id]);
+  }, [accountLifecycle.cleaning, routeAccountInventoryScope.key, routeAccountTransitionBlocked, routeTabMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2280,6 +2369,11 @@ function RouteBuilderScreenContent() {
           poi,
           routePointType: wp.route_point_type,
           routeShapeRole: type === 'start' ? 'start' : undefined,
+          persistence_policy: wp.search_source ? 'durable_external' : undefined,
+          temporary_use_only: false,
+          search_provider: wp.search_source?.provider,
+          provider_result_id: wp.search_source?.provider_result_id,
+          source_attribution: wp.search_source?.attribution,
         };
       });
     const importedFuelStops: BuilderStop[] = activeTrip.gas_stations
@@ -3069,21 +3163,47 @@ function RouteBuilderScreenContent() {
   }
 
   async function resolveRouteBuilderSearchPlace(place: SearchDisplayPlace): Promise<SearchPlace | null> {
+    const pressedScope = accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id);
+    if (accountStorage.isCleaning()
+      || routeAccountTransitionBlocked
+      || pressedScope.key !== routeAccountInventoryScope.key) return null;
     if (searchV2Enabled && place.result_id) {
       const pressedQuery = normalizeSearchV2Query(routeSearchQueryRef.current);
       try {
         const resolved = await routeSearchV2.resolveResult(place.result_id);
+        if (!accountInventoryRequestIsCurrent(
+          pressedScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) return null;
         if (!resolved) {
           if (normalizeSearchV2Query(routeSearchQueryRef.current) === pressedQuery) {
-            Alert.alert('Place unavailable', 'Choose another result or try a nearby town or address.');
+            Alert.alert('Place unavailable', 'That place is no longer available. Search again or drop a pin.');
           }
           return null;
         }
+        const downloaded = resolveDownloadedSearchResultPoi(
+          resolved,
+          offlineV2Catalog.places,
+          offlinePlaces,
+        );
+        if (downloaded) {
+          return {
+            ...downloaded,
+            result_id: resolved.result_id,
+            persistence_policy: resolved.persistence_policy,
+            temporary_use_only: resolved.provenance.temporary_use_only,
+            search_provider: resolved.provenance.provider,
+            provider_result_id: resolved.provenance.provider_result_id || undefined,
+            source_attribution: resolved.provenance.attribution || undefined,
+          } as SearchPlace;
+        }
         const mapped = searchResultV2ToLegacyPlace(resolved);
-        return mapped ? { ...mapped, source: 'search' } : null;
+        return mapped ? { ...mapped, search_provider: mapped.source, source: 'search' } : null;
       } catch {
         if (normalizeSearchV2Query(routeSearchQueryRef.current) === pressedQuery) {
-          Alert.alert('Search unavailable', 'Could not open that place. Try again.');
+          Alert.alert('Place unavailable', 'That place is no longer available. Search again or drop a pin.');
         }
         return null;
       }
@@ -3097,7 +3217,11 @@ function RouteBuilderScreenContent() {
 
   function addPlace(place: SearchPlace, type = pendingType) {
     setReplaceStopId(null);
-    addStop(buildRouteBuilderSearchStop(place, type));
+    addStop({
+      ...buildRouteBuilderSearchStop(place, type),
+      persistence_policy: place.persistence_policy,
+      temporary_use_only: place.temporary_use_only,
+    });
     setSearchResults([]);
     setQuery('');
   }
@@ -3244,6 +3368,16 @@ function RouteBuilderScreenContent() {
       }
     } finally {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setSearching(false);
+    }
+  }
+
+  function updateRouteSearchQuery(value: string) {
+    setQuery(value);
+    if (!searchV2Enabled) return;
+    setSearchResults([]);
+    setSearching(normalizeSearchV2Query(value).length >= 2);
+    if (screenActivity.isFocused && !accountLifecycle.cleaning) {
+      routeSearchV2.setQuery(value);
     }
   }
 
@@ -3453,15 +3587,6 @@ function RouteBuilderScreenContent() {
               ...osmFuel.map(poiToGasStation),
             ]));
           }
-          if (stations.length === 0) {
-            const nominatimFuel = await searchRouteBuilderProviderAtPoints({
-              points: samplePoints,
-              provider: point => searchNominatimNearby('gas station', point, Math.max(radius, 45), 'fuel', 6),
-              dedupe: uniqueByGeo,
-            });
-            if (!requestIsCurrent()) return;
-            stations.push(...nominatimFuel.map(poiToGasStation));
-          }
           const scoped = spreadAlongLeg(stations
             .map(st => withLegProjection(st, searchLeg!))
             .filter(st => (st.route_distance_mi ?? 999) <= routeBufferForMiles(searchLeg!.miles) + 18)
@@ -3504,14 +3629,6 @@ function RouteBuilderScreenContent() {
               ...nrelStations,
               ...osmFuel.map(poiToGasStation),
             ]));
-          }
-          if (stations.length === 0) {
-            const nominatimFuel = await searchRouteBuilderProviderAtPoints({
-              points: [target],
-              provider: point => searchNominatimNearby('gas station', point, 35, 'fuel', 8),
-            });
-            if (!requestIsCurrent()) return;
-            stations.push(...nominatimFuel.map(poiToGasStation));
           }
           stations.sort((a, b) => (a.route_distance_mi ?? haversineMi(a, target)) - (b.route_distance_mi ?? haversineMi(b, target)));
           if (!requestIsCurrent()) return;
@@ -3630,16 +3747,6 @@ function RouteBuilderScreenContent() {
             if (!requestIsCurrent()) return;
             routePlaces.push(...mapboxPlaces);
           }
-          if (routePlaces.length === 0) {
-            const nominatimPlaces = uniqueByGeo(await searchRouteBuilderFallbackPois({
-              points: legSamplePoints(searchLeg!),
-              radiusMi: radius,
-              limitPerQuery: 3,
-              provider: searchNominatimNearby,
-            }));
-            if (!requestIsCurrent()) return;
-            routePlaces.push(...nominatimPlaces);
-          }
           const scoped = spreadAlongLeg(routePlaces
               .map(poi => withLegProjection(poi, searchLeg!))
               .filter(poi => poi.route_distance_mi <= routeBufferForMiles(searchLeg!.miles) + 5)
@@ -3682,16 +3789,6 @@ function RouteBuilderScreenContent() {
             }));
             if (!requestIsCurrent()) return;
             routePlaces.push(...mapboxPlaces);
-          }
-          if (routePlaces.length === 0) {
-            const nominatimPlaces = uniqueByGeo(await searchRouteBuilderFallbackPois({
-              points: [target],
-              radiusMi: 40,
-              limitPerQuery: 5,
-              provider: searchNominatimNearby,
-            }));
-            if (!requestIsCurrent()) return;
-            routePlaces.push(...nominatimPlaces);
           }
           const scoped = routePlaces
             .map(poi => ({ ...poi, route_distance_mi: poi.route_distance_mi ?? haversineMi(poi, target) }))
@@ -5470,6 +5567,11 @@ function RouteBuilderScreenContent() {
       lng: st.lng,
       route_point_type: st.routePointType ?? (st.source === 'poi' && st.type === 'waypoint' ? 'side_stop' : 'break'),
       verified_source: st.source === 'camp' ? st.camp?.verified_source ?? 'Trailhead route' : 'Trailhead route',
+      search_source: st.persistence_policy === 'durable_external' ? {
+        provider: st.search_provider || 'external_search',
+        provider_result_id: st.provider_result_id,
+        attribution: st.source_attribution || 'OpenStreetMap contributors',
+      } : undefined,
       verified_match: true,
       camp_window_start: st.campWindowStart ?? campWindowFor(st.day, inputDays).start,
       camp_window_end: st.campWindowEnd ?? campWindowFor(st.day, inputDays).end,
@@ -5574,6 +5676,14 @@ function RouteBuilderScreenContent() {
     skipGeometryRebuild = false,
   ): Promise<CommitTripResult | undefined> {
     if (routeSaving) return;
+    const temporaryProviderStop = inputStops.find(stop => searchPlaceIsTemporary(stop));
+    if (temporaryProviderStop) {
+      Alert.alert(
+        'Choose a saved place',
+        `${temporaryProviderStop.name} can be used while editing, but it cannot be saved. Replace it with a Trailhead or downloaded result.`,
+      );
+      return;
+    }
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
     const requestToken = useStore.getState().token;
@@ -5835,7 +5945,7 @@ function RouteBuilderScreenContent() {
   }
 
   useEffect(() => {
-    const nextScope = `${accountEpoch}:${String(user?.id ?? '')}`;
+    const nextScope = routeAccountInventoryScope.key;
     if (routeBuilderAccountScopeRef.current === nextScope) return;
     routeBuilderAccountScopeRef.current = nextScope;
     consumedRouteBuilderDraftRef.current = '';
@@ -5846,15 +5956,23 @@ function RouteBuilderScreenContent() {
     setRouteToursLoading(false);
     setRouteToursLoadedFor('');
     setRouteToursStatus('');
-    setSavedTrails([]);
+    setSavedTrailInventory({ scope_key: '', trails: [] });
     setRouteTripCards({});
-    setOfflinePlaces([]);
+    const emptyOfflineInventory = {
+      scope_key: '',
+      places: [] as OsmPoi[],
+      catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG,
+    };
+    offlinePlaceInventoryRef.current = emptyOfflineInventory;
+    setOfflinePlaceInventory(emptyOfflineInventory);
     setFuelEstimate(null);
     setRouteGeometry(null);
     setCopilotAutoBuildRunId(0);
     setBuildingFramework(false);
     setRouteSaving(false);
     setQuery('');
+    routeSearchV2.setQuery('');
+    setRouteSearchOwnerScopeKey(nextScope);
     setSearching(false);
     setDiscoverTab('camps');
     setDiscoverLoading(false);
@@ -5884,7 +6002,7 @@ function RouteBuilderScreenContent() {
     setRouteNameDraft('');
     setShowNewRouteConfirm(false);
     setRouteBuilderDraftLoading(true);
-  }, [accountEpoch, user?.id]);
+  }, [accountEpoch, routeAccountInventoryScope.key, routeSearchV2.setQuery, user?.id]);
 
   function beginCleanNewRoute() {
     resetRouteDraft();
@@ -6154,7 +6272,10 @@ function RouteBuilderScreenContent() {
           const requestAccountId = useStore.getState().user?.id;
           await deleteOfflineTrail(trail.id).catch(() => {});
           if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-          setSavedTrails(prev => prev.filter(item => item.id !== trail.id));
+          setSavedTrailInventory(prev => ({
+            scope_key: prev.scope_key,
+            trails: prev.trails.filter(item => item.id !== trail.id),
+          }));
         },
       },
     ]);
@@ -6968,6 +7089,7 @@ function RouteBuilderScreenContent() {
           pendingType={pendingType}
           query={query}
           searching={searching}
+          emptyStateReady={routeSearchEmptyStateReady}
           results={searchResults}
           selectedStopName={selectedInsertStop?.name}
           targetDay={insertTargetDay}
@@ -6975,7 +7097,7 @@ function RouteBuilderScreenContent() {
           stopIcon={stopIcon}
           stopColor={stopColor}
           onSelectType={setPendingType}
-          onChangeQuery={setQuery}
+          onChangeQuery={updateRouteSearchQuery}
           onSubmitSearch={runSearch}
           onSelectResult={place => {
             void resolveRouteBuilderSearchPlace(place).then(selected => {

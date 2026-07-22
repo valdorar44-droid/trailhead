@@ -45,6 +45,7 @@ type Props = {
   hideSearch?: boolean;
   hideCategories?: boolean;
   showWeather?: boolean;
+  onOpenSearch?: () => void;
   onQueryChange: (value: string) => void;
   onClearQuery: () => void;
   onCategorySelect: (key: ExploreCategoryKey) => void;
@@ -63,6 +64,7 @@ export function ExploreHero({
   hideSearch = false,
   hideCategories = false,
   showWeather = true,
+  onOpenSearch,
   onQueryChange,
   onClearQuery,
   onCategorySelect,
@@ -89,6 +91,22 @@ export function ExploreHero({
         <Text style={styles.title}>Find your next adventure</Text>
         {!hideSearch ? (
           <View style={styles.searchRow}>
+            {onOpenSearch ? (
+              <TouchableOpacity
+                style={styles.search}
+                onPress={onOpenSearch}
+                activeOpacity={0.88}
+                accessibilityRole="button"
+                accessibilityLabel={query ? `Search, ${query}` : 'Search camps, trails, and places'}
+                accessibilityHint="Opens search"
+              >
+                <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.9)" />
+                <Text style={[styles.searchValue, !query && styles.searchPlaceholder]} numberOfLines={1}>
+                  {query || 'Search camps, trails, places'}
+                </Text>
+                <Ionicons name="chevron-forward" size={18} color="rgba(255,255,255,0.86)" />
+              </TouchableOpacity>
+            ) : (
             <View style={styles.search}>
               <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.9)" />
               <TextInput
@@ -105,6 +123,7 @@ export function ExploreHero({
                 </TouchableOpacity>
               ) : null}
             </View>
+            )}
           </View>
         ) : null}
         {showWeather && (weather.loading || !weather.unavailable) ? (
@@ -272,6 +291,8 @@ const styles = StyleSheet.create({
     shadowRadius: 22,
   },
   input: { position: 'relative', zIndex: 11, flex: 1, minHeight: 44, color: '#fff', fontSize: 15, fontWeight: '800', paddingVertical: 0 },
+  searchValue: { flex: 1, color: '#fff', fontSize: 15, lineHeight: 20, fontWeight: '800' },
+  searchPlaceholder: { color: 'rgba(255,255,255,0.72)' },
   iconButton: {
     width: 34,
     height: 34,

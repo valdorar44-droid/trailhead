@@ -2666,6 +2666,11 @@ export interface Waypoint {
   route_point_type?: 'side_stop' | 'break' | 'through';
   verified_match?: boolean; verified_distance_mi?: number; verified_name?: string;
   verified_source?: string; needs_review?: boolean; verification_note?: string;
+  search_source?: {
+    provider: string;
+    provider_result_id?: string;
+    attribution?: string;
+  };
   camp_window_start?: number; camp_window_end?: number; camp_window_label?: string;
 }
 export interface DayPlan {

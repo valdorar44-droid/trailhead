@@ -44,6 +44,7 @@ export function useSearchV2Session({
       return;
     }
     controller.setContext(context);
+    controller.resume();
   }, [active, contextKey, controller, enabled]);
 
   const setQuery = useCallback((query: string) => {
@@ -52,6 +53,7 @@ export function useSearchV2Session({
     controller.setQuery(query);
   }, [controller]);
   const search = useCallback((query?: string) => controller.search(query), [controller]);
+  const refreshOffline = useCallback(() => controller.refreshOffline(), [controller]);
   const loadNextPage = useCallback(() => controller.loadNextPage(), [controller]);
   const selectResult = useCallback((resultId: string) => controller.selectResult(resultId), [controller]);
   const resolveResult = useCallback((resultId: string) => controller.resolveResult(resultId), [controller]);
@@ -62,6 +64,7 @@ export function useSearchV2Session({
     state,
     setQuery,
     search,
+    refreshOffline,
     loadNextPage,
     selectResult,
     resolveResult,

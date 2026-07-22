@@ -19,6 +19,7 @@ type RouteBuilderSearchSurfaceProps = {
   pendingType: RouteBuilderStopType;
   query: string;
   searching: boolean;
+  emptyStateReady?: boolean;
   results: RouteBuilderSearchDisplayPlace[];
   selectedStopName?: string | null;
   targetDay?: number | null;
@@ -70,6 +71,7 @@ export default function RouteBuilderSearchSurface({
   pendingType,
   query,
   searching,
+  emptyStateReady,
   results,
   selectedStopName,
   targetDay,
@@ -153,7 +155,7 @@ export default function RouteBuilderSearchSurface({
             </TouchableOpacity>
           ))}
         </View>
-      ) : !searching && query.trim().length > 0 ? (
+      ) : (emptyStateReady ?? (!searching && query.trim().length > 0)) ? (
         <View style={s.resultsBox}>
           <Text style={s.resultMeta}>No results found. Try a different search.</Text>
         </View>

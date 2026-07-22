@@ -9,6 +9,7 @@ export type OfflineSearchIndexResultV2 = Readonly<{
   lat: number;
   lng: number;
   parent_destination?: string;
+  rank?: number;
 }>;
 
 const unavailable = 'Offline search indexes are available in the Trailhead mobile app.';
@@ -25,6 +26,7 @@ export async function searchExpoOfflineIndex(_input: Readonly<{
   query: string;
   bounds?: OfflineBoundsV2;
   limit?: number;
+  offset?: number;
 }>): Promise<readonly OfflineSearchIndexResultV2[]> {
   return Object.freeze([]);
 }

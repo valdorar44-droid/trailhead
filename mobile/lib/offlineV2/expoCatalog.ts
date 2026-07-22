@@ -3,8 +3,16 @@ import type { SearchRequestV2, SearchResultV2, SearchSurfaceV2 } from '../search
 import { createExpoOfflineV2Persistence } from './expoAdapters';
 import { markOfflineV2ArtifactsConsumed } from './consumption';
 import { searchExpoOfflineIndex, validateExpoOfflineSearchIndex } from './sqliteIndex';
-import { offlineSearchIndexRowsToResults } from './offlineSearchPresentation';
-import type { OfflineBoundsV2, OfflineBundleManifestV2 } from './types';
+import {
+  type DownloadedSearchResultPoiV2,
+  offlineInstallationRevisionV2,
+  searchDownloadedOfflineIndexesV2,
+} from './offlineSearchPresentation';
+import { trailGeometryRepresentativePointV2 } from './trailGeometry';
+import type {
+  OfflineBoundsV2,
+  OfflineBundleManifestV2,
+} from './types';
 
 export type ExpoOfflineV2SearchIndex = Readonly<{
   bundle_id: string;
@@ -13,12 +21,24 @@ export type ExpoOfflineV2SearchIndex = Readonly<{
   bounds: OfflineBoundsV2;
 }>;
 
+export type ExpoOfflineV2Poi = DownloadedSearchResultPoiV2 & Readonly<{
+  offline_entity_kind: 'place' | 'trail_profile';
+}>;
+
 export type ExpoOfflineV2Catalog = Readonly<{
   owner_scope: string;
-  places: readonly OsmPoi[];
+  /** Changes whenever the installed bundle set or a repaired copy changes. */
+  installation_revision: string;
+  places: readonly ExpoOfflineV2Poi[];
   trail_features: GeoJSON.FeatureCollection;
   search_indexes: readonly ExpoOfflineV2SearchIndex[];
   diagnostics: readonly string[];
+}>;
+
+export type ExpoOfflineV2CatalogRefresh = Readonly<{
+  catalog: ExpoOfflineV2Catalog;
+  installation_revision: string;
+  changed: boolean;
 }>;
 
 const EMPTY_FEATURE_COLLECTION: GeoJSON.FeatureCollection = {
@@ -33,20 +53,6 @@ function finiteCoordinate(value: unknown, low: number, high: number) {
 
 function within(bounds: OfflineBoundsV2, lat: number, lng: number) {
   return lat >= bounds.south && lat <= bounds.north && lng >= bounds.west && lng <= bounds.east;
-}
-
-function firstGeometryCoordinate(value: unknown): [number, number] | null {
-  if (!Array.isArray(value)) return null;
-  if (value.length >= 2 && !Array.isArray(value[0])) {
-    const lng = finiteCoordinate(value[0], -180, 180);
-    const lat = finiteCoordinate(value[1], -90, 90);
-    return lat == null || lng == null ? null : [lng, lat];
-  }
-  for (const nested of value) {
-    const result = firstGeometryCoordinate(nested);
-    if (result) return result;
-  }
-  return null;
 }
 
 const POI_TYPES = new Set([
@@ -66,7 +72,7 @@ function documentToPoi(
   document: Record<string, unknown>,
   bounds: OfflineBoundsV2,
   fallbackType: 'place' | 'trail',
-): OsmPoi | null {
+): ExpoOfflineV2Poi | null {
   const lat = finiteCoordinate(document.lat, -90, 90);
   const lng = finiteCoordinate(document.lng, -180, 180);
   const id = String(document.id || '').trim();
@@ -88,7 +94,8 @@ function documentToPoi(
     source_badge: String(document.source_badge || document.source_label || 'Downloaded').trim() || 'Downloaded',
     profile_id: fallbackType === 'trail' ? id : String(document.profile_id || '').trim() || undefined,
     raw: document,
-  } as OsmPoi;
+    offline_entity_kind: fallbackType === 'trail' ? 'trail_profile' : 'place',
+  } as ExpoOfflineV2Poi;
 }
 
 function parsePlaces(
@@ -107,7 +114,7 @@ function parsePlaces(
   return payload.places
     .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === 'object' && !Array.isArray(item)))
     .map(item => documentToPoi(item, manifest.bounds, 'place'))
-    .filter((item): item is OsmPoi => Boolean(item));
+    .filter((item): item is ExpoOfflineV2Poi => Boolean(item));
 }
 
 function parseTrails(
@@ -124,16 +131,15 @@ function parseTrails(
     throw new Error('The offline trails artifact record count does not match its manifest.');
   }
   const features: GeoJSON.Feature[] = [];
-  const pois: OsmPoi[] = [];
+  const pois: ExpoOfflineV2Poi[] = [];
   for (const feature of payload.features) {
     if (!feature || feature.type !== 'Feature' || !feature.geometry) continue;
     const properties = feature.properties && typeof feature.properties === 'object'
       ? { ...feature.properties } as Record<string, unknown>
       : {};
-    const coordinate = firstGeometryCoordinate((feature.geometry as { coordinates?: unknown }).coordinates);
-    const lat = finiteCoordinate(properties.lat, -90, 90) ?? coordinate?.[1] ?? null;
-    const lng = finiteCoordinate(properties.lng, -180, 180) ?? coordinate?.[0] ?? null;
-    if (lat == null || lng == null) continue;
+    const representative = trailGeometryRepresentativePointV2(feature.geometry, manifest.bounds);
+    if (!representative) continue;
+    const [lng, lat] = representative;
     const id = String(properties.id || feature.id || '').trim();
     const name = String(properties.name || properties.label || 'Trail').trim();
     const normalizedProperties = {
@@ -156,7 +162,8 @@ function parseTrails(
 export async function loadExpoOfflineV2Catalog(ownerScope: string): Promise<ExpoOfflineV2Catalog> {
   const persistence = createExpoOfflineV2Persistence(ownerScope);
   const installations = await persistence.repository.listCurrentInstallations();
-  const places = new Map<string, OsmPoi>();
+  const installationRevision = expoOfflineV2InstallationRevision(installations);
+  const places = new Map<string, ExpoOfflineV2Poi>();
   const trailFeatures = new Map<string, GeoJSON.Feature>();
   const searchIndexes: ExpoOfflineV2SearchIndex[] = [];
   const diagnostics: string[] = [];
@@ -204,6 +211,7 @@ export async function loadExpoOfflineV2Catalog(ownerScope: string): Promise<Expo
 
   return Object.freeze({
     owner_scope: ownerScope,
+    installation_revision: installationRevision,
     places: Object.freeze([...places.values()]),
     trail_features: Object.freeze({
       type: 'FeatureCollection',
@@ -220,17 +228,32 @@ export async function searchExpoOfflineV2Catalog(
   surface: SearchSurfaceV2,
   queryIndex: typeof searchExpoOfflineIndex = searchExpoOfflineIndex,
 ): Promise<SearchResultV2[]> {
-  const limit = Math.max(1, Math.min(30, Math.trunc(request.limit ?? 10)));
-  const rows = await Promise.all(catalog.search_indexes.map(async index => ({
-    index,
-    rows: await queryIndex({
-      path: index.path,
-      query: request.query,
-      bounds: request.bounds,
-      limit,
-    }).catch(() => []),
-  })));
-  return offlineSearchIndexRowsToResults(rows.map(group => group.rows), surface, limit);
+  return searchDownloadedOfflineIndexesV2({
+    request,
+    surface,
+    indexes: catalog.search_indexes,
+    canonical: catalog.places,
+    queryIndex,
+  });
+}
+
+/** Deterministic installed-content fingerprint suitable for view refresh checks. */
+export const expoOfflineV2InstallationRevision = offlineInstallationRevisionV2;
+
+/**
+ * Always rereads repository pointers; call when Search opens so a newly
+ * installed, repaired, updated, or removed bundle cannot leave stale results.
+ */
+export async function refreshExpoOfflineV2Catalog(
+  ownerScope: string,
+  previousInstallationRevision?: string | null,
+): Promise<ExpoOfflineV2CatalogRefresh> {
+  const catalog = await loadExpoOfflineV2Catalog(ownerScope);
+  return Object.freeze({
+    catalog,
+    installation_revision: catalog.installation_revision,
+    changed: previousInstallationRevision !== catalog.installation_revision,
+  });
 }
 
 /** Canonical V2 rows win identity conflicts; legacy-only detail remains additive. */
@@ -251,6 +274,7 @@ export function mergeOfflinePoiInventory(
 
 export const EMPTY_EXPO_OFFLINE_V2_CATALOG: ExpoOfflineV2Catalog = Object.freeze({
   owner_scope: 'anonymous',
+  installation_revision: 'empty',
   places: Object.freeze([]),
   trail_features: EMPTY_FEATURE_COLLECTION,
   search_indexes: Object.freeze([]),

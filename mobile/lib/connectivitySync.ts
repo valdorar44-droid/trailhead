@@ -8,6 +8,7 @@ import { accountStorage } from './storage';
 import {
   routeWeatherCacheEnvelope,
   routeWeatherCacheFileName,
+  routeWeatherEligibleWaypoints,
   routeWeatherWaypointSignature,
 } from './routeWeather';
 
@@ -56,8 +57,10 @@ export function useConnectivitySync({
     isSyncing.current = true;
     try {
       const units = useStore.getState().weatherUnitMode;
-      const weather = await api.getRouteWeather(trip.trip_id, trip.plan.waypoints, units);
-      const signature = routeWeatherWaypointSignature(trip.plan.waypoints);
+      const weatherWaypoints = routeWeatherEligibleWaypoints(trip.plan.waypoints);
+      if (!weatherWaypoints.length) return;
+      const weather = await api.getRouteWeather(trip.trip_id, weatherWaypoints, units);
+      const signature = routeWeatherWaypointSignature(weatherWaypoints);
       const path = `${FileSystem.documentDirectory}${routeWeatherCacheFileName(
         trip.trip_id,
         units,

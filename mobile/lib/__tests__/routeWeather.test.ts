@@ -5,6 +5,7 @@ import type { RouteWeatherResult, WeatherForecast } from '../api';
 import {
   routeWeatherCacheEnvelope,
   routeWeatherCacheFileName,
+  routeWeatherEligibleWaypoints,
   routeWeatherForecastForWaypoint,
   routeWeatherResultFromCache,
   routeWeatherWaypointSignature,
@@ -109,6 +110,36 @@ test('cache identity changes with units and normalized waypoint geometry', () =>
   );
 });
 
+test('weather eligibility excludes coordinate-less and invalid itinerary waypoints', () => {
+  const valid = { name: 'Moab', type: 'stop', day: 1, lat: 38.5733, lng: -109.5498 };
+  const waypoints = [
+    { name: 'Trip note', type: 'note', day: 1 },
+    { name: 'Missing longitude', type: 'stop', day: 1, lat: 38.5 },
+    { name: 'Non-finite', type: 'stop', day: 1, lat: Number.NaN, lng: -109.5 },
+    { name: 'Out of range', type: 'stop', day: 1, lat: 95, lng: -109.5 },
+    valid,
+  ];
+
+  assert.deepEqual(routeWeatherEligibleWaypoints(waypoints), [valid]);
+});
+
+test('coordinate-less waypoints do not change route-weather cache identity', () => {
+  const valid = { name: 'Moab', type: 'stop', day: 1, lat: 38.5733, lng: -109.5498 };
+  const withItineraryOnlyRows = [
+    { name: 'Pick up supplies', type: 'note', day: 1 },
+    valid,
+    { name: 'Unresolved campground', type: 'camp', day: 2, lat: 38.6 },
+  ];
+  const validSignature = routeWeatherWaypointSignature([valid]);
+  const mixedSignature = routeWeatherWaypointSignature(withItineraryOnlyRows);
+
+  assert.equal(mixedSignature, validSignature);
+  assert.equal(
+    routeWeatherCacheFileName('trip-coordinate-less', 'imperial', mixedSignature),
+    routeWeatherCacheFileName('trip-coordinate-less', 'imperial', validSignature),
+  );
+});
+
 test('cached weather must match units, waypoint identity, and camp coverage', () => {
   const camp = { name: 'Sand Flats', type: 'camp', day: 1, lat: 38.5677, lng: -109.5271 };
   const signature = routeWeatherWaypointSignature([camp]);
@@ -119,6 +150,15 @@ test('cached weather must match units, waypoint identity, and camp coverage', ()
   const envelope = routeWeatherCacheEnvelope(result, 'imperial', signature);
 
   assert.equal(routeWeatherResultFromCache(envelope, 'imperial', signature, [camp]), result);
+  assert.equal(
+    routeWeatherResultFromCache(
+      envelope,
+      'imperial',
+      signature,
+      [{ name: 'Unresolved camp', type: 'camp', day: 2 }, camp],
+    ),
+    result,
+  );
   assert.equal(routeWeatherResultFromCache(envelope, 'metric', signature, [camp]), null);
   assert.equal(routeWeatherResultFromCache(envelope, 'imperial', 'changed', [camp]), null);
   assert.equal(

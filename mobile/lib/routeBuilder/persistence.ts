@@ -20,6 +20,11 @@ export type PersistedRouteBuilderStop = PersistedRecord & {
   routePointType?: 'side_stop' | 'through' | 'break';
   routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
   routeProgressMi?: number;
+  persistence_policy?: 'canonical' | 'durable_external' | 'temporary';
+  temporary_use_only?: boolean;
+  search_provider?: string;
+  provider_result_id?: string;
+  source_attribution?: string;
   camp?: PersistedRecord;
   gas?: PersistedRecord;
   poi?: PersistedRecord;
@@ -151,6 +156,11 @@ function persistedStop(value: unknown, index: number): PersistedRouteBuilderStop
     routePointType: enumValue(source.routePointType, ROUTE_POINT_TYPES),
     routeShapeRole: enumValue(source.routeShapeRole, ROUTE_SHAPE_ROLES),
     routeProgressMi: routeProgressMi != null && routeProgressMi >= 0 ? routeProgressMi : undefined,
+    persistence_policy: enumValue(source.persistence_policy, ['canonical', 'durable_external', 'temporary']),
+    temporary_use_only: typeof source.temporary_use_only === 'boolean' ? source.temporary_use_only : undefined,
+    search_provider: typeof source.search_provider === 'string' ? source.search_provider.slice(0, 40) : undefined,
+    provider_result_id: typeof source.provider_result_id === 'string' ? source.provider_result_id.slice(0, 200) : undefined,
+    source_attribution: typeof source.source_attribution === 'string' ? source.source_attribution.slice(0, 200) : undefined,
     camp: persistedPlaceRecord(source.camp) ?? undefined,
     gas: persistedPlaceRecord(source.gas) ?? undefined,
     poi: persistedPlaceRecord(source.poi) ?? undefined,

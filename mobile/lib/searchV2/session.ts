@@ -73,14 +73,28 @@ export type SearchV2SessionOptions = {
   debounceMs?: number;
   scheduler?: SearchV2Scheduler;
   createSessionId?: () => string;
+  now?: () => number;
 };
 
 type Listener = (state: SearchV2SessionState) => void;
 
+type SearchV2ResumeIntent = {
+  generation: number;
+  kind: SearchPageModeV2 | 'load_more' | 'offline';
+};
+
 const defaultScheduler: SearchV2Scheduler = {
-  setTimeout: (handler, delayMs) => globalThis.setTimeout(handler, delayMs),
+  setTimeout: (handler, delayMs) => {
+    const handle = globalThis.setTimeout(handler, delayMs);
+    // Node-based unit tests should not stay alive solely for an abandoned
+    // Search Box session. Native/browser timer handles do not expose unref.
+    (handle as unknown as { unref?: () => void }).unref?.();
+    return handle;
+  },
   clearTimeout: handle => globalThis.clearTimeout(handle as ReturnType<typeof setTimeout>),
 };
+
+const ABANDONED_SESSION_TIMEOUT_MS = 180_000;
 
 export class SearchV2SessionController {
   private readonly client: SearchV2Client;
@@ -88,13 +102,23 @@ export class SearchV2SessionController {
   private readonly cache: SearchV2PageCache;
   private readonly debounceMs: number;
   private readonly scheduler: SearchV2Scheduler;
-  private readonly sessionId: string;
+  private readonly createSessionId: () => string;
+  private readonly now: () => number;
   private readonly listeners = new Set<Listener>();
+  private sessionId: string;
+  private sessionActivityAt: number | null = null;
+  private sessionExpiryHandle: unknown = null;
+  private readonly resultSessionIds = new Map<string, string>();
   private context: SearchV2SessionContext;
   private state: SearchV2SessionState = initialState();
   private onlineResults: SearchResultV2[] = [];
   private offlineResults: SearchResultV2[] = [];
   private generation = 0;
+  private contextRevision = 0;
+  private offlineRequestId = 0;
+  private readonly pendingOfflineRequestIds = new Set<number>();
+  private resumeIntent: SearchV2ResumeIntent | null = null;
+  private paused = false;
   private requestController: AbortController | null = null;
   private enrichmentController: AbortController | null = null;
   private resolveController: AbortController | null = null;
@@ -109,7 +133,9 @@ export class SearchV2SessionController {
     this.cache = options.cache ?? new SearchV2PageCache();
     this.debounceMs = clampInteger(options.debounceMs ?? 220, 180, 250);
     this.scheduler = options.scheduler ?? defaultScheduler;
-    this.sessionId = (options.createSessionId ?? createSearchSessionId)();
+    this.createSessionId = options.createSessionId ?? createSearchSessionId;
+    this.now = options.now ?? Date.now;
+    this.sessionId = this.createSessionId();
   }
 
   getState(): SearchV2SessionState {
@@ -126,6 +152,7 @@ export class SearchV2SessionController {
     const nextKey = searchV2CacheKey('results', { ...context, query: 'context' });
     if (previousKey === nextKey) return;
     this.context = { ...context };
+    this.contextRevision += 1;
     if (this.disposed || this.state.query.length < 2) return;
     const { mode, query } = this.state;
     if (refreshCurrent) {
@@ -136,6 +163,7 @@ export class SearchV2SessionController {
     this.startGeneration();
     this.onlineResults = [];
     this.offlineResults = [];
+    this.resultSessionIds.clear();
     this.setState({ ...initialState(), query, mode });
   }
 
@@ -145,6 +173,7 @@ export class SearchV2SessionController {
     const shouldEnrich = normalized.length >= 2 && this.shouldEnrichSuggestions();
     this.onlineResults = [];
     this.offlineResults = [];
+    this.resultSessionIds.clear();
     this.setState({
       ...initialState(),
       query: normalized,
@@ -154,7 +183,7 @@ export class SearchV2SessionController {
       isEnriching: shouldEnrich,
     });
     if (normalized.length >= 1) {
-      this.loadOffline(this.buildRequest(normalized, 'suggest'), generation);
+      void this.loadOffline(this.buildRequest(normalized, 'suggest'), generation);
     }
     if (normalized.length < 2 || this.disposed) return;
     if (this.context.scope === 'offline') {
@@ -166,6 +195,7 @@ export class SearchV2SessionController {
       });
       return;
     }
+    this.touchExternalSession();
 
     // Canonical Trailhead suggestions start immediately. The slower provider
     // fallback is a separate debounced pass, so it can never hold useful local
@@ -184,6 +214,7 @@ export class SearchV2SessionController {
     const generation = this.startGeneration();
     this.onlineResults = [];
     this.offlineResults = [];
+    this.resultSessionIds.clear();
     this.setState({
       ...initialState(),
       query: normalized,
@@ -192,8 +223,8 @@ export class SearchV2SessionController {
       loadingPresentation: normalized.length >= 2 ? 'skeleton' : 'none',
     });
     if (normalized.length < 2 || this.disposed) return;
-    const request = this.buildRequest(normalized, 'results');
-    this.loadOffline(request, generation);
+    const offlineRequest = this.buildRequest(normalized, 'results');
+    void this.loadOffline(offlineRequest, generation);
     if (this.context.scope === 'offline') {
       this.setState({
         ...this.state,
@@ -203,6 +234,7 @@ export class SearchV2SessionController {
       });
       return;
     }
+    this.touchExternalSession();
     await this.loadFirstPage('results', generation);
   }
 
@@ -215,10 +247,12 @@ export class SearchV2SessionController {
       || !this.state.nextCursor
       || this.state.query.length < 2
     ) return;
+    this.touchExternalSession();
     const generation = this.generation;
     const request = this.buildRequest(this.state.query, this.state.mode, this.state.nextCursor);
     const cached = this.cache.get(searchV2CacheKey(this.state.mode, request));
     if (cached) {
+      this.rememberResultSessions(cached.results, request.session_id);
       this.applyPage(cached, generation, true);
       return;
     }
@@ -230,6 +264,7 @@ export class SearchV2SessionController {
     try {
       const page = await this.requestPage(this.state.mode, request, controller.signal);
       if (!this.isCurrent(generation, controller)) return;
+      this.rememberResultSessions(page.results, request.session_id);
       this.cache.set(searchV2CacheKey(this.state.mode, request), page);
       this.applyPage(page, generation, true);
     } catch (error) {
@@ -242,6 +277,36 @@ export class SearchV2SessionController {
     } finally {
       if (this.requestController === controller) this.requestController = null;
     }
+  }
+
+  /**
+   * Re-query only the installed offline catalog for the current search. This
+   * is used after an asynchronous bundle/index install and intentionally does
+   * not restart network work, rotate the provider session, or clear warm rows.
+   */
+  async refreshOffline(): Promise<void> {
+    if (this.disposed || !this.offlineProvider || this.state.query.length < 1) return;
+    const request = this.buildRequest(this.state.query, this.state.mode);
+    await this.loadOffline(request, this.generation);
+  }
+
+  /** Resume only work that pause() actually interrupted. */
+  resume(): void {
+    if (this.disposed || !this.paused) return;
+    this.paused = false;
+    const intent = this.resumeIntent;
+    this.resumeIntent = null;
+    if (!intent || intent.generation !== this.generation) return;
+
+    if (intent.kind === 'offline') {
+      void this.refreshOffline();
+      return;
+    }
+    if (intent.kind === 'load_more') {
+      void this.loadNextPage();
+      return;
+    }
+    this.revalidateCurrent(intent.kind);
   }
 
   selectResult(resultId: string): SearchResultV2 | null {
@@ -258,7 +323,13 @@ export class SearchV2SessionController {
   async resolveResult(resultId: string): Promise<SearchResultV2 | null> {
     const result = this.state.results.find(item => item.result_id === resultId) ?? null;
     if (!result) return null;
-    if (hasCoordinates(result)) return this.selectResult(resultId);
+    if (hasCoordinates(result)) {
+      const selected = this.selectResult(resultId);
+      if (selected?.provenance?.temporary_use_only) {
+        this.completeExternalSession(this.resultSessionIds.get(resultId));
+      }
+      return selected;
+    }
     if (!result.detail_ref || !result.provenance?.temporary_use_only) {
       const error = new Error('This search result is not available.');
       this.setState({ ...this.state, resolveError: error, resolvingResultId: null });
@@ -269,6 +340,7 @@ export class SearchV2SessionController {
     const controller = new AbortController();
     this.resolveController = controller;
     const generation = this.generation;
+    const matchingSessionId = this.resultSessionIds.get(resultId) ?? this.sessionId;
     this.setState({
       ...this.state,
       selectedResult: null,
@@ -278,6 +350,7 @@ export class SearchV2SessionController {
     try {
       const response = await this.client.resolve({
         ...this.buildRequest(this.state.query, this.state.mode),
+        session_id: matchingSessionId,
         cursor: undefined,
         include_external: true,
         selected_result_id: result.result_id,
@@ -306,6 +379,8 @@ export class SearchV2SessionController {
         resolveError: null,
         revision: response.revision || this.state.revision,
       });
+      this.resultSessionIds.delete(resultId);
+      this.completeExternalSession(matchingSessionId);
       return selected;
     } catch (error) {
       if (!this.isResolveCurrent(generation, controller) || isAbortError(error)) return null;
@@ -329,16 +404,30 @@ export class SearchV2SessionController {
 
   pause(): void {
     if (this.disposed) return;
-    const wasBusy = this.debounceHandle !== null
+    if (this.paused) return;
+    const searchWasBusy = this.debounceHandle !== null
       || this.requestController !== null
       || this.enrichmentController !== null
-      || this.resolveController !== null
       || this.state.status === 'debouncing'
       || this.state.status === 'loading'
       || this.state.loadingMore
-      || this.state.isEnriching
-      || this.state.resolvingResultId !== null;
-    this.startGeneration();
+      || this.state.isEnriching;
+    const offlineWasBusy = this.pendingOfflineRequestIds.has(this.offlineRequestId);
+    const wasBusy = searchWasBusy
+      || this.resolveController !== null
+      || this.state.resolvingResultId !== null
+      || offlineWasBusy;
+    const resumeKind: SearchV2ResumeIntent['kind'] | null = this.state.loadingMore
+      ? 'load_more'
+      : searchWasBusy
+        ? this.state.mode
+        : offlineWasBusy
+          ? 'offline'
+          : null;
+    const pausedGeneration = this.startGeneration();
+    this.paused = true;
+    this.resumeIntent = resumeKind ? { generation: pausedGeneration, kind: resumeKind } : null;
+    this.abandonExternalSession();
     if (!wasBusy) return;
     const results = this.currentResults();
     this.setState({
@@ -360,6 +449,10 @@ export class SearchV2SessionController {
     if (this.disposed) return;
     this.disposed = true;
     this.cancelScheduledWork();
+    this.clearSessionExpiry();
+    this.resumeIntent = null;
+    this.pendingOfflineRequestIds.clear();
+    this.resultSessionIds.clear();
     this.listeners.clear();
   }
 
@@ -369,6 +462,7 @@ export class SearchV2SessionController {
     const cacheKey = searchV2CacheKey(mode, request);
     const cached = this.cache.get(cacheKey);
     if (cached) {
+      this.rememberResultSessions(cached.results, request.session_id);
       this.applyPage(cached, generation, false);
       return;
     }
@@ -388,6 +482,7 @@ export class SearchV2SessionController {
     try {
       const page = await this.requestPage(mode, request, controller.signal);
       if (!this.isCurrent(generation, controller)) return;
+      this.rememberResultSessions(page.results, request.session_id);
       this.cache.set(cacheKey, page);
       this.applyPage(page, generation, false);
     } catch (error) {
@@ -422,6 +517,7 @@ export class SearchV2SessionController {
     const cacheKey = searchV2CacheKey('suggest', request);
     const cached = this.cache.get(cacheKey);
     if (cached) {
+      this.rememberResultSessions(cached.results, request.session_id);
       this.applySuggestionPage(cached, generation, isFinalPass);
       return;
     }
@@ -432,6 +528,7 @@ export class SearchV2SessionController {
     try {
       const page = await this.client.suggest(request, { signal: controller.signal });
       if (!this.isCurrent(generation, controller) || this.enrichedGeneration === generation) return;
+      this.rememberResultSessions(page.results, request.session_id);
       this.cache.set(cacheKey, page);
       this.applySuggestionPage(page, generation, isFinalPass);
     } catch (error) {
@@ -457,6 +554,7 @@ export class SearchV2SessionController {
     const cacheKey = searchV2CacheKey('suggest', request);
     const cached = this.cache.get(cacheKey);
     if (cached) {
+      this.rememberResultSessions(cached.results, request.session_id);
       this.enrichedGeneration = generation;
       this.applySuggestionPage(cached, generation, true);
       return;
@@ -473,6 +571,7 @@ export class SearchV2SessionController {
     try {
       const page = await this.client.suggest(request, { signal: controller.signal });
       if (!this.isEnrichmentCurrent(generation, controller)) return;
+      this.rememberResultSessions(page.results, request.session_id);
       this.cache.set(cacheKey, page);
       this.enrichedGeneration = generation;
       this.applySuggestionPage(page, generation, true);
@@ -525,8 +624,10 @@ export class SearchV2SessionController {
     });
   }
 
-  private loadOffline(request: SearchRequestV2, generation: number): void {
-    if (!this.offlineProvider) return;
+  private loadOffline(request: SearchRequestV2, generation: number): Promise<void> {
+    if (!this.offlineProvider) return Promise.resolve();
+    const contextRevision = this.contextRevision;
+    const requestId = ++this.offlineRequestId;
     try {
       const result = this.offlineProvider({
         ...request,
@@ -535,19 +636,31 @@ export class SearchV2SessionController {
         include_external: false,
       });
       if (isPromiseLike<SearchResultV2[]>(result)) {
-        void result
-          .then(items => this.applyOffline(items, generation))
-          .catch(() => undefined);
+        this.pendingOfflineRequestIds.add(requestId);
+        return result
+          .then(items => this.applyOffline(items, generation, contextRevision, requestId))
+          .catch(() => undefined)
+          .finally(() => this.pendingOfflineRequestIds.delete(requestId));
       } else {
-        this.applyOffline(result, generation);
+        this.applyOffline(result, generation, contextRevision, requestId);
       }
     } catch {
       // Offline search is best effort. Network search remains available.
     }
+    return Promise.resolve();
   }
 
-  private applyOffline(items: SearchResultV2[], generation: number): void {
-    if (!this.isGenerationCurrent(generation)) return;
+  private applyOffline(
+    items: SearchResultV2[],
+    generation: number,
+    contextRevision: number,
+    requestId: number,
+  ): void {
+    if (
+      !this.isGenerationCurrent(generation)
+      || contextRevision !== this.contextRevision
+      || requestId !== this.offlineRequestId
+    ) return;
     const limit = clampInteger(this.context.limit ?? 20, 1, 30);
     this.offlineResults = dedupeResults(items).slice(0, limit);
     const status = this.context.scope === 'offline'
@@ -591,6 +704,58 @@ export class SearchV2SessionController {
       loadingPresentation: 'none',
       isEnriching: false,
     });
+  }
+
+  private revalidateCurrent(mode: SearchPageModeV2): void {
+    const query = this.state.query;
+    const minimumLength = mode === 'suggest' ? 1 : 2;
+    if (query.length < minimumLength) return;
+    const generation = this.startGeneration();
+    const shouldEnrich = mode === 'suggest'
+      && query.length >= 2
+      && this.shouldEnrichSuggestions();
+    const warmResults = this.currentResults();
+    this.setState({
+      ...this.state,
+      mode,
+      status: warmResults.length > 0 ? 'ready' : query.length >= 2 ? 'loading' : 'idle',
+      results: warmResults,
+      error: null,
+      loadMoreError: null,
+      loadingMore: false,
+      loadingPresentation: warmResults.length > 0
+        ? 'inline'
+        : mode === 'results'
+          ? 'skeleton'
+          : 'inline',
+      isEnriching: shouldEnrich,
+    });
+    void this.loadOffline(this.buildRequest(query, mode), generation);
+
+    if (query.length < 2 || this.context.scope === 'offline') {
+      const refreshedResults = this.currentResults();
+      this.setState({
+        ...this.state,
+        status: refreshedResults.length > 0 ? 'ready' : 'idle',
+        results: refreshedResults,
+        loadingPresentation: 'none',
+        isEnriching: false,
+      });
+      return;
+    }
+
+    this.touchExternalSession();
+    if (mode === 'results') {
+      void this.loadFirstPage(mode, generation);
+      return;
+    }
+    void this.loadCanonicalSuggestions(generation, !shouldEnrich);
+    if (shouldEnrich) {
+      this.debounceHandle = this.scheduler.setTimeout(() => {
+        this.debounceHandle = null;
+        void this.loadEnrichedSuggestions(generation);
+      }, this.debounceMs);
+    }
   }
 
   private buildRequest(query: string, mode: SearchPageModeV2, cursor?: string): SearchRequestV2 {
@@ -644,6 +809,68 @@ export class SearchV2SessionController {
     this.resolveController?.abort();
     this.resolveController = null;
     this.enrichedGeneration = null;
+  }
+
+  private rememberResultSessions(results: readonly SearchResultV2[], sessionId?: string): void {
+    if (!sessionId) return;
+    for (const result of results) {
+      if (result.provenance?.temporary_use_only) {
+        this.resultSessionIds.set(result.result_id, sessionId);
+      }
+    }
+  }
+
+  private touchExternalSession(): void {
+    if (this.disposed || !this.shouldEnrichSuggestions()) return;
+    const activityAt = this.now();
+    // Native timers can be delayed while the app is suspended. Enforce the
+    // inactivity boundary again on the next user action before issuing any
+    // request, rather than relying only on the scheduled callback.
+    if (
+      this.sessionActivityAt != null
+      && activityAt - this.sessionActivityAt >= ABANDONED_SESSION_TIMEOUT_MS
+    ) {
+      this.rotateExternalSession();
+    }
+    this.sessionActivityAt = activityAt;
+    this.scheduleSessionExpiry(ABANDONED_SESSION_TIMEOUT_MS, this.sessionId);
+  }
+
+  private scheduleSessionExpiry(delayMs: number, expectedSessionId: string): void {
+    this.clearSessionExpiry();
+    this.sessionExpiryHandle = this.scheduler.setTimeout(() => {
+      this.sessionExpiryHandle = null;
+      if (this.disposed || this.sessionId !== expectedSessionId || this.sessionActivityAt == null) return;
+      const idleMs = Math.max(0, this.now() - this.sessionActivityAt);
+      if (idleMs < ABANDONED_SESSION_TIMEOUT_MS) {
+        this.scheduleSessionExpiry(ABANDONED_SESSION_TIMEOUT_MS - idleMs, expectedSessionId);
+        return;
+      }
+      this.rotateExternalSession();
+    }, delayMs);
+  }
+
+  private clearSessionExpiry(): void {
+    if (this.sessionExpiryHandle !== null) {
+      this.scheduler.clearTimeout(this.sessionExpiryHandle);
+      this.sessionExpiryHandle = null;
+    }
+  }
+
+  private rotateExternalSession(): void {
+    this.clearSessionExpiry();
+    this.sessionActivityAt = null;
+    this.sessionId = this.createSessionId();
+  }
+
+  private abandonExternalSession(): void {
+    this.rotateExternalSession();
+  }
+
+  private completeExternalSession(completedSessionId?: string): void {
+    if (!completedSessionId || completedSessionId === this.sessionId) {
+      this.rotateExternalSession();
+    }
   }
 
   private isGenerationCurrent(generation: number): boolean {

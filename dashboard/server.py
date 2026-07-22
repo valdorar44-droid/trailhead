@@ -10142,6 +10142,20 @@ def _server_feature_enabled(name: str) -> bool:
     return str(configured or "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _search_v2_prewarm_enabled() -> bool:
+    """Warm Search V2 independently from its public rollout state.
+
+    Administrators can use Search V2 while the public feature flag is off, so
+    tying index readiness to that flag makes the first internal query pay the
+    complete in-memory SQLite build cost. Prewarming is therefore on by
+    default and may be explicitly disabled for a constrained worker.
+    """
+    configured = os.getenv("TRAILHEAD_SEARCH_V2_PREWARM_ENABLED")
+    if configured is None:
+        return True
+    return str(configured).strip().lower() in {"1", "true", "yes", "on"}
+
+
 def _product_feature_enabled(env_name: str, user: dict | None = None) -> bool:
     return bool((isinstance(user, dict) and user.get("is_admin")) or _server_feature_enabled(env_name))
 
@@ -19596,7 +19610,7 @@ def _search_v2_external_subject(request: Request, user: dict | None) -> str:
 
 @app.on_event("startup")
 async def _prewarm_search_v2() -> None:
-    if not _server_feature_enabled("TRAILHEAD_SEARCH_V2_ENABLED"):
+    if not _search_v2_prewarm_enabled():
         return
     try:
         count, revision = await _search_v2_service.prewarm()

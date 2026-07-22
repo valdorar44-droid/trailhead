@@ -1,0 +1,12 @@
+{
+  "name": "Open the canonical Map layers surface",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "contentDescription": "Open layers" },
+      "settleMs": 1200,
+      "label": "open-layers"
+    },
+    { "type": "capture", "label": "layers-open" }
+  ]
+}

@@ -55,7 +55,7 @@ const PAGES: OnboardingPage[] = [
     tone: '#38bdf8',
     cards: [
       { title: 'Nearby search', body: 'Find camps, trails, fuel, water, and services around a place.', icon: 'search-outline', tone: '#38bdf8' },
-      { title: 'Layers', body: 'Focus on camps, trails, public land, weather, or water safety.', icon: 'options-outline', tone: '#14b8a6' },
+      { title: 'Layers', body: 'Focus on camps, trails, public land, weather, or water sources.', icon: 'options-outline', tone: '#14b8a6' },
       { title: 'Trail tools', body: 'Draw a line, save it, or bring it into a trip.', icon: 'git-branch-outline', tone: '#f59e0b' },
     ],
   },

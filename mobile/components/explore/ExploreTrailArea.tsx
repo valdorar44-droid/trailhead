@@ -106,7 +106,7 @@ export function ExploreTrailArea({ place, mediaUrl, onTrailMap, onTrailRoute }: 
               >
                 <View style={styles.trailImageShell}>
                   {photo ? (
-                    <Image source={{ uri: mediaUrl(photo) }} style={styles.trailImage} resizeMode="cover" />
+                    <Image source={{ uri: mediaUrl(photo) }} style={styles.trailImage} resizeMode="cover" resizeMethod="resize" />
                   ) : (
                     <View style={styles.trailImageFallback}>
                       <Ionicons name="trail-sign-outline" size={32} color="#64748b" />

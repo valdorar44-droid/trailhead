@@ -13,8 +13,6 @@ import React, {
 } from 'react';
 import { Dimensions, PanResponder, Platform, TouchableOpacity, View, StyleSheet, Text } from 'react-native';
 import { EventEmitter, requireNativeModule } from 'expo-modules-core';
-import MapLibreGL from '@maplibre/maplibre-react-native';
-import MapboxGL from '@rnmapbox/maps';
 import { Ionicons } from '@expo/vector-icons';
 import { accountStorage } from '@/lib/storage';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
@@ -65,9 +63,28 @@ function safelyRemoveSubscription(subscription: { remove?: () => unknown } | nul
   } catch {}
 }
 
-function safelySetMapboxToken(token: string) {
+let cachedMapboxRenderer: any = null;
+let cachedMapLibreRenderer: any = null;
+
+function getNativeMapRenderer(isMapboxRenderer: boolean) {
+  if (isMapboxRenderer) {
+    if (!cachedMapboxRenderer) {
+      const mapboxModule = require('@rnmapbox/maps');
+      cachedMapboxRenderer = mapboxModule?.default ?? mapboxModule;
+    }
+    return cachedMapboxRenderer;
+  }
+
+  if (!cachedMapLibreRenderer) {
+    const mapLibreModule = require('@maplibre/maplibre-react-native');
+    cachedMapLibreRenderer = mapLibreModule?.default ?? mapLibreModule;
+  }
+  return cachedMapLibreRenderer;
+}
+
+function safelySetMapboxToken(mapRenderer: any, token: string) {
   try {
-    const result = MapboxGL.setAccessToken(token);
+    const result = mapRenderer?.setAccessToken?.(token);
     if (result && typeof (result as Promise<unknown>).catch === 'function') {
       (result as Promise<unknown>).catch(() => {});
     }
@@ -379,32 +396,6 @@ const POI_CODES: Record<string, string> = {
   wifi: 'W',
   poi: 'P',
 };
-const POI_ICON_NAMES: Record<string, keyof typeof Ionicons.glyphMap> = {
-  trail: 'walk-outline',
-  water: 'water-outline',
-  trailhead: 'trail-sign-outline',
-  viewpoint: 'flag-outline',
-  peak: 'triangle-outline',
-  hot_spring: 'flame-outline',
-  fuel: 'flash-outline',
-  propane: 'flame-outline',
-  dump: 'trash-bin-outline',
-  shower: 'rainy-outline',
-  laundromat: 'shirt-outline',
-  lodging: 'bed-outline',
-  food: 'restaurant-outline',
-  grocery: 'cart-outline',
-  mechanic: 'construct-outline',
-  parking: 'car-outline',
-  attraction: 'camera-outline',
-  camping: 'storefront-outline',
-  hardware: 'hammer-outline',
-  medical: 'medical-outline',
-  parts: 'cog-outline',
-  wifi: 'wifi-outline',
-  poi: 'location-outline',
-};
-
 const COMMUNITY_PIN_VISUALS: Record<string, { color: string; icon: keyof typeof Ionicons.glyphMap }> = {
   camp: { color: '#16a34a', icon: 'bonfire-outline' },
   informal_camp: { color: '#65a30d', icon: 'business-outline' },
@@ -968,7 +959,12 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   // Keep one native renderer mounted while switching basemaps. RNMapbox can
   // render Trailhead's inline style JSON as well as Mapbox Standard, avoiding
   // a full MapView teardown each time the user changes map layers.
-  const MapGL: any = isMapboxRenderer ? MapboxGL : MapLibreGL;
+  // Require only the selected native renderer. Importing both at module scope
+  // initializes two native map stacks even though a screen can display one.
+  const MapGL: any = useMemo(
+    () => getNativeMapRenderer(isMapboxRenderer),
+    [isMapboxRenderer],
+  );
   const routeArrowFont = isExtremeMapbox
     ? ['DIN Pro Medium', 'Arial Unicode MS Regular']
     : ['Noto Sans Medium'];
@@ -1543,9 +1539,9 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const mapboxTopSlotProps = isMapboxStandardStyle ? ({ slot: 'top' } as any) : {};
 
   useEffect(() => {
-    if (!mapboxToken) return;
-    safelySetMapboxToken(mapboxToken);
-  }, [mapboxToken]);
+    if (!isMapboxRenderer || !mapboxToken) return;
+    safelySetMapboxToken(MapGL, mapboxToken);
+  }, [MapGL, isMapboxRenderer, mapboxToken]);
 
   useEffect(() => {
     if (!isExtremeMapbox || !mapboxStandardInteractions?.enable || !mapboxStandardInteractionEvents) return;
@@ -3987,20 +3983,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
         </MapGL.ShapeSource>
       )}
 
-      {gas.slice(0, 60).map((station, i) => (
-        <MapGL.MarkerView
-          key={`gas-icon-${station.name}-${station.lat}-${station.lng}-${i}`}
-          id={`gas-icon-${i}`}
-          coordinate={[station.lng, station.lat]}
-        >
-          <IconPin
-            color="#eab308"
-            icon="flash-outline"
-            onPress={() => suppressFeatureTaps ? onMapTap(station.lat, station.lng) : onGasTap?.({ name: station.name || 'Gas Station', lat: station.lat, lng: station.lng })}
-          />
-        </MapGL.MarkerView>
-      ))}
-
       {/* Verified Offline V2 trail geometry. Points for the same records flow
           through the shared POI sheet; tapping a line opens that exact record. */}
       {showTrailOverlay && offlineTrailFeatures.features.length > 0 && (
@@ -4165,23 +4147,6 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapGL.ShapeSource>
       )}
-
-      {pois.slice(0, 70).map((poi, i) => {
-        const visual = poiMarkerVisual(poi);
-        return (
-        <MapGL.MarkerView
-          key={`poi-icon-${poi.type}-${poi.name}-${poi.lat}-${poi.lng}-${i}`}
-          id={`poi-icon-${i}`}
-          coordinate={[poi.lng, poi.lat]}
-        >
-          <IconPin
-            color={visual.color}
-            icon={visual.icon}
-            onPress={() => suppressFeatureTaps ? onMapTap(poi.lat, poi.lng) : onPoiTap?.(poi)}
-          />
-        </MapGL.MarkerView>
-        );
-      })}
 
       {/* ── Community pins ────────────────────────────────────────────── */}
       {communityPins.slice(0, 150).map((pin, i) => {
@@ -4937,75 +4902,6 @@ function compactMapStatus(status: string): string {
   const saved = status.match(/^(\d+) (state|region) maps? saved$/i);
   if (saved?.[1]) return `${saved[1]} saved`;
   return 'Saved maps';
-}
-
-function poiColor(type: string): string {
-  switch (type) {
-    case 'trail': return '#f97316';
-    case 'water': return '#3b82f6';
-    case 'trailhead': return '#22c55e';
-    case 'viewpoint': return '#a855f7';
-    case 'peak': return '#92400e';
-    case 'hot_spring': return '#f97316';
-    case 'fuel': return '#ea580c';
-    case 'propane': return '#f97316';
-    case 'dump': return '#a16207';
-    case 'shower': return '#06b6d4';
-    case 'laundromat': return '#06b6d4';
-    case 'lodging': return '#6366f1';
-    case 'food': return '#06b6d4';
-    case 'grocery': return '#06b6d4';
-    case 'mechanic': return '#f97316';
-    case 'parking': return '#d97706';
-    case 'attraction': return '#0ea5e9';
-    case 'camping': return '#16a34a';
-    case 'hardware': return '#f59e0b';
-    case 'medical': return '#ef4444';
-    case 'parts': return '#f97316';
-    case 'wifi': return '#2563eb';
-    default: return '#3b82f6';
-  }
-}
-
-function waterSubtypeVisual(subtype?: string): { color: string; code: string; icon: keyof typeof Ionicons.glyphMap } {
-  switch (String(subtype || '').toLowerCase().replace(/[\s-]+/g, '_')) {
-    case 'boat_ramp':
-      return { color: '#1d4ed8', code: 'R', icon: 'boat-outline' };
-    case 'paddle_launch':
-      return { color: '#0f766e', code: 'P', icon: 'navigate-circle-outline' };
-    case 'fishing_access':
-      return { color: '#15803d', code: 'F', icon: 'fish-outline' };
-    case 'marina':
-      return { color: '#0891b2', code: 'M', icon: 'boat-outline' };
-    case 'dock':
-      return { color: '#0369a1', code: 'D', icon: 'albums-outline' };
-    case 'shore_access':
-      return { color: '#0e7490', code: 'S', icon: 'map-outline' };
-    case 'swimming':
-      return { color: '#06b6d4', code: 'S', icon: 'water-outline' };
-    case 'gauge':
-      return { color: '#64748b', code: 'G', icon: 'speedometer-outline' };
-    case 'navigation_aid':
-      return { color: '#7c3aed', code: 'A', icon: 'flag-outline' };
-    case 'channel_marker':
-      return { color: '#2563eb', code: 'C', icon: 'git-branch-outline' };
-    case 'water_hazard':
-      return { color: '#dc2626', code: '!', icon: 'warning-outline' };
-    case 'anchorage':
-      return { color: '#0f766e', code: 'A', icon: 'boat-outline' };
-    case 'lock':
-      return { color: '#a16207', code: 'L', icon: 'lock-closed-outline' };
-    default:
-      return { color: '#0284c7', code: 'W', icon: 'water-outline' };
-  }
-}
-
-function poiMarkerVisual(poi: OsmPoi): { color: string; icon: keyof typeof Ionicons.glyphMap } {
-  if (poi.type === 'water') {
-    const visual = waterSubtypeVisual(poi.subtype);
-    return { color: visual.color, icon: visual.icon };
-  }
-  return { color: poiColor(poi.type), icon: POI_ICON_NAMES[poi.type] || 'location-outline' };
 }
 
 // ── Sub-components ─────────────────────────────────────────────────────────────

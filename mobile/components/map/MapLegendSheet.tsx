@@ -31,8 +31,13 @@ export default function MapLegendSheet({ visible, focusCategory, contextLabel, o
 
   return (
     <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
-      <View style={s.overlay}>
-        <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+      <View style={s.overlay} testID="map.legend.sheet">
+        <TouchableOpacity
+          style={StyleSheet.absoluteFillObject}
+          activeOpacity={1}
+          onPress={onClose}
+          testID="map.legend.backdrop"
+        />
         <TrailheadSheet
           handle={false}
           style={Platform.OS === 'android' ? [s.sheet, { maxHeight: '88%' }] : s.sheet}
@@ -43,7 +48,7 @@ export default function MapLegendSheet({ visible, focusCategory, contextLabel, o
               <Text style={s.title}>MAP LEGEND</Text>
               <Text style={s.sub} numberOfLines={1}>{contextLabel ? `${contextLabel} mode` : 'Map symbols and layers'}</Text>
             </View>
-            <TouchableOpacity onPress={onClose} style={s.closeBtn}>
+            <TouchableOpacity onPress={onClose} style={s.closeBtn} testID="map.legend.close">
               <Ionicons name="close" size={20} color={C.text2} />
             </TouchableOpacity>
           </View>
@@ -57,6 +62,7 @@ export default function MapLegendSheet({ visible, focusCategory, contextLabel, o
                   style={[s.tab, selected && { borderColor: category.color, backgroundColor: category.color + '16' }]}
                   activeOpacity={0.84}
                   onPress={() => setActiveCategory(category.id)}
+                  testID={`map.legend.category.${category.id}`}
                 >
                   <Ionicons name={category.icon} size={15} color={selected ? category.color : C.text3} />
                   <Text style={[s.tabText, selected && { color: C.text }]} numberOfLines={1}>{category.title}</Text>
@@ -65,7 +71,7 @@ export default function MapLegendSheet({ visible, focusCategory, contextLabel, o
             })}
           </ScrollView>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content}>
+          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.content} testID="map.legend.content">
             <CategorySection category={active} />
             <View style={s.sourceBox}>
               <View style={s.sourceIcon}>

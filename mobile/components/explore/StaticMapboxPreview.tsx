@@ -167,6 +167,7 @@ export function StaticMapboxPreview({
           source={{ uri: url }}
           style={[StyleSheet.absoluteFillObject, !imageReady && styles.pendingImage]}
           resizeMode="cover"
+          resizeMethod="resize"
           accessible={!!imageAlt}
           accessibilityLabel={imageAlt}
           onLoad={() => setLoadedUrl(url)}

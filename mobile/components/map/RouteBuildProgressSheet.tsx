@@ -12,6 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 import { useTheme, type ColorPalette } from '@/lib/design';
 import type { RouteBuildSession } from '@/lib/routeBuildSession';
+import { trailheadFonts } from '@/lib/typography';
 
 export type RouteBuildProgressSheetProps = {
   session: RouteBuildSession;
@@ -253,6 +254,7 @@ export default function RouteBuildProgressSheet({
 
   return (
     <Animated.View
+      testID="map.route-ready"
       style={[
         styles.positioner,
         {
@@ -267,6 +269,7 @@ export default function RouteBuildProgressSheet({
         <View style={styles.dragZone} {...panResponder.panHandlers}>
           <TouchableOpacity
             style={styles.handleButton}
+            testID="map.route-ready.toggle"
             activeOpacity={0.82}
             onPress={() => setExpanded(value => !value)}
             accessibilityRole="button"
@@ -283,6 +286,7 @@ export default function RouteBuildProgressSheet({
             </View>
             <TouchableOpacity
               style={styles.expandButton}
+              testID="map.route-ready.expand"
               activeOpacity={0.78}
               onPress={() => setExpanded(value => !value)}
               accessibilityRole="button"
@@ -297,6 +301,7 @@ export default function RouteBuildProgressSheet({
           <View style={styles.readyDetails}>
             <TouchableOpacity
               style={styles.readyPrimaryButton}
+              testID="map.route-ready.review-trip"
               activeOpacity={0.82}
               onPress={onReviewTrip}
               disabled={!onReviewTrip}
@@ -307,13 +312,14 @@ export default function RouteBuildProgressSheet({
             </TouchableOpacity>
             <View style={styles.readySecondaryRow}>
               {([
-                { label: 'Edit route', onPress: onEditRoute },
-                { label: 'Offline', onPress: onOffline },
-                { label: 'Options', onPress: onOptions },
+                { id: 'edit-route', label: 'Edit route', onPress: onEditRoute },
+                { id: 'offline', label: 'Offline', onPress: onOffline },
+                { id: 'options', label: 'Options', onPress: onOptions },
               ] as const).map(action => (
                 <TouchableOpacity
-                  key={action.label}
+                  key={action.id}
                   style={styles.readySecondaryButton}
+                  testID={`map.route-ready.${action.id}`}
                   activeOpacity={0.78}
                   onPress={action.onPress}
                   disabled={!action.onPress}
@@ -353,6 +359,7 @@ export default function RouteBuildProgressSheet({
               {session.status === 'running' ? (
                 <TouchableOpacity
                   style={styles.secondaryButton}
+                  testID="map.route-progress.stop"
                   activeOpacity={0.78}
                   onPress={onCancel}
                   accessibilityRole="button"
@@ -365,6 +372,7 @@ export default function RouteBuildProgressSheet({
               {failed && onDismiss ? (
                 <TouchableOpacity
                   style={styles.secondaryButton}
+                  testID="map.route-progress.close"
                   activeOpacity={0.78}
                   onPress={onDismiss}
                   accessibilityRole="button"
@@ -376,6 +384,7 @@ export default function RouteBuildProgressSheet({
               {primaryAction ? (
                 <TouchableOpacity
                   style={styles.primaryButton}
+                  testID="map.route-progress.retry"
                   activeOpacity={0.82}
                   onPress={primaryAction.onPress}
                   accessibilityRole="button"
@@ -408,7 +417,7 @@ const makeStyles = (C: ColorPalette) => {
     sheet: {
       flex: 1,
       overflow: 'hidden',
-      borderRadius: 16,
+      borderRadius: 20,
       borderWidth: 1,
       borderColor: C.border2,
       backgroundColor: C.s1,
@@ -459,8 +468,9 @@ const makeStyles = (C: ColorPalette) => {
       marginBottom: 2,
     },
     readyRouteName: {
+      fontFamily: trailheadFonts.displayBold,
       fontSize: 20,
-      lineHeight: 24,
+      lineHeight: 26,
     },
     phaseTitle: {
       marginTop: 3,

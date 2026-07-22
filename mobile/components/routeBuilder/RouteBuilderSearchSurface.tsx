@@ -1,7 +1,7 @@
 import { Ionicons } from '@expo/vector-icons';
 import { ActivityIndicator, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import TourTarget from '@/components/TourTarget';
-import { mono, useTheme, type ColorPalette } from '@/lib/design';
+import { useTheme, type ColorPalette } from '@/lib/design';
 import type { RouteBuilderSearchPlace, RouteBuilderStopType } from '@/lib/routeBuilder';
 import RouteBuilderInsertNotice from './RouteBuilderInsertNotice';
 
@@ -98,6 +98,7 @@ export default function RouteBuilderSearchSurface({
           return (
             <TouchableOpacity
               key={type}
+              testID={`route-builder.search.type.${type}`}
               style={[s.typeChip, active && { borderColor: color, backgroundColor: color + '18' }]}
               onPress={() => onSelectType(type)}
               activeOpacity={0.84}
@@ -120,6 +121,7 @@ export default function RouteBuilderSearchSurface({
         <View style={s.searchBox}>
           <Ionicons name="search" size={17} color={C.text3} />
           <TextInput
+            testID="route-builder.search.input"
             value={query}
             onChangeText={onChangeQuery}
             onSubmitEditing={onSubmitSearch}
@@ -128,8 +130,16 @@ export default function RouteBuilderSearchSurface({
             style={s.searchInput}
             returnKeyType="search"
           />
-          <TouchableOpacity style={s.searchBtn} onPress={onSubmitSearch} disabled={searching} activeOpacity={0.84}>
-            {searching ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.searchBtnText}>ADD</Text>}
+          <TouchableOpacity
+            style={s.searchBtn}
+            onPress={onSubmitSearch}
+            disabled={searching}
+            activeOpacity={0.84}
+            accessibilityRole="button"
+            accessibilityLabel="Search for a stop"
+            testID="route-builder.search.submit"
+          >
+            {searching ? <ActivityIndicator size="small" color="#fff" /> : <Text style={s.searchBtnText}>Search</Text>}
           </TouchableOpacity>
         </View>
       </TourTarget>
@@ -140,6 +150,7 @@ export default function RouteBuilderSearchSurface({
             <TouchableOpacity
               key={place.result_id || `${place.name}_${place.lat ?? 'pending'}_${place.lng ?? 'pending'}`}
               style={s.resultRow}
+              testID={`route-builder.search.result.${place.result_id || `${place.name}_${place.lat ?? 'pending'}_${place.lng ?? 'pending'}`}`}
               onPress={() => onSelectResult(place)}
               activeOpacity={0.86}
             >
@@ -156,8 +167,8 @@ export default function RouteBuilderSearchSurface({
           ))}
         </View>
       ) : (emptyStateReady ?? (!searching && query.trim().length > 0)) ? (
-        <View style={s.resultsBox}>
-          <Text style={s.resultMeta}>No results found. Try a different search.</Text>
+        <View style={s.resultsBox} testID="route-builder.search.empty">
+          <Text style={s.emptyText}>No matches found</Text>
         </View>
       ) : null}
     </>
@@ -176,18 +187,19 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     gap: 5,
     borderWidth: 1,
     borderColor: C.border,
-    borderRadius: 9,
-    paddingHorizontal: 9,
-    paddingVertical: 7,
+    minHeight: 48,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    paddingVertical: 8,
     backgroundColor: C.s2,
   },
   typeChipText: {
     color: C.text3,
-    fontSize: 9,
-    fontFamily: mono,
+    fontSize: 12,
     fontWeight: '800',
   },
   searchBox: {
+    minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
@@ -200,12 +212,15 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   searchInput: {
     flex: 1,
     color: C.text,
-    fontSize: 13,
-    paddingVertical: 11,
+    minHeight: 48,
+    fontSize: 15,
+    lineHeight: 20,
+    paddingVertical: 0,
   },
   searchBtn: {
     alignSelf: 'stretch',
-    minWidth: 56,
+    minWidth: 76,
+    minHeight: 48,
     backgroundColor: C.orange,
     borderTopRightRadius: 11,
     borderBottomRightRadius: 11,
@@ -214,9 +229,9 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   searchBtnText: {
     color: '#fff',
-    fontSize: 10,
-    fontFamily: mono,
-    fontWeight: '900',
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: '800',
   },
   resultsBox: {
     borderWidth: 1,
@@ -225,10 +240,12 @@ const styles = (C: ColorPalette) => StyleSheet.create({
     overflow: 'hidden',
   },
   resultRow: {
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    padding: 11,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
     borderBottomWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
@@ -239,13 +256,21 @@ const styles = (C: ColorPalette) => StyleSheet.create({
   },
   resultName: {
     color: C.text,
-    fontSize: 13,
+    fontSize: 15,
+    lineHeight: 20,
     fontWeight: '700',
   },
   resultMeta: {
     color: C.text3,
-    fontSize: 10,
-    fontFamily: mono,
-    marginTop: 2,
+    fontSize: 12,
+    lineHeight: 17,
+    marginTop: 3,
+  },
+  emptyText: {
+    color: C.text2,
+    fontSize: 14,
+    lineHeight: 20,
+    paddingHorizontal: 12,
+    paddingVertical: 14,
   },
 });

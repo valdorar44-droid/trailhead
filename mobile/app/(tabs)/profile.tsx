@@ -75,6 +75,7 @@ import {
   mpgToDisplayConsumption,
   resolveUnitMode,
 } from '@/lib/routeBuilder';
+import { telemetryQaSurfaceIsAvailable } from '@/lib/telemetry/qa';
 
 type AppleAuthModule = typeof import('expo-apple-authentication');
 WebBrowser.maybeCompleteAuthSession();
@@ -3594,6 +3595,18 @@ export default function ProfileScreen() {
               {Updates.createdAt ? Updates.createdAt.toLocaleDateString() : '—'}
             </Text>
           </View>
+          {telemetryQaSurfaceIsAvailable(Boolean(user?.is_admin)) ? (
+            <TouchableOpacity
+              testID="profile.qa.telemetry.open"
+              accessibilityRole="button"
+              accessibilityLabel="Open telemetry check"
+              onPress={() => router.push('/qa/telemetry' as any)}
+              style={[s.telemetryQaButton, { borderColor: C.border }]}
+            >
+              <Ionicons name="pulse-outline" size={18} color={C.orange} />
+              <Text style={[s.telemetryQaButtonText, { color: C.text }]}>Telemetry check</Text>
+            </TouchableOpacity>
+          ) : null}
         </View>
         )}
       </ScrollView>
@@ -4258,6 +4271,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   versionRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   versionLabel: { color: C.text3, fontSize: 10, fontWeight: '700', fontFamily: mono, letterSpacing: 1 },
   versionValue: { color: C.text2, fontSize: 11, fontFamily: mono, flex: 1, textAlign: 'right' },
+  telemetryQaButton: {
+    minHeight: 48, marginTop: 8, borderTopWidth: StyleSheet.hairlineWidth,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
+  },
+  telemetryQaButtonText: { fontSize: 14, fontWeight: '800' },
 
   bugCard: {
     backgroundColor: C.s2, borderRadius: 16, borderWidth: 1, borderColor: C.border,

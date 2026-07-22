@@ -1,0 +1,21 @@
+{
+  "name": "Choose the neutral guest travel party",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "text": "Solo" },
+      "settleMs": 500,
+      "label": "choose-solo"
+    },
+    {
+      "type": "tap",
+      "selector": { "text": "Next" },
+      "settleMs": 1200,
+      "label": "next"
+    },
+    {
+      "type": "capture",
+      "label": "after-travel-party"
+    }
+  ]
+}

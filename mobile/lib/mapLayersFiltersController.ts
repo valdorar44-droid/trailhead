@@ -48,7 +48,7 @@ export const initialMapLayersFiltersState: MapLayersFiltersState = {
 };
 
 export function resolveLayersFiltersEntry(entry: LayersFiltersEntry): {
-  surface: 'layers_filters';
+  surface: 'layer_gallery' | 'layers_filters';
   section: LayersFiltersSection;
   openLegend: boolean;
 } {
@@ -65,7 +65,15 @@ export function resolveLayersFiltersEntry(entry: LayersFiltersEntry): {
             : entry === 'weather'
               ? 'weather-layers'
               : 'map-content';
-  return { surface: 'layers_filters', section, openLegend: entry === 'legend' };
+  // Keep the complete layer gallery as the source of truth until the shared
+  // Layers & filters sheet reaches feature parity. The gallery still owns map
+  // styles, 3D, POIs, fire, avalanche, weather, public-land and trail controls.
+  // Redirecting these entries early makes the Layers shortcut look empty and
+  // hides controls that are not yet represented in the shared sheet.
+  const surface = entry === 'layers' || entry === 'styles'
+    ? 'layer_gallery'
+    : 'layers_filters';
+  return { surface, section, openLegend: entry === 'legend' };
 }
 
 export function mapLayersFiltersReducer(

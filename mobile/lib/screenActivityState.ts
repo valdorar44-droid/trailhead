@@ -3,6 +3,22 @@ export function screenIsActive(isFocused: boolean, appState: string) {
 }
 
 /**
+ * Android may restore a native ScrollView offset before asynchronously loaded
+ * content reaches its previous height. Keep retained warm-state offsets when
+ * they are valid, but never leave the viewport beyond the current content.
+ */
+export function boundedRetainedScrollOffset(
+  offset: number,
+  contentHeight: number,
+  viewportHeight: number,
+) {
+  const safeOffset = Number.isFinite(offset) ? Math.max(0, offset) : 0;
+  const safeContentHeight = Number.isFinite(contentHeight) ? Math.max(0, contentHeight) : 0;
+  const safeViewportHeight = Number.isFinite(viewportHeight) ? Math.max(0, viewportHeight) : 0;
+  return Math.min(safeOffset, Math.max(0, safeContentHeight - safeViewportHeight));
+}
+
+/**
  * Idle Map sensing belongs to the focused foreground screen. Once navigation
  * starts, its existing native/background adapters and mounted turn runtime must
  * retain the location watch across tab blur and screen lock.

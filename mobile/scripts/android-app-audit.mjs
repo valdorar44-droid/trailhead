@@ -41,9 +41,36 @@ Options:
   --record-seconds <0..30>   Optional screen recording; disabled by default
   --log-lines <100..10000>   Default: 2000
   --allow-text-actions       Permit exact-text scenario selectors (testID/resource-id preferred)
+  --runtime <safe-id>        Expected EAS runtime for this candidate
+  --build-id <safe-id>       EAS build ID for this candidate
+  --update-id <safe-id>      EAS update ID for this candidate
+  --account-role <role>      guest, account, explorer, or admin
+  --feature-stage FLAG=value Repeatable non-sensitive feature-stage evidence
 
 The harness never installs, launches, force-stops, clears data, clears logcat, changes
 permissions, submits reports, makes purchases, deletes content, or mutates accounts.`);
+}
+
+function gitSha() {
+  const result = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+    encoding: 'utf8',
+    timeout: 15_000,
+  });
+  const value = String(result.stdout || '').trim();
+  return result.status === 0 && /^[a-f0-9]{40}$/.test(value) ? value : null;
+}
+
+function candidateEvidence(options) {
+  return {
+    schema_version: 1,
+    git_sha: gitSha(),
+    runtime: options.runtime,
+    build_id: options.buildId,
+    update_id: options.updateId,
+    account_role: options.accountRole,
+    feature_stages: Object.fromEntries(options.featureStages.map(value => value.split(/=(.*)/s).slice(0, 2))),
+    privacy: 'No coordinates, route geometry, search text, support content, payout data, credentials, or account identifiers.',
+  };
 }
 
 function run(adb, serial, args, options = {}) {
@@ -188,7 +215,7 @@ function artifactManifest(directory, names) {
   return artifacts;
 }
 
-function captureDevice(adb, device, options, root, suffix = '') {
+function captureDevice(adb, device, options, root, candidate, suffix = '') {
   const serial = device.serial;
   const directory = join(root, `${sanitizeSegment(device.attributes.model || serial)}--${sanitizeSegment(serial)}`, `${sanitizeSegment(options.label)}${suffix}`);
   mkdirSync(directory, { recursive: true });
@@ -223,6 +250,7 @@ function captureDevice(adb, device, options, root, suffix = '') {
     memory,
     logFindings,
     logAlertLineCount: logs.alerts ? logs.alerts.split(/\r?\n/).filter(Boolean).length : 0,
+    candidate,
     notes: [
       'No app launch, force-stop, install, permission change, data clear, tap, swipe, back action, or logcat clear was performed.',
       'A UIAutomator dump temporarily written to shared storage was removed immediately after capture.',
@@ -293,7 +321,7 @@ function scenarioStep(adb, device, options, directory, action, index) {
   return plan;
 }
 
-function runScenario(adb, device, options, root) {
+function runScenario(adb, device, options, root, candidate) {
   const scenario = loadScenario(options.scenario);
   const directory = join(root, `${sanitizeSegment(device.attributes.model || device.serial)}--${sanitizeSegment(device.serial)}`, `${sanitizeSegment(options.label)}-scenario`);
   mkdirSync(directory, { recursive: true });
@@ -306,6 +334,7 @@ function runScenario(adb, device, options, root) {
     serial: device.serial,
     dryRun: !options.executeSafeActions,
     actionCount: results.length,
+    candidate,
     results,
   };
   write(join(directory, 'scenario-report.json'), `${JSON.stringify(report, null, 2)}\n`);
@@ -319,6 +348,8 @@ async function main() {
   const adb = findAdb(options.adb);
   const root = resolve(options.output || join(repoRoot, 'output', 'android-audit'), `${timestamp()}--${sanitizeSegment(options.label)}`);
   mkdirSync(root, { recursive: true });
+  const candidate = candidateEvidence(options);
+  write(join(root, 'candidate.json'), `${JSON.stringify(candidate, null, 2)}\n`);
   const devices = parseDevices(runHost(adb, ['devices', '-l']));
   const unavailable = devices.filter((device) => device.state !== 'device');
   if (unavailable.length) console.warn(`Ignoring unavailable devices: ${unavailable.map((device) => `${device.serial} (${device.state})`).join(', ')}`);
@@ -331,13 +362,14 @@ async function main() {
   for (const device of targets) {
     console.log(`${options.command === 'scenario' ? 'Auditing scenario on' : 'Capturing'} ${device.serial} (${device.attributes.model || 'unknown model'})...`);
     results.push(options.command === 'scenario'
-      ? runScenario(adb, device, options, root)
-      : captureDevice(adb, device, options, root));
+      ? runScenario(adb, device, options, root, candidate)
+      : captureDevice(adb, device, options, root, candidate));
   }
   write(join(root, 'run-summary.json'), `${JSON.stringify({
     command: options.command,
     dryRun: options.command === 'capture' || !options.executeSafeActions,
     packageName: options.packageName,
+    candidate,
     adb,
     devices: results.map((result) => ({ directory: result.directory, metadata: result.metadata, summary: result.summary, report: result.report })),
   }, null, 2)}\n`);

@@ -1,0 +1,12 @@
+{
+  "name": "Open Map weather and trail layers",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "testID": "map.filters.section.weather-layers" },
+      "settleMs": 900,
+      "label": "expand-weather-layers"
+    },
+    { "type": "capture", "label": "weather-layers-open" }
+  ]
+}

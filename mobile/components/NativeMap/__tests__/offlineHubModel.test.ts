@@ -76,10 +76,11 @@ assert.equal(displayOfflineDownloadName('Moab-to-Swell-corridor'), 'Moab to Swel
     c: { region_id: 'ut', pack_id: 'outdoors' },
     d: { region_id: 'ut', pack_id: 'camps' },
     e: { region_id: 'ut', pack_id: 'water' },
+    f: { region_id: 'ut', pack_id: 'trek_places' },
     future: { region_id: 'ut', pack_id: 'future-pack' },
     other: { region_id: 'co', pack_id: 'camps' },
   };
-  const order = ['essentials', 'services', 'outdoors', 'camps', 'water'];
+  const order = ['essentials', 'services', 'outdoors', 'camps', 'water', 'trek_places'];
   assert.deepEqual(
     regionPlacePackEntries(manifestPacks, 'ut', order).map(item => item.pack_id),
     [...order, 'future-pack'],
@@ -92,7 +93,7 @@ assert.equal(displayOfflineDownloadName('Moab-to-Swell-corridor'), 'Moab to Swel
       'ut',
       order,
     ).map(item => item.pack_id),
-    ['services', 'outdoors', 'camps', 'water', 'future-pack'],
+    ['services', 'outdoors', 'camps', 'water', 'trek_places', 'future-pack'],
   );
 }
 

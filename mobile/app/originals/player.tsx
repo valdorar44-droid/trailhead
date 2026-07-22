@@ -569,11 +569,12 @@ export default function OriginalPlayerScreen() {
   }
 
   return (
-    <View style={[styles.screen, { backgroundColor: C.bg }] }>
+    <View style={[styles.screen, { backgroundColor: C.bg }]} testID="originals.legacy-player.screen">
       <LinearGradient colors={[C.s2, '#0D0F10', C.bg]} locations={[0, 0.55, 1]} style={StyleSheet.absoluteFillObject} />
       <SafeAreaView edges={['top', 'left', 'right']} style={styles.safe}>
         <View style={styles.topBar}>
           <TouchableOpacity
+            testID="originals.legacy-player.minimize"
             accessibilityRole="button"
             accessibilityLabel={originalsRuntime.simulation ? 'Close trigger test' : 'Minimize tour player'}
             onPress={() => requestClosePlayer()}
@@ -586,6 +587,7 @@ export default function OriginalPlayerScreen() {
             <Text style={styles.topTitle} numberOfLines={1}>{playerDetail.title}</Text>
           </View>
           <TouchableOpacity
+            testID="originals.legacy-player.mute"
             accessibilityRole="button"
             accessibilityLabel={session.muted ? 'Unmute narration' : 'Mute narration'}
             onPress={() => void originalsRuntime.setMuted(!session.muted)}
@@ -595,7 +597,7 @@ export default function OriginalPlayerScreen() {
           </TouchableOpacity>
         </View>
 
-        <View style={styles.mapStage}>
+        <View style={styles.mapStage} testID="originals.legacy-player.map">
           <OriginalRouteMap
             route={originalsRuntime.manifest!.route}
             projectedProgressM={originalsRuntime.session!.last_projected_route_progress_m}
@@ -614,8 +616,9 @@ export default function OriginalPlayerScreen() {
           </View>
         </View>
 
-        <View style={[styles.playerSheet, originalsRuntime.simulation && styles.simulationSheet, { backgroundColor: C.s1, borderColor: C.border }] }>
+        <View testID="originals.legacy-player.sheet" style={[styles.playerSheet, originalsRuntime.simulation && styles.simulationSheet, { backgroundColor: C.s1, borderColor: C.border }] }>
           <ScrollView
+            testID="originals.legacy-player.scroll"
             showsVerticalScrollIndicator={false}
             contentContainerStyle={[styles.playerSheetContent, { paddingBottom: Math.max(insets.bottom, 14) }]}
           >
@@ -672,12 +675,12 @@ export default function OriginalPlayerScreen() {
 
           <View style={styles.progressHeader}>
             <Text style={[styles.progressLabel, { color: C.text2 }]}>{session.playedCount} of {session.totalCount} stories heard</Text>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Open all stories" onPress={() => setStoriesVisible(true)} style={styles.storiesAction}>
+            <TouchableOpacity testID="originals.legacy-player.stories" accessibilityRole="button" accessibilityLabel="Open all stories" onPress={() => setStoriesVisible(true)} style={styles.storiesAction}>
               <Text style={[styles.storiesActionText, { color: C.orange }]}>Stories</Text>
               <Ionicons name="list" size={15} color={C.orange} />
             </TouchableOpacity>
           </View>
-          <View style={[styles.progressTrack, { backgroundColor: C.s3 }] }>
+          <View testID="originals.legacy-player.progress" style={[styles.progressTrack, { backgroundColor: C.s3 }] }>
             <View style={[styles.progressFill, { width: `${Math.max(1, Math.round(session.progress * 100))}%`, backgroundColor: C.orange }]} />
           </View>
 
@@ -699,8 +702,9 @@ export default function OriginalPlayerScreen() {
           ) : null}
 
           <View style={styles.controls}>
-            <PlayerControl icon="play-back" label="Replay" disabled={!currentStory?.replayable} onPress={() => currentStory?.replayable && void originalsRuntime.replayStory(currentStory.id)} />
+            <PlayerControl testID="originals.legacy-player.replay" icon="play-back" label="Replay" disabled={!currentStory?.replayable} onPress={() => currentStory?.replayable && void originalsRuntime.replayStory(currentStory.id)} />
             <TouchableOpacity
+              testID="originals.legacy-player.pause-resume"
               accessibilityRole="button"
               accessibilityLabel={isPaused ? 'Resume narration' : 'Pause narration'}
               onPress={() => void togglePause()}
@@ -708,15 +712,16 @@ export default function OriginalPlayerScreen() {
             >
               <Ionicons name={isPaused ? 'play' : 'pause'} size={30} color="#FFFFFF" />
             </TouchableOpacity>
-            <PlayerControl icon="play-forward" label="Skip" onPress={() => void originalsRuntime.skipCurrentStory()} />
+            <PlayerControl testID="originals.legacy-player.skip" icon="play-forward" label="Skip" onPress={() => void originalsRuntime.skipCurrentStory()} />
           </View>
 
           <View style={styles.secondaryControls}>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel={transcriptVisible ? 'Hide transcript' : 'Show transcript'} onPress={() => setTranscriptVisible(value => !value)} style={[styles.secondaryButton, { borderColor: C.border }] }>
+            <TouchableOpacity testID="originals.legacy-player.captions" accessibilityRole="button" accessibilityLabel={transcriptVisible ? 'Hide transcript' : 'Show transcript'} onPress={() => setTranscriptVisible(value => !value)} style={[styles.secondaryButton, { borderColor: C.border }] }>
               <Ionicons name="text-outline" size={16} color={C.text2} />
               <Text style={[styles.secondaryLabel, { color: C.text2 }]}>{transcriptVisible ? 'Hide captions' : 'Show captions'}</Text>
             </TouchableOpacity>
             <TouchableOpacity
+              testID="originals.legacy-player.end"
               accessibilityRole="button"
               accessibilityLabel={originalsRuntime.simulation ? 'End trigger test' : 'End tour'}
               onPress={() => originalsRuntime.simulation
@@ -738,7 +743,7 @@ export default function OriginalPlayerScreen() {
             </TouchableOpacity>
           </View>
           {!originalsRuntime.simulation ? (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Share feedback about this Original" onPress={() => setFeedbackVisible(true)} style={[styles.feedbackButton, { borderColor: C.border }] }>
+            <TouchableOpacity testID="originals.legacy-player.feedback" accessibilityRole="button" accessibilityLabel="Share feedback about this Original" onPress={() => setFeedbackVisible(true)} style={[styles.feedbackButton, { borderColor: C.border }] }>
               <Ionicons name="chatbubble-ellipses-outline" size={16} color={C.orange} />
               <Text style={[styles.feedbackButtonText, { color: C.orange }]}>Share feedback</Text>
             </TouchableOpacity>
@@ -1161,10 +1166,10 @@ function ValidationMatrixPanel({ busy, report, onRun }: {
   );
 }
 
-function PlayerControl({ icon, label, disabled = false, onPress }: { icon: keyof typeof Ionicons.glyphMap; label: string; disabled?: boolean; onPress: () => void }) {
+function PlayerControl({ testID, icon, label, disabled = false, onPress }: { testID: string; icon: keyof typeof Ionicons.glyphMap; label: string; disabled?: boolean; onPress: () => void }) {
   const C = useTheme();
   return (
-    <TouchableOpacity accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={styles.smallControl}>
+    <TouchableOpacity testID={testID} accessibilityRole="button" accessibilityLabel={label} accessibilityState={{ disabled }} disabled={disabled} onPress={onPress} style={styles.smallControl}>
       <Ionicons name={icon} size={23} color={disabled ? C.text3 : C.text2} />
       <Text style={[styles.smallControlLabel, { color: disabled ? C.text3 : C.text2 }]}>{label}</Text>
     </TouchableOpacity>

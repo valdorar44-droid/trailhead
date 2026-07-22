@@ -49,14 +49,19 @@ export default function MapStyleSheet({
 
   return (
     <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
-      <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={onClose}>
-        <TouchableOpacity activeOpacity={1} style={[s.sheet, { paddingBottom: bottomInset + 16 }]} onPress={() => {}}>
+      <TouchableOpacity style={s.overlay} activeOpacity={1} onPress={onClose} testID="map.styles.backdrop">
+        <TouchableOpacity
+          activeOpacity={1}
+          style={[s.sheet, { paddingBottom: bottomInset + 16 }]}
+          onPress={() => {}}
+          testID="map.styles.sheet"
+        >
           <View style={s.header}>
             <View>
               <Text style={s.title}>Map style</Text>
               <Text style={s.sub}>Choose how the map looks.</Text>
             </View>
-            <TouchableOpacity style={s.closeBtn} onPress={onClose}>
+            <TouchableOpacity style={s.closeBtn} onPress={onClose} testID="map.styles.close">
               <Ionicons name="close" size={17} color={C.text2} />
             </TouchableOpacity>
           </View>
@@ -73,6 +78,7 @@ export default function MapStyleSheet({
                     onSelectMapLayer(option.id);
                     onClose();
                   }}
+                  testID={`map.styles.option.${option.id}`}
                 >
                   <View style={[s.preview, { backgroundColor: option.colors[0] }]}>
                     <View style={[s.previewWater, { backgroundColor: option.colors[2] }]} />
@@ -98,6 +104,7 @@ export default function MapStyleSheet({
                   option.onPress();
                   onClose();
                 }}
+                testID={`map.styles.option.${option.id}`}
               >
                 <View style={[s.premiumPreview, { borderColor: option.color + '55', backgroundColor: option.color + '14' }]}>
                   <Ionicons name={option.icon} size={22} color={option.color} />
@@ -121,6 +128,7 @@ export default function MapStyleSheet({
                     onSelectMapLayer(option.id);
                     onClose();
                   }}
+                  testID={`map.styles.option.${option.id}`}
                 >
                   <View style={[s.preview, { backgroundColor: option.colors[0] }]}>
                     <View style={[s.previewWater, { backgroundColor: option.colors[2] }]} />

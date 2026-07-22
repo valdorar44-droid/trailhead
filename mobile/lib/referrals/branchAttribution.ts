@@ -40,7 +40,10 @@ async function getBranchModule(): Promise<BranchModule | null> {
 }
 
 function referralCodeFromBranchParams(params: BranchParams | undefined): string {
-  return referralCodeFromAttributionParams(params as Record<string, unknown> | undefined);
+  return referralCodeFromAttributionParams(
+    params as Record<string, unknown> | undefined,
+    { branchDomains: [branchConfig().domain] },
+  );
 }
 
 export async function rememberReferralCode(code: string) {

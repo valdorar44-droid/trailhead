@@ -7,11 +7,15 @@ import {
   resolveLayersFiltersEntry,
 } from '../mapLayersFiltersController';
 
-test('every layers and filters shortcut opens the same canonical surface', () => {
-  for (const entry of ['layers', 'filters', 'styles', 'legend', 'camps', 'places', 'weather'] as const) {
+test('every layers and filters shortcut resolves to an owned map-tools surface', () => {
+  for (const entry of ['filters', 'legend', 'camps', 'places', 'weather'] as const) {
     const resolved = resolveLayersFiltersEntry(entry);
     assert.equal(resolved.surface, 'layers_filters');
   }
+  // The existing gallery retains map styles and the full production layer set
+  // until the consolidated sheet has passed a feature-parity audit.
+  assert.equal(resolveLayersFiltersEntry('layers').surface, 'layer_gallery');
+  assert.equal(resolveLayersFiltersEntry('styles').surface, 'layer_gallery');
   assert.equal(resolveLayersFiltersEntry('layers').section, 'map-content');
   assert.equal(resolveLayersFiltersEntry('camps').section, 'camps');
   assert.equal(resolveLayersFiltersEntry('weather').section, 'weather-layers');

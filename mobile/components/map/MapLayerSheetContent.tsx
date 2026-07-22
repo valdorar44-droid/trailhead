@@ -222,8 +222,17 @@ export default function MapLayerSheetContent({
   };
 
   return (
-    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.sheetContent}>
-      <TouchableOpacity style={s.offlineRow} onPress={onOpenOffline} activeOpacity={0.78}>
+    <ScrollView
+      showsVerticalScrollIndicator={false}
+      contentContainerStyle={s.sheetContent}
+      testID="map.layers.content"
+    >
+      <TouchableOpacity
+        style={s.offlineRow}
+        onPress={onOpenOffline}
+        activeOpacity={0.78}
+        testID="map.layers.offline"
+      >
         <View style={s.offlineIcon}>
           <Ionicons name="cloud-download-outline" size={20} color={C.orange} />
         </View>
@@ -241,6 +250,7 @@ export default function MapLayerSheetContent({
               style={[s.styleCard, active && s.styleCardActive]}
               activeOpacity={0.86}
               onPress={() => onSelectMapLayer(option.id)}
+              testID={`map.layers.style.${option.id}`}
             >
               <View style={[s.stylePreview, { backgroundColor: option.colors[0] }]}>
                 <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
@@ -266,6 +276,7 @@ export default function MapLayerSheetContent({
             ]}
             activeOpacity={0.86}
             onPress={option.onPress}
+            testID={`map.layers.style.${option.id}`}
           >
             <View style={[s.mapboxStylePreview, { borderColor: option.color + '55', backgroundColor: option.color + '14' }]}>
               <Ionicons name={option.icon} size={24} color={option.color} />
@@ -286,6 +297,7 @@ export default function MapLayerSheetContent({
               style={[s.styleCard, active && s.styleCardActive]}
               activeOpacity={0.86}
               onPress={() => onSelectMapLayer(option.id)}
+              testID={`map.layers.style.${option.id}`}
             >
               <View style={[s.stylePreview, { backgroundColor: option.colors[0] }]}>
                 <View style={[s.mapStylePreviewWater, { backgroundColor: option.colors[2] }]} />
@@ -311,6 +323,7 @@ export default function MapLayerSheetContent({
             style={[s.toggleCard, layer.val && { borderColor: layer.color + '88', backgroundColor: layer.color + '16' }]}
             activeOpacity={0.86}
             onPress={layer.onPress}
+            testID={`map.layers.toggle.${layer.key}`}
           >
             {renderLayerMiniPreview(layer)}
             <Text style={s.styleTitle} numberOfLines={1}>{layer.label}</Text>
@@ -333,6 +346,7 @@ export default function MapLayerSheetContent({
                 ]}
                 activeOpacity={0.86}
                 onPress={layer.onPress}
+                testID={`map.layers.tool.${layer.key}`}
               >
                 <View style={[s.layerTogglePreview, { borderColor: layer.color + '55', backgroundColor: layer.color + '14' }]}>
                   <Ionicons name={layer.icon} size={22} color={layer.color} />

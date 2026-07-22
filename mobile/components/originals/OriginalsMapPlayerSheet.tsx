@@ -188,6 +188,7 @@ export default function OriginalsMapPlayerSheet({
     return (
       <View pointerEvents="box-none" style={[styles.overlayRoot, { bottom: panelBottom }] }>
         <TouchableOpacity
+          testID="originals.player.resume-pill"
           accessibilityRole="button"
           accessibilityLabel={isCompleted ? 'View Original completion recap' : shouldResume ? 'Resume Original' : 'Open Original player'}
           disabled={Boolean(busyAction)}
@@ -226,6 +227,7 @@ export default function OriginalsMapPlayerSheet({
     <>
       <View pointerEvents="box-none" style={[styles.overlayRoot, { bottom: panelBottom }] }>
         <View
+          testID="originals.player.sheet"
           accessibilityLabel={`${manifest.title} Original player`}
           style={[
             styles.sheet,
@@ -243,6 +245,7 @@ export default function OriginalsMapPlayerSheet({
               <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>{manifest.title}</Text>
             </View>
             <TouchableOpacity
+              testID="originals.player.minimize"
               accessibilityRole="button"
               accessibilityLabel="Minimize Original player"
               onPress={() => setExpanded(false)}
@@ -251,6 +254,7 @@ export default function OriginalsMapPlayerSheet({
               <Ionicons name="chevron-down" size={20} color={C.text} />
             </TouchableOpacity>
             <TouchableOpacity
+              testID="originals.player.fit-route"
               accessibilityRole="button"
               accessibilityLabel="Fit the Original route on the map"
               onPress={() => onFitRoute(manifest.route)}
@@ -259,6 +263,7 @@ export default function OriginalsMapPlayerSheet({
               <Ionicons name="map-outline" size={20} color={C.text} />
             </TouchableOpacity>
             <TouchableOpacity
+              testID="originals.player.mute"
               accessibilityRole="button"
               accessibilityLabel={runtime.muted ? 'Unmute Original narration' : 'Mute Original narration'}
               accessibilityState={{ selected: runtime.muted }}
@@ -271,6 +276,7 @@ export default function OriginalsMapPlayerSheet({
           </View>
 
           <ScrollView
+            testID="originals.player.scroll"
             showsVerticalScrollIndicator={false}
             bounces={false}
             contentContainerStyle={styles.sheetContent}
@@ -302,6 +308,7 @@ export default function OriginalsMapPlayerSheet({
                 </View>
                 <View style={[styles.progressTrack, { backgroundColor: C.s3 }] }>
                   <View
+                    testID="originals.player.progress"
                     accessibilityRole="progressbar"
                     accessibilityValue={{ min: 0, max: manifest.stops.length, now: terminalCount }}
                     style={[
@@ -345,12 +352,14 @@ export default function OriginalsMapPlayerSheet({
 
                 <View style={styles.transportRow}>
                   <TransportButton
+                    testID="originals.player.replay"
                     icon="play-back"
                     label="Replay"
                     disabled={!currentStory || Boolean(busyAction)}
                     onPress={() => currentStory && void runAction('replay-current', () => runtime.seekStory(0))}
                   />
                   <TouchableOpacity
+                    testID="originals.player.pause-resume"
                     accessibilityRole="button"
                     accessibilityLabel={shouldResume ? 'Resume Original' : 'Pause Original'}
                     disabled={Boolean(busyAction)}
@@ -362,6 +371,7 @@ export default function OriginalsMapPlayerSheet({
                       : <Ionicons name={shouldResume ? 'play' : 'pause'} size={29} color="#FFFFFF" />}
                   </TouchableOpacity>
                   <TransportButton
+                    testID="originals.player.skip"
                     icon="play-forward"
                     label="Skip"
                     disabled={!currentStory || Boolean(busyAction)}
@@ -378,14 +388,15 @@ export default function OriginalsMapPlayerSheet({
             <View style={styles.actionGrid}>
               {!isCompleted ? (
                 <SheetAction
+                  testID="originals.player.captions"
                   icon="text-outline"
                   label={captionsVisible ? 'Hide captions' : 'Show captions'}
                   onPress={() => setCaptionsVisible(value => !value)}
                 />
               ) : null}
-              <SheetAction icon="list" label="Stories" onPress={() => setStoriesVisible(true)} />
-              <SheetAction icon="chatbubble-ellipses-outline" label="Feedback" onPress={() => setFeedbackVisible(true)} />
-              <SheetAction icon="flag-outline" label={isCompleted ? 'Close recap' : 'End tour'} onPress={endTour} disabled={Boolean(busyAction)} />
+              <SheetAction testID="originals.player.stories" icon="list" label="Stories" onPress={() => setStoriesVisible(true)} />
+              <SheetAction testID="originals.player.feedback" icon="chatbubble-ellipses-outline" label="Feedback" onPress={() => setFeedbackVisible(true)} />
+              <SheetAction testID="originals.player.end" icon="flag-outline" label={isCompleted ? 'Close recap' : 'End tour'} onPress={endTour} disabled={Boolean(busyAction)} />
             </View>
           </ScrollView>
         </View>
@@ -413,11 +424,13 @@ export default function OriginalsMapPlayerSheet({
 }
 
 function TransportButton({
+  testID,
   icon,
   label,
   disabled,
   onPress,
 }: {
+  testID: string;
   icon: 'play-back' | 'play-forward';
   label: string;
   disabled: boolean;
@@ -426,6 +439,7 @@ function TransportButton({
   const C = useTheme();
   return (
     <TouchableOpacity
+      testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
@@ -440,11 +454,13 @@ function TransportButton({
 }
 
 function SheetAction({
+  testID,
   icon,
   label,
   disabled = false,
   onPress,
 }: {
+  testID: string;
   icon: 'text-outline' | 'list' | 'chatbubble-ellipses-outline' | 'flag-outline';
   label: string;
   disabled?: boolean;
@@ -453,6 +469,7 @@ function SheetAction({
   const C = useTheme();
   return (
     <TouchableOpacity
+      testID={testID}
       accessibilityRole="button"
       accessibilityLabel={label}
       accessibilityState={{ disabled }}
@@ -499,14 +516,14 @@ function StoryListModal({
   const insets = useSafeAreaInsets();
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
+      <View style={styles.modalOverlay} testID="originals.player.story-list">
         <View style={[styles.storySheet, { backgroundColor: C.s1, borderColor: C.border, paddingBottom: Math.max(insets.bottom, 18) }] }>
           <View style={styles.storyModalHeader}>
             <View style={styles.storyModalCopy}>
               <Text style={[styles.kicker, { color: C.orange }]}>STORY LIST</Text>
               <Text style={[styles.storyModalTitle, { color: C.text }]} numberOfLines={1}>{title}</Text>
             </View>
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Close story list" onPress={onClose} style={styles.modalClose}>
+            <TouchableOpacity testID="originals.player.story-list.close" accessibilityRole="button" accessibilityLabel="Close story list" onPress={onClose} style={styles.modalClose}>
               <Ionicons name="close" size={22} color={C.text} />
             </TouchableOpacity>
           </View>

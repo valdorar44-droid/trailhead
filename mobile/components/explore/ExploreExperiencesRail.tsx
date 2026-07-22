@@ -143,7 +143,7 @@ function ExperienceCard({
     <View style={[listMode ? styles.listCard : styles.card, { borderColor: C.border, backgroundColor: C.s2 }]}>
       <View style={listMode ? styles.listImageWrap : styles.imageWrap}>
         {image ? (
-          <Image source={{ uri: mediaUrl(image) }} style={styles.image} resizeMode="cover" />
+          <Image source={{ uri: mediaUrl(image) }} style={styles.image} resizeMode="cover" resizeMethod="resize" />
         ) : (
           <View style={[styles.imageFallback, { backgroundColor: C.s3 }]}>
             <Ionicons name="ticket-outline" size={30} color={C.orange} />

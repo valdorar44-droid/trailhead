@@ -1,0 +1,31 @@
+appId: ${APP_ID}
+name: Launch and five-tab retention smoke
+tags:
+  - smoke
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- scrollUntilVisible:
+    element:
+      text: "Find your next adventure"
+    direction: DOWN
+    timeout: 20000
+    speed: 80
+- assertVisible: "Explore tab"
+- assertVisible: "Plan tab"
+- assertVisible: "Map tab"
+- assertVisible: "Reports tab"
+- assertVisible: "Profile tab"
+- tapOn: "Map tab"
+- assertVisible: "Open map menu"
+- tapOn: "Plan tab"
+- assertVisible: "Plan tab"
+- tapOn: "Profile tab"
+- assertVisible: "Profile tab"
+- tapOn: "Reports tab"
+- assertVisible: "Reports tab"
+- tapOn: "Explore tab"
+- assertVisible: "Find your next adventure"
+- takeScreenshot: launch-tabs-retained

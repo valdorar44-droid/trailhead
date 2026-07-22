@@ -127,7 +127,7 @@ export default function OwnedOriginalsSection({
   };
 
   return (
-    <View style={styles.section}>
+    <View style={styles.section} testID="plan.originals.section">
       <View style={styles.headingRow}>
         <View style={styles.headingCopy}>
           <View style={styles.titleRow}>
@@ -139,6 +139,7 @@ export default function OwnedOriginalsSection({
         <View style={styles.headerActions}>
           {scopedView.error ? (
             <TouchableOpacity
+              testID="plan.originals.retry"
               accessibilityRole="button"
               accessibilityLabel="Try loading your Trailhead Originals again"
               accessibilityState={{ busy: refreshing || loading }}
@@ -151,7 +152,7 @@ export default function OwnedOriginalsSection({
             </TouchableOpacity>
           ) : null}
           {accountId != null ? (
-            <TouchableOpacity accessibilityRole="button" accessibilityLabel="Restore Trailhead Originals" accessibilityState={{ busy: restoring }} disabled={restoring} onPress={() => void restore()} style={styles.browse}>
+            <TouchableOpacity testID="plan.originals.restore" accessibilityRole="button" accessibilityLabel="Restore Trailhead Originals" accessibilityState={{ busy: restoring }} disabled={restoring} onPress={() => void restore()} style={styles.browse}>
               {restoring ? <ActivityIndicator size="small" color={C.orange} /> : <Ionicons name="refresh" size={14} color={C.orange} />}
               <Text style={[styles.browseText, { color: C.orange }]}>Restore</Text>
             </TouchableOpacity>
@@ -175,6 +176,7 @@ export default function OwnedOriginalsSection({
           return (
             <TouchableOpacity
               key={`${item.id}:${item.version}`}
+              testID={`plan.originals.item.${item.id}.${item.version}`}
               accessibilityRole="button"
               accessibilityLabel={`Open ${item.title}. ${status}`}
               activeOpacity={0.72}

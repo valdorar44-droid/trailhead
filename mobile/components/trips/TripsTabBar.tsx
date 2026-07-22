@@ -49,6 +49,7 @@ export default function TripsTabBar({ state, descriptors, navigation }: BottomTa
   return (
     <View
       pointerEvents="box-none"
+      testID="app.tab-bar"
       style={[
         styles.wrap,
         {
@@ -72,6 +73,7 @@ export default function TripsTabBar({ state, descriptors, navigation }: BottomTa
           return (
             <TouchableOpacity
               key={route.key}
+              testID={`app.tab.${route.name}`}
               accessibilityRole="tab"
               accessibilityLabel={`${label} tab`}
               accessibilityState={{ selected: focused }}

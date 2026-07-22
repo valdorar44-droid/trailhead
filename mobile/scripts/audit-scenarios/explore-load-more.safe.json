@@ -1,0 +1,15 @@
+{
+  "name": "Load the next bounded Explore page",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "text": "Show 16 more" },
+      "settleMs": 2500,
+      "label": "show-more"
+    },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-new-01" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-new-02" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-new-03" },
+    { "type": "capture", "label": "after-next-page" }
+  ]
+}

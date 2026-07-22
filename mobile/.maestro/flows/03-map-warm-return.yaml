@@ -1,0 +1,28 @@
+appId: ${APP_ID}
+name: Warm map return preserves the mounted map shell
+tags:
+  - smoke
+  - state
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- assertVisible: "Open map menu"
+- assertVisible: "Open layers"
+- assertVisible: "Locate me"
+- takeScreenshot: map-before-warm-return
+- tapOn: "Explore tab"
+- scrollUntilVisible:
+    element:
+      text: "Find your next adventure"
+    direction: DOWN
+    timeout: 20000
+    speed: 80
+- assertVisible: "Find your next adventure"
+- tapOn: "Map tab"
+- assertVisible: "Open map menu"
+- assertVisible: "Open layers"
+- assertVisible: "Locate me"
+- takeScreenshot: map-after-warm-return

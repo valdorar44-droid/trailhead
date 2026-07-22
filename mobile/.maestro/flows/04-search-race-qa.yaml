@@ -1,0 +1,26 @@
+appId: ${APP_ID}
+name: Deterministic Search V2 race evidence
+tags:
+  - admin
+  - search
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- openLink: "trailhead:///qa/telemetry"
+- extendedWaitUntil:
+    visible:
+      id: "qa.telemetry.screen"
+    timeout: 10000
+- tapOn:
+    id: "qa.search-race.run"
+- extendedWaitUntil:
+    visible: "All checks passed"
+    timeout: 5000
+- assertVisible:
+    id: "qa.search-race.evidence"
+- assertVisible: "Late result rejected"
+- assertVisible: "No result opened automatically"
+- assertVisible: "Explicit selection confirmed"
+- takeScreenshot: search-race-deterministic

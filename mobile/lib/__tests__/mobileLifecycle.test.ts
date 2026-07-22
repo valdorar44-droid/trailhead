@@ -1,6 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapLocationWatchShouldRun, mapVisualWorkShouldRun, screenIsActive } from '../screenActivityState';
+import {
+  boundedRetainedScrollOffset,
+  mapLocationWatchShouldRun,
+  mapVisualWorkShouldRun,
+  screenIsActive,
+} from '../screenActivityState';
 import { completeLegacyMapSearch } from '../legacyMapSearchPolicy';
 import { subscriptionManagementUrl } from '../subscriptionManagement';
 import {
@@ -14,6 +19,13 @@ test('screen activity requires both focus and a foreground app', () => {
   assert.equal(screenIsActive(false, 'active'), false);
   assert.equal(screenIsActive(true, 'background'), false);
   assert.equal(screenIsActive(true, 'inactive'), false);
+});
+
+test('retained scroll offsets stay valid when asynchronously loaded content shrinks', () => {
+  assert.equal(boundedRetainedScrollOffset(640, 1600, 800), 640);
+  assert.equal(boundedRetainedScrollOffset(2400, 1600, 800), 800);
+  assert.equal(boundedRetainedScrollOffset(900, 500, 800), 0);
+  assert.equal(boundedRetainedScrollOffset(Number.NaN, 1600, 800), 0);
 });
 
 test('idle Map sensing pauses on blur/background while active navigation continues', () => {

@@ -70,6 +70,24 @@ jobs:
       - name: Typecheck
         run: npx tsc --noEmit
 
+      - name: Test telemetry privacy and QA guards
+        run: npm run test:telemetry
+
+      - name: Test referral trust boundaries
+        run: npm run test:referrals
+
+      - name: Test universal and app links
+        run: npm run test:app-links
+
+      - name: Test automation selector contracts
+        run: npm run test:automation-selectors
+
+      - name: Test release worktree publication guard
+        run: npm run test:release-worktree
+
+      - name: Audit native and release drift
+        run: npm run audit:native-drift
+
       - name: Test trip repository
         run: npm run test:trip-repository
 
@@ -93,6 +111,37 @@ jobs:
 
       - name: Audit Plan workspace
         run: npm run audit:plan-workspace
+
+  android-native:
+    name: Android Auto native unit tests
+    if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: gradle
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Android and Android Auto unit tests
+        working-directory: mobile/android
+        env:
+          RNMAPBOX_MAPS_DOWNLOAD_TOKEN: ${{ secrets.RNMAPBOX_MAPS_DOWNLOAD_TOKEN }}
+        run: ./gradlew :app:testDebugUnitTest --no-daemon
 
   website:
     name: Website and verified-link contracts

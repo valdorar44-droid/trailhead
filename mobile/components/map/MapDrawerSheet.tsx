@@ -28,6 +28,7 @@ export type MapDrawerSheetProps = {
 };
 
 type DrawerAction = {
+  id: string;
   label: string;
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
@@ -71,26 +72,27 @@ export default function MapDrawerSheet({
   };
 
   const quickActions: DrawerAction[] = [
-    { label: 'Search', icon: 'search-outline', onPress: onOpenSearch },
-    { label: 'Find camps', icon: 'bonfire-outline', onPress: onFindCamps },
-    { label: 'Add pin', icon: 'location-outline', onPress: onAddPin },
-    { label: 'Weather', icon: 'partly-sunny-outline', onPress: onOpenWeather },
+    { id: 'search', label: 'Search', icon: 'search-outline', onPress: onOpenSearch },
+    { id: 'camps', label: 'Find camps', icon: 'bonfire-outline', onPress: onFindCamps },
+    { id: 'add-pin', label: 'Add pin', icon: 'location-outline', onPress: onAddPin },
+    { id: 'weather', label: 'Weather', icon: 'partly-sunny-outline', onPress: onOpenWeather },
   ];
   const toolActions: DrawerAction[] = [
-    { label: 'Layers', icon: 'layers-outline', onPress: onOpenLayers },
-    { label: 'Filters', icon: 'options-outline', onPress: onOpenFilters },
-    { label: 'Offline', icon: 'cloud-download-outline', onPress: onOpenOffline },
-    { label: 'Trail builder', icon: 'git-branch-outline', onPress: onOpenTrailBuilder },
+    { id: 'layers', label: 'Layers', icon: 'layers-outline', onPress: onOpenLayers },
+    { id: 'filters', label: 'Filters', icon: 'options-outline', onPress: onOpenFilters },
+    { id: 'offline', label: 'Offline', icon: 'cloud-download-outline', onPress: onOpenOffline },
+    { id: 'trail-builder', label: 'Trail builder', icon: 'git-branch-outline', onPress: onOpenTrailBuilder },
   ];
 
   return (
-    <View style={s.overlay} pointerEvents="auto">
+    <View style={s.overlay} pointerEvents="auto" testID="map.drawer.sheet">
       <TouchableOpacity
         style={s.backdrop}
         activeOpacity={1}
         accessibilityRole="button"
         accessibilityLabel="Close map menu"
         onPress={onClose}
+        testID="map.drawer.backdrop"
       />
       <View
         accessibilityViewIsModal
@@ -112,6 +114,7 @@ export default function MapDrawerSheet({
             accessibilityLabel="Close map menu"
             hitSlop={8}
             onPress={onClose}
+            testID="map.drawer.close"
           >
             <Ionicons name="close" size={20} color={C.text2} />
           </TouchableOpacity>
@@ -126,12 +129,13 @@ export default function MapDrawerSheet({
           <View style={s.quickGrid}>
             {quickActions.map(action => (
               <TouchableOpacity
-                key={action.label}
+                key={action.id}
                 style={s.quickAction}
                 activeOpacity={0.8}
                 accessibilityRole="button"
                 accessibilityLabel={action.label}
                 onPress={closeThen(action.onPress)}
+                testID={`map.drawer.${action.id}`}
               >
                 <Ionicons name={action.icon} size={23} color={C.text} />
                 <Text style={s.quickActionLabel} numberOfLines={2}>{action.label}</Text>
@@ -142,12 +146,13 @@ export default function MapDrawerSheet({
           <View style={s.toolList}>
             {toolActions.map((action, index) => (
               <TouchableOpacity
-                key={action.label}
+                key={action.id}
                 style={[s.toolRow, index < toolActions.length - 1 && s.toolRowDivider]}
                 activeOpacity={0.72}
                 accessibilityRole="button"
                 accessibilityLabel={action.label}
                 onPress={closeThen(action.onPress)}
+                testID={`map.drawer.${action.id}`}
               >
                 <Ionicons name={action.icon} size={20} color={C.text2} />
                 <Text style={s.toolLabel} numberOfLines={1}>{action.label}</Text>

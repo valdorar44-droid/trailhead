@@ -24,6 +24,22 @@ The baseline command does not launch, restart, stop, tap, swipe, install, clear 
 
 Evidence can include a username, notification text, URLs, or other on-screen/log data. Keep the ignored output private and redact it before attaching it to a public issue.
 
+Bind evidence to the exact candidate without storing private data:
+
+```powershell
+npm run audit:android -- --serial RFCR408DA9B --label preview-search `
+  --runtime native-1.0.10-android.1 `
+  --build-id 06142308-0199-46cc-8a4c-fb9d45bca25e `
+  --update-id 019f8a0e-c002-75e4-b52b-1f20b9128950 `
+  --account-role admin `
+  --feature-stage TRAILHEAD_ORIGINALS_STAGE=internal
+```
+
+Those values and the parent-repository commit are written to `candidate.json`
+for every capture/scenario run. Only allowlisted identifiers and feature-stage
+values are accepted; never put coordinates, query text, account IDs, support
+content, or credentials in these arguments.
+
 ## Guarded scenarios
 
 Scenario mode is a dry run unless `--execute-safe-actions` is present:
@@ -47,5 +63,32 @@ Pass `--record-seconds 1..30` for a bounded MP4. Recording is disabled by defaul
 ```powershell
 npm run test:android-audit
 ```
+
+## Pinned Maestro smoke flows
+
+The checked-in workspace uses Maestro CLI `2.4.0`; the runner refuses another
+version and requires an exact device so a two-device setup cannot be selected at
+random.
+
+```powershell
+bash scripts/install-maestro.sh
+npm run maestro:doctor
+npm run maestro:smoke -- --device RFCR408DA9B --app-id com.trailhead.app
+```
+
+The smoke suite preserves app data and covers launch, all five tabs, rapid
+search typing with no automatic result opening, and a warm Map return. Results
+remain under ignored `output/maestro/`. These are safe baseline flows, not paid,
+destructive, report-submission, download, or tour-progress tests.
+
+For the exact installed Android Auto candidate, use:
+
+```powershell
+npm run android:auto:dhu -- --serial RFCR408DA9B --no-install `
+  --expected-version-name 1.0.10 --expected-version-code 59
+```
+
+The DHU launcher fails if the expected package/version is missing or another
+Trailhead package could be selected. It never installs the debug APK implicitly.
 
 When a screen has no app-owned resource IDs, add stable `testID` values during the reviewed implementation wave before relying on an automated tap scenario.

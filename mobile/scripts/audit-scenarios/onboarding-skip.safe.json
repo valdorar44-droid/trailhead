@@ -1,0 +1,15 @@
+{
+  "name": "Skip optional onboarding setup as a guest",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "text": "Later" },
+      "settleMs": 2000,
+      "label": "later"
+    },
+    {
+      "type": "capture",
+      "label": "after-skip"
+    }
+  ]
+}

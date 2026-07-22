@@ -3,95 +3,167 @@ name: Paired Mobile OTA
 on:
   workflow_dispatch:
     inputs:
-      channel:
+      target:
         description: "Expo update channel to publish"
         required: true
         default: "preview"
         type: choice
         options:
-          - production
           - preview
-          - both
+          - production
       message:
         description: "Paired Android and iOS update message"
         required: true
-        default: "Manual OTA from GitHub Actions"
+        default: "Manual paired OTA from GitHub Actions"
         type: string
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
-  group: paired-mobile-ota-${{ github.event.inputs.channel }}
+  group: paired-mobile-ota-${{ inputs.target }}
   cancel-in-progress: false
 
 jobs:
-  ota:
-    name: Publish Expo OTA
+  preview:
+    name: Validate and publish paired preview OTA
+    if: ${{ inputs.target == 'preview' }}
     runs-on: ubuntu-latest
+    environment: mobile-preview
     defaults:
       run:
         working-directory: mobile
     env:
-      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
-      EXPO_PUBLIC_API_URL: https://api.gettrailhead.app
+      EAS_UPDATE_MESSAGE: ${{ inputs.message }}
       EXPO_NO_TELEMETRY: "1"
+      EXPO_PUBLIC_API_URL: https://api.gettrailhead.app
+      EXPO_PUBLIC_BRANCH_CONFIGURED: "true"
+      EXPO_PUBLIC_TELEMETRY_QA_ENABLED: "true"
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Require main for production
-        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
-        shell: bash
-        run: |
-          if [ "${{ github.ref }}" != "refs/heads/main" ]; then
-            echo "Production OTA releases must run from main."
-            exit 1
-          fi
-
-      - name: Check EXPO_TOKEN
-        shell: bash
-        run: |
-          if [ -z "$EXPO_TOKEN" ]; then
-            echo "Missing EXPO_TOKEN. Add it in GitHub repo Settings -> Secrets and variables -> Actions."
-            exit 1
-          fi
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: mobile/package-lock.json
 
-      - name: Setup Expo and EAS
-        uses: expo/expo-github-action@v8
+      - uses: actions/setup-python@v5
         with:
-          eas-version: 21.0.2
-          token: ${{ secrets.EXPO_TOKEN }}
+          python-version: "3.12"
+          cache: pip
 
-      - name: Install mobile dependencies
-        run: npm ci
+      - name: Require an approved preview source
+        shell: bash
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/main|refs/heads/feat/trailhead-1.0.10-overhaul) ;;
+            *) echo "Preview OTA must run from main or the approved 1.0.10 branch."; exit 1 ;;
+          esac
 
-      - name: Typecheck mobile app
-        run: npx tsc --noEmit
+      - name: Install mobile and backend audit dependencies
+        run: |
+          npm ci
+          pip install -r ../requirements.txt
 
-      - name: Test trip repository
-        run: npm run test:trip-repository
+      - name: Require protected preview credentials
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          RNMAPBOX_MAPS_DOWNLOAD_TOKEN: ${{ secrets.RNMAPBOX_MAPS_DOWNLOAD_TOKEN }}
+        shell: bash
+        run: |
+          test -n "$EXPO_TOKEN" || { echo "Missing EXPO_TOKEN"; exit 1; }
+          test -n "$RNMAPBOX_MAPS_DOWNLOAD_TOKEN" || { echo "Missing RNMAPBOX_MAPS_DOWNLOAD_TOKEN"; exit 1; }
 
-      - name: Test account storage lifecycle
-        run: npm run test:account-storage
+      - name: Validate and publish with the EAS preview environment
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          RNMAPBOX_MAPS_DOWNLOAD_TOKEN: ${{ secrets.RNMAPBOX_MAPS_DOWNLOAD_TOKEN }}
+        run: >-
+          npx --yes eas-cli@21.0.2 env:exec preview
+          "npm run audit:release-env -- --native-gate && npm run audit:prepreview && node scripts/publish-eas-update.mjs preview"
+          --non-interactive
 
-      - name: Test Trailhead Originals runtime
-        run: npm run test:originals
+  production:
+    name: Approve, validate, and publish paired production OTA
+    if: ${{ inputs.target == 'production' }}
+    runs-on: ubuntu-latest
+    environment: mobile-production
+    defaults:
+      run:
+        working-directory: mobile
+    env:
+      EAS_UPDATE_MESSAGE: ${{ inputs.message }}
+      EXPO_NO_TELEMETRY: "1"
+      EXPO_PUBLIC_API_URL: https://api.gettrailhead.app
+      EXPO_PUBLIC_BRANCH_CONFIGURED: "true"
+      EXPO_PUBLIC_TELEMETRY_QA_ENABLED: "false"
+      TRAILHEAD_ALLOW_PRODUCTION_OTA: ${{ vars.TRAILHEAD_ALLOW_PRODUCTION_OTA }}
+      TRAILHEAD_ANDROID_PRODUCTION_BUILD_ID: ${{ vars.TRAILHEAD_ANDROID_PRODUCTION_BUILD_ID }}
+      TRAILHEAD_ANDROID_PRODUCTION_BUILD_SHA: ${{ vars.TRAILHEAD_ANDROID_PRODUCTION_BUILD_SHA }}
+      TRAILHEAD_ANDROID_PRODUCTION_RUNTIME: ${{ vars.TRAILHEAD_ANDROID_PRODUCTION_RUNTIME }}
+      TRAILHEAD_IOS_PRODUCTION_BUILD_ID: ${{ vars.TRAILHEAD_IOS_PRODUCTION_BUILD_ID }}
+      TRAILHEAD_IOS_PRODUCTION_BUILD_SHA: ${{ vars.TRAILHEAD_IOS_PRODUCTION_BUILD_SHA }}
+      TRAILHEAD_IOS_PRODUCTION_RUNTIME: ${{ vars.TRAILHEAD_IOS_PRODUCTION_RUNTIME }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Run release audits
-        run: npm run audit:copy && npm run audit:explore && npm run audit:routes && npm run audit:profile-map && npm run audit:plan-workspace
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: mobile/package-lock.json
 
-      - name: Publish preview OTA
-        if: ${{ github.event.inputs.channel == 'preview' || github.event.inputs.channel == 'both' }}
-        run: eas update --channel preview --platform all --message "${{ github.event.inputs.message }}" --non-interactive
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
 
-      - name: Publish production OTA
-        if: ${{ github.event.inputs.channel == 'production' || github.event.inputs.channel == 'both' }}
-        run: eas update --channel production --platform all --message "${{ github.event.inputs.message }}" --non-interactive
+      - name: Require protected paired production evidence
+        shell: bash
+        run: |
+          case "$GITHUB_REF" in
+            refs/heads/main|refs/tags/*) ;;
+            *) echo "Production OTA must run from main or an immutable tag."; exit 1 ;;
+          esac
+          test "$TRAILHEAD_ALLOW_PRODUCTION_OTA" = "YES" || { echo "Protected production approval is missing."; exit 1; }
+          test "$TRAILHEAD_ANDROID_PRODUCTION_BUILD_SHA" = "$GITHUB_SHA" || { echo "Android production build SHA does not match."; exit 1; }
+          test "$TRAILHEAD_IOS_PRODUCTION_BUILD_SHA" = "$GITHUB_SHA" || { echo "iOS production build SHA does not match."; exit 1; }
+          test -n "$TRAILHEAD_ANDROID_PRODUCTION_BUILD_ID" || { echo "Android production build ID is missing."; exit 1; }
+          test -n "$TRAILHEAD_IOS_PRODUCTION_BUILD_ID" || { echo "iOS production build ID is missing."; exit 1; }
+
+      - name: Require successful Trailhead CI for this SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          ci_sha="$(gh run list --workflow ci.yml --commit "$GITHUB_SHA" --status success --limit 1 --json headSha --jq '.[0].headSha // ""')"
+          test "$ci_sha" = "$GITHUB_SHA" || { echo "No successful Trailhead CI run exists for $GITHUB_SHA."; exit 1; }
+
+      - name: Install mobile and backend audit dependencies
+        run: |
+          npm ci
+          pip install -r ../requirements.txt
+
+      - name: Require protected production credentials
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          RNMAPBOX_MAPS_DOWNLOAD_TOKEN: ${{ secrets.RNMAPBOX_MAPS_DOWNLOAD_TOKEN }}
+        shell: bash
+        run: |
+          test -n "$EXPO_TOKEN" || { echo "Missing EXPO_TOKEN"; exit 1; }
+          test -n "$RNMAPBOX_MAPS_DOWNLOAD_TOKEN" || { echo "Missing RNMAPBOX_MAPS_DOWNLOAD_TOKEN"; exit 1; }
+
+      - name: Validate and publish with the EAS production environment
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          RNMAPBOX_MAPS_DOWNLOAD_TOKEN: ${{ secrets.RNMAPBOX_MAPS_DOWNLOAD_TOKEN }}
+        run: >-
+          npx --yes eas-cli@21.0.2 env:exec production
+          "npm run audit:release-env -- --native-gate && npm run audit:prepreview && node scripts/publish-eas-update.mjs production"
+          --non-interactive

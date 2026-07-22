@@ -1,0 +1,12 @@
+{
+  "name": "Continue Map QA without granting location",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "text": "Not now" },
+      "settleMs": 1500,
+      "label": "not-now"
+    },
+    { "type": "capture", "label": "map-without-location" }
+  ]
+}

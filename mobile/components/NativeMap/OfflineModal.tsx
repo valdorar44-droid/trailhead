@@ -207,7 +207,7 @@ const REGION_GROUPS = [
   { title: 'International', ids: ['fi', 'pk'] },
 ] as const;
 
-const PLACE_PACK_ORDER = ['essentials', 'services', 'outdoors', 'camps', 'water'];
+const PLACE_PACK_ORDER = ['essentials', 'services', 'outdoors', 'camps', 'water', 'trek_places'];
 
 function safePackId(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '').slice(0, 80) || 'download';
@@ -396,11 +396,11 @@ function MapArtwork({ height = 58, route = false, wide = false }: { height?: num
   );
 }
 
-function StatusLine({ label, icon }: { label: string; icon?: IconName }) {
+function StatusLine({ label, icon, testID }: { label: string; icon?: IconName; testID?: string }) {
   const C = useTheme();
   const color = statusColor(C, label);
   return (
-    <View style={shared.statusLine}>
+    <View style={shared.statusLine} testID={testID} accessibilityLiveRegion="polite">
       <Ionicons
         name={icon ?? (label === 'Ready offline' ? 'checkmark-circle' : /incomplete/i.test(label) ? 'alert-circle' : 'ellipse')}
         size={label === 'Ready offline' || icon ? 16 : 8}
@@ -411,25 +411,27 @@ function StatusLine({ label, icon }: { label: string; icon?: IconName }) {
   );
 }
 
-function ProgressBar({ progress }: { progress: number }) {
+function ProgressBar({ progress, testID }: { progress: number; testID?: string }) {
   const C = useTheme();
   return (
-    <View style={[shared.progressTrack, { backgroundColor: C.border }]}>
+    <View testID={testID} accessibilityRole="progressbar" accessibilityValue={{ min: 0, max: 100, now: Math.round(Math.max(0, Math.min(100, progress))) }} style={[shared.progressTrack, { backgroundColor: C.border }]}>
       <View style={[shared.progressFill, { backgroundColor: C.orange, width: `${Math.max(0, Math.min(100, progress))}%` }]} />
     </View>
   );
 }
 
-function IconButton({ icon, label, onPress, disabled, danger }: {
+function IconButton({ icon, label, onPress, disabled, danger, testID }: {
   icon: IconName;
   label: string;
   onPress: () => void;
   disabled?: boolean;
   danger?: boolean;
+  testID?: string;
 }) {
   const C = useTheme();
   return (
     <TouchableOpacity
+      testID={testID}
       style={[shared.iconButton, { backgroundColor: C.s2, borderColor: C.border }, disabled && shared.disabled]}
       onPress={onPress}
       disabled={disabled}
@@ -441,19 +443,22 @@ function IconButton({ icon, label, onPress, disabled, danger }: {
   );
 }
 
-function PrimaryButton({ label, onPress, disabled, icon }: {
+function PrimaryButton({ label, onPress, disabled, icon, testID }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   icon?: IconName;
+  testID?: string;
 }) {
   const C = useTheme();
   return (
     <TouchableOpacity
+      testID={testID}
       style={[shared.primaryButton, { backgroundColor: C.text }, disabled && shared.disabled]}
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
+      accessibilityLabel={label}
     >
       {icon ? <Ionicons name={icon} size={18} color={C.bg} /> : null}
       <Text style={[shared.primaryButtonText, { color: C.bg }]}>{label}</Text>
@@ -461,19 +466,22 @@ function PrimaryButton({ label, onPress, disabled, icon }: {
   );
 }
 
-function SecondaryButton({ label, onPress, disabled, danger }: {
+function SecondaryButton({ label, onPress, disabled, danger, testID }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
   danger?: boolean;
+  testID?: string;
 }) {
   const C = useTheme();
   return (
     <TouchableOpacity
+      testID={testID}
       style={[shared.secondaryButton, { borderColor: danger ? C.red + '66' : C.border2 }, disabled && shared.disabled]}
       onPress={onPress}
       disabled={disabled}
       accessibilityRole="button"
+      accessibilityLabel={label}
     >
       <Text style={[shared.secondaryButtonText, { color: danger ? C.red : C.text }]}>{label}</Text>
     </TouchableOpacity>
@@ -490,6 +498,7 @@ function DeviceRow({ item, selected, selectionMode, onToggle }: {
   const rowPress = selectionMode ? onToggle : item.onPress;
   return (
     <TouchableOpacity
+      testID={`offline.downloads.item.${safePackId(item.id)}`}
       style={[shared.deviceRow, { borderBottomColor: C.border }]}
       onPress={rowPress}
       disabled={selectionMode && item.active}
@@ -1743,13 +1752,13 @@ export default function OfflineModal({
   const renderHeader = () => (
     <View style={s.header}>
       {view !== 'home' ? (
-        <IconButton icon="chevron-back" label="Back" onPress={() => setView('home')} />
+        <IconButton testID="offline.downloads.back" icon="chevron-back" label="Back" onPress={() => setView('home')} />
       ) : null}
       <Text style={s.title} numberOfLines={2} adjustsFontSizeToFit minimumFontScale={0.8}>{headerTitle}</Text>
       {view === 'home' ? (
-        <IconButton icon="add" label="Download an area" onPress={() => onStartAreaSelect?.(null)} />
+        <IconButton testID="offline.downloads.add-area" icon="add" label="Download an area" onPress={() => onStartAreaSelect?.(null)} />
       ) : <View style={shared.iconButtonSpacer} />}
-      <IconButton icon="close" label="Close" onPress={onClose} />
+      <IconButton testID="offline.downloads.close" icon="close" label="Close" onPress={onClose} />
     </View>
   );
 
@@ -1780,6 +1789,7 @@ export default function OfflineModal({
           <>
             <SectionHeading label="Upcoming trips" />
             <TouchableOpacity
+              testID="offline.downloads.upcoming-trip"
               style={s.tripFeature}
               onPress={() => {
                 setSelectedTripId(currentTripRuntime.target.id);
@@ -1820,6 +1830,7 @@ export default function OfflineModal({
           return (
             <TouchableOpacity
               key={id}
+              testID={`offline.downloads.suggested-region.${id}`}
               style={[s.suggestionRow, { borderBottomColor: C.border }]}
               onPress={() => {
                 setSelectedRegionId(id);
@@ -1835,7 +1846,7 @@ export default function OfflineModal({
             </TouchableOpacity>
           );
         })}
-        <TouchableOpacity style={[s.suggestionRow, { borderBottomColor: C.border }]} onPress={() => onStartAreaSelect?.(null)}>
+        <TouchableOpacity testID="offline.downloads.current-area" style={[s.suggestionRow, { borderBottomColor: C.border }]} onPress={() => onStartAreaSelect?.(null)}>
           <MapArtwork height={46} route />
           <View style={s.suggestionCopy}>
             <Text style={s.suggestionTitle}>Current map area</Text>
@@ -1843,7 +1854,7 @@ export default function OfflineModal({
           </View>
           <Ionicons name="download-outline" size={21} color={C.orange} />
         </TouchableOpacity>
-        <TouchableOpacity style={[s.suggestionRow, { borderBottomColor: C.border }]} onPress={() => setView('regions')}>
+        <TouchableOpacity testID="offline.downloads.browse-regions" style={[s.suggestionRow, { borderBottomColor: C.border }]} onPress={() => setView('regions')}>
           <MapArtwork height={46} />
           <View style={s.suggestionCopy}>
             <Text style={s.suggestionTitle}>Browse regions</Text>
@@ -1851,7 +1862,7 @@ export default function OfflineModal({
           <Ionicons name="chevron-forward" size={20} color={C.text3} />
         </TouchableOpacity>
 
-        <TouchableOpacity style={[s.storageLink, { borderTopColor: C.border }]} onPress={() => setView('storage')}>
+        <TouchableOpacity testID="offline.downloads.storage" style={[s.storageLink, { borderTopColor: C.border }]} onPress={() => setView('storage')}>
           <Ionicons name="phone-portrait-outline" size={22} color={C.text2} />
           <View style={s.storageLinkCopy}>
             <Text style={s.storageLinkTitle}>Offline storage</Text>
@@ -1870,6 +1881,7 @@ export default function OfflineModal({
         <View style={s.searchBox}>
           <Ionicons name="search-outline" size={19} color={C.text3} />
           <TextInput
+            testID="offline.downloads.region-search"
             value={regionSearch}
             onChangeText={setRegionSearch}
             placeholder="Search regions"
@@ -1879,7 +1891,7 @@ export default function OfflineModal({
             returnKeyType="search"
           />
           {query ? (
-            <TouchableOpacity style={shared.clearButton} onPress={() => setRegionSearch('')} accessibilityLabel="Clear search">
+            <TouchableOpacity testID="offline.downloads.region-search.clear" style={shared.clearButton} onPress={() => setRegionSearch('')} accessibilityLabel="Clear search">
               <Ionicons name="close" size={17} color={C.text3} />
             </TouchableOpacity>
           ) : null}
@@ -1900,6 +1912,7 @@ export default function OfflineModal({
                 return (
                   <TouchableOpacity
                     key={id}
+                    testID={`offline.downloads.region.${id}`}
                     style={[s.regionRow, { borderBottomColor: C.border }]}
                     onPress={() => {
                       setSelectedRegionId(id);
@@ -1940,7 +1953,7 @@ export default function OfflineModal({
         <MapArtwork height={184} wide />
         <View style={s.detailIntro}>
           <Text style={s.detailTitle}>{region.name}</Text>
-          <StatusLine label={summary?.status || 'Not downloaded'} />
+          <StatusLine testID="offline.downloads.region.status" label={summary?.status || 'Not downloaded'} />
         </View>
 
         <SectionHeading label="Offline content" />
@@ -2008,9 +2021,10 @@ export default function OfflineModal({
 
         <View style={s.detailActions}>
           {summary?.ready ? (
-            <PrimaryButton label="Open map" icon="map-outline" onPress={() => openRegion(id)} />
+            <PrimaryButton testID="offline.downloads.region.open" label="Open map" icon="map-outline" onPress={() => openRegion(id)} />
           ) : (
             <PrimaryButton
+              testID="offline.downloads.region.download"
               label={regionBusy ? 'Downloading' : summary?.hasContent ? 'Download remaining' : 'Download'}
               icon="download-outline"
               onPress={() => void downloadRegionBundle(id)}
@@ -2018,10 +2032,10 @@ export default function OfflineModal({
             />
           )}
           {!summary?.ready && summary?.mapReady ? (
-            <SecondaryButton label="Open downloaded map" onPress={() => openRegion(id)} />
+            <SecondaryButton testID="offline.downloads.region.open-partial" label="Open downloaded map" onPress={() => openRegion(id)} />
           ) : null}
           {summary?.hasContent ? (
-            <SecondaryButton label="Remove download" danger disabled={regionBusy} onPress={() => askToRemoveRegion(id)} />
+            <SecondaryButton testID="offline.downloads.region.remove" label="Remove download" danger disabled={regionBusy} onPress={() => askToRemoveRegion(id)} />
           ) : null}
         </View>
       </>
@@ -2033,7 +2047,7 @@ export default function OfflineModal({
       return (
         <View style={s.areaStart}>
           <MapArtwork height={210} route wide />
-          <PrimaryButton label="Choose an area" icon="scan-outline" onPress={() => onStartAreaSelect?.(null)} />
+          <PrimaryButton testID="offline.downloads.area.choose" label="Choose an area" icon="scan-outline" onPress={() => onStartAreaSelect?.(null)} />
         </View>
       );
     }
@@ -2091,6 +2105,7 @@ export default function OfflineModal({
         <View style={s.areaSheet}>
           {!isReady && !isMapReady ? (
             <TextInput
+              testID="offline.downloads.area.name"
               value={selectedArea.label}
               onChangeText={value => onRenameArea?.(selectedArea.id, value)}
               style={s.areaNameInput}
@@ -2106,7 +2121,7 @@ export default function OfflineModal({
             <Text style={s.detailChoiceLabel}>Detail</Text>
             <Text style={s.detailChoiceValue}>{selectedArea.detail === 'high' ? 'High detail' : 'Standard'}</Text>
             {!isReady && !isMapReady && !isActive ? (
-              <TouchableOpacity style={shared.textAction} onPress={() => onStartAreaSelect?.(selectedArea)}>
+              <TouchableOpacity testID="offline.downloads.area.adjust" style={shared.textAction} onPress={() => onStartAreaSelect?.(selectedArea)}>
                 <Text style={[shared.textActionLabel, { color: C.orange }]}>Adjust</Text>
               </TouchableOpacity>
             ) : null}
@@ -2128,10 +2143,10 @@ export default function OfflineModal({
           ) : null}
           {showSearchRow ? <CheckRow label="Offline search" ready={searchReady} /> : null}
           {isActive ? (
-            <View style={s.activeArea}>
-              <StatusLine label={v2Paused || activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`} />
-              <ProgressBar progress={progress} />
-              <TouchableOpacity style={shared.textAction} onPress={() => void pauseOrResume()}>
+            <View style={s.activeArea} testID="offline.downloads.area.active">
+              <StatusLine testID="offline.downloads.area.status" label={v2Paused || activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`} />
+              <ProgressBar testID="offline.downloads.area.progress" progress={progress} />
+              <TouchableOpacity testID="offline.downloads.area.pause-resume" accessibilityRole="button" accessibilityLabel={v2Paused || activePackPaused ? 'Resume download' : 'Pause download'} style={shared.textAction} onPress={() => void pauseOrResume()}>
                 <Text style={[shared.textActionLabel, { color: C.orange }]}>{v2Paused || activePackPaused ? 'Resume' : 'Pause'}</Text>
               </TouchableOpacity>
             </View>
@@ -2144,11 +2159,12 @@ export default function OfflineModal({
           ) : null}
           <View style={s.detailActions}>
             {isReady ? (
-              <PrimaryButton label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+              <PrimaryButton testID="offline.downloads.area.open" label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
             ) : isMapReady && !offlineV2DownloadEnabled ? (
-              <PrimaryButton label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+              <PrimaryButton testID="offline.downloads.area.open" label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
             ) : (
               <PrimaryButton
+                testID="offline.downloads.area.download"
                 label={isMapReady ? 'Download remaining' : downloadLabel}
                 icon="download-outline"
                 onPress={() => void downloadSelectedArea()}
@@ -2156,10 +2172,10 @@ export default function OfflineModal({
               />
             )}
             {!isReady && isMapReady && offlineV2DownloadEnabled ? (
-              <SecondaryButton label="Open downloaded map" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+              <SecondaryButton testID="offline.downloads.area.open-partial" label="Open downloaded map" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
             ) : null}
             {isReady || isMapReady ? (
-              <SecondaryButton label="Remove download" danger onPress={() => {
+              <SecondaryButton testID="offline.downloads.area.remove" label="Remove download" danger onPress={() => {
                 Alert.alert(
                   `Remove ${selectedArea.label}?`,
                   'The downloaded offline content is removed from this device.',
@@ -2209,8 +2225,8 @@ export default function OfflineModal({
         <View style={s.detailIntro}>
           <Text style={s.detailTitle}>{runtime.target.name}</Text>
           {meta ? <Text style={s.detailMeta}>{meta}</Text> : null}
-          <StatusLine label={runtime.status} />
-          {runtime.active ? <ProgressBar progress={runtime.progress} /> : null}
+          <StatusLine testID="offline.downloads.trip.status" label={runtime.status} />
+          {runtime.active ? <ProgressBar testID="offline.downloads.trip.progress" progress={runtime.progress} /> : null}
         </View>
         <SectionHeading label={runtime.ready ? 'Available offline' : 'Offline content'} />
         <CheckRow label="Map & terrain" ready={runtime.mapReady} />
@@ -2226,14 +2242,16 @@ export default function OfflineModal({
         <View style={s.detailActions}>
           {runtime.active ? (
             <PrimaryButton
+              testID="offline.downloads.trip.pause-resume"
               label={v2Paused || activePackPaused ? 'Resume' : 'Pause'}
               icon={v2Paused || activePackPaused ? 'play-outline' : 'pause-outline'}
               onPress={() => void pauseOrResume()}
             />
           ) : runtime.ready ? (
-            <PrimaryButton label="Open map" icon="map-outline" onPress={() => void openOfflineTrip(runtime.target)} />
+            <PrimaryButton testID="offline.downloads.trip.open-map" label="Open map" icon="map-outline" onPress={() => void openOfflineTrip(runtime.target)} />
           ) : (
             <PrimaryButton
+              testID="offline.downloads.trip.download"
               label={tripDownloadLabel}
               icon="download-outline"
               onPress={() => void downloadTripBundle(runtime.target)}
@@ -2241,10 +2259,10 @@ export default function OfflineModal({
             />
           )}
           {runtime.notesReady ? (
-            <SecondaryButton label="Open trip" onPress={() => void openOfflineTrip(runtime.target)} />
+            <SecondaryButton testID="offline.downloads.trip.open" label="Open trip" onPress={() => void openOfflineTrip(runtime.target)} />
           ) : null}
           {runtime.hasDownload ? (
-            <SecondaryButton label="Remove download" danger disabled={runtime.active} onPress={() => askToRemoveTrip(runtime)} />
+            <SecondaryButton testID="offline.downloads.trip.remove" label="Remove download" danger disabled={runtime.active} onPress={() => askToRemoveTrip(runtime)} />
           ) : null}
         </View>
       </>
@@ -2271,6 +2289,7 @@ export default function OfflineModal({
           <View style={s.searchBox}>
             <Ionicons name="search-outline" size={19} color={C.text3} />
             <TextInput
+              testID="offline.downloads.storage.search"
               value={search}
               onChangeText={setSearch}
               placeholder="Search downloads"
@@ -2280,7 +2299,7 @@ export default function OfflineModal({
               returnKeyType="search"
             />
             {search ? (
-              <TouchableOpacity style={shared.clearButton} onPress={() => setSearch('')} accessibilityLabel="Clear search">
+              <TouchableOpacity testID="offline.downloads.storage.search.clear" style={shared.clearButton} onPress={() => setSearch('')} accessibilityLabel="Clear search">
                 <Ionicons name="close" size={17} color={C.text3} />
               </TouchableOpacity>
             ) : null}
@@ -2300,6 +2319,7 @@ export default function OfflineModal({
         ))}
         <View style={s.storageActions}>
           <SecondaryButton
+            testID="offline.downloads.storage.remove-selection"
             label={selectedForRemoval.length
               ? `Remove ${selectedForRemoval.length} download${selectedForRemoval.length === 1 ? '' : 's'} · ${fmtBytes(selectedBytes)}`
               : 'Select downloads to remove'}
@@ -2314,11 +2334,12 @@ export default function OfflineModal({
 
   return (
     <Modal visible={visible} animationType="slide" transparent onRequestClose={onClose}>
-      <View style={s.overlay}>
-        <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
-        <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]}>
+      <View style={s.overlay} testID="offline.downloads.modal">
+        <TouchableOpacity testID="offline.downloads.backdrop" accessibilityRole="button" accessibilityLabel="Close offline downloads" style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+        <View style={[s.sheet, { maxHeight: sheetMaxHeight, paddingBottom: bottomPad }]} testID={`offline.downloads.view.${view}`}>
           {renderHeader()}
           <ScrollView
+            testID="offline.downloads.scroll"
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={[s.content, { paddingBottom: bottomPad + 30 }]}
@@ -2335,7 +2356,7 @@ export default function OfflineModal({
         {confirmRemoval ? (
           <View style={s.confirmOverlay}>
             <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={() => setConfirmRemoval(null)} />
-            <View style={[s.confirmSheet, { paddingBottom: bottomPad + 8 }]}>
+            <View style={[s.confirmSheet, { paddingBottom: bottomPad + 8 }]} testID="offline.downloads.remove-confirmation">
               <Text style={s.confirmTitle}>
                 Remove {confirmRemoval.ids.length} download{confirmRemoval.ids.length === 1 ? '' : 's'}?
               </Text>
@@ -2343,8 +2364,8 @@ export default function OfflineModal({
                 {fmtBytes(confirmRemoval.bytes)} will be removed from this device. Trips and saved places remain in your account.
               </Text>
               <View style={s.confirmActions}>
-                <SecondaryButton label="Keep downloads" onPress={() => setConfirmRemoval(null)} />
-                <TouchableOpacity style={[shared.primaryButton, { backgroundColor: C.red }]} onPress={() => void removeConfirmedItems()}>
+                <SecondaryButton testID="offline.downloads.remove-confirmation.keep" label="Keep downloads" onPress={() => setConfirmRemoval(null)} />
+                <TouchableOpacity testID="offline.downloads.remove-confirmation.remove" accessibilityRole="button" accessibilityLabel="Remove downloads" style={[shared.primaryButton, { backgroundColor: C.red }]} onPress={() => void removeConfirmedItems()}>
                   <Text style={[shared.primaryButtonText, { color: '#fff' }]}>Remove downloads</Text>
                 </TouchableOpacity>
               </View>

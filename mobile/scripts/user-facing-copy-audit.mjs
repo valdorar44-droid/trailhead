@@ -142,6 +142,7 @@ const blockedTerms = [
   { label: 'Ambiguous yearly prize label', pattern: /^new year winner$/i },
   { label: 'Vague contest slogan', pattern: /^build the map\. share what matters\.?$/i },
   { label: 'Universal water quantity', pattern: /1\s+gal(?:lon)?\s+water per person per day/i },
+  { label: 'Unsupported safe preset', pattern: /\bsafe preset\b/i },
 ];
 
 // These are internal discriminator values, not rendered copy. Keep the exception

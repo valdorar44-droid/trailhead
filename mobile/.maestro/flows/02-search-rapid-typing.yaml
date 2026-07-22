@@ -1,0 +1,88 @@
+appId: ${APP_ID}
+name: Search rapid typing and explicit selection
+tags:
+  - smoke
+  - search
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- scrollUntilVisible:
+    element:
+      text: "Find your next adventure"
+    direction: DOWN
+    timeout: 20000
+    speed: 80
+- tapOn: "Explore tab"
+- runFlow:
+    when:
+      visible:
+        id: "explore.search.open"
+    commands:
+      - tapOn:
+          id: "explore.search.open"
+- runFlow:
+    when:
+      visible:
+        id: "explore.search.input"
+    commands:
+      - tapOn:
+          id: "explore.search.input"
+- runFlow:
+    when:
+      visible: "Search camps, trails, fuel"
+    commands:
+      - tapOn: "Search camps, trails, fuel"
+- runFlow:
+    when:
+      visible: "Search camps, trails, and places"
+    commands:
+      - tapOn: "Search camps, trails, and places"
+- runFlow:
+    when:
+      visible:
+        id: "search-v2.input"
+    commands:
+      - tapOn:
+          id: "search-v2.input"
+- inputText: "Moab"
+- assertVisible: "Moab"
+- runFlow:
+    when:
+      visible:
+        id: "search-v2.sheet"
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "search-v2.search-all"
+          timeout: 5000
+- eraseText: 4
+- inputText: "Yellowstone"
+- assertVisible: "Yellowstone"
+- runFlow:
+    when:
+      visible:
+        id: "search-v2.sheet"
+    commands:
+      - extendedWaitUntil:
+          visible:
+            id: "search-v2.search-all"
+          timeout: 5000
+- assertVisible:
+    id: "search-v2.sheet"
+- assertVisible:
+    id: "search-v2.results"
+- assertVisible: "Search all for “Yellowstone”"
+- takeScreenshot: search-rapid-typing
+- eraseText: 11
+- hideKeyboard
+- runFlow:
+    when:
+      visible:
+        id: "search-v2.cancel"
+    commands:
+      - tapOn:
+          id: "search-v2.cancel"
+- assertVisible: "Explore tab"
+- assertVisible: "Find your next adventure"

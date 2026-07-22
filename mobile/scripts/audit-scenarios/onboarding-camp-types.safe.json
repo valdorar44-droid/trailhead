@@ -1,0 +1,21 @@
+{
+  "name": "Choose the neutral guest camp preference",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "text": "Any" },
+      "settleMs": 500,
+      "label": "choose-any-camp-type"
+    },
+    {
+      "type": "tap",
+      "selector": { "text": "Next" },
+      "settleMs": 1200,
+      "label": "next"
+    },
+    {
+      "type": "capture",
+      "label": "after-camp-preference"
+    }
+  ]
+}

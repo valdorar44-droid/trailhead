@@ -103,12 +103,17 @@ export default function SearchV2Sheet({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
-      <SafeAreaView style={styles.screen} edges={['top', 'left', 'right']}>
+      <SafeAreaView
+        style={styles.screen}
+        edges={['top', 'left', 'right']}
+        testID="search-v2.sheet"
+      >
         <KeyboardAvoidingView style={styles.fill} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.header}>
             <TouchableOpacity
               style={styles.backButton}
               onPress={close}
+              testID="search-v2.close"
               accessibilityRole="button"
               accessibilityLabel="Close search"
             >
@@ -118,6 +123,7 @@ export default function SearchV2Sheet({
             <TouchableOpacity
               style={styles.cancelButton}
               onPress={close}
+              testID="search-v2.cancel"
               accessibilityRole="button"
               accessibilityLabel="Cancel search"
             >
@@ -129,6 +135,7 @@ export default function SearchV2Sheet({
             <Ionicons name="search-outline" size={20} color={C.text2} />
             <TextInput
               ref={inputRef}
+              testID="search-v2.input"
               value={query}
               onChangeText={onQueryChange}
               placeholder="Search camps, trails, places"
@@ -143,6 +150,7 @@ export default function SearchV2Sheet({
               <TouchableOpacity
                 style={styles.clearButton}
                 onPress={() => onQueryChange('')}
+                testID="search-v2.clear"
                 accessibilityRole="button"
                 accessibilityLabel="Clear search"
               >
@@ -151,24 +159,29 @@ export default function SearchV2Sheet({
             ) : null}
           </View>
 
-          <View style={styles.sectionHeader}>
+          <View style={styles.sectionHeader} testID="search-v2.section-header">
             <Text style={styles.sectionLabel}>{mode === 'results' ? 'RESULTS' : 'SUGGESTIONS'}</Text>
             {(isEnriching || (loading && !showInitialSkeleton)) ? <ActivityIndicator size="small" color={C.orange} /> : null}
           </View>
 
           {selectionError ? (
-            <View style={styles.errorBanner} accessibilityLiveRegion="polite">
+            <View style={styles.errorBanner} accessibilityLiveRegion="polite" testID="search-v2.selection-error">
               <Ionicons name="alert-circle-outline" size={18} color={C.orange} />
               <Text style={styles.errorText}>{selectionError}</Text>
             </View>
           ) : null}
 
           {showInitialSkeleton ? (
-            <View style={styles.skeletonList} accessibilityLabel="Loading search results">
+            <View
+              style={styles.skeletonList}
+              accessibilityLabel="Loading search results"
+              testID="search-v2.loading"
+            >
               {[0, 1, 2].map(index => <SearchRowSkeleton key={index} styles={styles} />)}
             </View>
           ) : (
             <FlatList
+              testID="search-v2.results"
               data={results}
               keyExtractor={item => item.result_id}
               keyboardShouldPersistTaps="handled"
@@ -191,6 +204,7 @@ export default function SearchV2Sheet({
                 <TouchableOpacity
                   style={styles.guidedAction}
                   onPress={onOpenGuided}
+                  testID="search-v2.guided-trips"
                   activeOpacity={0.84}
                   accessibilityRole="button"
                   accessibilityLabel={`Search guided trips for ${guidedQuery}`}
@@ -207,12 +221,12 @@ export default function SearchV2Sheet({
                 </TouchableOpacity>
               ) : null}
               ListEmptyComponent={showEmptyState ? (
-                <View style={styles.emptyState}>
+                <View style={styles.emptyState} testID="search-v2.empty">
                   <Ionicons name="search-outline" size={21} color={C.text3} />
                   <Text style={styles.emptyText}>No matches found</Text>
                 </View>
               ) : status === 'error' ? (
-                <View style={styles.emptyState}>
+                <View style={styles.emptyState} testID="search-v2.error">
                   <Ionicons name="cloud-offline-outline" size={21} color={C.text3} />
                   <Text style={styles.emptyText}>Search is not available right now.</Text>
                 </View>
@@ -223,6 +237,7 @@ export default function SearchV2Sheet({
                     <TouchableOpacity
                       style={styles.searchAllButton}
                       onPress={onSearchAll}
+                      testID="search-v2.search-all"
                       activeOpacity={0.82}
                       accessibilityRole="button"
                       accessibilityLabel={`Search all for ${cleanQuery}`}
@@ -235,6 +250,7 @@ export default function SearchV2Sheet({
                     <TouchableOpacity
                       style={styles.loadMoreButton}
                       onPress={onLoadMore}
+                      testID="search-v2.load-more"
                       activeOpacity={0.82}
                       disabled={loading}
                       accessibilityRole="button"
@@ -280,6 +296,7 @@ function SearchResultRow({
     <TouchableOpacity
       style={styles.resultRow}
       onPress={onPress}
+      testID={`search-v2.result.${result.result_id}`}
       disabled={resolving}
       activeOpacity={0.84}
       accessibilityRole="button"

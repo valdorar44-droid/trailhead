@@ -16,13 +16,18 @@ export default function MapModeGallery({ activePresetId, onSelectPreset, onOpenL
   const s = useMemo(() => makeStyles(C), [C]);
 
   return (
-    <View style={s.wrap}>
+    <View style={s.wrap} testID="map.filters.modes">
       <View style={s.headerRow}>
         <View style={s.headerCopy}>
           <Text style={s.kicker}>MAP MODES</Text>
           <Text style={s.headerSub}>Pick the map for the job. You can still adjust every layer below.</Text>
         </View>
-        <TouchableOpacity style={s.legendButton} activeOpacity={0.82} onPress={onOpenLegend}>
+        <TouchableOpacity
+          style={s.legendButton}
+          activeOpacity={0.82}
+          onPress={onOpenLegend}
+          testID="map.filters.modes.legend"
+        >
           <Ionicons name="list-outline" size={15} color={C.text2} />
           <Text style={s.legendButtonText}>Legend</Text>
         </TouchableOpacity>
@@ -54,6 +59,7 @@ function ModeCard({ preset, active, onPress }: { preset: MapModePreset; active: 
       onPress={onPress}
       accessibilityRole="button"
       accessibilityLabel={`Use ${preset.title} map mode`}
+      testID={`map.filters.mode.${preset.id}`}
     >
       <View style={[s.preview, { backgroundColor: base }]}>
         <View style={[s.previewLand, { backgroundColor: land }]} />

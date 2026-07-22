@@ -71,7 +71,7 @@ export function ExploreHero({
   onOpenOriginals,
 }: Props) {
   return (
-    <View style={[styles.shell, { height }]}>
+    <View style={[styles.shell, { height }]} testID="explore.hero">
       <Image source={DEFAULT_HERO_IMAGE} style={styles.image} resizeMode="cover" />
       <View style={styles.overlay} />
       <LinearGradient
@@ -93,6 +93,7 @@ export function ExploreHero({
           <View style={styles.searchRow}>
             {onOpenSearch ? (
               <TouchableOpacity
+                testID="explore.search.open"
                 style={styles.search}
                 onPress={onOpenSearch}
                 activeOpacity={0.88}
@@ -110,6 +111,7 @@ export function ExploreHero({
             <View style={styles.search}>
               <Ionicons name="search-outline" size={22} color="rgba(255,255,255,0.9)" />
               <TextInput
+                testID="explore.search.input"
                 value={query}
                 onChangeText={onQueryChange}
                 placeholder="Search camps, trails, fuel"
@@ -118,7 +120,7 @@ export function ExploreHero({
                 returnKeyType="search"
               />
               {query ? (
-                <TouchableOpacity onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
+                <TouchableOpacity testID="explore.search.clear" onPress={onClearQuery} style={styles.iconButton} hitSlop={8}>
                   <Ionicons name="close" size={16} color="rgba(255,255,255,0.86)" />
                 </TouchableOpacity>
               ) : null}
@@ -163,12 +165,14 @@ export function ExploreHero({
         ) : null}
         {!hideCategories ? (
           <ScrollView
+            testID="explore.categories"
             horizontal
             showsHorizontalScrollIndicator={false}
             style={styles.categoryScroller}
             contentContainerStyle={styles.categoryRail}
           >
             <TouchableOpacity
+              testID="explore.category.originals"
               accessibilityRole="button"
               accessibilityLabel="Open Trailhead Originals self-guided drives"
               style={[styles.categoryItem, { width: 80 }]}
@@ -192,6 +196,7 @@ export function ExploreHero({
             const icon = heroCategoryIcon(key, source.icon);
             return (
               <TouchableOpacity
+                testID={`explore.category.${key}`}
                 key={key}
                 style={[styles.categoryItem, { width: heroCategoryWidth(key) }]}
                 onPress={() => onCategorySelect(key)}

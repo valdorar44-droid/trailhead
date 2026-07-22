@@ -100,12 +100,12 @@ export default function OfflineDownloadsSection({ ownerScope }: { ownerScope: st
   if (visibleJobs.length === 0 && installations.length === 0) return null;
 
   return (
-    <View style={styles.section}>
+    <View style={styles.section} testID="offline.v2-downloads.section">
       <View style={styles.headingRow}>
         <Text style={[styles.heading, { color: C.text }]}>Downloads</Text>
         <Text style={[styles.count, { color: C.text2 }]}>{installations.length || visibleJobs.length}</Text>
       </View>
-      <View style={[styles.list, { borderColor: C.border, backgroundColor: C.s1 }]}>
+      <View style={[styles.list, { borderColor: C.border, backgroundColor: C.s1 }]} testID="offline.v2-downloads.list">
         {visibleJobs.map((job, index) => {
           const progress = progressFor(job);
           const active = ['preparing', 'queued', 'downloading', 'verifying'].includes(job.status);
@@ -113,6 +113,7 @@ export default function OfflineDownloadsSection({ ownerScope }: { ownerScope: st
           return (
             <View
               key={job.job_id}
+              testID={`offline.v2-downloads.job.${job.job_id}`}
               style={[styles.row, index > 0 && { borderTopColor: C.border, borderTopWidth: StyleSheet.hairlineWidth }]}
             >
               <View style={[styles.icon, { backgroundColor: `${C.orange}18` }]}>
@@ -120,17 +121,18 @@ export default function OfflineDownloadsSection({ ownerScope }: { ownerScope: st
               </View>
               <View style={styles.copy}>
                 <Text style={[styles.title, { color: C.text }]} numberOfLines={1}>{job.label}</Text>
-                <Text style={[styles.meta, { color: C.text2 }]} numberOfLines={2}>
+                <Text testID={`offline.v2-downloads.job.${job.job_id}.status`} style={[styles.meta, { color: C.text2 }]} numberOfLines={2}>
                   {statusLabel(job)} · {formatBytes(job.manifest?.required_storage_bytes || progress.total)}
                 </Text>
                 {(active || job.status === 'paused') && progress.total > 0 ? (
-                  <View style={[styles.progressTrack, { backgroundColor: C.border }] }>
+                  <View testID={`offline.v2-downloads.job.${job.job_id}.progress`} style={[styles.progressTrack, { backgroundColor: C.border }] }>
                     <View style={[styles.progressFill, { backgroundColor: C.orange, width: `${progress.percentage}%` }]} />
                   </View>
                 ) : null}
               </View>
               {busyId === job.job_id ? <ActivityIndicator size="small" color={C.orange} /> : active ? (
                 <TouchableOpacity
+                  testID={`offline.v2-downloads.job.${job.job_id}.pause`}
                   accessibilityRole="button"
                   accessibilityLabel={`Pause ${job.label}`}
                   onPress={() => void act(job, 'pause')}
@@ -140,6 +142,7 @@ export default function OfflineDownloadsSection({ ownerScope }: { ownerScope: st
                 </TouchableOpacity>
               ) : canResume ? (
                 <TouchableOpacity
+                  testID={`offline.v2-downloads.job.${job.job_id}.${job.status === 'repair_required' ? 'repair' : 'resume'}`}
                   accessibilityRole="button"
                   accessibilityLabel={`${job.status === 'repair_required' ? 'Repair' : 'Resume'} ${job.label}`}
                   onPress={() => void act(job, 'resume')}
@@ -149,6 +152,7 @@ export default function OfflineDownloadsSection({ ownerScope }: { ownerScope: st
                 </TouchableOpacity>
               ) : job.status === 'ready' && job.manifest ? (
                 <TouchableOpacity
+                  testID={`offline.v2-downloads.job.${job.job_id}.remove`}
                   accessibilityRole="button"
                   accessibilityLabel={`Remove ${job.label} download`}
                   onPress={() => Alert.alert(
@@ -170,6 +174,7 @@ export default function OfflineDownloadsSection({ ownerScope }: { ownerScope: st
         {visibleJobs.length === 0 && installations.map((installation, index) => (
           <View
             key={`${installation.bundle_id}@${installation.revision}`}
+            testID={`offline.v2-downloads.installation.${installation.bundle_id}.${installation.revision}`}
             style={[styles.row, index > 0 && { borderTopColor: C.border, borderTopWidth: StyleSheet.hairlineWidth }]}
           >
             <View style={[styles.icon, { backgroundColor: `${C.orange}18` }]}>
@@ -181,6 +186,7 @@ export default function OfflineDownloadsSection({ ownerScope }: { ownerScope: st
             </View>
             {busyId === installation.bundle_id ? <ActivityIndicator size="small" color={C.orange} /> : (
               <TouchableOpacity
+                testID={`offline.v2-downloads.installation.${installation.bundle_id}.${installation.revision}.remove`}
                 accessibilityRole="button"
                 accessibilityLabel="Remove offline area download"
                 onPress={() => Alert.alert(

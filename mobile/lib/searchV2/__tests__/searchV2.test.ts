@@ -19,6 +19,7 @@ import {
   SearchV2SessionController,
   type SearchV2Scheduler,
 } from '../session';
+import { runSearchRaceQaCheck } from '../qaAcceptance';
 import type { SearchPageV2, SearchRequestV2, SearchResultV2 } from '../types';
 
 test('Explore search maps visible filters to real server facets', () => {
@@ -829,7 +830,7 @@ test('full results keep useful offline rows visible instead of replacing them wi
   assert.equal(controller.getState().loadingPresentation, 'none');
 });
 
-test('session rejects a slow stale response even when transport ignores abort', async () => {
+test('slow-A/fast-B rejects stale results and requires explicit selection', async () => {
   const scheduler = new ManualScheduler();
   const requests = new Map<string, ReturnType<typeof deferred<SearchPageV2>>>();
   const client = pageClient({
@@ -855,7 +856,24 @@ test('session rejects a slow stale response even when transport ignores abort', 
 
   assert.equal(controller.getState().query, 'Yosemite');
   assert.deepEqual(controller.getState().results.map(item => item.title), ['Yosemite']);
+  assert.equal(
+    controller.getState().results.some(item => item.result_id === 'moab'),
+    false,
+    'the late A response must never enter the current B result set',
+  );
   assert.equal(controller.getState().selectedResult, null);
+
+  const selected = await controller.resolveResult('yosemite');
+  assert.equal(selected?.result_id, 'yosemite');
+  assert.equal(controller.getState().selectedResult?.result_id, 'yosemite');
+});
+
+test('preview search-race evidence exercises the same deterministic contract', async () => {
+  assert.deepEqual(await runSearchRaceQaCheck(), {
+    explicitSelectionConfirmed: true,
+    noAutomaticSelection: true,
+    staleResponseRejected: true,
+  });
 });
 
 test('changing search context restarts the active session and rejects old-context results', async () => {

@@ -60,5 +60,17 @@ assert.equal(args.command, 'scenario');
 assert.deepEqual(args.serials, ['one', 'two']);
 assert.equal(args.executeSafeActions, true);
 assert.throws(() => parseArgs(['capture', '--record-seconds', '31']), /0 to 30/);
+const evidenceArgs = parseArgs([
+  'capture',
+  '--runtime', 'native-1.0.10-android.1',
+  '--build-id', '06142308-0199-46cc-8a4c-fb9d45bca25e',
+  '--update-id', '019f8a0e-c002-75e4-b52b-1f20b9128950',
+  '--account-role', 'admin',
+  '--feature-stage', 'TRAILHEAD_ORIGINALS_STAGE=internal',
+]);
+assert.equal(evidenceArgs.accountRole, 'admin');
+assert.deepEqual(evidenceArgs.featureStages, ['TRAILHEAD_ORIGINALS_STAGE=internal']);
+assert.throws(() => parseArgs(['capture', '--account-role', 'owner']), /guest, account, explorer, or admin/);
+assert.throws(() => parseArgs(['capture', '--feature-stage', 'SEARCH_QUERY=Moab weekend']), /SAFE_FLAG=value/);
 
 console.log('PASS: Android audit harness helpers');

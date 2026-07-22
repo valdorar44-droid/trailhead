@@ -15,8 +15,9 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { mono, useTheme, type ColorPalette } from '@/lib/design';
+import { useTheme, type ColorPalette } from '@/lib/design';
 import { cleanExploreSourceLabel } from '@/lib/exploreContextFilters';
+import { trailheadFonts } from '@/lib/typography';
 
 export type MapSearchResultItem = {
   name: string;
@@ -98,16 +99,35 @@ export default function MapSearchSheet({
 
   return (
     <Modal visible={visible} animationType="slide" presentationStyle="pageSheet" onRequestClose={close}>
-      <SafeAreaView style={s.modal}>
+      <SafeAreaView style={s.modal} edges={['top', 'left', 'right']} testID="map.search.sheet">
         <KeyboardAvoidingView style={s.flex} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={s.header}>
-            <TouchableOpacity style={s.iconBtn} onPress={close} hitSlop={8}>
+            <TouchableOpacity
+              style={s.iconBtn}
+              onPress={close}
+              hitSlop={8}
+              accessibilityRole="button"
+              accessibilityLabel="Close search"
+              testID="map.search.close"
+            >
               <Ionicons name="chevron-back" size={22} color={C.text} />
             </TouchableOpacity>
-            <View style={s.searchBox}>
+            <Text style={s.title}>Search</Text>
+            <TouchableOpacity
+              style={s.cancelButton}
+              onPress={close}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel search"
+              testID="map.search.cancel"
+            >
+              <Text style={s.cancelText}>Cancel</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={s.searchBox} testID="map.search.field">
               <Ionicons name="search-outline" size={18} color={C.text3} />
               <TextInput
                 ref={inputRef}
+                testID="map.search.input"
                 value={query}
                 onChangeText={onQueryChange}
                 placeholder="Search camps, trails, fuel"
@@ -121,11 +141,17 @@ export default function MapSearchSheet({
               {searching ? (
                 <ActivityIndicator size="small" color={C.orange} />
               ) : cleanQuery ? (
-                <TouchableOpacity onPress={onClear} hitSlop={8}>
+                <TouchableOpacity
+                  style={s.clearButton}
+                  onPress={onClear}
+                  hitSlop={8}
+                  accessibilityRole="button"
+                  accessibilityLabel="Clear search"
+                  testID="map.search.clear"
+                >
                   <Ionicons name="close-circle" size={18} color={C.text3} />
                 </TouchableOpacity>
               ) : null}
-            </View>
           </View>
 
           <ScrollView
@@ -133,37 +159,48 @@ export default function MapSearchSheet({
             keyboardShouldPersistTaps="handled"
             contentContainerStyle={[s.content, { paddingBottom: Math.max(insets.bottom + 22, 34) }]}
           >
-            <View style={s.quickHeader}>
-              <Text style={s.sectionTitle}>Search nearby</Text>
-              <Text style={s.sectionSub}>{hasLocation ? 'Use your current area or type a place.' : 'Type a city, park, camp, trail, or service.'}</Text>
-            </View>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.quickRail}>
-              {quickActions.map(action => (
-                <TouchableOpacity key={action.label} style={s.quickChip} onPress={() => onQuickAction(action)} activeOpacity={0.84}>
-                  <Ionicons name={action.icon} size={15} color={C.orange} />
-                  <Text style={s.quickText}>{action.label}</Text>
-                </TouchableOpacity>
-              ))}
-            </ScrollView>
+            {!cleanQuery ? (
+              <>
+                <View style={s.quickHeader}>
+                  <Text style={s.sectionTitle}>{hasLocation ? 'SEARCH NEARBY' : 'QUICK SEARCH'}</Text>
+                </View>
+                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.quickRail}>
+                  {quickActions.map(action => (
+                    <TouchableOpacity
+                      key={action.id || action.label}
+                      style={s.quickChip}
+                      onPress={() => onQuickAction(action)}
+                      activeOpacity={0.84}
+                      accessibilityRole="button"
+                      accessibilityLabel={action.label}
+                      testID={`map.search.quick.${action.id || action.label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`}
+                    >
+                      <Ionicons name={action.icon} size={16} color={C.orange} />
+                      <Text style={s.quickText}>{action.label}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            ) : null}
 
             {cleanQuery.length >= 2 || searching || hasError || usableResults.length > 0 ? (
               <View style={s.resultsBlock}>
                 <View style={s.resultsHeader}>
-                  <Text style={s.sectionTitle}>Results</Text>
+                  <Text style={s.sectionTitle}>{cleanQuery ? 'SUGGESTIONS' : 'RESULTS'}</Text>
                   {usableResults.length ? <Text style={s.count}>{usableResults.length}</Text> : null}
                 </View>
                 {searching && usableResults.length === 0 ? (
-                  <View style={s.stateCard}>
+                  <View style={s.stateCard} testID="map.search.loading">
                     <ActivityIndicator size="small" color={C.orange} />
                     <Text style={s.stateText}>Looking nearby</Text>
                   </View>
                 ) : hasError ? (
-                  <View style={s.stateCard}>
+                  <View style={s.stateCard} testID="map.search.error">
                     <Ionicons name="cloud-offline-outline" size={18} color={C.text3} />
                     <Text style={s.stateText}>Search is not available right now.</Text>
                   </View>
                 ) : usableResults.length === 0 ? (
-                  <View style={s.stateCard}>
+                  <View style={s.stateCard} testID="map.search.empty">
                     <Ionicons name="search-outline" size={18} color={C.text3} />
                     <Text style={s.stateText}>Try a nearby town, park, or service.</Text>
                   </View>
@@ -172,6 +209,7 @@ export default function MapSearchSheet({
                     <ResultRow
                       key={place.result_id || `${place.name}:${place.lat ?? 'pending'}:${place.lng ?? 'pending'}:${idx}`}
                       place={place}
+                      testID={`map.search.result.${place.result_id || `${place.name}:${place.lat ?? 'pending'}:${place.lng ?? 'pending'}`}`}
                       colors={C}
                       styles={s}
                       onPress={() => onSelect(place)}
@@ -188,6 +226,7 @@ export default function MapSearchSheet({
                     <TouchableOpacity
                       key={`${item.name}-${idx}`}
                       style={s.recentRow}
+                      testID={`map.search.recent.${idx}`}
                       onPress={() => {
                         onQueryChange(item.name);
                         onSubmit(item.name);
@@ -220,12 +259,14 @@ export default function MapSearchSheet({
 
 function ResultRow({
   place,
+  testID,
   colors,
   styles,
   onPress,
   onRoute,
 }: {
   place: MapSearchResultItem;
+  testID: string;
   colors: ColorPalette;
   styles: ReturnType<typeof makeStyles>;
   onPress: () => void;
@@ -243,7 +284,14 @@ function ResultRow({
   ].filter(Boolean).join(' · ');
   const detail = searchResultDetail(place);
   return (
-    <TouchableOpacity style={styles.resultRow} onPress={onPress} activeOpacity={0.86}>
+    <TouchableOpacity
+      style={styles.resultRow}
+      onPress={onPress}
+      activeOpacity={0.86}
+      accessibilityRole="button"
+      accessibilityLabel={[place.name, source, detail].filter(Boolean).join(', ')}
+      testID={testID}
+    >
       <View style={styles.resultIcon}>
         <Ionicons name={iconForPlace(place)} size={16} color={colors.orange} />
       </View>
@@ -254,7 +302,14 @@ function ResultRow({
           <Text style={styles.resultDetail}>{detail}</Text>
         )}
       </View>
-      <TouchableOpacity style={styles.routeBtn} onPress={onRoute} hitSlop={8}>
+      <TouchableOpacity
+        style={styles.routeBtn}
+        onPress={onRoute}
+        hitSlop={8}
+        accessibilityRole="button"
+        accessibilityLabel={`Route to ${place.name}`}
+        testID={`${testID}.route`}
+      >
         {place.resolving ? (
           <ActivityIndicator size="small" color={colors.orange} />
         ) : (
@@ -301,59 +356,73 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   flex: { flex: 1 },
   modal: { flex: 1, backgroundColor: C.bg },
   header: {
-    minHeight: 64,
+    minHeight: 60,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s1,
+    gap: 8,
+    paddingHorizontal: 12,
   },
   iconBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
+    width: Platform.OS === 'android' ? 48 : 44,
+    height: Platform.OS === 'android' ? 48 : 44,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: C.s2,
   },
-  searchBox: {
+  title: {
     flex: 1,
-    minHeight: 44,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    backgroundColor: C.s2,
+    color: C.text,
+    fontFamily: trailheadFonts.displayBold,
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  cancelButton: {
+    minWidth: 62,
+    minHeight: Platform.OS === 'android' ? 48 : 44,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  cancelText: { color: C.orange, fontSize: 14, lineHeight: 18, fontWeight: '700' },
+  searchBox: {
+    minHeight: 48,
+    marginHorizontal: 16,
+    borderRadius: 12,
+    borderWidth: 2,
+    borderColor: C.orange,
+    backgroundColor: C.s1,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
-    paddingHorizontal: 12,
+    paddingLeft: 13,
   },
-  input: { flex: 1, color: C.text, fontSize: 15, fontWeight: '800', paddingVertical: 0 },
-  content: { padding: 16, gap: 18 },
+  input: { flex: 1, minHeight: 48, color: C.text, fontSize: 15, lineHeight: 20, fontWeight: '600', paddingVertical: 0 },
+  clearButton: {
+    width: Platform.OS === 'android' ? 48 : 44,
+    height: Platform.OS === 'android' ? 48 : 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  content: { padding: 16, gap: 16 },
   quickHeader: { gap: 4 },
-  sectionTitle: { color: C.text, fontSize: 16, fontWeight: '900' },
-  sectionSub: { color: C.text3, fontSize: 12, lineHeight: 17 },
+  sectionTitle: { color: C.text2, fontSize: 12, lineHeight: 16, fontWeight: '700', letterSpacing: 0.2 },
   quickRail: { gap: 8, paddingRight: 8 },
   quickChip: {
-    minHeight: 38,
+    minHeight: Platform.OS === 'android' ? 48 : 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
-    borderRadius: 999,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: C.orange + '45',
-    backgroundColor: C.orange + '10',
+    borderColor: C.border,
+    backgroundColor: C.s1,
     paddingHorizontal: 12,
   },
-  quickText: { color: C.text2, fontSize: 12, fontWeight: '800' },
+  quickText: { color: C.text, fontSize: 13, lineHeight: 18, fontWeight: '700' },
   resultsBlock: { gap: 10 },
   resultsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  count: { color: C.text3, fontSize: 11, fontFamily: mono, fontWeight: '900' },
+  count: { color: C.text3, fontSize: 12, lineHeight: 16, fontWeight: '600' },
   stateCard: {
-    minHeight: 74,
-    borderRadius: 18,
+    minHeight: 72,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
@@ -362,10 +431,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     gap: 10,
     padding: 14,
   },
-  stateText: { flex: 1, color: C.text2, fontSize: 13, lineHeight: 18, fontWeight: '700' },
+  stateText: { flex: 1, color: C.text2, fontSize: 14, lineHeight: 20, fontWeight: '600' },
   resultRow: {
-    minHeight: 78,
-    borderRadius: 18,
+    minHeight: 72,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
@@ -373,11 +442,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 12,
-    paddingVertical: 11,
+    paddingVertical: 8,
   },
   recentRow: {
-    minHeight: 62,
-    borderRadius: 16,
+    minHeight: 64,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: C.border,
     backgroundColor: C.s1,
@@ -388,23 +457,21 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     paddingVertical: 10,
   },
   resultIcon: {
-    width: 38,
-    height: 38,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: C.orange + '45',
-    backgroundColor: C.orange + '10',
-  },
-  resultCopy: { flex: 1, minWidth: 0, gap: 3 },
-  resultName: { color: C.text, fontSize: 14, lineHeight: 18, fontWeight: '900' },
-  resultMeta: { color: C.text2, fontSize: 11, lineHeight: 15, fontWeight: '700' },
-  resultDetail: { color: C.text3, fontSize: 10.5, lineHeight: 14 },
-  routeBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: C.s2,
+  },
+  resultCopy: { flex: 1, minWidth: 0, gap: 3 },
+  resultName: { color: C.text, fontSize: 15, lineHeight: 22, fontWeight: '700' },
+  resultMeta: { color: C.text2, fontSize: 13, lineHeight: 18, fontWeight: '500' },
+  resultDetail: { color: C.text3, fontSize: 12, lineHeight: 17 },
+  routeBtn: {
+    width: Platform.OS === 'android' ? 48 : 44,
+    height: Platform.OS === 'android' ? 48 : 44,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: C.s2,

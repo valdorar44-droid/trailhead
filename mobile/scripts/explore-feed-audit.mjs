@@ -52,8 +52,10 @@ assert(
   'Mobile API wrapper for bulk Explore detail hydration is missing.',
 );
 assert(
-  guide.includes('exploreVisibleLimit + EXPLORE_VISIBLE_STEP') && guide.includes('getExplorePlacesBulk'),
-  'Explorer feed must hydrate the visible page plus the next page with the bulk endpoint.',
+  guide.includes('detailHydrationWindow')
+    && guide.includes('rankedExplore.slice(0, Math.min(rankedExplore.length, exploreVisibleLimit))')
+    && guide.includes('getExplorePlacesBulk'),
+  'Explorer feed must hydrate only the explicitly visible window with the bulk endpoint.',
 );
 assert(
   /for \(let index = 0; index < candidates\.length; index \+= 24\)/.test(guide),

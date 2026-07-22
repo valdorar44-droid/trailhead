@@ -1,11 +1,30 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { delimiter, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const mobileRoot = join(dirname(fileURLToPath(import.meta.url)), '..');
 const repoRoot = join(mobileRoot, '..');
+const androidRoot = join(mobileRoot, 'android');
+
+function resolvedAndroidJavaEnvironment() {
+  const candidates = [
+    process.env.JAVA_HOME,
+    join(homedir(), '.local', 'share', 'jdks', 'temurin-17'),
+    '/usr/lib/jvm/java-17-openjdk-amd64',
+    '/usr/lib/jvm/temurin-17-jdk-amd64',
+  ].filter(Boolean);
+  const javaHome = candidates.find(candidate => (
+    existsSync(join(candidate, 'bin', process.platform === 'win32' ? 'java.exe' : 'java'))
+  ));
+  if (!javaHome) return {};
+  return {
+    JAVA_HOME: javaHome,
+    PATH: `${join(javaHome, 'bin')}${delimiter}${process.env.PATH ?? ''}`,
+  };
+}
 
 const checks = [
   {
@@ -13,6 +32,61 @@ const checks = [
     cwd: mobileRoot,
     cmd: 'node',
     args: ['scripts/native-drift-check.mjs'],
+  },
+  {
+    label: 'Pinned Maestro flow contract',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/maestro-config.test.mjs'],
+  },
+  {
+    label: 'Stable automation selector contract',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/automation-selector-contract.test.mjs'],
+  },
+  {
+    label: 'Release worktree publication guard',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/release-worktree.test.mjs'],
+  },
+  {
+    label: 'Release commit identity',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/release-identity.test.mjs'],
+  },
+  {
+    label: 'Paired EAS production-build evidence',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/eas-build-evidence.test.mjs'],
+  },
+  {
+    label: 'Paired EAS update evidence',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/eas-update-evidence.test.mjs'],
+  },
+  {
+    label: 'Release environment contract',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/release-environment.test.mjs'],
+  },
+  {
+    label: 'Version-pinned Originals route fixture',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['--import', 'tsx', 'scripts/original-route-fixture.test.ts'],
+  },
+  {
+    label: 'Android Auto debug unit tests',
+    cwd: androidRoot,
+    cmd: process.platform === 'win32' ? 'gradlew.bat' : './gradlew',
+    args: [':app:testDebugUnitTest'],
+    env: resolvedAndroidJavaEnvironment(),
   },
   {
     label: 'Mission flyover native/JS smoke',
@@ -39,16 +113,22 @@ const checks = [
     args: ['--import', 'tsx', 'lib/__tests__/mobileLifecycle.test.ts'],
   },
   {
-    label: 'Sentry privacy sanitization tests',
+    label: 'Map layers and filters routing tests',
     cwd: mobileRoot,
     cmd: 'node',
-    args: ['--import', 'tsx', 'lib/telemetry/__tests__/sanitize.test.ts'],
+    args: ['--import', 'tsx', 'lib/__tests__/mapLayersFiltersController.test.ts'],
+  },
+  {
+    label: 'Sentry privacy, QA guard, and diagnostics tests',
+    cwd: mobileRoot,
+    cmd: 'npm',
+    args: ['run', 'test:telemetry'],
   },
   {
     label: 'Referral link attribution tests',
     cwd: mobileRoot,
-    cmd: 'node',
-    args: ['--import', 'tsx', 'lib/referrals/__tests__/referralLinks.test.ts'],
+    cmd: 'npm',
+    args: ['run', 'test:referrals'],
   },
   {
     label: 'Universal and app-link routing tests',
@@ -79,6 +159,12 @@ const checks = [
     cwd: mobileRoot,
     cmd: 'node',
     args: ['scripts/explore-feed-audit.mjs'],
+  },
+  {
+    label: 'Explore source-level image and pagination guard',
+    cwd: mobileRoot,
+    cmd: 'node',
+    args: ['scripts/explore-memory-guard.test.mjs'],
   },
   {
     label: 'Explore live API audit',
@@ -112,10 +198,10 @@ const checks = [
     env: { NODE_OPTIONS: '--max-old-space-size=4096' },
   },
   {
-    label: 'Storyboard and Co-Pilot bridge tests',
+    label: 'Full backend regression suite',
     cwd: repoRoot,
     cmd: 'python',
-    args: ['-m', 'unittest', 'tests.test_mission_storyboard', 'tests.test_copilot_tool_bridge'],
+    args: ['-m', 'unittest', 'discover', '-s', 'tests'],
   },
   {
     label: 'Whitespace diff check',

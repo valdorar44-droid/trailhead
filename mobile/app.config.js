@@ -1,4 +1,5 @@
 const enabled = value => /^(1|true|yes|on|enabled)$/i.test(String(value || ''));
+const { resolveReleaseCommitSha } = require('./scripts/release-identity.cjs');
 const branchApiKey = process.env.BRANCH_API_KEY || process.env.EXPO_PUBLIC_BRANCH_KEY || '';
 const branchDomain = process.env.EXPO_PUBLIC_BRANCH_DOMAIN || 'go.gettrailhead.app';
 const branchAlternateDomain = process.env.EXPO_PUBLIC_BRANCH_ALTERNATE_DOMAIN || '';
@@ -9,6 +10,7 @@ const branchProvidedDomains = String(
 const branchUniversalLinkDomains = [
   ...new Set([branchDomain, branchAlternateDomain, ...branchProvidedDomains].filter(Boolean)),
 ];
+const releaseCommitSha = resolveReleaseCommitSha(process.env);
 const sentryPluginOptions = {
   url: process.env.SENTRY_URL || 'https://sentry.io/',
   ...(process.env.SENTRY_ORG ? { organization: process.env.SENTRY_ORG } : {}),
@@ -188,6 +190,7 @@ module.exports = {
     ],
     experiments: { typedRoutes: true },
     extra: {
+      releaseCommitSha,
       uiSystemV2Enabled: enabled(
         process.env.EXPO_PUBLIC_UI_SYSTEM_V2_ENABLED || process.env.UI_SYSTEM_V2_ENABLED || '',
       ),

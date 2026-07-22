@@ -674,7 +674,7 @@ export default function TripsScreen() {
 
           {repositoryReady ? (
             <>
-              <View onLayout={event => { sectionOffsets.current.originals = event.nativeEvent.layout.y; }}>
+            <View testID="plan.originals.anchor" onLayout={event => { sectionOffsets.current.originals = event.nativeEvent.layout.y; }}>
                 <OwnedOriginalsSection
                   requestedOriginalId={requestedPlanDestination?.section === 'originals'
                     ? requestedPlanDestination.item_id
@@ -682,11 +682,12 @@ export default function TripsScreen() {
                   onRequestedOriginalHandled={handleRequestedOriginal}
                 />
               </View>
-              <View onLayout={event => { sectionOffsets.current.downloads = event.nativeEvent.layout.y; }}>
+            <View testID="plan.downloads.anchor" onLayout={event => { sectionOffsets.current.downloads = event.nativeEvent.layout.y; }}>
                 <View style={styles.section}>
                   <Text style={[styles.sectionTitle, { color: C.text }]}>Downloads</Text>
-                  <TouchableOpacity
-                    accessibilityRole="button"
+              <TouchableOpacity
+                testID="plan.downloads.manage"
+                accessibilityRole="button"
                     accessibilityLabel="Manage offline downloads"
                     onPress={openDownloads}
                     style={[styles.downloadsRow, { backgroundColor: C.s1, borderColor: C.border }]}

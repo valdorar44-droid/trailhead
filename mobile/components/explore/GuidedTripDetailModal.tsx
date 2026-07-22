@@ -60,7 +60,7 @@ export function GuidedTripDetailModal({
               >
                 {details.images.length ? details.images.map((image, index) => (
                   <View key={`${image.url}:${index}`} style={[styles.heroFrame, { width: heroWidth, backgroundColor: C.s2 }]}>
-                    <Image source={{ uri: mediaUrl(image.url) }} style={styles.heroImage} resizeMode="cover" />
+                    <Image source={{ uri: mediaUrl(image.url) }} style={styles.heroImage} resizeMode="cover" resizeMethod="resize" />
                   </View>
                 )) : (
                   <View style={[styles.heroFrame, styles.heroFallback, { width: heroWidth, backgroundColor: C.s2 }]}>

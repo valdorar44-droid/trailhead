@@ -409,6 +409,7 @@ export const api = {
     body: JSON.stringify(data),
   }),
   productFeatures: () => req<ProductFeatures>('/api/product/features'),
+  adminQaDiagnostics: () => req<AdminQaDiagnosticsV1>('/api/admin/qa/diagnostics'),
   getCommunicationPreferences: () =>
     req<CommunicationPreferences>('/api/communication-preferences'),
   updateCommunicationPreferences: (preferences: CommunicationPreferencesUpdate) =>
@@ -2436,6 +2437,23 @@ export interface ProductFeatures {
   community_ratings?: boolean;
   brief_and_backup?: boolean;
   digest_preferences?: boolean;
+}
+export type QaBinaryRolloutStageV1 = 'off' | 'public';
+export type OriginalsRolloutStageV1 = 'off' | 'internal' | 'public_beta' | 'public';
+export interface AdminQaDiagnosticsV1 {
+  schema: 'admin_qa_diagnostics_v1';
+  configured: {
+    search_v2: QaBinaryRolloutStageV1;
+    offline_v2: QaBinaryRolloutStageV1;
+    ui_system_v2: QaBinaryRolloutStageV1;
+    originals: OriginalsRolloutStageV1;
+  };
+  effective_access: {
+    search_v2: boolean;
+    offline_v2: boolean;
+    ui_system_v2: boolean;
+    originals: boolean;
+  };
 }
 export type CommunityRatingKind = 'camp' | 'trail' | 'trailhead' | 'place';
 export interface RatingSummaryV1 {

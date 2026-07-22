@@ -63,7 +63,12 @@ export function ExplorePlaceCard({
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
   const safeImageUrl = isRenderableImageUrl(imageUrl) ? imageUrl : '';
   const renderMedia = (height: number) => safeImageUrl ? (
-    <Image source={{ uri: safeImageUrl }} style={styles.image} resizeMode="cover" />
+    <Image
+      source={{ uri: safeImageUrl }}
+      style={styles.image}
+      resizeMode="cover"
+      resizeMethod="resize"
+    />
   ) : hasCoordinates ? (
     <StaticMapboxPreview
       pins={[{ id: place.id, title, lat, lng, kind: getExploreCategoryKey(place), active: true }]}

@@ -45,6 +45,7 @@ import {
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
 import { useScreenActivity } from '@/lib/screenActivity';
+import { boundedRetainedScrollOffset } from '@/lib/screenActivityState';
 import { adaptExploreHubSheet, type PlaceSheetModel } from '@/lib/placeSheetAdapters';
 import {
   initialSheetCoordinatorState,
@@ -121,8 +122,10 @@ const EXPLORE_CAMPGROUNDS_CACHE_PREFIX = 'trailhead_explore_campgrounds_v1:';
 const EXPLORE_TRAIL_AREA_CACHE_PREFIX = 'trailhead_explore_trail_area_v2:';
 const EXPLORE_EXPERIENCES_CACHE_PREFIX = 'trailhead_explore_experiences_v1:';
 const EXPLORE_GUIDED_FALLBACK_CACHE_PREFIX = 'trailhead_explore_guided_fallback_v1:';
-const EXPLORE_INITIAL_VISIBLE = 48;
-const EXPLORE_VISIBLE_STEP = 48;
+// A long Explore feed can contain very large source photographs. Keep the first
+// render bounded and let the existing pagination controls reveal more on demand.
+const EXPLORE_INITIAL_VISIBLE = 16;
+const EXPLORE_VISIBLE_STEP = 16;
 const API_BASE = TRAILHEAD_API_BASE;
 const BOOKABLE_EXPERIENCES_ENABLED = true;
 
@@ -2375,6 +2378,32 @@ function GuideScreenContent() {
   const explorePlacesRef = useRef<ExplorePlaceProfile[]>([]);
   const exploreCatalogPagesRef = useRef<Record<string, ExploreCatalogPageState>>({});
   const storyScrollRef = useRef<ScrollView | null>(null);
+  const exploreScrollRef = useRef<ScrollView | null>(null);
+  const exploreScrollOffsetRef = useRef(0);
+  const exploreScrollContentHeightRef = useRef(0);
+  const exploreScrollViewportHeightRef = useRef(0);
+
+  const reconcileExploreScrollBounds = useCallback(() => {
+    const nextOffset = boundedRetainedScrollOffset(
+      exploreScrollOffsetRef.current,
+      exploreScrollContentHeightRef.current,
+      exploreScrollViewportHeightRef.current,
+    );
+    if (nextOffset + 1 >= exploreScrollOffsetRef.current) return;
+    exploreScrollOffsetRef.current = nextOffset;
+    exploreScrollRef.current?.scrollTo({ y: nextOffset, animated: false });
+  }, []);
+
+  useEffect(() => {
+    // Disable stale Android native-view restoration on a cold component mount.
+    // The component stays mounted between tabs, so warm returns still retain
+    // the user's actual position through exploreScrollOffsetRef.
+    const frame = requestAnimationFrame(() => {
+      exploreScrollOffsetRef.current = 0;
+      exploreScrollRef.current?.scrollTo({ y: 0, animated: false });
+    });
+    return () => cancelAnimationFrame(frame);
+  }, []);
   const storyTimers = useRef<ReturnType<typeof setTimeout>[]>([]);
   const requestedView = Array.isArray(params.view) ? params.view[0] : params.view;
   const guidedDestinationContextActive = !!guidedTourSelectedDestinationKey
@@ -2693,7 +2722,6 @@ function GuideScreenContent() {
 
   useEffect(() => {
     let cancelled = false;
-    let backgroundTimer: ReturnType<typeof setTimeout> | null = null;
     const homePageSpec = exploreCatalogPageSpec('', '', 'best');
 
     const mergeById = (base: ExplorePlaceProfile[], next: ExplorePlaceProfile[]) => {
@@ -2737,45 +2765,8 @@ function GuideScreenContent() {
       }
     };
 
-    const hydrateRemainingCatalog = async (cursor: number | null | undefined, seededPlaces: ExplorePlaceProfile[]) => {
-      if (cursor == null) return;
-      const currentPage = exploreCatalogPagesRef.current[homePageSpec.key];
-      if (currentPage?.loading || currentPage?.nextCursor !== cursor) return;
-      updateExploreCatalogPage(homePageSpec.key, current => ({ ...current, loading: true }));
-      let nextCursor: number | null = cursor;
-      let allPlaces = seededPlaces;
-      let totalCount = currentPage?.totalCount || seededPlaces.length;
-      try {
-        for (let page = 0; nextCursor != null && page < 2; page += 1) {
-          const requestedCursor: number = nextCursor;
-          const catalog = await api.getExploreCatalogIndex({ limit: 180, cursor: requestedCursor });
-          if (cancelled) return;
-          const pagePlaces = (catalog.places ?? []).map(exploreIndexItemToProfile);
-          allPlaces = mergeById(allPlaces, pagePlaces);
-          setExplorePlaces(current => mergeById(current, pagePlaces));
-          totalCount = Number(catalog.total_count || catalog.count || totalCount || allPlaces.length);
-          nextCursor = catalog.next_cursor === requestedCursor ? null : catalog.next_cursor ?? null;
-          updateExploreCatalogPage(homePageSpec.key, {
-            nextCursor,
-            totalCount,
-            loading: nextCursor != null && page < 1,
-          });
-          if (nextCursor != null) await new Promise(resolve => setTimeout(resolve, 220));
-        }
-      } finally {
-        if (!cancelled) {
-          updateExploreCatalogPage(homePageSpec.key, current => ({ ...current, nextCursor, totalCount, loading: false }));
-          storage.set(EXPLORE_CACHE_KEY, JSON.stringify({
-            places: allPlaces,
-            next_cursor: nextCursor,
-            total_count: totalCount,
-            fetched_at: Date.now(),
-          })).catch(() => {});
-        }
-      }
-    };
-
-    // Compact home load: show a curated first page, keep source-rich data findable through search/filter.
+    // Keep startup compact. Additional catalog pages are fetched only after the
+    // user asks for them, while Search V2 remains responsible for full discovery.
     setExploreLoading(true);
     (async () => {
       const applyFirstPage = (firstPage: Awaited<ReturnType<typeof api.getExploreHome>>) => {
@@ -2796,13 +2787,8 @@ function GuideScreenContent() {
         setExploreError('');
         setExploreCatalogNotice('');
         setExploreLoading(false);
-        backgroundTimer = setTimeout(() => {
-          hydrateRemainingCatalog(nextCursor, firstPlaces).catch(() => {
-            updateExploreCatalogPage(homePageSpec.key, current => ({ ...current, loading: false }));
-          });
-        }, 1200);
       };
-      const firstPageRequest = api.getExploreHome({ mode: 'featured', sort: 'best', limit: 120 });
+      const firstPageRequest = api.getExploreHome({ mode: 'featured', sort: 'best', limit: 48 });
       try {
         const firstPage = await withExploreTimeout(firstPageRequest);
         if (cancelled) return;
@@ -2841,7 +2827,6 @@ function GuideScreenContent() {
 
     return () => {
       cancelled = true;
-      if (backgroundTimer) clearTimeout(backgroundTimer);
     };
   }, [exploreCatalogReloadId, updateExploreCatalogPage]);
 
@@ -3906,7 +3891,7 @@ function GuideScreenContent() {
   const exploreCatalogPageLoading = !!activeExploreCatalogPage?.loading;
   const exploreLocalRemaining = Math.max(0, rankedExplore.length - visibleRankedExplore.length);
   const detailHydrationWindow = useMemo(
-    () => rankedExplore.slice(0, Math.min(rankedExplore.length, exploreVisibleLimit + EXPLORE_VISIBLE_STEP)),
+    () => rankedExplore.slice(0, Math.min(rankedExplore.length, exploreVisibleLimit)),
     [exploreVisibleLimit, rankedExplore],
   );
   const visibleExplorePrefetchKey = detailHydrationWindow.map(({ place }) => place.id).join('|');
@@ -4057,7 +4042,7 @@ function GuideScreenContent() {
             return exploreHomeShelfKey(place, exploreHubMeta.categoryKeysByHubId) === key;
           })
           .sort((a, b) => (a.place.summary.hero_rank ?? a.place.summary.rank) - (b.place.summary.hero_rank ?? b.place.summary.rank))
-          .slice(0, 3);
+          .slice(0, 2);
         rows.forEach(({ place }) => used.add(place.id));
         return {
           key,
@@ -4892,7 +4877,7 @@ function GuideScreenContent() {
         place={place}
         compact={compact}
         lead={idx === 0}
-        imageUrl={mediaUrl(place.summary.image_url || place.summary.thumbnail_url)}
+        imageUrl={mediaUrl(place.summary.thumbnail_url || place.summary.image_url)}
         context={{
           distanceMi: distance,
           day,
@@ -4967,7 +4952,7 @@ function GuideScreenContent() {
                 >
                   <View style={s.campgroundImageWrap}>
                     {image ? (
-                      <Image source={{ uri: image }} style={s.campgroundImage} resizeMode="cover" />
+                      <Image source={{ uri: image }} style={s.campgroundImage} resizeMode="cover" resizeMethod="resize" />
                     ) : (
                       <View style={s.campgroundImageFallback}>
                         <Ionicons name="bonfire-outline" size={28} color={C.orange} />
@@ -5758,8 +5743,34 @@ function GuideScreenContent() {
   }
 
   return (
-    <SafeAreaView style={s.container} edges={['left', 'right', 'bottom']}>
-      <ScrollView style={s.scroll} contentContainerStyle={s.scrollContent}>
+    <SafeAreaView style={s.container} edges={['left', 'right', 'bottom']} testID="explore.screen">
+      <ScrollView
+        ref={exploreScrollRef}
+        testID="explore.scroll"
+        style={s.scroll}
+        contentContainerStyle={s.scrollContent}
+        scrollEventThrottle={32}
+        onLayout={event => {
+          exploreScrollViewportHeightRef.current = event.nativeEvent.layout.height;
+          reconcileExploreScrollBounds();
+        }}
+        onContentSizeChange={(_width, height) => {
+          exploreScrollContentHeightRef.current = height;
+          reconcileExploreScrollBounds();
+        }}
+        onScroll={event => {
+          const rawOffset = Math.max(0, event.nativeEvent.contentOffset.y);
+          const boundedOffset = boundedRetainedScrollOffset(
+            rawOffset,
+            exploreScrollContentHeightRef.current,
+            exploreScrollViewportHeightRef.current,
+          );
+          exploreScrollOffsetRef.current = boundedOffset;
+          if (boundedOffset + 1 < rawOffset) {
+            exploreScrollRef.current?.scrollTo({ y: boundedOffset, animated: false });
+          }
+        }}
+      >
         {tab === 'explore' ? renderLandingHeader() : renderUtilityHeader()}
 
         {tab === 'explore' && (
@@ -5897,7 +5908,7 @@ function GuideScreenContent() {
                 {filteredLiveExplorePlaces.map(place => (
                   <TouchableOpacity key={place.id} style={s.livePlaceRow} activeOpacity={0.86} onPress={() => setSelectedLivePlace(place)}>
                     {place.photo_url ? (
-                      <Image source={{ uri: mediaUrl(place.photo_url) }} style={s.livePlacePhoto} resizeMode="cover" />
+                      <Image source={{ uri: mediaUrl(place.photo_url) }} style={s.livePlacePhoto} resizeMode="cover" resizeMethod="resize" />
                     ) : (
                       <View style={s.livePlaceIcon}>
                         <Ionicons name="business-outline" size={18} color={C.orange} />

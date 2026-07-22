@@ -516,8 +516,11 @@ function ReadinessModal({
   const ready = bundle.state === 'ready';
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose}>
-      <View style={styles.modalOverlay}>
-        <View style={[styles.sheet, { backgroundColor: C.s1, borderColor: C.border }] }>
+      <View style={styles.modalOverlay} testID="original.start.overlay">
+        <View
+          style={[styles.sheet, { backgroundColor: C.s1, borderColor: C.border }]}
+          testID="original.start.sheet"
+        >
           <ScrollView
             style={styles.sheetScroll}
             contentContainerStyle={styles.sheetContent}
@@ -647,7 +650,10 @@ function StartTourModal({
 
           {showPermissionDisclosure ? (
             <>
-              <Text style={[styles.disclosureBody, { color: C.text2 }]}>
+              <Text
+                style={[styles.disclosureBody, { color: C.text2 }]}
+                testID="original.start.disclosure"
+              >
                 Trailhead uses location in the background so navigation and Original stories can continue after you lock your phone or switch apps. Location stops when you end navigation or the tour.
               </Text>
               <View style={styles.permissionList}>
@@ -659,6 +665,7 @@ function StartTourModal({
           ) : null}
 
           <TouchableOpacity
+            testID="original.start.confirm"
             accessibilityRole="checkbox"
             accessibilityState={{ checked: confirmed }}
             accessibilityLabel="I am parked or a passenger will manage the phone"
@@ -682,9 +689,18 @@ function StartTourModal({
             </View>
           ) : null}
 
-          <TrailheadButton label={showPermissionDisclosure ? 'Agree & continue' : 'Start tour'} icon="play" variant="primary" disabled={!confirmed || Boolean(starting)} loading={starting === 'tour'} onPress={() => void start('tour')} />
+          <TrailheadButton
+            testID="original.start.continue"
+            label={showPermissionDisclosure ? 'Agree & continue' : 'Start tour'}
+            icon="play"
+            variant="primary"
+            disabled={!confirmed || Boolean(starting)}
+            loading={starting === 'tour'}
+            onPress={() => void start('tour')}
+          />
           {showPermissionDisclosure ? (
             <TouchableOpacity
+              testID="original.start.not-now"
               accessibilityRole="button"
               disabled={Boolean(starting)}
               onPress={onClose}
@@ -695,7 +711,14 @@ function StartTourModal({
           ) : null}
           {onSimulate ? (
             <View style={styles.simulationAction}>
-              <TrailheadButton label="Test without driving" icon="speedometer-outline" disabled={!confirmed || Boolean(starting)} loading={starting === 'simulation'} onPress={() => void start('simulation')} />
+              <TrailheadButton
+                testID="original.start.simulate"
+                label="Test without driving"
+                icon="speedometer-outline"
+                disabled={!confirmed || Boolean(starting)}
+                loading={starting === 'simulation'}
+                onPress={() => void start('simulation')}
+              />
               <Text style={[styles.simulationNote, { color: C.text3 }]}>ADMIN TEST · SYNTHETIC GPS · SAVED DRIVE PROGRESS IS UNCHANGED</Text>
             </View>
           ) : null}

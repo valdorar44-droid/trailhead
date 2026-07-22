@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, useMemo, useCallback, useReducer, Componen
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, Keyboard, KeyboardAvoidingView, Platform, PanResponder, useWindowDimensions, InteractionManager, type ViewProps } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import NativeMap, { type NativeMapDebugEvent, type NativeMapHandle } from '@/components/NativeMap';
+import type { NativeMapDebugEvent, NativeMapHandle } from '@/components/NativeMap';
 import RouteSearchModal from '@/components/RouteSearchModal';
-import OfflineModal, { type OfflineAreaSelection } from '@/components/NativeMap/OfflineModal';
+import type { OfflineAreaSelection } from '@/components/NativeMap/OfflineModal';
 import CampCommentsSection from '@/components/map/CampCommentsSection';
 import CampCoordinatesSection from '@/components/map/CampCoordinatesSection';
 import CampFieldReportsSection from '@/components/map/CampFieldReportsSection';
@@ -424,7 +424,39 @@ const WebMapPlaceholder = forwardRef<any, WebMapPlaceholderProps>(function WebMa
     </View>
   );
 });
-const WebView: any = Platform.OS === 'web' ? WebMapPlaceholder : require('react-native-webview').WebView;
+type NativeMapComponent = typeof import('../../components/NativeMap').default;
+type OfflineModalComponent = typeof import('../../components/NativeMap/OfflineModal').default;
+
+let nativeMapComponent: NativeMapComponent | null = null;
+let nativeWebViewComponent: any = null;
+let offlineModalComponent: OfflineModalComponent | null = null;
+
+/**
+ * Expo Router keeps visited tabs mounted. Resolve the GPU map and Chromium
+ * fallback only while the Map tab is actually presented so an Explore launch
+ * does not initialize either native runtime.
+ */
+function getNativeMapComponent(): NativeMapComponent {
+  if (!nativeMapComponent) {
+    const module = require('../../components/NativeMap') as typeof import('../../components/NativeMap');
+    nativeMapComponent = module.default;
+  }
+  return nativeMapComponent;
+}
+
+function getFallbackWebViewComponent() {
+  if (Platform.OS === 'web') return WebMapPlaceholder;
+  if (!nativeWebViewComponent) nativeWebViewComponent = require('react-native-webview').WebView;
+  return nativeWebViewComponent;
+}
+
+function getOfflineModalComponent(): OfflineModalComponent {
+  if (!offlineModalComponent) {
+    const module = require('../../components/NativeMap/OfflineModal') as typeof import('../../components/NativeMap/OfflineModal');
+    offlineModalComponent = module.default;
+  }
+  return offlineModalComponent;
+}
 
 function safelyRemoveSubscription(subscription: { remove?: () => unknown } | null | undefined) {
   try {
@@ -6890,6 +6922,14 @@ function MapScreen() {
     returnContext: LayersFiltersReturnContext = 'map_shortcut',
   ) => {
     const target = resolveLayersFiltersEntry(entry);
+    if (target.surface === 'layer_gallery') {
+      // The consolidated surface does not yet contain every production layer
+      // and style. Preserve the complete gallery until its parity audit passes.
+      dispatchLayersFilters({ type: 'close' });
+      setShowMapStyleSheet(false);
+      setShowLayerSheet(true);
+      return;
+    }
     setExpandedFilterSections(current => current.includes(target.section)
       ? current
       : [...current, target.section]);
@@ -7201,6 +7241,22 @@ function MapScreen() {
   const lastAppliedRouteRestoreRef = useRef('');
   const persistedRouteIdentityRef = useRef(new Set<string>());
   const useNativeMapSurface = USE_NATIVE_MAP && !mapLoadFailed;
+  const [mapRendererHasMounted, setMapRendererHasMounted] = useState(screenActivity.isActive);
+  const mapRendererPresentationMounted = mapRendererHasMounted || screenActivity.isActive;
+  const NativeMapSurface = useMemo(
+    () => mapRendererPresentationMounted && useNativeMapSurface ? getNativeMapComponent() : null,
+    [mapRendererPresentationMounted, useNativeMapSurface],
+  );
+  const FallbackMapWebView = useMemo(
+    () => mapRendererPresentationMounted && !useNativeMapSurface ? getFallbackWebViewComponent() : null,
+    [mapRendererPresentationMounted, useNativeMapSurface],
+  );
+  const OfflineModalSurface = useMemo(
+    () => mapRendererPresentationMounted && (showOfflineModal || offlineModalComponent)
+      ? getOfflineModalComponent()
+      : null,
+    [mapRendererPresentationMounted, showOfflineModal],
+  );
   const [showLocDisclosure, setShowLocDisclosure] = useState(false);
   const [routeBuildReveal, setRouteBuildReveal] = useState(0);
   const routeBuildGeometryKeyRef = useRef('');
@@ -7212,6 +7268,10 @@ function MapScreen() {
   useEffect(() => {
     nativeMapSurfaceActiveRef.current = useNativeMapSurface;
   }, [useNativeMapSurface]);
+
+  useEffect(() => {
+    if (screenActivity.isActive) setMapRendererHasMounted(true);
+  }, [screenActivity.isActive]);
 
   const mapExperienceMode = resolveMapExperienceMode({
     navigationActive: navMode,
@@ -20971,7 +21031,7 @@ function MapScreen() {
     return (
       <TouchableOpacity key={place.id || `${place.type}:${place.lat}:${place.lng}`} style={[s.nearbyPlaceCard, compact && s.nearbyPlaceCardCompact]} onPress={() => openNearbyPlace(place, day)} activeOpacity={0.86}>
         {photo ? (
-          <Image source={{ uri: photo }} style={s.nearbyPlacePhoto} resizeMode="cover" />
+          <Image source={{ uri: photo }} style={s.nearbyPlacePhoto} resizeMode="cover" resizeMethod="resize" />
         ) : (
           <View style={s.nearbyPlaceIconBlock}>
             <Ionicons name={placeTypeIcon(place.type) as any} size={18} color={C.orange} />
@@ -23055,6 +23115,7 @@ function MapScreen() {
 
   const nativeNavigationPanel = navMode ? (
     <Animated.View
+      testID="map.navigation.hud"
       pointerEvents="box-none"
       style={[
         s.navHudAnimated,
@@ -23132,18 +23193,36 @@ function MapScreen() {
       )}
 
       <View style={s.navActions}>
-        <TouchableOpacity style={s.navEndBtn} onPress={endNavigation} hitSlop={14}>
+        <TouchableOpacity
+          style={s.navEndBtn}
+          onPress={endNavigation}
+          hitSlop={14}
+          testID="map.navigation.end"
+          accessibilityRole="button"
+          accessibilityLabel="End navigation"
+        >
           <Ionicons name="close" size={14} color={C.red} />
           <Text style={s.navEndText}>END</Text>
         </TouchableOpacity>
         {routeSteps.length > 0 && (
-          <TouchableOpacity style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={14}>
+          <TouchableOpacity
+            style={s.navStepsBtn}
+            onPress={() => setShowSteps(p => !p)}
+            hitSlop={14}
+            testID="map.navigation.turns"
+          >
             <Ionicons name="list-outline" size={14} color={C.text2} />
             <Text style={s.navStepsBtnText}>TURNS {showSteps ? '▲' : '▼'}</Text>
           </TouchableOpacity>
         )}
         {isRouted && userLoc && (
-          <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={14}>
+          <TouchableOpacity
+            style={s.navRerouteBtn}
+            onPress={manualReroute}
+            disabled={isRerouting}
+            hitSlop={14}
+            testID="map.navigation.reroute"
+          >
             <Ionicons name="refresh-outline" size={14} color={isRerouting ? C.text3 : C.text2} />
             <Text style={[s.navStepsBtnText, isRerouting && { color: C.text3 }]}>REROUTE</Text>
           </TouchableOpacity>
@@ -23195,6 +23274,9 @@ function MapScreen() {
       onPress={() => focusNavigationCamera(userLoc)}
       hitSlop={12}
       activeOpacity={0.82}
+      testID="map.navigation.recenter"
+      accessibilityRole="button"
+      accessibilityLabel={navCameraFollow ? 'Navigation camera following' : 'Recenter navigation map'}
     >
       <Ionicons name={navCameraFollow ? 'navigate' : 'locate'} size={20} color={navCameraFollow ? '#fff' : C.text} />
     </TouchableOpacity>
@@ -23203,12 +23285,12 @@ function MapScreen() {
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
-    <View style={s.container}>
+    <View style={s.container} testID="map.screen">
       {!mapCredentialsReady ? (
-        <View style={s.map} />
-      ) : useNativeMapSurface ? (
+        <View style={s.map} testID="map.renderer-loading" />
+      ) : useNativeMapSurface && NativeMapSurface ? (
         // ── Native MapLibre SDK (new binary required) ───────────────────────
-        <NativeMap
+        <NativeMapSurface
           ref={nativeMapRef}
           waypoints={mapVisualWorkActive ? waypoints : []}
           camps={!mapVisualWorkActive || mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
@@ -23527,9 +23609,9 @@ function MapScreen() {
             setMapLoadFailed(true);
           }}
         />
-      ) : (
+      ) : FallbackMapWebView ? (
         // ── WebView (current binary) ────────────────────────────────────────
-        <WebView
+        <FallbackMapWebView
           ref={webRef}
           source={mapWebSource}
           style={s.map}
@@ -23564,8 +23646,10 @@ function MapScreen() {
           }}
           onError={() => setMapLoadFailed(true)}
         />
+      ) : (
+        <View style={s.map} testID="map.renderer-loading" />
       )}
-      {useNativeMapSurface && !mapSurfaceReady && (
+      {mapRendererPresentationMounted && useNativeMapSurface && !mapSurfaceReady && (
         <View style={s.mapWarmupOverlay} pointerEvents="none">
           <View style={s.mapWarmupCard}>
             <View style={s.mapWarmupIcon}>
@@ -23648,6 +23732,7 @@ function MapScreen() {
           <TouchableOpacity
             style={[s.mapDrawerToggle, mapChrome.button]}
             onPress={openMapDrawer}
+            testID="map.menu"
             activeOpacity={0.84}
             hitSlop={10}
             accessibilityRole="button"
@@ -24084,7 +24169,7 @@ function MapScreen() {
                     activeOpacity={0.88}
                   >
                     {photo ? (
-                      <Image source={{ uri: photo }} style={s.campDiscoveryPhoto} resizeMode="cover" />
+                      <Image source={{ uri: photo }} style={s.campDiscoveryPhoto} resizeMode="cover" resizeMethod="resize" />
                     ) : (
                       <View style={[s.campDiscoveryPhotoPlaceholder, { backgroundColor: landColor(camp.land_type).bg }]}>
                         <Ionicons name={(camp.tags ?? []).includes('rv') ? 'car-outline' : 'bonfire-outline'} size={34} color={landColor(camp.land_type).text} />
@@ -24167,7 +24252,10 @@ function MapScreen() {
       )}
 
       {!trailPinCaptureMode && !navMode && (scopedMapSearchActive || !activeTrip) && !safeWaterPlanningActive && !waterFollowActive && userHeading !== null && !showSearch && !inlineSearchOpen && (
-        <View style={[s.compassPill, mapChrome.toast, { top: compassTop, left: 68 }]}>
+        <View
+          style={[s.compassPill, mapChrome.toast, { top: compassTop, left: 68 }]}
+          testID="map.compass"
+        >
           <ThreeNeedleCompass heading={userHeading} bearing={null} compact />
           <View>
             <Text style={[s.compassDir, { color: mapChrome.toastText }]}>{compassDir(userHeading)}</Text>
@@ -24181,10 +24269,14 @@ function MapScreen() {
           style={[s.inlineMapSearchWrap, { top: inlineSearchTop, left: inlineSearchLeft, right: 16 }]}
           pointerEvents="box-none"
         >
-          <View style={[s.inlineMapSearchBar, mapChrome.toast, inlineSearchOpen && s.inlineMapSearchBarActive]}>
+          <View
+            style={[s.inlineMapSearchBar, mapChrome.toast, inlineSearchOpen && s.inlineMapSearchBarActive]}
+            testID="map.search.inline"
+          >
             <Ionicons name="search" size={16} color={mapChrome.textMuted} />
             <TextInput
               ref={inlineSearchInputRef}
+              testID="map.search.inline.input"
               value={searchQuery}
               onFocus={() => setInlineSearchOpen(true)}
               onChangeText={text => {
@@ -24209,11 +24301,21 @@ function MapScreen() {
             {isSearching ? (
               <ActivityIndicator size="small" color={mapChrome.toastText} />
             ) : searchQuery.trim().length > 0 ? (
-              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={() => searchMap()} hitSlop={8}>
+              <TouchableOpacity
+                style={s.inlineMapSearchIconBtn}
+                onPress={() => searchMap()}
+                hitSlop={8}
+                testID="map.search.inline.submit"
+              >
                 <Ionicons name="arrow-forward" size={15} color={mapChrome.textMuted} />
               </TouchableOpacity>
             ) : (
-              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={focusInlineMapSearch} hitSlop={8}>
+              <TouchableOpacity
+                style={s.inlineMapSearchIconBtn}
+                onPress={focusInlineMapSearch}
+                hitSlop={8}
+                testID="map.search.inline.open"
+              >
                 <Ionicons name="chevron-forward" size={15} color={mapChrome.textMuted} />
               </TouchableOpacity>
             )}
@@ -24246,6 +24348,7 @@ function MapScreen() {
                       key={place.result_id || `${place.name}:${place.lat ?? 'pending'}:${place.lng ?? 'pending'}`}
                       style={s.inlineMapSearchResultRow}
                       onPress={() => void selectSearchResult(place)}
+                      testID={`map.search.inline.result.${place.result_id || `${place.name}:${place.lat ?? 'pending'}:${place.lng ?? 'pending'}`}`}
                       activeOpacity={0.84}
                     >
                       <View style={s.inlineMapSearchResultIcon}>
@@ -24503,6 +24606,7 @@ function MapScreen() {
             style={[s.ctrlBtn, mapChrome.button]}
             onPress={() => openLayersAndFilters('layers', 'map_shortcut')}
             activeOpacity={0.84}
+            testID="map.layers.open"
             accessibilityLabel="Open layers"
           >
             <Ionicons name="layers-outline" size={18} color={mapChrome.text} />
@@ -24928,7 +25032,12 @@ function MapScreen() {
           <PlaceSheetShell model={selectedTrailSheetModel!} fill={false} style={s.trailOverlayCard}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailOverlayContent}>
               <View style={s.trailHeroPanel}>
-                <Image source={heroUri ? { uri: heroUri } : TRAIL_FALLBACK_IMAGE} style={s.trailHeroPhoto} resizeMode="cover" />
+                <Image
+                  source={heroUri ? { uri: heroUri } : TRAIL_FALLBACK_IMAGE}
+                  style={s.trailHeroPhoto}
+                  resizeMode="cover"
+                  resizeMethod={heroUri ? 'resize' : undefined}
+                />
                 <View style={s.trailHeroShade} />
                 <View style={s.trailHeroTopBar}>
                   <TouchableOpacity style={s.trailHeroCircleBtn} onPress={() => setTrailCardCollapsed(true)}>
@@ -25041,7 +25150,7 @@ function MapScreen() {
                     </View>
                     <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.trailPhotoStrip}>
                       {reportPhotoRows.slice(0, 10).map(fr => (
-                        <Image key={fr.id} source={{ uri: trailReportPhotoUrl(selectedTrail, fr.id) }} style={s.trailReportPhoto} resizeMode="cover" />
+                        <Image key={fr.id} source={{ uri: trailReportPhotoUrl(selectedTrail, fr.id) }} style={s.trailReportPhoto} resizeMode="cover" resizeMethod="resize" />
                       ))}
                     </ScrollView>
                   </View>
@@ -25390,7 +25499,7 @@ function MapScreen() {
                         activeOpacity={0.88}
                       >
                         {trail.photo_url ? (
-                          <Image source={{ uri: trail.photo_url }} style={s.campDiscoveryPhoto} resizeMode="cover" />
+                          <Image source={{ uri: trail.photo_url }} style={s.campDiscoveryPhoto} resizeMode="cover" resizeMethod="resize" />
                         ) : (
                           <Image source={TRAIL_FALLBACK_IMAGE} style={s.campDiscoveryPhoto} resizeMode="cover" />
                         )}
@@ -25422,7 +25531,7 @@ function MapScreen() {
                   activeOpacity={0.88}
                 >
                   {camp.photo_url ? (
-                    <Image source={{ uri: camp.photo_url }} style={s.campDiscoveryPhoto} resizeMode="cover" />
+                    <Image source={{ uri: camp.photo_url }} style={s.campDiscoveryPhoto} resizeMode="cover" resizeMethod="resize" />
                   ) : (
                     <View style={[s.campDiscoveryPhotoPlaceholder, { backgroundColor: landColor(camp.land_type).bg }]}>
                       <Ionicons name={(camp.tags ?? []).includes('rv') ? 'car-outline' : 'bonfire-outline'} size={34} color={landColor(camp.land_type).text} />
@@ -26377,7 +26486,7 @@ function MapScreen() {
                   onPress={() => activePhoto && setCampGalleryIndex(safeIndex)}
                 >
                   {activePhoto
-                    ? <Image source={{ uri: activePhoto.url }} style={s.quickCardPhoto} resizeMode="cover" />
+                    ? <Image source={{ uri: activePhoto.url }} style={s.quickCardPhoto} resizeMode="cover" resizeMethod="resize" />
                     : <View style={[s.quickCardPhotoPlaceholder, { backgroundColor: landColor(selectedCamp.land_type).bg }]}>
                         <Ionicons name={(selectedCamp.tags ?? []).includes('rv') ? 'car-outline' : (selectedCamp.tags ?? []).includes('dispersed') ? 'moon-outline' : 'bonfire-outline'} size={34} color={landColor(selectedCamp.land_type).text} />
                         <Text style={{ fontSize: 9, color: landColor(selectedCamp.land_type).text, fontFamily: mono, marginTop: 4, fontWeight: '700' }}>
@@ -26651,7 +26760,7 @@ function MapScreen() {
 		                            onPress={() => openCampSiteCard(site, campDetail, selectedCamp)}
 		                          >
 	                            {photo ? (
-	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+	                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" resizeMethod="resize" />
 	                            ) : (
                               <View style={s.sitePlaceholder}>
                                 <Ionicons name="bonfire-outline" size={22} color={C.orange} />
@@ -26829,7 +26938,7 @@ function MapScreen() {
                   <ScrollView horizontal pagingEnabled showsHorizontalScrollIndicator={false} style={s.photoGallery}>
                     {(campDetail.photos ?? []).map((uri, i) => (
                       <TouchableOpacity key={i} activeOpacity={0.9} onPress={() => setCampGalleryIndex(i)}>
-                        <Image source={{ uri: mediaUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" />
+                        <Image source={{ uri: mediaUrl(uri) }} style={[s.galleryPhoto, { width: windowWidth }]} resizeMode="cover" resizeMethod="resize" />
                       </TouchableOpacity>
                     ))}
                   </ScrollView>
@@ -27036,7 +27145,7 @@ function MapScreen() {
                         return (
                           <View key={site.id || `${site.name}-${idx}`} style={s.sitePhotoCard}>
                             {photo ? (
-                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" />
+                              <Image source={{ uri: photo }} style={s.sitePhoto} resizeMode="cover" resizeMethod="resize" />
                             ) : (
                               <View style={s.sitePlaceholder}>
                                 <Ionicons name="bonfire-outline" size={22} color={C.orange} />
@@ -27357,7 +27466,7 @@ function MapScreen() {
       </Modal>
 
       {/* ── Offline Map Download Modal — native MLN pack system ── */}
-      <OfflineModal
+      {OfflineModalSurface ? <OfflineModalSurface
         visible={showOfflineModal}
         activeNativeRenderer={mapRendererMode === 'mapbox' ? 'rnmapbox' : 'maplibre'}
         legacyNativePackCompatible={
@@ -27424,7 +27533,7 @@ function MapScreen() {
         webDownloadMB={downloadMB}
         webCachedRegions={cachedRegions}
         webDownloadLabel={downloadLabel}
-      />
+      /> : null}
 
       <MapStyleSheet
         visible={showMapStyleSheet && !navMode}
@@ -27508,7 +27617,7 @@ function MapScreen() {
                   <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
                     {briefAndBackup.timeline_media.filter(media => media.media_url && media.license_id && media.attribution).map(media => (
                       <View key={media.id} style={s.sitePhotoCard}>
-                        <Image source={{ uri: media.media_url }} style={s.sitePhoto} resizeMode="cover" />
+                        <Image source={{ uri: media.media_url }} style={s.sitePhoto} resizeMode="cover" resizeMethod="resize" />
                         <View style={s.siteBody}><Text style={s.siteMeta} numberOfLines={2}>{media.attribution}</Text></View>
                       </View>
                     ))}
@@ -27586,17 +27695,18 @@ function MapScreen() {
         presentationStyle="overFullScreen"
         onRequestClose={() => showTrailList ? setShowTrailList(false) : setShowLayerSheet(false)}
       >
-        <View style={s.layerModalOverlay}>
+        <View style={s.layerModalOverlay} testID="map.layers.sheet">
           <TouchableOpacity
             style={s.layerBackdropHit}
             activeOpacity={1}
             onPress={() => { setShowTrailList(false); setShowLayerSheet(false); }}
+            testID="map.layers.backdrop"
           />
         <View style={[s.layerSheet, showTrailList ? s.layerSheetTall : s.layerSheetHalf]}>
           <View style={s.layerSheetHandle} />
           <View style={s.layerSheetHeader}>
             {showTrailList ? (
-              <TouchableOpacity onPress={() => setShowTrailList(false)}>
+              <TouchableOpacity onPress={() => setShowTrailList(false)} testID="map.layers.back">
                 <Ionicons name="chevron-back" size={22} color={C.text2} />
               </TouchableOpacity>
             ) : null}
@@ -27606,7 +27716,10 @@ function MapScreen() {
                 <Text style={s.trailListSub}>{trailDiscoveries.length ? `${trailDiscoveries.length} trail places loaded` : 'Search near you or in the visible map area'}</Text>
               ) : null}
             </View>
-            <TouchableOpacity onPress={() => { setShowTrailList(false); setShowLayerSheet(false); }}>
+            <TouchableOpacity
+              onPress={() => { setShowTrailList(false); setShowLayerSheet(false); }}
+              testID="map.layers.close"
+            >
               <Ionicons name="close" size={22} color={C.text2} />
             </TouchableOpacity>
           </View>
@@ -27683,7 +27796,7 @@ function MapScreen() {
 
       {/* ── Navigation HUD ── */}
       {!useNativeMapSurface && navMode && (
-        <View style={s.navHud} pointerEvents="auto">
+        <View style={s.navHud} pointerEvents="auto" testID="map.navigation.hud">
 
         {/* Turn instruction strip — arriving / rerouting / proceed-to-route / normal */}
         {navMode && isApproaching ? (
@@ -27846,20 +27959,38 @@ function MapScreen() {
 
         {/* Turn list toggle + actions */}
         <View style={s.navActions}>
-          <TouchableOpacity style={s.navEndBtn} onPress={endNavigation} hitSlop={12}>
+          <TouchableOpacity
+            style={s.navEndBtn}
+            onPress={endNavigation}
+            hitSlop={12}
+            testID="map.navigation.end"
+            accessibilityRole="button"
+            accessibilityLabel="End navigation"
+          >
             <Ionicons name="close" size={14} color={C.red} />
             <Text style={s.navEndText}>END</Text>
           </TouchableOpacity>
 
           {routeSteps.length > 0 && (
-            <TouchableOpacity style={s.navStepsBtn} onPress={() => setShowSteps(p => !p)} hitSlop={12}>
+            <TouchableOpacity
+              style={s.navStepsBtn}
+              onPress={() => setShowSteps(p => !p)}
+              hitSlop={12}
+              testID="map.navigation.turns"
+            >
               <Ionicons name="list-outline" size={14} color={C.text2} />
               <Text style={s.navStepsBtnText}>TURNS {showSteps ? '▲' : '▼'}</Text>
             </TouchableOpacity>
           )}
 
           {isRouted && userLoc && (
-            <TouchableOpacity style={s.navRerouteBtn} onPress={manualReroute} disabled={isRerouting} hitSlop={12}>
+            <TouchableOpacity
+              style={s.navRerouteBtn}
+              onPress={manualReroute}
+              disabled={isRerouting}
+              hitSlop={12}
+              testID="map.navigation.reroute"
+            >
               <Ionicons name="refresh-outline" size={14} color={isRerouting ? C.text3 : C.text2} />
               <Text style={[s.navStepsBtnText, isRerouting && { color: C.text3 }]}>REROUTE</Text>
             </TouchableOpacity>
@@ -28085,7 +28216,7 @@ function MapScreen() {
 
       {/* ── Location permission prominent disclosure ── */}
       {showLocDisclosure && !guidedTourActive && (
-        <View style={s.locDisclosureOverlay}>
+        <View style={s.locDisclosureOverlay} testID="map.location-disclosure">
           <View style={s.locDisclosureCard}>
             <View style={s.locDisclosureIcon}>
               <Ionicons name="navigate-circle" size={40} color={C.orange} />
@@ -28109,13 +28240,14 @@ function MapScreen() {
               </View>
               <View style={s.locDisclosureRow}>
                 <Ionicons name="warning" size={13} color={C.orange} />
-                <Text style={s.locDisclosureItem}>Alert you to live route conditions</Text>
+                <Text style={s.locDisclosureItem}>Show available route reports</Text>
               </View>
             </View>
             <Text style={s.locDisclosureNote}>
               Location is only used while the app is open and is never shared without your consent.
             </Text>
             <TouchableOpacity
+              testID="map.location-disclosure.continue"
               style={s.locDisclosureAllow}
               onPress={async () => {
                 setShowLocDisclosure(false);
@@ -28134,6 +28266,7 @@ function MapScreen() {
               <Text style={s.locDisclosureAllowText}>Continue</Text>
             </TouchableOpacity>
             <TouchableOpacity
+              testID="map.location-disclosure.not-now"
               style={s.locDisclosureDeny}
               onPress={() => {
                 setShowLocDisclosure(false);
@@ -28176,8 +28309,8 @@ function MapScreen() {
 
       {/* Bottom itinerary panel */}
       {showPanel && panelCollapsed && !navMode && activeTrip && !mapMissionVisible && !routeBuildSession && !originalsMapExperience.active && (
-        <View style={s.panelPeek} {...collapsedPanelPan.panHandlers}>
-          <TouchableOpacity activeOpacity={0.9} onPress={expandTripPanel}>
+        <View style={s.panelPeek} testID="map.trip-overview.collapsed" {...collapsedPanelPan.panHandlers}>
+          <TouchableOpacity testID="map.trip-overview.expand" accessibilityRole="button" accessibilityLabel="Open trip overview" activeOpacity={0.9} onPress={expandTripPanel}>
             <View style={s.tripSheetGrabber}>
               <View style={s.tripSheetHandle} />
             </View>
@@ -28188,6 +28321,7 @@ function MapScreen() {
             </View>
           </TouchableOpacity>
           <TouchableOpacity
+            testID="map.trip-overview.collapsed.close"
             style={[s.panelPeekClose, routeClosing && { opacity: 0.55 }]}
             disabled={routeClosing}
             onPress={openRouteExitOptions}
@@ -28199,9 +28333,9 @@ function MapScreen() {
       )}
 
       {showPanel && !panelCollapsed && !navMode && activeTrip && !mapMissionVisible && !routeBuildSession && !originalsMapExperience.active && (
-        <View style={s.panel}>
+        <View style={s.panel} testID="map.trip-overview">
           <View style={s.tripSheetGrabber} {...expandedPanelPan.panHandlers}>
-            <TouchableOpacity activeOpacity={0.85} onPress={collapseTripPanel} style={s.tripSheetTapTarget}>
+            <TouchableOpacity testID="map.trip-overview.collapse" accessibilityRole="button" accessibilityLabel="Minimize trip overview" activeOpacity={0.85} onPress={collapseTripPanel} style={s.tripSheetTapTarget}>
               <View style={s.tripSheetHandle} />
             </TouchableOpacity>
           </View>
@@ -28214,6 +28348,7 @@ function MapScreen() {
             </View>
             <View style={s.tripPanelHeaderActions}>
               <TouchableOpacity
+                testID="map.trip-overview.save"
                 style={s.tripPanelIconBtn}
                 onPress={async () => {
                   await saveActiveRouteSnapshot();
@@ -28226,6 +28361,7 @@ function MapScreen() {
                 <Ionicons name="bookmark-outline" size={17} color={C.text2} />
               </TouchableOpacity>
               <TouchableOpacity
+                testID="map.trip-overview.edit-route"
                 style={s.tripPanelIconBtn}
                 onPress={() => router.push({
                   pathname: '/(tabs)/route-builder',
@@ -28237,6 +28373,7 @@ function MapScreen() {
                 <Ionicons name="create-outline" size={17} color={C.text2} />
               </TouchableOpacity>
               <TouchableOpacity
+                testID="map.trip-overview.preview-3d"
                 style={s.tripPanelIconBtn}
                 onPress={() => {
                   void startMapMissionBrief({
@@ -28252,6 +28389,7 @@ function MapScreen() {
                 <Ionicons name="play-outline" size={18} color={C.text2} />
               </TouchableOpacity>
               <TouchableOpacity
+                testID="map.trip-overview.close"
                 style={[s.tripPanelIconBtn, routeClosing && { opacity: 0.55 }]}
                 disabled={routeClosing}
                 onPress={openRouteExitOptions}
@@ -28263,12 +28401,13 @@ function MapScreen() {
             </View>
           </View>
           <ScrollView
+            testID="map.trip-overview.scroll"
             style={s.tripPanelScroller}
             showsVerticalScrollIndicator={false}
             nestedScrollEnabled
             contentContainerStyle={s.tripPanelScroll}
           >
-            <View style={s.tripTimeline}>
+            <View style={s.tripTimeline} testID="map.trip-overview.timeline">
               {tripOverviewDays.map(({ day, previousCamp, first, last, camp, campWp, gasStops, poiStops, timelineDay, waypoints: dayWps, forecast, legMiles }) => {
                 const pin = camp as CampsitePin | null;
                 const forecastDay = forecast?.daily;
@@ -28325,6 +28464,9 @@ function MapScreen() {
                 return (
                   <TouchableOpacity
                     key={day.day}
+                    testID={`map.trip-overview.day.${day.day}`}
+                    accessibilityRole="button"
+                    accessibilityLabel={`Open day ${day.day} on the map`}
                     style={[s.tripTimelineDay, selectedDay === day.day && s.tripTimelineDayActive]}
                     onPress={() => {
                       setSelectedDay(selectedDay === day.day ? null : day.day);
@@ -28434,7 +28576,7 @@ function MapScreen() {
                           })()}
                           <View style={s.tripTimelineCamp}>
                             {pin?.photo_url ? (
-                              <Image source={{ uri: pin.photo_url }} style={s.tripTimelineCampPhoto} resizeMode="cover" />
+                              <Image source={{ uri: pin.photo_url }} style={s.tripTimelineCampPhoto} resizeMode="cover" resizeMethod="resize" />
                             ) : (
                               <View style={s.tripTimelineCampPlaceholder}>
                                 <Ionicons name={isFinalDay && !hasOvernight ? 'flag-outline' : 'bonfire-outline'} size={30} color={C.green} />
@@ -28453,17 +28595,17 @@ function MapScreen() {
                             </View>
                           </View>
                           <View style={s.tripDayButtons}>
-                            <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => startDayNav(day.day)}>
+                            <TouchableOpacity testID={`map.trip-overview.day.${day.day}.start`} accessibilityRole="button" accessibilityLabel={`Start navigation for day ${day.day}`} style={s.tripDaySmallBtn} onPress={() => startDayNav(day.day)}>
                               <Ionicons name="navigate-outline" size={15} color={C.orange} />
                               <Text style={s.tripDaySmallText}>Start day</Text>
                             </TouchableOpacity>
                             {!isFinalDay || hasOvernight ? (
-                              <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => openCampPicker(day.day)}>
+                              <TouchableOpacity testID={`map.trip-overview.day.${day.day}.camp`} accessibilityRole="button" accessibilityLabel={`${hasOvernight ? 'Swap' : 'Choose'} camp for day ${day.day}`} style={s.tripDaySmallBtn} onPress={() => openCampPicker(day.day)}>
                                 <Ionicons name="bonfire-outline" size={15} color={C.orange} />
                                 <Text style={s.tripDaySmallText}>{hasOvernight ? 'Swap camp' : 'Choose camp'}</Text>
                               </TouchableOpacity>
                             ) : null}
-                            <TouchableOpacity style={s.tripDaySmallBtn} onPress={() => openTripPlacesSearch(day.day)}>
+                            <TouchableOpacity testID={`map.trip-overview.day.${day.day}.places`} accessibilityRole="button" accessibilityLabel={`Find places for day ${day.day}`} style={s.tripDaySmallBtn} onPress={() => openTripPlacesSearch(day.day)}>
                               <Ionicons name="trail-sign-outline" size={15} color={C.orange} />
                               <Text style={s.tripDaySmallText}>Places</Text>
                             </TouchableOpacity>
@@ -28476,7 +28618,7 @@ function MapScreen() {
               })}
             </View>
           {/* ── WEATHER section ── */}
-          <View style={s.weatherSection}>
+          <View style={s.weatherSection} testID="map.trip-overview.weather">
             <View style={s.weatherSectionHeader}>
               <Ionicons name="cloud-outline" size={11} color={C.text3} />
               <Text style={s.weatherSectionLabel}>WEATHER</Text>
@@ -28536,8 +28678,11 @@ function MapScreen() {
             )}
           </View>
 
-          <View style={s.tripTools}>
+          <View style={s.tripTools} testID="map.trip-overview.actions">
             <TouchableOpacity
+              testID="map.trip-overview.start"
+              accessibilityRole="button"
+              accessibilityLabel="Start trip navigation"
               style={s.tripStartAction}
               onPress={() => {
                 const days = [...new Set(waypoints.map(w => w.day))].sort((a, b) => a - b);
@@ -28550,6 +28695,9 @@ function MapScreen() {
             <View style={s.tripToolGrid}>
               {firstMissingOvernightDay != null ? (
                 <TouchableOpacity
+                  testID="map.trip-overview.complete-overnight"
+                  accessibilityRole="button"
+                  accessibilityLabel="Complete overnight"
                   style={s.tripToolBtn}
                   onPress={() => openCampPicker(firstMissingOvernightDay)}
                   disabled={campPickerLoading}
@@ -28561,14 +28709,14 @@ function MapScreen() {
                   <Text style={s.tripToolText}>Complete overnight</Text>
                 </TouchableOpacity>
               ) : null}
-              <TouchableOpacity style={s.tripToolBtn} onPress={() => fetchRouteBrief()} disabled={loadingBrief}>
+              <TouchableOpacity testID="map.trip-overview.brief-backup" accessibilityRole="button" accessibilityLabel="Brief and Backup" style={s.tripToolBtn} onPress={() => fetchRouteBrief()} disabled={loadingBrief}>
                 {loadingBrief
                   ? <ActivityIndicator size="small" color={C.orange} />
                   : <Ionicons name="shield-checkmark-outline" size={16} color={C.orange} />
                 }
                 <Text style={s.tripToolText}>Brief &amp; Backup</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={s.tripToolBtn} onPress={() => fetchPackingList()} disabled={loadingPacking}>
+              <TouchableOpacity testID="map.trip-overview.packing-list" accessibilityRole="button" accessibilityLabel="Packing list" style={s.tripToolBtn} onPress={() => fetchPackingList()} disabled={loadingPacking}>
                 {loadingPacking
                   ? <ActivityIndicator size="small" color={C.orange} />
                   : <Ionicons name="bag-outline" size={16} color={C.orange} />
@@ -28576,6 +28724,7 @@ function MapScreen() {
                 <Text style={s.tripToolText}>Packing list</Text>
               </TouchableOpacity>
               <TouchableOpacity
+                testID="map.trip-overview.notes"
                 style={s.tripToolBtn}
                 onPress={() => { void openActiveTripNotes(); }}
                 accessibilityRole="button"
@@ -28600,12 +28749,12 @@ function MapScreen() {
 
       {/* ── Day selector modal ── */}
       <Modal visible={showDayModal} transparent animationType="slide" onRequestClose={() => setShowDayModal(false)}>
-        <TouchableOpacity style={s.modalOverlay} activeOpacity={1} onPress={() => setShowDayModal(false)}>
+        <TouchableOpacity testID="map.trip-overview.day-picker" style={s.modalOverlay} activeOpacity={1} onPress={() => setShowDayModal(false)}>
           <TrailheadSheet handle={false} style={[s.daySheet, modalSheetPad]} contentStyle={{ padding: 0 }}>
             <View style={s.daySheetHandle} />
             <Text style={s.daySheetTitle}>START NAVIGATION</Text>
             <Text style={s.daySheetSub}>Choose which day's route to navigate</Text>
-            <TouchableOpacity style={s.dayBtnAll} onPress={() => startDayNav('all')}>
+            <TouchableOpacity testID="map.trip-overview.day-picker.all" accessibilityRole="button" accessibilityLabel="Start full trip navigation" style={s.dayBtnAll} onPress={() => startDayNav('all')}>
               <Ionicons name="navigate" size={16} color="#fff" />
               <Text style={s.dayBtnAllText}>START FULL TRIP (ALL DAYS)</Text>
             </TouchableOpacity>
@@ -28619,9 +28768,9 @@ function MapScreen() {
                 const start = previousCamp ?? first;
                 const finish = campWp ?? camp ?? last;
                 return (
-                  <TouchableOpacity key={day.day} style={s.dayBtn} onPress={() => startDayNav(day.day)}>
+                  <TouchableOpacity key={day.day} testID={`map.trip-overview.day-picker.${day.day}`} accessibilityRole="button" accessibilityLabel={`Start navigation for day ${day.day}`} style={s.dayBtn} onPress={() => startDayNav(day.day)}>
                     {(camp as any)?.photo_url ? (
-                      <Image source={{ uri: (camp as any).photo_url }} style={s.dayBtnPhoto} resizeMode="cover" />
+                      <Image source={{ uri: (camp as any).photo_url }} style={s.dayBtnPhoto} resizeMode="cover" resizeMethod="resize" />
                     ) : (
                       <View style={s.dayBtnDayBadge}>
                         <Text style={s.dayBtnDayNum}>{day.day}</Text>

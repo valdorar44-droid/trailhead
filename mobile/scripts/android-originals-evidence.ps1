@@ -5,11 +5,28 @@ param(
   [Parameter(Mandatory = $true)]
   [string]$FixturePath,
 
+  [Parameter(Mandatory = $true)]
+  [string]$ExpectedPackId,
+
+  [Parameter(Mandatory = $true)]
+  [ValidateRange(1, 2147483647)]
+  [int]$ExpectedVersion,
+
+  [Parameter(Mandatory = $true)]
+  [ValidatePattern('^[a-f0-9]{64}$')]
+  [string]$ExpectedManifestSha256,
+
   [ValidateRange(1000, 15000)]
   [int]$IntervalMs = 3500,
 
   [ValidateRange(1, 10)]
   [int]$Loops = 1,
+
+  [ValidateRange(0, 10000000)]
+  [Nullable[double]]$StartProgressM = $null,
+
+  [ValidateRange(0, 10000000)]
+  [Nullable[double]]$EndProgressM = $null,
 
   [string]$AdbPath = "$env:LOCALAPPDATA\Android\Sdk\platform-tools\adb.exe"
 )
@@ -24,11 +41,44 @@ if (-not (Test-Path -LiteralPath $FixturePath)) {
 }
 
 $fixture = Get-Content -LiteralPath $FixturePath -Raw | ConvertFrom-Json
-$samples = @($fixture.samples | Where-Object {
+if ($fixture.schema_version -ne 1 -or $fixture.kind -ne 'trailhead_original_continuous_location_fixture') {
+  throw 'The fixture is not a supported continuous Trailhead Original route export.'
+}
+if ($fixture.manifest.pack_id -ne $ExpectedPackId) {
+  throw "Fixture pack mismatch: expected $ExpectedPackId, found $($fixture.manifest.pack_id)."
+}
+if ([int]$fixture.manifest.version -ne $ExpectedVersion) {
+  throw "Fixture version mismatch: expected $ExpectedVersion, found $($fixture.manifest.version)."
+}
+if ($fixture.manifest.sha256 -cne $ExpectedManifestSha256) {
+  throw 'Fixture manifest SHA-256 does not match the reviewed evidence manifest.'
+}
+$allSamples = @($fixture.samples | Where-Object {
   $null -ne $_.lat -and $null -ne $_.lng
 })
-if ($samples.Count -lt 2) {
+if ($allSamples.Count -lt 2) {
   throw 'The fixture must contain at least two samples with lat and lng.'
+}
+if ($allSamples[0].phase -ne 'route_start' -or $allSamples[-1].phase -ne 'route_end') {
+  throw 'The continuous fixture must cover the complete route from route_start to route_end.'
+}
+for ($index = 1; $index -lt $allSamples.Count; $index += 1) {
+  if ([int64]$allSamples[$index].timestamp_ms -le [int64]$allSamples[$index - 1].timestamp_ms) {
+    throw "Fixture timestamps are not strictly increasing at sample $index."
+  }
+  if ([double]$allSamples[$index].expected_route_progress_m -lt [double]$allSamples[$index - 1].expected_route_progress_m) {
+    throw "Fixture route progress regresses at sample $index."
+  }
+}
+if ($null -ne $StartProgressM -and $null -ne $EndProgressM -and $EndProgressM -le $StartProgressM) {
+  throw 'EndProgressM must be greater than StartProgressM.'
+}
+$samples = @($allSamples | Where-Object {
+  ($null -eq $StartProgressM -or [double]$_.expected_route_progress_m -ge $StartProgressM) -and
+  ($null -eq $EndProgressM -or [double]$_.expected_route_progress_m -le $EndProgressM)
+})
+if ($samples.Count -lt 2) {
+  throw 'The requested continuous route slice contains fewer than two fixes.'
 }
 
 function Invoke-Adb {
@@ -58,7 +108,7 @@ try {
   $providerAdded = $true
   Invoke-Adb shell cmd location providers set-test-provider-enabled gps true | Out-Null
 
-  Write-Host "Injecting $($samples.Count) OS-level GPS fixes on $Serial. Keep the real Trailhead tour running."
+  Write-Host "Injecting $($samples.Count) continuous OS-level GPS fixes on $Serial. Keep the real Trailhead tour running."
   for ($loop = 0; $loop -lt $Loops; $loop += 1) {
     foreach ($sample in $samples) {
       $lat = [Convert]::ToString([double]$sample.lat, [Globalization.CultureInfo]::InvariantCulture)
@@ -68,7 +118,7 @@ try {
       $time = [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
       Invoke-Adb shell cmd location providers set-test-provider-location gps --location "$lat,$lng" --accuracy $accuracy --time $time | Out-Null
       $phase = if ($sample.phase) { " [$($sample.phase)]" } else { '' }
-      Write-Host "  $lat,$lng ±${accuracy}m$phase"
+      Write-Host "  $lat,$lng +/-${accuracy}m$phase"
       Start-Sleep -Milliseconds $IntervalMs
     }
   }

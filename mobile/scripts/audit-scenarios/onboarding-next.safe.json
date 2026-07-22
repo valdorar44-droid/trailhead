@@ -1,0 +1,15 @@
+{
+  "name": "Advance one non-destructive onboarding step",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "text": "Continue" },
+      "settleMs": 1200,
+      "label": "continue"
+    },
+    {
+      "type": "capture",
+      "label": "after-continue"
+    }
+  ]
+}

@@ -71,6 +71,7 @@ type MapFilterSheetProps = {
 };
 
 type SectionRowProps = {
+  id: string;
   icon: keyof typeof Ionicons.glyphMap;
   iconColor: string;
   title: string;
@@ -154,6 +155,7 @@ export default function MapFilterSheet({
         return (
           <TouchableOpacity
             key={item.id}
+            testID={`map.filters.option.${item.id}`}
             style={[styles.filterOptionRow, locked && styles.filterOptionRowDisabled]}
             activeOpacity={0.82}
             onPress={() => {
@@ -185,7 +187,13 @@ export default function MapFilterSheet({
   const renderToggleRows = (items: readonly MapFilterToggleItem[]) => (
     <View style={styles.filterToggleList}>
       {items.map(item => (
-        <TouchableOpacity key={item.key} style={styles.filterToggleRow} onPress={item.onPress} activeOpacity={0.82}>
+        <TouchableOpacity
+          key={item.key}
+          style={styles.filterToggleRow}
+          onPress={item.onPress}
+          activeOpacity={0.82}
+          testID={`map.filters.toggle.${item.key}`}
+        >
           <Ionicons name={item.icon} size={18} color={item.enabled ? C.orange : C.text3} />
           <View style={styles.filterSectionCopy}>
             <Text style={styles.filterOptionText}>{item.title}</Text>
@@ -200,6 +208,7 @@ export default function MapFilterSheet({
   );
 
   const renderSectionRow = ({
+    id,
     icon,
     iconColor,
     title,
@@ -210,7 +219,12 @@ export default function MapFilterSheet({
     onPress,
     onActionPress,
   }: SectionRowProps) => (
-    <TouchableOpacity style={styles.filterSectionRow} onPress={onPress} activeOpacity={0.84}>
+    <TouchableOpacity
+      style={styles.filterSectionRow}
+      onPress={onPress}
+      activeOpacity={0.84}
+      testID={`map.filters.section.${id}`}
+    >
       <View style={styles.filterSectionIcon}>
         <Ionicons name={icon} size={18} color={iconColor} />
       </View>
@@ -219,7 +233,12 @@ export default function MapFilterSheet({
         <Text style={styles.filterSectionRowSub} numberOfLines={1}>{summary}</Text>
       </View>
       {actionLabel ? (
-        <TouchableOpacity onPress={onActionPress} disabled={actionDisabled} hitSlop={8}>
+        <TouchableOpacity
+          onPress={onActionPress}
+          disabled={actionDisabled}
+          hitSlop={8}
+          testID={`map.filters.section.${id}.action`}
+        >
           <Text style={[styles.filterClearText, actionDisabled && styles.filterActionDisabled]}>{actionLabel}</Text>
         </TouchableOpacity>
       ) : null}
@@ -229,8 +248,16 @@ export default function MapFilterSheet({
 
   return (
       <Modal visible={visible} animationType="slide" transparent statusBarTranslucent onRequestClose={onClose}>
-        <View style={[styles.overlay, isAndroid ? styles.androidOverlay : styles.iosOverlay]}>
-          <TouchableOpacity style={StyleSheet.absoluteFillObject} activeOpacity={1} onPress={onClose} />
+        <View
+          style={[styles.overlay, isAndroid ? styles.androidOverlay : styles.iosOverlay]}
+          testID="map.filters.sheet"
+        >
+          <TouchableOpacity
+            style={StyleSheet.absoluteFillObject}
+            activeOpacity={1}
+            onPress={onClose}
+            testID="map.filters.backdrop"
+          />
           <TrailheadSheet
             handle={false}
             style={isAndroid
@@ -244,19 +271,20 @@ export default function MapFilterSheet({
                 <Text style={styles.sub}>{activeModeTitle} · {changedCount > 0 ? `${changedCount} changed` : 'Default view'}</Text>
               </View>
               <View style={styles.headerActions}>
-                <TouchableOpacity onPress={onOpenLegend} style={styles.resetBtn}>
+                <TouchableOpacity onPress={onOpenLegend} style={styles.resetBtn} testID="map.filters.legend">
                   <Text style={styles.resetText}>Legend</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={onResetAll} style={styles.resetBtn}>
+                <TouchableOpacity onPress={onResetAll} style={styles.resetBtn} testID="map.filters.reset">
                   <Text style={styles.resetText}>Reset</Text>
                 </TouchableOpacity>
-                <TouchableOpacity onPress={onClose} style={styles.closeBtn}>
+                <TouchableOpacity onPress={onClose} style={styles.closeBtn} testID="map.filters.close">
                   <Ionicons name="close" size={20} color={C.text2} />
                 </TouchableOpacity>
               </View>
             </View>
 
             <ScrollView
+              testID="map.filters.scroll"
               showsVerticalScrollIndicator={false}
               style={styles.scroll}
               contentContainerStyle={[styles.scrollContent, { paddingBottom: Math.max(28, filterBottomSpacer) }]}
@@ -281,6 +309,7 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'map-content',
                 icon: 'map-outline',
                 iconColor: C.orange,
                 title: 'Base layers',
@@ -293,6 +322,7 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'camps',
                 icon: 'bonfire-outline',
                 iconColor: C.orange,
                 title: 'Camps',
@@ -312,6 +342,7 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'places',
                 icon: 'location-outline',
                 iconColor: C.orange,
                 title: 'Places',
@@ -331,12 +362,13 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'water',
                 icon: 'boat-outline',
                 iconColor: '#0891b2',
                 title: 'Water',
                 summary: waterSummary,
                 expanded: expandedSections.includes('water'),
-                actionLabel: 'Safe preset',
+                actionLabel: 'Common sources',
                 onPress: () => onToggleSection('water'),
                 onActionPress: onSafeWaterPreset,
               })}
@@ -345,6 +377,7 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'stays',
                 icon: 'bed-outline',
                 iconColor: C.orange,
                 title: 'Camps & Stays',
@@ -359,6 +392,7 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'explore-services',
                 icon: 'briefcase-outline',
                 iconColor: C.orange,
                 title: 'Services',
@@ -376,6 +410,7 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'community',
                 icon: 'people-outline',
                 iconColor: C.orange,
                 title: 'Community notes',
@@ -398,10 +433,11 @@ export default function MapFilterSheet({
 
             <View style={styles.group}>
               {renderSectionRow({
+                id: 'weather-layers',
                 icon: 'partly-sunny-outline',
                 iconColor: C.orange,
                 title: 'Weather & trails',
-                summary: 'Radar, trails, public land, topo, and water safety',
+                summary: 'Radar, trails, public land, topo, and water context',
                 expanded: expandedSections.includes('weather-layers'),
                 onPress: () => onToggleSection('weather-layers'),
               })}

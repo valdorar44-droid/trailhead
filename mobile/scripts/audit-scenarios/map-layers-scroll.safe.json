@@ -1,0 +1,10 @@
+{
+  "name": "Inspect the full Map layers catalog",
+  "actions": [
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "layers-scroll-01" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "layers-scroll-02" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "layers-scroll-03" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "layers-scroll-04" },
+    { "type": "capture", "label": "lower-layers" }
+  ]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "Open the mounted Map tab",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "testID": "app.tab.map" },
+      "settleMs": 2500,
+      "label": "open-map"
+    },
+    { "type": "capture", "label": "map-ready" }
+  ]
+}

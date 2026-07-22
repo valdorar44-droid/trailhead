@@ -1,0 +1,16 @@
+{
+  "name": "Exercise the bounded Explore feed without account mutations",
+  "actions": [
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-01" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-02" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-03" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-04" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-05" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-06" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-07" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-08" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-09" },
+    { "type": "swipe", "direction": "up", "durationMs": 300, "label": "scroll-10" },
+    { "type": "capture", "label": "settled-bottom" }
+  ]
+}

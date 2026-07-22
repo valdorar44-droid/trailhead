@@ -1,0 +1,15 @@
+{
+  "name": "Advance one configured onboarding step",
+  "actions": [
+    {
+      "type": "tap",
+      "selector": { "text": "Next" },
+      "settleMs": 1200,
+      "label": "next"
+    },
+    {
+      "type": "capture",
+      "label": "after-next"
+    }
+  ]
+}

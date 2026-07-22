@@ -137,6 +137,9 @@ module.exports = {
     ],
     experiments: { typedRoutes: true },
     extra: {
+      uiSystemV2Enabled: /^(1|true|yes|on|enabled)$/i.test(
+        process.env.EXPO_PUBLIC_UI_SYSTEM_V2_ENABLED || process.env.UI_SYSTEM_V2_ENABLED || '',
+      ),
       googleIosClientId: process.env.EXPO_PUBLIC_GOOGLE_IOS_CLIENT_ID || '253003227791-o34lb5706rokbgq6qdjhagggue5kqddh.apps.googleusercontent.com',
       googleAndroidClientId: process.env.EXPO_PUBLIC_GOOGLE_ANDROID_CLIENT_ID || '253003227791-1diqvaq7d5oqnvncmdk22aus8ech1t8p.apps.googleusercontent.com',
       googleWebClientId: process.env.EXPO_PUBLIC_GOOGLE_WEB_CLIENT_ID || '',

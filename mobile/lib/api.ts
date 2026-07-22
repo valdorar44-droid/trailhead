@@ -379,13 +379,13 @@ export const api = {
     req<{ token: string; user: User }>('/api/auth/login', {
       method: 'POST', body: JSON.stringify({ email, password }),
     }),
-  oauthApple: (identity_token: string, full_name = '', email = '') =>
+  oauthApple: (identity_token: string, full_name = '', email = '', referral_code = '') =>
     req<{ token: string; user: User }>('/api/auth/oauth/apple', {
-      method: 'POST', body: JSON.stringify({ identity_token, full_name, email }),
+      method: 'POST', body: JSON.stringify({ identity_token, full_name, email, referral_code }),
     }),
-  oauthGoogle: (identity_token: string, full_name = '', email = '') =>
+  oauthGoogle: (identity_token: string, full_name = '', email = '', referral_code = '') =>
     req<{ token: string; user: User }>('/api/auth/oauth/google', {
-      method: 'POST', body: JSON.stringify({ identity_token, full_name, email }),
+      method: 'POST', body: JSON.stringify({ identity_token, full_name, email, referral_code }),
     }),
   verifyEmail: (token: string) =>
     req<{ token: string; user: User }>('/api/auth/verify-email', {
@@ -845,10 +845,15 @@ export const api = {
     }
     const safeLimit = Math.max(2, Math.min(Math.round(limit || 8), 10));
     const optionParams = geocodeOptionsQuery(options);
+    const run = () => req<GeocodeResolveResponse>(
+      `/api/geocode/resolve?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`,
+      { signal: options.signal },
+    );
+    if (options.signal) return run();
     return guardedRequest(
       `geocode-resolve:${normalized}:${safeLimit}:${optionParams.cacheKey}`,
       10 * 60_000,
-      () => req<GeocodeResolveResponse>(`/api/geocode/resolve?q=${encodeURIComponent(normalized)}&limit=${safeLimit}${optionParams.query}`),
+      run,
     );
   },
   getSearchPlaceCard: (query: string, lat: number, lng: number) =>
@@ -2355,6 +2360,7 @@ export interface GeocodeResolveResponse {
   retry_of?: string;
 }
 export interface ProductFeatures {
+  search_v2?: boolean;
   trip_graph_v2: boolean;
   trips_tab: boolean;
   availability_monitors?: boolean;
@@ -4424,22 +4430,50 @@ export interface CampsiteInsightRequest {
   name: string; lat: number; lng: number;
   description?: string; land_type?: string; amenities?: string[];
   facility_id?: string;
+  source_label?: string;
+  source_url?: string;
+  source_updated_at?: number | string | null;
+}
+export interface CampsiteInsightProvenanceSource {
+  id: 'camp_listing' | 'nearby_references' | 'planning_guidance' | string;
+  label: string;
+  url?: string | null;
+  source_updated_at?: number | null;
+  retrieved_at?: number;
+  max_age_seconds?: number;
+  freshness: 'checked_recently' | 'dated' | 'older_source' | 'date_unknown' | 'refreshed_within_48_hours' | 'current_policy' | string;
+}
+export interface CampsiteInsightProvenance {
+  schema_version: 'campsite-insight-v2' | string;
+  evidence_status: 'supported' | 'limited';
+  source_revision: string;
+  generated_at: number;
+  expires_at: number;
+  sources: CampsiteInsightProvenanceSource[];
+  field_sources: Record<string, string[]>;
+  notice: string;
 }
 export interface CampsiteInsight {
   insider_tip: string; best_for: string; best_season: string;
   nearby_highlights: string[]; hazards: string | null;
   star_rating: number; coordinates_dms: string;
+  provenance?: CampsiteInsightProvenance;
 }
 export interface RouteBriefRequest {
   trip_name: string; waypoints: object[]; reports?: object[];
 }
 export interface RouteBrief {
-  readiness_score: number; top_concerns: string[]; must_do_before_leaving: string[];
-  daily_highlights: string[]; estimated_fuel_stops: number;
-  water_carry_gallons: number; briefing_summary: string;
-  signal_dead_zones?: string[];
-  fire_restriction_likelihood?: string;
-  emergency_bailout?: string;
+  schema_version: 2;
+  planning_status: 'Review required';
+  top_concerns: string[];
+  must_do_before_leaving: string[];
+  daily_highlights: string[];
+  fuel_status: string;
+  water_status: string;
+  signal_status: string;
+  fire_status: string;
+  exit_options_status: string;
+  briefing_summary: string;
 }
 export interface PackingRequest {
   trip_name: string; duration_days: number;

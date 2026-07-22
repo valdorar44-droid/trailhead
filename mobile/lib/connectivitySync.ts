@@ -23,6 +23,7 @@ async function probe(): Promise<boolean> {
 }
 
 interface SyncCallbacks {
+  active?: boolean;
   activeTrip: TripResult | null;
   onWeatherUpdate: (weather: RouteWeatherResult) => void;
   onSyncComplete: () => void; // called when any sync succeeds (show toast)
@@ -31,6 +32,7 @@ interface SyncCallbacks {
 }
 
 export function useConnectivitySync({
+  active = true,
   activeTrip,
   onWeatherUpdate,
   onSyncComplete,
@@ -40,6 +42,8 @@ export function useConnectivitySync({
   const wasOnline = useRef<boolean | null>(null); // null = unknown (first probe not done)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const isSyncing = useRef(false);
+  const activeRef = useRef(active);
+  activeRef.current = active;
 
   const syncWeather = useCallback(async (trip: TripResult) => {
     if (isSyncing.current) return;
@@ -54,7 +58,7 @@ export function useConnectivitySync({
         });
         return true;
       }, epoch);
-      if (!stored) return;
+      if (!stored || !activeRef.current) return;
       onWeatherUpdate(weather);
       onSyncComplete();
     } catch {
@@ -69,7 +73,8 @@ export function useConnectivitySync({
     const tickAccountId = useStore.getState().user?.id;
     const online = await probe();
     if (
-      accountStorage.epoch() !== tickEpoch
+      !activeRef.current
+      || accountStorage.epoch() !== tickEpoch
       || String(useStore.getState().user?.id ?? '') !== String(tickAccountId ?? '')
     ) return;
     const prevOnline = wasOnline.current;
@@ -93,6 +98,10 @@ export function useConnectivitySync({
   useEffect(() => { tickRef.current = tick; }, [tick]);
 
   useEffect(() => {
+    if (!active) {
+      wasOnline.current = null;
+      return;
+    }
     // Start polling
     intervalRef.current = setInterval(() => tickRef.current(), POLL_MS);
 
@@ -112,5 +121,5 @@ export function useConnectivitySync({
       if (intervalRef.current) clearInterval(intervalRef.current);
       sub.remove();
     };
-  }, []); // run once — tickRef keeps tick current
+  }, [active]); // tickRef keeps the request closure current without restarting the interval
 }

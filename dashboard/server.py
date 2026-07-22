@@ -1,14 +1,14 @@
 """Trailhead FastAPI server. All API routes."""
 from __future__ import annotations
-import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress
+import asyncio, os, sys, json, uuid, secrets, xml.etree.ElementTree as ET, time, hashlib, hmac, re, sqlite3, smtplib, html, base64, binascii, math, heapq, threading, functools, logging, contextvars, ipaddress, io
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
-from urllib.parse import quote, unquote
+from urllib.parse import quote, unquote, urlsplit
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Header, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from fastapi.staticfiles import StaticFiles
@@ -45,7 +45,7 @@ if not any(
 ):
     _uvicorn_access_logger.addFilter(_SearchV2AccessLogPrivacyFilter())
 
-from config.settings import settings
+from config.settings import settings, validate_production_secret_key
 from ai.planner import plan_trip, chat_guide, edit_trip, plan_trip_from_conversation
 from dashboard.route_enrichment import enrich_trip_along_route
 from dashboard.adventure_intelligence import build_mission_control
@@ -71,17 +71,26 @@ from dashboard.search_v2 import (
     SearchPageV2,
     SearchProvenanceV2,
     SearchRequestV2,
+    SearchResolveRequestV2,
     SearchResolveResponseV2,
     SearchResultV2,
     SearchV2Service,
     documents_from_canonical,
     normalize_search_text,
+    _external_result_for_request,
 )
 from dashboard.offline_bundles_v2 import (
     OfflineBundleManifestV2,
+    OfflineBundlePreparationV2,
     OfflineBundlePrepareRequestV2,
     OfflineBundlePreparationError,
+    load_offline_renderer_config_v2,
     prepare_offline_bundle_manifest_v2,
+)
+from dashboard.offline_materializer_v2 import (
+    materialize_offline_bundle_v2,
+    offline_artifact_root_v2,
+    offline_r2_client_v2,
 )
 from scripts.explore_sources.travel.ranking import rank_experiences
 from scripts.explore_sources.travel.viator.client import ViatorClient, config_from_env as viator_config_from_env
@@ -160,6 +169,8 @@ from db.store import (
     list_push_campaigns, get_push_campaign,
     create_support_thread, list_support_threads_for_user, list_support_threads_admin,
     get_support_thread, add_support_message, update_support_thread_status,
+    SupportAttachmentRateLimitError,
+    create_support_attachment, get_support_attachment, claim_support_attachments,
     list_user_trips, save_account_trip, save_trip_geometry,
     RevisionConflictError, IdempotencyConflictError,
     get_saved_entity, list_saved_entities, upsert_saved_entity, set_saved_entity_status,
@@ -238,6 +249,18 @@ from db.store import (
     update_dispersed_site_lead_profile, add_dispersed_site_lead_photo,
     get_dispersed_site_lead_photos, publish_dispersed_site_lead,
     save_viator_booking_intent, update_viator_booking, get_viator_booking, list_viator_bookings,
+    CommunityRatingRateLimitError,
+    get_community_rating_summary, set_community_rating, delete_community_rating,
+    create_or_get_offline_bundle_preparation_v2, get_offline_bundle_preparation_v2,
+    claim_offline_bundle_preparation_v2, complete_offline_bundle_preparation_v2,
+    claim_recoverable_offline_bundle_preparations_v2,
+    update_offline_bundle_preparation_progress_v2,
+    fail_offline_bundle_preparation_v2, get_offline_bundle_artifact_v2,
+    register_offline_bundle_artifact_v2,
+    get_route_evidence_v1, replace_route_evidence_v1,
+    create_trip_brief_and_backup_v1,
+    get_referral_summary, issue_account_deletion_authorization,
+    consume_account_deletion_authorization,
 )
 from ingestors.active import get_active_activities, get_active_campgrounds
 from ingestors.fcc import get_mobile_coverage
@@ -470,6 +493,14 @@ _originals_preview_token_context: contextvars.ContextVar[str | None] = contextva
 
 app = FastAPI(title="Trailhead API")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+
+
+@app.on_event("startup")
+async def _validate_production_runtime_security() -> None:
+    # This handler is intentionally registered before background prewarm and
+    # recovery tasks. A production process must not begin serving or enqueueing
+    # work with the public development JWT signing key.
+    validate_production_secret_key(settings.secret_key)
 
 
 @app.middleware("http")
@@ -6930,7 +6961,13 @@ def _optional_user(creds: HTTPAuthorizationCredentials | None = Depends(bearer))
     return get_user_by_id(uid) if uid else None
 
 def _safe_user(u: dict) -> dict:
-    return {k: v for k, v in u.items() if k not in ("password_hash", "photo_data")}
+    safe = {
+        k: v for k, v in u.items()
+        if k not in ("password_hash", "photo_data", "apple_sub", "google_sub")
+    }
+    provider = str(u.get("auth_provider") or "").strip().lower()
+    safe["auth_method"] = provider if provider in {"apple", "google"} else "password"
+    return safe
 
 _OAUTH_JWKS_CACHE: dict[str, tuple[float, list[dict]]] = {}
 
@@ -7749,6 +7786,14 @@ class SupportInboxMessageBody(BaseModel):
     subject: Optional[str] = None
     category: str = "support"
     body: str
+    attachment_refs: list[str] = Field(default_factory=list, max_length=3)
+    diagnostic_consent: bool = False
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
+
+
+class SupportAttachmentUploadBody(BaseModel):
+    content_type: Literal["image/jpeg", "image/png", "image/heic", "image/heif"]
+    data_base64: str = Field(min_length=16, max_length=11_200_000)
 
 class AdminSupportThreadCreateBody(BaseModel):
     user_id: int
@@ -7784,6 +7829,78 @@ def _reject_plaintext_support_secrets(text: str) -> None:
             400,
             "For your security, do not send bank, card, password, or identity-document details in chat. Trailhead support will arrange a secure step when needed.",
         )
+
+
+_SUPPORT_DIAGNOSTIC_SCALARS = {
+    "platform", "app_version", "runtime_version", "device_class",
+    "network_state", "location_permission", "notification_permission",
+    "storage_state",
+}
+
+
+def _support_diagnostics(consent: bool, supplied: dict[str, Any]) -> dict:
+    if not consent:
+        return {}
+    safe: dict[str, Any] = {}
+    for key in _SUPPORT_DIAGNOSTIC_SCALARS:
+        value = supplied.get(key)
+        if isinstance(value, (str, int, float, bool)) and len(str(value)) <= 160:
+            safe[key] = value
+    codes = supplied.get("error_codes")
+    if isinstance(codes, list):
+        safe["error_codes"] = [
+            str(value)[:80] for value in codes[:20]
+            if re.fullmatch(r"[A-Za-z0-9._:-]{1,80}", str(value or ""))
+        ]
+    return safe
+
+
+def _sanitize_support_image(content_type: str, encoded: str) -> tuple[str, bytes]:
+    try:
+        raw = base64.b64decode(encoded, validate=True)
+    except (ValueError, binascii.Error):
+        raise HTTPException(400, "Attachment data is invalid") from None
+    if len(raw) > 8 * 1024 * 1024:
+        raise HTTPException(413, "Support screenshots must be 8 MB or smaller")
+    if content_type in {"image/heic", "image/heif"}:
+        try:
+            from pillow_heif import register_heif_opener
+        except ImportError:
+            raise HTTPException(503, "HEIC support is temporarily unavailable") from None
+        register_heif_opener()
+    try:
+        from PIL import Image, ImageOps, UnidentifiedImageError
+        Image.MAX_IMAGE_PIXELS = 36_000_000
+        with Image.open(io.BytesIO(raw)) as source:
+            source.verify()
+        with Image.open(io.BytesIO(raw)) as source:
+            try:
+                image = ImageOps.exif_transpose(source)
+            except (SyntaxError, ValueError, OSError):
+                # Some otherwise valid phone images contain malformed EXIF blocks.
+                # Decode the pixels and discard that metadata instead of returning 500.
+                image = source.copy()
+            if getattr(image, "n_frames", 1) != 1:
+                raise HTTPException(415, "Animated support images are not supported")
+            output = io.BytesIO()
+            if content_type == "image/png":
+                image.convert("RGBA" if "A" in image.getbands() else "RGB").save(
+                    output, format="PNG", optimize=True,
+                )
+                normalized_type = "image/png"
+            else:
+                if content_type in {"image/heic", "image/heif"} and str(source.format or "").upper() not in {"HEIC", "HEIF"}:
+                    raise HTTPException(415, "This HEIC image could not be decoded")
+                image.convert("RGB").save(output, format="JPEG", quality=90, optimize=True)
+                normalized_type = "image/jpeg"
+    except HTTPException:
+        raise
+    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
+        raise HTTPException(415, "This screenshot format could not be read") from None
+    sanitized = output.getvalue()
+    if not sanitized or len(sanitized) > 8 * 1024 * 1024:
+        raise HTTPException(413, "The processed support screenshot is too large")
+    return normalized_type, sanitized
 
 class AdminExtremeGrantBody(BaseModel):
     user_id: Optional[int] = None
@@ -9116,6 +9233,302 @@ async def originals_landing_page(slug: str):
     return FileResponse(path, media_type="text/html")
 
 
+_BRANCH_REFERRAL_API_URL = "https://api2.branch.io/v1/url"
+_BRANCH_REFERRAL_DOMAIN = "go.gettrailhead.app"
+_BRANCH_REFERRAL_CACHE_MAX = 2048
+_BRANCH_REFERRAL_CACHE_SUCCESS_SECONDS = 6 * 3600
+_BRANCH_REFERRAL_CACHE_FAILURE_SECONDS = 60
+_BRANCH_REFERRAL_CACHE: dict[str, tuple[float, str | None]] = {}
+_BRANCH_REFERRAL_CACHE_LOCK = threading.Lock()
+_BRANCH_REFERRAL_DEV_SECRET = "trailhead-dev-secret-change-in-prod"
+_TRAILHEAD_IOS_STORE_URL = "https://apps.apple.com/app/id6763677349"
+_TRAILHEAD_ANDROID_STORE_URL = (
+    "https://play.google.com/store/apps/details?id=com.trailhead.app&gl=us&hl=en_US"
+)
+
+
+def _branch_referral_config() -> tuple[str, str, str] | None:
+    if not bool(getattr(settings, "branch_referral_handoff_enabled", False)):
+        return None
+    branch_key = str(getattr(settings, "branch_live_key", "") or "").strip()
+    domain = str(getattr(settings, "branch_link_domain", "") or "").strip().lower().rstrip(".")
+    if not re.fullmatch(r"key_(?:live|test)_[A-Za-z0-9]{8,200}", branch_key):
+        return None
+    # The approved handoff must remain on Trailhead's configured branded host.
+    # Never silently substitute a Branch default domain.
+    if domain != _BRANCH_REFERRAL_DOMAIN:
+        return None
+    alias_secret = str(
+        getattr(settings, "branch_referral_alias_secret", "") or ""
+    ).strip()
+    if not alias_secret:
+        fallback = str(getattr(settings, "secret_key", "") or "").strip()
+        if fallback and fallback != _BRANCH_REFERRAL_DEV_SECRET:
+            alias_secret = fallback
+    if len(alias_secret) < 32 or alias_secret == _BRANCH_REFERRAL_DEV_SECRET:
+        return None
+    return branch_key, domain, alias_secret
+
+
+def _branch_referral_alias(code: str, alias_secret: str) -> str:
+    digest = hmac.new(
+        alias_secret.encode("utf-8"),
+        f"trailhead-branch-referral-v1\0{code}".encode("utf-8"),
+        hashlib.sha256,
+    ).digest()
+    opaque = base64.urlsafe_b64encode(digest).decode("ascii").rstrip("=")[:32]
+    return f"r/{opaque}"
+
+
+def _branch_referral_request_payload(
+    code: str,
+    branch_key: str,
+    domain: str,
+    alias_secret: str,
+) -> dict:
+    canonical_url = f"https://gettrailhead.app/r/{quote(code)}"
+    return {
+        "branch_key": branch_key,
+        "domain": domain,
+        "feature": "referral",
+        "channel": "trailhead_referral",
+        "alias": _branch_referral_alias(code, alias_secret),
+        "type": 0,
+        "data": {
+            # Referral code is the only account-derived value sent to Branch.
+            "referral_code": code,
+            "$deeplink_path": f"referral?code={quote(code)}",
+            "$canonical_url": canonical_url,
+            "$desktop_url": canonical_url,
+            "$fallback_url": canonical_url,
+            "$ios_url": _TRAILHEAD_IOS_STORE_URL,
+            "$android_url": _TRAILHEAD_ANDROID_STORE_URL,
+        },
+    }
+
+
+def _validated_branch_referral_url(
+    candidate: str,
+    expected_domain: str,
+    expected_alias: str,
+) -> str:
+    parsed = urlsplit(str(candidate or "").strip())
+    try:
+        port = parsed.port
+    except ValueError:
+        raise RuntimeError("Branch link creation returned an unexpected URL") from None
+    expected_path = "/" + expected_alias.strip("/")
+    if (
+        parsed.scheme != "https"
+        or str(parsed.hostname or "").lower().rstrip(".") != expected_domain
+        or parsed.username is not None
+        or parsed.password is not None
+        or port not in (None, 443)
+        or parsed.query
+        or parsed.fragment
+        or parsed.path.rstrip("/") != expected_path
+    ):
+        raise RuntimeError("Branch link creation returned an unexpected URL")
+    return parsed.geturl()
+
+
+def _branch_referral_record_matches(response_payload: object, request_payload: dict) -> bool:
+    if not isinstance(response_payload, dict):
+        return False
+    expected_data = request_payload.get("data")
+    actual_data = response_payload.get("data")
+    if not isinstance(expected_data, dict) or not isinstance(actual_data, dict):
+        return False
+    if response_payload.get("feature") != request_payload.get("feature"):
+        return False
+    if response_payload.get("channel") != request_payload.get("channel"):
+        return False
+    actual_alias = response_payload.get("alias")
+    if actual_alias not in (None, "", request_payload.get("alias")):
+        return False
+    for key in (
+        "referral_code", "$deeplink_path", "$canonical_url", "$desktop_url",
+        "$fallback_url", "$ios_url", "$android_url",
+    ):
+        if actual_data.get(key) != expected_data.get(key):
+            return False
+    return True
+
+
+async def _verify_existing_branch_referral_url(
+    client: httpx.AsyncClient,
+    candidate: str,
+    payload: dict,
+    expected_domain: str,
+) -> str:
+    verified_candidate = _validated_branch_referral_url(
+        candidate, expected_domain, str(payload.get("alias") or ""),
+    )
+    response = await client.get(
+        _BRANCH_REFERRAL_API_URL,
+        headers={"Accept": "application/json"},
+        params={
+            "url": verified_candidate,
+            "branch_key": str(payload.get("branch_key") or ""),
+        },
+    )
+    if response.status_code != 200:
+        raise RuntimeError("Branch alias could not be verified")
+    try:
+        response_payload = response.json()
+    except (ValueError, TypeError):
+        raise RuntimeError("Branch alias verification returned an invalid response") from None
+    if not _branch_referral_record_matches(response_payload, payload):
+        raise RuntimeError("Branch alias is bound to a different referral")
+    return verified_candidate
+
+
+async def _request_branch_referral_url(payload: dict, expected_domain: str) -> str:
+    timeout = httpx.Timeout(4.0, connect=2.0)
+    async with httpx.AsyncClient(timeout=timeout, follow_redirects=False) as client:
+        response = await client.post(
+            _BRANCH_REFERRAL_API_URL,
+            headers={"Accept": "application/json", "Content-Type": "application/json"},
+            json=payload,
+        )
+        if response.status_code == 200:
+            try:
+                candidate = str(response.json().get("url") or "").strip()
+            except (ValueError, TypeError, AttributeError):
+                raise RuntimeError("Branch link creation returned an invalid response") from None
+            return _validated_branch_referral_url(
+                candidate, expected_domain, str(payload.get("alias") or ""),
+            )
+        if response.status_code not in {400, 409}:
+            raise RuntimeError(f"Branch link creation returned HTTP {response.status_code}")
+        # A deterministic alias may already exist after a process restart or
+        # cache expiry. Constructing its address is for lookup only; it is never
+        # returned unless Branch proves the stored referral/canonical target is
+        # exactly the one requested here.
+        candidate = (
+            f"https://{expected_domain}/"
+            f"{quote(str(payload.get('alias') or ''), safe='/')}"
+        )
+        return await _verify_existing_branch_referral_url(
+            client, candidate, payload, expected_domain,
+        )
+
+
+def _branch_referral_cache_key(
+    code: str,
+    branch_key: str,
+    domain: str,
+    alias_secret: str,
+) -> str:
+    secret_fingerprint = hashlib.sha256(alias_secret.encode("utf-8")).hexdigest()
+    return hashlib.sha256(
+        f"{branch_key}\0{domain}\0{code}\0{secret_fingerprint}".encode("utf-8")
+    ).hexdigest()
+
+
+def _branch_referral_cache_get(key: str) -> tuple[bool, str | None]:
+    now = time.monotonic()
+    with _BRANCH_REFERRAL_CACHE_LOCK:
+        cached = _BRANCH_REFERRAL_CACHE.get(key)
+        if cached is None:
+            return False, None
+        expires_at, value = cached
+        if expires_at <= now:
+            _BRANCH_REFERRAL_CACHE.pop(key, None)
+            return False, None
+        return True, value
+
+
+def _branch_referral_cache_set(key: str, value: str | None) -> None:
+    now = time.monotonic()
+    ttl = (
+        _BRANCH_REFERRAL_CACHE_SUCCESS_SECONDS
+        if value is not None else _BRANCH_REFERRAL_CACHE_FAILURE_SECONDS
+    )
+    with _BRANCH_REFERRAL_CACHE_LOCK:
+        expired = [
+            cache_key for cache_key, (expires_at, _value) in _BRANCH_REFERRAL_CACHE.items()
+            if expires_at <= now
+        ]
+        for cache_key in expired:
+            _BRANCH_REFERRAL_CACHE.pop(cache_key, None)
+        if len(_BRANCH_REFERRAL_CACHE) >= _BRANCH_REFERRAL_CACHE_MAX:
+            oldest = min(
+                _BRANCH_REFERRAL_CACHE,
+                key=lambda cache_key: _BRANCH_REFERRAL_CACHE[cache_key][0],
+            )
+            _BRANCH_REFERRAL_CACHE.pop(oldest, None)
+        _BRANCH_REFERRAL_CACHE[key] = (now + ttl, value)
+
+
+async def _branch_referral_url(code: str) -> str | None:
+    config = _branch_referral_config()
+    if config is None:
+        return None
+    branch_key, domain, alias_secret = config
+    cache_key = _branch_referral_cache_key(code, branch_key, domain, alias_secret)
+    found, cached = _branch_referral_cache_get(cache_key)
+    if found:
+        return cached
+    payload = _branch_referral_request_payload(
+        code, branch_key, domain, alias_secret,
+    )
+    try:
+        value = await _request_branch_referral_url(payload, domain)
+    except Exception:
+        # Referral entry must remain usable during provider/network failures.
+        # Do not log the code, request payload, provider response, or key.
+        logger.warning("Branded referral handoff is temporarily unavailable")
+        value = None
+    _branch_referral_cache_set(cache_key, value)
+    return value
+
+
+@app.get("/r/{referral_code}", response_class=HTMLResponse)
+async def referral_landing_page(referral_code: str):
+    code = unquote(referral_code).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,63}", code):
+        raise HTTPException(404, "Referral link was not found")
+    if not get_user_by_referral_code(code):
+        raise HTTPException(404, "Referral link was not found")
+    safe_code = html.escape(code, quote=True)
+    app_link = f"trailhead://referral?code={quote(code)}"
+    branch_link = await _branch_referral_url(code)
+    handoff_link = branch_link or app_link
+    ios_link = branch_link or _TRAILHEAD_IOS_STORE_URL
+    android_link = branch_link or _TRAILHEAD_ANDROID_STORE_URL
+    handoff_note = (
+        "If the referral does not apply automatically, enter the code shown above."
+        if branch_link
+        else "Open or download Trailhead, then enter the code shown above."
+    )
+    return HTMLResponse(f"""<!doctype html>
+<html lang="en"><head><meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta name="robots" content="noindex,nofollow" />
+<title>Join Trailhead</title>
+<style>
+body{{margin:0;background:#f7f8f6;color:#111412;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;min-height:100vh;display:grid;place-items:center;padding:24px;box-sizing:border-box}}
+main{{width:min(100%,480px);background:#fff;border:1px solid #dedfda;border-radius:20px;padding:32px;box-sizing:border-box;box-shadow:0 18px 52px rgba(17,20,18,.08)}}
+.kicker{{color:#984f2f;font-weight:800;letter-spacing:.08em;text-transform:uppercase;font-size:13px}}h1{{font-size:38px;line-height:1;margin:12px 0 14px}}p{{font-size:17px;line-height:1.5;color:#4f5752}}.code{{font-weight:800;color:#111412}}a.button{{display:block;text-align:center;text-decoration:none;border-radius:12px;padding:15px 18px;margin-top:12px;font-weight:800}}.primary{{background:#ad5a33;color:#fff}}.secondary{{border:1px solid #cfd2cd;color:#111412;background:#fff}}small{{display:block;margin-top:20px;color:#69716c;line-height:1.45}}
+</style></head><body><main>
+<div class="kicker">Trailhead referral</div><h1>Plan the road ahead.</h1>
+<p>Open Trailhead and use referral code <span class="code">{safe_code}</span> when you create your account.</p>
+<a class="button primary" href="{html.escape(handoff_link, quote=True)}">Continue to Trailhead</a>
+<a class="button secondary" href="{html.escape(ios_link, quote=True)}">Download for iPhone</a>
+<a class="button secondary" href="{html.escape(android_link, quote=True)}">Download for Android</a>
+<small>{html.escape(handoff_note)}</small>
+</main></body></html>""", headers={"Cache-Control": "private, no-store"})
+
+
+@app.head("/r/{referral_code}")
+async def referral_landing_page_head(referral_code: str):
+    code = unquote(referral_code).strip()
+    if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_-]{2,63}", code) or not get_user_by_referral_code(code):
+        raise HTTPException(404, "Referral link was not found")
+    return Response(status_code=200, media_type="text/html", headers={"Cache-Control": "private, no-store"})
+
+
 @app.head("/originals/{slug}")
 async def originals_landing_page_head(slug: str):
     clean_slug = unquote(slug).strip("/")
@@ -9707,8 +10120,22 @@ async def me(user: dict = Depends(_current_user)):
     return _safe_user(user)
 
 
+@app.get("/api/referrals/me")
+async def referral_summary(user: dict = Depends(_current_user)):
+    summary = get_referral_summary(user["id"])
+    code = summary["referral_code"]
+    return {
+        **summary,
+        "share_url": f"https://gettrailhead.app/r/{quote(code)}",
+        "manual_code": code,
+    }
+
+
 def _server_feature_enabled(name: str) -> bool:
-    return str(os.getenv(name, "0")).strip().lower() in {"1", "true", "yes", "on"}
+    configured = os.getenv(name)
+    if configured is None and name == "TRAILHEAD_SEARCH_V2_ENABLED":
+        configured = os.getenv("SEARCH_V2_ENABLED")
+    return str(configured or "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _product_feature_enabled(env_name: str, user: dict | None = None) -> bool:
@@ -9836,13 +10263,60 @@ async def product_features(user: dict | None = Depends(_optional_user)):
         "trip_packs": _product_feature_enabled("TRAILHEAD_TRIP_PACKS_ENABLED", user),
         "originals": _originals_feature_enabled(user),
         "community_publications": _product_feature_enabled("TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED", user),
+        "community_ratings": _product_feature_enabled("TRAILHEAD_COMMUNITY_RATINGS_ENABLED", user),
+        "brief_and_backup": _product_feature_enabled("TRAILHEAD_BRIEF_AND_BACKUP_ENABLED", user),
         "digest_preferences": _product_feature_enabled("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user),
     }
 
+class AccountDeletionAuthorizationRequest(BaseModel):
+    password: str = Field(default="", max_length=256)
+    provider: str = Field(default="", max_length=20)
+    identity_token: str = Field(default="", max_length=16_384)
+
+
+@app.post("/api/auth/deletion-authorization")
+async def authorize_account_deletion(
+    body: AccountDeletionAuthorizationRequest,
+    user: dict = Depends(_current_user),
+):
+    provider = str(user.get("auth_provider") or "").strip().lower()
+    auth_method = provider if provider in {"apple", "google"} else "password"
+    if auth_method == "password":
+        if body.provider.strip() or body.identity_token.strip():
+            raise HTTPException(400, "This account requires the current password")
+        if not body.password or not _verify_pw(body.password, str(user.get("password_hash") or "")):
+            raise HTTPException(401, "Current password is incorrect")
+    else:
+        supplied_provider = body.provider.strip().lower()
+        if supplied_provider != auth_method:
+            raise HTTPException(400, f"Reauthenticate with {auth_method.title()}")
+        claims = await _decode_oauth_token(auth_method, body.identity_token)
+        expected_subject = str(user.get(f"{auth_method}_sub") or "")
+        if not expected_subject or not hmac.compare_digest(
+            str(claims.get("sub") or ""), expected_subject,
+        ):
+            raise HTTPException(401, "Reauthentication does not match this account")
+        try:
+            issued_at = int(claims.get("iat") or 0)
+        except (TypeError, ValueError):
+            issued_at = 0
+        now = int(time.time())
+        if issued_at < now - 600 or issued_at > now + 60:
+            raise HTTPException(401, "Sign in again before deleting this account")
+    return issue_account_deletion_authorization(user["id"], auth_method, 300)
+
+
 @app.delete("/api/auth/me")
-async def delete_account(user: dict = Depends(_current_user)):
+async def delete_account(
+    user: dict = Depends(_current_user),
+    deletion_authorization: str = Header(
+        "", alias="X-Trailhead-Deletion-Authorization", max_length=512,
+    ),
+):
     """Permanently delete the authenticated user's account and all associated data.
     Required by App Store guideline 5.1.1(v)."""
+    if not consume_account_deletion_authorization(user["id"], deletion_authorization):
+        raise HTTPException(401, "Fresh reauthentication is required")
     from db.store import delete_user
     delete_user(user["id"])
     return {"deleted": True}
@@ -10689,6 +11163,43 @@ async def support_inbox(user: dict = Depends(_current_user)):
         "unread_count": sum(int(t.get("unread_count") or 0) for t in threads),
     }
 
+
+@app.post("/api/support/attachments")
+async def support_attachment_upload(
+    body: SupportAttachmentUploadBody,
+    user: dict = Depends(_current_user),
+):
+    content_type, image_data = await asyncio.to_thread(
+        _sanitize_support_image, body.content_type, body.data_base64,
+    )
+    try:
+        return create_support_attachment(user["id"], content_type, image_data)
+    except SupportAttachmentRateLimitError as exc:
+        raise HTTPException(429, str(exc)) from None
+
+
+@app.get("/api/support/attachments/{attachment_id}")
+async def support_attachment_download(
+    attachment_id: str,
+    user: dict = Depends(_current_user),
+):
+    attachment = get_support_attachment(
+        attachment_id,
+        user_id=user["id"],
+        admin=bool(user.get("is_admin")),
+    )
+    if not attachment:
+        raise HTTPException(404, "Support attachment was not found")
+    return Response(
+        content=bytes(attachment["image_data"]),
+        media_type=attachment["content_type"],
+        headers={
+            "Cache-Control": "private, no-store",
+            "Content-Disposition": f'inline; filename="{attachment_id}.jpg"',
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
+
 @app.get("/api/support/threads/{thread_id}")
 async def support_thread_detail(thread_id: int, user: dict = Depends(_current_user)):
     thread = get_support_thread(thread_id, user_id=user["id"], admin=False)
@@ -10704,11 +11215,22 @@ async def support_inbox_message(body: SupportInboxMessageBody, user: dict = Depe
     if len(text) > 4000:
         raise HTTPException(400, "Message body must be 4,000 characters or fewer")
     _reject_plaintext_support_secrets(text)
+    attachment_refs = list(dict.fromkeys(body.attachment_refs))
+    for attachment_ref in attachment_refs:
+        attachment = get_support_attachment(attachment_ref, user_id=user["id"])
+        if not attachment or attachment.get("message_id") is not None:
+            raise HTTPException(400, "Support attachment is unavailable")
+    message_meta = {
+        "diagnostic_consent": bool(body.diagnostic_consent),
+        "diagnostics": _support_diagnostics(body.diagnostic_consent, body.diagnostics),
+    }
     if body.thread_id:
         thread = get_support_thread(body.thread_id, user_id=user["id"], admin=False)
         if not thread:
             raise HTTPException(404, "Thread not found")
-        message = add_support_message(body.thread_id, "user", text, user_id=user["id"])
+        message = add_support_message(
+            body.thread_id, "user", text, user_id=user["id"], meta=message_meta,
+        )
         thread_id = body.thread_id
     else:
         subject = (body.subject or "Trailhead support").strip() or "Trailhead support"
@@ -10721,10 +11243,74 @@ async def support_inbox_message(body: SupportInboxMessageBody, user: dict = Depe
             category=(body.category or "support").strip().lower()[:60] or "support",
             opened_by="user",
             initial_body=text,
+            meta=message_meta,
         )
-        message = None
+        detail = get_support_thread(thread_id, user_id=user["id"], admin=False)
+        message = detail["messages"][-1] if detail and detail.get("messages") else None
+    if attachment_refs:
+        if not message or not message.get("id"):
+            raise HTTPException(500, "Support message could not attach the screenshots")
+        try:
+            message["attachments"] = claim_support_attachments(
+                user["id"], int(message["id"]), attachment_refs,
+            )
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from None
     log_event(user["id"], None, "support_user_message", {"thread_id": thread_id, "category": body.category})
     return {"ok": True, "thread_id": thread_id, "message": message}
+
+
+class CommunityRatingUpdateV1(BaseModel):
+    rating: int = Field(ge=1, le=5)
+
+
+def _community_rating_error(exc: ValueError) -> HTTPException:
+    message = str(exc)
+    if isinstance(exc, CommunityRatingRateLimitError):
+        status = 429
+    else:
+        status = 404 if message == "Canonical place was not found" else 400
+    return HTTPException(status, message)
+
+
+@app.get("/api/community/ratings/{entity_kind}/{entity_id:path}")
+async def community_rating_summary_v1(
+    entity_kind: str,
+    entity_id: str,
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_RATINGS_ENABLED", user)
+    try:
+        return get_community_rating_summary(entity_kind, entity_id, user["id"])
+    except ValueError as exc:
+        raise _community_rating_error(exc) from None
+
+
+@app.put("/api/community/ratings/{entity_kind}/{entity_id:path}")
+async def community_rating_update_v1(
+    entity_kind: str,
+    entity_id: str,
+    body: CommunityRatingUpdateV1,
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_RATINGS_ENABLED", user)
+    try:
+        return set_community_rating(user["id"], entity_kind, entity_id, body.rating)
+    except ValueError as exc:
+        raise _community_rating_error(exc) from None
+
+
+@app.delete("/api/community/ratings/{entity_kind}/{entity_id:path}")
+async def community_rating_delete_v1(
+    entity_kind: str,
+    entity_id: str,
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_COMMUNITY_RATINGS_ENABLED", user)
+    try:
+        return delete_community_rating(user["id"], entity_kind, entity_id)
+    except ValueError as exc:
+        raise _community_rating_error(exc) from None
 
 
 # ── Routing ───────────────────────────────────────────────────────────────────
@@ -18214,6 +18800,30 @@ def _search_v2_mapbox_session_token(session_id: str) -> str:
     return str(uuid.UUID(bytes=bytes(digest)))
 
 
+def _search_v2_mapbox_detail_ref(
+    request: SearchRequestV2,
+    provider_id: str,
+) -> str:
+    """Sign a resolution-only suggestion for this exact search session/scope."""
+    context = request.model_dump(
+        mode="json",
+        exclude={"cursor", "limit"},
+        exclude_none=True,
+    )
+    payload = json.dumps(
+        {"v": 1, "provider_id": provider_id, "request": context},
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    signature = hmac.new(
+        str(settings.secret_key).encode("utf-8"),
+        b"search-v2-mapbox-selection\0" + payload,
+        hashlib.sha256,
+    ).hexdigest()[:32]
+    return f"provider:mapbox:{provider_id}:{signature}"
+
+
 async def _search_v2_external_mapbox(
     request: SearchRequestV2, limit: int, mode: str,
 ) -> list[SearchResultV2]:
@@ -18256,9 +18866,9 @@ async def _search_v2_external_mapbox(
     ]
     results: list[SearchResultV2] = []
     for index, suggestion in enumerate(suggestions):
-        provider_id = str(
+        provider_id = _clean_mapbox_param(str(
             suggestion.get("mapbox_id") or suggestion.get("id") or ""
-        ).strip()
+        ).removeprefix("mapbox:"), r"[^a-zA-Z0-9_=:.+\-/]+", 180)
         title = re.sub(
             r"\s+", " ", str(suggestion.get("name") or "").strip(),
         )[:140]
@@ -18291,7 +18901,7 @@ async def _search_v2_external_mapbox(
         context = suggestion.get("context") if isinstance(suggestion.get("context"), dict) else {}
         region = context.get("region") if isinstance(context.get("region"), dict) else {}
         results.append(SearchResultV2(
-            result_id=f"mapbox:{provider_id}" if not provider_id.startswith("mapbox:") else provider_id,
+            result_id=f"mapbox:{provider_id}",
             canonical_place_id=None,
             title=title,
             subtitle=subtitle,
@@ -18309,11 +18919,143 @@ async def _search_v2_external_mapbox(
                 temporary_use_only=True,
             ),
             persistence_policy="temporary",
-            detail_ref=f"provider:mapbox:{provider_id}"[:260],
+            detail_ref=_search_v2_mapbox_detail_ref(request, provider_id),
             score=100_000.0 + index,
             match_reason="provider_fallback",
         ))
     return results[:max(1, min(int(limit), 10))]
+
+
+def _search_v2_mapbox_result_from_feature(
+    feature: dict,
+    request: SearchRequestV2,
+    provider_id: str,
+) -> SearchResultV2 | None:
+    props = feature.get("properties") if isinstance(feature.get("properties"), dict) else feature
+    returned_id = _clean_mapbox_param(str(
+        props.get("mapbox_id") or props.get("id")
+        or feature.get("mapbox_id") or feature.get("id") or ""
+    ).removeprefix("mapbox:"), r"[^a-zA-Z0-9_=:.+\-/]+", 180)
+    if returned_id and returned_id != provider_id:
+        return None
+    lat, lng = _map_context_feature_coords(feature)
+    if lat is None or lng is None or not (-90 <= lat <= 90 and -180 <= lng <= 180):
+        return None
+    title = re.sub(r"\s+", " ", str(
+        props.get("name") or props.get("full_address")
+        or feature.get("text") or feature.get("place_name") or ""
+    ).strip())[:140]
+    if not title:
+        return None
+    categories: list[str] = []
+    values: list[object] = []
+    for raw_values in (props.get("poi_category"), props.get("poi_category_ids")):
+        if isinstance(raw_values, list):
+            values.extend(raw_values)
+        elif raw_values:
+            values.append(raw_values)
+    values.append(props.get("feature_type") or feature.get("place_type"))
+    for value in values:
+        clean = normalize_search_text(value).replace(" ", "_")[:40]
+        if clean and clean not in categories:
+            categories.append(clean)
+        if len(categories) >= 12:
+            break
+    raw_feature_type = props.get("feature_type") or feature.get("place_type") or "place"
+    if isinstance(raw_feature_type, list):
+        raw_feature_type = raw_feature_type[0] if raw_feature_type else "place"
+    kind = _search_v2_external_kind(raw_feature_type)
+    context = props.get("context") if isinstance(props.get("context"), dict) else {}
+    region = context.get("region") if isinstance(context.get("region"), dict) else {}
+    subtitle = re.sub(r"\s+", " ", str(
+        props.get("full_address") or props.get("place_formatted")
+        or props.get("address") or feature.get("place_name") or ""
+    ).strip())[:180] or None
+    result = SearchResultV2(
+        result_id=f"mapbox:{provider_id}",
+        canonical_place_id=None,
+        title=title,
+        subtitle=subtitle,
+        kind=kind,
+        categories=categories or [kind],
+        coordinates=SearchCenterV2(lat=float(lat), lng=float(lng)),
+        parent=re.sub(r"\s+", " ", str(region.get("name") or "").strip())[:100] or None,
+        provenance=SearchProvenanceV2(
+            provider="mapbox",
+            source_label="Mapbox search",
+            provider_result_id=provider_id,
+            temporary_use_only=True,
+        ),
+        persistence_policy="temporary",
+        detail_ref=_search_v2_mapbox_detail_ref(request, provider_id),
+        score=100_000.0,
+        match_reason="explicit_selection",
+    )
+    return _external_result_for_request(result, request)
+
+
+async def _search_v2_resolve_mapbox_selection(
+    request: SearchRequestV2,
+    *,
+    selected_result_id: str,
+    selected_detail_ref: str,
+) -> SearchResolveResponseV2:
+    if not request.include_external or not request.session_id or not settings.mapbox_token:
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "This search suggestion can no longer be resolved.",
+        })
+    provider_id = _clean_mapbox_param(
+        selected_result_id.removeprefix("mapbox:"),
+        r"[^a-zA-Z0-9_=:.+\-/]+",
+        180,
+    )
+    if not provider_id or selected_result_id != f"mapbox:{provider_id}":
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "This search suggestion can no longer be resolved.",
+        })
+    expected_ref = _search_v2_mapbox_detail_ref(request, provider_id)
+    if not hmac.compare_digest(selected_detail_ref, expected_ref):
+        raise HTTPException(422, {
+            "code": "invalid_search_selection",
+            "message": "This search suggestion no longer matches this search session.",
+        })
+    data = await _mapbox_get(
+        "https://api.mapbox.com/search/searchbox/v1/retrieve/"
+        f"{quote(provider_id, safe='')}",
+        _searchbox_params({
+            "session_token": _search_v2_mapbox_session_token(request.session_id),
+            "language": "en",
+        }),
+    )
+    selected = None
+    for feature in data.get("features", []):
+        if not isinstance(feature, dict):
+            continue
+        selected = _search_v2_mapbox_result_from_feature(
+            feature, request, provider_id,
+        )
+        if selected is not None:
+            break
+    _count, revision = await _search_v2_service.prewarm()
+    if selected is None:
+        return SearchResolveResponseV2(
+            query=request.query,
+            status="not_found",
+            selected=None,
+            alternatives=[],
+            reason="selected_result_outside_scope",
+            revision=revision,
+        )
+    return SearchResolveResponseV2(
+        query=request.query,
+        status="resolved",
+        selected=selected,
+        alternatives=[],
+        reason="explicit_selection",
+        revision=revision,
+    )
 
 
 def _search_v2_external_timeout_seconds() -> float:
@@ -18387,6 +19129,76 @@ def _search_v2_parse_query_request(
         }) from None
 
 
+def _route_search_bounds(trip: dict) -> SearchBoundsV2 | None:
+    candidates: list[object] = []
+    for key in ("route_geometry", "routeGeometry", "geometry"):
+        if trip.get(key) is not None:
+            candidates.append(trip.get(key))
+    route = trip.get("route")
+    if isinstance(route, dict):
+        candidates.extend([
+            route.get("geometry"), route.get("route_geometry"), route.get("coordinates"),
+        ])
+    points: list[tuple[float, float]] = []
+
+    def visit(value: object) -> None:
+        if isinstance(value, dict):
+            if value.get("type") == "Feature":
+                visit(value.get("geometry"))
+                return
+            visit(value.get("coordinates"))
+            return
+        if not isinstance(value, (list, tuple)):
+            return
+        if len(value) >= 2 and not isinstance(value[0], (list, tuple, dict)):
+            try:
+                lng, lat = float(value[0]), float(value[1])
+            except (TypeError, ValueError):
+                return
+            if math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180:
+                points.append((lng, lat))
+            return
+        for child in value:
+            visit(child)
+
+    for candidate in candidates:
+        visit(candidate)
+    if not points:
+        return None
+    west, east = min(point[0] for point in points), max(point[0] for point in points)
+    south, north = min(point[1] for point in points), max(point[1] for point in points)
+    padding = 0.15
+    return SearchBoundsV2(
+        west=max(-180.0, west - padding), east=min(180.0, east + padding),
+        south=max(-90.0, south - padding), north=min(90.0, north + padding),
+    )
+
+
+def _authorize_search_v2_request(
+    request: SearchRequestV2,
+    user: dict | None,
+) -> SearchRequestV2:
+    if request.scope != "route":
+        return request
+    if not user:
+        raise HTTPException(401, "Authentication required for trip search")
+    route_ref = str(request.route_ref or "").strip()
+    trip_id = route_ref[5:] if route_ref.startswith("trip:") else route_ref
+    try:
+        trip = get_trip_document_v2(int(user["id"]), trip_id)
+    except ValueError:
+        trip = None
+    if not trip:
+        raise HTTPException(404, {"code": "trip_not_found", "message": "Trip was not found"})
+    bounds = _route_search_bounds(trip)
+    if not bounds:
+        raise HTTPException(409, {
+            "code": "trip_route_not_ready",
+            "message": "Finish calculating this route before searching along it.",
+        })
+    return request.model_copy(update={"route_ref": f"trip:{trip_id}", "bounds": bounds})
+
+
 async def _search_v2_page(request: SearchRequestV2, *, mode: str) -> SearchPageV2:
     try:
         return await _search_v2_service.page(request, mode=mode)
@@ -18424,6 +19236,7 @@ async def api_search_v2_suggest(
         cursor=cursor, limit=limit, session_id=session_id,
         include_external=include_external,
     )
+    request = _authorize_search_v2_request(request, user)
     return await _search_v2_page(request, mode="suggest")
 
 
@@ -18455,17 +19268,45 @@ async def api_search_v2_results(
         cursor=cursor, limit=limit, session_id=session_id,
         include_external=include_external,
     )
+    request = _authorize_search_v2_request(request, user)
     return await _search_v2_page(request, mode="results")
 
 
 @app.post("/api/search/v2/resolve", response_model=SearchResolveResponseV2)
 async def api_search_v2_resolve(
-    body: SearchRequestV2,
+    body: SearchResolveRequestV2,
     user: dict | None = Depends(_optional_user),
 ):
     _require_product_feature("TRAILHEAD_SEARCH_V2_ENABLED", user)
+    selected_result_id = body.selected_result_id
+    selected_detail_ref = body.selected_detail_ref
+    request = SearchRequestV2.model_validate(body.model_dump(
+        exclude={"selected_result_id", "selected_detail_ref"},
+    ))
+    request = _authorize_search_v2_request(request, user)
+    if selected_result_id and selected_detail_ref:
+        if selected_result_id.startswith("mapbox:"):
+            return await _search_v2_resolve_mapbox_selection(
+                request,
+                selected_result_id=selected_result_id,
+                selected_detail_ref=selected_detail_ref,
+            )
+        page = await _search_v2_page(request, mode="resolve")
+        selected = next((
+            result for result in page.results
+            if result.result_id == selected_result_id
+            and result.detail_ref == selected_detail_ref
+        ), None)
+        return SearchResolveResponseV2(
+            query=request.query,
+            status="resolved" if selected is not None else "not_found",
+            selected=selected,
+            alternatives=[],
+            reason="explicit_selection" if selected is not None else "selected_result_not_found",
+            revision=page.revision,
+        )
     try:
-        return await _search_v2_service.resolve(body)
+        return await _search_v2_service.resolve(request)
     except SearchCursorError as exc:
         raise HTTPException(400, {
             "code": "invalid_search_cursor", "message": str(exc),
@@ -21985,44 +22826,477 @@ async def offline_authorize(body: OfflineAuthorizeRequest, user: dict = Depends(
     }
 
 
+def _run_offline_bundle_preparation_v2(
+    preparation_id: str,
+    user_id: int,
+    request_payload: dict,
+    already_claimed: bool = False,
+) -> None:
+    if not already_claimed and not claim_offline_bundle_preparation_v2(preparation_id, user_id):
+        return
+    heartbeat_stop = threading.Event()
+
+    def heartbeat() -> None:
+        interval = max(10, min(60, _offline_preparation_lease_seconds() // 3))
+        while not heartbeat_stop.wait(interval):
+            try:
+                # Progress is monotonic, so a low value only renews updated_at.
+                update_offline_bundle_preparation_progress_v2(
+                    preparation_id, user_id, 5,
+                )
+            except Exception:
+                logger.exception("Offline bundle V2 lease heartbeat failed")
+                continue
+
+    heartbeat_thread = threading.Thread(
+        target=heartbeat,
+        name="offline-v2-heartbeat",
+        daemon=True,
+    )
+    heartbeat_thread.start()
+    try:
+        request = OfflineBundlePrepareRequestV2.model_validate(request_payload)
+        result = materialize_offline_bundle_v2(
+            preparation_id,
+            request,
+            progress_callback=lambda value: (
+                update_offline_bundle_preparation_progress_v2(
+                    preparation_id, user_id, value,
+                )
+            ),
+        )
+        for artifact in result.artifacts:
+            register_offline_bundle_artifact_v2(
+                preparation_id=preparation_id,
+                artifact_id=artifact.artifact_id,
+                kind=artifact.kind,
+                storage_path=artifact.storage_path,
+                media_type=artifact.media_type,
+                byte_count=artifact.byte_count,
+                sha256=artifact.sha256,
+                record_count=artifact.record_count,
+            )
+        complete_offline_bundle_preparation_v2(
+            preparation_id,
+            user_id,
+            result.manifest.model_dump(mode="json", exclude_none=True),
+        )
+    except OfflineBundlePreparationError as exc:
+        fail_offline_bundle_preparation_v2(
+            preparation_id, user_id, exc.code, exc.message,
+        )
+    except Exception:
+        logger.exception("Offline bundle V2 preparation failed")
+        fail_offline_bundle_preparation_v2(
+            preparation_id,
+            user_id,
+            "offline_preparation_failed",
+            "This offline bundle could not be prepared.",
+        )
+    finally:
+        heartbeat_stop.set()
+        heartbeat_thread.join(timeout=1)
+
+
+def _offline_preparation_lease_seconds() -> int:
+    try:
+        configured = int(os.getenv("TRAILHEAD_OFFLINE_PREPARATION_LEASE_SECONDS", "180"))
+    except (TypeError, ValueError):
+        configured = 180
+    return max(60, min(configured, 3600))
+
+
+def _offline_preparation_recovery_poll_seconds() -> int:
+    try:
+        configured = int(os.getenv("TRAILHEAD_OFFLINE_RECOVERY_POLL_SECONDS", "20"))
+    except (TypeError, ValueError):
+        configured = 20
+    return max(5, min(configured, 300))
+
+
+_OFFLINE_PREPARATION_RECOVERY_TASK: asyncio.Task | None = None
+_OFFLINE_PREPARATION_WORK_TASKS: set[asyncio.Task] = set()
+
+
+def _schedule_recovered_offline_preparation(work: dict) -> asyncio.Task:
+    task = asyncio.create_task(asyncio.to_thread(
+        _run_offline_bundle_preparation_v2,
+        str(work["id"]),
+        int(work["user_id"]),
+        dict(work["request_payload"]),
+        True,
+    ))
+    _OFFLINE_PREPARATION_WORK_TASKS.add(task)
+    task.add_done_callback(_OFFLINE_PREPARATION_WORK_TASKS.discard)
+    return task
+
+
+async def _recover_offline_bundle_preparations_once() -> list[asyncio.Task]:
+    stale_before = int(time.time()) - _offline_preparation_lease_seconds()
+    work = await asyncio.to_thread(
+        claim_recoverable_offline_bundle_preparations_v2,
+        stale_before,
+        limit=8,
+    )
+    return [_schedule_recovered_offline_preparation(item) for item in work]
+
+
+async def _offline_preparation_recovery_loop() -> None:
+    while True:
+        try:
+            await _recover_offline_bundle_preparations_once()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Offline bundle V2 recovery pass failed")
+        await asyncio.sleep(_offline_preparation_recovery_poll_seconds())
+
+
+@app.on_event("startup")
+async def _start_offline_preparation_recovery() -> None:
+    global _OFFLINE_PREPARATION_RECOVERY_TASK
+    if (
+        _OFFLINE_PREPARATION_RECOVERY_TASK is None
+        or _OFFLINE_PREPARATION_RECOVERY_TASK.done()
+    ):
+        _OFFLINE_PREPARATION_RECOVERY_TASK = asyncio.create_task(
+            _offline_preparation_recovery_loop()
+        )
+
+
+@app.on_event("shutdown")
+async def _stop_offline_preparation_recovery() -> None:
+    global _OFFLINE_PREPARATION_RECOVERY_TASK
+    task = _OFFLINE_PREPARATION_RECOVERY_TASK
+    _OFFLINE_PREPARATION_RECOVERY_TASK = None
+    if task is not None and not task.done():
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
 @app.post(
     "/api/offline/bundles/prepare",
-    response_model=OfflineBundleManifestV2,
+    response_model=OfflineBundleManifestV2 | OfflineBundlePreparationV2,
     response_model_exclude_none=True,
 )
 async def api_prepare_offline_bundle_v2(
     body: OfflineBundlePrepareRequestV2,
+    response: Response,
+    background_tasks: BackgroundTasks,
     user: dict = Depends(_current_user),
 ):
-    """Issue one immutable V2 manifest only from materialized artifacts.
-
-    This stays additive to the legacy authorization endpoint. Bundle identity,
-    integrity metadata, catalog coverage, licensing, and renderer pack IDs are
-    all server-owned. Until real artifact files and delivery endpoints exist,
-    preparation fails closed and the request is not written to analytics.
-    """
+    """Return a cached manifest or queue one server-owned preparation job."""
     _require_product_feature("OFFLINE_BUNDLE_V2_ENABLED", user)
+    # Keep absent optional additions out of the deterministic hash so legacy
+    # clients continue to address their existing default-style preparation.
+    request_payload = body.model_dump(mode="json", exclude_none=True)
     try:
-        manifest = prepare_offline_bundle_manifest_v2(body)
+        selected_renderer = load_offline_renderer_config_v2(
+            body.renderer_style_id,
+        )
     except OfflineBundlePreparationError as exc:
         raise HTTPException(exc.http_status, {
             "code": exc.code,
             "message": exc.message,
         }) from None
+    cache_binding = {
+        "renderer": selected_renderer.id,
+        "style_id": selected_renderer.style_id,
+        "style_uri": selected_renderer.style_uri,
+        "style_revision": selected_renderer.style_revision,
+    }
+    preparation, _created = create_or_get_offline_bundle_preparation_v2(
+        int(user["id"]), request_payload, cache_binding=cache_binding,
+    )
+    if preparation.get("status") == "ready" and preparation.get("manifest"):
+        return OfflineBundleManifestV2.model_validate(preparation["manifest"])
 
+    # Re-check entitlement on every non-ready attempt. In particular, a job
+    # that previously failed authorization must not become authorized merely
+    # because its deterministic request row already exists.
     authorization = authorize_offline_download(
         user,
         "trailhead_offline_bundle_v2",
-        manifest.bundle_id,
+        preparation["id"],
         0,
         "Prepare Trailhead offline bundle V2",
     )
     if not authorization.get("authorized"):
+        fail_offline_bundle_preparation_v2(
+            preparation["id"], int(user["id"]),
+            "offline_bundle_not_authorized",
+            "This account cannot prepare the requested offline bundle.",
+        )
         raise HTTPException(403, {
             "code": "offline_bundle_not_authorized",
             "message": "This account cannot prepare the requested offline bundle.",
         })
+
+    # Cached materialized artifacts can complete fast enough to return the
+    # immutable manifest in the original request. Missing artifacts are queued
+    # for the trusted materializer instead of making the client retry blindly.
+    try:
+        manifest = prepare_offline_bundle_manifest_v2(body)
+    except OfflineBundlePreparationError as exc:
+        if exc.code not in {"offline_artifacts_not_ready", "offline_artifacts_incomplete"}:
+            fail_offline_bundle_preparation_v2(
+                preparation["id"], int(user["id"]), exc.code, exc.message,
+            )
+            raise HTTPException(exc.http_status, {
+                "code": exc.code,
+                "message": exc.message,
+            }) from None
+        response.status_code = 202
+        background_tasks.add_task(
+            _run_offline_bundle_preparation_v2,
+            preparation["id"], int(user["id"]), request_payload,
+        )
+        return OfflineBundlePreparationV2.model_validate(preparation)
+
+    complete_offline_bundle_preparation_v2(
+        preparation["id"], int(user["id"]),
+        manifest.model_dump(mode="json", exclude_none=True),
+    )
     return manifest
+
+
+@app.get(
+    "/api/offline/bundles/preparations/{preparation_id}",
+    response_model=OfflineBundlePreparationV2,
+    response_model_exclude_none=True,
+)
+async def api_offline_bundle_preparation_v2(
+    preparation_id: str,
+    background_tasks: BackgroundTasks,
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("OFFLINE_BUNDLE_V2_ENABLED", user)
+    item = get_offline_bundle_preparation_v2(preparation_id, int(user["id"]))
+    if not item:
+        raise HTTPException(404, "Offline preparation was not found")
+    if item.get("status") in {"queued", "running"}:
+        # A queued row might represent the tiny crash window between row
+        # creation and the original authorization write. Re-authorizing is
+        # idempotent and creates the durable trust record used by recovery.
+        authorization = authorize_offline_download(
+            user,
+            "trailhead_offline_bundle_v2",
+            preparation_id,
+            0,
+            "Recover Trailhead offline bundle V2",
+        )
+        if not authorization.get("authorized"):
+            fail_offline_bundle_preparation_v2(
+                preparation_id,
+                int(user["id"]),
+                "offline_bundle_not_authorized",
+                "This account cannot prepare the requested offline bundle.",
+            )
+        else:
+            recovered = claim_recoverable_offline_bundle_preparations_v2(
+                int(time.time()) - _offline_preparation_lease_seconds(),
+                limit=1,
+                preparation_id=preparation_id,
+                user_id=int(user["id"]),
+            )
+            if recovered:
+                work = recovered[0]
+                background_tasks.add_task(
+                    _run_offline_bundle_preparation_v2,
+                    work["id"],
+                    work["user_id"],
+                    work["request_payload"],
+                    True,
+                )
+        item = get_offline_bundle_preparation_v2(preparation_id, int(user["id"]))
+        if not item:
+            raise HTTPException(404, "Offline preparation was not found")
+    return OfflineBundlePreparationV2.model_validate(item)
+
+
+def _offline_artifact_root() -> Path:
+    return offline_artifact_root_v2()
+
+
+def _offline_requested_range(size: int, range_header: str) -> tuple[int, int] | None:
+    if not range_header:
+        return None
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())
+    if not match or not (match.group(1) or match.group(2)):
+        raise ValueError("invalid range")
+    if match.group(1):
+        start = int(match.group(1))
+        end = int(match.group(2)) if match.group(2) else size - 1
+    else:
+        suffix = int(match.group(2))
+        if suffix <= 0:
+            raise ValueError("invalid range")
+        start, end = max(0, size - suffix), size - 1
+    if start < 0 or end < start or start >= size:
+        raise ValueError("invalid range")
+    return start, min(end, size - 1)
+
+
+async def _offline_r2_artifact_response(
+    artifact: dict,
+    range_header: str,
+    if_none_match: str,
+    if_range: str,
+):
+    parsed = urlsplit(str(artifact["storage_path"]))
+    if (
+        parsed.scheme != "r2" or not parsed.netloc or not parsed.path.strip("/")
+        or parsed.query or parsed.fragment or parsed.username or parsed.password
+        or parsed.netloc != settings.r2_bucket
+    ):
+        raise HTTPException(503, "Offline artifact storage is unavailable")
+    key = parsed.path.lstrip("/")
+    try:
+        client = offline_r2_client_v2()
+        head = await asyncio.to_thread(
+            client.head_object, Bucket=settings.r2_bucket, Key=key,
+        )
+    except Exception:
+        raise HTTPException(503, "Offline artifact storage is unavailable") from None
+    size = int(head.get("ContentLength") or -1)
+    metadata = head.get("Metadata") or {}
+    if (
+        size != int(artifact["byte_count"])
+        or str(metadata.get("sha256") or "") != str(artifact["sha256"])
+    ):
+        raise HTTPException(503, "Offline artifact integrity could not be verified")
+    etag = f'"{artifact["etag"]}"'
+    headers = {
+        "ETag": etag,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+        "Content-Disposition": f'attachment; filename="{artifact["artifact_id"]}"',
+    }
+    if if_none_match.strip() in {etag, artifact["etag"]}:
+        return Response(status_code=304, headers=headers)
+    if if_range.strip() and if_range.strip() not in {etag, artifact["etag"]}:
+        range_header = ""
+    try:
+        requested = _offline_requested_range(size, range_header)
+    except ValueError:
+        return Response(
+            status_code=416,
+            headers={**headers, "Content-Range": f"bytes */{size}"},
+        )
+    request_kwargs = {"Bucket": settings.r2_bucket, "Key": key}
+    status_code = 200
+    if requested:
+        start, end = requested
+        request_kwargs["Range"] = f"bytes={start}-{end}"
+        status_code = 206
+        headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+        headers["Content-Length"] = str(end - start + 1)
+    else:
+        headers["Content-Length"] = str(size)
+    try:
+        obj = await asyncio.to_thread(client.get_object, **request_kwargs)
+        body = obj["Body"]
+    except Exception:
+        raise HTTPException(503, "Offline artifact storage is unavailable") from None
+
+    def stream_object():
+        try:
+            while True:
+                chunk = body.read(64 * 1024)
+                if not chunk:
+                    break
+                yield chunk
+        finally:
+            body.close()
+
+    return StreamingResponse(
+        stream_object(),
+        status_code=status_code,
+        media_type=artifact["media_type"],
+        headers=headers,
+    )
+
+
+@app.get("/api/offline/bundles/{preparation_id}/artifacts/{artifact_id}")
+async def api_offline_bundle_artifact_v2(
+    preparation_id: str,
+    artifact_id: str,
+    range_header: str = Header("", alias="Range", max_length=120),
+    if_none_match: str = Header("", alias="If-None-Match", max_length=160),
+    if_range: str = Header("", alias="If-Range", max_length=160),
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("OFFLINE_BUNDLE_V2_ENABLED", user)
+    artifact = get_offline_bundle_artifact_v2(
+        preparation_id, artifact_id, int(user["id"]),
+    )
+    if not artifact:
+        raise HTTPException(404, "Offline artifact was not found")
+    if str(artifact["storage_path"]).startswith("r2://"):
+        return await _offline_r2_artifact_response(
+            artifact, range_header, if_none_match, if_range,
+        )
+    root = _offline_artifact_root()
+    path = Path(str(artifact["storage_path"])).expanduser().resolve()
+    if root != path and root not in path.parents:
+        raise HTTPException(503, "Offline artifact storage is unavailable")
+    if not path.is_file():
+        raise HTTPException(503, "Offline artifact storage is unavailable")
+    size = int(path.stat().st_size)
+    if size != int(artifact["byte_count"]):
+        raise HTTPException(503, "Offline artifact integrity could not be verified")
+    etag = f'"{artifact["etag"]}"'
+    headers = {
+        "ETag": etag,
+        "Accept-Ranges": "bytes",
+        "Cache-Control": "private, max-age=31536000, immutable",
+        "X-Content-Type-Options": "nosniff",
+    }
+    if if_none_match.strip() in {etag, artifact["etag"]}:
+        return Response(status_code=304, headers=headers)
+    if if_range.strip() and if_range.strip() not in {etag, artifact["etag"]}:
+        range_header = ""
+    if not range_header:
+        return FileResponse(
+            path,
+            media_type=artifact["media_type"],
+            filename=path.name,
+            headers=headers,
+        )
+    try:
+        requested = _offline_requested_range(size, range_header)
+    except ValueError:
+        return Response(status_code=416, headers={**headers, "Content-Range": f"bytes */{size}"})
+    if requested is None:
+        raise HTTPException(500, "Offline range processing failed")
+    start, end = requested
+    length = end - start + 1
+
+    def stream_file():
+        remaining = length
+        with path.open("rb") as handle:
+            handle.seek(start)
+            while remaining > 0:
+                chunk = handle.read(min(64 * 1024, remaining))
+                if not chunk:
+                    break
+                remaining -= len(chunk)
+                yield chunk
+
+    return StreamingResponse(
+        stream_file(),
+        status_code=206,
+        media_type=artifact["media_type"],
+        headers={
+            **headers,
+            "Content-Range": f"bytes {start}-{end}/{size}",
+            "Content-Length": str(length),
+        },
+    )
 
 @app.get("/credits/success", response_class=HTMLResponse)
 async def credits_success(session_id: str = ""):
@@ -33024,6 +34298,464 @@ async def campsite_insight(request: Request, body: CampsiteInsightRequest, user:
 
 
 # ── AI route briefing ─────────────────────────────────────────────────────────
+
+class BriefAndBackupRequestV1(BaseModel):
+    expected_trip_revision: int | None = Field(default=None, ge=1)
+
+
+def _trip_route_payload(trip: dict) -> object | None:
+    for key in ("route_geometry", "routeGeometry", "geometry"):
+        value = trip.get(key)
+        if value:
+            if isinstance(value, str):
+                try:
+                    value = json.loads(value)
+                except json.JSONDecodeError:
+                    continue
+            return value
+    route = trip.get("route")
+    if isinstance(route, dict):
+        for key in ("geometry", "route_geometry", "coordinates"):
+            if route.get(key):
+                return route[key]
+    return None
+
+
+def _trip_route_coordinates_v1(route_payload: object) -> list[list[float]]:
+    value = route_payload
+    if isinstance(value, dict) and value.get("type") == "Feature":
+        value = value.get("geometry")
+    if isinstance(value, dict):
+        geometry_type = str(value.get("type") or "")
+        coordinates = value.get("coordinates")
+        if geometry_type == "LineString":
+            value = coordinates
+        elif geometry_type == "MultiLineString" and isinstance(coordinates, list):
+            value = [point for line in coordinates if isinstance(line, list) for point in line]
+        else:
+            value = coordinates
+    if not isinstance(value, list):
+        return []
+    points: list[dict] = []
+    for raw in value:
+        if not isinstance(raw, (list, tuple)) or len(raw) < 2:
+            continue
+        try:
+            lng, lat = float(raw[0]), float(raw[1])
+        except (TypeError, ValueError):
+            continue
+        if math.isfinite(lat) and math.isfinite(lng) and -90 <= lat <= 90 and -180 <= lng <= 180:
+            points.append({"lat": lat, "lng": lng})
+    points = _downsample_route_points(points, limit=900)
+    return [[point["lng"], point["lat"]] for point in points]
+
+
+def _route_evidence_source_url(value: object) -> str | None:
+    clean = str(value or "").strip()
+    if not clean or len(clean) > 800:
+        return None
+    parsed = urlsplit(clean)
+    if (
+        parsed.scheme != "https" or not parsed.netloc
+        or parsed.username or parsed.password or any(ord(char) < 32 for char in clean)
+    ):
+        return None
+    return parsed._replace(query="", fragment="").geturl()
+
+
+def _route_evidence_observed_at(value: object) -> int | None:
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        epoch = int(value)
+        return epoch if 946684800 <= epoch <= int(time.time()) + 86400 else None
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text.replace("Z", "+00:00"))
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        epoch = int(parsed.timestamp())
+        return epoch if 946684800 <= epoch <= int(time.time()) + 86400 else None
+    except ValueError:
+        return None
+
+
+def _route_evidence_sample_points(route_points: list[dict], max_samples: int = 10) -> list[dict]:
+    if len(route_points) < 2:
+        return []
+    total_mi = _route_distance_mi(route_points)
+    count = max(2, min(max_samples, int(math.ceil(total_mi / 40.0)) + 1))
+    result: list[dict] = []
+    for index in range(count):
+        route_progress = index / max(1, count - 1)
+        point = _point_at_route_mile(route_points, total_mi * route_progress)
+        if point:
+            result.append({**point, "route_progress": route_progress})
+    return result
+
+
+async def _route_service_observations_v1(route_points: list[dict]) -> list[dict]:
+    samples = _route_evidence_sample_points(route_points, max_samples=10)
+    if not samples:
+        return []
+    semaphore = asyncio.Semaphore(3)
+
+    async def fetch(sample: dict) -> tuple[dict, dict]:
+        async with semaphore:
+            try:
+                result = await asyncio.wait_for(
+                    get_mobile_coverage(float(sample["lat"]), float(sample["lng"])),
+                    timeout=10,
+                )
+            except Exception:
+                result = {}
+        return sample, result if isinstance(result, dict) else {}
+
+    rows = await asyncio.gather(*(fetch(sample) for sample in samples))
+    observations: list[dict] = []
+    for sample, result in rows:
+        for record in (result.get("records") or [])[:8]:
+            if not isinstance(record, dict):
+                continue
+            availability = re.sub(
+                r"[^a-z0-9_]+", "_", str(record.get("availability_class") or "").lower(),
+            ).strip("_")
+            if not availability or availability == "unknown":
+                continue
+            progress = float(sample["route_progress"])
+            source_kind = str(record.get("source") or "").lower()
+            observations.append({
+                "start_progress": max(0.0, progress - 0.001),
+                "end_progress": min(1.0, progress + 0.001),
+                "availability": availability,
+                "source_label": str(
+                    record.get("source_label") or result.get("source_label")
+                    or "FCC mobile coverage observation"
+                )[:160],
+                "source_url": (
+                    "https://www.fcc.gov/BroadbandData/speed-test-app"
+                    if source_kind == "fcc_vizmo"
+                    else _route_evidence_source_url(
+                        (result.get("modeled_source") or {}).get("url")
+                    )
+                ),
+                "observed_at": _route_evidence_observed_at(record.get("data_date")),
+                "updated_at": int(result.get("last_checked") or time.time()),
+                "details": {
+                    "provider": str(record.get("provider") or "Mobile carrier")[:100],
+                    "technology": str(record.get("technology") or "Mobile broadband")[:80],
+                    "sample_count": record.get("sample_count"),
+                    "observation_kind": "point_observation",
+                    "advisory": True,
+                },
+            })
+            if len(observations) >= 40:
+                return observations
+    return observations
+
+
+def _route_report_service_observations_v1(route_points: list[dict]) -> list[dict]:
+    samples = _route_evidence_sample_points(route_points, max_samples=40)
+    reports = get_reports_along_route(samples, radius_deg=0.08)
+    observations: list[dict] = []
+    for report in reports:
+        context = " ".join(str(report.get(key) or "") for key in (
+            "type", "subtype", "description",
+        )).lower()
+        if not any(term in context for term in (
+            "signal", "cell service", "cellular", "coverage", "dead zone",
+        )):
+            continue
+        projection = _route_projection_for_item(report, route_points)
+        if not projection or float(projection["route_distance_mi"]) > 5:
+            continue
+        progress = float(projection["route_progress"])
+        observations.append({
+            "start_progress": max(0.0, progress - 0.002),
+            "end_progress": min(1.0, progress + 0.002),
+            "availability": "community_report",
+            "source_label": "Trailhead community report",
+            "source_url": None,
+            "observed_at": _route_evidence_observed_at(
+                report.get("observed_at") or report.get("created_at")
+            ),
+            "updated_at": int(report.get("created_at") or time.time()),
+            "details": {
+                "report_id": int(report.get("id") or 0),
+                "report_type": str(report.get("subtype") or report.get("type") or "signal")[:80],
+                "severity": str(report.get("severity") or "")[:40],
+                "description": re.sub(r"\s+", " ", str(report.get("description") or ""))[:400],
+                "confirmations": int(report.get("confirmations") or 0),
+                "advisory": True,
+            },
+        })
+    return observations[:20]
+
+
+def _route_exit_references_from_places_v1(
+    places: list[dict],
+    route_points: list[dict],
+) -> list[dict]:
+    allowed_categories = {
+        "fuel", "propane", "mechanic", "grocery", "resupply",
+        "visitor_center", "parking", "water",
+    }
+    blocked_sources = {"mapbox", "google", "foursquare", "viator", "originals"}
+    references: list[dict] = []
+    seen: set[str] = set()
+    for place in places:
+        if not isinstance(place, dict):
+            continue
+        category = _normalize_place_category(
+            place.get("type") or place.get("category") or "",
+        )
+        if category not in allowed_categories:
+            continue
+        source = str(place.get("source") or "").strip().lower()
+        if source in blocked_sources or source.startswith("mapbox"):
+            continue
+        projection = _route_projection_for_item(place, route_points)
+        if not projection or float(projection["route_distance_mi"]) > 12:
+            continue
+        label = re.sub(r"\s+", " ", str(place.get("name") or "")).strip()
+        source_label = re.sub(r"\s+", " ", str(
+            place.get("verified_source") or place.get("source_label")
+            or place.get("source_badge") or source
+        )).strip()
+        if not label or not source_label:
+            continue
+        canonical_id = str(place.get("trailhead_place_id") or place.get("id") or "")
+        dedupe_key = canonical_id or f"{label.lower()}:{projection['route_progress']:.4f}"
+        if dedupe_key in seen:
+            continue
+        seen.add(dedupe_key)
+        references.append({
+            "id": (
+                "route_exit_" + hashlib.sha256(dedupe_key.encode("utf-8")).hexdigest()[:32]
+            ),
+            "route_progress": float(projection["route_progress"]),
+            "label": label[:180],
+            "availability": "not_checked",
+            "source_label": source_label[:160],
+            "source_url": _route_evidence_source_url(
+                place.get("official_url") or place.get("url") or place.get("website")
+            ),
+            "observed_at": _route_evidence_observed_at(
+                place.get("last_seen_at") or place.get("last_seen")
+            ),
+            "updated_at": int(
+                place.get("last_refreshed_at") or place.get("updated_at") or time.time()
+            ),
+            "details": {
+                "canonical_place_id": canonical_id[:180] or None,
+                "category": category,
+                "detour_miles": float(projection["route_distance_mi"]),
+                "availability_note": "Location reference only; current hours and availability are not checked.",
+                "stale": bool(place.get("stale")),
+            },
+        })
+        if len(references) >= 30:
+            break
+    return sorted(references, key=lambda item: (item["route_progress"], item["label"]))
+
+
+async def _materialize_route_evidence_v1(
+    user: dict,
+    trip_id: str,
+    route_sha256: str,
+    route_coordinates: list[list[float]],
+) -> dict:
+    route_points = _route_points_from_lonlat(route_coordinates)
+    if len(route_points) < 2:
+        return get_route_evidence_v1(user["id"], trip_id, route_sha256)
+    samples = _route_evidence_sample_points(route_points, max_samples=10)
+    cached_places = list_cached_places_near_samples(
+        samples,
+        radius_mi=18,
+        categories=[
+            "fuel", "propane", "mechanic", "grocery", "resupply",
+            "visitor_center", "parking", "water",
+        ],
+        stale_after_seconds=14 * 86400,
+        include_stale=True,
+        limit=100,
+    )
+    places = list(cached_places)
+    if len(cached_places) < 6:
+        try:
+            intelligence = await asyncio.wait_for(
+                _build_route_intelligence(RouteIntelligenceRequest(
+                    route=route_coordinates,
+                    radius=18,
+                    categories=[
+                        "fuel", "propane", "mechanic", "grocery", "resupply",
+                        "visitor_center", "parking", "water",
+                    ],
+                    scope_id=f"brief:{trip_id}",
+                    route_scope="route",
+                    max_samples=6,
+                    force_refresh=False,
+                    include_stale=True,
+                    stale_after_hours=336,
+                    limit=80,
+                ), user),
+                timeout=15,
+            )
+            places = [
+                item for item in (intelligence.get("places") or [])
+                if isinstance(item, dict)
+            ] or places
+        except Exception:
+            pass
+    fcc_observations = await _route_service_observations_v1(route_points)
+    report_observations = _route_report_service_observations_v1(route_points)
+    service_segments = [*fcc_observations, *report_observations]
+    exits = _route_exit_references_from_places_v1(places, route_points)
+    revision_payload = {
+        "schema_version": 1,
+        "route_sha256": route_sha256,
+        "service_segments": [
+            {key: value for key, value in item.items() if key != "updated_at"}
+            for item in service_segments
+        ],
+        "exits": [
+            {key: value for key, value in item.items() if key != "updated_at"}
+            for item in exits
+        ],
+        "timeline_media": [],
+    }
+    if not service_segments and not exits:
+        return get_route_evidence_v1(user["id"], trip_id, route_sha256)
+    revision = "evidence-" + hashlib.sha256(json.dumps(
+        revision_payload, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    return replace_route_evidence_v1(
+        user["id"], trip_id, route_sha256, revision,
+        service_segments=service_segments,
+        exits=exits,
+        timeline_media=[],
+    )
+
+
+def _brief_and_backup_response_v1(
+    trip: dict,
+    route_sha256: str,
+    evidence: dict,
+) -> dict:
+    service_segments = evidence.get("service_segments") or []
+    exits = evidence.get("exits") or []
+    media = evidence.get("timeline_media") or []
+    evidence_available = bool(service_segments or exits)
+    sources: list[dict] = []
+    seen_sources: set[tuple[str, str]] = set()
+    for item in [*service_segments, *exits]:
+        label = str(item.get("source_label") or "").strip()
+        url = str(item.get("source_url") or "").strip()
+        if not label or (label, url) in seen_sources:
+            continue
+        seen_sources.add((label, url))
+        sources.append({
+            "label": label,
+            "url": url or None,
+            "observed_at": item.get("observed_at"),
+            "updated_at": item.get("updated_at"),
+        })
+    return {
+        "schema_version": 1,
+        "trip_id": trip["trip_id"],
+        "trip_revision": int(trip.get("revision") or 1),
+        "route_sha256": route_sha256,
+        "evidence_revision": evidence["evidence_revision"],
+        "generated_at": int(time.time()),
+        "status": "partially_checked" if evidence_available else "not_checked",
+        "evidence_available": evidence_available,
+        "legacy_fallback_recommended": not evidence_available,
+        "checks": {
+            "mobile_service": "observations_found" if service_segments else "not_checked",
+            "exits": "references_found" if exits else "not_checked",
+            "backup_routes": "not_checked",
+            "hazards": "not_checked",
+        },
+        "service_segments": service_segments,
+        "exits": exits,
+        "timeline_media": media,
+        "sources": sources,
+        "note": (
+            "Review the sourced observations and route references before departure. Current availability is not guaranteed."
+            if evidence_available
+            else "Route service, exits, backup routes, and hazards have not been checked."
+        ),
+    }
+
+
+@app.post("/api/trips/{trip_id}/brief-and-backup")
+async def trip_brief_and_backup_v1(
+    trip_id: str,
+    body: BriefAndBackupRequestV1,
+    idempotency_key: str = Header(..., alias="Idempotency-Key", min_length=8, max_length=128),
+    user: dict = Depends(_current_user),
+):
+    _require_product_feature("TRAILHEAD_BRIEF_AND_BACKUP_ENABLED", user)
+    try:
+        trip = get_trip_document_v2(user["id"], trip_id)
+    except ValueError:
+        trip = None
+    if not trip:
+        raise HTTPException(404, "Trip was not found")
+    revision = int(trip.get("revision") or 1)
+    if body.expected_trip_revision is not None and body.expected_trip_revision != revision:
+        raise HTTPException(409, {
+            "code": "trip_revision_changed",
+            "message": "This trip changed. Review the latest route before running Brief & Backup.",
+            "current_revision": revision,
+        })
+    route_payload = _trip_route_payload(trip)
+    if route_payload is None:
+        raise HTTPException(409, {
+            "code": "trip_route_not_ready",
+            "message": "Finish calculating this route before running Brief & Backup.",
+        })
+    route_sha256 = hashlib.sha256(json.dumps(
+        route_payload, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    route_coordinates = _trip_route_coordinates_v1(route_payload)
+    if len(route_coordinates) < 2:
+        raise HTTPException(409, {
+            "code": "trip_route_not_supported",
+            "message": "This saved route must be recalculated before Brief & Backup can check it.",
+        })
+    evidence = get_route_evidence_v1(user["id"], trip_id, route_sha256)
+    if not (evidence.get("service_segments") or evidence.get("exits")):
+        try:
+            evidence = await _materialize_route_evidence_v1(
+                user, trip_id, route_sha256, route_coordinates,
+            )
+        except Exception:
+            logger.exception("Brief & Backup evidence materialization failed")
+            evidence = get_route_evidence_v1(user["id"], trip_id, route_sha256)
+    result_payload = _brief_and_backup_response_v1(trip, route_sha256, evidence)
+    charge = (
+        0
+        if user.get("is_admin") or has_active_plan(user) or not result_payload["evidence_available"]
+        else AI_COSTS["route_brief"]
+    )
+    try:
+        result, _created = create_trip_brief_and_backup_v1(
+            user["id"], trip_id, revision, route_sha256,
+            evidence["evidence_revision"], idempotency_key, result_payload, charge,
+        )
+    except IdempotencyConflictError as exc:
+        raise HTTPException(409, str(exc)) from None
+    except ValueError as exc:
+        if str(exc) == "Not enough credits":
+            raise HTTPException(402, {
+                "code": "insufficient_credits",
+                "message": f"Brief & Backup costs {charge} credits.",
+                "credits_needed": charge,
+            }) from None
+        raise HTTPException(400, str(exc)) from None
+    return result
+
 
 class RouteBriefRequest(BaseModel):
     trip_name: str; waypoints: list[dict]; reports: list[dict] = []

@@ -12,7 +12,7 @@ import math
 import os
 import re
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timezone
 from functools import lru_cache
 from pathlib import Path
@@ -71,6 +71,14 @@ class OfflineBundlePrepareRequestV2(BaseModel):
     bounds: OfflineBoundsV2
     min_zoom: int = Field(default=6, ge=0, le=24)
     max_zoom: int = Field(default=14, ge=0, le=24)
+    # Clients select only a server-approved identifier. They can never submit
+    # an arbitrary style URI or revision.
+    renderer_style_id: str | None = Field(
+        default=None,
+        min_length=1,
+        max_length=64,
+        pattern=r"^[a-z0-9][a-z0-9_-]{0,63}$",
+    )
     options: OfflineBundleOptionsV2 = Field(default_factory=OfflineBundleOptionsV2)
 
     @model_validator(mode="after")
@@ -136,6 +144,7 @@ class OfflineBundleRendererV2(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
     id: Literal["rnmapbox", "maplibre"]
+    style_id: str | None = Field(default=None, max_length=64)
     style_uri: str
     style_revision: str
     style_pack_id: str
@@ -168,6 +177,29 @@ class OfflineBundleManifestV2(BaseModel):
         return self
 
 
+class OfflineBundlePreparationIssueV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    code: str = Field(min_length=1, max_length=80)
+    message: str = Field(min_length=1, max_length=500)
+
+
+class OfflineBundlePreparationV2(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    schema_version: Literal[2] = OFFLINE_BUNDLE_SCHEMA_VERSION
+    id: str = Field(min_length=8, max_length=100)
+    status: Literal["queued", "running", "ready", "error"]
+    progress: int = Field(ge=0, le=100)
+    bundle_id: str | None = Field(default=None, max_length=80)
+    revision: str | None = Field(default=None, max_length=80)
+    manifest: OfflineBundleManifestV2 | None = None
+    error: OfflineBundlePreparationIssueV2 | None = None
+    created_at: int
+    updated_at: int
+    completed_at: int | None = None
+
+
 @dataclass(frozen=True)
 class OfflineCatalogItemV2:
     item_id: str
@@ -181,6 +213,16 @@ class OfflineCatalogItemV2:
     # Places use their point. Trails must carry real geometry bounds; an
     # arbitrary label/anchor point is not sufficient to claim area coverage.
     spatial_bounds: tuple[float, float, float, float] | None = None
+    title: str = ""
+    subtitle: str = ""
+    category: str = ""
+    parent_destination: str = ""
+    aliases: tuple[str, ...] = ()
+    document: dict | None = None
+    geometry: dict | None = None
+    thumbnail_url: str | None = None
+    thumbnail_license_id: str | None = None
+    thumbnail_attribution: str | None = None
 
 
 @dataclass(frozen=True)
@@ -195,6 +237,7 @@ class OfflineRendererConfigV2:
     id: Literal["rnmapbox", "maplibre"]
     style_uri: str
     style_revision: str
+    style_id: str = "server_default"
 
 
 @dataclass(frozen=True)
@@ -224,6 +267,8 @@ _SOURCE_RIGHTS = {
     "blm": ("US-FEDERAL-PUBLIC-DATA", "Bureau of Land Management"),
     "recreation.gov": ("US-FEDERAL-PUBLIC-DATA", "Recreation.gov"),
     "ridb": ("US-FEDERAL-PUBLIC-DATA", "Recreation.gov"),
+    "trailhead": ("TRAILHEAD-FIRST-PARTY", "Trailhead"),
+    "trailhead_explore": ("TRAILHEAD-FIRST-PARTY", "Trailhead"),
 }
 
 
@@ -245,6 +290,145 @@ def _media_is_licensed(media: object) -> bool:
         ):
             return True
     return False
+
+
+def _licensed_thumbnail(media: object) -> tuple[str, str, str] | None:
+    """Return one redistribution-safe image candidate, never a provider photo by default."""
+    if not isinstance(media, list):
+        return None
+    for item in media:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        parsed = urlsplit(url)
+        if (
+            parsed.scheme != "https" or not parsed.netloc
+            or parsed.username or parsed.password or parsed.fragment
+        ):
+            continue
+        license_text = str(item.get("license") or "").strip()
+        normalized = license_text.lower()
+        if "public domain" in normalized:
+            license_id = "PUBLIC-DOMAIN"
+        elif "cc0" in normalized:
+            license_id = "CC0-1.0"
+        elif "cc by" in normalized or "creative commons attribution" in normalized:
+            license_id = "CC-BY"
+        else:
+            continue
+        attribution = str(
+            item.get("attribution") or item.get("credit") or item.get("caption") or ""
+        ).strip()
+        if license_id == "CC-BY" and not attribution:
+            continue
+        return url, license_id, attribution
+    return None
+
+
+def _compact_public_document(
+    record: dict,
+    *,
+    item_id: str,
+    kind: Literal["place", "trail"],
+    lat: float,
+    lng: float,
+    source_label: str,
+    attribution: str,
+) -> dict:
+    """Copy durable place-sheet/search fields while excluding volatile live data."""
+    scalar_keys = (
+        "name", "category", "kind", "type", "subtype", "label", "land_type", "country", "region",
+        "admin", "summary", "description", "difficulty", "best_season", "access",
+        "safety", "official_url", "reservation_url", "reservable", "verified",
+        "distance_mi", "elevation_gain_ft", "elevation_loss_ft", "route_shape",
+        "activity", "surface", "allowed_uses", "land_manager", "seasonal_notes",
+        "campsite_count", "campsites_count", "max_rig_length", "max_vehicle_length",
+        "max_trailer_length", "max_rv_length", "cost", "ada", "phone", "address",
+        "website", "booking_url", "access_notes", "bail_out_notes", "stay_limit",
+        "reservation_notes", "source_confidence_notes", "link_label", "site_type",
+        "camp_type", "rig_suitability", "vehicle_suitability", "fuel_types",
+        "elevation", "source_badge", "source_freshness", "last_checked",
+    )
+    document: dict = {
+        "id": item_id,
+        "kind": kind,
+        "lat": lat,
+        "lng": lng,
+        "source_label": source_label,
+        "attribution": attribution,
+    }
+    for key in scalar_keys:
+        value = record.get(key)
+        if value is None or value == "":
+            continue
+        if isinstance(value, (str, int, float, bool)):
+            document[key] = value
+    for key in (
+        "subcategories", "tags", "search_aliases", "amenities", "activities",
+        "site_types", "camp_types", "fact_labels", "trailheads", "linked_trail_ids",
+        "linked_place_ids", "rig_types", "vehicle_types", "aliases", "search_terms",
+        "local_terms",
+    ):
+        values = record.get(key)
+        if isinstance(values, list):
+            document[key] = [
+                value for value in values[:100]
+                if isinstance(value, (str, int, float, bool))
+            ]
+    normalized_site_types: list[str] = []
+    for value in [
+        *(record.get("site_types") if isinstance(record.get("site_types"), list) else []),
+        *(record.get("camp_types") if isinstance(record.get("camp_types"), list) else []),
+        record.get("site_type"), record.get("camp_type"),
+    ]:
+        clean = str(value or "").strip()
+        if clean and clean not in normalized_site_types:
+            normalized_site_types.append(clean[:120])
+    if normalized_site_types:
+        document["site_types"] = normalized_site_types[:100]
+    reservations = record.get("reservations")
+    if isinstance(reservations, dict):
+        durable = {
+            key: reservations[key]
+            for key in ("reservation_url", "reservable", "required")
+            if isinstance(reservations.get(key), (str, bool))
+        }
+        if durable:
+            document["reservations"] = durable
+    sources = []
+    for source in record.get("sources") or []:
+        if not isinstance(source, dict):
+            continue
+        public_source = {
+            key: source[key]
+            for key in (
+                "source", "source_id", "url", "license", "attribution", "quality",
+                "pack_id", "revision", "generated_at",
+            )
+            if isinstance(source.get(key), (str, int, float, bool))
+        }
+        if public_source:
+            sources.append(public_source)
+    if sources:
+        document["sources"] = sources[:12]
+    campsites = record.get("campsites")
+    if isinstance(campsites, list):
+        campsite_keys = {
+            "id", "name", "type", "loop", "map_card_id", "facility_id", "lat", "lng",
+            "max_people", "equipment_length", "driveway", "surface", "accessible",
+            "shade", "fire", "pets", "hookups", "check_in", "check_out", "reserve_type",
+        }
+        document["campsites"] = [
+            {
+                key: value for key, value in campsite.items()
+                if key in campsite_keys and isinstance(value, (str, int, float, bool))
+            }
+            for campsite in campsites[:500]
+            if isinstance(campsite, dict)
+        ]
+    # Live weather, fire, reports, closures, availability, and reservation
+    # inventory are intentionally not copied into immutable bundles.
+    return document
 
 
 def _clean_coordinate(value: object, low: float, high: float) -> float | None:
@@ -310,6 +494,7 @@ def _load_catalog_snapshot_cached(
     items: dict[str, OfflineCatalogItemV2] = {}
     generated_at = 0
     digest = hashlib.sha256()
+    payloads: dict[str, dict] = {}
     for filename, _mtime, size in signature:
         path = Path(filename)
         if size <= 0:
@@ -319,75 +504,159 @@ def _load_catalog_snapshot_cached(
         digest.update(b"\0")
         digest.update(raw)
         payload = json.loads(raw)
+        payloads[path.name] = payload
         generated_at = max(generated_at, int(payload.get("generated_at") or 0))
 
-        if path.name == "explore_catalog_v3.json":
-            records = payload.get("places") or []
-            for record in records:
-                if not isinstance(record, dict):
-                    continue
-                source_quality = record.get("source_quality") or {}
-                if isinstance(source_quality, dict) and source_quality.get("offline_allowed") is False:
-                    continue
-                sources = record.get("sources") or []
-                source = sources[0] if sources and isinstance(sources[0], dict) else {}
-                rights = _source_rights(
-                    source.get("source") or source_quality.get("primary_provider")
-                )
-                if not rights:
-                    continue
-                lat = _clean_coordinate(record.get("lat"), -90, 90)
-                lng = _clean_coordinate(record.get("lng"), -180, 180)
-                item_id = str(record.get("id") or "").strip()
-                if lat is None or lng is None or not item_id:
-                    continue
-                kind = "trail" if str(record.get("category") or "").lower() == "trail" else "place"
-                spatial_bounds = _geometry_bounds(record.get("geometry")) if kind == "trail" else None
-                if kind == "trail" and spatial_bounds is None:
-                    # An anchor can be far from a trail segment that crosses
-                    # the selected area (or inside while the geometry is not).
-                    # Exclude it until the canonical index carries geometry.
-                    continue
-                items[item_id] = OfflineCatalogItemV2(
-                    item_id=item_id,
-                    kind=kind,
-                    lat=lat,
-                    lng=lng,
-                    source_label=str(
-                        source.get("source") or source_quality.get("primary_provider") or ""
-                    ),
-                    license_id=rights[0],
-                    attribution=str(source.get("attribution") or rights[1]),
-                    licensed_thumbnail=_media_is_licensed(record.get("media")),
-                    spatial_bounds=spatial_bounds,
-                )
-            continue
+    geometry_records = {
+        str(record.get("id") or ""): record
+        for record in (payloads.get("explore_trail_geometries_v1.json", {}).get("trails") or [])
+        if isinstance(record, dict) and str(record.get("id") or "")
+    }
 
-        records = payload.get("items") or []
-        kind: Literal["place", "trail"] = "trail" if "trail" in path.name else "place"
-        for record in records:
-            if not isinstance(record, dict) or record.get("review_only") is True:
+    def aliases(record: dict) -> tuple[str, ...]:
+        values: list[str] = []
+        for key in ("search_aliases", "tags", "subcategories", "activities", "allowed_uses"):
+            raw_values = record.get(key)
+            if isinstance(raw_values, str):
+                raw_values = [raw_values]
+            if not isinstance(raw_values, list):
                 continue
-            rights = _source_rights(record.get("source_label") or record.get("source"))
-            lat = _clean_coordinate(record.get("lat"), -90, 90)
-            lng = _clean_coordinate(record.get("lng"), -180, 180)
-            item_id = str(record.get("id") or "").strip()
-            if not rights or lat is None or lng is None or not item_id:
-                continue
-            # The V1 trail index contains only a label point plus a geometry
-            # reference. Until that reference is resolved into geometry, it
-            # cannot truthfully participate in selected-area coverage.
-            if kind == "trail":
-                continue
-            items[item_id] = OfflineCatalogItemV2(
-                item_id=item_id,
-                kind=kind,
-                lat=lat,
-                lng=lng,
-                source_label=str(record.get("source_label") or record.get("source") or ""),
-                license_id=rights[0],
+            for value in raw_values:
+                clean = str(value or "").strip()
+                if clean and clean not in values:
+                    values.append(clean[:120])
+        return tuple(values[:80])
+
+    def add_record(
+        record: dict,
+        *,
+        kind: Literal["place", "trail"],
+        rights: tuple[str, str],
+        source_label: str,
+        attribution: str,
+        geometry: dict | None = None,
+    ) -> None:
+        lat = _clean_coordinate(
+            record.get("lat", record.get("representative_lat")), -90, 90,
+        )
+        lng = _clean_coordinate(
+            record.get("lng", record.get("representative_lng")), -180, 180,
+        )
+        item_id = str(record.get("id") or "").strip()
+        if lat is None or lng is None or not item_id:
+            return
+        spatial_bounds = _geometry_bounds(geometry) if kind == "trail" else None
+        if kind == "trail" and spatial_bounds is None:
+            return
+        thumbnail = _licensed_thumbnail(record.get("media") or record.get("photos"))
+        title = str(record.get("name") or record.get("label") or item_id).strip()[:240]
+        subtitle = str(
+            record.get("summary") or record.get("label") or record.get("category") or ""
+        ).strip()[:500]
+        category = str(record.get("category") or record.get("kind") or kind).strip()[:80]
+        parent_destination = str(record.get("admin") or record.get("region") or "").strip()[:180]
+        document = _compact_public_document(
+            record,
+            item_id=item_id,
+            kind=kind,
+            lat=lat,
+            lng=lng,
+            source_label=source_label,
+            attribution=attribution,
+        )
+        items[item_id] = OfflineCatalogItemV2(
+            item_id=item_id,
+            kind=kind,
+            lat=lat,
+            lng=lng,
+            source_label=source_label,
+            license_id=rights[0],
+            attribution=attribution,
+            licensed_thumbnail=thumbnail is not None,
+            spatial_bounds=spatial_bounds,
+            title=title,
+            subtitle=subtitle,
+            category=category,
+            parent_destination=parent_destination,
+            aliases=aliases(record),
+            document=document,
+            geometry=geometry,
+            thumbnail_url=thumbnail[0] if thumbnail else None,
+            thumbnail_license_id=thumbnail[1] if thumbnail else None,
+            thumbnail_attribution=thumbnail[2] if thumbnail else None,
+        )
+
+    for record in payloads.get("explore_catalog_v3.json", {}).get("places") or []:
+        if not isinstance(record, dict):
+            continue
+        source_quality = record.get("source_quality") or {}
+        if isinstance(source_quality, dict) and source_quality.get("offline_allowed") is False:
+            continue
+        sources = record.get("sources") or []
+        source = sources[0] if sources and isinstance(sources[0], dict) else {}
+        source_label = str(
+            source.get("source") or (
+                source_quality.get("primary_provider") if isinstance(source_quality, dict) else ""
+            ) or ""
+        )
+        rights = _source_rights(source_label)
+        if not rights:
+            continue
+        kind: Literal["place", "trail"] = (
+            "trail" if str(record.get("category") or "").lower() == "trail" else "place"
+        )
+        add_record(
+            record,
+            kind=kind,
+            rights=rights,
+            source_label=source_label,
+            attribution=str(source.get("attribution") or rights[1]),
+            geometry=record.get("geometry") if kind == "trail" else None,
+        )
+
+    for record in payloads.get("canonical_camp_index_v1.json", {}).get("items") or []:
+        if not isinstance(record, dict) or record.get("review_only") is True:
+            continue
+        source_label = str(record.get("source_label") or record.get("source") or "")
+        rights = _source_rights(source_label)
+        if rights:
+            add_record(
+                record, kind="place", rights=rights, source_label=source_label,
                 attribution=rights[1],
-                licensed_thumbnail=False,
+            )
+
+    used_geometry: set[str] = set()
+    for record in payloads.get("canonical_trail_index_v1.json", {}).get("items") or []:
+        if not isinstance(record, dict) or record.get("review_only") is True:
+            continue
+        source_label = str(record.get("source_label") or record.get("source") or "")
+        rights = _source_rights(source_label)
+        geometry_id = str(record.get("geometry_ref") or record.get("id") or "")
+        geometry_record = geometry_records.get(geometry_id)
+        geometry = (
+            geometry_record.get("geometry_line") or geometry_record.get("geometry")
+            if isinstance(geometry_record, dict) else None
+        )
+        if rights and isinstance(geometry, dict):
+            merged = {**geometry_record, **record}
+            add_record(
+                merged, kind="trail", rights=rights, source_label=source_label,
+                attribution=rights[1], geometry=geometry,
+            )
+            used_geometry.add(geometry_id)
+
+    for geometry_id, record in geometry_records.items():
+        if geometry_id in used_geometry:
+            continue
+        sources = record.get("sources") or []
+        source = sources[0] if sources and isinstance(sources[0], dict) else {}
+        source_label = str(source.get("source") or "")
+        rights = _source_rights(source_label)
+        geometry = record.get("geometry_line") or record.get("geometry")
+        if rights and isinstance(geometry, dict):
+            add_record(
+                record, kind="trail", rights=rights, source_label=source_label,
+                attribution=str(source.get("attribution") or rights[1]), geometry=geometry,
             )
 
     if not generated_at:
@@ -404,8 +673,116 @@ def load_offline_catalog_snapshot_v2() -> OfflineCatalogSnapshotV2:
         CATALOG_ROOT / "explore_catalog_v3.json",
         CATALOG_ROOT / "canonical_camp_index_v1.json",
         CATALOG_ROOT / "canonical_trail_index_v1.json",
+        CATALOG_ROOT / "explore_trail_geometries_v1.json",
     )
     return _load_catalog_snapshot_cached(_file_signature(paths))
+
+
+def merge_offline_catalog_snapshot_v2(
+    snapshot: OfflineCatalogSnapshotV2,
+    items: tuple[OfflineCatalogItemV2, ...],
+) -> OfflineCatalogSnapshotV2:
+    """Merge current database records into the serving snapshot deterministically."""
+    def merge_list(left: list, right: list) -> list:
+        result: list = []
+        seen: set[str] = set()
+        for value in [*left, *right]:
+            marker = json.dumps(
+                value, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+            )
+            if marker in seen:
+                continue
+            seen.add(marker)
+            result.append(value)
+        return result
+
+    def merge_document(left: dict | None, right: dict | None) -> dict | None:
+        if not left:
+            return dict(right) if right else None
+        if not right:
+            return dict(left)
+        result = dict(left)
+        for key, value in right.items():
+            existing = result.get(key)
+            if isinstance(existing, list) and isinstance(value, list):
+                result[key] = merge_list(existing, value)
+            elif isinstance(existing, dict) and isinstance(value, dict):
+                result[key] = {**existing, **value}
+            elif value not in (None, "", [], {}):
+                # The incoming source is deliberately later in the precedence
+                # order (serving snapshot -> packaged records -> live DB).
+                result[key] = value
+        return result
+
+    def merge_item(
+        existing: OfflineCatalogItemV2,
+        incoming: OfflineCatalogItemV2,
+    ) -> OfflineCatalogItemV2:
+        if existing.kind != incoming.kind:
+            return incoming
+        aliases = tuple(dict.fromkeys((*existing.aliases, *incoming.aliases)))[:80]
+        use_incoming_thumbnail = bool(
+            incoming.licensed_thumbnail
+            and incoming.thumbnail_url
+            and incoming.thumbnail_license_id
+        )
+        return replace(
+            incoming,
+            title=incoming.title or existing.title,
+            subtitle=incoming.subtitle or existing.subtitle,
+            category=incoming.category or existing.category,
+            parent_destination=incoming.parent_destination or existing.parent_destination,
+            aliases=aliases,
+            document=merge_document(existing.document, incoming.document),
+            geometry=incoming.geometry or existing.geometry,
+            spatial_bounds=incoming.spatial_bounds or existing.spatial_bounds,
+            licensed_thumbnail=(
+                incoming.licensed_thumbnail or existing.licensed_thumbnail
+            ),
+            thumbnail_url=(
+                incoming.thumbnail_url if use_incoming_thumbnail else existing.thumbnail_url
+            ),
+            thumbnail_license_id=(
+                incoming.thumbnail_license_id
+                if use_incoming_thumbnail else existing.thumbnail_license_id
+            ),
+            thumbnail_attribution=(
+                incoming.thumbnail_attribution
+                if use_incoming_thumbnail else existing.thumbnail_attribution
+            ),
+        )
+
+    merged = {item.item_id: item for item in snapshot.items}
+    for item in items:
+        existing = merged.get(item.item_id)
+        merged[item.item_id] = merge_item(existing, item) if existing else item
+    ordered = tuple(sorted(merged.values(), key=lambda item: item.item_id))
+    revision_payload = [
+        {
+            "id": item.item_id,
+            "kind": item.kind,
+            "lat": item.lat,
+            "lng": item.lng,
+            "bounds": item.spatial_bounds,
+            "document": item.document,
+            "geometry": item.geometry,
+            "thumbnail_url": item.thumbnail_url,
+            "thumbnail_license_id": item.thumbnail_license_id,
+        }
+        for item in sorted(items, key=lambda item: item.item_id)
+    ]
+    revision = hashlib.sha256(
+        (
+            snapshot.revision + "\0" + json.dumps(
+                revision_payload, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
+            )
+        ).encode("utf-8")
+    ).hexdigest()
+    return OfflineCatalogSnapshotV2(
+        revision=revision,
+        generated_at=snapshot.generated_at,
+        items=ordered,
+    )
 
 
 def _validate_server_style_uri(renderer_id: str, uri: str) -> str:
@@ -438,12 +815,114 @@ def _validate_server_style_uri(renderer_id: str, uri: str) -> str:
     return clean
 
 
-def load_offline_renderer_config_v2() -> OfflineRendererConfigV2:
+_RNMAPBOX_APPROVED_STYLES_V2: dict[str, str] = {
+    "standard": "mapbox://styles/mapbox/standard",
+    "standard_satellite": "mapbox://styles/mapbox/standard-satellite",
+    "satellite_streets": "mapbox://styles/mapbox/satellite-streets-v12",
+    "streets": "mapbox://styles/mapbox/streets-v12",
+    "outdoors": "mapbox://styles/mapbox/outdoors-v12",
+    "navigation_day": "mapbox://styles/mapbox/navigation-day-v1",
+    "navigation_night": "mapbox://styles/mapbox/navigation-night-v1",
+}
+
+
+def _style_revision_v2(uri: str) -> str:
+    return "style-" + hashlib.sha256(uri.encode("utf-8")).hexdigest()[:16]
+
+
+def _rnmapbox_style_allowlist_v2() -> dict[str, OfflineRendererConfigV2]:
+    approved = {
+        style_id: OfflineRendererConfigV2(
+            id="rnmapbox",
+            style_id=style_id,
+            style_uri=uri,
+            style_revision=_style_revision_v2(uri),
+        )
+        for style_id, uri in _RNMAPBOX_APPROVED_STYLES_V2.items()
+    }
+    configured = str(
+        os.getenv("TRAILHEAD_OFFLINE_RNMAPBOX_STYLE_ALLOWLIST") or ""
+    ).strip()
+    if not configured:
+        return approved
+    try:
+        payload = json.loads(configured)
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise OfflineBundlePreparationError(
+            "offline_style_allowlist_invalid",
+            "The server offline style allowlist is invalid.",
+            http_status=503,
+        ) from exc
+    if not isinstance(payload, dict) or len(payload) > 32:
+        raise OfflineBundlePreparationError(
+            "offline_style_allowlist_invalid",
+            "The server offline style allowlist is invalid.",
+            http_status=503,
+        )
+    for style_id, descriptor in payload.items():
+        if (
+            not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", str(style_id))
+            or not isinstance(descriptor, dict)
+        ):
+            raise OfflineBundlePreparationError(
+                "offline_style_allowlist_invalid",
+                "The server offline style allowlist is invalid.",
+                http_status=503,
+            )
+        uri = _validate_server_style_uri(
+            "rnmapbox", str(descriptor.get("uri") or ""),
+        )
+        revision = str(descriptor.get("revision") or _style_revision_v2(uri)).strip()
+        if not SAFE_REVISION_RE.fullmatch(revision):
+            raise OfflineBundlePreparationError(
+                "offline_style_allowlist_invalid",
+                "The server offline style allowlist is invalid.",
+                http_status=503,
+            )
+        approved[str(style_id)] = OfflineRendererConfigV2(
+            id="rnmapbox",
+            style_id=str(style_id),
+            style_uri=uri,
+            style_revision=revision,
+        )
+    return approved
+
+
+def load_offline_renderer_config_v2(
+    requested_style_id: str | None = None,
+) -> OfflineRendererConfigV2:
     renderer_id = str(os.getenv("TRAILHEAD_OFFLINE_RENDERER", "rnmapbox")).strip().lower()
     if renderer_id not in {"rnmapbox", "maplibre"}:
         raise OfflineBundlePreparationError(
             "invalid_server_renderer", "The configured offline renderer is invalid.", http_status=503,
         )
+    clean_requested = str(requested_style_id or "").strip()
+    if clean_requested:
+        if renderer_id != "rnmapbox":
+            raise OfflineBundlePreparationError(
+                "offline_style_not_allowed",
+                "The selected map style is not available for offline use.",
+            )
+        selected = _rnmapbox_style_allowlist_v2().get(clean_requested)
+        if selected is None:
+            raise OfflineBundlePreparationError(
+                "offline_style_not_allowed",
+                "The selected map style is not available for offline use.",
+            )
+        return selected
+    if renderer_id == "rnmapbox":
+        configured_default_id = str(
+            os.getenv("TRAILHEAD_OFFLINE_DEFAULT_STYLE_ID") or ""
+        ).strip()
+        if configured_default_id:
+            selected = _rnmapbox_style_allowlist_v2().get(configured_default_id)
+            if selected is None:
+                raise OfflineBundlePreparationError(
+                    "offline_default_style_invalid",
+                    "The configured default offline style is invalid.",
+                    http_status=503,
+                )
+            return selected
     env_name = (
         "TRAILHEAD_RNMAPBOX_STYLE_URI"
         if renderer_id == "rnmapbox"
@@ -469,9 +948,21 @@ def load_offline_renderer_config_v2() -> OfflineRendererConfigV2:
             raise OfflineBundlePreparationError("invalid_style_revision", f"{env_name} is invalid")
         revision = configured
     else:
-        revision = "style-" + hashlib.sha256(style_uri.encode("utf-8")).hexdigest()[:16]
+        revision = _style_revision_v2(style_uri)
+    style_id = "server_default"
+    if renderer_id == "rnmapbox":
+        matches = [
+            candidate_id for candidate_id, candidate_uri
+            in _RNMAPBOX_APPROVED_STYLES_V2.items()
+            if candidate_uri == style_uri
+        ]
+        if matches:
+            style_id = matches[0]
     return OfflineRendererConfigV2(
-        id=renderer_id, style_uri=style_uri, style_revision=revision,
+        id=renderer_id,
+        style_id=style_id,
+        style_uri=style_uri,
+        style_revision=revision,
     )
 
 
@@ -487,8 +978,14 @@ def _validated_renderer_config_v2(
         raise OfflineBundlePreparationError(
             "invalid_style_revision", "The configured offline style revision is invalid.", http_status=503,
         )
+    style_id = str(renderer.style_id or "server_default").strip()
+    if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{0,63}", style_id):
+        raise OfflineBundlePreparationError(
+            "invalid_style_id", "The configured offline style identifier is invalid.", http_status=503,
+        )
     return OfflineRendererConfigV2(
         id=renderer.id,
+        style_id=style_id,
         style_uri=style_uri,
         style_revision=renderer.style_revision,
     )
@@ -651,8 +1148,17 @@ def prepare_offline_bundle_manifest_v2(
     snapshot = snapshot or load_offline_catalog_snapshot_v2()
     _validate_snapshot_freshness(snapshot, int(now_epoch if now_epoch is not None else time.time()))
     renderer = _validated_renderer_config_v2(
-        renderer or load_offline_renderer_config_v2(),
+        renderer or load_offline_renderer_config_v2(request.renderer_style_id),
     )
+    if (
+        request.renderer_style_id
+        and renderer.style_id != request.renderer_style_id
+    ):
+        raise OfflineBundlePreparationError(
+            "offline_renderer_style_mismatch",
+            "The prepared offline map style does not match the requested approved style.",
+            http_status=503,
+        )
     sources = _read_materialized_artifacts(materialized_artifacts)
 
     selected = tuple(item for item in snapshot.items if (
@@ -664,23 +1170,20 @@ def prepare_offline_bundle_manifest_v2(
     ))
     places = tuple(item for item in selected if item.kind == "place")
     trails = tuple(item for item in selected if item.kind == "trail")
-    thumbnails = tuple(item for item in selected if item.licensed_thumbnail)
-
     expected_counts = {
         "places": len(places),
         "trails": len(trails),
         "search_index": len(places) + len(trails),
-        "thumbnail": len(thumbnails),
     }
     required_kinds = {"places", "trails", "search_index"}
-    if thumbnails:
-        required_kinds.add("thumbnail")
     if request.options.routing:
         required_kinds.add("routing")
     if request.options.contours:
         required_kinds.add("contours")
-    if request.options.extended_media:
-        required_kinds.add("media")
+    # 1.0.10 preserves licensed thumbnail metadata in the canonical catalog,
+    # but does not publish thumbnail/media payloads until the mobile client has
+    # an atomic installer and a verified local-photo consumer. Shipping unused
+    # ZIPs would waste storage and make the manifest's media claim untrue.
     missing = sorted(required_kinds.difference(sources))
     if missing:
         raise OfflineBundlePreparationError(
@@ -699,6 +1202,7 @@ def prepare_offline_bundle_manifest_v2(
     identity_payload = {
         "schema_version": OFFLINE_BUNDLE_SCHEMA_VERSION,
         "renderer": renderer.id,
+        "renderer_style_id": renderer.style_id,
         "style_uri": renderer.style_uri,
         "bounds": request.bounds.model_dump(mode="json"),
         "min_zoom": request.min_zoom,
@@ -716,7 +1220,6 @@ def prepare_offline_bundle_manifest_v2(
         "options": request.options.model_dump(mode="json"),
         "place_ids": [item.item_id for item in places],
         "trail_ids": [item.item_id for item in trails],
-        "thumbnail_ids": [item.item_id for item in thumbnails],
         "artifact_digests": {
             kind: digest for kind, (_source, _size, digest) in sorted(sources.items())
             if kind in required_kinds
@@ -821,6 +1324,7 @@ def prepare_offline_bundle_manifest_v2(
         "created_at": created_at,
         "renderer": OfflineBundleRendererV2(
             id=renderer.id,
+            style_id=renderer.style_id,
             style_uri=renderer.style_uri,
             style_revision=renderer.style_revision,
             style_pack_id=style_pack_id,
@@ -837,7 +1341,7 @@ def prepare_offline_bundle_manifest_v2(
             search="search_index" in sources,
             routing=request.options.routing and "routing" in sources,
             contours=request.options.contours and "contours" in sources,
-            media=any(artifact.kind in {"thumbnail", "media"} for artifact in artifacts),
+            media=False,
         ).model_dump(mode="json"),
         "required_storage_bytes": required_storage_bytes,
         "source_attribution": sorted(attribution),

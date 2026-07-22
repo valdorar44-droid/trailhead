@@ -927,6 +927,8 @@ class TripGraphV2StoreTests(unittest.TestCase):
             "TRAILHEAD_TRIP_PACKS_ENABLED": "0",
             "TRAILHEAD_ORIGINALS_ENABLED": "0",
             "TRAILHEAD_COMMUNITY_PUBLICATIONS_ENABLED": "0",
+            "TRAILHEAD_COMMUNITY_RATINGS_ENABLED": "0",
+            "TRAILHEAD_BRIEF_AND_BACKUP_ENABLED": "0",
             "TRAILHEAD_DIGEST_PREFERENCES_ENABLED": "0",
         }):
             anonymous = asyncio.run(product_features(None))
@@ -943,6 +945,8 @@ class TripGraphV2StoreTests(unittest.TestCase):
             "trip_packs": False,
             "originals": False,
             "community_publications": False,
+            "community_ratings": False,
+            "brief_and_backup": False,
             "digest_preferences": False,
         })
         self.assertTrue(all(admin.values()))

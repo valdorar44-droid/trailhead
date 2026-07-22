@@ -36,6 +36,10 @@ PersistencePolicyV2 = Literal["canonical", "temporary"]
 _MAX_QUERY_CHARS = 160
 _MAX_CURSOR_OFFSET = 300
 _DEFAULT_NEARBY_RADIUS_METERS = 50_000
+_SUPPORTED_FILTERS = {
+    "kind", "kinds", "category", "categories", "provider", "providers",
+    "difficulty", "surface", "activity", "verified", "has_coordinates",
+}
 _CONTROL_RE = re.compile(r"[\x00-\x1f\x7f]")
 _TOKEN_RE = re.compile(r"[a-z0-9]+")
 _STOPWORDS = {
@@ -157,6 +161,8 @@ class SearchRequestV2(BaseModel):
                     raise ValueError("filter lists must contain at most 20 scalar values")
             elif value is not None and not isinstance(value, (str, int, float, bool)):
                 raise ValueError("filter values must be scalar values or scalar lists")
+            if str(key) not in _SUPPORTED_FILTERS:
+                raise ValueError(f"unsupported search filter: {key}")
         return filters
 
     @field_validator("session_id")
@@ -177,8 +183,7 @@ class SearchRequestV2(BaseModel):
         if self.scope == "route":
             if not self.route_ref:
                 raise ValueError("route scope requires route_ref")
-            raise ValueError("route scope is not supported by this Search V2 rollout")
-        if self.route_ref:
+        elif self.route_ref:
             raise ValueError("route_ref is only valid with route scope")
         if self.bounds and self.scope not in {"viewport", "offline"}:
             raise ValueError("bounds are only valid with viewport or offline scope")
@@ -187,8 +192,6 @@ class SearchRequestV2(BaseModel):
                 raise ValueError("radius_meters is only valid with nearby or offline scope")
             if not self.center:
                 raise ValueError("radius_meters requires center")
-        if self.filters:
-            raise ValueError("filters are not supported by this Search V2 rollout")
         if self.scope == "offline" and self.include_external:
             raise ValueError("offline scope cannot include external providers")
         if self.include_external and not self.session_id:
@@ -238,6 +241,25 @@ class SearchResolveResponseV2(BaseModel):
     alternatives: list[SearchResultV2] = Field(default_factory=list)
     reason: str
     revision: str
+
+
+class SearchResolveRequestV2(SearchRequestV2):
+    """Resolve one user-selected suggestion, or retain legacy ranked resolve.
+
+    New clients send both selected fields copied verbatim from a suggestion.
+    Omitting both preserves the query-only resolver for older app versions.
+    """
+
+    selected_result_id: str | None = Field(default=None, min_length=1, max_length=220)
+    selected_detail_ref: str | None = Field(default=None, min_length=1, max_length=260)
+
+    @model_validator(mode="after")
+    def validate_selection(self) -> "SearchResolveRequestV2":
+        if bool(self.selected_result_id) != bool(self.selected_detail_ref):
+            raise ValueError(
+                "selected_result_id and selected_detail_ref must be provided together"
+            )
+        return self
 
 
 @dataclass(frozen=True)
@@ -557,6 +579,15 @@ class SearchIndexV2:
                     continue
                 if not _intent_accepts(request.intent, row["kind"], categories):
                     continue
+                if not _filters_accept(
+                    request.filters,
+                    kind=row["kind"],
+                    categories=categories,
+                    provider=row["provider"],
+                    quality_score=float(row["quality_score"] or 0.0),
+                    has_coordinates=row["lat"] is not None and row["lng"] is not None,
+                ):
+                    continue
                 title_norm = row["title_norm"]
                 aliases = set(json.loads(row["aliases_json"]))
                 title_terms = set(_TOKEN_RE.findall(title_norm))
@@ -666,6 +697,46 @@ def _intent_accepts(intent: SearchIntentV2, kind: str, categories: tuple[str, ..
     if intent == "service":
         return bool(values.intersection({"service", "fuel", "gas_station", "grocery", "mechanic", "water"}))
     return kind not in {"destination", "city", "locality", "region", "country"}
+
+
+def _filter_values(value: Any) -> set[str]:
+    values = value if isinstance(value, list) else [value]
+    return {
+        normalize_search_text(item).replace(" ", "_")
+        for item in values
+        if item is not None and normalize_search_text(item)
+    }
+
+
+def _filters_accept(
+    filters: dict[str, Any],
+    *,
+    kind: str,
+    categories: tuple[str, ...] | list[str],
+    provider: str,
+    quality_score: float,
+    has_coordinates: bool,
+) -> bool:
+    if not filters:
+        return True
+    normalized_categories = {
+        normalize_search_text(value).replace(" ", "_") for value in categories
+    }
+    for key, raw_value in filters.items():
+        if key in {"kind", "kinds"}:
+            if kind not in _filter_values(raw_value):
+                return False
+        elif key in {"category", "categories", "difficulty", "surface", "activity"}:
+            if not normalized_categories.intersection(_filter_values(raw_value)):
+                return False
+        elif key in {"provider", "providers"}:
+            if normalize_search_text(provider).replace(" ", "_") not in _filter_values(raw_value):
+                return False
+        elif key == "verified" and bool(raw_value) != bool(quality_score > 0):
+            return False
+        elif key == "has_coordinates" and bool(raw_value) != bool(has_coordinates):
+            return False
+    return True
 
 
 ExternalSearchProviderV2 = Callable[[SearchRequestV2, int, str], Awaitable[list[SearchResultV2]]]
@@ -852,6 +923,21 @@ class SearchV2Service:
                 alternatives=[], reason="no_candidates", revision=page.revision,
             )
         selected = page.results[0]
+        if (
+            selected.persistence_policy == "temporary"
+            and selected.coordinates is None
+        ):
+            # Query-only legacy resolution must never turn an asynchronous
+            # provider suggestion into an automatic selection. New clients
+            # explicitly post the signed result/detail references on press.
+            return SearchResolveResponseV2(
+                query=request.query,
+                status="ambiguous",
+                selected=None,
+                alternatives=page.results[:6],
+                reason="explicit_selection_required",
+                revision=page.revision,
+            )
         alternatives = page.results[1:6]
         exact = selected.match_reason in {"exact_title", "exact_alias"}
         ambiguous = bool(
@@ -906,6 +992,39 @@ def _external_result_for_request(
         return None
     if not _intent_accepts(request.intent, result.kind, tuple(result.categories)):
         return None
+    if not _filters_accept(
+        request.filters,
+        kind=result.kind,
+        categories=result.categories,
+        provider=result.provenance.provider,
+        quality_score=0.0,
+        has_coordinates=result.coordinates is not None,
+    ):
+        return None
+    if request.bounds:
+        if not result.coordinates:
+            # Mapbox Search Box suggestions intentionally omit coordinates.
+            # They remain selectable resolution references; the explicit
+            # retrieve call validates the final coordinates against this scope.
+            if not (
+                result.provenance.provider == "mapbox"
+                and result.persistence_policy == "temporary"
+                and result.provenance.temporary_use_only
+                and result.detail_ref
+            ):
+                return None
+            return result
+        within_lng = (
+            request.bounds.west <= result.coordinates.lng <= request.bounds.east
+            if request.bounds.west < request.bounds.east
+            else result.coordinates.lng >= request.bounds.west
+            or result.coordinates.lng <= request.bounds.east
+        )
+        if not (
+            within_lng
+            and request.bounds.south <= result.coordinates.lat <= request.bounds.north
+        ):
+            return None
     radius_meters = request.effective_radius_meters
     if radius_meters is None:
         return result
@@ -915,6 +1034,15 @@ def _external_result_for_request(
             request.center, result.coordinates.lat, result.coordinates.lng,
         )
     if distance is None or distance > radius_meters:
+        if (
+            distance is None
+            and not result.coordinates
+            and result.provenance.provider == "mapbox"
+            and result.persistence_policy == "temporary"
+            and result.provenance.temporary_use_only
+            and result.detail_ref
+        ):
+            return result
         return None
     if result.distance_meters is None:
         return result.model_copy(update={"distance_meters": round(distance, 1)})

@@ -943,7 +943,9 @@ export default {
             tiles: [`${TILE_BASE}/api/tiles/{z}/{x}/{y}.pbf`],
             minzoom: 0,
             maxzoom: 15,
-            bounds: [-125.0, 24.5, -66.5, 49.5],
+            // The Railway-backed tile endpoint is global. Do not constrain
+            // native offline packs to CONUS; Alaska, Canada, Mexico, Finland,
+            // Pakistan, and other supported route boxes use this same source.
             attribution: "© OpenStreetMap",
           },
         },

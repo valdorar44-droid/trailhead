@@ -327,6 +327,240 @@ def _backfill_embedded_trip_payloads(db: sqlite3.Connection) -> None:
                 ),
             )
 
+
+TRAILHEAD_V110_BACKEND_MIGRATION = "trailhead_1_0_10_backend_contracts_v1"
+
+
+def _table_columns(db: sqlite3.Connection, table: str) -> set[str]:
+    return {
+        str(row["name"])
+        for row in db.execute(f"PRAGMA table_info('{table}')").fetchall()
+    }
+
+
+def _require_table_columns(
+    db: sqlite3.Connection,
+    table: str,
+    required: set[str],
+) -> None:
+    columns = _table_columns(db, table)
+    missing = required.difference(columns)
+    if missing:
+        raise RuntimeError(
+            f"Backend schema migration did not create {table}: "
+            f"missing {', '.join(sorted(missing))}"
+        )
+
+
+def _migrate_trailhead_v110_backend_contracts(db: sqlite3.Connection) -> None:
+    """Install additive 1.0.10 contracts transactionally and verify them.
+
+    Older migrations in this database intentionally tolerate duplicate-column
+    errors. New contracts use a migration ledger and structural post-checks so
+    a partially applied production schema cannot masquerade as ready.
+    """
+    db.commit()
+    db.execute("BEGIN IMMEDIATE")
+    try:
+        db.execute(
+            """CREATE TABLE IF NOT EXISTS schema_migrations (
+                migration_id TEXT PRIMARY KEY,
+                applied_at   INTEGER NOT NULL
+            )"""
+        )
+        schema_sql = """
+            CREATE TABLE IF NOT EXISTS community_ratings (
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                entity_kind TEXT NOT NULL,
+                entity_id   TEXT NOT NULL,
+                rating      INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+                created_at  INTEGER NOT NULL,
+                updated_at  INTEGER NOT NULL,
+                PRIMARY KEY (user_id, entity_kind, entity_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_community_ratings_entity
+                ON community_ratings(entity_kind, entity_id, updated_at DESC);
+            CREATE TABLE IF NOT EXISTS community_rating_events (
+                id          INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id     INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                entity_kind TEXT NOT NULL,
+                entity_id   TEXT NOT NULL,
+                action      TEXT NOT NULL,
+                created_at  INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_community_rating_events_user
+                ON community_rating_events(user_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS offline_bundle_preparations_v2 (
+                id             TEXT PRIMARY KEY,
+                user_id        INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                request_hash   TEXT NOT NULL,
+                request_json   TEXT NOT NULL,
+                status         TEXT NOT NULL DEFAULT 'queued',
+                progress       INTEGER NOT NULL DEFAULT 0,
+                bundle_id      TEXT,
+                revision       TEXT,
+                manifest_json  TEXT,
+                error_code     TEXT,
+                error_message  TEXT,
+                created_at     INTEGER NOT NULL,
+                updated_at     INTEGER NOT NULL,
+                completed_at   INTEGER,
+                UNIQUE(user_id, request_hash)
+            );
+            CREATE INDEX IF NOT EXISTS idx_offline_bundle_preparations_user
+                ON offline_bundle_preparations_v2(user_id, updated_at DESC);
+            CREATE TABLE IF NOT EXISTS offline_bundle_artifacts_v2 (
+                preparation_id TEXT NOT NULL REFERENCES offline_bundle_preparations_v2(id) ON DELETE CASCADE,
+                artifact_id    TEXT NOT NULL,
+                kind           TEXT NOT NULL,
+                storage_path   TEXT NOT NULL,
+                media_type     TEXT NOT NULL,
+                byte_count     INTEGER NOT NULL,
+                sha256         TEXT NOT NULL,
+                etag           TEXT NOT NULL,
+                record_count   INTEGER,
+                created_at     INTEGER NOT NULL,
+                PRIMARY KEY (preparation_id, artifact_id)
+            );
+
+            CREATE TABLE IF NOT EXISTS route_service_segments_v1 (
+                id                 TEXT PRIMARY KEY,
+                user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                trip_id            TEXT NOT NULL,
+                route_sha256       TEXT NOT NULL,
+                evidence_revision  TEXT NOT NULL,
+                sequence           INTEGER NOT NULL,
+                start_progress     REAL NOT NULL,
+                end_progress       REAL NOT NULL,
+                availability       TEXT NOT NULL,
+                source_label       TEXT,
+                source_url         TEXT,
+                observed_at        INTEGER,
+                updated_at         INTEGER NOT NULL,
+                payload_json       TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_route_service_segments_trip
+                ON route_service_segments_v1(user_id, trip_id, route_sha256, sequence);
+            CREATE TABLE IF NOT EXISTS route_exit_references_v1 (
+                id                 TEXT PRIMARY KEY,
+                user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                trip_id            TEXT NOT NULL,
+                route_sha256       TEXT NOT NULL,
+                evidence_revision  TEXT NOT NULL,
+                route_progress     REAL NOT NULL,
+                label              TEXT NOT NULL,
+                availability       TEXT NOT NULL,
+                source_label       TEXT,
+                source_url         TEXT,
+                observed_at        INTEGER,
+                updated_at         INTEGER NOT NULL,
+                payload_json       TEXT NOT NULL DEFAULT '{}'
+            );
+            CREATE INDEX IF NOT EXISTS idx_route_exit_references_trip
+                ON route_exit_references_v1(user_id, trip_id, route_sha256, route_progress);
+            CREATE TABLE IF NOT EXISTS timeline_event_media_v1 (
+                id                 TEXT PRIMARY KEY,
+                user_id            INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                trip_id            TEXT NOT NULL,
+                route_sha256       TEXT NOT NULL,
+                evidence_revision  TEXT NOT NULL,
+                event_id           TEXT NOT NULL,
+                place_id           TEXT,
+                media_url          TEXT NOT NULL,
+                license_id         TEXT NOT NULL,
+                attribution        TEXT NOT NULL,
+                updated_at         INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_timeline_event_media_trip
+                ON timeline_event_media_v1(user_id, trip_id, route_sha256, event_id);
+            CREATE TABLE IF NOT EXISTS trip_brief_and_backup_v1 (
+                user_id           INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                idempotency_key   TEXT NOT NULL,
+                trip_id           TEXT NOT NULL,
+                trip_revision     INTEGER NOT NULL,
+                route_sha256      TEXT NOT NULL,
+                evidence_revision TEXT NOT NULL,
+                request_hash      TEXT NOT NULL,
+                response_json     TEXT NOT NULL,
+                credits_charged   INTEGER NOT NULL DEFAULT 0,
+                created_at        INTEGER NOT NULL,
+                PRIMARY KEY (user_id, idempotency_key)
+            );
+            CREATE INDEX IF NOT EXISTS idx_trip_brief_and_backup_trip
+                ON trip_brief_and_backup_v1(user_id, trip_id, created_at DESC);
+
+            CREATE TABLE IF NOT EXISTS support_attachments (
+                id            TEXT PRIMARY KEY,
+                user_id       INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                message_id    INTEGER REFERENCES support_messages(id) ON DELETE CASCADE,
+                content_type  TEXT NOT NULL,
+                byte_count    INTEGER NOT NULL,
+                sha256        TEXT NOT NULL,
+                image_data    BLOB NOT NULL,
+                created_at    INTEGER NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_support_attachments_owner
+                ON support_attachments(user_id, created_at DESC);
+            CREATE INDEX IF NOT EXISTS idx_support_attachments_message
+                ON support_attachments(message_id, created_at);
+
+            CREATE TABLE IF NOT EXISTS account_deletion_authorizations (
+                token_hash   TEXT PRIMARY KEY,
+                user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+                auth_method  TEXT NOT NULL,
+                issued_at    INTEGER NOT NULL,
+                expires_at   INTEGER NOT NULL,
+                used_at      INTEGER
+            );
+            CREATE INDEX IF NOT EXISTS idx_account_deletion_authorizations_user
+                ON account_deletion_authorizations(user_id, expires_at DESC);
+            """
+        for statement in schema_sql.split(";"):
+            if statement.strip():
+                db.execute(statement)
+
+        required_tables = {
+            "community_ratings": {"user_id", "entity_kind", "entity_id", "rating"},
+            "community_rating_events": {
+                "user_id", "entity_kind", "entity_id", "action", "created_at",
+            },
+            "offline_bundle_preparations_v2": {
+                "id", "user_id", "request_hash", "status", "manifest_json",
+            },
+            "offline_bundle_artifacts_v2": {
+                "preparation_id", "artifact_id", "storage_path", "sha256", "etag",
+            },
+            "route_service_segments_v1": {
+                "trip_id", "route_sha256", "evidence_revision", "start_progress", "end_progress",
+            },
+            "route_exit_references_v1": {
+                "trip_id", "route_sha256", "evidence_revision", "route_progress",
+            },
+            "timeline_event_media_v1": {
+                "trip_id", "route_sha256", "event_id", "license_id", "attribution",
+            },
+            "trip_brief_and_backup_v1": {
+                "user_id", "idempotency_key", "trip_id", "route_sha256", "request_hash",
+            },
+            "support_attachments": {
+                "id", "user_id", "message_id", "content_type", "image_data",
+            },
+            "account_deletion_authorizations": {
+                "token_hash", "user_id", "auth_method", "expires_at", "used_at",
+            },
+        }
+        for table, columns in required_tables.items():
+            _require_table_columns(db, table, columns)
+        db.execute(
+            "INSERT OR REPLACE INTO schema_migrations (migration_id,applied_at) VALUES (?,?)",
+            (TRAILHEAD_V110_BACKEND_MIGRATION, int(time.time())),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+
 def init_db():
     db = _conn()
     db.executescript("""
@@ -2231,6 +2465,7 @@ def init_db():
         interrupted_by_restart=True,
     )
     _backfill_embedded_trip_payloads(db)
+    _migrate_trailhead_v110_backend_contracts(db)
     db.commit()
     db.close()
     try:
@@ -4532,6 +4767,14 @@ def delete_user(user_id: int) -> None:
         db.execute("DELETE FROM trip_documents_v2 WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM saved_entity_mutations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM saved_entities WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM community_ratings WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM community_rating_events WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM offline_bundle_preparations_v2 WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM route_service_segments_v1 WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM route_exit_references_v1 WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM timeline_event_media_v1 WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM trip_brief_and_backup_v1 WHERE user_id=?", (user_id,))
+        db.execute("DELETE FROM account_deletion_authorizations WHERE user_id=?", (user_id,))
         db.execute("DELETE FROM users WHERE id=?", (user_id,))
         db.commit()
     except Exception:
@@ -4548,6 +4791,7 @@ def _delete_user_support_data(db: sqlite3.Connection, user_id: int) -> None:
     and the locked-database recovery path intentionally disables foreign keys. The
     child rows therefore have to be removed explicitly in both paths.
     """
+    db.execute("DELETE FROM support_attachments WHERE user_id=?", (user_id,))
     db.execute(
         """DELETE FROM support_messages
            WHERE thread_id IN (SELECT id FROM support_threads WHERE user_id=?)""",
@@ -7256,7 +7500,13 @@ def get_support_thread(thread_id: int, user_id: int | None = None, admin: bool =
         )
     db.commit()
     db.close()
-    item["messages"] = [_decode_support_thread_row(m) for m in messages]
+    decoded_messages = [_decode_support_thread_row(m) for m in messages]
+    attachment_map = list_support_message_attachments([
+        int(message["id"]) for message in decoded_messages
+    ]) if decoded_messages else {}
+    for message in decoded_messages:
+        message["attachments"] = attachment_map.get(int(message["id"]), [])
+    item["messages"] = decoded_messages
     return item
 
 def add_support_message(thread_id: int, sender_role: str, body: str, user_id: int | None = None,
@@ -13387,3 +13637,933 @@ def update_camp_edit_suggestion_status(suggestion_id: int, status: str) -> bool:
     cur = db.execute("UPDATE camp_edit_suggestions SET status=? WHERE id=?", (status, suggestion_id))
     db.commit(); db.close()
     return cur.rowcount > 0
+
+
+# --- Trailhead 1.0.10 additive backend contracts ---------------------------
+
+COMMUNITY_RATING_KINDS = {"camp", "trail", "trailhead", "place"}
+COMMUNITY_RATING_MUTATION_LIMIT_PER_HOUR = 60
+
+
+class CommunityRatingRateLimitError(ValueError):
+    pass
+
+
+def _enforce_community_rating_rate_limit(
+    db: sqlite3.Connection,
+    user_id: int,
+    entity_kind: str,
+    entity_id: str,
+    action: str,
+    now: int,
+) -> None:
+    window_start = now - 3600
+    db.execute(
+        "DELETE FROM community_rating_events WHERE created_at<?",
+        (now - 7 * 86400,),
+    )
+    count = int(db.execute(
+        """SELECT COUNT(*) AS count FROM community_rating_events
+           WHERE user_id=? AND created_at>=?""",
+        (int(user_id), window_start),
+    ).fetchone()["count"])
+    if count >= COMMUNITY_RATING_MUTATION_LIMIT_PER_HOUR:
+        raise CommunityRatingRateLimitError(
+            "Rating updates are temporarily limited. Try again later."
+        )
+    db.execute(
+        """INSERT INTO community_rating_events
+           (user_id,entity_kind,entity_id,action,created_at) VALUES (?,?,?,?,?)""",
+        (int(user_id), entity_kind, entity_id, action, now),
+    )
+
+
+def _validate_rating_target(entity_kind: str, entity_id: str) -> tuple[str, str]:
+    kind = str(entity_kind or "").strip().lower()
+    if kind not in COMMUNITY_RATING_KINDS:
+        raise ValueError("This place type cannot be rated")
+    canonical_id = _validate_canonical_id(entity_id, "entity id")
+    lowered = canonical_id.lower()
+    if lowered.startswith(("viator:", "original:", "originals:", "mapbox:", "provider:")):
+        raise ValueError("Only canonical Trailhead places can be rated")
+    db = _conn()
+    try:
+        if kind == "trail":
+            exists = bool(db.execute(
+                "SELECT 1 FROM trail_profiles WHERE id=? LIMIT 1", (canonical_id,),
+            ).fetchone())
+        else:
+            exists = bool(db.execute(
+                "SELECT 1 FROM places WHERE trailhead_place_id=? LIMIT 1", (canonical_id,),
+            ).fetchone())
+    finally:
+        db.close()
+    if not exists:
+        raise ValueError("Canonical place was not found")
+    return kind, canonical_id
+
+
+def get_community_rating_summary(
+    entity_kind: str,
+    entity_id: str,
+    viewer_user_id: int | None = None,
+) -> dict:
+    kind, canonical_id = _validate_rating_target(entity_kind, entity_id)
+    db = _conn()
+    row = db.execute(
+        """SELECT AVG(rating) AS average,COUNT(*) AS count
+           FROM community_ratings WHERE entity_kind=? AND entity_id=?""",
+        (kind, canonical_id),
+    ).fetchone()
+    viewer = None
+    if viewer_user_id is not None:
+        viewer_row = db.execute(
+            """SELECT rating FROM community_ratings
+               WHERE user_id=? AND entity_kind=? AND entity_id=?""",
+            (int(viewer_user_id), kind, canonical_id),
+        ).fetchone()
+        viewer = int(viewer_row["rating"]) if viewer_row else None
+    db.close()
+    count = int(row["count"] or 0)
+    average = round(float(row["average"]), 2) if count else None
+    return {"average": average, "count": count, "viewer_rating": viewer}
+
+
+def set_community_rating(
+    user_id: int,
+    entity_kind: str,
+    entity_id: str,
+    rating: int,
+) -> dict:
+    kind, canonical_id = _validate_rating_target(entity_kind, entity_id)
+    if isinstance(rating, bool) or not isinstance(rating, int) or not 1 <= rating <= 5:
+        raise ValueError("Rating must be from 1 through 5")
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            """SELECT rating FROM community_ratings
+               WHERE user_id=? AND entity_kind=? AND entity_id=?""",
+            (int(user_id), kind, canonical_id),
+        ).fetchone()
+        if existing and int(existing["rating"]) == rating:
+            db.commit()
+            return get_community_rating_summary(kind, canonical_id, int(user_id))
+        _enforce_community_rating_rate_limit(
+            db, int(user_id), kind, canonical_id, "set", now,
+        )
+        db.execute(
+            """INSERT INTO community_ratings
+               (user_id,entity_kind,entity_id,rating,created_at,updated_at)
+               VALUES (?,?,?,?,?,?)
+               ON CONFLICT(user_id,entity_kind,entity_id) DO UPDATE SET
+                 rating=excluded.rating,updated_at=excluded.updated_at""",
+            (int(user_id), kind, canonical_id, rating, now, now),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return get_community_rating_summary(kind, canonical_id, int(user_id))
+
+
+def delete_community_rating(user_id: int, entity_kind: str, entity_id: str) -> dict:
+    kind, canonical_id = _validate_rating_target(entity_kind, entity_id)
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            """SELECT 1 FROM community_ratings
+               WHERE user_id=? AND entity_kind=? AND entity_id=?""",
+            (int(user_id), kind, canonical_id),
+        ).fetchone()
+        if not existing:
+            db.commit()
+            return get_community_rating_summary(kind, canonical_id, int(user_id))
+        _enforce_community_rating_rate_limit(
+            db, int(user_id), kind, canonical_id, "delete", now,
+        )
+        db.execute(
+            "DELETE FROM community_ratings WHERE user_id=? AND entity_kind=? AND entity_id=?",
+            (int(user_id), kind, canonical_id),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return get_community_rating_summary(kind, canonical_id, int(user_id))
+
+
+def _offline_preparation_from_row(row: sqlite3.Row | dict) -> dict:
+    raw = dict(row)
+    item = {
+        "schema_version": 2,
+        "id": raw["id"],
+        "status": raw["status"],
+        "progress": int(raw.get("progress") or 0),
+        "bundle_id": raw.get("bundle_id"),
+        "revision": raw.get("revision"),
+        "error": (
+            {"code": raw.get("error_code"), "message": raw.get("error_message")}
+            if raw.get("error_code") else None
+        ),
+        "created_at": int(raw["created_at"]),
+        "updated_at": int(raw["updated_at"]),
+        "completed_at": raw.get("completed_at"),
+    }
+    if raw.get("manifest_json"):
+        item["manifest"] = json.loads(raw["manifest_json"])
+    return item
+
+
+def create_or_get_offline_bundle_preparation_v2(
+    user_id: int,
+    request_payload: dict,
+    *,
+    cache_binding: dict | None = None,
+) -> tuple[dict, bool]:
+    request_json = json.dumps(request_payload, sort_keys=True, separators=(",", ":"))
+    hash_payload: object = request_payload
+    if cache_binding:
+        hash_payload = {
+            "request": request_payload,
+            "server_binding": cache_binding,
+        }
+    request_hash = hashlib.sha256(json.dumps(
+        hash_payload, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()
+    now = int(time.time())
+    db = _conn()
+    row = db.execute(
+        """SELECT * FROM offline_bundle_preparations_v2
+           WHERE user_id=? AND request_hash=?""",
+        (int(user_id), request_hash),
+    ).fetchone()
+    created = False
+    if row and (
+        row["status"] == "error"
+        or row["status"] == "running" and int(row["updated_at"] or 0) < now - 900
+    ):
+        db.execute(
+            """UPDATE offline_bundle_preparations_v2
+               SET status='queued',progress=0,error_code=NULL,error_message=NULL,
+                   completed_at=NULL,updated_at=? WHERE id=?""",
+            (now, row["id"]),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM offline_bundle_preparations_v2 WHERE id=?", (row["id"],),
+        ).fetchone()
+    if not row:
+        preparation_id = f"offprep_{secrets.token_urlsafe(18)}"
+        db.execute(
+            """INSERT INTO offline_bundle_preparations_v2
+               (id,user_id,request_hash,request_json,status,progress,created_at,updated_at)
+               VALUES (?,?,?,?,?,?,?,?)""",
+            (preparation_id, int(user_id), request_hash, request_json, "queued", 0, now, now),
+        )
+        db.commit()
+        row = db.execute(
+            "SELECT * FROM offline_bundle_preparations_v2 WHERE id=?", (preparation_id,),
+        ).fetchone()
+        created = True
+    db.close()
+    return _offline_preparation_from_row(row), created
+
+
+def get_offline_bundle_preparation_v2(
+    preparation_id: str,
+    user_id: int,
+) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        """SELECT * FROM offline_bundle_preparations_v2
+           WHERE id=? AND user_id=?""",
+        (str(preparation_id), int(user_id)),
+    ).fetchone()
+    db.close()
+    return _offline_preparation_from_row(row) if row else None
+
+
+def claim_recoverable_offline_bundle_preparations_v2(
+    stale_before: int,
+    *,
+    limit: int = 8,
+    preparation_id: str | None = None,
+    user_id: int | None = None,
+) -> list[dict]:
+    """Lease authorized queued or stale Offline V2 work for trusted runners.
+
+    ``authorize_offline_download`` durably records the exact preparation ID in
+    ``offline_downloads`` before a task is scheduled. Using that server-owned
+    record as the trust boundary means a process restart can recover work
+    without accepting a client assertion or accidentally running the narrow
+    class of rows created just before an authorization failure.
+
+    When a specific preparation is requested, its owner is required as part of
+    the same query. The transition to ``running`` is performed under an
+    immediate transaction, so repeated polls and multiple server workers can
+    schedule at most one active lease for a given row.
+    """
+    if (preparation_id is None) != (user_id is None):
+        raise ValueError("Preparation ID and user ID must be provided together")
+    bounded_limit = max(1, min(int(limit), 32))
+    cutoff = int(stale_before)
+    now = int(time.time())
+    scope_sql = ""
+    scope_params: list[object] = []
+    if preparation_id is not None and user_id is not None:
+        scope_sql = " AND id=? AND user_id=?"
+        scope_params = [str(preparation_id), int(user_id)]
+    authorized_sql = """
+        EXISTS (
+            SELECT 1 FROM offline_downloads authorization
+            WHERE authorization.user_id=offline_bundle_preparations_v2.user_id
+              AND authorization.asset_type='trailhead_offline_bundle_v2'
+              AND LOWER(authorization.region_id)=LOWER(offline_bundle_preparations_v2.id)
+        )
+    """
+    db = _conn()
+    work: list[dict] = []
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(
+            f"""UPDATE offline_bundle_preparations_v2
+                SET status='queued',progress=0,error_code=NULL,error_message=NULL,
+                    completed_at=NULL,updated_at=?
+                WHERE status='running' AND updated_at<=? AND {authorized_sql}
+                {scope_sql}""",
+            (now, cutoff, *scope_params),
+        )
+        rows = db.execute(
+            f"""SELECT id,user_id,request_json
+                FROM offline_bundle_preparations_v2
+                WHERE status='queued' AND {authorized_sql}
+                {scope_sql}
+                ORDER BY updated_at,id LIMIT ?""",
+            (*scope_params, bounded_limit),
+        ).fetchall()
+        for row in rows:
+            try:
+                request_payload = json.loads(row["request_json"])
+                if not isinstance(request_payload, dict):
+                    raise ValueError("request payload is not an object")
+            except (TypeError, ValueError, json.JSONDecodeError):
+                db.execute(
+                    """UPDATE offline_bundle_preparations_v2
+                       SET status='error',progress=0,error_code=?,error_message=?,
+                           updated_at=?,completed_at=?
+                       WHERE id=? AND user_id=? AND status='queued'""",
+                    (
+                        "offline_preparation_request_invalid",
+                        "This offline preparation could not be recovered.",
+                        now,
+                        now,
+                        row["id"],
+                        int(row["user_id"]),
+                    ),
+                )
+                continue
+            claimed = db.execute(
+                """UPDATE offline_bundle_preparations_v2
+                   SET status='running',progress=CASE WHEN progress<5 THEN 5 ELSE progress END,
+                       error_code=NULL,error_message=NULL,completed_at=NULL,updated_at=?
+                   WHERE id=? AND user_id=? AND status='queued'""",
+                (now, row["id"], int(row["user_id"])),
+            )
+            if claimed.rowcount == 1:
+                work.append({
+                    "id": str(row["id"]),
+                    "user_id": int(row["user_id"]),
+                    "request_payload": request_payload,
+                })
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return work
+
+
+def claim_offline_bundle_preparation_v2(preparation_id: str, user_id: int) -> bool:
+    db = _conn()
+    now = int(time.time())
+    cursor = db.execute(
+        """UPDATE offline_bundle_preparations_v2
+           SET status='running',progress=5,error_code=NULL,error_message=NULL,updated_at=?
+           WHERE id=? AND user_id=? AND status='queued'""",
+        (now, str(preparation_id), int(user_id)),
+    )
+    db.commit(); db.close()
+    return cursor.rowcount == 1
+
+
+def update_offline_bundle_preparation_progress_v2(
+    preparation_id: str,
+    user_id: int,
+    progress: int,
+) -> None:
+    value = max(5, min(99, int(progress)))
+    db = _conn()
+    db.execute(
+        """UPDATE offline_bundle_preparations_v2
+           SET progress=CASE WHEN progress<? THEN ? ELSE progress END,updated_at=?
+           WHERE id=? AND user_id=? AND status='running'""",
+        (value, value, int(time.time()), str(preparation_id), int(user_id)),
+    )
+    db.commit(); db.close()
+
+
+def complete_offline_bundle_preparation_v2(
+    preparation_id: str,
+    user_id: int,
+    manifest: dict,
+) -> None:
+    now = int(time.time())
+    db = _conn()
+    cursor = db.execute(
+        """UPDATE offline_bundle_preparations_v2
+           SET status='ready',progress=100,bundle_id=?,revision=?,manifest_json=?,
+               error_code=NULL,error_message=NULL,updated_at=?,completed_at=?
+           WHERE id=? AND user_id=? AND status IN ('queued','running')""",
+        (
+            str(manifest.get("bundle_id") or ""), str(manifest.get("revision") or ""),
+            json.dumps(manifest, sort_keys=True, separators=(",", ":")),
+            now, now, str(preparation_id), int(user_id),
+        ),
+    )
+    if cursor.rowcount != 1:
+        db.rollback(); db.close()
+        raise ValueError("Offline preparation is not active")
+    db.commit(); db.close()
+
+
+def fail_offline_bundle_preparation_v2(
+    preparation_id: str,
+    user_id: int,
+    code: str,
+    message: str,
+) -> None:
+    now = int(time.time())
+    db = _conn()
+    db.execute(
+        """UPDATE offline_bundle_preparations_v2
+           SET status='error',progress=0,error_code=?,error_message=?,updated_at=?,completed_at=?
+           WHERE id=? AND user_id=? AND status IN ('queued','running')""",
+        (str(code)[:80], str(message)[:500], now, now, str(preparation_id), int(user_id)),
+    )
+    db.commit(); db.close()
+
+
+def register_offline_bundle_artifact_v2(
+    preparation_id: str,
+    artifact_id: str,
+    kind: str,
+    storage_path: str,
+    media_type: str,
+    byte_count: int,
+    sha256: str,
+    record_count: int | None = None,
+) -> None:
+    if not re.fullmatch(r"[a-f0-9]{64}", str(sha256 or "")):
+        raise ValueError("Artifact SHA-256 is invalid")
+    db = _conn()
+    db.execute(
+        """INSERT OR REPLACE INTO offline_bundle_artifacts_v2
+           (preparation_id,artifact_id,kind,storage_path,media_type,byte_count,
+            sha256,etag,record_count,created_at)
+           VALUES (?,?,?,?,?,?,?,?,?,?)""",
+        (
+            str(preparation_id), str(artifact_id)[:220], str(kind)[:40], str(storage_path),
+            str(media_type)[:120], int(byte_count), str(sha256), str(sha256),
+            record_count, int(time.time()),
+        ),
+    )
+    db.commit(); db.close()
+
+
+def get_offline_bundle_artifact_v2(
+    preparation_id: str,
+    artifact_id: str,
+    user_id: int,
+) -> dict | None:
+    db = _conn()
+    row = db.execute(
+        """SELECT artifact.* FROM offline_bundle_artifacts_v2 artifact
+           JOIN offline_bundle_preparations_v2 preparation
+             ON preparation.id=artifact.preparation_id
+           WHERE artifact.preparation_id=? AND artifact.artifact_id=?
+             AND preparation.user_id=? AND preparation.status='ready'""",
+        (str(preparation_id), str(artifact_id), int(user_id)),
+    ).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+
+def get_route_evidence_v1(user_id: int, trip_id: str, route_sha256: str) -> dict:
+    db = _conn()
+    segments = db.execute(
+        """SELECT * FROM route_service_segments_v1
+           WHERE user_id=? AND trip_id=? AND route_sha256=? ORDER BY sequence,id""",
+        (int(user_id), trip_id, route_sha256),
+    ).fetchall()
+    exits = db.execute(
+        """SELECT * FROM route_exit_references_v1
+           WHERE user_id=? AND trip_id=? AND route_sha256=? ORDER BY route_progress,id""",
+        (int(user_id), trip_id, route_sha256),
+    ).fetchall()
+    media = db.execute(
+        """SELECT * FROM timeline_event_media_v1
+           WHERE user_id=? AND trip_id=? AND route_sha256=? ORDER BY event_id,id""",
+        (int(user_id), trip_id, route_sha256),
+    ).fetchall()
+    db.close()
+
+    def decoded(rows: list[sqlite3.Row]) -> list[dict]:
+        result = []
+        for row in rows:
+            item = dict(row)
+            payload = json.loads(item.pop("payload_json", "{}") or "{}") if "payload_json" in item else {}
+            if isinstance(payload, dict):
+                item.update(payload)
+            item.pop("user_id", None)
+            item.pop("trip_id", None)
+            item.pop("route_sha256", None)
+            result.append(item)
+        return result
+
+    revisions = sorted({
+        str(row["evidence_revision"])
+        for row in [*segments, *exits, *media]
+        if row["evidence_revision"]
+    })
+    revision = (
+        hashlib.sha256("|".join(revisions).encode("utf-8")).hexdigest()
+        if revisions else "not-checked"
+    )
+    return {
+        "evidence_revision": revision,
+        "service_segments": decoded(segments),
+        "exits": decoded(exits),
+        "timeline_media": decoded(media),
+    }
+
+
+def replace_route_evidence_v1(
+    user_id: int,
+    trip_id: str,
+    route_sha256: str,
+    evidence_revision: str,
+    *,
+    service_segments: list[dict] | None = None,
+    exits: list[dict] | None = None,
+    timeline_media: list[dict] | None = None,
+) -> dict:
+    """Replace trusted evidence for one exact owned route revision.
+
+    This function is intentionally not exposed as a client write endpoint. The
+    server materializer passes source-bound observations and references after
+    resolving the saved route; clients can only request/read the resulting
+    Brief & Backup document.
+    """
+    clean_trip_id = _validate_canonical_id(trip_id, "trip id")
+    clean_route_sha = str(route_sha256 or "").strip().lower()
+    if not re.fullmatch(r"[a-f0-9]{64}", clean_route_sha):
+        raise ValueError("Route SHA-256 is invalid")
+    clean_revision = str(evidence_revision or "").strip()
+    if not re.fullmatch(r"[A-Za-z0-9._:-]{8,128}", clean_revision):
+        raise ValueError("Evidence revision is invalid")
+    service_segments = service_segments or []
+    exits = exits or []
+    timeline_media = timeline_media or []
+    if len(service_segments) > 80 or len(exits) > 80 or len(timeline_media) > 80:
+        raise ValueError("Route evidence exceeds the supported size")
+
+    def progress(value: object, label: str) -> float:
+        try:
+            parsed = float(value)
+        except (TypeError, ValueError):
+            raise ValueError(f"{label} is invalid") from None
+        if not math.isfinite(parsed) or not 0 <= parsed <= 1:
+            raise ValueError(f"{label} is invalid")
+        return parsed
+
+    def text(value: object, limit: int) -> str:
+        return re.sub(r"\s+", " ", str(value or "")).strip()[:limit]
+
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        owned = db.execute(
+            """SELECT 1 FROM trip_documents_v2
+               WHERE user_id=? AND id=? AND deleted_at IS NULL""",
+            (int(user_id), clean_trip_id),
+        ).fetchone()
+        if not owned:
+            raise ValueError("Trip was not found")
+        for table in (
+            "route_service_segments_v1",
+            "route_exit_references_v1",
+            "timeline_event_media_v1",
+        ):
+            db.execute(
+                f"DELETE FROM {table} WHERE user_id=? AND trip_id=? AND route_sha256=?",
+                (int(user_id), clean_trip_id, clean_route_sha),
+            )
+
+        for sequence, raw in enumerate(service_segments):
+            start = progress(raw.get("start_progress"), "Service segment start")
+            end = progress(raw.get("end_progress"), "Service segment end")
+            if end < start:
+                raise ValueError("Service segment progress is reversed")
+            item_id = text(raw.get("id"), 180) or (
+                "route_service_" + hashlib.sha256(json.dumps(
+                    [clean_route_sha, sequence, start, end, raw.get("source_label")],
+                    sort_keys=True, separators=(",", ":"),
+                ).encode("utf-8")).hexdigest()[:32]
+            )
+            payload = raw.get("details") if isinstance(raw.get("details"), dict) else {}
+            db.execute(
+                """INSERT INTO route_service_segments_v1
+                   (id,user_id,trip_id,route_sha256,evidence_revision,sequence,
+                    start_progress,end_progress,availability,source_label,source_url,
+                    observed_at,updated_at,payload_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    item_id, int(user_id), clean_trip_id, clean_route_sha, clean_revision,
+                    sequence, start, end, text(raw.get("availability"), 40) or "not_checked",
+                    text(raw.get("source_label"), 160) or None,
+                    text(raw.get("source_url"), 800) or None,
+                    int(raw["observed_at"]) if raw.get("observed_at") is not None else None,
+                    int(raw.get("updated_at") or now),
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+
+        for raw in exits:
+            route_progress = progress(raw.get("route_progress"), "Exit progress")
+            item_id = text(raw.get("id"), 180) or (
+                "route_exit_" + hashlib.sha256(json.dumps(
+                    [clean_route_sha, route_progress, raw.get("label"), raw.get("source_label")],
+                    sort_keys=True, separators=(",", ":"),
+                ).encode("utf-8")).hexdigest()[:32]
+            )
+            payload = raw.get("details") if isinstance(raw.get("details"), dict) else {}
+            db.execute(
+                """INSERT INTO route_exit_references_v1
+                   (id,user_id,trip_id,route_sha256,evidence_revision,route_progress,
+                    label,availability,source_label,source_url,observed_at,updated_at,payload_json)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    item_id, int(user_id), clean_trip_id, clean_route_sha, clean_revision,
+                    route_progress, text(raw.get("label"), 180) or "Route reference",
+                    text(raw.get("availability"), 40) or "not_checked",
+                    text(raw.get("source_label"), 160) or None,
+                    text(raw.get("source_url"), 800) or None,
+                    int(raw["observed_at"]) if raw.get("observed_at") is not None else None,
+                    int(raw.get("updated_at") or now),
+                    json.dumps(payload, sort_keys=True, separators=(",", ":")),
+                ),
+            )
+
+        for raw in timeline_media:
+            item_id = text(raw.get("id"), 180) or (
+                "route_media_" + hashlib.sha256(json.dumps(
+                    [clean_route_sha, raw.get("event_id"), raw.get("media_url")],
+                    sort_keys=True, separators=(",", ":"),
+                ).encode("utf-8")).hexdigest()[:32]
+            )
+            db.execute(
+                """INSERT INTO timeline_event_media_v1
+                   (id,user_id,trip_id,route_sha256,evidence_revision,event_id,place_id,
+                    media_url,license_id,attribution,updated_at)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
+                (
+                    item_id, int(user_id), clean_trip_id, clean_route_sha, clean_revision,
+                    text(raw.get("event_id"), 180), text(raw.get("place_id"), 180) or None,
+                    text(raw.get("media_url"), 1000), text(raw.get("license_id"), 160),
+                    text(raw.get("attribution"), 240), int(raw.get("updated_at") or now),
+                ),
+            )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return get_route_evidence_v1(int(user_id), clean_trip_id, clean_route_sha)
+
+
+def create_trip_brief_and_backup_v1(
+    user_id: int,
+    trip_id: str,
+    trip_revision: int,
+    route_sha256: str,
+    evidence_revision: str,
+    idempotency_key: str,
+    response: dict,
+    credits_to_charge: int,
+) -> tuple[dict, bool]:
+    if not _IDEMPOTENCY_KEY_RE.fullmatch(str(idempotency_key or "")):
+        raise ValueError("Invalid Idempotency-Key")
+    payload_json = json.dumps(response, sort_keys=True, separators=(",", ":"))
+    request_hash = hashlib.sha256(json.dumps({
+        "trip_id": trip_id,
+        "trip_revision": int(trip_revision),
+        "route_sha256": route_sha256,
+        "evidence_revision": evidence_revision,
+    }, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        existing = db.execute(
+            """SELECT request_hash,response_json FROM trip_brief_and_backup_v1
+               WHERE user_id=? AND idempotency_key=?""",
+            (int(user_id), idempotency_key),
+        ).fetchone()
+        if existing:
+            if existing["request_hash"] != request_hash:
+                raise IdempotencyConflictError("Idempotency-Key was already used for another brief")
+            db.commit()
+            return json.loads(existing["response_json"]), False
+        charge = max(0, int(credits_to_charge))
+        if charge:
+            cursor = db.execute(
+                "UPDATE users SET credits=credits-? WHERE id=? AND credits>=?",
+                (charge, int(user_id), charge),
+            )
+            if cursor.rowcount != 1:
+                raise ValueError("Not enough credits")
+            db.execute(
+                """INSERT INTO credit_transactions
+                   (user_id,amount,reason,reward_key,created_at) VALUES (?,?,?,?,?)""",
+                (
+                    int(user_id), -charge, "Brief & Backup",
+                    f"brief-and-backup:{int(user_id)}:{idempotency_key}", int(time.time()),
+                ),
+            )
+        db.execute(
+            """INSERT INTO trip_brief_and_backup_v1
+               (user_id,idempotency_key,trip_id,trip_revision,route_sha256,
+                evidence_revision,request_hash,response_json,credits_charged,created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?)""",
+            (
+                int(user_id), idempotency_key, trip_id, int(trip_revision), route_sha256,
+                evidence_revision, request_hash, payload_json, charge, int(time.time()),
+            ),
+        )
+        db.commit()
+        return response, True
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+class SupportAttachmentRateLimitError(ValueError):
+    pass
+
+
+def create_support_attachment(
+    user_id: int,
+    content_type: str,
+    image_data: bytes,
+) -> dict:
+    attachment_id = f"sat_{secrets.token_urlsafe(24)}"
+    digest = hashlib.sha256(image_data).hexdigest()
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        db.execute(
+            """DELETE FROM support_attachments
+               WHERE message_id IS NULL AND created_at<?""",
+            (now - 86400,),
+        )
+        recent = int(db.execute(
+            """SELECT COUNT(*) FROM support_attachments
+               WHERE user_id=? AND created_at>=?""",
+            (int(user_id), now - 3600),
+        ).fetchone()[0])
+        unclaimed = int(db.execute(
+            """SELECT COUNT(*) FROM support_attachments
+               WHERE user_id=? AND message_id IS NULL""",
+            (int(user_id),),
+        ).fetchone()[0])
+        if recent >= 20 or unclaimed >= 12:
+            raise SupportAttachmentRateLimitError(
+                "Support screenshot uploads are temporarily limited. Attach or remove pending screenshots, then try again."
+            )
+        db.execute(
+            """INSERT INTO support_attachments
+               (id,user_id,content_type,byte_count,sha256,image_data,created_at)
+               VALUES (?,?,?,?,?,?,?)""",
+            (attachment_id, int(user_id), content_type, len(image_data), digest, image_data, now),
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+    return {
+        "attachment_ref": attachment_id, "content_type": content_type,
+        "byte_count": len(image_data), "sha256": digest, "created_at": now,
+    }
+
+
+def get_support_attachment(
+    attachment_id: str,
+    user_id: int | None = None,
+    admin: bool = False,
+) -> dict | None:
+    db = _conn()
+    if admin:
+        row = db.execute(
+            "SELECT * FROM support_attachments WHERE id=?", (attachment_id,),
+        ).fetchone()
+    else:
+        row = db.execute(
+            "SELECT * FROM support_attachments WHERE id=? AND user_id=?",
+            (attachment_id, int(user_id or 0)),
+        ).fetchone()
+    db.close()
+    return dict(row) if row else None
+
+
+def claim_support_attachments(
+    user_id: int,
+    message_id: int,
+    attachment_ids: list[str],
+) -> list[dict]:
+    unique = list(dict.fromkeys(str(value) for value in attachment_ids))
+    if len(unique) > 3:
+        raise ValueError("A support message can include up to three attachments")
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        result = []
+        for attachment_id in unique:
+            row = db.execute(
+                """SELECT id,content_type,byte_count,sha256,created_at
+                   FROM support_attachments
+                   WHERE id=? AND user_id=? AND message_id IS NULL""",
+                (attachment_id, int(user_id)),
+            ).fetchone()
+            if not row:
+                raise ValueError("Support attachment is unavailable")
+            db.execute(
+                "UPDATE support_attachments SET message_id=? WHERE id=?",
+                (int(message_id), attachment_id),
+            )
+            item = dict(row)
+            item["attachment_ref"] = item.pop("id")
+            result.append(item)
+        db.commit()
+        return result
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()
+
+
+def list_support_message_attachments(message_ids: list[int]) -> dict[int, list[dict]]:
+    if not message_ids:
+        return {}
+    placeholders = ",".join("?" for _ in message_ids)
+    db = _conn()
+    rows = db.execute(
+        f"""SELECT id,message_id,content_type,byte_count,sha256,created_at
+            FROM support_attachments WHERE message_id IN ({placeholders})
+            ORDER BY created_at,id""",
+        [int(value) for value in message_ids],
+    ).fetchall()
+    db.close()
+    result: dict[int, list[dict]] = {}
+    for row in rows:
+        item = dict(row)
+        item["attachment_ref"] = item.pop("id")
+        result.setdefault(int(row["message_id"]), []).append(item)
+    return result
+
+
+def get_referral_summary(user_id: int) -> dict:
+    db = _conn()
+    user = db.execute(
+        "SELECT referral_code FROM users WHERE id=?", (int(user_id),),
+    ).fetchone()
+    rows = db.execute(
+        """SELECT status,COUNT(*) AS count FROM referrals
+           WHERE referrer_id=? GROUP BY status""",
+        (int(user_id),),
+    ).fetchall()
+    credits = db.execute(
+        """SELECT COALESCE(SUM(amount),0) AS credits FROM credit_transactions
+           WHERE user_id=? AND reward_key LIKE 'signup-referral:%'""",
+        (int(user_id),),
+    ).fetchone()
+    db.close()
+    counts = {str(row["status"]): int(row["count"]) for row in rows}
+    return {
+        "referral_code": str(user["referral_code"] or "") if user else "",
+        "converted_count": counts.get("converted", 0),
+        "pending_count": counts.get("pending", 0),
+        "credits_earned": int(credits["credits"] or 0),
+    }
+
+
+def issue_account_deletion_authorization(
+    user_id: int,
+    auth_method: str,
+    ttl_seconds: int = 300,
+) -> dict:
+    token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(token.encode("utf-8")).hexdigest()
+    now = int(time.time())
+    expires_at = now + max(60, min(int(ttl_seconds), 600))
+    db = _conn()
+    db.execute(
+        "DELETE FROM account_deletion_authorizations WHERE user_id=? OR expires_at<=?",
+        (int(user_id), now),
+    )
+    db.execute(
+        """INSERT INTO account_deletion_authorizations
+           (token_hash,user_id,auth_method,issued_at,expires_at) VALUES (?,?,?,?,?)""",
+        (token_hash, int(user_id), str(auth_method)[:20], now, expires_at),
+    )
+    db.commit(); db.close()
+    return {
+        "authorization_token": token,
+        "expires_at": expires_at,
+        "auth_method": auth_method,
+    }
+
+
+def consume_account_deletion_authorization(user_id: int, token: str) -> bool:
+    token_hash = hashlib.sha256(str(token or "").encode("utf-8")).hexdigest()
+    now = int(time.time())
+    db = _conn()
+    try:
+        db.execute("BEGIN IMMEDIATE")
+        cursor = db.execute(
+            """UPDATE account_deletion_authorizations SET used_at=?
+               WHERE token_hash=? AND user_id=? AND used_at IS NULL AND expires_at>?""",
+            (now, token_hash, int(user_id), now),
+        )
+        db.commit()
+        return cursor.rowcount == 1
+    except Exception:
+        db.rollback()
+        raise
+    finally:
+        db.close()

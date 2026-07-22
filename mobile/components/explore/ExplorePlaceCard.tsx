@@ -3,6 +3,7 @@ import { Image, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import type { ExplorePlaceProfile } from '@/lib/api';
 import { useTheme } from '@/lib/design';
+import { isRenderableImageUrl } from '@/lib/mediaPolicy';
 import {
   getExploreCardSummary,
   getExploreCardSourceLine,
@@ -60,8 +61,9 @@ export function ExplorePlaceCard({
   const lat = Number(place.summary.lat);
   const lng = Number(place.summary.lng);
   const hasCoordinates = Number.isFinite(lat) && Number.isFinite(lng);
-  const renderMedia = (height: number) => imageUrl ? (
-    <Image source={{ uri: imageUrl }} style={styles.image} resizeMode="cover" />
+  const safeImageUrl = isRenderableImageUrl(imageUrl) ? imageUrl : '';
+  const renderMedia = (height: number) => safeImageUrl ? (
+    <Image source={{ uri: safeImageUrl }} style={styles.image} resizeMode="cover" />
   ) : hasCoordinates ? (
     <StaticMapboxPreview
       pins={[{ id: place.id, title, lat, lng, kind: getExploreCategoryKey(place), active: true }]}

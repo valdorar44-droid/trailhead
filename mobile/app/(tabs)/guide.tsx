@@ -6,7 +6,7 @@ import {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import * as Location from 'expo-location';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
@@ -42,6 +42,7 @@ import {
   type GuidedDestination,
 } from '@/components/explore';
 import { useStore } from '@/lib/store';
+import { useScreenActivity } from '@/lib/screenActivity';
 import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
@@ -2091,6 +2092,7 @@ function GuideScreenContent() {
   const insets = useSafeAreaInsets();
   const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
+  const screenActivity = useScreenActivity();
   const params = useLocalSearchParams<{ view?: string | string[] }>();
   const user = useStore(st => st.user);
   const authToken = useStore(st => st.token);
@@ -3921,7 +3923,7 @@ function GuideScreenContent() {
       && accountStorage.epoch() === requestEpoch
       && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
       && useStore.getState().activeTrip?.trip_id === requestTripId;
-    if (!autoPlay || !activeTrip) {
+    if (!screenActivity.isActive || !autoPlay || !activeTrip) {
       safelyRemoveSubscription(locationSub.current);
       locationSub.current = null;
       return () => { cancelled = true; };
@@ -3957,7 +3959,7 @@ function GuideScreenContent() {
       safelyRemoveSubscription(locationSub.current);
       locationSub.current = null;
     };
-  }, [autoPlay, activeTrip?.trip_id, guide, user?.id]);
+  }, [autoPlay, activeTrip?.trip_id, guide, screenActivity.isActive, user?.id]);
 
   useEffect(() => {
     stopTrailheadVoice();
@@ -5893,8 +5895,6 @@ function ExploreCampgroundSkeletonCard({
 }
 
 export default function GuideScreen() {
-  const pathname = usePathname();
-  if (pathname !== '/' && !pathname.includes('/guide')) return null;
   return <GuideScreenContent />;
 }
 

@@ -10,12 +10,12 @@ import * as Notifications from 'expo-notifications';
 import { accountStorage, type AccountStorageEpoch } from '@/lib/storage';
 import * as Haptics from 'expo-haptics';
 import { Ionicons } from '@expo/vector-icons';
-import { usePathname } from 'expo-router';
 import TourTarget from '@/components/TourTarget';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow, TrailheadSheet, TrailheadTopBar } from '@/components/TrailheadUI';
 import { api, Report, ReportPayload, ReportResponse, ContributorLeader, ContributorProfile, ContributionPeriod } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { useStore } from '@/lib/store';
+import { useScreenActivity } from '@/lib/screenActivity';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { trackPhase0Once } from '@/lib/telemetry';
@@ -302,6 +302,7 @@ function tonightAnchorForTrip(
 function ReportScreenContent() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
+  const screenActivity = useScreenActivity();
   const { user, setAuth, addLiveReport } = useStore();
   const activeTrip = useStore(st => st.activeTrip);
   const [loc, setLoc] = useState<{ lat: number; lng: number } | null>(null);
@@ -479,26 +480,40 @@ function ReportScreenContent() {
     }
   }
 
-  // Request location once on mount. Account-local state is restored separately.
+  // Keep a current fix only while this mounted screen is actively in use. Draft
+  // fields and the last rendered feed remain mounted, while precise coordinates
+  // are discarded off-tab/background and reacquired before the feed refreshes.
   useEffect(() => {
+    if (!screenActivity.isActive) {
+      setLoc(null);
+      locRef.current = null;
+      setDrivingWarning(false);
+      setNearbyLoading(false);
+      return;
+    }
+    let cancelled = false;
     Location.requestForegroundPermissionsAsync().then(({ status }) => {
-      if (status !== 'granted') return;
+      if (cancelled || status !== 'granted') return;
       Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced })
         .then(l => {
+          if (cancelled) return;
           const c = { lat: l.coords.latitude, lng: l.coords.longitude };
           setLoc(c);
           locRef.current = c;
           if (l.coords.speed !== null && l.coords.speed > 2.2) setDrivingWarning(true);
           setNearbyLoading(true);
           api.getNearbyAlerts(c.lat, c.lng).then(reports => {
+            if (cancelled) return;
             setNearby(reports);
             checkAndNotify(reports);
-          }).catch(() => {}).finally(() => setNearbyLoading(false));
+          }).catch(() => {}).finally(() => {
+            if (!cancelled) setNearbyLoading(false);
+          });
         })
         .catch(() => {}); // prevent unhandled rejection crash
     }).catch(() => {});
-
-  }, []);
+    return () => { cancelled = true; };
+  }, [screenActivity.isActive, user?.id]);
 
   useEffect(() => {
     const scope = currentReportAccountScope();
@@ -885,7 +900,7 @@ function ReportScreenContent() {
             <Text style={s.nearbySubtitle}>{options.subtitle}</Text>
           </View>
           <View style={s.nearbyCount}>
-            <Text style={s.nearbyCountNum}>{options.loading ? '…' : reports.length > 0 ? reports.length : 'CLEAR'}</Text>
+            <Text style={s.nearbyCountNum}>{options.loading ? '…' : reports.length}</Text>
             <Text style={s.nearbyCountLabel}>{options.countLabel}</Text>
           </View>
         </View>
@@ -1248,8 +1263,8 @@ function ReportScreenContent() {
               subtitle: activeTrip?.plan.trip_name || 'Active route',
               countLabel: 'ON ROUTE',
               loading: routeLoading,
-              emptyTitle: 'Route looks clear right now',
-              emptySub: 'Your saved route is clear right now. If you hit a closure, washed road, or fuel issue, post it from Submit.',
+              emptyTitle: 'No recent reports for this route',
+              emptySub: 'A lack of reports does not confirm conditions. Check official sources and what you see on the road.',
               primaryActionLabel: 'SUBMIT REPORT',
               primaryAction: () => setView('submit'),
             })
@@ -1278,8 +1293,8 @@ function ReportScreenContent() {
               subtitle: tonightAnchor.name || 'Camp area',
               countLabel: 'NEAR CAMP',
               loading: campLoading,
-              emptyTitle: 'Tonight’s camp looks clear',
-              emptySub: 'This stop looks quiet. If the camp is full, trashed, closed, or sketchy, add the update before the next rig rolls in.',
+              emptyTitle: 'No recent reports for this stop',
+              emptySub: 'A lack of reports does not confirm conditions. Check official sources and what you find when you arrive.',
               primaryActionLabel: 'ADD CAMP REPORT',
               primaryAction: () => {
                 setSelectedType(REPORT_TYPES.find(rt => rt.type === 'campsite') ?? null);
@@ -1307,10 +1322,10 @@ function ReportScreenContent() {
         title: 'Nearby trail reports',
         kicker: 'NEAR ME',
         subtitle: 'Local conditions around your current position',
-        countLabel: 'ACTIVE',
+        countLabel: 'RECENT',
         loading: nearbyLoading,
-        emptyTitle: 'Nearby looks clear right now',
-        emptySub: 'This area looks quiet. If you spot a closure, washed road, full camp, or fuel issue, add the first report.',
+        emptyTitle: 'No recent reports for this area',
+        emptySub: 'A lack of reports does not confirm conditions. Check official sources and what you observe nearby.',
         primaryActionLabel: 'ADD REPORT',
         primaryAction: () => setView('submit'),
       })}
@@ -1441,8 +1456,6 @@ function ReportScreenContent() {
 }
 
 export default function ReportScreen() {
-  const pathname = usePathname();
-  if (!pathname.includes('/report')) return null;
   return <ReportScreenContent />;
 }
 

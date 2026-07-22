@@ -344,6 +344,7 @@ async function main() {
     return {
       items: [{
         ...summary,
+        coverage_region: 'north_america',
         public_metadata: { ...summary.public_metadata, hero_image_url: AUTHORED_ARTWORK_URI },
       }],
     };
@@ -351,6 +352,7 @@ async function main() {
   const guestPreviewCatalog = await service.listOriginals();
   assert.equal(guestPreviewCatalog.length, 1, 'a guest preview credential unlocks the internal catalog');
   assert.equal(guestPreviewCatalog[0]?.heroImageUrl, AUTHORED_ARTWORK_URI);
+  assert.equal(guestPreviewCatalog[0]?.region, 'North America', 'internal coverage slugs are formatted for people');
   assert.deepEqual(availabilityCalls[0], [undefined, null], 'guest availability is explicitly pinned anonymous');
   assert.equal((catalogCalls[0]?.[0] as { authToken?: string | null })?.authToken, null);
 

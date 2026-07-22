@@ -53,7 +53,7 @@ import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Ionicons } from '@expo/vector-icons';
-import { usePathname, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { applyBackendAcknowledgedActiveTrip, useStore, type WaterSpot, type CatchLog, type WaterRoute } from '@/lib/store';
 import {
   buildCarAccountState,
@@ -83,6 +83,7 @@ import {
   routeWeatherResultFromCache,
   routeWeatherWaypointSignature,
 } from '@/lib/routeWeather';
+import { localRouteBrief, normalizeRouteBrief } from '@/lib/routeBrief';
 import { routeUnitsParam } from '@/lib/routeBuilder/units';
 import { shouldPersistTripRoute, type RoutePersistenceScope } from '@/lib/routePersistencePolicy';
 import type { RouteBuildPreviewStop } from '@/lib/routeBuildSession';
@@ -137,6 +138,10 @@ import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { MAP_MODE_PRESETS, legendCategoryForPreset, mapModePresetTitle, type MapModePresetId } from '@/lib/mapLegend';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
+import { completeLegacyMapSearch } from '@/lib/legacyMapSearchPolicy';
+import { useScreenActivity } from '@/lib/screenActivity';
+import { mapLocationWatchShouldRun } from '@/lib/screenActivityState';
+import { useTabBarVisibility } from '@/lib/tabBarVisibility';
 import { playTrailheadCue, playTrailheadVoice, preloadTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
 import { buildTrailheadUserContext } from '@/lib/trailheadUserContext';
@@ -995,62 +1000,6 @@ function isPlanningTargetWaypoint(wp: Partial<Waypoint> | null | undefined) {
 
 function usableTripWaypoints(wps: Waypoint[] | undefined) {
   return wps ?? [];
-}
-
-function localRouteBrief(trip: TripResult, reports: Report[] = []): RouteBrief {
-  const wps = usableTripWaypoints(trip.plan.waypoints);
-  const days = Math.max(1, trip.plan.duration_days || trip.plan.daily_itinerary.length || 1);
-  const miles = Math.max(0, trip.plan.total_est_miles || 0);
-  const camps = wps.filter(w => w.type === 'camp' || w.type === 'motel');
-  const fuelStops = Math.max(trip.gas_stations?.length ?? 0, Math.max(0, Math.ceil(miles / 220) - 1));
-  const missingCampDays = Math.max(0, days - camps.length);
-  const routeName = trip.plan.trip_name || 'this route';
-  const topConcerns = [
-    missingCampDays > 0 ? `${missingCampDays} day${missingCampDays === 1 ? '' : 's'} still need a confirmed overnight camp or lodging stop.` : '',
-    fuelStops === 0 && miles > 180 ? 'Fuel stops need to be saved before remote stretches.' : '',
-    reports.length ? `${reports.length} recent route alert${reports.length === 1 ? '' : 's'} should be reviewed before departure.` : '',
-  ].filter(Boolean).slice(0, 3);
-  const mustDo = [
-    'Save this trip before leaving service.',
-    camps.length ? 'Check each saved camp is open, legal, and reachable for your rig.' : 'Choose overnight camps for each travel day before using GPS navigation.',
-    fuelStops > 0 ? 'Confirm fuel range against the longest day and top off before remote legs.' : 'Add at least one fuel stop or bail-out town to the route.',
-    'Carry extra water and check current fire restrictions before departure.',
-  ];
-  const dailyHighlights = trip.plan.daily_itinerary
-    .slice(0, 7)
-    .map(day => `Day ${day.day}: ${day.title.replace(/^Day\s+\d+:\s*/i, '')}${day.est_miles ? `, about ${Math.round(day.est_miles)} mi` : ''}.`);
-  const readiness = Math.max(4, Math.min(9, 8 - (missingCampDays ? 2 : 0) - (fuelStops === 0 && miles > 180 ? 1 : 0)));
-  return {
-    readiness_score: readiness,
-    top_concerns: topConcerns,
-    must_do_before_leaving: mustDo,
-    daily_highlights: dailyHighlights,
-    estimated_fuel_stops: fuelStops,
-    water_carry_gallons: Math.max(3, Math.min(10, Math.ceil(days * 1.5))),
-    signal_dead_zones: miles > 80 ? [`${routeName}: expect weak service away from towns; save the route before departure.`] : [],
-    fire_restriction_likelihood: 'possible - check current land manager rules and posted restrictions before lighting any fire.',
-    emergency_bailout: wps.length >= 2 ? `Use the nearest mapped town, highway, or saved fuel stop from the active day if conditions turn.` : 'Add at least one named town or fuel stop as a bail-out point.',
-    briefing_summary: `${routeName} is usable, but confirm camps, fuel, offline maps, and current closures before you roll.`,
-  };
-}
-
-function normalizeRouteBrief(brief: RouteBrief | null | undefined, trip: TripResult, reports: Report[] = []): RouteBrief {
-  const fallback = localRouteBrief(trip, reports);
-  if (!brief || !String(brief.briefing_summary ?? '').trim()) return fallback;
-  const fire = String(brief.fire_restriction_likelihood ?? '').trim();
-  return {
-    ...fallback,
-    ...brief,
-    readiness_score: Number.isFinite(brief.readiness_score) ? brief.readiness_score : fallback.readiness_score,
-    top_concerns: Array.isArray(brief.top_concerns) ? brief.top_concerns.map(cleanAiCardText).filter(Boolean) : fallback.top_concerns,
-    must_do_before_leaving: Array.isArray(brief.must_do_before_leaving) ? brief.must_do_before_leaving.map(cleanAiCardText).filter(Boolean) : fallback.must_do_before_leaving,
-    daily_highlights: Array.isArray(brief.daily_highlights) ? brief.daily_highlights.map(cleanAiCardText).filter(Boolean) : fallback.daily_highlights,
-    estimated_fuel_stops: Number.isFinite(brief.estimated_fuel_stops) ? brief.estimated_fuel_stops : fallback.estimated_fuel_stops,
-    water_carry_gallons: Number.isFinite(brief.water_carry_gallons) ? brief.water_carry_gallons : fallback.water_carry_gallons,
-    fire_restriction_likelihood: !fire || /^unknown$/i.test(fire) ? fallback.fire_restriction_likelihood : cleanAiCardText(fire),
-    emergency_bailout: cleanAiCardText(brief.emergency_bailout) || fallback.emergency_bailout,
-    briefing_summary: cleanAiCardText(brief.briefing_summary) || fallback.briefing_summary,
-  };
 }
 
 function stripClippedTail(value: string): string {
@@ -5948,9 +5897,9 @@ function MapScreen() {
   }, [insets.top, windowHeight]);
   const filterBottomSpacer = Platform.OS === 'android' ? Math.max(insets.bottom + 130, 150) : Math.max(insets.bottom + 34, 52);
   const router = useRouter();
+  const screenActivity = useScreenActivity();
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
-  const setTabBarHidden = useStore(st => st.setTabBarHidden);
   const activeTripFromCache = useStore(st => st.activeTripFromCache);
   const pendingSavedTrailId = useStore(st => st.pendingSavedTrailId);
   const setPendingSavedTrailId = useStore(st => st.setPendingSavedTrailId);
@@ -6323,9 +6272,12 @@ function MapScreen() {
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
   const [showFullMapSearch, setShowFullMapSearch] = useState(false);
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const inlineSearchInputRef = useRef<TextInput | null>(null);
+  const [inlineSearchFocusRequest, setInlineSearchFocusRequest] = useState(0);
+  const handledInlineSearchFocusRequestRef = useRef(0);
   const autoMapSearchRef = useRef('');
+  const mapSearchRequestSequenceRef = useRef(0);
+  const mapSearchRequestRef = useRef<{ id: number; controller: AbortController } | null>(null);
   const [copilotResults, setCopilotResults] = useState<SearchPlace[]>([]);
   const [copilotResultScope, setCopilotResultScope] = useState<CopilotResultScope | null>(null);
   const [copilotDebugTranscript, setCopilotDebugTranscript] = useState('');
@@ -6344,18 +6296,34 @@ function MapScreen() {
   useEffect(() => {
     const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
     const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (event: any) => {
+    const showSub = Keyboard.addListener(showEvent, () => {
       setKeyboardVisible(true);
-      setKeyboardHeight(Number(event?.endCoordinates?.height) || 0);
     });
     const hideSub = Keyboard.addListener(hideEvent, () => {
       setKeyboardVisible(false);
-      setKeyboardHeight(0);
     });
     return () => {
       showSub.remove();
       hideSub.remove();
     };
+  }, []);
+
+  useEffect(() => {
+    if (
+      !inlineSearchOpen
+      || !screenActivity.isFocused
+      || handledInlineSearchFocusRequestRef.current === inlineSearchFocusRequest
+    ) return;
+    const frame = requestAnimationFrame(() => {
+      handledInlineSearchFocusRequestRef.current = inlineSearchFocusRequest;
+      inlineSearchInputRef.current?.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [inlineSearchFocusRequest, inlineSearchOpen, screenActivity.isFocused]);
+
+  useEffect(() => () => {
+    mapSearchRequestRef.current?.controller.abort();
+    mapSearchRequestRef.current = null;
   }, []);
 
   const [routeLegOffset, setRouteLegOffset] = useState(0);
@@ -6654,7 +6622,7 @@ function MapScreen() {
       trackPhase0Event('phase0_route_brief_dismissed', {
         trip_id: activeTrip?.trip_id ?? null,
         reason,
-        readiness_score: routeBrief.readiness_score,
+        planning_status: routeBrief.planning_status,
         saved: routeBriefSaved,
       });
     }
@@ -6677,7 +6645,7 @@ function MapScreen() {
     trackPhase0Event('phase0_route_brief_opened', {
       trip_id: activeTrip?.trip_id ?? null,
       alert_count: routeAlerts.length,
-      readiness_score: routeBrief.readiness_score,
+      planning_status: routeBrief.planning_status,
       saved: routeBriefSaved,
     });
   }, [activeTrip?.trip_id, routeAlerts.length, routeBrief, routeBriefSaved, showRouteBrief]);
@@ -6800,7 +6768,7 @@ function MapScreen() {
     let cancelled = false;
     loadSavedTripAi<RouteBrief>(activeTrip, 'route_brief').then(saved => {
       if (cancelled) return;
-      setRouteBrief(saved);
+      setRouteBrief(saved ? normalizeRouteBrief(saved, activeTrip, routeAlerts) : null);
       setRouteBriefSaved(!!saved);
     });
     loadSavedTripAi<PackingList>(activeTrip, 'packing_list').then(saved => {
@@ -7533,9 +7501,9 @@ function MapScreen() {
     };
   }, [navMode]);
 
-  useEffect(() => {
-    setTabBarHidden(
-      navMode
+  useTabBarVisibility(
+    'map',
+    navMode
       || mapMissionVisible
       || waterFollowActive
       || safeWaterSheetOwnsPage
@@ -7561,14 +7529,9 @@ function MapScreen() {
       || !!tappedWp
       || !!pendingPin
       || trailPinCaptureMode
-      || trailRouteBuilderOpen
-    );
-    return () => setTabBarHidden(false);
-  }, [
-    navMode, mapMissionVisible, waterFollowActive, safeWaterSheetOwnsPage, offlineAreaPicker, showMapDrawer, showSearch, showFilterSheet, showLayerSheet, showMapStyleSheet, mapWeatherEnabled, showMapWeatherSheet, routeBuildSession?.requestId, inlineSearchOpen, keyboardVisible, searchRouteCard, selectedCamp, selectedPlace, selectedTrail,
-    selectedCommunityPin, tappedPoi, tappedGas, tappedTileSpot, tappedTrail,
-    tappedWp, pendingPin, trailPinCaptureMode, trailRouteBuilderOpen, setTabBarHidden,
-  ]);
+      || trailRouteBuilderOpen,
+    screenActivity.isFocused,
+  );
 
   useEffect(() => {
     if (!waterFollowActive) return;
@@ -7752,6 +7715,7 @@ function MapScreen() {
 
   const [locGranted, setLocGranted] = useState(false);
   const [locPermissionState, setLocPermissionState] = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
+  const mapLocationWatchActive = mapLocationWatchShouldRun(screenActivity.isActive, navMode);
 
   // On mount: check if already granted; otherwise show disclosure first
   useEffect(() => {
@@ -7773,7 +7737,8 @@ function MapScreen() {
 
   // Start watch only after permission is confirmed granted
   useEffect(() => {
-    if (!locGranted) return;
+    if (!locGranted || !mapLocationWatchActive) return;
+    let cancelled = false;
     let sub: Location.LocationSubscription | null = null;
     let headingSub: Location.LocationSubscription | null = null;
     if (Platform.OS !== 'web') {
@@ -7804,7 +7769,13 @@ function MapScreen() {
         if ((userSpeedRef.current ?? 0) < 1.2) {
           smoothedHdgRef.current = smooth;
         }
-      }).then(s => { headingSub = s; }).catch(() => {});
+      }).then(s => {
+        if (cancelled) {
+          safelyRemoveSubscription(s);
+          return;
+        }
+        headingSub = s;
+      }).catch(() => {});
     }
     Location.watchPositionAsync(
       { accuracy: Location.Accuracy.BestForNavigation, timeInterval: 1000, distanceInterval: 5 },
@@ -8070,12 +8041,19 @@ function MapScreen() {
             safeSpeech(`Arrived at ${wps[idx].name}. Now heading to ${wps[next].name}.`, { rate: 0.88, pitch: 1.05, language: 'en-US' });
           }
         }
-    ).then(s => { sub = s; }).catch(() => {});
+    ).then(s => {
+      if (cancelled) {
+        safelyRemoveSubscription(s);
+        return;
+      }
+      sub = s;
+    }).catch(() => {});
     return () => {
+      cancelled = true;
       safelyRemoveSubscription(sub);
       safelyRemoveSubscription(headingSub);
     };
-  }, [locGranted]);
+  }, [locGranted, mapLocationWatchActive]);
 
   // ── Trip data ───────────────────────────────────────────────────────────────
 
@@ -8203,6 +8181,7 @@ function MapScreen() {
   }
 
   useConnectivitySync({
+    active: screenActivity.isActive,
     activeTrip,
     onWeatherUpdate: (weather) => {
       setCachedWeather(weather);
@@ -8228,6 +8207,7 @@ function MapScreen() {
 
   // ── Reload camps in current viewport whenever filters change ──────────────
   useEffect(() => {
+    if (!screenActivity.isActive) return;
     if (!showCampPins) {
       setAreaCamps([]);
       setCampDiscoveryWideActive(false);
@@ -8237,12 +8217,12 @@ function MapScreen() {
     if (!viewportRef.current) return;
     lastCampFetchRef.current = null;
     loadCampsInArea(viewportRef.current, activeFilters);
-  }, [activeFilters, showCampPins, campDiscoveryWideActive]);
+  }, [activeFilters, showCampPins, campDiscoveryWideActive, screenActivity.isActive]);
 
   // Auto-load camps when userLoc first becomes available + map is ready
   const autoLoadedRef = useRef(false);
   useEffect(() => {
-    if (!userLoc || autoLoadedRef.current) return;
+    if (!screenActivity.isActive || !userLoc || autoLoadedRef.current) return;
     autoLoadedRef.current = true;
     const deg = 0.5;
     const bounds = { n: userLoc.lat + deg, s: userLoc.lat - deg, e: userLoc.lng + deg, w: userLoc.lng - deg, zoom: 10 };
@@ -8250,14 +8230,14 @@ function MapScreen() {
     if (!viewportRef.current) viewportRef.current = bounds;
     if (showCampPins) loadCampsInArea(targetBounds, activeFilters);
     refreshCommunityPins(userLoc, 3.0, true);
-  }, [userLoc, showCampPins]);
+  }, [screenActivity.isActive, userLoc, showCampPins]);
 
   useEffect(() => {
     const sub = AppState.addEventListener('change', state => {
-      if (state === 'active') refreshCommunityPins(null, 3.0, true);
+      if (state === 'active' && screenActivity.isFocused) refreshCommunityPins(null, 3.0, true);
     });
     return () => safelyRemoveSubscription(sub);
-  }, [refreshCommunityPins]);
+  }, [refreshCommunityPins, screenActivity.isFocused]);
 
   // POI layer
   useEffect(() => { showPoisRef.current = showPois; }, [showPois]);
@@ -10028,15 +10008,35 @@ function MapScreen() {
 
   // ── Server-proxied map search ───────────────────────────────────────────────
 
+  function beginMapSearchRequest() {
+    mapSearchRequestRef.current?.controller.abort();
+    const request = {
+      id: ++mapSearchRequestSequenceRef.current,
+      controller: new AbortController(),
+    };
+    mapSearchRequestRef.current = request;
+    return request;
+  }
+
+  function mapSearchRequestIsCurrent(request: { id: number; controller: AbortController }) {
+    return mapSearchRequestRef.current?.id === request.id && !request.controller.signal.aborted;
+  }
+
+  function finishMapSearchRequest(request: { id: number; controller: AbortController }) {
+    if (!mapSearchRequestIsCurrent(request)) return;
+    mapSearchRequestRef.current = null;
+    setIsSearching(false);
+  }
+
+  function cancelMapSearchRequest() {
+    mapSearchRequestRef.current?.controller.abort();
+    mapSearchRequestRef.current = null;
+    setIsSearching(false);
+  }
+
   function focusInlineMapSearch() {
     setInlineSearchOpen(true);
-    InteractionManager.runAfterInteractions(() => {
-      inlineSearchInputRef.current?.focus();
-      if (Platform.OS === 'android') {
-        setTimeout(() => inlineSearchInputRef.current?.focus(), 110);
-        setTimeout(() => inlineSearchInputRef.current?.focus(), 260);
-      }
-    });
+    setInlineSearchFocusRequest(value => value + 1);
   }
 
   function openInlineMapSearch() {
@@ -10087,7 +10087,7 @@ function MapScreen() {
 
   function closeFullMapSearch(clear = false) {
     setShowFullMapSearch(false);
-    setIsSearching(false);
+    cancelMapSearchRequest();
     if (clear) {
       setSearchQuery('');
       setSearchResults([]);
@@ -10098,7 +10098,7 @@ function MapScreen() {
 
   function closeInlineMapSearch(clear = true) {
     setInlineSearchOpen(false);
-    setIsSearching(false);
+    cancelMapSearchRequest();
     setSearchResults([]);
     if (clear) {
       setSearchQuery('');
@@ -10107,7 +10107,10 @@ function MapScreen() {
     Keyboard.dismiss();
   }
 
-  async function runScopedMapSearch(intent: ScopedMapSearchIntent) {
+  async function runScopedMapSearch(
+    intent: ScopedMapSearchIntent,
+    request: { id: number; controller: AbortController },
+  ) {
     const sessionId = `map-search-${Date.now().toString(36)}`;
     const currentLocationSearch = SCOPED_SEARCH_CURRENT_LOCATION_RE.test(intent.whereText);
     setIsSearching(true);
@@ -10141,7 +10144,14 @@ function MapScreen() {
         ? userLoc
           ? { lat: userLoc.lat, lng: userLoc.lng, name: 'Current location' }
           : null
-        : await resolveVerifiedGeocodePlace(intent.whereText, { allowAmbiguous: true, center: userLoc, source: 'map_scoped_search', geocodePrefer: 'search_center' });
+        : await resolveVerifiedGeocodePlace(intent.whereText, {
+            allowAmbiguous: true,
+            center: userLoc,
+            source: 'map_scoped_search',
+            geocodePrefer: 'search_center',
+            signal: request.controller.signal,
+          });
+      if (!mapSearchRequestIsCurrent(request)) return;
       if (!center) {
         setMapSearchSession(current => current?.id === sessionId
           ? { ...current, loading: false, places: [], error: currentLocationSearch ? 'Location unavailable' : `Could not find ${intent.whereText}.` }
@@ -10159,10 +10169,12 @@ function MapScreen() {
         undefined,
         { scope_id: sessionId, route_scope: 'area' },
       ).catch(() => null);
+      if (!mapSearchRequestIsCurrent(request)) return;
       let rawPlaces = (smartPack?.places ?? []) as OsmPoi[];
       if (rawPlaces.length === 0) {
         rawPlaces = await api.getNearbyPlaces(center.lat, center.lng, intent.radiusMi, intent.categories, 'auto').catch(() => [] as OsmPoi[]);
       }
+      if (!mapSearchRequestIsCurrent(request)) return;
 
       const allowed = new Set(intent.categoryIds);
       const seen = new Set<string>();
@@ -10193,38 +10205,41 @@ function MapScreen() {
       Keyboard.dismiss();
       focusPlaceCamera({ lat: center.lat, lng: center.lng, name: center.name || intent.whereText, type: intent.categoryLabel }, places.length ? 12.8 : 11.5, intent.categoryLabel);
     } catch (e: any) {
+      if (!mapSearchRequestIsCurrent(request)) return;
       setMapSearchSession(current => current?.id === sessionId
         ? { ...current, loading: false, places: [], error: e?.message || 'Search unavailable' }
         : current);
       setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
     } finally {
-      setIsSearching(false);
+      finishMapSearchRequest(request);
     }
   }
 
-  async function searchMap(queryOverride?: string, opts: { autoSelect?: boolean } = {}) {
+  async function searchMap(queryOverride?: string) {
     const cleanQuery = (queryOverride ?? searchQuery).trim();
     if (cleanQuery.length < 2) {
+      cancelMapSearchRequest();
       setSearchResults([]);
       return;
     }
+    const request = beginMapSearchRequest();
     const scopedIntent = parseScopedMapSearchQuery(cleanQuery);
     if (scopedIntent) {
-      await runScopedMapSearch(scopedIntent);
+      await runScopedMapSearch(scopedIntent, request);
       return;
     }
     setIsSearching(true);
     setSearchRouteCard(null);
     setMapSearchSession(null);
     try {
-      const resolved = await api.resolveGeocodePlace(cleanQuery, 8).catch(() => null);
+      const resolved = await api.resolveGeocodePlace(cleanQuery, 8, { signal: request.controller.signal }).catch(() => null);
+      if (!mapSearchRequestIsCurrent(request)) return;
       const places = resolved?.selected
         ? [resolved.selected, ...(resolved.alternatives ?? [])]
-        : await api.geocodePlaces(cleanQuery, 6);
-      const sorted = userLoc
-        ? places.slice().sort((a, b) => haversineKm(userLoc.lat, userLoc.lng, a.lat, a.lng) - haversineKm(userLoc.lat, userLoc.lng, b.lat, b.lng))
-        : places;
-      const mappedResults = sorted.map(place => {
+        : await api.geocodePlaces(cleanQuery, 6, { signal: request.controller.signal });
+      if (!mapSearchRequestIsCurrent(request)) return;
+      const completion = completeLegacyMapSearch(places);
+      const mappedResults = completion.results.map(place => {
         const displayLabel = mapSearchDisplayLabel(place, 'Place');
         return {
           ...place,
@@ -10239,20 +10254,20 @@ function MapScreen() {
         };
       });
       setSearchResults(mappedResults);
-      if (opts.autoSelect && mappedResults.length) {
-        selectSearchResult(mappedResults[0], cleanQuery);
-      }
     } catch (e: any) {
+      if (!mapSearchRequestIsCurrent(request)) return;
       setSearchResults([{ lat: 0, lng: 0, name: '__error__' }]);
     } finally {
-      setIsSearching(false);
+      finishMapSearchRequest(request);
     }
   }
 
   useEffect(() => {
     const cleanQuery = searchQuery.trim();
-    if ((!inlineSearchOpen && !showFullMapSearch) || navMode || cleanQuery.length < 2) {
+    if (!screenActivity.isFocused || (!inlineSearchOpen && !showFullMapSearch) || navMode || cleanQuery.length < 2) {
+      if (!screenActivity.isFocused) autoMapSearchRef.current = '';
       if (cleanQuery.length < 2) autoMapSearchRef.current = '';
+      cancelMapSearchRequest();
       return;
     }
     const timer = setTimeout(() => {
@@ -10260,8 +10275,12 @@ function MapScreen() {
       autoMapSearchRef.current = cleanQuery;
       searchMap(cleanQuery);
     }, cleanQuery.length <= 3 ? 260 : 380);
-    return () => clearTimeout(timer);
-  }, [inlineSearchOpen, navMode, searchQuery, showFullMapSearch]);
+    return () => {
+      clearTimeout(timer);
+      mapSearchRequestRef.current?.controller.abort();
+      mapSearchRequestRef.current = null;
+    };
+  }, [inlineSearchOpen, navMode, screenActivity.isFocused, searchQuery, showFullMapSearch]);
 
   function selectSearchResult(place: SearchPlace, submittedQuery?: string) {
     if (place.name === '__error__') return;
@@ -10414,7 +10433,7 @@ function MapScreen() {
     }
     setSearchMode('route_pick');
     setShowSearch(true);
-    setQuickToast('Choose a destination for Mapbox Directions.');
+    setQuickToast('Choose a destination first.');
     setTimeout(() => setQuickToast(''), 2600);
   }
 
@@ -13965,10 +13984,19 @@ function MapScreen() {
     };
   }
 
-  async function resolveVerifiedGeocodePlace(query: string, options: { allowAmbiguous?: boolean; center?: { lat: number; lng: number } | null; source?: string; geocodePrefer?: string } = {}): Promise<SearchPlace | null> {
+  async function resolveVerifiedGeocodePlace(query: string, options: {
+    allowAmbiguous?: boolean;
+    center?: { lat: number; lng: number } | null;
+    source?: string;
+    geocodePrefer?: string;
+    signal?: AbortSignal;
+  } = {}): Promise<SearchPlace | null> {
     const cleanQuery = String(query || '').trim();
     if (cleanQuery.length < 2) return null;
-    const geocodeOptions = options.geocodePrefer ? { prefer: options.geocodePrefer } : undefined;
+    const geocodeOptions = {
+      ...(options.geocodePrefer ? { prefer: options.geocodePrefer } : {}),
+      ...(options.signal ? { signal: options.signal } : {}),
+    };
     const resolved = await api.resolveGeocodePlace(cleanQuery, 8, geocodeOptions).catch((error: any) => {
       logCopilotMapTelemetry('copilot_geocode_resolve_failed', {
         query: cleanQuery,
@@ -17078,8 +17106,12 @@ function MapScreen() {
     setLoadingWiki(true);
     try {
       const insight = await api.getCampsiteInsight({ name: camp.name, lat: camp.lat, lng: camp.lng,
-        description: camp.description, land_type: camp.land_type,
-        amenities: detail?.amenities ?? [], facility_id: camp.id ?? '' });
+        description: detail?.description || camp.description, land_type: detail?.land_type || camp.land_type,
+        amenities: detail?.amenities ?? camp.amenities ?? [], facility_id: camp.id ?? '',
+        source_label: detail?.source_badge || detail?.verified_source || camp.source_badge || camp.verified_source || '',
+        source_url: detail?.official_url || detail?.url || camp.official_url || camp.url || '',
+        source_updated_at: detail?.last_checked || detail?.fetched_at || camp.last_checked || camp.fetched_at || null,
+      });
       if (selectedCampRef.current?.id !== camp.id) {
         setLoadingWiki(false);
         return false;
@@ -17120,7 +17152,7 @@ function MapScreen() {
       const saved = routeBrief ?? await loadSavedTripAi<RouteBrief>(requestTrip, 'route_brief');
       if (!requestIsCurrent()) return;
       if (saved) {
-        setRouteBrief(saved);
+        setRouteBrief(normalizeRouteBrief(saved, requestTrip, routeAlerts));
         setRouteBriefSaved(true);
         setShowRouteBrief(true);
         return;
@@ -17143,12 +17175,12 @@ function MapScreen() {
         reports: briefReports,
       });
       if (!requestIsCurrent()) return;
-      const normalized = normalizeRouteBrief(brief, requestTrip, routeAlerts);
+      const normalized = normalizeRouteBrief(brief, requestTrip, briefReports);
       trackPhase0Event('phase0_route_brief_generated', {
         trip_id: requestTrip.trip_id,
         source: 'ai',
         alert_count: briefReports.length,
-        readiness_score: normalized.readiness_score,
+        planning_status: normalized.planning_status,
       });
       setRouteBrief(normalized);
       setRouteBriefSaved(true);
@@ -17164,7 +17196,7 @@ function MapScreen() {
           trip_id: requestTrip.trip_id,
           source: 'fallback',
           alert_count: routeAlerts.length,
-          readiness_score: fallback.readiness_score,
+          planning_status: fallback.planning_status,
         });
         setRouteBrief(fallback);
         setRouteBriefSaved(true);
@@ -22419,7 +22451,8 @@ function MapScreen() {
     right: missionChromeRight,
   };
   const inlineSearchResultsMaxHeight = androidInlineSearchKeyboardActive
-    ? Math.max(128, windowHeight - keyboardHeight - inlineSearchTop - 28)
+    // Android uses adjustResize, so windowHeight already excludes the keyboard.
+    ? Math.max(128, windowHeight - inlineSearchTop - 28)
     : undefined;
   const mapControlsBlocked = Boolean(
     navMode ||
@@ -23662,14 +23695,14 @@ function MapScreen() {
               blurOnSubmit={false}
               onKeyPress={event => {
                 if (event.nativeEvent.key !== 'Enter') return;
-                searchMap(undefined, { autoSelect: true });
+                searchMap();
               }}
-              onSubmitEditing={() => searchMap(undefined, { autoSelect: true })}
+              onSubmitEditing={() => searchMap()}
             />
             {isSearching ? (
               <ActivityIndicator size="small" color={mapChrome.toastText} />
             ) : searchQuery.trim().length > 0 ? (
-              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={() => searchMap(undefined, { autoSelect: true })} hitSlop={8}>
+              <TouchableOpacity style={s.inlineMapSearchIconBtn} onPress={() => searchMap()} hitSlop={8}>
                 <Ionicons name="arrow-forward" size={15} color={mapChrome.textMuted} />
               </TouchableOpacity>
             ) : (
@@ -24932,7 +24965,7 @@ function MapScreen() {
           }}
           onSubmit={queryOverride => {
             if (queryOverride != null) setSearchQuery(queryOverride);
-            searchMap(queryOverride, { autoSelect: true });
+            searchMap(queryOverride);
           }}
           onSelect={place => selectSearchResult(place as SearchPlace)}
           onRoute={place => {
@@ -26883,9 +26916,9 @@ function MapScreen() {
                   <Ionicons name="close" size={22} color={C.text} />
                 </TouchableOpacity>
               </View>
-              <View style={[s.readinessRow, { borderColor: routeBrief.readiness_score >= 7 ? C.green : routeBrief.readiness_score >= 4 ? C.yellow : C.red }]}>
-                <Text style={s.readinessScore}>{routeBrief.readiness_score}/10</Text>
-                <Text style={s.readinessLabel}>READINESS</Text>
+              <View style={[s.readinessRow, { borderColor: C.orange }]}>
+                <Text style={s.planningStatusValue}>Review</Text>
+                <Text style={s.readinessLabel}>PLANNING STATUS</Text>
               </View>
               <Text style={s.briefSummary}>{routeBrief.briefing_summary}</Text>
               {routeBrief.top_concerns.length > 0 && (
@@ -26904,48 +26937,37 @@ function MapScreen() {
                   <Text style={s.detailSectionTitle}>Before You Leave</Text>
                   {routeBrief.must_do_before_leaving.map((t, i) => (
                     <View key={i} style={s.briefItem}>
-                      <Ionicons name="checkmark-circle-outline" size={14} color={C.green} />
+                      <Ionicons name="checkmark-circle-outline" size={14} color={C.orange} />
                       <Text style={s.briefItemText}>{t}</Text>
                     </View>
                   ))}
                 </View>
               )}
               <View style={s.briefStats}>
-                <View style={s.briefStat}><Text style={s.briefStatVal}>{routeBrief.estimated_fuel_stops}</Text><Text style={s.briefStatLabel}>Fuel Stops</Text></View>
-                <View style={s.briefStat}><Text style={s.briefStatVal}>{routeBrief.water_carry_gallons}</Text><Text style={s.briefStatLabel}>Gals Water</Text></View>
+                <View style={s.briefStat}><Text style={s.briefStatusValue}>{routeBrief.fuel_status}</Text><Text style={s.briefStatLabel}>FUEL STOPS</Text></View>
+                <View style={s.briefStat}><Text style={s.briefStatusValue}>{routeBrief.water_status}</Text><Text style={s.briefStatLabel}>WATER PLAN</Text></View>
               </View>
-              {routeBrief.signal_dead_zones && routeBrief.signal_dead_zones.length > 0 && (
-                <View style={s.detailSection}>
-                  <View style={s.detailSectionTitleRow}>
-                    <Ionicons name="cellular-outline" size={14} color={C.text3} />
-                    <Text style={s.detailSectionTitleInline}>Signal Dead Zones</Text>
-                  </View>
-                  {routeBrief.signal_dead_zones.map((z, i) => (
-                    <View key={i} style={s.briefItem}>
-                      <Ionicons name="cellular-outline" size={14} color={C.text3} />
-                      <Text style={s.briefItemText}>{z}</Text>
-                    </View>
-                  ))}
+              <View style={s.detailSection}>
+                <View style={s.detailSectionTitleRow}>
+                  <Ionicons name="cellular-outline" size={14} color={C.text3} />
+                  <Text style={s.detailSectionTitleInline}>Signal Coverage</Text>
                 </View>
-              )}
-              {routeBrief.fire_restriction_likelihood && (
-                <View style={s.detailSection}>
-                  <View style={s.detailSectionTitleRow}>
-                    <Ionicons name="flame-outline" size={14} color={C.orange} />
-                    <Text style={s.detailSectionTitleInline}>Fire Restrictions</Text>
-                  </View>
-                  <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.fire_restriction_likelihood}</Text>
+                <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.signal_status}</Text>
+              </View>
+              <View style={s.detailSection}>
+                <View style={s.detailSectionTitleRow}>
+                  <Ionicons name="flame-outline" size={14} color={C.orange} />
+                  <Text style={s.detailSectionTitleInline}>Fire Restrictions</Text>
                 </View>
-              )}
-              {routeBrief.emergency_bailout && (
-                <View style={[s.detailSection, { backgroundColor: C.red + '12', borderRadius: 8, padding: 10 }]}>
-                  <View style={[s.detailSectionTitleRow, { borderColor: C.red + '33' }]}>
-                    <Ionicons name="medical-outline" size={14} color={C.red} />
-                    <Text style={[s.detailSectionTitleInline, { color: C.red }]}>Emergency Bailout</Text>
-                  </View>
-                  <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.emergency_bailout}</Text>
+                <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.fire_status}</Text>
+              </View>
+              <View style={s.detailSection}>
+                <View style={s.detailSectionTitleRow}>
+                  <Ionicons name="navigate-outline" size={14} color={C.text3} />
+                  <Text style={s.detailSectionTitleInline}>Exit Options</Text>
                 </View>
-              )}
+                <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.exit_options_status}</Text>
+              </View>
               {routeBrief.daily_highlights.length > 0 && (
                 <View style={s.detailSection}>
                   <Text style={s.detailSectionTitle}>Daily Highlights</Text>
@@ -28782,8 +28804,6 @@ function MapScreen() {
 }
 
 export default function MapScreenWithBoundary() {
-  const pathname = usePathname();
-  if (!pathname.includes('/map')) return null;
   return <MapErrorBoundary><MapScreen /></MapErrorBoundary>;
 }
 
@@ -31129,7 +31149,7 @@ const makeStyles = (C: ColorPalette) => {
     alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderRadius: 60,
     width: 100, height: 100, alignSelf: 'center', marginBottom: 16,
   },
-  readinessScore: { color: C.text, fontSize: 32, fontWeight: '800', fontFamily: mono },
+  planningStatusValue: { color: C.text, fontSize: 17, fontWeight: '900', fontFamily: mono },
   readinessLabel: { color: C.text3, fontSize: 9, fontFamily: mono },
   savedAiMeta: { color: C.green, fontSize: 9, fontFamily: mono, fontWeight: '800', letterSpacing: 0.8, marginTop: 2 },
   briefSummary: { color: C.text2, fontSize: 14, lineHeight: 21, marginBottom: 20 },
@@ -31137,7 +31157,7 @@ const makeStyles = (C: ColorPalette) => {
   briefItemText: { color: C.text2, fontSize: 13, flex: 1, lineHeight: 18 },
   briefStats: { flexDirection: 'row', gap: 16, justifyContent: 'center', marginTop: 8 },
   briefStat: { alignItems: 'center', paddingHorizontal: 20, paddingVertical: 14, backgroundColor: C.s2, borderRadius: 14, flex: 1 },
-  briefStatVal: { color: C.text, fontSize: 28, fontWeight: '800', fontFamily: mono },
+  briefStatusValue: { color: C.text, fontSize: 11, lineHeight: 15, fontWeight: '800', fontFamily: mono, textAlign: 'center', minHeight: 32 },
   briefStatLabel: { color: C.text3, fontSize: 10, fontFamily: mono },
 
   // ── Nav speed circle + limit badge

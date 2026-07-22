@@ -4,7 +4,7 @@ import {
   TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
@@ -24,6 +24,7 @@ import ProfileLibraryOverview from '@/components/profile/ProfileLibraryOverview'
 import CommunicationPreferencesSection from '@/components/profile/CommunicationPreferencesSection';
 import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
 import { useSubscription } from '@/lib/useSubscription';
+import { subscriptionManagementUrl } from '@/lib/subscriptionManagement';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { deleteOfflineTrip, getOfflineTripIndex, getOfflineTripSummaries, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { deleteRouteGeometry, saveRouteGeometry } from '@/lib/offlineRoutes';
@@ -69,7 +70,7 @@ type ExplorerPlanPoint = { icon: keyof typeof Ionicons.glyphMap; label: string }
 
 const EXPLORER_PLAN_POINTS: ExplorerPlanPoint[] = [
   { icon: 'trail-sign-outline', label: 'Trip planning tools' },
-  { icon: 'chatbubble-ellipses-outline', label: 'Map Co-Pilot' },
+  { icon: 'chatbubble-ellipses-outline', label: 'Co-Pilot voice assistant (Explorer)' },
   { icon: 'bonfire-outline', label: 'Camp Briefs' },
   { icon: 'shield-checkmark-outline', label: 'Trip and packing briefs' },
 ];
@@ -94,7 +95,7 @@ const DEFAULT_CHECKLIST: ChecklistSection[] = [
     { id: 'paper', label: 'Paper maps / topo backup', done: false },
   ]},
   { title: 'Provisions', icon: 'water-outline', items: [
-    { id: 'water', label: '1 gal water per person per day', done: false },
+    { id: 'water', label: 'Water supply planned for route and conditions', done: false },
     { id: 'food', label: 'Extra food (2-day buffer)', done: false },
     { id: 'filter', label: 'Water filter / purification tabs', done: false },
     { id: 'firstaid', label: 'First aid kit', done: false },
@@ -234,7 +235,6 @@ export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
-  const pathname = usePathname();
   const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; auth?: string }>();
   const { user, rigProfile, setAuth, signOut, clearAuthAndLocalData, setRigProfile } = useStore();
 
@@ -1095,8 +1095,8 @@ export default function ProfileScreen() {
     setLoading(true);
     try {
       const res = provider === 'apple'
-        ? await api.oauthApple(identityToken, fullName, providerEmail)
-        : await api.oauthGoogle(identityToken, fullName, providerEmail);
+        ? await api.oauthApple(identityToken, fullName, providerEmail, refCode.trim())
+        : await api.oauthGoogle(identityToken, fullName, providerEmail, refCode.trim());
       setAuth(res.token, res.user);
       transitionToMain(`Welcome, ${res.user.username}!`);
     } catch (e: any) {
@@ -1380,7 +1380,7 @@ export default function ProfileScreen() {
   function shareReferral() {
     if (!user) return;
     Share.share({
-      message: `Join me on Trailhead — the adventure planner for overlanders.\nUse my code ${user.referral_code} to sign up and we both earn credits.\nhttps://api.gettrailhead.app`,
+      message: `Join me on Trailhead — the adventure planner for overlanders.\nUse my code ${user.referral_code} when you create your account. You get the welcome credits, and I get ${CREDIT_REWARDS.referral} referral credits.\nhttps://gettrailhead.app`,
       title: 'Join Trailhead',
     });
   }
@@ -1572,8 +1572,6 @@ export default function ProfileScreen() {
       if (accountRequestIsCurrent(requestEpoch, requestAccountId)) setContributorApplying(false);
     }
   }
-
-  if (!pathname.includes('/profile')) return null;
 
   function renderVerificationPanel() {
     const target = pendingVerifyEmail || email.trim().toLowerCase();
@@ -1869,6 +1867,8 @@ export default function ProfileScreen() {
               <Ionicons name="flash" size={14} color={C.orange} />
               <Text style={s.signupPerkText}>Start with {CREDIT_REWARDS.signup} credits. Helpful reports can earn more.</Text>
             </View>
+            <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
+              value={refCode} onChangeText={setRefCode} autoCapitalize="none" autoCorrect={false} returnKeyType="done" />
             <View style={s.socialAuthStack}>
               {appleAuthAvailable && AppleAuthentication ? (
                 <AppleAuthentication.AppleAuthenticationButton
@@ -1897,8 +1897,6 @@ export default function ProfileScreen() {
                 value={password} onChangeText={setPassword} secureTextEntry returnKeyType="next" blurOnSubmit />
               <TextInput style={s.input} placeholder="Confirm password" placeholderTextColor={C.text3}
                 value={confirmPassword} onChangeText={setConfirmPassword} secureTextEntry returnKeyType="next" blurOnSubmit />
-              <TextInput style={s.input} placeholder="Referral code (optional)" placeholderTextColor={C.text3}
-                value={refCode} onChangeText={setRefCode} autoCapitalize="none" returnKeyType="done" onSubmitEditing={register} />
             </View>
             <TouchableOpacity style={[s.btn, loading && s.btnDisabled]} onPress={register} disabled={loading}>
               <Text style={s.btnText}>{loading ? 'CREATING...' : 'CREATE ACCOUNT'}</Text>
@@ -2118,8 +2116,8 @@ export default function ProfileScreen() {
               <Ionicons name="notifications-outline" size={18} color={C.orange} />
             </View>
             <View style={{ flex: 1 }}>
-              <Text style={s.supportCardKicker}>NOTIFICATION BOARD</Text>
-              <Text style={s.supportCardTitle}>Messages</Text>
+              <Text style={s.supportCardKicker}>INBOX</Text>
+              <Text style={s.supportCardTitle}>Support & Trailhead</Text>
             </View>
             {supportUnreadCount > 0 ? (
               <View style={s.supportUnreadBadge}>
@@ -2130,13 +2128,13 @@ export default function ProfileScreen() {
           <Text style={s.supportCardBody}>
             {supportThreads[0]?.last_message_body
               ? supportThreads[0].last_message_body
-              : 'Replies, contest updates, and account messages will show up here.'}
+              : 'Replies, contest updates, and account messages appear here.'}
           </Text>
           <View style={s.supportMetaRow}>
             <Text style={s.supportMetaText}>
               {supportThreads.length
                 ? `${supportThreads.length} thread${supportThreads.length === 1 ? '' : 's'}`
-                : 'Inbox ready'}
+                : 'No messages'}
             </Text>
             <Text style={s.supportMetaAction}>OPEN</Text>
           </View>
@@ -2580,7 +2578,12 @@ export default function ProfileScreen() {
                 <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
                 <Text style={s.planActiveText}>Active</Text>
               </View>
-              <TouchableOpacity style={s.managePlanBtn} onPress={() => Linking.openURL('https://apps.apple.com/account/subscriptions')}>
+              <TouchableOpacity
+                style={s.managePlanBtn}
+                onPress={() => Linking.openURL(subscriptionManagementUrl(Platform.OS)).catch(() => {
+                  Alert.alert('Unable to open subscriptions', 'Open your device store account to manage the plan.');
+                })}
+              >
                 <Text style={s.managePlanBtnText}>Manage subscription</Text>
                 <Ionicons name="open-outline" size={12} color={C.text3} />
               </TouchableOpacity>
@@ -2699,14 +2702,21 @@ export default function ProfileScreen() {
         />
 
         <Modal visible={showSupportInbox} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSupportInbox(false)}>
-          <SafeAreaView style={s.contestModal}>
+          <SafeAreaView style={s.contestModal} testID="profile.support.modal">
             <TrailheadTopBar
               title="INBOX"
-              subtitle="Support and admin messages"
+              subtitle="Support and Trailhead messages"
               icon="mail-outline"
               style={s.contestModalHeader}
               right={(
-                <TouchableOpacity style={s.contestClose} onPress={() => setShowSupportInbox(false)}>
+                <TouchableOpacity
+                  style={s.contestClose}
+                  onPress={() => setShowSupportInbox(false)}
+                  testID="profile.support.close"
+                  accessible
+                  accessibilityRole="button"
+                  accessibilityLabel="Close messages"
+                >
                   <Ionicons name="close" size={20} color={C.text} />
                 </TouchableOpacity>
               )}
@@ -2714,14 +2724,22 @@ export default function ProfileScreen() {
             {supportLoading && !supportThreads.length ? (
               <View style={s.contestLoading}>
                 <ActivityIndicator color={C.orange} />
-                <Text style={s.contestMuted}>Loading your message board...</Text>
+                <Text style={s.contestMuted}>Loading messages...</Text>
               </View>
             ) : (
               <ScrollView contentContainerStyle={s.contestScroll}>
                 <TrailheadCard style={s.supportModalCard}>
                   <Text style={s.sectionLabel}>THREADS</Text>
                   {(supportThreads || []).length ? supportThreads.map(thread => (
-                    <TouchableOpacity key={thread.id} style={[s.supportThreadRow, selectedSupportThread?.id === thread.id && s.supportThreadRowActive]} onPress={() => openSupportThread(thread.id)}>
+                    <TouchableOpacity
+                      key={thread.id}
+                      style={[s.supportThreadRow, selectedSupportThread?.id === thread.id && s.supportThreadRowActive]}
+                      onPress={() => openSupportThread(thread.id)}
+                      testID={`profile.support.thread.${thread.id}`}
+                      accessible
+                      accessibilityRole="button"
+                      accessibilityLabel={`${thread.subject}${Number(thread.unread_count || 0) > 0 ? `, ${thread.unread_count} unread` : ''}`}
+                    >
                       <View style={{ flex: 1 }}>
                         <Text style={s.supportThreadSubject} numberOfLines={1}>{thread.subject}</Text>
                         <Text style={s.supportThreadMeta} numberOfLines={2}>
@@ -2748,10 +2766,13 @@ export default function ProfileScreen() {
                         <Text style={s.supportBubbleBody}>{msg.body}</Text>
                       </View>
                     )) : (
-                      <Text style={s.contestMuted}>Start a thread here for customer service, account help, or winner payout details.</Text>
+                      <Text style={s.contestMuted}>Start a thread for account help, app support, or a prize message.</Text>
                     )}
                   </View>
+                  <Text style={s.contestMuted}>For your security, never send passwords, bank account or routing numbers, card details, or identity documents in chat.</Text>
                   <TextInput
+                    testID="profile.support.composer"
+                    accessibilityLabel={selectedSupportThread ? 'Reply to support thread' : 'New support message'}
                     style={s.supportComposer}
                     placeholder={selectedSupportThread ? 'Reply to this thread…' : 'Write a message to Trailhead support…'}
                     placeholderTextColor={C.text3}
@@ -2762,6 +2783,7 @@ export default function ProfileScreen() {
                     textAlignVertical="top"
                   />
                   <TrailheadButton
+                    testID="profile.support.send"
                     label={supportSending ? 'SENDING...' : 'SEND MESSAGE'}
                     icon="send-outline"
                     variant="primary"
@@ -3023,7 +3045,7 @@ export default function ProfileScreen() {
             ) : (
               <ScrollView contentContainerStyle={s.contestScroll}>
                 <TrailheadCard style={s.contestHero}>
-                  <Text style={s.contestHeroTitle}>Build the map. Share what matters.</Text>
+                  <Text style={s.contestHeroTitle}>Earn points for useful contributions</Text>
                   <Text style={s.contestHeroText}>Contest points come from useful contributions across Trailhead. Your spendable credits stay separate.</Text>
                   <View style={s.contestHeroStats}>
                     <View style={s.contestHeroStat}>
@@ -3043,7 +3065,7 @@ export default function ProfileScreen() {
 
                 <View style={s.contestPrizeGrid}>
                   {[
-                    ['$1,000', 'New Year winner', 'Top total contest points for the calendar year.'],
+                    ['$1,000', 'Yearly leader', 'Top total contest points for the calendar year.'],
                     ['$100', 'Monthly leader', 'Top contributor at the end of each calendar month.'],
                     ['$50', 'Monthly drawing', 'Subscribers enter automatically. Free entry is available here.'],
                   ].map(([amount, title, desc]) => (
@@ -3060,7 +3082,7 @@ export default function ProfileScreen() {
                     <Text style={s.contestEntryTitle}>Monthly drawing</Text>
                     <Text style={s.contestEntryText}>
                       {contest?.drawing_entered
-                        ? `Entered for ${contest.period_month}${contest.drawing_entry_type ? ` via ${contest.drawing_entry_type}` : ''}.`
+                        ? `Entered for ${contest.period_month}${contest.drawing_entry_type === 'subscriber' ? ' with Explorer' : contest.drawing_entry_type === 'free' ? ' with a free entry' : ''}.`
                         : 'No purchase necessary. One free entry per eligible user each month.'}
                     </Text>
                   </View>
@@ -3186,14 +3208,14 @@ export default function ProfileScreen() {
             <Text style={s.referralTitle}>Refer Friends</Text>
           </View>
           <Text style={s.referralDesc}>
-            Share your code — +{CREDIT_REWARDS.referral} credits when a friend signs up.
+            Share your code — +{CREDIT_REWARDS.referral} credits after a friend creates and verifies an account.
           </Text>
           <View style={s.codeBox}>
             <Text style={s.codeText}>{user?.referral_code ?? 'Generating...'}</Text>
           </View>
           <TouchableOpacity style={s.shareBtn} onPress={shareReferral}>
             <Ionicons name="share-outline" size={16} color="#fff" />
-            <Text style={s.shareBtnText}>SHARE REFERRAL LINK</Text>
+            <Text style={s.shareBtnText}>SHARE REFERRAL CODE</Text>
           </TouchableOpacity>
         </View>
         )}
@@ -3209,7 +3231,7 @@ export default function ProfileScreen() {
             [CREDIT_REWARDS.confirmReport,  'Confirm another user report'],
             [CREDIT_REWARDS.communityPin,  'Add a manual community pin'],
             [CREDIT_REWARDS.gpxImport,  'Import GPX pins (unverified)'],
-            [CREDIT_REWARDS.referral, 'Refer a friend who signs up'],
+            [CREDIT_REWARDS.referral, 'Refer a friend who verifies an account'],
             [CREDIT_REWARDS.campEditSuggestion, 'Suggest a camp profile edit'],
             [CREDIT_REWARDS.streak3, '3-day reporting streak bonus'],
             [CREDIT_REWARDS.streak7, '7-day reporting streak bonus'],

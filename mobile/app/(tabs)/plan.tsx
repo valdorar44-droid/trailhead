@@ -5,7 +5,7 @@ import {
   Share, Animated, Alert, Image,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { usePathname, useRouter } from 'expo-router';
+import { useRouter } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -1112,8 +1112,6 @@ function TripCard({ trip, C, onViewMap, onViewGuide, onNextLeg }: {
 }
 
 export default function PlanScreen() {
-  const pathname = usePathname();
-  if (!pathname.includes('/plan')) return null;
   return <PlanScreenContent />;
 }
 

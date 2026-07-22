@@ -18,6 +18,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/lib/design';
 import { useStore, type SavedPlace } from '@/lib/store';
 import { useProductFeatures } from '@/lib/useProductFeatures';
+import { useScreenActivity } from '@/lib/screenActivity';
+import { useTabBarVisibility } from '@/lib/tabBarVisibility';
 import PlanWorkspaceSwitcher from '@/components/plan/PlanWorkspaceSwitcher';
 import {
   useTripRepositorySnapshot,
@@ -67,6 +69,7 @@ const TRIP_RENDER_BATCH = 10;
 export default function TripsScreen() {
   const C = useTheme();
   const router = useRouter();
+  const screenActivity = useScreenActivity();
   const insets = useSafeAreaInsets();
   const repository = useTripRepositorySnapshot();
   const activeTripId = useStore(state => state.activeTrip?.trip_id ?? '');
@@ -74,7 +77,6 @@ export default function TripsScreen() {
   const setPendingMapSelection = useStore(state => state.setPendingMapSelection);
   const setPendingOpenOfflineModal = useStore(state => state.setPendingOpenOfflineModal);
   const setPendingOfflineTrip = useStore(state => state.setPendingOfflineTrip);
-  const setTabBarHidden = useStore(state => state.setTabBarHidden);
 
   const [snapshot, setSnapshot] = useState<TripLibrarySnapshot>(EMPTY_SNAPSHOT);
   const [filter, setFilter] = useState<TripLibraryFilter>('draft');
@@ -176,10 +178,7 @@ export default function TripsScreen() {
   useEffect(() => {
     setVisibleTripCount(TRIP_RENDER_BATCH);
   }, [filter, expectedOwnerScope]);
-  useEffect(() => {
-    setTabBarHidden(selectingDrafts);
-    return () => setTabBarHidden(false);
-  }, [selectingDrafts, setTabBarHidden]);
+  useTabBarVisibility('trips', selectingDrafts, screenActivity.isFocused);
   const draftTrips = useMemo(
     () => snapshot.trips.filter(trip => trip.status === 'draft'),
     [snapshot.trips],

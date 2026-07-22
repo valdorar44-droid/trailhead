@@ -14,7 +14,7 @@ type Props = {
 };
 
 export default function CampInsightSection({
-  title = 'CAMP INSIGHT',
+  title = 'SITE NOTES',
   nearbyTitle = 'NEARBY',
   insight,
   loading,
@@ -22,6 +22,18 @@ export default function CampInsightSection({
 }: Props) {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
+  const sourceLine = useMemo(() => {
+    const listing = insight?.provenance?.sources?.find(source => source.id === 'camp_listing');
+    if (!listing) return '';
+    const freshness = listing.freshness === 'checked_recently'
+      ? 'checked recently'
+      : listing.freshness === 'dated'
+        ? 'dated source'
+        : listing.freshness === 'older_source'
+          ? 'older source — verify details'
+          : 'source date not provided';
+    return `${listing.label} · ${freshness}`;
+  }, [insight]);
 
   if (!insight && !loading) return null;
 
@@ -30,11 +42,10 @@ export default function CampInsightSection({
       <View style={s.header}>
         <Text style={s.sectionTitle}>{title}</Text>
         {showLoadingSpinner && loading ? <ActivityIndicator size="small" color={C.orange} /> : null}
-        {insight?.star_rating ? <Text style={s.stars}>{insight.star_rating}/5</Text> : null}
       </View>
       {insight?.insider_tip ? (
         <View style={s.tipCard}>
-          <Text style={s.tipLabel}>INSIDER TIP</Text>
+          <Text style={s.tipLabel}>PLANNING NOTE</Text>
           <Text style={s.tipText}>{insight.insider_tip}</Text>
         </View>
       ) : null}
@@ -54,6 +65,7 @@ export default function CampInsightSection({
           ))}
         </View>
       ) : null}
+      {sourceLine ? <Text style={s.sourceLine}>{sourceLine}</Text> : null}
     </View>
   );
 }
@@ -78,10 +90,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     fontWeight: '800',
     letterSpacing: 1.5,
     textTransform: 'uppercase',
-  },
-  stars: {
-    color: C.yellow,
-    fontSize: 14,
   },
   tipCard: {
     backgroundColor: C.orange + '14',
@@ -139,5 +147,11 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     color: C.text2,
     fontSize: 12,
     marginBottom: 3,
+  },
+  sourceLine: {
+    color: C.text3,
+    fontSize: 10,
+    lineHeight: 15,
+    marginTop: 9,
   },
 });

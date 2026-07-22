@@ -268,7 +268,7 @@ export default function RootLayout() {
           return;
         }
       } catch (error: any) {
-        Alert.alert('Preview link unavailable', error?.message || 'This internal preview link is invalid or expired.');
+        Alert.alert('Preview link unavailable', error?.message || 'This preview link is invalid or expired.');
         return;
       }
     }

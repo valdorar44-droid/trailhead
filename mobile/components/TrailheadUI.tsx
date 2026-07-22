@@ -229,6 +229,9 @@ export function TrailheadButton({
   loading,
   style,
   textStyle,
+  testID,
+  accessibilityLabel,
+  accessibilityHint,
 }: {
   label: string;
   icon?: IconName;
@@ -238,6 +241,9 @@ export function TrailheadButton({
   loading?: boolean;
   style?: StyleProp<ViewStyle>;
   textStyle?: StyleProp<TextStyle>;
+  testID?: string;
+  accessibilityLabel?: string;
+  accessibilityHint?: string;
 }) {
   const C = useTheme();
   const tone = useOverlayTone(C);
@@ -248,6 +254,12 @@ export function TrailheadButton({
   const color = primary ? '#fff' : danger ? C.red : C.text2;
   return (
     <TouchableOpacity
+      testID={testID}
+      accessible
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel ?? label}
+      accessibilityHint={accessibilityHint}
+      accessibilityState={{ disabled: Boolean(disabled || loading), busy: Boolean(loading) }}
       activeOpacity={0.84}
       onPress={onPress}
       disabled={disabled || loading}

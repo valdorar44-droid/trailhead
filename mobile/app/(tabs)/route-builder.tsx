@@ -2,11 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView, TextInput,
   ActivityIndicator, Keyboard, Modal, Alert, Image, Platform,
-  useWindowDimensions, KeyboardAvoidingView, Linking,
+  useWindowDimensions, KeyboardAvoidingView, Linking, Dimensions,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
-import { useFocusEffect, useLocalSearchParams, usePathname, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import * as Location from 'expo-location';
 import PaywallModal from '@/components/PaywallModal';
@@ -55,6 +55,8 @@ import {
   type TrailheadRouteBuilderDraftStop,
 } from '@/lib/copilotCapabilities';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
+import { useScreenActivity } from '@/lib/screenActivity';
+import { useTabBarVisibility } from '@/lib/tabBarVisibility';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
@@ -1653,6 +1655,7 @@ function RouteBuilderScreenContent() {
   const bottomSheetPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
   const blurTint: 'dark' | 'light' = C.bg === '#050505' ? 'dark' : 'light';
   const router = useRouter();
+  const screenActivity = useScreenActivity();
   const routeParams = useLocalSearchParams();
   const routeBuilderIntent = Array.isArray(routeParams.intent) ? routeParams.intent[0] : routeParams.intent;
   const routeBuilderRequest = Array.isArray(routeParams.request) ? routeParams.request[0] : routeParams.request;
@@ -1685,7 +1688,6 @@ function RouteBuilderScreenContent() {
   const addTripToHistory = useStore(st => st.addTripToHistory);
   const removeTripFromHistory = useStore(st => st.removeTripFromHistory);
   const tripHistory = useStore(st => st.tripHistory);
-  const setTabBarHidden = useStore(st => st.setTabBarHidden);
   const userLoc = useStore(st => st.userLoc);
   const setStoreUserLoc = useStore(st => st.setUserLoc);
   const rigProfile = useStore(st => st.rigProfile);
@@ -1845,7 +1847,6 @@ function RouteBuilderScreenContent() {
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits to open full campsite profiles. You can still add this camp to your route from the free preview.');
   const [keyboardVisible, setKeyboardVisible] = useState(false);
-  const wizardStepScrollRef = useRef<ScrollView>(null);
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
   const trailheadContext = useMemo(
@@ -1988,20 +1989,12 @@ function RouteBuilderScreenContent() {
     };
   }, []);
 
-  useEffect(() => {
-    if (!keyboardVisible || wizardStep > 1) return;
-    const frame = requestAnimationFrame(() => {
-      wizardStepScrollRef.current?.scrollTo({ y: 0, animated: false });
-    });
-    return () => cancelAnimationFrame(frame);
-  }, [keyboardVisible, wizardStep]);
+  useTabBarVisibility(
+    'route-builder',
+    buildingFramework || stops.length >= 2 || keyboardVisible,
+    screenActivity.isFocused,
+  );
 
-  useEffect(() => {
-    setTabBarHidden(buildingFramework || stops.length >= 2 || keyboardVisible);
-    return () => setTabBarHidden(false);
-  }, [buildingFramework, keyboardVisible, setTabBarHidden, stops.length]);
-
-  useEffect(consumeCopilotRouteBuilderDraft, [consumeCopilotRouteBuilderDraft]);
   useFocusEffect(consumeCopilotRouteBuilderDraft);
 
   useEffect(() => {
@@ -4133,6 +4126,9 @@ function RouteBuilderScreenContent() {
         land_type: detail.land_type || camp.land_type,
         amenities: detail.amenities ?? [],
         facility_id: camp.id ?? '',
+        source_label: detail.source_badge || detail.verified_source || camp.source_badge || camp.verified_source || '',
+        source_url: detail.official_url || detail.url || camp.official_url || camp.url || '',
+        source_updated_at: detail.last_checked || detail.fetched_at || camp.last_checked || camp.fetched_at || null,
       });
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId) || selectedCampRef.current?.id !== camp.id) return;
       setCampDetail({ ...detail, description: stripHtml(detail.description) });
@@ -6429,8 +6425,9 @@ function RouteBuilderScreenContent() {
   function renderWizardSetup(fullScreen = false) {
     const steps = ['Start', 'Destination', 'Style', 'Camp', 'Pace'];
     const stepMeta = steps[wizardStep];
-    const compactWizardLayout = fullScreen && (keyboardVisible || windowHeight <= 620);
-    const hideStartExtras = fullScreen && (keyboardVisible || windowHeight <= 500);
+    const screenHeight = Dimensions.get('screen').height;
+    const compactWizardLayout = fullScreen && screenHeight <= 620;
+    const hideStartExtras = fullScreen && screenHeight <= 500;
     const canMoveNext = wizardStep === 0
       ? !!(startQuery.trim() || orderedStops[0])
       : wizardStep === 1
@@ -6467,7 +6464,6 @@ function RouteBuilderScreenContent() {
         </View>
 
         <ScrollView
-          ref={wizardStepScrollRef}
           style={s.wizardStepScroll}
           contentContainerStyle={[s.wizardStepScrollContent, { paddingBottom: compactWizardLayout ? 8 : 10 }]}
           showsVerticalScrollIndicator={false}
@@ -6775,7 +6771,7 @@ function RouteBuilderScreenContent() {
   }
 
   if (!hasBaseRoute) {
-    const compactWizardLayout = keyboardVisible || windowHeight <= 620;
+    const compactWizardLayout = Dimensions.get('screen').height <= 620;
     return (
       <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         <SafeAreaView style={s.wizardScreen}>
@@ -7298,9 +7294,6 @@ function RouteBuilderScreenContent() {
                   <TrailheadCard style={s.detailSection}>
                     <View style={s.aiHeader}>
                       <Text style={s.detailSectionTitle}>Camp guide</Text>
-                      {campInsight.star_rating ? (
-                        <Text style={s.aiStars}>{campInsight.star_rating}/5</Text>
-                      ) : null}
                     </View>
                     {campInsight.insider_tip ? (
                       <View style={s.insiderTip}>
@@ -7560,8 +7553,6 @@ function RouteBuilderScreenContent() {
 }
 
 export default function RouteBuilderScreen() {
-  const pathname = usePathname();
-  if (!pathname.includes('/route-builder')) return null;
   return <RouteBuilderScreenContent />;
 }
 
@@ -8507,7 +8498,6 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   coordText: { color: C.text2, fontSize: 13, fontFamily: mono },
   coordDms: { color: C.text2, fontSize: 11, fontFamily: mono, marginTop: 4 },
   aiHeader: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  aiStars: { color: C.yellow, fontSize: 14, marginBottom: 10 },
   insiderTip: { backgroundColor: C.s2, borderRadius: 18, borderWidth: 1, borderColor: C.border, padding: 12, marginBottom: 8 },
   insiderLabel: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '800', marginBottom: 4 },
   insiderText: { color: C.text, fontSize: 13, lineHeight: 19 },

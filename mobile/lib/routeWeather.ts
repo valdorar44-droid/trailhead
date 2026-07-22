@@ -30,6 +30,21 @@ function validCoordinate(coordinate: Coordinate): coordinate is { lat: number; l
     && (coordinate.lng as number) <= 180;
 }
 
+/**
+ * Route weather is only requested and cached for waypoints the weather
+ * endpoint can resolve. Keep this normalization shared by every producer and
+ * reader so itinerary-only rows (for example, a note without coordinates) do
+ * not create a different cache identity.
+ */
+export function routeWeatherEligibleWaypoints<T extends RouteWeatherWaypoint>(
+  waypoints: readonly T[],
+): T[] {
+  return waypoints.filter(waypoint => validCoordinate({
+    lat: waypoint.lat,
+    lng: waypoint.lng,
+  }));
+}
+
 function distanceMiles(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
@@ -45,7 +60,7 @@ function distanceMiles(
 }
 
 export function routeWeatherWaypointSignature(waypoints: readonly RouteWeatherWaypoint[]) {
-  return JSON.stringify(waypoints.map(waypoint => ({
+  return JSON.stringify(routeWeatherEligibleWaypoints(waypoints).map(waypoint => ({
     name: String(waypoint.name || '').trim().toLowerCase(),
     day: Number.isFinite(waypoint.day) ? waypoint.day : null,
     type: String(waypoint.type || '').trim().toLowerCase(),
@@ -130,8 +145,9 @@ export function routeWeatherResultFromCache(
     || Object.keys(envelope.result.forecasts).length === 0
   ) return null;
 
-  const camps = waypoints.filter(waypoint => waypoint.type === 'camp');
-  const requiredWaypoints = camps.length > 0 ? camps : waypoints.slice(0, 1);
+  const eligibleWaypoints = routeWeatherEligibleWaypoints(waypoints);
+  const camps = eligibleWaypoints.filter(waypoint => waypoint.type === 'camp');
+  const requiredWaypoints = camps.length > 0 ? camps : eligibleWaypoints.slice(0, 1);
   if (!requiredWaypoints.length) return null;
   return requiredWaypoints.every(waypoint => (
     !!routeWeatherForecastForWaypoint(envelope.result, waypoint)?.daily?.time?.length

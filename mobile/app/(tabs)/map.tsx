@@ -50,6 +50,12 @@ const USE_NATIVE_MAP = true;
 const ENABLE_REALTIME_NARRATOR = true;
 import * as Location from 'expo-location';
 import { accountStorage, storage } from '@/lib/storage';
+import {
+  accountInventoryIsVisible,
+  accountInventoryRequestIsCurrent,
+  accountInventoryRequiresCleanup,
+  accountInventoryScope,
+} from '@/lib/accountInventoryScope';
 import * as Speech from 'expo-speech';
 import * as Haptics from 'expo-haptics';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
@@ -81,6 +87,7 @@ import { VALHALLA_MANEUVER_PRESENTATIONS } from '@/lib/valhallaManeuvers';
 import {
   routeWeatherCacheEnvelope,
   routeWeatherCacheFileName,
+  routeWeatherEligibleWaypoints,
   routeWeatherForecastForWaypoint,
   routeWeatherResultFromCache,
   routeWeatherWaypointSignature,
@@ -98,6 +105,7 @@ import type { RouteBuildPreviewStop } from '@/lib/routeBuildSession';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
 import { trailRouteGraphLocalPath } from '@/lib/useOfflineFiles';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
+import { downloadedPlacePointToPoi } from '@/lib/downloadedPlacePoint';
 import {
   EMPTY_EXPO_OFFLINE_V2_CATALOG,
   loadExpoOfflineV2Catalog,
@@ -192,6 +200,7 @@ import {
   offlineSearchResultsV2,
   normalizeSearchV2Query,
   productFeaturesAllowSearchV2,
+  searchPlaceIsTemporary,
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
   useSearchV2Session,
@@ -5979,6 +5988,22 @@ function MapScreen() {
   const clearRouteBuildSession = useStore(st => st.clearRouteBuildSession);
   const chooseRouteBuildActivities = useStore(st => st.chooseRouteBuildActivities);
   const user = useStore(st => st.user);
+  const [mapAccountLifecycle, setMapAccountLifecycle] = useState(() => ({
+    cleaning: accountStorage.isCleaning(),
+    epoch: accountStorage.epoch(),
+  }));
+  const mapAccountInventoryScope = accountInventoryScope(mapAccountLifecycle.epoch, user?.id);
+  const previousMapAccountInventoryScopeRef = useRef(mapAccountInventoryScope);
+  const mapAccountTransitionBlocked = !mapAccountLifecycle.cleaning
+    && accountInventoryRequiresCleanup(
+      previousMapAccountInventoryScopeRef.current,
+      mapAccountInventoryScope,
+    );
+  useEffect(() => {
+    if (!mapAccountLifecycle.cleaning && !mapAccountTransitionBlocked) {
+      previousMapAccountInventoryScopeRef.current = mapAccountInventoryScope;
+    }
+  }, [mapAccountInventoryScope.key, mapAccountLifecycle.cleaning, mapAccountTransitionBlocked]);
   const originalsRuntime = useOriginalsRuntime();
   const originalsOwnerScope = (
     user?.id == null ? 'guest' : `account:${String(user.id)}`
@@ -6572,17 +6597,49 @@ function MapScreen() {
   const [placesLoadedAt, setPlacesLoadedAt] = useState<number | null>(null);
   const [exploreCategoriesUnlocked, setExploreCategoriesUnlocked] = useState(false);
   const [categoryUnlocking, setCategoryUnlocking] = useState(false);
-  const [offlinePlacePois, setOfflinePlacePois] = useState<OsmPoi[]>([]);
-  const [offlinePlaceCount, setOfflinePlaceCount] = useState(0);
-  const [offlineV2Catalog, setOfflineV2Catalog] = useState(EMPTY_EXPO_OFFLINE_V2_CATALOG);
+  const [offlinePlaceInventory, setOfflinePlaceInventory] = useState<{
+    scope_key: string;
+    places: OsmPoi[];
+    count: number;
+    catalog: typeof EMPTY_EXPO_OFFLINE_V2_CATALOG;
+  }>({
+    scope_key: '',
+    places: [],
+    count: 0,
+    catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG,
+  });
+  const offlinePlaceInventoryRef = useRef(offlinePlaceInventory);
+  const offlinePlaceInventoryVisible = accountInventoryIsVisible(
+    offlinePlaceInventory.scope_key,
+    mapAccountInventoryScope,
+    mapAccountLifecycle.cleaning,
+  );
+  const offlinePlacePois = offlinePlaceInventoryVisible ? offlinePlaceInventory.places : [];
+  const offlinePlaceCount = offlinePlaceInventoryVisible ? offlinePlaceInventory.count : 0;
+  const offlineV2Catalog = offlinePlaceInventoryVisible
+    ? offlinePlaceInventory.catalog
+    : EMPTY_EXPO_OFFLINE_V2_CATALOG;
   const mapSearchV2OfflineProvider = useCallback(
     async (request: Parameters<typeof offlineSearchResultsV2>[0]) => {
-      const indexed = await searchExpoOfflineV2Catalog(offlineV2Catalog, request, 'map');
-      const fallback = offlineSearchResultsV2(request, offlinePlacePois, 'map');
+      const currentScope = accountInventoryScope(
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+      );
+      const inventory = offlinePlaceInventoryRef.current;
+      if (!accountInventoryIsVisible(inventory.scope_key, currentScope, accountStorage.isCleaning())) {
+        return [];
+      }
+      const indexed = await searchExpoOfflineV2Catalog(inventory.catalog, request, 'map');
+      if (!accountInventoryIsVisible(
+        inventory.scope_key,
+        accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id),
+        accountStorage.isCleaning(),
+      )) return [];
+      const fallback = offlineSearchResultsV2(request, inventory.places, 'map');
       const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
       return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
     },
-    [offlinePlacePois, offlineV2Catalog],
+    [],
   );
   const mapSearchV2Context = useMemo(() => ({
     surface: 'map' as const,
@@ -6598,6 +6655,13 @@ function MapScreen() {
     context: mapSearchV2Context,
     offlineProvider: mapSearchV2OfflineProvider,
   });
+  const [mapSearchOwnerScopeKey, setMapSearchOwnerScopeKey] = useState(mapAccountInventoryScope.key);
+  const mapSearchOwnerIsCurrent = !mapAccountLifecycle.cleaning
+    && mapSearchOwnerScopeKey === mapAccountInventoryScope.key;
+
+  useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
+    setMapAccountLifecycle({ cleaning, epoch });
+  }), []);
 
   useEffect(() => {
     if (!searchV2Enabled) {
@@ -6605,6 +6669,11 @@ function MapScreen() {
       return;
     }
     if (!inlineSearchOpen && !showFullMapSearch) return;
+    if (!mapSearchOwnerIsCurrent) {
+      setSearchResults([]);
+      setIsSearching(false);
+      return;
+    }
     const mapped = mapSearchV2.state.results
       .map(searchResultV2ToLegacyPlace)
       .filter((place): place is NonNullable<typeof place> => Boolean(place));
@@ -6623,11 +6692,13 @@ function MapScreen() {
     mapSearchV2.state.isEnriching,
     mapSearchV2.state.results,
     mapSearchV2.state.status,
+    mapSearchOwnerIsCurrent,
     searchV2Enabled,
     showFullMapSearch,
   ]);
   const mapSearchDisplayResults = useMemo<MapSearchResultItem[]>(() => {
     if (!searchV2Enabled) return searchResults;
+    if (!mapSearchOwnerIsCurrent) return [];
     if (normalizeSearchV2Query(searchQuery) !== mapSearchV2.state.query) return [];
     const rows = mapSearchV2.state.results.map(result => ({
       ...searchResultV2ToDisplayPlace(result),
@@ -6642,6 +6713,7 @@ function MapScreen() {
     mapSearchV2.state.resolvingResultId,
     mapSearchV2.state.results,
     mapSearchV2.state.status,
+    mapSearchOwnerIsCurrent,
     searchQuery,
     searchResults,
     searchV2Enabled,
@@ -6788,7 +6860,7 @@ function MapScreen() {
   // Cached route weather (loaded from FileSystem)
   const [cachedWeather, setCachedWeather] = useState<RouteWeatherResult | null>(null);
   const routeWeatherWaypoints = useMemo(
-    () => activeTrip?.plan.waypoints.filter(wp => Number.isFinite(wp.lat) && Number.isFinite(wp.lng)) ?? [],
+    () => routeWeatherEligibleWaypoints(activeTrip?.plan.waypoints ?? []),
     [activeTrip?.plan.waypoints],
   );
   const routeWeatherSignature = useMemo(
@@ -8367,14 +8439,11 @@ function MapScreen() {
     const missing = usableTripWaypoints(activeTrip.plan.waypoints).filter(w => !w.lat || !w.lng);
     if (missing.length > 0) {
       Promise.all(missing.map(async wp => {
-        try {
-          const r = await fetch(
-            `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(wp.name)}&format=json&limit=1`,
-            { headers: { 'User-Agent': 'Trailhead/1.0' } }
-          );
-          const d = await r.json();
-          if (d[0]) { wp.lat = parseFloat(d[0].lat); wp.lng = parseFloat(d[0].lon); }
-        } catch {}
+        const [resolved] = await api.geocodePlaces(wp.name, 1, { prefer: 'locality' }).catch(() => []);
+        if (Number.isFinite(Number(resolved?.lat)) && Number.isFinite(Number(resolved?.lng))) {
+          wp.lat = Number(resolved.lat);
+          wp.lng = Number(resolved.lng);
+        }
       })).then(() => {
         if (
           cancelled
@@ -8734,78 +8803,93 @@ function MapScreen() {
   ]);
 
   const reloadOfflinePlacePois = useCallback(async () => {
-    const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
-    const ownerScope = requestAccountId == null ? 'anonymous' : `account:${String(requestAccountId)}`;
+    const requestScope = accountInventoryScope(accountStorage.epoch(), requestAccountId);
+    if (accountStorage.isCleaning() || mapAccountTransitionBlocked) return;
     const [points, catalog] = await Promise.all([
       loadAllPlacePoints().catch(() => []),
       requestAccountId == null
         ? Promise.resolve(EMPTY_EXPO_OFFLINE_V2_CATALOG)
-        : loadExpoOfflineV2Catalog(ownerScope).catch(() => EMPTY_EXPO_OFFLINE_V2_CATALOG),
+        : loadExpoOfflineV2Catalog(requestScope.owner_scope).catch(() => EMPTY_EXPO_OFFLINE_V2_CATALOG),
     ]);
-    if (accountStorage.epoch() !== requestEpoch
-      || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')) return;
-    const legacy = points.map(p => ({
-      id: p.id,
-      name: p.name,
-      lat: p.lat,
-      lng: p.lng,
-      type: p.type || 'poi',
-      subtype: cleanDisplayLabel(p.subtype || ''),
-      elevation: p.elevation,
-      source: p.source || 'offline',
-      source_label: p.source_badge || p.source || 'Saved places',
-      address: p.address,
-      fuel_types: p.fuel_types,
-      photo_url: p.photo_url || undefined,
-      website: p.booking_url || p.official_url,
-      official_url: p.official_url,
-      booking_url: p.booking_url,
-      reservable: p.reservable,
-      tags: p.tags,
-      amenities: p.amenities,
-      site_types: p.site_types,
-      source_badge: p.source_badge,
-      source_freshness: p.source_freshness,
-      last_checked: p.last_checked,
-      waterbody_name: p.waterbody_name,
-      waterbody_type: p.waterbody_type,
-      access: p.access,
-      craft: p.craft,
-      fishing_score: p.fishing_score,
-      fishing_score_label: p.fishing_score_label,
-      fish_species: p.fish_species,
-      stocking_notes: p.stocking_notes,
-      regulations_url: p.regulations_url,
-      gauge_id: p.gauge_id,
-      gauge_url: p.gauge_url,
-      flow_cfs: p.flow_cfs,
-      gage_height_ft: p.gage_height_ft,
-      observed_at: p.observed_at,
-      chart_source: p.chart_source,
-      chart_url: p.chart_url,
-      weather_url: p.weather_url,
-      tides_url: p.tides_url,
-      safety_url: p.safety_url,
-      navigation_feature: p.navigation_feature,
-      hazard_type: p.hazard_type,
-      mark_color: p.mark_color,
-      mark_shape: p.mark_shape,
-      light_character: p.light_character,
-      depth_ft: p.depth_ft,
-      max_draft_ft: p.max_draft_ft,
-      navigation_note: p.navigation_note,
-      cache_status: 'downloaded',
-    } as OsmPoi));
+    if (!accountInventoryRequestIsCurrent(
+      requestScope,
+      accountStorage.epoch(),
+      useStore.getState().user?.id,
+      accountStorage.isCleaning(),
+    )) return;
+    const legacy = points.map(point => downloadedPlacePointToPoi(point, {
+      normalizeSubtype: cleanDisplayLabel,
+      sourceLabelFallback: 'Saved places',
+      websitePreference: 'booking_first',
+      markDownloaded: true,
+      normalizeNullPhoto: true,
+    }));
     const merged = mergeOfflinePoiInventory(catalog.places, legacy);
-    setOfflineV2Catalog(catalog);
-    setOfflinePlaceCount(merged.length);
-    setOfflinePlacePois(merged);
-  }, [activeTrip?.trip_id, user?.id]);
+    const nextInventory = {
+      scope_key: requestScope.key,
+      places: merged,
+      count: merged.length,
+      catalog,
+    };
+    offlinePlaceInventoryRef.current = nextInventory;
+    setOfflinePlaceInventory(nextInventory);
+    setMapSearchOwnerScopeKey(requestScope.key);
+    if (searchV2Enabled) {
+      const activeQuery = searchQueryRef.current;
+      if (normalizeSearchV2Query(activeQuery).length > 0
+        && (inlineSearchOpen || showFullMapSearch)) {
+        mapSearchV2.setQuery(activeQuery);
+      }
+      await mapSearchV2.refreshOffline();
+    }
+  }, [
+    inlineSearchOpen,
+    mapSearchV2.refreshOffline,
+    mapSearchV2.setQuery,
+    mapAccountTransitionBlocked,
+    searchV2Enabled,
+    showFullMapSearch,
+  ]);
 
   useEffect(() => {
-    reloadOfflinePlacePois();
-  }, [reloadOfflinePlacePois]);
+    if (mapAccountLifecycle.cleaning || mapAccountTransitionBlocked) {
+      const emptyInventory = {
+        scope_key: '',
+        places: [] as OsmPoi[],
+        count: 0,
+        catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG,
+      };
+      offlinePlaceInventoryRef.current = emptyInventory;
+      setOfflinePlaceInventory(emptyInventory);
+      setSearchResults([]);
+      setMapSearchOwnerScopeKey(mapAccountInventoryScope.key);
+      mapSearchV2.setQuery('');
+      return;
+    }
+    if (mapSearchOwnerScopeKey !== mapAccountInventoryScope.key) {
+      const emptyInventory = {
+        scope_key: '',
+        places: [] as OsmPoi[],
+        count: 0,
+        catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG,
+      };
+      offlinePlaceInventoryRef.current = emptyInventory;
+      setOfflinePlaceInventory(emptyInventory);
+      setSearchResults([]);
+      setMapSearchOwnerScopeKey(mapAccountInventoryScope.key);
+      mapSearchV2.setQuery('');
+      return;
+    }
+    void reloadOfflinePlacePois();
+  }, [
+    mapAccountInventoryScope.key,
+    mapAccountLifecycle.cleaning,
+    mapAccountTransitionBlocked,
+    mapSearchOwnerScopeKey,
+    mapSearchV2.setQuery,
+    reloadOfflinePlacePois,
+  ]);
 
   function poiKey(p: OsmPoi) {
     return String(p.id || `${p.type || 'poi'}:${p.name || ''}:${Number(p.lat).toFixed(4)}:${Number(p.lng).toFixed(4)}`);
@@ -10562,6 +10646,7 @@ function MapScreen() {
       return;
     }
     if (searchV2Enabled) {
+      setMapSearchOwnerScopeKey(mapAccountInventoryScope.key);
       mapSearchV2.setQuery(cleanQuery);
       return;
     }
@@ -10580,16 +10665,35 @@ function MapScreen() {
       mapSearchRequestRef.current?.controller.abort();
       mapSearchRequestRef.current = null;
     };
-  }, [inlineSearchOpen, mapSearchV2.setQuery, navMode, screenActivity.isFocused, searchQuery, searchV2Enabled, showFullMapSearch]);
+  }, [
+    inlineSearchOpen,
+    mapAccountInventoryScope.key,
+    mapSearchV2.setQuery,
+    navMode,
+    screenActivity.isFocused,
+    searchQuery,
+    searchV2Enabled,
+    showFullMapSearch,
+  ]);
 
   async function resolvePressedMapSearchResult(
     place: SearchPlace | MapSearchResultItem,
   ): Promise<SearchPlace | null> {
     if (place.name === '__error__') return null;
+    const pressedScope = accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id);
+    if (accountStorage.isCleaning()
+      || mapAccountTransitionBlocked
+      || pressedScope.key !== mapAccountInventoryScope.key) return null;
     if (searchV2Enabled && place.result_id) {
       const pressedQuery = normalizeSearchV2Query(searchQueryRef.current);
       try {
         const resolved = await mapSearchV2.resolveResult(place.result_id);
+        if (!accountInventoryRequestIsCurrent(
+          pressedScope,
+          accountStorage.epoch(),
+          useStore.getState().user?.id,
+          accountStorage.isCleaning(),
+        )) return null;
         if (!resolved) {
           if (normalizeSearchV2Query(searchQueryRef.current) === pressedQuery) {
             setQuickToast('That place is not available in this search area.');
@@ -10654,7 +10758,9 @@ function MapScreen() {
         source_label: basePlace.source_label || 'Place',
       });
     }
-    addSearchHistory({ name: basePlace.name, lat: basePlace.lat, lng: basePlace.lng, searchedAt: Date.now() });
+    if (!searchPlaceIsTemporary(basePlace)) {
+      addSearchHistory({ name: basePlace.name, lat: basePlace.lat, lng: basePlace.lng, searchedAt: Date.now() });
+    }
     setShowFullMapSearch(false);
     closeInlineMapSearch();
     focusPlaceCamera(basePlace, 14, query);
@@ -24115,7 +24221,7 @@ function MapScreen() {
 
           {inlineSearchOpen && (mapSearchDisplayResults.length > 0 || isSearching) && (
             <View style={[s.inlineMapSearchResults, mapChrome.toast, inlineSearchResultsMaxHeight ? { maxHeight: inlineSearchResultsMaxHeight } : null]}>
-              {isSearching ? (
+              {isSearching && mapSearchDisplayResults.length === 0 ? (
                 <View style={s.inlineMapSearchStateRow}>
                   <ActivityIndicator size="small" color={mapChrome.toastText} />
                   <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Searching</Text>
@@ -25395,7 +25501,9 @@ function MapScreen() {
             }
             void resolvePressedMapSearchResult(place).then(selected => {
               if (!selected) return;
-              addSearchHistory({ name: selected.name, lat: selected.lat, lng: selected.lng, searchedAt: Date.now() });
+              if (!searchPlaceIsTemporary(selected)) {
+                addSearchHistory({ name: selected.name, lat: selected.lat, lng: selected.lng, searchedAt: Date.now() });
+              }
               setShowFullMapSearch(false);
               previewSearchRoute(
                 { name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true },

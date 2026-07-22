@@ -56,6 +56,26 @@ Do not request the advertising ID permission. Referral attribution uses the Play
 Fill this only after the worktree is clean, the external gate passes, and both
 previews are launched from the same commit. Do not infer remote build numbers.
 
+### Foundation evidence pair (not the final candidate)
+
+The first native 1.0.10 evidence pair was built from the same immutable commit
+before the compatible Search/Offline implementation wave. It remains suitable
+for preview OTAs on the runtime versions below, but it is not a production
+candidate and does not close the final device checklist.
+
+| Field | Android | iOS |
+|---|---|---|
+| Commit SHA | `cd61f6c3` | `cd61f6c3` |
+| EAS build ID | `06142308-0199-46cc-8a4c-fb9d45bca25e` | `7d3c170d-46d2-4bae-b7c7-6fbee63a69c1` |
+| Marketing version | 1.0.10 | 1.0.10 |
+| Runtime | `native-1.0.10-android.1` | `native-1.0.10-ios.1` |
+| Remote build/version code | 59 | 54 |
+| Channel | `preview` | `preview` |
+| Artifact/install URL | [APK](https://expo.dev/artifacts/eas/-TGjzCjq-htc5edUbuDDsiT7xWzLp654IU0jRPlLOlY.apk) | [IPA](https://expo.dev/artifacts/eas/bQ2t6831lwSIkc8oWTcepiQ9-phk7W2f14wRl_M071k.ipa) |
+| Preview update group | Embedded update | Embedded update |
+
+### Final paired candidate
+
 | Field | Android | iOS |
 |---|---|---|
 | Commit SHA | Pending | Pending |

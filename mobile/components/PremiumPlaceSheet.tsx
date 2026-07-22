@@ -222,6 +222,14 @@ function hasPaidProviderSource(place: PlaceLike | null | undefined) {
 }
 
 function isTransientMapboxPlace(place: PlaceLike | null | undefined) {
+  const metadata = place as any;
+  if (
+    metadata?.persistence_policy === 'temporary'
+    || metadata?.temporary_use_only === true
+    || metadata?._trailhead?.temporary_use_only === true
+  ) {
+    return true;
+  }
   const source = String(place?.source || '').toLowerCase();
   return source === 'rendered_mapbox_standard' || source === 'mapbox_feature' || source === 'rendered_map' || source === 'mapbox_search';
 }
@@ -413,6 +421,7 @@ export default function PremiumPlaceSheet({
   const [alertEnd, setAlertEnd] = useState('');
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<string[]>([]);
   const dragY = useRef(new Animated.Value(0)).current;
+  const transientPlace = place ? isTransientMapboxPlace(place) : false;
   const sheetModel = useMemo(
     () => adaptGenericPlaceSheet(place ?? { name: 'Place', type: 'place' }),
     [place?.id, place?.place_id, place?.provider_place_id, place?.name, place?.lat, place?.lng, place?.type, place?.subtype, place?.source_label],
@@ -425,7 +434,7 @@ export default function PremiumPlaceSheet({
     source: place?.source || place?.source_label,
     type: place?.type,
     persistencePolicy: (place as any)?.persistence_policy,
-    temporaryUseOnly: place ? isTransientMapboxPlace(place) : false,
+    temporaryUseOnly: transientPlace,
   }), [
     canRate,
     canonical?.trailhead_place_id,
@@ -435,6 +444,7 @@ export default function PremiumPlaceSheet({
     place?.type,
     (place as any)?.persistence_policy,
     sheetModel.identity.kind,
+    transientPlace,
   ]);
 
   useEffect(() => {
@@ -459,7 +469,7 @@ export default function PremiumPlaceSheet({
     setGalleryIndex(null);
     setFailedPhotoUrls([]);
     setLoading(false);
-    if (isTransientMapboxPlace(place)) return;
+    if (transientPlace) return;
     let canonicalCancelled = false;
     api.canonicalizePlace(canonicalPayload(place))
       .then(({ place: canonicalPlace }) => {
@@ -490,7 +500,7 @@ export default function PremiumPlaceSheet({
         if (!cancelled) setLoading(false);
       });
     return () => { cancelled = true; canonicalCancelled = true; };
-  }, [place?.id, place?.name, place?.lat, place?.lng, initialStage]);
+  }, [place?.id, place?.name, place?.lat, place?.lng, initialStage, transientPlace]);
 
   const data = detail ?? place;
   const maxFull = Math.min(height * 0.84, height - Math.max(insets.top + 22, 54));
@@ -784,7 +794,7 @@ export default function PremiumPlaceSheet({
           <ScrollView
             showsVerticalScrollIndicator={false}
             scrollEnabled={stage === 'full'}
-            contentContainerStyle={[s.content, addToRoutePrimary && !!onAddToRoute && s.contentWithStickyAction]}
+            contentContainerStyle={[s.content, addToRoutePrimary && !!onAddToRoute && !transientPlace && s.contentWithStickyAction]}
           >
             {hero ? (
               <TouchableOpacity style={s.hero} activeOpacity={0.9} onPress={() => setGalleryIndex(0)}>
@@ -966,7 +976,7 @@ export default function PremiumPlaceSheet({
               )}
 
               <TrailheadButtonDock style={s.actions}>
-                {addToRoutePrimary && !!onAddToRoute ? (
+                {addToRoutePrimary && !!onAddToRoute && !transientPlace ? (
                   <>
                     <TrailheadButton
                       label={addToRouteLabel}
@@ -1004,12 +1014,12 @@ export default function PremiumPlaceSheet({
                     <Ionicons name="globe-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
-                {!!onSave && (
+                {!!onSave && !transientPlace && (
                   <TouchableOpacity style={s.secondaryBtn} onPress={() => onSave({ name: place.name, lat: place.lat, lng: place.lng, note: subtitle })}>
                     <Ionicons name="bookmark-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
                 )}
-                {!!onAddToRoute && !addToRoutePrimary && (
+                {!!onAddToRoute && !addToRoutePrimary && !transientPlace && (
                   <TouchableOpacity style={s.secondaryBtn} onPress={addToRoute}>
                     <Ionicons name="add-circle-outline" size={15} color={C.text2} />
                   </TouchableOpacity>
@@ -1024,7 +1034,7 @@ export default function PremiumPlaceSheet({
                       <Text style={[s.linkText, { color: C.orange }]}>Nearby camps</Text>
                     </TouchableOpacity>
                   )}
-                  {!!onReport && (
+                  {!!onReport && !transientPlace && (
                     <TouchableOpacity style={s.linkBtn} onPress={onReport}>
                       <Ionicons name="warning-outline" size={14} color={C.orange} />
                       <Text style={[s.linkText, { color: C.orange }]}>Report / update</Text>
@@ -1080,7 +1090,7 @@ export default function PremiumPlaceSheet({
                 />
               ) : null}
 
-              {stage === 'full' && (
+              {stage === 'full' && !transientPlace && (
                 <View style={s.communityBlock}>
                   <View style={s.communityHeader}>
                     <Text style={s.sectionLabel}>Community notes</Text>
@@ -1135,7 +1145,7 @@ export default function PremiumPlaceSheet({
                 </View>
               )}
 
-              {stage === 'full' && (
+              {stage === 'full' && !transientPlace && (
                 <View style={s.communityBlock}>
                   <View style={s.communityHeader}>
                     <Text style={s.sectionLabel}>Suggest an edit</Text>
@@ -1221,7 +1231,7 @@ export default function PremiumPlaceSheet({
             </View>
           </ScrollView>
         )}
-        {stage !== 'peek' && addToRoutePrimary && !!onAddToRoute && (
+        {stage !== 'peek' && addToRoutePrimary && !!onAddToRoute && !transientPlace && (
           <TrailheadButtonDock style={[s.stickyRouteAction, { paddingBottom: Math.max(insets.bottom, 10) }]}>
             <TrailheadButton
               label={addToRouteLabel}

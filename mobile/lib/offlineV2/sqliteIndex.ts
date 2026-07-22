@@ -11,6 +11,8 @@ export type OfflineSearchIndexResultV2 = Readonly<{
   lat: number;
   lng: number;
   parent_destination?: string;
+  /** SQLite FTS5 bm25 rank; lower values are more relevant. */
+  rank?: number;
 }>;
 
 function pathParts(path: string) {
@@ -71,41 +73,44 @@ export async function searchExpoOfflineIndex(input: Readonly<{
   query: string;
   bounds?: OfflineBoundsV2;
   limit?: number;
+  offset?: number;
 }>): Promise<readonly OfflineSearchIndexResultV2[]> {
   const query = offlineFtsPrefixQuery(input.query);
   if (!query) return Object.freeze([]);
   const limit = Math.max(1, Math.min(50, Math.trunc(input.limit ?? 20)));
+  const offset = Math.max(0, Math.min(10_000, Math.trunc(input.offset ?? 0)));
   const database = await openIndex(input.path);
   try {
     const rows = input.bounds
       ? await database.getAllAsync<OfflineSearchIndexResultV2>(
         `SELECT d.result_id, d.canonical_place_id, d.title, d.subtitle, d.kind,
-                d.lat, d.lng, d.parent_destination
+                d.lat, d.lng, d.parent_destination, bm25(offline_search_fts) AS rank
            FROM offline_search_fts f
            JOIN offline_search_documents d ON d.rowid = f.rowid
            JOIN offline_search_spatial s ON s.id = d.rowid
           WHERE offline_search_fts MATCH ?
             AND s.min_lng <= ? AND s.max_lng >= ?
             AND s.min_lat <= ? AND s.max_lat >= ?
-          ORDER BY bm25(offline_search_fts), d.title
-          LIMIT ?`,
+          ORDER BY bm25(offline_search_fts), d.title, d.result_id
+          LIMIT ? OFFSET ?`,
         query, input.bounds.east, input.bounds.west,
-        input.bounds.north, input.bounds.south, limit,
+        input.bounds.north, input.bounds.south, limit, offset,
       )
       : await database.getAllAsync<OfflineSearchIndexResultV2>(
         `SELECT d.result_id, d.canonical_place_id, d.title, d.subtitle, d.kind,
-                d.lat, d.lng, d.parent_destination
+                d.lat, d.lng, d.parent_destination, bm25(offline_search_fts) AS rank
            FROM offline_search_fts f
            JOIN offline_search_documents d ON d.rowid = f.rowid
           WHERE offline_search_fts MATCH ?
-          ORDER BY bm25(offline_search_fts), d.title
-          LIMIT ?`,
-        query, limit,
+          ORDER BY bm25(offline_search_fts), d.title, d.result_id
+          LIMIT ? OFFSET ?`,
+        query, limit, offset,
       );
     return Object.freeze(rows.map(row => Object.freeze({
       ...row,
       lat: Number(row.lat),
       lng: Number(row.lng),
+      rank: Number.isFinite(Number(row.rank)) ? Number(row.rank) : undefined,
     })));
   } finally {
     await database.closeAsync();

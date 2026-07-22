@@ -149,10 +149,10 @@ export default function MapSearchSheet({
             {cleanQuery.length >= 2 || searching || hasError || usableResults.length > 0 ? (
               <View style={s.resultsBlock}>
                 <View style={s.resultsHeader}>
-                  <Text style={s.sectionTitle}>{searching ? 'Searching' : 'Results'}</Text>
-                  {!searching && usableResults.length ? <Text style={s.count}>{usableResults.length}</Text> : null}
+                  <Text style={s.sectionTitle}>Results</Text>
+                  {usableResults.length ? <Text style={s.count}>{usableResults.length}</Text> : null}
                 </View>
-                {searching ? (
+                {searching && usableResults.length === 0 ? (
                   <View style={s.stateCard}>
                     <ActivityIndicator size="small" color={C.orange} />
                     <Text style={s.stateText}>Looking nearby</Text>

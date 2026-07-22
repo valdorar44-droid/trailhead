@@ -8,7 +8,7 @@ export type SearchSurfaceV2 =
 
 export type SearchIntentV2 = 'any' | 'destination' | 'place' | 'trail' | 'camp' | 'service';
 export type SearchScopeV2 = 'global' | 'viewport' | 'nearby' | 'route' | 'offline';
-export type SearchPersistencePolicyV2 = 'canonical' | 'temporary';
+export type SearchPersistencePolicyV2 = 'canonical' | 'durable_external' | 'temporary';
 
 export type SearchCenterV2 = {
   lat: number;
@@ -52,6 +52,7 @@ export type SearchProvenanceV2 = {
   provider: string;
   source_label: string;
   provider_result_id?: string | null;
+  attribution?: string | null;
   temporary_use_only: boolean;
 };
 

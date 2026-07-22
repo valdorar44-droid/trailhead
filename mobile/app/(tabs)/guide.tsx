@@ -11,6 +11,7 @@ import TourTarget from '@/components/TourTarget';
 import PaywallModal from '@/components/PaywallModal';
 import PremiumPlaceSheet from '@/components/PremiumPlaceSheet';
 import PlaceSheetShell from '@/components/map/PlaceSheetShell';
+import SearchV2Sheet from '@/components/search/SearchV2Sheet';
 import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadLoadingRow } from '@/components/TrailheadUI';
 import { OriginalsContextCard } from '@/components/originals';
 import {
@@ -54,9 +55,34 @@ import {
 import { api, PaywallError, type BookableExperience, type CampsitePin, type ExploreCatalogIndexItem, type ExploreExperienceQueryOptions, type ExploreExperiencesResponse, type ExploreGuidedDestination, type ExploreGuidedDestinationResponse, type ExplorePlaceProfile, type ExploreSourcePackItem, type ExploreTrailCard, type OsmPoi, type TrailProfile } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { accountStorage, storage } from '@/lib/storage';
+import {
+  accountInventoryIsVisible,
+  accountInventoryRequestIsCurrent,
+  accountInventoryRequiresCleanup,
+  accountInventoryScope,
+} from '@/lib/accountInventoryScope';
+import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
+import {
+  EMPTY_EXPO_OFFLINE_V2_CATALOG,
+  loadExpoOfflineV2Catalog,
+  searchExpoOfflineV2Catalog,
+} from '@/lib/offlineV2/expoCatalog';
+import { resolveDownloadedSearchResultPoi } from '@/lib/offlineV2/offlineSearchPresentation';
 import { originalsApi } from '@/lib/originals/api';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
 import { trackPhase0Once } from '@/lib/telemetry';
+import { useProductFeatures } from '@/lib/useProductFeatures';
+import {
+  normalizeSearchV2Query,
+  offlineSearchResultsV2,
+  canonicalSearchResultIdV2,
+  exploreSearchCategoriesForCategory,
+  exploreSearchIntentForCategory,
+  isTemporarySearchResultV2,
+  productFeaturesAllowSearchV2,
+  useSearchV2Session,
+  type SearchResultV2,
+} from '@/lib/searchV2';
 import { playTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 import {
   addEntityToTrip,
@@ -2101,8 +2127,33 @@ function GuideScreenContent() {
   const { height: windowHeight } = useWindowDimensions();
   const router = useRouter();
   const screenActivity = useScreenActivity();
+  const { features: productFeatures } = useProductFeatures(screenActivity.isActive);
+  const searchV2Enabled = productFeaturesAllowSearchV2(productFeatures);
   const params = useLocalSearchParams<{ view?: string | string[] }>();
   const user = useStore(st => st.user);
+  const [exploreAccountLifecycle, setExploreAccountLifecycle] = useState(() => ({
+    cleaning: accountStorage.isCleaning(),
+    epoch: accountStorage.epoch(),
+  }));
+  const exploreAccountInventoryScope = accountInventoryScope(exploreAccountLifecycle.epoch, user?.id);
+  const previousExploreAccountInventoryScopeRef = useRef(exploreAccountInventoryScope);
+  const exploreAccountTransitionBlocked = !exploreAccountLifecycle.cleaning
+    && accountInventoryRequiresCleanup(
+      previousExploreAccountInventoryScopeRef.current,
+      exploreAccountInventoryScope,
+    );
+  useEffect(() => {
+    if (!exploreAccountLifecycle.cleaning && !exploreAccountTransitionBlocked) {
+      previousExploreAccountInventoryScopeRef.current = exploreAccountInventoryScope;
+    }
+  }, [
+    exploreAccountInventoryScope.key,
+    exploreAccountLifecycle.cleaning,
+    exploreAccountTransitionBlocked,
+  ]);
+  useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
+    setExploreAccountLifecycle({ cleaning, epoch });
+  }), []);
   const authToken = useStore(st => st.token);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
@@ -2164,6 +2215,27 @@ function GuideScreenContent() {
   const [guidedFallbackExplorePlaces, setGuidedFallbackExplorePlaces] = useState<ExplorePlaceProfile[]>([]);
   const [exploreSavedOnly, setExploreSavedOnly] = useState(false);
   const [exploreQuery, setExploreQuery] = useState('');
+  const [exploreSearchOpen, setExploreSearchOpen] = useState(false);
+  const [exploreSearchDraft, setExploreSearchDraft] = useState('');
+  const exploreSearchDraftRef = useRef('');
+  exploreSearchDraftRef.current = exploreSearchDraft;
+  const [exploreSearchSelectionError, setExploreSearchSelectionError] = useState('');
+  const [exploreOpeningResultId, setExploreOpeningResultId] = useState<string | null>(null);
+  const [exploreOfflineInventory, setExploreOfflineInventory] = useState<{
+    scope_key: string;
+    catalog: typeof EMPTY_EXPO_OFFLINE_V2_CATALOG;
+    places: OsmPoi[];
+  }>({ scope_key: '', catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG, places: [] });
+  const exploreOfflineInventoryRef = useRef(exploreOfflineInventory);
+  exploreOfflineInventoryRef.current = exploreOfflineInventory;
+  const [exploreSearchOwnerScopeKey, setExploreSearchOwnerScopeKey] = useState(
+    exploreAccountInventoryScope.key,
+  );
+  const exploreSearchControllerScopeRef = useRef(exploreAccountInventoryScope.key);
+  const exploreSearchOwnerIsCurrent = !exploreAccountLifecycle.cleaning
+    && !exploreAccountTransitionBlocked
+    && exploreSearchOwnerScopeKey === exploreAccountInventoryScope.key;
+  const exploreSearchSelectionSeq = useRef(0);
   const [exploreServiceDestinationResolution, setExploreServiceDestinationResolution] = useState<{
     query: string;
     status: 'resolving' | 'resolved' | 'failed';
@@ -2334,6 +2406,165 @@ function GuideScreenContent() {
     preferredNearbyDestinationCenter,
     exploreServiceDestinationQuery ? null : userLoc,
   );
+  const exploreSearchOfflineProvider = useCallback(
+    async (request: Parameters<typeof offlineSearchResultsV2>[0]) => {
+      const currentScope = accountInventoryScope(
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+      );
+      const inventory = exploreOfflineInventoryRef.current;
+      if (!accountInventoryIsVisible(
+        inventory.scope_key,
+        currentScope,
+        accountStorage.isCleaning(),
+      )) return [];
+      const indexed = await searchExpoOfflineV2Catalog(inventory.catalog, request, 'explore');
+      if (!accountInventoryIsVisible(
+        inventory.scope_key,
+        accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id),
+        accountStorage.isCleaning(),
+      )) return [];
+      const fallback = offlineSearchResultsV2(request, inventory.places, 'explore');
+      const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
+      return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
+    },
+    [],
+  );
+  const exploreSearchContext = useMemo(() => ({
+    surface: 'explore' as const,
+    intent: exploreSearchIntentForCategory(exploreCategory),
+    scope: exploreMode === 'nearby' && exploreNearbySearchCenter ? 'nearby' as const : 'global' as const,
+    center: exploreNearbySearchCenter
+      ? { lat: exploreNearbySearchCenter.lat, lng: exploreNearbySearchCenter.lng }
+      : userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
+    categories: exploreSearchCategoriesForCategory(exploreCategory),
+    include_external: exploreCategory !== 'guided' && exploreCategory !== 'tours',
+    limit: 10,
+  }), [
+    exploreCategory,
+    exploreMode,
+    exploreNearbySearchCenter?.lat,
+    exploreNearbySearchCenter?.lng,
+    userLoc?.lat,
+    userLoc?.lng,
+  ]);
+  const exploreSearchV2 = useSearchV2Session({
+    enabled: searchV2Enabled,
+    active: screenActivity.isActive
+      && tab === 'explore'
+      && exploreSearchOpen
+      && exploreSearchOwnerIsCurrent
+      && exploreCategory !== 'guided'
+      && exploreCategory !== 'tours',
+    context: exploreSearchContext,
+    offlineProvider: exploreSearchOfflineProvider,
+  });
+
+  useEffect(() => {
+    if (!searchV2Enabled || !exploreSearchOpen || !exploreSearchOwnerIsCurrent) return;
+    setExploreSearchOwnerScopeKey(exploreAccountInventoryScope.key);
+    exploreSearchV2.setQuery(exploreSearchDraft);
+  }, [
+    exploreAccountInventoryScope.key,
+    exploreSearchDraft,
+    exploreSearchOpen,
+    exploreSearchOwnerIsCurrent,
+    exploreSearchV2.setQuery,
+    searchV2Enabled,
+  ]);
+
+  useEffect(() => {
+    if (!searchV2Enabled) return;
+    if (!exploreAccountLifecycle.cleaning
+      && !exploreAccountTransitionBlocked
+      && exploreSearchControllerScopeRef.current === exploreAccountInventoryScope.key) return;
+    exploreSearchControllerScopeRef.current = exploreAccountInventoryScope.key;
+    setExploreSearchOwnerScopeKey(exploreAccountInventoryScope.key);
+    const emptyInventory = {
+      scope_key: '',
+      catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG,
+      places: [] as OsmPoi[],
+    };
+    exploreOfflineInventoryRef.current = emptyInventory;
+    setExploreOfflineInventory(emptyInventory);
+    exploreSearchSelectionSeq.current += 1;
+    setExploreOpeningResultId(null);
+    setExploreSearchSelectionError('');
+    exploreSearchV2.setQuery('');
+  }, [
+    exploreAccountInventoryScope.key,
+    exploreAccountLifecycle.cleaning,
+    exploreAccountTransitionBlocked,
+    exploreSearchV2.setQuery,
+    searchV2Enabled,
+  ]);
+
+  useEffect(() => {
+    if (!searchV2Enabled
+      || !exploreSearchOpen
+      || exploreAccountLifecycle.cleaning
+      || exploreAccountTransitionBlocked
+      || !exploreSearchOwnerIsCurrent) return;
+    const requestScope = exploreAccountInventoryScope;
+    const requestAccountId = user?.id;
+    let mounted = true;
+    const requestIsCurrent = () => mounted && accountInventoryRequestIsCurrent(
+      requestScope,
+      accountStorage.epoch(),
+      useStore.getState().user?.id,
+      accountStorage.isCleaning(),
+    );
+    Promise.all([
+      loadAllPlacePoints().catch(() => []),
+      requestAccountId == null
+        ? Promise.resolve(EMPTY_EXPO_OFFLINE_V2_CATALOG)
+        : loadExpoOfflineV2Catalog(requestScope.owner_scope).catch(() => EMPTY_EXPO_OFFLINE_V2_CATALOG),
+    ]).then(([points, catalog]) => {
+      if (!requestIsCurrent()) return;
+      const offlinePlaces = points.map(point => ({
+        ...point,
+        id: point.id,
+        name: point.name,
+        lat: point.lat,
+        lng: point.lng,
+        type: point.type,
+        subtype: point.subtype,
+        address: point.address,
+        source: point.source || 'offline',
+        source_label: point.source_badge || point.source || 'Downloaded',
+      } as OsmPoi));
+      const nextInventory = {
+        scope_key: requestScope.key,
+        catalog,
+        places: offlinePlaces,
+      };
+      exploreOfflineInventoryRef.current = nextInventory;
+      setExploreOfflineInventory(nextInventory);
+      setExploreSearchOwnerScopeKey(requestScope.key);
+      void exploreSearchV2.refreshOffline();
+    }).catch(() => {
+      if (!requestIsCurrent()) return;
+      const nextInventory = {
+        scope_key: requestScope.key,
+        catalog: EMPTY_EXPO_OFFLINE_V2_CATALOG,
+        places: [] as OsmPoi[],
+      };
+      exploreOfflineInventoryRef.current = nextInventory;
+      setExploreOfflineInventory(nextInventory);
+      setExploreSearchOwnerScopeKey(requestScope.key);
+      void exploreSearchV2.refreshOffline();
+    });
+    return () => { mounted = false; };
+  }, [
+    exploreAccountInventoryScope.key,
+    exploreAccountLifecycle.cleaning,
+    exploreAccountTransitionBlocked,
+    exploreSearchOpen,
+    exploreSearchOwnerIsCurrent,
+    exploreSearchV2.refreshOffline,
+    searchV2Enabled,
+    user?.id,
+  ]);
 
   useEffect(() => {
     const query = exploreServiceDestinationQuery;
@@ -4812,8 +5043,8 @@ function GuideScreenContent() {
     );
   }
 
-  function submitGuidedTourSearch() {
-    const query = guidedTourDraft.trim();
+  function submitGuidedTourSearch(queryOverride?: string) {
+    const query = (queryOverride ?? guidedTourDraft).trim();
     const normalizedQuery = normalizeExploreText(query);
     const destination = guidedDestinations.find(item => (
       [item.name, item.searchQuery, ...item.terms]
@@ -5013,7 +5244,7 @@ function GuideScreenContent() {
             <TextInput
               value={guidedTourDraft}
               onChangeText={changeGuidedTourDraft}
-              onSubmitEditing={submitGuidedTourSearch}
+              onSubmitEditing={() => submitGuidedTourSearch()}
               returnKeyType="search"
               placeholder="Moab, Yosemite, Big Sur"
               placeholderTextColor={C.text3}
@@ -5031,7 +5262,7 @@ function GuideScreenContent() {
           style={[s.guidedSearchButton, { opacity: canSearch ? 1 : 0.55 }]}
           activeOpacity={0.86}
           disabled={!canSearch}
-          onPress={submitGuidedTourSearch}
+          onPress={() => submitGuidedTourSearch()}
         >
           <Ionicons name="search-outline" size={17} color="#fff" />
           <Text style={s.guidedSearchButtonText}>Search</Text>
@@ -5243,6 +5474,200 @@ function GuideScreenContent() {
     }
   }
 
+  function closeExploreSearch() {
+    exploreSearchSelectionSeq.current += 1;
+    setExploreSearchOpen(false);
+    setExploreOpeningResultId(null);
+    setExploreSearchSelectionError('');
+    exploreSearchV2.pause();
+  }
+
+  function updateExploreSearchDraft(value: string) {
+    exploreSearchSelectionSeq.current += 1;
+    setExploreOpeningResultId(null);
+    setExploreSearchSelectionError('');
+    setExploreSearchDraft(value);
+    if (searchV2Enabled && exploreSearchOpen && exploreSearchOwnerIsCurrent) {
+      exploreSearchV2.setQuery(value);
+    }
+  }
+
+  function openGuidedTripsFromSearch() {
+    const query = exploreSearchDraft.trim();
+    if (!query) return;
+    exploreSearchSelectionSeq.current += 1;
+    setExploreSearchOpen(false);
+    setExploreOpeningResultId(null);
+    setExploreSearchSelectionError('');
+    exploreSearchV2.pause();
+    setGuidedTourDraft(query);
+    submitGuidedTourSearch(query);
+  }
+
+  async function selectExploreSearchResult(result: SearchResultV2) {
+    if (!exploreSearchOwnerIsCurrent) return;
+    const selectionSeq = ++exploreSearchSelectionSeq.current;
+    const pressedQuery = normalizeSearchV2Query(exploreSearchDraft);
+    const requestScope = accountInventoryScope(
+      accountStorage.epoch(),
+      useStore.getState().user?.id,
+    );
+    const selectionIsCurrent = () => (
+      selectionSeq === exploreSearchSelectionSeq.current
+      && accountInventoryRequestIsCurrent(
+        requestScope,
+        accountStorage.epoch(),
+        useStore.getState().user?.id,
+        accountStorage.isCleaning(),
+      )
+      && normalizeSearchV2Query(exploreSearchDraftRef.current) === pressedQuery
+    );
+    setExploreOpeningResultId(result.result_id);
+    setExploreSearchSelectionError('');
+    let selected: SearchResultV2 | null = null;
+    try {
+      selected = await exploreSearchV2.resolveResult(result.result_id);
+    } catch {
+      if (selectionIsCurrent()) {
+        setExploreOpeningResultId(null);
+        setExploreSearchSelectionError('That result could not open. Try it again.');
+      }
+      return;
+    }
+    if (!selected || !selectionIsCurrent()) return;
+
+    const canonicalId = canonicalSearchResultIdV2(selected);
+    const offlineInventory = exploreOfflineInventoryRef.current;
+    const offlinePlace = accountInventoryIsVisible(
+      offlineInventory.scope_key,
+      requestScope,
+      accountStorage.isCleaning(),
+    ) ? resolveDownloadedSearchResultPoi(
+        selected,
+        offlineInventory.catalog.places,
+        offlineInventory.places,
+      ) : null;
+    if (offlinePlace) {
+      if (!selectionIsCurrent()) return;
+      setExploreSearchOpen(false);
+      setExploreSearchDraft(selected.title);
+      setExploreOpeningResultId(null);
+      exploreSearchV2.pause();
+      const offlineEntityKind = String((offlinePlace as any).offline_entity_kind || '');
+      const opensTrailProfile = offlineEntityKind === 'trail_profile'
+        || (offlineEntityKind !== 'place' && Boolean(
+          (offlinePlace as any).geometry_ref || (offlinePlace as any).profile_id,
+        ));
+      if (opensTrailProfile) {
+        setPendingMapSelection({
+          kind: 'trail',
+          trail: {
+            id: offlinePlace.id,
+            name: offlinePlace.name,
+            lat: offlinePlace.lat,
+            lng: offlinePlace.lng,
+            icon: 'flag',
+            note: offlinePlace.summary || offlinePlace.address || 'Downloaded trail',
+            trailId: canonicalId || offlinePlace.provider_place_id || offlinePlace.id,
+            geometryRef: (offlinePlace as any).geometry_ref,
+            sourceLabel: offlinePlace.source_label || 'Downloaded',
+            createdAt: Date.now(),
+          },
+        });
+        router.push('/(tabs)/map');
+      } else {
+        setSelectedLivePlace(offlinePlace);
+      }
+      return;
+    }
+
+    if (canonicalId && selected.kind === 'trail') {
+      try {
+        const trail = await api.getTrailProfile(canonicalId);
+        if (!selectionIsCurrent()) return;
+        setPendingMapSelection({
+          kind: 'trail',
+          trail: {
+            id: trail.id,
+            name: trail.name,
+            lat: trail.lat,
+            lng: trail.lng,
+            icon: 'flag',
+            note: trail.summary || trail.description || 'Trail',
+            trailId: trail.id,
+            geometryRef: trail.geometry_ref,
+            sourceLabel: trail.source_label || trail.source || 'Trailhead',
+            createdAt: Date.now(),
+          },
+        });
+        setExploreSearchOpen(false);
+        setExploreSearchDraft(trail.name);
+        setExploreOpeningResultId(null);
+        exploreSearchV2.pause();
+        router.push('/(tabs)/map');
+        return;
+      } catch {
+        // Explore hubs can legitimately use the `trail` category without
+        // owning a trail-profile row. Fall through to the exact canonical
+        // Explore lookup below; never substitute a title match.
+        if (!selectionIsCurrent()) return;
+      }
+    }
+
+    let profile = canonicalId
+      ? enrichedExplorePlaces.find(place => place.id === canonicalId)
+      : undefined;
+    if (!profile && canonicalId) {
+      try {
+        profile = await api.getExplorePlace(canonicalId);
+        if (!selectionIsCurrent()) return;
+        const nextProfile = profile;
+        setExplorePlaces(current => current.some(place => place.id === nextProfile.id)
+          ? current
+          : [nextProfile, ...current]);
+      } catch {
+        profile = undefined;
+      }
+    }
+    if (profile) {
+      if (!selectionIsCurrent()) return;
+      setExploreSearchOpen(false);
+      setExploreSearchDraft(profile.summary.title || selected.title);
+      setExploreOpeningResultId(null);
+      exploreSearchV2.pause();
+      await openExplorePlace(profile);
+      return;
+    }
+    if (!canonicalId && selected.coordinates) {
+      const temporary = isTemporarySearchResultV2(selected);
+      if (!selectionIsCurrent()) return;
+      setExploreSearchOpen(false);
+      setExploreSearchDraft(selected.title);
+      setExploreOpeningResultId(null);
+      exploreSearchV2.pause();
+      setSelectedLivePlace({
+        id: selected.result_id,
+        name: selected.title,
+        lat: selected.coordinates.lat,
+        lng: selected.coordinates.lng,
+        type: selected.kind || 'place',
+        subtype: selected.categories[0] || selected.kind || 'place',
+        address: selected.subtitle || selected.parent || undefined,
+        source: temporary && selected.provenance.provider === 'mapbox'
+          ? 'mapbox_search'
+          : selected.provenance.provider,
+        source_label: 'Search result',
+        persistence_policy: selected.persistence_policy,
+        temporary_use_only: temporary,
+      } as OsmPoi);
+      return;
+    }
+    if (selectionIsCurrent()) {
+      setExploreOpeningResultId(null);
+      setExploreSearchSelectionError('That place could not open. Try it again.');
+    }
+  }
+
   function renderLandingHeader() {
     return (
       <View style={s.landingHeader}>
@@ -5256,9 +5681,16 @@ function GuideScreenContent() {
           mode={exploreMode}
           weather={heroWeather}
           hideSearch={guidedCategoryActive}
-	          hideCategories
-	          showWeather={exploreMode === 'nearby' && !!exploreNearbySearchCenter}
-	          onQueryChange={handleExploreQueryChange}
+          hideCategories
+          showWeather={exploreMode === 'nearby' && !!exploreNearbySearchCenter}
+          onOpenSearch={searchV2Enabled ? () => {
+            exploreSearchSelectionSeq.current += 1;
+            setExploreSearchSelectionError('');
+            setExploreOpeningResultId(null);
+            setExploreSearchDraft(exploreQuery);
+            setExploreSearchOpen(true);
+          } : undefined}
+          onQueryChange={handleExploreQueryChange}
           onClearQuery={() => handleExploreQueryChange('')}
           onCategorySelect={selectExploreHomeCategory}
           onOpenOriginals={() => router.push('/originals' as any)}
@@ -5847,6 +6279,38 @@ function GuideScreenContent() {
           </>
         )}
       </ScrollView>
+
+      <SearchV2Sheet
+        visible={searchV2Enabled && exploreSearchOpen}
+        query={exploreSearchDraft}
+        settledQuery={exploreSearchV2.state.query}
+        results={exploreSearchOwnerIsCurrent
+          && normalizeSearchV2Query(exploreSearchDraft) === exploreSearchV2.state.query
+          ? exploreSearchV2.state.results
+          : []}
+        mode={exploreSearchV2.state.mode}
+        status={exploreSearchV2.state.status}
+        loadingPresentation={exploreSearchV2.state.loadingPresentation}
+        isEnriching={exploreSearchV2.state.isEnriching || exploreSearchV2.state.loadingMore}
+        resolvingResultId={exploreOpeningResultId || exploreSearchV2.state.resolvingResultId}
+        selectionError={exploreSearchSelectionError || (exploreSearchV2.state.resolveError
+          ? 'That result could not open. Try it again.'
+          : '')}
+        hasMore={exploreSearchV2.state.hasMore}
+        loadMoreError={exploreSearchV2.state.loadMoreError ? 'More results could not load.' : ''}
+        guidedQuery={isExplicitTourOnlyQuery(exploreSearchDraft) ? exploreSearchDraft.trim() : ''}
+        unitMode={weatherUnitMode}
+        onQueryChange={updateExploreSearchDraft}
+        onSearchAll={() => {
+          if (normalizeSearchV2Query(exploreSearchDraft).length >= 2) {
+            void exploreSearchV2.search(exploreSearchDraft);
+          }
+        }}
+        onSelect={result => { void selectExploreSearchResult(result); }}
+        onLoadMore={() => { void exploreSearchV2.loadNextPage(); }}
+        onOpenGuided={openGuidedTripsFromSearch}
+        onClose={closeExploreSearch}
+      />
 
       {renderGuidedDateSheet()}
       {renderGuidedFilterSheet()}

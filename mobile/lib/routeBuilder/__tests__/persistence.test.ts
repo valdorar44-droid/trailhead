@@ -112,4 +112,29 @@ assertPersistenceContract(
   'coordinate and day matching removes a legacy duplicate',
 );
 
+const durableExternal = readPersistedRouteBuilderState({
+  stops: [{
+    id: 'durable-place',
+    day: 1,
+    name: 'Moab Information Center',
+    lat: 38.5734,
+    lng: -109.5499,
+    type: 'waypoint',
+    description: 'Saved stop',
+    land_type: 'route',
+    source: 'search',
+    persistence_policy: 'durable_external',
+    temporary_use_only: false,
+    search_provider: 'geoapify',
+    provider_result_id: '51abc123',
+    source_attribution: 'OpenStreetMap contributors',
+  }],
+});
+assertPersistenceContract(
+  durableExternal?.stops[0].persistence_policy === 'durable_external'
+    && durableExternal.stops[0].provider_result_id === '51abc123'
+    && durableExternal.stops[0].source_attribution === 'OpenStreetMap contributors',
+  'resolved external destination identity and attribution survive route draft reload',
+);
+
 console.log('Route Builder persistence contract passed.');

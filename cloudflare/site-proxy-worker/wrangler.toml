@@ -1,0 +1,7 @@
+name = "trailhead-site-proxy"
+main = "src/worker.js"
+compatibility_date = "2026-07-22"
+
+# Custom domains are managed in Cloudflare so the same worker serves both:
+# - gettrailhead.app
+# - www.gettrailhead.app

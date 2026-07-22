@@ -35,6 +35,15 @@ export type OfflineBundleStageV2 = Readonly<{
   final_directory_uri: string;
 }>;
 
+export type OfflineBundleCommitOptionsV2 = Readonly<{
+  /**
+   * Replaces a damaged local copy with the exact same immutable revision.
+   * The staged manifest and every required artifact are still verified before
+   * the previous directory is swapped out atomically.
+   */
+  repair?: boolean;
+}>;
+
 export interface OfflineBundleManifestRepository {
   verifyManifest(manifest: OfflineBundleManifestV2): Promise<void>;
   saveManifest(manifest: OfflineBundleManifestV2): Promise<string>;
@@ -46,9 +55,12 @@ export interface OfflineBundleManifestRepository {
     stage: OfflineBundleStageV2,
     installation: OfflineBundleInstallationV2,
     receipt: OfflineBundleCommitReceiptV2,
+    options?: OfflineBundleCommitOptionsV2,
   ): Promise<void>;
   getInstallation(bundleId: string, revision: string): Promise<OfflineBundleInstallationV2 | null>;
   getCurrentInstallation(bundleId: string): Promise<OfflineBundleInstallationV2 | null>;
+  listCurrentInstallations(): Promise<readonly OfflineBundleInstallationV2[]>;
+  removeCurrentInstallation(bundleId: string): Promise<OfflineBundleInstallationV2 | null>;
 }
 
 function joinPath(root: string, ...parts: string[]) {
@@ -137,6 +149,39 @@ export function createOfflineBundleManifestRepository(
     joinPath(root, 'bundles', safePart(bundleId), safePart(revision))
   );
   const currentPath = (bundleId: string) => joinPath(root, 'bundles', safePart(bundleId), '_current.json');
+  const bundleIndexPath = joinPath(root, 'bundles', '_bundle_ids.json');
+
+  const readBundleIdsInternal = async () => {
+    await recover(storage, bundleIndexPath);
+    if (!(await storage.info(bundleIndexPath)).exists) return [] as string[];
+    try {
+      const parsed = JSON.parse(await storage.readText(bundleIndexPath));
+      if (!Array.isArray(parsed?.bundle_ids)) return [] as string[];
+      const ids: string[] = parsed.bundle_ids
+        .map((value: unknown) => String(value))
+        .filter((value: string) => Boolean(value));
+      return [...new Set<string>(ids)].sort();
+    } catch {
+      return [] as string[];
+    }
+  };
+
+  const getCurrentInstallationInternal = async (bundleId: string) => {
+    const pointer = currentPath(bundleId);
+    await recover(storage, pointer);
+    if (!(await storage.info(pointer)).exists) return null;
+    try {
+      const revision = String(JSON.parse(await storage.readText(pointer))?.revision || '');
+      if (!revision) return null;
+      const directory = installRoot(bundleId, revision);
+      const path = joinPath(directory, 'installation.json');
+      await recover(storage, directory);
+      if (!(await storage.info(path)).exists) return null;
+      return parseInstallation(await storage.readText(path));
+    } catch {
+      return null;
+    }
+  };
 
   const verifyManifestDigestInternal = async (manifestInput: OfflineBundleManifestV2) => {
     const manifest = validateOfflineBundleManifest(manifestInput);
@@ -226,7 +271,7 @@ export function createOfflineBundleManifestRepository(
       return serialized(() => storage.remove(stage.directory_uri).catch(() => undefined));
     },
 
-    commitStage(stage, installation, receipt) {
+    commitStage(stage, installation, receipt, options = {}) {
       return serialized(async () => {
         const stagedManifestPath = joinPath(stage.directory_uri, 'manifest.json');
         if (!(await storage.info(stagedManifestPath)).exists) {
@@ -288,12 +333,33 @@ export function createOfflineBundleManifestRepository(
             throw new Error(`Required artifact ${artifact.id} has an invalid final path.`);
           }
         }
-        if ((await storage.info(stage.final_directory_uri)).exists) {
+        const liveExists = (await storage.info(stage.final_directory_uri)).exists;
+        if (liveExists && !options.repair) {
           throw new Error(`Offline installation ${stage.bundle_id}@${stage.revision} is immutable.`);
+        }
+        if (liveExists) {
+          const previousPath = joinPath(stage.final_directory_uri, 'installation.json');
+          const previous = (await storage.info(previousPath)).exists
+            ? parseInstallation(await storage.readText(previousPath))
+            : null;
+          if (!previous
+            || previous.bundle_id !== installation.bundle_id
+            || previous.revision !== installation.revision
+            || previous.manifest_sha256.toLowerCase() !== installation.manifest_sha256.toLowerCase()) {
+            throw new Error('A repair can only replace the same immutable bundle revision.');
+          }
         }
         await storage.writeText(joinPath(stage.directory_uri, 'installation.json'), JSON.stringify(installation));
         await promote(storage, stage.directory_uri, stage.final_directory_uri);
         await writeAtomically(storage, currentPath(stage.bundle_id), JSON.stringify({ revision: stage.revision }));
+        const bundleIds = await readBundleIdsInternal();
+        if (!bundleIds.includes(stage.bundle_id)) {
+          await writeAtomically(
+            storage,
+            bundleIndexPath,
+            JSON.stringify({ schema_version: 1, bundle_ids: [...bundleIds, stage.bundle_id].sort() }),
+          );
+        }
       });
     },
 
@@ -308,20 +374,40 @@ export function createOfflineBundleManifestRepository(
     },
 
     getCurrentInstallation(bundleId) {
+      return serialized(() => getCurrentInstallationInternal(bundleId));
+    },
+
+    listCurrentInstallations() {
       return serialized(async () => {
-        const pointer = currentPath(bundleId);
-        await recover(storage, pointer);
-        if (!(await storage.info(pointer)).exists) return null;
-        try {
-          const revision = String(JSON.parse(await storage.readText(pointer))?.revision || '');
-          if (!revision) return null;
-          const path = joinPath(installRoot(bundleId, revision), 'installation.json');
-          await recover(storage, installRoot(bundleId, revision));
-          if (!(await storage.info(path)).exists) return null;
-          return parseInstallation(await storage.readText(path));
-        } catch {
-          return null;
-        }
+        const installations = await Promise.all(
+          (await readBundleIdsInternal()).map(bundleId => getCurrentInstallationInternal(bundleId)),
+        );
+        return Object.freeze(
+          installations
+            .filter((item): item is OfflineBundleInstallationV2 => Boolean(item))
+            .sort((left, right) => right.installed_at_ms - left.installed_at_ms),
+        );
+      });
+    },
+
+    removeCurrentInstallation(bundleId) {
+      return serialized(async () => {
+        const installation = await getCurrentInstallationInternal(bundleId);
+        if (!installation) return null;
+        // This method is used only by the explicit user-facing Remove action.
+        // Remove retained previous-good revisions and stale stages as well so
+        // the storage summary cannot claim bytes were freed while hidden bundle
+        // data remains on device.
+        await storage.remove(joinPath(root, 'bundles', safePart(bundleId))).catch(() => undefined);
+        await storage.remove(joinPath(root, 'manifests', safePart(bundleId))).catch(() => undefined);
+        await storage.remove(joinPath(root, '_staging', safePart(bundleId))).catch(() => undefined);
+        const bundleIds = (await readBundleIdsInternal()).filter(id => id !== bundleId);
+        await writeAtomically(
+          storage,
+          bundleIndexPath,
+          JSON.stringify({ schema_version: 1, bundle_ids: bundleIds }),
+        );
+        return installation;
       });
     },
   };

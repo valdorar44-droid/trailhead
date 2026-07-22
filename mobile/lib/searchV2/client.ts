@@ -124,8 +124,8 @@ export function normalizeRequest(request: SearchRequestV2, mode: SearchPageModeV
   const scope = request.scope ?? 'global';
   if (scope === 'viewport' && !request.bounds) throw new TypeError('Viewport search requires bounds.');
   if (scope === 'nearby' && !request.center) throw new TypeError('Nearby search requires a center.');
-  if (scope === 'route') throw new TypeError('Route search is not supported in this Search V2 rollout.');
-  if (request.route_ref) throw new TypeError('Route references are only valid with route search.');
+  if (scope === 'route' && !request.route_ref) throw new TypeError('Route search requires a route reference.');
+  if (request.route_ref && scope !== 'route') throw new TypeError('Route references are only valid with route search.');
   if (request.bounds && scope !== 'viewport' && scope !== 'offline') {
     throw new TypeError('Bounds are only valid for viewport or offline search.');
   }
@@ -136,12 +136,17 @@ export function normalizeRequest(request: SearchRequestV2, mode: SearchPageModeV
       throw new TypeError('Search radius must be between 100 and 250000 meters.');
     }
   }
-  if (request.filters && Object.keys(request.filters).length) {
-    throw new TypeError('Search filters are not supported in this Search V2 rollout.');
+  const hasSelectedResult = Boolean(request.selected_result_id);
+  const hasSelectedDetail = Boolean(request.selected_detail_ref);
+  if (hasSelectedResult !== hasSelectedDetail) {
+    throw new TypeError('Explicit search selection requires both result and detail references.');
   }
   const includeExternal = request.include_external ?? (Boolean(request.session_id) && scope !== 'offline');
   if (scope === 'offline' && includeExternal) throw new TypeError('Offline search cannot use external providers.');
   if (includeExternal && !request.session_id) throw new TypeError('External search requires a session identifier.');
+  if (hasSelectedResult && (!request.session_id || !includeExternal)) {
+    throw new TypeError('External result selection requires its original search session.');
+  }
   return {
     ...request,
     query,

@@ -20,8 +20,11 @@ import { cleanExploreSourceLabel } from '@/lib/exploreContextFilters';
 
 export type MapSearchResultItem = {
   name: string;
-  lat: number;
-  lng: number;
+  lat?: number;
+  lng?: number;
+  result_id?: string;
+  resolution_required?: boolean;
+  resolving?: boolean;
   source?: string;
   source_label?: string;
   type?: string;
@@ -167,7 +170,7 @@ export default function MapSearchSheet({
                 ) : (
                   usableResults.slice(0, 18).map((place, idx) => (
                     <ResultRow
-                      key={`${place.name}:${place.lat}:${place.lng}:${idx}`}
+                      key={place.result_id || `${place.name}:${place.lat ?? 'pending'}:${place.lng ?? 'pending'}:${idx}`}
                       place={place}
                       colors={C}
                       styles={s}
@@ -252,7 +255,11 @@ function ResultRow({
         )}
       </View>
       <TouchableOpacity style={styles.routeBtn} onPress={onRoute} hitSlop={8}>
-        <Ionicons name="navigate-outline" size={16} color={colors.orange} />
+        {place.resolving ? (
+          <ActivityIndicator size="small" color={colors.orange} />
+        ) : (
+          <Ionicons name="navigate-outline" size={16} color={colors.orange} />
+        )}
       </TouchableOpacity>
     </TouchableOpacity>
   );

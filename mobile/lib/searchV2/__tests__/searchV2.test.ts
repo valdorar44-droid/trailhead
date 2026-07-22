@@ -67,6 +67,43 @@ test('HTTP client serializes scoped search and forwards cancellation and auth', 
   assert.equal((calls[0].init?.headers as Record<string, string>).Authorization, 'Bearer test');
 });
 
+test('HTTP client resolves only an explicitly selected provider row with its original session', async () => {
+  const calls: Array<{ url: string; init?: RequestInit }> = [];
+  const selected = makeResult('mapbox:place.moab', 'Moab');
+  selected.persistence_policy = 'temporary';
+  selected.provenance = {
+    provider: 'mapbox', source_label: 'Mapbox search', provider_result_id: 'place.moab', temporary_use_only: true,
+  };
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    fetchImpl: (async (url: string | URL | Request, init?: RequestInit) => {
+      calls.push({ url: String(url), init });
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({
+          query: 'Moab', status: 'resolved', selected, alternatives: [], reason: 'explicit_selection', revision: 'r2',
+        }),
+      } as Response;
+    }) as typeof fetch,
+  });
+
+  await client.resolve({
+    query: 'Moab', surface: 'map', intent: 'destination', scope: 'global',
+    session_id: 'session-original', include_external: true,
+    selected_result_id: 'mapbox:place.moab',
+    selected_detail_ref: 'provider:mapbox:place.moab:0123456789abcdef0123456789abcdef',
+  });
+
+  assert.equal(calls.length, 1);
+  assert.equal(new URL(calls[0].url).pathname, '/api/search/v2/resolve');
+  const body = JSON.parse(String(calls[0].init?.body));
+  assert.equal(body.session_id, 'session-original');
+  assert.equal(body.selected_result_id, 'mapbox:place.moab');
+  assert.equal(body.selected_detail_ref, 'provider:mapbox:place.moab:0123456789abcdef0123456789abcdef');
+});
+
 test('typeahead shows offline and canonical rows immediately, then debounces provider fallback', async () => {
   const scheduler = new ManualScheduler();
   const canonical = deferred<SearchPageV2>();
@@ -118,6 +155,35 @@ test('typeahead shows offline and canonical rows immediately, then debounces pro
   assert.equal(controller.getState().selectedResult, null);
   assert.equal(controller.selectResult('server-moab')?.title, 'Moab');
   assert.equal(controller.getState().selectedResult?.result_id, 'server-moab');
+});
+
+test('pausing cancels pending work without clearing warm search results', async () => {
+  const scheduler = new ManualScheduler();
+  const canonical = deferred<SearchPageV2>();
+  let calls = 0;
+  const controller = new SearchV2SessionController({
+    client: pageClient({ suggest: async () => {
+      calls += 1;
+      return canonical.promise;
+    } }),
+    context: { surface: 'route_editor' },
+    debounceMs: 220,
+    scheduler,
+    offlineProvider: () => [makeResult('offline-moab', 'Moab offline', 'canonical-moab')],
+  });
+
+  controller.setQuery('Moab');
+  assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab offline']);
+  controller.pause();
+  assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab offline']);
+  assert.equal(controller.getState().status, 'ready');
+  assert.equal(controller.getState().isEnriching, false);
+
+  canonical.resolve(makePage([makeResult('server-moab', 'Moab', 'canonical-moab')]));
+  await flushPromises();
+  scheduler.advance(220);
+  assert.equal(calls, 1);
+  assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab offline']);
 });
 
 test('one typed character may show offline suggestions without making a server request', () => {
@@ -172,14 +238,14 @@ test('offline scope never calls the HTTP search client', async () => {
   assert.deepEqual(controller.getState().results.map(item => item.title), ['Moab']);
 });
 
-test('client rejects unsupported search semantics before transport', () => {
+test('client validates scoped search and explicit-selection pairs before transport', () => {
   assert.throws(
-    () => normalizeRequest({ query: 'Moab', filters: { free: true } }, 'results'),
-    /filters are not supported/i,
+    () => normalizeRequest({ query: 'Moab', scope: 'route' }, 'results'),
+    /requires a route reference/i,
   );
   assert.throws(
-    () => normalizeRequest({ query: 'Moab', scope: 'route', route_ref: 'trip:1' }, 'results'),
-    /route search is not supported/i,
+    () => normalizeRequest({ query: 'Moab', selected_result_id: 'mapbox:one' }, 'results'),
+    /both result and detail references/i,
   );
   assert.throws(
     () => normalizeRequest({ query: 'Moab', include_external: true }, 'results'),
@@ -193,6 +259,92 @@ test('client rejects unsupported search semantics before transport', () => {
     session_id: 'session-nearby',
   }, 'results');
   assert.equal(nearby.radius_meters, 5_000);
+  const route = normalizeRequest({
+    query: 'fuel', scope: 'route', route_ref: 'trip:1', filters: { open_now: true },
+    session_id: 'session-route',
+  }, 'results');
+  assert.equal(route.route_ref, 'trip:1');
+  assert.equal(route.filters?.open_now, true);
+});
+
+test('coordinate-less provider suggestions resolve only after their row is pressed', async () => {
+  const resolveRequests: SearchRequestV2[] = [];
+  const unresolved = makeResult('mapbox:place.moab', 'Moab');
+  unresolved.coordinates = null;
+  unresolved.canonical_place_id = null;
+  unresolved.persistence_policy = 'temporary';
+  unresolved.detail_ref = 'provider:mapbox:place.moab:0123456789abcdef0123456789abcdef';
+  unresolved.provenance = {
+    provider: 'mapbox', source_label: 'Mapbox search', provider_result_id: 'place.moab', temporary_use_only: true,
+  };
+  const resolved = { ...unresolved, coordinates: { lat: 38.5733, lng: -109.5498 } };
+  const controller = new SearchV2SessionController({
+    client: pageClient({
+      suggest: async () => makePage([unresolved]),
+      resolve: async request => {
+        resolveRequests.push(request);
+        return {
+          query: request.query, status: 'resolved', selected: resolved,
+          alternatives: [], reason: 'explicit_selection', revision: 'resolved-r2',
+        };
+      },
+    }),
+    context: {
+      surface: 'map', intent: 'destination', scope: 'nearby',
+      center: { lat: 38.57, lng: -109.55 }, include_external: true,
+    },
+    createSessionId: () => 'session-original',
+  });
+
+  controller.setQuery('Moab');
+  await flushPromises();
+  assert.equal(resolveRequests.length, 0);
+  assert.equal(controller.getState().results[0].coordinates, null);
+
+  const selection = controller.resolveResult(unresolved.result_id);
+  assert.equal(controller.getState().resolvingResultId, unresolved.result_id);
+  const selected = await selection;
+  assert.equal(resolveRequests.length, 1);
+  assert.equal(resolveRequests[0].session_id, 'session-original');
+  assert.deepEqual(resolveRequests[0].center, { lat: 38.57, lng: -109.55 });
+  assert.equal(resolveRequests[0].selected_result_id, unresolved.result_id);
+  assert.equal(resolveRequests[0].selected_detail_ref, unresolved.detail_ref);
+  assert.equal(selected?.coordinates?.lat, 38.5733);
+  assert.equal(controller.getState().selectedResult?.result_id, unresolved.result_id);
+  assert.equal(controller.getState().resolvingResultId, null);
+});
+
+test('typing a new query cancels an in-flight explicit selection without committing it', async () => {
+  const pendingResolve = deferred<Awaited<ReturnType<SearchV2Client['resolve']>>>();
+  const unresolved = makeResult('mapbox:place.moab', 'Moab');
+  unresolved.coordinates = null;
+  unresolved.persistence_policy = 'temporary';
+  unresolved.detail_ref = 'provider:mapbox:place.moab:0123456789abcdef0123456789abcdef';
+  unresolved.provenance = {
+    provider: 'mapbox', source_label: 'Mapbox search', provider_result_id: 'place.moab', temporary_use_only: true,
+  };
+  const controller = new SearchV2SessionController({
+    client: pageClient({
+      suggest: async request => makePage(request.query === 'Moab' ? [unresolved] : [makeResult('arches', 'Arches')]),
+      resolve: async () => pendingResolve.promise,
+    }),
+    context: { surface: 'map' },
+    createSessionId: () => 'session-original',
+  });
+  controller.setQuery('Moab');
+  await flushPromises();
+  const selecting = controller.resolveResult(unresolved.result_id);
+  controller.setQuery('Arches');
+  pendingResolve.resolve({
+    query: 'Moab', status: 'resolved',
+    selected: { ...unresolved, coordinates: { lat: 38.57, lng: -109.55 } },
+    alternatives: [], reason: 'explicit_selection', revision: 'old',
+  });
+  await selecting;
+  await flushPromises();
+  assert.equal(controller.getState().query, 'Arches');
+  assert.equal(controller.getState().selectedResult, null);
+  assert.equal(controller.getState().resolvingResultId, null);
 });
 
 test('canonical-only contexts skip the provider pass and finish without a debounce wait', async () => {

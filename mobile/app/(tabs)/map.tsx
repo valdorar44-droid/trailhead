@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useMemo, useCallback, Component, forwardRef, useImperativeHandle, type ForwardRefExoticComponent, type RefAttributes } from 'react';
+import { useEffect, useRef, useState, useMemo, useCallback, useReducer, Component, forwardRef, useImperativeHandle, type ForwardRefExoticComponent, type RefAttributes } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Linking, Animated, TextInput, ActivityIndicator, Modal, Image, Share, Alert, AppState, Keyboard, KeyboardAvoidingView, Platform, PanResponder, useWindowDimensions, InteractionManager, type ViewProps } from 'react-native';
 import { requireOptionalNativeModule } from 'expo-modules-core';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -14,11 +14,13 @@ import CampNearbyPlacesSection from '@/components/map/CampNearbyPlacesSection';
 import CampReviewsSection from '@/components/map/CampReviewsSection';
 import CampEditSheet, { type CampEditDraft } from '@/components/map/CampEditSheet';
 import TrailheadSnapSheet from '@/components/map/TrailheadSnapSheet';
+import PlaceSheetShell, { PlaceSheetHeroChrome } from '@/components/map/PlaceSheetShell';
+import FirstPartyRatingSection from '@/components/map/FirstPartyRatingSection';
 import MapDrawerSheet from '@/components/map/MapDrawerSheet';
 import MapFilterSheet from '@/components/map/MapFilterSheet';
 import MapLegendSheet from '@/components/map/MapLegendSheet';
 import MapLayerSheetContent from '@/components/map/MapLayerSheetContent';
-import MapSearchSheet, { type MapSearchQuickAction } from '@/components/map/MapSearchSheet';
+import MapSearchSheet, { type MapSearchQuickAction, type MapSearchResultItem } from '@/components/map/MapSearchSheet';
 import MapStyleSheet from '@/components/map/MapStyleSheet';
 import MapWeatherPeek from '@/components/map/MapWeatherPeek';
 import MapWeatherSheet from '@/components/map/MapWeatherSheet';
@@ -61,7 +63,7 @@ import {
   setCarTrailFollow,
   type CarNavigationMode,
 } from '@/lib/carIntegration';
-import { api, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, RouteBrief, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
+import { api, ApiError, PaywallError, Report, Pin, CampsitePin, CampsiteDetail, OsmPoi, WikiArticle, CampsiteInsight, PackingList, CampFullness, WeatherForecast, RouteWeatherResult, CampFieldReport, FieldReportSummary, FieldReportSentiment, FieldReportAccess, FieldReportCrowd, CampComment, Waypoint, TripResult, TrailProfile, MapCardResolveResponse, WaterNavigationLinesResponse, WaterConditionsResponse, WaterSpotCard, WaterSpotCardsResponse, FishingConditionsResponse, SuggestedWaterCorridorResponse, type BookableExperience, type BriefAndBackupV1, type GasStation, type GeocodePlace, type ExtremeConfig, type CopilotContext, type MapActionRequest, type MapSelectableFeature, type RouteCampWindowInput, type RouteCampWindowResult, type RouteScoutDayPlan, type RouteScoutState, type TrailPreviewManifest, type DispersedLead, type MissionControlBrief, type SavedRouteGeometryPayload } from '@/lib/api';
 import { TRAILHEAD_API_BASE } from '@/lib/apiBase';
 import { trackPhase0Event, trackPhase0Once } from '@/lib/telemetry';
 import { loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
@@ -83,13 +85,33 @@ import {
   routeWeatherResultFromCache,
   routeWeatherWaypointSignature,
 } from '@/lib/routeWeather';
-import { localRouteBrief, normalizeRouteBrief } from '@/lib/routeBrief';
+import {
+  briefAvailabilityLabel,
+  briefEvidenceStatusLabel,
+  briefRouteProgressLabel,
+  createBriefAndBackupIdempotencyKey,
+  exactSavedTripRevision,
+} from '@/lib/briefAndBackup';
 import { routeUnitsParam } from '@/lib/routeBuilder/units';
 import { shouldPersistTripRoute, type RoutePersistenceScope } from '@/lib/routePersistencePolicy';
 import type { RouteBuildPreviewStop } from '@/lib/routeBuildSession';
 import { loadOfflineTrail, saveOfflineTrail } from '@/lib/offlineTrails';
 import { trailRouteGraphLocalPath } from '@/lib/useOfflineFiles';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
+import {
+  EMPTY_EXPO_OFFLINE_V2_CATALOG,
+  loadExpoOfflineV2Catalog,
+  mergeOfflinePoiInventory,
+  searchExpoOfflineV2Catalog,
+} from '@/lib/offlineV2/expoCatalog';
+import { resolveDownloadedSearchResultPoi } from '@/lib/offlineV2/offlineSearchPresentation';
+import {
+  isOfflineV2CampPin,
+  offlineV2CampPinToDetail,
+  offlineV2PlaceToCampPin,
+} from '@/lib/offlineV2/campDetail';
+import { resolveActiveOfflineRendererStyleId } from '@/lib/offlineV2/activeStyle';
+import { setActiveNativeMapRenderer } from '@/lib/nativeMapRendererState';
 import {
   buildCampNearbyGroups,
   isLowValueGenericBlmPlace,
@@ -135,12 +157,45 @@ import PaywallModal from '@/components/PaywallModal';
 import AppReviewPrompt from '@/components/AppReviewPrompt';
 import AiReportModal from '@/components/AiReportModal';
 import { useTheme, mono, ColorPalette } from '@/lib/design';
+import { trailheadFonts } from '@/lib/typography';
 import { MAP_MODE_PRESETS, legendCategoryForPreset, mapModePresetTitle, type MapModePresetId } from '@/lib/mapLegend';
 import { CREDIT_REWARDS } from '@/lib/credits';
 import { useConnectivitySync } from '@/lib/connectivitySync';
 import { completeLegacyMapSearch } from '@/lib/legacyMapSearchPolicy';
 import { useScreenActivity } from '@/lib/screenActivity';
-import { mapLocationWatchShouldRun } from '@/lib/screenActivityState';
+import { mapLocationWatchShouldRun, mapVisualWorkShouldRun } from '@/lib/screenActivityState';
+import { useKeyboardInset } from '@/lib/keyboardInset';
+import { mapModeOwnsRoutePreview, resolveMapExperienceMode } from '@/lib/mapExperienceMode';
+import { communityRatingTarget } from '@/lib/communityRatingEligibility';
+import {
+  initialMapLayersFiltersState,
+  mapLayersFiltersReducer,
+  resolveLayersFiltersEntry,
+  type LayersFiltersEntry,
+  type LayersFiltersReturnContext,
+} from '@/lib/mapLayersFiltersController';
+import {
+  adaptCampgroundSheet,
+  adaptCommunityReportSheet,
+  adaptGenericPlaceSheet,
+  adaptTrailSheet,
+  type PlaceSheetModel,
+} from '@/lib/placeSheetAdapters';
+import {
+  initialSheetCoordinatorState,
+  sheetCoordinatorReducer,
+  sheetRequestIsCurrent,
+  type SheetIdentity,
+} from '@/lib/sheetCoordinator';
+import { useProductFeatures } from '@/lib/useProductFeatures';
+import {
+  offlineSearchResultsV2,
+  normalizeSearchV2Query,
+  productFeaturesAllowSearchV2,
+  searchResultV2ToDisplayPlace,
+  searchResultV2ToLegacyPlace,
+  useSearchV2Session,
+} from '@/lib/searchV2';
 import { useTabBarVisibility } from '@/lib/tabBarVisibility';
 import { playTrailheadCue, playTrailheadVoice, preloadTrailheadVoice, stopTrailheadVoice } from '@/lib/voice';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
@@ -1206,7 +1261,7 @@ function campMobileCoverage(detail?: CampsiteDetail | null, camp?: CampsitePin |
 }
 
 type SavedAiKind = 'route_brief' | 'packing_list';
-type SavedAiPayload = RouteBrief | PackingList;
+type SavedAiPayload = PackingList;
 
 function tripAiFingerprint(trip: TripResult, kind: SavedAiKind): string {
   const wps = usableTripWaypoints(trip.plan.waypoints).map(w => ({
@@ -5898,6 +5953,8 @@ function MapScreen() {
   const filterBottomSpacer = Platform.OS === 'android' ? Math.max(insets.bottom + 130, 150) : Math.max(insets.bottom + 34, 52);
   const router = useRouter();
   const screenActivity = useScreenActivity();
+  const { features: productFeatures } = useProductFeatures(screenActivity.isActive);
+  const searchV2Enabled = productFeaturesAllowSearchV2(productFeatures);
   const activeTrip = useStore(st => st.activeTrip);
   const setActiveTrip = useStore(st => st.setActiveTrip);
   const activeTripFromCache = useStore(st => st.activeTripFromCache);
@@ -6126,6 +6183,7 @@ function MapScreen() {
   const [routeSourceDebug, setRouteSourceDebug] = useState('');
   const [mapLayer,    setMapLayerState] = useState<MapLayer>(DEFAULT_MAP_LAYER);
   const [premiumMapStyle, setPremiumMapStyle] = useState<PremiumMapStyle>('standard');
+  const activeOfflineRendererStyleId = resolveActiveOfflineRendererStyleId(mapLayer, premiumMapStyle);
   const [extremeTrafficEnabled, setExtremeTrafficEnabled] = useState(false);
   const extremeMapboxSupported = Platform.OS !== 'android' || extremeMapboxCapabilities?.supported === true;
   const extremeMapLayerActive = mapLayer === 'extreme';
@@ -6267,11 +6325,13 @@ function MapScreen() {
   const [routeProgress, setRouteProgress] = useState<{ distanceM: number; remainingM: number; routeDistanceM: number; deviationM: number; segmentIdx: number } | null>(null);
   const [selectOnMapMode, setSelectOnMapMode] = useState(false);
   const [searchQuery,  setSearchQuery]  = useState('');
+  const searchQueryRef = useRef(searchQuery);
+  searchQueryRef.current = searchQuery;
   const [searchResults,setSearchResults] = useState<SearchPlace[]>([]);
   const [mapSearchSession, setMapSearchSession] = useState<ScopedMapSearchSession | null>(null);
   const [inlineSearchOpen, setInlineSearchOpen] = useState(false);
   const [showFullMapSearch, setShowFullMapSearch] = useState(false);
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const { visible: keyboardVisible } = useKeyboardInset();
   const inlineSearchInputRef = useRef<TextInput | null>(null);
   const [inlineSearchFocusRequest, setInlineSearchFocusRequest] = useState(0);
   const handledInlineSearchFocusRequestRef = useRef(0);
@@ -6292,21 +6352,6 @@ function MapScreen() {
   const [showSearch,   setShowSearch]   = useState(false);
   const [searchMode, setSearchMode] = useState<'browse' | 'route_pick'>('browse');
   const [isSearching,  setIsSearching]  = useState(false);
-
-  useEffect(() => {
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, () => {
-      setKeyboardVisible(true);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardVisible(false);
-    });
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
 
   useEffect(() => {
     if (
@@ -6356,6 +6401,11 @@ function MapScreen() {
   const [mapRendererMode, setMapRendererMode] = useState<'mapbox' | 'maplibre' | null>(
     initialMapboxToken ? 'mapbox' : null,
   );
+  useEffect(() => {
+    if (mapRendererMode) {
+      setActiveNativeMapRenderer(mapRendererMode === 'mapbox' ? 'rnmapbox' : 'maplibre');
+    }
+  }, [mapRendererMode]);
   const [mapCredentialsReady, setMapCredentialsReady] = useState(() => Boolean(initialMapboxToken));
   // Basemap rendering and route calculation are separate choices. A Mapbox
   // token must not silently replace a Trailhead route with a traffic route.
@@ -6368,8 +6418,17 @@ function MapScreen() {
     : extremeTrafficEnabled
       ? 'traffic'
       : 'trailhead';
-  const [showFilterSheet, setShowFilterSheet] = useState(false);
-  const [showMapLegendSheet, setShowMapLegendSheet] = useState(false);
+  const [layersFiltersState, dispatchLayersFilters] = useReducer(mapLayersFiltersReducer, initialMapLayersFiltersState);
+  const showFilterSheet = layersFiltersState.visible;
+  const showMapLegendSheet = layersFiltersState.legendVisible;
+  const setShowFilterSheet = useCallback((visible: boolean) => {
+    dispatchLayersFilters(visible
+      ? { type: 'open', entry: 'filters', returnContext: 'unknown' }
+      : { type: 'close' });
+  }, []);
+  const setShowMapLegendSheet = useCallback((visible: boolean) => {
+    dispatchLayersFilters({ type: visible ? 'open_legend' : 'close_legend' });
+  }, []);
   const [activeMapModePreset, setActiveMapModePreset] = useState<MapModePresetId>('default');
   const [activeFilters, setActiveFilters] = useState<string[]>(DEFAULT_CAMP_FILTERS);
   const [activePinFilters, setActivePinFilters] = useState<string[]>(DEFAULT_COMMUNITY_PIN_FILTERS);
@@ -6469,11 +6528,6 @@ function MapScreen() {
   }, [activeTrip, selectedCamp]);
 
   useEffect(() => {
-    if (!selectedCamp?.id) return;
-    loadCampDetailForCamp(selectedCamp, { loadInsight: hasPlan }).catch(() => {});
-  }, [selectedCamp?.id, selectedCamp?.lat, selectedCamp?.lng, hasPlan]);
-
-  useEffect(() => {
     if (!showAlerts || routeAlerts.length === 0) return;
     trackPhase0Once(
       `phase0:route-alerts:${activeTrip?.trip_id || 'none'}:${routeAlerts.map(alert => String(alert.id)).join(',')}`,
@@ -6520,6 +6574,78 @@ function MapScreen() {
   const [categoryUnlocking, setCategoryUnlocking] = useState(false);
   const [offlinePlacePois, setOfflinePlacePois] = useState<OsmPoi[]>([]);
   const [offlinePlaceCount, setOfflinePlaceCount] = useState(0);
+  const [offlineV2Catalog, setOfflineV2Catalog] = useState(EMPTY_EXPO_OFFLINE_V2_CATALOG);
+  const mapSearchV2OfflineProvider = useCallback(
+    async (request: Parameters<typeof offlineSearchResultsV2>[0]) => {
+      const indexed = await searchExpoOfflineV2Catalog(offlineV2Catalog, request, 'map');
+      const fallback = offlineSearchResultsV2(request, offlinePlacePois, 'map');
+      const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
+      return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
+    },
+    [offlinePlacePois, offlineV2Catalog],
+  );
+  const mapSearchV2Context = useMemo(() => ({
+    surface: 'map' as const,
+    intent: 'any' as const,
+    scope: 'global' as const,
+    center: userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
+    include_external: true,
+    limit: 10,
+  }), [userLoc?.lat, userLoc?.lng]);
+  const mapSearchV2 = useSearchV2Session({
+    enabled: searchV2Enabled,
+    active: screenActivity.isActive && (inlineSearchOpen || showFullMapSearch) && !navMode,
+    context: mapSearchV2Context,
+    offlineProvider: mapSearchV2OfflineProvider,
+  });
+
+  useEffect(() => {
+    if (!searchV2Enabled) {
+      setIsSearching(false);
+      return;
+    }
+    if (!inlineSearchOpen && !showFullMapSearch) return;
+    const mapped = mapSearchV2.state.results
+      .map(searchResultV2ToLegacyPlace)
+      .filter((place): place is NonNullable<typeof place> => Boolean(place));
+    setSearchResults(
+      mapSearchV2.state.status === 'error' && mapped.length === 0
+        ? [{ lat: 0, lng: 0, name: '__error__' }]
+        : mapped,
+    );
+    setIsSearching(
+      mapSearchV2.state.status === 'debouncing'
+      || mapSearchV2.state.status === 'loading'
+      || mapSearchV2.state.isEnriching,
+    );
+  }, [
+    inlineSearchOpen,
+    mapSearchV2.state.isEnriching,
+    mapSearchV2.state.results,
+    mapSearchV2.state.status,
+    searchV2Enabled,
+    showFullMapSearch,
+  ]);
+  const mapSearchDisplayResults = useMemo<MapSearchResultItem[]>(() => {
+    if (!searchV2Enabled) return searchResults;
+    if (normalizeSearchV2Query(searchQuery) !== mapSearchV2.state.query) return [];
+    const rows = mapSearchV2.state.results.map(result => ({
+      ...searchResultV2ToDisplayPlace(result),
+      resolving: mapSearchV2.state.resolvingResultId === result.result_id,
+    }));
+    if (mapSearchV2.state.status === 'error' && rows.length === 0) {
+      return [{ name: '__error__' }];
+    }
+    return rows;
+  }, [
+    mapSearchV2.state.query,
+    mapSearchV2.state.resolvingResultId,
+    mapSearchV2.state.results,
+    mapSearchV2.state.status,
+    searchQuery,
+    searchResults,
+    searchV2Enabled,
+  ]);
   const [waterNavLines, setWaterNavLines] = useState<WaterNavigationLinesResponse | null>(null);
   const [waterConditions, setWaterConditions] = useState<WaterConditionsResponse | null>(null);
   const [waterSpotCards, setWaterSpotCards] = useState<WaterSpotCardsResponse | null>(null);
@@ -6611,22 +6737,26 @@ function MapScreen() {
   const waterRoutes = useStore(s => s.waterRoutes);
   const addWaterRoute = useStore(s => s.addWaterRoute);
 
-  // Route brief
-  const [routeBrief,    setRouteBrief]    = useState<RouteBrief | null>(null);
-  const [showRouteBrief,setShowRouteBrief]= useState(false);
+  // Brief & Backup is bound to the saved trip revision and server-owned route evidence.
+  const [briefAndBackup, setBriefAndBackup] = useState<BriefAndBackupV1 | null>(null);
+  const [showBriefAndBackup, setShowBriefAndBackup] = useState(false);
   const [loadingBrief,  setLoadingBrief]  = useState(false);
-  const [routeBriefSaved, setRouteBriefSaved] = useState(false);
+  const briefRequestRef = useRef<{
+    tripId: string;
+    tripRevision: number;
+    idempotencyKey: string;
+  } | null>(null);
 
   function closeRouteBrief(reason: 'close_button' | 'system_dismiss' = 'close_button') {
-    if (showRouteBrief && routeBrief) {
+    if (showBriefAndBackup && briefAndBackup) {
       trackPhase0Event('phase0_route_brief_dismissed', {
         trip_id: activeTrip?.trip_id ?? null,
         reason,
-        planning_status: routeBrief.planning_status,
-        saved: routeBriefSaved,
+        planning_status: briefAndBackup.status,
+        evidence_revision: briefAndBackup.evidence_revision,
       });
     }
-    setShowRouteBrief(false);
+    setShowBriefAndBackup(false);
   }
 
   function closeRouteAlerts(reason: 'close_button' | 'toggle_button' = 'close_button') {
@@ -6641,14 +6771,13 @@ function MapScreen() {
   }
 
   useEffect(() => {
-    if (!showRouteBrief || !routeBrief) return;
+    if (!showBriefAndBackup || !briefAndBackup) return;
     trackPhase0Event('phase0_route_brief_opened', {
       trip_id: activeTrip?.trip_id ?? null,
-      alert_count: routeAlerts.length,
-      planning_status: routeBrief.planning_status,
-      saved: routeBriefSaved,
+      planning_status: briefAndBackup.status,
+      evidence_revision: briefAndBackup.evidence_revision,
     });
-  }, [activeTrip?.trip_id, routeAlerts.length, routeBrief, routeBriefSaved, showRouteBrief]);
+  }, [activeTrip?.trip_id, briefAndBackup, showBriefAndBackup]);
 
   // Packing list
   const [packingList,   setPackingList]   = useState<PackingList | null>(null);
@@ -6684,6 +6813,18 @@ function MapScreen() {
   // Dynamic map layers
   const [showLayerSheet, setShowLayerSheet] = useState(false);
   const [showMapStyleSheet, setShowMapStyleSheet] = useState(false);
+  const openLayersAndFilters = useCallback((
+    entry: LayersFiltersEntry,
+    returnContext: LayersFiltersReturnContext = 'map_shortcut',
+  ) => {
+    const target = resolveLayersFiltersEntry(entry);
+    setExpandedFilterSections(current => current.includes(target.section)
+      ? current
+      : [...current, target.section]);
+    setShowLayerSheet(false);
+    setShowMapStyleSheet(false);
+    dispatchLayersFilters({ type: 'open', entry, returnContext });
+  }, []);
   const [map3dEnabled, setMap3dEnabled] = useState(false);
   const mapMissionCurrentSurfaceRef = useRef({ mapLayer, premiumMapStyle, map3dEnabled });
   mapMissionCurrentSurfaceRef.current = { mapLayer, premiumMapStyle, map3dEnabled };
@@ -6709,7 +6850,162 @@ function MapScreen() {
   const [tappedGas,  setTappedGas]  = useState<{ name: string; lat: number; lng: number } | null>(null);
   const [tappedPoi,  setTappedPoi]  = useState<OsmPoi | null>(null);
   const [selectedTrail, setSelectedTrail] = useState<TrailFeature | null>(null);
+  const selectedTrailRef = useRef<TrailFeature | null>(null);
+  selectedTrailRef.current = selectedTrail;
   const [selectedTrailProfile, setSelectedTrailProfile] = useState<TrailProfile | null>(null);
+  const selectedCampSheetModel = useMemo(
+    () => selectedCamp ? adaptCampgroundSheet(selectedCamp) : null,
+    [selectedCamp?.id, selectedCamp?.name, selectedCamp?.lat, selectedCamp?.lng, selectedCamp?.source, selectedCamp?.source_badge, selectedCamp?.verified_source],
+  );
+  const selectedCampRatingTarget = useMemo(() => communityRatingTarget({
+    enabled: productFeatures?.community_ratings === true,
+    signedIn: !!user,
+    kind: 'camp',
+    canonicalEntityId: campCanonicalId,
+    source: selectedCamp?.source || selectedCamp?.source_badge || selectedCamp?.verified_source,
+    type: 'camp',
+    persistencePolicy: (selectedCamp as any)?.persistence_policy,
+    temporaryUseOnly: (selectedCamp as any)?.temporary_use_only,
+  }), [
+    campCanonicalId,
+    productFeatures?.community_ratings,
+    selectedCamp?.source,
+    selectedCamp?.source_badge,
+    selectedCamp?.verified_source,
+    (selectedCamp as any)?.persistence_policy,
+    (selectedCamp as any)?.temporary_use_only,
+    user?.id,
+  ]);
+  const selectedPlaceSheetModel = useMemo(
+    () => selectedPlace ? adaptGenericPlaceSheet(selectedPlace) : null,
+    [selectedPlace?.id, selectedPlace?.place_id, selectedPlace?.provider_place_id, selectedPlace?.name, selectedPlace?.lat, selectedPlace?.lng, selectedPlace?.type, selectedPlace?.subtype, selectedPlace?.source_label],
+  );
+  const tappedPoiSheetModel = useMemo(
+    () => tappedPoi ? adaptGenericPlaceSheet(tappedPoi) : null,
+    [tappedPoi?.id, tappedPoi?.place_id, tappedPoi?.provider_place_id, tappedPoi?.name, tappedPoi?.lat, tappedPoi?.lng, tappedPoi?.type, tappedPoi?.subtype, tappedPoi?.source_label],
+  );
+  const selectedTrailSheetModel = useMemo(
+    () => selectedTrail ? adaptTrailSheet(selectedTrail) : null,
+    [selectedTrail?.id, selectedTrail?.name, selectedTrail?.lat, selectedTrail?.lng, selectedTrail?.type, selectedTrail?.source_label],
+  );
+  const selectedTrailRatingTarget = useMemo(() => {
+    if (!selectedTrail || (selectedTrail.type !== 'trail' && selectedTrail.type !== 'trailhead')) return null;
+    const canonicalEntityId = selectedTrail.source === 'trailhead'
+      ? (selectedTrail.profile_id || selectedTrailProfile?.id)
+      : null;
+    return communityRatingTarget({
+      enabled: productFeatures?.community_ratings === true,
+      signedIn: !!user,
+      kind: selectedTrail.type,
+      canonicalEntityId,
+      source: selectedTrail.source,
+      type: selectedTrail.type,
+    });
+  }, [
+    productFeatures?.community_ratings,
+    selectedTrail?.id,
+    selectedTrail?.profile_id,
+    selectedTrail?.source,
+    selectedTrail?.type,
+    selectedTrailProfile?.id,
+    user?.id,
+  ]);
+  const selectedReportSheetModel = useMemo(
+    () => selectedCommunityPin ? adaptCommunityReportSheet(selectedCommunityPin) : null,
+    [selectedCommunityPin?.id, selectedCommunityPin?.name, selectedCommunityPin?.lat, selectedCommunityPin?.lng, selectedCommunityPin?.type],
+  );
+  const activePlaceSheetModel: PlaceSheetModel | null = selectedCampSheetModel
+    ?? selectedTrailSheetModel
+    ?? selectedReportSheetModel
+    ?? selectedPlaceSheetModel
+    ?? tappedPoiSheetModel;
+  const [placeSheetCoordinator, dispatchPlaceSheet] = useReducer(sheetCoordinatorReducer, initialSheetCoordinatorState);
+  const placeSheetCoordinatorRef = useRef(placeSheetCoordinator);
+  placeSheetCoordinatorRef.current = placeSheetCoordinator;
+  const activePlaceSheetIdentityKey = activePlaceSheetModel
+    ? `${activePlaceSheetModel.identity.kind}:${activePlaceSheetModel.identity.entityId}`
+    : '';
+
+  useEffect(() => {
+    if (!activePlaceSheetModel) {
+      dispatchPlaceSheet({ type: 'close' });
+      return;
+    }
+    dispatchPlaceSheet({
+      type: 'open',
+      identity: activePlaceSheetModel.identity,
+      presentation: 'full',
+      returnContext: { surface: 'map' },
+    });
+  }, [activePlaceSheetIdentityKey]);
+
+  const currentPlaceSheetRequest = useCallback((model: PlaceSheetModel) => {
+    if (!sheetRequestIsCurrent(placeSheetCoordinator, model.identity, placeSheetCoordinator.requestGeneration)) return null;
+    return { identity: model.identity, requestGeneration: placeSheetCoordinator.requestGeneration };
+  }, [placeSheetCoordinator]);
+  const placeSheetRequestIsCurrent = useCallback((request: { identity: SheetIdentity; requestGeneration: number }) => (
+    sheetRequestIsCurrent(placeSheetCoordinatorRef.current, request.identity, request.requestGeneration)
+  ), []);
+
+  useEffect(() => {
+    const trail = selectedTrail;
+    const model = selectedTrailSheetModel;
+    if (!trail || !model) return;
+    const request = currentPlaceSheetRequest(model);
+    if (!request) return;
+    const reportId = trailReportId(trail);
+    api.getTrailFieldReports(reportId)
+      .then(reports => {
+        if (placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id) {
+          setTrailFieldReports(reports);
+        }
+      })
+      .catch(() => {});
+    api.getTrailFieldReportSummary(reportId)
+      .then(summary => {
+        if (placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id) {
+          setTrailFieldReportSummary(summary);
+        }
+      })
+      .catch(() => {});
+    if (!trail.profile_id) return;
+    api.getTrailProfile(trail.profile_id)
+      .then(profile => {
+        if (!placeSheetRequestIsCurrent(request) || selectedTrailRef.current?.id !== trail.id) return;
+        setSelectedTrailProfile(profile);
+        setSelectedTrail(current => {
+          if (!current || current.id !== trail.id || current.profile_id !== trail.profile_id) return current;
+          return {
+            ...current,
+            name: profile.name || current.name,
+            summary: profile.summary || current.summary,
+            photo_url: profile.photos?.[0]?.url || current.photo_url,
+          };
+        });
+        if (profile.field_report_summary) setTrailFieldReportSummary(profile.field_report_summary);
+      })
+      .catch(() => {});
+  }, [
+    currentPlaceSheetRequest,
+    placeSheetRequestIsCurrent,
+    selectedTrail?.id,
+    selectedTrail?.profile_id,
+    selectedTrailSheetModel,
+  ]);
+
+  useEffect(() => {
+    if (!selectedCamp?.id || !selectedCampSheetModel) return;
+    const request = currentPlaceSheetRequest(selectedCampSheetModel);
+    if (!request) return;
+    loadCampDetailForCamp(selectedCamp, { loadInsight: hasPlan, sheetRequest: request }).catch(() => {});
+  }, [
+    currentPlaceSheetRequest,
+    hasPlan,
+    selectedCamp?.id,
+    selectedCamp?.lat,
+    selectedCamp?.lng,
+    selectedCampSheetModel,
+  ]);
   const [trailWeather, setTrailWeather] = useState<WeatherForecast | null>(null);
   const trailWeatherSeqRef = useRef(0);
   const [trailPreviewOpen, setTrailPreviewOpen] = useState(false);
@@ -6721,15 +7017,20 @@ function MapScreen() {
   const trailPreviewTone = useMemo<'cyan' | 'gold'>(() => 'cyan', []);
   useEffect(() => {
     const trail = selectedTrail;
+    const model = selectedTrailSheetModel;
     const seq = ++trailWeatherSeqRef.current;
     setTrailWeather(null);
-    if (!trail || !Number.isFinite(trail.lat) || !Number.isFinite(trail.lng)) return;
+    if (!trail || !model || !Number.isFinite(trail.lat) || !Number.isFinite(trail.lng)) return;
+    const request = currentPlaceSheetRequest(model);
+    if (!request) return;
     api.getWeather(trail.lat, trail.lng, 3, weatherUnitMode)
       .then(result => {
-        if (trailWeatherSeqRef.current === seq) setTrailWeather(result);
+        if (trailWeatherSeqRef.current === seq && placeSheetRequestIsCurrent(request) && selectedTrailRef.current?.id === trail.id) {
+          setTrailWeather(result);
+        }
       })
       .catch(() => {});
-  }, [selectedTrail?.id, selectedTrail?.lat, selectedTrail?.lng, weatherUnitMode]);
+  }, [currentPlaceSheetRequest, placeSheetRequestIsCurrent, selectedTrail?.id, selectedTrail?.lat, selectedTrail?.lng, selectedTrailSheetModel, weatherUnitMode]);
   const [trailCardCollapsed, setTrailCardCollapsed] = useState(false);
   const [showTrailList, setShowTrailList] = useState(false);
   const [trailRouteBuilderOpen, setTrailRouteBuilderOpen] = useState(false);
@@ -6759,18 +7060,15 @@ function MapScreen() {
 
   useEffect(() => {
     if (!activeTrip) {
-      setRouteBrief(null);
+      setBriefAndBackup(null);
       setPackingList(null);
-      setRouteBriefSaved(false);
+      briefRequestRef.current = null;
       setPackingListSaved(false);
       return;
     }
     let cancelled = false;
-    loadSavedTripAi<RouteBrief>(activeTrip, 'route_brief').then(saved => {
-      if (cancelled) return;
-      setRouteBrief(saved ? normalizeRouteBrief(saved, activeTrip, routeAlerts) : null);
-      setRouteBriefSaved(!!saved);
-    });
+    setBriefAndBackup(current => current?.trip_id === activeTrip.trip_id && current.trip_revision === activeTrip.version ? current : null);
+    briefRequestRef.current = null;
     loadSavedTripAi<PackingList>(activeTrip, 'packing_list').then(saved => {
       if (cancelled) return;
       setPackingList(saved);
@@ -6843,9 +7141,18 @@ function MapScreen() {
     nativeMapSurfaceActiveRef.current = useNativeMapSurface;
   }, [useNativeMapSurface]);
 
-  const routeBuildMapActive = Boolean(
-    routeBuildSession
-    && (routeBuildSession.status === 'running' || routeBuildSession.status === 'failed')
+  const mapExperienceMode = resolveMapExperienceMode({
+    navigationActive: navMode,
+    originalsActive: originalsMapExperience.active,
+    preview3dActive: mapMissionVisible,
+    traceActive: trailTraceMode || trailPinCaptureMode,
+    routeBuildStatus: routeBuildSession?.status ?? null,
+  });
+  const routeBuildMapActive = mapModeOwnsRoutePreview(mapExperienceMode);
+  const mapVisualWorkActive = mapVisualWorkShouldRun(
+    screenActivity.isActive,
+    screenActivity.isAppActive,
+    navMode,
   );
 
   const fitOriginalsRoute = useCallback(() => {
@@ -7014,15 +7321,6 @@ function MapScreen() {
       }));
     }
   }, [routeBuildSession?.requestId, routeBuildSession?.previewStops, useNativeMapSurface]);
-
-  useEffect(() => {
-    const session = routeBuildSession;
-    if (!session || session.status !== 'complete') return;
-    setShowPanel(true);
-    setPanelCollapsed(false);
-    const timer = setTimeout(() => clearRouteBuildSession(session.requestId), 900);
-    return () => clearTimeout(timer);
-  }, [clearRouteBuildSession, routeBuildSession?.requestId, routeBuildSession?.status]);
 
   useEffect(() => () => clearRouteBuildMapTimers(), [clearRouteBuildMapTimers]);
 
@@ -7374,7 +7672,9 @@ function MapScreen() {
     const lockRenderer = () => {
       if (cancelled || rendererLocked) return;
       rendererLocked = true;
-      setMapRendererMode(configuredToken ? 'mapbox' : 'maplibre');
+      const renderer = configuredToken ? 'rnmapbox' : 'maplibre';
+      setActiveNativeMapRenderer(renderer);
+      setMapRendererMode(renderer === 'rnmapbox' ? 'mapbox' : 'maplibre');
       setMapCredentialsReady(true);
     };
     const finishWhenSettled = () => {
@@ -8263,6 +8563,9 @@ function MapScreen() {
       setSelectedPlaceContext(null);
       return;
     }
+    if (!selectedPlaceSheetModel) return;
+    const sheetRequest = currentPlaceSheetRequest(selectedPlaceSheetModel);
+    if (!sheetRequest) return;
     const resolveKey = `${selectedPlace.id || selectedPlace.source || 'place'}:${selectedPlace.name}:${selectedPlace.lat.toFixed(5)}:${selectedPlace.lng.toFixed(5)}`;
     if (selectedPlaceResolveKeyRef.current === resolveKey) return;
     selectedPlaceResolveKeyRef.current = resolveKey;
@@ -8270,6 +8573,7 @@ function MapScreen() {
     const selectedPlaceIsExplore = isTrailheadExploreSelection(selectedPlace);
     let cancelled = false;
     const mergeResolvedCard = (resolved: MapCardResolveResponse) => {
+      if (cancelled || !placeSheetRequestIsCurrent(sheetRequest)) return;
       const resolvedCard = (resolved.card as any) ?? {};
       const shouldOpenCampCard = !selectedPlaceIsExplore && (!!resolved.camp || !!resolved.camp_detail || isOvernightPlaceLike(selectedPlace) || isOvernightPlaceLike(resolvedCard));
       if (shouldOpenCampCard) {
@@ -8409,20 +8713,39 @@ function MapScreen() {
       region: selectedPlace.region,
       bbox: selectedPlace.bbox,
     }).then(resolved => {
-      if (cancelled) return;
+      if (cancelled || !placeSheetRequestIsCurrent(sheetRequest)) return;
       mapCardResolveCacheRef.current.set(resolveKey, { at: Date.now(), response: resolved });
       mergeResolvedCard(resolved);
     }).catch(() => {
+      if (!placeSheetRequestIsCurrent(sheetRequest)) return;
       selectedPlaceResolveKeyRef.current = '';
       if (!cancelled) setSelectedPlaceContext({ loading: false, places: [], camps: [], trails: [], things_to_do: [], things_to_see: [], visitor_centers: [], campgrounds_nearby: [], trip_services: [] });
     });
     return () => { cancelled = true; };
-  }, [selectedPlace?.id, selectedPlace?.name, selectedPlace?.lat, selectedPlace?.lng, navMode]);
+  }, [
+    currentPlaceSheetRequest,
+    navMode,
+    placeSheetRequestIsCurrent,
+    selectedPlace?.id,
+    selectedPlace?.name,
+    selectedPlace?.lat,
+    selectedPlace?.lng,
+    selectedPlaceSheetModel,
+  ]);
 
   const reloadOfflinePlacePois = useCallback(async () => {
-    const points = await loadAllPlacePoints().catch(() => []);
-    setOfflinePlaceCount(points.length);
-    setOfflinePlacePois(points.map(p => ({
+    const requestEpoch = accountStorage.epoch();
+    const requestAccountId = useStore.getState().user?.id;
+    const ownerScope = requestAccountId == null ? 'anonymous' : `account:${String(requestAccountId)}`;
+    const [points, catalog] = await Promise.all([
+      loadAllPlacePoints().catch(() => []),
+      requestAccountId == null
+        ? Promise.resolve(EMPTY_EXPO_OFFLINE_V2_CATALOG)
+        : loadExpoOfflineV2Catalog(ownerScope).catch(() => EMPTY_EXPO_OFFLINE_V2_CATALOG),
+    ]);
+    if (accountStorage.epoch() !== requestEpoch
+      || String(useStore.getState().user?.id ?? '') !== String(requestAccountId ?? '')) return;
+    const legacy = points.map(p => ({
       id: p.id,
       name: p.name,
       lat: p.lat,
@@ -8473,8 +8796,12 @@ function MapScreen() {
       max_draft_ft: p.max_draft_ft,
       navigation_note: p.navigation_note,
       cache_status: 'downloaded',
-    })));
-  }, [activeTrip?.trip_id]);
+    } as OsmPoi));
+    const merged = mergeOfflinePoiInventory(catalog.places, legacy);
+    setOfflineV2Catalog(catalog);
+    setOfflinePlaceCount(merged.length);
+    setOfflinePlacePois(merged);
+  }, [activeTrip?.trip_id, user?.id]);
 
   useEffect(() => {
     reloadOfflinePlacePois();
@@ -8781,52 +9108,7 @@ function MapScreen() {
   }
 
   function offlinePlaceToCampPin(place: OsmPoi): CampsitePin | null {
-    if (!CAMP_PLACE_TYPES.has(String(place.type || '')) || place.lat == null || place.lng == null || !isFinite(place.lat) || !isFinite(place.lng)) return null;
-    const anyPlace = place as any;
-    const source = anyPlace.source_badge || place.source_label || place.source || 'Saved places';
-    const bookingUrl = anyPlace.booking_url || '';
-    const officialUrl = anyPlace.official_url || place.website || '';
-    const subtype = cleanDisplayLabel(place.subtype || '');
-    const cachedNotes = [
-      subtype,
-      place.address,
-      anyPlace.source_freshness,
-      officialUrl ? 'Official listing.' : '',
-      bookingUrl ? 'Booking details.' : '',
-    ].filter(Boolean).join(' ');
-    return {
-      id: String(place.id || `offline:camp:${place.lat.toFixed(5)}:${place.lng.toFixed(5)}`),
-      name: place.name || 'Saved camp',
-      lat: place.lat,
-      lng: place.lng,
-      tags: [
-        ...(Array.isArray(anyPlace.tags) ? anyPlace.tags : []),
-        ...(Array.isArray(anyPlace.site_types) ? anyPlace.site_types : []),
-        'saved',
-      ],
-      land_type: source,
-      description: cachedNotes || 'Saved camp details.',
-      photo_url: place.photo_url || undefined,
-      reservable: Boolean(anyPlace.reservable || bookingUrl),
-      cost: anyPlace.reservable || bookingUrl ? 'Reservable' : undefined,
-      url: bookingUrl || officialUrl,
-      official_url: officialUrl,
-      booking_url: bookingUrl,
-      source_badge: source,
-      source_freshness: anyPlace.source_freshness,
-      last_checked: anyPlace.last_checked,
-      ada: false,
-      source: place.source || 'offline',
-      verified_source: source,
-      address: place.address,
-      route_distance_mi: place.route_distance_mi,
-      route_fit: (place as any).route_fit,
-      route_progress: place.route_progress,
-      route_progress_mi: place.route_progress_mi,
-      route_segment_index: place.route_segment_index,
-      amenities: Array.isArray(anyPlace.amenities) ? anyPlace.amenities : undefined,
-      site_types: Array.isArray(anyPlace.site_types) ? anyPlace.site_types : undefined,
-    };
+    return offlineV2PlaceToCampPin(place);
   }
 
   function mergePoiBatch(batch: OsmPoi[], center: { lat: number; lng: number }) {
@@ -9816,8 +10098,10 @@ function MapScreen() {
   }
 
   useEffect(() => {
-    if (!selectedCommunityPin) return;
+    if (!selectedCommunityPin || !selectedReportSheetModel) return;
     const pin = selectedCommunityPin;
+    const sheetRequest = currentPlaceSheetRequest(selectedReportSheetModel);
+    if (!sheetRequest) return;
     const cached = communityLiveContext[pin.id];
     if (cached?.loadedAt && Date.now() - cached.loadedAt < 5 * 60_000) return;
     setCommunityLiveContext(prev => ({
@@ -9844,7 +10128,7 @@ function MapScreen() {
       api.getOsmPois(pin.lat, pin.lng, 25, 'fuel,water,trail,trailhead,viewpoint,peak,hot_spring'),
       api.getNearbyAlerts(pin.lat, pin.lng, 0.15),
     ]).then(([campsResult, fuelResult, poisResult, reportsResult]) => {
-      if (cancelled) return;
+      if (cancelled || !placeSheetRequestIsCurrent(sheetRequest)) return;
       const camps = campsResult.status === 'fulfilled' ? campsResult.value.slice(0, 80) : [];
       const pois = poisResult.status === 'fulfilled' ? poisResult.value : [];
       const fuelFromPois = pois
@@ -9869,14 +10153,14 @@ function MapScreen() {
         [pin.id]: { loading: false, camps, fuel, pois, reports, loadedAt: Date.now() },
       }));
     }).catch(() => {
-      if (cancelled) return;
+      if (cancelled || !placeSheetRequestIsCurrent(sheetRequest)) return;
       setCommunityLiveContext(prev => ({
         ...prev,
         [pin.id]: { loading: false, camps: [], fuel: [], pois: [], reports: [], loadedAt: Date.now() },
       }));
     });
     return () => { cancelled = true; };
-  }, [selectedCommunityPin?.id, selectedCommunityPin?.lat, selectedCommunityPin?.lng, activeFilters]);
+  }, [activeFilters, currentPlaceSheetRequest, placeSheetRequestIsCurrent, selectedCommunityPin?.id, selectedCommunityPin?.lat, selectedCommunityPin?.lng, selectedReportSheetModel]);
 
   useEffect(() => {
     if (!showPois) {
@@ -10092,6 +10376,7 @@ function MapScreen() {
       setSearchQuery('');
       setSearchResults([]);
       setMapSearchSession(null);
+      if (searchV2Enabled) mapSearchV2.setQuery('');
     }
     Keyboard.dismiss();
   }
@@ -10103,6 +10388,7 @@ function MapScreen() {
     if (clear) {
       setSearchQuery('');
       setMapSearchSession(null);
+      if (searchV2Enabled) mapSearchV2.setQuery('');
     }
     Keyboard.dismiss();
   }
@@ -10220,6 +10506,12 @@ function MapScreen() {
     if (cleanQuery.length < 2) {
       cancelMapSearchRequest();
       setSearchResults([]);
+      if (searchV2Enabled) mapSearchV2.setQuery(cleanQuery);
+      return;
+    }
+    if (searchV2Enabled) {
+      setMapSearchSession(null);
+      await mapSearchV2.search(cleanQuery);
       return;
     }
     const request = beginMapSearchRequest();
@@ -10264,9 +10556,17 @@ function MapScreen() {
 
   useEffect(() => {
     const cleanQuery = searchQuery.trim();
-    if (!screenActivity.isFocused || (!inlineSearchOpen && !showFullMapSearch) || navMode || cleanQuery.length < 2) {
+    if (!screenActivity.isFocused || (!inlineSearchOpen && !showFullMapSearch) || navMode) {
       if (!screenActivity.isFocused) autoMapSearchRef.current = '';
-      if (cleanQuery.length < 2) autoMapSearchRef.current = '';
+      cancelMapSearchRequest();
+      return;
+    }
+    if (searchV2Enabled) {
+      mapSearchV2.setQuery(cleanQuery);
+      return;
+    }
+    if (cleanQuery.length < 2) {
+      autoMapSearchRef.current = '';
       cancelMapSearchRequest();
       return;
     }
@@ -10280,14 +10580,57 @@ function MapScreen() {
       mapSearchRequestRef.current?.controller.abort();
       mapSearchRequestRef.current = null;
     };
-  }, [inlineSearchOpen, navMode, screenActivity.isFocused, searchQuery, showFullMapSearch]);
+  }, [inlineSearchOpen, mapSearchV2.setQuery, navMode, screenActivity.isFocused, searchQuery, searchV2Enabled, showFullMapSearch]);
 
-  function selectSearchResult(place: SearchPlace, submittedQuery?: string) {
+  async function resolvePressedMapSearchResult(
+    place: SearchPlace | MapSearchResultItem,
+  ): Promise<SearchPlace | null> {
+    if (place.name === '__error__') return null;
+    if (searchV2Enabled && place.result_id) {
+      const pressedQuery = normalizeSearchV2Query(searchQueryRef.current);
+      try {
+        const resolved = await mapSearchV2.resolveResult(place.result_id);
+        if (!resolved) {
+          if (normalizeSearchV2Query(searchQueryRef.current) === pressedQuery) {
+            setQuickToast('That place is not available in this search area.');
+            setTimeout(() => setQuickToast(''), 2400);
+          }
+          return null;
+        }
+        const downloaded = resolveDownloadedSearchResultPoi(
+          resolved,
+          offlineV2Catalog.places,
+          offlinePlacePois,
+        );
+        if (downloaded) return downloaded as unknown as SearchPlace;
+        const mapped = searchResultV2ToLegacyPlace(resolved);
+        if (mapped) return mapped as SearchPlace;
+      } catch {
+        if (normalizeSearchV2Query(searchQueryRef.current) === pressedQuery) {
+          setQuickToast('Could not open that place. Try again.');
+          setTimeout(() => setQuickToast(''), 2400);
+        }
+        return null;
+      }
+    }
+    if (typeof place.lat !== 'number' || !Number.isFinite(place.lat)
+      || typeof place.lng !== 'number' || !Number.isFinite(place.lng)) {
+      return null;
+    }
+    return place as SearchPlace;
+  }
+
+  async function selectSearchResult(place: SearchPlace | MapSearchResultItem, submittedQuery?: string) {
     if (place.name === '__error__') return;
+    const selectedPlace = await resolvePressedMapSearchResult(place);
+    if (!selectedPlace) return;
     const query = (submittedQuery ?? searchQuery).trim();
-    const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
-    const basePlace = { ...place, dist, source: place.source || 'search', type: place.type || 'poi' };
+    const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, selectedPlace.lat, selectedPlace.lng) : null;
+    const basePlace = { ...selectedPlace, dist, source: selectedPlace.source || 'search', type: selectedPlace.type || 'poi' };
     const isMapboxPlace = String(basePlace.source || '').toLowerCase().includes('mapbox');
+    const downloadedCamp = String(basePlace.source || '') === 'trailhead_offline_v2'
+      ? offlinePlaceToCampPin(basePlace as unknown as OsmPoi)
+      : null;
     setSearchRouteCard(null);
     setSelectedCamp(null);
     setTappedTrail(null);
@@ -10300,11 +10643,17 @@ function MapScreen() {
     const summary = rawSummary && !/^selected\s+place\.?$/i.test(rawSummary)
       ? rawSummary
       : 'Search nearby camps, trails, stays, fuel, and services from here.';
-    setSelectedPlace({
-      ...basePlace,
-      summary: isMapboxPlace && !rawSummary ? undefined : summary,
-      source_label: basePlace.source_label || 'Place',
-    });
+    if (downloadedCamp) {
+      setSelectedPlace(null);
+      setSelectedCamp(downloadedCamp);
+      setCampDetail(offlineV2CampPinToDetail(downloadedCamp));
+    } else {
+      setSelectedPlace({
+        ...basePlace,
+        summary: isMapboxPlace && !rawSummary ? undefined : summary,
+        source_label: basePlace.source_label || 'Place',
+      });
+    }
     addSearchHistory({ name: basePlace.name, lat: basePlace.lat, lng: basePlace.lng, searchedAt: Date.now() });
     setShowFullMapSearch(false);
     closeInlineMapSearch();
@@ -17101,7 +17450,13 @@ function MapScreen() {
     setShowMapDrawer(false);
   }
 
-  async function openCampInsight(camp: CampsitePin, detail?: CampsiteDetail | null): Promise<boolean> {
+  async function openCampInsight(
+    camp: CampsitePin,
+    detail?: CampsiteDetail | null,
+    request = currentPlaceSheetRequest(adaptCampgroundSheet(camp)),
+  ): Promise<boolean> {
+    if (!request || !placeSheetRequestIsCurrent(request)) return false;
+    const requestIsCurrent = () => placeSheetRequestIsCurrent(request) && selectedCampRef.current?.id === camp.id;
     setLoadingInsight(true);
     setLoadingWiki(true);
     try {
@@ -17112,96 +17467,102 @@ function MapScreen() {
         source_url: detail?.official_url || detail?.url || camp.official_url || camp.url || '',
         source_updated_at: detail?.last_checked || detail?.fetched_at || camp.last_checked || camp.fetched_at || null,
       });
-      if (selectedCampRef.current?.id !== camp.id) {
+      if (!requestIsCurrent()) {
         setLoadingWiki(false);
         return false;
       }
       setCampInsight(insight);
       api.getWikipediaNearby(camp.lat, camp.lng, 15000)
         .then(articles => {
-          if (selectedCampRef.current?.id === camp.id) setWikiArticles(articles);
+          if (requestIsCurrent()) setWikiArticles(articles);
         })
         .catch(() => {
-          if (selectedCampRef.current?.id === camp.id) setWikiArticles([]);
+          if (requestIsCurrent()) setWikiArticles([]);
         })
         .finally(() => {
-          if (selectedCampRef.current?.id === camp.id) setLoadingWiki(false);
+          if (requestIsCurrent()) setLoadingWiki(false);
         });
       return true;
     } catch (e: any) {
-      setLoadingWiki(false);
+      if (requestIsCurrent()) setLoadingWiki(false);
       if (e instanceof PaywallError) {
-        setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
+        if (requestIsCurrent()) {
+          setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
+        }
         return false;
       }
       return true;
     } finally {
-      if (selectedCampRef.current?.id === camp.id) setLoadingInsight(false);
+      if (requestIsCurrent()) setLoadingInsight(false);
     }
   }
 
   async function fetchRouteBrief(forceRefresh = false) {
     if (!activeTrip) return;
     const requestTrip = activeTrip;
+    if (productFeatures?.brief_and_backup !== true) {
+      setQuickToast('Brief & Backup is not available yet');
+      setTimeout(() => setQuickToast(''), 2600);
+      return;
+    }
+    const requestTripRevision = exactSavedTripRevision(requestTrip.version);
+    if (requestTripRevision == null) {
+      setQuickToast('Save this trip before running Brief & Backup');
+      setTimeout(() => setQuickToast(''), 2800);
+      return;
+    }
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
     const requestIsCurrent = () => accountStorage.epoch() === requestEpoch
       && String(useStore.getState().user?.id ?? '') === String(requestAccountId ?? '')
-      && useStore.getState().activeTrip?.trip_id === requestTrip.trip_id;
-    if (!forceRefresh) {
-      const saved = routeBrief ?? await loadSavedTripAi<RouteBrief>(requestTrip, 'route_brief');
-      if (!requestIsCurrent()) return;
-      if (saved) {
-        setRouteBrief(normalizeRouteBrief(saved, requestTrip, routeAlerts));
-        setRouteBriefSaved(true);
-        setShowRouteBrief(true);
-        return;
-      }
+      && useStore.getState().activeTrip?.trip_id === requestTrip.trip_id
+      && exactSavedTripRevision(useStore.getState().activeTrip?.version) === requestTripRevision;
+    if (!forceRefresh && briefAndBackup?.trip_id === requestTrip.trip_id && briefAndBackup.trip_revision === requestTripRevision) {
+      setShowBriefAndBackup(true);
+      return;
     }
+    const previousRequest = briefRequestRef.current;
+    const requestMetadata = !forceRefresh
+      && previousRequest?.tripId === requestTrip.trip_id
+      && previousRequest.tripRevision === requestTripRevision
+      ? previousRequest
+      : {
+          tripId: requestTrip.trip_id,
+          tripRevision: requestTripRevision,
+          idempotencyKey: createBriefAndBackupIdempotencyKey({
+            tripId: requestTrip.trip_id,
+            tripRevision: requestTripRevision,
+          }),
+        };
+    briefRequestRef.current = requestMetadata;
     setLoadingBrief(true);
     try {
-      const briefReports = routeAlerts.filter(alert => {
-        const provider = String((alert as any).provider || '').toLowerCase();
-        const type = String(alert.type || '').toLowerCase();
-        const subtype = String(alert.subtype || '').toLowerCase();
-        const severity = String(alert.severity || '').toLowerCase();
-        if (provider === 'tomtom' && type === 'traffic' && subtype === 'summary') return false;
-        if (provider === 'tomtom' && type === 'traffic' && !['critical', 'high'].includes(severity)) return false;
-        return true;
-      });
-      const brief = await api.getRouteBrief({
-        trip_name: requestTrip.plan.trip_name,
-        waypoints: usableTripWaypoints(requestTrip.plan.waypoints),
-        reports: briefReports,
-      });
+      const brief = await api.getBriefAndBackup(
+        requestTrip.trip_id,
+        requestTripRevision,
+        requestMetadata.idempotencyKey,
+      );
       if (!requestIsCurrent()) return;
-      const normalized = normalizeRouteBrief(brief, requestTrip, briefReports);
       trackPhase0Event('phase0_route_brief_generated', {
         trip_id: requestTrip.trip_id,
-        source: 'ai',
-        alert_count: briefReports.length,
-        planning_status: normalized.planning_status,
+        source: 'server_evidence',
+        planning_status: brief.status,
+        evidence_revision: brief.evidence_revision,
+        service_segment_count: brief.service_segments.length,
+        exit_count: brief.exits.length,
       });
-      setRouteBrief(normalized);
-      setRouteBriefSaved(true);
-      saveTripAi(requestTrip, 'route_brief', normalized, requestEpoch).catch(() => {});
-      setShowRouteBrief(true);
+      setBriefAndBackup(brief);
+      setShowBriefAndBackup(true);
     } catch (e: any) {
       if (!requestIsCurrent()) return;
       if (e instanceof PaywallError) {
         setPaywallCode(e.code); setPaywallMessage(e.message); setPaywallVisible(true);
       } else {
-        const fallback = localRouteBrief(requestTrip, routeAlerts);
-        trackPhase0Event('phase0_route_brief_generated', {
-          trip_id: requestTrip.trip_id,
-          source: 'fallback',
-          alert_count: routeAlerts.length,
-          planning_status: fallback.planning_status,
-        });
-        setRouteBrief(fallback);
-        setRouteBriefSaved(true);
-        saveTripAi(requestTrip, 'route_brief', fallback, requestEpoch).catch(() => {});
-        setShowRouteBrief(true);
+        const message = e instanceof ApiError && e.status === 409
+          ? e.message
+          : 'Could not check this trip. Try again.';
+        setQuickToast(message);
+        setTimeout(() => setQuickToast(''), 3200);
       }
     } finally {
       if (requestIsCurrent()) setLoadingBrief(false);
@@ -18401,7 +18762,17 @@ function MapScreen() {
     setFullnessVoting(false);
   }
 
-  async function loadCampDetailForCamp(camp: CampsitePin, opts: { showModal?: boolean; loadInsight?: boolean } = {}) {
+  async function loadCampDetailForCamp(
+    camp: CampsitePin,
+    opts: {
+      showModal?: boolean;
+      loadInsight?: boolean;
+      sheetRequest?: { identity: SheetIdentity; requestGeneration: number };
+    } = {},
+  ) {
+    const sheetRequest = opts.sheetRequest ?? currentPlaceSheetRequest(adaptCampgroundSheet(camp));
+    if (!sheetRequest || !placeSheetRequestIsCurrent(sheetRequest)) return;
+    const requestIsCurrent = () => placeSheetRequestIsCurrent(sheetRequest) && selectedCampRef.current?.id === camp.id;
     setLoadingDetail(true);
     setCampInsight(null);
     setWikiArticles([]);
@@ -18425,32 +18796,33 @@ function MapScreen() {
         detail = minimal;
       }
     }
+    if (!requestIsCurrent()) return;
     detail = normalizeCampDetailArrays(detail);
     detail = await enrichCampDetailWithGoogle(detail, camp);
-    if (selectedCampRef.current?.id !== camp.id) {
+    if (!requestIsCurrent()) {
       return;
     }
     setCampDetail(detail);
     if (privateLeadKeyFromCamp(camp, detail)) {
       return;
     }
-    if (opts.loadInsight) openCampInsight(camp, detail).catch(() => {});
-    if (selectedCampRef.current?.id !== camp.id) {
+    if (opts.loadInsight) openCampInsight(camp, detail, sheetRequest).catch(() => {});
+    if (!requestIsCurrent()) {
       return;
     }
     recordReviewMoment('camp_viewed')
       .then(async shouldShow => {
-        if (!shouldShow) return;
+        if (!shouldShow || !requestIsCurrent()) return;
         await markReviewPromptShown();
-        setReviewPromptVisible(true);
+        if (requestIsCurrent()) setReviewPromptVisible(true);
       })
       .catch(() => {});
     // Load field reports in background
     api.getFieldReports(camp.id).then(r => {
-      if (selectedCampRef.current?.id === camp.id) setFieldReports(r);
+      if (requestIsCurrent()) setFieldReports(r);
     }).catch(() => {});
     api.getFieldReportSummary(camp.id).then(r => {
-      if (selectedCampRef.current?.id === camp.id) setFieldReportSummary(r);
+      if (requestIsCurrent()) setFieldReportSummary(r);
     }).catch(() => {});
     api.canonicalizePlace({
       id: camp.id,
@@ -18476,17 +18848,21 @@ function MapScreen() {
       reservable: camp.reservable,
       amenities: camp.amenities,
     }).then(({ place }) => {
-      if (selectedCampRef.current?.id !== camp.id) return;
+      if (!requestIsCurrent()) return;
       setCampCanonicalId(place.trailhead_place_id);
       setCampComments((place.comments ?? []) as CampComment[]);
     }).catch(() => {
       api.getCampComments(camp.id).then(r => {
-        if (selectedCampRef.current?.id === camp.id) setCampComments(r);
+        if (requestIsCurrent()) setCampComments(r);
       }).catch(() => {});
     });
   }
 
   async function openCampSiteCard(site: NonNullable<CampsiteDetail['campsites']>[number], parentDetail: CampsiteDetail, parentCamp: CampsitePin) {
+    const sheetRequest = currentPlaceSheetRequest(adaptCampgroundSheet(parentCamp));
+    if (!sheetRequest || !placeSheetRequestIsCurrent(sheetRequest)) return;
+    const requestIsCurrent = () => placeSheetRequestIsCurrent(sheetRequest)
+      && selectedCampRef.current?.id === parentCamp.id;
     const facilityId = String(site.facility_id || parentDetail.id || parentCamp.id || '').replace(/^ridb_site:[^:]+:.+$/, '');
     const siteId = String(site.id || '').replace(/^ridb_site:[^:]+:/, '');
     const siteCardId = site.map_card_id || (facilityId && siteId ? `ridb_site:${facilityId}:${siteId}` : site.id || '');
@@ -18499,6 +18875,7 @@ function MapScreen() {
     setCampWeather(null);
     try {
       const detail = normalizeCampDetailArrays(await api.getCampsiteDetail(String(siteCardId)));
+      if (!requestIsCurrent()) return;
       const photos = campPhotoItems(detail as unknown as CampsitePin, detail);
       const firstPhoto = photos[0]?.url || campPhotoUrl(detail.photo_url || detail.photos?.[0]);
       const sitePin = {
@@ -18537,10 +18914,11 @@ function MapScreen() {
         }).catch(() => {});
       }
     } catch {
+      if (!requestIsCurrent()) return;
       setQuickToast('Could not load this Recreation.gov site');
       setTimeout(() => setQuickToast(''), 2800);
     } finally {
-      setLoadingDetail(false);
+      if (requestIsCurrent()) setLoadingDetail(false);
     }
   }
 
@@ -18570,6 +18948,7 @@ function MapScreen() {
   }
 
   function minimalCampDetail(camp: CampsitePin): CampsiteDetail {
+    if (isOfflineV2CampPin(camp)) return offlineV2CampPinToDetail(camp);
     return {
       id: camp.id,
       name: camp.name,
@@ -18800,18 +19179,22 @@ function MapScreen() {
 
   async function submitTrailFieldReport() {
     if (!ensureTrailReportSignedIn()) return;
-    if (!selectedTrail || !frSentiment || !frAccess || !frCrowd) return;
+    const trail = selectedTrail;
+    const model = selectedTrailSheetModel;
+    if (!trail || !model || !frSentiment || !frAccess || !frCrowd) return;
+    const sheetRequest = currentPlaceSheetRequest(model);
+    if (!sheetRequest) return;
     setFrSubmitting(true);
     try {
       const rigLabel = rigProfile?.make && rigProfile?.model
         ? `${rigProfile.year ? rigProfile.year + ' ' : ''}${rigProfile.make} ${rigProfile.model}`
         : undefined;
       const today = new Date().toISOString().split('T')[0];
-      const id = trailReportId(selectedTrail);
+      const id = trailReportId(trail);
       const res = await api.submitTrailFieldReport(id, {
-        trail_name: selectedTrail.name,
-        lat: selectedTrail.lat,
-        lng: selectedTrail.lng,
+        trail_name: trail.name,
+        lat: trail.lat,
+        lng: trail.lng,
         rig_label: rigLabel,
         visited_date: today,
         sentiment: frSentiment,
@@ -18821,16 +19204,23 @@ function MapScreen() {
         note: frNote || undefined,
         photo_data: frPhoto ?? undefined,
       });
+      if (!placeSheetRequestIsCurrent(sheetRequest) || selectedTrailRef.current?.id !== trail.id) return;
       setQuickToast(`+${res.credits_earned} credits`);
       setTimeout(() => setQuickToast(''), 2500);
       setShowTrailFieldReportForm(false);
       resetFieldReportForm();
-      api.getTrailFieldReports(id).then(setTrailFieldReports).catch(() => {});
-      api.getTrailFieldReportSummary(id).then(setTrailFieldReportSummary).catch(() => {});
+      api.getTrailFieldReports(id).then(reports => {
+        if (placeSheetRequestIsCurrent(sheetRequest) && selectedTrailRef.current?.id === trail.id) setTrailFieldReports(reports);
+      }).catch(() => {});
+      api.getTrailFieldReportSummary(id).then(summary => {
+        if (placeSheetRequestIsCurrent(sheetRequest) && selectedTrailRef.current?.id === trail.id) setTrailFieldReportSummary(summary);
+      }).catch(() => {});
     } catch (e: any) {
-      Alert.alert('Error', e.message ?? 'Could not submit trail report');
+      if (placeSheetRequestIsCurrent(sheetRequest)) {
+        Alert.alert('Error', e.message ?? 'Could not submit trail report');
+      }
     }
-    setFrSubmitting(false);
+    if (placeSheetRequestIsCurrent(sheetRequest)) setFrSubmitting(false);
   }
 
   // ── Stable map HTML (only rebuilds on trip/pins change) ─────────────────────
@@ -20105,9 +20495,13 @@ function MapScreen() {
       setTimeout(() => setQuickToast(''), 2400);
       return;
     }
+    const model = selectedTrailSheetModel;
+    const sheetRequest = model ? currentPlaceSheetRequest(model) : null;
+    if (!sheetRequest || selectedTrailRef.current?.id !== trail.id) return;
     setTrailPreviewLoading(true);
     try {
       const manifest = await api.getTrailPreview(trail.profile_id);
+      if (!placeSheetRequestIsCurrent(sheetRequest) || selectedTrailRef.current?.id !== trail.id) return;
       const nextManifest = manifest.status === 'available' && (manifest.coordinates?.length ?? 0) >= 2
         ? manifest
         : null;
@@ -20117,33 +20511,40 @@ function MapScreen() {
         setTimeout(() => setQuickToast(''), 2400);
       }
     } catch {
-      setQuickToast('Preview is not available for this trail yet.');
-      setTimeout(() => setQuickToast(''), 2400);
+      if (placeSheetRequestIsCurrent(sheetRequest)) {
+        setQuickToast('Preview is not available for this trail yet.');
+        setTimeout(() => setQuickToast(''), 2400);
+      }
     } finally {
-      setTrailPreviewLoading(false);
+      if (placeSheetRequestIsCurrent(sheetRequest)) setTrailPreviewLoading(false);
     }
   }
 
   async function refreshSelectedTrailSource() {
-    if (!selectedTrail || trailSourceRefreshing) return;
+    const trail = selectedTrail;
+    const model = selectedTrailSheetModel;
+    if (!trail || !model || trailSourceRefreshing) return;
+    const sheetRequest = currentPlaceSheetRequest(model);
+    if (!sheetRequest) return;
     setTrailSourceRefreshing(true);
     setQuickToast('Refreshing trail source...');
     try {
       const discovered = await api.discoverTrails({
-        lat: selectedTrail.lat,
-        lng: selectedTrail.lng,
+        lat: trail.lat,
+        lng: trail.lng,
         radius: 8,
         limit: 24,
         refresh: true,
       });
       const match = (discovered.trails ?? []).find(profile => (
-        profile.id === selectedTrail.profile_id ||
-        profile.name === selectedTrail.name ||
-        (selectedTrail.profile_id && profile.geometry_ref === selectedTrail.profile_id)
+        profile.id === trail.profile_id ||
+        profile.name === trail.name ||
+        (trail.profile_id && profile.geometry_ref === trail.profile_id)
       ));
+      if (!placeSheetRequestIsCurrent(sheetRequest) || selectedTrailRef.current?.id !== trail.id) return;
       if (match) {
         setSelectedTrailProfile(match);
-        setSelectedTrail(current => current ? {
+        setSelectedTrail(current => current?.id === trail.id ? {
           ...current,
           profile_id: match.id || current.profile_id,
           name: match.name || current.name,
@@ -20162,10 +20563,12 @@ function MapScreen() {
       setQuickToast('Trail source refreshed');
       setTimeout(() => setQuickToast(''), 2200);
     } catch {
-      setQuickToast('Could not refresh trail source');
-      setTimeout(() => setQuickToast(''), 2400);
+      if (placeSheetRequestIsCurrent(sheetRequest)) {
+        setQuickToast('Could not refresh trail source');
+        setTimeout(() => setQuickToast(''), 2400);
+      }
     } finally {
-      setTrailSourceRefreshing(false);
+      if (placeSheetRequestIsCurrent(sheetRequest)) setTrailSourceRefreshing(false);
     }
   }
 
@@ -20183,6 +20586,8 @@ function MapScreen() {
     setTrailRouteSegmentStatus([]);
     setTrailFieldReports([]);
     setTrailFieldReportSummary(null);
+    setTrailSourceRefreshing(false);
+    setFrSubmitting(false);
     setShowTrailFieldReportForm(false);
     resetFieldReportForm();
     setTrailCardCollapsed(false);
@@ -20196,26 +20601,6 @@ function MapScreen() {
     setTappedGas(null);
     setTappedPoi(null);
     setSelectedCommunityPin(null);
-    const id = trailReportId(feature);
-    api.getTrailFieldReports(id).then(setTrailFieldReports).catch(() => {});
-    api.getTrailFieldReportSummary(id).then(setTrailFieldReportSummary).catch(() => {});
-    if (feature.profile_id) {
-      api.getTrailProfile(feature.profile_id)
-        .then(profile => {
-          setSelectedTrailProfile(profile);
-          setSelectedTrail(current => {
-            if (!current || current.profile_id !== feature.profile_id) return current;
-            return {
-              ...current,
-              name: profile.name || current.name,
-              summary: profile.summary || current.summary,
-              photo_url: profile.photos?.[0]?.url || current.photo_url,
-            };
-          });
-          if (profile.field_report_summary) setTrailFieldReportSummary(profile.field_report_summary);
-        })
-        .catch(() => {});
-    }
   }
 
   function openTrailFromPoint(name: string, lat: number, lng: number, cls = 'path') {
@@ -22234,8 +22619,7 @@ function MapScreen() {
     setter(prev => prev.includes(id) ? prev.filter(item => item !== id) : [...prev, id]);
   };
   const openMapFilterLegend = () => {
-    setShowFilterSheet(false);
-    setTimeout(() => setShowMapLegendSheet(true), Platform.OS === 'ios' ? 90 : 0);
+    setShowMapLegendSheet(true);
   };
   const applyMapFilterPreset = (preset: MapModePresetId) => {
     setActiveMapModePreset(preset);
@@ -22720,18 +23104,19 @@ function MapScreen() {
         // ── Native MapLibre SDK (new binary required) ───────────────────────
         <NativeMap
           ref={nativeMapRef}
-          waypoints={waypoints}
-          camps={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
-          gas={mapMissionVisible || routeBuildMapActive || scopedMapSearchActive ? [] : routeSearchGas as any}
-          pois={mapMissionVisible || routeBuildMapActive ? [] : scopedMapSearchPois}
-          waterNavLines={mapMissionVisible || scopedMapSearchActive ? null : waterNavLines}
-          waterSpotCards={mapMissionVisible || scopedMapSearchActive ? [] : allWaterSpotCards}
-          waterCorridor={mapMissionVisible ? null : waterCorridor}
-          waterFollowRoute={mapMissionVisible ? null : waterFollowRoute}
-          reports={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
-          communityPins={mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
-          searchMarker={!mapMissionVisible && searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
-          userLoc={userLoc}
+          waypoints={mapVisualWorkActive ? waypoints : []}
+          camps={!mapVisualWorkActive || mapMissionVisible || routeBuildMapActive || scopedMapSearchActive || waterFollowActive ? [] : nativeMapCampPins as any}
+          gas={!mapVisualWorkActive || mapMissionVisible || routeBuildMapActive || scopedMapSearchActive ? [] : routeSearchGas as any}
+          pois={!mapVisualWorkActive || mapMissionVisible || routeBuildMapActive ? [] : scopedMapSearchPois}
+          offlineTrailFeatures={mapVisualWorkActive && layerTrails ? offlineV2Catalog.trail_features : undefined}
+          waterNavLines={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive ? null : waterNavLines}
+          waterSpotCards={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive ? [] : allWaterSpotCards}
+          waterCorridor={!mapVisualWorkActive || mapMissionVisible ? null : waterCorridor}
+          waterFollowRoute={!mapVisualWorkActive || mapMissionVisible ? null : waterFollowRoute}
+          reports={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : mapReports}
+          communityPins={!mapVisualWorkActive || mapMissionVisible || scopedMapSearchActive || safeWaterPlanningActive || waterFollowActive ? [] : displayCommunityPins}
+          searchMarker={mapVisualWorkActive && !mapMissionVisible && searchRouteCard ? { lat: searchRouteCard.lat, lng: searchRouteCard.lng, name: searchRouteCard.name } : null}
+          userLoc={mapVisualWorkActive ? userLoc : null}
           navMode={navMode}
           navCameraFollow={navCameraFollow}
           nativeNavEngineActive={USE_IOS_NATIVE_NAV_ENGINE}
@@ -22743,42 +23128,43 @@ function MapScreen() {
           rendererMode={mapRendererMode ?? 'maplibre'}
           routeProviderMode={activeRouteProviderMode}
           routeOpts={routeOpts}
-          traceMode={trailTraceMode}
-          traceDraftCoords={trailTraceMode ? trailTraceDraft : []}
-          traceRouteCoords={trailTraceRoute}
-          tracePinCoords={trailPinCaptureMode ? trailCapturePins : []}
-          trailPreviewCoords={trailPreviewOpen && trailPreviewManifest?.status === 'available' ? trailPreviewManifest.coordinates ?? [] : []}
+          traceMode={mapVisualWorkActive && trailTraceMode}
+          traceDraftCoords={mapVisualWorkActive && trailTraceMode ? trailTraceDraft : []}
+          traceRouteCoords={mapVisualWorkActive ? trailTraceRoute : []}
+          tracePinCoords={mapVisualWorkActive && trailPinCaptureMode ? trailCapturePins : []}
+          trailPreviewCoords={mapVisualWorkActive && trailPreviewOpen && trailPreviewManifest?.status === 'available' ? trailPreviewManifest.coordinates ?? [] : []}
           trailPreviewProgress={trailPreviewProgress}
           trailPreviewTone={trailPreviewTone}
-          routeBuildActive={routeBuildMapActive}
-          routeBuildCoords={routeBuildSession?.routeCoords ?? []}
+          routeBuildActive={mapVisualWorkActive && routeBuildMapActive}
+          routeBuildCoords={mapVisualWorkActive ? routeBuildSession?.routeCoords ?? [] : []}
           routeBuildReveal={routeBuildReveal}
-          routeBuildStops={routeBuildSession?.previewStops ?? []}
-          originalsRouteActive={originalsMapExperience.active && !navMode}
-          originalsRouteCoords={originalsMapExperience.routeCoords}
+          routeBuildStops={mapVisualWorkActive ? routeBuildSession?.previewStops ?? [] : []}
+          originalsRouteActive={mapVisualWorkActive && originalsMapExperience.active && !navMode}
+          originalsRouteCoords={mapVisualWorkActive ? originalsMapExperience.routeCoords : []}
           originalsRouteProgress={originalsMapExperience.routeProgress}
-          originalsCueStops={originalsMapExperience.cues}
+          originalsCueStops={mapVisualWorkActive ? originalsMapExperience.cues : []}
           suppressFeatureTaps={mapTapToolOwnsFeatureSelection}
-          showLandOverlay={showLands}
-          showUsgsOverlay={showUsgs}
-          showTerrain={map3dEnabled && !navMode}
-          showTrailOverlay={layerTrails}
-          showMvum={layerMvum}
-          showFire={layerFire}
-          showAva={layerAva}
-          showRadar={layerRadar}
-          showNautical={layerNautical}
-          hideMapStatusBadge={scopedMapSearchActive}
-          missionBriefActive={missionBriefOverlay.active}
-          missionBriefFullRoute={missionBriefOverlay.fullRoute}
-          missionBriefProgressRoute={missionBriefOverlay.progressRoute}
-          missionBriefMarker={missionBriefOverlay.marker}
-          missionBriefCallouts={missionBriefOverlay.callouts}
-          missionBriefWarning={missionBriefOverlay.warning}
+          showLandOverlay={mapVisualWorkActive && showLands}
+          showUsgsOverlay={mapVisualWorkActive && showUsgs}
+          showTerrain={mapVisualWorkActive && map3dEnabled && !navMode}
+          showTrailOverlay={mapVisualWorkActive && layerTrails}
+          showMvum={mapVisualWorkActive && layerMvum}
+          showFire={mapVisualWorkActive && layerFire}
+          showAva={mapVisualWorkActive && layerAva}
+          showRadar={mapVisualWorkActive && layerRadar}
+          showNautical={mapVisualWorkActive && layerNautical}
+          hideMapStatusBadge={!mapVisualWorkActive || scopedMapSearchActive}
+          missionBriefActive={mapVisualWorkActive && missionBriefOverlay.active}
+          missionBriefFullRoute={mapVisualWorkActive ? missionBriefOverlay.fullRoute : []}
+          missionBriefProgressRoute={mapVisualWorkActive ? missionBriefOverlay.progressRoute : []}
+          missionBriefMarker={mapVisualWorkActive ? missionBriefOverlay.marker : null}
+          missionBriefCallouts={mapVisualWorkActive ? missionBriefOverlay.callouts : []}
+          missionBriefWarning={mapVisualWorkActive && missionBriefOverlay.warning}
           onMapReady={() => {
             webLoadedRef.current = true;
             setMapSurfaceReady(true);
             setMapSurfaceGeneration(generation => generation + 1);
+            if (!mapVisualWorkActive) return;
             // Load camps in the current area — this is what the WebView did on map_ready.
             // Without this, no camp/POI pins show on the native map until user pans.
             const vp = viewportRef.current;
@@ -22798,6 +23184,7 @@ function MapScreen() {
             }
           }}
           onBoundsChange={b => {
+            if (!mapVisualWorkActive) return;
             viewportRef.current = b;
             setMapZoom(b.zoom ?? 10);
             if ((b.zoom ?? 0) >= (campDiscoveryWideActive ? MIN_MANUAL_CAMP_SEARCH_ZOOM : 9)) setMapMoved(true);
@@ -23105,6 +23492,20 @@ function MapScreen() {
             router.replace('/(tabs)/route-builder');
           }}
           onDismiss={() => clearRouteBuildSession(routeBuildSession.requestId)}
+          onReviewTrip={() => {
+            clearRouteBuildSession(routeBuildSession.requestId);
+            restoreTripOverview(true);
+            requestAnimationFrame(() => focusTripOverviewCamera());
+          }}
+          onEditRoute={() => {
+            clearRouteBuildSession(routeBuildSession.requestId);
+            router.replace('/(tabs)/route-builder?intent=edit-active');
+          }}
+          onOffline={() => {
+            setOfflineTripContext(activeTrip);
+            setShowOfflineModal(true);
+          }}
+          onOptions={() => setShowRouteOpts(true)}
         />
       ) : null}
       <TrailPreviewPlayer
@@ -23160,8 +23561,8 @@ function MapScreen() {
         onFindCamps={() => { void searchCampDiscoveryArea(); }}
         onAddPin={() => beginCommunityPinDrop(false)}
         onOpenWeather={openMapWeatherTool}
-        onOpenLayers={() => setShowLayerSheet(true)}
-        onOpenFilters={() => setShowFilterSheet(true)}
+        onOpenLayers={() => openLayersAndFilters('layers', 'map_drawer')}
+        onOpenFilters={() => openLayersAndFilters('filters', 'map_drawer')}
         onOpenOffline={() => setShowOfflineModal(true)}
         onOpenTrailBuilder={() => {
           if (trailPinCaptureMode) clearTrailPinCapture();
@@ -23500,7 +23901,7 @@ function MapScreen() {
                 style={s.campDiscoveryFilterBtn}
                 onPress={() => {
                   setCampDiscoveryWideActive(false);
-                  setShowFilterSheet(true);
+                  openLayersAndFilters('camps', 'map_shortcut');
                 }}
                 activeOpacity={0.84}
               >
@@ -23712,28 +24113,41 @@ function MapScreen() {
             )}
           </View>
 
-          {inlineSearchOpen && (searchResults.length > 0 || isSearching) && (
+          {inlineSearchOpen && (mapSearchDisplayResults.length > 0 || isSearching) && (
             <View style={[s.inlineMapSearchResults, mapChrome.toast, inlineSearchResultsMaxHeight ? { maxHeight: inlineSearchResultsMaxHeight } : null]}>
               {isSearching ? (
                 <View style={s.inlineMapSearchStateRow}>
                   <ActivityIndicator size="small" color={mapChrome.toastText} />
                   <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Searching</Text>
                 </View>
-              ) : searchResults.some(place => place.name === '__error__') ? (
+              ) : mapSearchDisplayResults.some(place => place.name === '__error__') ? (
                 <Text style={[s.inlineMapSearchStateText, { color: mapChrome.textMuted }]}>Search unavailable</Text>
               ) : (
-                searchResults.slice(0, 4).map(place => {
-                  const distMi = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) * 0.621371 : null;
-                  const sourceLabel = cleanMapPlaceMeta(place, 'Place');
+                mapSearchDisplayResults.slice(0, 4).map(place => {
+                  const hasCoordinates = typeof place.lat === 'number' && Number.isFinite(place.lat)
+                    && typeof place.lng === 'number' && Number.isFinite(place.lng);
+                  const distMi = userLoc && hasCoordinates
+                    ? haversineKm(userLoc.lat, userLoc.lng, place.lat as number, place.lng as number) * 0.621371
+                    : null;
+                  const sourceLabel = cleanExploreSourceLabel(
+                    place.source_label || place.source,
+                    String(place.subtype || place.type || 'Place')
+                      .replace(/[_-]+/g, ' ')
+                      .replace(/\b\w/g, character => character.toUpperCase()),
+                  );
                   return (
                     <TouchableOpacity
-                      key={`${place.name}:${place.lat}:${place.lng}:${place.place_id || place.provider_place_id || ''}`}
+                      key={place.result_id || `${place.name}:${place.lat ?? 'pending'}:${place.lng ?? 'pending'}`}
                       style={s.inlineMapSearchResultRow}
-                      onPress={() => selectSearchResult(place)}
+                      onPress={() => void selectSearchResult(place)}
                       activeOpacity={0.84}
                     >
                       <View style={s.inlineMapSearchResultIcon}>
-                        <Ionicons name="location-outline" size={14} color={C.orange} />
+                        {place.resolving ? (
+                          <ActivityIndicator size="small" color={C.orange} />
+                        ) : (
+                          <Ionicons name="location-outline" size={14} color={C.orange} />
+                        )}
                       </View>
                       <View style={s.inlineMapSearchResultCopy}>
                         <Text style={[s.inlineMapSearchResultName, { color: mapChrome.toastText }]} numberOfLines={1}>
@@ -23981,7 +24395,7 @@ function MapScreen() {
         {!waterFollowActive && (
           <TouchableOpacity
             style={[s.ctrlBtn, mapChrome.button]}
-            onPress={() => setShowLayerSheet(true)}
+            onPress={() => openLayersAndFilters('layers', 'map_shortcut')}
             activeOpacity={0.84}
             accessibilityLabel="Open layers"
           >
@@ -24405,7 +24819,7 @@ function MapScreen() {
         ].filter(Boolean) as Array<{ icon: keyof typeof Ionicons.glyphMap; color: string; text: string }>;
         const reportPhotoRows = trailFieldReports.filter(fr => fr.has_photo);
         return (
-          <View style={s.trailOverlayCard}>
+          <PlaceSheetShell model={selectedTrailSheetModel!} fill={false} style={s.trailOverlayCard}>
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={s.trailOverlayContent}>
               <View style={s.trailHeroPanel}>
                 <Image source={heroUri ? { uri: heroUri } : TRAIL_FALLBACK_IMAGE} style={s.trailHeroPhoto} resizeMode="cover" />
@@ -24495,6 +24909,11 @@ function MapScreen() {
                     <Text style={s.trailCleanCopy}>{summary}</Text>
                   </View>
                 )}
+
+                <FirstPartyRatingSection
+                  target={selectedTrailRatingTarget}
+                  testID={`${selectedTrailSheetModel!.testID}-rating`}
+                />
 
                 {nearbyRows.length > 0 && (
                   <View style={s.trailCleanSection}>
@@ -24617,7 +25036,7 @@ function MapScreen() {
                 </View>
               </View>
             </ScrollView>
-          </View>
+          </PlaceSheetShell>
         );
       })()}
 
@@ -24953,7 +25372,7 @@ function MapScreen() {
         <MapSearchSheet
           visible={showFullMapSearch}
           query={searchQuery}
-          results={searchResults}
+          results={mapSearchDisplayResults}
           searching={isSearching}
           hasLocation={!!userLoc}
           recent={searchHistory}
@@ -24967,16 +25386,22 @@ function MapScreen() {
             if (queryOverride != null) setSearchQuery(queryOverride);
             searchMap(queryOverride);
           }}
-          onSelect={place => selectSearchResult(place as SearchPlace)}
+          onSelect={place => { void selectSearchResult(place); }}
           onRoute={place => {
             if (!userLoc) {
               setQuickToast('Turn on location to preview a route.');
               setTimeout(() => setQuickToast(''), 2400);
               return;
             }
-            addSearchHistory({ name: place.name, lat: place.lat, lng: place.lng, searchedAt: Date.now() });
-            setShowFullMapSearch(false);
-            previewSearchRoute({ name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true }, place as SearchPlace);
+            void resolvePressedMapSearchResult(place).then(selected => {
+              if (!selected) return;
+              addSearchHistory({ name: selected.name, lat: selected.lat, lng: selected.lng, searchedAt: Date.now() });
+              setShowFullMapSearch(false);
+              previewSearchRoute(
+                { name: 'My Location', lat: userLoc.lat, lng: userLoc.lng, isCurrentLocation: true },
+                selected,
+              );
+            });
           }}
           onQuickAction={action => {
             if (action.id === 'trails-in-view') {
@@ -25499,7 +25924,7 @@ function MapScreen() {
       </Modal>
 
       <MapFilterSheet
-        visible={showFilterSheet && !navMode}
+        visible={showFilterSheet && !showMapLegendSheet && !navMode}
         changedCount={changedFilterGroupCount}
         filterSheetHeight={filterSheetHeight}
         filterBottomSpacer={filterBottomSpacer}
@@ -25656,6 +26081,8 @@ function MapScreen() {
         place={selectedPlace}
         visible={!!selectedPlace && !navMode && !safeWaterPlanningActive}
         initialStage="full"
+        communityRatingsEnabled={productFeatures?.community_ratings === true}
+        canRate={!!user}
         related={selectedPlaceContext ?? undefined}
         routeContextLabel={selectedPlaceTripContext?.label}
         onClose={() => {
@@ -25768,6 +26195,8 @@ function MapScreen() {
         } as any : null}
         visible={!!tappedPoi && !navMode && !safeWaterPlanningActive}
         initialStage="full"
+        communityRatingsEnabled={productFeatures?.community_ratings === true}
+        canRate={!!user}
         routeContextLabel={tappedPoi ? tripPlaceContextFor(tappedPoi)?.label : undefined}
         onClose={() => {
           setTappedPoi(null);
@@ -25827,6 +26256,7 @@ function MapScreen() {
           scrollContentStyle={s.quickSnapContent}
           peekHeader={null}
         >
+          <PlaceSheetShell model={selectedCampSheetModel!} fill={false}>
             {/* Photo / placeholder */}
             {(() => {
               const photos = campPhotoItems(selectedCamp, campDetail);
@@ -25859,31 +26289,18 @@ function MapScreen() {
                     </View>
                   ) : null}
                   {photos.length > 1 ? <Text style={[s.quickPhotoCount, { top: Math.max(insets.top + 12, 12) }]}>{safeIndex + 1}/{photos.length} photos</Text> : null}
-                  <View style={[s.quickCardHeroActions, { top: Math.max(insets.top + 8, 12) }]}>
-                    <TouchableOpacity
-                      style={s.quickCardHeroIcon}
-                      accessibilityRole="button"
-                      accessibilityLabel={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'Remove saved camp' : 'Save camp'}
-                      onPress={() => saveCampPlace(selectedCamp)}
-                    >
-                      <Ionicons
-                        name={favoriteCamps.some(f => f.id === selectedCamp.id) ? 'heart' : 'heart-outline'}
-                        size={17}
-                        color={favoriteCamps.some(f => f.id === selectedCamp.id) ? '#ef4444' : '#fff'}
-                      />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.quickCardHeroIcon} accessibilityRole="button" accessibilityLabel="Share camp" onPress={() => shareCampPlace(selectedCamp)}>
-                      <Ionicons name="share-outline" size={17} color="#fff" />
-                    </TouchableOpacity>
-                    <TouchableOpacity style={s.quickCardHeroIcon} accessibilityRole="button" accessibilityLabel="Close camp" onPress={closeSelectedCampProfile}>
-                      <Ionicons name="close" size={17} color="#fff" />
-                    </TouchableOpacity>
-                  </View>
-                  <View style={s.quickCardHeroText}>
-                    <Text style={s.quickCardHeroKicker} numberOfLines={1}>
-                      {campSourceDisplayLabel(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type, 'Campsite')}
-                    </Text>
-                    <Text style={s.quickCardHeroTitle} numberOfLines={2}>{campDisplayName(selectedCamp.name)}</Text>
+                  <PlaceSheetHeroChrome
+                    model={{
+                      ...selectedCampSheetModel!,
+                      title: campDisplayName(selectedCamp.name),
+                      subtitle: campSourceDisplayLabel(selectedCamp.verified_source || selectedCamp.source || selectedCamp.land_type, 'Campsite'),
+                    }}
+                    top={Math.max(insets.top + 8, 12)}
+                    saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
+                    onSave={() => saveCampPlace(selectedCamp)}
+                    onShare={() => shareCampPlace(selectedCamp)}
+                    onClose={closeSelectedCampProfile}
+                  >
                     {(() => {
                       const weather = campWeather;
                       if (!weather?.daily?.time?.length) return null;
@@ -25900,7 +26317,7 @@ function MapScreen() {
                         </View>
                       );
                     })()}
-                  </View>
+                  </PlaceSheetHeroChrome>
                 </TouchableOpacity>
               );
             })()}
@@ -26161,6 +26578,11 @@ function MapScreen() {
                   }}
                 />
 
+                <FirstPartyRatingSection
+                  target={selectedCampRatingTarget}
+                  testID={`${selectedCampSheetModel!.testID}-rating`}
+                />
+
                 <CampCommentsSection
                   comments={campComments}
                   limit={3}
@@ -26282,8 +26704,9 @@ function MapScreen() {
                   <Text style={s.quickCardSecondaryText}>Open details</Text>
                 </TouchableOpacity>
               )}
-            </View>
-            </View>
+              </View>
+              </View>
+          </PlaceSheetShell>
         </TrailheadSnapSheet>
       )}
 
@@ -26828,6 +27251,14 @@ function MapScreen() {
       {/* ── Offline Map Download Modal — native MLN pack system ── */}
       <OfflineModal
         visible={showOfflineModal}
+        activeNativeRenderer={mapRendererMode === 'mapbox' ? 'rnmapbox' : 'maplibre'}
+        legacyNativePackCompatible={
+          mapLayer !== 'satellite'
+          && mapLayer !== 'hybrid'
+          && mapLayer !== 'extreme'
+          && !map3dEnabled
+        }
+        activeRendererStyleId={activeOfflineRendererStyleId}
         onClose={() => {
           setShowOfflineModal(false);
           setOfflineTripContext(null);
@@ -26900,14 +27331,14 @@ function MapScreen() {
       />
 
       {/* ── Route Brief Modal ── */}
-      <Modal visible={showRouteBrief} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => closeRouteBrief('system_dismiss')}>
+      <Modal visible={showBriefAndBackup} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => closeRouteBrief('system_dismiss')}>
         <View style={s.detailModal}>
-          {routeBrief && (
+          {briefAndBackup && (
             <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ padding: 20 }}>
               <View style={s.detailHeader}>
                 <View style={{ flex: 1 }}>
-                  <Text style={s.detailName}>Route Brief</Text>
-                  {routeBriefSaved ? <Text style={s.savedAiMeta}>SAVED TO THIS TRIP</Text> : null}
+                  <Text style={s.detailName}>Brief &amp; Backup</Text>
+                  <Text style={s.savedAiMeta}>TRIP REVISION {briefAndBackup.trip_revision}</Text>
                 </View>
                 <TouchableOpacity style={s.detailClose} onPress={() => fetchRouteBrief(true)} disabled={loadingBrief}>
                   {loadingBrief ? <ActivityIndicator size="small" color={C.orange} /> : <Ionicons name="refresh" size={18} color={C.orange} />}
@@ -26917,68 +27348,74 @@ function MapScreen() {
                 </TouchableOpacity>
               </View>
               <View style={[s.readinessRow, { borderColor: C.orange }]}>
-                <Text style={s.planningStatusValue}>Review</Text>
-                <Text style={s.readinessLabel}>PLANNING STATUS</Text>
+                <Text style={s.planningStatusValue}>{briefEvidenceStatusLabel(briefAndBackup.status)}</Text>
+                <Text style={s.readinessLabel}>ROUTE EVIDENCE</Text>
               </View>
-              <Text style={s.briefSummary}>{routeBrief.briefing_summary}</Text>
-              {routeBrief.top_concerns.length > 0 && (
-                <View style={s.detailSection}>
-                  <Text style={s.detailSectionTitle}>Key Concerns</Text>
-                  {routeBrief.top_concerns.map((c, i) => (
-                    <View key={i} style={s.briefItem}>
-                      <Ionicons name="warning-outline" size={14} color={C.yellow} />
-                      <Text style={s.briefItemText}>{c}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
-              {routeBrief.must_do_before_leaving.length > 0 && (
-                <View style={s.detailSection}>
-                  <Text style={s.detailSectionTitle}>Before You Leave</Text>
-                  {routeBrief.must_do_before_leaving.map((t, i) => (
-                    <View key={i} style={s.briefItem}>
-                      <Ionicons name="checkmark-circle-outline" size={14} color={C.orange} />
-                      <Text style={s.briefItemText}>{t}</Text>
-                    </View>
-                  ))}
-                </View>
-              )}
+              <Text style={s.briefSummary}>{briefAndBackup.note || 'Not checked'}</Text>
               <View style={s.briefStats}>
-                <View style={s.briefStat}><Text style={s.briefStatusValue}>{routeBrief.fuel_status}</Text><Text style={s.briefStatLabel}>FUEL STOPS</Text></View>
-                <View style={s.briefStat}><Text style={s.briefStatusValue}>{routeBrief.water_status}</Text><Text style={s.briefStatLabel}>WATER PLAN</Text></View>
+                <View style={s.briefStat}><Text style={s.briefStatusValue}>{briefEvidenceStatusLabel(briefAndBackup.checks.mobile_service)}</Text><Text style={s.briefStatLabel}>MOBILE SERVICE</Text></View>
+                <View style={s.briefStat}><Text style={s.briefStatusValue}>{briefEvidenceStatusLabel(briefAndBackup.checks.exits)}</Text><Text style={s.briefStatLabel}>EXITS</Text></View>
               </View>
-              <View style={s.detailSection}>
-                <View style={s.detailSectionTitleRow}>
-                  <Ionicons name="cellular-outline" size={14} color={C.text3} />
-                  <Text style={s.detailSectionTitleInline}>Signal Coverage</Text>
-                </View>
-                <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.signal_status}</Text>
+              <View style={s.briefStats}>
+                <View style={s.briefStat}><Text style={s.briefStatusValue}>{briefEvidenceStatusLabel(briefAndBackup.checks.backup_routes)}</Text><Text style={s.briefStatLabel}>BACKUP ROUTES</Text></View>
+                <View style={s.briefStat}><Text style={s.briefStatusValue}>{briefEvidenceStatusLabel(briefAndBackup.checks.hazards)}</Text><Text style={s.briefStatLabel}>HAZARDS</Text></View>
               </View>
-              <View style={s.detailSection}>
-                <View style={s.detailSectionTitleRow}>
-                  <Ionicons name="flame-outline" size={14} color={C.orange} />
-                  <Text style={s.detailSectionTitleInline}>Fire Restrictions</Text>
-                </View>
-                <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.fire_status}</Text>
-              </View>
-              <View style={s.detailSection}>
-                <View style={s.detailSectionTitleRow}>
-                  <Ionicons name="navigate-outline" size={14} color={C.text3} />
-                  <Text style={s.detailSectionTitleInline}>Exit Options</Text>
-                </View>
-                <Text style={[s.briefSummary, { marginTop: 4 }]}>{routeBrief.exit_options_status}</Text>
-              </View>
-              {routeBrief.daily_highlights.length > 0 && (
+              {briefAndBackup.evidence_available && briefAndBackup.service_segments.length > 0 ? (
                 <View style={s.detailSection}>
-                  <Text style={s.detailSectionTitle}>Daily Highlights</Text>
-                  {routeBrief.daily_highlights.map((h, i) => (
-                    <View key={i} style={s.briefItem}>
-                      <Text style={{ fontSize: 12, color: C.orange }}>D{i + 1}</Text>
-                      <Text style={s.briefItemText}>{h}</Text>
+                  <View style={s.detailSectionTitleRow}>
+                    <Ionicons name="cellular-outline" size={14} color={C.text3} />
+                    <Text style={s.detailSectionTitleInline}>Mobile service intervals</Text>
+                  </View>
+                  {briefAndBackup.service_segments.map(segment => (
+                    <View key={segment.id} style={s.briefItem}>
+                      <Ionicons name="cellular-outline" size={14} color={C.orange} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.briefItemText}>{briefAvailabilityLabel(segment.availability)}</Text>
+                        <Text style={s.savedAiMeta}>{briefRouteProgressLabel(segment.start_progress)}–{briefRouteProgressLabel(segment.end_progress)}{segment.source_label ? ` · ${segment.source_label}` : ''}</Text>
+                      </View>
                     </View>
                   ))}
                 </View>
-              )}
+              ) : null}
+              {briefAndBackup.evidence_available && briefAndBackup.exits.length > 0 ? (
+                <View style={s.detailSection}>
+                  <View style={s.detailSectionTitleRow}>
+                    <Ionicons name="navigate-outline" size={14} color={C.text3} />
+                    <Text style={s.detailSectionTitleInline}>Exit references</Text>
+                  </View>
+                  {briefAndBackup.exits.map(exit => (
+                    <View key={exit.id} style={s.briefItem}>
+                      <Ionicons name="navigate-outline" size={14} color={C.orange} />
+                      <View style={{ flex: 1 }}>
+                        <Text style={s.briefItemText}>{exit.label || 'Exit reference'}</Text>
+                        <Text style={s.savedAiMeta}>{briefAvailabilityLabel(exit.availability)} · {briefRouteProgressLabel(exit.route_progress)}{exit.source_label ? ` · ${exit.source_label}` : ''}</Text>
+                      </View>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              {briefAndBackup.evidence_available && briefAndBackup.timeline_media.some(media => media.media_url && media.license_id && media.attribution) ? (
+                <View style={s.detailSection}>
+                  <Text style={s.detailSectionTitle}>Trip places</Text>
+                  <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={s.siteRail}>
+                    {briefAndBackup.timeline_media.filter(media => media.media_url && media.license_id && media.attribution).map(media => (
+                      <View key={media.id} style={s.sitePhotoCard}>
+                        <Image source={{ uri: media.media_url }} style={s.sitePhoto} resizeMode="cover" />
+                        <View style={s.siteBody}><Text style={s.siteMeta} numberOfLines={2}>{media.attribution}</Text></View>
+                      </View>
+                    ))}
+                  </ScrollView>
+                </View>
+              ) : null}
+              <View style={s.detailSection}>
+                <Text style={s.detailSectionTitle}>Sources</Text>
+                {briefAndBackup.sources.length > 0 ? briefAndBackup.sources.map((source, index) => (
+                  <TouchableOpacity key={`${source.label}-${index}`} style={s.briefItem} disabled={!source.url} onPress={() => source.url && Linking.openURL(source.url)}>
+                    <Ionicons name="document-text-outline" size={14} color={C.orange} />
+                    <Text style={s.briefItemText}>{source.label}</Text>
+                  </TouchableOpacity>
+                )) : <Text style={s.briefSummary}>Not checked</Text>}
+              </View>
             </ScrollView>
           )}
         </View>
@@ -28021,7 +28458,7 @@ function MapScreen() {
                   ? <ActivityIndicator size="small" color={C.orange} />
                   : <Ionicons name="shield-checkmark-outline" size={16} color={C.orange} />
                 }
-                <Text style={s.tripToolText}>Route brief &amp; bailout</Text>
+                <Text style={s.tripToolText}>Brief &amp; Backup</Text>
               </TouchableOpacity>
               <TouchableOpacity style={s.tripToolBtn} onPress={() => fetchPackingList()} disabled={loadingPacking}>
                 {loadingPacking
@@ -28383,7 +28820,7 @@ function MapScreen() {
           ? `Nearest camp: ${liveSupport.nearestCampName}${liveSupport.nearestCampDistanceMi != null ? ` · ${liveSupport.nearestCampDistanceMi.toFixed(1)} mi` : ''}`
           : '';
         const communityCard = (
-          <>
+          <PlaceSheetShell model={selectedReportSheetModel!} fill={false}>
                   <View style={[s.communityHero, { borderColor: meta.color + '55' }]}>
                     <View style={[s.communityHeroGrid, { backgroundColor: meta.color + '18' }]} />
                     <View style={[s.pinIconBadge, { backgroundColor: meta.color }]}>
@@ -28544,7 +28981,7 @@ function MapScreen() {
                       <Text style={[s.communityActionText, { color: C.orange }]} numberOfLines={1}>REPORT</Text>
                     </TouchableOpacity>
                   </View>}
-          </>
+          </PlaceSheetShell>
         );
         if (privateLead) {
           return (
@@ -31144,7 +31581,7 @@ const makeStyles = (C: ColorPalette) => {
   },
   offlineAreaPrimaryText: { color: '#fff', fontSize: 10, fontFamily: mono, fontWeight: '900' },
 
-  // ── Route brief
+  // Brief & Backup
   readinessRow: {
     alignItems: 'center', justifyContent: 'center', borderWidth: 2, borderRadius: 60,
     width: 100, height: 100, alignSelf: 'center', marginBottom: 16,
@@ -31470,9 +31907,9 @@ const makeStyles = (C: ColorPalette) => {
   },
   trailHeroTitle: {
     color: '#fff',
-    fontSize: 25,
-    lineHeight: 30,
-    fontWeight: '900',
+    fontSize: 29,
+    lineHeight: 32,
+    fontFamily: trailheadFonts.displayBold,
     letterSpacing: 0,
     textShadowColor: 'rgba(0,0,0,0.38)',
     textShadowRadius: 12,

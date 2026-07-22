@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapLocationWatchShouldRun, screenIsActive } from '../screenActivityState';
+import { mapLocationWatchShouldRun, mapVisualWorkShouldRun, screenIsActive } from '../screenActivityState';
 import { completeLegacyMapSearch } from '../legacyMapSearchPolicy';
 import { subscriptionManagementUrl } from '../subscriptionManagement';
 import {
@@ -26,6 +26,14 @@ test('idle Map sensing pauses on blur/background while active navigation continu
   assert.equal(mapLocationWatchShouldRun(focusedBackground, false), false);
   assert.equal(mapLocationWatchShouldRun(blurredForeground, true), true);
   assert.equal(mapLocationWatchShouldRun(focusedBackground, true), true);
+});
+
+test('hidden Map pauses visual layers without stopping the navigation runtime', () => {
+  assert.equal(mapVisualWorkShouldRun(true, true, false), true);
+  assert.equal(mapVisualWorkShouldRun(false, true, false), false);
+  assert.equal(mapVisualWorkShouldRun(false, true, true), true);
+  assert.equal(mapVisualWorkShouldRun(false, false, true), false);
+  assert.equal(mapLocationWatchShouldRun(false, true), true);
 });
 
 test('legacy Map search preserves server order and requires explicit selection', () => {

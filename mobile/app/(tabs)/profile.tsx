@@ -1,11 +1,11 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { useState, useEffect, useMemo, useRef, useCallback, type ComponentProps } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, Share, Linking, ActivityIndicator, Image, Modal, Animated, Keyboard, Switch, Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
-import { Ionicons } from '@expo/vector-icons';
+import { Ionicons as ExpoIonicons } from '@expo/vector-icons';
 import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
@@ -16,12 +16,24 @@ import * as Updates from 'expo-updates';
 import Constants from 'expo-constants';
 import * as Application from 'expo-application';
 import * as Location from 'expo-location';
-import { api, ApiError, ContestStatus, ContributorProfile, SupportThread, TripResult } from '@/lib/api';
+import * as Notifications from 'expo-notifications';
+import {
+  api,
+  ApiError,
+  ContestStatus,
+  ContributorProfile,
+  SupportThread,
+  TripResult,
+  type SupportAttachment,
+  type SupportAttachmentContentType,
+  type SupportDiagnosticAllowlist,
+} from '@/lib/api';
 import { cancelActiveTripMirror, useStore, RigProfile, SavedPlace, TripHistoryItem } from '@/lib/store';
 import PaywallModal from '@/components/PaywallModal';
 import TourTarget from '@/components/TourTarget';
 import ProfileLibraryOverview from '@/components/profile/ProfileLibraryOverview';
 import CommunicationPreferencesSection from '@/components/profile/CommunicationPreferencesSection';
+import AccountDeletionSheet from '@/components/profile/AccountDeletionSheet';
 import { TrailheadButton, TrailheadCard, TrailheadMetricRow, TrailheadTopBar } from '@/components/TrailheadUI';
 import { useSubscription } from '@/lib/useSubscription';
 import { subscriptionManagementUrl } from '@/lib/subscriptionManagement';
@@ -42,9 +54,20 @@ import { CREDIT_REWARDS } from '@/lib/credits';
 import { trackPhase0Event } from '@/lib/telemetry';
 import { BookedTour, loadBookedTours } from '@/lib/bookedTours';
 import { eraseTripRepositoryScope } from '@/lib/tripRepository';
+import { clearExpoOfflineV2Scope } from '@/lib/offlineV2/expoRuntime';
 import { AUDIO_LOCATION_TASK } from '@/lib/backgroundTasks';
+import { clearOriginalsAccountScope, stopOriginalsForAccountDeparture } from '@/lib/originals/accountCleanup';
 import { removeAccountPushToken, removeLocalPushRegistration } from '@/lib/deviceNotifications';
 import { cancelTripRepositorySync } from '@/lib/tripRepositorySync';
+import { accountDeletionAuthMethod } from '@/lib/accountDeletion';
+import {
+  canonicalReferralUrl,
+  clearPendingReferralCode,
+  getReferralAttributionEnabled,
+  getPendingReferralCode,
+  normalizeReferralCode,
+  setReferralAttributionEnabled,
+} from '@/lib/referrals/branchAttribution';
 import {
   displayConsumptionToMpg,
   displayToMiles,
@@ -64,9 +87,17 @@ const AppleAuthentication: AppleAuthModule | null = (() => {
   }
 })();
 
+const Ionicons = Object.assign(
+  (props: ComponentProps<typeof ExpoIonicons>) => (
+    <ExpoIonicons {...props} accessible={false} importantForAccessibility="no" />
+  ),
+  { glyphMap: ExpoIonicons.glyphMap },
+);
+
 type ChecklistItem = { id: string; label: string; done: boolean };
 type ChecklistSection = { title: string; icon: keyof typeof Ionicons.glyphMap; items: ChecklistItem[] };
 type ExplorerPlanPoint = { icon: keyof typeof Ionicons.glyphMap; label: string };
+type SupportDraftAttachment = SupportAttachment & { name: string };
 
 const EXPLORER_PLAN_POINTS: ExplorerPlanPoint[] = [
   { icon: 'trail-sign-outline', label: 'Trip planning tools' },
@@ -222,6 +253,20 @@ function icsText(value?: string) {
     .replace(/;/g, '\\;');
 }
 
+function supportAttachmentContentType(mimeType: string | null | undefined, name: string): SupportAttachmentContentType | null {
+  const mime = String(mimeType || '').trim().toLowerCase();
+  if (mime === 'image/jpeg' || mime === 'image/jpg') return 'image/jpeg';
+  if (mime === 'image/png') return 'image/png';
+  if (mime === 'image/heic') return 'image/heic';
+  if (mime === 'image/heif') return 'image/heif';
+  const extension = name.toLowerCase().split('.').pop();
+  if (extension === 'jpg' || extension === 'jpeg') return 'image/jpeg';
+  if (extension === 'png') return 'image/png';
+  if (extension === 'heic') return 'image/heic';
+  if (extension === 'heif') return 'image/heif';
+  return null;
+}
+
 const PROFILE_SECTIONS = [
   { id: 'account', label: 'Account', icon: 'person-circle-outline' },
   { id: 'trips', label: 'Trips & Saved', icon: 'albums-outline' },
@@ -235,7 +280,7 @@ export default function ProfileScreen() {
   const C = useTheme();
   const s = useMemo(() => makeStyles(C), [C]);
   const router = useRouter();
-  const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; auth?: string }>();
+  const params = useLocalSearchParams<{ support?: string; support_thread_id?: string; prizes?: string; auth?: string; referral_code?: string }>();
   const { user, rigProfile, setAuth, signOut, clearAuthAndLocalData, setRigProfile } = useStore();
 
   function accountRequestIsCurrent(epoch: number, accountId: string | number | null | undefined) {
@@ -304,8 +349,15 @@ export default function ProfileScreen() {
   const [supportSelectedThreadId, setSupportSelectedThreadId] = useState<number | null>(null);
   const [supportDraft, setSupportDraft] = useState('');
   const [supportSending, setSupportSending] = useState(false);
+  const [supportAttachments, setSupportAttachments] = useState<SupportDraftAttachment[]>([]);
+  const [supportUploading, setSupportUploading] = useState(false);
+  const [supportDiagnosticConsent, setSupportDiagnosticConsent] = useState(false);
   const [visibilitySaving, setVisibilitySaving] = useState(false);
   const [accountLifecycleBusy, setAccountLifecycleBusy] = useState(false);
+  const [showAccountDeletion, setShowAccountDeletion] = useState(false);
+  const [deletionAuthMethod, setDeletionAuthMethod] = useState(accountDeletionAuthMethod(user?.auth_method));
+  const [referralAttributionEnabled, setReferralAttributionEnabledState] = useState(true);
+  const [referralAttributionSaving, setReferralAttributionSaving] = useState(false);
   const accountLifecycleBusyRef = useRef(false);
   const deletedAccountPendingCleanupRef = useRef<number | null>(null);
   const [bookedTours, setBookedTours] = useState<BookedTour[]>([]);
@@ -349,6 +401,9 @@ export default function ProfileScreen() {
   const [googleRequest, googleResponse, promptGoogleAsync] = Google.useAuthRequest({
     ...googleAuthConfig,
   });
+  const [deletionGoogleRequest, , promptDeletionGoogleAsync] = Google.useAuthRequest({
+    ...googleAuthConfig,
+  });
 
   function openSavedCampOnMap(camp: typeof favoriteCamps[number]) {
     setPendingMapSelection({ kind: 'camp', camp });
@@ -366,9 +421,19 @@ export default function ProfileScreen() {
   }
 
   async function stopAccountBackgroundLocation() {
-    if (Platform.OS !== 'ios') return;
-    const active = await Location.hasStartedLocationUpdatesAsync(AUDIO_LOCATION_TASK);
-    if (active) await Location.stopLocationUpdatesAsync(AUDIO_LOCATION_TASK);
+    const errors: string[] = [];
+    try { await stopOriginalsForAccountDeparture(); } catch (error) {
+      errors.push(error instanceof Error ? error.message : String(error));
+    }
+    if (Platform.OS !== 'web') {
+      try {
+        const active = await Location.hasStartedLocationUpdatesAsync(AUDIO_LOCATION_TASK);
+        if (active) await Location.stopLocationUpdatesAsync(AUDIO_LOCATION_TASK);
+      } catch (error) {
+        errors.push(error instanceof Error ? error.message : String(error));
+      }
+    }
+    if (errors.length > 0) throw new Error(errors.join('\n'));
   }
 
   function showCleanupIncomplete(accountId: number) {
@@ -390,7 +455,9 @@ export default function ProfileScreen() {
       await stopAccountBackgroundLocation();
       await cancelTripRepositorySync();
       await cancelActiveTripMirror();
+      await clearExpoOfflineV2Scope(`account:${String(accountId)}`);
       await eraseTripRepositoryScope(accountId);
+      await clearOriginalsAccountScope(accountId);
       await clearAuthAndLocalData();
       const pushCleanupDrained = accountStorage.beginCleanup();
       try {
@@ -417,36 +484,37 @@ export default function ProfileScreen() {
     accountLifecycleBusyRef.current = true;
     setAccountLifecycleBusy(true);
     let cleanupIncomplete = false;
-    // Both actions clear all private in-memory Store state before their first await.
-    const localClear = finishingDeletedAccount ? clearAuthAndLocalData() : signOut();
-    setView(finishingDeletedAccount ? 'login' : 'main');
+    try { await stopAccountBackgroundLocation(); } catch { cleanupIncomplete = true; }
     try { await cancelTripRepositorySync(); } catch { cleanupIncomplete = true; }
     try { await cancelActiveTripMirror(); } catch { cleanupIncomplete = true; }
+    try { await clearExpoOfflineV2Scope(`account:${String(accountId)}`); } catch { cleanupIncomplete = true; }
     try { await eraseTripRepositoryScope(accountId); } catch { cleanupIncomplete = true; }
-    try { await stopAccountBackgroundLocation(); } catch { cleanupIncomplete = true; }
+    try { await clearOriginalsAccountScope(accountId); } catch { cleanupIncomplete = true; }
     try {
-      await localClear;
+      // Clear the account identity only after its V2 transfer/removal barrier.
+      await (finishingDeletedAccount ? clearAuthAndLocalData() : signOut());
+      setView(finishingDeletedAccount ? 'login' : 'main');
       if (finishingDeletedAccount) deletedAccountPendingCleanupRef.current = null;
     } catch {
       cleanupIncomplete = true;
     }
-    if (!finishingDeletedAccount) {
-      const pushCleanupDrained = accountStorage.beginCleanup();
-      try {
-        await pushCleanupDrained;
+    const pushCleanupDrained = accountStorage.beginCleanup();
+    try {
+      await pushCleanupDrained;
+      if (!finishingDeletedAccount) {
         await removeAccountPushToken(authToken);
-      } catch {
-        cleanupIncomplete = true;
-      } finally {
-        accountStorage.endCleanup();
       }
+    } catch {
+      cleanupIncomplete = true;
+    } finally {
+      accountStorage.endCleanup();
     }
     accountLifecycleBusyRef.current = false;
     setAccountLifecycleBusy(false);
     if (cleanupIncomplete) showCleanupIncomplete(accountId);
   }
 
-  async function deleteAccountAndClearDevice() {
+  async function deleteAccountAndClearDevice(authorizationToken: string) {
     const accountId = user?.id;
     if (accountId == null || accountLifecycleBusyRef.current) return;
     accountLifecycleBusyRef.current = true;
@@ -455,42 +523,77 @@ export default function ProfileScreen() {
       await stopAccountBackgroundLocation();
       if (deletedAccountPendingCleanupRef.current !== accountId) {
         await removeAccountPushToken();
-        await api.deleteAccount();
+        await api.deleteAccount(authorizationToken);
         deletedAccountPendingCleanupRef.current = accountId;
       }
       let cleanupIncomplete = false;
       try { await cancelTripRepositorySync(); } catch { cleanupIncomplete = true; }
       try { await cancelActiveTripMirror(); } catch { cleanupIncomplete = true; }
+      try { await clearExpoOfflineV2Scope(`account:${String(accountId)}`); } catch { cleanupIncomplete = true; }
       try { await eraseTripRepositoryScope(accountId); } catch { cleanupIncomplete = true; }
+      try { await clearOriginalsAccountScope(accountId); } catch { cleanupIncomplete = true; }
       try { await clearAuthAndLocalData(); } catch { cleanupIncomplete = true; }
+      const cleanupDrained = accountStorage.beginCleanup();
+      try { await cleanupDrained; } catch { cleanupIncomplete = true; } finally { accountStorage.endCleanup(); }
+      setShowAccountDeletion(false);
       setView('login');
       if (cleanupIncomplete) showCleanupIncomplete(accountId);
       else deletedAccountPendingCleanupRef.current = null;
-    } catch {
-      Alert.alert(
-        'Deletion Failed',
-        'Could not delete your account. Please check your connection and try again.',
-      );
+    } catch (error) {
+      throw error;
     } finally {
       accountLifecycleBusyRef.current = false;
       setAccountLifecycleBusy(false);
     }
   }
 
-  function confirmAccountDeletion() {
+  async function confirmAccountDeletion() {
     if (accountLifecycleBusyRef.current) return;
-    Alert.alert(
-      'Delete Account',
-      'This permanently deletes your account, all trips, reports, and credits. This cannot be undone.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete My Account',
-          style: 'destructive',
-          onPress: () => { void deleteAccountAndClearDevice(); },
-        },
-      ],
-    );
+    let method = accountDeletionAuthMethod(user?.auth_method);
+    if (!user?.auth_method) {
+      try {
+        const freshUser = await api.me();
+        method = accountDeletionAuthMethod(freshUser.auth_method);
+      } catch (error: any) {
+        Alert.alert('Account unavailable', error?.message || 'Connect to the internet and try again.');
+        return;
+      }
+    }
+    setDeletionAuthMethod(method);
+    setShowAccountDeletion(true);
+  }
+
+  async function authorizePasswordAccountDeletion(currentPassword: string) {
+    const authorization = await api.authorizeAccountDeletion({ password: currentPassword });
+    return authorization.authorization_token;
+  }
+
+  async function authorizeProviderAccountDeletion(provider: 'apple' | 'google') {
+    let identityToken = '';
+    if (provider === 'apple') {
+      if (Platform.OS !== 'ios' || !AppleAuthentication || !appleAuthAvailable) {
+        throw new Error('Apple sign-in is not available on this device.');
+      }
+      const credential = await AppleAuthentication.signInAsync({ requestedScopes: [] });
+      identityToken = credential.identityToken || '';
+    } else {
+      if (!deletionGoogleRequest || !googleAuthAvailable) {
+        throw new Error('Google sign-in is not available on this device.');
+      }
+      const result = await promptDeletionGoogleAsync();
+      if (result.type !== 'success') {
+        throw new Error(result.type === 'cancel' || result.type === 'dismiss'
+          ? 'Google sign-in was cancelled.'
+          : 'Could not confirm your Google account.');
+      }
+      identityToken = result.params?.id_token || result.authentication?.idToken || '';
+    }
+    if (!identityToken) throw new Error(`${provider === 'apple' ? 'Apple' : 'Google'} did not return a sign-in token.`);
+    const authorization = await api.authorizeAccountDeletion({
+      provider,
+      identity_token: identityToken,
+    });
+    return authorization.authorization_token;
   }
 
   function clearCampCacheAdmin() {
@@ -548,6 +651,30 @@ export default function ProfileScreen() {
   }, [params.auth, user?.id]);
 
   useEffect(() => {
+    if (user) return;
+    let alive = true;
+    const directCode = normalizeReferralCode(Array.isArray(params.referral_code)
+      ? params.referral_code[0]
+      : params.referral_code);
+    if (directCode) {
+      setRefCode(directCode);
+      return () => { alive = false; };
+    }
+    getPendingReferralCode().then(code => {
+      if (alive && code) setRefCode(current => current || code);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, [params.referral_code, user?.id]);
+
+  useEffect(() => {
+    let alive = true;
+    getReferralAttributionEnabled()
+      .then(enabled => { if (alive) setReferralAttributionEnabledState(enabled); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+
+  useEffect(() => {
     if (!user) return;
     loadSupportInbox(false).catch(() => {});
   }, [user?.id]);
@@ -597,6 +724,11 @@ export default function ProfileScreen() {
     const threadId = threadIdRaw ? parseInt(String(threadIdRaw), 10) : NaN;
     openSupportInbox(Number.isFinite(threadId) ? threadId : null).catch(() => {});
   }, [params.support, params.support_thread_id, user?.id]);
+
+  useEffect(() => {
+    if (!user || params.prizes !== '1') return;
+    setShowContest(true);
+  }, [params.prizes, user?.id]);
 
   const selectedSupportThread = supportThreads.find(thread => thread.id === supportSelectedThreadId) ?? null;
 
@@ -1037,6 +1169,70 @@ export default function ProfileScreen() {
     }
   }
 
+  async function addSupportScreenshots() {
+    if (supportUploading || supportAttachments.length >= 3) return;
+    const selection = await DocumentPicker.getDocumentAsync({
+      type: ['image/jpeg', 'image/png', 'image/heic', 'image/heif'],
+      multiple: true,
+      copyToCacheDirectory: true,
+    });
+    if (selection.canceled) return;
+    const remaining = Math.max(0, 3 - supportAttachments.length);
+    const selected = selection.assets.slice(0, remaining);
+    if (selection.assets.length > remaining) {
+      Alert.alert('Three screenshots maximum', `You can add ${remaining || 'no'} more screenshot${remaining === 1 ? '' : 's'} to this message.`);
+    }
+    setSupportUploading(true);
+    const uploaded: SupportDraftAttachment[] = [];
+    try {
+      for (const asset of selected) {
+        if (Number(asset.size || 0) > 8 * 1024 * 1024) {
+          Alert.alert('Screenshot too large', `${asset.name} is over 8 MB.`);
+          continue;
+        }
+        const contentType = supportAttachmentContentType(asset.mimeType, asset.name);
+        if (!contentType) {
+          Alert.alert('Unsupported image', `${asset.name} must be JPEG, PNG, HEIC or HEIF.`);
+          continue;
+        }
+        const dataBase64 = await FileSystem.readAsStringAsync(asset.uri, {
+          encoding: FileSystem.EncodingType.Base64,
+        });
+        const attachment = await api.uploadSupportAttachment({
+          content_type: contentType,
+          data_base64: dataBase64,
+        });
+        uploaded.push({ ...attachment, name: asset.name });
+      }
+      if (uploaded.length) setSupportAttachments(current => [...current, ...uploaded].slice(0, 3));
+    } catch (error: any) {
+      Alert.alert('Screenshot not added', error?.message || 'Try again on a stable connection.');
+    } finally {
+      setSupportUploading(false);
+    }
+  }
+
+  async function collectSupportDiagnostics(): Promise<SupportDiagnosticAllowlist> {
+    const diagnostics: SupportDiagnosticAllowlist = {
+      platform: Platform.OS,
+      app_version: Application.nativeApplicationVersion || Constants.expoConfig?.version || undefined,
+      runtime_version: String(Updates.runtimeVersion || Constants.expoConfig?.runtimeVersion || ''),
+      device_class: Platform.OS === 'ios' && Platform.isPad ? 'tablet' : 'phone',
+      error_codes: [],
+    };
+    const [locationPermission, notificationPermission, freeStorage] = await Promise.all([
+      Location.getForegroundPermissionsAsync().catch(() => null),
+      Notifications.getPermissionsAsync().catch(() => null),
+      FileSystem.getFreeDiskStorageAsync().catch(() => null),
+    ]);
+    if (locationPermission?.status) diagnostics.location_permission = locationPermission.status;
+    if (notificationPermission?.status) diagnostics.notification_permission = notificationPermission.status;
+    if (typeof freeStorage === 'number') {
+      diagnostics.storage_state = freeStorage < 500 * 1024 * 1024 ? 'low' : 'available';
+    }
+    return diagnostics;
+  }
+
   async function sendSupportReply() {
     const text = supportDraft.trim();
     if (!text || supportSending) return;
@@ -1045,14 +1241,20 @@ export default function ProfileScreen() {
     setSupportSending(true);
     try {
       const selectedThread = supportThreads.find(thread => thread.id === supportSelectedThreadId) ?? null;
+      const diagnostics = supportDiagnosticConsent ? await collectSupportDiagnostics() : undefined;
       const response = await api.sendSupportMessage({
         thread_id: selectedThread?.id,
         subject: selectedThread?.subject || 'Trailhead support',
         category: selectedThread?.category || 'support',
         body: text,
+        attachment_refs: supportAttachments.map(attachment => attachment.attachment_ref),
+        diagnostic_consent: supportDiagnosticConsent,
+        diagnostics,
       });
       if (!accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
       setSupportDraft('');
+      setSupportAttachments([]);
+      setSupportDiagnosticConsent(false);
       await loadSupportInbox(true, response.thread_id);
     } catch (e: any) {
       Alert.alert('Message failed', e?.message ?? 'Could not send your message.');
@@ -1097,6 +1299,7 @@ export default function ProfileScreen() {
       const res = provider === 'apple'
         ? await api.oauthApple(identityToken, fullName, providerEmail, refCode.trim())
         : await api.oauthGoogle(identityToken, fullName, providerEmail, refCode.trim());
+      await clearPendingReferralCode();
       setAuth(res.token, res.user);
       transitionToMain(`Welcome, ${res.user.username}!`);
     } catch (e: any) {
@@ -1159,6 +1362,7 @@ export default function ProfileScreen() {
     setLoading(true);
     try {
       const res = await api.register(cleanEmail, cleanUsername, password, refCode.trim());
+      await clearPendingReferralCode();
       if (res.token && res.user) {
         setAuth(res.token, res.user);
         transitionToMain(`Welcome to Trailhead, ${res.user.username}! ${CREDIT_REWARDS.signup} credits added.`);
@@ -1379,10 +1583,24 @@ export default function ProfileScreen() {
 
   function shareReferral() {
     if (!user) return;
+    const shareUrl = canonicalReferralUrl(user.referral_code);
     Share.share({
-      message: `Join me on Trailhead — the adventure planner for overlanders.\nUse my code ${user.referral_code} when you create your account. You get the welcome credits, and I get ${CREDIT_REWARDS.referral} referral credits.\nhttps://gettrailhead.app`,
+      message: `Join me on Trailhead. Use code ${user.referral_code} when you create your account. You get the welcome credits, and I get ${CREDIT_REWARDS.referral} referral credits.\n${shareUrl}`,
       title: 'Join Trailhead',
     });
+  }
+
+  async function updateReferralAttribution(enabled: boolean) {
+    if (referralAttributionSaving) return;
+    setReferralAttributionSaving(true);
+    try {
+      await setReferralAttributionEnabled(enabled);
+      setReferralAttributionEnabledState(enabled);
+    } catch (error: any) {
+      Alert.alert('Setting not saved', error?.message || 'Try again in a moment.');
+    } finally {
+      setReferralAttributionSaving(false);
+    }
   }
 
   function toggleCheckItem(sectionIdx: number, itemId: string) {
@@ -1982,7 +2200,7 @@ export default function ProfileScreen() {
               ? [
                   { icon: 'compass', label: 'PLAN TRIP', color: C.orange, onPress: () => router.push({ pathname: '/(tabs)/route-builder', params: { intent: 'new', request: String(Date.now()) } } as any) },
                   { icon: 'map-outline', label: 'OPEN MAP', color: C.orange, onPress: () => router.push('/(tabs)/map') },
-                  { icon: 'cloud-download-outline', label: 'OFFLINE', color: C.green, onPress: openOfflineMapsManager },
+                  { icon: 'cloud-download-outline', label: 'OFFLINE', color: C.orange, onPress: openOfflineMapsManager },
                   { icon: 'ticket-outline', label: 'TOURS', color: '#0f766e', onPress: () => router.push('/(tabs)/guide?view=explore' as any) },
                   ...(upcomingBookedTour ? [{ icon: 'calendar-outline', label: 'CALENDAR', color: '#3b82f6', onPress: () => addBookedTourToCalendar(upcomingBookedTour) }] : []),
                 ]
@@ -2001,11 +2219,11 @@ export default function ProfileScreen() {
                       }
                     },
                   },
-                  { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.green, onPress: () => setShowChecklist(true) },
+                  { icon: 'checkmark-circle', label: 'TRIP PREP', color: C.orange, onPress: () => setShowChecklist(true) },
                 ]
               : [
-                        { icon: 'options-outline', label: 'TRIP SETUP', color: '#14b8a6', onPress: startWelcomeSetup },
-                        { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: '#d4af37', onPress: startWelcomePrompt },
+                        { icon: 'options-outline', label: 'TRIP SETUP', color: C.orange, onPress: startWelcomeSetup },
+                        { icon: 'trail-sign-outline', label: 'WALKTHROUGH', color: C.orange, onPress: startWelcomePrompt },
                         { icon: 'mic-outline', label: 'TRIP AUDIO', color: '#3b82f6', onPress: () => router.push('/(tabs)/guide?view=narrations' as any) },
                         { icon: 'partly-sunny-outline', label: 'WEATHER', color: '#0ea5e9', onPress: () => router.push('/(tabs)/guide?view=weather' as any) },
                         { icon: 'alert-circle-outline', label: 'REPORT', color: C.red, onPress: () => setShowBugModal(true) },
@@ -2503,7 +2721,7 @@ export default function ProfileScreen() {
         {profileSection === 'rig' && (
         <View style={s.checklistCard}>
           <TouchableOpacity style={s.checklistHeader} onPress={() => setShowChecklist(p => !p)}>
-            <Ionicons name="checkmark-circle-outline" size={18} color={C.green} />
+            <Ionicons name="checkmark-circle-outline" size={18} color={C.orange} />
             <Text style={s.checklistTitle}>TRIP PREP</Text>
             <View style={s.checklistProgress}>
               {(() => {
@@ -2511,7 +2729,7 @@ export default function ProfileScreen() {
                 const done  = checklist.reduce((n, s) => n + s.items.filter(i => i.done).length, 0);
                 return (
                   <>
-                    <Text style={[s.checklistProgressText, done === total && total > 0 && { color: C.green }]}>
+                    <Text style={[s.checklistProgressText, done === total && total > 0 && { color: C.orange }]}>
                       {done === 0 ? 'Start prep' : `${done}/${total}`}
                     </Text>
                     {done > 0 && done < total && (
@@ -2519,7 +2737,7 @@ export default function ProfileScreen() {
                         <View style={[s.checklistFill, { width: `${(done / total) * 100}%` as any }]} />
                       </View>
                     )}
-                    {done === total && <Text style={{ color: C.green, fontSize: 12 }}>Done</Text>}
+                    {done === total && <Text style={{ color: C.orange, fontSize: 12 }}>Done</Text>}
                   </>
                 );
               })()}
@@ -2559,15 +2777,15 @@ export default function ProfileScreen() {
         <View style={s.creditsCard}>
           <View style={s.planSignupHeader}>
             <View style={[s.planSignupIcon, hasPlan && s.planSignupIconActive]}>
-              <Ionicons name={hasPlan ? 'shield-checkmark' : 'compass-outline'} size={21} color={hasPlan ? C.green : C.orange} />
+              <Ionicons name={hasPlan ? 'shield-checkmark' : 'compass-outline'} size={21} color={C.orange} />
             </View>
             <View style={{ flex: 1, minWidth: 0 }}>
               <Text style={s.planSignupEyebrow}>Explorer</Text>
               <Text style={s.planSignupTitle}>{hasPlan ? 'Explorer active' : 'Plan better trips'}</Text>
               <Text style={s.planSignupText}>
                 {hasPlan
-                  ? 'Trip planning, Camp Briefs, Co-Pilot, and route tools are ready.'
-                  : 'Trip planning, Camp Briefs, Co-Pilot, packing lists, and route briefs.'}
+                  ? 'Includes Trip Planner, Camp Briefs, Co-Pilot voice assistant and route tools.'
+                  : 'Trip Planner, Camp Briefs, Co-Pilot voice assistant, packing lists and route briefs.'}
               </Text>
             </View>
           </View>
@@ -2575,7 +2793,7 @@ export default function ProfileScreen() {
           {hasPlan ? (
             <>
               <View style={s.planActiveBanner}>
-                <Ionicons name="checkmark-circle" size={16} color="#22c55e" />
+                <Ionicons name="checkmark-circle" size={16} color={C.orange} />
                 <Text style={s.planActiveText}>Active</Text>
               </View>
               <TouchableOpacity
@@ -2696,9 +2914,46 @@ export default function ProfileScreen() {
         </View>
         )}
 
+        {profileSection === 'settings' && (
+        <View style={s.referralPrivacyCard}>
+          <View style={s.referralPrivacyCopy}>
+            <Text style={s.themeToggleLabel}>REFERRAL LINKS</Text>
+            <Text style={s.themeToggleSub}>Credit referral links after install. Manual codes still work when this is off.</Text>
+          </View>
+          {referralAttributionSaving ? (
+            <ActivityIndicator size="small" color={C.orange} />
+          ) : (
+            <Switch
+              value={referralAttributionEnabled}
+              onValueChange={enabled => { void updateReferralAttribution(enabled); }}
+              trackColor={{ false: C.s3, true: C.orange + '88' }}
+              thumbColor={referralAttributionEnabled ? C.orange : C.text3}
+              accessibilityLabel="Referral link attribution"
+              testID="profile.settings.referralAttribution"
+            />
+          )}
+        </View>
+        )}
+
         <CommunicationPreferencesSection
           active={profileSection === 'settings'}
           signedIn={Boolean(user)}
+        />
+
+        <AccountDeletionSheet
+          visible={showAccountDeletion}
+          authMethod={deletionAuthMethod}
+          hasActiveSubscription={hasPlan}
+          deleting={accountLifecycleBusy}
+          onClose={() => setShowAccountDeletion(false)}
+          onManageSubscription={() => {
+            Linking.openURL(subscriptionManagementUrl(Platform.OS)).catch(() => {
+              Alert.alert('Unable to open subscriptions', 'Open your device store account to manage the plan.');
+            });
+          }}
+          onAuthorizePassword={authorizePasswordAccountDeletion}
+          onAuthorizeProvider={authorizeProviderAccountDeletion}
+          onDelete={deleteAccountAndClearDevice}
         />
 
         <Modal visible={showSupportInbox} animationType="slide" presentationStyle="pageSheet" onRequestClose={() => setShowSupportInbox(false)}>
@@ -2764,12 +3019,57 @@ export default function ProfileScreen() {
                       <View key={msg.id} style={[s.supportBubble, msg.sender_role === 'admin' ? s.supportBubbleAdmin : s.supportBubbleUser]}>
                         <Text style={s.supportBubbleRole}>{msg.sender_role === 'admin' ? 'Trailhead' : 'You'}</Text>
                         <Text style={s.supportBubbleBody}>{msg.body}</Text>
+                        {(msg.attachments || []).length ? (
+                          <View style={s.supportMessageAttachmentRow}>
+                            <Ionicons name="images-outline" size={15} color={C.text2} />
+                            <Text style={s.supportMessageAttachmentText}>
+                              {msg.attachments!.length} screenshot{msg.attachments!.length === 1 ? '' : 's'} attached
+                            </Text>
+                          </View>
+                        ) : null}
                       </View>
                     )) : (
                       <Text style={s.contestMuted}>Start a thread for account help, app support, or a prize message.</Text>
                     )}
                   </View>
                   <Text style={s.contestMuted}>For your security, never send passwords, bank account or routing numbers, card details, or identity documents in chat.</Text>
+                  {supportAttachments.length ? (
+                    <View style={s.supportAttachmentList}>
+                      {supportAttachments.map(attachment => (
+                        <View key={attachment.attachment_ref} style={s.supportAttachmentRow}>
+                          <Ionicons name="image-outline" size={17} color={C.orange} />
+                          <View style={s.supportAttachmentCopy}>
+                            <Text style={s.supportAttachmentName} numberOfLines={1}>{attachment.name}</Text>
+                            <Text style={s.supportAttachmentMeta}>{Math.max(1, Math.round(attachment.byte_count / 1024))} KB</Text>
+                          </View>
+                          <TouchableOpacity
+                            accessibilityRole="button"
+                            accessibilityLabel={`Remove ${attachment.name}`}
+                            onPress={() => setSupportAttachments(current => current.filter(item => item.attachment_ref !== attachment.attachment_ref))}
+                            style={s.supportAttachmentRemove}
+                          >
+                            <Ionicons name="close" size={18} color={C.text2} />
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  ) : null}
+                  <View style={s.supportComposerTools}>
+                    <TouchableOpacity
+                      accessibilityRole="button"
+                      disabled={supportUploading || supportAttachments.length >= 3}
+                      onPress={() => void addSupportScreenshots()}
+                      style={[s.supportAttachButton, (supportUploading || supportAttachments.length >= 3) && s.actionDisabled]}
+                      testID="profile.support.attach"
+                    >
+                      {supportUploading
+                        ? <ActivityIndicator size="small" color={C.orange} />
+                        : <Ionicons name="attach-outline" size={18} color={C.orange} />}
+                      <Text style={s.supportAttachText}>
+                        {supportAttachments.length ? `Screenshots ${supportAttachments.length}/3` : 'Add screenshots'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
                   <TextInput
                     testID="profile.support.composer"
                     accessibilityLabel={selectedSupportThread ? 'Reply to support thread' : 'New support message'}
@@ -2782,6 +3082,20 @@ export default function ProfileScreen() {
                     maxLength={1200}
                     textAlignVertical="top"
                   />
+                  <View style={s.supportDiagnosticRow}>
+                    <View style={s.supportDiagnosticCopy}>
+                      <Text style={s.supportDiagnosticTitle}>Include app diagnostics</Text>
+                      <Text style={s.supportDiagnosticBody}>App version, permissions and storage state. No messages or location.</Text>
+                    </View>
+                    <Switch
+                      value={supportDiagnosticConsent}
+                      onValueChange={setSupportDiagnosticConsent}
+                      trackColor={{ false: C.s3, true: C.orange + '88' }}
+                      thumbColor={supportDiagnosticConsent ? C.orange : C.text3}
+                      accessibilityLabel="Include app diagnostics"
+                      testID="profile.support.diagnostics"
+                    />
+                  </View>
                   <TrailheadButton
                     testID="profile.support.send"
                     label={supportSending ? 'SENDING...' : 'SEND MESSAGE'}
@@ -3153,7 +3467,7 @@ export default function ProfileScreen() {
           </View>
           <View style={s.contributionMiniRow}>
             <View style={s.contributionMini}>
-              <Ionicons name="medal-outline" size={16} color="#d4af37" />
+              <Ionicons name="medal-outline" size={16} color={C.orange} />
               <Text style={s.contributionMiniText}>tier badges</Text>
             </View>
             <View style={s.contributionMini}>
@@ -3161,7 +3475,7 @@ export default function ProfileScreen() {
               <Text style={s.contributionMiniText}>streaks</Text>
             </View>
             <View style={s.contributionMini}>
-              <Ionicons name="people-outline" size={16} color="#14b8a6" />
+              <Ionicons name="people-outline" size={16} color={C.orange} />
               <Text style={s.contributionMiniText}>leaderboards</Text>
             </View>
           </View>
@@ -3568,42 +3882,57 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   supportBubbleUser: { backgroundColor: C.s3, borderColor: C.border },
   supportBubbleRole: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 0.7, marginBottom: 5 },
   supportBubbleBody: { color: C.text, fontSize: 13, lineHeight: 19 },
+  supportMessageAttachmentRow: { flexDirection: 'row', alignItems: 'center', gap: 7, marginTop: 9 },
+  supportMessageAttachmentText: { color: C.text2, fontSize: 12, lineHeight: 17, fontWeight: '700' },
+  supportAttachmentList: { gap: 8 },
+  supportAttachmentRow: { minHeight: 52, borderRadius: 12, borderWidth: 1, borderColor: C.border, backgroundColor: C.s3, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  supportAttachmentCopy: { flex: 1, minWidth: 0 },
+  supportAttachmentName: { color: C.text, fontSize: 13, lineHeight: 18, fontWeight: '800' },
+  supportAttachmentMeta: { color: C.text3, fontSize: 11, lineHeight: 15 },
+  supportAttachmentRemove: { width: 44, height: 44, alignItems: 'center', justifyContent: 'center' },
+  supportComposerTools: { flexDirection: 'row', alignItems: 'center' },
+  supportAttachButton: { minHeight: 44, borderRadius: 12, borderWidth: 1, borderColor: C.border, paddingHorizontal: 12, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  supportAttachText: { color: C.orange, fontSize: 13, lineHeight: 18, fontWeight: '800' },
   supportComposer: { minHeight: 96, borderRadius: 16, borderWidth: 1, borderColor: C.border, backgroundColor: C.s3, color: C.text, padding: 12, fontSize: 14 },
+  supportDiagnosticRow: { minHeight: 60, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  supportDiagnosticCopy: { flex: 1, minWidth: 0 },
+  supportDiagnosticTitle: { color: C.text, fontSize: 13, lineHeight: 18, fontWeight: '800' },
+  supportDiagnosticBody: { color: C.text3, fontSize: 11, lineHeight: 16, marginTop: 2 },
 
   contributionCard: {
-    backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: '#14b8a655',
+    backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border,
     padding: 16, overflow: 'hidden', gap: 14,
-    shadowColor: '#14b8a6', shadowOpacity: 0.12, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
   },
-  contributionGlow: { position: 'absolute', right: -44, top: -60, width: 162, height: 162, borderRadius: 81, backgroundColor: '#14b8a61f' },
-  contributionIcon: { width: 42, height: 42, borderRadius: 16, backgroundColor: '#14b8a61f', borderWidth: 1, borderColor: '#14b8a666', alignItems: 'center', justifyContent: 'center' },
-  contributionKicker: { color: '#14b8a6', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  contributionGlow: { position: 'absolute', right: -44, top: -60, width: 162, height: 162, borderRadius: 81, backgroundColor: C.orangeGlow },
+  contributionIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '44', alignItems: 'center', justifyContent: 'center' },
+  contributionKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   contributionMiniRow: { flexDirection: 'row', gap: 8 },
   contributionMini: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, minHeight: 62, alignItems: 'center', justifyContent: 'center', gap: 5 },
   contributionMiniText: { color: C.text3, fontSize: 9, fontFamily: mono, textAlign: 'center' },
-  contributionHero: { backgroundColor: C.s2, borderRadius: 26, borderWidth: 1, borderColor: '#14b8a655', padding: 18, gap: 12, alignItems: 'center' },
+  contributionHero: { backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 18, gap: 12, alignItems: 'center' },
   contributionAvatar: { width: 76, height: 76, borderRadius: 26, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#ffffff44' },
   contributionAvatarText: { color: '#fff', fontSize: 32, fontWeight: '900' },
   contributionName: { color: C.text, fontSize: 25, fontWeight: '900', letterSpacing: 0 },
-  contributionTitle: { color: '#14b8a6', fontSize: 12, fontFamily: mono, fontWeight: '900' },
+  contributionTitle: { color: C.orange, fontSize: 12, fontFamily: mono, fontWeight: '900' },
   contributionProgress: { width: '100%', height: 9, borderRadius: 999, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, overflow: 'hidden' },
-  contributionProgressFill: { height: '100%', borderRadius: 999, backgroundColor: '#14b8a6' },
+  contributionProgressFill: { height: '100%', borderRadius: 999, backgroundColor: C.orange },
   contributionPrivacyCard: { flexDirection: 'row', alignItems: 'center', gap: 12, backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border, padding: 14 },
   contributionBadgeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  contributionBadge: { width: '48%', minHeight: 106, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: '#d4af3738', padding: 10, gap: 5 },
+  contributionBadge: { width: '48%', minHeight: 106, borderRadius: 12, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, gap: 5 },
   contributionBadgeTitle: { color: C.text, fontSize: 12, fontWeight: '900' },
   contributionBadgeDesc: { color: C.text3, fontSize: 10.5, lineHeight: 14 },
   contributionMetricLabel: { color: C.text2, flex: 1, fontSize: 13 },
 
   contestCard: {
-    backgroundColor: C.s2, borderRadius: 24, borderWidth: 1, borderColor: '#d4af3744',
+    backgroundColor: C.s2, borderRadius: 20, borderWidth: 1, borderColor: C.border,
     padding: 16, overflow: 'hidden', gap: 14,
-    shadowColor: '#d4af37', shadowOpacity: 0.13, shadowRadius: 24, shadowOffset: { width: 0, height: 12 },
+    shadowColor: '#000', shadowOpacity: 0.08, shadowRadius: 18, shadowOffset: { width: 0, height: 8 },
   },
-  contestGlow: { position: 'absolute', right: -42, top: -58, width: 160, height: 160, borderRadius: 80, backgroundColor: '#d4af3722' },
+  contestGlow: { position: 'absolute', right: -42, top: -58, width: 160, height: 160, borderRadius: 80, backgroundColor: C.orangeGlow },
   contestHeader: { flexDirection: 'row', alignItems: 'center', gap: 12 },
-  contestIcon: { width: 42, height: 42, borderRadius: 16, backgroundColor: '#d4af3720', borderWidth: 1, borderColor: '#d4af3755', alignItems: 'center', justifyContent: 'center' },
-  contestKicker: { color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
+  contestIcon: { width: 42, height: 42, borderRadius: 12, backgroundColor: C.orangeGlow, borderWidth: 1, borderColor: C.orange + '44', alignItems: 'center', justifyContent: 'center' },
+  contestKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1 },
   contestTitle: { color: C.text, fontSize: 18, fontWeight: '900', marginTop: 3, letterSpacing: 0 },
   contestPrizeRow: { flexDirection: 'row', gap: 8 },
   contestPrize: { flex: 1, borderRadius: 16, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, padding: 10, minHeight: 76, justifyContent: 'center' },
@@ -3615,8 +3944,8 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   contestClose: { width: 38, height: 38, borderRadius: 14, backgroundColor: C.s3, borderWidth: 1, borderColor: C.border, alignItems: 'center', justifyContent: 'center' },
   contestModalKicker: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900', letterSpacing: 1.2 },
   contestModalTitle: { color: C.text, fontSize: 22, fontWeight: '900', letterSpacing: 0 },
-  betaBadge: { borderRadius: 999, borderWidth: 1, borderColor: '#d4af3766', backgroundColor: '#d4af371c', paddingHorizontal: 10, paddingVertical: 5 },
-  betaBadgeText: { color: '#d4af37', fontSize: 9, fontFamily: mono, fontWeight: '900' },
+  betaBadge: { borderRadius: 999, borderWidth: 1, borderColor: C.orange + '55', backgroundColor: C.orangeGlow, paddingHorizontal: 10, paddingVertical: 5 },
+  betaBadgeText: { color: C.orange, fontSize: 9, fontFamily: mono, fontWeight: '900' },
   contestScroll: { padding: 16, gap: 14, paddingBottom: 40 },
   contestLoading: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   contestHero: { backgroundColor: C.s2, borderRadius: 26, borderWidth: 1, borderColor: C.border, padding: 18, gap: 14 },
@@ -3763,7 +4092,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     width: 22, height: 22, borderRadius: 6, borderWidth: 1.5, borderColor: C.border,
     backgroundColor: C.s3, alignItems: 'center', justifyContent: 'center',
   },
-  checkboxDone: { backgroundColor: C.green, borderColor: C.green },
+  checkboxDone: { backgroundColor: C.orange, borderColor: C.orange },
   checkLabel: { color: C.text2, fontSize: 13, flex: 1 },
   checkLabelDone: { color: C.text3, textDecorationLine: 'line-through' },
   checkResetBtn: {
@@ -3782,7 +4111,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.orangeGlow, alignItems: 'center', justifyContent: 'center',
     borderWidth: 1, borderColor: C.orange + '55',
   },
-  planSignupIconActive: { backgroundColor: C.green + '18', borderColor: C.green + '55' },
+  planSignupIconActive: { backgroundColor: C.orangeGlow, borderColor: C.orange + '44' },
   planSignupEyebrow: { color: C.orange, fontSize: 11, fontWeight: '800', marginBottom: 2 },
   planSignupTitle: { color: C.text, fontSize: 23, lineHeight: 27, fontWeight: '900' },
   planSignupText: { color: C.text2, fontSize: 13, lineHeight: 18, marginTop: 4 },
@@ -3792,10 +4121,10 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   divider: { height: 1, backgroundColor: C.border },
   planActiveBanner: {
     flexDirection: 'row', alignItems: 'center', gap: 8,
-    backgroundColor: C.green + '18', borderRadius: 10, borderWidth: 1, borderColor: C.green + '44',
+    backgroundColor: C.orangeGlow, borderRadius: 10, borderWidth: 1, borderColor: C.orange + '44',
     paddingHorizontal: 12, paddingVertical: 10,
   },
-  planActiveText: { color: C.green, fontSize: 13, fontWeight: '700' },
+  planActiveText: { color: C.orange, fontSize: 13, fontWeight: '700' },
   managePlanBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 6,
     paddingVertical: 6,
@@ -3976,6 +4305,19 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     backgroundColor: C.s1, borderRadius: 14, borderWidth: 1, borderColor: C.border,
     padding: 14, flexDirection: 'row', alignItems: 'center', gap: 12,
   },
+  referralPrivacyCard: {
+    minHeight: 76,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: C.s1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  referralPrivacyCopy: { flex: 1, minWidth: 0, gap: 3 },
   weatherUnitsSegment: {
     flexDirection: 'row', alignItems: 'center', padding: 3, borderRadius: 12,
     backgroundColor: C.s3, borderWidth: 1, borderColor: C.border,

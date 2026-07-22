@@ -10,9 +10,11 @@
  * no per-tile download loop. The SDK handles resume on failure, quota, etc.
  */
 import MapLibreGL from '@maplibre/maplibre-react-native';
+import MapboxGL from '@rnmapbox/maps';
 import {
   installedOfflinePackStatuses,
   mapLibreOfflinePackBounds,
+  offlineStyleCoversBounds,
 } from './offlinePackStatus';
 
 // Internal bounds format: [[westLng, southLat], [eastLng, northLat]].
@@ -33,7 +35,10 @@ export interface InstalledPack {
   percentage: number;
   complete:   boolean;
   sizeMb:     number;
+  renderer:   NativeOfflineRenderer;
 }
+
+export type NativeOfflineRenderer = 'maplibre' | 'rnmapbox';
 
 // Increase well above the default 5,000 tile limit.
 // CONUS at z3-z12 is ~285K tiles; z3-z10 is ~18K tiles.
@@ -47,6 +52,22 @@ function packStyleURI(_mapboxToken: string): string {
   return 'https://tiles.gettrailhead.app/api/style.json';
 }
 
+const RNMAPBOX_LEGACY_PREFIX = 'trailhead-legacy-rnmapbox-';
+
+function physicalPackName(name: string, renderer: NativeOfflineRenderer) {
+  return renderer === 'rnmapbox' ? `${RNMAPBOX_LEGACY_PREFIX}${name}` : name;
+}
+
+function logicalPackName(name: string, renderer: NativeOfflineRenderer) {
+  return renderer === 'rnmapbox' && name.startsWith(RNMAPBOX_LEGACY_PREFIX)
+    ? name.slice(RNMAPBOX_LEGACY_PREFIX.length)
+    : name;
+}
+
+function offlineManager(renderer: NativeOfflineRenderer): any {
+  return renderer === 'rnmapbox' ? MapboxGL.offlineManager : MapLibreGL.offlineManager;
+}
+
 // ── Download a pack ───────────────────────────────────────────────────────────
 export async function downloadPack(
   name: string,
@@ -57,24 +78,43 @@ export async function downloadPack(
   onProgress: (progress: PackProgress) => void,
   onComplete: () => void,
   onError: (msg: string) => void,
+  renderer: NativeOfflineRenderer = 'maplibre',
 ): Promise<void> {
-  // Set tile limit before creating the pack
-  await MapLibreGL.offlineManager.setTileCountLimit(MAX_TILE_COUNT);
-
-  // Delete any existing pack with the same name so we can restart cleanly
-  try { await MapLibreGL.offlineManager.deletePack(name); } catch { /* didn't exist */ }
+  const manager = offlineManager(renderer);
+  const nativeName = physicalPackName(name, renderer);
+  // MapLibre enforces its own region tile cap. RNMapbox manages this through
+  // the v10 tile store and does not expose the same setting.
+  if (renderer === 'maplibre') {
+    await MapLibreGL.offlineManager.setTileCountLimit(MAX_TILE_COUNT);
+  }
 
   const styleURL = packStyleURI(mapboxToken);
+  const styleResponse = await fetch(styleURL, { headers: { Accept: 'application/json' } });
+  if (!styleResponse.ok) {
+    throw new Error('Trailhead could not verify offline map coverage. Try again.');
+  }
+  const style = await styleResponse.json().catch(() => null);
+  if (!offlineStyleCoversBounds(style, bounds)) {
+    throw new Error('Offline map coverage is not available for this area yet.');
+  }
 
-  await MapLibreGL.offlineManager.createPack(
-    { name, styleURL, bounds: mapLibreOfflinePackBounds(bounds), minZoom, maxZoom },
+  // Coverage must be proven before replacing an existing native pack. A
+  // temporary network/style outage must never remove the last usable copy.
+  try { await manager.deletePack(nativeName); } catch { /* didn't exist */ }
+  let completed = false;
+
+  await manager.createPack(
+    { name: nativeName, styleURL, bounds: mapLibreOfflinePackBounds(bounds), minZoom, maxZoom },
     (_pack: any, status: any) => {
       const pct = status.percentage ?? 0;
       const cr  = status.completedResourceCount ?? 0;
       const er  = status.requiredResourceCount  ?? 1;
       const sz  = Math.round((status.completedResourceSize ?? 0) / 1_048_576 * 10) / 10;
       onProgress({ percentage: pct, completedTiles: cr, expectedTiles: er, completedResources: cr, expectedResources: er, sizeMb: sz });
-      if (pct >= 100) onComplete();
+      if (pct >= 100 && !completed) {
+        completed = true;
+        onComplete();
+      }
     },
     (_pack: any, err: any) => {
       onError(err?.message ?? 'Download failed');
@@ -83,31 +123,41 @@ export async function downloadPack(
 }
 
 // ── Pause / resume (via OfflinePack object) ───────────────────────────────────
-export async function pausePack(name: string): Promise<void> {
+export async function pausePack(name: string, renderer: NativeOfflineRenderer = 'maplibre'): Promise<void> {
   try {
-    const packs = await MapLibreGL.offlineManager.getPacks();
-    const pack = packs?.find((p: any) => p.name === name);
+    const packs = await offlineManager(renderer).getPacks();
+    const nativeName = physicalPackName(name, renderer);
+    const pack = packs?.find((p: any) => p.name === nativeName);
     if (pack) await (pack as any).pause();
   } catch {}
 }
-export async function resumePack(name: string): Promise<void> {
+export async function resumePack(name: string, renderer: NativeOfflineRenderer = 'maplibre'): Promise<void> {
   try {
-    const packs = await MapLibreGL.offlineManager.getPacks();
-    const pack = packs?.find((p: any) => p.name === name);
+    const packs = await offlineManager(renderer).getPacks();
+    const nativeName = physicalPackName(name, renderer);
+    const pack = packs?.find((p: any) => p.name === nativeName);
     if (pack) await (pack as any).resume();
   } catch {}
 }
 
 // ── Delete a pack ─────────────────────────────────────────────────────────────
-export async function deletePack(name: string): Promise<void> {
-  await MapLibreGL.offlineManager.deletePack(name);
+export async function deletePack(name: string, renderer: NativeOfflineRenderer = 'maplibre'): Promise<void> {
+  await offlineManager(renderer).deletePack(physicalPackName(name, renderer));
 }
 
 // ── List installed packs ──────────────────────────────────────────────────────
-export async function getInstalledPacks(): Promise<InstalledPack[]> {
+export async function getInstalledPacks(renderer: NativeOfflineRenderer = 'maplibre'): Promise<InstalledPack[]> {
   try {
-    const packs = await MapLibreGL.offlineManager.getPacks();
-    return installedOfflinePackStatuses(packs || []);
+    const packs = await offlineManager(renderer).getPacks();
+    const scoped = renderer === 'rnmapbox'
+      ? (packs || []).filter((pack: any) => String(pack?.name || '').startsWith(RNMAPBOX_LEGACY_PREFIX))
+      : packs || [];
+    const statuses = await installedOfflinePackStatuses(scoped);
+    return statuses.map(pack => ({
+      ...pack,
+      name: logicalPackName(pack.name, renderer),
+      renderer,
+    }));
   } catch {
     return [];
   }

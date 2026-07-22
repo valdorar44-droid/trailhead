@@ -71,6 +71,8 @@ export type OfflineBundleCapabilitiesV2 = Readonly<{
 
 export type OfflineBundleRendererV2 = Readonly<{
   id: OfflineMapRenderer;
+  /** Server-approved style identifier selected by the active physical map. */
+  style_id?: string;
   style_uri: string;
   style_revision: string;
   style_pack_id: string;
@@ -110,6 +112,7 @@ export type OfflineRendererInstallationV2 = Readonly<{
   renderer: OfflineMapRenderer;
   style_pack_id?: string;
   tile_region_id?: string;
+  native_pack_name?: string;
   legacy_pack_name?: string;
 }>;
 

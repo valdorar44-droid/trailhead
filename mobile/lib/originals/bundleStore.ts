@@ -411,6 +411,28 @@ export function createOriginalBundleStore(
       });
     },
 
+    eraseScope(ownerScope: OriginalOwnerScope) {
+      return serialized(async () => {
+        const index = await readIndex();
+        const scope = index.scopes[ownerScope];
+        const records = scope
+          ? Object.values(scope.records).flatMap(group => Object.values(group))
+          : [];
+        // Native map deletion is part of account cleanup. Keep the index and
+        // files intact if it fails so the privacy barrier can report/retry it.
+        for (const record of records) {
+          if (record.map_pack_id) await defaultMapAdapter?.remove?.(record.map_pack_id);
+        }
+        const rootForScope = scopeRoot(ownerScope);
+        await files.remove(rootForScope);
+        if ((await files.info(rootForScope)).exists) {
+          throw new Error('The account-owned Original downloads could not be removed.');
+        }
+        delete index.scopes[ownerScope];
+        await writeIndex(index);
+      });
+    },
+
     migrateGuestToAccount(
       accountId: string | number,
       allowed: Array<{ pack_id: string; version: number }>,

@@ -19,6 +19,10 @@ export type RouteBuildProgressSheetProps = {
   onCancel: () => void;
   onRetry?: () => void;
   onDismiss?: () => void;
+  onReviewTrip?: () => void;
+  onEditRoute?: () => void;
+  onOffline?: () => void;
+  onOptions?: () => void;
 };
 
 type ProgressRowState = 'active' | 'complete' | 'pending' | 'failed';
@@ -164,7 +168,7 @@ function StatusMark({ state, colors }: { state: ProgressRowState; colors: ColorP
       ? 'alert-circle'
       : 'ellipse-outline';
   const color = state === 'complete'
-    ? colors.green
+    ? colors.orange
     : state === 'failed'
       ? colors.red
       : colors.text3;
@@ -177,6 +181,10 @@ export default function RouteBuildProgressSheet({
   onCancel,
   onRetry,
   onDismiss,
+  onReviewTrip,
+  onEditRoute,
+  onOffline,
+  onOptions,
 }: RouteBuildProgressSheetProps) {
   const C = useTheme();
   const styles = useMemo(() => makeStyles(C), [C]);
@@ -185,9 +193,14 @@ export default function RouteBuildProgressSheet({
   const height = useRef(new Animated.Value(COLLAPSED_HEIGHT)).current;
   const rows = useMemo(() => buildRows(session), [session]);
   const title = phaseTitle(session);
-  const finished = session.status !== 'running';
   const failed = session.status === 'failed' || session.phase === 'failed';
-  const expandedHeight = Math.min(338, 206 + rows.length * 48 + (failed ? 40 : 0));
+  const complete = session.status === 'complete' || session.phase === 'complete';
+  const routeMetrics = [
+    formatDistance(session.totalDistanceMi),
+    formatDuration(session.totalDurationHours),
+    session.previewStops.length ? `${session.previewStops.length} stops` : '',
+  ].filter(Boolean).join(' · ');
+  const expandedHeight = complete ? 276 : Math.min(338, 206 + rows.length * 48 + (failed ? 40 : 0));
 
   useEffect(() => {
     Animated.spring(height, {
@@ -200,8 +213,8 @@ export default function RouteBuildProgressSheet({
   }, [expanded, expandedHeight, height]);
 
   useEffect(() => {
-    if (failed) setExpanded(true);
-  }, [failed]);
+    if (failed || complete) setExpanded(true);
+  }, [complete, failed]);
 
   const panResponder = useMemo(() => PanResponder.create({
     onStartShouldSetPanResponder: () => false,
@@ -236,9 +249,7 @@ export default function RouteBuildProgressSheet({
 
   const primaryAction = failed && onRetry
     ? { label: 'Edit trip', icon: 'create' as const, onPress: onRetry }
-    : finished && onDismiss
-      ? { label: 'Close', icon: 'close' as const, onPress: onDismiss }
-      : null;
+    : null;
 
   return (
     <Animated.View
@@ -266,8 +277,9 @@ export default function RouteBuildProgressSheet({
 
           <View style={styles.headingRow}>
             <View style={styles.headingCopy}>
-              <Text style={styles.routeName} numberOfLines={1}>{session.routeName || 'New trip'}</Text>
-              <Text style={styles.phaseTitle} numberOfLines={1}>{title}</Text>
+              {complete ? <Text style={styles.readyKicker}>ROUTE READY</Text> : null}
+              <Text style={[styles.routeName, complete && styles.readyRouteName]} numberOfLines={1}>{session.routeName || 'New trip'}</Text>
+              <Text style={styles.phaseTitle} numberOfLines={1}>{complete ? routeMetrics || title : title}</Text>
             </View>
             <TouchableOpacity
               style={styles.expandButton}
@@ -281,7 +293,39 @@ export default function RouteBuildProgressSheet({
           </View>
         </View>
 
-        {expanded ? (
+        {expanded && complete ? (
+          <View style={styles.readyDetails}>
+            <TouchableOpacity
+              style={styles.readyPrimaryButton}
+              activeOpacity={0.82}
+              onPress={onReviewTrip}
+              disabled={!onReviewTrip}
+              accessibilityRole="button"
+              accessibilityLabel="Review trip"
+            >
+              <Text style={styles.readyPrimaryText}>Review trip</Text>
+            </TouchableOpacity>
+            <View style={styles.readySecondaryRow}>
+              {([
+                { label: 'Edit route', onPress: onEditRoute },
+                { label: 'Offline', onPress: onOffline },
+                { label: 'Options', onPress: onOptions },
+              ] as const).map(action => (
+                <TouchableOpacity
+                  key={action.label}
+                  style={styles.readySecondaryButton}
+                  activeOpacity={0.78}
+                  onPress={action.onPress}
+                  disabled={!action.onPress}
+                  accessibilityRole="button"
+                  accessibilityLabel={action.label}
+                >
+                  <Text style={styles.readySecondaryText}>{action.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+          </View>
+        ) : expanded ? (
           <View style={styles.details}>
             <View style={styles.rows}>
               {rows.map((row, index) => (
@@ -406,6 +450,18 @@ const makeStyles = (C: ColorPalette) => {
       fontWeight: '800',
       letterSpacing: 0,
     },
+    readyKicker: {
+      color: C.orange,
+      fontSize: 12,
+      lineHeight: 16,
+      fontWeight: '800',
+      letterSpacing: 0.6,
+      marginBottom: 2,
+    },
+    readyRouteName: {
+      fontSize: 20,
+      lineHeight: 24,
+    },
     phaseTitle: {
       marginTop: 3,
       color: C.text2,
@@ -426,6 +482,51 @@ const makeStyles = (C: ColorPalette) => {
       borderTopColor: C.border,
       paddingHorizontal: 16,
       paddingBottom: 14,
+    },
+    readyDetails: {
+      flex: 1,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: C.border,
+      paddingHorizontal: 16,
+      paddingTop: 14,
+      paddingBottom: 14,
+      gap: 12,
+    },
+    readyPrimaryButton: {
+      minHeight: 52,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      backgroundColor: C.orange,
+      borderWidth: 1,
+      borderColor: C.orange,
+    },
+    readyPrimaryText: {
+      color: primaryText,
+      fontSize: 15,
+      lineHeight: 20,
+      fontWeight: '800',
+    },
+    readySecondaryRow: {
+      flexDirection: 'row',
+      alignItems: 'center',
+      gap: 8,
+    },
+    readySecondaryButton: {
+      flex: 1,
+      minHeight: 48,
+      borderRadius: 12,
+      alignItems: 'center',
+      justifyContent: 'center',
+      borderWidth: 1,
+      borderColor: C.border2,
+      backgroundColor: C.s1,
+    },
+    readySecondaryText: {
+      color: C.text,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: '700',
     },
     rows: {
       flexShrink: 1,

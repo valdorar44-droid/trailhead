@@ -223,6 +223,11 @@ async function main() {
     activeRenderer: 'maplibre', files, repository, rendererAdapters: {}, now: () => 3000,
   });
   assert.equal((await wrongRenderer.inspect(first, installation)).status, 'repair_required');
+  assert.equal(
+    (await repository.getCurrentInstallation(first.bundle_id))?.revision,
+    first.revision,
+    'renderer classification never deletes the legacy/current installation',
+  );
 
   const interruptedManifest = manifest('2026-07-20.interrupted');
   const interrupted = await coordinator.begin(interruptedManifest);
@@ -329,6 +334,11 @@ async function main() {
   assert.equal(newStage.artifact_states.places.status, 'queued');
   assert.equal((await repository.getManifest(first.bundle_id, '2026-07-20.3'))?.revision, '2026-07-20.3');
   await repository.discardStage(newStage.stage);
+
+  const explicitlyRemoved = await repository.removeCurrentInstallation(first.bundle_id);
+  assert.equal(explicitlyRemoved?.revision, first.revision);
+  assert.equal(await repository.getCurrentInstallation(first.bundle_id), null);
+  assert.equal(await repository.getManifest(first.bundle_id, first.revision), null);
 }
 
 console.log('Offline V2 foundation tests passed.');

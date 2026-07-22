@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createOriginalAccessStore } from '../accessStore';
 import { createOriginalBundleStore } from '../bundleStore';
+import { createOriginalFeedbackStore } from '../feedbackStore';
 import { writeOriginalTextAtomically } from '../fileAdapter';
 import {
   originalPackVersionAccessIsExact,
@@ -283,6 +284,42 @@ async function main() {
     null,
     'admin draft access never leaks into the guest scope',
   );
+
+  // Account departure removes only the signed-in scope. A free guest Original
+  // on the same installation must remain available after logout/deletion.
+  await bundles.download(manifest, { ownerScope: accountScope });
+  await sessions.save(createOriginalSession(manifest, 'guest', 600));
+  await access.claimGuest(guestAcquisition);
+  const feedback = createOriginalFeedbackStore(files);
+  const feedbackBase = {
+    schema_version: 1 as const,
+    pack_id: manifest.pack_id,
+    payload: {
+      version: manifest.version,
+      category: 'general' as const,
+      message: 'Test feedback',
+      platform: 'android' as const,
+    },
+    created_at_ms: 1,
+    updated_at_ms: 1,
+    attempt_count: 0,
+  };
+  await feedback.enqueue({ ...feedbackBase, idempotency_key: 'guest-feedback', authentication: 'guest' });
+  await feedback.enqueue({ ...feedbackBase, idempotency_key: 'account-feedback', authentication: 'signed_in' });
+
+  await sessions.eraseScope(accountScope);
+  await bundles.eraseScope(accountScope);
+  await access.eraseScope(accountScope);
+  await feedback.eraseSignedIn();
+
+  assert.equal((await sessions.list(accountScope)).length, 0);
+  assert.equal((await bundles.list(accountScope)).length, 0);
+  assert.equal((await access.list(accountScope)).length, 0);
+  assert.equal((await sessions.list('guest')).length, 1, 'guest progress survives account cleanup');
+  assert.ok(await bundles.getPinned('guest', manifest.pack_id), 'guest download survives account cleanup');
+  assert.ok(await access.get('guest', manifest.pack_id, 1), 'guest-free access survives account cleanup');
+  assert.ok(await access.get('account:77', manifest.pack_id, 1), 'another account scope remains isolated');
+  assert.deepEqual((await feedback.listPending()).map(item => item.idempotency_key), ['guest-feedback']);
 
   console.log('Originals durable store tests passed.');
 }

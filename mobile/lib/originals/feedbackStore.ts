@@ -51,6 +51,7 @@ export type OriginalFeedbackReceiptV1 = {
   version: number;
   submitted_at_ms: number;
   server_receipt_id?: string;
+  authentication?: 'guest' | 'signed_in';
 };
 
 type OriginalFeedbackIndexV1 = {
@@ -167,6 +168,7 @@ export function createOriginalFeedbackStore(
           pack_id: pending.pack_id,
           version: pending.payload.version,
           submitted_at_ms: submittedAtMs,
+          authentication: pending.authentication,
           ...(serverReceiptId ? { server_receipt_id: serverReceiptId } : {}),
         };
         index.pending = index.pending.filter(item => item.idempotency_key !== idempotencyKey);
@@ -174,6 +176,17 @@ export function createOriginalFeedbackStore(
           .slice(0, MAX_RECEIPTS);
         await writeIndex(index);
         return receipt;
+      });
+    },
+
+    eraseSignedIn() {
+      return serialized(async () => {
+        const index = await readIndex();
+        index.pending = index.pending.filter(item => item.authentication === 'guest');
+        // Legacy receipts did not record authentication. Treat an unknown
+        // receipt as account-scoped; new guest receipts remain intentionally.
+        index.receipts = index.receipts.filter(item => item.authentication === 'guest');
+        await writeIndex(index);
       });
     },
   };

@@ -4,6 +4,7 @@ import {
   installedOfflinePackStatus,
   installedOfflinePackStatuses,
   mapLibreOfflinePackBounds,
+  offlineStyleCoversBounds,
 } from '../../../components/NativeMap/offlinePackStatus';
 
 async function main() {
@@ -49,9 +50,48 @@ async function main() {
     'MapLibre must receive north-east before south-west',
   );
 
+  const globalStyle = {
+    sources: { pm: { tiles: ['https://tiles.gettrailhead.app/api/tiles/{z}/{x}/{y}.pbf'] } },
+  };
+  const oldConusStyle = {
+    sources: {
+      pm: {
+        tiles: ['https://tiles.gettrailhead.app/api/tiles/{z}/{x}/{y}.pbf'],
+        bounds: [-125, 24.5, -66.5, 49.5],
+      },
+    },
+  };
+  const alaska: [[number, number], [number, number]] = [[-168, 54.6], [-130, 71.4]];
+  const canada: [[number, number], [number, number]] = [[-141, 41.7], [-52.6, 83.2]];
+  const finland: [[number, number], [number, number]] = [[19.1, 59.4], [31.6, 70.2]];
+  assert.equal(offlineStyleCoversBounds(globalStyle, alaska), true);
+  assert.equal(offlineStyleCoversBounds(globalStyle, canada), true);
+  assert.equal(offlineStyleCoversBounds(globalStyle, finland), true);
+  assert.equal(offlineStyleCoversBounds(oldConusStyle, alaska), false);
+  assert.equal(offlineStyleCoversBounds(oldConusStyle, canada), false);
+  assert.equal(offlineStyleCoversBounds(oldConusStyle, finland), false);
+
   const adapterSource = readFileSync('components/NativeMap/offlineManager.ts', 'utf8');
-  assert.match(adapterSource, /await MapLibreGL\.offlineManager\.createPack\(/);
+  const workerSource = readFileSync('../cloudflare/wrangler-worker/src/worker.js', 'utf8');
+  const offlineStyleStart = workerSource.indexOf('if (path === "/api/style.json")');
+  const offlineStyleEnd = workerSource.indexOf('return Response.json(style', offlineStyleStart);
+  assert.ok(offlineStyleStart >= 0 && offlineStyleEnd > offlineStyleStart);
+  assert.doesNotMatch(
+    workerSource.slice(offlineStyleStart, offlineStyleEnd),
+    /bounds:\s*\[-125\.0,\s*24\.5,\s*-66\.5,\s*49\.5\]/,
+    'the offline style must not constrain a global tile endpoint to CONUS',
+  );
+  assert.match(
+    adapterSource,
+    /renderer === 'rnmapbox' \? MapboxGL\.offlineManager : MapLibreGL\.offlineManager/,
+  );
+  assert.match(adapterSource, /renderer: NativeOfflineRenderer = 'maplibre'/);
+  assert.match(adapterSource, /await manager\.createPack\(/);
   assert.match(adapterSource, /bounds: mapLibreOfflinePackBounds\(bounds\)/);
+  const coverageCheckIndex = adapterSource.indexOf('offlineStyleCoversBounds(style, bounds)');
+  const destructiveRestartIndex = adapterSource.indexOf('manager.deletePack(nativeName)');
+  assert.ok(coverageCheckIndex >= 0 && destructiveRestartIndex > coverageCheckIndex,
+    'style coverage must be proven before an existing native pack is replaced');
 
   console.log('Originals native offline-pack status tests passed.');
 }

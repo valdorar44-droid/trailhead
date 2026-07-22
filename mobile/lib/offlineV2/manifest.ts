@@ -94,6 +94,10 @@ export function validateOfflineBundleManifest(input: OfflineBundleManifestV2): O
     throw new OfflineBundleManifestError('created_at must be an ISO-8601 timestamp.');
   }
   nonEmpty(input.renderer?.style_uri, 'renderer.style_uri');
+  if (input.renderer?.style_id != null
+    && !/^[a-z0-9][a-z0-9_-]{0,63}$/.test(input.renderer.style_id)) {
+    throw new OfflineBundleManifestError('renderer.style_id must be a valid server-approved identifier.');
+  }
   nonEmpty(input.renderer?.style_revision, 'renderer.style_revision');
   nonEmpty(input.renderer?.style_pack_id, 'renderer.style_pack_id');
   nonEmpty(input.renderer?.tile_region_id, 'renderer.tile_region_id');

@@ -3,11 +3,20 @@ import { ActivityIndicator, StyleSheet, Text, TouchableOpacity, View } from 'rea
 import { Ionicons } from '@expo/vector-icons';
 import { useRouter } from 'expo-router';
 import { useTheme } from '@/lib/design';
+import { findAuthorizedPlanItem } from '@/lib/planDeepLinks';
 import { useStore } from '@/lib/store';
 import { listOwnedOriginals, restoreOwnedOriginals } from './originalsUiService';
 import type { OriginalUiSummary } from './types';
 
-export default function OwnedOriginalsSection() {
+type OwnedOriginalsSectionProps = Readonly<{
+  requestedOriginalId?: string;
+  onRequestedOriginalHandled?: (result: 'opened' | 'not_owned') => void;
+}>;
+
+export default function OwnedOriginalsSection({
+  requestedOriginalId,
+  onRequestedOriginalHandled,
+}: OwnedOriginalsSectionProps = {}) {
   const C = useTheme();
   const router = useRouter();
   const accountId = useStore(state => state.user?.id ?? null);
@@ -15,6 +24,7 @@ export default function OwnedOriginalsSection() {
   const currentScopeRef = useRef(accountScope);
   currentScopeRef.current = accountScope;
   const requestRef = useRef(0);
+  const handledRequestRef = useRef('');
   const [view, setView] = useState<{
     scope: string;
     items: OriginalUiSummary[];
@@ -70,6 +80,29 @@ export default function OwnedOriginalsSection() {
     ? view
     : { items: [] as OriginalUiSummary[], verified: false, loaded: false, error: '' };
   const items = scopedView.items;
+
+  useEffect(() => {
+    if (!requestedOriginalId) {
+      handledRequestRef.current = '';
+      return;
+    }
+    if (!scopedView.loaded || !scopedView.verified) return;
+    const requestKey = `${accountScope}:${requestedOriginalId}`;
+    if (handledRequestRef.current === requestKey) return;
+    handledRequestRef.current = requestKey;
+    // The external identifier never drives a detail fetch. It must first
+    // resolve against this scope's verified entitlement list.
+    const owned = findAuthorizedPlanItem(requestedOriginalId, items);
+    if (!owned) {
+      onRequestedOriginalHandled?.('not_owned');
+      return;
+    }
+    onRequestedOriginalHandled?.('opened');
+    router.push({
+      pathname: '/originals/[id]',
+      params: { id: owned.id, version: String(owned.version) },
+    } as any);
+  }, [accountScope, items, onRequestedOriginalHandled, requestedOriginalId, router, scopedView.loaded, scopedView.verified]);
 
   // Trips is an ownership surface, not another Originals acquisition entry.
   // A verified empty library stays hidden; a failed check retains recovery controls.

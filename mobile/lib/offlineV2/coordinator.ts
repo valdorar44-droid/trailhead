@@ -73,6 +73,7 @@ export interface OfflineDownloadCoordinator {
   commit(
     start: OfflineBundleStartV2,
     rendererInstallation: OfflineBundleInstallationV2['renderer'],
+    options?: Readonly<{ repair?: boolean }>,
   ): Promise<Readonly<{
     installation: OfflineBundleInstallationV2;
     receipt: OfflineBundleCommitReceiptV2;
@@ -175,7 +176,7 @@ export function createOfflineDownloadCoordinator(input: Readonly<{
       });
     },
 
-    async commit(start, rendererInstallation) {
+    async commit(start, rendererInstallation, options = {}) {
       const manifest = validateOfflineBundleManifest(start.manifest);
       await input.repository.verifyManifest(manifest);
       if (start.stage.bundle_id !== manifest.bundle_id || start.stage.revision !== manifest.revision) {
@@ -249,7 +250,7 @@ export function createOfflineDownloadCoordinator(input: Readonly<{
         installed_at_ms: verifiedAt,
         verified_at_ms: verifiedAt,
       });
-      await input.repository.commitStage(start.stage, installation, receipt);
+      await input.repository.commitStage(start.stage, installation, receipt, options);
       return Object.freeze({ installation, receipt });
     },
 

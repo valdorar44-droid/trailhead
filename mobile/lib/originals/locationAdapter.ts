@@ -83,6 +83,15 @@ const expoLocationQueueStorage: OriginalLocationQueueStorage = {
 
 const headlessLocationQueue = createOriginalLocationQueue(expoLocationQueueStorage);
 
+/** Account-departure barrier for raw fixes persisted by a cold native task. */
+export async function clearOriginalLocationRuntimeQueue() {
+  taskLocationHandler = null;
+  await headlessLocationQueue.clear();
+  if (await headlessLocationQueue.count()) {
+    throw new Error('Trailhead could not verify that queued Original locations were removed.');
+  }
+}
+
 function locationSample(location: Location.LocationObject): OriginalLocationSample {
   return {
     lat: location.coords.latitude,

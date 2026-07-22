@@ -1,10 +1,10 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import type { PlacePack, PlacePackPoint } from './api';
 import { accountStorage } from './storage';
+import { nextOfflinePlacePackIndex } from './offlinePlacePackIndex';
 
 const DIR = FileSystem.documentDirectory + 'offline_place_packs/';
 const INDEX_PATH = DIR + '_index.json';
-const MAX_PLACE_PACKS = 96;
 
 export interface OfflinePlacePackSummary {
   pack_id: string;
@@ -48,15 +48,7 @@ export async function saveOfflinePlacePack(pack: PlacePack, preserveIds: string[
     await ensureDir();
     await FileSystem.writeAsStringAsync(packPath(pack.pack_id), JSON.stringify(pack));
     const index = await getIndex();
-    const preserve = new Set([pack.pack_id, ...preserveIds.filter(Boolean)]);
-    const ordered = [pack.pack_id, ...index.filter(id => id !== pack.pack_id)];
-    const kept: string[] = [];
-    for (const id of ordered) {
-      if (kept.length < MAX_PLACE_PACKS || preserve.has(id)) kept.push(id);
-    }
-    const updated = kept;
-    const evicted = index.filter(id => !updated.includes(id));
-    await Promise.all(evicted.map(id => FileSystem.deleteAsync(packPath(id), { idempotent: true }).catch(() => {})));
+    const updated = nextOfflinePlacePackIndex(index, pack.pack_id, preserveIds);
     await writeIndex(updated);
   }, epoch);
 }

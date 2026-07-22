@@ -184,6 +184,7 @@ function isPrivateRootFile(name: string) {
     || name === 'notified_wps.json'
     || name === 'gpx_import_batches.json'
     || /^weather_.+\.json$/i.test(name)
+    || /^route_weather_v2_.+\.json$/i.test(name)
     || /^guide_.+\.json$/i.test(name)
     || /^trip_ai_.+\.json$/i.test(name)
     || /\.gpx$/i.test(name);

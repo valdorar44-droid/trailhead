@@ -12,10 +12,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { useFocusEffect, useRouter } from 'expo-router';
+import { useFocusEffect, useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '@/lib/design';
+import { findAuthorizedPlanItem, planDeepLinkRequest, type PlanDeepLinkSection } from '@/lib/planDeepLinks';
 import { useStore, type SavedPlace } from '@/lib/store';
 import { useProductFeatures } from '@/lib/useProductFeatures';
 import { useScreenActivity } from '@/lib/screenActivity';
@@ -69,6 +70,11 @@ const TRIP_RENDER_BATCH = 10;
 export default function TripsScreen() {
   const C = useTheme();
   const router = useRouter();
+  const params = useLocalSearchParams<{
+    section?: string | string[];
+    trip_id?: string | string[];
+    original_id?: string | string[];
+  }>();
   const screenActivity = useScreenActivity();
   const insets = useSafeAreaInsets();
   const repository = useTripRepositorySnapshot();
@@ -93,11 +99,20 @@ export default function TripsScreen() {
   const [deleteConfirmationVisible, setDeleteConfirmationVisible] = useState(false);
   const [deletingDrafts, setDeletingDrafts] = useState(false);
   const requestSequence = useRef(0);
+  const planScrollRef = useRef<ScrollView>(null);
+  const sectionOffsets = useRef<Partial<Record<PlanDeepLinkSection, number>>>({});
+  const handledTripRequestRef = useRef('');
+  const handledSectionRequestRef = useRef('');
   const expectedOwnerScope = userId ? `account:${String(userId)}` : 'anonymous';
   const repositoryReady = repository.initialized && repository.ownerScope === expectedOwnerScope;
   const { features } = useProductFeatures();
   const publicationEnabled = Boolean(userId && features?.community_publications);
   const availabilityEnabled = Boolean(userId && features?.availability_monitors);
+  const requestedPlanDestination = useMemo(() => planDeepLinkRequest(params), [
+    params.original_id,
+    params.section,
+    params.trip_id,
+  ]);
 
   const refresh = useCallback(async (mode: 'loading' | 'refreshing' | 'silent' = 'loading') => {
     const request = ++requestSequence.current;
@@ -204,6 +219,65 @@ export default function TripsScreen() {
     const items = snapshot.activeTrip ? [snapshot.activeTrip, ...snapshot.trips] : snapshot.trips;
     return items.reduce((total, trip) => total + trip.activeMonitorCount, 0);
   }, [snapshot.activeTrip, snapshot.trips]);
+
+  const scrollToSection = useCallback((section: PlanDeepLinkSection) => {
+    const y = sectionOffsets.current[section];
+    if (y == null) return;
+    requestAnimationFrame(() => planScrollRef.current?.scrollTo({ y: Math.max(0, y - 12), animated: true }));
+  }, []);
+
+  useEffect(() => {
+    if (!requestedPlanDestination) {
+      handledTripRequestRef.current = '';
+      handledSectionRequestRef.current = '';
+      return;
+    }
+    if (!repositoryReady) return;
+    const key = `${expectedOwnerScope}:${requestedPlanDestination.section}:${requestedPlanDestination.item_id || ''}`;
+    if (handledSectionRequestRef.current === key) return;
+    handledSectionRequestRef.current = key;
+    scrollToSection(requestedPlanDestination.section);
+    if (!requestedPlanDestination.item_id) {
+      router.setParams({ section: undefined } as any);
+    }
+  }, [expectedOwnerScope, repositoryReady, requestedPlanDestination, router, scrollToSection]);
+
+  useEffect(() => {
+    if (loading
+      || !repositoryReady
+      || requestedPlanDestination?.section !== 'trips'
+      || !requestedPlanDestination.item_id) return;
+    const requestKey = `${expectedOwnerScope}:${requestedPlanDestination.item_id}`;
+    if (handledTripRequestRef.current === requestKey) return;
+    const authorizedItems = snapshot.activeTrip
+      ? [snapshot.activeTrip, ...snapshot.trips]
+      : snapshot.trips;
+    const ownedTrip = findAuthorizedPlanItem(requestedPlanDestination.item_id, authorizedItems);
+    handledTripRequestRef.current = requestKey;
+    if (!ownedTrip) {
+      setNotice('That trip is not in this account.');
+    } else {
+      setFilter(ownedTrip.status);
+      setSelectedTrip(ownedTrip);
+      setActionSheetVisible(true);
+      scrollToSection('trips');
+    }
+    router.setParams({ trip_id: undefined, section: undefined } as any);
+  }, [
+    expectedOwnerScope,
+    loading,
+    repositoryReady,
+    requestedPlanDestination,
+    router,
+    scrollToSection,
+    snapshot.activeTrip,
+    snapshot.trips,
+  ]);
+
+  const handleRequestedOriginal = useCallback((result: 'opened' | 'not_owned') => {
+    if (result === 'not_owned') setNotice('That Original is not in this account.');
+    router.setParams({ original_id: undefined, section: undefined } as any);
+  }, [router]);
 
   const openActions = useCallback((trip: TripLibraryItem) => {
     setSelectedTrip(trip);
@@ -358,6 +432,11 @@ export default function TripsScreen() {
 
   const browseExplore = useCallback(() => router.push('/(tabs)/guide'), [router]);
 
+  const openDownloads = useCallback(() => {
+    setPendingOpenOfflineModal(true);
+    router.push('/(tabs)/map');
+  }, [router, setPendingOpenOfflineModal]);
+
   const beginDraftSelection = useCallback(() => {
     setFilter('draft');
     setSelectedDraftIds(new Set());
@@ -509,6 +588,7 @@ export default function TripsScreen() {
   return (
     <SafeAreaView edges={['top']} style={[styles.screen, { backgroundColor: C.bg }]}>
       <ScrollView
+        ref={planScrollRef}
         style={styles.screen}
         contentInsetAdjustmentBehavior="automatic"
         showsVerticalScrollIndicator={false}
@@ -542,7 +622,7 @@ export default function TripsScreen() {
               onPress={() => setNotice('')}
               style={[styles.notice, { borderTopColor: C.border, borderBottomColor: C.border }]}
             >
-              <Ionicons name="checkmark-circle-outline" size={17} color={C.green} />
+              <Ionicons name="checkmark-circle-outline" size={17} color={C.orange} />
               <Text style={[styles.noticeText, { color: C.text2 }]}>{notice}</Text>
               <Ionicons name="close" size={16} color={C.text3} />
             </TouchableOpacity>
@@ -559,7 +639,10 @@ export default function TripsScreen() {
             </View>
           ) : null}
 
-          <View style={styles.section}>
+          <View
+            style={styles.section}
+            onLayout={event => { sectionOffsets.current.trips = event.nativeEvent.layout.y; }}
+          >
             <TripFilterSegment
               value={filter}
               counts={snapshot.counts}
@@ -591,12 +674,38 @@ export default function TripsScreen() {
 
           {repositoryReady ? (
             <>
-              <OwnedOriginalsSection />
+              <View onLayout={event => { sectionOffsets.current.originals = event.nativeEvent.layout.y; }}>
+                <OwnedOriginalsSection
+                  requestedOriginalId={requestedPlanDestination?.section === 'originals'
+                    ? requestedPlanDestination.item_id
+                    : undefined}
+                  onRequestedOriginalHandled={handleRequestedOriginal}
+                />
+              </View>
+              <View onLayout={event => { sectionOffsets.current.downloads = event.nativeEvent.layout.y; }}>
+                <View style={styles.section}>
+                  <Text style={[styles.sectionTitle, { color: C.text }]}>Downloads</Text>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Manage offline downloads"
+                    onPress={openDownloads}
+                    style={[styles.downloadsRow, { backgroundColor: C.s1, borderColor: C.border }]}
+                  >
+                    <View style={[styles.downloadsIcon, { backgroundColor: `${C.orange}18` }]}>
+                      <Ionicons name="download-outline" size={20} color={C.orange} />
+                    </View>
+                    <Text style={[styles.downloadsLabel, { color: C.text }]}>Manage offline downloads</Text>
+                    <Ionicons name="chevron-forward" size={19} color={C.text2} />
+                  </TouchableOpacity>
+                </View>
+              </View>
               {availabilityEnabled ? (
                 <AvailabilityWatchManager signedIn={Boolean(userId)} knownActiveCount={knownActiveWatchCount} />
               ) : null}
               {snapshot.savedItems.length > 0 ? (
-                <SavedItemsSection items={snapshot.savedItems} onOpen={openSavedItem} onBrowse={browseExplore} />
+                <View onLayout={event => { sectionOffsets.current.saved = event.nativeEvent.layout.y; }}>
+                  <SavedItemsSection items={snapshot.savedItems} onOpen={openSavedItem} onBrowse={browseExplore} />
+                </View>
               ) : null}
             </>
           ) : null}
@@ -811,6 +920,28 @@ const styles = StyleSheet.create({
     lineHeight: 23,
     fontWeight: '800',
     letterSpacing: 0,
+  },
+  downloadsRow: {
+    minHeight: 68,
+    borderWidth: 1,
+    borderRadius: 16,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  downloadsIcon: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  downloadsLabel: {
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
   },
   tripList: {
     gap: 0,

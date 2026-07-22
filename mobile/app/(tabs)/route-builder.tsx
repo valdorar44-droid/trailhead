@@ -22,7 +22,7 @@ import RouteBuilderInlineResults, {
   RouteBuilderInlineResultRow,
 } from '@/components/routeBuilder/RouteBuilderInlineResults';
 import RouteBuilderReadinessCard from '@/components/routeBuilder/RouteBuilderReadinessCard';
-import RouteBuilderSearchSurface from '@/components/routeBuilder/RouteBuilderSearchSurface';
+import RouteBuilderSearchSurface, { type RouteBuilderSearchDisplayPlace } from '@/components/routeBuilder/RouteBuilderSearchSurface';
 import {
   RouteBuilderCampPreviewCard,
   RouteBuilderFuelPreviewCard,
@@ -40,6 +40,12 @@ import { TrailheadButton, TrailheadCard, TrailheadCardSkeleton, TrailheadSheet, 
 import TrailheadPhotoGallery, { type TrailheadGalleryPhoto } from '@/components/TrailheadPhotoGallery';
 import { api, ApiError, BookableExperience, CampFullness, Campsite, CampsiteDetail, CampsiteInsight, CampsitePin, CampReusePolicy, ExcursionCandidate, ExtremeConfig, FuelEstimate, GasStation, GeocodePlace, OutdoorOffer, OsmPoi, PaywallError, RouteStyleMode, SavedRouteGeometryPayload, TripResult, TripShapeMode, TripTimeline, Waypoint, WeatherForecast } from '@/lib/api';
 import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
+import {
+  EMPTY_EXPO_OFFLINE_V2_CATALOG,
+  loadExpoOfflineV2Catalog,
+  mergeOfflinePoiInventory,
+  searchExpoOfflineV2Catalog,
+} from '@/lib/offlineV2/expoCatalog';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
 import { deleteOfflineTrip, loadOfflineTrip, saveOfflineTrip } from '@/lib/offlineTrips';
 import { applyBackendAcknowledgedActiveTrip, useStore, type TripHistoryItem } from '@/lib/store';
@@ -56,7 +62,17 @@ import {
 } from '@/lib/copilotCapabilities';
 import { useTheme, mono, ColorPalette, RADIUS } from '@/lib/design';
 import { useScreenActivity } from '@/lib/screenActivity';
+import { useKeyboardInset } from '@/lib/keyboardInset';
 import { useTabBarVisibility } from '@/lib/tabBarVisibility';
+import { useProductFeatures } from '@/lib/useProductFeatures';
+import {
+  offlineSearchResultsV2,
+  normalizeSearchV2Query,
+  productFeaturesAllowSearchV2,
+  searchResultV2ToDisplayPlace,
+  searchResultV2ToLegacyPlace,
+  useSearchV2Session,
+} from '@/lib/searchV2';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
 import { useOfflineFiles } from '@/lib/useOfflineFiles';
 import { loadWelcomeSetupPreferences, type WelcomeSetupPreferences } from '@/lib/welcomeGate';
@@ -205,7 +221,8 @@ type BuilderStop = {
   routeShapeRole?: 'start' | 'destination' | 'outbound_anchor' | 'return_anchor' | 'overnight' | 'side_stop';
   routeProgressMi?: number;
 };
-type SearchPlace = RouteBuilderSearchPlace;
+type SearchPlace = RouteBuilderSearchPlace & { result_id?: string };
+type SearchDisplayPlace = RouteBuilderSearchDisplayPlace;
 type CampPreferenceMode = 'public' | 'developed' | 'rv' | 'private' | 'any';
 type CampCadenceMode = 'nightly' | 'alternate' | 'manual';
 type RoutePlaceSelection =
@@ -1656,6 +1673,8 @@ function RouteBuilderScreenContent() {
   const blurTint: 'dark' | 'light' = C.bg === '#050505' ? 'dark' : 'light';
   const router = useRouter();
   const screenActivity = useScreenActivity();
+  const { features: productFeatures } = useProductFeatures(screenActivity.isActive);
+  const searchV2Enabled = productFeaturesAllowSearchV2(productFeatures);
   const routeParams = useLocalSearchParams();
   const routeBuilderIntent = Array.isArray(routeParams.intent) ? routeParams.intent[0] : routeParams.intent;
   const routeBuilderRequest = Array.isArray(routeParams.request) ? routeParams.request[0] : routeParams.request;
@@ -1796,12 +1815,14 @@ function RouteBuilderScreenContent() {
   const [importedTripId, setImportedTripId] = useState<string | null>(null);
   const routeActivityOfferTripId = activeTrip?.trip_id ?? null;
   const [query, setQuery] = useState('');
+  const routeSearchQueryRef = useRef(query);
+  routeSearchQueryRef.current = query;
   const [searching, setSearching] = useState(false);
   const [routeName, setRouteName] = useState('');
   const [copilotScoutSummary, setCopilotScoutSummary] = useState<TrailheadRouteScoutDraftSummary | null>(null);
   const [routeActionSheet, setRouteActionSheet] = useState<'actions' | 'rename' | null>(null);
   const [routeNameDraft, setRouteNameDraft] = useState('');
-  const [searchResults, setSearchResults] = useState<SearchPlace[]>([]);
+  const [searchResults, setSearchResults] = useState<SearchDisplayPlace[]>([]);
   const [pendingType, setPendingType] = useState<BuilderStopType>('start');
   const [insertAfterId, setInsertAfterId] = useState<string | null>(null);
   const [insertTargetDay, setInsertTargetDay] = useState<number | null>(null);
@@ -1829,6 +1850,63 @@ function RouteBuilderScreenContent() {
     discoveryRetryTimerRef.current = null;
   }, []);
   const [offlinePlaces, setOfflinePlaces] = useState<OsmPoi[]>([]);
+  const [offlineV2Catalog, setOfflineV2Catalog] = useState(EMPTY_EXPO_OFFLINE_V2_CATALOG);
+  const routeSearchV2OfflineProvider = useCallback(
+    async (request: Parameters<typeof offlineSearchResultsV2>[0]) => {
+      const indexed = await searchExpoOfflineV2Catalog(offlineV2Catalog, request, 'route_editor');
+      const fallback = offlineSearchResultsV2(request, offlinePlaces, 'route_editor');
+      const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
+      return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
+    },
+    [offlinePlaces, offlineV2Catalog],
+  );
+  const routeSearchV2Context = useMemo(() => ({
+    surface: 'route_editor' as const,
+    intent: 'destination' as const,
+    scope: 'global' as const,
+    center: userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
+    include_external: true,
+    limit: 10,
+  }), [userLoc?.lat, userLoc?.lng]);
+  const routeSearchV2 = useSearchV2Session({
+    enabled: searchV2Enabled,
+    active: screenActivity.isActive,
+    context: routeSearchV2Context,
+    offlineProvider: routeSearchV2OfflineProvider,
+  });
+
+  useEffect(() => {
+    if (!searchV2Enabled || !screenActivity.isFocused) return;
+    routeSearchV2.setQuery(query);
+  }, [query, routeSearchV2.setQuery, screenActivity.isFocused, searchV2Enabled]);
+
+  useEffect(() => {
+    if (!searchV2Enabled) {
+      setSearching(false);
+      return;
+    }
+    const mapped = normalizeSearchV2Query(query) === routeSearchV2.state.query
+      ? routeSearchV2.state.results.map(result => ({
+        ...searchResultV2ToDisplayPlace(result),
+        source: 'search',
+        resolving: routeSearchV2.state.resolvingResultId === result.result_id,
+      }))
+      : [];
+    setSearchResults(mapped);
+    setSearching(
+      routeSearchV2.state.status === 'debouncing'
+      || routeSearchV2.state.status === 'loading'
+      || routeSearchV2.state.isEnriching,
+    );
+  }, [
+    routeSearchV2.state.isEnriching,
+    routeSearchV2.state.query,
+    routeSearchV2.state.resolvingResultId,
+    routeSearchV2.state.results,
+    routeSearchV2.state.status,
+    query,
+    searchV2Enabled,
+  ]);
   const [activePlaceFilters, setActivePlaceFilters] = useState<string[]>(DEFAULT_PLACE_FILTERS);
   const [showPlaceFilters, setShowPlaceFilters] = useState(false);
   const [selectedRoutePlace, setSelectedRoutePlace] = useState<RoutePlaceSelection | null>(null);
@@ -1846,7 +1924,7 @@ function RouteBuilderScreenContent() {
   const [paywallVisible, setPaywallVisible] = useState(false);
   const [paywallCode, setPaywallCode] = useState('camp_detail');
   const [paywallMessage, setPaywallMessage] = useState('Use credits to open full campsite profiles. You can still add this camp to your route from the free preview.');
-  const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const { visible: keyboardVisible } = useKeyboardInset();
   const tripLoop = tripShapeMode !== 'one_way';
   const effectiveCampReusePolicy: CampReusePolicy = tripShapeMode === 'there_and_back' ? 'same_camp_window' : campReusePolicy;
   const trailheadContext = useMemo(
@@ -1976,19 +2054,6 @@ function RouteBuilderScreenContent() {
     setQuickCampPhotoIndex(0);
   }, [selectedCamp]);
 
-  useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
-      setKeyboardVisible(true);
-    });
-    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
-      setKeyboardVisible(false);
-    });
-    return () => {
-      showSub.remove();
-      hideSub.remove();
-    };
-  }, []);
-
   useTabBarVisibility(
     'route-builder',
     buildingFramework || stops.length >= 2 || keyboardVisible,
@@ -2011,10 +2076,16 @@ function RouteBuilderScreenContent() {
     let mounted = true;
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
-    loadAllPlacePoints()
-      .then(points => {
+    const ownerScope = requestAccountId == null ? 'anonymous' : `account:${String(requestAccountId)}`;
+    Promise.all([
+      loadAllPlacePoints().catch(() => []),
+      requestAccountId == null
+        ? Promise.resolve(EMPTY_EXPO_OFFLINE_V2_CATALOG)
+        : loadExpoOfflineV2Catalog(ownerScope).catch(() => EMPTY_EXPO_OFFLINE_V2_CATALOG),
+    ])
+      .then(([points, catalog]) => {
         if (!mounted || !accountRequestIsCurrent(requestEpoch, requestAccountId)) return;
-        setOfflinePlaces(points.map(point => ({
+        const legacy = points.map(point => ({
           id: point.id,
           name: point.name,
           lat: point.lat,
@@ -2060,10 +2131,15 @@ function RouteBuilderScreenContent() {
           trek_name: point.trek_name,
           stage_name: point.stage_name,
           safety_note: point.safety_note,
-        })));
+        } as OsmPoi));
+        setOfflineV2Catalog(catalog);
+        setOfflinePlaces(mergeOfflinePoiInventory(catalog.places, legacy));
       })
       .catch(() => {
-        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) setOfflinePlaces([]);
+        if (mounted && accountRequestIsCurrent(requestEpoch, requestAccountId)) {
+          setOfflineV2Catalog(EMPTY_EXPO_OFFLINE_V2_CATALOG);
+          setOfflinePlaces([]);
+        }
       });
     return () => { mounted = false; };
   }, [user?.id]);
@@ -2992,6 +3068,33 @@ function RouteBuilderScreenContent() {
     setActiveDay(stop.day);
   }
 
+  async function resolveRouteBuilderSearchPlace(place: SearchDisplayPlace): Promise<SearchPlace | null> {
+    if (searchV2Enabled && place.result_id) {
+      const pressedQuery = normalizeSearchV2Query(routeSearchQueryRef.current);
+      try {
+        const resolved = await routeSearchV2.resolveResult(place.result_id);
+        if (!resolved) {
+          if (normalizeSearchV2Query(routeSearchQueryRef.current) === pressedQuery) {
+            Alert.alert('Place unavailable', 'Choose another result or try a nearby town or address.');
+          }
+          return null;
+        }
+        const mapped = searchResultV2ToLegacyPlace(resolved);
+        return mapped ? { ...mapped, source: 'search' } : null;
+      } catch {
+        if (normalizeSearchV2Query(routeSearchQueryRef.current) === pressedQuery) {
+          Alert.alert('Search unavailable', 'Could not open that place. Try again.');
+        }
+        return null;
+      }
+    }
+    if (typeof place.lat !== 'number' || !Number.isFinite(place.lat)
+      || typeof place.lng !== 'number' || !Number.isFinite(place.lng)) {
+      return null;
+    }
+    return place as SearchPlace;
+  }
+
   function addPlace(place: SearchPlace, type = pendingType) {
     setReplaceStopId(null);
     addStop(buildRouteBuilderSearchStop(place, type));
@@ -3118,6 +3221,10 @@ function RouteBuilderScreenContent() {
 
   async function runSearch() {
     if (!query.trim()) return;
+    if (searchV2Enabled) {
+      await routeSearchV2.search(query.trim());
+      return;
+    }
     const requestEpoch = accountStorage.epoch();
     const requestAccountId = useStore.getState().user?.id;
     const searchQuery = query;
@@ -6870,7 +6977,11 @@ function RouteBuilderScreenContent() {
           onSelectType={setPendingType}
           onChangeQuery={setQuery}
           onSubmitSearch={runSearch}
-          onSelectResult={addPlace}
+          onSelectResult={place => {
+            void resolveRouteBuilderSearchPlace(place).then(selected => {
+              if (selected) addPlace(selected);
+            });
+          }}
           onClearInsert={() => { setInsertAfterId(null); setInsertTargetDay(null); }}
         />
 

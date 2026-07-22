@@ -39,6 +39,13 @@ export type SearchRequestV2 = {
   limit?: number;
   session_id?: string;
   include_external?: boolean;
+  /**
+   * Explicit provider selection. These values are copied verbatim from one
+   * SearchResultV2 returned in this session; clients must never construct a
+   * provider detail reference.
+   */
+  selected_result_id?: string;
+  selected_detail_ref?: string;
 };
 
 export type SearchProvenanceV2 = {

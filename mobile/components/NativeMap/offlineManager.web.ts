@@ -3,6 +3,7 @@
 // @maplibre/maplibre-react-native while rendering the Map tab in Playwright.
 
 export type PackBounds = [[number, number], [number, number]];
+export type NativeOfflineRenderer = 'maplibre' | 'rnmapbox';
 
 export interface PackProgress {
   percentage: number;
@@ -18,6 +19,7 @@ export interface InstalledPack {
   percentage: number;
   complete: boolean;
   sizeMb: number;
+  renderer: NativeOfflineRenderer;
 }
 
 export const US_STATE_PACKS: Record<string, { name: string; bounds: PackBounds; icon: string }> = {};
@@ -31,17 +33,18 @@ export async function downloadPack(
   _onProgress: (progress: PackProgress) => void,
   _onComplete: () => void,
   onError: (msg: string) => void,
+  _renderer: NativeOfflineRenderer = 'maplibre',
 ): Promise<void> {
   onError('Native offline map packs are not available in the web preview.');
 }
 
-export async function pausePack(_name: string): Promise<void> {}
+export async function pausePack(_name: string, _renderer: NativeOfflineRenderer = 'maplibre'): Promise<void> {}
 
-export async function resumePack(_name: string): Promise<void> {}
+export async function resumePack(_name: string, _renderer: NativeOfflineRenderer = 'maplibre'): Promise<void> {}
 
-export async function deletePack(_name: string): Promise<void> {}
+export async function deletePack(_name: string, _renderer: NativeOfflineRenderer = 'maplibre'): Promise<void> {}
 
-export async function getInstalledPacks(): Promise<InstalledPack[]> {
+export async function getInstalledPacks(_renderer: NativeOfflineRenderer = 'maplibre'): Promise<InstalledPack[]> {
   return [];
 }
 

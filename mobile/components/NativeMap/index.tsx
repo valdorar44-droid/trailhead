@@ -231,6 +231,7 @@ export interface NativeMapProps {
   camps:         CampsitePin[];
   gas:           { lat: number; lng: number; name: string }[];
   pois:          OsmPoi[];
+  offlineTrailFeatures?: GeoJSON.FeatureCollection;
   waterNavLines?: any;
   waterSpotCards?: WaterSpotCard[];
   waterCorridor?: SuggestedWaterCorridorResponse | null;
@@ -843,7 +844,7 @@ async function probeTileCdn(timeoutMs = 1500): Promise<boolean> {
 // ── Main component ────────────────────────────────────────────────────────────
 const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
   const {
-    waypoints, camps, gas, pois, waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
+    waypoints, camps, gas, pois, offlineTrailFeatures = emptyFC(), waterNavLines, waterSpotCards = [], waterCorridor = null, waterFollowRoute = null, reports, communityPins, searchMarker,
     userLoc, navMode, navCameraFollow = false, nativeNavEngineActive = false, navIdx, navHeading, navSpeed,
     mapLayer, routeProviderMode = 'trailhead', routeOpts, rendererMode,
     traceMode = false, traceDraftCoords = [], traceRouteCoords = [], tracePinCoords = [],
@@ -3999,6 +4000,60 @@ const NativeMap = forwardRef<NativeMapHandle, NativeMapProps>((props, ref) => {
           />
         </MapGL.MarkerView>
       ))}
+
+      {/* Verified Offline V2 trail geometry. Points for the same records flow
+          through the shared POI sheet; tapping a line opens that exact record. */}
+      {showTrailOverlay && offlineTrailFeatures.features.length > 0 && (
+        <MapGL.ShapeSource
+          id="trailhead-offline-v2-trails"
+          shape={offlineTrailFeatures}
+          onPress={(event: any) => {
+            const feature = event.features?.[0];
+            const properties = feature?.properties ?? {};
+            const eventCoordinate = Array.isArray(event.coordinates) ? event.coordinates : null;
+            const lat = Number(properties.lat ?? eventCoordinate?.[1]);
+            const lng = Number(properties.lng ?? eventCoordinate?.[0]);
+            if (!Number.isFinite(lat) || !Number.isFinite(lng)) return;
+            if (suppressFeatureTaps) {
+              onMapTap(lat, lng);
+              return;
+            }
+            onPoiTap?.({
+              ...properties,
+              id: String(properties.id || feature?.id || `offline-trail:${lat}:${lng}`),
+              name: String(properties.name || 'Trail'),
+              type: 'trail',
+              profile_id: String(properties.id || feature?.id || ''),
+              lat,
+              lng,
+              source: 'trailhead_offline_v2',
+              source_label: String(properties.source_label || 'Downloaded'),
+              raw: properties,
+            } as OsmPoi);
+          }}
+        >
+          <MapGL.LineLayer
+            id="trailhead-offline-v2-trail-halo"
+            {...mapboxTopSlotProps}
+            style={{
+              lineColor: 'rgba(17,20,18,0.72)',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 7, 4, 13, 7, 17, 10],
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+          <MapGL.LineLayer
+            id="trailhead-offline-v2-trail-line"
+            {...mapboxTopSlotProps}
+            style={{
+              lineColor: '#AD5A33',
+              lineWidth: ['interpolate', ['linear'], ['zoom'], 7, 2, 13, 4, 17, 6],
+              lineCap: 'round',
+              lineJoin: 'round',
+            } as any}
+          />
+        </MapGL.ShapeSource>
+      )}
 
       {/* ── POIs (water, trailheads, viewpoints, peaks) ───────────────── */}
       {pois.length > 0 && (

@@ -33,6 +33,7 @@ import {
   resumePack,
   routeCorridorBounds,
   type InstalledPack,
+  type NativeOfflineRenderer,
   type PackProgress,
 } from './offlineManager';
 import type { WP } from './types';
@@ -52,10 +53,20 @@ import {
   saveOfflineTrip,
 } from '@/lib/offlineTrips';
 import { accountStorage, type AccountStorageEpoch } from '@/lib/storage';
+import { useProductFeatures } from '@/lib/useProductFeatures';
+import { getExpoOfflineV2Runtime } from '@/lib/offlineV2/expoRuntime';
+import type { OfflineBundleDownloadJobV2 } from '@/lib/offlineV2/jobStore';
+import type { OfflineArtifactKind } from '@/lib/offlineV2/types';
+import {
+  offlineV2ArtifactsConsumed,
+  subscribeOfflineV2Consumption,
+} from '@/lib/offlineV2/consumption';
 import {
   displayOfflineDownloadName,
+  missingRegionPlacePackEntries,
   offlineRegionIdsForPoints,
   offlineStateStoredBytes,
+  regionPlacePackEntries,
   summarizeOfflineRegion,
   type OfflineRegionSummary,
 } from './offlineHubModel';
@@ -119,6 +130,12 @@ interface Props {
   tripId?: string | null;
   tripName: string | null;
   useNativeMap: boolean;
+  /** Physical native renderer currently mounted by the visible map surface. */
+  activeNativeRenderer?: NativeOfflineRenderer;
+  /** True only when the legacy Trailhead vector pack feeds the visible style. */
+  legacyNativePackCompatible?: boolean;
+  /** Exact server-approved style used by the visible RNMapbox surface. */
+  activeRendererStyleId?: string | null;
   onOfflinePlacesChanged?: () => void;
   onWebDownloadBbox?: (opts: WebDownloadOpts) => void;
   onWebDownloadRoute?: (opts: WebDownloadOpts) => void;
@@ -225,6 +242,65 @@ function validCoords(coords?: [number, number][]) {
   ));
 }
 
+function normalizedOfflineBounds(bounds: [[number, number], [number, number]]) {
+  const lngs = [Number(bounds[0][0]), Number(bounds[1][0])];
+  const lats = [Number(bounds[0][1]), Number(bounds[1][1])];
+  return {
+    west: Math.min(...lngs),
+    south: Math.min(...lats),
+    east: Math.max(...lngs),
+    north: Math.max(...lats),
+  };
+}
+
+function v2ArtifactKindsReady(
+  job: OfflineBundleDownloadJobV2 | undefined,
+  kinds: readonly OfflineArtifactKind[],
+) {
+  if (!job?.manifest) return false;
+  const artifacts = job.manifest.artifacts.filter(artifact => kinds.includes(artifact.kind));
+  return artifacts.length > 0 && artifacts.every(artifact => job.artifact_states[artifact.id]?.status === 'ready');
+}
+
+function v2StyleMatches(
+  job: OfflineBundleDownloadJobV2 | undefined,
+  activeRendererStyleId: string | null | undefined,
+) {
+  return Boolean(
+    job?.status === 'ready'
+    && activeRendererStyleId
+    && job.manifest?.renderer.id === 'rnmapbox'
+    && job.manifest.renderer.style_id === activeRendererStyleId,
+  );
+}
+
+function v2ConsumerKindsReady(
+  job: OfflineBundleDownloadJobV2 | undefined,
+  ownerScope: string,
+  kinds: readonly OfflineArtifactKind[],
+) {
+  return Boolean(
+    job?.status === 'ready'
+    && job.manifest
+    && v2ArtifactKindsReady(job, kinds)
+    && offlineV2ArtifactsConsumed(
+      ownerScope,
+      job.manifest.bundle_id,
+      job.manifest.revision,
+      kinds,
+    ),
+  );
+}
+
+function showOfflineRemovalError(error: unknown) {
+  Alert.alert(
+    'Download not removed',
+    error instanceof Error && error.message
+      ? error.message
+      : 'Trailhead could not remove this download. Try again.',
+  );
+}
+
 function validWaypoints(points?: Array<Partial<WP>>) {
   return (points ?? []).filter(point => Number.isFinite(point.lat) && Number.isFinite(point.lng)).map(point => ({
     lat: Number(point.lat),
@@ -280,7 +356,7 @@ function artifactActionLabel(state: FileDownloadState) {
 }
 
 function statusColor(C: ColorPalette, status: string) {
-  if (status === 'Ready offline' || status === 'Downloaded') return C.green;
+  if (status === 'Ready offline' || status === 'Downloaded') return C.orange;
   if (/incomplete/i.test(status)) return C.red;
   if (/Downloading|Paused/i.test(status)) return C.orange;
   return C.text2;
@@ -420,7 +496,7 @@ function DeviceRow({ item, selected, selectionMode, onToggle }: {
       activeOpacity={0.78}
     >
       {selectionMode ? (
-        <View style={[shared.selectionBox, { borderColor: selected ? C.green : C.border2, backgroundColor: selected ? C.green : 'transparent' }]}>
+        <View style={[shared.selectionBox, { borderColor: selected ? C.orange : C.border2, backgroundColor: selected ? C.orange : 'transparent' }]}>
           {selected ? <Ionicons name="checkmark" size={15} color="#fff" /> : null}
         </View>
       ) : (
@@ -442,7 +518,7 @@ function CheckRow({ label, ready }: { label: string; ready: boolean }) {
   const C = useTheme();
   return (
     <View style={shared.checkRow}>
-      <Ionicons name={ready ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={ready ? C.green : C.text3} />
+      <Ionicons name={ready ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={ready ? C.orange : C.text3} />
       <Text style={[shared.checkLabel, { color: ready ? C.text : C.text2 }]}>{label}</Text>
     </View>
   );
@@ -459,7 +535,7 @@ function ArtifactRow({ label, state, onAction, available = true }: {
   const status = available ? artifactStatus(state) : 'Not available';
   return (
     <View style={[shared.artifactRow, { borderBottomColor: C.border }]}>
-      <Ionicons name={state.status === 'complete' ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={state.status === 'complete' ? C.green : C.text3} />
+      <Ionicons name={state.status === 'complete' ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={state.status === 'complete' ? C.orange : C.text3} />
       <View style={shared.artifactCopy}>
         <Text style={[shared.artifactTitle, { color: C.text }]}>{label}</Text>
         <Text style={[shared.artifactStatus, { color: statusColor(C, status) }]}>{status}</Text>
@@ -483,6 +559,9 @@ export default function OfflineModal({
   tripId,
   tripName,
   useNativeMap,
+  activeNativeRenderer = 'maplibre',
+  legacyNativePackCompatible = true,
+  activeRendererStyleId,
   onOfflinePlacesChanged,
   onWebDownloadBbox,
   onWebDownloadRoute,
@@ -511,6 +590,10 @@ export default function OfflineModal({
   const mapboxToken = useStore(state => state.mapboxToken);
   const activeTrip = useStore(state => state.activeTrip);
   const setActiveTrip = useStore(state => state.setActiveTrip);
+  const { features } = useProductFeatures(Boolean(user));
+  const offlineV2Available = Boolean(features?.offline_bundle_v2 && user && useNativeMap && mapboxToken);
+  const offlineV2DownloadEnabled = Boolean(offlineV2Available && activeRendererStyleId);
+  const offlineV2OwnerScope = user ? `account:${String(user.id)}` : 'anonymous';
   const bottomPad = Math.max(insets.bottom, Platform.OS === 'android' ? 16 : 18);
   const sheetMaxHeight = Math.min(height * 0.94, height - Math.max(insets.top + 16, 48));
 
@@ -571,11 +654,20 @@ export default function OfflineModal({
   const [freeDiskBytes, setFreeDiskBytes] = useState<number | null>(null);
   const [tripStorageBytes, setTripStorageBytes] = useState<Record<string, number>>({});
   const [placeStorageBytes, setPlaceStorageBytes] = useState<Record<string, number>>({});
+  const [offlineV2Jobs, setOfflineV2Jobs] = useState<readonly OfflineBundleDownloadJobV2[]>([]);
+  const [, setOfflineV2ConsumptionRevision] = useState(0);
   const wasVisible = useRef(false);
 
   const reloadNativePacks = useCallback(async () => {
-    const packs = await getInstalledPacks().catch(() => []);
-    setMlnPacks(packs);
+    const [mapLibrePacks, rnMapboxPacks] = await Promise.all([
+      getInstalledPacks('maplibre').catch(() => []),
+      getInstalledPacks('rnmapbox').catch(() => []),
+    ]);
+    // Originals owns its immutable map packs and removal/repair lifecycle.
+    // Do not expose those raw native packs as generic maps here.
+    setMlnPacks([...mapLibrePacks, ...rnMapboxPacks].filter(
+      pack => !pack.name.startsWith('trailhead-original:'),
+    ));
   }, []);
 
   const reloadPlacePacks = useCallback(async (scope = currentOfflineAccountScope()) => {
@@ -603,6 +695,52 @@ export default function OfflineModal({
     setFreeDiskBytes(bytes);
   }, []);
 
+  const reloadOfflineV2Jobs = useCallback(async () => {
+    if (!offlineV2Available) {
+      setOfflineV2Jobs([]);
+      return;
+    }
+    let runtime: ReturnType<typeof getExpoOfflineV2Runtime>;
+    try {
+      runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+    } catch {
+      setOfflineV2Jobs([]);
+      return;
+    }
+    const persisted = await runtime.list(offlineV2OwnerScope).catch(() => []);
+    // Inspection validates live files, SQLite, and RNMapbox. It never starts
+    // a transfer; failed checks become an explicit Repair required state.
+    for (const job of persisted.filter(item => item.status === 'ready')) {
+      await runtime.inspect(job.job_id).catch(() => undefined);
+    }
+    const jobs = await runtime.list(offlineV2OwnerScope).catch(() => persisted);
+    setOfflineV2Jobs(jobs);
+  }, [offlineV2Available, offlineV2OwnerScope]);
+
+  useEffect(() => {
+    if (!offlineV2Available) {
+      setOfflineV2Jobs([]);
+      return;
+    }
+    let runtime: ReturnType<typeof getExpoOfflineV2Runtime>;
+    try {
+      runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+    } catch {
+      setOfflineV2Jobs([]);
+      return;
+    }
+    void reloadOfflineV2Jobs();
+    return runtime.subscribe(job => {
+      if (job.owner_scope !== offlineV2OwnerScope) return;
+      setOfflineV2Jobs(current => [job, ...current.filter(item => item.job_id !== job.job_id)]);
+      if (job.status === 'ready') void Promise.resolve(onOfflinePlacesChanged?.());
+    });
+  }, [offlineV2Available, offlineV2OwnerScope, onOfflinePlacesChanged, reloadOfflineV2Jobs]);
+
+  useEffect(() => subscribeOfflineV2Consumption(ownerScope => {
+    if (ownerScope === offlineV2OwnerScope) setOfflineV2ConsumptionRevision(value => value + 1);
+  }), [offlineV2OwnerScope]);
+
   useEffect(() => {
     if (!visible) {
       wasVisible.current = false;
@@ -623,8 +761,9 @@ export default function OfflineModal({
     reloadPlacePacks(scope);
     reloadOfflineTrips(scope);
     reloadStorage();
+    reloadOfflineV2Jobs();
     api.getPlacePackManifest().then(setPlaceManifest).catch(() => setPlaceManifest(null));
-  }, [reloadNativePacks, reloadOfflineTrips, reloadPlacePacks, reloadStorage, requestedTrip, selectedArea?.updatedAt, visible]);
+  }, [reloadNativePacks, reloadOfflineTrips, reloadOfflineV2Jobs, reloadPlacePacks, reloadStorage, requestedTrip, selectedArea?.updatedAt, visible]);
 
   useEffect(() => accountStorage.subscribe((cleaning, epoch) => {
     setPlacePacks([]);
@@ -698,54 +837,69 @@ export default function OfflineModal({
     setActivePackProgress(null);
     setActivePackPaused(false);
     setPackError(null);
-    await downloadPack(
-      key,
-      bounds,
-      minZoom,
-      maxZoom,
-      mapboxToken || '',
-      progress => setActivePackProgress({ ...progress }),
-      () => {
-        setActivePackName('');
-        setActivePackLabel('');
-        setActivePackProgress(null);
-        setActivePackPaused(false);
-        reloadNativePacks();
-        onComplete?.();
-      },
-      message => {
-        setPackError({ key, message });
-        setActivePackName('');
-        setActivePackLabel('');
-        setActivePackProgress(null);
-        setActivePackPaused(false);
-        reloadNativePacks();
-      },
-    );
-  }, [mapboxToken, reloadNativePacks]);
+    const fail = (message: string) => {
+      setPackError({ key, message });
+      setActivePackName('');
+      setActivePackLabel('');
+      setActivePackProgress(null);
+      setActivePackPaused(false);
+      reloadNativePacks();
+    };
+    try {
+      await downloadPack(
+        key,
+        bounds,
+        minZoom,
+        maxZoom,
+        mapboxToken || '',
+        progress => setActivePackProgress({ ...progress }),
+        () => {
+          setActivePackName('');
+          setActivePackLabel('');
+          setActivePackProgress(null);
+          setActivePackPaused(false);
+          reloadNativePacks();
+          onComplete?.();
+        },
+        fail,
+        activeNativeRenderer,
+      );
+    } catch (error: any) {
+      fail(error?.message || 'Could not start this offline map download.');
+    }
+  }, [activeNativeRenderer, mapboxToken, reloadNativePacks]);
 
   const pauseActivePack = useCallback(async () => {
     if (!activePackName) return;
-    await pausePack(activePackName);
+    await pausePack(activePackName, activeNativeRenderer);
     setActivePackPaused(true);
-  }, [activePackName]);
+  }, [activeNativeRenderer, activePackName]);
 
   const resumeActivePack = useCallback(async () => {
     if (!activePackName) return;
-    await resumePack(activePackName);
+    await resumePack(activePackName, activeNativeRenderer);
     setActivePackPaused(false);
-  }, [activePackName]);
+  }, [activeNativeRenderer, activePackName]);
 
-  const deleteMlnPack = useCallback(async (name: string) => {
+  const deleteMlnPack = useCallback(async (
+    name: string,
+    renderer: NativeOfflineRenderer = activeNativeRenderer,
+  ) => {
     if (activePackName === name) return;
-    await deletePack(name).catch(() => {});
-    setMlnPacks(previous => previous.filter(pack => pack.name !== name));
-  }, [activePackName]);
+    try {
+      await deletePack(name, renderer);
+      setMlnPacks(previous => previous.filter(pack => !(pack.name === name && pack.renderer === renderer)));
+    } catch (error: any) {
+      setPackError({ key: name, message: error?.message || 'Could not remove this offline map.' });
+      throw error;
+    }
+  }, [activeNativeRenderer, activePackName]);
 
   const tripPackFor = useCallback((target: TripTarget) => {
     const names = [tripPackKey(target), legacyTripPackKey(target.name)];
-    return mlnPacks.find(pack => names.includes(pack.name));
-  }, [mlnPacks]);
+    const matching = mlnPacks.filter(pack => names.includes(pack.name));
+    return matching.find(pack => pack.renderer === activeNativeRenderer) ?? matching[0];
+  }, [activeNativeRenderer, mlnPacks]);
 
   const startTripCorridor = useCallback((target: TripTarget) => {
     const coords = validCoords(target.routeCoords);
@@ -814,15 +968,112 @@ export default function OfflineModal({
       await saveOfflineTrip(target.trip);
       await reloadOfflineTrips(currentOfflineAccountScope());
     }
+    if (offlineV2DownloadEnabled) {
+      const coords = validCoords(target.routeCoords);
+      const points = coords.length >= 2
+        ? coords.map(([lng, lat]) => ({ lat, lng }))
+        : target.waypoints;
+      const bounds = routeCorridorBounds(points, 0.22);
+      if (!bounds) {
+        setPackError({ key: tripPackKey(target), message: 'This trip needs at least two mapped stops.' });
+        return;
+      }
+      const v2Bounds = normalizedOfflineBounds(bounds);
+      // V2 preparation deliberately caps one immutable region at 12 degrees.
+      // Until route bundles can contain multiple regions, keep long trips on
+      // the proven corridor downloader instead of sending a request the server
+      // must reject.
+      const v2BoundsSupported = v2Bounds.east - v2Bounds.west <= 12
+        && v2Bounds.north - v2Bounds.south <= 12;
+      if (v2BoundsSupported) {
+        // V2 canonical places are additive in 1.0.10. Preserve the existing
+        // trip-essentials pack (camps, fuel, water, dump stations and services)
+        // until artifact parity is proven field-for-field.
+        void downloadTripPlaces(target);
+        const runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+        const existing = offlineV2Jobs.find(item => item.client_ref === `trip:${target.id}`);
+        if (existing && ['paused', 'error', 'repair_required'].includes(existing.status)) {
+          void runtime.resume(existing.job_id);
+          setView('home');
+          return;
+        }
+        if (existing && ['preparing', 'queued', 'downloading', 'verifying', 'ready'].includes(existing.status)) {
+          setView('home');
+          return;
+        }
+        await runtime.create({
+          owner_scope: offlineV2OwnerScope,
+          client_ref: `trip:${target.id}`,
+          label: target.name,
+          request: {
+            bounds: v2Bounds,
+            min_zoom: 8,
+            max_zoom: 15,
+            renderer_style_id: activeRendererStyleId!,
+          },
+        });
+        setView('home');
+        return;
+      }
+    }
+    if (useNativeMap && (activeRendererStyleId || !legacyNativePackCompatible)) {
+      setPackError({
+        key: tripPackKey(target),
+        message: 'Offline download is not available for this map style yet. Choose a Trailhead map style and try again.',
+      });
+      return;
+    }
     const key = tripPackKey(target);
     const started = await authorizeAndRun(key, 'trip_corridor', target.id, target.name, () => startTripCorridor(target));
     if (!started) return;
     void downloadTripPlaces(target);
     setView('home');
-  }, [authorizeAndRun, downloadTripPlaces, reloadOfflineTrips, startTripCorridor]);
+  }, [activeRendererStyleId, authorizeAndRun, downloadTripPlaces, legacyNativePackCompatible, offlineV2DownloadEnabled, offlineV2Jobs, offlineV2OwnerScope, reloadOfflineTrips, startTripCorridor, useNativeMap]);
 
   const downloadSelectedArea = useCallback(async () => {
     if (!selectedArea) return;
+    if (offlineV2DownloadEnabled) {
+      // Persist the user-created area before starting native preparation. A
+      // process kill between create() and the old onSaveArea() call otherwise
+      // left a durable V2 job that Plan could not name or reopen.
+      onSaveArea?.(selectedArea);
+      const runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+      const existing = offlineV2Jobs.find(item => item.client_ref === `area:${selectedArea.id}`);
+      if (existing && ['paused', 'error', 'repair_required'].includes(existing.status)) {
+        void runtime.resume(existing.job_id);
+        setView('home');
+        return;
+      }
+      if (existing && ['preparing', 'queued', 'downloading', 'verifying', 'ready'].includes(existing.status)) {
+        setView('home');
+        return;
+      }
+      await runtime.create({
+        owner_scope: offlineV2OwnerScope,
+        client_ref: `area:${selectedArea.id}`,
+        label: selectedArea.label,
+        request: {
+          bounds: {
+            west: selectedArea.w,
+            south: selectedArea.s,
+            east: selectedArea.e,
+            north: selectedArea.n,
+          },
+          min_zoom: selectedArea.minZoom,
+          max_zoom: selectedArea.maxZoom,
+          renderer_style_id: activeRendererStyleId!,
+        },
+      });
+      setView('home');
+      return;
+    }
+    if (useNativeMap && (activeRendererStyleId || !legacyNativePackCompatible)) {
+      setPackError({
+        key: areaPackKey(selectedArea),
+        message: 'Offline download is not available for this map style yet. Choose a Trailhead map style and try again.',
+      });
+      return;
+    }
     const key = areaPackKey(selectedArea);
     const started = await authorizeAndRun(key, 'trip_corridor', selectedArea.id, selectedArea.label, () => {
       if (!useNativeMap) {
@@ -848,16 +1099,16 @@ export default function OfflineModal({
       );
     });
     if (started) setView('home');
-  }, [authorizeAndRun, onSaveArea, onWebDownloadBbox, selectedArea, startMlnPack, useNativeMap]);
+  }, [activeRendererStyleId, authorizeAndRun, legacyNativePackCompatible, offlineV2DownloadEnabled, offlineV2Jobs, offlineV2OwnerScope, onSaveArea, onWebDownloadBbox, selectedArea, startMlnPack, useNativeMap]);
 
   const downloadRegionPlaces = useCallback(async (regionId: string) => {
     if (placeBusy) return;
-    const entries = Object.values(placeManifest?.packs ?? {})
-      .filter(entry => entry.region_id === regionId)
-      .sort((a, b) => PLACE_PACK_ORDER.indexOf(a.pack_id) - PLACE_PACK_ORDER.indexOf(b.pack_id));
-    const missing = entries.filter(entry => !placePacks.some(pack => (
-      pack.region_id === regionId && pack.pack_id === `${regionId}-${entry.pack_id}`
-    )));
+    const missing = missingRegionPlacePackEntries(
+      placeManifest?.packs,
+      placePacks,
+      regionId,
+      PLACE_PACK_ORDER,
+    );
     if (!missing.length) return;
     const scope = currentOfflineAccountScope();
     setPlaceBusy(true);
@@ -866,7 +1117,7 @@ export default function OfflineModal({
       for (const entry of missing) {
         const pack = await api.getPlacePack(regionId, entry.pack_id);
         if (!offlineAccountScopeIsCurrent(scope)) return;
-        await saveOfflinePlacePack(pack, []);
+        await saveOfflinePlacePack(pack, placePacks.map(item => item.pack_id));
       }
       await reloadPlacePacks(scope);
       onOfflinePlacesChanged?.();
@@ -940,6 +1191,10 @@ export default function OfflineModal({
   const regionSummaries = useMemo(() => {
     const summaries: Record<string, OfflineRegionSummary> = {};
     Object.keys(FILE_REGIONS).forEach(id => {
+      const expectedPlacePacks = regionPlacePackEntries(placeManifest?.packs, id, PLACE_PACK_ORDER);
+      const placesComplete = expectedPlacePacks.every(entry => placePacks.some(pack => (
+        pack.region_id === id && pack.pack_id === `${id}-${entry.pack_id}`
+      )));
       const placeCount = placePacks
         .filter(pack => pack.region_id === id)
         .reduce((total, pack) => total + pack.point_count, 0);
@@ -950,10 +1205,25 @@ export default function OfflineModal({
         trails: id === 'conus' ? undefined : trailStates[id] ?? getTrailState(id),
         placeCount,
         requiresRouting: id !== 'conus',
+        requiresPlaces: expectedPlacePacks.length > 0,
+        placesComplete,
+        requiresTrails: id !== 'conus' && isTrailPublished(id),
       });
     });
     return summaries;
-  }, [contourStates, getContourState, getRoutingState, getState, getTrailState, placePacks, routingStates, states, trailStates]);
+  }, [
+    contourStates,
+    getContourState,
+    getRoutingState,
+    getState,
+    getTrailState,
+    isTrailPublished,
+    placeManifest?.packs,
+    placePacks,
+    routingStates,
+    states,
+    trailStates,
+  ]);
 
   const inferredRegionIds = useMemo(() => {
     const routePoints = currentTripTarget?.routeCoords.map(([lng, lat]) => ({ lat, lng })) ?? [];
@@ -964,13 +1234,26 @@ export default function OfflineModal({
 
   const tripRuntime = useCallback((target: TripTarget): TripRuntime => {
     const pack = tripPackFor(target);
+    const v2Job = offlineV2Jobs.find(item => item.client_ref === `trip:${target.id}`);
+    const v2States = Object.values(v2Job?.artifact_states ?? {});
+    const v2Total = v2States.reduce((sum, state) => sum + state.total_bytes, 0);
+    const v2Received = v2States.reduce((sum, state) => sum + state.received_bytes, 0);
+    const v2Progress = v2Total > 0 ? v2Received / v2Total * 100 : v2Job?.preparation?.progress ?? 0;
+    const v2Ready = v2Job?.status === 'ready';
+    const v2MapReady = v2Ready
+      && v2StyleMatches(v2Job, activeRendererStyleId)
+      && v2ArtifactKindsReady(v2Job, ['map_style', 'map_tiles']);
+    const v2PlacesReady = v2ConsumerKindsReady(v2Job, offlineV2OwnerScope, ['places']);
+    const v2TrailsReady = v2ConsumerKindsReady(v2Job, offlineV2OwnerScope, ['trails']);
+    const v2Active = Boolean(v2Job && ['preparing', 'queued', 'downloading', 'verifying'].includes(v2Job.status));
+    const v2Paused = v2Job?.status === 'paused';
     const matchingPlacePacks = placePacks.filter(item => item.trip_id === target.id);
     const storedTrip = offlineTrips.find(trip => trip.trip_id === target.id);
-    const active = Boolean(
+    const active = Boolean(v2Active || v2Paused ||
       activePackName === tripPackKey(target)
       || (!useNativeMap && webIsDownloading && webDownloadLabel === target.name),
     );
-    const progress = useNativeMap
+    const progress = v2Job ? v2Progress : useNativeMap
       ? activePackProgress?.percentage ?? 0
       : webDownloadProgress ?? 0;
     const routeRegions = offlineRegionIdsForPoints(
@@ -983,19 +1266,29 @@ export default function OfflineModal({
     const regionMapsCoverRoute = routeRegions.length > 0
       && routeRegions.every(id => getState(id).status === 'complete');
     const webMapReady = !useNativeMap && webCachedRegions.includes(target.name);
-    const mapReady = Boolean(pack?.complete) || conusCoversRoute || regionMapsCoverRoute || webMapReady;
+    const legacyPackMatchesRenderer = legacyNativePackCompatible
+      && pack?.renderer === activeNativeRenderer;
+    const mapReady = Boolean(v2Job?.manifest?.capabilities.map && v2MapReady)
+      || Boolean(pack?.complete && legacyPackMatchesRenderer)
+      || conusCoversRoute || regionMapsCoverRoute || webMapReady;
     const storedCoords = validCoords(storedTrip?.route_geometry?.coords ?? target.trip?.route_geometry?.coords);
+    // V2 routing is not requested until navigation has a real, verified
+    // artifact consumer. The saved route is the only truthful offline signal.
     const directionsReady = Boolean(storedTrip && storedCoords.length >= 2);
     const notesReady = Boolean(storedTrip);
-    const placesReady = matchingPlacePacks.length > 0;
-    const hasDownload = Boolean(pack || matchingPlacePacks.length > 0 || active || webMapReady);
-    const trailsReady = routeRegions.length > 0 && routeRegions.every(id => getTrailState(id).status === 'complete');
+    const placesReady = Boolean(v2Job?.manifest?.capabilities.places && v2PlacesReady) || matchingPlacePacks.length > 0;
+    const hasDownload = Boolean(v2Job || pack || matchingPlacePacks.length > 0 || active || webMapReady);
+    const trailsReady = Boolean(v2Job?.manifest?.capabilities.trails && v2TrailsReady)
+      || routeRegions.length > 0 && routeRegions.every(id => getTrailState(id).status === 'complete');
     const ready = mapReady && directionsReady && notesReady && placesReady;
-    const storedBytes = (pack?.sizeMb ?? 0) * 1_048_576
+    const storedBytes = (v2Ready ? v2Job?.manifest?.required_storage_bytes ?? 0 : 0)
+      + (pack?.sizeMb ?? 0) * 1_048_576
       + Number(tripStorageBytes[target.id] ?? 0)
       + matchingPlacePacks.reduce((total, item) => total + Number(placeStorageBytes[item.pack_id] ?? 0), 0);
     let status = '';
-    if (active) status = activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`;
+    if (active) status = v2Paused || activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`;
+    else if (pack?.complete && !legacyPackMatchesRenderer) status = 'Repair required';
+    else if (v2Job?.status === 'error' || v2Job?.status === 'repair_required') status = 'Download incomplete';
     else if (packError?.key === tripPackKey(target)) status = 'Download incomplete';
     else if (ready) status = 'Ready offline';
     else if (mapReady && placesReady) status = 'Map and places saved';
@@ -1026,6 +1319,11 @@ export default function OfflineModal({
     getState,
     getTrailState,
     offlineTrips,
+    offlineV2Jobs,
+    offlineV2OwnerScope,
+    activeRendererStyleId,
+    activeNativeRenderer,
+    legacyNativePackCompatible,
     packError?.key,
     placePacks,
     placeStorageBytes,
@@ -1049,22 +1347,57 @@ export default function OfflineModal({
       : savedAreas;
     return candidates.map(area => {
       const key = areaPackKey(area);
-      const pack = mlnPacks.find(item => item.name === key || item.name === area.label);
-      const active = Boolean(activePackName === key || (!useNativeMap && webIsDownloading && webDownloadLabel === area.label));
-      const ready = Boolean(pack?.complete) || (!useNativeMap && webCachedRegions.includes(area.label));
+      const matchingPacks = mlnPacks.filter(item => item.name === key || item.name === area.label);
+      const pack = matchingPacks.find(item => item.renderer === activeNativeRenderer) ?? matchingPacks[0];
+      const v2Job = offlineV2Jobs.find(item => item.client_ref === `area:${area.id}`);
+      const v2States = Object.values(v2Job?.artifact_states ?? {});
+      const v2Total = v2States.reduce((sum, state) => sum + state.total_bytes, 0);
+      const v2Received = v2States.reduce((sum, state) => sum + state.received_bytes, 0);
+      const active = Boolean(
+        v2Job && ['preparing', 'queued', 'downloading', 'paused', 'verifying'].includes(v2Job.status)
+        || activePackName === key
+        || (!useNativeMap && webIsDownloading && webDownloadLabel === area.label),
+      );
+      const v2MapReady = v2StyleMatches(v2Job, activeRendererStyleId)
+        && v2ArtifactKindsReady(v2Job, ['map_style', 'map_tiles']);
+      const requiredConsumerKinds: OfflineArtifactKind[] = [
+        ...(v2Job?.manifest?.capabilities.places ? ['places' as const] : []),
+        ...(v2Job?.manifest?.capabilities.trails ? ['trails' as const] : []),
+        ...(v2Job?.manifest?.capabilities.search ? ['search_index' as const] : []),
+      ];
+      const v2ConsumersReady = requiredConsumerKinds.every(kind => (
+        v2ConsumerKindsReady(v2Job, offlineV2OwnerScope, [kind])
+      ));
+      const legacyPackMatchesRenderer = legacyNativePackCompatible
+        && pack?.renderer === activeNativeRenderer;
+      const v2Ready = v2MapReady && v2ConsumersReady;
+      const mapReady = v2MapReady
+        || Boolean(pack?.complete && legacyPackMatchesRenderer)
+        || (!useNativeMap && webCachedRegions.includes(area.label));
       return {
         area,
         pack,
+        v2Job,
         active,
-        ready,
-        progress: useNativeMap ? activePackProgress?.percentage ?? 0 : webDownloadProgress ?? 0,
-        bytes: (pack?.sizeMb ?? 0) * 1_048_576,
+        ready: v2Ready,
+        mapReady,
+        repairRequired: Boolean(pack?.complete && !legacyPackMatchesRenderer),
+        progress: v2Job
+          ? (v2Total > 0 ? v2Received / v2Total * 100 : v2Job.preparation?.progress ?? 0)
+          : useNativeMap ? activePackProgress?.percentage ?? 0 : webDownloadProgress ?? 0,
+        bytes: (v2Job?.status === 'ready' ? v2Job.manifest?.required_storage_bytes ?? 0 : 0)
+          + (pack?.sizeMb ?? 0) * 1_048_576,
       };
-    }).filter(item => item.pack || item.active || item.ready);
+    }).filter(item => item.v2Job || item.pack || item.active || item.mapReady || item.ready);
   }, [
     activePackName,
     activePackProgress?.percentage,
     mlnPacks,
+    offlineV2Jobs,
+    offlineV2OwnerScope,
+    activeRendererStyleId,
+    activeNativeRenderer,
+    legacyNativePackCompatible,
     savedAreas,
     selectedArea,
     useNativeMap,
@@ -1134,7 +1467,21 @@ export default function OfflineModal({
       id: `area:${item.area.id}`,
       kind: 'area',
       title: item.area.label,
-      status: item.active ? `Downloading ${Math.round(item.progress)}%` : item.ready ? 'Map saved' : 'Download incomplete',
+      status: item.v2Job?.status === 'paused'
+        ? 'Paused'
+        : item.v2Job?.status === 'verifying'
+          ? 'Verifying'
+          : item.v2Job?.status === 'repair_required'
+            ? 'Repair required'
+            : item.v2Job?.status === 'error'
+              ? 'Download incomplete'
+              : item.repairRequired
+                ? 'Repair required'
+              : item.active
+                ? `Downloading ${Math.round(item.progress)}%`
+                : item.ready
+                  ? 'Ready offline'
+                  : item.mapReady ? 'Map saved' : 'Download incomplete',
       bytes: item.bytes,
       active: item.active,
       progress: item.active ? item.progress : undefined,
@@ -1145,10 +1492,12 @@ export default function OfflineModal({
       },
     }));
     mlnPacks.filter(pack => !linkedPackNames.has(pack.name)).forEach(pack => rows.push({
-      id: `map:${pack.name}`,
+      id: `map:${pack.renderer}:${encodeURIComponent(pack.name)}`,
       kind: 'map',
       title: displayOfflineDownloadName(pack.name),
-      status: pack.complete ? 'Map saved' : 'Download incomplete',
+      status: pack.complete && (!legacyNativePackCompatible || pack.renderer !== activeNativeRenderer)
+        ? 'Repair required'
+        : pack.complete ? 'Map saved' : 'Download incomplete',
       bytes: pack.sizeMb * 1_048_576,
       active: activePackName === pack.name,
       progress: pack.percentage,
@@ -1168,6 +1517,8 @@ export default function OfflineModal({
     return rows.sort((a, b) => Number(b.active) - Number(a.active) || a.title.localeCompare(b.title));
   }, [
     activePackName,
+    activeNativeRenderer,
+    legacyNativePackCompatible,
     areaCatalog,
     linkedPackNames,
     mlnPacks,
@@ -1262,7 +1613,14 @@ export default function OfflineModal({
   const removeTripNow = useCallback(async (target: TripTarget) => {
     const runtime = tripRuntime(target);
     if (runtime.active) return;
-    if (runtime.pack) await deleteMlnPack(runtime.pack.name);
+    const v2Job = offlineV2Jobs.find(item => item.client_ref === `trip:${target.id}`);
+    if (v2Job) {
+      const offlineRuntime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+      if (v2Job.manifest) await offlineRuntime.remove(v2Job.manifest.bundle_id);
+      else await offlineRuntime.cancel(v2Job.job_id);
+      await reloadOfflineV2Jobs();
+    }
+    if (runtime.pack) await deleteMlnPack(runtime.pack.name, runtime.pack.renderer);
     await Promise.all([
       deleteOfflineTrip(target.id),
       ...runtime.placePacks.map(pack => deleteOfflinePlacePack(pack.pack_id)),
@@ -1272,15 +1630,29 @@ export default function OfflineModal({
       reloadPlacePacks(currentOfflineAccountScope()),
     ]);
     onOfflinePlacesChanged?.();
-  }, [deleteMlnPack, onOfflinePlacesChanged, reloadOfflineTrips, reloadPlacePacks, tripRuntime]);
+  }, [deleteMlnPack, offlineV2Jobs, offlineV2OwnerScope, onOfflinePlacesChanged, reloadOfflineTrips, reloadOfflineV2Jobs, reloadPlacePacks, tripRuntime]);
 
   const removeAreaNow = useCallback(async (area: OfflineAreaSelection) => {
     const entry = areaCatalog.find(item => item.area.id === area.id);
     if (entry?.active) return;
-    if (entry?.pack) await deleteMlnPack(entry.pack.name);
+    if (entry?.pack) await deleteMlnPack(entry.pack.name, entry.pack.renderer);
     onWebClearRegion?.(area.label);
     onDeleteArea?.(area.id);
   }, [areaCatalog, deleteMlnPack, onDeleteArea, onWebClearRegion]);
+
+  const removeAreaDownloadNow = useCallback(async (area: OfflineAreaSelection) => {
+    const v2Job = offlineV2Jobs.find(item => item.client_ref === `area:${area.id}`);
+    if (v2Job) {
+      const runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+      if (v2Job.manifest) await runtime.remove(v2Job.manifest.bundle_id);
+      else await runtime.cancel(v2Job.job_id);
+      await reloadOfflineV2Jobs();
+    }
+    // A selected area can have both a legacy Mapbox pack and a V2 bundle
+    // during migration. Explicit removal clears both; merely inspecting the
+    // area never deletes either format.
+    await removeAreaNow(area);
+  }, [offlineV2Jobs, offlineV2OwnerScope, reloadOfflineV2Jobs, removeAreaNow]);
 
   const removeDeviceItem = useCallback(async (id: string) => {
     const separator = id.indexOf(':');
@@ -1294,25 +1666,38 @@ export default function OfflineModal({
     }
     if (kind === 'area') {
       const area = savedAreas.find(item => item.id === value);
-      if (area) return removeAreaNow(area);
+      if (area) return removeAreaDownloadNow(area);
       return;
     }
-    if (kind === 'map') return deleteMlnPack(value);
+    if (kind === 'map') {
+      const rendererSeparator = value.indexOf(':');
+      const renderer = value.slice(0, rendererSeparator) as NativeOfflineRenderer;
+      const name = decodeURIComponent(value.slice(rendererSeparator + 1));
+      if ((renderer === 'maplibre' || renderer === 'rnmapbox') && name) {
+        return deleteMlnPack(name, renderer);
+      }
+      return;
+    }
     if (kind === 'places') {
       await deleteOfflinePlacePack(value);
       await reloadPlacePacks(currentOfflineAccountScope());
       onOfflinePlacesChanged?.();
     }
-  }, [deleteMlnPack, offlineTrips, onOfflinePlacesChanged, reloadPlacePacks, removeAreaNow, removeRegionNow, removeTripNow, savedAreas]);
+  }, [deleteMlnPack, offlineTrips, onOfflinePlacesChanged, reloadPlacePacks, removeAreaDownloadNow, removeRegionNow, removeTripNow, savedAreas]);
 
   const removeConfirmedItems = useCallback(async () => {
     const pending = confirmRemoval;
     if (!pending) return;
     setConfirmRemoval(null);
-    for (const id of pending.ids) await removeDeviceItem(id);
-    setSelectedForRemoval([]);
-    await Promise.all([reloadNativePacks(), reloadStorage()]);
-  }, [confirmRemoval, reloadNativePacks, reloadStorage, removeDeviceItem]);
+    try {
+      for (const id of pending.ids) await removeDeviceItem(id);
+      setSelectedForRemoval([]);
+      await Promise.all([reloadNativePacks(), reloadStorage()]);
+    } catch (error) {
+      showOfflineRemovalError(error);
+      await Promise.all([reloadNativePacks(), reloadOfflineV2Jobs(), reloadStorage()]);
+    }
+  }, [confirmRemoval, reloadNativePacks, reloadOfflineV2Jobs, reloadStorage, removeDeviceItem]);
 
   const askToRemoveTrip = useCallback((runtime: TripRuntime) => {
     if (runtime.active) return;
@@ -1321,7 +1706,11 @@ export default function OfflineModal({
       'The trip stays in your plans. Its downloaded maps, route details, and places are removed from this device.',
       [
         { text: 'Keep download', style: 'cancel' },
-        { text: 'Remove download', style: 'destructive', onPress: () => void removeTripNow(runtime.target) },
+        {
+          text: 'Remove download',
+          style: 'destructive',
+          onPress: () => void removeTripNow(runtime.target).catch(showOfflineRemovalError),
+        },
       ],
     );
   }, [removeTripNow]);
@@ -1590,10 +1979,10 @@ export default function OfflineModal({
         ) : null}
         {placesAvailable || regionPlacePacks.length > 0 ? (
           <View style={[shared.artifactRow, { borderBottomColor: C.border }]}>
-            <Ionicons name={regionPlacePacks.length ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={regionPlacePacks.length ? C.green : C.text3} />
+            <Ionicons name={regionPlacePacks.length ? 'checkmark-circle' : 'ellipse-outline'} size={18} color={regionPlacePacks.length ? C.orange : C.text3} />
             <View style={shared.artifactCopy}>
               <Text style={[shared.artifactTitle, { color: C.text }]}>Camps & essentials</Text>
-              <Text style={[shared.artifactStatus, { color: regionPlacePacks.length ? C.green : C.text2 }]}>
+              <Text style={[shared.artifactStatus, { color: regionPlacePacks.length ? C.orange : C.text2 }]}>
                 {placeBusy ? 'Downloading' : regionPlacePacks.length ? `${regionPlaceCount.toLocaleString()} places downloaded` : 'Not downloaded'}
               </Text>
             </View>
@@ -1622,12 +2011,15 @@ export default function OfflineModal({
             <PrimaryButton label="Open map" icon="map-outline" onPress={() => openRegion(id)} />
           ) : (
             <PrimaryButton
-              label={regionBusy ? 'Downloading' : 'Download'}
+              label={regionBusy ? 'Downloading' : summary?.hasContent ? 'Download remaining' : 'Download'}
               icon="download-outline"
               onPress={() => void downloadRegionBundle(id)}
               disabled={regionBusy}
             />
           )}
+          {!summary?.ready && summary?.mapReady ? (
+            <SecondaryButton label="Open downloaded map" onPress={() => openRegion(id)} />
+          ) : null}
           {summary?.hasContent ? (
             <SecondaryButton label="Remove download" danger disabled={regionBusy} onPress={() => askToRemoveRegion(id)} />
           ) : null}
@@ -1646,14 +2038,58 @@ export default function OfflineModal({
       );
     }
     const entry = areaCatalog.find(item => item.area.id === selectedArea.id);
-    const isActive = entry?.active || activePackName === areaPackKey(selectedArea);
-    const isReady = entry?.ready;
-    const progress = entry?.progress ?? activePackProgress?.percentage ?? 0;
+    const v2Job = offlineV2Jobs.find(item => item.client_ref === `area:${selectedArea.id}`);
+    const v2States = Object.values(v2Job?.artifact_states ?? {});
+    const v2Total = v2States.reduce((sum, state) => sum + state.total_bytes, 0);
+    const v2Received = v2States.reduce((sum, state) => sum + state.received_bytes, 0);
+    const v2Progress = v2Total > 0 ? v2Received / v2Total * 100 : v2Job?.preparation?.progress ?? 0;
+    const v2Active = Boolean(v2Job && ['preparing', 'queued', 'downloading', 'verifying'].includes(v2Job.status));
+    const v2Paused = v2Job?.status === 'paused';
+    const isActive = Boolean(entry?.active || activePackName === areaPackKey(selectedArea) || v2Active || v2Paused);
+    const isReady = Boolean(entry?.ready);
+    const isMapReady = Boolean(entry?.mapReady);
+    const v2Capabilities = v2Job?.manifest?.capabilities;
+    const mapContentReady = v2Job
+      ? v2StyleMatches(v2Job, activeRendererStyleId)
+        && v2ArtifactKindsReady(v2Job, ['map_style', 'map_tiles'])
+      : isMapReady;
+    const placeTrailKinds: OfflineArtifactKind[] = [
+      ...(v2Capabilities?.places ? ['places' as const] : []),
+      ...(v2Capabilities?.trails ? ['trails' as const] : []),
+    ];
+    const showPlaceTrailRow = v2Job?.manifest
+      ? placeTrailKinds.length > 0
+      : offlineV2DownloadEnabled;
+    const placeTrailReady = placeTrailKinds.length > 0
+      && placeTrailKinds.every(kind => v2ConsumerKindsReady(v2Job, offlineV2OwnerScope, [kind]));
+    const showSearchRow = v2Job?.manifest
+      ? Boolean(v2Capabilities?.search)
+      : offlineV2DownloadEnabled;
+    const searchReady = Boolean(v2Capabilities?.search)
+      && v2ConsumerKindsReady(v2Job, offlineV2OwnerScope, ['search_index']);
+    const progress = v2Job ? v2Progress : entry?.progress ?? activePackProgress?.percentage ?? 0;
+    const downloadLabel = isActive
+      ? v2Paused || activePackPaused ? 'Paused' : 'Downloading'
+      : v2Job?.status === 'repair_required'
+        ? 'Repair download'
+        : v2Job?.status === 'error'
+          ? 'Try download again'
+          : 'Download';
+    const pauseOrResume = async () => {
+      if (!v2Job) {
+        if (activePackPaused) await resumeActivePack();
+        else await pauseActivePack();
+        return;
+      }
+      const runtime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+      if (v2Paused) void runtime.resume(v2Job.job_id);
+      else await runtime.pause(v2Job.job_id);
+    };
     return (
       <>
         <MapArtwork height={210} route wide />
         <View style={s.areaSheet}>
-          {!isReady ? (
+          {!isReady && !isMapReady ? (
             <TextInput
               value={selectedArea.label}
               onChangeText={value => onRenameArea?.(selectedArea.id, value)}
@@ -1669,22 +2105,39 @@ export default function OfflineModal({
           <View style={s.detailChoice}>
             <Text style={s.detailChoiceLabel}>Detail</Text>
             <Text style={s.detailChoiceValue}>{selectedArea.detail === 'high' ? 'High detail' : 'Standard'}</Text>
-            {!isReady && !isActive ? (
+            {!isReady && !isMapReady && !isActive ? (
               <TouchableOpacity style={shared.textAction} onPress={() => onStartAreaSelect?.(selectedArea)}>
                 <Text style={[shared.textActionLabel, { color: C.orange }]}>Adjust</Text>
               </TouchableOpacity>
             ) : null}
           </View>
-          <SectionHeading label={isReady ? 'Available offline' : 'Download includes'} />
-          <CheckRow label="Map & terrain" ready={Boolean(isReady)} />
+          <SectionHeading label={isReady ? 'Available offline' : isMapReady ? 'Offline content' : 'Download includes'} />
+          <CheckRow
+            label={v2Job?.manifest || offlineV2DownloadEnabled ? 'Map & terrain' : 'Map only'}
+            ready={mapContentReady}
+          />
+          {showPlaceTrailRow ? (
+            <CheckRow
+              label={v2Capabilities?.places && !v2Capabilities.trails
+                ? 'Places'
+                : !v2Capabilities?.places && v2Capabilities?.trails
+                  ? 'Trails'
+                  : 'Places & trails'}
+              ready={placeTrailReady}
+            />
+          ) : null}
+          {showSearchRow ? <CheckRow label="Offline search" ready={searchReady} /> : null}
           {isActive ? (
             <View style={s.activeArea}>
-              <StatusLine label={activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`} />
+              <StatusLine label={v2Paused || activePackPaused ? 'Paused' : `Downloading ${Math.round(progress)}%`} />
               <ProgressBar progress={progress} />
-              <TouchableOpacity style={shared.textAction} onPress={activePackPaused ? resumeActivePack : pauseActivePack}>
-                <Text style={[shared.textActionLabel, { color: C.orange }]}>{activePackPaused ? 'Resume' : 'Pause'}</Text>
+              <TouchableOpacity style={shared.textAction} onPress={() => void pauseOrResume()}>
+                <Text style={[shared.textActionLabel, { color: C.orange }]}>{v2Paused || activePackPaused ? 'Resume' : 'Pause'}</Text>
               </TouchableOpacity>
             </View>
+          ) : null}
+          {v2Job?.status === 'error' || v2Job?.status === 'repair_required' ? (
+            <Text style={s.errorText}>{v2Job.error?.message || 'This download needs repair.'}</Text>
           ) : null}
           {packError?.key === areaPackKey(selectedArea) ? (
             <Text style={s.errorText}>{packError.message}</Text>
@@ -1692,22 +2145,31 @@ export default function OfflineModal({
           <View style={s.detailActions}>
             {isReady ? (
               <PrimaryButton label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+            ) : isMapReady && !offlineV2DownloadEnabled ? (
+              <PrimaryButton label="Open map" icon="map-outline" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
             ) : (
               <PrimaryButton
-                label={isActive ? 'Downloading' : 'Download'}
+                label={isMapReady ? 'Download remaining' : downloadLabel}
                 icon="download-outline"
                 onPress={() => void downloadSelectedArea()}
                 disabled={Boolean(isActive || authorizing)}
               />
             )}
-            {isReady ? (
+            {!isReady && isMapReady && offlineV2DownloadEnabled ? (
+              <SecondaryButton label="Open downloaded map" onPress={() => { onSelectArea?.(selectedArea); onClose(); }} />
+            ) : null}
+            {isReady || isMapReady ? (
               <SecondaryButton label="Remove download" danger onPress={() => {
                 Alert.alert(
                   `Remove ${selectedArea.label}?`,
-                  'The downloaded map is removed from this device.',
+                  'The downloaded offline content is removed from this device.',
                   [
                     { text: 'Keep download', style: 'cancel' },
-                    { text: 'Remove download', style: 'destructive', onPress: () => void removeAreaNow(selectedArea) },
+                    {
+                      text: 'Remove download',
+                      style: 'destructive',
+                      onPress: () => void removeAreaDownloadNow(selectedArea).catch(showOfflineRemovalError),
+                    },
                   ],
                 );
               }} />
@@ -1721,7 +2183,26 @@ export default function OfflineModal({
   const renderTripDetail = () => {
     const runtime = selectedTripRuntime;
     if (!runtime) return null;
+    const v2Job = offlineV2Jobs.find(item => item.client_ref === `trip:${runtime.target.id}`);
+    const v2Paused = v2Job?.status === 'paused';
+    const pauseOrResume = async () => {
+      if (!v2Job) {
+        if (activePackPaused) await resumeActivePack();
+        else await pauseActivePack();
+        return;
+      }
+      const offlineRuntime = getExpoOfflineV2Runtime(offlineV2OwnerScope);
+      if (v2Paused) void offlineRuntime.resume(v2Job.job_id);
+      else await offlineRuntime.pause(v2Job.job_id);
+    };
     const meta = formatTripMeta(runtime.target);
+    const tripDownloadLabel = v2Job?.status === 'repair_required'
+      ? 'Repair download'
+      : v2Job?.status === 'error'
+        ? 'Try download again'
+        : placeBusy || authorizing
+          ? 'Downloading'
+          : 'Download';
     return (
       <>
         <MapArtwork height={220} route wide />
@@ -1738,19 +2219,22 @@ export default function OfflineModal({
         <CheckRow label="Camps & essentials" ready={runtime.placesReady} />
         <CheckRow label="Trip notes & saved places" ready={runtime.notesReady} />
         {packError?.key === tripPackKey(runtime.target) ? <Text style={s.errorText}>{packError.message}</Text> : null}
+        {v2Job?.status === 'error' || v2Job?.status === 'repair_required' ? (
+          <Text style={s.errorText}>{v2Job.error?.message || 'This download needs repair.'}</Text>
+        ) : null}
         {placeError ? <Text style={s.errorText}>{placeError}</Text> : null}
         <View style={s.detailActions}>
           {runtime.active ? (
             <PrimaryButton
-              label={activePackPaused ? 'Resume' : 'Pause'}
-              icon={activePackPaused ? 'play-outline' : 'pause-outline'}
-              onPress={activePackPaused ? resumeActivePack : pauseActivePack}
+              label={v2Paused || activePackPaused ? 'Resume' : 'Pause'}
+              icon={v2Paused || activePackPaused ? 'play-outline' : 'pause-outline'}
+              onPress={() => void pauseOrResume()}
             />
           ) : runtime.ready ? (
             <PrimaryButton label="Open map" icon="map-outline" onPress={() => void openOfflineTrip(runtime.target)} />
           ) : (
             <PrimaryButton
-              label={placeBusy || authorizing ? 'Downloading' : 'Download'}
+              label={tripDownloadLabel}
               icon="download-outline"
               onPress={() => void downloadTripBundle(runtime.target)}
               disabled={Boolean(placeBusy || authorizing)}

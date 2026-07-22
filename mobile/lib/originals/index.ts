@@ -1,5 +1,6 @@
 export * from './api';
 export * from './accessStore';
+export * from './accountCleanup';
 export * from './analytics';
 export * from './audioAdapter';
 export * from './audioCoordinator';

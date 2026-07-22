@@ -31,6 +31,8 @@ export type SearchV2SessionState = {
   status: SearchV2SessionStatus;
   results: SearchResultV2[];
   selectedResult: SearchResultV2 | null;
+  resolvingResultId: string | null;
+  resolveError: Error | null;
   nextCursor: string | null;
   hasMore: boolean;
   loadingMore: boolean;
@@ -51,7 +53,7 @@ export type SearchV2SessionState = {
 
 export type SearchV2SessionContext = Omit<
   SearchRequestV2,
-  'query' | 'cursor' | 'session_id' | 'limit'
+  'query' | 'cursor' | 'session_id' | 'limit' | 'selected_result_id' | 'selected_detail_ref'
 > & { limit?: number };
 
 export type OfflineSearchProviderV2 = (
@@ -95,6 +97,7 @@ export class SearchV2SessionController {
   private generation = 0;
   private requestController: AbortController | null = null;
   private enrichmentController: AbortController | null = null;
+  private resolveController: AbortController | null = null;
   private enrichedGeneration: number | null = null;
   private debounceHandle: unknown = null;
   private disposed = false;
@@ -248,9 +251,109 @@ export class SearchV2SessionController {
     return result;
   }
 
+  /**
+   * Resolve a row only after an explicit press. Canonical/offline rows already
+   * carrying coordinates are selected synchronously without a provider call.
+   */
+  async resolveResult(resultId: string): Promise<SearchResultV2 | null> {
+    const result = this.state.results.find(item => item.result_id === resultId) ?? null;
+    if (!result) return null;
+    if (hasCoordinates(result)) return this.selectResult(resultId);
+    if (!result.detail_ref || !result.provenance?.temporary_use_only) {
+      const error = new Error('This search result is not available.');
+      this.setState({ ...this.state, resolveError: error, resolvingResultId: null });
+      throw error;
+    }
+
+    this.resolveController?.abort();
+    const controller = new AbortController();
+    this.resolveController = controller;
+    const generation = this.generation;
+    this.setState({
+      ...this.state,
+      selectedResult: null,
+      resolvingResultId: resultId,
+      resolveError: null,
+    });
+    try {
+      const response = await this.client.resolve({
+        ...this.buildRequest(this.state.query, this.state.mode),
+        cursor: undefined,
+        include_external: true,
+        selected_result_id: result.result_id,
+        selected_detail_ref: result.detail_ref,
+      }, { signal: controller.signal });
+      if (!this.isResolveCurrent(generation, controller)) return null;
+      const selected = response.status === 'resolved' && response.selected && hasCoordinates(response.selected)
+        ? response.selected
+        : null;
+      if (!selected) {
+        this.setState({
+          ...this.state,
+          selectedResult: null,
+          resolvingResultId: null,
+          resolveError: null,
+        });
+        return null;
+      }
+      this.onlineResults = replaceResult(this.onlineResults, resultId, selected);
+      this.offlineResults = replaceResult(this.offlineResults, resultId, selected);
+      this.setState({
+        ...this.state,
+        results: replaceResult(this.state.results, resultId, selected),
+        selectedResult: selected,
+        resolvingResultId: null,
+        resolveError: null,
+        revision: response.revision || this.state.revision,
+      });
+      return selected;
+    } catch (error) {
+      if (!this.isResolveCurrent(generation, controller) || isAbortError(error)) return null;
+      const normalizedError = toError(error);
+      this.setState({
+        ...this.state,
+        selectedResult: null,
+        resolvingResultId: null,
+        resolveError: normalizedError,
+      });
+      throw normalizedError;
+    } finally {
+      if (this.resolveController === controller) this.resolveController = null;
+    }
+  }
+
   clearSelection(): void {
     if (!this.state.selectedResult) return;
     this.setState({ ...this.state, selectedResult: null });
+  }
+
+  pause(): void {
+    if (this.disposed) return;
+    const wasBusy = this.debounceHandle !== null
+      || this.requestController !== null
+      || this.enrichmentController !== null
+      || this.resolveController !== null
+      || this.state.status === 'debouncing'
+      || this.state.status === 'loading'
+      || this.state.loadingMore
+      || this.state.isEnriching
+      || this.state.resolvingResultId !== null;
+    this.startGeneration();
+    if (!wasBusy) return;
+    const results = this.currentResults();
+    this.setState({
+      ...this.state,
+      results,
+      status: results.length > 0
+        ? this.state.status === 'offline' ? 'offline' : 'ready'
+        : 'idle',
+      loadingPresentation: 'none',
+      isEnriching: false,
+      loadingMore: false,
+      loadMoreError: null,
+      resolvingResultId: null,
+      resolveError: null,
+    });
   }
 
   dispose(): void {
@@ -538,6 +641,8 @@ export class SearchV2SessionController {
     this.requestController = null;
     this.enrichmentController?.abort();
     this.enrichmentController = null;
+    this.resolveController?.abort();
+    this.resolveController = null;
     this.enrichedGeneration = null;
   }
 
@@ -554,6 +659,12 @@ export class SearchV2SessionController {
   private isEnrichmentCurrent(generation: number, controller: AbortController): boolean {
     return this.isGenerationCurrent(generation)
       && this.enrichmentController === controller
+      && !controller.signal.aborted;
+  }
+
+  private isResolveCurrent(generation: number, controller: AbortController): boolean {
+    return this.isGenerationCurrent(generation)
+      && this.resolveController === controller
       && !controller.signal.aborted;
   }
 
@@ -599,6 +710,8 @@ function initialState(): SearchV2SessionState {
     status: 'idle',
     results: [],
     selectedResult: null,
+    resolvingResultId: null,
+    resolveError: null,
     nextCursor: null,
     hasMore: false,
     loadingMore: false,
@@ -610,6 +723,21 @@ function initialState(): SearchV2SessionState {
     loadingPresentation: 'none',
     isEnriching: false,
   };
+}
+
+function hasCoordinates(result: SearchResultV2): boolean {
+  return typeof result.coordinates?.lat === 'number'
+    && Number.isFinite(result.coordinates.lat)
+    && typeof result.coordinates?.lng === 'number'
+    && Number.isFinite(result.coordinates.lng);
+}
+
+function replaceResult(
+  results: SearchResultV2[],
+  resultId: string,
+  replacement: SearchResultV2,
+): SearchResultV2[] {
+  return results.map(result => result.result_id === resultId ? replacement : result);
 }
 
 function createSearchSessionId(): string {

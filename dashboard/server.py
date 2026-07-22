@@ -10286,6 +10286,30 @@ async def product_features(user: dict | None = Depends(_optional_user)):
         "digest_preferences": _product_feature_enabled("TRAILHEAD_DIGEST_PREFERENCES_ENABLED", user),
     }
 
+
+def _qa_binary_rollout_stage(env_name: str) -> str:
+    return "public" if _server_feature_enabled(env_name) else "off"
+
+
+@app.get("/api/admin/qa/diagnostics")
+async def admin_qa_diagnostics(admin: dict = Depends(_require_admin)):
+    """Privacy-minimal server rollout facts for an authenticated QA operator."""
+    return {
+        "schema": "admin_qa_diagnostics_v1",
+        "configured": {
+            "search_v2": _qa_binary_rollout_stage("TRAILHEAD_SEARCH_V2_ENABLED"),
+            "offline_v2": _qa_binary_rollout_stage("OFFLINE_BUNDLE_V2_ENABLED"),
+            "ui_system_v2": _qa_binary_rollout_stage("UI_SYSTEM_V2_ENABLED"),
+            "originals": _originals_rollout_stage(),
+        },
+        "effective_access": {
+            "search_v2": _product_feature_enabled("TRAILHEAD_SEARCH_V2_ENABLED", admin),
+            "offline_v2": _product_feature_enabled("OFFLINE_BUNDLE_V2_ENABLED", admin),
+            "ui_system_v2": _product_feature_enabled("UI_SYSTEM_V2_ENABLED", admin),
+            "originals": _originals_feature_enabled(admin),
+        },
+    }
+
 class AccountDeletionAuthorizationRequest(BaseModel):
     password: str = Field(default="", max_length=256)
     provider: str = Field(default="", max_length=20)

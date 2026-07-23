@@ -1,6 +1,6 @@
 # Trailhead 1.0.10 Active Checkpoint
 
-Last updated: 2026-07-23 08:50:00 CDT (America/Winnipeg)
+Last updated: 2026-07-23 09:18:14 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -149,6 +149,27 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Exact next action: cold-load the paired update on Samsung without clearing the account; verify version/build/channel/source/runtime/update and the QA deep-link; then run the exact candidate-bound Memory Gate V3 command recorded below.
 - Do not repeat: Figma/research packets, the 33-run Android crawl, NPS research, a broad manual Layers audit, the first incomplete V3 run, production preflight, backend deployment, paired OTA, or the full pre-preview suite unless a relevant source change invalidates them.
 - Task-owned process state: no WSL Gradle, Metro, Expo, EAS, Railway, Maestro, test, or memory-gate process remains. The obsolete Windows Trailhead Originals static preview server that had listened on port `8085` since July 16 was stopped. The ADB daemon remains intentionally active for the connected Samsung and emulator.
+
+## Checkpoint A.3 — Exact identity, compact hydration, and slow-sheet evidence
+
+- Timestamp: `2026-07-23T09:18:14-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; harness-fix HEAD: `898ddc485c524ffb427ddede3645069c8f1ee9b6`; installed OTA source remains `62e40b1519e7a53061dd4cac02a2db96edf0be0a`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain unstaged and untouched.
+- The Samsung completed the two-launch update handoff without clearing app data. The cold admin QA deep link reported Android `1.0.10`, build `59`, channel `preview`, source `62e40b1519e7a53061dd4cac02a2db96edf0be0a`, runtime `native-1.0.10-android.1`, update `019f8f37-81ed-7366-86bc-59e977335e08`, account role `admin`, and status `Ready`.
+- Signed-in compact hydration completed against the deployed backend. The local trip repository retained `13` trips and `5` saved entities while its state file fell from `19266625` to `9977305` bytes. The allowlisted QA counters recorded three pages, 178 items inspected, 17 applied, 161 skipped, and zero outbox items; no trip IDs, titles, content, searches, coordinates, or routes were logged.
+- The first exact `62e40b1` candidate-bound rerun is preserved at `/home/sean/.openclaw/workspace/trailhead/output/android-map-memory-gate/2026-07-23T14-01-25-429Z/report.json`, SHA-256 `4e9a35509a1ba8747e95a5e459b618b8a6558e97587555e3a6f2ec3d50d1bf93`.
+- That run stopped before layer-state capture or any memory cycle with `layer_carousel_unavailable`. The app stayed alive in the same process, produced 13 foreground proofs, and had zero new exit, OOM, LMK, ANR, or process-death records. `layers.initial` remained null and cycle count remained zero, proving the harness had not toggled or changed the user's saved layers.
+- The signed-in Explore phase now passes the source-controlled light-screen budgets:
+  - Total PSS samples `457432`, `445761`, and `445741` KB; median `445761` KB versus the `650000` KB limit.
+  - RSS samples `515548`, `503888`, and `503868` KB; median `503888` KB versus the `550000` KB limit.
+  - Median SwapPSS was `40593` KB. PSS-minus-SwapPSS remains a labelled diagnostic only and does not override the authoritative PSS/RSS pass.
+- The exact `map.layers.toggle-carousel` was visibly present shortly after the 20-second harness deadline. Layers therefore remain working/not reproduced; this report is evidence of slow sheet readiness on the older Samsung, not a product Layers regression.
+- Harness commit `898ddc4` replaces the 20-second interaction loop with a source-controlled 60-second readiness window. It passively waits for 30 seconds, never taps an already-open sheet a second time, and only then performs a bounded reveal swipe at most once every five seconds. It still requires the exact visible carousel and leaves memory budgets, checked-state capture, ten valid cycles, and durable exact-state restoration unchanged.
+- Deterministic tests cover a carousel appearing after 25 seconds with zero reveal swipes, an already-open sheet with no second open action, bounded timeout failure, and invalid-configuration fail-closed behavior. `npm run test:android-map-memory` and `git diff --check` pass.
+- Open P0 defects: none. Open/pending P1 acceptance: a complete ten-cycle Memory Gate V3 result and the affected Android/iOS M1 delta. M1 is not accepted yet.
+- Exact next action: advance the clean detached harness worktree to `898ddc485c524ffb427ddede3645069c8f1ee9b6`, rerun the same exact `62e40b1` Samsung command without clearing account data, and preserve the complete atomic report and recovery curves.
+- Do not repeat: production preflight/deployment, paired OTA, Figma/research packets, the 33-run Android crawl, NPS research, broad Layers testing, or the partial `layer_carousel_unavailable` run.
+- Task-owned process state: no Gradle, Metro, Expo, EAS, Railway, Maestro, test, or memory-gate process remains. Only the ADB daemon is intentionally active for the connected Samsung and emulator.
 
 ## Verified completed work
 

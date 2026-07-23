@@ -3,12 +3,10 @@ builder = "nixpacks"
 
 [deploy]
 startCommand = "mkdir -p /data && python run.py"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 30
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3
-
-[deploy.healthcheck]
-path = "/api/health"
-healthcheckTimeout = 30
 
 # ── IMPORTANT: Persistent Volume ──────────────────────────────────────
 # Database lives at /data/trailhead.db — mount a Railway Volume at /data

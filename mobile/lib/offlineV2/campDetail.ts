@@ -1,9 +1,5 @@
 import type { CampsiteDetail, CampsitePin, OsmPoi } from '../api';
-
-const CAMP_PLACE_TYPES = new Set([
-  'camp', 'camping', 'informal_camp', 'wild_camp', 'private_stay',
-  'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp',
-]);
+import { isOfflineV2CampPlaceType } from './placeTypes';
 
 const DURABLE_CAMPSITE_KEYS = new Set([
   'id', 'name', 'type', 'loop', 'map_card_id', 'facility_id', 'lat', 'lng',
@@ -57,7 +53,7 @@ function durableReservations(value: unknown) {
  */
 export function offlineV2PlaceToCampPin(place: OsmPoi): CampsitePin | null {
   if (
-    !CAMP_PLACE_TYPES.has(String(place.type || ''))
+    !isOfflineV2CampPlaceType(place.type)
     || !Number.isFinite(place.lat)
     || !Number.isFinite(place.lng)
   ) return null;

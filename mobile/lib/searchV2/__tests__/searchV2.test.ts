@@ -12,6 +12,7 @@ import {
 import {
   HttpSearchV2Client,
   SearchV2FeatureDisabledError,
+  SearchV2TimeoutError,
   normalizeRequest,
   type SearchV2Client,
 } from '../client';
@@ -20,6 +21,7 @@ import {
   type SearchV2Scheduler,
 } from '../session';
 import { runSearchRaceQaCheck } from '../qaAcceptance';
+import { nextFrozenSearchCenterStateV2 } from '../searchOrigin';
 import type { SearchPageV2, SearchRequestV2, SearchResultV2 } from '../types';
 
 test('Explore search maps visible filters to real server facets', () => {
@@ -73,6 +75,18 @@ test('search result distances respect the selected unit mode', () => {
   assert.equal(formatSearchDistanceV2(null, 'imperial'), '');
 });
 
+test('an open search keeps one GPS origin until its explicit session changes', () => {
+  const inactive = { active: false, sessionKey: 'map', center: undefined } as const;
+  const opened = nextFrozenSearchCenterStateV2(inactive, true, { lat: 38.5733, lng: -109.5498 }, 'map');
+  const jittered = nextFrozenSearchCenterStateV2(opened, true, { lat: 38.5739, lng: -109.5491 }, 'map');
+  assert.deepEqual(jittered.center, opened.center);
+
+  const explicitArea = nextFrozenSearchCenterStateV2(jittered, true, { lat: 38.4, lng: -109.8 }, 'viewport:2');
+  assert.deepEqual(explicitArea.center, { lat: 38.4, lng: -109.8 });
+  const closed = nextFrozenSearchCenterStateV2(explicitArea, false, { lat: 39, lng: -110 }, 'viewport:2');
+  assert.equal(closed.center, undefined);
+});
+
 test('HTTP client blocks requests when the product feature is disabled', async () => {
   let fetchCalls = 0;
   const client = new HttpSearchV2Client({
@@ -88,6 +102,45 @@ test('HTTP client blocks requests when the product feature is disabled', async (
     client.suggest({ query: 'Moab' }),
     SearchV2FeatureDisabledError,
   );
+  assert.equal(fetchCalls, 0);
+});
+
+test('HTTP client deadline covers feature-gate and auth preparation', async () => {
+  let fetchCalls = 0;
+  const gateClient = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: async () => await new Promise<boolean>(() => {}),
+    deadlinesMs: { suggest: 20 },
+    fetchImpl: (async () => {
+      fetchCalls += 1;
+      throw new Error('fetch should not run');
+    }) as typeof fetch,
+  });
+  await assert.rejects(
+    gateClient.suggest({ query: 'Moab' }),
+    (error: unknown) => error instanceof SearchV2TimeoutError && error.timeoutMs === 20,
+  );
+
+  const caller = new AbortController();
+  let authStarted!: () => void;
+  const authIsReading = new Promise<void>(resolve => { authStarted = resolve; });
+  const authClient = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    getHeaders: async () => {
+      authStarted();
+      return await new Promise<Record<string, string>>(() => {});
+    },
+    deadlinesMs: { results: 2_000 },
+    fetchImpl: (async () => {
+      fetchCalls += 1;
+      throw new Error('fetch should not run');
+    }) as typeof fetch,
+  });
+  const pending = authClient.results({ query: 'Moab' }, { signal: caller.signal });
+  await authIsReading;
+  caller.abort();
+  await assert.rejects(pending, (error: unknown) => error instanceof Error && error.name === 'AbortError');
   assert.equal(fetchCalls, 0);
 });
 
@@ -122,8 +175,106 @@ test('HTTP client serializes scoped search and forwards cancellation and auth', 
   assert.equal(requestUrl.searchParams.get('bbox'), '-110,38,-109,39');
   assert.equal(requestUrl.searchParams.get('filters'), null);
   assert.equal(requestUrl.searchParams.get('limit'), '30');
-  assert.equal(calls[0].init?.signal, controller.signal);
+  assert.ok(calls[0].init?.signal, 'the transport keeps a cancellable request signal');
   assert.equal((calls[0].init?.headers as Record<string, string>).Authorization, 'Bearer test');
+  assert.equal(normalizeRequest({
+    query: 'camps near me',
+    categories: Array.from({ length: 16 }, (_, index) => `camp-${index}`),
+  }, 'results').categories?.length, 16);
+});
+
+test('HTTP client bounds a stalled request and aborts its transport', async () => {
+  let transportSignal: AbortSignal | null = null;
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    deadlinesMs: { suggest: 20 },
+    fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+      transportSignal = init?.signal ?? null;
+      return await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })), { once: true });
+      });
+    }) as typeof fetch,
+  });
+
+  await assert.rejects(
+    client.suggest({ query: 'Moab' }),
+    (error: unknown) => error instanceof SearchV2TimeoutError && error.timeoutMs === 20,
+  );
+  assert.equal((transportSignal as AbortSignal | null)?.aborted, true);
+});
+
+test('HTTP client deadline covers a response body that stalls after headers', async () => {
+  let transportSignal: AbortSignal | null = null;
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    deadlinesMs: { suggest: 20 },
+    fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => {
+      transportSignal = init?.signal ?? null;
+      return {
+        ok: true,
+        status: 200,
+        json: async () => await new Promise<never>(() => {}),
+      } as unknown as Response;
+    }) as typeof fetch,
+  });
+
+  await assert.rejects(
+    client.suggest({ query: 'Moab' }),
+    (error: unknown) => error instanceof SearchV2TimeoutError && error.timeoutMs === 20,
+  );
+  assert.equal((transportSignal as AbortSignal | null)?.aborted, true);
+});
+
+test('HTTP client forwards caller cancellation without reporting a timeout', async () => {
+  const caller = new AbortController();
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    deadlinesMs: { results: 2_000 },
+    fetchImpl: (async (_url: string | URL | Request, init?: RequestInit) => (
+      await new Promise<Response>((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })), { once: true });
+      })
+    )) as typeof fetch,
+  });
+
+  const pending = client.results({ query: 'Moab' }, { signal: caller.signal });
+  caller.abort();
+  await assert.rejects(pending, (error: unknown) => (
+    error instanceof Error
+    && error.name === 'AbortError'
+    && !(error instanceof SearchV2TimeoutError)
+  ));
+});
+
+test('HTTP client forwards caller cancellation while reading a response body', async () => {
+  const caller = new AbortController();
+  let bodyStarted!: () => void;
+  const bodyIsReading = new Promise<void>(resolve => { bodyStarted = resolve; });
+  const client = new HttpSearchV2Client({
+    baseUrl: 'https://api.example.test',
+    isEnabled: () => true,
+    deadlinesMs: { results: 2_000 },
+    fetchImpl: (async () => ({
+      ok: true,
+      status: 200,
+      json: async () => {
+        bodyStarted();
+        return await new Promise<never>(() => {});
+      },
+    }) as unknown as Response) as typeof fetch,
+  });
+
+  const pending = client.results({ query: 'Moab' }, { signal: caller.signal });
+  await bodyIsReading;
+  caller.abort();
+  await assert.rejects(pending, (error: unknown) => (
+    error instanceof Error
+    && error.name === 'AbortError'
+    && !(error instanceof SearchV2TimeoutError)
+  ));
 });
 
 test('HTTP client resolves only an explicitly selected provider row with its original session', async () => {

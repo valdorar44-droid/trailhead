@@ -75,13 +75,45 @@ test('Map and Route Editor render server-ranked Search V2 rows until an explicit
   assert.doesNotMatch(searchResultRowSource, /Newer typing/);
 });
 
+test('Map routes durable search results to complete type-specific sheets', () => {
+  assert.match(mapSource, /else if \(!searchPlaceIsTemporary\(basePlace\)\) \{[\s\S]{0,700}openPoiFeature\(/);
+  assert.match(mapSource, /const canonicalTrail = poi\.type === 'trailhead'[\s\S]{0,320}poiSource === 'trailhead_search'/);
+  assert.match(mapSource, /featureFromPoi\(poi, support, canonicalTrail \? 'trailhead' : 'osm'\)/);
+  assert.match(premiumPlaceSheetSource, /isTransientMapboxPlace\(place\)/);
+  assert.match(mapSource, /selectedCampRef\.current = downloadedCamp;/);
+  assert.match(mapSource, /setCampDetail\(offlineV2CampPinToDetail\(downloadedCamp\)\)/);
+  assert.match(mapSource, /else \{\s*selectedCampRef\.current = null;/);
+  assert.match(mapSource, /setSelectedCommunityPin\(null\);\s*setSelectedPlace\(\{/);
+  assert.match(mapSource, /function loadSelectedCampAmbient\(camp:[\s\S]{0,700}selectedCampRef\.current\?\.id === campId/);
+  assert.doesNotMatch(mapSource, /then\(r => setCampFullness\(r\)\)/);
+  assert.doesNotMatch(mapSource, /then\(r => setCampWeather\(r\)\)/);
+});
+
 test('Map search changes viewport scope only through the explicit Search this area action', () => {
   assert.match(mapSource, /function searchCurrentMapArea\(\)/);
   assert.match(mapSource, /setMapSearchViewportScope\(\{[\s\S]*north: bounds\.n,[\s\S]*west: bounds\.w,/);
-  assert.match(mapSource, /scope: mapSearchViewportScope \? 'viewport' as const : 'global' as const/);
+  assert.match(mapSource, /scope: activeMapSearchQuickScope[\s\S]{0,140}mapSearchViewportScope \? 'viewport' as const : 'global' as const/);
   assert.match(mapSource, /testID="map\.search\.this-area"/);
   assert.match(mapSource, /onPress=\{searchCurrentMapArea\}/);
   assert.doesNotMatch(mapSource, /onBoundsChange=\{[\s\S]{0,900}searchCurrentMapArea\(/);
+});
+
+test('Map full search and nearby quick actions retain their requested mode and scope', () => {
+  assert.match(mapSource, /mapSearchV2\.state\.mode === 'results'[\s\S]{0,180}mapSearchV2\.state\.query === normalizeSearchV2Query\(cleanQuery\)[\s\S]{0,80}return;/);
+  assert.match(mapSource, /function runMapQuickActionSearch\(action: MapSearchQuickAction\)/);
+  assert.match(mapSource, /scope: 'nearby' as const,[\s\S]{0,260}radius_meters: quickScope\.radius_meters/);
+  assert.match(mapSource, /mapSearchV2\.setContext\(nextContext, false\);[\s\S]{0,100}mapSearchV2\.search\(action\.query\)/);
+  assert.match(mapSearchSheetSource, /const showFieldSpinner = searching && !hasUsefulRows;/);
+  assert.match(mapSearchSheetSource, /testID="map\.search\.enriching"/);
+  assert.match(mapSource, /categories: \['camp', 'camping', 'campground', 'campsite', 'rv', 'rv_park', 'dispersed_camp', 'overnight_parking'/);
+});
+
+test('Search surfaces prefer the offline FTS index and clear stale place modules', () => {
+  for (const source of [mapSource, exploreSource, routeBuilderSource]) {
+    assert.match(source, /searchExpoOfflineV2CatalogWithFallback\(/);
+    assert.doesNotMatch(source, /if \(fallback\.length > 0\) return fallback;/);
+  }
+  assert.match(mapSource, /setSearchRouteCard\(null\);\s*setSelectedPlaceContext\(null\);\s*setSelectedPlaceTripContext/);
 });
 
 test('temporary place sheets expose session-safe actions only', () => {
@@ -92,6 +124,13 @@ test('temporary place sheets expose session-safe actions only', () => {
   assert.match(premiumPlaceSheetSource, /!!onReport && !transientPlace/);
   const guardedCommunityBlocks = premiumPlaceSheetSource.match(/stage === 'full' && !transientPlace && \(/g) || [];
   assert.equal(guardedCommunityBlocks.length, 2);
+});
+
+test('Search V2 place sheets keep a bounded, visible result body', () => {
+  assert.match(premiumPlaceSheetSource, /sheetContent:\s*\{\s*padding:\s*0,\s*flex:\s*1,\s*minHeight:\s*0\s*\}/);
+  assert.match(premiumPlaceSheetSource, /contentScroll:\s*\{\s*flex:\s*1,\s*minHeight:\s*0\s*\}/);
+  assert.match(premiumPlaceSheetSource, /style=\{s\.contentScroll\}[\s\S]{0,360}testID=\{`\$\{sheetModel\.testID\}-content`\}/);
+  assert.match(premiumPlaceSheetSource, /label="Navigate"[\s\S]{0,180}onPress=\{\(\) => onNavigate\(place\)\}/);
 });
 
 test('temporary provider rows are not written to Map history or persisted by Route Builder', () => {

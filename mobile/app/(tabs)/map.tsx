@@ -111,7 +111,7 @@ import {
   EMPTY_EXPO_OFFLINE_V2_CATALOG,
   loadExpoOfflineV2Catalog,
   mergeOfflinePoiInventory,
-  searchExpoOfflineV2Catalog,
+  searchExpoOfflineV2CatalogWithFallback,
 } from '@/lib/offlineV2/expoCatalog';
 import { resolveDownloadedSearchResultPoi } from '@/lib/offlineV2/offlineSearchPresentation';
 import {
@@ -228,7 +228,9 @@ import {
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
   type SearchBoundsV2,
+  type SearchIntentV2,
   type SearchResultV2,
+  useFrozenSearchCenterV2,
   useSearchV2Session,
 } from '@/lib/searchV2';
 import { useTabBarVisibility } from '@/lib/tabBarVisibility';
@@ -776,6 +778,7 @@ function isRenderedMapboxPlaceSource(source: unknown) {
 
 const OVERNIGHT_PLACE_TYPES = new Set([
   'camp', 'camping', 'campground', 'campsite', 'rv', 'rv_park', 'caravan',
+  'dispersed_camp', 'overnight_parking', 'informal_camp', 'wild_camp',
   'lodging', 'hotel', 'motel', 'stay', 'private_stay', 'farm_stay', 'ranch',
   'winery', 'glamping', 'private_camp',
 ]);
@@ -3283,7 +3286,11 @@ const ALL_PLACE_FILTER_IDS = [...PLACE_FILTER_TYPES.map(t => t.id), ...WATER_ACC
 const SMART_PLACE_CATEGORIES = ESSENTIAL_PLACE_CATEGORIES;
 const UTILITY_PLACE_TYPES = new Set(['fuel', 'propane', 'water', 'dump', 'parking']);
 const TRAIL_DISCOVERY_PIN_TYPES = new Set(['trail', 'trailhead', 'viewpoint', 'peak', 'hot_spring']);
-const CAMP_PLACE_TYPES = new Set(['camp', 'camping', 'informal_camp', 'wild_camp', 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp']);
+const CAMP_PLACE_TYPES = new Set([
+  'camp', 'camping', 'campground', 'campsite', 'rv', 'rv_park',
+  'dispersed_camp', 'overnight_parking', 'informal_camp', 'wild_camp',
+  'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp',
+]);
 const DEFAULT_COMMUNITY_PIN_FILTERS = COMMUNITY_PIN_TYPES
   .filter(t => t.id !== 'gpx_import')
   .map(t => t.id);
@@ -3373,6 +3380,14 @@ type ScopedMapSearchSession = {
   startedAt: number;
 };
 
+type MapSearchQuickScope = {
+  query: string;
+  intent: SearchIntentV2;
+  categories: string[];
+  radius_meters: number;
+  center: { lat: number; lng: number };
+};
+
 type ScopedSearchCategoryRule = {
   label: string;
   ids: string[];
@@ -3384,11 +3399,11 @@ const SCOPED_SEARCH_SPLIT_RE = /\s+(near|nearby|around|by|close to|in|at)\s+/i;
 const SCOPED_SEARCH_CURRENT_LOCATION_RE = /^(me|my location|current location|here|near me)$/i;
 const SCOPED_SEARCH_PREFIX_RE = /^(gas stations?|gas|fuel|petrol|diesel|propane|restaurants?|food|coffee|groceries|grocery|campgrounds?|camps?|camping|rv parks?|lodging|hotels?|motels?|trailheads?|trails?|treks?|hikes?|views?|viewpoints?|waterfalls?|falls|glaciers?|parks?|attractions?|mechanics?|repair|parking|medical|pharmacy|wifi)\s+(.{2,})$/i;
 const FULL_MAP_SEARCH_QUICK_ACTIONS: MapSearchQuickAction[] = [
-  { label: 'Camps', query: 'camps near me', icon: 'bonfire-outline' },
-  { label: 'Fuel', query: 'fuel near me', icon: 'car-sport-outline' },
-  { label: 'Water', query: 'water near me', icon: 'water-outline' },
-  { id: 'trails-in-view', label: 'Trails', query: 'trails near me', icon: 'trail-sign-outline' },
-  { label: 'Groceries', query: 'grocery near me', icon: 'cart-outline' },
+  { id: 'camps-nearby', label: 'Camps', query: 'camps near me', icon: 'bonfire-outline', intent: 'camp', categories: ['camp', 'camping', 'campground', 'campsite', 'rv', 'rv_park', 'dispersed_camp', 'overnight_parking', 'informal_camp', 'wild_camp', 'private_stay', 'private_camp', 'glamping', 'farm_stay', 'ranch', 'winery'], radiusMeters: 45_000 },
+  { id: 'fuel-nearby', label: 'Fuel', query: 'fuel near me', icon: 'car-sport-outline', intent: 'service', categories: ['fuel', 'gas_station', 'service_station'], radiusMeters: 30_000 },
+  { id: 'water-nearby', label: 'Water', query: 'water near me', icon: 'water-outline', intent: 'any', categories: ['water', 'potable_water', 'drinking_water'], radiusMeters: 30_000 },
+  { id: 'trails-in-view', label: 'Trails', query: 'trails near me', icon: 'trail-sign-outline', intent: 'trail', categories: ['trail', 'trailhead'], radiusMeters: 50_000 },
+  { id: 'groceries-nearby', label: 'Groceries', query: 'grocery near me', icon: 'cart-outline', intent: 'service', categories: ['grocery', 'market', 'supplies'], radiusMeters: 30_000 },
 ];
 
 const SCOPED_SEARCH_CATEGORY_RULES: ScopedSearchCategoryRule[] = [
@@ -6609,6 +6624,21 @@ function MapScreen() {
     setQuickCampPhotoIndex(0);
   }, [selectedCamp]);
 
+  function loadSelectedCampAmbient(camp: CampsitePin | null | undefined) {
+    selectedCampRef.current = camp ?? null;
+    const campId = camp?.id;
+    if (campId) {
+      api.getCampFullness(campId).then(result => {
+        if (selectedCampRef.current?.id === campId) setCampFullness(result);
+      }).catch(() => {});
+    }
+    if (camp?.lat && camp?.lng) {
+      api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(result => {
+        if (selectedCampRef.current?.id === campId) setCampWeather(result);
+      }).catch(() => {});
+    }
+  }
+
   useEffect(() => {
     if (!selectedCamp?.id) return;
     trackPhase0Once(`phase0:camp-card:${selectedCamp.id}`, 'phase0_camp_card_opened', {
@@ -6688,6 +6718,7 @@ function MapScreen() {
   const offlineV2Catalog = offlinePlaceInventoryVisible
     ? offlinePlaceInventory.catalog
     : EMPTY_EXPO_OFFLINE_V2_CATALOG;
+  const [mapSearchQuickScope, setMapSearchQuickScope] = useState<MapSearchQuickScope | null>(null);
   const mapSearchV2OfflineProvider = useCallback(
     async (request: Parameters<typeof offlineSearchResultsV2>[0]) => {
       const currentScope = accountInventoryScope(
@@ -6698,35 +6729,48 @@ function MapScreen() {
       if (!accountInventoryIsVisible(inventory.scope_key, currentScope, accountStorage.isCleaning())) {
         return [];
       }
-      const indexed = await searchExpoOfflineV2Catalog(inventory.catalog, request, 'map');
+      const results = await searchExpoOfflineV2CatalogWithFallback(
+        inventory.catalog,
+        request,
+        'map',
+        inventory.places,
+      );
       if (!accountInventoryIsVisible(
         inventory.scope_key,
         accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id),
         accountStorage.isCleaning(),
       )) return [];
-      const fallback = offlineSearchResultsV2(request, inventory.places, 'map');
-      const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
-      return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
+      return results;
     },
     [],
   );
+  const mapSearchV2Active = screenActivity.isActive && (inlineSearchOpen || showFullMapSearch) && !navMode;
+  const mapSearchOrigin = useFrozenSearchCenterV2(mapSearchV2Active, userLoc, 'map-search');
+  const activeMapSearchQuickScope = mapSearchQuickScope
+    && normalizeSearchV2Query(mapSearchQuickScope.query) === normalizeSearchV2Query(searchQuery)
+    ? mapSearchQuickScope
+    : null;
   const mapSearchV2Context = useMemo(() => ({
     surface: 'map' as const,
-    intent: 'any' as const,
-    scope: mapSearchViewportScope ? 'viewport' as const : 'global' as const,
-    center: mapSearchViewportScope
+    intent: activeMapSearchQuickScope?.intent ?? 'any' as const,
+    scope: activeMapSearchQuickScope
+      ? 'nearby' as const
+      : mapSearchViewportScope ? 'viewport' as const : 'global' as const,
+    center: activeMapSearchQuickScope?.center ?? (mapSearchViewportScope
       ? {
           lat: (mapSearchViewportScope.north + mapSearchViewportScope.south) / 2,
           lng: (mapSearchViewportScope.east + mapSearchViewportScope.west) / 2,
         }
-      : userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
-    bounds: mapSearchViewportScope || undefined,
+      : mapSearchOrigin),
+    bounds: activeMapSearchQuickScope ? undefined : mapSearchViewportScope || undefined,
+    categories: activeMapSearchQuickScope?.categories,
+    radius_meters: activeMapSearchQuickScope?.radius_meters,
     include_external: true,
     limit: 10,
-  }), [mapSearchViewportScope, userLoc?.lat, userLoc?.lng]);
+  }), [activeMapSearchQuickScope, mapSearchOrigin?.lat, mapSearchOrigin?.lng, mapSearchViewportScope]);
   const mapSearchV2 = useSearchV2Session({
     enabled: searchV2Enabled,
-    active: screenActivity.isActive && (inlineSearchOpen || showFullMapSearch) && !navMode,
+    active: mapSearchV2Active,
     context: mapSearchV2Context,
     offlineProvider: mapSearchV2OfflineProvider,
   });
@@ -9197,8 +9241,7 @@ function MapScreen() {
     setCampFullness(null);
     setCampWeather(null);
     focusMapSelectionPoint({ lat: camp.lat, lng: camp.lng, name: camp.name }, 12, 'place');
-    if (camp.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
-    if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+    loadSelectedCampAmbient(camp);
   }
 
   function smartPlaceToCampPin(place: OsmPoi): CampsitePin | null {
@@ -9873,8 +9916,7 @@ function MapScreen() {
       setCampFullness(null);
       setCampWeather(null);
       focusMapSelectionPoint({ lat: camp.lat, lng: camp.lng, name: camp.name }, 12, 'place');
-      if (camp.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
-      if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+      loadSelectedCampAmbient(camp);
       return;
     }
     if (pendingMapSelection.kind === 'explorePlace') {
@@ -10625,6 +10667,7 @@ function MapScreen() {
       east: bounds.e,
       west: bounds.w,
     });
+    setMapSearchQuickScope(null);
     setMapSearchAreaDirty(false);
     Keyboard.dismiss();
   }
@@ -10638,6 +10681,7 @@ function MapScreen() {
       setMapSearchSession(null);
       setMapSearchViewportScope(null);
       setMapSearchAreaDirty(false);
+      setMapSearchQuickScope(null);
       if (searchV2Enabled) mapSearchV2.setQuery('');
     }
     Keyboard.dismiss();
@@ -10652,6 +10696,7 @@ function MapScreen() {
       setMapSearchSession(null);
       setMapSearchViewportScope(null);
       setMapSearchAreaDirty(false);
+      setMapSearchQuickScope(null);
       if (searchV2Enabled) mapSearchV2.setQuery('');
     }
     Keyboard.dismiss();
@@ -10818,6 +10863,51 @@ function MapScreen() {
     }
   }
 
+  function runMapQuickActionSearch(action: MapSearchQuickAction) {
+    if (action.id === 'trails-in-view') {
+      closeFullMapSearch(false);
+      void runTrailDiscoverySearch('view');
+      return;
+    }
+    const center = mapSearchOrigin ?? (userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined);
+    if (
+      searchV2Enabled
+      && center
+      && action.intent
+      && action.categories?.length
+      && action.radiusMeters
+    ) {
+      const quickScope: MapSearchQuickScope = {
+        query: action.query,
+        intent: action.intent,
+        categories: action.categories,
+        radius_meters: action.radiusMeters,
+        center,
+      };
+      const nextContext = {
+        surface: 'map' as const,
+        intent: quickScope.intent,
+        scope: 'nearby' as const,
+        center: quickScope.center,
+        categories: quickScope.categories,
+        radius_meters: quickScope.radius_meters,
+        include_external: true,
+        limit: 10,
+      };
+      setMapSearchQuickScope(quickScope);
+      setMapSearchViewportScope(null);
+      setMapSearchAreaDirty(false);
+      setMapSearchSession(null);
+      setSearchQuery(action.query);
+      mapSearchV2.setContext(nextContext, false);
+      void mapSearchV2.search(action.query);
+      return;
+    }
+    setMapSearchQuickScope(null);
+    setSearchQuery(action.query);
+    void searchMap(action.query);
+  }
+
   useEffect(() => {
     const cleanQuery = searchQuery.trim();
     if (!screenActivity.isFocused || (!inlineSearchOpen && !showFullMapSearch) || navMode) {
@@ -10827,6 +10917,10 @@ function MapScreen() {
     }
     if (searchV2Enabled) {
       setMapSearchOwnerScopeKey(mapAccountInventoryScope.key);
+      if (
+        mapSearchV2.state.mode === 'results'
+        && mapSearchV2.state.query === normalizeSearchV2Query(cleanQuery)
+      ) return;
       mapSearchV2.setQuery(cleanQuery);
       return;
     }
@@ -10848,6 +10942,8 @@ function MapScreen() {
   }, [
     inlineSearchOpen,
     mapAccountInventoryScope.key,
+    mapSearchV2.state.mode,
+    mapSearchV2.state.query,
     mapSearchV2.setQuery,
     navMode,
     screenActivity.isFocused,
@@ -10915,23 +11011,56 @@ function MapScreen() {
     const downloadedCamp = String(basePlace.source || '') === 'trailhead_offline_v2'
       ? offlinePlaceToCampPin(basePlace as unknown as OsmPoi)
       : null;
-    setSearchRouteCard(null);
-    setSelectedCamp(null);
-    setTappedTrail(null);
-    setTappedTileSpot(null);
-    setTappedGas(null);
-    setTappedPoi(null);
-    setSelectedTrail(null);
-    setSelectedCommunityPin(null);
     const rawSummary = String(basePlace.summary || '').trim();
     const summary = rawSummary && !/^selected\s+place\.?$/i.test(rawSummary)
       ? rawSummary
       : 'Search nearby camps, trails, stays, fuel, and services from here.';
     if (downloadedCamp) {
+      selectedCampRef.current = downloadedCamp;
+      setSearchRouteCard(null);
       setSelectedPlace(null);
+      setSelectedPlaceContext(null);
+      setSelectedPlaceTripContext(null);
+      setTappedTrail(null);
+      setTappedTileSpot(null);
+      setTappedGas(null);
+      setTappedPoi(null);
+      setSelectedTrail(null);
+      setSelectedCommunityPin(null);
       setSelectedCamp(downloadedCamp);
+      setCampInsight(null);
+      setWikiArticles([]);
+      setCampFullness(null);
+      setCampWeather(null);
       setCampDetail(offlineV2CampPinToDetail(downloadedCamp));
+    } else if (!searchPlaceIsTemporary(basePlace)) {
+      // Durable Search V2 rows use the same type router as native map taps so
+      // camps and trails open their complete specialized sheets instead of a
+      // thin generic interim. Temporary provider rows remain generic because
+      // that sheet suppresses persistence/community actions for session-only
+      // results.
+      openPoiFeature({
+        ...basePlace,
+        summary,
+        source_label: basePlace.source_label || 'Place',
+      } as unknown as OsmPoi);
     } else {
+      selectedCampRef.current = null;
+      setSearchRouteCard(null);
+      setSelectedPlaceContext(null);
+      setSelectedPlaceTripContext(null);
+      setSelectedCamp(null);
+      setCampDetail(null);
+      setCampInsight(null);
+      setWikiArticles([]);
+      setCampFullness(null);
+      setCampWeather(null);
+      setTappedTrail(null);
+      setTappedTileSpot(null);
+      setTappedGas(null);
+      setTappedPoi(null);
+      setSelectedTrail(null);
+      setSelectedCommunityPin(null);
       setSelectedPlace({
         ...basePlace,
         summary: isMapboxPlace && !rawSummary ? undefined : summary,
@@ -14777,9 +14906,8 @@ function MapScreen() {
     setWikiArticles([]);
     setCampFullness(null);
     setCampWeather(null);
-    if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
+    loadSelectedCampAmbient(camp);
     if (camp?.lat && camp?.lng) {
-      api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
       nativeMapRef.current?.flyTo(camp.lat, camp.lng, 11, camp.name);
       postWebMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, zoom: 11, name: camp.name }));
     }
@@ -19039,8 +19167,7 @@ function MapScreen() {
         setWikiArticles([]);
         setCampFullness(null);
         setCampWeather(null);
-        if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
-        if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+        loadSelectedCampAmbient(camp);
       }
       if (msg.type === 'poi_tapped') {
         const rawPoi = msg.poi as OsmPoi;
@@ -21089,7 +21216,12 @@ function MapScreen() {
         mapReports,
         offlineSaved,
       );
-      const feature = featureFromPoi(poi, support, poi.type === 'trailhead' ? 'trailhead' : 'osm');
+      const poiSource = String(poi.source || '').toLowerCase();
+      const canonicalTrail = poi.type === 'trailhead'
+        || poiSource === 'trailhead_search'
+        || poiSource === 'trailhead_offline'
+        || poiSource === 'trailhead_offline_v2';
+      const feature = featureFromPoi(poi, support, canonicalTrail ? 'trailhead' : 'osm');
       if (feature) {
         setSelectedPlaceTripContext(null);
         openTrailFeature(feature);
@@ -21122,8 +21254,7 @@ function MapScreen() {
         setSelectedCamp(camp);
         setCampDetail(null); setCampInsight(null); setWikiArticles([]);
         setCampFullness(null); setCampWeather(null);
-        if (camp.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
-        if (camp.lat && camp.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+        loadSelectedCampAmbient(camp);
         return;
       }
     }
@@ -21154,6 +21285,7 @@ function MapScreen() {
     setCopilotResultScope(null);
     setSearchResults([]);
     setSearchRouteCard(null);
+    setSelectedPlaceContext(null);
     setSelectedPlaceTripContext(tripPlaceContextFor(poi, day));
     setSelectedPlace(nextPlace);
     setSelectedCamp(null);
@@ -23813,8 +23945,7 @@ function MapScreen() {
             setSelectedCamp(camp);
             setCampDetail(null); setCampInsight(null); setWikiArticles([]);
             setCampFullness(null); setCampWeather(null);
-            if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
-            if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+            loadSelectedCampAmbient(camp);
           }}
           onGasTap={station => { if (mapTapToolOwnsFeatureSelection) return; setTappedGas(null); setSearchRouteCard(null); setSelectedPlace({ ...station, type: 'fuel', source: 'fuel' }); setSelectedCamp(null); setTappedTrail(null); setTappedTileSpot(null); setSelectedTrail(null); }}
           onPoiTap={p => { if (mapTapToolOwnsFeatureSelection) return; openPoiFeature(p); }}
@@ -24591,6 +24722,9 @@ function MapScreen() {
               onFocus={() => setInlineSearchOpen(true)}
               onChangeText={text => {
                 setSearchQuery(text);
+                if (normalizeSearchV2Query(text) !== normalizeSearchV2Query(mapSearchQuickScope?.query || '')) {
+                  setMapSearchQuickScope(null);
+                }
                 if (!inlineSearchOpen) setInlineSearchOpen(true);
                 if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
                 if (text.trim().length < 2) {
@@ -24612,7 +24746,7 @@ function MapScreen() {
               }}
               onSubmitEditing={() => searchMap()}
             />
-            {isSearching ? (
+            {isSearching && (searchV2Enabled ? mapSearchV2RenderResults.length === 0 : mapSearchDisplayResults.length === 0) ? (
               <ActivityIndicator size="small" color={mapChrome.toastText} />
             ) : searchQuery.trim().length > 0 ? (
               <TouchableOpacity
@@ -25969,6 +26103,9 @@ function MapScreen() {
           quickActions={FULL_MAP_SEARCH_QUICK_ACTIONS}
           onQueryChange={text => {
             setSearchQuery(text);
+            if (normalizeSearchV2Query(text) !== normalizeSearchV2Query(mapSearchQuickScope?.query || '')) {
+              setMapSearchQuickScope(null);
+            }
             if (mapSearchSession && normalizeScopedSearchText(text) !== mapSearchSession.query) setMapSearchSession(null);
             if (text.trim().length < 2) {
               setSearchResults([]);
@@ -26020,13 +26157,7 @@ function MapScreen() {
           }}
           onLoadMoreSearchV2={() => { void mapSearchV2.loadNextPage(); }}
           onQuickAction={action => {
-            if (action.id === 'trails-in-view') {
-              closeFullMapSearch(false);
-              void runTrailDiscoverySearch('view');
-              return;
-            }
-            setSearchQuery(action.query);
-            searchMap(action.query);
+            runMapQuickActionSearch(action);
           }}
           onClose={() => closeFullMapSearch(false)}
           onClear={() => {
@@ -26035,6 +26166,7 @@ function MapScreen() {
             setMapSearchSession(null);
             setMapSearchViewportScope(null);
             setMapSearchAreaDirty(false);
+            setMapSearchQuickScope(null);
           }}
         />
       )}
@@ -26075,8 +26207,7 @@ function MapScreen() {
               setShowSearch(false); setSelectedCamp(camp);
               setCampDetail(null); setCampInsight(null); setWikiArticles([]);
               setCampFullness(null); setCampWeather(null);
-              if (camp?.id) api.getCampFullness(camp.id).then(r => setCampFullness(r)).catch(() => {});
-              if (camp?.lat && camp?.lng) api.getWeather(camp.lat, camp.lng, 3, weatherUnitMode).then(r => setCampWeather(r)).catch(() => {});
+              loadSelectedCampAmbient(camp);
             }}
             onSelectDest={place => {
               const dist = userLoc ? haversineKm(userLoc.lat, userLoc.lng, place.lat, place.lng) : null;
@@ -26775,6 +26906,7 @@ function MapScreen() {
           setSelectedPlaceTripContext(null);
           const camp = place as CampsitePin;
           setSelectedCamp(camp);
+          selectedCampRef.current = camp;
           setCampDetail(null); setCampInsight(null); setWikiArticles([]);
           setCampFullness(null); setCampWeather(null);
           nativeMapRef.current?.flyTo(camp.lat, camp.lng, 12, camp.name);

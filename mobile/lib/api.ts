@@ -3102,7 +3102,7 @@ export interface PinPayload {
 }
 export interface OsmPoi {
   id: string; name: string; lat: number; lng: number;
-  type: 'camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'pass' | 'glacier' | 'bridge' | 'checkpost' | 'settlement' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'private_stay' | 'farm_stay' | 'ranch' | 'winery' | 'glamping' | 'private_camp' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'camping' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
+  type: 'camp' | 'camping' | 'campground' | 'campsite' | 'rv' | 'rv_park' | 'dispersed_camp' | 'overnight_parking' | 'informal_camp' | 'wild_camp' | 'water' | 'trail' | 'trailhead' | 'viewpoint' | 'peak' | 'pass' | 'glacier' | 'bridge' | 'checkpost' | 'settlement' | 'hot_spring' | 'fuel' | 'propane' | 'dump' | 'shower' | 'laundromat' | 'lodging' | 'private_stay' | 'farm_stay' | 'ranch' | 'winery' | 'glamping' | 'private_camp' | 'food' | 'grocery' | 'mechanic' | 'parking' | 'attraction' | 'hardware' | 'medical' | 'parts' | 'wifi' | 'poi'; subtype?: string; elevation?: string;
   display_type?: string;
   source?: string;
   source_label?: string;

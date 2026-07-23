@@ -77,8 +77,9 @@ const INTENT_FACETS: Readonly<Record<string, ReadonlySet<string>>> = Object.free
   trail: new Set(['trail', 'trails', 'trailhead', 'hike', 'hiking', 'offroad_route', 'forest_road']),
   camp: new Set([
     'camp', 'camping', 'campground', 'campsite', 'rv', 'rv_park',
-    'private_stay', 'private_camp', 'glamping', 'lodging',
-    'dispersed_camp', 'overnight_parking',
+    'private_stay', 'private_camp', 'glamping', 'lodging', 'farm_stay',
+    'ranch', 'winery', 'dispersed_camp', 'overnight_parking',
+    'informal_camp', 'wild_camp',
   ]),
   service: new Set([
     'service', 'fuel', 'gas_station', 'service_station', 'resupply', 'grocery', 'market',
@@ -124,6 +125,7 @@ export type SearchV2LegacyPlace = {
   provider_result_id?: string;
   source_attribution?: string;
   detail_ref?: string;
+  profile_id?: string;
 };
 
 export type SearchV2DisplayPlace = Omit<SearchV2LegacyPlace, 'lat' | 'lng'> & {
@@ -141,6 +143,7 @@ export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2Di
     ? result.coordinates.lng
     : undefined;
   const sourceLabel = cleanLabel(result.provenance?.source_label) || cleanLabel(result.kind) || 'Place';
+  const normalizedKind = cleanKind(result.kind || result.categories?.[0] || 'place');
   return {
     name: result.title,
     lat,
@@ -163,6 +166,9 @@ export function searchResultV2ToDisplayPlace(result: SearchResultV2): SearchV2Di
     provider_result_id: result.provenance.provider_result_id || undefined,
     source_attribution: result.provenance.attribution || undefined,
     detail_ref: result.detail_ref || undefined,
+    profile_id: normalizedKind === 'trail' || normalizedKind === 'trailhead'
+      ? result.canonical_place_id || result.detail_ref || undefined
+      : undefined,
     resolution_required: lat == null || lng == null,
   };
 }
@@ -188,7 +194,7 @@ export function searchResultV2ToLegacyPlace(result: SearchResultV2): SearchV2Leg
 
 export function offlineSearchResultsV2(
   request: SearchRequestV2,
-  places: SearchablePlaceV2[],
+  places: readonly SearchablePlaceV2[],
   surface: SearchSurfaceV2,
 ): SearchResultV2[] {
   const query = normalize(request.query);

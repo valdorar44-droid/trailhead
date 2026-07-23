@@ -179,13 +179,14 @@ test('presentation adapter rejects unresolved coordinates and keeps stable ident
   assert.equal(display.lat, undefined);
   assert.equal(display.resolution_required, true);
   const place = searchResultV2ToLegacyPlace({
-    result_id: 'result-1', canonical_place_id: 'place-1', title: 'Mesa Arch', subtitle: 'Canyonlands', kind: 'trailhead', categories: ['scenic'], coordinates: { lat: 38.389, lng: -109.868 }, provenance: { provider: 'trailhead', source_label: 'Trailhead', temporary_use_only: false }, persistence_policy: 'canonical', score: 10, match_reason: 'exact',
+    result_id: 'result-1', canonical_place_id: 'place-1', title: 'Mesa Arch', subtitle: 'Canyonlands', kind: 'trailhead', categories: ['scenic'], coordinates: { lat: 38.389, lng: -109.868 }, detail_ref: 'place-1', provenance: { provider: 'trailhead', source_label: 'Trailhead', temporary_use_only: false }, persistence_policy: 'canonical', score: 10, match_reason: 'exact',
   });
   assert.equal(place?.id, 'place-1');
   assert.equal(place?.result_id, 'result-1');
   assert.equal(place?.summary, 'Canyonlands');
   assert.equal(place?.persistence_policy, 'canonical');
   assert.equal(place?.temporary_use_only, false);
+  assert.equal(place?.profile_id, 'place-1');
 });
 
 test('presentation keeps temporary provider policy through display and legacy adapters', () => {

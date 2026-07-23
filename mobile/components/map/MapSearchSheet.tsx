@@ -22,6 +22,7 @@ import { cleanExploreSourceLabel } from '@/lib/exploreContextFilters';
 import {
   searchV2ShouldShowEmptyState,
   type SearchPageModeV2,
+  type SearchIntentV2,
   type SearchResultV2,
   type SearchV2SessionStatus,
 } from '@/lib/searchV2';
@@ -51,6 +52,9 @@ export type MapSearchQuickAction = {
   label: string;
   query: string;
   icon: keyof typeof Ionicons.glyphMap;
+  intent?: SearchIntentV2;
+  categories?: string[];
+  radiusMeters?: number;
 };
 
 type Props = {
@@ -132,6 +136,8 @@ export default function MapSearchSheet({
     resultCount: activeResults.length,
   });
   const showSearchAll = usingSearchV2 && searchV2Mode === 'suggest' && cleanQuery.length >= 2;
+  const hasUsefulRows = usingSearchV2 ? activeResults.length > 0 : usableResults.length > 0;
+  const showFieldSpinner = searching && !hasUsefulRows;
 
   useEffect(() => {
     if (!visible) return;
@@ -185,7 +191,7 @@ export default function MapSearchSheet({
                 autoCapitalize="none"
                 onSubmitEditing={() => onSubmit()}
               />
-              {searching ? (
+              {showFieldSpinner ? (
                 <ActivityIndicator size="small" color={C.orange} />
               ) : cleanQuery ? (
                 <TouchableOpacity
@@ -234,9 +240,14 @@ export default function MapSearchSheet({
               <View style={s.resultsBlock}>
                 <View style={s.resultsHeader}>
                   <Text style={s.sectionTitle}>{usingSearchV2 && searchV2Mode === 'results' ? 'RESULTS' : 'SUGGESTIONS'}</Text>
-                  {(usingSearchV2 ? activeResults.length : usableResults.length) ? (
-                    <Text style={s.count}>{usingSearchV2 ? activeResults.length : usableResults.length}</Text>
-                  ) : null}
+                  <View style={s.resultsHeaderStatus}>
+                    {usingSearchV2 && searchV2IsEnriching && activeResults.length > 0 ? (
+                      <ActivityIndicator testID="map.search.enriching" size="small" color={C.orange} />
+                    ) : null}
+                    {(usingSearchV2 ? activeResults.length : usableResults.length) ? (
+                      <Text style={s.count}>{usingSearchV2 ? activeResults.length : usableResults.length}</Text>
+                    ) : null}
+                  </View>
                 </View>
                 {showInitialSkeleton ? (
                   <View style={s.skeletonList} testID="map.search.loading" accessibilityLabel="Loading search results">
@@ -537,6 +548,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   skeletonIcon: { width: 36, height: 36, borderRadius: 12, backgroundColor: C.s2 },
   skeletonCopy: { flex: 1, gap: 8 },
   resultsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  resultsHeaderStatus: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   count: { color: C.text3, fontSize: 12, lineHeight: 16, fontWeight: '600' },
   stateCard: {
     minHeight: 72,

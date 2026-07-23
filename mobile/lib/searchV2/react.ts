@@ -7,6 +7,11 @@ import {
   type SearchV2SessionState,
 } from './session';
 import { normalizeSearchV2Query } from './cache';
+import {
+  nextFrozenSearchCenterStateV2,
+  type FrozenSearchCenterStateV2,
+  type SearchCenterSnapshotV2,
+} from './searchOrigin';
 
 export type UseSearchV2SessionOptions = {
   enabled: boolean;
@@ -15,6 +20,16 @@ export type UseSearchV2SessionOptions = {
   offlineProvider?: OfflineSearchProviderV2;
   debounceMs?: number;
 };
+
+export function useFrozenSearchCenterV2(
+  active: boolean,
+  liveCenter: SearchCenterSnapshotV2 | null | undefined,
+  sessionKey = 'default',
+): SearchCenterSnapshotV2 | undefined {
+  const snapshotRef = useRef<FrozenSearchCenterStateV2>({ active: false, sessionKey, center: undefined });
+  snapshotRef.current = nextFrozenSearchCenterStateV2(snapshotRef.current, active, liveCenter, sessionKey);
+  return snapshotRef.current.center;
+}
 
 export function useSearchV2Session({
   enabled,
@@ -52,6 +67,9 @@ export function useSearchV2Session({
     if (current.mode === 'suggest' && current.query === normalizeSearchV2Query(query)) return;
     controller.setQuery(query);
   }, [controller]);
+  const setContext = useCallback((next: SearchV2SessionContext, refreshCurrent = true) => {
+    controller.setContext(next, refreshCurrent);
+  }, [controller]);
   const search = useCallback((query?: string) => controller.search(query), [controller]);
   const refreshOffline = useCallback(() => controller.refreshOffline(), [controller]);
   const loadNextPage = useCallback(() => controller.loadNextPage(), [controller]);
@@ -62,6 +80,7 @@ export function useSearchV2Session({
 
   return {
     state,
+    setContext,
     setQuery,
     search,
     refreshOffline,

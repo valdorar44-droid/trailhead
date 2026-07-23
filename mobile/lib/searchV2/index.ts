@@ -4,5 +4,6 @@ export * from './client';
 export * from './explore';
 export * from './presentation';
 export * from './react';
+export * from './searchOrigin';
 export * from './session';
 export * from './types';

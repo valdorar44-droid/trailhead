@@ -9,6 +9,7 @@ import {
   offlineV2CampPinToDetail,
   offlineV2PlaceToCampPin,
 } from '../campDetail';
+import { normalizeOfflineV2PoiType } from '../placeTypes';
 import {
   filterDownloadedSearchResultsV2,
   OFFLINE_SEARCH_INDEX_PAGE_SIZE_V2,
@@ -25,6 +26,26 @@ async function flush() {
 }
 
 async function main() {
+  const durableCampPlaceTypes: OsmPoi['type'][] = [
+    'camp', 'camping', 'campground', 'campsite', 'rv', 'rv_park',
+    'dispersed_camp', 'overnight_parking', 'informal_camp', 'wild_camp',
+    'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp',
+  ];
+  for (const type of durableCampPlaceTypes) {
+    assert.equal(normalizeOfflineV2PoiType(type), type, `${type} must survive Offline V2 normalization`);
+    assert.ok(offlineV2PlaceToCampPin({
+      id: `offline-${type}`,
+      name: `Downloaded ${type}`,
+      lat: 38.5,
+      lng: -109.5,
+      type,
+      source: 'trailhead_offline_v2',
+    }), `${type} must open the complete downloaded campground sheet`);
+  }
+  assert.equal(normalizeOfflineV2PoiType('RV Park'), 'rv_park');
+  assert.equal(normalizeOfflineV2PoiType('dispersed-camp'), 'dispersed_camp');
+  assert.equal(normalizeOfflineV2PoiType('unsupported place type'), 'poi');
+
   const richCamp = {
     id: 'osm_camp_node_100',
     name: 'Juniper Camp',
@@ -408,6 +429,8 @@ async function main() {
   const catalogSource = readFileSync('lib/offlineV2/expoCatalog.ts', 'utf8');
   const sqliteSource = readFileSync('lib/offlineV2/sqliteIndex.ts', 'utf8');
   assert.match(catalogSource, /searchDownloadedOfflineIndexesV2\(\{/);
+  assert.match(catalogSource, /const indexed = await searchExpoOfflineV2Catalog[\s\S]*const legacy = offlineSearchResultsV2/);
+  assert.doesNotMatch(catalogSource, /if \(fallback\.length > 0\) return fallback;/);
   assert.match(catalogSource, /offline_entity_kind: fallbackType === 'trail' \? 'trail_profile' : 'place'/);
   assert.match(catalogSource, /trailGeometryRepresentativePointV2\(feature\.geometry, manifest\.bounds\)/);
   assert.match(sqliteSource, /LIMIT \? OFFSET \?/);

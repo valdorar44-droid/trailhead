@@ -791,9 +791,11 @@ export default function PremiumPlaceSheet({
 
         {stage !== 'peek' && (
           <ScrollView
+            style={s.contentScroll}
             showsVerticalScrollIndicator={false}
             scrollEnabled={stage === 'full'}
             contentContainerStyle={[s.content, addToRoutePrimary && !!onAddToRoute && !transientPlace && s.contentWithStickyAction]}
+            testID={`${sheetModel.testID}-content`}
           >
             {hero ? (
               <TouchableOpacity style={s.hero} activeOpacity={0.9} onPress={() => setGalleryIndex(0)}>
@@ -1317,7 +1319,12 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
     borderTopLeftRadius: 26,
     borderTopRightRadius: 26,
   },
-  sheetContent: { padding: 0 },
+  // TrailheadSheet wraps content in an inner View. Both that wrapper and the
+  // body scroller need a bounded flex height; otherwise React Native can
+  // measure the flexing PlaceSheetShell at header height and collapse the
+  // result body to zero (the visible symptom is a titled, entirely blank
+  // sheet after selecting a Search V2 row).
+  sheetContent: { padding: 0, flex: 1, minHeight: 0 },
   sheetTip: {
     borderRadius: 24,
   },
@@ -1328,6 +1335,7 @@ const makeStyles = (C: ColorPalette) => StyleSheet.create({
   tipTitle: { color: C.text, fontSize: 15, fontWeight: '900' },
   tipMeta: { color: C.text3, fontSize: 10, fontFamily: mono, marginTop: 2 },
   iconBtn: { width: 34, height: 34, borderRadius: 17, alignItems: 'center', justifyContent: 'center', backgroundColor: C.glassStrong, borderWidth: 1, borderColor: C.border },
+  contentScroll: { flex: 1, minHeight: 0 },
   content: { paddingBottom: 22 },
   contentWithStickyAction: { paddingBottom: 102 },
   hero: { height: 164, marginHorizontal: 12, borderRadius: 22, overflow: 'hidden', backgroundColor: C.s2 },

@@ -20,7 +20,14 @@ export type HttpSearchV2ClientOptions = {
   isEnabled: SearchV2FeatureGate;
   fetchImpl?: typeof fetch;
   getHeaders?: () => Record<string, string> | Promise<Record<string, string>>;
+  deadlinesMs?: Partial<Record<'suggest' | 'results' | 'resolve', number>>;
 };
+
+const DEFAULT_SEARCH_DEADLINES_MS = Object.freeze({
+  suggest: 1_500,
+  results: 1_500,
+  resolve: 4_000,
+});
 
 export class SearchV2FeatureDisabledError extends Error {
   readonly code = 'search_v2_disabled';
@@ -43,17 +50,34 @@ export class SearchV2HttpError extends Error {
   }
 }
 
+export class SearchV2TimeoutError extends Error {
+  readonly code = 'search_v2_timeout';
+  readonly timeoutMs: number;
+
+  constructor(timeoutMs: number) {
+    super('Search took too long.');
+    this.name = 'SearchV2TimeoutError';
+    this.timeoutMs = timeoutMs;
+  }
+}
+
 export class HttpSearchV2Client implements SearchV2Client {
   private readonly baseUrl: string;
   private readonly isEnabled: SearchV2FeatureGate;
   private readonly fetchImpl: typeof fetch;
   private readonly getHeaders: () => Record<string, string> | Promise<Record<string, string>>;
+  private readonly deadlinesMs: Record<'suggest' | 'results' | 'resolve', number>;
 
   constructor(options: HttpSearchV2ClientOptions) {
     this.baseUrl = options.baseUrl.replace(/\/+$/, '');
     this.isEnabled = options.isEnabled;
     this.fetchImpl = options.fetchImpl ?? fetch;
     this.getHeaders = options.getHeaders ?? (() => ({}));
+    this.deadlinesMs = {
+      suggest: normalizedDeadline(options.deadlinesMs?.suggest, DEFAULT_SEARCH_DEADLINES_MS.suggest),
+      results: normalizedDeadline(options.deadlinesMs?.results, DEFAULT_SEARCH_DEADLINES_MS.results),
+      resolve: normalizedDeadline(options.deadlinesMs?.resolve, DEFAULT_SEARCH_DEADLINES_MS.resolve),
+    };
   }
 
   suggest(request: SearchRequestV2, options: SearchV2CallOptions = {}): Promise<SearchPageV2> {
@@ -73,7 +97,7 @@ export class HttpSearchV2Client implements SearchV2Client {
       method: 'POST',
       body: JSON.stringify(body),
       signal: options.signal,
-    });
+    }, this.deadlinesMs.resolve);
     if (!isResolveResponse(payload)) throw new SearchV2HttpError('Search returned an invalid response.', 502, payload);
     return payload;
   }
@@ -88,34 +112,90 @@ export class HttpSearchV2Client implements SearchV2Client {
     const payload = await this.requestJson(`/api/search/v2/${mode}?${query}`, {
       method: 'GET',
       signal: options.signal,
-    });
+    }, this.deadlinesMs[mode]);
     if (!isSearchPage(payload)) throw new SearchV2HttpError('Search returned an invalid response.', 502, payload);
     return payload;
   }
 
-  private async requestJson(path: string, init: RequestInit): Promise<unknown> {
-    if (!(await this.isEnabled())) throw new SearchV2FeatureDisabledError();
-    const extraHeaders = await this.getHeaders();
-    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
-      ...init,
-      headers: {
-        Accept: 'application/json',
-        ...(init.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
-        ...extraHeaders,
-      },
+  private async requestJson(path: string, init: RequestInit, deadlineMs: number): Promise<unknown> {
+    return runWithSearchDeadline(deadlineMs, init.signal, async signal => {
+      if (!(await this.isEnabled())) throw new SearchV2FeatureDisabledError();
+      const extraHeaders = await this.getHeaders();
+      const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+        ...init,
+        signal,
+        headers: {
+          Accept: 'application/json',
+          ...(init.method === 'POST' ? { 'Content-Type': 'application/json' } : {}),
+          ...extraHeaders,
+        },
+      });
+      const payload = await response.json().catch(error => {
+        if (signal.aborted) throw error;
+        return null;
+      });
+      if (!response.ok) {
+        const detail = isRecord(payload) ? payload.detail : payload;
+        const message = typeof detail === 'string'
+          ? detail
+          : isRecord(detail) && typeof detail.message === 'string'
+            ? detail.message
+            : 'Search request failed.';
+        throw new SearchV2HttpError(message, response.status, detail);
+      }
+      return payload;
     });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) {
-      const detail = isRecord(payload) ? payload.detail : payload;
-      const message = typeof detail === 'string'
-        ? detail
-        : isRecord(detail) && typeof detail.message === 'string'
-          ? detail.message
-          : 'Search request failed.';
-      throw new SearchV2HttpError(message, response.status, detail);
-    }
-    return payload;
   }
+}
+
+async function runWithSearchDeadline<T>(
+  deadlineMs: number,
+  callerSignal: AbortSignal | null | undefined,
+  task: (signal: AbortSignal) => Promise<T>,
+): Promise<T> {
+  if (callerSignal?.aborted) throw abortError();
+  const controller = new AbortController();
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined;
+  let cancelFromCaller: (() => void) | undefined;
+  const work = task(controller.signal);
+  const timeout = new Promise<never>((_resolve, reject) => {
+    timer = globalThis.setTimeout(() => {
+      controller.abort();
+      reject(new SearchV2TimeoutError(deadlineMs));
+    }, deadlineMs);
+  });
+  const callerCancellation = callerSignal
+    ? new Promise<never>((_resolve, reject) => {
+        cancelFromCaller = () => {
+          controller.abort();
+          reject(abortError());
+        };
+        callerSignal.addEventListener('abort', cancelFromCaller, { once: true });
+      })
+    : null;
+  try {
+    return await Promise.race(callerCancellation
+      ? [work, timeout, callerCancellation]
+      : [work, timeout]);
+  } finally {
+    if (timer) globalThis.clearTimeout(timer);
+    if (callerSignal && cancelFromCaller) callerSignal.removeEventListener('abort', cancelFromCaller);
+  }
+}
+
+function abortError(): Error {
+  try {
+    return new DOMException('Aborted', 'AbortError');
+  } catch {
+    const error = new Error('Aborted');
+    error.name = 'AbortError';
+    return error;
+  }
+}
+
+function normalizedDeadline(value: number | undefined, fallback: number): number {
+  if (!Number.isFinite(value) || Number(value) <= 0) return fallback;
+  return Math.max(10, Math.round(Number(value)));
 }
 
 export function normalizeRequest(request: SearchRequestV2, mode: SearchPageModeV2): SearchRequestV2 {
@@ -153,7 +233,7 @@ export function normalizeRequest(request: SearchRequestV2, mode: SearchPageModeV
     surface: request.surface ?? 'map',
     intent: request.intent ?? 'any',
     scope,
-    categories: Array.from(new Set((request.categories ?? []).map(value => value.trim()).filter(Boolean))).slice(0, 12),
+    categories: Array.from(new Set((request.categories ?? []).map(value => value.trim()).filter(Boolean))).slice(0, 24),
     filters: request.filters ?? {},
     limit: clampInteger(request.limit ?? (mode === 'suggest' ? 8 : 20), 1, mode === 'suggest' ? 10 : 30),
     include_external: includeExternal,

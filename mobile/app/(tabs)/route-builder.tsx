@@ -45,7 +45,7 @@ import {
   EMPTY_EXPO_OFFLINE_V2_CATALOG,
   loadExpoOfflineV2Catalog,
   mergeOfflinePoiInventory,
-  searchExpoOfflineV2Catalog,
+  searchExpoOfflineV2CatalogWithFallback,
 } from '@/lib/offlineV2/expoCatalog';
 import { resolveDownloadedSearchResultPoi } from '@/lib/offlineV2/offlineSearchPresentation';
 import { deleteOfflineTrail, listOfflineTrails, type OfflineTrail } from '@/lib/offlineTrails';
@@ -81,6 +81,7 @@ import {
   searchResultV2ToDisplayPlace,
   searchResultV2ToLegacyPlace,
   searchV2ShouldShowEmptyState,
+  useFrozenSearchCenterV2,
   useSearchV2Session,
 } from '@/lib/searchV2';
 import { computeOfflineReadiness } from '@/lib/offlineReadiness';
@@ -1894,18 +1895,22 @@ function RouteBuilderScreenContent() {
       if (!accountInventoryIsVisible(inventory.scope_key, currentScope, accountStorage.isCleaning())) {
         return [];
       }
-      const indexed = await searchExpoOfflineV2Catalog(inventory.catalog, request, 'route_editor');
+      const results = await searchExpoOfflineV2CatalogWithFallback(
+        inventory.catalog,
+        request,
+        'route_editor',
+        inventory.places,
+      );
       if (!accountInventoryIsVisible(
         inventory.scope_key,
         accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id),
         accountStorage.isCleaning(),
       )) return [];
-      const fallback = offlineSearchResultsV2(request, inventory.places, 'route_editor');
-      const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
-      return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
+      return results;
     },
     [],
   );
+  const routeSearchOrigin = useFrozenSearchCenterV2(screenActivity.isActive, userLoc, 'route-editor');
   const routeSearchV2Context = useMemo(() => ({
     surface: 'route_editor' as const,
     // This field adds every kind of route stop, so keep Trailhead and
@@ -1913,10 +1918,10 @@ function RouteBuilderScreenContent() {
     // The backend may add durable destination completion for this surface.
     intent: 'any' as const,
     scope: 'global' as const,
-    center: userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
+    center: routeSearchOrigin,
     include_external: true,
     limit: 10,
-  }), [userLoc?.lat, userLoc?.lng]);
+  }), [routeSearchOrigin?.lat, routeSearchOrigin?.lng]);
   const routeSearchV2 = useSearchV2Session({
     enabled: searchV2Enabled,
     active: screenActivity.isActive,

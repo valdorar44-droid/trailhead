@@ -68,7 +68,7 @@ import { loadAllPlacePoints } from '@/lib/offlinePlacePacks';
 import {
   EMPTY_EXPO_OFFLINE_V2_CATALOG,
   loadExpoOfflineV2Catalog,
-  searchExpoOfflineV2Catalog,
+  searchExpoOfflineV2CatalogWithFallback,
 } from '@/lib/offlineV2/expoCatalog';
 import { resolveDownloadedSearchResultPoi } from '@/lib/offlineV2/offlineSearchPresentation';
 import { originalsApi } from '@/lib/originals/api';
@@ -83,6 +83,7 @@ import {
   exploreSearchIntentForCategory,
   isTemporarySearchResultV2,
   productFeaturesAllowSearchV2,
+  useFrozenSearchCenterV2,
   useSearchV2Session,
   type SearchResultV2,
 } from '@/lib/searchV2';
@@ -2479,44 +2480,51 @@ function GuideScreenContent() {
         currentScope,
         accountStorage.isCleaning(),
       )) return [];
-      const indexed = await searchExpoOfflineV2Catalog(inventory.catalog, request, 'explore');
+      const results = await searchExpoOfflineV2CatalogWithFallback(
+        inventory.catalog,
+        request,
+        'explore',
+        inventory.places,
+      );
       if (!accountInventoryIsVisible(
         inventory.scope_key,
         accountInventoryScope(accountStorage.epoch(), useStore.getState().user?.id),
         accountStorage.isCleaning(),
       )) return [];
-      const fallback = offlineSearchResultsV2(request, inventory.places, 'explore');
-      const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
-      return [...indexed, ...fallback.filter(item => !seen.has(item.canonical_place_id || item.result_id))];
+      return results;
     },
     [],
+  );
+  const exploreSearchV2Active = screenActivity.isActive
+    && tab === 'explore'
+    && exploreSearchOpen
+    && exploreSearchOwnerIsCurrent
+    && exploreCategory !== 'guided'
+    && exploreCategory !== 'tours';
+  const exploreSearchOrigin = useFrozenSearchCenterV2(
+    exploreSearchV2Active,
+    exploreNearbySearchCenter
+      ? { lat: exploreNearbySearchCenter.lat, lng: exploreNearbySearchCenter.lng }
+      : userLoc,
+    `${exploreMode}:${guidedTourSelectedDestinationKey || exploreServiceDestinationQuery || 'local'}`,
   );
   const exploreSearchContext = useMemo(() => ({
     surface: 'explore' as const,
     intent: exploreSearchIntentForCategory(exploreCategory),
     scope: exploreMode === 'nearby' && exploreNearbySearchCenter ? 'nearby' as const : 'global' as const,
-    center: exploreNearbySearchCenter
-      ? { lat: exploreNearbySearchCenter.lat, lng: exploreNearbySearchCenter.lng }
-      : userLoc ? { lat: userLoc.lat, lng: userLoc.lng } : undefined,
+    center: exploreSearchOrigin,
     categories: exploreSearchCategoriesForCategory(exploreCategory),
     include_external: exploreCategory !== 'guided' && exploreCategory !== 'tours',
     limit: 10,
   }), [
     exploreCategory,
     exploreMode,
-    exploreNearbySearchCenter?.lat,
-    exploreNearbySearchCenter?.lng,
-    userLoc?.lat,
-    userLoc?.lng,
+    exploreSearchOrigin?.lat,
+    exploreSearchOrigin?.lng,
   ]);
   const exploreSearchV2 = useSearchV2Session({
     enabled: searchV2Enabled,
-    active: screenActivity.isActive
-      && tab === 'explore'
-      && exploreSearchOpen
-      && exploreSearchOwnerIsCurrent
-      && exploreCategory !== 'guided'
-      && exploreCategory !== 'tours',
+    active: exploreSearchV2Active,
     context: exploreSearchContext,
     offlineProvider: exploreSearchOfflineProvider,
   });

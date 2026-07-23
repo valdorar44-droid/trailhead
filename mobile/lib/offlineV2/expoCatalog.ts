@@ -1,5 +1,6 @@
 import type { OsmPoi } from '../api';
 import type { SearchRequestV2, SearchResultV2, SearchSurfaceV2 } from '../searchV2/types';
+import { offlineSearchResultsV2 } from '../searchV2/presentation';
 import { createExpoOfflineV2Persistence } from './expoAdapters';
 import { markOfflineV2ArtifactsConsumed } from './consumption';
 import { searchExpoOfflineIndex, validateExpoOfflineSearchIndex } from './sqliteIndex';
@@ -8,6 +9,7 @@ import {
   offlineInstallationRevisionV2,
   searchDownloadedOfflineIndexesV2,
 } from './offlineSearchPresentation';
+import { normalizeOfflineV2PoiType } from './placeTypes';
 import { trailGeometryRepresentativePointV2 } from './trailGeometry';
 import type {
   OfflineBoundsV2,
@@ -55,19 +57,6 @@ function within(bounds: OfflineBoundsV2, lat: number, lng: number) {
   return lat >= bounds.south && lat <= bounds.north && lng >= bounds.west && lng <= bounds.east;
 }
 
-const POI_TYPES = new Set([
-  'camp', 'water', 'trail', 'trailhead', 'viewpoint', 'peak', 'pass', 'glacier', 'bridge',
-  'checkpost', 'settlement', 'hot_spring', 'fuel', 'propane', 'dump', 'shower', 'laundromat',
-  'lodging', 'private_stay', 'farm_stay', 'ranch', 'winery', 'glamping', 'private_camp',
-  'food', 'grocery', 'mechanic', 'parking', 'attraction', 'hardware', 'camping', 'medical',
-  'parts', 'wifi', 'poi',
-]);
-
-function poiType(value: unknown): OsmPoi['type'] {
-  const clean = String(value || '').trim().toLowerCase().replace(/[\s-]+/g, '_');
-  return (POI_TYPES.has(clean) ? clean : 'poi') as OsmPoi['type'];
-}
-
 function documentToPoi(
   document: Record<string, unknown>,
   bounds: OfflineBoundsV2,
@@ -78,7 +67,7 @@ function documentToPoi(
   const id = String(document.id || '').trim();
   const name = String(document.name || document.label || '').trim();
   if (lat == null || lng == null || !id || !name || !within(bounds, lat, lng)) return null;
-  const type = poiType(fallbackType === 'trail'
+  const type = normalizeOfflineV2PoiType(fallbackType === 'trail'
     ? 'trail'
     : document.type || document.category || document.kind || document.subtype);
   return {
@@ -235,6 +224,33 @@ export async function searchExpoOfflineV2Catalog(
     canonical: catalog.places,
     queryIndex,
   });
+}
+
+/**
+ * Prefer the installed FTS/spatial index, then fill any remaining result slots
+ * from legacy downloaded rows. This keeps typo/ranking support authoritative
+ * and avoids scanning a large in-memory catalog before the first async yield.
+ */
+export async function searchExpoOfflineV2CatalogWithFallback(
+  catalog: ExpoOfflineV2Catalog,
+  request: SearchRequestV2,
+  surface: SearchSurfaceV2,
+  fallback: readonly OsmPoi[],
+  queryIndex: typeof searchExpoOfflineIndex = searchExpoOfflineIndex,
+): Promise<SearchResultV2[]> {
+  const indexed = await searchExpoOfflineV2Catalog(catalog, request, surface, queryIndex);
+  const limit = Math.max(1, Math.min(30, Math.round(request.limit ?? 10)));
+  if (indexed.length >= limit || fallback.length === 0) return indexed.slice(0, limit);
+
+  // Yield before a legacy scan so an index miss cannot monopolize the input
+  // event that scheduled the search.
+  await Promise.resolve();
+  const legacy = offlineSearchResultsV2(request, fallback, surface);
+  const seen = new Set(indexed.map(item => item.canonical_place_id || item.result_id));
+  return [
+    ...indexed,
+    ...legacy.filter(item => !seen.has(item.canonical_place_id || item.result_id)),
+  ].slice(0, limit);
 }
 
 /** Deterministic installed-content fingerprint suitable for view refresh checks. */

@@ -1,0 +1,34 @@
+appId: ${APP_ID}
+name: Map search opens a complete place sheet
+tags:
+  - search
+  - map
+  - sheets
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Yellowstone National Park"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:nps:yell"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.result.place:nps:yell"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yell-content"
+    timeout: 10000
+- assertVisible: "Navigate"
+- assertVisible:
+    id: "place-sheet-place-place-place-nps-yell-content"
+- takeScreenshot: map-search-complete-place-sheet

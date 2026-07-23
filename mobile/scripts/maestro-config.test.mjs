@@ -36,6 +36,8 @@ assert.deepEqual(flowNames, [
   '02-search-rapid-typing.yaml',
   '03-map-warm-return.yaml',
   '04-search-race-qa.yaml',
+  '05-search-canonical-result.yaml',
+  '06-map-search-opens-complete-sheet.yaml',
 ]);
 for (const name of flowNames) {
   const source = readFileSync(join(workspace, 'flows', name), 'utf8');
@@ -57,6 +59,11 @@ assert.match(deterministicSearchFlow, /id:\s*"qa\.search-race\.run"/);
 assert.match(deterministicSearchFlow, /Late result rejected/);
 assert.match(deterministicSearchFlow, /No result opened automatically/);
 assert.match(deterministicSearchFlow, /Explicit selection confirmed/);
+
+const completeMapSheetFlow = readFileSync(join(workspace, 'flows', '06-map-search-opens-complete-sheet.yaml'), 'utf8');
+assert.match(completeMapSheetFlow, /id:\s*"map\.search\.inline\.result\.place:nps:yell"/);
+assert.match(completeMapSheetFlow, /id:\s*"place-sheet-place-place-place-nps-yell-content"/);
+assert.match(completeMapSheetFlow, /assertVisible:\s*"Navigate"/);
 
 const parsed = parseMaestroArgs([
   '--device', 'emulator-5554',

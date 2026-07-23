@@ -1,5 +1,13 @@
 # Trailhead Mobile Handoff Memory
 
+## Active 1.0.10 checkpoint — read first
+
+The current authoritative implementation checkpoint is:
+
+- `docs/checkpoints/trailhead-1.0.10-active-checkpoint.md`
+
+Read it before resuming after any restart or context compaction. It records the exact branch/commits, protected files, completed tests and crawls, unresolved blockers, and next action. Do not restart completed design or audit work unless that checkpoint explicitly says to repeat it.
+
 Use this after a Codex restart:
 
 1. Read `CLAUDE.md`.

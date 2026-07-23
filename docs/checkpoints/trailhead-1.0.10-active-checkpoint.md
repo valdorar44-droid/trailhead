@@ -1,6 +1,6 @@
 # Trailhead 1.0.10 Active Checkpoint
 
-Last updated: 2026-07-23 06:20:05 CDT (America/Winnipeg)
+Last updated: 2026-07-23 08:00:30 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -91,6 +91,39 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Do not repeat: the 33-run crawl, NPS research, Figma packets, broad manual layer audit, cold QA proof, or first V3 run without the continuation/profile fix.
 - Task-owned background processes after report finalization: none.
 
+## Checkpoint A.1 — Diagnostic continuation and compact trip hydration ready
+
+- Timestamp: `2026-07-23T08:00:30-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`.
+- Implementation HEAD before this checkpoint-only commit: `c84f844ae7c6bcf329b2005270f841ee97494d43`.
+- Intentional commits:
+  - `f5ca0b3fed6abb3213201c6b5d065a06f8f08cee test(android): complete memory diagnostics after layer errors`
+  - `37dba293380db5100a5ebbe6e1509686d4388d26 feat(api): add compact compatible trip listing`
+  - `c84f844ae7c6bcf329b2005270f841ee97494d43 fix(mobile): hydrate compact trip summaries safely`
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- Installed candidate identity is unchanged because these commits are not deployed yet:
+  - Android build `59`, runtime `native-1.0.10-android.1`, source `83287394ce41f1100bd980c9249f20d364b51db7`, update `019f8e05-bad8-7925-8d46-54d2627b76b8`.
+  - iOS runtime `native-1.0.10-ios.1`, source `83287394ce41f1100bd980c9249f20d364b51db7`, update `019f8e05-bad8-745d-bc46-1ef41615d7cb`.
+- Memory Gate V3 now records recoverable enable/disable workload failures as incomplete attempts and continues all ten diagnostic attempts after proving process, foreground, renderer, and safety-cap health. Incomplete attempts never enter authoritative curves or satisfy the ten-cycle requirement. Fatal ADB/measurement/process/foreground/cancellation/safety failures still stop the run. Layer-state convergence now polls for 15 seconds without a blind second tap, post-cycle recovery requires the exact all-disabled baseline, and final saved choices remain fail-closed and relaunch-verified.
+- The server now supports `GET /api/trips/v2?include_legacy_v1=false` while defaulting to the complete legacy response for released clients. Compact pages return canonical card/timeline/route fields plus an availability marker, emit tombstone-only deletions, and keep individual trip reads complete.
+- Compact V2 writes preserve server-owned legacy data, synchronize existing old-client rows, retain rich matched campground/fuel/day/builder fields, and treat explicit empty summary, regions, days, stops, route, camps, and fuel as authoritative. Occurrence-aware identity prevents repeated or nearby places from inheriting another stop's reservations/site data. Inbound client documents remain capped at 2 MiB; trusted preservation of already-stored legacy data has a fixed 8 MiB cap and transactional rollback.
+- Mobile hydration now stores the compact marker once instead of repeatedly serializing full legacy payloads. Opening a non-downloaded compact trip fetches its full individual detail lazily, rejects a changed remote revision, preserves actionable offline copy, and merges rich legacy detail without overriding canonical V2 membership or explicit clear states. Existing downloaded trips remain the offline-first detail source.
+- Verification passed on the implementation HEAD:
+  - `python3 -m unittest tests.test_trip_graph_v2`: 37/37.
+  - `npm run test:trip-repository`.
+  - `npm run test:android-map-memory`.
+  - `npx tsc --noEmit`.
+  - `git diff --check`.
+  - `npm run audit:prepreview`: passed in 489.9 seconds, including native/config drift, Android Auto debug tests, Search V2, Offline V1/V2, Originals, Explore/NPS/Viator/copy/privacy checks, TypeScript, and 773 backend tests.
+- The earlier pre-preview attempt was not counted: it exposed a brittle source assertion after `legacy_v1_available` was added. The guard was corrected to verify both server-owned fields and the complete suite was rerun successfully.
+- Independent regression review found and closed explicit-clear resurrection, stale old-client mirrors, compact updates over 2 MiB, changed-day camp/fuel placement, distinct-ID collisions, repeated-place occurrence matching, and sparse-mirror data loss. Code-level P0/P1 defects for this change: none.
+- Rollout precaution: query production for authoritative legacy trip documents already exceeding the trusted 8 MiB cap before deployment. No document contents should be logged; record counts and maximum byte size only.
+- Existing evidence remains `/home/sean/.openclaw/workspace/trailhead/output/android-map-memory-gate/2026-07-23T10-21-20-418Z/report.json` with SHA-256 `f2140b20b8a0ae3d3297a4f41052e9bad694c87f9826b4c27469be9ec408867a`. No new device result exists yet.
+- Open P0/P1 defects: none in the committed gate/compact hydration implementation. M1 acceptance remains pending backend deployment, one paired preview OTA, exact identity proof, and a complete Samsung Memory Gate V3 result.
+- Exact next action: run the count/max-size production legacy preflight, deploy backend compatibility, verify health/default/compact/individual contracts, publish one paired preview OTA from one clean immutable SHA with Sentry source maps, then run the exact Samsung gate without clearing account data.
+- Do not repeat: Figma packets, NPS research, the 33-run Android crawl, broad manual Layers testing, the first incomplete V3 run, or the just-passed full pre-preview suite unless source changes invalidate it.
+- Task-owned background processes: none. The Gradle daemon was explicitly stopped after the successful pre-preview run; no Metro, Expo, Maestro, memory-gate, or test process remains.
+
 ## Verified completed work
 
 - The final frozen source tree passed `npm run audit:prepreview`:
@@ -153,11 +186,12 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 
 ## Next exact actions
 
-1. Fix the bounded layer workload so a transient toggle failure is recorded/retried and cannot terminate the ten diagnostic cycles unless the app dies or crosses a phase safety cap. Keep exact verification and final restoration fail-closed.
-2. Profile signed-in Explore hydration and retained repository state using the captured phase breakdown; add the backward-compatible compact trip-list contract only if evidence still identifies legacy trip documents as the cause.
-3. Commit/push the evidence-backed fixes, update the gate checkpoint, and rerun the exact **Checkpoint A** command without clearing the signed-in account.
-4. Preserve the new atomic report, SHA-256, full ten-cycle curves, post-Map/Explore recovery, process/exit evidence, and exact layer restoration.
-5. After memory passes, run only the affected Android delta and iOS shared spot-check, then assemble Checkpoint B and the M1 review packet. Do not begin M2 with an unresolved P0/P1.
+1. Push the intentional implementation commits plus this checkpoint; keep `.cursor/` and the Explore index unstaged.
+2. Run a count/max-size-only production preflight for authoritative legacy trip documents above 8 MiB. Do not log document contents.
+3. Deploy backend compatibility first and verify health, default full-list compatibility, compact-list redaction/projection, individual full detail, and a non-destructive compact update fixture.
+4. Publish one paired preview OTA from the same clean immutable SHA with Sentry source maps and verify Android/iOS source, runtime, and update identities.
+5. Rerun the exact **Checkpoint A** Samsung command without clearing the signed-in account. Preserve the atomic report, SHA-256, ten-cycle curves, recovery, exit evidence, QA counts, and exact layer restoration.
+6. After memory passes, run only the affected Android delta and iOS shared spot-check, then assemble Checkpoint B and the M1 review packet. Do not begin M2 with an unresolved P0/P1.
 
 ## Checkpoint maintenance
 

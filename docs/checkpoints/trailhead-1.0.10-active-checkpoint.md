@@ -1,6 +1,6 @@
 # Trailhead 1.0.10 Active Checkpoint
 
-Last updated: 2026-07-23 09:39:11 CDT (America/Winnipeg)
+Last updated: 2026-07-23 09:51:01 CDT (America/Winnipeg)
 
 ## Resume protocol
 
@@ -16,8 +16,8 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Branch: `feat/trailhead-1.0.10-overhaul`
 - Current implementation/release HEAD before this checkpoint-only commit: `62e40b1519e7a53061dd4cac02a2db96edf0be0a`.
 - Exact source now published to the paired preview: `62e40b1519e7a53061dd4cac02a2db96edf0be0a`. The checkpoint commit that records this evidence is documentation/test-only and does not require another OTA.
-- Memory Gate V3 implementation baseline: `d5d73924dc5a969a66ac9eba2b85acca5db0cc19`; current evidence harness/checkpoint HEAD before this documentation-only commit: `65451cf7bab0eed23a1f50c212cb084ff78031f8`.
-- Previous installed-preview source `83287394ce41f1100bd980c9249f20d364b51db7` is superseded by the paired `62e40b1` preview below; device installation/identity proof for the new update is pending.
+- Memory Gate V3 implementation baseline: `d5d73924dc5a969a66ac9eba2b85acca5db0cc19`; current evidence harness/checkpoint HEAD before this documentation-only commit: `aec820449c835aef38f0d86ecd9c1dda84db56a3`.
+- Previous installed-preview source `83287394ce41f1100bd980c9249f20d364b51db7` is superseded by the paired `62e40b1` preview below; Android installation and exact QA identity are verified.
 - M1 commit series created from the verified tree:
   - `4fa0379 feat(api): harden fire and explore delivery`
   - `d44618b feat(mobile): preserve explore context and map state`
@@ -187,6 +187,22 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 - Do not repeat: the two partial carousel reports, manual Layers functionality checks, production/deployment/OTA work, Figma/NPS research, or the 33-run crawl.
 - Task-owned process state: no Gradle, Metro, Expo, EAS, Railway, Maestro, test, or memory-gate process remains. Only ADB is intentionally active.
 
+## Checkpoint A.5 — Cold Explore ANR captured
+
+- Timestamp: `2026-07-23T09:51:01-05:00`.
+- Branch: `feat/trailhead-1.0.10-overhaul`; exact evidence-harness HEAD before this checkpoint-only commit: `aec820449c835aef38f0d86ecd9c1dda84db56a3`; installed OTA source remains `62e40b1519e7a53061dd4cac02a2db96edf0be0a`.
+- Protected Explore index SHA-256 remains `7e59e5e2273dbbe1a26d7bbd4d947faa20935c51fb79c464eed8a17babf4d8f4`. `.cursor/` and `dashboard/explore_serving_index_v2.json` remain excluded and unstaged.
+- The third exact-candidate gate stopped before sampling with `explore_retained_tree_not_ready`. Its atomic report is `output/android-map-memory-gate/2026-07-23T14-40-56-655Z/report.json`, SHA-256 `8ada8d5783b7c2974bf5ba0a0648b5221a7595c6766878b145f16ae6cf1c3d6c`.
+- This failure revealed a real Android ANR rather than a Layers defect. Android reported that `MainActivity` had not answered a `MotionEvent` for `10010` ms. The system dialog offered `Close app` and `Wait`; QA selected `Wait`. The same process, PID `5476`, recovered after about eight seconds with Explore and the five-tab shell still mounted.
+- The read-only evidence bundle is `output/android-audit/2026-07-23T14-43-52-626Z--m1-explore-anr/`. Its sanitized manifest SHA-256 is `ff791bbdf34d621fa430a4af4110cd7c23963f6923319d041ee48d5dfb154de1`; sanitized `lastanr.txt` SHA-256 is `290e3056c3f128cb3572fbe62fc0b56fdceef68b9a2a4274c0e6c810163fdf1e`. Sensitive client metadata was scrubbed and the retained evidence contains no matching key/token patterns.
+- At capture the still-live process used total PSS `505583` KB, RSS `546616` KB, and SwapPSS `68620` KB. The host was under high aggregate load and Trailhead consumed about half a CPU over the preceding interval. This may amplify the older Samsung stress result, but it does not excuse a ten-second main-thread input stall.
+- `ApplicationExitInfo` reported no new record because the process did not die. The gate must supplement exit-info with live ANR detection so a recoverable ANR cannot be misreported as stable.
+- Layers remain user-confirmed working and were never reached by this attempt. Do not reopen Layers or repeat its manual audit.
+- Open P0 defects: none. Open P1: cold signed-in Explore can block Android input long enough to show an ANR dialog. M1 is not accepted and M2 must not begin.
+- Exact next action: correlate the sanitized ANR window with cold signed-in hydration and Explore startup work; add a deterministic regression for the demonstrated stall; repair only the evidenced hot path; teach the gate to fail on a live ANR; publish a paired preview OTA only if application source changes; then rerun identity and the complete ten-cycle gate.
+- Do not repeat: Figma/NPS research, the 33-run crawl, broad Layers testing, the two carousel-only reports, backend deployment, or the paired OTA before the ANR cause is fixed.
+- Task-owned process state: no Gradle, Metro, Expo, EAS, Railway, Maestro, Trailhead test, or memory-gate process remains. ADB remains intentionally active for the Samsung and emulator.
+
 ## Verified completed work
 
 - The final frozen source tree passed `npm run audit:prepreview`:
@@ -249,23 +265,11 @@ Read this file before resuming the 1.0.10 overhaul after a restart or context co
 
 ## Next exact actions
 
-1. Install/load update `019f8f37-81ed-7366-86bc-59e977335e08` on Samsung without clearing the signed-in account. Cold-open the QA deep link and verify version `1.0.10`, build `59`, channel `preview`, source `62e40b1519e7a53061dd4cac02a2db96edf0be0a`, runtime `native-1.0.10-android.1`, update ID, and compact repository count/byte diagnostics.
-2. Run from `mobile/` with a wrapper timeout above 70 minutes and never start a second copy while the original process is alive:
-
-   ```powershell
-   npm run audit:android-map-memory -- --serial RFCR408DA9B `
-     --expected-version-name 1.0.10 `
-     --expected-version-code 59 `
-     --expected-commit-sha 62e40b1519e7a53061dd4cac02a2db96edf0be0a `
-     --expected-build-commit-sha cd61f6c3dbf9d176bc49b2d96a2c13fc9470dcaf `
-     --runtime native-1.0.10-android.1 `
-     --build-id 06142308-0199-46cc-8a4c-fb9d45bca25e `
-     --update-id 019f8f37-81ed-7366-86bc-59e977335e08
-   ```
-
-3. Preserve the atomic report, report SHA-256, ten-cycle phase table/curves, recovery, process/exit evidence, compact hydration diagnostics, and exact saved-layer restoration.
-4. If the gate passes, run only the affected Android delta: warm Map/Explore returns, search/keyboard retention, fire/style/filter/legend presence, NPS list → detail → map → back, exact-place imagery, and stable sheet identity/frames.
-5. Apply the paired iOS update `019f8f37-81ed-71a8-886f-6f4768560f4e`; after the launch-wait procedure, verify the iOS identity and repeat only shared M1 delta checks.
+1. Diagnose the cold signed-in Explore ANR captured in `output/android-audit/2026-07-23T14-43-52-626Z--m1-explore-anr/`, using bounded log/timestamp reads that do not expose scrubbed metadata.
+2. Add deterministic characterization for the demonstrated startup stall and live-ANR gate detection. Fix only the correlated application hot path; keep phase budgets and Layers behavior unchanged.
+3. Run focused unit/type/copy/privacy tests. If application source changes, run the relevant pre-preview gates, publish one paired preview OTA from one immutable SHA with Sentry source maps, and verify both identities.
+4. Rerun the complete Samsung Memory Gate V3 without clearing the signed-in account. Preserve the atomic report, hashes, ten-cycle curves, recovery, live/exit evidence, and exact saved-layer restoration.
+5. Only after the gate passes, run the affected Android delta and paired iOS M1 spot checks already listed in Checkpoint B scope.
 6. Commit/push Checkpoint B and assemble the M1 review packet. Do not begin M2 while any P0/P1 remains.
 
 ## Checkpoint maintenance

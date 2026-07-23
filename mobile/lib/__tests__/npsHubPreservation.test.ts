@@ -104,6 +104,14 @@ test('official canonical rail labels survive client filtering without keyword gu
   }), true);
 });
 
+test('changing sheet identity resets the shared place sheet to the top', () => {
+  const testDirectory = dirname(fileURLToPath(import.meta.url));
+  const sheetSource = readFileSync(resolve(testDirectory, '../../components/PremiumPlaceSheet.tsx'), 'utf8');
+  assert.match(sheetSource, /const contentScrollRef = useRef<ScrollView>\(null\)/);
+  assert.match(sheetSource, /contentScrollRef\.current\?\.scrollTo\(\{ y: 0, animated: false \}\)/);
+  assert.match(sheetSource, /<ScrollView\s+ref=\{contentScrollRef\}/s);
+});
+
 for (const fixture of NPS_HUB_PRESERVATION_FIXTURES) {
   test(`${fixture.name} preserves adaptive depth and exact main-map return context`, () => {
     const unchangedInput = JSON.parse(JSON.stringify(fixture.input));

@@ -429,6 +429,7 @@ export default function PremiumPlaceSheet({
   const [alertEnd, setAlertEnd] = useState('');
   const [failedPhotoUrls, setFailedPhotoUrls] = useState<string[]>([]);
   const dragY = useRef(new Animated.Value(0)).current;
+  const contentScrollRef = useRef<ScrollView>(null);
   const transientPlace = place ? isTransientMapboxPlace(place) : false;
   const sheetModel = useMemo(
     () => adaptGenericPlaceSheet(place ?? { name: 'Place', type: 'place' }),
@@ -477,6 +478,7 @@ export default function PremiumPlaceSheet({
     setGalleryIndex(null);
     setFailedPhotoUrls([]);
     setLoading(false);
+    contentScrollRef.current?.scrollTo({ y: 0, animated: false });
     if (transientPlace) return;
     let canonicalCancelled = false;
     api.canonicalizePlace(canonicalPayload(place))
@@ -794,6 +796,7 @@ export default function PremiumPlaceSheet({
 
         {stage !== 'peek' && (
           <ScrollView
+            ref={contentScrollRef}
             style={s.contentScroll}
             showsVerticalScrollIndicator={false}
             scrollEnabled={stage === 'full'}

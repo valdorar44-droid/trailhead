@@ -1172,6 +1172,38 @@ async function remoteReconciliation() {
   assert.equal(repository.getTrip('wrong-owner'), null);
 }
 
+async function identicalRemoteTripsDoNotRewriteTheRepository() {
+  const storage = new CountingStorage();
+  const repository = deterministicRepository(storage).repository;
+  await repository.initialize('compact-idempotency');
+  const local = await repository.upsertTrip(createTripDocument({
+    id: 'compact-trip',
+    ownerScope: 'account:compact-idempotency',
+    title: 'Compact trip',
+    revision: 7,
+    legacy: {
+      source: 'server_legacy_v1',
+      payload: { trip: { plan: { trip_name: 'Large legacy trip' } } },
+    },
+  }), { enqueueSync: false });
+  storage.resetCounts();
+
+  const compactRemote = {
+    ...local,
+    legacy: { source: 'server_legacy_v1_omitted', payload: {} },
+  };
+  const first = await repository.applyRemoteTrip(compactRemote);
+  assert.equal(first.record.legacy?.source, 'server_legacy_v1_omitted', 'a compact same-revision row replaces the local legacy payload once');
+  assert.equal(storage.writes, 1);
+
+  const revisionAfterCompaction = repository.getSnapshot().revision;
+  storage.resetCounts();
+  const second = await repository.applyRemoteTrip(compactRemote);
+  assert.equal(second.record.legacy?.source, 'server_legacy_v1_omitted');
+  assert.equal(storage.writes, 0, 'an identical compact row does not serialize the repository again');
+  assert.equal(repository.getSnapshot().revision, revisionAfterCompaction);
+}
+
 async function legacyAcknowledgementDoesNotDualWrite() {
   const { repository } = deterministicRepository();
   await repository.initialize(77);
@@ -1651,6 +1683,7 @@ async function run() {
   await failedRemoteBatchWriteRollsBackWithoutEmission();
   await remoteBatchIsCanceledOrCommittedWithinOneAccountScope();
   await remoteReconciliation();
+  await identicalRemoteTripsDoNotRewriteTheRepository();
   await legacyAcknowledgementDoesNotDualWrite();
   await authChangeCancelsOutboxBeforeNextMutation();
   await startupOutboxSuccessUsesOneDurableAcknowledgement();

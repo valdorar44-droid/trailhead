@@ -42,12 +42,22 @@ import {
   tripWithReconciledRevision,
   type TripRevisionReconciliationSnapshot,
 } from '@/lib/tripRevisionReconciliation';
-import { syncTripRepositoryWritesForTrip } from '@/lib/tripRepositorySync';
+import {
+  accountTripDocumentToRepository,
+  syncTripRepositoryWritesForTrip,
+} from '@/lib/tripRepositorySync';
+import {
+  OMITTED_SERVER_LEGACY_SOURCE,
+  preserveOmittedServerLegacy,
+  requireMatchingTripDetailRevision,
+  TripDetailResolutionError,
+} from '@/lib/tripRepository/compactSync';
 import {
   beginTripWriteBarrier,
   clearTripWriteBarrier,
 } from '@/lib/tripWriteBarrier';
 import type { TripLibraryFilter, TripLibraryItem, TripLibrarySnapshot } from './types';
+import { mergeCanonicalAndLegacyTripResults } from './tripResultMerge';
 import { tripPreviewMedia } from './tripPreview';
 import { assertTripOperationOwnerScope } from './tripOperationScope';
 
@@ -145,9 +155,27 @@ function legacyTripResult(document: TripDocumentV2): TripResult | null {
   const payload = document.legacy?.payload;
   const root = record(payload);
   const nested = record(root?.payload);
+  const legacyTrip = record(root?.trip);
+  const legacyTripWithEnvelope = legacyTrip ? {
+    ...legacyTrip,
+    route_geometry: legacyTrip.route_geometry ?? root?.route_geometry,
+    builder_state: legacyTrip.builder_state ?? root?.builder_state,
+  } : null;
   const nestedLegacy = record(root?.legacy_v1);
   const nestedLegacyPayload = record(nestedLegacy?.payload);
-  for (const candidate of [payload, root?.payload, root?.legacy_v1, nestedLegacy?.payload, nested?.payload, nestedLegacyPayload?.payload]) {
+  for (const candidate of [
+    legacyTripWithEnvelope,
+    payload,
+    root?.payload,
+    root?.legacy_v1,
+    legacyTrip?.trip,
+    nested?.trip,
+    nestedLegacy?.trip,
+    nestedLegacy?.payload,
+    nested?.payload,
+    nestedLegacyPayload?.trip,
+    nestedLegacyPayload?.payload,
+  ]) {
     const trip = tripResultFromCandidate(candidate, document);
     if (trip) return trip;
   }
@@ -156,20 +184,23 @@ function legacyTripResult(document: TripDocumentV2): TripResult | null {
 
 function waypointFromDocumentItem(document: TripDocumentV2, index: number): Waypoint {
   const item = document.items[index];
-  const legacyWaypoint = record(item.facts?.legacyWaypoint);
+  const legacyWaypoint = record(item.facts?.legacyWaypoint)
+    ?? record(item.facts?.legacy_waypoint);
   return {
     ...((legacyWaypoint ?? {}) as Partial<Waypoint>),
     day: Math.max(1, Math.round(item.day || 1)),
     name: item.title,
     type: item.kind === 'activity' ? 'bookable_experience' : item.kind,
-    description: item.summary || '',
+    description: item.summary || String(legacyWaypoint?.description || legacyWaypoint?.summary || ''),
     land_type: item.kind,
-    notes: item.note || '',
-    lat: item.coordinates?.lat,
-    lng: item.coordinates?.lng,
-    verified_source: item.source,
+    notes: item.note || String(legacyWaypoint?.notes || ''),
+    lat: item.coordinates?.lat ?? finiteNumber(legacyWaypoint?.lat) ?? undefined,
+    lng: item.coordinates?.lng ?? finiteNumber(legacyWaypoint?.lng) ?? undefined,
+    verified_source: item.source || String(legacyWaypoint?.verified_source || '') || undefined,
     needs_review: document.readiness.status !== 'ready',
-    verification_note: item.sourceUrl || item.bookingUrl || '',
+    verification_note: item.sourceUrl
+      || item.bookingUrl
+      || String(legacyWaypoint?.verification_note || ''),
   };
 }
 
@@ -186,14 +217,16 @@ function milesFromDocument(document: TripDocumentV2, legacy = legacyTripResult(d
   return routeMeters != null && routeMeters > 0 ? routeMeters / 1609.344 : 0;
 }
 
-function tripResultFromDocument(document: TripDocumentV2): TripResult {
+function tripResultFromDocument(document: TripDocumentV2, useOverviewFallback = true): TripResult {
   const waypoints = document.items.flatMap((item, index) => (
     item.kind === 'note' ? [] : [waypointFromDocumentItem(document, index)]
   ));
   const dayCount = Math.max(
-    1,
+    0,
     document.days.length,
-    ...document.items.map(item => Math.max(1, Math.round(item.day || 1))),
+    ...document.items.flatMap(item => (
+      item.kind === 'note' ? [] : [Math.max(1, Math.round(item.day || 1))]
+    )),
   );
   const daysByNumber = new Map(document.days.map(day => [day.day, day]));
   const dailyItinerary: DayPlan[] = Array.from({ length: dayCount }, (_, index) => {
@@ -233,8 +266,8 @@ function tripResultFromDocument(document: TripDocumentV2): TripResult {
     trip_id: document.id,
     plan: {
       trip_name: document.title,
-      overview: document.summary || 'Open the route to review stops, access, and timing.',
-      duration_days: dayCount,
+      overview: document.summary || (useOverviewFallback ? 'Open the route to review stops, access, and timing.' : ''),
+      duration_days: Math.max(1, dayCount),
       states: document.regions,
       total_est_miles: milesFromDocument(document, null),
       waypoints,
@@ -348,7 +381,7 @@ async function reconcileActiveTrip() {
     items: converted.items,
     offline: { ...current.offline, ...converted.offline },
     route: converted.route,
-    legacy: converted.legacy,
+    legacy: preserveOmittedServerLegacy(current.legacy, converted.legacy),
     archivedAt: undefined,
   }, { expectedRevision: current.revision });
 }
@@ -403,9 +436,36 @@ async function resolveTrip(item: TripLibraryItem): Promise<TripResult> {
   if (currentActive?.trip_id === item.id) return currentActive;
   const offline = await loadOfflineTrip(item.id);
   if (offline) return offline;
-  const legacy = legacyTripResult(item.document);
-  if (legacy) return legacy;
-  if (!hasMapDetail(item.document)) {
+  let resolvedDocument = item.document;
+  if (item.document.legacy?.source === OMITTED_SERVER_LEGACY_SOURCE) {
+    let fullDocument: TripDocumentV2;
+    try {
+      const remote = await api.getTripDocumentV2(item.id);
+      fullDocument = accountTripDocumentToRepository(remote, item.document.ownerScope);
+    } catch (error) {
+      throw new TripDetailResolutionError(
+        'detail_unavailable',
+        'Connect to open the complete trip, or download it before going offline.',
+        { cause: error },
+      );
+    }
+    const matchingFullDocument = requireMatchingTripDetailRevision(item.document, fullDocument);
+    // The compact row is already the canonical, migration-safe projection.
+    // Fetch the individual document only to restore server-owned legacy detail;
+    // older legacy-only rows can still have raw waypoint shapes in that full body.
+    resolvedDocument = {
+      ...item.document,
+      legacy: matchingFullDocument.legacy,
+    };
+  }
+  const legacy = legacyTripResult(resolvedDocument);
+  if (legacy) {
+    return mergeCanonicalAndLegacyTripResults(
+      tripResultFromDocument(resolvedDocument, false),
+      legacy,
+    );
+  }
+  if (!hasMapDetail(resolvedDocument)) {
     try {
       const remote = await api.getTrip(item.id);
       if (remote?.plan) return { ...remote, trip_id: item.id };
@@ -413,7 +473,7 @@ async function resolveTrip(item: TripLibraryItem): Promise<TripResult> {
       // Older account records may not have v1 detail. The canonical document is still usable.
     }
   }
-  return tripResultFromDocument(item.document);
+  return tripResultFromDocument(resolvedDocument);
 }
 
 export async function resolveLibraryTrip(item: TripLibraryItem) {
@@ -449,6 +509,7 @@ function freshDocument(item: TripLibraryItem) {
 }
 
 function publicTripError(error: unknown, fallback: string) {
+  if (error instanceof TripDetailResolutionError) return error;
   if (error instanceof TripRepositoryConflictError) {
     return new Error('This trip changed while you were viewing it. Refresh and try again.');
   }

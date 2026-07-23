@@ -258,7 +258,7 @@ assert(
 assert(
   tripRepositorySync.includes('experienceRef: tripExperienceRefFromApi(item.experience_ref)')
     && tripLibraryAdapter.includes('.filter(document => !isTrailheadOriginalTripDocument(document))')
-    && api.includes("'experience_ref'>"),
+    && /document: Omit<AccountTripDocumentV2,[\s\S]*?'experience_ref'[\s\S]*?'legacy_v1_available'/.test(api),
   'Server-owned Original provenance must keep cloned fulfillment trips out of the editable Plan trip list and out of client writes.',
 );
 

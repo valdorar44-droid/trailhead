@@ -61,6 +61,37 @@ const factsPreview = tripPreviewMedia(createTripDocument({
 }), new Map());
 assert.equal(factsPreview.imageUrl, 'https://images.example.test/photo-stop.jpg');
 
+const compactLegacyItemPreview = tripPreviewMedia(createTripDocument({
+  id: 'compact-legacy-item-trip',
+  title: 'Compact legacy item trip',
+  items: [{
+    schemaVersion: TRIP_ITEM_SCHEMA_VERSION,
+    id: 'compact-photo-stop',
+    kind: 'camp',
+    title: 'Dead Horse Point Campground',
+    day: 1,
+    order: 0,
+    coordinates: { lat: 38.4869, lng: -109.7396 },
+    facts: {
+      legacy_waypoint: {
+        photo_url: 'https://images.example.test/dead-horse.jpg',
+        site_types: ['RV', 'Tent'],
+      },
+    },
+    createdAt: now,
+    updatedAt: now,
+  }],
+}), new Map());
+assert.equal(
+  compactLegacyItemPreview.imageUrl,
+  'https://images.example.test/dead-horse.jpg',
+  'compact legacy projections retain exact-place card imagery',
+);
+assert.deepEqual(
+  compactLegacyItemPreview.pins.map(pin => [pin.lat, pin.lng]),
+  [[38.4869, -109.7396]],
+);
+
 const nestedLegacyPreview = tripPreviewMedia(createTripDocument({
   id: 'nested-legacy-trip',
   title: 'Nested legacy trip',

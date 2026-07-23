@@ -177,6 +177,7 @@ export function tripDocumentFromTripResult(trip: TripResult): TripDocumentV2 {
         route_pois: trip.route_pois,
         timeline: trip.timeline,
         builder_state: trip.builder_state,
+        route_geometry: trip.route_geometry,
       },
     },
   });

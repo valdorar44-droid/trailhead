@@ -36,6 +36,7 @@ import {
 import { canonicalSavedEntityId, tripDocumentFromTripResult } from './tripCompatibility';
 import { saveOfflineTrip } from './offlineTrips';
 import { tripWriteBarrierPending } from './tripWriteBarrier';
+import { preserveOmittedServerLegacy } from './tripRepository/compactSync';
 import {
   legacyTripSaveContextIsCurrent,
   type LegacyTripSaveContext,
@@ -416,6 +417,7 @@ function mergeActiveTripDocument(current: TripDocumentV2, converted: TripDocumen
     bookings: converted.bookings.length ? converted.bookings : current.bookings,
     alerts: current.alerts,
     offline: { ...current.offline, ...converted.offline },
+    legacy: preserveOmittedServerLegacy(current.legacy, converted.legacy),
     createdAt: current.createdAt,
     archivedAt: undefined,
   };

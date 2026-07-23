@@ -1,5 +1,15 @@
 import assert from 'node:assert/strict';
 import { deleteRemoteTripWithRevisionRebase } from '../deleteSync';
+import {
+  canonicalTripRouteForWrite,
+  compactTripListPath,
+  normalizeTripLegacyV1,
+  OMITTED_SERVER_LEGACY_SOURCE,
+  preserveOmittedServerLegacy,
+  requireMatchingTripDetailRevision,
+  TripDetailResolutionError,
+  tripLegacyV1ForWrite,
+} from '../compactSync';
 
 function httpError(status: number) {
   return Object.assign(new Error(`HTTP ${status}`), { status });
@@ -122,11 +132,110 @@ async function explicitSingleDeleteRebasesSavedAndArchivedTrips() {
   }
 }
 
+function compactListAndLegacyRoundTripAreStable() {
+  assert.equal(
+    compactTripListPath(),
+    '/api/trips/v2?limit=100&include_archived=true&include_deleted=true&include_legacy_v1=false',
+  );
+  assert.equal(
+    compactTripListPath('next page'),
+    '/api/trips/v2?limit=100&include_archived=true&include_deleted=true&include_legacy_v1=false&cursor=next+page',
+  );
+
+  const raw = {
+    request: 'Denver to Moab',
+    trip: { plan: { trip_name: 'Desert route' } },
+    route_geometry: { coordinates: [[-109.5, 38.5], [-108.5, 39]] },
+  };
+  assert.deepEqual(normalizeTripLegacyV1(raw), raw);
+  assert.deepEqual(normalizeTripLegacyV1({ source: 'server_legacy_v1', payload: raw }), raw);
+  assert.deepEqual(normalizeTripLegacyV1({
+    source: 'server_legacy_v1',
+    payload: { source: 'server_legacy_v1', payload: raw },
+  }), raw, 'old nested sync envelopes are flattened at the boundary');
+  assert.deepEqual(
+    normalizeTripLegacyV1({ source: 'real-source', payload: raw, note: 'domain data' }),
+    { source: 'real-source', payload: raw, note: 'domain data' },
+    'objects with domain fields are not mistaken for sync envelopes',
+  );
+  assert.deepEqual(tripLegacyV1ForWrite({ source: 'server_legacy_v1', payload: raw }), raw);
+  assert.equal(
+    tripLegacyV1ForWrite({ source: OMITTED_SERVER_LEGACY_SOURCE, payload: {} }),
+    undefined,
+    'a compact-list marker is omitted so the server keeps its authoritative legacy payload',
+  );
+  const omitted = { source: OMITTED_SERVER_LEGACY_SOURCE, payload: {} };
+  const reconstructed = { source: 'trip_result', payload: { plan: { trip_name: 'Fallback' } } };
+  assert.equal(
+    preserveOmittedServerLegacy(omitted, reconstructed),
+    omitted,
+    'active-trip mirroring keeps the omission marker instead of replacing authoritative server legacy',
+  );
+  assert.equal(
+    preserveOmittedServerLegacy(undefined, reconstructed),
+    reconstructed,
+  );
+  const mergedAuthoritative = preserveOmittedServerLegacy({
+    source: 'server_legacy_v1',
+    payload: {
+      request: 'Keep this request',
+      trip: { plan: { trip_name: 'Old route' }, licensed_note: 'Keep this note' },
+      builder_state: { mode: 'manual', private_option: 'keep' },
+      unknown_server_field: { keep: true },
+    },
+  }, {
+    source: 'trip_result',
+    payload: {
+      plan: { trip_name: 'Edited route' },
+      route_geometry: { coords: [[-109.5, 38.5], [-109.4, 38.6]] },
+      builder_state: { mode: 'manual', private_option: 'keep', snap: true },
+    },
+  });
+  const mergedPayload = mergedAuthoritative?.payload as Record<string, unknown>;
+  assert.equal(mergedPayload.request, 'Keep this request');
+  assert.equal(
+    (mergedPayload.trip as { licensed_note?: string })?.licensed_note,
+    'Keep this note',
+  );
+  assert.deepEqual(
+    (mergedPayload.trip as { plan?: unknown })?.plan,
+    { trip_name: 'Edited route' },
+  );
+  assert.deepEqual(mergedPayload.unknown_server_field, { keep: true });
+  assert.deepEqual(mergedPayload.route_geometry, {
+    coords: [[-109.5, 38.5], [-109.4, 38.6]],
+  });
+}
+
+function compactDetailRevisionMustMatch() {
+  const full = { revision: 7, title: 'Current trip' };
+  assert.equal(requireMatchingTripDetailRevision({ revision: 7 }, full), full);
+  assert.throws(
+    () => requireMatchingTripDetailRevision({ revision: 6 }, full),
+    (error: unknown) => error instanceof TripDetailResolutionError
+      && error.code === 'revision_changed'
+      && error.message === 'This trip changed while you were viewing it. Refresh and try again.',
+  );
+}
+
+function clearedCanonicalRouteIsExplicitInWrites() {
+  const route = canonicalTripRouteForWrite(undefined);
+  assert.deepEqual(route, {});
+  assert.deepEqual(
+    JSON.parse(JSON.stringify({ route })).route,
+    {},
+    'JSON serialization retains the canonical empty-route marker',
+  );
+}
+
 async function run() {
   await conflictRebasesAgainstTheLiveDraft();
   await missingOrAlreadyDeletedTripsSucceed();
   await rebaseIsBoundedAndNeverDeletesANonDraft();
   await explicitSingleDeleteRebasesSavedAndArchivedTrips();
+  compactListAndLegacyRoundTripAreStable();
+  compactDetailRevisionMustMatch();
+  clearedCanonicalRouteIsExplicitInWrites();
   console.log('trip repository sync deletion contracts passed');
 }
 

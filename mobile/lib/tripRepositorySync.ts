@@ -47,6 +47,13 @@ import {
   deleteRemoteTripWithRevisionRebase,
   isOutboxEntrySupersededByDelete,
 } from './tripRepository/deleteSync';
+import {
+  canonicalTripRouteForWrite,
+  compactTripListPath,
+  normalizeTripLegacyV1,
+  OMITTED_SERVER_LEGACY_SOURCE,
+  tripLegacyV1ForWrite,
+} from './tripRepository/compactSync';
 
 export { deleteRemoteTripWithRevisionRebase } from './tripRepository/deleteSync';
 
@@ -151,7 +158,7 @@ function remoteSavedEntity(item: AccountLibraryItem, ownerScope: string): SavedE
   };
 }
 
-function remoteTripDocument(item: AccountTripDocumentV2, ownerScope: string): TripDocumentV2 {
+export function accountTripDocumentToRepository(item: AccountTripDocumentV2, ownerScope: string): TripDocumentV2 {
   const dates = record(item.dates);
   const days = Array.isArray(item.days) ? item.days.map((value, index) => {
     const day = record(value);
@@ -208,7 +215,7 @@ function remoteTripDocument(item: AccountTripDocumentV2, ownerScope: string): Tr
   }) : [];
   const readiness = record(item.readiness);
   const readinessStatus = readiness.status === 'ready' || readiness.status === 'review' ? readiness.status : 'not_started';
-  const legacy = record(item.legacy_v1);
+  const legacy = normalizeTripLegacyV1(item.legacy_v1);
   return {
     schemaVersion: 2,
     id: item.trip_id,
@@ -235,7 +242,11 @@ function remoteTripDocument(item: AccountTripDocumentV2, ownerScope: string): Tr
     createdAt: milliseconds(item.created_at),
     updatedAt: milliseconds(item.updated_at),
     archivedAt: item.archived_at ? milliseconds(item.archived_at) : undefined,
-    legacy: Object.keys(legacy).length ? { source: 'server_legacy_v1', payload: legacy } : undefined,
+    legacy: legacy && Object.keys(legacy).length
+      ? { source: 'server_legacy_v1', payload: legacy }
+      : item.legacy_v1_available === true
+        ? { source: OMITTED_SERVER_LEGACY_SOURCE, payload: {} }
+        : undefined,
   };
 }
 
@@ -308,12 +319,7 @@ function tripNotePayload(note: TripNoteV1): Record<string, unknown> {
 }
 
 function tripDocumentPayload(trip: TripDocumentV2, expectedRevision: number): AccountTripDocumentWritePayload {
-  const legacyPayload = trip.legacy?.payload;
-  const legacy = legacyPayload && typeof legacyPayload === 'object' && !Array.isArray(legacyPayload)
-    ? { source: trip.legacy?.source, payload: legacyPayload }
-    : trip.legacy?.source
-      ? { source: trip.legacy.source }
-      : undefined;
+  const legacy = tripLegacyV1ForWrite(trip.legacy);
   const document: AccountTripDocumentWritePayload['document'] = {
     schema_version: 2,
     trip_id: trip.id,
@@ -340,7 +346,7 @@ function tripDocumentPayload(trip: TripDocumentV2, expectedRevision: number): Ac
     bookings: trip.bookings,
     alerts: trip.alerts,
     offline: trip.offline,
-    route: trip.route ? { ...trip.route } : undefined,
+    route: canonicalTripRouteForWrite(trip.route),
     visibility: trip.visibility,
     source: trip.source ?? 'trailhead-mobile',
     legacy_v1: legacy,
@@ -407,12 +413,6 @@ function libraryListPath(cursor?: string) {
   const query = new URLSearchParams({ limit: '100', include_archived: 'true', include_deleted: 'true' });
   if (cursor) query.set('cursor', cursor);
   return `/api/library?${query.toString()}`;
-}
-
-function tripListPath(cursor?: string) {
-  const query = new URLSearchParams({ limit: '100', include_archived: 'true', include_deleted: 'true' });
-  if (cursor) query.set('cursor', cursor);
-  return `/api/trips/v2?${query.toString()}`;
 }
 
 function expectedServerRevision(entry: RepositoryOutboxEntryV1): number {
@@ -521,7 +521,7 @@ async function preserveRemoteConflict(session: ActiveSyncSession, entry: Reposit
       );
       return;
     }
-    await applyTripRepositoryRemoteTrip(remoteTripDocument(remote, ownerScope));
+    await applyTripRepositoryRemoteTrip(accountTripDocumentToRepository(remote, ownerScope));
     return;
   }
   const remote = await syncRequest<AccountLibraryItem>(
@@ -563,7 +563,7 @@ async function hydrateWithSession(session: ActiveSyncSession): Promise<{ trips: 
   let tripCursor: string | undefined;
   const tripCursors = new Set<string>();
   do {
-    const page = await syncRequest<AccountTripDocumentPage>(session, tripListPath(tripCursor));
+    const page = await syncRequest<AccountTripDocumentPage>(session, compactTripListPath(tripCursor));
     recordTripRepositoryHydrationPage(scopeKey, page.items.length);
     if (!sessionIsCurrent(session)) {
       recordTripRepositoryHydrationResult(scopeKey, { skipped: page.items.length });
@@ -578,7 +578,7 @@ async function hydrateWithSession(session: ActiveSyncSession): Promise<{ trips: 
         }
       : {
           kind: 'trip',
-          record: remoteTripDocument(item, session.ownerScope),
+          record: accountTripDocumentToRepository(item, session.ownerScope),
         });
     const batch = await applyTripRepositoryRemoteBatch(remoteItems, { expectedOwnerScope: session.ownerScope });
     recordTripRepositoryHydrationResult(scopeKey, {

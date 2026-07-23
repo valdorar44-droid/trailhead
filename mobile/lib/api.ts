@@ -536,6 +536,7 @@ export const api = {
     if (options.cursor) query.set('cursor', options.cursor);
     if (options.status) query.set('status', options.status);
     if (options.includeArchived) query.set('include_archived', 'true');
+    if (options.includeLegacyV1 === false) query.set('include_legacy_v1', 'false');
     return req<AccountTripDocumentPage>(`/api/trips/v2?${query.toString()}`);
   },
   createTripDocumentV2: (payload: AccountTripDocumentWritePayload, idempotencyKey: string) =>
@@ -2564,6 +2565,7 @@ export interface AccountTripDocumentV2 {
   source: string;
   experience_ref?: AccountTripExperienceRef | null;
   legacy_v1?: Record<string, unknown> | null;
+  legacy_v1_available?: boolean;
   created_at: number;
   updated_at: number;
   archived_at?: number | null;
@@ -2572,7 +2574,7 @@ export interface AccountTripDocumentV2 {
 export interface AccountTripDocumentWritePayload {
   trip_id?: string;
   expected_revision: number;
-  document: Omit<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at' | 'experience_ref'>
+  document: Omit<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at' | 'experience_ref' | 'legacy_v1_available'>
     & Partial<Pick<AccountTripDocumentV2, 'revision' | 'created_at' | 'updated_at' | 'archived_at' | 'deleted_at'>>;
 }
 export interface AccountTripDocumentListOptions {
@@ -2580,6 +2582,7 @@ export interface AccountTripDocumentListOptions {
   cursor?: string;
   status?: Exclude<AccountTripDocumentStatus, 'deleted'>;
   includeArchived?: boolean;
+  includeLegacyV1?: boolean;
 }
 export interface AccountTripDocumentPage {
   items: AccountTripDocumentV2[];

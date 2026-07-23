@@ -70,6 +70,11 @@ function imageFromRecord(value: unknown): string | undefined {
       if (url) return url;
     }
   }
+  const legacyWaypoint = source.legacyWaypoint ?? source.legacy_waypoint;
+  if (legacyWaypoint !== value) {
+    const legacyUrl = imageFromRecord(legacyWaypoint);
+    if (legacyUrl) return legacyUrl;
+  }
   return undefined;
 }
 

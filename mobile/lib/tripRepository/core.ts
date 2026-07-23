@@ -1095,6 +1095,14 @@ export class TripRepository {
     const dirtyEntries = this.state.outbox.filter(entry => entry.entityType === 'trip'
       && entry.entityId === remote.id
       && entry.operation !== 'delete');
+    if (
+      local
+      && dirtyEntries.length === 0
+      && localRevision === remote.revision
+      && comparableJson(local) === comparableJson(remote)
+    ) {
+      return { result: { record: local }, changed: false, conflict: false };
+    }
     let conflictCopy: TripDocumentV2 | undefined;
     if (local && dirtyEntries.length > 0 && comparableJson(local) !== comparableJson(remote)) {
       const now = this.now();

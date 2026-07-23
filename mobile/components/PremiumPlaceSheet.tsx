@@ -161,6 +161,7 @@ type Props = {
     trails?: RelatedItem[];
     error?: string;
   };
+  onBack?: () => void;
   onClose: () => void;
   onNavigate: (place: { name: string; lat: number; lng: number }) => void;
   onSave?: (place: { name: string; lat: number; lng: number; note?: string }) => void;
@@ -386,6 +387,7 @@ export default function PremiumPlaceSheet({
   visible = !!place,
   initialStage = 'full',
   related,
+  onBack,
   onClose,
   onNavigate,
   onSave,
@@ -785,6 +787,7 @@ export default function PremiumPlaceSheet({
               model={{ ...sheetModel, subtitle: subtitle || data.display_type || sourceLabel }}
               loading={loading}
               onToggleStage={cycleStage}
+              onBack={onBack}
               onClose={onClose}
             />
           </View>

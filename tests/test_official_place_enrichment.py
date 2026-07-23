@@ -378,6 +378,7 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
             patch.object(server, "set_cached", return_value=None),
             patch.object(server, "_find_explore_place", return_value=catalog_place),
             patch.object(server, "_explore_place_to_nearby_place", return_value=catalog_card),
+            patch.object(server, "_canonical_explore_related_rails", return_value={}),
             patch.object(server, "_discovery_context_smart_places", new=AsyncMock(return_value={"places": []})),
             patch.object(server, "trails_discover", new=AsyncMock(return_value={"trails": []})),
             patch.object(server, "_open_town_profile", new=town_profile),
@@ -403,7 +404,81 @@ class OfficialPlaceEndpointTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result["card"]["official_url"], catalog_card["official_url"])
         self.assertNotIn("town_profile", result["card"])
         town_profile.assert_not_awaited()
-        self.assertTrue(server._map_card_cache_key(body).startswith("map_card_v12:"))
+        self.assertTrue(server._map_card_cache_key(body).startswith("map_card_v13:"))
+
+    def test_canonical_nps_children_fill_real_related_sheet_rails(self):
+        children = [
+            {
+                "id": "place:nps-child:yose:thingstodo:valley-loop",
+                "parent_hub_id": "place:nps:yose",
+                "module_target": "visitor",
+                "summary": {"title": "Valley Loop", "lat": 37.74, "lng": -119.59, "category": "Visitor Center", "rank": 1},
+                "sources": [{"publisher": "National Park Service"}],
+            },
+            {
+                "id": "place:nps-child:yose:places:tunnel-view",
+                "parent_hub_id": "place:nps:yose",
+                "module_target": "trails",
+                "summary": {"title": "Tunnel View", "lat": 37.715, "lng": -119.677, "category": "Lodging", "rank": 2},
+                "sources": [{"publisher": "National Park Service"}],
+            },
+            {
+                "id": "place:nps-child:yose:campgrounds:bridalveil-creek-campground",
+                "parent_hub_id": "place:nps:yose",
+                "module_target": "stay",
+                "summary": {"title": "Bridalveil Creek Campground", "lat": 37.664, "lng": -119.624, "category": "Campground", "rank": 3},
+                "sources": [{"publisher": "National Park Service"}],
+            },
+        ]
+        body = server.MapCardResolveRequest(
+            kind="place",
+            id="place:nps:yose",
+            place_id="place:nps:yose",
+            source="trailhead_search",
+            name="Yosemite National Park",
+            lat=37.8651,
+            lng=-119.5383,
+            type="park",
+        )
+        with (
+            patch.object(server, "_find_explore_place", return_value={"id": "place:nps:yose"}),
+            patch.object(server, "_explore_children_for_parent", return_value=children),
+        ):
+            rails = server._canonical_explore_related_rails(body)
+
+        self.assertEqual([item["name"] for item in rails["things_to_do"]], ["Valley Loop"])
+        self.assertEqual([item["name"] for item in rails["things_to_see"]], ["Tunnel View"])
+        self.assertEqual([item["name"] for item in rails["campgrounds_nearby"]], ["Bridalveil Creek Campground"])
+        self.assertEqual(rails["trails"], [])
+        self.assertEqual(rails["visitor_centers"], [])
+        self.assertEqual(rails["things_to_do"][0]["type"], "attraction")
+        self.assertEqual(rails["things_to_do"][0]["display_type"], "Activity")
+        self.assertEqual(rails["things_to_see"][0]["display_type"], "Place to see")
+        self.assertEqual(rails["campgrounds_nearby"][0]["type"], "camp")
+        self.assertEqual(rails["things_to_do"][0]["source_label"], "National Park Service")
+
+    def test_canonical_explore_map_pin_source_receives_the_same_related_rails(self):
+        child = {
+            "id": "place:nps-child:yose:thingstodo:valley-loop",
+            "parent_hub_id": "place:nps:yose",
+            "module_target": "do",
+            "summary": {"title": "Valley Loop", "lat": 37.74, "lng": -119.59, "category": "Activity", "rank": 1},
+            "sources": [{"publisher": "National Park Service"}],
+        }
+        bodies = [
+            server.MapCardResolveRequest(
+                kind="place", id="place:nps:yose", place_id="place:nps:yose",
+                source=source, name="Yosemite National Park", lat=37.8651, lng=-119.5383, type="park",
+            )
+            for source in ("trailhead_search", "trailhead_explore")
+        ]
+        with (
+            patch.object(server, "_find_explore_place", return_value={"id": "place:nps:yose"}),
+            patch.object(server, "_explore_children_for_parent", return_value=[child]),
+        ):
+            counts = [len(server._canonical_explore_related_rails(body)["things_to_do"]) for body in bodies]
+
+        self.assertEqual(counts, [1, 1])
 
     def test_legacy_provider_card_fields_are_scrubbed(self):
         stale = {

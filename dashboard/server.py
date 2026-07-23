@@ -1599,6 +1599,7 @@ _EXPLORE_CATALOG_CACHE: dict[str, Any] = {
     "loaded_at": 0.0,
     "catalog": None,
 }
+_EXPLORE_CHILDREN_BY_PARENT_CACHE: dict[str, Any] = {"key": None, "by_parent": {}}
 _EXPLORE_LEGACY_SEARCH_CACHE: dict[str, object] = {"key": None, "places": []}
 _EXPLORE_GLOBAL_SEED_RAW_CACHE: dict[str, object] = {"mtime": 0, "groups": []}
 # Version 7 invalidates persisted catalogs that may contain page/video URLs in
@@ -5287,7 +5288,20 @@ def _explore_place_to_nearby_place(place: dict, center_lat: float, center_lng: f
     dist = _haversine_m(center_lat, center_lng, lat, lng) / 1609.344
     source_pack = place.get("source_pack") or {}
     source_url = source_pack.get("official_url") or summary.get("source_url") or ""
+    source_label = str(
+        source_pack.get("primary")
+        or summary.get("source_title")
+        or place.get("attribution")
+        or "Trailhead Explore"
+    ).strip()
     photo_url = summary.get("image_url") or summary.get("thumbnail_url") or ""
+    summary_text = _planner_clean_text(
+        summary.get("short_description")
+        or (place.get("profile") or {}).get("summary")
+        or summary.get("hook")
+        or "",
+        320,
+    )
     return {
         "id": f"explore:{place.get('id') or summary.get('title')}",
         "name": summary.get("title") or "Trailhead Explore place",
@@ -5301,10 +5315,10 @@ def _explore_place_to_nearby_place(place: dict, center_lat: float, center_lng: f
             "trail": "Trail area",
         }.get(ptype, "Attraction"),
         "source": "trailhead_explore",
-        "source_label": "Trailhead Explore",
+        "source_label": source_label,
         "source_badge": "Explore",
-        "verified_source": "Trailhead seeded catalog",
-        "summary": _planner_clean_text(summary.get("hook") or summary.get("short_description") or (place.get("profile") or {}).get("summary") or "", 320),
+        "verified_source": source_label,
+        "summary": summary_text,
         "description": _planner_clean_text((place.get("profile") or {}).get("summary") or summary.get("short_description") or "", 700),
         "photo_url": photo_url,
         "photos": [photo_url] if photo_url else [],
@@ -5313,8 +5327,8 @@ def _explore_place_to_nearby_place(place: dict, center_lat: float, center_lng: f
         "url": source_url,
         "official_url": source_url,
         "distance_mi": round(dist, 2),
-        "attribution": place.get("attribution") or "Trailhead Explore catalog",
-        "source_freshness": "Seeded Trailhead Explore fallback; verify current closures, permits, fees, and access with the official source.",
+        "attribution": place.get("attribution") or source_label,
+        "source_freshness": f"{source_label} information. Check current access, hours, fees, and closures before you go.",
         "category_access": {
             "explore_unlocked": True,
             "locked_categories": [],
@@ -29699,6 +29713,138 @@ def _canonical_search_explore_card(body: MapCardResolveRequest) -> dict | None:
     return None
 
 
+def _canonical_explore_place_id(body: MapCardResolveRequest) -> str:
+    source = str(body.source or "").strip().lower()
+    candidate_values = (body.place_id, body.provider_place_id, body.id)
+    has_canonical_id = any(str(value or "").strip().startswith(("place:", "explore:place:")) for value in candidate_values)
+    if source not in {"trailhead_search", "trailhead_explore"} and not has_canonical_id:
+        return ""
+    for value in candidate_values:
+        candidate = str(value or "").strip()
+        if candidate.startswith("explore:"):
+            candidate = candidate[len("explore:"):]
+        if candidate and _find_explore_place(candidate):
+            return candidate
+    return ""
+
+
+def _explore_children_for_parent(parent_id: str) -> list[dict]:
+    catalog = _load_explore_catalog()
+    cache_key = _EXPLORE_CATALOG_CACHE.get("key")
+    if _EXPLORE_CHILDREN_BY_PARENT_CACHE.get("key") != cache_key:
+        by_parent: dict[str, list[dict]] = {}
+        for place in catalog.get("places") or []:
+            if not isinstance(place, dict):
+                continue
+            parent = str(place.get("parent_hub_id") or "").strip()
+            if parent:
+                by_parent.setdefault(parent, []).append(place)
+        for children in by_parent.values():
+            children.sort(key=lambda item: float((item.get("summary") or {}).get("rank") or 999999))
+        _EXPLORE_CHILDREN_BY_PARENT_CACHE.update({"key": cache_key, "by_parent": by_parent})
+    return list((_EXPLORE_CHILDREN_BY_PARENT_CACHE.get("by_parent") or {}).get(parent_id) or [])
+
+
+def _canonical_explore_related_rails(body: MapCardResolveRequest) -> dict[str, list[dict]]:
+    parent_id = _canonical_explore_place_id(body)
+    rails: dict[str, list[dict]] = {
+        "things_to_do": [],
+        "things_to_see": [],
+        "visitor_centers": [],
+        "campgrounds_nearby": [],
+        "trails": [],
+        "trip_services": [],
+    }
+    if not parent_id:
+        return rails
+    rail_for_target = {
+        "do": "things_to_do",
+        "see": "things_to_see",
+        "visitor": "visitor_centers",
+        "stay": "campgrounds_nearby",
+        "trails": "trails",
+    }
+    rail_for_nps_record_kind = {
+        "thingstodo": "things_to_do",
+        "places": "things_to_see",
+        "visitorcenters": "visitor_centers",
+        "campgrounds": "campgrounds_nearby",
+    }
+    for child in _explore_children_for_parent(parent_id):
+        child_id = str(child.get("id") or "").strip().lower()
+        match = re.search(r":nps-child:[^:]+:(thingstodo|places|visitorcenters|campgrounds):", child_id)
+        nps_record_kind = match.group(1) if match else ""
+        target = rail_for_nps_record_kind.get(nps_record_kind) or rail_for_target.get(str(child.get("module_target") or "").strip().lower())
+        if not target:
+            continue
+        item = _explore_place_to_nearby_place(child, float(body.lat), float(body.lng))
+        if not item:
+            continue
+        if nps_record_kind == "thingstodo":
+            item.update({"type": "attraction", "subtype": "Activity", "display_type": "Activity"})
+        elif nps_record_kind == "places" and _smart_pack_type(item.get("type")) not in {"historic", "viewpoint", "peak", "hot_spring"}:
+            item.update({"type": "attraction", "subtype": "Place to see", "display_type": "Place to see"})
+        elif nps_record_kind == "visitorcenters":
+            item.update({"type": "visitor_center", "subtype": "Visitor Center", "display_type": "Visitor Center"})
+        elif nps_record_kind == "campgrounds":
+            item.update({"type": "camp", "subtype": "Campground", "display_type": "Campground"})
+        source_candidates = [
+            *(child.get("sources") or []),
+            *((child.get("source_pack") or {}).get("sources") or []),
+        ]
+        official_label = next((
+            str(source.get("publisher") or source.get("title") or "").strip()
+            for source in source_candidates
+            if isinstance(source, dict)
+            and str(source.get("publisher") or source.get("title") or "").strip()
+            and str(source.get("publisher") or source.get("title") or "").strip().lower() != "trailhead"
+        ), "")
+        if official_label:
+            item["source_label"] = official_label
+            item["verified_source"] = official_label
+        normalized = _normalize_related_rail_item(item)
+        if item.get("display_type"):
+            normalized["display_type"] = item["display_type"]
+            normalized["subtype"] = item["subtype"]
+        rails[target].append(normalized)
+    return rails
+
+
+def _merge_related_rail_sets(primary: dict, canonical: dict) -> dict:
+    merged = dict(primary or {})
+    limits = {
+        "things_to_do": 16,
+        "things_to_see": 16,
+        "visitor_centers": 12,
+        "campgrounds_nearby": 12,
+        "trails": 10,
+        "trip_services": 4,
+    }
+    for key, limit in limits.items():
+        rows: list[dict] = []
+        seen: set[str] = set()
+        for item in [*((canonical or {}).get(key) or []), *((primary or {}).get(key) or [])]:
+            if not isinstance(item, dict):
+                continue
+            identity = str(item.get("id") or "").strip().lower()
+            if not identity:
+                identity = f"{_smart_pack_type(item.get('type'))}:{_place_cluster_name(item.get('name'))}:{round(float(item.get('lat') or 0), 4)}:{round(float(item.get('lng') or 0), 4)}"
+            if identity in seen:
+                continue
+            seen.add(identity)
+            rows.append(item)
+            if len(rows) >= limit:
+                break
+        merged[key] = rows
+    merged["camps"] = list(merged.get("campgrounds_nearby") or [])
+    merged["places"] = [
+        *(merged.get("things_to_do") or []),
+        *(merged.get("things_to_see") or []),
+        *(merged.get("visitor_centers") or []),
+    ][:14]
+    return merged
+
+
 def _map_card_merge(primary: dict, secondary: dict | None) -> dict:
     if not secondary:
         return primary
@@ -30359,7 +30505,7 @@ def _map_card_cache_key(body: MapCardResolveRequest) -> str:
         f"{float(body.lat):.4f}",
         f"{float(body.lng):.4f}",
     ])
-    return f"map_card_v12:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
+    return f"map_card_v13:{hashlib.sha1(base.encode()).hexdigest()[:24]}"
 
 
 def _contains_restricted_provider(value: object) -> bool:
@@ -30532,6 +30678,7 @@ async def resolve_map_card(body: MapCardResolveRequest, user: dict | None = Depe
 
     smart_places = (related_pack or {}).get("places") or []
     related = _related_rails_from_places(smart_places, (trail_pack or {}).get("trails", []), camp_detail)
+    related = _merge_related_rail_sets(related, _canonical_explore_related_rails(body))
     if _is_broad_map_place(body, card):
         town_profile, town_ms = await guarded(
             "town_profile",

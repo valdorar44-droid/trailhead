@@ -1,0 +1,55 @@
+appId: ${APP_ID}
+name: Map place sheet drills into a related place sheet
+tags:
+  - search
+  - map
+  - sheets
+  - related
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Yosemite National Park"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:nps:yose"
+    timeout: 30000
+- tapOn:
+    id: "map.search.inline.result.place:nps:yose"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yose-content"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: "place-sheet-place-place-place-nps-yose-related.things-to-do"
+    direction: DOWN
+    timeout: 30000
+    speed: 65
+- tapOn:
+    id: "place-sheet-place-place-place-nps-yose-related.things-to-do.item.explore-place-nps-child-yose-thingstodo-go-skiing-at-badger-pass"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-explore-place-nps-child-yose-thingstodo-go-skiing-at-badger-pass-content"
+    timeout: 15000
+- assertVisible: "Go Skiing at Badger Pass"
+- assertVisible: "The Badger Pass Ski Area.*"
+- assertVisible: "Navigate"
+- takeScreenshot: map-related-place-sheet-drilldown
+- tapOn:
+    id: "place-sheet-place-place-explore-place-nps-child-yose-thingstodo-go-skiing-at-badger-pass-back"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yose-content"
+    timeout: 15000
+- assertVisible: "Yosemite National Park"
+- takeScreenshot: map-related-place-sheet-parent-return

@@ -41,6 +41,8 @@ assert.deepEqual(flowNames, [
   '07-map-search-opens-complete-camp-sheet.yaml',
   '08-map-search-opens-complete-trail-sheet.yaml',
   '09-map-search-opens-trailhead-sheet.yaml',
+  '10-map-place-related-sheet-drilldown.yaml',
+  '11-map-place-related-camp-sheet.yaml',
 ]);
 for (const name of flowNames) {
   const source = readFileSync(join(workspace, 'flows', name), 'utf8');
@@ -81,6 +83,18 @@ assert.match(completeTrailSheetFlow, /place-sheet-trail-trail-place-ridb-270422/
 const trailheadSheetFlow = readFileSync(join(workspace, 'flows', '09-map-search-opens-trailhead-sheet.yaml'), 'utf8');
 assert.match(trailheadSheetFlow, /map\.search\.inline\.result\.place:nps-child:grca:places:bright-angel-trailhead/);
 assert.match(trailheadSheetFlow, /place-sheet-trailhead-trailhead-place-nps-child-grca-places-bright-angel-trailhead/);
+
+const relatedSheetFlow = readFileSync(join(workspace, 'flows', '10-map-place-related-sheet-drilldown.yaml'), 'utf8');
+assert.match(relatedSheetFlow, /place-sheet-place-place-place-nps-yose-related\.things-to-do/);
+assert.match(relatedSheetFlow, /item\.explore-place-nps-child-yose-thingstodo-go-skiing-at-badger-pass/);
+assert.match(relatedSheetFlow, /place-sheet-place-place-explore-place-nps-child-yose-thingstodo-go-skiing-at-badger-pass-content/);
+assert.match(relatedSheetFlow, /go-skiing-at-badger-pass-back/);
+
+const relatedCampFlow = readFileSync(join(workspace, 'flows', '11-map-place-related-camp-sheet.yaml'), 'utf8');
+assert.match(relatedCampFlow, /related\.campgrounds-nearby/);
+assert.match(relatedCampFlow, /item\.explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground/);
+assert.match(relatedCampFlow, /place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground-summary/);
+assert.match(relatedCampFlow, /bridalveil-creek-campground-back/);
 
 const parsed = parseMaestroArgs([
   '--device', 'emulator-5554',

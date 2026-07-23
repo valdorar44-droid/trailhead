@@ -44,11 +44,13 @@ export function PlaceSheetShellHeader({
   model,
   loading = false,
   onToggleStage,
+  onBack,
   onClose,
 }: {
   model: PlaceSheetModel;
   loading?: boolean;
   onToggleStage: () => void;
+  onBack?: () => void;
   onClose: () => void;
 }) {
   const C = useTheme();
@@ -66,6 +68,17 @@ export function PlaceSheetShellHeader({
         <View style={s.handle} />
       </TouchableOpacity>
       <View style={s.titleRow}>
+        {onBack ? (
+          <TouchableOpacity
+            testID={`${model.testID}-back`}
+            accessibilityRole="button"
+            accessibilityLabel="Back to previous place"
+            style={s.iconButton}
+            onPress={onBack}
+          >
+            <Ionicons name="arrow-back" size={18} color={C.text2} />
+          </TouchableOpacity>
+        ) : null}
         <View style={s.titleCopy}>
           <Text style={s.title} numberOfLines={1}>{model.title}</Text>
           <Text style={s.subtitle} numberOfLines={1}>{model.subtitle}</Text>
@@ -91,6 +104,7 @@ export function PlaceSheetHeroChrome({
   saved = false,
   onSave,
   onShare,
+  onBack,
   onClose,
   children,
 }: {
@@ -99,11 +113,17 @@ export function PlaceSheetHeroChrome({
   saved?: boolean;
   onSave?: () => void;
   onShare?: () => void;
+  onBack?: () => void;
   onClose?: () => void;
   children?: ReactNode;
 }) {
   return (
     <>
+      {onBack ? (
+        <View style={[styles.heroBack, { top }]}>
+          <HeroAction testID={`${model.testID}-back`} label="Back to previous place" icon="arrow-back" onPress={onBack} />
+        </View>
+      ) : null}
       {onSave || onShare || onClose ? (
         <View style={[styles.heroActions, { top }]}>
           {onSave ? (
@@ -156,6 +176,11 @@ function HeroAction({
 
 const styles = StyleSheet.create({
   fill: { flex: 1, minHeight: 0 },
+  heroBack: {
+    position: 'absolute',
+    left: 12,
+    zIndex: 4,
+  },
   heroActions: {
     position: 'absolute',
     right: 12,

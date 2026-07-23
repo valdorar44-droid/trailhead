@@ -136,6 +136,12 @@ test('Search V2 place sheets keep a bounded, visible result body', () => {
   assert.match(premiumPlaceSheetSource, /testID=\{railTestID\}/);
   assert.match(premiumPlaceSheetSource, /testID=\{`\$\{railTestID\}\.item\.\$\{relatedTestIDPart\(item\.id \|\| item\.name \|\| idx\)\}`\}/);
   assert.match(premiumPlaceSheetSource, /accessibilityLabel=\{item\.name \|\| titleCase\(item\.type\)\}/);
+  assert.match(premiumPlaceSheetSource, /onBack=\{onBack\}/);
+  assert.match(mapSource, /const \[relatedPlaceReturnStack, setRelatedPlaceReturnStack\] = useState<RelatedPlaceReturnEntry\[\]>/);
+  assert.match(mapSource, /function rememberRelatedPlaceParent\(\)/);
+  assert.match(mapSource, /function restoreRelatedPlaceParent\(\)/);
+  assert.match(mapSource, /onBack=\{relatedPlaceReturnStack\.length \? restoreRelatedPlaceParent : undefined\}/);
+  assert.match(mapSource, /rememberRelatedPlaceParent\(\);[\s\S]{0,240}openNearbyPlace\(/);
 });
 
 test('temporary provider rows are not written to Map history or persisted by Route Builder', () => {

@@ -1,0 +1,59 @@
+appId: ${APP_ID}
+name: Map place sheet drills into a related campground sheet
+tags:
+  - search
+  - map
+  - sheets
+  - related
+  - camp
+  - current-selectors
+---
+- launchApp:
+    clearState: false
+    stopApp: true
+- tapOn: "Map tab"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.input"
+    timeout: 20000
+- tapOn:
+    id: "map.search.inline.input"
+- eraseText: 80
+- inputText: "Yosemite National Park"
+- extendedWaitUntil:
+    visible:
+      id: "map.search.inline.result.place:nps:yose"
+    timeout: 30000
+- tapOn:
+    id: "map.search.inline.result.place:nps:yose"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yose-content"
+    timeout: 15000
+- scrollUntilVisible:
+    element:
+      id: "place-sheet-place-place-place-nps-yose-related.campgrounds-nearby"
+    direction: DOWN
+    timeout: 30000
+    speed: 65
+- tapOn:
+    id: "place-sheet-place-place-place-nps-yose-related.campgrounds-nearby.item.explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground"
+    timeout: 20000
+- assertVisible: "Bridalveil Creek Campground"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground-summary"
+    timeout: 20000
+- assertVisible: "The Bridalveil Creek Campground is located.*"
+- takeScreenshot: map-related-camp-sheet-drilldown
+- tapOn:
+    id: "place-sheet-camp-camp-explore-place-nps-child-yose-campgrounds-bridalveil-creek-campground-back"
+- extendedWaitUntil:
+    visible:
+      id: "place-sheet-place-place-place-nps-yose-content"
+    timeout: 15000
+- assertVisible: "Yosemite National Park"
+- takeScreenshot: map-related-camp-sheet-parent-return

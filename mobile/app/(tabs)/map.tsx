@@ -930,6 +930,12 @@ type SelectedPlaceContext = {
   error?: string;
 };
 
+type RelatedPlaceReturnEntry = {
+  place: SearchPlace;
+  context: SelectedPlaceContext | null;
+  tripContext: TripPlaceContext | null;
+};
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type WP = { lat: number; lng: number; name: string; day: number; type: string; route_point_type?: 'side_stop' | 'break' | 'through' };
@@ -6567,6 +6573,7 @@ function MapScreen() {
   const [selectedPlace, setSelectedPlace] = useState<SearchPlace | null>(null);
   const [selectedPlaceContext, setSelectedPlaceContext] = useState<SelectedPlaceContext | null>(null);
   const [selectedPlaceTripContext, setSelectedPlaceTripContext] = useState<TripPlaceContext | null>(null);
+  const [relatedPlaceReturnStack, setRelatedPlaceReturnStack] = useState<RelatedPlaceReturnEntry[]>([]);
   const recentRenderedMapboxSelectionRef = useRef<{ at: number; lat: number; lng: number; key: string } | null>(null);
   const renderedMapboxEnrichmentSeqRef = useRef(0);
   const renderedMapboxEnrichmentTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -7049,6 +7056,11 @@ function MapScreen() {
   const selectedTrailRef = useRef<TrailFeature | null>(null);
   selectedTrailRef.current = selectedTrail;
   const [selectedTrailProfile, setSelectedTrailProfile] = useState<TrailProfile | null>(null);
+  useEffect(() => {
+    if (!selectedPlace && !selectedCamp && !selectedTrail) {
+      setRelatedPlaceReturnStack(current => current.length ? [] : current);
+    }
+  }, [selectedCamp?.id, selectedPlace?.id, selectedTrail?.id]);
   const selectedCampSheetModel = useMemo(
     () => selectedCamp ? adaptCampgroundSheet(selectedCamp) : null,
     [selectedCamp?.id, selectedCamp?.name, selectedCamp?.lat, selectedCamp?.lng, selectedCamp?.source, selectedCamp?.source_badge, selectedCamp?.verified_source],
@@ -21326,6 +21338,43 @@ function MapScreen() {
     return `${prefix}:${lat.toFixed(3)}:${lng.toFixed(3)}`;
   }
 
+  function rememberRelatedPlaceParent() {
+    if (!selectedPlace) return;
+    const entry: RelatedPlaceReturnEntry = {
+      place: selectedPlace,
+      context: selectedPlaceContext,
+      tripContext: selectedPlaceTripContext,
+    };
+    setRelatedPlaceReturnStack(current => {
+      const last = current[current.length - 1];
+      if (last?.place.id === entry.place.id) return current;
+      return [...current, entry].slice(-4);
+    });
+  }
+
+  function restoreRelatedPlaceParent() {
+    const parent = relatedPlaceReturnStack[relatedPlaceReturnStack.length - 1];
+    if (!parent) return;
+    cancelRenderedMapboxEnrichment();
+    setRelatedPlaceReturnStack(current => current.slice(0, -1));
+    setSelectedCamp(null);
+    selectedCampRef.current = null;
+    setShowCampDetail(false);
+    if (selectedTrail) clearTrailMapOverlays();
+    setSelectedTrail(null);
+    setTappedPoi(null);
+    setTappedTrail(null);
+    setTappedTileSpot(null);
+    setTappedGas(null);
+    setSelectedCommunityPin(null);
+    selectedPlaceResolveKeyRef.current = '';
+    setSelectedPlace(parent.place);
+    setSelectedPlaceContext(parent.context);
+    setSelectedPlaceTripContext(parent.tripContext);
+    nativeMapRef.current?.flyTo(parent.place.lat, parent.place.lng, 11, parent.place.name);
+    postWebMessage(JSON.stringify({ type: 'fly_to', lat: parent.place.lat, lng: parent.place.lng, name: parent.place.name }));
+  }
+
   function openNearbyPlace(place: OsmPoi, day?: number | null) {
     setSelectedCamp(null);
     setShowCampDetail(false);
@@ -25518,6 +25567,7 @@ function MapScreen() {
             style={s.trailMapCloseBtn}
             activeOpacity={0.82}
             onPress={() => {
+              setRelatedPlaceReturnStack([]);
               clearTrailMapOverlays();
               setTrailCardCollapsed(false);
               setSelectedTrail(null);
@@ -25565,9 +25615,21 @@ function MapScreen() {
                 />
                 <View style={s.trailHeroShade} />
                 <View style={s.trailHeroTopBar}>
-                  <TouchableOpacity style={s.trailHeroCircleBtn} onPress={() => setTrailCardCollapsed(true)}>
-                    <Ionicons name="chevron-down" size={18} color="#fff" />
-                  </TouchableOpacity>
+                  {relatedPlaceReturnStack.length ? (
+                    <TouchableOpacity
+                      testID={`${selectedTrailSheetModel!.testID}-back`}
+                      accessibilityRole="button"
+                      accessibilityLabel="Back to previous place"
+                      style={s.trailHeroCircleBtn}
+                      onPress={restoreRelatedPlaceParent}
+                    >
+                      <Ionicons name="arrow-back" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  ) : (
+                    <TouchableOpacity style={s.trailHeroCircleBtn} onPress={() => setTrailCardCollapsed(true)}>
+                      <Ionicons name="chevron-down" size={18} color="#fff" />
+                    </TouchableOpacity>
+                  )}
                   <View style={s.trailHeroTopActions}>
                     {canPreviewTrail && (
                       <TouchableOpacity
@@ -25589,6 +25651,7 @@ function MapScreen() {
                     <TouchableOpacity
                       style={s.trailHeroCircleBtn}
                       onPress={() => {
+                        setRelatedPlaceReturnStack([]);
                         clearTrailMapOverlays();
                         setTrailCardCollapsed(false);
                         setSelectedTrail(null);
@@ -26860,8 +26923,10 @@ function MapScreen() {
         canRate={!!user}
         related={selectedPlaceContext ?? undefined}
         routeContextLabel={selectedPlaceTripContext?.label}
+        onBack={relatedPlaceReturnStack.length ? restoreRelatedPlaceParent : undefined}
         onClose={() => {
           cancelRenderedMapboxEnrichment();
+          setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -26870,6 +26935,7 @@ function MapScreen() {
         }}
         onNavigate={place => {
           cancelRenderedMapboxEnrichment();
+          setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -26890,6 +26956,7 @@ function MapScreen() {
         }}
         onReport={() => {
           cancelRenderedMapboxEnrichment();
+          setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -26897,6 +26964,7 @@ function MapScreen() {
         }}
         onNearbyCamps={place => {
           cancelRenderedMapboxEnrichment();
+          setRelatedPlaceReturnStack([]);
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
@@ -26919,13 +26987,16 @@ function MapScreen() {
           setPaywallVisible(true);
         }}
         onOpenRelatedPlace={place => {
+          const day = selectedPlaceTripContext?.day ?? selectedDay;
+          rememberRelatedPlaceParent();
           cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
           setSelectedPlaceTripContext(null);
-          openNearbyPlace(place as OsmPoi, selectedPlaceTripContext?.day ?? selectedDay);
+          openNearbyPlace(place as OsmPoi, day);
         }}
         onOpenRelatedCamp={place => {
+          rememberRelatedPlaceParent();
           cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
@@ -26939,6 +27010,7 @@ function MapScreen() {
           postWebMessage(JSON.stringify({ type: 'fly_to', lat: camp.lat, lng: camp.lng, name: camp.name }));
         }}
         onOpenRelatedTrail={place => {
+          rememberRelatedPlaceParent();
           cancelRenderedMapboxEnrichment();
           setSelectedPlace(null);
           setSelectedPlaceContext(null);
@@ -27075,7 +27147,11 @@ function MapScreen() {
                     saved={favoriteCamps.some(f => f.id === selectedCamp.id)}
                     onSave={() => saveCampPlace(selectedCamp)}
                     onShare={() => shareCampPlace(selectedCamp)}
-                    onClose={closeSelectedCampProfile}
+                    onBack={relatedPlaceReturnStack.length ? restoreRelatedPlaceParent : undefined}
+                    onClose={() => {
+                      setRelatedPlaceReturnStack([]);
+                      closeSelectedCampProfile();
+                    }}
                   >
                     {(() => {
                       const weather = campWeather;
@@ -27171,6 +27247,12 @@ function MapScreen() {
               <View style={s.inlineLoadingDetail}>
                 <TrailheadCardSkeleton media lines={3} style={s.detailSkeletonCard} />
                 <TrailheadCardSkeleton lines={2} style={s.detailSkeletonCard} />
+              </View>
+            ) : null}
+            {!loadingDetail && !campDetail && String(selectedCamp.description || '').trim() ? (
+              <View style={s.detailSection} testID={`${selectedCampSheetModel!.testID}-summary`}>
+                <Text style={s.detailSectionTitle}>Summary</Text>
+                <ExpandableDetailText text={String(selectedCamp.description)} style={s.detailDesc} linkColor={C.orange} />
               </View>
             ) : null}
             {campDetail ? (() => {

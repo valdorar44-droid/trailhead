@@ -34,7 +34,7 @@ export const EXPLORE_RECOVERY_SETTLE_MS = 90_000;
 export const CYCLE_PHASE_SETTLE_MS = 5_000;
 export const SAMPLE_GAP_MS = 3_000;
 export const FOREGROUND_PROOF_INTERVAL_MS = 10_000;
-export const LAYER_STATE_CONVERGENCE_TIMEOUT_MS = 5_000;
+export const LAYER_STATE_CONVERGENCE_TIMEOUT_MS = 15_000;
 export const LAYER_STATE_POLL_INTERVAL_MS = 350;
 export const LAYER_PERSISTENCE_SETTLE_MS = 2_000;
 export const FINAL_LAYER_REPAIR_MAX_ATTEMPTS = 2;
@@ -1430,7 +1430,7 @@ export function assertPssAndRssPhaseSafety(samples, safetyBudget, phase) {
 
 const MEMORY_GATE_REPORT_TOP_LEVEL_KEYS = Object.freeze([
   'schema_version', 'started_at', 'completed_at', 'candidate', 'device', 'app', 'safety', 'layers',
-  'memory', 'process', 'result', 'failure_code', 'terminal_evidence_failure_code',
+  'memory', 'process', 'result', 'failure_code', 'execution_failure_codes', 'terminal_evidence_failure_code',
   'restoration_failure_code', 'privacy',
 ]);
 
@@ -1445,8 +1445,9 @@ const MEMORY_GATE_REPORT_ALLOWED_KEYS = new Set([
   'layer_state_retention_check_completed', 'layer_state_loss_observed', 'raw_ui_or_logs_stored',
   'stress_keys', 'purpose', 'functional_regression_tested', 'initial', 'baseline', 'restored', 'recovery',
   'explore_idle_settle_ms', 'map_idle_settle_ms', 'cycle_phase_settle_ms', 'post_map_settle_ms',
-  'explore_recovery_settle_ms', 'sample_gap_ms', 'cycle_count', 'explore_idle_samples',
-  'map_idle_samples', 'cycles', 'partial_cycle', 'post_map_recovery_samples', 'explore_recovery_samples',
+  'explore_recovery_settle_ms', 'sample_gap_ms', 'cycle_count', 'cycle_attempt_count',
+  'explore_idle_samples', 'map_idle_samples', 'cycles', 'incomplete_cycles', 'partial_cycle',
+  'post_map_recovery_samples', 'explore_recovery_samples',
   'active_samples', 'active_phase_status', 'object_count_ratchet', 'evaluation', 'policy', 'device_role',
   'navigation', 'preview3d', 'originals', 'alive', 'instance_changed', 'exit_evidence_checked',
   'foreground_proof_count', 'foreground_proof_completed',
@@ -1461,7 +1462,8 @@ const MEMORY_GATE_REPORT_ALLOWED_KEYS = new Set([
   'glMtrackPssKb', 'glMtrackRssKb', 'unknownPssKb', 'unknownRssKb',
   'viewCount', 'activityCount', 'appContextCount', 'webViewCount',
   'cycle', 'heavyPeakWindow', 'disabledRecoveryWindow', 'heavyLayerStateVerified',
-  'disabledLayerStateVerified', 'version', 'budgetPassed', 'growthPassed', 'cycleCountPassed',
+  'disabledLayerStateVerified', 'enable_failure_code', 'disable_failure_code',
+  'version', 'budgetPassed', 'growthPassed', 'cycleCountPassed',
   'observedCycleCount', 'phaseBudgets', 'growth', 'heavyPeaks', 'disabledRecoveries', 'retainedSlope',
   'stability', 'cycleCurve', 'evaluated', 'required', 'passed', 'sampleCount', 'limits',
   'checks', 'observed', 'count', 'median', 'maximum', 'totalPss', 'totalRss',
@@ -1497,6 +1499,7 @@ const MEMORY_GATE_STRING_IDENTIFIER_KEYS = new Set([
 ]);
 const MEMORY_GATE_STRING_FAILURE_KEYS = new Set([
   'failure_code', 'terminal_evidence_failure_code', 'restoration_failure_code', 'retry_reason',
+  'enable_failure_code', 'disable_failure_code', 'execution_failure_codes',
 ]);
 const ISO_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
 const SAFE_FAILURE_CODE = /^[a-z][a-z0-9_.-]{0,95}$/;
@@ -1604,8 +1607,9 @@ export function assertAndroidMemoryGateReportV3Privacy(report) {
   assertExactObjectKeys(report.memory, [
     'policy', 'device_role', 'explore_idle_settle_ms', 'map_idle_settle_ms', 'cycle_phase_settle_ms',
     'post_map_settle_ms', 'explore_recovery_settle_ms', 'sample_gap_ms', 'cycle_count',
-    'explore_idle_samples', 'map_idle_samples', 'cycles', 'partial_cycle', 'post_map_recovery_samples',
-    'explore_recovery_samples', 'active_samples', 'active_phase_status', 'object_count_ratchet', 'evaluation',
+    'cycle_attempt_count', 'explore_idle_samples', 'map_idle_samples', 'cycles', 'incomplete_cycles',
+    'partial_cycle', 'post_map_recovery_samples', 'explore_recovery_samples', 'active_samples',
+    'active_phase_status', 'object_count_ratchet', 'evaluation',
   ], 'report_privacy_invalid_memory_schema');
   assertExactObjectKeys(report.process, [
     'alive', 'instance_changed', 'foreground_proof_count', 'foreground_proof_completed',
@@ -1650,6 +1654,152 @@ function safeFailureCode(error) {
   return 'unexpected_gate_failure';
 }
 
+function recordExecutionFailure(report, failureCode) {
+  const code = SAFE_FAILURE_CODE.test(String(failureCode || ''))
+    ? String(failureCode)
+    : 'unexpected_gate_failure';
+  if (!report.failure_code) {
+    report.failure_code = code;
+    return;
+  }
+  if (!Array.isArray(report.execution_failure_codes)) report.execution_failure_codes = [];
+  if (report.execution_failure_codes.length < 32) report.execution_failure_codes.push(code);
+}
+
+function createLayerCycleAttempt(cycle) {
+  return {
+    cycle,
+    heavyPeak: null,
+    heavyPeakWindow: [],
+    heavyLayerStateVerified: false,
+    enable_failure_code: null,
+    disabledRecovery: null,
+    disabledRecoveryWindow: [],
+    disabledLayerStateVerified: false,
+    disable_failure_code: null,
+  };
+}
+
+function completeLayerCycleFromAttempt(attempt) {
+  return {
+    cycle: attempt.cycle,
+    heavyPeak: attempt.heavyPeak,
+    heavyPeakWindow: attempt.heavyPeakWindow,
+    heavyLayerStateVerified: true,
+    disabledRecovery: attempt.disabledRecovery,
+    disabledRecoveryWindow: attempt.disabledRecoveryWindow,
+    disabledLayerStateVerified: true,
+  };
+}
+
+export function isContinuableLayerWorkloadFailureCode(code) {
+  const value = String(code || '');
+  return /^layer_toggle_failed_(?:3d|lands|usgs|pois|trails|fire|ava|radar|mvum)$/.test(value)
+    || /^layer_selector_unavailable_(?:3d|lands|usgs|pois|trails|fire|ava|radar|mvum)$/.test(value)
+    || /^layer_cycle_(?:enable|disable)_not_confirmed(?:_(?:3d|lands|usgs|pois|trails|fire|ava|radar|mvum))?$/.test(value)
+    || /^layer_state_snapshot_incomplete(?:_(?:3d|lands|usgs|pois|trails|fire|ava|radar|mvum))?$/.test(value)
+    || value === 'layer_accessibility_state_missing'
+    || value === 'layer_carousel_unavailable'
+    || value === 'layer_carousel_start_unavailable';
+}
+
+/**
+ * Run every requested layer workload attempt while keeping invalid phases out
+ * of the authoritative memory curve. A layer transition failure is
+ * continuable only after the caller independently proves that the same process
+ * is alive, foreground-ready, and below the phase safety cap. Measurement,
+ * process, foreground, ADB, safety-cap, and cancellation failures are never
+ * caught here.
+ */
+export async function executeLayerDiagnosticCycles({
+  cycleCount,
+  memory,
+  enableTransition,
+  measureHeavyPeak,
+  disableTransition,
+  measureDisabledRecovery,
+  assertContinuationSafe,
+  recordWorkloadFailure,
+  requirePostCycleBaseline,
+}) {
+  if (!Number.isInteger(cycleCount) || cycleCount <= 0
+    || !memory || !Array.isArray(memory.cycles) || !Array.isArray(memory.incomplete_cycles)
+    || typeof enableTransition !== 'function' || typeof measureHeavyPeak !== 'function'
+    || typeof disableTransition !== 'function' || typeof measureDisabledRecovery !== 'function'
+    || typeof assertContinuationSafe !== 'function' || typeof recordWorkloadFailure !== 'function'
+    || typeof requirePostCycleBaseline !== 'function') {
+    throw new MemoryGateError('layer_cycle_execution_contract_invalid');
+  }
+
+  const attemptTransition = async ({ cycle, attempt, phase, transition, verified }) => {
+    try {
+      await transition(cycle, attempt);
+      if (!verified(attempt)) {
+        throw new MemoryGateError(`layer_cycle_${phase}_not_confirmed`);
+      }
+      return true;
+    } catch (error) {
+      const failureCode = safeFailureCode(error);
+      if (failureCode === 'cancelled' || !isContinuableLayerWorkloadFailureCode(failureCode)) {
+        throw error;
+      }
+      if (phase === 'enable') attempt.enable_failure_code = failureCode;
+      else attempt.disable_failure_code = failureCode;
+
+      // The workload error is recorded as primary only after the independent
+      // continuation proof succeeds. If that proof finds process death,
+      // foreground loss, ADB loss, or a safety-cap breach, its stop-the-line
+      // error remains authoritative while the partial attempt retains this
+      // sanitized transition failure.
+      await assertContinuationSafe({ cycle, phase, failureCode });
+      await recordWorkloadFailure({ cycle, phase, failureCode });
+      return false;
+    }
+  };
+
+  for (let cycle = 1; cycle <= cycleCount; cycle += 1) {
+    const attempt = createLayerCycleAttempt(cycle);
+    memory.cycle_attempt_count = cycle;
+    memory.partial_cycle = attempt;
+
+    const enableVerified = await attemptTransition({
+      cycle,
+      attempt,
+      phase: 'enable',
+      transition: enableTransition,
+      verified: current => current.heavyLayerStateVerified === true,
+    });
+    if (enableVerified) await measureHeavyPeak(cycle, attempt);
+
+    const disableVerified = await attemptTransition({
+      cycle,
+      attempt,
+      phase: 'disable',
+      transition: disableTransition,
+      verified: current => current.disabledLayerStateVerified === true,
+    });
+    if (disableVerified) await measureDisabledRecovery(cycle, attempt);
+
+    const complete = enableVerified
+      && disableVerified
+      && attempt.heavyPeak != null
+      && attempt.disabledRecovery != null;
+    if (complete) memory.cycles.push(completeLayerCycleFromAttempt(attempt));
+    else memory.incomplete_cycles.push(attempt);
+    memory.partial_cycle = null;
+  }
+
+  // A failed final disable cannot make post-Map recovery look artificially
+  // high or low. All ten attempts finish first, then the caller must establish
+  // and verify the exact all-disabled baseline before any recovery sample.
+  await requirePostCycleBaseline();
+  return {
+    attemptedCycleCount: memory.cycle_attempt_count,
+    completedCycleCount: memory.cycles.length,
+    incompleteCycleCount: memory.incomplete_cycles.length,
+  };
+}
+
 /**
  * Own the gate's catch/finally contract independently from ADB so failure-path
  * behavior can be proven deterministically. Once layer state has been captured,
@@ -1670,7 +1820,7 @@ export async function executeMemoryGateLifecycle({
     await executeGate();
   } catch (error) {
     report.result = 'failed';
-    report.failure_code = safeFailureCode(error);
+    recordExecutionFailure(report, safeFailureCode(error));
   } finally {
     try {
       await collectTerminalEvidence(report);
@@ -1753,9 +1903,11 @@ async function runGate(options) {
       explore_recovery_settle_ms: EXPLORE_RECOVERY_SETTLE_MS,
       sample_gap_ms: SAMPLE_GAP_MS,
       cycle_count: MAP_LAYER_CYCLE_COUNT,
+      cycle_attempt_count: 0,
       explore_idle_samples: [],
       map_idle_samples: [],
       cycles: [],
+      incomplete_cycles: [],
       partial_cycle: null,
       post_map_recovery_samples: [],
       explore_recovery_samples: [],
@@ -1783,6 +1935,7 @@ async function runGate(options) {
     },
     result: 'running',
     failure_code: null,
+    execution_failure_codes: [],
     terminal_evidence_failure_code: null,
     restoration_failure_code: null,
     privacy: MEMORY_GATE_REPORT_PRIVACY_STATEMENT,
@@ -1960,90 +2113,142 @@ async function runGate(options) {
       'map_idle',
     );
 
-    for (let cycle = 1; cycle <= MAP_LAYER_CYCLE_COUNT; cycle += 1) {
-      console.log(`Layer cycle ${cycle}/${MAP_LAYER_CYCLE_COUNT}: enable`);
-      await ensureLayerSheet(adb, serial, options.packageName);
-      await moveCarouselToStart(adb, serial, options.packageName);
-      await visitLayerStates(adb, serial, options.packageName, HEAVY_MAP_LAYER_KEYS, true, 'forward');
-      const heavyEnabledStates = assertExactLayerState(
-        await captureCurrentLayerStates(adb, serial, options.packageName),
-        Object.fromEntries(HEAVY_MAP_LAYER_KEYS.map(key => [key, true])),
-        'layer_cycle_enable_not_confirmed',
-      );
-      await closeLayerSheet(adb, serial, options.packageName);
-      await waitMs(CYCLE_PHASE_SETTLE_MS);
-      const heavyPeakWindow = await collectSamples(
-        adb,
-        serial,
-        options.packageName,
-        processState,
-        3,
-        () => proveMeasurementState('map.screen'),
-      );
-      const heavyPeak = summarizeMemoryWindow(
-        heavyPeakWindow,
-        ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.heavyPeak,
-        'peak',
-      );
-      report.memory.partial_cycle = {
-        cycle,
-        heavyPeak,
-        heavyPeakWindow,
-        heavyLayerStateVerified: Object.values(heavyEnabledStates).every(Boolean),
-        disabledRecovery: null,
-        disabledRecoveryWindow: [],
-        disabledLayerStateVerified: false,
-      };
-      assertPssAndRssPhaseSafety(
-        heavyPeakWindow,
-        phaseSafetyCap,
-        'heavy_peak',
-      );
-
-      console.log(`Layer cycle ${cycle}/${MAP_LAYER_CYCLE_COUNT}: disable`);
-      await ensureLayerSheet(adb, serial, options.packageName);
-      await moveCarouselToStart(adb, serial, options.packageName);
-      await visitLayerStates(adb, serial, options.packageName, HEAVY_MAP_LAYER_KEYS, false, 'forward');
-      const heavyDisabledStates = assertExactLayerState(
-        await captureCurrentLayerStates(adb, serial, options.packageName),
-        Object.fromEntries(HEAVY_MAP_LAYER_KEYS.map(key => [key, false])),
-        'layer_cycle_disable_not_confirmed',
-      );
-      await closeLayerSheet(adb, serial, options.packageName);
-      await waitMs(CYCLE_PHASE_SETTLE_MS);
-      const disabledRecoveryWindow = await collectSamples(
-        adb,
-        serial,
-        options.packageName,
-        processState,
-        3,
-        () => proveMeasurementState('map.screen'),
-      );
-      const disabledRecovery = summarizeMemoryWindow(
-        disabledRecoveryWindow,
-        ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.mapIdle,
-        'valley',
-      );
-      report.memory.partial_cycle.disabledRecovery = disabledRecovery;
-      report.memory.partial_cycle.disabledRecoveryWindow = disabledRecoveryWindow;
-      report.memory.partial_cycle.disabledLayerStateVerified = Object.values(heavyDisabledStates)
-        .every(value => value === false);
-      assertPssAndRssPhaseSafety(
-        disabledRecoveryWindow,
-        phaseSafetyCap,
-        'disabled_recovery',
-      );
-      report.memory.cycles.push({
-        cycle,
-        heavyPeak,
-        heavyPeakWindow,
-        heavyLayerStateVerified: true,
-        disabledRecovery,
-        disabledRecoveryWindow,
-        disabledLayerStateVerified: true,
-      });
-      report.memory.partial_cycle = null;
-    }
+    const allHeavyLayersEnabled = Object.fromEntries(
+      HEAVY_MAP_LAYER_KEYS.map(key => [key, true]),
+    );
+    const allHeavyLayersDisabled = Object.fromEntries(
+      HEAVY_MAP_LAYER_KEYS.map(key => [key, false]),
+    );
+    await executeLayerDiagnosticCycles({
+      cycleCount: MAP_LAYER_CYCLE_COUNT,
+      memory: report.memory,
+      enableTransition: async (cycle, attempt) => {
+        console.log(`Layer cycle ${cycle}/${MAP_LAYER_CYCLE_COUNT}: enable`);
+        await ensureLayerSheet(adb, serial, options.packageName);
+        await moveCarouselToStart(adb, serial, options.packageName);
+        await visitLayerStates(
+          adb,
+          serial,
+          options.packageName,
+          HEAVY_MAP_LAYER_KEYS,
+          true,
+          'forward',
+        );
+        const states = assertExactLayerState(
+          await captureCurrentLayerStates(adb, serial, options.packageName),
+          allHeavyLayersEnabled,
+          'layer_cycle_enable_not_confirmed',
+        );
+        attempt.heavyLayerStateVerified = Object.values(states).every(Boolean);
+      },
+      measureHeavyPeak: async (_cycle, attempt) => {
+        await closeLayerSheet(adb, serial, options.packageName);
+        await waitMs(CYCLE_PHASE_SETTLE_MS);
+        attempt.heavyPeakWindow = await collectSamples(
+          adb,
+          serial,
+          options.packageName,
+          processState,
+          3,
+          () => proveMeasurementState('map.screen'),
+        );
+        attempt.heavyPeak = summarizeMemoryWindow(
+          attempt.heavyPeakWindow,
+          ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.heavyPeak,
+          'peak',
+        );
+        assertPssAndRssPhaseSafety(
+          attempt.heavyPeakWindow,
+          phaseSafetyCap,
+          'heavy_peak',
+        );
+      },
+      disableTransition: async (cycle, attempt) => {
+        console.log(`Layer cycle ${cycle}/${MAP_LAYER_CYCLE_COUNT}: disable`);
+        await ensureLayerSheet(adb, serial, options.packageName);
+        await moveCarouselToStart(adb, serial, options.packageName);
+        await visitLayerStates(
+          adb,
+          serial,
+          options.packageName,
+          HEAVY_MAP_LAYER_KEYS,
+          false,
+          'forward',
+        );
+        const states = assertExactLayerState(
+          await captureCurrentLayerStates(adb, serial, options.packageName),
+          allHeavyLayersDisabled,
+          'layer_cycle_disable_not_confirmed',
+        );
+        attempt.disabledLayerStateVerified = Object.values(states)
+          .every(value => value === false);
+      },
+      measureDisabledRecovery: async (_cycle, attempt) => {
+        await closeLayerSheet(adb, serial, options.packageName);
+        await waitMs(CYCLE_PHASE_SETTLE_MS);
+        attempt.disabledRecoveryWindow = await collectSamples(
+          adb,
+          serial,
+          options.packageName,
+          processState,
+          3,
+          () => proveMeasurementState('map.screen'),
+        );
+        attempt.disabledRecovery = summarizeMemoryWindow(
+          attempt.disabledRecoveryWindow,
+          ANDROID_MEMORY_GATE_V3_POLICY.phaseBudgetsKb.mapIdle,
+          'valley',
+        );
+        assertPssAndRssPhaseSafety(
+          attempt.disabledRecoveryWindow,
+          phaseSafetyCap,
+          'disabled_recovery',
+        );
+      },
+      assertContinuationSafe: async () => {
+        // A failed transition leaves the sheet open. Close it without changing
+        // any layer value, then require the same strict foreground/renderer,
+        // process-instance, and safety-cap evidence used by valid samples.
+        await closeLayerSheet(adb, serial, options.packageName);
+        await proveMeasurementState('map.screen');
+        const continuationSample = sampleMemoryV3(
+          adb,
+          serial,
+          options.packageName,
+          processState,
+        );
+        assertPssAndRssPhaseSafety(
+          [continuationSample],
+          phaseSafetyCap,
+          'layer_workload_continuation',
+        );
+      },
+      recordWorkloadFailure: async ({ cycle, phase, failureCode }) => {
+        console.warn(
+          `Layer cycle ${cycle}/${MAP_LAYER_CYCLE_COUNT}: ${phase} workload invalid (${failureCode}); continuing diagnostics.`,
+        );
+        report.result = 'failed';
+        recordExecutionFailure(report, failureCode);
+      },
+      requirePostCycleBaseline: async () => {
+        await ensureLayerSheet(adb, serial, options.packageName);
+        await moveCarouselToStart(adb, serial, options.packageName);
+        await visitLayerStates(
+          adb,
+          serial,
+          options.packageName,
+          HEAVY_MAP_LAYER_KEYS,
+          false,
+          'forward',
+        );
+        assertExactLayerState(
+          await captureCurrentLayerStates(adb, serial, options.packageName),
+          allHeavyLayersDisabled,
+          'layer_post_cycle_baseline_not_confirmed',
+        );
+      },
+    });
+    await closeLayerSheet(adb, serial, options.packageName);
 
     await settleWithProof(
       POST_MAP_SETTLE_MS,

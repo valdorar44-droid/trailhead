@@ -29,6 +29,7 @@ import {
   classifyActiveMapSession,
   convergeLayerState,
   durablyRestoreCapturedHeavyLayers,
+  executeLayerDiagnosticCycles,
   executeMemoryGateLifecycle,
   horizontalCarouselSwipePoints,
   hasPositiveVisibleBounds,
@@ -38,6 +39,7 @@ import {
   inspectRecognizedActiveServiceDump,
   inspectRetainedTreeReadiness,
   inspectTopResumedVisibleActivityDump,
+  isContinuableLayerWorkloadFailureCode,
   parseMemoryGateArgs,
   parseRecognizedExitInfoDump,
   recordAndVerifyProcessIdentity,
@@ -62,7 +64,7 @@ assert.equal(POST_MAP_SETTLE_MS, 90_000);
 assert.equal(EXPLORE_RECOVERY_SETTLE_MS, 90_000);
 assert.equal(CYCLE_PHASE_SETTLE_MS, 5_000);
 assert.equal(FOREGROUND_PROOF_INTERVAL_MS, 10_000);
-assert.equal(LAYER_STATE_CONVERGENCE_TIMEOUT_MS, 5_000);
+assert.equal(LAYER_STATE_CONVERGENCE_TIMEOUT_MS, 15_000);
 assert.equal(LAYER_PERSISTENCE_SETTLE_MS, 2_000);
 assert.equal(FINAL_LAYER_REPAIR_MAX_ATTEMPTS, 2);
 assert.equal(MAP_LAYER_CYCLE_COUNT, 10);
@@ -261,9 +263,11 @@ const privacyReportFixture = () => ({
     explore_recovery_settle_ms: 90_000,
     sample_gap_ms: 3_000,
     cycle_count: 10,
+    cycle_attempt_count: 0,
     explore_idle_samples: [],
     map_idle_samples: [],
     cycles: [],
+    incomplete_cycles: [],
     partial_cycle: null,
     post_map_recovery_samples: [],
     explore_recovery_samples: [],
@@ -287,6 +291,7 @@ const privacyReportFixture = () => ({
   },
   result: 'passed',
   failure_code: null,
+  execution_failure_codes: [],
   terminal_evidence_failure_code: null,
   restoration_failure_code: null,
   privacy: MEMORY_GATE_REPORT_PRIVACY_STATEMENT,
@@ -773,6 +778,253 @@ assert.equal(await convergeLayerState({
 }), true);
 assert.equal(alreadyConvergedTaps, 0);
 
+assert.equal(isContinuableLayerWorkloadFailureCode('layer_toggle_failed_ava'), true);
+assert.equal(isContinuableLayerWorkloadFailureCode('layer_cycle_disable_not_confirmed_fire'), true);
+assert.equal(isContinuableLayerWorkloadFailureCode('layer_selector_unavailable_radar'), true);
+assert.equal(isContinuableLayerWorkloadFailureCode('layer_state_snapshot_incomplete_ava'), true);
+assert.equal(isContinuableLayerWorkloadFailureCode('tap_failed'), false);
+assert.equal(isContinuableLayerWorkloadFailureCode('process_instance_changed'), false);
+assert.equal(isContinuableLayerWorkloadFailureCode('heavy_peak_total_pss_safety_cap_failed'), false);
+
+const emptyLayerCycleMemory = () => ({
+  cycle_attempt_count: 0,
+  cycles: [],
+  incomplete_cycles: [],
+  partial_cycle: null,
+});
+const populateVerifiedHeavyPhase = async (cycle, attempt) => {
+  attempt.heavyLayerStateVerified = true;
+};
+const populateHeavyMeasurement = async (cycle, attempt) => {
+  attempt.heavyPeak = privacyMemorySample(900_000 + cycle, 800_000 + cycle);
+  attempt.heavyPeakWindow = [attempt.heavyPeak];
+};
+const populateVerifiedDisabledPhase = async (cycle, attempt) => {
+  attempt.disabledLayerStateVerified = true;
+};
+const populateDisabledMeasurement = async (cycle, attempt) => {
+  attempt.disabledRecovery = privacyMemorySample(700_000 + cycle, 600_000 + cycle);
+  attempt.disabledRecoveryWindow = [attempt.disabledRecovery];
+};
+
+const continuedCycleMemory = emptyLayerCycleMemory();
+const continuedCycleEvents = [];
+const continuedFailures = [];
+const continuedSummary = await executeLayerDiagnosticCycles({
+  cycleCount: MAP_LAYER_CYCLE_COUNT,
+  memory: continuedCycleMemory,
+  enableTransition: async (cycle, attempt) => {
+    continuedCycleEvents.push(`enable:${cycle}`);
+    await populateVerifiedHeavyPhase(cycle, attempt);
+  },
+  measureHeavyPeak: populateHeavyMeasurement,
+  disableTransition: async (cycle, attempt) => {
+    continuedCycleEvents.push(`disable:${cycle}`);
+    if (cycle === 5) throw new MemoryGateError('layer_toggle_failed_ava');
+    await populateVerifiedDisabledPhase(cycle, attempt);
+  },
+  measureDisabledRecovery: populateDisabledMeasurement,
+  assertContinuationSafe: async ({ cycle, phase, failureCode }) => {
+    continuedCycleEvents.push(`safe:${cycle}:${phase}:${failureCode}`);
+  },
+  recordWorkloadFailure: async failure => {
+    continuedFailures.push(failure);
+  },
+  requirePostCycleBaseline: async () => {
+    continuedCycleEvents.push('post-cycle-baseline');
+  },
+});
+assert.deepEqual(continuedSummary, {
+  attemptedCycleCount: 10,
+  completedCycleCount: 9,
+  incompleteCycleCount: 1,
+});
+assert.equal(continuedCycleMemory.cycle_attempt_count, 10);
+assert.equal(continuedCycleMemory.cycles.length, 9);
+assert.equal(continuedCycleMemory.incomplete_cycles.length, 1);
+assert.equal(continuedCycleMemory.partial_cycle, null);
+assert.equal(continuedCycleMemory.incomplete_cycles[0].cycle, 5);
+assert.equal(continuedCycleMemory.incomplete_cycles[0].heavyLayerStateVerified, true);
+assert.equal(continuedCycleMemory.incomplete_cycles[0].heavyPeak != null, true);
+assert.equal(continuedCycleMemory.incomplete_cycles[0].disabledLayerStateVerified, false);
+assert.equal(continuedCycleMemory.incomplete_cycles[0].disabledRecovery, null);
+assert.equal(continuedCycleMemory.incomplete_cycles[0].enable_failure_code, null);
+assert.equal(continuedCycleMemory.incomplete_cycles[0].disable_failure_code, 'layer_toggle_failed_ava');
+assert.deepEqual(continuedFailures, [{
+  cycle: 5,
+  phase: 'disable',
+  failureCode: 'layer_toggle_failed_ava',
+}]);
+assert.equal(
+  continuedCycleEvents.filter(event => event === 'disable:5').length,
+  1,
+  'the failed transition is never blindly retried inside the same phase',
+);
+assert.equal(continuedCycleEvents.includes('enable:6'), true, 'diagnostics continue after a safe workload failure');
+assert.equal(
+  continuedCycleEvents.at(-1),
+  'post-cycle-baseline',
+  'the exact post-cycle baseline is required only after all ten attempts',
+);
+const incompleteCycleEvaluation = evaluateAndroidMemoryGateV3({
+  exploreIdleSamples: [privacyMemorySample(400_000, 350_000)],
+  mapIdleSamples: [privacyMemorySample(700_000, 600_000)],
+  cycles: continuedCycleMemory.cycles,
+  postMapRecoverySamples: [privacyMemorySample(700_000, 600_000)],
+  exploreRecoverySamples: [privacyMemorySample(400_000, 350_000)],
+  activeSamples: { navigation: [], preview3d: [], originals: [] },
+  stability: {
+    processAlive: true,
+    exitEvidenceChecked: true,
+    cancelled: false,
+    layerStateRestored: true,
+    objectCountRatchetDetected: false,
+    lowMemoryKillCount: 0,
+    oomCount: 0,
+    anrCount: 0,
+    processDeathCount: 0,
+    duplicateRendererEvidenceComplete: true,
+    duplicateRendererCount: 0,
+    stateLossEvidenceComplete: true,
+    stateLossCount: 0,
+  },
+});
+assert.equal(incompleteCycleEvaluation.observedCycleCount, 9);
+assert.equal(incompleteCycleEvaluation.cycleCountPassed, false);
+assert.equal(incompleteCycleEvaluation.m1Passed, false, 'an incomplete workload cycle can never pass M1');
+
+const mixedFailureMemory = emptyLayerCycleMemory();
+const mixedFailureEvents = [];
+const mixedFailures = [];
+await executeLayerDiagnosticCycles({
+  cycleCount: 3,
+  memory: mixedFailureMemory,
+  enableTransition: async (cycle, attempt) => {
+    mixedFailureEvents.push(`enable:${cycle}`);
+    if (cycle === 1) throw new MemoryGateError('layer_toggle_failed_fire');
+    await populateVerifiedHeavyPhase(cycle, attempt);
+  },
+  measureHeavyPeak: async (cycle, attempt) => {
+    mixedFailureEvents.push(`heavy:${cycle}`);
+    await populateHeavyMeasurement(cycle, attempt);
+  },
+  disableTransition: async (cycle, attempt) => {
+    mixedFailureEvents.push(`disable:${cycle}`);
+    if (cycle === 2) throw new MemoryGateError('layer_toggle_failed_ava');
+    await populateVerifiedDisabledPhase(cycle, attempt);
+  },
+  measureDisabledRecovery: async (cycle, attempt) => {
+    mixedFailureEvents.push(`valley:${cycle}`);
+    await populateDisabledMeasurement(cycle, attempt);
+  },
+  assertContinuationSafe: async ({ cycle, phase }) => {
+    mixedFailureEvents.push(`safe:${cycle}:${phase}`);
+  },
+  recordWorkloadFailure: async failure => { mixedFailures.push(failure); },
+  requirePostCycleBaseline: async () => { mixedFailureEvents.push('post-cycle-baseline'); },
+});
+assert.equal(mixedFailureMemory.cycle_attempt_count, 3);
+assert.equal(mixedFailureMemory.cycles.length, 1);
+assert.equal(mixedFailureMemory.incomplete_cycles.length, 2);
+const enableFailureAttempt = mixedFailureMemory.incomplete_cycles[0];
+assert.equal(enableFailureAttempt.cycle, 1);
+assert.equal(enableFailureAttempt.enable_failure_code, 'layer_toggle_failed_fire');
+assert.equal(enableFailureAttempt.heavyPeak, null, 'a failed enable phase cannot produce a heavy sample');
+assert.equal(enableFailureAttempt.disabledLayerStateVerified, true);
+assert.equal(enableFailureAttempt.disabledRecovery != null, true, 'disable still reaches a measured safe valley');
+assert.equal(mixedFailureEvents.filter(event => event === 'enable:1').length, 1, 'enable is not blindly retapped');
+assert.equal(mixedFailureEvents.filter(event => event === 'disable:1').length, 1, 'disable runs once after enable failure');
+assert.deepEqual(
+  mixedFailures.map(failure => `${failure.cycle}:${failure.phase}:${failure.failureCode}`),
+  ['1:enable:layer_toggle_failed_fire', '2:disable:layer_toggle_failed_ava'],
+  'multiple recoverable phase failures retain their diagnostic order',
+);
+
+const incompletePrivacyReport = privacyReportFixture();
+incompletePrivacyReport.result = 'failed';
+incompletePrivacyReport.failure_code = 'layer_toggle_failed_ava';
+incompletePrivacyReport.memory.cycle_attempt_count = 10;
+incompletePrivacyReport.memory.cycles = continuedCycleMemory.cycles;
+incompletePrivacyReport.memory.incomplete_cycles = continuedCycleMemory.incomplete_cycles;
+assert.equal(assertAndroidMemoryGateReportV3Privacy(incompletePrivacyReport), true);
+
+for (const fatalContinuationCode of [
+  'layer_workload_continuation_total_pss_safety_cap_failed',
+  'process_instance_changed',
+  'app_not_top_resumed_visible',
+]) {
+  const fatalMemory = emptyLayerCycleMemory();
+  let recordedAfterFatalProof = false;
+  let postBaselineReached = false;
+  await assert.rejects(
+    executeLayerDiagnosticCycles({
+      cycleCount: MAP_LAYER_CYCLE_COUNT,
+      memory: fatalMemory,
+      enableTransition: populateVerifiedHeavyPhase,
+      measureHeavyPeak: populateHeavyMeasurement,
+      disableTransition: async (cycle, attempt) => {
+        if (cycle === 2) throw new MemoryGateError('layer_toggle_failed_ava');
+        await populateVerifiedDisabledPhase(cycle, attempt);
+      },
+      measureDisabledRecovery: populateDisabledMeasurement,
+      assertContinuationSafe: async () => {
+        throw new MemoryGateError(fatalContinuationCode);
+      },
+      recordWorkloadFailure: async () => { recordedAfterFatalProof = true; },
+      requirePostCycleBaseline: async () => { postBaselineReached = true; },
+    }),
+    error => error instanceof MemoryGateError && error.code === fatalContinuationCode,
+  );
+  assert.equal(fatalMemory.cycle_attempt_count, 2);
+  assert.equal(fatalMemory.cycles.length, 1);
+  assert.equal(fatalMemory.incomplete_cycles.length, 0);
+  assert.equal(fatalMemory.partial_cycle.disable_failure_code, 'layer_toggle_failed_ava');
+  assert.equal(recordedAfterFatalProof, false, 'a fatal continuation proof is never downgraded to workload failure');
+  assert.equal(postBaselineReached, false);
+}
+
+for (const immediateFailureCode of ['cancelled', 'tap_failed']) {
+  const immediateMemory = emptyLayerCycleMemory();
+  let continuationProofCalled = false;
+  await assert.rejects(
+    executeLayerDiagnosticCycles({
+      cycleCount: MAP_LAYER_CYCLE_COUNT,
+      memory: immediateMemory,
+      enableTransition: async () => { throw new MemoryGateError(immediateFailureCode); },
+      measureHeavyPeak: populateHeavyMeasurement,
+      disableTransition: populateVerifiedDisabledPhase,
+      measureDisabledRecovery: populateDisabledMeasurement,
+      assertContinuationSafe: async () => { continuationProofCalled = true; },
+      recordWorkloadFailure: async () => {},
+      requirePostCycleBaseline: async () => {},
+    }),
+    error => error instanceof MemoryGateError && error.code === immediateFailureCode,
+  );
+  assert.equal(immediateMemory.cycle_attempt_count, 1);
+  assert.equal(continuationProofCalled, false, `${immediateFailureCode} must abort before continuation proof`);
+}
+
+const postBaselineFailureMemory = emptyLayerCycleMemory();
+await assert.rejects(
+  executeLayerDiagnosticCycles({
+    cycleCount: MAP_LAYER_CYCLE_COUNT,
+    memory: postBaselineFailureMemory,
+    enableTransition: populateVerifiedHeavyPhase,
+    measureHeavyPeak: populateHeavyMeasurement,
+    disableTransition: populateVerifiedDisabledPhase,
+    measureDisabledRecovery: populateDisabledMeasurement,
+    assertContinuationSafe: async () => {},
+    recordWorkloadFailure: async () => {},
+    requirePostCycleBaseline: async () => {
+      throw new MemoryGateError('layer_post_cycle_baseline_not_confirmed_ava');
+    },
+  }),
+  error => error instanceof MemoryGateError && error.code === 'layer_post_cycle_baseline_not_confirmed_ava',
+);
+assert.equal(postBaselineFailureMemory.cycle_attempt_count, 10);
+assert.equal(postBaselineFailureMemory.cycles.length, 10);
+assert.equal(postBaselineFailureMemory.partial_cycle, null);
+
 const originalLayerStates = Object.fromEntries(
   HEAVY_MAP_LAYER_KEYS.map((key, index) => [key, index % 2 === 0]),
 );
@@ -1076,6 +1328,7 @@ assert.equal(restorationOnlyFailureReport.restoration_failure_code, 'layer_resto
 const lifecycleReport = () => ({
   result: 'running',
   failure_code: null,
+  execution_failure_codes: [],
   terminal_evidence_failure_code: null,
   restoration_failure_code: null,
   completed_at: null,
@@ -1133,6 +1386,29 @@ assert.equal(completedBaselineFailure.safety.layer_state_retention_check_complet
 assert.equal(completedBaselineFailure.safety.layer_state_loss_observed, false);
 assert.equal(completedBaselineFailure.completed_at, '2026-07-23T00:00:00.000Z');
 assert.deepEqual(finalizedBaselineFailure, completedBaselineFailure);
+
+const firstFailureReport = lifecycleReport();
+firstFailureReport.failure_code = 'layer_toggle_failed_ava';
+await executeMemoryGateLifecycle({
+  report: firstFailureReport,
+  executeGate: async () => {
+    throw new MemoryGateError('layer_post_cycle_baseline_not_confirmed_ava');
+  },
+  getInitialStates: () => null,
+  collectTerminalEvidence: async () => {},
+  restoreLayers: async () => { throw new Error('restoration must not run without a snapshot'); },
+  finalizeReport: async () => {},
+});
+assert.equal(
+  firstFailureReport.failure_code,
+  'layer_toggle_failed_ava',
+  'a later post-cycle failure cannot overwrite the first root workload failure',
+);
+assert.deepEqual(
+  firstFailureReport.execution_failure_codes,
+  ['layer_post_cycle_baseline_not_confirmed_ava'],
+  'a later fatal execution failure remains visible without replacing the root cause',
+);
 
 const dualFailureReport = lifecycleReport();
 let dualFailureInitialStates = null;

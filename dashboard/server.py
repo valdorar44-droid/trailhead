@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from email.message import EmailMessage
 from email.utils import formataddr
 from pathlib import Path
-from urllib.parse import quote, unquote, urlsplit
+from urllib.parse import parse_qsl, quote, unquote, urlencode, urlsplit, urlunsplit
 from fastapi import BackgroundTasks, FastAPI, HTTPException, Depends, Header, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, Response, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -30,10 +30,17 @@ class _SearchV2AccessLogPrivacyFilter(logging.Filter):
         if not isinstance(args, tuple) or len(args) < 3:
             return True
         path = str(args[2] or "")
-        if not path.startswith("/api/search/v2/") or "?" not in path:
+        if "?" not in path:
+            return True
+        if path.startswith("/api/search/v2/"):
+            redacted_path = path.split("?", 1)[0] + "?query=redacted"
+        elif path.startswith("/api/conditions/fire-perimeters"):
+            # Viewport coordinates are operational input, not telemetry.
+            redacted_path = path.split("?", 1)[0] + "?viewport=redacted"
+        else:
             return True
         safe_args = list(args)
-        safe_args[2] = path.split("?", 1)[0] + "?query=redacted"
+        safe_args[2] = redacted_path
         record.args = tuple(safe_args)
         return True
 
@@ -139,7 +146,13 @@ from ingestors.provider_guard import provider_call_snapshot, record_provider_cal
 from ingestors.blm import get_blm_campsites, get_blm_campsite_detail, get_blm_recreation_sites
 from ingestors.international_registry import international_camp_tasks
 from ingestors.pakistan_curated import get_pakistan_curated_treks
-from ingestors.conditions import get_provider_conditions_along_route, get_provider_conditions_near, get_wfigs_fire_perimeters
+from ingestors.conditions import (
+    WFIGS_LEGACY_MAP_MAX_FEATURES,
+    WFIGS_MAP_MAX_FEATURES,
+    get_provider_conditions_along_route,
+    get_provider_conditions_near,
+    get_wfigs_fire_perimeters,
+)
 from ingestors.pakistan_confidence import pakistan_route_confidence
 from db.store import (
     save_trip, get_trip, add_community_pin, get_community_pins, find_duplicate_community_pin,
@@ -940,6 +953,35 @@ def _v3_primary_media(place: dict) -> dict:
     return {}
 
 
+def _v3_exact_primary_media(place: dict) -> dict:
+    """Return media that belongs to this place and carries its own rights data.
+
+    Source-pack child cards represent an exact place. They must not borrow a
+    photograph from one of that place's nested modules, or inherit a parent
+    source-pack license that was never attached to the photograph itself.
+    """
+    source_pack = place.get("source_pack") if isinstance(place.get("source_pack"), dict) else {}
+    candidates = [
+        *(place.get("media") if isinstance(place.get("media"), list) else []),
+        *(source_pack.get("photos") if isinstance(source_pack.get("photos"), list) else []),
+    ]
+    for item in candidates:
+        if not isinstance(item, dict):
+            continue
+        url = str(item.get("url") or "").strip()
+        credit = str(item.get("credit") or item.get("image_credit") or "").strip()
+        license_name = str(item.get("license") or item.get("image_license") or "").strip()
+        if not url or not credit or not license_name:
+            continue
+        return {
+            "url": url,
+            "caption": str(item.get("caption") or item.get("image_caption") or "").strip(),
+            "credit": credit,
+            "license": license_name,
+        }
+    return {}
+
+
 def _v3_source_pack(place: dict) -> dict:
     source_pack = place.get("source_pack")
     return source_pack if isinstance(source_pack, dict) else {}
@@ -985,7 +1027,7 @@ def _v3_nearby_region_match(parent: dict, child: dict) -> bool:
 def _v3_source_pack_child_item(place: dict, *, kind: str, distance_mi: float) -> dict:
     source_pack = _v3_source_pack(place)
     primary_source = _v3_primary_source(place)
-    media = _v3_primary_media(place)
+    media = _v3_exact_primary_media(place)
     title = str(place.get("name") or "Place").strip()
     source_title = (
         source_pack.get("primary")
@@ -1013,9 +1055,9 @@ def _v3_source_pack_child_item(place: dict, *, kind: str, distance_mi: float) ->
         "lat": lat,
         "lng": lng,
         "image_url": media.get("url") or "",
-        "image_caption": media.get("caption") or title,
-        "image_credit": media.get("credit") or source_title,
-        "image_license": media.get("license") or source_pack.get("license") or "",
+        "image_caption": (media.get("caption") or title) if media.get("url") else "",
+        "image_credit": media.get("credit") or "",
+        "image_license": media.get("license") or "",
         "source_label": primary_source.get("attribution") or source_title,
         "category": str(place.get("category") or kind).replace("_", " "),
         "tags": [str(tag) for tag in (place.get("tags") or []) if str(tag).strip()][:8],
@@ -1071,7 +1113,7 @@ def _attach_v3_nearby_source_items(profiles: list[dict], raw_places: list[dict])
         if not nearby:
             continue
         nearby.sort(key=lambda item: (
-            0 if _v3_primary_media(item[1]).get("url") else 1,
+            0 if _v3_exact_primary_media(item[1]).get("url") else 1,
             item[0],
             str(item[1].get("name") or ""),
         ))
@@ -4660,13 +4702,88 @@ def _safe_explore_image_url(value: object) -> str:
     lower = url.lower()
     if "test-yosemite-camp" in lower:
         return ""
-    if "commons.wikimedia.org/wiki/special:" in lower:
-        return ""
     if lower.startswith("/assets/"):
         return url
     if is_supported_remote_image_url(url):
         return url
     return ""
+
+
+EXPLORE_COMPACT_NPS_IMAGE_MAX_EDGE = 640
+EXPLORE_COMPACT_WIKIMEDIA_IMAGE_WIDTH = 500
+EXPLORE_COMPACT_WIKIMEDIA_WIDTHS = (60, 120, 250, 330, 500, 960)
+
+
+def _explore_compact_thumbnail_url(value: object) -> str:
+    """Return a bounded provider derivative for compact Explore cards.
+
+    Detail/source media keeps its original URL. Compact cards use provider
+    derivatives that are loadable by the native image stack and avoid
+    multi-megapixel originals.
+    """
+    url = _safe_explore_image_url(value)
+    if not url or url.startswith("/assets/"):
+        return url
+    try:
+        parsed = urlsplit(url)
+    except ValueError:
+        return url
+    hostname = str(parsed.hostname or "").lower().rstrip(".")
+    path_lower = parsed.path.lower()
+
+    if (hostname == "nps.gov" or hostname.endswith(".nps.gov")) and path_lower.startswith("/common/uploads/"):
+        transform_keys = {"width", "height", "maxwidth", "maxheight", "quality", "format", "mode"}
+        retained_query = sorted(
+            (
+                (key, query_value)
+                for key, query_value in parse_qsl(parsed.query, keep_blank_values=True)
+                if key.lower() not in transform_keys
+            ),
+            key=lambda item: (item[0].lower(), item[0], item[1]),
+        )
+        retained_query.extend([
+            ("maxWidth", str(EXPLORE_COMPACT_NPS_IMAGE_MAX_EDGE)),
+            ("maxHeight", str(EXPLORE_COMPACT_NPS_IMAGE_MAX_EDGE)),
+            ("quality", "78"),
+            ("format", "webp"),
+        ])
+        return urlunsplit(("https", parsed.netloc, parsed.path, urlencode(retained_query), ""))
+
+    if hostname == "upload.wikimedia.org":
+        path_parts = [unquote(part) for part in parsed.path.split("/") if part]
+        try:
+            commons_index = path_parts.index("commons")
+        except ValueError:
+            commons_index = -1
+        if commons_index >= 0:
+            after_commons = path_parts[commons_index + 1:]
+            thumb_offset = 1 if after_commons[:1] == ["thumb"] else 0
+            if len(after_commons) >= thumb_offset + 3:
+                hash_a, hash_b, filename = after_commons[thumb_offset:thumb_offset + 3]
+                if re.fullmatch(r"[0-9a-f]", hash_a, flags=re.I) and re.fullmatch(r"[0-9a-f]{2}", hash_b, flags=re.I):
+                    existing_width = None
+                    if thumb_offset and len(after_commons) >= thumb_offset + 4:
+                        width_match = re.match(r"^(\d{2,4})px-", after_commons[thumb_offset + 3], flags=re.I)
+                        if width_match:
+                            existing_width = int(width_match.group(1))
+                    maximum_width = min(
+                        EXPLORE_COMPACT_WIKIMEDIA_IMAGE_WIDTH,
+                        existing_width or EXPLORE_COMPACT_WIKIMEDIA_IMAGE_WIDTH,
+                    )
+                    width = max(
+                        (candidate for candidate in EXPLORE_COMPACT_WIKIMEDIA_WIDTHS if candidate <= maximum_width),
+                        default=EXPLORE_COMPACT_WIKIMEDIA_WIDTHS[0],
+                    )
+                    encoded_filename = quote(filename.replace(" ", "_"), safe="()_,.-")
+                    rendered_filename = f"{encoded_filename}.png" if filename.lower().endswith(".svg") else encoded_filename
+                    derivative_path = f"/wikipedia/commons/thumb/{hash_a}/{hash_b}/{encoded_filename}/{width}px-{rendered_filename}"
+                    return urlunsplit(("https", "upload.wikimedia.org", derivative_path, "", ""))
+    elif hostname in {"commons.wikimedia.org", "www.commons.wikimedia.org"}:
+        # Special:Redirect requires headers the React Native Image loader does
+        # not reliably attach. Prefer another licensed candidate/placeholder.
+        return ""
+
+    return url
 
 EXPLORE_LOCAL_IMAGE_CONTEXTS: tuple[tuple[str, tuple[str, ...]], ...] = (
     ("yosemite", ("yosemite", "half dome", "mist trail", "mirror lake", "mariposa grove", "glacier point", "vernal fall")),
@@ -5100,7 +5217,9 @@ def _explore_place_index_item(place: dict) -> dict:
         or ""
     )
     image_url = _explore_contextual_image_url(place, summary.get("image_url") or summary.get("thumbnail_url"))
-    thumbnail_url = _explore_contextual_image_url(place, summary.get("thumbnail_url") or summary.get("image_url"))
+    thumbnail_url = _explore_compact_thumbnail_url(
+        _explore_contextual_image_url(place, summary.get("thumbnail_url") or summary.get("image_url"))
+    )
     category = _explore_index_display_category(place, category)
     enrichment = _explore_enrichment_metadata(place)
     provenance = _explore_provenance_metadata(place)
@@ -22831,6 +22950,24 @@ async def nearby_reports(lat: float, lng: float, radius: float = 0.5):
 class RouteReportRequest(BaseModel):
     waypoints: list[dict]
 
+
+class FirePerimeterViewportRequest(BaseModel):
+    n: Annotated[float, Field(ge=-90, le=90)]
+    s: Annotated[float, Field(ge=-90, le=90)]
+    e: Annotated[float, Field(ge=-180, le=180)]
+    w: Annotated[float, Field(ge=-180, le=180)]
+
+    @model_validator(mode="after")
+    def validate_viewport(self):
+        if not all(math.isfinite(value) for value in (self.n, self.s, self.e, self.w)):
+            raise ValueError("Viewport values must be finite")
+        if self.n <= self.s:
+            raise ValueError("Viewport north must be greater than south")
+        if self.e == self.w:
+            raise ValueError("Viewport longitude span must be non-zero")
+        return self
+
+
 def _community_alert(report: dict) -> dict:
     alert = dict(report)
     alert.setdefault("source", "trailhead")
@@ -22903,10 +23040,42 @@ async def pakistan_confidence(body: RouteReportRequest):
     return pakistan_route_confidence(body.waypoints)
 
 @app.get("/api/conditions/fire-perimeters")
-async def fire_perimeters():
-    """Cached WFIGS active fire perimeters for map overlays."""
-    data = await get_wfigs_fire_perimeters()
-    return data or {"type": "FeatureCollection", "features": []}
+async def fire_perimeters(
+    n: float | None = Query(default=None, ge=-90, le=90),
+    s: float | None = Query(default=None, ge=-90, le=90),
+    e: float | None = Query(default=None, ge=-180, le=180),
+    w: float | None = Query(default=None, ge=-180, le=180),
+):
+    """Viewport-bounded, generalized WFIGS perimeters for the native map."""
+    values = (n, s, e, w)
+    if any(value is not None for value in values) and not all(value is not None for value in values):
+        raise HTTPException(422, "A complete viewport is required")
+    bounds = None
+    if all(value is not None for value in values):
+        assert n is not None and s is not None and e is not None and w is not None
+        if n <= s or e == w:
+            raise HTTPException(422, "Invalid viewport")
+        bounds = (n, s, e, w)
+    # Older clients call this route without a viewport. Preserve the original
+    # 800-feature contract while generalizing and bounding the geometry.
+    max_features = WFIGS_LEGACY_MAP_MAX_FEATURES if bounds is None else WFIGS_MAP_MAX_FEATURES
+    data = await get_wfigs_fire_perimeters(bounds=bounds, map_safe=True, max_features=max_features)
+    if data is None:
+        raise HTTPException(503, "Fire perimeter data is temporarily unavailable")
+    return data
+
+
+@app.post("/api/conditions/fire-perimeters/query")
+async def fire_perimeters_query(body: FirePerimeterViewportRequest):
+    """Return bounded WFIGS geometry without placing viewport coordinates in a URL."""
+    data = await get_wfigs_fire_perimeters(
+        bounds=(body.n, body.s, body.e, body.w),
+        map_safe=True,
+        max_features=WFIGS_MAP_MAX_FEATURES,
+    )
+    if data is None:
+        raise HTTPException(503, "Fire perimeter data is temporarily unavailable")
+    return data
 
 @app.post("/api/reports/{report_id}/upvote")
 async def upvote(report_id: int, user: dict = Depends(_current_user)):

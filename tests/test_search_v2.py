@@ -1668,6 +1668,30 @@ class SearchV2ApiTests(unittest.TestCase):
         self.assertNotIn("session-test", rendered)
         self.assertIn("query=redacted", rendered)
 
+    def test_access_log_filter_redacts_fire_viewport(self):
+        record = logging.LogRecord(
+            name="uvicorn.access",
+            level=logging.INFO,
+            pathname=__file__,
+            lineno=1,
+            msg='%s - "%s %s HTTP/%s" %d',
+            args=(
+                "127.0.0.1:1",
+                "GET",
+                "/api/conditions/fire-perimeters?n=39&s=38&e=-108&w=-110",
+                "1.1",
+                200,
+            ),
+            exc_info=None,
+        )
+
+        server._SearchV2AccessLogPrivacyFilter().filter(record)
+
+        rendered = record.getMessage()
+        self.assertNotIn("-108", rendered)
+        self.assertNotIn("-110", rendered)
+        self.assertIn("viewport=redacted", rendered)
+
     def test_admin_can_preview_while_public_feature_flag_is_disabled(self):
         server.app.dependency_overrides[server._optional_user] = lambda: {"id": 1, "is_admin": 1}
         try:

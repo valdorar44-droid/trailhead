@@ -1,11 +1,16 @@
 """Server-side live condition providers for map and navigation alerts."""
 from __future__ import annotations
 
+import asyncio
+from collections import deque
 import csv
 import io
 import logging
 import math
+import hashlib
+import json
 import time
+import weakref
 from datetime import datetime
 from email.utils import parsedate_to_datetime
 from typing import Any
@@ -14,7 +19,7 @@ from xml.etree import ElementTree as ET
 import httpx
 
 from config.settings import settings
-from db.store import get_cached, set_cached
+from db.store import get_cached, get_wfigs_map_cached, set_cached, set_wfigs_map_cached
 from ingestors.tomtom_traffic import (
     bbox_for_center,
     bboxes_for_route_corridor,
@@ -26,9 +31,34 @@ from ingestors.tomtom_traffic import (
 log = logging.getLogger(__name__)
 
 WFIGS_PERIMETERS_URL = "https://services3.arcgis.com/T4QMspbfLg3qTGWY/arcgis/rest/services/WFIGS_Interagency_Perimeters_Current/FeatureServer/0/query"
+WFIGS_MAP_CACHE_TTL_SECONDS = 900
+WFIGS_MAP_MAX_FEATURES = 120
+WFIGS_LEGACY_MAP_MAX_FEATURES = 800
+WFIGS_MAP_MAX_FEATURE_VERTICES = 12_000
+WFIGS_MAP_MAX_TOTAL_VERTICES = 60_000
+WFIGS_MAP_MAX_SERIALIZED_BYTES = 2_000_000
+WFIGS_MAP_MAX_UPSTREAM_BYTES = 8_000_000
+WFIGS_MAP_STALE_MAX_AGE_SECONDS = 1_800
+WFIGS_MAP_FAILURE_BACKOFF_SECONDS = 60
+WFIGS_MAP_OUTBOUND_WINDOW_SECONDS = 60
+WFIGS_MAP_OUTBOUND_MAX_REQUESTS = 24
+WFIGS_MAP_OUTBOUND_CONCURRENCY = 3
+WFIGS_MAP_MAX_DROPPED_SUMMARY = 1_000_000
+WFIGS_MAP_PARTIAL_REASONS = frozenset({
+    "provider_limit",
+    "invalid_geometry",
+    "feature_vertex_limit",
+    "total_vertex_limit",
+    "feature_limit",
+    "serialized_size_limit",
+    "cell_fetch_failure",
+    "stale_cell",
+})
 NWS_ALERTS_URL = "https://api.weather.gov/alerts/active"
 AIRNOW_CURRENT_URL = "https://www.airnowapi.org/aq/observation/latLong/current/"
 FIRMS_AREA_URL = "https://firms.modaps.eosdis.nasa.gov/usfs/api/area/csv"
+
+_WFIGS_MAP_LOOP_STATES: weakref.WeakKeyDictionary = weakref.WeakKeyDictionary()
 GDACS_RSS_URL = "https://www.gdacs.org/xml/rss.xml"
 UA = "Trailhead/1.0 (https://api.gettrailhead.app; hello@gettrailhead.app)"
 
@@ -399,7 +429,667 @@ async def get_wfigs_fire_alerts_near(lat: float, lng: float, radius_miles: float
     return out
 
 
-async def get_wfigs_fire_perimeters() -> dict | None:
+def _wfigs_map_query_params(
+    bounds: tuple[float, float, float, float] | None,
+    *,
+    max_features: int,
+) -> dict[str, str | int]:
+    """Build a bounded, generalized WFIGS query suitable for a map overlay.
+
+    Bounds are `(north, south, east, west)`. The generalization is deliberately
+    tied to viewport span so the native bridge never receives the full national
+    perimeter geometry merely because the layer was enabled.
+    """
+    safe_limit = max(1, min(int(max_features), WFIGS_LEGACY_MAP_MAX_FEATURES))
+    params: dict[str, str | int] = {
+        "where": "1=1",
+        "outFields": "poly_IRWINID,poly_IncidentName,attr_ModifiedOnDateTime_dt",
+        "returnGeometry": "true",
+        "outSR": "4326",
+        "geometryPrecision": 5,
+        "orderByFields": "attr_ModifiedOnDateTime_dt DESC",
+        "f": "geojson",
+        "resultRecordCount": safe_limit,
+    }
+    if bounds is None:
+        # Backward-compatible callers without a viewport receive a deliberately
+        # coarse, capped national overview rather than the unbounded source.
+        params["maxAllowableOffset"] = "0.01"
+        return params
+
+    north, south, east, west = bounds
+    span = max(north - south, east - west)
+    if span <= 2:
+        offset = 0.00025
+    elif span <= 10:
+        offset = 0.001
+    elif span <= 30:
+        offset = 0.005
+    else:
+        offset = 0.01
+    params.update({
+        "geometry": f"{west:.6f},{south:.6f},{east:.6f},{north:.6f}",
+        "geometryType": "esriGeometryEnvelope",
+        "spatialRel": "esriSpatialRelIntersects",
+        "inSR": "4326",
+        "maxAllowableOffset": f"{offset:.5f}",
+    })
+    return params
+
+
+def _wfigs_map_grid_size(bounds: tuple[float, float, float, float]) -> float:
+    north, south, east, west = bounds
+    longitude_span = east - west if east > west else (180 - west) + (east + 180)
+    span = max(north - south, longitude_span)
+    for degrees in (0.25, 0.5, 1, 2, 5, 10, 20, 45, 90, 180):
+        if degrees >= span:
+            return degrees
+    return 180
+
+
+def _wfigs_map_cells(
+    bounds: tuple[float, float, float, float],
+) -> tuple[tuple[float, float, float, float], ...]:
+    """Expand a viewport into reusable grid cells, including wrapped longitudes."""
+    north, south, east, west = (float(value) for value in bounds)
+    if not all(math.isfinite(value) for value in (north, south, east, west)):
+        raise ValueError("viewport values must be finite")
+    if not (-90 <= south < north <= 90 and -180 <= east <= 180 and -180 <= west <= 180):
+        raise ValueError("viewport is outside WGS84 bounds")
+    if east == west:
+        raise ValueError("viewport longitude span must be non-zero")
+
+    grid = _wfigs_map_grid_size((north, south, east, west))
+    longitude_segments = ((west, east),) if east > west else ((west, 180.0), (-180.0, east))
+    lat_start = math.floor((south + 90) / grid)
+    lat_stop = math.ceil((north + 90) / grid)
+    cell_south = max(-90.0, -90 + lat_start * grid)
+    cell_north = min(90.0, -90 + lat_stop * grid)
+    cells: set[tuple[float, float, float, float]] = set()
+    for segment_west, segment_east in longitude_segments:
+        if segment_east <= segment_west:
+            continue
+        lng_start = math.floor((segment_west + 180) / grid)
+        lng_stop = math.ceil((segment_east + 180) / grid)
+        cell_west = max(-180.0, -180 + lng_start * grid)
+        cell_east = min(180.0, -180 + lng_stop * grid)
+        if cell_north <= cell_south or cell_east <= cell_west:
+            continue
+        cells.add(tuple(round(value, 6) for value in (
+            cell_north, cell_south, cell_east, cell_west,
+        )))
+    if not cells:
+        raise ValueError("viewport did not produce a map cell")
+    return tuple(sorted(cells, key=lambda item: (item[3], item[1], item[2], item[0])))
+
+
+def _wfigs_map_cache_key(
+    bounds: tuple[float, float, float, float] | None,
+    *,
+    max_features: int,
+) -> str:
+    params = _wfigs_map_query_params(bounds, max_features=max_features)
+    cache_fingerprint = hashlib.sha256(
+        json.dumps(params, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()[:20]
+    return f"conditions:wfigs:map:v3:{cache_fingerprint}"
+
+
+def _normalized_wfigs_position(value: Any) -> list[float] | None:
+    if not isinstance(value, (list, tuple)) or len(value) < 2:
+        return None
+    if isinstance(value[0], bool) or isinstance(value[1], bool):
+        return None
+    try:
+        longitude = float(value[0])
+        latitude = float(value[1])
+    except (TypeError, ValueError):
+        return None
+    if not (math.isfinite(longitude) and math.isfinite(latitude)):
+        return None
+    if not (-180 <= longitude <= 180 and -90 <= latitude <= 90):
+        return None
+    return [round(longitude, 5), round(latitude, 5)]
+
+
+def _normalized_wfigs_ring(value: Any) -> list[list[float]] | None:
+    if not isinstance(value, list) or len(value) < 4:
+        return None
+    ring: list[list[float]] = []
+    for raw_position in value:
+        position = _normalized_wfigs_position(raw_position)
+        if position is None:
+            return None
+        ring.append(position)
+    if ring[0] != ring[-1]:
+        return None
+    return ring
+
+
+def _normalized_wfigs_geometry(value: Any) -> tuple[dict, int] | None:
+    if not isinstance(value, dict):
+        return None
+    geometry_type = value.get("type")
+    coordinates = value.get("coordinates")
+    if geometry_type == "Polygon":
+        if not isinstance(coordinates, list) or not coordinates:
+            return None
+        rings: list[list[list[float]]] = []
+        for raw_ring in coordinates:
+            ring = _normalized_wfigs_ring(raw_ring)
+            if ring is None:
+                return None
+            rings.append(ring)
+        vertex_count = sum(len(ring) for ring in rings)
+        return {"type": "Polygon", "coordinates": rings}, vertex_count
+    if geometry_type == "MultiPolygon":
+        if not isinstance(coordinates, list) or not coordinates:
+            return None
+        polygons: list[list[list[list[float]]]] = []
+        for raw_polygon in coordinates:
+            if not isinstance(raw_polygon, list) or not raw_polygon:
+                return None
+            polygon: list[list[list[float]]] = []
+            for raw_ring in raw_polygon:
+                ring = _normalized_wfigs_ring(raw_ring)
+                if ring is None:
+                    return None
+                polygon.append(ring)
+            polygons.append(polygon)
+        vertex_count = sum(len(ring) for polygon in polygons for ring in polygon)
+        return {"type": "MultiPolygon", "coordinates": polygons}, vertex_count
+    return None
+
+
+def _wfigs_geometry_vertex_count(geometry: Any) -> int:
+    if not isinstance(geometry, dict):
+        return 0
+    coordinates = geometry.get("coordinates")
+    if geometry.get("type") == "Polygon" and isinstance(coordinates, list):
+        return sum(len(ring) for ring in coordinates if isinstance(ring, list))
+    if geometry.get("type") == "MultiPolygon" and isinstance(coordinates, list):
+        return sum(
+            len(ring)
+            for polygon in coordinates if isinstance(polygon, list)
+            for ring in polygon if isinstance(ring, list)
+        )
+    return 0
+
+
+def _refresh_wfigs_map_metadata(result: dict) -> int:
+    metadata = result["metadata"]
+    features = result["features"]
+    # Completeness is its own axis. A response can be complete while stale,
+    # or current while incomplete for a reason that is not a truncation.
+    reported_partial = metadata.get("partial") is True
+    metadata["returned_feature_count"] = len(features)
+    metadata["vertex_count"] = sum(
+        _wfigs_geometry_vertex_count(feature.get("geometry"))
+        for feature in features if isinstance(feature, dict)
+    )
+    dropped = metadata["dropped"]
+    reasons = set(metadata.get("truncation_reasons") or [])
+    reasons.update(reason for reason, count in dropped.items() if count)
+    safe_reasons = sorted(reason for reason in reasons if reason in WFIGS_MAP_PARTIAL_REASONS)
+    dropped_feature_count = min(
+        WFIGS_MAP_MAX_DROPPED_SUMMARY,
+        sum(
+            max(0, int(count))
+            for count in dropped.values()
+            if isinstance(count, (int, float)) and not isinstance(count, bool) and math.isfinite(count)
+        ),
+    )
+    metadata["truncation_reasons"] = safe_reasons
+    metadata["truncated"] = bool(safe_reasons or dropped_feature_count)
+    # Compact, client-safe coverage summary. This intentionally excludes
+    # provider messages, viewport coordinates, and source geometry details.
+    metadata["partial"] = reported_partial or metadata["truncated"]
+    metadata["partial_reasons"] = safe_reasons
+    metadata["dropped_feature_count"] = dropped_feature_count
+    metadata["serialized_bytes"] = 0
+    for _ in range(4):
+        size = len(json.dumps(result, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+        if metadata["serialized_bytes"] == size:
+            break
+        metadata["serialized_bytes"] = size
+    return len(json.dumps(result, separators=(",", ":"), allow_nan=False).encode("utf-8"))
+
+
+def _fit_wfigs_map_serialized_budget(result: dict, *, max_serialized_bytes: int) -> dict:
+    while True:
+        size = _refresh_wfigs_map_metadata(result)
+        if size <= max_serialized_bytes or not result["features"]:
+            return result
+        result["features"].pop()
+        result["metadata"]["dropped"]["serialized_size_limit"] += 1
+
+
+def _compact_wfigs_map_payload(
+    payload: Any,
+    *,
+    max_features: int,
+    max_feature_vertices: int = WFIGS_MAP_MAX_FEATURE_VERTICES,
+    max_total_vertices: int = WFIGS_MAP_MAX_TOTAL_VERTICES,
+    max_serialized_bytes: int = WFIGS_MAP_MAX_SERIALIZED_BYTES,
+) -> dict:
+    features = payload.get("features") if isinstance(payload, dict) else None
+    if not isinstance(features, list):
+        features = []
+    feature_limit = max(1, min(int(max_features), WFIGS_LEGACY_MAP_MAX_FEATURES))
+    feature_vertex_limit = max(4, min(int(max_feature_vertices), WFIGS_MAP_MAX_FEATURE_VERTICES))
+    total_vertex_limit = max(4, min(int(max_total_vertices), WFIGS_MAP_MAX_TOTAL_VERTICES))
+    serialized_limit = max(1024, min(int(max_serialized_bytes), WFIGS_MAP_MAX_SERIALIZED_BYTES))
+    compact: list[dict] = []
+    total_vertices = 0
+    dropped = {
+        "invalid_geometry": 0,
+        "feature_vertex_limit": 0,
+        "total_vertex_limit": 0,
+        "feature_limit": 0,
+        "serialized_size_limit": 0,
+    }
+    for index, feature in enumerate(features):
+        if len(compact) >= feature_limit:
+            dropped["feature_limit"] += len(features) - index
+            break
+        if not isinstance(feature, dict):
+            dropped["invalid_geometry"] += 1
+            continue
+        normalized_geometry = _normalized_wfigs_geometry(feature.get("geometry"))
+        if normalized_geometry is None:
+            dropped["invalid_geometry"] += 1
+            continue
+        geometry, vertex_count = normalized_geometry
+        if vertex_count > feature_vertex_limit:
+            dropped["feature_vertex_limit"] += 1
+            continue
+        if total_vertices + vertex_count > total_vertex_limit:
+            dropped["total_vertex_limit"] += 1
+            continue
+        props = feature.get("properties") if isinstance(feature.get("properties"), dict) else {}
+        provider_id = props.get("id") or props.get("poly_IRWINID") or feature.get("id")
+        provider_name = props.get("name") or props.get("poly_IncidentName")
+        updated_at = props.get("updated_at") or props.get("attr_ModifiedOnDateTime_dt")
+        compact.append({
+            "type": "Feature",
+            "geometry": geometry,
+            "properties": {
+                "id": str(provider_id)[:128] if provider_id is not None else None,
+                "name": str(provider_name)[:200] if provider_name is not None else None,
+                "updated_at": (
+                    updated_at if isinstance(updated_at, (int, float)) and not isinstance(updated_at, bool)
+                    else str(updated_at)[:64] if updated_at is not None else None
+                ),
+            },
+        })
+        total_vertices += vertex_count
+    upstream_truncated = bool(
+        isinstance(payload, dict)
+        and (
+            payload.get("exceededTransferLimit")
+            or (isinstance(payload.get("metadata"), dict) and payload["metadata"].get("truncated"))
+        )
+    )
+    result = {
+        "type": "FeatureCollection",
+        "features": compact,
+        "metadata": {
+            "source": "WFIGS",
+            "source_feature_count": len(features),
+            "returned_feature_count": len(compact),
+            "vertex_count": total_vertices,
+            "serialized_bytes": 0,
+            "truncated": upstream_truncated,
+            "truncation_reasons": ["provider_limit"] if upstream_truncated else [],
+            "dropped": dropped,
+            "limits": {
+                "features": feature_limit,
+                "vertices_per_feature": feature_vertex_limit,
+                "vertices_total": total_vertex_limit,
+                "serialized_bytes": serialized_limit,
+            },
+        },
+    }
+    return _fit_wfigs_map_serialized_budget(result, max_serialized_bytes=serialized_limit)
+
+
+def _merge_wfigs_map_payloads(
+    payloads: list[dict],
+    *,
+    max_features: int,
+    failed_cell_count: int = 0,
+) -> dict:
+    source_feature_count = 0
+    upstream_reasons: set[str] = set()
+    degraded_cell_count = 0
+    stale_cell_count = 0
+    partial_cell_count = 0
+    maximum_age_seconds = 0
+    combined_dropped = {
+        "invalid_geometry": 0,
+        "feature_vertex_limit": 0,
+        "total_vertex_limit": 0,
+        "feature_limit": 0,
+        "serialized_size_limit": 0,
+    }
+    combined: list[dict] = []
+    for payload in payloads:
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+        source_feature_count += int(metadata.get("source_feature_count") or len(payload.get("features") or []))
+        upstream_reasons.update(
+            reason
+            for reason in [
+                *(metadata.get("truncation_reasons") or []),
+                *(metadata.get("partial_reasons") or []),
+            ]
+            if reason in WFIGS_MAP_PARTIAL_REASONS
+        )
+        payload_dropped = metadata.get("dropped") if isinstance(metadata.get("dropped"), dict) else {}
+        for reason in combined_dropped:
+            count = payload_dropped.get(reason)
+            if isinstance(count, (int, float)) and not isinstance(count, bool) and math.isfinite(count):
+                combined_dropped[reason] = min(
+                    WFIGS_MAP_MAX_DROPPED_SUMMARY,
+                    combined_dropped[reason] + max(0, int(count)),
+                )
+        maximum_age_seconds = max(maximum_age_seconds, int(metadata.get("age_seconds") or 0))
+        availability = metadata.get("availability")
+        freshness = metadata.get("freshness")
+        if availability != "available":
+            degraded_cell_count += 1
+        if freshness == "stale":
+            stale_cell_count += 1
+        if (
+            freshness == "partial"  # Backward compatibility with pre-axis cache rows.
+            or metadata.get("partial")
+            or metadata.get("truncated")
+            or metadata.get("partial_reasons")
+            or metadata.get("truncation_reasons")
+        ):
+            partial_cell_count += 1
+        combined.extend(payload.get("features") or [])
+    combined.sort(
+        key=lambda feature: (
+            _parse_ts((feature.get("properties") or {}).get("updated_at")) or 0,
+            str((feature.get("properties") or {}).get("id") or ""),
+        ),
+        reverse=True,
+    )
+    unique: list[dict] = []
+    seen: set[str] = set()
+    duplicate_count = 0
+    for feature in combined:
+        props = feature.get("properties") if isinstance(feature, dict) else {}
+        identity = str((props or {}).get("id") or "").strip()
+        if not identity:
+            identity = hashlib.sha256(
+                json.dumps(feature.get("geometry"), sort_keys=True, separators=(",", ":")).encode("utf-8")
+            ).hexdigest()
+        if identity in seen:
+            duplicate_count += 1
+            continue
+        seen.add(identity)
+        unique.append(feature)
+    merged = _compact_wfigs_map_payload(
+        {"type": "FeatureCollection", "features": unique},
+        max_features=max_features,
+    )
+    metadata = merged["metadata"]
+    for reason, count in combined_dropped.items():
+        metadata["dropped"][reason] = min(
+            WFIGS_MAP_MAX_DROPPED_SUMMARY,
+            int(metadata["dropped"].get(reason) or 0) + count,
+        )
+    metadata["source_feature_count"] = source_feature_count
+    metadata["cell_count"] = len(payloads) + failed_cell_count
+    metadata["failed_cell_count"] = failed_cell_count
+    metadata["degraded_cell_count"] = degraded_cell_count
+    metadata["stale_cell_count"] = stale_cell_count
+    metadata["partial_cell_count"] = partial_cell_count
+    metadata["duplicate_feature_count"] = duplicate_count
+    metadata["availability"] = "degraded" if degraded_cell_count or failed_cell_count else "available"
+    has_partial_coverage = bool(
+        failed_cell_count
+        or partial_cell_count
+        or upstream_reasons
+        or any(combined_dropped.values())
+    )
+    # Availability, freshness, and completeness are independent. In
+    # particular, a complete cached fallback is degraded + stale, not partial.
+    metadata["freshness"] = "stale" if stale_cell_count else "fresh"
+    metadata["partial"] = has_partial_coverage
+    metadata["age_seconds"] = maximum_age_seconds
+    reasons = set(metadata.get("truncation_reasons") or []) | upstream_reasons
+    if failed_cell_count:
+        reasons.add("cell_fetch_failure")
+    metadata["truncation_reasons"] = sorted(reasons)
+    metadata["truncated"] = bool(reasons)
+    return _fit_wfigs_map_serialized_budget(
+        merged,
+        max_serialized_bytes=int(metadata["limits"]["serialized_bytes"]),
+    )
+
+
+def _wfigs_map_loop_state() -> dict:
+    loop = asyncio.get_running_loop()
+    state = _WFIGS_MAP_LOOP_STATES.get(loop)
+    if state is None:
+        state = {
+            "semaphore": asyncio.Semaphore(WFIGS_MAP_OUTBOUND_CONCURRENCY),
+            "rate_lock": asyncio.Lock(),
+            "request_times": deque(),
+            "failures": {},
+            "flights": {},
+        }
+        _WFIGS_MAP_LOOP_STATES[loop] = state
+    return state
+
+
+def _wfigs_map_payload_availability(
+    payload: dict,
+    *,
+    availability: str,
+    freshness: str,
+    age_seconds: int,
+    reason: str | None = None,
+) -> dict:
+    result = dict(payload)
+    metadata = dict(payload.get("metadata") or {})
+    is_partial = bool(
+        metadata.get("partial")
+        or metadata.get("truncated")
+        or metadata.get("partial_reasons")
+        or metadata.get("truncation_reasons")
+        or metadata.get("dropped_feature_count")
+    )
+    metadata.update({
+        "availability": availability,
+        # Do not encode completeness in freshness. A current response with a
+        # missing cell is fresh + partial; a complete cache fallback is stale
+        # + not partial.
+        "freshness": freshness,
+        "partial": is_partial,
+        "age_seconds": max(0, int(age_seconds)),
+    })
+    if reason:
+        metadata["availability_reason"] = reason
+    else:
+        metadata.pop("availability_reason", None)
+    result["metadata"] = metadata
+    return result
+
+
+async def _reserve_wfigs_map_outbound_request(state: dict) -> bool:
+    async with state["rate_lock"]:
+        now = time.monotonic()
+        request_times: deque = state["request_times"]
+        while request_times and now - request_times[0] >= WFIGS_MAP_OUTBOUND_WINDOW_SECONDS:
+            request_times.popleft()
+        if len(request_times) >= WFIGS_MAP_OUTBOUND_MAX_REQUESTS:
+            return False
+        request_times.append(now)
+        return True
+
+
+def _wfigs_map_failure_is_active(state: dict, key: str) -> bool:
+    now = time.monotonic()
+    failures: dict[str, float] = state["failures"]
+    expired = [candidate for candidate, deadline in failures.items() if deadline <= now]
+    for candidate in expired:
+        failures.pop(candidate, None)
+    return failures.get(key, 0) > now
+
+
+def _wfigs_map_record_failure(state: dict, key: str) -> None:
+    failures: dict[str, float] = state["failures"]
+    if len(failures) >= 256 and key not in failures:
+        oldest = min(failures, key=failures.get)
+        failures.pop(oldest, None)
+    failures[key] = time.monotonic() + WFIGS_MAP_FAILURE_BACKOFF_SECONDS
+
+
+async def _fetch_wfigs_map_payload(
+    client: httpx.AsyncClient,
+    *,
+    bounds: tuple[float, float, float, float] | None,
+    max_features: int,
+) -> dict | None:
+    params = _wfigs_map_query_params(bounds, max_features=max_features)
+    key = _wfigs_map_cache_key(bounds, max_features=max_features)
+    cached, cached_age = get_wfigs_map_cached(key, max_age_seconds=WFIGS_MAP_STALE_MAX_AGE_SECONDS)
+    if isinstance(cached, dict) and cached_age is not None and cached_age <= WFIGS_MAP_CACHE_TTL_SECONDS:
+        return _wfigs_map_payload_availability(
+            cached,
+            availability="available",
+            freshness="fresh",
+            age_seconds=cached_age,
+        )
+    state = _wfigs_map_loop_state()
+    if _wfigs_map_failure_is_active(state, key):
+        return _wfigs_map_payload_availability(
+            cached,
+            availability="degraded",
+            freshness="stale",
+            age_seconds=cached_age or 0,
+            reason="provider_backoff",
+        ) if isinstance(cached, dict) else None
+
+    flights: dict = state["flights"]
+    flight = flights.get(key)
+    if flight is None:
+        flight = {"lock": asyncio.Lock(), "users": 0}
+        flights[key] = flight
+    flight["users"] += 1
+    try:
+        async with flight["lock"]:
+            cached, cached_age = get_wfigs_map_cached(key, max_age_seconds=WFIGS_MAP_STALE_MAX_AGE_SECONDS)
+            if isinstance(cached, dict) and cached_age is not None and cached_age <= WFIGS_MAP_CACHE_TTL_SECONDS:
+                return _wfigs_map_payload_availability(
+                    cached,
+                    availability="available",
+                    freshness="fresh",
+                    age_seconds=cached_age,
+                )
+            if _wfigs_map_failure_is_active(state, key):
+                return _wfigs_map_payload_availability(
+                    cached,
+                    availability="degraded",
+                    freshness="stale",
+                    age_seconds=cached_age or 0,
+                    reason="provider_backoff",
+                ) if isinstance(cached, dict) else None
+            if not await _reserve_wfigs_map_outbound_request(state):
+                return _wfigs_map_payload_availability(
+                    cached,
+                    availability="degraded",
+                    freshness="stale",
+                    age_seconds=cached_age or 0,
+                    reason="provider_rate_limited",
+                ) if isinstance(cached, dict) else None
+            try:
+                content = bytearray()
+                async with state["semaphore"]:
+                    async with client.stream("GET", WFIGS_PERIMETERS_URL, params=params) as response:
+                        response.raise_for_status()
+                        content_length = response.headers.get("content-length")
+                        if content_length and int(content_length) > WFIGS_MAP_MAX_UPSTREAM_BYTES:
+                            raise ValueError("WFIGS map response exceeds byte budget")
+                        async for chunk in response.aiter_bytes():
+                            if len(content) + len(chunk) > WFIGS_MAP_MAX_UPSTREAM_BYTES:
+                                raise ValueError("WFIGS map response exceeds byte budget")
+                            content.extend(chunk)
+                payload = json.loads(content)
+                if (
+                    not isinstance(payload, dict)
+                    or payload.get("type") != "FeatureCollection"
+                    or not isinstance(payload.get("features"), list)
+                    or payload.get("error")
+                ):
+                    # ArcGIS may report quota and provider failures in a JSON
+                    # body while retaining HTTP 200. Never cache that response
+                    # as a fresh, empty fire layer.
+                    raise ValueError("WFIGS map response is not a GeoJSON FeatureCollection")
+                compact = _compact_wfigs_map_payload(payload, max_features=max_features)
+                try:
+                    set_wfigs_map_cached(key, compact)
+                except Exception as cache_error:
+                    log.warning("WFIGS map cache write failed: %s", type(cache_error).__name__)
+                state["failures"].pop(key, None)
+                return _wfigs_map_payload_availability(
+                    compact,
+                    availability="available",
+                    freshness="fresh",
+                    age_seconds=0,
+                )
+            except Exception as exc:
+                _wfigs_map_record_failure(state, key)
+                log.warning("WFIGS map fetch failed: %s", type(exc).__name__)
+                return _wfigs_map_payload_availability(
+                    cached,
+                    availability="degraded",
+                    freshness="stale",
+                    age_seconds=cached_age or 0,
+                    reason="provider_unavailable",
+                ) if isinstance(cached, dict) else None
+    finally:
+        flight["users"] -= 1
+        if flight["users"] <= 0 and flights.get(key) is flight:
+            flights.pop(key, None)
+
+
+async def get_wfigs_fire_perimeters(
+    *,
+    bounds: tuple[float, float, float, float] | None = None,
+    map_safe: bool = False,
+    max_features: int = 120,
+) -> dict | None:
+    if map_safe:
+        cells: tuple[tuple[float, float, float, float] | None, ...] = (
+            (None,) if bounds is None else _wfigs_map_cells(bounds)
+        )
+        async with httpx.AsyncClient(timeout=15) as client:
+            results = await asyncio.gather(*(
+                _fetch_wfigs_map_payload(client, bounds=cell, max_features=max_features)
+                for cell in cells
+            ))
+        payloads = [payload for payload in results if isinstance(payload, dict)]
+        if not payloads:
+            return None
+        if len(cells) == 1 and len(payloads) == 1:
+            return payloads[0]
+        return _merge_wfigs_map_payloads(
+            payloads,
+            max_features=max_features,
+            failed_cell_count=len(cells) - len(payloads),
+        )
+
+    params = {
+        "where": "1=1",
+        "outFields": "poly_IRWINID,poly_IncidentName,poly_GISAcres,attr_IncidentSize,attr_PercentContained,attr_FireCause,attr_IncidentTypeCategory,attr_ModifiedOnDateTime_dt",
+        "returnGeometry": "true",
+        "f": "geojson",
+        "resultRecordCount": 800,
+    }
     key = "conditions:wfigs:perimeters"
     payload = get_cached("weather_cache", key, ttl_seconds=900)
     if payload is None:
@@ -407,13 +1097,7 @@ async def get_wfigs_fire_perimeters() -> dict | None:
             async with httpx.AsyncClient(timeout=15) as client:
                 resp = await client.get(
                     WFIGS_PERIMETERS_URL,
-                    params={
-                        "where": "1=1",
-                        "outFields": "poly_IRWINID,poly_IncidentName,poly_GISAcres,attr_IncidentSize,attr_PercentContained,attr_FireCause,attr_IncidentTypeCategory,attr_ModifiedOnDateTime_dt",
-                        "returnGeometry": "true",
-                        "f": "geojson",
-                        "resultRecordCount": 800,
-                    },
+                    params=params,
                 )
                 resp.raise_for_status()
                 payload = resp.json()

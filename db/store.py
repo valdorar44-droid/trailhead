@@ -4543,6 +4543,125 @@ def set_cached(table: str, key: str, data: list):
                (key, int(time.time()), json.dumps(data)))
     db.commit(); db.close()
 
+
+WFIGS_MAP_CACHE_PREFIX = "conditions:wfigs:map:"
+WFIGS_MAP_CACHE_MAX_ROWS = 128
+WFIGS_MAP_CACHE_MAX_AGE_SECONDS = 1800
+
+
+def get_wfigs_map_cached(
+    key: str,
+    *,
+    max_age_seconds: int = WFIGS_MAP_CACHE_MAX_AGE_SECONDS,
+    now: int | None = None,
+) -> tuple[dict | None, int | None]:
+    """Read one WFIGS map payload with its bounded age for stale fallback."""
+    if not str(key).startswith(WFIGS_MAP_CACHE_PREFIX):
+        raise ValueError("invalid WFIGS map cache key")
+    timestamp = int(time.time()) if now is None else int(now)
+    db = _conn()
+    try:
+        row = db.execute(
+            "SELECT fetched_at,data FROM weather_cache WHERE cache_key=?",
+            (key,),
+        ).fetchone()
+    finally:
+        db.close()
+    if not row:
+        return None, None
+    age = max(0, timestamp - int(row["fetched_at"]))
+    if age > max(1, int(max_age_seconds)):
+        return None, age
+    try:
+        payload = json.loads(row["data"])
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return None, age
+    return (payload if isinstance(payload, dict) else None), age
+
+
+def _prune_wfigs_map_cache_rows(
+    db: sqlite3.Connection,
+    *,
+    max_rows: int,
+    max_age_seconds: int,
+    now: int,
+    preserve_key: str | None = None,
+) -> int:
+    """Prune only viewport-derived WFIGS rows from ``weather_cache``."""
+    safe_max_rows = max(1, int(max_rows))
+    safe_max_age = max(1, int(max_age_seconds))
+    deleted = 0
+    stale = db.execute(
+        "DELETE FROM weather_cache WHERE cache_key LIKE ? AND fetched_at < ?",
+        (f"{WFIGS_MAP_CACHE_PREFIX}%", int(now) - safe_max_age),
+    )
+    deleted += stale.rowcount or 0
+    overflow = db.execute(
+        """DELETE FROM weather_cache
+           WHERE cache_key IN (
+               SELECT cache_key FROM weather_cache
+               WHERE cache_key LIKE ?
+               ORDER BY (cache_key = ?) DESC, fetched_at DESC, cache_key DESC
+               LIMIT -1 OFFSET ?
+           )""",
+        (f"{WFIGS_MAP_CACHE_PREFIX}%", preserve_key or "", safe_max_rows),
+    )
+    deleted += overflow.rowcount or 0
+    return deleted
+
+
+def prune_wfigs_map_cache(
+    *,
+    max_rows: int = WFIGS_MAP_CACHE_MAX_ROWS,
+    max_age_seconds: int = WFIGS_MAP_CACHE_MAX_AGE_SECONDS,
+    now: int | None = None,
+) -> int:
+    """Bound the WFIGS map cache without touching other weather providers."""
+    db = _conn()
+    try:
+        deleted = _prune_wfigs_map_cache_rows(
+            db,
+            max_rows=max_rows,
+            max_age_seconds=max_age_seconds,
+            now=int(time.time()) if now is None else int(now),
+            preserve_key=None,
+        )
+        db.commit()
+        return deleted
+    finally:
+        db.close()
+
+
+def set_wfigs_map_cached(
+    key: str,
+    data: dict,
+    *,
+    max_rows: int = WFIGS_MAP_CACHE_MAX_ROWS,
+    max_age_seconds: int = WFIGS_MAP_CACHE_MAX_AGE_SECONDS,
+    now: int | None = None,
+) -> int:
+    """Atomically store one bounded WFIGS map cell and prune that namespace."""
+    if not str(key).startswith(WFIGS_MAP_CACHE_PREFIX):
+        raise ValueError("invalid WFIGS map cache key")
+    timestamp = int(time.time()) if now is None else int(now)
+    db = _conn()
+    try:
+        db.execute(
+            "INSERT OR REPLACE INTO weather_cache (cache_key,fetched_at,data) VALUES (?,?,?)",
+            (key, timestamp, json.dumps(data, separators=(",", ":"), allow_nan=False)),
+        )
+        deleted = _prune_wfigs_map_cache_rows(
+            db,
+            max_rows=max_rows,
+            max_age_seconds=max_age_seconds,
+            now=timestamp,
+            preserve_key=key,
+        )
+        db.commit()
+        return deleted
+    finally:
+        db.close()
+
 def clear_cached_rows(table: str, prefixes: list[str] | None = None, keys: list[str] | None = None) -> int:
     if table not in {"weather_cache", "campsite_cache", "gas_cache"}:
         raise ValueError("unsupported cache table")

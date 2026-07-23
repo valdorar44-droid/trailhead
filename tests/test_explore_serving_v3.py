@@ -290,6 +290,153 @@ class ExploreServingV3Tests(unittest.TestCase):
         search_products.assert_not_called()
         search_freetext.assert_not_called()
 
+    def test_compact_cards_use_bounded_provider_derivatives_and_keep_source_images(self):
+        nps_original = (
+            "https://www.nps.gov/common/uploads/structured_data/"
+            "3C861263-1DD8-B71B-0B71EF9B95F9644F.jpg?width=2400&mode=crop&asset=hero"
+        )
+        wikimedia_original = (
+            "https://upload.wikimedia.org/wikipedia/commons/4/41/New_havasu_falls.JPG"
+        )
+        nps_place = place("nps:park", "Official Park", "park")
+        nps_place["summary"].update({"image_url": nps_original, "thumbnail_url": nps_original})
+        wikimedia_place = place("commons:falls", "Commons Falls", "waterfall")
+        wikimedia_place["summary"].update({
+            "image_url": wikimedia_original,
+            "thumbnail_url": wikimedia_original,
+        })
+        catalog = {
+            "schema_version": 3,
+            "catalog_id": "image-derivatives",
+            "generated_at": 123,
+            "places": [nps_place, wikimedia_place],
+        }
+
+        with patch.object(server, "_load_explore_catalog", return_value=catalog):
+            catalog_index = asyncio.run(server.explore_catalog_index(limit=2))
+            home = asyncio.run(server.explore_home(limit=2))
+
+        expected_nps_thumbnail = (
+            "https://www.nps.gov/common/uploads/structured_data/"
+            "3C861263-1DD8-B71B-0B71EF9B95F9644F.jpg?"
+            "asset=hero&maxWidth=640&maxHeight=640&quality=78&format=webp"
+        )
+        expected_wikimedia_thumbnail = (
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/"
+            "New_havasu_falls.JPG/500px-New_havasu_falls.JPG"
+        )
+        for payload in (catalog_index, home):
+            cards = {item["id"]: item for item in payload["places"]}
+            self.assertEqual(cards["nps:park"]["image_url"], nps_original)
+            self.assertEqual(cards["nps:park"]["thumbnail_url"], expected_nps_thumbnail)
+            self.assertEqual(cards["commons:falls"]["image_url"], wikimedia_original)
+            self.assertEqual(cards["commons:falls"]["thumbnail_url"], expected_wikimedia_thumbnail)
+
+    def test_compact_thumbnail_policy_handles_special_file_paths_without_changing_other_fields(self):
+        original = (
+            "https://commons.wikimedia.org/wiki/Special:FilePath/"
+            "Baltoro_glacier_from_air.jpg"
+        )
+        profile = place("commons:baltoro", "Baltoro Glacier", "glacier")
+        profile["summary"].update({"image_url": original, "thumbnail_url": original})
+
+        with patch.object(server, "_explore_compact_thumbnail_url", side_effect=lambda value: value):
+            identity_card = server._explore_place_index_item(profile)
+        derivative_card = server._explore_place_index_item(profile)
+
+        self.assertEqual(derivative_card["image_url"], original)
+        self.assertEqual(derivative_card["thumbnail_url"], "")
+        identity_thumbnail = identity_card.pop("thumbnail_url")
+        derivative_thumbnail = derivative_card.pop("thumbnail_url")
+        self.assertEqual(identity_thumbnail, original)
+        self.assertNotEqual(derivative_thumbnail, identity_thumbnail)
+        self.assertEqual(derivative_card, identity_card)
+
+    def test_compact_wikimedia_thumbnail_is_direct_and_never_upscales(self):
+        existing = (
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/"
+            "New_havasu_falls.JPG/320px-New_havasu_falls.JPG"
+        )
+        self.assertEqual(
+            server._explore_compact_thumbnail_url(existing),
+            "https://upload.wikimedia.org/wikipedia/commons/thumb/4/41/"
+            "New_havasu_falls.JPG/250px-New_havasu_falls.JPG",
+        )
+
+    def test_source_pack_child_never_borrows_nested_media_or_inherits_rights(self):
+        child = place("child:no-exact-media", "Unphotographed Overlook", "viewpoint")
+        child["source_pack"].update({
+            "license": "Parent pack license must not be inherited",
+            "things_to_see": [{
+                "title": "A different nested place",
+                "image_url": "https://example.test/nested-place.jpg",
+                "image_caption": "A different place",
+                "image_credit": "Nested photographer",
+                "image_license": "CC BY 4.0",
+            }],
+        })
+
+        item = server._v3_source_pack_child_item(child, kind="place", distance_mi=2.4)
+
+        self.assertEqual(item["image_url"], "")
+        self.assertEqual(item["image_caption"], "")
+        self.assertEqual(item["image_credit"], "")
+        self.assertEqual(item["image_license"], "")
+
+    def test_source_pack_child_keeps_exact_media_credit_and_license(self):
+        child = place("child:exact-media", "Exact Lake", "lake")
+        child["media"] = [{
+            "url": "https://example.test/exact-lake.jpg",
+            "caption": "Exact Lake at sunrise",
+            "credit": "River Photographer",
+            "license": "CC BY-SA 4.0",
+        }]
+        child["source_pack"]["license"] = "Unrelated parent pack license"
+
+        item = server._v3_source_pack_child_item(child, kind="lake", distance_mi=4.8)
+
+        self.assertEqual(item["image_url"], "https://example.test/exact-lake.jpg")
+        self.assertEqual(item["image_caption"], "Exact Lake at sunrise")
+        self.assertEqual(item["image_credit"], "River Photographer")
+        self.assertEqual(item["image_license"], "CC BY-SA 4.0")
+
+    def test_nearby_source_children_rank_only_exact_licensed_media_as_photographed(self):
+        parent = place("parent:park", "Fixture Park", "park", lat=38.0, lng=-110.0)
+        nested_only = place("child:nested", "Near Nested Image", "waterfall", lat=38.001, lng=-110.0)
+        exact = place("child:exact", "Farther Exact Image", "lake", lat=38.01, lng=-110.0)
+        for item in (parent, nested_only, exact):
+            item.update({"country": "United States", "region": "Utah"})
+            item.update({
+                "name": item["summary"]["title"],
+                "lat": item["summary"]["lat"],
+                "lng": item["summary"]["lng"],
+            })
+        nested_only["source_pack"]["things_to_see"] = [{
+            "title": "Different nested subject",
+            "image_url": "https://example.test/nested.jpg",
+            "image_credit": "Nested credit",
+            "image_license": "CC BY 4.0",
+        }]
+        exact["source_pack"]["photos"] = [{
+            "url": "https://example.test/exact.jpg",
+            "caption": "The exact lake",
+            "credit": "Exact credit",
+            "license": "CC0 1.0",
+        }]
+        profile = {**parent, "source_pack": dict(parent["source_pack"])}
+
+        server._attach_v3_nearby_source_items([profile], [parent, nested_only, exact])
+
+        children = profile["source_pack"]["things_to_see"]
+        self.assertEqual([child["title"] for child in children[:2]], [
+            "Farther Exact Image",
+            "Near Nested Image",
+        ])
+        self.assertEqual(children[0]["image_credit"], "Exact credit")
+        self.assertEqual(children[0]["image_license"], "CC0 1.0")
+        self.assertEqual(children[1]["image_url"], "")
+        self.assertEqual(children[1]["image_license"], "")
+
     def test_promoted_enrichment_and_provenance_survive_compact_and_full_responses(self):
         catalog = server._load_explore_catalog()
         compact = asyncio.run(server.explore_catalog_index(limit=1))
